@@ -4,7 +4,6 @@ import type { CleanWorkspace } from "./clean-workspace.mjs";
 export declare const PROFILES_FILE: "profiles.json";
 export declare const PROFILE_NAME_LIMIT: number;
 export declare const MAX_PROFILES: number;
-export declare const SETTLE_MS: number;
 export declare const SETTLE_POLL_MS: number;
 
 /** One workspace of this computer's own, as the registry keeps it: `name` null is This Mac's own (This Mac or This PC). */
@@ -57,5 +56,4 @@ export function createLocalProfiles(deps: {
   fs?: typeof import("node:fs");
   sleep?(ms: number): Promise<void>;
   now?(): number;
-  settleMs?: number;
 }): LocalProfiles;

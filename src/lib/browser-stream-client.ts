@@ -104,6 +104,9 @@ export type PreviewStreamInput =
   | { readonly type: "dialog"; readonly accept: boolean; readonly promptText?: string }
   | { readonly type: "viewport"; readonly setting: PreviewViewportSetting }
   | { readonly type: "zoom"; readonly factor: number }
+  /** The installed extensions, for the Extensions menu; an extension's own page opens by its id only. */
+  | { readonly type: "extensions" }
+  | { readonly type: "openExtension"; readonly id: string }
   | {
       readonly type: "mouse";
       readonly action: "move" | "down" | "up";

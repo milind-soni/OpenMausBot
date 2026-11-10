@@ -120,7 +120,8 @@ export function createMoveKinds({ localJson, localBytes, localSend, entry, persi
     if (!names.length) return {};
     const held = await localJson(`/api/cloud-send/kind?key=${encodeURIComponent(`bot:${botId}`)}`);
     const fields = Object.fromEntries(names.map((name) => [name, record(held?.record) && held.record[name] !== undefined ? held.record[name] : null]));
-    const answer = await ctx.session.call("PUT", "/api/cloud-send/kind", { v: 1, key: `bot:${botId}`, dataDir: held?.dataDir ?? "-", record: fields });
+    const answer = await ctx.session.call("PUT", "/api/cloud-send/kind", { v: 1, key: `bot:${botId}`, dataDir: held?.dataDir ?? "-", record: fields,
+      ...(typeof held?.computer === "string" && held.computer ? { computer: held.computer } : {}), ...(record(held?.record) && held.record.defaultBot ? { sourceDefault: true } : {}) });
     return answer.ok ? {} : Object.fromEntries(parts.filter((part) => MOVE_BOT_PARTS[part]).map((part) => [part, refusal(answer, "My Cloud refused this setting.")]));
   }
 

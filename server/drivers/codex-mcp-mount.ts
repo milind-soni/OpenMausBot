@@ -1,4 +1,4 @@
-import type { StdioMcpSpec } from "../contracts.ts";
+import type { McpServerSpec, StdioMcpSpec } from "../contracts.ts";
 import { BOX_NO_PROXY_ENV, BOX_PROXY_ENV, botBox } from "../bot-box/box.ts";
 import { tomlInlineTable } from "./codex-process.ts";
 
@@ -36,4 +36,20 @@ export function mountMcpServer(
  * just a few env names plus env_vars: a person's own stdio server would otherwise look hosts up itself and fail. */
 export function boxProxyEnvNames(boxed: boolean = botBox.enabled()): string[] {
   return boxed ? [...BOX_PROXY_ENV, ...BOX_NO_PROXY_ENV] : [];
+}
+
+/** A person's own stdio server mounted as configured gets its env only through Codex's own environment (env_vars),
+ * which the bot box would otherwise cut down to its allow-list: the app-server spawn lets those names through. */
+export function customServerEnvBox(
+  custom: Record<string, McpServerSpec> | undefined,
+  mounted: ReadonlyMap<string, StdioMcpSpec>,
+): { box?: { allowEnv: string[] } } {
+  const configured = new Set<McpServerSpec>(Object.values(custom ?? {}));
+  const names = [...new Set([...mounted.values()].filter((server) => configured.has(server)).flatMap((server) => Object.keys(server.env)))];
+  return names.length ? { box: { allowEnv: names } } : {};
+}
+
+/** The custom env names the box admits into Codex: none with the box off, where its shell keeps what it inherited anyway. */
+export function boxAdmittedEnv(custom: { box?: { allowEnv: string[] } }): Set<string> {
+  return new Set(botBox.enabled() ? custom.box?.allowEnv : []);
 }

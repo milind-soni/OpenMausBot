@@ -3459,7 +3459,9 @@
       "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2",
       "server.runOwner.onlyAskerStops": "832c893848422bf9040e17b415756f5466d3988354b4e661cb73511be36ff56e",
       "server.runOwner.notYourQueued": "18216333edfdf5e36266b29f5fb8f41152345ab4700f69fe64a0f609743fe25d",
-      "server.runOwner.waitsItsTurn": "e8cd9fac4417e654d67bd9b2bb8a0ebf3ffc70b328de47fd1039da6995b84462"
+      "server.runOwner.waitsItsTurn": "e8cd9fac4417e654d67bd9b2bb8a0ebf3ffc70b328de47fd1039da6995b84462",
+      "server.mcp.alsoOn": "a7717d98c90c14e338a9e5d265c8f4c8f8c3d5ea4eb197a93705b868bc5f0dc7",
+      "server.rooms.chiefRetargeted": "2f8fbfd73503b5871395ef76bc69b867583dae6b03003099d551a7f019a070fb"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -7290,9 +7292,6 @@
       "connectors.setupNeeded": "0c0f4d640367f987918f004210d7f5bb6baa77ea56a73770ccb68e3e1f0ea632",
       "connectors.setupNeededRemote": "aeb6713a570fd69d6269fb0afdf396cf22bc18f9424661d765497f5fb75f44ab",
       "connectors.openSettings": "ca381c1e76e681b6c18fa984a2e2fda6ed4a9f28e914f539db34a6dcb3737149",
-      "connectors.perBot.title": "6889c132c8dc1089a3ad7bfa89d1c3ee9fdc7d0c7ec231225dd9371b6d348126",
-      "connectors.perBot.body": "1e37a8a6e58075113cbf6a2b59aaa4190f36abcbd87de2d23e5e3abfacfb44ef",
-      "connectors.perBot.allow": "0fb2caad04a3ed35146534ae3cd2fa6974d62b4a226e09065e5c4162720347b6",
       "connectors.featuredBefore": "b4168ab2c4624572cdbeaa8df5bfa1913737f9b55d8f84f0bea388beccb58af9",
       "connectors.updateKey": "a97d0403e4c11731af29c8e5bf5111ff0997ab9fe3b4e00767ff90e345847804",
       "connectors.featuredAfter": "8b160145b2cb0d2d86c0f6c702cd9799c8afe46eaa11e285370c9c46f8e29845",
@@ -9550,9 +9549,7 @@
       "advancedBack.body": "54c4c7c49255470019c5a6953885a8a0826e0b049a9662fb9e5bca6130bb7454",
       "botLimit.created.title": "c8ed0785d466a4784db1862131dd84767f22eefd5ef7edabf794ae5a328df0f7",
       "botLimit.created.body": "5ab519ffccc837cc76b1e1c3437077b4f997add4e7226556ab395ebfd62074d8",
-      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2",
-      "planUsage.monthly": "9b11f6b707d2a03e0265465f32520bc1bc213de121de958539662d0ec1453fcb",
-      "planUsage.inSidebar": "5b55843d5600926382d4002c3035e4632ee9754d23bf4d55adf1ee8ea0398920"
+      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -20293,9 +20290,6 @@
       "connectors.setupNeeded": "0c0f4d640367f987918f004210d7f5bb6baa77ea56a73770ccb68e3e1f0ea632",
       "connectors.setupNeededRemote": "aeb6713a570fd69d6269fb0afdf396cf22bc18f9424661d765497f5fb75f44ab",
       "connectors.openSettings": "ca381c1e76e681b6c18fa984a2e2fda6ed4a9f28e914f539db34a6dcb3737149",
-      "connectors.perBot.title": "6889c132c8dc1089a3ad7bfa89d1c3ee9fdc7d0c7ec231225dd9371b6d348126",
-      "connectors.perBot.body": "1e37a8a6e58075113cbf6a2b59aaa4190f36abcbd87de2d23e5e3abfacfb44ef",
-      "connectors.perBot.allow": "0fb2caad04a3ed35146534ae3cd2fa6974d62b4a226e09065e5c4162720347b6",
       "connectors.featuredBefore": "b4168ab2c4624572cdbeaa8df5bfa1913737f9b55d8f84f0bea388beccb58af9",
       "connectors.updateKey": "a97d0403e4c11731af29c8e5bf5111ff0997ab9fe3b4e00767ff90e345847804",
       "connectors.featuredAfter": "8b160145b2cb0d2d86c0f6c702cd9799c8afe46eaa11e285370c9c46f8e29845",
@@ -23800,9 +23794,7 @@
       "advancedBack.body": "54c4c7c49255470019c5a6953885a8a0826e0b049a9662fb9e5bca6130bb7454",
       "botLimit.created.title": "c8ed0785d466a4784db1862131dd84767f22eefd5ef7edabf794ae5a328df0f7",
       "botLimit.created.body": "5ab519ffccc837cc76b1e1c3437077b4f997add4e7226556ab395ebfd62074d8",
-      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2",
-      "planUsage.monthly": "9b11f6b707d2a03e0265465f32520bc1bc213de121de958539662d0ec1453fcb",
-      "planUsage.inSidebar": "5b55843d5600926382d4002c3035e4632ee9754d23bf4d55adf1ee8ea0398920"
+      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -29036,9 +29028,6 @@
       "connectors.setupNeeded": "0c0f4d640367f987918f004210d7f5bb6baa77ea56a73770ccb68e3e1f0ea632",
       "connectors.setupNeededRemote": "aeb6713a570fd69d6269fb0afdf396cf22bc18f9424661d765497f5fb75f44ab",
       "connectors.openSettings": "ca381c1e76e681b6c18fa984a2e2fda6ed4a9f28e914f539db34a6dcb3737149",
-      "connectors.perBot.title": "6889c132c8dc1089a3ad7bfa89d1c3ee9fdc7d0c7ec231225dd9371b6d348126",
-      "connectors.perBot.body": "1e37a8a6e58075113cbf6a2b59aaa4190f36abcbd87de2d23e5e3abfacfb44ef",
-      "connectors.perBot.allow": "0fb2caad04a3ed35146534ae3cd2fa6974d62b4a226e09065e5c4162720347b6",
       "connectors.featuredBefore": "b4168ab2c4624572cdbeaa8df5bfa1913737f9b55d8f84f0bea388beccb58af9",
       "connectors.updateKey": "a97d0403e4c11731af29c8e5bf5111ff0997ab9fe3b4e00767ff90e345847804",
       "connectors.featuredAfter": "8b160145b2cb0d2d86c0f6c702cd9799c8afe46eaa11e285370c9c46f8e29845",
@@ -33831,8 +33820,44 @@
       "native.teamLink.otherTitle": "d160e3032fd4f4fedabfad5fc84852563d0cf85dcdbf92e82f9a06359a8d8522",
       "native.teamLink.otherDetail": "11b8a9828b4afd5d0e6aef778751b00fe688893eee2e81e9865e834f21f8391d",
       "native.teamLink.signIn": "bdfe6b9bdb9f911ecbe705d31d1dcc1b58295c05617c16d8b743cffa8084c2e0",
-      "planUsage.monthly": "9b11f6b707d2a03e0265465f32520bc1bc213de121de958539662d0ec1453fcb",
-      "planUsage.inSidebar": "5b55843d5600926382d4002c3035e4632ee9754d23bf4d55adf1ee8ea0398920"
+      "server.mcp.alsoOn": "a7717d98c90c14e338a9e5d265c8f4c8f8c3d5ea4eb197a93705b868bc5f0dc7",
+      "server.rooms.chiefRetargeted": "2f8fbfd73503b5871395ef76bc69b867583dae6b03003099d551a7f019a070fb",
+      "cloudSend.list.secretOne": "69c40bee9db073a9fb47fa5fb652d50b8b77b598df8432518f372b6531bab1e2",
+      "cloudSend.list.secrets": "c2415948dbe8d1915fd8ebf02fc8fd83144375381f5fe47ad832d16ef71f91d9",
+      "chat.startFresh": "652aceea790a47a67dd6201d09a2c66160178bbfe1ae2a7ecbc7bb6733334f56",
+      "chat.startFresh.hint": "89906f545a191ed5bf7a5b3534d9ea7dd23ff0059bf84f0d6cadb618796f253f",
+      "chat.startFresh.divider": "47016c34c794cc92a9e5b6f6a4f52f5c794b6e65df304567d3d20a545fd285b8",
+      "chat.startFresh.dividerHint": "60c0be588463d382c2019ab71430c8c973fc22aacbf7d0f2ddbda6032a29ae97",
+      "settings.logins.onePassword.guide": "93d48827955ded4e1cee29716eb10e04cdac5c153ca11585bf87bc318e227beb",
+      "settings.logins.onePassword.connected": "7c8266cf963d34d381e0c3cda6df7a86960cefff126a31c48b0a65fa37f6524f",
+      "settings.vault.secret.keyOff": "af2a828b6587a80352bf00b4ea265c9b173c985536647b12bfab528bc20a5293",
+      "room.chiefAbsent.hint": "4ef6555d4b40e06f4f32e7a668f901fea92c9466161538df3f3db564fbcf8488",
+      "room.chiefAbsent.add": "2cc06c85e7728eac82645052604302cec4fdbdc5c9dfbad8a832b2d0f64bb9ca",
+      "limits.tryAgainNow": "fa2c9861e14900f9645e6473eb26df66152a6d292c6e26500bd0ca1aee792620",
+      "connectors.card.alsoUseful": "4c96bae2aee2a5b10d08ed69a637e6d676044d19c9f94e9401fbdbb15ccde7ee",
+      "mcp.keyOff": "6c432648faaaf5fd097a7072b030bed4d635902d15c9569b3c9b60448debafb9",
+      "apps.usedByNone": "33534a334fa97b9a45fec2768fbef4b01b0144ae1ec8f63cf9f4241dba1c9017",
+      "apps.usedByChange": "c0bf75bd78bf9572596720d596bd5a20a5b9145cde0fe50dec1e783cb184d69b",
+      "apps.whichBots": "4a3e85ed716744611a15f7320286c21c5a4cae891a217b2e5ac78b7f877cf411",
+      "apps.botsCanUse": "3d0d9827ec1b2cbcaa8abb5f1f16e6a86ebef64aea063d05d7b9e16f06b5307f",
+      "apps.noBotsUse": "2fbf2fcb37d6688e989a842ebfaee2717f71e5d80f8de77eee87b97298fd591b",
+      "apps.mcp.manage": "5a23444828db654a0eaef5f81aabe79432871f43f73ea888279b3ee212f98a7b",
+      "apps.section.suggested": "fe079cfa9423c6c2874da1034ef740d97d5b907e53d094df7e7f8e8f89ecab12",
+      "apps.suggested.show": "c09819ee11075a5f1c86c5ac33c2e401526fb9cee5829fd97493f62926c3735f",
+      "apps.suggested.picking": "08efc1f5e20b6f93485bef6d41cef9e346b61b1af6a45d0fdf046bb8e2404ef8",
+      "apps.suggested.picked": "236e77db1dda8071953cbb2ae8c30f898e7e946eee715d1c7eb27426f2203473",
+      "apps.suggested.addKey": "27b267e3cf41162667b2993420f21e76780b973f2384adbdd07464ce4fd97db2",
+      "webPanels.settings.chatPage": "5f91a43d9ab7b59e888918479fcbfe51b365743302ac0d9042dd35dfe3fadba5",
+      "webPanels.page.pageGone": "98a0b4b8583492387bbd9fbb96b8044b9fdc979baa40210d6d8e5489d9fb668a",
+      "chat.preview.pin": "d5112330c62b1d4f09810792611f10db67c27fcafdf8c81274ecd8a8656d2748",
+      "chat.preview.unpin": "ee3c716130546a45492c899f7486b67f880e5631a2b8b8065bb16be9956d0b43",
+      "chat.preview.pinHint": "f5f31cfdaf2c8d4a02bf609b4d9006246fd561a7c8e1b8d81985feea435682a8",
+      "chat.preview.unpinHint": "3df27bb21925a0a6ad3458a902df50be9e666b88a233d1a7c81b14f216c71e01",
+      "chat.preview.pinFull": "f3cb86a1f0b52a900f5f7a62701255b5f1fdc8189864d129ffa8e6d836778679",
+      "browser.extensions.title": "fe3436af86b47d22f22d93da68119fcb749dbed0335b4dc99f254e02db236156",
+      "browser.extensions.empty": "85494666424df419c354a92e4f107aebcfe4a636a3e54ff7ea3914284313c31e",
+      "browser.extensions.takeControl": "e8357ac6462e969a5a75175e9d79ed5030939cca831b530fd6a4472276264f16",
+      "serverError.chat.busyFresh": "46c60722ffc0ccb52f387d58f962168a3f091f5af50e9049ef4ff932b2ccba4d"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -35977,9 +36002,6 @@
       "connectors.setupNeeded": "0c0f4d640367f987918f004210d7f5bb6baa77ea56a73770ccb68e3e1f0ea632",
       "connectors.setupNeededRemote": "aeb6713a570fd69d6269fb0afdf396cf22bc18f9424661d765497f5fb75f44ab",
       "connectors.openSettings": "ca381c1e76e681b6c18fa984a2e2fda6ed4a9f28e914f539db34a6dcb3737149",
-      "connectors.perBot.title": "6889c132c8dc1089a3ad7bfa89d1c3ee9fdc7d0c7ec231225dd9371b6d348126",
-      "connectors.perBot.body": "1e37a8a6e58075113cbf6a2b59aaa4190f36abcbd87de2d23e5e3abfacfb44ef",
-      "connectors.perBot.allow": "0fb2caad04a3ed35146534ae3cd2fa6974d62b4a226e09065e5c4162720347b6",
       "connectors.featuredBefore": "b4168ab2c4624572cdbeaa8df5bfa1913737f9b55d8f84f0bea388beccb58af9",
       "connectors.updateKey": "a97d0403e4c11731af29c8e5bf5111ff0997ab9fe3b4e00767ff90e345847804",
       "connectors.featuredAfter": "8b160145b2cb0d2d86c0f6c702cd9799c8afe46eaa11e285370c9c46f8e29845",
@@ -41484,9 +41506,7 @@
       "automations.run.waitingOnTeam": "9765029257ea4e83e5f94c3e6d2dd37e11b5aa9459e50eeb878aaba8fbecd833",
       "botLimit.created.title": "c8ed0785d466a4784db1862131dd84767f22eefd5ef7edabf794ae5a328df0f7",
       "botLimit.created.body": "5ab519ffccc837cc76b1e1c3437077b4f997add4e7226556ab395ebfd62074d8",
-      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2",
-      "planUsage.monthly": "9b11f6b707d2a03e0265465f32520bc1bc213de121de958539662d0ec1453fcb",
-      "planUsage.inSidebar": "5b55843d5600926382d4002c3035e4632ee9754d23bf4d55adf1ee8ea0398920"
+      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -44374,9 +44394,6 @@
       "connectors.setupNeeded": "0c0f4d640367f987918f004210d7f5bb6baa77ea56a73770ccb68e3e1f0ea632",
       "connectors.setupNeededRemote": "aeb6713a570fd69d6269fb0afdf396cf22bc18f9424661d765497f5fb75f44ab",
       "connectors.openSettings": "ca381c1e76e681b6c18fa984a2e2fda6ed4a9f28e914f539db34a6dcb3737149",
-      "connectors.perBot.title": "6889c132c8dc1089a3ad7bfa89d1c3ee9fdc7d0c7ec231225dd9371b6d348126",
-      "connectors.perBot.body": "1e37a8a6e58075113cbf6a2b59aaa4190f36abcbd87de2d23e5e3abfacfb44ef",
-      "connectors.perBot.allow": "0fb2caad04a3ed35146534ae3cd2fa6974d62b4a226e09065e5c4162720347b6",
       "connectors.featuredBefore": "b4168ab2c4624572cdbeaa8df5bfa1913737f9b55d8f84f0bea388beccb58af9",
       "connectors.updateKey": "a97d0403e4c11731af29c8e5bf5111ff0997ab9fe3b4e00767ff90e345847804",
       "connectors.featuredAfter": "8b160145b2cb0d2d86c0f6c702cd9799c8afe46eaa11e285370c9c46f8e29845",
@@ -51310,9 +51327,7 @@
       "automations.run.waitingOnTeam": "9765029257ea4e83e5f94c3e6d2dd37e11b5aa9459e50eeb878aaba8fbecd833",
       "botLimit.created.title": "c8ed0785d466a4784db1862131dd84767f22eefd5ef7edabf794ae5a328df0f7",
       "botLimit.created.body": "5ab519ffccc837cc76b1e1c3437077b4f997add4e7226556ab395ebfd62074d8",
-      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2",
-      "planUsage.monthly": "9b11f6b707d2a03e0265465f32520bc1bc213de121de958539662d0ec1453fcb",
-      "planUsage.inSidebar": "5b55843d5600926382d4002c3035e4632ee9754d23bf4d55adf1ee8ea0398920"
+      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -53209,9 +53224,6 @@
       "connectors.setupNeeded": "0c0f4d640367f987918f004210d7f5bb6baa77ea56a73770ccb68e3e1f0ea632",
       "connectors.setupNeededRemote": "aeb6713a570fd69d6269fb0afdf396cf22bc18f9424661d765497f5fb75f44ab",
       "connectors.openSettings": "ca381c1e76e681b6c18fa984a2e2fda6ed4a9f28e914f539db34a6dcb3737149",
-      "connectors.perBot.title": "6889c132c8dc1089a3ad7bfa89d1c3ee9fdc7d0c7ec231225dd9371b6d348126",
-      "connectors.perBot.body": "1e37a8a6e58075113cbf6a2b59aaa4190f36abcbd87de2d23e5e3abfacfb44ef",
-      "connectors.perBot.allow": "0fb2caad04a3ed35146534ae3cd2fa6974d62b4a226e09065e5c4162720347b6",
       "connectors.featuredBefore": "b4168ab2c4624572cdbeaa8df5bfa1913737f9b55d8f84f0bea388beccb58af9",
       "connectors.updateKey": "a97d0403e4c11731af29c8e5bf5111ff0997ab9fe3b4e00767ff90e345847804",
       "connectors.featuredAfter": "8b160145b2cb0d2d86c0f6c702cd9799c8afe46eaa11e285370c9c46f8e29845",
@@ -58289,9 +58301,6 @@
       "connectors.setupNeeded": "0c0f4d640367f987918f004210d7f5bb6baa77ea56a73770ccb68e3e1f0ea632",
       "connectors.setupNeededRemote": "aeb6713a570fd69d6269fb0afdf396cf22bc18f9424661d765497f5fb75f44ab",
       "connectors.openSettings": "ca381c1e76e681b6c18fa984a2e2fda6ed4a9f28e914f539db34a6dcb3737149",
-      "connectors.perBot.title": "6889c132c8dc1089a3ad7bfa89d1c3ee9fdc7d0c7ec231225dd9371b6d348126",
-      "connectors.perBot.body": "1e37a8a6e58075113cbf6a2b59aaa4190f36abcbd87de2d23e5e3abfacfb44ef",
-      "connectors.perBot.allow": "0fb2caad04a3ed35146534ae3cd2fa6974d62b4a226e09065e5c4162720347b6",
       "connectors.featuredBefore": "b4168ab2c4624572cdbeaa8df5bfa1913737f9b55d8f84f0bea388beccb58af9",
       "connectors.updateKey": "a97d0403e4c11731af29c8e5bf5111ff0997ab9fe3b4e00767ff90e345847804",
       "connectors.featuredAfter": "8b160145b2cb0d2d86c0f6c702cd9799c8afe46eaa11e285370c9c46f8e29845",
@@ -60512,9 +60521,7 @@
       "advancedBack.body": "54c4c7c49255470019c5a6953885a8a0826e0b049a9662fb9e5bca6130bb7454",
       "botLimit.created.title": "c8ed0785d466a4784db1862131dd84767f22eefd5ef7edabf794ae5a328df0f7",
       "botLimit.created.body": "5ab519ffccc837cc76b1e1c3437077b4f997add4e7226556ab395ebfd62074d8",
-      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2",
-      "planUsage.monthly": "9b11f6b707d2a03e0265465f32520bc1bc213de121de958539662d0ec1453fcb",
-      "planUsage.inSidebar": "5b55843d5600926382d4002c3035e4632ee9754d23bf4d55adf1ee8ea0398920"
+      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -63882,9 +63889,6 @@
       "connectors.setupNeeded": "0c0f4d640367f987918f004210d7f5bb6baa77ea56a73770ccb68e3e1f0ea632",
       "connectors.setupNeededRemote": "aeb6713a570fd69d6269fb0afdf396cf22bc18f9424661d765497f5fb75f44ab",
       "connectors.openSettings": "ca381c1e76e681b6c18fa984a2e2fda6ed4a9f28e914f539db34a6dcb3737149",
-      "connectors.perBot.title": "6889c132c8dc1089a3ad7bfa89d1c3ee9fdc7d0c7ec231225dd9371b6d348126",
-      "connectors.perBot.body": "1e37a8a6e58075113cbf6a2b59aaa4190f36abcbd87de2d23e5e3abfacfb44ef",
-      "connectors.perBot.allow": "0fb2caad04a3ed35146534ae3cd2fa6974d62b4a226e09065e5c4162720347b6",
       "connectors.featuredBefore": "b4168ab2c4624572cdbeaa8df5bfa1913737f9b55d8f84f0bea388beccb58af9",
       "connectors.updateKey": "a97d0403e4c11731af29c8e5bf5111ff0997ab9fe3b4e00767ff90e345847804",
       "connectors.featuredAfter": "8b160145b2cb0d2d86c0f6c702cd9799c8afe46eaa11e285370c9c46f8e29845",
@@ -66105,9 +66109,7 @@
       "advancedBack.body": "54c4c7c49255470019c5a6953885a8a0826e0b049a9662fb9e5bca6130bb7454",
       "botLimit.created.title": "c8ed0785d466a4784db1862131dd84767f22eefd5ef7edabf794ae5a328df0f7",
       "botLimit.created.body": "5ab519ffccc837cc76b1e1c3437077b4f997add4e7226556ab395ebfd62074d8",
-      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2",
-      "planUsage.monthly": "9b11f6b707d2a03e0265465f32520bc1bc213de121de958539662d0ec1453fcb",
-      "planUsage.inSidebar": "5b55843d5600926382d4002c3035e4632ee9754d23bf4d55adf1ee8ea0398920"
+      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -70313,9 +70315,6 @@
       "connectors.setupNeeded": "0c0f4d640367f987918f004210d7f5bb6baa77ea56a73770ccb68e3e1f0ea632",
       "connectors.setupNeededRemote": "aeb6713a570fd69d6269fb0afdf396cf22bc18f9424661d765497f5fb75f44ab",
       "connectors.openSettings": "ca381c1e76e681b6c18fa984a2e2fda6ed4a9f28e914f539db34a6dcb3737149",
-      "connectors.perBot.title": "6889c132c8dc1089a3ad7bfa89d1c3ee9fdc7d0c7ec231225dd9371b6d348126",
-      "connectors.perBot.body": "1e37a8a6e58075113cbf6a2b59aaa4190f36abcbd87de2d23e5e3abfacfb44ef",
-      "connectors.perBot.allow": "0fb2caad04a3ed35146534ae3cd2fa6974d62b4a226e09065e5c4162720347b6",
       "connectors.featuredBefore": "b4168ab2c4624572cdbeaa8df5bfa1913737f9b55d8f84f0bea388beccb58af9",
       "connectors.updateKey": "a97d0403e4c11731af29c8e5bf5111ff0997ab9fe3b4e00767ff90e345847804",
       "connectors.featuredAfter": "8b160145b2cb0d2d86c0f6c702cd9799c8afe46eaa11e285370c9c46f8e29845",
@@ -72957,9 +72956,7 @@
       "advancedBack.body": "54c4c7c49255470019c5a6953885a8a0826e0b049a9662fb9e5bca6130bb7454",
       "botLimit.created.title": "c8ed0785d466a4784db1862131dd84767f22eefd5ef7edabf794ae5a328df0f7",
       "botLimit.created.body": "5ab519ffccc837cc76b1e1c3437077b4f997add4e7226556ab395ebfd62074d8",
-      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2",
-      "planUsage.monthly": "9b11f6b707d2a03e0265465f32520bc1bc213de121de958539662d0ec1453fcb",
-      "planUsage.inSidebar": "5b55843d5600926382d4002c3035e4632ee9754d23bf4d55adf1ee8ea0398920"
+      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -77222,9 +77219,6 @@
       "connectors.setupNeeded": "0c0f4d640367f987918f004210d7f5bb6baa77ea56a73770ccb68e3e1f0ea632",
       "connectors.setupNeededRemote": "aeb6713a570fd69d6269fb0afdf396cf22bc18f9424661d765497f5fb75f44ab",
       "connectors.openSettings": "ca381c1e76e681b6c18fa984a2e2fda6ed4a9f28e914f539db34a6dcb3737149",
-      "connectors.perBot.title": "6889c132c8dc1089a3ad7bfa89d1c3ee9fdc7d0c7ec231225dd9371b6d348126",
-      "connectors.perBot.body": "1e37a8a6e58075113cbf6a2b59aaa4190f36abcbd87de2d23e5e3abfacfb44ef",
-      "connectors.perBot.allow": "0fb2caad04a3ed35146534ae3cd2fa6974d62b4a226e09065e5c4162720347b6",
       "connectors.featuredBefore": "b4168ab2c4624572cdbeaa8df5bfa1913737f9b55d8f84f0bea388beccb58af9",
       "connectors.updateKey": "a97d0403e4c11731af29c8e5bf5111ff0997ab9fe3b4e00767ff90e345847804",
       "connectors.featuredAfter": "8b160145b2cb0d2d86c0f6c702cd9799c8afe46eaa11e285370c9c46f8e29845",
@@ -79871,9 +79865,7 @@
       "advancedBack.body": "54c4c7c49255470019c5a6953885a8a0826e0b049a9662fb9e5bca6130bb7454",
       "botLimit.created.title": "c8ed0785d466a4784db1862131dd84767f22eefd5ef7edabf794ae5a328df0f7",
       "botLimit.created.body": "5ab519ffccc837cc76b1e1c3437077b4f997add4e7226556ab395ebfd62074d8",
-      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2",
-      "planUsage.monthly": "9b11f6b707d2a03e0265465f32520bc1bc213de121de958539662d0ec1453fcb",
-      "planUsage.inSidebar": "5b55843d5600926382d4002c3035e4632ee9754d23bf4d55adf1ee8ea0398920"
+      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -84018,9 +84010,6 @@
       "connectors.setupNeeded": "0c0f4d640367f987918f004210d7f5bb6baa77ea56a73770ccb68e3e1f0ea632",
       "connectors.setupNeededRemote": "aeb6713a570fd69d6269fb0afdf396cf22bc18f9424661d765497f5fb75f44ab",
       "connectors.openSettings": "ca381c1e76e681b6c18fa984a2e2fda6ed4a9f28e914f539db34a6dcb3737149",
-      "connectors.perBot.title": "6889c132c8dc1089a3ad7bfa89d1c3ee9fdc7d0c7ec231225dd9371b6d348126",
-      "connectors.perBot.body": "1e37a8a6e58075113cbf6a2b59aaa4190f36abcbd87de2d23e5e3abfacfb44ef",
-      "connectors.perBot.allow": "0fb2caad04a3ed35146534ae3cd2fa6974d62b4a226e09065e5c4162720347b6",
       "connectors.featuredBefore": "b4168ab2c4624572cdbeaa8df5bfa1913737f9b55d8f84f0bea388beccb58af9",
       "connectors.updateKey": "a97d0403e4c11731af29c8e5bf5111ff0997ab9fe3b4e00767ff90e345847804",
       "connectors.featuredAfter": "8b160145b2cb0d2d86c0f6c702cd9799c8afe46eaa11e285370c9c46f8e29845",
@@ -86585,9 +86574,7 @@
       "advancedBack.body": "54c4c7c49255470019c5a6953885a8a0826e0b049a9662fb9e5bca6130bb7454",
       "botLimit.created.title": "c8ed0785d466a4784db1862131dd84767f22eefd5ef7edabf794ae5a328df0f7",
       "botLimit.created.body": "5ab519ffccc837cc76b1e1c3437077b4f997add4e7226556ab395ebfd62074d8",
-      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2",
-      "planUsage.monthly": "9b11f6b707d2a03e0265465f32520bc1bc213de121de958539662d0ec1453fcb",
-      "planUsage.inSidebar": "5b55843d5600926382d4002c3035e4632ee9754d23bf4d55adf1ee8ea0398920"
+      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -91420,9 +91407,6 @@
       "connectors.setupNeeded": "0c0f4d640367f987918f004210d7f5bb6baa77ea56a73770ccb68e3e1f0ea632",
       "connectors.setupNeededRemote": "aeb6713a570fd69d6269fb0afdf396cf22bc18f9424661d765497f5fb75f44ab",
       "connectors.openSettings": "ca381c1e76e681b6c18fa984a2e2fda6ed4a9f28e914f539db34a6dcb3737149",
-      "connectors.perBot.title": "6889c132c8dc1089a3ad7bfa89d1c3ee9fdc7d0c7ec231225dd9371b6d348126",
-      "connectors.perBot.body": "1e37a8a6e58075113cbf6a2b59aaa4190f36abcbd87de2d23e5e3abfacfb44ef",
-      "connectors.perBot.allow": "0fb2caad04a3ed35146534ae3cd2fa6974d62b4a226e09065e5c4162720347b6",
       "connectors.featuredBefore": "b4168ab2c4624572cdbeaa8df5bfa1913737f9b55d8f84f0bea388beccb58af9",
       "connectors.updateKey": "a97d0403e4c11731af29c8e5bf5111ff0997ab9fe3b4e00767ff90e345847804",
       "connectors.featuredAfter": "8b160145b2cb0d2d86c0f6c702cd9799c8afe46eaa11e285370c9c46f8e29845",
@@ -94020,9 +94004,7 @@
       "advancedBack.body": "54c4c7c49255470019c5a6953885a8a0826e0b049a9662fb9e5bca6130bb7454",
       "botLimit.created.title": "c8ed0785d466a4784db1862131dd84767f22eefd5ef7edabf794ae5a328df0f7",
       "botLimit.created.body": "5ab519ffccc837cc76b1e1c3437077b4f997add4e7226556ab395ebfd62074d8",
-      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2",
-      "planUsage.monthly": "9b11f6b707d2a03e0265465f32520bc1bc213de121de958539662d0ec1453fcb",
-      "planUsage.inSidebar": "5b55843d5600926382d4002c3035e4632ee9754d23bf4d55adf1ee8ea0398920"
+      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2"
     }
   }
 }
