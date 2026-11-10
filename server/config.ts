@@ -417,7 +417,7 @@ const appConfigSchema = z.object({
     /** Local hour (0-23) after which the nightly tidy-up runs. */
     tidyHour: z.number().int().min(0).max(23).optional(),
   }).strict().optional(),
-  threads: threadsConfigSchema.optional(),
+  threads: threadsConfigSchema.optional(), /** Burst mode on an open-source install; a Cloud's plan sets it instead. `maxParallel`: burst threads running at once (default 10). */ burst: z.object({ maxParallel: z.number().int().min(1).max(100).optional() }).strict().optional(),
   /** Minimum days of decision-log month files kept; OMB_DECISION_RETENTION_DAYS wins. */
   decisions: z.object({ retentionDays: z.number().int().min(1).max(3650).optional() }).strict().optional(),
   loopGuard: loopGuardConfigSchema.optional(),
@@ -494,7 +494,7 @@ export interface AppConfig extends HelperConfig {
   profile?: { name?: string; email?: string; aboutMe?: string; avatarUrl?: string }; everyBotRules?: string;
   rooms?: { turnTimeoutMinutes: number };
   mcp?: { callTimeoutMinutes?: number };
-  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
+  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number }; burst?: { maxParallel?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
   localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean };
