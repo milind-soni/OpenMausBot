@@ -274,6 +274,22 @@ describe("control-plane desktop client", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(9);
   });
 
+  it("reads why a relay-capable computer goes without a tunnel, and nothing else from the body", async () => {
+    for (const [body, tunnel] of [
+      [{ error: "relay_capable", tunnel: "retired" }, "retired"],
+      [{ error: "relay_capable", tunnel: "full" }, "full"],
+      [{ error: "relay_capable" }, null],
+      [{ error: "relay_capable", tunnel: "<b>anything</b>" }, null],
+      [{ error: "endpoint_capacity", tunnel: "retired" }, null],
+    ]) {
+      const client = createControlPlaneClient({
+        baseURL: "https://accounts.openmausbot.com",
+        fetchImpl: vi.fn(async () => jsonResponse(body, { status: 409 })),
+      });
+      await expect(client.ensureEndpoint(INSTALL, { appVersion: "0.1.152", legacyDevices: 1 })).rejects.toMatchObject({ code: body.error, tunnel });
+    }
+  });
+
   it("maps bounded server error codes and hides arbitrary response text", async () => {
     const client = createControlPlaneClient({
       baseURL: "https://accounts.openmausbot.com",

@@ -137,6 +137,7 @@ export declare const CLOUD_TEAM_ROLES: readonly CloudTeamRole[];
 /** owner → Super admin, admin → Admin, member → User, in `t`'s language (English by default). */
 export declare function teamRoleLabel(role: string | null | undefined, t?: (key: string, params?: Record<string, unknown>) => string): string;
 export declare function parseCloudTeams(input: unknown): CloudTeam[];
+export declare function parseCloudLanding(input: unknown, teams: readonly CloudTeam[]): { teamId: string } | null;
 export declare function cloudUnreachableCause(state: unknown, origin?: string | null): "host" | "no_answer" | null;
 export declare function cloudUnreachableText(state: unknown, origin?: string | null, t?: (key: string, params?: Record<string, string | number>) => string): string | null;
 export declare function parseCloudPurchase(input: unknown): CloudPurchase | null;

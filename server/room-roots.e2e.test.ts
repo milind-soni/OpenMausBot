@@ -665,22 +665,3 @@ it("R9 does not rerun a one-on-one goal step after a restart: its goal run ended
   await expect.poll(() => nothingLive(f), { timeout: 15_000 }).toEqual([]);
 }), hostTimeout(90_000));
 
-it("R9 a one-on-one goal step still asks the person first when the bot must ask before contacting other bots", () => scenario(async (f) => {
-  const mira = await f.bot("Mira", "Leadership");
-  const clive = (await f.bots()).find((bot: any) => bot.id === f.clive.id);
-  expect((await f.api("PATCH", `/api/bots/${clive.id}`, { approvePeerComms: true, approvalMode: "ask" })).status).toBe(200);
-  f.script(clive.id,
-    { key: "C-STEP", match: ["R9A-GOAL"], steps: [{ arguments: { bot_ids: [mira.id], message: "R9A-BRIEF: check the export numbers." }, expectError: true }],
-      reply: `R9A-ASKED: I asked before contacting Mira.\n${goalDone("Asked first.")}` });
-  expect((await sendGoal(f, clive, "R9A-GOAL: have Mira check the export numbers.")).status).toBe(202);
-  const asked = async () => (await f.messages(clive.threadId)).find((message: any) => message.card?.tool === "delegate_bot");
-  await expect.poll(async () => Boolean(await asked()), { timeout: 30_000 }).toBe(true);
-  expect(f.db().assignments.filter((row: any) => row.parentId)).toEqual([]);
-  const card = await asked();
-  expect((await f.api("POST", `/api/bots/${clive.id}/respond`, { threadId: clive.threadId, requestId: card.card.requestId, behavior: "deny" })).status).toBe(200);
-  await expect.poll(async () => (await f.messages(clive.threadId)).find((message: any) => message.kind === "goal.run")?.goalRun?.status, { timeout: 30_000 }).toBe("completed");
-  await f.settle(1_000);
-  expect(f.db().assignments.filter((row: any) => row.parentId)).toEqual([]);
-  expect(f.turns(mira.id)).toEqual([]);
-  await expect.poll(() => nothingLive(f), { timeout: 15_000 }).toEqual([]);
-}), hostTimeout(90_000));

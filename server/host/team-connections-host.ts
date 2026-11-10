@@ -15,7 +15,7 @@ import type * as Composio from "../composio.ts";
 import type { AppConfig } from "../config.ts";
 import type { McpServerSpec } from "../contracts.ts";
 import { serviceSlugFor } from "../connector-verdict.ts";
-import { type McpOAuthManager, type McpSignInPhase, withMcpSignIn, withoutPendingSignIn } from "../mcp-oauth.ts";
+import { type McpOAuthManager, type McpRefreshOutcome, type McpSignInPhase, withMcpSignIn, withoutPendingSignIn } from "../mcp-oauth.ts";
 import { isRemoteMcpServer, parseStoredMcpServer } from "../mcp-registry.ts";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { appLabel, ConnectionScopes, PeopleConnections, personAppOf, SCOPES_FILE, type BrokerAccess } from "../team-connections.ts";
@@ -48,6 +48,10 @@ export interface TeamConnectionsHostDeps {
   /** Whether whoever started a member's sign-in (a session, or a chat's Sign in card) is still there to finish it. */
   isOwnerLive(owner: string): boolean;
   onSettled?(name: string, phase: McpSignInPhase, owner: string): void;
+  /** How each refresh of a member's own MCP sign-in ended. */
+  onRefresh?(person: string, name: string, outcome: McpRefreshOutcome): void;
+  /** A member signed in again, saved a key or started connecting an app of their own. */
+  onPersonChanged?(person: string, kind: "app" | "mcp", id: string): void;
   /** The connected-apps service a member's own installation is made on; null: none here. */
   brokerUrl(): string | null;
   composio: Pick<typeof Composio, "configured" | "mcpIntegration" | "connectedServices" | "verifiedConnectedServiceSlugs" | "authorizeService" | "removeService">;
@@ -58,6 +62,8 @@ const list = (names: readonly string[]) => names.length <= 1 ? names.join("") : 
 /** How long a read of an installation's connected apps stands, how soon a failed first read is tried again, and how long a
  * turn waits for an installation's first answer. */
 const APPS_FRESH_MS = 60_000, APPS_RETRY_MS = 10_000, FIRST_APPS_WAIT_MS = 3_000;
+/** How long one read of every member's own apps serves the Admin's reads made together. */
+const OWN_APPS_READ_MS = 20_000;
 
 export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
   const team = deps.team;
@@ -74,6 +80,8 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     clients: (name, url) => { const server = teamServer(name); return server && isRemoteMcpServer(server) && server.url === url ? server.oauth : undefined; },
     isOwnerLive: deps.isOwnerLive,
     ...(deps.onSettled ? { onSettled: deps.onSettled } : {}),
+    ...(deps.onRefresh ? { onRefresh: deps.onRefresh } : {}),
+    ...(deps.onPersonChanged ? { onChanged: deps.onPersonChanged } : {}),
   });
   const personApps = () => (team ? scopes.person("app") : []);
   /** The apps connected for an installation, the team's or a member's own. A turn never waits on a refresh: what is known
@@ -99,6 +107,16 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     return tools.length ? { ...bridge, env: { ...bridge.env, [APP_TOOLS_ENV]: JSON.stringify(tools), [APP_TOOL_NAMES_ENV]: names } } : bridge;
   };
   const personMcp = () => (team ? scopes.person("mcp") : []);
+  let ownAppsRead: { at: number; read: Promise<Array<{ person: string; email: string; services: Record<string, Composio.ConnectorServiceState> | null }>> } | null = null;
+  /** Every member's own installation's apps (null where it could not be read), read once for reads close together. */
+  const ownAppsServices = () => {
+    if (!ownAppsRead || Date.now() - ownAppsRead.at >= OWN_APPS_READ_MS) {
+      ownAppsRead = { at: Date.now(), read: Promise.all(people.appsPeople().map(async ({ person, email, access }) => ({
+        person, email, services: await deps.composio.connectedServices(deps.cfg(), access).catch(() => null),
+      }))) };
+    }
+    return ownAppsRead.read;
+  };
   const link = () => (team && deps.adminOrigin ? `${deps.adminOrigin}/cloud/team/${encodeURIComponent(team.id)}` : null);
   const without = <T,>(servers: Record<string, T>, names: readonly string[]) =>
     Object.fromEntries(Object.entries(servers).filter(([name]) => !names.includes(name)));
@@ -382,6 +400,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
       return shared;
     },
 
+    ownAppsServices,
     /** A person who left the team (host/team-member-left.ts): every connection, key and sign-in of theirs goes. */
     forgetPerson: (person: string) => people.forgetPerson(person),
     /** For the Admin's signed read: what is `person`, and who has connected each (addresses, never a secret). */
@@ -390,10 +409,9 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
       const apps = personApps(), servers = personMcp();
       const byApp: Record<string, string[]> = Object.fromEntries(apps.map((slug) => [slug, [] as string[]]));
       if (apps.length) {
-        await Promise.all(people.appsPeople().map(async ({ email, access }) => {
-          const connected = await deps.composio.connectedServices(deps.cfg(), access).catch(() => null);
-          for (const slug of apps) if (connected?.[slug]?.connected) byApp[slug]!.push(email);
-        }));
+        for (const { email, services } of await ownAppsServices()) {
+          for (const slug of apps) if (services?.[slug]?.connected) byApp[slug]!.push(email);
+        }
       }
       const byServer: Record<string, string[]> = {};
       for (const name of servers) {

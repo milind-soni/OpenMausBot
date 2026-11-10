@@ -125,7 +125,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | --- | --- | --- |
 | `app_first_open` | The first time this app page starts with analytics on | `platform`: `desktop`, `browser` |
 | `app_opened` | Each time this app page starts with analytics on | `platform`: `desktop`, `browser` |
-| `app_active` | Once a day you use the app: when this app page starts, comes into view or is focused, or when a check every ten minutes finds a new day while the page is in view and focused. At most once per day by your computer's date for each app page, and never while the page is hidden | `platform`: `desktop`, `browser`; `mode`: `simple`, the look this app page is in when it counts the day, the only one now (earlier versions also sent `advanced`) |
+| `app_active` | Once a day you use the app: when this app page starts, comes into view or is focused, or when a check every ten minutes finds a new day while the page is in view and focused. At most once per day by your computer's date for each app page, and never while the page is hidden | `platform`: `desktop`, `browser`; `mode`: `simple`, `advanced`, the look this app page is in when it counts the day |
 | `onboarding_step` | A first-run screen is shown | `step`: `meet`, `chief`; `replay`: true/false |
 | `onboarding_completed` | The first run ends in the chat | `reason`: `completed`; `at`: the screen it ended on; `replay`: true/false |
 | `setup_import_applied` | You bring in the skills and MCP servers found from other AI tools on this computer, in Settings → Import | `skills`, `tools`: how many were added. Never their names or where they came from |
@@ -163,6 +163,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `boat_offer` | Boat's credit offer: its one-time card is shown or you act on it, or you act on it on the Boat card in Settings → API keys | `action`: `shown` (the card only), `get_boat`, `claim` (the drafted email to Boat opened), `not_now`, `close`; `place`: `card`, `settings` |
 | `simple_mode_prompt` | The Simple mode popup, shown once in each browser after an update when nothing else is on screen, is shown, its Simple mode switch is flipped, or it is closed (Done, the X, Escape or a click outside) | `action`: `shown`, `toggled`, `closed`; `mode`: `simple`, `advanced`, the mode it was shown or closed in, or the one a flip turned on |
 | `new_look_notice` | The notice that Simple is now the only look, shown once in each browser that was on Advanced mode, when nothing else is on screen, is shown or closed (Done, the X, Escape or a click outside) | `action`: `shown`, `closed` |
+| `advanced_back_notice` | The notice that Advanced mode is back, shown once in each browser that was on Advanced mode before Simple became the only look and is put back on it, when nothing else is on screen, is shown or closed (Done, the X, Escape or a click outside) | `action`: `shown`, `closed` |
 | `grok_move_popup` | The one-time Move from Grok Bot popup is shown or you act on it | `action`: `shown`, `start`, `not_now`, `close` |
 | `two_places_card` | You act on the card that says your bots live in two places (this computer and a server of your own, or My Cloud) | `action`: `bring`, `not_now`; `kind`: `server`, `cloud`, the place it offered |
 

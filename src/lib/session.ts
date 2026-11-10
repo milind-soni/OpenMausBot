@@ -14,7 +14,7 @@ export interface TeamSession { id: string; name: string; role: string }
 
 export type SessionState =
   | { kind: "loopback"; trust?: "service" }
-  | { kind: "session"; id: string; label: string; email?: string; scopes: string[]; expiresAt: number; cloudGuest?: true; openedThreads?: string[]; reactor?: string; team?: TeamSession }
+  | { kind: "session"; id: string; label: string; email?: string; scopes: string[]; expiresAt: number; cloudGuest?: true; openedThreads?: string[]; reactor?: string; team?: TeamSession; teamSignIn?: string }
   | { kind: "unauthenticated"; error: string }
   | { kind: "unreachable"; error: string };
 
@@ -29,6 +29,16 @@ export function profileForSession(profile: SessionProfile | undefined, sessionSt
   const email = sessionState.email;
   if (!email?.trim()) return undefined;
   return profile?.email?.trim().toLowerCase() === email.trim().toLowerCase() ? profile : { email };
+}
+
+const TEAM_SIGN_IN_KEY = "omb.team-sign-in";
+/** A team session's page on MausBot Cloud, kept by this browser for this server, so the page its session ended on can offer
+ * the way back. Nothing that signs anyone in: an address the signed-in session was told. */
+export function rememberTeamSignIn(url: string | undefined): void {
+  try { if (url) globalThis.localStorage?.setItem(TEAM_SIGN_IN_KEY, url); } catch {}
+}
+export function rememberedTeamSignIn(): string | null {
+  try { return globalThis.localStorage?.getItem(TEAM_SIGN_IN_KEY) ?? null; } catch { return null; }
 }
 
 export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise<SessionState> {
@@ -53,6 +63,7 @@ export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise
       scopes: Array.isArray(record.scopes) ? record.scopes.filter((s): s is string => typeof s === "string") : [],
       expiresAt: typeof record.expiresAt === "number" ? record.expiresAt : 0,
       ...(typeof record.reactor === "string" ? { reactor: record.reactor } : {}),
+      ...(typeof record.teamSignIn === "string" ? { teamSignIn: record.teamSignIn } : {}),
       ...(teamSessionOf(record.team) ? { team: teamSessionOf(record.team)!, openedThreads: Array.isArray(record.openedThreads) ? record.openedThreads.filter((id): id is string => typeof id === "string") : [] } : {}),
       ...(record.cloudGuest === true ? {
         cloudGuest: true as const,
@@ -143,7 +154,7 @@ export async function pairWithCode(
   return { ok: false, error: refusalText(body, res) };
 }
 
-export async function previewBrowserSignIn(credential: string, fetchImpl: typeof fetch = fetch): Promise<{ owner: string } | null> {
+export async function previewBrowserSignIn(credential: string, fetchImpl: typeof fetch = fetch): Promise<{ owner: string; team?: string } | null> {
   try {
     const res = await fetchImpl("/api/auth/pair", {
       method: "POST",
@@ -151,8 +162,9 @@ export async function previewBrowserSignIn(credential: string, fetchImpl: typeof
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code: credential, browser: true, preview: true }),
     });
-    const owner: unknown = Reflect.get(Object(await res.json().catch(() => ({}))), "owner");
-    return res.ok && typeof owner === "string" && owner ? { owner } : null;
+    const body = Object(await res.json().catch(() => ({})));
+    const owner: unknown = Reflect.get(body, "owner"), team: unknown = Reflect.get(body, "team");
+    return res.ok && typeof owner === "string" && owner ? { owner, ...(typeof team === "string" && team.trim() ? { team: team.trim() } : {}) } : null;
   } catch {
     return null;
   }
