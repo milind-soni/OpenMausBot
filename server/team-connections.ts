@@ -12,7 +12,7 @@ import { z } from "zod";
 
 import { ensureManagedComposioCredentials, managedComposioAccess } from "../electron/managed-composio.mjs";
 import { writeFileAtomic } from "./atomic.ts";
-import { McpOAuthManager, type McpSignInPhase } from "./mcp-oauth.ts";
+import { McpOAuthManager, type McpRefreshOutcome, type McpSignInPhase } from "./mcp-oauth.ts";
 import type { McpOAuthClientConfig } from "./mcp-registry.ts";
 
 export type ConnectionScope = "team" | "person";
@@ -98,6 +98,10 @@ export interface PeopleConnectionsOptions {
   isOwnerLive: (owner: string) => boolean;
   /** Each member's sign-in ending, as McpOAuthManager's own option hears it. */
   onSettled?: (name: string, phase: McpSignInPhase, owner: string) => void;
+  /** How each refresh of a member's own sign-in ended. */
+  onRefresh?: (person: string, name: string, outcome: McpRefreshOutcome) => void;
+  /** A member signed in again, saved a key or started connecting an app: what was known about their old one is stale. */
+  onChanged?: (person: string, kind: ConnectionKind, id: string) => void;
   fetchImpl?: typeof fetch;
 }
 
@@ -184,6 +188,11 @@ export class PeopleConnections {
     file.people[person] = { email, servers: { ...own.servers, [name]: key } };
     this.write("mcp-keys.json", file);
     this.remember(person, email);
+    this.options.onChanged?.(person, "mcp", name);
+  }
+  /** The member started connecting their own app. */
+  appConnecting(person: string, slug: string): void {
+    this.options.onChanged?.(person, "app", slug);
   }
   deleteKey(person: string, name: string): void {
     const file = this.keys();
@@ -204,7 +213,11 @@ export class PeopleConnections {
       this.ensureDir();
       manager = new McpOAuthManager({
         file: join(this.dir, "mcp-oauth", `${person}.json`), clients: this.options.clients, isOwnerLive: this.options.isOwnerLive,
-        ...(this.options.onSettled ? { onSettled: this.options.onSettled } : {}),
+        onSettled: (name: string, phase: McpSignInPhase, owner: string) => {
+          if (phase === "succeeded") this.options.onChanged?.(person, "mcp", name);
+          this.options.onSettled?.(name, phase, owner);
+        },
+        ...(this.options.onRefresh ? { onRefresh: (name: string, outcome: McpRefreshOutcome) => this.options.onRefresh?.(person, name, outcome) } : {}),
       });
       this.managers.set(person, manager);
     }
