@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createCleanWorkspace, DEFAULT_PROFILE, profileDir, profilesDir } from "./clean-workspace.mjs";
-import { createLocalProfiles, createProfileRegistry, MAX_PROFILES, PROFILES_FILE, profileName, SETTLE_MS } from "./local-profiles.mjs";
+import { createLocalProfiles, createProfileRegistry, MAX_PROFILES, PROFILES_FILE, profileName } from "./local-profiles.mjs";
 
 /** This computer's data folder on disk, with the one server the app runs at a time (`running`), the real profile swap
  * (clean-workspace.mjs) over it, the registry beside it and the home window's side of a profile on screen. */
@@ -16,7 +16,7 @@ function computer(t, { home = "cloud", frozen = home === "cloud" } = {}) {
   mkdirSync(dataDir, { recursive: true });
   if (frozen) writeFileSync(join(dataDir, "moved.json"), JSON.stringify({ v: 1, at: 1, cloud: "https://omb-t-1.fly.dev" }));
   let clock = 1_000;
-  const w = { dataDir, running: dataDir, swaps: [], home, shown: null, onScreen: "cloud", busy: [], trashed: [], trashFails: false, changes: 0, logs: [], waits: 0, remembered: [], asked: [] };
+  const w = { dataDir, running: dataDir, swaps: [], home, shown: null, onScreen: "cloud", busy: [], trashed: [], trashFails: false, changes: 0, logs: [], waits: 0, remembered: [] };
   w.now = () => clock;
   w.clean = createCleanWorkspace({ dataDir: () => dataDir, running: () => w.running,
     swap: async (dir) => { w.swaps.push(dir); await new Promise((resolve) => setImmediate(resolve)); w.running = dir; w.onScreen = "local"; return { ok: true }; } });
@@ -29,10 +29,9 @@ function computer(t, { home = "cloud", frozen = home === "cloud" } = {}) {
     },
     showLocal: () => { w.onScreen = "local"; }, onLocal: () => w.onScreen === "local",
     busy: async () => w.busy[0] ?? null,
-    ask: async (input) => { w.asked.push(input); return w.answer ? w.answer(input) : "stop"; },
     trash: async (dir) => { if (w.trashFails) throw new Error("no Trash here"); w.trashed.push(dir); rmSync(dir, { recursive: true, force: true }); },
     reserved: () => "This Mac", remember: (place) => w.remembered.push(place), changed: () => { w.changes++; }, log: (line) => w.logs.push(line), now: w.now,
-    sleep: w.sleep = async (ms) => { clock += ms; w.waits++; w.onWait?.(); } });
+    sleep: async (ms) => { clock += ms; w.waits++; w.onWait?.(); } });
   w.file = () => join(profilesDir(dataDir), PROFILES_FILE);
   w.saved = () => JSON.parse(readFileSync(w.file(), "utf8"));
   return w;
@@ -150,41 +149,42 @@ test("a switch waits for the work under way in the workspace it leaves, says so 
   assert.equal(w.running, profileDir(w.dataDir, "work"));
 });
 
-test(`a switch waits at most ${SETTLE_MS / 1000} s: then the server stops as a quit stops it, and each cut turn says so there`, async (t) => {
+test("a switch waits with no time limit while the work goes on: nothing is cut short", async (t) => {
   const w = computer(t);
   w.profiles.create({ name: "Work" });
   await w.profiles.open(DEFAULT_PROFILE);
   w.busy = [{ name: "Scout", what: "bot" }];
+  w.onWait = () => { if (w.waits === 600) w.busy = []; };
   assert.equal(await w.profiles.open("work"), true);
-  assert.equal(w.waits, SETTLE_MS / 1000);
-  assert.match(w.logs.at(-1), /work opens though Scout still works/);
+  assert.equal(w.waits, 600, "ten minutes of Scout working, and it still waited");
+  assert.equal(w.running, profileDir(w.dataDir, "work"));
+  assert.equal(w.logs.some((line) => /still works/.test(line)), false);
 });
 
-test("the person picks how a busy switch goes: asked once, wait has no time limit, cancel opens nothing", async (t) => {
+test("a second click on the place that waits opens it at once: the server stops as a quit stops it, and each cut turn says so there", async (t) => {
   const w = computer(t);
   w.profiles.create({ name: "Work" });
   await w.profiles.open(DEFAULT_PROFILE);
-  assert.deepEqual(w.asked, [], "nothing busy: never asked");
   w.busy = [{ name: "Scout", what: "bot" }];
-  w.answer = () => "wait";
-  w.onWait = () => { if (w.waits === SETTLE_MS / 1000 + 5) w.busy = []; };
-  assert.equal(await w.profiles.open("work"), true);
-  assert.equal(w.waits, SETTLE_MS / 1000 + 5, "waited past the limit until Scout finished");
-  assert.deepEqual(w.asked, [{ leaving: DEFAULT_PROFILE, target: "work", name: "Scout" }], "asked once");
+  let again = null;
+  w.onWait = () => { if (w.waits === 2) again = w.profiles.open("work"); };
+  assert.equal(await w.profiles.open("work"), null, "the first click's wait ends");
+  assert.equal(await again, true);
+  assert.equal(w.waits, 2, "no more waiting after the second click");
+  assert.equal(w.running, profileDir(w.dataDir, "work"));
   assert.equal(w.profiles.settling(), null);
+  assert.match(w.logs.at(-1), /work opens though Scout still works/);
 
-  w.busy = [{ name: "Scout", what: "bot" }];
-  w.waits = 0; w.asked = []; w.onWait = null; w.answer = () => "cancel";
-  const swaps = w.swaps.length;
-  assert.equal(await w.profiles.open(DEFAULT_PROFILE), null, "stayed");
-  assert.equal(w.swaps.length, swaps, "nothing stopped or started");
-  assert.equal(w.waits, 0);
-  assert.equal(w.asked.length, 1);
-
-  w.answer = async () => { await w.sleep(2 * SETTLE_MS); return "stop"; };
-  w.waits = 0;
-  assert.equal(await w.profiles.open(DEFAULT_PROFILE), true);
-  assert.equal(w.waits, 1 + SETTLE_MS / 1000, "stop keeps the limit, counted from the answer");
+  const local = computer(t, { home: "local" });
+  local.onScreen = "local";
+  local.profiles.create({ name: "Work" });
+  await local.profiles.open("work");
+  local.busy = [{ name: "Juno", what: "bot" }];
+  local.onWait = () => { if (local.waits === 1) again = local.profiles.computer(); };
+  assert.equal(await local.profiles.computer(), null);
+  assert.equal(await again, true, "This computer clicked again: back at once");
+  assert.equal(local.running, local.dataDir);
+  assert.match(local.logs.at(-1), /this computer opens though Juno still works/);
 });
 
 test("nothing to wait for when the frozen copy runs: My Cloud's first This Mac opens at once", async (t) => {
