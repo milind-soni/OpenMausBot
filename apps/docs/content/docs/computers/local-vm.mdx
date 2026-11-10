@@ -38,6 +38,31 @@ The equivalent source configuration is:
 
 Local VMs always run on the same physical host as the OpenMausBot desktop process. `maxInstances: 2` does not pool one VM from a Mac and another from a Windows PC. To use Windows capacity today, run MausBot on Windows with its supported Podman lane and create both per-bot desktops there. The BYO-VPS backend is limited to an x86_64 Linux Docker host; do not point it at Windows as a substitute remote Local VM. Cross-host Mac and Windows pooling is tracked in [issue #508](https://github.com/milind-soni/OpenMausBot/issues/508).
 
+## Memory and CPU
+
+Each desktop gets 4 GiB of memory (swap capped at the same) and 2 CPUs. To change that, set `memoryGb` (2 to 128) and `cpus` (1 to 64) in `config.json`:
+
+```json
+{
+  "localVm": {
+    "memoryGb": 8,
+    "cpus": 4
+  }
+}
+```
+
+A new desktop is created with these limits. On Docker and Podman, a stopped desktop takes them the next time it starts. On Apple container, remove and recreate the desktop to apply them. Every running desktop counts against the machine's memory, so leave room for MausBot itself.
+
+## Installing packages
+
+A bot can install system packages in its desktop with `sudo apt-get install`. Packages installed this way live in the desktop's own filesystem, not the durable workspace, so recreating the desktop (or an update that recreates it) removes them. User-level installs such as `pip install --user` or anything under `~/.local` are stored in the workspace and survive recreation.
+
+On Linux with Docker Engine, a desktop's root account is the host's root account. Those desktops therefore run with `no-new-privileges`: `sudo` is off and system packages cannot be installed. User-level installs still work. Use rootless Podman on Linux when a bot needs `sudo` in its desktop.
+
+## Linux accounts
+
+On Linux with Docker Engine, the desktop's `cua` account takes the user ID and group ID of the account running MausBot, so files the bot writes in its workspace belong to you on the host. The first start of a new desktop takes longer while it does this. Rootless Podman maps the IDs itself.
+
 ## Persistence
 
 The bot's workspace and browser profile live in a durable mounted directory. Recreating the desktop can repair stale runtime state without deleting the durable workspace.
