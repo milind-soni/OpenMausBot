@@ -8,6 +8,7 @@ import { z } from "zod";
 import {
   ensureManagedComposioCredentials,
   managedComposioAccess,
+  managedComposioBrokerOff,
   type ManagedComposioAccess,
   type ManagedComposioCredentials,
 } from "../electron/managed-composio.mjs";
@@ -18,6 +19,9 @@ import { managedComposioBrokerUrl } from "../electron/managed-composio.mjs";
 export const CLOUD_CONNECTED_APPS_FILE = "connected-apps-installation.json";
 /** Between attempts while the Cloud holds no token, each with up to a fifth of jitter; the last one repeats. */
 export const CLOUD_CONNECTED_APPS_RETRY_MS: readonly number[] = [30_000, 60_000, 120_000, 300_000, 600_000, 1_800_000];
+
+/** How often a Cloud on its owner's Composio key looks whether the key is still saved; nothing leaves the server. */
+const OWN_KEY_CHECK_MS = 60_000;
 
 const TOKEN = /^[0-9a-f]{64}$/;
 const storedSchema = z.object({
@@ -37,6 +41,8 @@ export interface CloudConnectedAppsOptions {
   apply(access: ManagedComposioAccess | null): void;
   /** OMB_CLOUD_CONNECTED_APPS_GRANT: the Admin's proof that this is a paid Cloud, which raises its daily app-event limit. */
   cloudGrant?: string;
+  /** Whether the owner's own Composio project key is saved; while it is, nothing is sent to the service. */
+  ownKey?: () => boolean;
   fetchImpl?: typeof fetch;
   log?: (line: string) => void;
   retryDelaysMs?: readonly number[];
@@ -101,12 +107,16 @@ export function startCloudConnectedApps(options: CloudConnectedAppsOptions): Clo
     }
   };
 
+  const retryAfter = (ms: number) => {
+    timer = setTimer(() => { timer = null; current = attempt(); }, ms);
+    timer.unref?.();
+  };
+
   const retryLater = () => {
     if (stopped) return;
     const base = delays[Math.min(failures, delays.length - 1)] ?? 1_800_000;
     failures += 1;
-    timer = setTimer(() => { timer = null; current = attempt(); }, Math.round(base * (1 + 0.2 * random())));
-    timer.unref?.();
+    retryAfter(Math.round(base * (1 + 0.2 * random())));
   };
 
   /** Settled once the service took the grant or refused it for good (4xx, including a service without the route);
@@ -137,6 +147,10 @@ export function startCloudConnectedApps(options: CloudConnectedAppsOptions): Clo
 
   const attempt = async (): Promise<void> => {
     try {
+      if (options.ownKey?.()) {
+        if (!stopped) retryAfter(OWN_KEY_CHECK_MS);
+        return;
+      }
       const stored = readStored(file, options.brokerUrl);
       if (stored.kind === "kept") {
         log(`connected apps: ${CLOUD_CONNECTED_APPS_FILE} is left as it is, since ${stored.why}; trying again later`);
@@ -193,15 +207,19 @@ let cloudHome: CloudConnectedApps | null = null;
 export const cloudConnectedAppsBrokerUrl = (): string => managedComposioBrokerUrl(process.env.OMB_COMPOSIO_BROKER_URL, !import.meta.url.endsWith(".ts"));
 
 /** A Cloud home's plan includes the connected-apps service, so it registers itself. */
-export function startCloudHomeConnectedApps(input: { cloudHome: boolean; dataDir: string; apply: CloudConnectedAppsOptions["apply"]; cloudGrant?: string }): void {
+export function startCloudHomeConnectedApps(input: { cloudHome: boolean; dataDir: string; apply: CloudConnectedAppsOptions["apply"]; cloudGrant?: string; ownKey?: () => boolean }): void {
   if (!input.cloudHome || cloudHome) return;
+  if (managedComposioBrokerOff()) {
+    console.log("cloud home: the connected-apps service is switched off (OMB_COMPOSIO_BROKER)");
+    return;
+  }
   const configured = process.env.OMB_COMPOSIO_BROKER_URL;
   const brokerUrl = cloudConnectedAppsBrokerUrl();
   if (!brokerUrl) {
     if (configured?.trim()) console.warn("cloud home: connected-apps service URL rejected: HTTPS or a loopback HTTP URL is required");
     return;
   }
-  cloudHome = startCloudConnectedApps({ dataDir: input.dataDir, brokerUrl, apply: input.apply, cloudGrant: input.cloudGrant, log: (line) => console.log(`cloud home: ${line}`) });
+  cloudHome = startCloudConnectedApps({ dataDir: input.dataDir, brokerUrl, apply: input.apply, cloudGrant: input.cloudGrant, ownKey: input.ownKey, log: (line) => console.log(`cloud home: ${line}`) });
 }
 
 export function stopCloudHomeConnectedApps(): void {
