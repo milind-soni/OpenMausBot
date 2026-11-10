@@ -2,7 +2,7 @@ import { userError, userErrorFields } from "../user-errors.ts";
 import { hostedWorkspaceConfiguration } from "../enterprise.ts";
 import { runsElsewhere, type McpConfig, type McpConfigDeps, type McpConfigResult } from "../host/mcp-config.ts";
 import { McpOAuthError, McpSignInError, mcpCallbackOrigin } from "../mcp-oauth.ts";
-import { isRemoteMcpServer, mcpServerBody, mcpServerServes, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "../mcp-registry.ts";
+import { isRemoteMcpServer, mcpServerBody, mcpServerNotFound, mcpServerServes, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "../mcp-registry.ts";
 import { personKey } from "../person-key.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { toolBudgetOf } from "../tool-budgets.ts";
@@ -103,7 +103,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       const [, name, action, flowId] = mcpSignIn;
       const raw = cfg.mcpServers?.[name!];
       const parsed = raw === undefined ? null : parseStoredMcpServer(name!, raw);
-      if (!parsed?.ok) return json(res, 404, { error: "MCP server not found." });
+      if (!parsed?.ok) return json(res, 404, { error: mcpServerNotFound(name!) });
       if (!isRemoteMcpServer(parsed.server)) return json(res, 400, { error: "Only servers reached by URL can be signed in to." });
       if (parsed.server.runsOn) return json(res, 409, { error: runsElsewhere(parsed.server.runsOn) });
       const url = parsed.server.url;
@@ -199,7 +199,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       if (method === "DELETE") return answer(res, json, config.remove(name));
       const body = await readBody(req);
       const current = cfg.mcpServers ?? {};
-      if (!Object.hasOwn(current, name)) return json(res, 404, { error: "MCP server not found." });
+      if (!Object.hasOwn(current, name)) return json(res, 404, { error: mcpServerNotFound(name) });
       const existing = parseStoredMcpServer(name, current[name]);
       if (!existing.ok) return json(res, 400, { error: existing.error });
       if (method === "PATCH") {

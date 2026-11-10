@@ -115,7 +115,11 @@ export function typedValue(spec: FieldSpec, value: unknown): FieldValue | undefi
     case "string": return typeof value === "string" ? value : undefined;
     case "number": return typeof value === "number" && Number.isFinite(value) ? value : undefined;
     case "boolean": return typeof value === "boolean" ? value : undefined;
-    case "date": return typeof value === "string" && ISO_DATE.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) ? value : undefined;
+    case "date": {
+      if (typeof value !== "string" || !ISO_DATE.test(value)) return undefined;
+      const date = new Date(`${value}T00:00:00Z`);
+      return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value ? value : undefined;
+    }
     case "enum": return typeof value === "string" && spec.options?.includes(value) ? value : undefined;
   }
 }

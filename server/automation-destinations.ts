@@ -1,6 +1,6 @@
-// Where an automation's runs report: the chat a routine chose, else the bot's main chat. On a Cloud home a chat the
-// owner writes in never gets words they did not choose, so a Mac they lend stays theirs there: a routine someone else
-// wrote, and every outside event, report into a chat of their own.
+// Where an automation's runs report: the chat a routine chose, else the bot's main chat; every outside event, into a
+// chat of its own. On a Cloud home a chat the owner writes in never gets words they did not choose, so a Mac they lend
+// stays theirs there: a routine someone else wrote reports into a chat of its own too.
 import { CLOUD_OUTSIDE_KEY } from "./cloud-sharing.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 import { threadTitleFrom, type Message, type Store, type TaskRecord } from "./store.ts";
@@ -27,9 +27,9 @@ function legacyResultsThread(routineName: string, task: TaskRecord): boolean {
 
 export function createAutomationDestinations(deps: AutomationDestinationDeps) {
   const { store, cloud } = deps;
-  const chatOfItsOwn = (botId: string, name: string, person: string) => {
+  const chatOfItsOwn = (botId: string, name: string, person?: string) => {
     const threadId = store.createTask(botId, `${name} · Results`, false)?.threadId;
-    if (threadId) cloud?.opened(threadId, person);
+    if (threadId && person) cloud?.opened(threadId, person);
     return threadId;
   };
   return {
@@ -53,12 +53,12 @@ export function createAutomationDestinations(deps: AutomationDestinationDeps) {
     event({ webhookId, webhookName, botId }: { webhookId: string; webhookName: string; botId: string }): string | undefined {
       const bot = store.bot(botId);
       if (!bot || bot.hidden) return undefined;
-      if (!cloud) return deps.mainThread(botId);
       const earlier = deps.runs().find((run) => run.webhookId === webhookId && run.botId === botId && run.resultsThreadId)?.resultsThreadId;
       const kept = earlier ? store.taskByThread(botId, earlier) : undefined;
       const lines = kept && !kept.routineRunId ? store.messagesFor(kept.threadId) : undefined;
-      const threadId = kept && lines && (lines.length === 0 || lines.some(cloud.reportFromOthers)) ? kept.threadId : chatOfItsOwn(botId, webhookName, cloud.owner);
-      if (threadId) cloud.outside(threadId);
+      const stillItsOwn = kept && lines && (cloud ? lines.length === 0 || lines.some(cloud.reportFromOthers) : legacyResultsThread(webhookName, kept));
+      const threadId = stillItsOwn ? kept.threadId : chatOfItsOwn(botId, webhookName, cloud?.owner);
+      if (threadId) cloud?.outside(threadId);
       return threadId;
     },
   };

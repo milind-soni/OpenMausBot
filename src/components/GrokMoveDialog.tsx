@@ -98,7 +98,7 @@ function BringBack({ local, look, found, reply, error, onReply, onFile, onFound 
 
 /** Settings → Import → Move from Grok Bot: the message, what the Bot wrote, the preview, the import, the report. Nothing on
  * this computer is read until this dialog is open. */
-export function GrokMoveDialog({ onClose }: { onClose: () => void }) {
+export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => void; inline?: boolean }) {
   const { state, dispatch } = useStore();
   const local = localSetupImport(state.config?.cloudHome === true);
   const [look, setLook] = useState<GrokLook>(NOTHING_FOUND);
@@ -173,27 +173,26 @@ export function GrokMoveDialog({ onClose }: { onClose: () => void }) {
     refresh();
   };
 
-  return (
-    <div className="ui-scrim fixed inset-0 z-[60] flex items-center justify-center p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !importing) onClose(); }}>
-      <div ref={root} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="grok-move-title" data-grok-move={report ? "report" : preview ? "preview" : "start"}
+  const panel = (
+      <div ref={root} tabIndex={-1} {...(inline ? {} : { role: "dialog", "aria-modal": true, "aria-labelledby": "grok-move-title" })} data-grok-move={report ? "report" : preview ? "preview" : "start"}
         onKeyDown={(event) => {
-          if (event.key !== "Escape" || importing) return;
+          if (inline || event.key !== "Escape" || importing) return;
           event.preventDefault();
           event.stopPropagation();
           if (preview) setPreview(null);
           else onClose();
         }}
-        className="ui-modal animate-pop-in flex max-h-[min(720px,calc(100dvh-32px))] w-[560px] max-w-full flex-col overflow-hidden text-left outline-none">
-        <div className="flex h-[52px] shrink-0 items-center justify-between pl-4 pr-3">
+        className={inline ? "mt-3 flex flex-col rounded-lg border border-hairline/40 text-left outline-none" : "ui-modal animate-pop-in flex max-h-[min(720px,calc(100dvh-32px))] w-[560px] max-w-full flex-col overflow-hidden text-left outline-none"}>
+        {(!inline || preview) && <><div className="flex h-[52px] shrink-0 items-center justify-between pl-4 pr-3">
           <h2 id="grok-move-title" className="text-[14px] font-semibold leading-[22px] text-ink">
             {preview ? t("grokMove.previewTitle") : t("settings.import.grokTitle")}
           </h2>
-          <button type="button" disabled={importing} onClick={onClose} aria-label={t("common.close")} title={t("common.close")}
+          {!inline && <button type="button" disabled={importing} onClick={onClose} aria-label={t("common.close")} title={t("common.close")}
             className="flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink disabled:opacity-40">
             <X size={16} />
-          </button>
+          </button>}
         </div>
-        <div className="ui-modal-divider shrink-0" />
+        <div className="ui-modal-divider shrink-0" /></>}
         <div key={report ? "report" : preview ? "preview" : "start"} data-grok-move-body className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 [scrollbar-width:thin]">
           {report ? (
             <>
@@ -235,6 +234,11 @@ export function GrokMoveDialog({ onClose }: { onClose: () => void }) {
           )}
         </div>
       </div>
+  );
+  if (inline) return panel;
+  return (
+    <div className="ui-scrim fixed inset-0 z-[60] flex items-center justify-center p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !importing) onClose(); }}>
+      {panel}
     </div>
   );
 }

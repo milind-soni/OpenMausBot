@@ -203,6 +203,9 @@ const LENT_PLATFORMS = new Set(["darwin", "win32", "linux"]);
 const RECONNECT_EVERY_MS = 15 * 60_000;
 /** Waits before the device link is dialled again, longer after each attempt that never opened. */
 const LINK_RETRY_MS = [2_000, 5_000, 15_000, 60_000];
+/** Lending that is failing, as the menu and a notification say it; a sleeping Cloud or a Pause is no failure. */
+const WHY_NOT_LENT = Object.freeze({ "connect-first": "native.lendTray.whySignIn", "machine-changed": "native.lendTray.whyMoved", "account-changed": "native.lendTray.whyAccount", "not-cloud": "native.lendTray.whyMoved", "not-own": "native.lendTray.whyMoved" });
+const whyNotLent = problem => WHY_NOT_LENT[problem] ?? "native.lendTray.whyUnreachable";
 /** The link carried bytes this recently: the tray says the computer is in use. */
 const IN_USE_MS = 5_000;
 /** A site opened through this computer goes into its activity once per outcome in this long, so a page's many
@@ -259,12 +262,14 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
     const browsing = [...inUse.keys()].find(id => linked.has(id));
     const lent = paused ? [] : environments().filter(env => (records[env.id]?.cloud || records[env.id]?.own) && records[env.id]?.enabled === true);
     const using = lent.filter(env => executing?.env === env.id || (inUse.has(env.id) && linked.has(env.id)));
+    const problems = lendingProblems(lent);
     return {
       lending: lent.map(env => env.id),
       clouds: (paused ? [...ownClouds(), ...environments().filter(env => records[env.id]?.own && records[env.id].enabled === true)] : lent).map(env => env.name),
       // Lent, but the Cloud hasn't accepted this computer yet (or lost it): the menu must not say it can use it. A
       // sleeping My Cloud still can; it wakes when a bot needs this computer.
       waiting: lent.filter(env => !status.get(env.id)?.connected && status.get(env.id)?.problem !== "asleep").map(env => env.name),
+      ...(problems.length ? { problems } : {}),
       using: using.map(env => env.name),
       paused,
       ...(pauseError ? { pauseError } : {}),
@@ -274,6 +279,23 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       busy: executing ?? (browsing ? { env: browsing, action: "internet" } : null),
       screen: screenNow,
     };
+  };
+  /** What is keeping this computer from a Cloud of the person's own, for the menu and one notification: a Cloud it can't
+   * reach or stay signed in to, lending that ended by itself, and a signed-in My Cloud this app has no saved place for. */
+  const lendingProblems = lent => {
+    if (paused) return [];
+    const failing = lent.flatMap(env => {
+      const now = status.get(env.id);
+      return now && !now.connected && now.problem !== "asleep" && now.problem !== "paused" && (now.problem || now.error) ? [{ name: env.name, why: t(whyNotLent(now.problem)) }] : [];
+    });
+    const ended = environments().flatMap(env => {
+      const record = records[env.id], reason = record?.stopped?.reason;
+      return record?.cloud && record.enabled !== true && (reason === "machine-changed" || reason === "account-changed") && !lent.includes(env) ? [{ name: env.name, why: t(whyNotLent(reason)) }] : [];
+    });
+    const signedIn = cloud();
+    const homeless = signedIn?.status === "connected" && signedIn.origin && !environments().some(env => env.origin === signedIn.origin)
+      ? [{ name: t("native.lendTray.myCloud"), why: t("native.lendTray.whyNoServer") }] : [];
+    return [...failing, ...ended, ...homeless];
   };
   /** Whether apps and screen are lent now; the icon's menu follows any change in why not. */
   const readScreen = () => Promise.resolve().then(screen).then(status => status, () => null).then(status => {

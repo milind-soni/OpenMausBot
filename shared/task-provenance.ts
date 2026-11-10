@@ -12,6 +12,8 @@ export interface TaskOpenedBy {
   threadId?: string;
   /** A parallel room job's thread: `threadId` is the room thread it came from, and the member must stay in that room. */
   roomLane?: true;
+  /** Security invariant: harness-set only when the opening turn could use the owner's lent computer. */
+  forOwner?: true;
   at: number;
 }
 

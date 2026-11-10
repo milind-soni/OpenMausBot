@@ -13,6 +13,8 @@ export interface WireTool extends ServerToolText {
   place?: PlaceRow;
   /** error rows: epoch ms when the usage limit that stopped the turn resets. */
   limitResetsAt?: number;
+  /** A failed step on an MCP server, in the reader's language: which server, why, and what to do. */
+  problem?: string;
   /** Provider item identity, scoped to the owning turn. */
   itemId?: string;
   /** Whether the harness captured the full redacted result. Private

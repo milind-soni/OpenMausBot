@@ -77,6 +77,9 @@ export function allowList(entries: readonly string[] | undefined): (address: str
     if (!parsed) return [];
     const list = new BlockList();
     list.addSubnet(parsed.network, parsed.prefix, family(parsed.network));
+    // `localhost` resolves to both 127.0.0.1 and ::1, so an entry for one loopback address and port also covers the other.
+    if (parsed.port !== null && parsed.prefix === 32 && list.check("127.0.0.1", "ipv4")) list.addAddress("::1", "ipv6");
+    else if (parsed.port !== null && parsed.prefix === 128 && list.check("::1", "ipv6")) list.addAddress("127.0.0.1", "ipv4");
     return [{ list, port: parsed.port }];
   });
   return (raw, port) => {

@@ -14,6 +14,7 @@ import {
 } from "./endpoints";
 import { registerPushDevice, sendPush, unregisterPushDevice } from "./push";
 import { issueRelayToken, relayAdoption } from "./relay";
+import { releaseTunnels, tunnelReleaseHealth } from "./tunnel-release";
 import { capacityHealth, reportEndpointAccountProblems, scanTunnelCapacity } from "./tunnel-capacity";
 import {
   createInstallation,
@@ -192,11 +193,13 @@ export function createWorker(
         // so a full quota never hides sign-in, recovery, or local pairing.
         const capacity = await capacityHealth(env, healthConfig, ctx).catch(() => null);
         const adoption = await relayAdoption(env).catch(() => null);
+        const release = await tunnelReleaseHealth(env, healthConfig).catch(() => null);
         return secureResponse(json({
           ok: true,
           service: "openmausbot-control-plane",
           ...(capacity === null ? {} : { capacity }),
           ...(adoption === null ? {} : { relayAdoption: adoption }),
+          ...(release === null ? {} : { tunnelRelease: release }),
         }), request, null, requestId);
       }
 
@@ -245,6 +248,17 @@ export function createWorker(
         } catch {
           console.error(JSON.stringify({
             message: "managed endpoint tunnel scan failed",
+            requestId,
+            errorCode: "endpoint_internal",
+          }));
+        }
+        // Marks only, like the scan: tunnels the relay has replaced, and
+        // those a version cutoff ends. The sweep below removes them.
+        try {
+          await releaseTunnels(env, config, requestId);
+        } catch {
+          console.error(JSON.stringify({
+            message: "managed endpoint tunnel release failed",
             requestId,
             errorCode: "endpoint_internal",
           }));
