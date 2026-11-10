@@ -11,6 +11,37 @@ afterEach(async () => {
 });
 
 describe("a server's own requests to the client", () => {
+  it("keeps the shared SSE stream alive after the opening request's signal expires", async () => {
+    fake = await startFakeHttpMcp({ transport: "sse", tools: [{ name: "still_available" }] });
+    let streamSignal: AbortSignal | null | undefined;
+    client = new RemoteMcpClient({ type: "sse", url: fake.url, headers: {} }, { fetch: (url, init) => {
+      if (init?.method === "GET") streamSignal = init.signal;
+      return fetch(url, init);
+    } });
+    const opening = new AbortController();
+    await client.initialize("fixture", opening.signal);
+    opening.abort();
+    await expect(client.request("tools/list", {}, AbortSignal.timeout(1_000))).resolves.toEqual({ tools: [{ name: "still_available" }] });
+    expect(streamSignal?.aborted).toBe(false);
+    await client.close();
+    expect(streamSignal?.aborted).toBe(true);
+  });
+
+  it("still aborts an SSE connection before the endpoint arrives", async () => {
+    let streamSignal: AbortSignal | null | undefined;
+    client = new RemoteMcpClient({ type: "sse", url: "https://fixture.example/sse", headers: {} }, { fetch: async (_url, init) => {
+      streamSignal = init?.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        streamSignal?.addEventListener("abort", () => reject(new Error("opening cancelled")), { once: true });
+      });
+    } });
+    const opening = new AbortController();
+    const reply = client.request("initialize", {}, opening.signal);
+    opening.abort();
+    await expect(reply).rejects.toThrow("aborted");
+    expect(streamSignal?.aborted).toBe(true);
+  });
+
   it.each(["http", "sse"] as const)("are refused at once over %s, so the call they interrupt still finishes", async (transport) => {
     fake = await startFakeHttpMcp({ transport, tools: [{ name: "ask_first", inputSchema: { type: "object" } }], askOnCall: "elicitation/create" });
     client = new RemoteMcpClient({ type: transport, url: fake.url, headers: {} });

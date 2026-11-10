@@ -335,8 +335,12 @@ export class RemoteMcpClient {
       const headers = this.headers();
       headers.set("accept", "text/event-stream");
       // The caller's signal covers only the opening: later requests are answered on this stream.
-      const opening = AbortSignal.any([signal, this.sseAbort.signal]);
-      this.fetchImpl(this.target.url, { method: "GET", headers, signal: opening })
+      const opening = new AbortController();
+      const abortOpening = () => opening.abort(signal.reason);
+      signal.addEventListener("abort", abortOpening, { once: true });
+      if (signal.aborted) abortOpening();
+      const streamSignal = AbortSignal.any([opening.signal, this.sseAbort.signal]);
+      this.fetchImpl(this.target.url, { method: "GET", headers, signal: streamSignal })
         .then(async (response) => {
           if (!response.ok) {
             drain(response);
@@ -348,6 +352,7 @@ export class RemoteMcpClient {
                 settled = true;
                 try {
                   resolveEndpoint(new URL(event.data, this.target.url).toString());
+                  signal.removeEventListener("abort", abortOpening);
                 } catch {
                   rejectEndpoint(new McpHttpError("protocol", "invalid endpoint event"));
                 }
@@ -373,7 +378,8 @@ export class RemoteMcpClient {
         })
         .catch((error: unknown) => {
           fail(error instanceof McpHttpError ? error : new McpHttpError("network", "event stream failed"));
-        });
+        })
+        .finally(() => signal.removeEventListener("abort", abortOpening));
     });
     return this.sseEndpoint;
   }
