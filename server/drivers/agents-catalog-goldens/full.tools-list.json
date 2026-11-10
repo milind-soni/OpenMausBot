@@ -324,7 +324,7 @@
           },
           "message": {
             "type": "string",
-            "description": "The complete first message of the thread — everything the run needs, since it will not see this conversation."
+            "description": "The complete first message of the thread — everything the run needs, since it will not see this conversation. Ask for what the person asked for and no more; anything else from this conversation must be marked as background, never as a requirement."
           },
           "folder": {
             "type": "string",
