@@ -12109,7 +12109,7 @@ ROUTES.push(createBotMessageRoutes({
     { emoji, name: person.name ?? person.email, at: Date.now() }),
 }));
 const liveRoots = (threadId: string, botId: string | undefined) => { const bot = botId ? store.bot(botId) : store.botByThread(threadId); return bot ? messageFileRootsForThread(bot.id, threadId).filter((root) => root !== ATTACHMENTS_DIR) : null; }; const chatApps = createChatApps({ store, dataDir: DATA_DIR, liveRows: liveAppRows, liveRoots, paused: () => workspaceMaintenance.active || moveFreeze.frozen() });
-const chatAppsMcp = createChatAppsMcp({ store, apps: chatApps, dataDir: DATA_DIR, storedServers: () => cfg.mcpServers ?? {}, mountedServers: engineMcpServers, personMcp: teamConnections.personMcp, oauth: mcpOAuth });
+const chatAppsMcp = createChatAppsMcp({ store, apps: chatApps, dataDir: DATA_DIR, storedServers: () => cfg.mcpServers ?? {}, mountedServers: engineMcpServers, personMcp: teamConnections.personMcp, probeAs: (server) => mcpServersHost.probeAs(server), oauth: mcpOAuth });
 ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal, mcpRpc: chatAppsMcp.rpc, threadVisible: (auth, threadId) => (auth.kind !== "session" || sessions.isLive(auth.session.id)) && visibleTo(viewerFor(auth)).thread(threadId) }));
 const { react } = createReactions({
   store, reply: (input) => teamMessages.reactedIn(input.auth, input.threadId, input.target.id, input.answer, { sendId: input.sendId, sender: messageSender(input.auth) }) ?? personReplies.deliver({ ...input, about: "message" }),

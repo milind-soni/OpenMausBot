@@ -35,7 +35,7 @@ const REPORT = {
 const cleanup: Array<() => Promise<void> | void> = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
 
-function setup(options: { servers?: Record<string, Record<string, unknown>>; scope?: BotRecord["toolScope"]; approval?: "ask" | "full"; needsSignIn?: string[]; probe?: typeof probeMcpServer; oauth?: ChatAppsMcpOAuth; startupProbes?: boolean } = {}) {
+function setup(options: { servers?: Record<string, Record<string, unknown>>; scope?: BotRecord["toolScope"]; approval?: "ask" | "full"; needsSignIn?: string[]; probe?: typeof probeMcpServer; oauth?: ChatAppsMcpOAuth; startupProbes?: boolean; probeAs?: (server: { bot?: string }) => { id?: string; cwd?: string } } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-chat-apps-mcp-"));
   cleanup.push(() => removeTempDir(dataDir));
   const threads = new Map<string, Message[]>();
@@ -74,6 +74,7 @@ function setup(options: { servers?: Record<string, Record<string, unknown>>; sco
     oauth: options.oauth ?? { authState: (name) => (options.needsSignIn?.includes(name) ? "needs-sign-in" : "none"), accessToken: async () => null, requireSignIn: () => {} },
     startupProbes: options.startupProbes ?? false,
     ...(options.probe ? { probe: options.probe } : {}),
+    ...(options.probeAs ? { probeAs: options.probeAs } : {}),
     log: (line) => lines.push(line),
   });
   cleanup.push(() => { mcp.close(); apps.close(); });
@@ -310,6 +311,17 @@ describe("mounts and probes", () => {
     expect(mcp.turnMounts({ board: board() })).toEqual({});
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(probe).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts a command server for its background probe the way the bots' turns start it, never beside the server", async () => {
+    const probe = vi.fn(async () => ({ ok: false as const, error: "offline" }));
+    const probeAs = vi.fn((server: { bot?: string }) => (server.bot ? { id: server.bot, cwd: `/data/workspaces/${server.bot}` } : {}));
+    const { mcp, servers } = setup({ probe, probeAs, servers: { board: { ...board(), enabled: true }, own: { ...board(), enabled: true, bot: "bot-scout" } } });
+    expect(mcp.turnMounts({ board: board(), own: board() })).toEqual({});
+    await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(2));
+    // `asBot` is what makes the probe ask for the bot box (server/mcp-probe.ts); without it the command runs unboxed.
+    expect(probe.mock.calls.map((call) => (call as unknown as [unknown, unknown, unknown, { asBot?: unknown }])[3].asBot)).toEqual([{}, { id: "bot-scout", cwd: "/data/workspaces/bot-scout" }]);
+    expect(Object.keys(servers)).toEqual(["board", "own"]);
   });
 
   it("tells Settings which stored servers have been seen to offer an app", () => {

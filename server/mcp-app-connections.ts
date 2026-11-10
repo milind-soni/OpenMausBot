@@ -1,13 +1,15 @@
 // OMB's own connections to MCP app servers: they read an app's UI resource and run its view's calls long
-// after the turn that called the tool has ended. A command server is spawned with the probe environment.
+// after the turn that called the tool has ended. A command server is spawned with the probe environment, and where the
+// bots' turns are boxed it is started as they start it: in the bot box (as server/mcp-probe.ts does for Test).
 import { createHash } from "node:crypto";
 
 import { APP_EXTENSION_KEY } from "../shared/app.ts";
 import type { McpServerSpec, RemoteMcpSpec, StdioMcpSpec } from "./contracts.ts";
+import { botBox } from "./bot-box/box.ts";
 import { createLineSplitter } from "./mcp-bridge.ts";
 import { UI_EXTENSION, withUiExtension } from "./mcp-app-observer.ts";
 import { MAX_REMOTE_MCP_BYTES, McpHttpError, McpRpcError, REMOTE_MCP_STARTUP_MS, RemoteMcpClient } from "./mcp-http.ts";
-import { probeEnvironment } from "./mcp-probe.ts";
+import { probeEnvironment, type McpProbeOptions } from "./mcp-probe.ts";
 import { killCliTree, spawnCli } from "./procs.ts";
 
 export const APP_CONNECTION_IDLE_MS = 5 * 60_000;
@@ -28,6 +30,9 @@ export interface AppClient {
   readonly closed: boolean;
 }
 
+/** Whose turns a command server is started like: its bot's (own folder in the box), or any bot's (no bot's folder). */
+export type AppServerAs = NonNullable<McpProbeOptions["asBot"]>;
+
 export interface AppClientHooks {
   onNotification(method: string): void;
 }
@@ -41,8 +46,13 @@ class StdioAppClient implements AppClient {
   extensions: "ok" | "refused" | undefined;
   serverInfo: Json | undefined;
 
-  constructor(server: StdioMcpSpec, hooks: AppClientHooks) {
-    this.child = spawnCli(server.command, server.args, { cwd: process.cwd(), env: probeEnvironment(server), stdio: ["pipe", "pipe", "pipe"] });
+  constructor(server: StdioMcpSpec, hooks: AppClientHooks, as: AppServerAs = {}) {
+    // With the box off `box` changes nothing, and the server starts where it always did.
+    this.child = spawnCli(server.command, server.args, {
+      ...(botBox.enabled() ? (as.cwd ? { cwd: as.cwd } : {}) : { cwd: process.cwd() }),
+      env: probeEnvironment(server), stdio: ["pipe", "pipe", "pipe"],
+      box: { ...(as.id ? { botId: as.id } : {}), allowEnv: Object.keys(server.env) },
+    });
     const splitter = createLineSplitter((line) => this.onLine(line, hooks));
     this.child.stdout.on("data", (chunk: Buffer) => {
       // A connection lives for minutes; the bound is per message, not total.
@@ -163,8 +173,8 @@ class RemoteAppClient implements AppClient {
   }
 }
 
-export async function openAppClient(server: McpServerSpec, hooks: AppClientHooks, extension: boolean, signal: AbortSignal): Promise<AppClient> {
-  const client = "url" in server ? new RemoteAppClient(server, hooks) : new StdioAppClient(server, hooks);
+export async function openAppClient(server: McpServerSpec, hooks: AppClientHooks, extension: boolean, signal: AbortSignal, as: AppServerAs = {}): Promise<AppClient> {
+  const client = "url" in server ? new RemoteAppClient(server, hooks) : new StdioAppClient(server, hooks, as);
   try {
     await client.initialize(signal, extension);
     return client;
@@ -190,6 +200,8 @@ export interface AppConnectionsOptions {
   now?: () => number;
   open?: typeof openAppClient;
   onTools?(name: string, server: McpServerSpec, tools: Json[], extensions: "ok" | "refused" | undefined): void;
+  /** Whose turns the named command server is started like; absent: any bot's. */
+  asBot?(name: string): AppServerAs;
 }
 
 function connectionLost(error: unknown): boolean {
@@ -203,6 +215,7 @@ export class AppConnections {
   private readonly now: () => number;
   private readonly open: typeof openAppClient;
   private readonly onTools: AppConnectionsOptions["onTools"];
+  private readonly asBot: AppConnectionsOptions["asBot"];
 
   constructor(options: AppConnectionsOptions = {}) {
     this.idleMs = options.idleMs ?? APP_CONNECTION_IDLE_MS;
@@ -210,6 +223,7 @@ export class AppConnections {
     this.now = options.now ?? Date.now;
     this.open = options.open ?? openAppClient;
     this.onTools = options.onTools;
+    this.asBot = options.asBot;
   }
 
   get size(): number { return this.slots.size; }
@@ -234,7 +248,7 @@ export class AppConnections {
             if (current) delete current.tools;
           }
         },
-      }, extension, AbortSignal.timeout(REMOTE_MCP_STARTUP_MS));
+      }, extension, AbortSignal.timeout(REMOTE_MCP_STARTUP_MS), this.asBot?.(name) ?? {});
       const created: Slot = { name, server, client: opening, used: this.now() };
       slot = created;
       this.slots.set(key, created);
