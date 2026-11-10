@@ -55,7 +55,7 @@ export interface AppTriggerManagerOptions {
   now?: () => number;
   broker: AppTriggerBroker;
   /** Whether app events can work here at all, and why not. Checked on every loop, since access arrives late. */
-  service: () => { available: true } | { available: false; reason: "self-hosted" | "unavailable" };
+  service: () => { available: true } | { available: false; reason: "self-hosted" | "unavailable" | "off" };
   connectedApps: () => Promise<ConnectedApps>;
   botState: (botId: string) => "ready" | "busy" | "missing";
   runs: {
@@ -618,7 +618,7 @@ export class AppTriggerManager {
     if (!binding || binding.remote?.state === "missing") {
       trigger.remote = { state: "pending" };
       await this.bind(trigger);
-      if (!trigger.enabled) await this.options.broker.setEnabled(trigger.remote.triggerId!, false);
+      if (!trigger.enabled && trigger.remote.triggerId) await this.options.broker.setEnabled(trigger.remote.triggerId, false);
       return;
     }
     trigger.remote = { triggerId: binding.triggerId, state: "active", syncedAt: this.now() };
@@ -669,6 +669,7 @@ export class AppTriggerManager {
   }
 
   private async bind(trigger: StoredTrigger): Promise<void> {
+    if (this.serviceOutOfReach()) return;
     const { triggerId } = await this.options.broker.create({ slug: trigger.event, connectedAccountId: trigger.accountId, config: trigger.config });
     trigger.remote = { triggerId, state: "active", syncedAt: this.now() };
     if (trigger.problem?.kind === "error") delete trigger.problem;
@@ -677,11 +678,21 @@ export class AppTriggerManager {
   /** Several automations with the same settings share one service copy; it goes only when the last one does. */
   private async release(triggerId: string | undefined): Promise<void> {
     if (!triggerId || this.triggers.some((trigger) => trigger.remote.triggerId === triggerId)) return;
+    if (this.serviceOutOfReach()) {
+      this.releasePending = true;
+      return;
+    }
     await this.options.broker.remove(triggerId);
   }
 
   private async applyEnabled(triggerId: string | undefined): Promise<void> {
-    if (triggerId) await this.options.broker.setEnabled(triggerId, this.wantsEnabled(triggerId));
+    if (triggerId && !this.serviceOutOfReach()) await this.options.broker.setEnabled(triggerId, this.wantsEnabled(triggerId));
+  }
+
+  /** The owner's own key, or the service switched off. A service merely not reached yet still gets its calls and retries. */
+  private serviceOutOfReach(): boolean {
+    const service = this.options.service();
+    return !service.available && service.reason !== "unavailable";
   }
 
   private wantsEnabled(triggerId: string): boolean {

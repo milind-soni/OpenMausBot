@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
+import { operatorEnvKey } from "../credential-env.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
 
 const DEFAULT_URL = "https://api.mistral.ai/v1";
@@ -57,7 +58,7 @@ export const MistralDriver: ProviderDriver<MistralConfig> = {
   defaultConfig: () => decodeConfig({}),
   async create(input) {
     const { config } = input;
-    const apiKey = (input.environment.MISTRAL_API_KEY ?? process.env.MISTRAL_API_KEY ?? "").trim();
+    const apiKey = (input.environment.MISTRAL_API_KEY ?? operatorEnvKey("MISTRAL_API_KEY") ?? "").trim();
     const withConfiguredModel = (options: ModelCatalog["options"]): ModelCatalog => {
       const preferred = config.model ?? DEFAULT_MODELS.default;
       if (config.model && !options.some((option) => option.id === config.model)) {
