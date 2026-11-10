@@ -37,8 +37,9 @@ browser engine and a bot allowed to use it.
 ## Boolean switches
 
 Defaults below mean the key is omitted. A switch being on does not promise a
-fixed price: model calls use the configured engine, and tool results, recalled
-text and extra work can increase its token usage.
+fixed price. Background writing jobs may use the bot's engine or an eligible
+configured helper, whose provider and model can differ. Tool results, recalled
+text and extra work can increase token usage.
 
 | Key under `features` | Default | Effect | Work or cost to consider |
 | --- | --- | --- | --- |
@@ -50,7 +51,7 @@ text and extra work can increase its token usage.
 | `claudeUserMcp` | Off | Claude bots also load this machine's personal Claude Code MCP servers. | Adds tools and may start those servers; their tools can consume tokens or contact services. |
 | `claudeUserSkills` | Off | Claude bots also load the personal skills in `~/.claude/skills`. | Adds skill instructions/files to the engine's available context; does not control Codex native skills. |
 | `llmThreadTitles` | Off | Generates new conversation titles with the engine. | Additional one-shot model calls. |
-| `smartSetupChoices` | On | Offers model-written setup choices for a new bot when enough information is available. | Background model calls, subject to the engine's capabilities and the budget. |
+| `smartSetupChoices` | On | Offers model-written setup choices for a new bot when enough information is available. | Background model calls, subject to the bot's engine capabilities and the budget. If that engine has no one-off text call, an eligible configured [helper](memory.md#the-helper-model) may write the choices using its own provider and model. |
 | `autoRecall` | On | Recalls matching memory passages into turns. | Recalled text uses context. Disabling this does not disable memory storage or upkeep; see [Memory](memory.md). |
 | `skillsLibrary` | Off | Enables the shared skills store and its Skills settings. | Enables the library, not automatic conversation review. Skill use follows assignments and permissions. |
 | `roomMemoryCapture` | Off | Lets memory upkeep also read a member bot's room turns. | Extends the material processed by memory upkeep. |
