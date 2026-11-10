@@ -65,6 +65,7 @@ Object.defineProperty(document, "referrer", { configurable: true, value: REFERRE
 vi.stubGlobal("sessionStorage", memoryStorage());
 // What an install that ran a build with save_referrer and save_campaign_params on still holds.
 vi.stubGlobal("localStorage", memoryStorage({
+  "omb-analytics-opt-out": "0",
   [STORED]: JSON.stringify({
     distinct_id: "01a140ba-9e71-7f25-a581-b39f69b5e934",
     $device_id: "01a140ba-9e71-7f25-a581-b39f69b5e934",

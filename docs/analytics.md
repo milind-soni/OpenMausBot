@@ -1,8 +1,8 @@
 # Usage analytics
 
 MausBot can send anonymous product analytics to PostHog (US cloud, `us.i.posthog.com`), so its maintainers can see
-which features people set up and use. This page lists every event and every property the app can send. Nothing else is
-sent.
+which features people set up and use. It is off until you turn it on. This page lists every event and every property the
+app can send. Nothing else is sent.
 
 ## What it is
 
@@ -17,10 +17,11 @@ sent.
 - Events are tied to a random id that PostHog keeps in the page's storage. Nothing ties them to you: the app never sends
   your email or your name with them.
 
-## Turning it off
+## Turning it on or off
 
-**Settings → General → Usage analytics.** When it is off, nothing loads and nothing is sent: no events, no daily
-snapshot, and none of the snapshot's requests.
+**Settings → General → Usage analytics.** It starts off on every page, including a fresh install and an install that
+never touched the switch. When it is off, nothing loads and nothing is sent: no events, no daily snapshot, and none of
+the snapshot's requests.
 
 The desktop app keeps the switch for this computer's page itself, so it holds whichever port the app serves that page on
 (it moves to another when its usual one is taken). It is read before anything loads, and before any email is tied to
@@ -29,7 +30,7 @@ the app serves its page on that port again, which moves it to the app; while the
 a port other than its first ties no email to your events. Each server page (your MausBot Cloud, a self-hosted server,
 each browser you use) keeps its own switch in that page's storage. With the switch off in the desktop app, a server page
 that the app's window shows, My Cloud's included, starts with it off too once that server runs this version; turning it
-on there lasts until that page reloads. In a browser, switch it off on each server's page.
+on there lasts until that page reloads. In a browser, each server's page stays off until you switch it on there.
 
 ## Never sent
 

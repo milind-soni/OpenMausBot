@@ -6,7 +6,8 @@ import { readAdvancedMode } from "@/lib/interface-mode";
 
 const TOKEN = "phc_m2hP39w8y2gLPvHgDvSXAu6xcZ3agjf4ruL56rGcMZEe";
 
-// Read before init(): an opted-out install must never call posthog.init(), so no request leaves the machine.
+// Read before init(): an install that has not opted in must never call posthog.init(), so no request leaves the machine.
+// Security: analytics is opt-in. Only an explicit "0" (switched on in Settings) turns it on; a missing key is off.
 const OPT_OUT_KEY = "omb-analytics-opt-out";
 // The desktop app's own page is served on whichever of its ports was free, and each port has its own storage.
 const desktopSwitch = () => globalThis.window?.ogb?.desktopAnalytics;
@@ -23,9 +24,9 @@ export function analyticsEnabled(): boolean {
   const desktop = desktopSwitch()?.enabled();
   if (typeof desktop === "boolean") return desktop;
   try {
-    return localStorage.getItem(OPT_OUT_KEY) !== "1";
+    return localStorage.getItem(OPT_OUT_KEY) === "0";
   } catch {
-    return true;
+    return false;
   }
 }
 
