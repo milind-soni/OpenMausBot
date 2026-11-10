@@ -41,6 +41,8 @@ export interface HandoffView {
   text: string;
   createdAt: number;
   requestBatchKey?: string;
+  /** Its reply only acknowledged (runtime/status-reply.ts). */
+  statusOnly?: boolean;
   status: HandoffStatus;
   result: string;
   reported: boolean;

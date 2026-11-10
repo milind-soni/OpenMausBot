@@ -37,6 +37,8 @@ const lineSchema = z.object({
   /** The guest whose conversation this is: it is theirs, not the owner's. */
   guest: id.optional(),
   text: z.string().max(NOTICE_TEXT_MAX), at: z.number(), seen: z.boolean().optional(), done: z.boolean().optional(),
+  /** The conversation this result is news for: its next unread result replaces this line, so one job keeps one row. */
+  job: id.optional(),
 });
 const fileSchema = z.object({ version: z.literal(1), lines: z.array(lineSchema).max(MAX_LINES), seenAsks: z.array(id).max(MAX_SEEN_ASKS) });
 type Line = z.infer<typeof lineSchema>;
@@ -180,6 +182,7 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
   }
 
   function addLine(line: Line): Line {
+    if (line.job) lines = lines.filter((one) => one.job !== line.job || one.seen || one.done);
     lines.push(line);
     save();
     return line;
@@ -211,19 +214,32 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     return { status: 200, text: "It is in their Inbox and they were notified. Their answer comes back here, and you carry on from it." };
   }
 
-  /** A routine's report or a failure of work nobody is watching gets a line; the notification about it goes out as it is. */
-  function route(notification: Notification, how: { routine?: boolean } = {}): Notification {
+  /** A routine's report, the answer that sums up work handed out, or a failure of work nobody is watching gets a line; the
+   * notification about it goes out as it is. */
+  function route(notification: Notification, how: { routine?: boolean; summary?: boolean } = {}): Notification {
     const { kind, botId, threadId } = notification;
-    const result = kind === "done" && how.routine === true;
+    const result = (kind === "done" && (how.routine === true || how.summary === true)) || (kind === "delegation-settled" && how.summary === true);
     const notice = ASK_NOTIFICATIONS.has(kind) && kind !== "approval" && kind !== "question" && (how.routine === true || deps.handedBy(threadId) !== null);
     const bot = result || notice ? store.bot(botId) : undefined;
     if (bot) {
       const handed = workingFor(threadId);
       const guest = deps.guestOf(threadId);
       addLine({ id: crypto.randomUUID(), botId: bot.id, threadId, ...(notification.groupId ? { groupId: notification.groupId } : {}), kind: result ? "result" : "notice", from: bot.name.slice(0, 200),
-        ...(handed ? { workingFor: handed } : {}), ...(guest ? { guest } : {}), text: clip(notification.body || notification.title, NOTICE_TEXT_MAX), at: now() });
+        ...(handed ? { workingFor: handed } : {}), ...(guest ? { guest } : {}), text: clip(notification.body || notification.title, NOTICE_TEXT_MAX), at: now(), ...(how.summary ? { job: threadId } : {}) });
     }
     return notification;
+  }
+
+  /** Work handed on finished: one line, so the result is here even if the conversation that asked never reports back. It
+   * sends nothing, and that conversation's next result or its summary replaces it. */
+  function handedResult(work: { botId: string; threadId: string; groupId?: string; text: string }, requester: { botId: string; threadId: string }): void {
+    const bot = store.bot(work.botId);
+    const text = work.text.trim();
+    if (!bot || bot.notifications === false || !text) return;
+    const asked = store.bot(requester.botId);
+    const guest = deps.guestOf(requester.threadId);
+    addLine({ id: crypto.randomUUID(), botId: bot.id, threadId: work.threadId, ...(work.groupId ? { groupId: work.groupId } : {}), kind: "result", from: bot.name.slice(0, 200),
+      ...(asked ? { workingFor: { botId: asked.id, name: asked.name } } : {}), ...(guest ? { guest } : {}), text: clip(text, NOTICE_TEXT_MAX), at: now(), job: requester.threadId });
   }
 
   const unsubscribe = store.onChange((change: StoreChange) => {
@@ -237,6 +253,7 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     view,
     message,
     route,
+    handedResult,
     /** What waits on this viewer: every open ask, and news they have not read. */
     count(auth: RequestAuth): number {
       return view(auth).rows.filter((row) => row.tab === "needs-you" || (row.tab === "info" && row.unread)).length;
