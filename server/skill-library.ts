@@ -335,6 +335,18 @@ export function setLibrarySkillOptOut(botId: string, name: string, optedOut: boo
   writeFileAtomic(path, `${JSON.stringify([...names].sort(), null, 2)}\n`, { mode: 0o600 });
 }
 
+/** Library skills this bot has: an explicit assignment, or every bot unless this bot opted out. */
+export function librarySkillsForBot(botId: string, assigned: ReadonlySet<string>, owned: ReadonlySet<string>): LibrarySkillListing[] {
+  const optedOut = librarySkillOptOuts(botId);
+  return listLibrarySkills().filter((skill) => !owned.has(skill.name) && (assigned.has(skill.name) || (skill.everyBot && !optedOut.has(skill.name))));
+}
+
+/** Library skills this bot can still add: not owned, not assigned, and not already on for every bot. */
+export function librarySkillsToOffer(botId: string, assigned: ReadonlySet<string>, owned: ReadonlySet<string>): LibrarySkillListing[] {
+  const optedOut = librarySkillOptOuts(botId);
+  return listLibrarySkills().filter((entry) => !owned.has(entry.name) && !assigned.has(entry.name) && (!entry.everyBot || optedOut.has(entry.name)));
+}
+
 /** Drops one bot's assignment. A skill on for every bot is opted out here so the others keep it. */
 export function unassignLibrarySkill(
   botId: string,
