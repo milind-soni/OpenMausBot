@@ -17,6 +17,8 @@ export type { BotVisibility };
 export interface ThreadAudiences {
   of(threadId: string): Audience | undefined;
   person: string | null;
+  /** A bot's conversation as this person has read it: its unread mark and read line their own (host/room-reads.ts). */
+  ownTask?<T extends { threadId: string; unread?: boolean; lastReadMessageId?: string }>(task: T): T;
 }
 
 /** `all`: every bot and room. On a Team Cloud an admin session is `all` with its address, and still sees only the
@@ -236,6 +238,11 @@ export class VisibleSet {
     return members.length > 0 && members.every((member) => this.bot(member)) && viewerSees(this.viewer, group.audienceFloor);
   }
 
+  /** A conversation's unread mark and read line as this viewer read it; the task as it is where everyone reads alike. */
+  ownTask<T extends { threadId: string; unread?: boolean; lastReadMessageId?: string }>(task: T): T {
+    return this.audiences?.ownTask ? this.audiences.ownTask(task) : task;
+  }
+
   /** Conversations have audiences of their own (a Team Cloud): a bot's tasks are then filtered one by one. */
   get filtersThreads(): boolean {
     return this.audiences !== null;
@@ -415,10 +422,11 @@ function shownConversations<T extends object>(bot: T, visible: VisibleSet): T {
   const record = bot as T & Record<string, unknown>;
   let out: Record<string, unknown> = record;
   const tasks = Array.isArray(record.tasks) ? record.tasks as unknown[] : [];
-  const kept = tasks.filter((task) => !task || typeof task !== "object" || typeof (task as { threadId?: unknown }).threadId !== "string" || visible.thread((task as { threadId: string }).threadId));
-  if (kept.length !== tasks.length) {
+  const isTask = (task: unknown): task is { threadId: string; unread?: boolean; routineRunId?: unknown } => Boolean(task) && typeof task === "object" && typeof (task as { threadId?: unknown }).threadId === "string";
+  const kept = tasks.filter((task) => !isTask(task) || visible.thread(task.threadId)).map((task) => (isTask(task) ? visible.ownTask(task) : task));
+  if (kept.length !== tasks.length || kept.some((task, index) => task !== tasks[index])) {
     out = { ...record, tasks: kept };
-    if (typeof record.unread === "boolean") out.unread = kept.some((task) => (task as { unread?: unknown } | null)?.unread === true);
+    if (typeof record.unread === "boolean") out.unread = kept.some((task) => isTask(task) && task.unread === true && !task.routineRunId);
   }
   const main = typeof record.mainThreadId === "string" && visible.thread(record.mainThreadId) ? record.mainThreadId : teamConversation(kept);
   if (typeof record.mainThreadId === "string" && record.mainThreadId !== main) {
