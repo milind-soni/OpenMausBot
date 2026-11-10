@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Copy, Pause, Pencil, Play, RotateCw, Trash2, X } from "lucide-react";
 
 import { automationStatus, automationSubtitle, capital, lastReceived, lastWhen, runLine, STATUS_WORD, webhookCalls, type Automation } from "@/lib/automations";
 import { cn } from "@/lib/cn";
 import { copyText } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
+import { isRoutineProblemRun } from "@/lib/routines";
 import { loadWebhookCredentials, webhookCredentialStore } from "@/lib/webhook-credentials";
 import { useStore } from "@/state/store";
 import { AppEventsSection } from "./AppEventsSection";
@@ -14,7 +15,6 @@ import { FixButton, StatusMark } from "./parts";
 const RECENT = 5;
 const BUTTON = "flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-medium disabled:opacity-50";
 
-/** One automation, simply: its sentence, its status, the last five runs, and what can be done to it. */
 export function AutomationPanel({ automation, sentence, onClose, onEdit, onDeleted }: {
   automation: Automation;
   sentence: string;
@@ -22,7 +22,12 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
   onEdit: () => void;
   onDeleted: () => void;
 }) {
-  const { state } = useStore();
+  const { state, dispatch } = useStore();
+  const [unseenRunIds] = useState(() => new Set(automation.runs.filter((run) => isRoutineProblemRun(run) && !run.seenAt).map((run) => run.id)));
+  const visibleRuns = automation.runs.filter((run, index) => index < RECENT || unseenRunIds.has(run.id) || (isRoutineProblemRun(run) && !run.seenAt));
+  useEffect(() => {
+    for (const run of automation.runs) if (isRoutineProblemRun(run) && !run.seenAt) dispatch({ type: "markRoutineRunSeen", runId: run.id });
+  }, [automation.runs, dispatch]);
   const actions = useAllAutomationActions();
   const status = automationStatus(automation);
   const webhook = automation.kind === "webhook" ? state.webhooks.find((candidate) => candidate.id === automation.id) : undefined;
@@ -120,7 +125,7 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
           <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wider text-ink-tertiary">{t("automations.panel.recent")}</h3>
           {automation.runs.length === 0
             ? <p className="text-[13px] text-ink-secondary">{t("automations.panel.noRuns")}</p>
-            : <ul className="space-y-1">{automation.runs.slice(0, RECENT).map((run) => {
+            : <ul className="space-y-1">{visibleRuns.map((run) => {
               const line = runLine(run);
               return (
                 <li key={run.id}>
