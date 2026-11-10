@@ -6,6 +6,7 @@ import { IMAGE_MAX_BYTES, imageAttachmentFromFile, isImageFile } from "@/lib/com
 import type { LocaleKey } from "@/locales";
 import { botAvatarUrlFromStoredPath } from "../../shared/bot-avatar";
 import { AboutMeSettings } from "./AboutMeSettings";
+import { AwayEmailsSetting } from "./AwayEmailsSetting";
 import { EveryBotRules } from "./EveryBotRules";
 import { profileInitials } from "./SidebarProfileMenu";
 import { User } from "lucide-react";
@@ -196,6 +197,7 @@ export function ProfileFields() {
         className={inputClass}
       />
       <AboutMeSettings />
+      {team && <AwayEmailsSetting />}
       <EveryBotRules />
     </div>
   );
