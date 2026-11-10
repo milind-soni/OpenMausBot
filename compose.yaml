@@ -14,11 +14,15 @@ services:
     restart: unless-stopped
     volumes:
       - data:/data
-    ports:
-      - "${OMB_BIND_ADDRESS:-127.0.0.1}:${OMB_HTTP_PORT:-8080}:80"
+      - edge:/run/openmausbot
     environment:
       OMB_PORT: "8799"
       OMB_WEBHOOK_PORT: "8800"
+      # Caddy, in its own container, reaches the server over these (deploy/local/Caddyfile). A request on a socket is
+      # never a local one. Caddy does not share the server's network: a server restarted on its own would come back
+      # in a new one and leave Caddy, and the port, behind in the old one.
+      OMB_TUNNEL_SOCKET: /run/openmausbot/http.sock
+      OMB_WEBHOOK_SOCKET: /run/openmausbot/hooks.sock
       # The name the desktop app shows for this server (a container's own hostname is a random id).
       OMB_SERVER_NAME: ${OMB_SERVER_NAME:-mausbot-docker}
       OMB_PUBLIC_URL: ${OMB_PUBLIC_URL:-http://localhost:${OMB_HTTP_PORT:-8080}}
@@ -36,7 +40,8 @@ services:
   caddy:
     image: ${CADDY_IMAGE:-caddy:2}
     restart: unless-stopped
-    network_mode: service:omb
+    ports:
+      - "${OMB_BIND_ADDRESS:-127.0.0.1}:${OMB_HTTP_PORT:-8080}:80"
     environment:
       OMB_HTTPS_HOST: ${OMB_HTTPS_HOST:-}
       OMB_BIND_ADDRESS: ${OMB_BIND_ADDRESS:-127.0.0.1}
@@ -58,11 +63,19 @@ services:
         condition: service_healthy
     volumes:
       - ./deploy/local/Caddyfile:/etc/caddy/Caddyfile:ro
+      - edge:/run/openmausbot
       - caddy_data:/data
       - caddy_config:/config
 volumes:
   data:
     external: ${OMB_DATA_EXTERNAL:-false}
     name: ${OMB_DATA_VOLUME:-${COMPOSE_PROJECT_NAME:-openmausbot}_data}
+  # The two sockets: in memory, made afresh by the server at each start. Not under /data, which every bot's sandbox
+  # sees; the sandbox has its own /run.
+  edge:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: mode=1777,size=1m
   caddy_data:
   caddy_config:
