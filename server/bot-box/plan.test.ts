@@ -201,6 +201,45 @@ linuxBox("the box plan", () => {
     expect(bwrapArgs(plan).join(" ")).not.toContain("--tmpfs /srv/omb");
   });
 
+  it("shows no path on the command line that is in the data folder or holds it, unless the caller named it", () => {
+    for (const { dataDir, home } of [{ dataDir: "/data/.openmausbot", home: "/data" }, { dataDir: "/srv/omb", home: "/home/maus" }]) {
+      const server = ["config.json", "sessions.json", "messages.db", "workspaces/other/MEMORY.md"].map((file) => join(dataDir, file));
+      const ask = (args: string[], ro: string[] = []) => planBox({ ...setup(), dataDir, home }, { command: "/bin/sh", args, cwd: join(dataDir, "task-workspaces", "b", "t"), env: {}, botId: "b", ro });
+      for (const args of [server, [dataDir], [`--model=${server[0]}`], [`@${server[0]}`], [join(dataDir, "..")], [join(dataDir, "workspaces", "..")], ["/srv", "/var"]]) {
+        const plan = ask(args);
+        for (const file of server) expect(visibleInBox(plan, file), `${dataDir}: ${args.join(" ")}`).toBe("none");
+      }
+      // A server whose program is in the bot's own folder still finds it: with the bot known its folder is there
+      // anyway, and without one (a configured server run for a chat) the file itself is shown, read-only.
+      expect(visibleInBox(ask([join(dataDir, "workspaces", "b", "tools", "server.js")]), join(dataDir, "workspaces", "b", "tools", "server.js"))).not.toBe("none");
+      const noBot = planBox({ ...setup(), dataDir, home }, { command: "python3", args: [join(dataDir, "workspaces", "b", "tools", "server.py")], env: {}, configured: true });
+      expect(visibleInBox(noBot, join(dataDir, "workspaces", "b", "tools", "server.py"))).toBe("ro");
+      expect(visibleInBox(noBot, join(dataDir, "config.json"))).toBe("none");
+      // Never another bot's for a box that has a bot, and never the folder of every bot.
+      expect(visibleInBox(ask([join(dataDir, "workspaces", "other", "MEMORY.md")]), join(dataDir, "workspaces", "other", "MEMORY.md"))).toBe("none");
+      for (const all of [join(dataDir, "workspaces"), join(dataDir, "task-workspaces")]) {
+        expect(visibleInBox(planBox({ ...setup(), dataDir, home }, { command: "ls", args: [all], env: {}, configured: true }), join(all, "other", "MEMORY.md"))).toBe("none");
+      }
+      expect(visibleInBox(ask(["--token", join(dataDir, "hook-tokens", "t", "token")], [join(dataDir, "hook-tokens", "t")]), join(dataDir, "hook-tokens", "t", "token"))).toBe("ro");
+      expect(visibleInBox(ask(["--mcp-config", "/tmp/omb-mcp-1/mcp.json"]), "/tmp/omb-mcp-1/mcp.json")).toBe("ro");
+      expect(visibleInBox(ask([]), join(dataDir, "bots", "b", "SOUL.md"))).toBe("ro");
+    }
+  });
+
+  it("makes nothing of the data folder writable for a configured server's environment, but the bot's own folders", () => {
+    const dataDir = "/data/.openmausbot";
+    const ask = (env: Record<string, string>, configured: boolean) => planBox({ ...setup(), dataDir, home: "/data" }, { command: "sh", args: [], cwd: join(dataDir, "task-workspaces", "b", "t"), env, botId: "b", configured });
+    for (const value of [join(dataDir, "config.json"), join(dataDir, "box"), dataDir, join(dataDir, "workspaces", "other"), "/"]) {
+      for (const name of ["XDG_CACHE_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "TMPDIR"]) {
+        const plan = ask({ [name]: value }, true);
+        for (const file of ["config.json", "box/harness.sock", "messages.db", "workspaces/other/MEMORY.md"]) expect(visibleInBox(plan, join(dataDir, file)), `${name}=${value}`).toBe("none");
+      }
+    }
+    expect(visibleInBox(ask({ XDG_CACHE_HOME: join(dataDir, "workspaces", "b", "cache") }, true), join(dataDir, "workspaces", "b", "cache", "x"))).toBe("rw");
+    // An engine OpenMausBot starts keeps the home it was given there.
+    expect(visibleInBox(ask({ CODEX_HOME: join(dataDir, "providers", "codex-1") }, false), join(dataDir, "providers", "codex-1", "auth.json"))).toBe("rw");
+  });
+
   it("each mutation opens exactly the hole it names", () => {
     const base = turn();
     const flips: Record<BoxMutation, (plan: ReturnType<typeof turn>) => boolean> = {

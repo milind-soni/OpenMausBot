@@ -27,3 +27,8 @@ test("the external secret save never leaves a migrated secret in config.json", (
     );
   }
 });
+
+test("a first Anthropic key leaves bots signed in to Claude on their sign-in, and only that option crosses", () => {
+  assert.deepEqual(CREDENTIAL_PATCH.anthropicApiKey("secret", { everyClaudeBot: false }), { anthropic: { key: "secret", everyClaudeBot: false } });
+  assert.deepEqual(CREDENTIAL_PATCH.anthropicApiKey("secret", { everyClaudeBot: true, url: "https://elsewhere.example.test" }), { anthropic: { key: "secret" } });
+});

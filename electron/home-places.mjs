@@ -19,11 +19,13 @@ const KINDS = Object.freeze(["team", "cloud", "profile", "server"]);
  *   persist(state: unknown): void,
  *   makeId(): string,
  *   homeOrigin(): string | null,
+ *   synced?(state: any): void,
  *   log?(line: string): void,
  * }} deps `store`: this app's home-place.json (`{ team }` or `{ cloud }`); `environments()` / `persist()`: the saved
- * places and their file; `homeOrigin()`: My Cloud's verified origin, the place the window falls back to.
+ * places and their file; `homeOrigin()`: My Cloud's verified origin, the place the window falls back to. `synced(state)`: each sign-in state as it
+ * comes, after the places follow it (a team the person just joined opens from there: team-join-main.mjs).
  */
-export function createHomePlaces({ store, environments: read, persist, makeId, homeOrigin, log = () => {} }) {
+export function createHomePlaces({ store, environments: read, persist, makeId, homeOrigin, synced = () => {}, log = () => {} }) {
   let cached = null;
   const pending = [];
   /** One kind of place at most: the first of KINDS the record names. */
@@ -81,6 +83,9 @@ export function createHomePlaces({ store, environments: read, persist, makeId, h
      * (one it no longer lists is gone; a team with its name for the line), in the colours the Admin keeps for them;
      * anything else changes nothing. An Admin that lists no Clouds leaves the Cloud places as they were. */
     sync(state) {
+      try { places.follow(state); } finally { synced(state); }
+    },
+    follow(state) {
       if (state?.status !== "connected") return;
       const teams = Array.isArray(state.teams) ? state.teams : [];
       const { state: withTeams, left } = environments.reconcileTeams(read(), teams, makeId, homeOrigin());
