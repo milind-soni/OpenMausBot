@@ -85,16 +85,17 @@ export type LayoutVerdict = { hidden: true } | { hidden: false; why: string };
  */
 export function checkLayout(dataDir: string, box: Pick<BotBox, "wrap" | "startOptions"> = botBox): LayoutVerdict {
   const canary = join(dataDir, "box", `layout-${randomBytes(6).toString("hex")}`);
-  const cwd = join(dataDir, "task-workspaces", "omb-layout-check", "t");
+  const bot = "omb-layout-check";
+  const cwd = join(dataDir, "task-workspaces", bot, "t"), own = join(dataDir, "workspaces", bot);
   try {
-    mkdirSync(cwd, { recursive: true, mode: 0o700 });
+    for (const folder of [cwd, own]) mkdirSync(folder, { recursive: true, mode: 0o700 });
     writeFileSync(canary, "the server's own\n", { mode: 0o600 });
     const home = box.startOptions()?.home ?? dataDir;
     // The paths ride as arguments: a command line is not a grant, so naming them shows nothing.
     const script = 'for path in "$@"; do if [ -e "$path" ]; then echo "omb-layout:visible $path"; exit 0; fi; done; echo omb-layout:hidden';
     const wrapped = box.wrap({
       command: "/bin/sh", args: ["-c", script, "sh", canary, join(dataDir, "config.json"), join(dataDir, "sessions.json"), join(dataDir, OPERATOR_TOKEN_FILE)],
-      cwd, env: { PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin", HOME: home }, botId: "omb-layout-check",
+      cwd, env: { PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin", HOME: home }, botId: bot,
     });
     if (!wrapped) return { hidden: false, why: "the box is not on" };
     let result: ReturnType<typeof spawnSync<string>>;
@@ -112,7 +113,7 @@ export function checkLayout(dataDir: string, box: Pick<BotBox, "wrap" | "startOp
     return { hidden: false, why: `the check could not run (${error instanceof Error ? error.message : String(error)})` };
   } finally {
     rmSync(canary, { force: true });
-    rmSync(join(dataDir, "task-workspaces", "omb-layout-check"), { recursive: true, force: true });
+    for (const folder of [join(dataDir, "task-workspaces", bot), own]) rmSync(folder, { recursive: true, force: true });
   }
 }
 

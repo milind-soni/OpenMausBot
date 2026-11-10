@@ -127,6 +127,7 @@ describe.skipIf(!works).each(layouts)(`the hardened profile in a real box (${wor
     expect(checkLayout(dataDir, leaky)).toEqual({ hidden: false, why: `a bot can see ${join(dataDir, "config.json")}` });
     expect(checkLayout(dataDir, standard)).toEqual({ hidden: false, why: "the box is not on" });
     expect(existsSync(join(dataDir, "task-workspaces", "omb-layout-check"))).toBe(false);
+    expect(existsSync(join(dataDir, "workspaces", "omb-layout-check"))).toBe(false);
   });
 
   it("a bot's process reaches nothing of the server over loopback but the harness routes", async () => {
@@ -144,7 +145,7 @@ describe.skipIf(!works)("what else the profile's box takes away", () => {
   const guarded = new BotBox(), cloudLike = new BotBox();
   const shell = (box: BotBox, script: string) => asBot(box, cwd, home, "/bin/sh", ["-c", script]);
   beforeAll(async () => {
-    for (const dir of [cwd, join(home, ".ssh"), join(home, ".aws"), join(home, ".config", "gcloud")]) mkdirSync(dir, { recursive: true, mode: 0o700 });
+    for (const dir of [cwd, join(dataDir, "workspaces", "bot-1"), join(home, ".ssh"), join(home, ".aws"), join(home, ".config", "gcloud")]) mkdirSync(dir, { recursive: true, mode: 0o700 });
     for (const file of [".ssh/id_ed25519", ".ssh/authorized_keys", ".aws/credentials", ".config/gcloud/credentials.db", ".netrc", ".git-credentials", ".bash_history"]) writeFileSync(join(home, file), SECRET, { mode: 0o600 });
     for (const file of [".bashrc", ".profile", ".gitconfig"]) writeFileSync(join(home, file), "# the person's own\n");
     writeFileSync(join(home, "project.txt"), "a file of the person's");
