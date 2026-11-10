@@ -82,6 +82,10 @@ function unwrap(message: JsonRpcMessage): unknown {
   return message.result;
 }
 
+function isResponse(message: JsonRpcMessage): boolean {
+  return message.method === undefined && (Object.hasOwn(message, "result") || Object.hasOwn(message, "error"));
+}
+
 function parseMessage(text: string): JsonRpcMessage | JsonRpcMessage[] | null {
   try {
     const parsed: unknown = JSON.parse(text);
@@ -297,7 +301,7 @@ export class RemoteMcpClient {
     if (type.startsWith("application/json")) {
       const parsed = parseMessage(await readBounded(response, this.maxBytes));
       this.deliverNotifications(parsed);
-      const message = (Array.isArray(parsed) ? parsed : parsed ? [parsed] : []).find((entry) => entry.id === id);
+      const message = (Array.isArray(parsed) ? parsed : parsed ? [parsed] : []).find((entry) => entry.id === id && isResponse(entry));
       if (!message) throw new McpHttpError("protocol", "response did not answer the request");
       return unwrap(message);
     }
@@ -307,7 +311,7 @@ export class RemoteMcpClient {
         if (event.event !== "message") return undefined;
         const parsed = parseMessage(event.data);
         this.deliverNotifications(parsed);
-        const message = (Array.isArray(parsed) ? parsed : parsed ? [parsed] : []).find((entry) => entry.id === id);
+        const message = (Array.isArray(parsed) ? parsed : parsed ? [parsed] : []).find((entry) => entry.id === id && isResponse(entry));
         if (!message) return undefined;
         found = message;
         return "stop";
@@ -358,6 +362,7 @@ export class RemoteMcpClient {
             const parsed = parseMessage(event.data);
             this.deliverNotifications(parsed);
             for (const message of Array.isArray(parsed) ? parsed : parsed ? [parsed] : []) {
+              if (!isResponse(message)) continue;
               const entry = typeof message.id === "number" ? this.pending.get(message.id) : undefined;
               if (!entry) continue;
               this.pending.delete(message.id as number);
