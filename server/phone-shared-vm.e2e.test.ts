@@ -569,7 +569,8 @@ describe("a person's hold on the shared Local VM", () => {
     await ok("POST", `/api/bots/${books.id}/sign-in-cards/${card}/done`, { threadId: pinned });
     expect(await held(witness)).toBe(false);
     expect(await gate(computer)).toEqual({ held: false, helpOpen: false });
-    await finishTurns([worker.id, worker.threadId]);
+    await until(() => busy(books.id, pinned), Boolean);
+    await finishTurns([worker.id, worker.threadId], [books.id, pinned]);
 
     const own = lease();
     expect((await control(phone, books.id, { action: "take", controlLeaseId: own })).body.owned).toBe(true);
