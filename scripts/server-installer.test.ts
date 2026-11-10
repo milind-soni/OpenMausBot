@@ -198,6 +198,7 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     ["unprivileged user namespaces off", { userns: { clone: "0" } }, /^This server switches off user namespaces/],
     ["a clock an hour off", { env: { FAKE_THEIRS: "1794265200" } }, /^This server's clock is 60 minutes off, so HTTPS certificates will be refused\. Run: sudo timedatectl set-ntp true/],
     ["a release without an image", { env: { FAKE_RELEASE_STATUS: "404" } }, /^MausBot v0\.1\.151 has no server image yet/],
+    ["a registry that is throttling", { env: { FAKE_RELEASE_STATUS: "429" } }, /^The image registry ghcr\.io did not say whether it has MausBot v0\.1\.151 \(it answered 429\)\. Run this again in a few minutes\.$/],
     ["the latest tag asked for", { env: { OMB_INSTALL_IMAGE: "ghcr.io/milind-soni/openmausbot:latest" } }, /^OMB_INSTALL_IMAGE names the latest tag/],
   ])("--check on %s prints the one thing to fix", (_name, server, sentence) => {
     const result = run(["--check", "--domain", "maus.example.com"], server);
@@ -213,7 +214,7 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     const result = run(["--check", "--domain", "maus.example.com"], { env: { FAKE_BLOCKED: "ghcr.io registry-1.docker.io" } });
     expect(result.fixes).toEqual([
       "This server can't reach ghcr.io registry-1.docker.io over HTTPS (port 443). Allow outbound HTTPS to them in your firewall, then run this again.",
-      "The image registry ghcr.io did not answer, so the version to install is unknown. Check this server's outbound HTTPS, then run this again.",
+      "The image registry ghcr.io did not say which versions exist (it answered 000). Check this server's outbound HTTPS, then run this again.",
     ]);
   });
 

@@ -38,6 +38,8 @@ settings() {
   DOCKER_PROBLEM=""
   IMAGE=""
   PUBLIC_IP=""
+  REGISTRY_TOKEN=""
+  REGISTRY_STATUS=000
 }
 
 say() { printf '%s\n' "$*"; }
@@ -400,18 +402,27 @@ check_clock() {
   fi
 }
 
-registry_has() { # tag: 0 when the image has it, 1 when it does not, 2 when the registry could not be asked
-  token=$(curl -fsS --max-time 15 "https://ghcr.io/token?scope=repository:$IMAGE_REPO:pull" 2>/dev/null | sed -n 's/.*"token":"\([^"]*\)".*/\1/p' || true)
-  [ -n "$token" ] || return 2
-  # The pull token goes to curl on its standard input, never on a command line.
-  status=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -K - -s -o /dev/null -w '%{http_code}' --max-time 15 -I \
-    -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
-    "https://ghcr.io/v2/$IMAGE_REPO/manifests/$1" 2>/dev/null || true)
-  case "$status" in
-    200) return 0 ;;
-    404) return 1 ;;
-    *) return 2 ;;
-  esac
+registry_token() {
+  curl -fsS --max-time 15 "https://ghcr.io/token?scope=repository:$IMAGE_REPO:pull" 2>/dev/null | sed -n 's/.*"token":"\([^"]*\)".*/\1/p' | head -n 1
+}
+
+# REGISTRY_STATUS: the registry's HTTP answer for a tag (200 it has it, 404 it does not), or 000 when it gave none.
+registry_ask() { # tag
+  REGISTRY_STATUS=000
+  for _ in 1 2 3; do
+    if [ -z "$REGISTRY_TOKEN" ]; then REGISTRY_TOKEN=$(registry_token || true); fi
+    if [ -n "$REGISTRY_TOKEN" ]; then
+      # The pull token goes to curl on its standard input, never on a command line.
+      REGISTRY_STATUS=$(printf 'header = "Authorization: Bearer %s"\n' "$REGISTRY_TOKEN" | curl -K - -s -o /dev/null -w '%{http_code}' --max-time 15 -I \
+        -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+        "https://ghcr.io/v2/$IMAGE_REPO/manifests/$1" 2>/dev/null || true)
+      case "$REGISTRY_STATUS" in
+        200 | 404) return 0 ;;
+        401 | 403) REGISTRY_TOKEN="" ;;
+      esac
+    fi
+    sleep 2
+  done
 }
 
 newest_release() {
@@ -438,15 +449,14 @@ check_version() {
     esac
     return
   fi
-  asked=0
-  registry_has stable || asked=$?
-  if [ "$asked" = 0 ]; then
+  registry_ask stable
+  if [ "$REGISTRY_STATUS" = 200 ]; then
     IMAGE="ghcr.io/$IMAGE_REPO:stable"
     ok "version: the stable channel"
     return
   fi
-  if [ "$asked" = 2 ]; then
-    fix "The image registry ghcr.io did not answer, so the version to install is unknown. Check this server's outbound HTTPS, then run this again."
+  if [ "$REGISTRY_STATUS" != 404 ]; then
+    fix "The image registry ghcr.io did not say which versions exist (it answered $REGISTRY_STATUS). Check this server's outbound HTTPS, then run this again."
     return
   fi
   release=$(newest_release || true)
@@ -454,10 +464,13 @@ check_version() {
     fix "The newest MausBot release could not be read from api.github.com. Check this server's outbound HTTPS, then run this again in a few minutes."
     return
   fi
-  asked=0
-  registry_has "$release" || asked=$?
-  if [ "$asked" != 0 ]; then
+  registry_ask "$release"
+  if [ "$REGISTRY_STATUS" = 404 ]; then
     fix "MausBot $release has no server image yet. Run this again in a few minutes."
+    return
+  fi
+  if [ "$REGISTRY_STATUS" != 200 ]; then
+    fix "The image registry ghcr.io did not say whether it has MausBot $release (it answered $REGISTRY_STATUS). Run this again in a few minutes."
     return
   fi
   IMAGE="ghcr.io/$IMAGE_REPO:$release"
