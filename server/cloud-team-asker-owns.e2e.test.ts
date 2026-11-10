@@ -108,7 +108,10 @@ beforeAll(async () => {
 
 /** Whatever a test left holding (a stopped run's CI poll, a waiting line) ends before the next one starts. */
 afterEach(async () => {
-  for (const [callId, token] of calls) await team.as(token, "POST", "/api/live/call/end", { callId });
+  for (const [callId, token] of calls) {
+    const ended = await team.as(token, "POST", "/api/live/call/end", { callId });
+    expect([200, 404], JSON.stringify(ended.body)).toContain(ended.status);
+  }
   calls.clear();
   writeFileSync(home("release"), "");
   writeFileSync(home("tool-calls.json"), "[]");
