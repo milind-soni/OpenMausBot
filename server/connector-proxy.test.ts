@@ -406,15 +406,80 @@ describe("connector MCP bridge", () => {
     expect(reply.result.tools).toEqual([{ name: "COMPOSIO_MANAGE_CONNECTIONS" }]);
   });
 
-  it("returns a JSON-RPC error, not a tools result, when a non-call relay fails", async () => {
+  it("keeps the MCP server available when connected apps are not configured", async () => {
     const lines = start({});
     child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/list", params: {} })}\n`);
     const reply = await nextJson(lines);
     expect(reply).toEqual({
       jsonrpc: "2.0",
       id: 3,
-      error: { code: -32000, message: "connected apps are unavailable" },
+      result: { tools: [] },
     });
+  });
+
+  it.each(["http", "rpc", "malformed", "disconnected"])("survives a cold-start %s outage and discovers tools after recovery", async (failure) => {
+    let offline = true;
+    let listings = 0;
+    let executions = 0;
+    const upstream = await listen((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        const rpc = JSON.parse(body);
+        if (rpc.method === "tools/call") {
+          executions += 1;
+          response.writeHead(500);
+          response.end();
+          return;
+        }
+        if (rpc.method !== "tools/list") {
+          response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: {} }));
+          return;
+        }
+        listings += 1;
+        if (offline) {
+          if (failure === "disconnected") return request.socket.destroy();
+          response.writeHead(failure === "http" ? 500 : 200);
+          response.end(failure === "rpc"
+            ? JSON.stringify({ jsonrpc: "2.0", id: rpc.id, error: { code: -32603, message: "Internal error" } })
+            : "unavailable");
+          return;
+        }
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { tools: [{ name: "GMAIL_FETCH_EMAILS" }] } }));
+      });
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    const ask = async (id: number, method: string, params = {}) => {
+      child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+      return nextJson(lines);
+    };
+    expect((await ask(1, "initialize")).result.serverInfo.name).toBe("openmausbot-connectors");
+    expect(await ask(2, "tools/list")).toEqual({ jsonrpc: "2.0", id: 2, result: { tools: [] } });
+    expect(listings).toBe(2);
+    const failedCall = await ask(3, "tools/call", { name: "GMAIL_FETCH_EMAILS", arguments: {} });
+    expect(failedCall.result.isError).toBe(true);
+    expect(executions).toBe(1);
+    offline = false;
+    expect((await ask(4, "tools/list")).result.tools).toEqual([{ name: "GMAIL_FETCH_EMAILS" }]);
+  });
+
+  it("bounds discovery when the connector service stops responding", async () => {
+    let listings = 0;
+    const upstream = await listen((request) => {
+      listings += 1;
+      request.resume();
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 5, method: "tools/list" })}\n`);
+    expect(await nextJson(lines)).toEqual({ jsonrpc: "2.0", id: 5, result: { tools: [] } });
+    expect(listings).toBe(2);
+  });
+
+  it("keeps locally defined app tools available during a discovery outage", async () => {
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: "", OMB_CONNECTOR_APP_TOOLS: JSON.stringify(["gmail.search_emails"]) });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 6, method: "tools/list" })}\n`);
+    const reply = await nextJson(lines);
+    expect(reply.result.tools.map((tool: { name: string }) => tool.name)).toEqual(["gmail_search_emails"]);
   });
 
   it("filters a JSON tools/list response down to the bot's grants", async () => {
