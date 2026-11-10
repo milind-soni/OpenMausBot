@@ -23,11 +23,14 @@ export const MAX_IMAGE_BYTES = 200 * 1024;
 export const MAX_DAYS_AHEAD = 180;
 const DAY = 24 * 60 * 60 * 1000;
 
+/** Line endings aside: a Windows checkout may turn LF into CRLF, which changes nothing an install reads. */
+export const lf = (text) => text.replace(/\r\n/g, "\n");
 export const schemaText = () => `${JSON.stringify(announcementsJsonSchema(), null, 2)}\n`;
 
 /** Problems with the file's text, or an empty list when it is sound. `fileSize(path)` is a picture's size in bytes, or null when
  * the repository has no such file. */
-export function announcementProblems(text, { previous = null, now = Date.now(), fileSize = (path) => (existsSync(join(root, path)) ? statSync(join(root, path)).size : null) } = {}) {
+export function announcementProblems(raw, { previous: rawPrevious = null, now = Date.now(), fileSize = (path) => (existsSync(join(root, path)) ? statSync(join(root, path)).size : null) } = {}) {
+  const text = lf(raw), previous = rawPrevious === null ? null : lf(rawPrevious);
   if (Buffer.byteLength(text) > MAX_FILE_BYTES) return [`the file is larger than ${MAX_FILE_BYTES} bytes`];
   let doc;
   try {
@@ -67,7 +70,7 @@ function main() {
     return;
   }
   const problems = [];
-  if (!existsSync(schemaPath) || readFileSync(schemaPath, "utf8") !== schemaText()) {
+  if (!existsSync(schemaPath) || lf(readFileSync(schemaPath, "utf8")) !== schemaText()) {
     problems.push(`${ANNOUNCEMENTS_SCHEMA_FILE} is out of date: run node scripts/check-announcements.mjs --write-schema`);
   }
   let previous = null;

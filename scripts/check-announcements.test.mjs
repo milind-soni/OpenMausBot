@@ -3,7 +3,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import formats from "ajv-formats";
 import { describe, expect, it } from "vitest";
 
-import { announcementProblems, MAX_DAYS_AHEAD, MAX_FILE_BYTES, MAX_IMAGE_BYTES, schemaText } from "./check-announcements.mjs";
+import { announcementProblems, lf, MAX_DAYS_AHEAD, MAX_FILE_BYTES, MAX_IMAGE_BYTES, schemaText } from "./check-announcements.mjs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const committed = read("announcements/announcements.json");
@@ -21,7 +21,7 @@ describe("the committed file", () => {
   });
 
   it("has its JSON Schema beside it, up to date with the app's own rules", () => {
-    expect(read("announcements/announcements.schema.json"), "run node scripts/check-announcements.mjs --write-schema").toBe(schemaText());
+    expect(lf(read("announcements/announcements.schema.json")), "run node scripts/check-announcements.mjs --write-schema").toBe(schemaText());
   });
 
   it("the JSON Schema an editor reads takes the committed file and the documented examples", () => {
@@ -70,6 +70,13 @@ describe("what the check refuses", () => {
     expect(problems(withCards(pictured))).toEqual(["tip-first-api-key: the picture announcements/images/tip.png is not in the repository"]);
     expect(problems(withCards(pictured), { fileSize: () => MAX_IMAGE_BYTES + 1 })[0]).toMatch(/larger than/);
     expect(problems(withCards(pictured), { fileSize: () => 40_000 })).toEqual([]);
+  });
+
+  it("ignores line endings: a CRLF checkout of an unchanged file is the same file", () => {
+    const before = JSON.stringify(example, null, 2);
+    expect(problems(before.replace(/\n/g, "\r\n"), { previous: before })).toEqual([]);
+    expect(problems(before, { previous: before.replace(/\n/g, "\r\n") })).toEqual([]);
+    expect(lf(schemaText().replace(/\n/g, "\r\n"))).toBe(schemaText());
   });
 
   it("a change that does not move updatedAt forward", () => {
