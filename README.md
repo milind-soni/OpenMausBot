@@ -508,7 +508,8 @@ from `openmausbot setup` and the server are saved as plaintext, not encrypted,
 in private `config.json` (`0600` on Unix). The packaged desktop app keeps your
 AI provider and service keys encrypted through the operating system instead;
 its `config.json` still holds OpenCode provider keys, keys given to one engine,
-and MCP header values in plaintext.
+and MCP header values in plaintext (a key a bot set from a secret card is kept
+in the Vault, and `config.json` holds only a pointer to it).
 See the [short setup guide](docs/cli-onboarding.md) for account differences,
 phone choices, credential storage, and cancellation.
 
