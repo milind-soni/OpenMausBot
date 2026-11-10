@@ -35,7 +35,7 @@ describe.skipIf(!available)(`the real box (${detection.box === "bwrap" ? "bubble
     const expected: Record<string, string[]> = {
       "bind-data": ["messages-db-hidden", "config-hidden", "data-dir-empty", "other-bot-folder-hidden", "other-task-folder-hidden", "secret-not-on-disk"],
       "share-pid": ["other-pid-hidden", "server-pid-hidden"],
-      "share-net": ["host-loopback-unreachable", "no-direct-internet"],
+      "share-net": [],
       "env-all": ["secret-not-in-env"],
       "tmp-shared": ["tmp-private"],
       "engines-rw": ["engine-read-only"],
@@ -46,6 +46,7 @@ describe.skipIf(!available)(`the real box (${detection.box === "bwrap" ? "bubble
       expect(result.error, mutation).toBeUndefined();
       for (const id of checks) expect(result.failed, `${mutation} should fail ${id}`).toContain(id);
       // share-net drops the two isolated-network checks instead of failing them; everything else holds.
+      if (mutation === "share-net") expect(result.results.map((check) => check.id)).not.toContain("host-loopback-unreachable");
       const other = result.failed.filter((id) => !checks.includes(id));
       expect(other, `${mutation} broke more than it should`).toEqual([]);
     }

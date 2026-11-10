@@ -42,7 +42,7 @@ describe.skipIf(!available)(`engine homes in a real box (${available ? "bubblewr
   });
   const script = [
     'ls -R "$HOME/.claude/projects"',
-    `cat "${join(bob, ".claude", "projects", "p", "bob-session.jsonl")}" || echo BOB-UNREADABLE`,
+    `cat "${join(bob, ".claude", "projects", "p", "bob-session.jsonl")}" 2>/dev/null || echo BOB-UNREADABLE`,
     `ls -a "${engineHomesRoot(dataDir)}"`,
     `grep -rl lighthouse "${serverHome}" 2>/dev/null || echo SHARED-HOME-UNREADABLE`,
     'cat "$HOME/.claude/.credentials.json"; echo',
