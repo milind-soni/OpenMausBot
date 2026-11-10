@@ -116,7 +116,7 @@ import { boatDeletionSnapshot } from "./boat-delete-journal.ts";
 import { liveDecisionRefusal } from "../shared/live-approval.ts"; import type { PersonWaitKind } from "../shared/person-wait.ts";
 import { vpsLeftBehindNotice } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
-import { connectorCallFromFrame, connectorRefusalText, connectorScopeRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
+import { appSandboxRule, connectorCallFromFrame, connectorRefusalText, connectorScopeRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
 import { signInCardText } from "./connector-card-text.ts";
 import { BOT_PAUSED_CODE } from "../shared/bot-limit.ts"; import { createStarterAwake } from "./host/starter-awake.ts"; import { createStarterCaps } from "./host/starter-caps.ts"; import { createStarterAwakeRoutes } from "./routes/starter-awake.ts"; import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts"; import { chiefAbsentFrom, createChiefRooms } from "./host/chief-rooms.ts"; import { chiefLevel, readTeamRolesWith } from "./chief-level.ts"; import { defaultBotRefusal, ensureDefaultBot } from "./default-bot.ts";
 import { buildRecall, recallRooms, recallThreadIds, withRecalled } from "./recall.ts";
@@ -1382,7 +1382,7 @@ const mcpOAuth = new McpOAuthManager({
 const teamConnections = createTeamConnectionsHost({ team: CLOUD_TEAM, dataDir: DATA_DIR, cfg: () => cfg, adminOrigin: CLOUD_HOME?.adminOrigin ?? null, harnessUrl: `http://127.0.0.1:${PORT}`, audienceOf: teamHost.audienceOf,
   requester: (threadId, generation) => actingPeople.requester(threadId, generation), personName: (person) => teamHost.personName(person), roster: () => (teamOwners.people?.list() ?? []).map((member) => ({ person: personKey({ id: "", email: member.email }), email: member.email, role: member.role })),
   mint: (capability) => mintInternalCapability({ ...capability, depth: 0, kind: "connectors", skillAuthoring: false, createdBots: 0, openedThreads: 0 }), mcpOAuth, isOwnerLive: (owner) => sessions.isLive(owner) || isCardOwnerLive(store, owner), onSettled: (name, phase, owner) => mcpSignInCards.settled(name, phase, owner), onRefresh: (person, name, outcome) => connectionHealth.refreshed(person, name, outcome), onPersonChanged: (person, kind, id) => connectionHealth.connectedAgain({ kind, id, person }),
-  botMcp: (bot) => mcpServersHost.mounted(bot), oauthClient: mcpKeys.oauthClient, brokerUrl: () => (CLOUD_TEAM ? cloudConnectedAppsBrokerUrl() || null : null), composio }); teamConnections.primeApps(); const connectionHealth = createConnectionHealthHost({ dataDir: CLOUD_TEAM ? DATA_DIR : null, mcpServers: () => cfg.mcpServers ?? {}, mcpOAuth, connections: teamConnections, bots: () => store.bots, botServers: (bot) => Object.keys(mcpServersHost.mounted(bot)), roster: () => teamOwners.people?.list() ?? [], personKey: (email) => personKey({ id: "", email }), personName: (email) => teamHost.people.profile(personKey({ id: "", email })).name || null, test: (name, signal) => mcpConfig.test(name, { signal, person: () => null }), asleep: () => cloudPowerNow()?.sleeping() ?? false, wokeAt: () => cloudPowerNow()?.sleptUntil() ?? null }); if (CLOUD_TEAM) connectionHealth.start();
+  botMcp: (bot) => mcpServersHost.mounted(bot), oauthClient: mcpKeys.oauthClient, brokerUrl: () => (CLOUD_TEAM ? cloudConnectedAppsBrokerUrl() || null : null), fullAccess: fullAccessForSource, composio }); teamConnections.primeApps(); const connectionHealth = createConnectionHealthHost({ dataDir: CLOUD_TEAM ? DATA_DIR : null, mcpServers: () => cfg.mcpServers ?? {}, mcpOAuth, connections: teamConnections, bots: () => store.bots, botServers: (bot) => Object.keys(mcpServersHost.mounted(bot)), roster: () => teamOwners.people?.list() ?? [], personKey: (email) => personKey({ id: "", email }), personName: (email) => teamHost.people.profile(personKey({ id: "", email })).name || null, test: (name, signal) => mcpConfig.test(name, { signal, person: () => null }), asleep: () => cloudPowerNow()?.sleeping() ?? false, wokeAt: () => cloudPowerNow()?.sleptUntil() ?? null }); if (CLOUD_TEAM) connectionHealth.start();
 // OpenCode reads provider keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, …) from its environment. Wired before the first catalog probe below.
 let openCodeOrganisationManaged = (): boolean => false;
 const openCodeKeysAllowed = (): boolean => openCodeProviderKeysAllowed({
@@ -14464,7 +14464,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           : [];
         if (proactive.fence.refusesConnectorCall(currentSender, internalCapability.threadId, body)) return refuseOutbound(READ_AND_DRAFT_REFUSAL);
         const scopeRefusal = managedPolicy.appsCallRefusal(connectorCalls, serviceSlugs) ?? await teamConnections.callRefusal(internalCapability, connectorCalls); if (scopeRefusal) return refuseOutbound(scopeRefusal);
-        const access = connectorAccessDecision(currentSender.connectorScopes, connectorCalls, serviceSlugs);
+        // A room turn can run at a Chief's delegated level, which only the room handoff carries.
+        const sendsFreely = () => roomTurnLevels.forRequest(internalCapability.threadId, internalCapability.botId,
+          () => sourceApprovalMode(internalCapability.botId, internalCapability.threadId)) === "full"; const sandbox = appSandboxRule(body, sendsFreely);
+        const access = connectorAccessDecision(currentSender.connectorScopes, sandbox.open() ? [] : connectorCalls, serviceSlugs);
         if (!access.ok) {
           const described = describeTool(access.slug);
           const appName = described.app ?? access.toolkit;
@@ -14475,10 +14478,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return refuseOutbound(connectorScopeRefusalText(call, access.reason, currentSender.name, appName, described.label));
         }
         const opaque = connectorCalls.some(call => call.slug === "COMPOSIO_PROXY_EXECUTE");
-        if (opaque && currentSender.connectorTools !== undefined) return refuseOutbound("OpenMausBot cannot verify this code against this bot's tool grants. Use a direct app tool.");
-        // A room turn can run at a Chief's delegated level, which only the room handoff carries.
-        const sendsFreely = () => roomTurnLevels.forRequest(internalCapability.threadId, internalCapability.botId,
-          () => sourceApprovalMode(internalCapability.botId, internalCapability.threadId)) === "full";
+        if (opaque && currentSender.connectorTools !== undefined && !sandbox.open()) return refuseOutbound(sandbox.refusal);
         const fullAccess = outboundTool !== null && sendsFreely();
         const held: OutboundHoldAnswer = outboundTool
           ? await outboundHold.hold({
@@ -14505,8 +14505,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             requireActiveInternalCapability();
             const fresh = store.bot(internalCapability.botId);
             if (!fresh || fresh.composio === false || !composio.configured(cfg) || managedPolicy.appsCallRefusal(connectorCalls, serviceSlugs)) refuseDispatch("Connected apps were disabled while this call waited.");
-            const freshAccess = connectorAccessDecision(fresh.connectorScopes, connectorCalls, serviceSlugs);
-            if (!freshAccess.ok || (opaque && fresh.connectorTools !== undefined) ||
+            const freshAccess = connectorAccessDecision(fresh.connectorScopes, sandbox.open() ? [] : connectorCalls, serviceSlugs);
+            if (!freshAccess.ok || (opaque && fresh.connectorTools !== undefined && !sandbox.open()) ||
                 (call.kind === "tools" && !evaluateConnectorTools(call.names, fresh.connectorTools, serviceSlugs).allowed) ||
                 (call.kind === "unrecognized" && fresh.connectorTools !== undefined)) {
               refuseDispatch("This bot's connected-app permissions changed. The call was not run.");
