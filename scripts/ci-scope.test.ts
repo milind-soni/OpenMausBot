@@ -244,6 +244,7 @@ describe("CI outputs", () => {
       "server/shared-computers.e2e.test.ts",
       "server/shared-computers.gate.test.ts",
       "server/team-move.e2e.test.ts",
+      "server/team-welcome.e2e.test.ts",
       "server/use-my-mac.e2e.test.ts",
       "server/workspace-banner.e2e.test.ts",
       "scripts/server-locale-plugin.test.ts",
