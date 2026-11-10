@@ -9,10 +9,13 @@ type Frame = {
 type Refusal = { text: string; kind: "auth" | "limit"; said?: string; resetsAt?: number; scope?: "engine" | "model" | "credits" };
 type Pending = { refusal?: Refusal; refused?: boolean; buffered: RuntimeEvent[]; settle: (error?: Error) => void };
 
+/** Claude's saved sign-in ran out and could not refresh, in the CLI's own words ("OAuth session expired"). */
+export const claudeOAuthExpired = (text: string): boolean => /\boauth\b(?!.{0,40}\bnot\b).{0,40}\b(?:expired|revoked)\b/i.test(text);
+
 /** Only CLI-marked API errors count; assistant prose about signing out does not. */
 export function claudeAuthFailure(frame: { error?: unknown; is_api_error_message?: unknown }, text: string): boolean {
   if (frame.is_api_error_message !== true && typeof frame.error !== "string") return false;
-  return frame.error === "authentication_failed" || classifyError({ text }).reason === "auth";
+  return frame.error === "authentication_failed" || classifyError({ text }).reason === "auth" || claudeOAuthExpired(text);
 }
 
 /** Claude Code 2.1.295 refuses a signed-out turn with an `authentication_failed` error, and a turn past its usage limit

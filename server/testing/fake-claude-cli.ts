@@ -1031,6 +1031,13 @@ const playTurn = (prompt: JsonValue, late = false) => {
     process.stdout.write("this is not json\n{broken\n");
   }
 
+  if (mode === "oauth-expired-result") {
+    out({ type: "result", is_error: true, stop_reason: "stop_sequence", terminal_reason: "api_error", result: "OAuth session expired. Please sign in again.", total_cost_usd: runningCost.total });
+    turnRunning = false;
+    finishIfDone();
+    return;
+  }
+
   // A signed-out CLI's frames, as Claude Code 2.1.296 sends them: only the frame's own error fields mark the failure.
   if (mode === "not-logged-in" || process.env.FAKE_CLAUDE_AUTH_AFTER_TURN === "1" && turnsPlayed > 0 || signedInAs === null) {
     if (process.env.FAKE_CLAUDE_AUTH_AFTER_WORK === "1") out({
