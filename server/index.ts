@@ -15216,6 +15216,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (m && method === "GET") {
       const bot = computerPreviewBot(m[1], url);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      const watchBackend = url.searchParams.get("watchBackend");
+      if (watchBackend !== null) {
+        if (watchBackend !== "box" && watchBackend !== "vps") return json(res, 400, { error: "unknown computer provider" });
+        if (!auth.scopes.includes("admin")) return json(res, 403, { error: "admin access is required to watch another computer" });
+        if (computerProviderConfigTransitions.has(watchBackend)) return json(res, 409, { error: providerTransitionMessage(watchBackend) });
+        res.setHeader("cache-control", "private, no-store");
+        return watchBackend === "vps"
+          ? json(res, 200, { surface: "cloud", backend: "vps", ...(await vps.vpsComputerStatus(vpsConfigForBot(cfg, bot), bot.id)) })
+          : json(res, 200, { surface: "cloud", backend: "box", ...(await boat.boatStatus(cfg, bot.id)) });
+      }
       const surface = url.searchParams.has("threadId") ? await computerPreviewSurface(bot, bot.threadId) : "cloud";
       if (surface !== "cloud") return json(res, 200, { surface, configured: false, backend: bot.cloudBackend === "vps" ? "vps" : "box" });
       const teamComputer = inheritedTeamComputer(bot);
@@ -15286,9 +15296,22 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     m = path.match(/^\/api\/bots\/([\w-]+)\/computer\/(provision|join|sleep|exec|screenshot|remove)$/);
     if (m && method === "POST") {
       const botId = m[1];
+      const watchBackend = url.searchParams.get("watchBackend");
+      if (watchBackend !== null) {
+        if (watchBackend !== "box" && watchBackend !== "vps") return json(res, 400, { error: "unknown computer provider" });
+        if (m[2] !== "screenshot") return json(res, 400, { error: "watching a computer only allows a screenshot" });
+        if (!auth.scopes.includes("admin")) return json(res, 403, { error: "admin access is required to watch another computer" });
+      }
       const previewOnly = m[2] === "screenshot" || m[2] === "join";
       const bot = previewOnly ? computerPreviewBot(botId, url) : store.bot(botId);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      if (watchBackend !== null) {
+        if (computerProviderConfigTransitions.has(watchBackend)) return json(res, 409, { error: providerTransitionMessage(watchBackend) });
+        res.setHeader("cache-control", "private, no-store");
+        if (watchBackend === "vps") return json(res, 200, await computerPreviews.capture(`vps:${botId}`, () => vps.vpsComputerScreenshot(vpsConfigForBot(cfg, bot), botId)));
+        try { return json(res, 200, await computerPreviews.capture(`box:${botId}`, () => boat.screenshotBoat(cfg, botId))); }
+        finally { cloudComputerPower.used(botId); }
+      }
       const threadPreview = previewOnly && url.searchParams.has("threadId");
       if (threadPreview && await computerPreviewSurface(bot, bot.threadId) !== "cloud") {
         return json(res, 409, { error: "This conversation is not using the cloud computer" });

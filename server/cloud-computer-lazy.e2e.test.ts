@@ -261,6 +261,25 @@ describe("a cloud computer starts only when the bot uses it", () => {
     await apiOk("DELETE", `/api/bots/${bot.id}`);
   });
 
+  it("watches an existing Boat after the bot switches to VPS without changing its working computer", async () => {
+    const bot = await cloudBot("Watcher");
+    await apiOk("POST", `/api/bots/${bot.id}/computer/provision`, {});
+    await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: null, cloudBackend: "vps" });
+    const beforeCreates = creates();
+    const beforeResumes = resumes();
+    const status = await apiOk("GET", `/api/bots/${bot.id}/computer?watchBackend=box`);
+    expect(status).toMatchObject({ surface: "cloud", backend: "box", configured: true, box: { state: "ready" } });
+    const frame = await apiOk("POST", `/api/bots/${bot.id}/computer/screenshot?watchBackend=box`, {});
+    expect(frame).toMatchObject({ format: "jpeg", png: expect.any(String) });
+    expect((await api("POST", `/api/bots/${bot.id}/computer/sleep?watchBackend=box`, {})).status).toBe(400);
+    expect((await api("GET", `/api/bots/${bot.id}/computer?watchBackend=unknown`)).status).toBe(400);
+    expect(creates()).toBe(beforeCreates);
+    expect(resumes()).toBe(beforeResumes);
+    expect((await task(bot.id)).cloudBackend).toBe("vps");
+    expect((await task(bot.id)).computer).toBeUndefined();
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
+  }, 30_000);
+
   it("a plain chat on Cloud computer makes no relay call at all", async () => {
     const bot = await cloudBot("Chatter");
     const before = requests.length;
