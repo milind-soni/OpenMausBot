@@ -48,10 +48,12 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ste
     const token = await exchangeGitHubToken({ client_id: app.clientId, client_secret: app.clientSecret, code, code_verifier: pending.verifier, redirect_uri: `${originUrl()}/api/github/oauth/callback` });
     const account = await githubRequest<{ id: number; login: string }>("/user", token.access_token);
     if (app.slug) {
-      const result = await githubRequest<{ installations: { account: { id: number }; app_slug: string; suspended_at: string | null; permissions: { administration?: string } }[] }>("/user/installations?per_page=100", token.access_token);
-      const installation = result.installations.find(item => item.app_slug === app.slug && item.account.id === account.id && !item.suspended_at);
-      if (!installation || installation.permissions.administration !== "write") {
-        if (pending.installationAttempted) throw new Error("GitHub installation needs Administration write permission on your personal account");
+      // The App can live on the person's account or any organization they can reach; repositories are bound to a
+      // workspace later by proving the workspace connection can read them (lib/github-access.ts).
+      const result = await githubRequest<{ installations: { app_slug: string; suspended_at: string | null }[] }>("/user/installations?per_page=100", token.access_token);
+      const installation = result.installations.find(item => item.app_slug === app.slug && !item.suspended_at);
+      if (!installation) {
+        if (pending.installationAttempted) throw new Error("Install the Origin GitHub App on the account or organization that owns your repositories");
         const next = createGithubState({ teamId: pending.teamId, userId: pending.userId, slug: pending.slug, sessionToken: pending.sessionToken, mode: "connect", installationAttempted: true, projectId: pending.projectId });
         const response = NextResponse.redirect(`https://github.com/apps/${app.slug}/installations/new?state=${encodeURIComponent(next.state)}`);
         response.cookies.set("origin.github", next.browser, { httpOnly: true, secure: originUrl().startsWith("https:"), sameSite: "lax", path: "/api/github", maxAge: 900 });

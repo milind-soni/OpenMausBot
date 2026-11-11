@@ -1,8 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { integrationDb, openIntegration, sealIntegration } from "./githubConnection";
 import { githubHeaders } from "./github-repo";
-import { integrationBridge, originUrl } from "./integration-bridge";
-import { DEFAULT_OWNER_EMAIL } from "@/convex/lib/auth";
+import { originUrl } from "./integration-bridge";
 
 export type GitHubAppConfig = { clientId: string; clientSecret: string; slug?: string; webhookSecret?: string; appId?: number; privateKey?: string };
 type TokenRecord = { access_token: string; refresh_token?: string; expires_at?: number };
@@ -25,41 +24,23 @@ export function githubAppConfig(): GitHubAppConfig | null {
   if (row) { const saved = JSON.parse(openIntegration(row.encrypted, "github-app")); return { ...saved, appId: credentials.appId ?? saved.appId, privateKey: credentials.privateKey ?? saved.privateKey }; }
   return process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET ? { ...credentials, clientId: process.env.GITHUB_CLIENT_ID, clientSecret: process.env.GITHUB_CLIENT_SECRET, webhookSecret: process.env.GITHUB_WEBHOOK_SECRET } : null;
 }
-/** ORIGIN_ADMIN_EMAILS (comma separated) plus the legacy ORIGIN_LEGACY_OWNER_EMAIL, lowercased. */
+/** ORIGIN_ADMIN_EMAILS (comma separated, lowercased): an optional operator lock on registering the App. */
 function instanceAdminEmails() {
-  return [...(process.env.ORIGIN_ADMIN_EMAILS || "").split(","), DEFAULT_OWNER_EMAIL].map(email => email.trim().toLowerCase()).filter(Boolean);
+  return (process.env.ORIGIN_ADMIN_EMAILS || "").split(",").map(email => email.trim().toLowerCase()).filter(Boolean);
 }
 /**
- * The fallback instance operator's user id. Resolved once (the owner of the first workspace created, via the signed
- * bridge) and recorded here, so deleting or handing over that workspace later never moves the role to someone else.
- * Null while no workspace exists; throws when the bridge is unavailable.
+ * Who may register the instance's GitHub App with the manifest flow while none is configured: any owner or admin of
+ * their workspace. An operator who opens sign-up to strangers can restrict it to named accounts with ORIGIN_ADMIN_EMAILS.
  */
-export async function fallbackInstanceOperator() {
-  const recorded = () => (db().prepare("SELECT user_id FROM instance_operator WHERE id=1").get() as { user_id: string } | undefined)?.user_id;
-  const existing = recorded();
-  if (existing) return existing;
-  const operator = await integrationBridge<{ userId: string } | null>("instanceOperator", {});
-  if (!operator) return null;
-  db().prepare("INSERT INTO instance_operator VALUES(1,?,?) ON CONFLICT(id) DO NOTHING").run(operator.userId, Date.now());
-  return recorded() ?? null;
-}
-/**
- * Who may register the instance-wide GitHub App with the manifest flow, while none is configured: the instance
- * operator only. With ORIGIN_ADMIN_EMAILS or ORIGIN_LEGACY_OWNER_EMAIL set, those accounts (in any workspace role);
- * otherwise the recorded fallback operator (see fallbackInstanceOperator), from a workspace they own or administer.
- * Fails closed when the operator cannot be determined.
- */
-export async function canSetupGitHubApp(user: { _id: string; email: string }, workspaceRole: string) {
-  if (githubAppConfig()) return false;
+export function canSetupGitHubApp(user: { email: string }, workspaceRole: string) {
+  if (githubAppConfig() || !["owner", "admin"].includes(workspaceRole)) return false;
   const admins = instanceAdminEmails();
-  if (admins.length) return admins.includes(user.email.trim().toLowerCase());
-  if (!["owner", "admin"].includes(workspaceRole)) return false;
-  try {
-    return (await fallbackInstanceOperator()) === user._id;
-  } catch { return false; }
+  return !admins.length || admins.includes(user.email.trim().toLowerCase());
 }
+/** Stores the App registered by the manifest flow. Returns false when another admin registered one first. */
 export function saveGitHubApp(config: GitHubAppConfig) {
-  db().prepare("INSERT INTO github_app VALUES(1,?) ON CONFLICT(id) DO UPDATE SET encrypted=excluded.encrypted").run(sealIntegration(JSON.stringify(config), "github-app"));
+  const result = db().prepare("INSERT INTO github_app VALUES(1,?) ON CONFLICT(id) DO NOTHING").run(sealIntegration(JSON.stringify(config), "github-app"));
+  return Number(result.changes) === 1;
 }
 export function workspaceGitHubInfo(team: string) {
   const row = db().prepare("SELECT team,login,account_id,connected_by FROM github_workspace WHERE team=?").get(team) as Omit<Connection, "encrypted"> | undefined;
