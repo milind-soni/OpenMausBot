@@ -150,7 +150,7 @@ function db(): DatabaseSync {
 }
 
 /** One prepared statement per SQL text for the life of the open database. */
-function prepared(sql: string): StatementSync {
+export function prepared(sql: string): StatementSync {
   const database = db();
   let statement = statements.get(sql);
   if (!statement) statements.set(sql, statement = database.prepare(sql));

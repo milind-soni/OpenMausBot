@@ -19,6 +19,7 @@ import { companionPairingMode } from "../lib/phone-setup";
 import { revealPhonePairing } from "../lib/phone-pairing";
 import { PhonesList } from "./PhonesList";
 import { PairedPhones } from "./PairedPhones";
+import { TailnetComputers } from "./TailnetComputers";
 import { Card, Switch } from "./SettingsPrimitives";
 import { Layer } from "./Layer";
 import { productName } from "../lib/brand";
@@ -463,6 +464,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
                 </div>
               </div>
             )}
+            {tailscaleOn && state.routes?.tailscale?.name && <TailnetComputers c={c} state={state} blocked={managedBy} simple={simple} />}
             <div className="flex items-start justify-between gap-4 border-t border-hairline/30 pt-4" data-route-row="https">
               <div className="min-w-0">
                 <div className="text-[13px] text-ink">{t("devices.route.https")}</div>

@@ -1,6 +1,7 @@
 import { agentEndpointAddress, discoverAgentEndpointModels, hasExplicitModel, isGatewayEndpoint } from "../agent-endpoint-models.ts";
 import { codexEndpointSchema, codexEndpointUpdateSchema, newCodexEndpoint, updateCodexEndpoint, withCodexEndpointInfo, isCodexEndpoint } from "../codex-endpoints.ts";
 import { userError, userErrorFields } from "../user-errors.ts";
+import { modelManifest } from "../model-manifest/manifest.ts";
 import { randomUUID } from "node:crypto";
 import { providerIconError } from "../../shared/provider-icon.ts";
 import {
@@ -27,7 +28,8 @@ import {
 } from "../claude-bedrock.ts";
 import { updateClaudeCli } from "../claude-update.ts";
 import { persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
-import { addEndpoint, addEndpointSchema, isAddedEndpoint, withEndpointUrls } from "../openai-compat-endpoints.ts";
+import { addEndpoint, addEndpointSchema, endpointBaseUrl, isAddedEndpoint, withEndpointUrls } from "../openai-compat-endpoints.ts";
+import { findOllama, probeOllama } from "../drivers/ollama.ts";
 import type { InstanceConfigMap, ModelSelection, ProviderInstance } from "../contracts.ts";
 import { removeAntigravityProfile } from "../drivers/antigravity-acp.ts";
 import { BUILT_IN_DRIVERS } from "../drivers/builtIn.ts";
@@ -37,7 +39,7 @@ import { checkEngine, type EngineCheck } from "../engine-check.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import type { ProviderAuthSessions } from "../provider-auth-sessions.ts";
 import { providerIconPatchSchema, withInstanceIcon } from "../provider-icon.ts";
-import { isLoopbackHost, isProxied } from "../request-auth.ts";
+import { isLoopbackHost, isProxied, ownerOrAdmin } from "../request-auth.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import type { Store } from "../store.ts";
 import type { BusyFlag, ConfigStatus } from "./config.ts";
@@ -114,7 +116,16 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       // Rescan PATH: Windows never pushes PATH changes into a live process, so a CLI installed since launch stays invisible.
       resetPathCache();
       if (url.searchParams.get("fresh") === "1") registry.forgetSnapshots();
+      // Whatever this download brings shows on the next open; the answer does not wait for it.
+      void modelManifest().refreshOnDemand().catch(() => {});
       return json(res, 200, { instances: await describeInstances() });
+    }
+    if (method === "GET" && path === "/api/instances/ollama") {
+      if (hostedModels || !ownerOrAdmin(auth)) return json(res, 403, { error: "Only the owner of this server can look for Ollama." });
+      const asked = url.searchParams.get("url")?.trim();
+      const address = asked ? endpointBaseUrl(asked) : null;
+      if (asked && !address) return json(res, 400, { error: "Enter an http or https address, such as http://127.0.0.1:11434." });
+      return json(res, 200, { status: address ? await probeOllama(address) : await findOllama() });
     }
     // How many engines could start a bot now, never which: the check an update makes that the new version still can
     // (deploy/update.sh), which a shared server lets a local caller without a session make (SERVICE_ALLOW).

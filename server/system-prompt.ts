@@ -1,6 +1,6 @@
 // One builder for every turn's system prompt, so what a bot receives and the "what the model sees" preview are the same bytes.
 import { soulSystemPrompt } from "./bot-folder.ts";
-import { theirComputer } from "./lent-computers.ts";
+import { lentComputersLine, theirComputer } from "./lent-computers.ts";
 import { agentsToolBridged } from "./drivers/agents-bridge.ts";
 import { teammateAvailabilityPrompt, type RosterMember } from "./peer-roster.ts";
 import type { ConnectorToolGrant } from "../shared/wire.ts";
@@ -179,13 +179,13 @@ export const CLOUD_ENGINES_HERE = " The AIs bots run on (Claude, Codex, Cursor a
 
 /** `asks`: the person's own Cloud, whose bots ask them to turn on what their computer doesn't give now (ask_for_computer). */
 export function cloudHomePrompt(sharedComputerTools: boolean, synced: ReadonlyArray<{ computerName: string; pcPath: string; cloudPath: string }> = [],
-  lent: ReadonlyArray<{ name: string; platform: "darwin" | "win32" | "linux" | null }> = [], asks = false): string {
+  lent: ReadonlyArray<{ name: string; platform: "darwin" | "win32" | "linux" | null; online?: boolean; lent?: boolean; lastSeenAt?: number }> = [], asks = false): string {
   const { theirs, device } = theirComputer(lent);
   const unavailable = asks
     ? ` If it isn't online, or doesn't lend what you need (its apps and screen, its files, running commands), call ask_for_computer with what you want to do and why: it shows them one card with a one-tap Turn on, and you carry on once it's on. Don't explain the fix yourself, and never do it on their cloud computer or in the built-in browser instead unless they ask you to.`
     : ` If none is online, say so in one sentence: use its say field when it has one (it names the computer and when it was last online), otherwise ask them to open OpenMausBot on that ${device}, signed in to MausBot Cloud: it shares that ${device} with you by itself.`;
   return ` You run on ${CLOUD_HOME_PLACE}.` + (sharedComputerTools
-    ? ` If they ask for something on ${theirs}, check list_shared_computers: a computer they share with the Cloud is reachable through shared_computer, within the folders and apps it allows.${unavailable}${device === "computer" ? " Call it their computer: never assume it is a Mac." : ` It is a ${device}: call it that, never a Mac unless it is one.`}`
+    ? ` If they ask for something on ${theirs}, check list_shared_computers: a computer they share with the Cloud is reachable through shared_computer, within the folders and apps it allows.${lentComputersLine(lent)}${unavailable}${device === "computer" ? " Call it their computer: never assume it is a Mac." : ` It is a ${device}: call it that, never a Mac unless it is one.`}`
       + ` While that ${device} is away, each folder it lends that the Cloud keeps a copy of still works from that copy: list_shared_computers lists them under away_computers (copy null means a folder only on the ${device}), every read says how fresh the copy is, and a write to a folder lent with editing is saved here and reaches the ${device} when it's on (tell them so in a few words). A file or folder that isn't in the copy is only on the ${device}: say you'll get it when it's on.`
     : ` You cannot see or use ${theirs}, its screen or its files from here. If they ask for something on it, say so in one sentence.`)
     + offTheirNetwork(sharedComputerTools, theirs)
@@ -268,7 +268,7 @@ export function longCommandsPrompt(computer: ComputerPromptKind | null): string 
   return LONG_COMMANDS_TEXT + (computer === "vm-private" || computer === "vm-shared" ? VM_LONG_COMMANDS_TEXT : "");
 }
 export const THREADS_PROMPT =
-  " A thread is one conversation with its own history and its own run; a bot can have several running at once, and the person sees them as rows under that bot. Use start_thread to open one on yourself for separate work; to hand a teammate a job in a fresh thread of its own, use coordinate_bots with thread \"new\". Use list_threads to see how the ones you opened are going. When you mention a thread to the person, write its title as #Title so it links. Do not use a ticket comment, a note, or a room post as a stand-in for a thread.";
+  " A thread is one conversation with its own history and its own run; a bot can have several running at once, and the person sees them as rows under that bot. Use start_thread to open one on yourself for separate work; to hand a teammate a job in a fresh thread of its own, use coordinate_bots with thread \"new\". Use list_threads to see how the ones you opened are going. When you mention a thread to the person, write its title as #Title so it links. When the person says to burst something, or a request is clearly many independent items worked in parallel, use the burst tool: it shows a card, nothing runs until they press Run, and the results come back here as one merged reply. Do not use a ticket comment, a note, or a room post as a stand-in for a thread.";
 export const WIDGET_PROMPT =
   " Ask only what you cannot find or sensibly default yourself, and one thing at a time. When the answer is a pick from a few options (a time, a day, one of a few choices), offer them with show_widget as tap-to-answer choices instead of asking the person to type: a Card with a Row of Buttons, one per option, whose onClickAction sends that option in one tap, at most six; the caption can say they may also just type an answer. When the person wants to change something that already exists, such as a routine, a reminder, a booking or a setting, show it as a form prefilled with its current values (each field's defaultValue), say in the caption that this is how it is set now, and give it a confirm button that saves the change, so they edit what is there instead of describing it again. Use a form with several fields only for that, or when several required details truly cannot be defaulted. A plain yes or no, such as whether to go ahead, needs no widget: ask it in one short sentence; the person answers in a word or with 👍 or 👎 on your message, and either comes back to you as their reply. Put data and comparisons in a markdown table in your message, not in a widget.";
 const APPLIED_RESULT_PROMPT =
