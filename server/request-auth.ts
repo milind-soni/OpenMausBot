@@ -463,6 +463,9 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/bot-api\/new-key$/ },
   // asking to chat with a team bot one can view: the handler puts a card in the inbox of whoever can let them in
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/access-request$/ },
+  // what the viewer's own bots put online, from conversations they can read; the handler deletes only what is theirs
+  { methods: ["GET"], path: /^\/api\/published-apps(?:\/framing)?$/ },
+  { methods: ["POST"], path: /^\/api\/published-apps\/delete$/ },
 ];
 
 export function requiredScope(method: string, path: string, features: { sharedComputers?: boolean } = {}): Scope {
