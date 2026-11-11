@@ -1998,12 +1998,12 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }
   });
   it.skipIf(process.platform === "win32")("passes none of the old copy's flags when the newly found copy's version check fails, and checks it again next turn", async () => {
-    const dump = join(scratch, "path-swap-fail.json"), failedOnce = join(scratch, "older-version-failed");
+    const dump = join(scratch, "path-swap-fail.json"), failedOnce = join(scratch, "older-version-failed"), calls = join(scratch, "older-calls.log");
     const newer = join(scratch, "newer-f"), older = join(scratch, "older-f");
     mkdirSync(newer); mkdirSync(older);
     writeFileSync(join(newer, "claude"), `#!/bin/sh\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
-    // The older copy: its first --version fails, and it refuses --system-prompt-snapshot like 2.1.197 does.
-    writeFileSync(join(older, "claude"), `#!/bin/sh\n[ "$1" = --version ] && [ ! -e "${failedOnce}" ] && { : > "${failedOnce}"; exit 1; }\nfor a in "$@"; do [ "$a" = --system-prompt-snapshot ] && { echo "error: unknown option '$a'" >&2; exit 1; }; done\nFAKE_CLAUDE_VERSION=2.1.197 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    // The older copy: logs its probes, its first --version fails, and it refuses --system-prompt-snapshot like 2.1.197 does.
+    writeFileSync(join(older, "claude"), `#!/bin/sh\ncase "$1" in --version|--help) echo "$1" >> "${calls}";; esac\n[ "$1" = --version ] && [ ! -e "${failedOnce}" ] && { : > "${failedOnce}"; exit 1; }\nfor a in "$@"; do [ "$a" = --system-prompt-snapshot ] && { echo "error: unknown option '$a'" >&2; exit 1; }; done\nFAKE_CLAUDE_VERSION=2.1.197 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
     try {
       resetPathCacheForTests();
       registerPathDir(newer);
@@ -2013,9 +2013,37 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       for (const threadId of ["t-swap-fail-1", "t-swap-fail-2"]) {
         await instance.adapter.sendTurn({ threadId, text: "hi" });
         expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId)).toMatchObject({ ok: true });
-        expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--system-prompt-snapshot");
+        const { argv } = JSON.parse(readFileSync(dump, "utf8"));
+        expect(argv).not.toContain("--system-prompt-snapshot");
+        if (threadId === "t-swap-fail-1") expect(argv).not.toContain("--autocompact"); // nor any of 2.1.321's help flags
       }
       expect(existsSync(failedOnce)).toBe(true);
+      // the failed --version is tried again on the next turn, and that copy's own --help is read once it answers
+      expect(readFileSync(calls, "utf8").trim().split("\n")).toEqual(["--version", "--version", "--help"]);
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
+  it.skipIf(process.platform === "win32")("keeps the new copy's flags when the old copy's slower --help read finishes last", async () => {
+    // snapshot() is still reading 2.1.321's help when PATH finds 2.1.197 (no --autocompact); that old read must not restore 2.1.321's flags.
+    const refused = join(scratch, "stale-help-autocompact.jsonl"), helpStarted = join(scratch, "newer-help-started");
+    const newer = join(scratch, "newer-slow"), older = join(scratch, "older-quick");
+    mkdirSync(newer); mkdirSync(older);
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\n[ "$1" = --help ] && { : > "${helpStarted}"; sleep 2; }\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(older, "claude"), `#!/bin/sh\nFAKE_CLAUDE_VERSION=2.1.197 FAKE_CLAUDE_AUTOCOMPACT=0 FAKE_CLAUDE_REJECT_AUTOCOMPACT="${refused}" exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, {}, { cli: "claude" });
+      const snapshot = instance.snapshot();
+      await vi.waitFor(() => expect(existsSync(helpStarted)).toBe(true), { timeout: 5000 });
+      registerPathDir(older);
+      for (const threadId of ["t-stale-help-1", "t-stale-help-2"]) {
+        await instance.adapter.sendTurn({ threadId, text: "hi" });
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId)).toMatchObject({ ok: true });
+        if (threadId === "t-stale-help-1") await snapshot; // the old copy's help read has finished by now
+      }
+      expect(existsSync(refused)).toBe(false);
     } finally {
       resetPathCacheForTests();
     }

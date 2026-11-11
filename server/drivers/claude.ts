@@ -808,7 +808,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const at = findCliCandidates(config.cli, env.PATH ?? "")[0], reprobed = cliVersionChecked, seen = cliProbedAt !== undefined;
       if (reprobed && at === cliProbedAt) { await helpRead?.done; return; } // a help read for this copy may still be running
       const probe = await readCliVersion(env);
-      if ("version" in probe) [cliVersion, cliVersionChecked, cliProbedAt] = [parseClaudeCliVersion(probe.version), true, at]; else if (reprobed) [cliVersion, cliVersionChecked, cliHasAutocompact, cliHelpVersion] = [null, false, null, null]; // another copy that could not be checked: none of the old copy's flags, check again next turn
+      if ("version" in probe) [cliVersion, cliVersionChecked, cliProbedAt] = [parseClaudeCliVersion(probe.version), true, at]; else if (reprobed) [cliVersion, cliVersionChecked, cliHasAutocompact, cliHelpVersion, helpRead] = [null, false, null, null, null]; // another copy that could not be checked: none of the old copy's flags (nor a running read of its help), check again next turn
       if (seen && "version" in probe && probe.version !== cliHelpVersion) await readCliHelp(probe.version, env);
     };
     let helpRead: { version: string; done: Promise<void> } | null = null;
@@ -818,10 +818,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         version,
         done: new Promise<string | null>((resolve) => {
           execCli(config.cli, ["--help"], { timeout: 8000, env }, (err, stdout) => resolve(err ? null : stdout));
-        }).then((help) => {
-          cliHasAutocompact = help === null ? null : !autocompactRefusedBy.has(version) && /^\s*--autocompact\b/m.test(help);
-          cliHelpVersion = version;
-          if (helpRead === read) helpRead = null;
+        }).then((help) => { // a read another copy's read or a failed re-probe replaced since must not bring back its flags
+          if (helpRead === read) [cliHasAutocompact, cliHelpVersion, helpRead] = [help === null ? null : !autocompactRefusedBy.has(version) && /^\s*--autocompact\b/m.test(help), version, null];
         }),
       };
       helpRead = read;
