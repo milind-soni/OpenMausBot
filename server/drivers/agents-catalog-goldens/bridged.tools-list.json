@@ -266,6 +266,7 @@
               "cerebrasApiKey",
               "groqApiKey",
               "greenferenceApiKey",
+              "modelgoApiKey",
               "metaApiKey",
               "deepseekApiKey",
               "email"
@@ -324,7 +325,7 @@
     },
     {
       "name": "fill_login",
-      "description": "Sign in with a login the person saved in OpenMausBot or in their connected 1Password. Call it on the login page open in your browser: OpenMausBot types the username, password and any one-time code itself, submits each step, and says where the page went; you never see the password. A login fills on its own site, such as any page of example.com. With no saved login for the site, sign in another way the person allowed (a code sent to their own email, which you read and type in, is one), or call request_sign_in.",
+      "description": "Sign in with a login the person saved in OpenMausBot or in their connected 1Password. Call it on the login page open in your browser: OpenMausBot types the username, password and any one-time code itself (also one emailed to a connected mailbox), submits each step, and says where the page went; you never see them. A login fills on its own site, such as any page of example.com. With no saved login for the site, sign in another way the person allowed, or call request_sign_in.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -332,6 +333,9 @@
           "username": {
             "type": "string",
             "description": "Which saved login to use when the site has more than one."
+          },
+          "email": {
+            "type": "string"
           },
           "submit": {
             "type": "boolean",
@@ -417,7 +421,7 @@
     },
     {
       "name": "find_tool",
-      "description": "Find an OpenMausBot tool that is not in your tool list. Say what you want to do in a few words, or give the tool's name. Each match comes back with its description and exact input schema; run one with use_tool. Tools reached this way: list_shared_computers, shared_computer, assignment_status, raise_escalation, usage_limits, list_threads, close_thread, start_thread, list_models, vm_exec, show_widget, show_html, unpublish_page, create_bot, list_team_setup, list_team_library, propose_team_setup, propose_bot_deletion, manage_room, x_search, research_search, research_endpoint, research_call, decide, extract, generate_image, report_bug, retry_thread, memory_log, session_search, trigger_info, trigger, delete_trigger, wait_until, list_waits, cancel_wait, propose_profile, propose_model, propose_team_memory, skills_list, skill_manage, mcp_server.",
+      "description": "Find an OpenMausBot tool that is not in your tool list. Say what you want to do in a few words, or give the tool's name. Each match comes back with its description and exact input schema; run one with use_tool. Tools reached this way: list_shared_computers, shared_computer, assignment_status, usage_limits, list_threads, close_thread, start_thread, burst, list_models, vm_exec, show_widget, show_html, unpublish_page, create_bot, list_team_setup, list_team_library, propose_team_setup, propose_bot_deletion, manage_room, x_search, research_search, research_endpoint, research_call, decide, extract, generate_image, report_bug, retry_thread, memory_log, session_search, trigger_info, trigger, delete_trigger, wait_until, list_waits, cancel_wait, propose_profile, propose_model, propose_team_memory, skills_list, skill_manage, mcp_server.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

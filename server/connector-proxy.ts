@@ -9,7 +9,7 @@ import {
   filterToolsListFrame,
   parseConnectorAllowedToolsEnv,
   parseConnectorServiceSlugsEnv,
-  withAuthConfigParameter,
+  withConnectionParameters,
 } from "./connector-advertisement.ts";
 import { APP_TOOL_NAMES_ENV, APP_TOOLS_ENV, appToolAnswer, appToolCall, appToolEntries, parseAppToolsEnv } from "./connector-app-tools.ts";
 import { ARGUMENT_REFUSAL, argumentRefusalNote, fitArguments, fittedArgumentsNote } from "./connector-arguments.ts";
@@ -37,6 +37,7 @@ const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 const INITIALIZE_RELAY_TIMEOUT_MS = 1_000;
 const RELAY_TIMEOUT_MS = 10 * 60_000;
 const TOOLS_LIST_RETRY_MS = 500;
+const TOOLS_LIST_RELAY_TIMEOUT_MS = 5_000;
 
 function parsedHeaders(): Record<string, string> {
   try {
@@ -217,6 +218,19 @@ async function showConnectorCards(items: ConnectorRequest[]): Promise<string> {
   return typeof body.authConfigNote === "string" && body.authConfigNote ? ` ${body.authConfigNote}` : "";
 }
 
+/** The harness's answer to a bot's search of the catalog. */
+async function findApps(query: string): Promise<string> {
+  const response = await fetch(`${HARNESS}/api/internal/connectors/find`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify({ botId: BOT_ID, threadId: THREAD_ID, query }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  const body = (await response.json().catch(() => ({}))) as { error?: unknown; text?: unknown };
+  if (!response.ok || typeof body.text !== "string") throw new Error(String(body.error ?? `could not search the apps (HTTP ${response.status})`));
+  return body.text;
+}
+
 /** The upstream list with the app tools after it, unless it already has one by that name. */
 function withAppTools(frame: Json): Json {
   const result = frame.result as { tools?: unknown } | undefined;
@@ -253,6 +267,19 @@ function fittedList(frame: Json): Json {
   if ((!SCHEMA_PROFILE && TOOL_LIMIT === undefined) || !("result" in frame)) return frame;
   const log = (line: string) => process.stderr.write(`connector-proxy: ${line}\n`);
   return { ...frame, result: capToolListResult(fitToolListResult(frame.result, SCHEMA_PROFILE, log), TOOL_LIMIT, log) };
+}
+
+async function listTools(message: Json): Promise<Json> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt) await delay(TOOLS_LIST_RETRY_MS);
+    try {
+      const response = await relay(message, TOOLS_LIST_RELAY_TIMEOUT_MS);
+      if (response && !response.error && Array.isArray((response.result as Json | undefined)?.tools)) return response;
+    } catch {
+    }
+  }
+  process.stderr.write("connector-proxy: Connected apps are temporarily unavailable; start a new session to retry discovery.\n");
+  return { jsonrpc: "2.0", id: message.id, result: { tools: [] } };
 }
 
 async function handle(received: Json): Promise<void> {
@@ -302,6 +329,11 @@ async function handle(received: Json): Promise<void> {
       ));
       return;
     }
+    const find = /MANAGE_CONNECTIONS$/i.test(name) ? (params.arguments as { find?: unknown } | undefined)?.find : undefined;
+    if (typeof find === "string" && find.trim()) {
+      send(textResult(id, await findApps(find)));
+      return;
+    }
     if (/WAIT_FOR_CONNECTIONS$/i.test(name)) {
       send(textResult(id, "OpenMausBot is handling connection completion and will continue the task automatically."));
       return;
@@ -315,13 +347,12 @@ async function handle(received: Json): Promise<void> {
     }
   }
   try {
-    // The engine lists tools once per session, so one failed listing would leave the whole session without them.
     const response = method === "tools/list"
-      ? await relay(message).catch(() => delay(TOOLS_LIST_RETRY_MS).then(() => relay(message)))
+      ? await listTools(message)
       : await relay(message);
     if (response && id !== undefined) {
       const name = String((message.params as Json | undefined)?.name ?? "");
-      send(method === "tools/list" ? fittedList(rememberSchemas(withAppTools(withAuthConfigParameter(ALLOWED_TOOLS ? filterToolsListFrame(response, ALLOWED_TOOLS, SERVICE_SLUGS) : response))))
+      send(method === "tools/list" ? fittedList(rememberSchemas(withAppTools(withConnectionParameters(ALLOWED_TOOLS ? filterToolsListFrame(response, ALLOWED_TOOLS, SERVICE_SLUGS) : response))))
         : method === "tools/call" ? withArgumentNotes(name, withSignedOutHint(message, response, SERVICE_SLUGS), changed) : response);
     }
   } catch (error) {

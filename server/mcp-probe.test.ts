@@ -69,11 +69,11 @@ describe("custom MCP probe", () => {
       return spawned[0]!.opts;
     };
     const anyBot = await opts({ asBot: {} });
-    expect(anyBot.box).toEqual({ allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"] });
+    expect(anyBot.box).toEqual({ allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"], configured: true });
     expect(anyBot).not.toHaveProperty("cwd");
     const folder = mkdtempSync(join(tmpdir(), "omb-probe-bot-"));
     try {
-      expect(await opts({ asBot: { id: "ada", cwd: folder } })).toMatchObject({ cwd: folder, box: { botId: "ada", allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"] } });
+      expect(await opts({ asBot: { id: "ada", cwd: folder } })).toMatchObject({ cwd: folder, box: { botId: "ada", allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"], configured: true } });
     } finally { await removeTempDir(folder); }
     const plain = await opts({});
     expect(plain).not.toHaveProperty("box");
@@ -560,4 +560,41 @@ describe("remote MCP probe", () => {
       await fake.close();
     }
   });
+
+  it("redacts complete credentials when configured values contain one another", async () => {
+    const fake = await startFakeHttpMcp({ tools: [{
+      name: "read_prefix-sensitive-suffix",
+      description: "prefix-sensitive-suffix / prefix / a.b+c / acted",
+      inputSchema: { type: "object" },
+    }] });
+    try {
+      await expect(probeMcpServer({
+        type: "http", url: fake.url,
+        headers: { "X-Short": "prefix", "X-Long": "prefix-sensitive-suffix", "X-Symbols": "a.b+c", "X-Fragment": "acted" },
+        enabled: false,
+      }, 2_000)).resolves.toEqual({
+        ok: true,
+        tools: [{ name: "read_[redacted]", description: "[redacted] / [redacted] / [redacted] / [redacted]" }],
+      });
+    } finally {
+      await fake.close();
+    }
+  });
+
+  for (const { label, text, headers } of [
+    { label: "crossing configured values", text: "abcdefghi", headers: { "X-First": "abc", "X-Second": "bcdefghi" } },
+    { label: "overlapping occurrences of one value", text: "ababa", headers: { "X-First": "aba", "X-Second": "" } },
+  ]) {
+    it(`redacts the whole matched range for ${label}`, async () => {
+      const fake = await startFakeHttpMcp({ tools: [{
+        name: `read_${text}`, description: `before ${text} after`, inputSchema: { type: "object" },
+      }] });
+      try {
+        await expect(probeMcpServer({ type: "http", url: fake.url, headers, enabled: false }, 2_000))
+          .resolves.toEqual({ ok: true, tools: [{ name: "read_[redacted]", description: "before [redacted] after" }] });
+      } finally {
+        await fake.close();
+      }
+    });
+  }
 });

@@ -88,6 +88,7 @@ function sides({ here = [], bots = {}, there = [], connections = [], secrets = {
     },
     store: stored(),
     engineWaitMs: 0,
+    patience: { stallMs: 0, waits: [0], blips: [] },
   };
   return { calls, cloud, deps, opened, asked };
 }
@@ -156,9 +157,9 @@ test("a bot a move made on My Cloud has all its fields sent again when the move 
 test("each item is recorded from My Cloud's own answer as soon as it went, so a send cut short later never takes it for My Cloud's own change", async () => {
   const store = stored({ v: 1, clouds: { [CLOUD]: { sent: { [itemKey.bot("juno")]: { team: ["p1", "p1"] } } } } });
   let cutAtEnd = true;
-  const move = sides({ here: [bot("juno", { team: "p2" })], bots: { juno: { peers: ["ember"] } }, there: [bot("juno", { team: "p1" })],
+  const move = sides({ here: [bot("juno", { team: "p2" })], bots: { juno: { section: "Ops" } }, there: [bot("juno", { team: "p1" })],
     onCall: (method, route, _body, cloud) => {
-      // My Cloud keeps the team without the bot it lacks: its own hash for what it took.
+      // My Cloud files the bot its own way: its own hash for what it took.
       if (method === "PATCH" && route === "/api/bots/juno") { cloud.get(itemKey.bot("juno")).parts.team = "p3"; return reply(200, {}); }
       if (cutAtEnd && method === "GET" && route === "/api/cloud-send?move=1" && cloud.get(itemKey.bot("juno")).parts.team === "p3") throw new TypeError("fetch failed");
     } });
@@ -445,10 +446,10 @@ test("a check that finds things missing names, for what may stay behind, each sh
     conversations: [{ threadId: "t-b1", bot: "b1", rows: 1, newest: "t-b1-1", settings: {} }, { threadId: "t-b2", bot: "b2", rows: 1, newest: "t-b2-1", settings: {} }],
     attachments: side === "here" ? ["0b6c9f2e-1d4a.mp3"] : [], files: [], automations: [], runs: [] });
   const s = sides({ here: [bot("b1", { soul: "s" }), bot("b2", { soul: "s" })], there: [bot("b1", { soul: "s" }), bot("b2", { soul: "s" })], onCall: (method, route, body) => {
-    if (route === "/api/cloud-send/manifest") return reply(200, { ...manifest("there"), rooms: [{ id: "r1", name: "Launch room", members: ["b1"], threads: ["t-r1"] }] });
+    if (route.startsWith("/api/cloud-send/manifest")) return reply(200, { ...manifest("there"), rooms: [{ id: "r1", name: "Launch room", members: ["b1"], threads: ["t-r1"] }] });
     if (route === "/api/cloud-send/chats/verify") {
-      const threadId = body.conversations[0].threadId;
-      return reply(200, { v: 1, conversations: [{ threadId, missing: threadId === "t-b1" ? body.conversations[0].ids : [], unstamped: 0, path: { holds: true, at: null, leaf: `${threadId}-1`, length: 1 } }] });
+      return reply(200, { v: 1, conversations: body.conversations.map(({ threadId, ids }) => ({ threadId, missing: threadId === "t-b1" ? ids : [], unstamped: 0,
+        path: { holds: true, at: null, leaf: `${threadId}-1`, length: 1 } })) });
     }
     if (route === "/api/cloud-send/chats/attachments") return reply(200, { missing: body.names });
     if (route === "/api/cloud-send/verify-secrets") return reply(200, { v: 1, secrets: {} });

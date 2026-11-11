@@ -34,6 +34,24 @@ const codex = (primary: [number, number], secondary: [number, number]) => row("c
 }));
 const report = (...providers: PlanProviderRow[]): PlanUsageReport => ({ fetchedAt: iso(NOW), providers });
 
+describe("a Claude account whose usage is not read", () => {
+  it("stops a full reading from holding it, even one saved before an update stopped reading it, and keeps a refusal's hold", () => {
+    const account = { id: "claude", name: "Claude", driver: "claude" as const, environment: {} };
+    let accounts: Array<typeof account & { noUsage?: true }> = [account];
+    const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW });
+    const full = report(claude([100, NOW + 2 * HOUR], [40, NOW + 50 * HOUR]));
+    instance.noteUsage(full);
+    expect(instance.blockedUntil("claude")).toBe(NOW + 2 * HOUR);
+    accounts = [{ ...account, noUsage: true }];
+    expect(instance.blockedUntil("claude")).toBeNull();
+    instance.noteUsage(full);
+    expect(instance.blockedUntil("claude")).toBeNull();
+    expect(instance.report().engines).toEqual([]);
+    instance.noteRefusal("claude", NOW + HOUR);
+    expect(instance.blockedUntil("claude")).toBe(NOW + HOUR);
+  });
+});
+
 describe("engineLimitFromUsage", () => {
   it("takes Claude's fullest window and its reset when nothing is at the limit", () => {
     expect(engineLimitFromUsage(claude([92, NOW + 2 * HOUR], [40, NOW + 50 * HOUR]))).toEqual({
@@ -430,11 +448,86 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     expect(instance.blockedUntil("codex"), "a read from after it").toBeNull();
   });
 
-  it("keeps a Claude hold whatever its usage shows, since Claude refuses on limits those windows do not show", () => {
+  it("ends a Claude hold too once fresh usage shows room, but not while a window is still at its limit (emails 1a1c2500, 1a1c136d)", () => {
     const { instance } = clock();
     instance.noteRefusal("claude", NOW + 23 * HOUR);
+    instance.noteUsage(report(claude([100, NOW + 2 * HOUR], [8, NOW + 5 * 24 * HOUR])));
+    expect(instance.blockedUntil("claude"), "a window still full keeps it held").not.toBeNull();
     instance.noteUsage(report(claude([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR])));
-    expect(instance.blockedUntil("claude")).toBe(NOW + 23 * HOUR);
+    expect(instance.blockedUntil("claude")).toBeNull();
+  });
+
+  it("re-reads usage every few minutes while an engine is held, with nothing else waiting, and so ends a hold that reset early", async () => {
+    vi.useFakeTimers({ now: NOW });
+    let usage = report(claude([100, NOW + 23 * HOUR], [8, NOW + 5 * 24 * HOUR]));
+    const loadUsage = vi.fn(async () => ({ ...usage, fetchedAt: iso(Date.now()) }));
+    const instance = new LimitResetClock({ accounts: () => accounts, loadUsage, waiting: () => false });
+    instance.start();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(loadUsage, "nothing held, nothing waiting: no reads").not.toHaveBeenCalled();
+    instance.noteRefusal("claude", Date.now() + 23 * HOUR);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(instance.blockedUntil("claude"), "the read soon after the refusal still shows the full window").not.toBeNull();
+    usage = report(claude([2, NOW + 5 * HOUR], [8, NOW + 5 * 24 * HOUR]));
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(instance.blockedUntil("claude")).toBeNull();
+    instance.stop();
+  });
+
+  it("stops re-reading usage once the last hold ran out, a guessed one included", async () => {
+    vi.useFakeTimers({ now: NOW });
+    const loadUsage = vi.fn(async () => ({ ...report(claude([40, NOW + 3 * HOUR], [8, NOW + 5 * 24 * HOUR])), fetchedAt: iso(Date.now()) }));
+    const instance = new LimitResetClock({ accounts: () => accounts, loadUsage, waiting: () => false });
+    instance.start();
+    instance.noteLimit("claude", undefined);
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(loadUsage, "a guessed hold is polled too").toHaveBeenCalled();
+    // Nothing reads the hold meanwhile, so only the poll itself can notice it ran out.
+    await vi.advanceTimersByTimeAsync(2 * HOUR);
+    loadUsage.mockClear();
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    expect(loadUsage).not.toHaveBeenCalled();
+    expect(instance.blockedUntil("claude"), "the guessed hold ran out").toBeNull();
+    instance.stop();
+    vi.useRealTimers();
+  });
+
+  it("keeps an OpenCode Go hold while its month is full, even with room in its rolling and weekly windows", () => {
+    const goAccounts = [{ id: "opencodeGo", name: "OpenCode", driver: "opencode" as const, environment: {} }];
+    const instance = new LimitResetClock({ accounts: () => goAccounts, now: () => NOW });
+    const go = (monthly: number) => row("opencodeGo", "opencode", parseOpenCodeUsage({ usage: {
+      rolling: { percent: 3, resetsAt: iso(NOW + 4 * HOUR) },
+      weekly: { percent: 8, resetsAt: iso(NOW + 5 * 24 * HOUR) },
+      monthly: { percent: monthly, resetsAt: iso(NOW + 20 * 24 * HOUR) },
+    } }));
+    instance.noteRefusal("opencodeGo", NOW + 23 * HOUR);
+    instance.noteUsage(report(go(100)));
+    expect(instance.blockedUntil("opencodeGo"), "a full month keeps it held").not.toBeNull();
+    instance.noteUsage(report(go(40)));
+    expect(instance.blockedUntil("opencodeGo")).toBeNull();
+  });
+
+  it("ends a hold at once on Try again now, saved across a restart, and a new refusal holds it again", () => {
+    const dir = mkdtempSync(join(tmpdir(), "limit-release-"));
+    try {
+      const file = join(dir, "holds.json");
+      const changed = vi.fn();
+      const boot = () => new LimitResetClock({ accounts: () => accounts, now: () => NOW, file, onChange: changed });
+      const instance = boot();
+      expect(instance.release("claude"), "nothing held").toBe(false);
+      instance.noteRefusal("claude", NOW + 23 * HOUR);
+      expect(instance.limit("claude")?.held, "only a hold offers Try again now").toBe(true);
+      changed.mockClear();
+      expect(instance.release("claude")).toBe(true);
+      expect(changed).toHaveBeenCalled();
+      expect(instance.blockedUntil("claude")).toBeNull();
+      expect(boot().blockedUntil("claude"), "still released after a restart").toBeNull();
+      instance.noteRefusal("claude", NOW + 23 * HOUR);
+      expect(instance.blockedUntil("claude")).toBe(NOW + 23 * HOUR);
+      instance.stop();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("never holds the engine for one model's own limit", () => {

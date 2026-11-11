@@ -213,10 +213,10 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       if (body.projectId !== undefined && (typeof body.projectId !== "string" || !store.project(bot.id, body.projectId))) {
         return json(res, 400, { error: "projectId must belong to this bot" });
       }
-      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, body.select !== false, body.projectId, undefined, body.approvalMode, undefined, cwd);
+      // Who opened it decides who may answer its cards on a shared workspace, and on a team who sees it at all.
+      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, body.select !== false, body.projectId, undefined, body.approvalMode, undefined, cwd,
+        auth.kind === "session" ? (created) => threadStarters.set(created.threadId, actorKey(auth)) : undefined);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
-      // Who opened it decides who may answer its cards on a shared workspace.
-      if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
       return json(res, 201, { bot: publicBot(store.bot(bot.id)!), task: wireTask(task, store.bot(bot.id)!.modelSelection) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/delete$/);

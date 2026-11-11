@@ -10,6 +10,7 @@ import { createBotEngine, type MeetingComputer } from "../meetings/engine.ts";
 import { END_LINE, LEAVE_ACTION, liveCard } from "../meetings/cards.ts";
 import { createMeetings, type MeetingRecord } from "../meetings/manager.ts";
 import { createMeetingRoutes, type MeetingRouteContext, type MeetingRouteDeps } from "../meetings/routes.ts";
+import { MEETINGS_NEED_CLOUD_COMPUTER } from "../meetings/prompt.ts";
 import { speechSource } from "../meetings/speech.ts";
 import { OUTSIDE, type WorkOrigin } from "../peer-provenance.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -118,7 +119,7 @@ export function createMeetingsHost(deps: MeetingsHostDeps, routeDeps: () => Meet
     computerOwner(botId) {
       const bot = store.bot(botId);
       if (!bot) return { error: "The bot is gone." };
-      if (!boat.boatConfigured(cfg)) return { error: "Meeting notes run on a cloud computer, and none is set up here. Add a Boat key in Settings → Computers, or use MausBot Cloud." };
+      if (!boat.boatConfigured(cfg)) return { error: MEETINGS_NEED_CLOUD_COMPUTER };
       return deps.computerOwner(bot);
     },
     createRoutine(botId, threadId) {

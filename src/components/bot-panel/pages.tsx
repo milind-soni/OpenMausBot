@@ -14,6 +14,7 @@ import { shortPath } from "@/lib/short-path";
 import { skillImportLines } from "@/lib/skill-import";
 import { useStore, type Bot } from "@/state/store";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
+import { connectAppFromBot } from "../AppGrantPrompt";
 import { ServiceIcon } from "../ServiceIcon";
 import { RoutineEditor } from "../RoutinesPage";
 import { useWorkingFolder } from "../bot-settings/AccessSection";
@@ -121,10 +122,7 @@ export function AppsPage({ bot, derived }: PageContext) {
         <LinkRow
           data-panel-link="add-app"
           icon={Plus}
-          onClick={() => {
-            dispatch({ type: "toggleSettings", open: false });
-            dispatch({ type: "togglePlugins", open: true, surface: "apps" });
-          }}
+          onClick={() => connectAppFromBot(dispatch, bot.id)}
         >
           {t("botPanel.apps.connectAnother")}
         </LinkRow>
@@ -142,6 +140,7 @@ export function RoutinesPage({ bot, derived }: PageContext) {
       <RoutineList
         routines={derived.botRoutines}
         runs={state.routineRuns}
+        pausedBots={state.config?.pausedBots}
         loading={state.routinesLoadState === "loading" && derived.botRoutines.length === 0}
         error={state.routinesLoadState === "error"}
         onOpen={setEditing}
@@ -312,7 +311,8 @@ function MemoryTextEditor({ bot, doc, mine, onDone }: {
   };
   const reload = () => {
     if (!conflict) return;
-    setSavedDraft(text);
+    // A second Reload keeps the first kept draft too.
+    setSavedDraft((kept) => (kept === null || kept === text ? text : `${kept}\n\n${text}`));
     setBase({ text: conflict.current, hash: conflict.currentHash });
     setText(conflict.current);
     setConflict(null);
@@ -328,6 +328,7 @@ function MemoryTextEditor({ bot, doc, mine, onDone }: {
           value={text}
           placeholder={t("memory.indexPlaceholder")}
           aria-label={t("memory.botMemory")}
+          readOnly={saving}
           onChange={(event) => setText(event.target.value)}
         />
         {error && <div className="text-[13px] text-warning">{error}</div>}
@@ -368,15 +369,12 @@ export function SkillsPage({ bot }: PageContext) {
 
   const remove = async (skill: ManagedSkill) => {
     if (skills.working) return;
-    if (!window.confirm(t("botPanel.skills.removeConfirm", { name: skill.name }))) return;
+    if (!window.confirm(t(skill.origin === "library" ? "skills.unassignConfirm" : "botPanel.skills.removeConfirm", { name: skill.name }))) return;
     skills.setWorking(skill.name);
     skills.setError("");
     try {
-      if (skill.origin === "library") await skills.putAssignments(skill.name, true);
-      else {
-        await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, { method: "DELETE" });
-        await skills.refresh();
-      }
+      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, { method: "DELETE" });
+      await skills.refresh();
     } catch (cause) {
       skills.setError(errorText(cause, t("botPanel.skills.removeFailed")));
     } finally {
@@ -427,7 +425,7 @@ export function SkillsPage({ bot }: PageContext) {
             checked={skillSwitchOn(skill)}
             disabled={Boolean(skills.working)}
             onChange={() => void skills.toggle(skill)}
-            extra={<TrashButton data-panel-action={`remove-skill:${skill.name}`} label={t("botPanel.skills.remove", { name: skill.name })} disabled={Boolean(skills.working)} onClick={() => void remove(skill)} />}
+            extra={skill.origin === "imported" || skill.origin === "native" ? undefined : <TrashButton data-panel-action={`remove-skill:${skill.name}`} label={t("botPanel.skills.remove", { name: skill.name })} disabled={Boolean(skills.working)} onClick={() => void remove(skill)} />}
           />
         ))}
         {skills.error && !skills.reviewing && <NoteRow tone="warn">{skills.error}</NoteRow>}

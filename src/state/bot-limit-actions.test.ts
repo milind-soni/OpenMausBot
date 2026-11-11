@@ -24,7 +24,7 @@ const json = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.
 
 const { StoreProvider, useStore } = await import("./store");
 const { api, ApiError } = await import("./api");
-const { botLimitShown, closeBotLimit } = await import("@/lib/bot-limit");
+const { botLimitReason, botLimitShown, closeBotLimit, createdPausedBot } = await import("@/lib/bot-limit");
 
 let seen!: AppState;
 let dispatch!: Dispatch<Action>;
@@ -82,7 +82,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-describe("a create button with no room", () => {
+describe("a create button with no room, on an older server that caps Starter's bots", () => {
   it.each<[string, Action]>([["New bot", { type: "newBot" }], ["Duplicate", { type: "duplicateBot", botId: "b0" }]])("%s opens the popup and asks the server nothing", async (_name, action) => {
     await mount(five(), STARTER);
     await send(action);
@@ -118,7 +118,19 @@ describe("a create button with no room", () => {
   });
 });
 
-describe("the server's refusal, when the page's count was stale", () => {
+describe("a sixth bot on a Starter Cloud that makes any number", () => {
+  it.each<[string, Action]>([["New bot", { type: "newBot" }], ["Duplicate", { type: "duplicateBot", botId: "b0" }]])("%s makes it and offers to swap it in", async (_name, action) => {
+    await mount(five(), { cloudStarter: true, awakeLimit: 5 });
+    created = () => json({ bot: botNamed("sixth"), paused: true }, 201);
+    await send(action);
+    await vi.waitFor(() => expect(creates).toBe(1));
+    await vi.waitFor(() => expect([botLimitReason(), createdPausedBot()]).toEqual(["created", "sixth"]));
+    expect(seen.bots.map((bot) => bot.id)).toContain("sixth");
+    expect(seen.error).toBeNull();
+  });
+});
+
+describe("an older server's refusal, when the page's count was stale", () => {
   it.each<[string, Action]>([["New bot", { type: "newBot" }], ["Duplicate", { type: "duplicateBot", botId: "b1" }]])("%s shows the popup and no error beside it", async (_name, action) => {
     await mount(five().slice(1), STARTER);
     await send(action);

@@ -1,7 +1,7 @@
 // The workspaces of this computer's own on the rail (each a profile, clean-workspace.mjs): their names and colours, a new
 // one from the rail's ＋, and switching between them. One runs at a time, on this computer's one server: opening another
 // stops the one that runs once the work under way in it has finished (as the move waits for it, server/move-waits.ts),
-// or after SETTLE_MS, when its server notes each turn cut short as a quit does.
+// or at once on a second click on the place that waits, when its server notes each turn cut short as a quit does.
 //
 // Who sees them: once My Cloud is home, every one, This Mac (`default`) first; before any home, This computer is the data
 // folder as ever and the named ones sit beside it, so This Mac's profile is never offered there. A server of the person's
@@ -20,8 +20,6 @@ import { DEFAULT_PROFILE, PROFILE_ID, profileDir, profilesDir } from "./clean-wo
 export const PROFILES_FILE = "profiles.json";
 export const PROFILE_NAME_LIMIT = 40;
 export const MAX_PROFILES = 20;
-/** The longest a switch waits for the work under way in the workspace it leaves. */
-export const SETTLE_MS = 60_000;
 export const SETTLE_POLL_MS = 1_000;
 
 /** A name as a person typed it: one line, no control characters, at most PROFILE_NAME_LIMIT characters; null when empty. */
@@ -131,7 +129,6 @@ export function createProfileRegistry({ dataDir, fs = nodeFs, now = Date.now, ra
  *   fs?: typeof nodeFs,
  *   sleep?(ms: number): Promise<void>,
  *   now?(): number,
- *   settleMs?: number,
  * }} deps `home()`: My Cloud is home ("cloud"), no home but this computer ("local"), or another home (null). `window`: the
  * home window's profile on screen (home-window.mjs), and My Cloud shown again. `showLocal()`: the window onto this
  * computer's page, LOCAL_ID active. `onLocal()`: this computer's page is on screen. `busy()`: what the server that runs now
@@ -140,7 +137,7 @@ export function createProfileRegistry({ dataDir, fs = nodeFs, now = Date.now, ra
  * the workspace that opened, or null once This computer's own copy is back.
  */
 export function createLocalProfiles({ registry, clean, dataDir, home, window: shown, showLocal, onLocal, busy, trash, reserved = () => null, allowed = () => true,
-  remember = () => {}, changed = () => {}, log = () => {}, fs = nodeFs, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), now = Date.now, settleMs = SETTLE_MS }) {
+  remember = () => {}, changed = () => {}, log = () => {}, fs = nodeFs, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), now = Date.now }) {
   /** Each switch asked for; a newer one (another tile, My Cloud) ends the wait of the one before. */
   let turn = 0;
   /** The workspace a switch waits to open (null: This computer's own copy), and for whom. */
@@ -150,18 +147,16 @@ export function createLocalProfiles({ registry, clean, dataDir, home, window: sh
   const running = () => clean.profile();
   const tell = () => { try { changed(); } catch {} };
 
-  /** Waits while the server that runs now still works and will stop for this switch, at most `settleMs`. False when a newer
-   * switch took over. */
+  /** Waits while the server that runs now still works and will stop for this switch, for as long as it works. False when a
+   * newer switch took over. */
   async function settle(mine, target, stops) {
     if (!stops) return true;
-    const until = now() + settleMs;
     for (;;) {
       if (mine !== turn) return false;
       let who = null;
       try { who = await busy(); } catch {}
       if (mine !== turn) return false;
       if (!who) break;
-      if (now() >= until) { log(`local profiles: ${target} opens though ${who.name || who.what || "a turn"} still works`); break; }
       if (settling?.id !== target || settling.name !== who.name) { settling = { id: target, name: who.name || "" }; tell(); }
       await sleep(SETTLE_POLL_MS);
     }
@@ -169,12 +164,21 @@ export function createLocalProfiles({ registry, clean, dataDir, home, window: sh
     return mine === turn;
   }
 
+  /** A second click on the place a switch waits for: it opens now, and the server stops as a quit stops it. */
+  function hurry() {
+    log(`local profiles: ${settling.id ?? "this computer"} opens though ${settling.name || "a turn"} still works`);
+    settling = null;
+    tell();
+    return true;
+  }
+
   /** True once workspace `id` is on screen, false when it can't open, null when a newer switch took over. */
   async function open(id) {
+    const again = settling?.id === id;
     const mine = ++turn;
     if (!allowed() || !listed(id)) return false;
     const stops = running() !== id && (home() === "local" || running() !== null);
-    if (!(await settle(mine, id, stops))) return null;
+    if (!(again ? hurry() : await settle(mine, id, stops))) return null;
     const opened = home() === "cloud" ? await shown.openProfile(id) : running() === id ? (await showLocal(), true) : await clean.open(id);
     if (opened) remember({ profile: id });
     return opened || mine === turn ? opened : null;
@@ -196,9 +200,10 @@ export function createLocalProfiles({ registry, clean, dataDir, home, window: sh
     open,
     /** Back to This computer's own copy from a workspace (no home but this computer). */
     async computer() {
+      const again = settling?.id === null;
       const mine = ++turn;
       if (running() === null) { await showLocal(); remember(null); return true; }
-      if (!(await settle(mine, null, true))) return null;
+      if (!(again ? hurry() : await settle(mine, null, true))) return null;
       const left = await clean.leave();
       if (left && mine === turn) remember(null);
       return left;

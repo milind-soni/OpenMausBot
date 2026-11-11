@@ -50,7 +50,7 @@ export function shownDevices(devices: PairedDevice[], cloudHome: boolean): Paire
 const button = "ui-button ui-button-primary";
 const quiet = "ui-button";
 
-export function ServerPairingCard({ initialSession = null, initialPairingCodes = true, cloudHome = false, focusRequest = 0, team, teamPhoneBlocked = null, simple = false }: { initialSession?: SessionState | null; initialPairingCodes?: boolean; cloudHome?: boolean; focusRequest?: number; team?: string; teamPhoneBlocked?: string | null; simple?: boolean }) {
+export function ServerPairingCard({ initialSession = null, initialPairingCodes = true, cloudHome = false, focusRequest = 0, team, teamPhoneBlocked = null, simple = false, reveal = true }: { initialSession?: SessionState | null; initialPairingCodes?: boolean; cloudHome?: boolean; focusRequest?: number; team?: string; teamPhoneBlocked?: string | null; simple?: boolean; /** False where another pairing flow owns the page's focus. */ reveal?: boolean }) {
   const [session, setSession] = useState<SessionState | null>(initialSession);
   const [pairingCodes, setPairingCodes] = useState(initialPairingCodes);
   const [computerName, setComputerName] = useState<string | null>(null);
@@ -198,7 +198,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
                     <option value="client">{t("remote.serverPairing.scope.client")}</option>
                   </Select>
                 )}
-                <button type="button" data-phone-pairing-action onClick={() => void create()} disabled={busy} className="ui-button">
+                <button type="button" data-phone-pairing-action={reveal ? "" : undefined} onClick={() => void create()} disabled={busy} className="ui-button">
                   {busy ? t("remote.serverPairing.creating") : t("settings.simple.computer.createCode")}
                 </button>
               </div>
@@ -243,7 +243,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
             {t("remote.serverPairing.scope.client")}
           </label>
         </>}
-        <button type="button" data-phone-pairing-action onClick={() => void create()} disabled={busy} className={button}>
+        <button type="button" data-phone-pairing-action={reveal ? "" : undefined} onClick={() => void create()} disabled={busy} className={button}>
           {busy ? t("remote.serverPairing.creating") : t("remote.serverPairing.create")}
         </button>
       </div> : <p data-server-pairing-portal className="mt-3 text-[13px] text-ink-secondary">{t("remote.serverPairing.portal")}</p>}

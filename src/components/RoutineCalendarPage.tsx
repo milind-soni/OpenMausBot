@@ -35,7 +35,7 @@ import {
 import { BotAvatar } from "@/components/Avatar";
 import { useBotEditor } from "./bot-settings/BotEditorContext";
 import { pathForFile } from "@/components/ComposerAttachments";
-import { ResultsDestination } from "@/components/routines/ResultsDestination";
+import { ResultsDestination, resultsOfPlace, RoutineAudience } from "@/components/routines/ResultsDestination";
 import { CronScheduleFields, CronSchedulePreview } from "@/components/routines/CronScheduleFields";
 import { cronChoiceFor, cronDraftFor, cronEditorValue, isCronChoice, type CronChoice } from "@/components/routines/cron-editor";
 import { partlyDone, routineRunLabel, routineRunsOn, routineRunText, routineRunTime, routineScheduleState } from "@/lib/routine-display";
@@ -348,9 +348,9 @@ export function EventEditor({
     ? toLocalDateInput(schedule.endsAt)
     : toLocalDateInput(addDays(startOfDay(Math.max(Date.now(), initialAt)), 7)));
   const [botIds, setBotIds] = useState(lockedBotId ? [lockedBotId] : existingRoutine ? [existingRoutine.botId] : existingCall?.botIds ?? seed.botIds);
-  const [resultsThreadId, setResultsThreadId] = useState<string | null | undefined>((existingRoutine ? existingRoutine.resultsThreadId : seed.resultsThreadId) ?? null);
+  const [resultsThreadId, setResultsThreadId] = useState<string | null | undefined>(() => (existingRoutine ? existingRoutine.resultsThreadId : seed.resultsThreadId ?? resultsOfPlace(state, botIds[0])) ?? null);
   const selectBots = (ids: string[]) => {
-    if (ids[0] !== botIds[0]) setResultsThreadId(null);
+    if (ids[0] !== botIds[0]) setResultsThreadId(resultsOfPlace(state, ids[0]) ?? null);
     setBotIds(ids);
   };
   const [routineTarget, setRoutineTarget] = useState<RoutineTarget>(existingRoutine?.target ?? "bot");
@@ -944,7 +944,7 @@ export function EventEditor({
                   {bots.length > 0 ? (
                 <>
                   <BotPicker bots={bots} selected={botIds} multiple={kind === "call"} locked={Boolean(lockedBotId)} onChange={selectBots} />
-                  <div className="mt-2 text-[12px] text-ink-secondary">{kind === "routine" ? t("routines.event.botOwnsRuns") : t(selectedBots.length === 0 ? "routines.event.invitedNone" : selectedBots.length === 1 ? "routines.event.invitedOne" : "routines.event.invitedMany", { count: selectedBots.length })}</div>
+                  <div className="mt-2 text-[12px] text-ink-secondary">{kind === "routine" ? t("routines.event.botOwnsRuns") : t(selectedBots.length === 0 ? "routines.event.invitedNone" : selectedBots.length === 1 ? "routines.event.invitedOne" : "routines.event.invitedMany", { count: selectedBots.length })}</div>{kind === "routine" && <RoutineAudience team={state.config?.team} bot={selectedBots[0]} value={resultsThreadId} madeIn={existingRoutine?.sourceThreadId} />}
                 </>
               ) : (
                 <button type="button" onClick={() => { dispatch({ type: "newBot" }); onClose(); }} className="w-full rounded-xl border border-dashed border-accent/45 bg-accent/[0.06] px-4 py-4 text-left hover:bg-accent/10">
@@ -1028,14 +1028,14 @@ export function QuickComposer({
   onSavedRoutine: (routine: Routine) => void;
   onSavedCall: (call: CalendarCall) => void;
 }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const [kind, setKind] = useState<EventKind>(routinesOnly || seed.limitReset ? "routine" : seed.kind);
   const [name, setName] = useState(seed.name ?? "");
   const [description, setDescription] = useState(seed.description ?? "");
   const [botIds, setBotIds] = useState(seed.botIds.length ? seed.botIds : bots[0] ? [bots[0].id] : []);
-  const [resultsThreadId, setResultsThreadId] = useState<string | null>(seed.resultsThreadId ?? null);
+  const [resultsThreadId, setResultsThreadId] = useState<string | null>(() => seed.resultsThreadId ?? resultsOfPlace(state, botIds[0]) ?? null);
   const selectBots = (ids: string[]) => {
-    if (ids[0] !== botIds[0]) setResultsThreadId(null);
+    if (ids[0] !== botIds[0]) setResultsThreadId(resultsOfPlace(state, ids[0]) ?? null);
     setBotIds(ids);
   };
   const [working, setWorking] = useState(false);
@@ -1148,7 +1148,7 @@ export function QuickComposer({
           <FileText size={16} className="mt-2.5 shrink-0 text-ink-secondary" />
           <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} aria-label={t("routines.editor.descriptionLabel")} placeholder={t(kind === "routine" ? "routines.quick.whatToDo" : "routines.quick.description")} className="min-w-0 flex-1 resize-none rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-tertiary focus:border-accent" />
         </div>
-        {kind === "routine" && <ResultsDestination bot={bots.find((bot) => bot.id === botIds[0])} value={resultsThreadId} onChange={(threadId) => setResultsThreadId(threadId ?? null)} />}
+        {kind === "routine" && <ResultsDestination bot={bots.find((bot) => bot.id === botIds[0])} value={resultsThreadId} onChange={(threadId) => setResultsThreadId(threadId ?? null)} />}{kind === "routine" && <RoutineAudience team={state.config?.team} bot={bots.find((bot) => bot.id === botIds[0])} value={resultsThreadId} />}
         {error && <div className="rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
       </div>
       <div className="flex items-center justify-end gap-2 border-t border-hairline/40 px-4 py-3">

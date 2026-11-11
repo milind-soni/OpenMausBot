@@ -3977,6 +3977,24 @@ describe("turning a schedule back on, and a deleted bot's schedules", () => {
     expect(h.manager.listRuns()).toEqual([]);
     expect(h.started).toEqual([]);
   });
+
+  it("fails a paused bot's runs at once in the person's words, making no conversation and waking nothing for them", async () => {
+    const h = harness(start);
+    let paused: string | null = "Paused: Starter keeps 5 bots awake.";
+    h.options.pausedText = (botId) => (botId === "maus-1" ? paused : null);
+    h.manager.create(once(start + 60_000));
+    expect(h.manager.nextDueAt()).toBeNull();
+    h.setNow(start + 60_000);
+    await h.manager.tick();
+    h.manager.enqueueWebhook({ webhookId: "hook", webhookName: "New lead", prompt: "Handle it", botId: "maus-1", runOn: "maus", deliveryId: "d1", receivedAt: start });
+    await h.manager.tick();
+    expect([h.taskTitles, h.started]).toEqual([[], []]);
+    expect(h.manager.listRuns().map((run) => [run.status, run.error])).toEqual([["failed", "Paused: Starter keeps 5 bots awake."], ["failed", "Paused: Starter keeps 5 bots awake."]]);
+
+    paused = null;
+    h.manager.create(once(start + 120_000));
+    expect(h.manager.nextDueAt()).toBe(start + 120_000);
+  });
 });
 
 describe("runs that report into a chat", () => {

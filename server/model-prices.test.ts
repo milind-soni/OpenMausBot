@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estimatePriceFor, LIST_PRICES, ledgerCost, listPriceFor } from "./model-prices.ts";
+import { estimatePriceFor, ledgerCost, listPriceFor, listPrices } from "./model-prices.ts";
 import type { PriceList } from "./prices.ts";
 
 const OFFICIAL = [
@@ -13,8 +13,8 @@ const OFFICIAL = [
 
 describe("built-in list prices", () => {
   it("names an official source and the day it was read for every entry, with sane numbers", () => {
-    expect(Object.keys(LIST_PRICES).length).toBeGreaterThan(20);
-    for (const [model, entry] of Object.entries(LIST_PRICES)) {
+    expect(Object.keys(listPrices()).length).toBeGreaterThan(20);
+    for (const [model, entry] of Object.entries(listPrices())) {
       expect(model, "keys are lower-case").toBe(model.toLowerCase());
       expect(entry.asOf).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(OFFICIAL.some((prefix) => entry.source.startsWith(prefix)), `${model}: ${entry.source}`).toBe(true);

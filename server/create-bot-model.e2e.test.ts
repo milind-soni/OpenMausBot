@@ -44,12 +44,15 @@ it("Chief creation uses the workspace default or a validated explicit model with
     };
     const before = (await api("GET", "/api/bots")).bots.length;
     const first = applied(await create("Default specialist"));
-    const explicit = { instanceId: "claude", model: claude.models.options.find((item: any) => item.id !== claude.models.default).id, effort: "low" };
+    // The installed CLI is too old for the newest model: a proposal may not name it, and the explicit pick is one it can run.
+    const tooNew = claude.models.options.find((item: any) => item.needsCliUpdate);
+    expect(tooNew).toBeTruthy();
+    const explicit = { instanceId: "claude", model: claude.models.options.find((item: any) => item.id !== claude.models.default && !item.needsCliUpdate).id, effort: "low" };
     const second = applied(await create("Chosen specialist", explicit));
     expect((await api("GET", "/api/bots")).bots.length).toBe(before + 2);
     for (const invalid of [null, {}, { instanceId: "missing", model: "missing" },
       { ...explicit, model: "not-in-catalog" }, { ...explicit, effort: "invalid" },
-      { ...explicit, variant: "a-variant" }]) {
+      { ...explicit, variant: "a-variant" }, { instanceId: "claude", model: tooNew.id }]) {
       await create("Invalid specialist", invalid, 400);
     }
     await create("Third specialist");
@@ -65,7 +68,7 @@ it("Chief creation uses the workspace default or a validated explicit model with
     expect(bots.find((bot: any) => bot.id === chief.id).modelSelection).toEqual(chiefModel);
     for (const [id, modelSelection] of [[first.id, defaultModel], [second.id, explicit]]) {
       expect(bots.find((bot: any) => bot.id === id)).toMatchObject({
-        section: "Design", modelSelection, approvalMode: "full", autoApprove: false, approvePeerComms: false, connectorScopes: { apps: { gmail: "read" } },
+        section: "Design", modelSelection, approvalMode: "full", autoApprove: false, connectorScopes: { apps: { gmail: "read" } },
         soul: "Complete assigned work.",
       });
     }

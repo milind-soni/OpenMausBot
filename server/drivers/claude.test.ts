@@ -655,6 +655,13 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }, { timeout: 7_000 }).toBe(true);
   });
 
+  it("reads an error result saying the OAuth session expired as a sign-out", async () => {
+    await create("oauth-expired-result");
+    await instance.adapter.sendTurn({ threadId: "t-oauth", text: "hi" });
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: false, stopReason: "auth_required" });
+    expect(recorder.events.find((e: any) => e.type === "runtime.error")).toMatchObject({ message: "OAuth session expired. Please sign in again.", setup: true });
+  });
+
   it("reports a synthetic sign-out refusal for recovery only after its process has stopped", async () => {
     const dump = join(scratch, "recover-signed-out-session.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
@@ -2424,6 +2431,29 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-built-ins-inherit", text: "hi" });
     await recorder.until((event) => event.type === "turn.completed");
     expect(JSON.parse(readFileSync(inherited, "utf8")).argv).not.toContain("--disallowedTools");
+  });
+
+  it("denies the native skills this bot switched off, and only for that bot", async () => {
+    const { setNativeSkillEnabled } = await import("../native-skill-choices.ts");
+    setNativeSkillEnabled("bot-skills-off", "pdf", false);
+    setNativeSkillEnabled("bot-skills-off", "hatch-pet", false);
+    try {
+      const dump = join(scratch, "skills-off.json");
+      await create(undefined, { FAKE_CLAUDE_DUMP: dump, OMB_CLAUDE_INHERIT_USER_CONFIG: "1" });
+      await instance.adapter.sendTurn({ threadId: "t-skills-off", botId: "bot-skills-off", text: "hi" });
+      await recorder.until((event) => event.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.argv[seen.argv.indexOf("--disallowedTools") + 1].split(",")).toEqual(["Skill(hatch-pet)", "Skill(pdf)"]);
+
+      const other = join(scratch, "skills-other.json");
+      await create(undefined, { FAKE_CLAUDE_DUMP: other, OMB_CLAUDE_INHERIT_USER_CONFIG: "1" });
+      await instance.adapter.sendTurn({ threadId: "t-skills-other", botId: "bot-skills-on", text: "hi" });
+      await recorder.until((event) => event.type === "turn.completed");
+      expect(JSON.parse(readFileSync(other, "utf8")).argv).not.toContain("--disallowedTools");
+    } finally {
+      setNativeSkillEnabled("bot-skills-off", "pdf", true);
+      setNativeSkillEnabled("bot-skills-off", "hatch-pet", true);
+    }
   });
 
   it("passes an explicit empty available set to disable every Claude built-in", async () => {

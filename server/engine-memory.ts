@@ -31,6 +31,9 @@ const MINUTE_MS = 60_000, DAY_MINUTES = 24 * 60;
 export const ENGINE_PROCESS_KINDS: ReadonlySet<string> = new Set(["claudeAgent", "codex", "opencodeGo", "grokAgent", "geminiAgent", "kimiAgent",
   "droidAgent", "cursorAgent", "qwenAgent", "hermesAgent", "clineAgent", "copilotAgent", "commandCodeAgent", "kiroAgent", "customAcp", "piAgent", "antigravityAgent"]);
 
+/** Chat-runtime engines (openai-chat.ts) have no process of their own, but each turn starts its MCP servers, each a Node process. */
+export const CHAT_RUNTIME_KINDS: ReadonlySet<string> = new Set(["openai-compat", "cerebras", "greenference", "grok", "groq", "meta", "minimax", "mistral", "modelgo"]);
+
 export interface HostMemory { totalBytes: number; availableBytes: number; swapFreeBytes: number; oomKills: number | null; fullStall10: number | null }
 
 const procText = (path: string) => readFileSync(path, "utf8");
@@ -147,6 +150,8 @@ export interface EngineCap {
   most(): number | undefined;
   /** Whether this thread's running turn waits on work it handed out: it holds no place, so the work it waits on can run. */
   waitsOnOthers(threadId: string): boolean;
+  /** Whether a lane of its own runs this thread (a burst's): it neither takes a place under this limit nor waits for one. */
+  laneOwned?(threadId: string): boolean;
 }
 
 /** An engine process and the threads whose sessions it runs: one, or several when the driver shares processes. */
@@ -219,13 +224,27 @@ export class EngineMemory {
   /** The plan's limit when it is what this thread's turn must wait for now; undefined when there is a place. */
   private capped(threadId: string): number | undefined {
     const most = this.cap?.most();
-    if (most === undefined) return undefined;
+    if (most === undefined || this.cap!.laneOwned?.(threadId)) return undefined;
     let running = 0;
     for (const other of new Set([...this.active, ...this.reserved.keys()])) {
-      if (other === threadId || this.cap!.waitsOnOthers(other)) continue;
+      if (other === threadId || this.cap!.waitsOnOthers(other) || this.cap!.laneOwned?.(other)) continue;
       if (++running >= most) return most;
     }
     return undefined;
+  }
+
+  /** Whether a lane may start one more turn: nobody's own work is waiting, and under a plan's limit the whole machine, the
+   * lane's own turns counted, has a place. Linear in the turns running and the ones waiting. */
+  laneHasRoom(): boolean {
+    if (!this.enabled) return true;
+    if (this.queue.some((waiter) => this.personsOwn(waiter.threadId))) return false;
+    const most = this.cap?.most();
+    if (most === undefined) return true;
+    let running = 0;
+    for (const other of new Set([...this.active, ...this.reserved.keys()])) {
+      if (!this.cap!.waitsOnOthers(other) && ++running >= most) return false;
+    }
+    return true;
   }
 
   /** Whether a task is waiting for memory now. */
@@ -521,7 +540,7 @@ export const engineMemory = new EngineMemory({ enabled: (process.env.OMB_CLOUD_R
  * for memory fails with that reason. The instance is changed in place: its `models` may be a getter a copy would freeze.
  */
 export function withEngineMemory(instance: ProviderInstance, memory: EngineMemory = engineMemory): ProviderInstance {
-  if (!memory.enabled || !ENGINE_PROCESS_KINDS.has(instance.driverKind)) return instance;
+  if (!memory.enabled || !(ENGINE_PROCESS_KINDS.has(instance.driverKind) || CHAT_RUNTIME_KINDS.has(instance.driverKind))) return instance;
   const adapter = instance.adapter;
   const listeners = new Set<RuntimeEventListener>();
   const waiting = new Map<string, AbortController>();

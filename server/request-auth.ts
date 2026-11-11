@@ -1,5 +1,6 @@
 // Loopback requests (Host and Origin both loopback) or paired sessions (bearer, cookie, stream ticket); a session swaps the loopback rule for same-origin (CSRF) and a scope check.
 // Browsers never get loopback trust: a page a bot opens is a browser on this machine too.
+import { TEAM_LEFT_REFUSAL } from "../shared/cloud-hints.ts";
 import type { IncomingMessage } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
@@ -38,9 +39,11 @@ const SERVICE_SCOPES: readonly Scope[] = ["client"];
  * the Slack worker holds, so these routes stop answering session-less loopback. */
 export const SERVICE_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: RegExp }> = [
   { methods: ["GET"], path: /^\/api\/health$/ },
+  { methods: ["GET"], path: /^\/api\/health\/engines$/ }, // a count: deploy/update.sh checks the server can still start a bot
   { methods: ["GET"], path: /^\/api\/auth\/session$/ },
   { methods: ["GET"], path: /^\/api\/edition$/ },
   { methods: ["GET"], path: /^\/api\/brand$/ },
+  { methods: ["GET"], path: /^\/api\/seats$/ }, // a number: the MausBot connector on the same server reads it
   { methods: ["GET"], path: /^\/api\/bots$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages$/ },
   { methods: ["GET"], path: /^\/api\/attachments\/[\w.-]+$/ },
@@ -177,7 +180,7 @@ export function requestOrigin(req: IncomingMessage): string | null {
 }
 
 /** Every header a reverse proxy uses to name its client, so one that sets only X-Real-IP is still not loopback. */
-const PROXY_HEADERS = [
+export const PROXY_HEADERS = [
   "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "forwarded",
   "x-real-ip", "cf-connecting-ip", "true-client-ip", "x-client-ip",
 ] as const;
@@ -348,6 +351,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST", "DELETE"], path: /^\/api\/bots\/[\w-]+\/setup-request$/ }, // Set me up: what a typed /setup could do
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/compact$/ },
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/start-fresh$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/helper-followup$/ }, // MausBot's own person only: see mayFollowUp
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/interrupt$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/read$/ },
@@ -362,6 +366,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/respond$/ },
   { methods: ["POST"], path: /^\/api\/threads\/[\w-]+\/respond$/ },
   { methods: ["POST"], path: /^\/api\/threads\/[\w-]+\/undo$/ }, // whoever may answer the card: see the handler
+  { methods: ["GET"], path: /^\/api\/bursts\/[\w-]+$/ }, // whoever sees the chat: see the handler
+  { methods: ["POST"], path: /^\/api\/bursts\/[\w-]+\/(?:run|cancel|retry|edit)$/ }, // whoever may answer the card: see the handler
   { methods: ["PATCH"], path: /^\/api\/bots\/[\w-]+\/cards\/[\w-]+$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/(?:resume|dismiss)$/ },
   // A secret only the conversation's own person may type in: kept behind the card, never in Settings (routes/secret-cards.ts).
@@ -418,6 +424,10 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/config$/ },
   // a person's own "About you" on a Team Cloud
   { methods: ["GET", "PUT"], path: /^\/api\/me$/ },
+  // whether the person saw their own welcome to the team, and its steps they finished (team-welcome.ts)
+  { methods: ["PUT"], path: /^\/api\/me\/welcome$/ },
+  // their own "Email me when I'm away" switch on a Team Cloud
+  { methods: ["GET", "PUT"], path: /^\/api\/me\/away-emails$/ },
   // what a bot remembers about the signed-in person on a Team Cloud: their own layer only (routes/bot-memory.ts ownLayer)
   { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/memory\/mine$/ },
   { methods: ["GET", "PUT", "DELETE"], path: /^\/api\/bots\/[\w-]+\/memory\/mine\/file$/ },
@@ -430,6 +440,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["DELETE"], path: /^\/api\/team\/my-connections\/(?:apps\/[\w-]{1,64}|mcp\/[a-z][a-z0-9_-]{0,31})$/ },
   // the person opened the app: their own brief on a Team Cloud, nothing recorded for anyone else
   { methods: ["POST"], path: /^\/api\/presence\/active$/ },
+  // which shared conversation a team member's window shows: the handler keeps only one they and others may read
+  { methods: ["POST"], path: /^\/api\/presence\/here$/ },
   // what a bot asks of this person: their own questions and approvals only
   { methods: ["GET"], path: /^\/api\/needs-you$/ },
   // a person's own inbox: its lines, how many wait, and one of them read or done; the handler serves the session's own alone
@@ -621,6 +633,8 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
 
   // A removed member's invalid credential must not fall back to loopback owner.
   if (via) {
+    const presented = via === "bearer" ? bearer : via === "cookie" ? cookie : null;
+    if (presented && options.sessions.leftTeam(presented)) return deny(401, TEAM_LEFT_REFUSAL);
     return deny(401, "unauthorized: this session has expired or was revoked; pair this device again");
   }
 

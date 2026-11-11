@@ -50,6 +50,10 @@ export const FROZEN_RETRY_MAX_MS = 12 * HOUR;
 export const INCOMPLETE = "Some things didn't reach My Cloud yet. It tries again by itself, and if they still can't go, the rest moves without them and you'll see what stayed here.";
 /** A failure before the freeze (no network, My Cloud asleep or updating): tried again sooner at first, then hourly. */
 export const COPY_RETRY_MS = [2 * MINUTE, 5 * MINUTE, 15 * MINUTE, 30 * MINUTE, HOUR];
+/** A check My Cloud stopped answering after it got somewhere goes on from there this soon: nothing it did is done again. */
+export const CHECK_RESUME_MS = 5 * MINUTE;
+/** How often a move that waits for another computer's move into the same Cloud asks again. */
+export const QUEUE_POLL_MS = MINUTE;
 export const FAILING_LINE_MS = DAY;
 /** At most this many of the things a move could not carry are named on its line. */
 const NAMED_MAX = 5;
@@ -171,6 +175,8 @@ export function arrivedCounts(here, there) {
  *   gone?(origin: string): Promise<"deleted" | "ended" | null>,
  *   session(): Promise<{ call(method: string, route: string, body?: unknown): Promise<{ ok: boolean, status: number, body: any }>, close(): Promise<void> }>,
  *   release?(): Promise<void>,
+ *   lease?: { take(): Promise<null | { name: string }>, release(): Promise<void> },
+ *   choosing?(): Promise<boolean>,
  *   lend?(projects: string[]): Promise<unknown>,
  *   phone?: { paired(): boolean, start(): Promise<void> },
  *   openHome?(): void,
@@ -192,7 +198,9 @@ export function arrivedCounts(here, there) {
  *   t?(key: string, params?: Record<string, string | number>): string,
  * }} deps `gone(origin)`: the Admin's word that this account's Cloud at `origin` is gone ("deleted", or "ended": stopped
  * and kept only until it is deleted); null for anything else, and while it can't be asked. `cloud().verified`: the Admin
- * answered this sign-in just now (connected). `local.marker()`: this computer's freeze marker.
+ * answered this sign-in just now (connected). `local.marker()`: this computer's freeze marker. `lease`: one computer at a
+ * time runs the heavy part of a move into My Cloud (move-lease.mjs); `take()` is null once this one does, else who does.
+ * `choosing`: no first move starts yet, as the person is asked which bots go; the line says so with phase "choose".
  */
 export function createOneHome(deps) {
   const now = deps.now ?? Date.now;
@@ -203,6 +211,10 @@ export function createOneHome(deps) {
   /** What the last run found holding the move that only a run can find out; `heldOff`, a first move waits for this
    * computer's own copy, said once in the log. */
   let noted = null, heldOff = false;
+  /** The other computer whose move into the same Cloud this one waits for (`deps.lease`), by its name ("" without one). */
+  let queuedFor = null;
+  /** No move has started, and the person is asked first which bots go (`deps.choosing`). */
+  let choosing = false;
 
   const read = () => parseJournal(deps.journal.read());
   const kept = () => { try { return parseKeep(deps.keep?.read()).on; } catch { return false; } };
@@ -226,6 +238,7 @@ export function createOneHome(deps) {
    * until it is closed, and coming home; `place`, a server of the person's own the move goes to, by its name. Null when
    * there is nothing to say. */
   function view() {
+    if (choosing && !read() && !kept()) return { phase: "choose" };
     if (anotherAccount(read())) return null;
     const seen = phaseView(), place = read()?.cloud?.name;
     return seen && typeof place === "string" ? { ...seen, place } : seen;
@@ -250,7 +263,12 @@ export function createOneHome(deps) {
     const items = failing ? notCarried(sent, false) : [];
     const phase = FROZEN.has(journal.phase) || journal.phase === "switch" ? "finishing" : journal.phase;
     const waits = phase === "wait" && waitingFor !== null ? { waitingFor, ...(waitingWhat ? { waitingWhat } : {}) } : {};
-    return { phase, ...(chats ? { chats } : {}), ...waits, ...(failing ? { failing: { ...failing, ...(items.length ? { items } : {}) } } : {}) };
+    const checking = journal.phase === "check" ? checkingOf(sent?.checking) : null;
+    // My Cloud did not answer: when it is asked again, said at once rather than after a day of failing.
+    const slowUntil = checking?.until ?? (journal.phase === "copy" && journal.failure?.code === "unanswered" && journal.retryAt > now() ? journal.retryAt : null);
+    return { phase, ...(chats ? { chats } : {}), ...waits, ...(checking ? { checking: { step: checking.step, done: checking.done, total: checking.total, bots: checking.bots } } : {}),
+      ...(slowUntil && !failing ? { slow: { until: slowUntil } } : {}), ...(queuedFor !== null && (phase === "copy" || phase === "wait") ? { queued: { name: queuedFor } } : {}),
+      ...(failing ? { failing: { ...failing, ...(items.length ? { items } : {}) } } : {}) };
   }
 
   /** What the last whole pass could not carry, each with why: all of it while the move is failing, only what My Cloud
@@ -260,6 +278,28 @@ export function createOneHome(deps) {
     return (Array.isArray(failed) ? failed : []).filter((entry) => typeof entry?.label === "string" && (!onlyFinal || entry.final === true))
       .slice(0, NAMED_MAX).map((entry) => ({ label: entry.label, error: sentence(entry.error) ?? t("native.home.itemDidNotMove") }));
   }
+
+  /** How far the check is (cloud-send-check.mjs `moveCheck`), kept to its known shape. */
+  function checkingOf(value) {
+    if (!record(value) || typeof value.step !== "string") return null;
+    const count = (number) => (Number.isSafeInteger(number) && number >= 0 ? number : 0);
+    return { step: value.step, done: count(value.done), total: count(value.total), bots: count(value.bots), ...(Number.isSafeInteger(value.until) && value.until > now() ? { until: value.until } : {}) };
+  }
+
+  /** True when another computer's move into the same Cloud runs its heavy part now: this one asks again in a minute.
+   * Without a lease (an older Cloud, or none given), nothing waits. */
+  async function queued() {
+    let other = null;
+    try { other = await deps.lease?.take() ?? null; } catch (error) { log(`one home: could not ask My Cloud which computer moves now (${error?.message ?? error})`); }
+    if (!other) { if (queuedFor !== null) { queuedFor = null; publish(); } return false; }
+    if (queuedFor === null) log("one home: another computer is moving into My Cloud; this one waits for it");
+    queuedFor = typeof other.name === "string" ? other.name : "";
+    publish();
+    later(QUEUE_POLL_MS);
+    return true;
+  }
+
+  const letGo = () => deps.lease?.release().catch(() => {});
 
   /** Lifts this computer's freeze; true once it is lifted. */
   async function thaw(journal) {
@@ -275,21 +315,26 @@ export function createOneHome(deps) {
     const said = sentence(error?.message) ?? "My Cloud did not answer.";
     log(`one home: ${journal.phase} failed (${said})`);
     const tries = (journal.tries ?? 0) + 1;
-    const hourly = frozen && !rateLimited(error);
+    // A check that got somewhere before My Cloud stopped answering goes on from there soon, as a pass that carried things does.
+    const resumes = frozen && error?.progressed === true;
+    const hourly = frozen && !rateLimited(error) && !resumes;
     const frozenTries = hourly ? (journal.frozenTries ?? 0) + 1 : journal.frozenTries;
-    const wait = hourly ? Math.min(FROZEN_RETRY_MAX_MS, FROZEN_RETRY_MS * 2 ** Math.min(frozenTries - 1, 8)) : COPY_RETRY_MS[Math.min(tries - 1, COPY_RETRY_MS.length - 1)];
+    const wait = resumes ? CHECK_RESUME_MS : hourly ? Math.min(FROZEN_RETRY_MAX_MS, FROZEN_RETRY_MS * 2 ** Math.min(frozenTries - 1, 8)) : COPY_RETRY_MS[Math.min(tries - 1, COPY_RETRY_MS.length - 1)];
     // A check's gaps are kept by key, so the next check can tell whether sending again carried any of them.
     const next = write({ ...journal, phase: "copy", passes: 0, tries, frozenTries, error: said, ...errorText(error), failingSince: journal.failingSince ?? now(), failure: failureOf(error, journal.phase, journal.failure, now()),
       gapKey: typeof error?.gapKey === "string" ? error.gapKey : undefined, gaps: typeof error?.gaps === "string" ? error.gaps : undefined,
       retryAt: now() + wait, hourly: hourly || undefined, ...(frozen ? { thaw: true } : {}) });
     if (frozen) await thaw(next);
+    await letGo();
     return null;
   }
 
   async function copy(journal) {
     waitingFor = waitingWhat = null;
+    if (await queued()) return null;
     try { await deps.send.move(); }
-    catch (error) { return error?.code === "outdated" ? updating(journal, error) : failed({ ...journal, updating: undefined }, error, false); }
+    catch (error) { return error?.code === "outdated" ? (await letGo(), updating(journal, error)) : failed({ ...journal, updating: undefined }, error, false); }
+    await letGo();
     return write({ ...journal, phase: "wait", retryAt: undefined, hourly: undefined, updating: undefined });
   }
 
@@ -305,6 +350,8 @@ export function createOneHome(deps) {
   async function wait(journal) {
     const quietFor = now() - (deps.lastInput?.() ?? 0);
     if (quietFor < QUIET_MS) { noted = "waiting_quiet"; later(QUIET_MS - quietFor); return null; }
+    // The finish, from the freeze to the switch, is one heavy part: asked for before anything stops here, and held to the end.
+    if (await queued()) return null;
     // The journal says "freeze" before the server is frozen: a crash in between resumes frozen, never forgotten.
     return freeze(write({ ...journal, phase: "freeze" }));
   }
@@ -318,6 +365,7 @@ export function createOneHome(deps) {
       // hour (server/move-waits.ts), so this poll ends by itself.
       waitingFor = answer.busy;
       waitingWhat = typeof answer.what === "string" ? answer.what : null;
+      await letGo();
       write({ ...journal, phase: "wait" });
       later(BUSY_POLL_MS);
       return null;
@@ -327,6 +375,8 @@ export function createOneHome(deps) {
   }
 
   async function final(journal) {
+    // Held since the freeze; asked again only for an app that started again frozen, which never waits for it here.
+    await deps.lease?.take().catch(() => null);
     try { await deps.send.move({ final: true }); }
     catch (error) { return failed(journal, error, true); }
     return write({ ...journal, phase: "check", passes: 1 });
@@ -338,7 +388,8 @@ export function createOneHome(deps) {
   async function check(journal) {
     let passes = journal.passes ?? 1, first = null, stuck = null;
     try {
-      for (let report = await deps.send.check(); report?.ok !== true; report = await deps.send.check()) {
+      const stopped = () => closed || kept();
+      for (let report = await deps.send.check({ stopped }); report?.ok !== true; report = await deps.send.check({ stopped })) {
         log(`one home: the check found ${missingOf(report)} missing`);
         const key = gapKey(report);
         first ??= key;
@@ -389,7 +440,7 @@ export function createOneHome(deps) {
       const next = write({ ...journal, switched, error: sentence(error?.message) ?? undefined, ...errorText(error), retryAt: now() + 2 * MINUTE, failure: failureOf(error, "switch", journal.failure, now()) });
       later(next.retryAt - now());
       return null;
-    } finally { await session?.close().catch(() => {}); }
+    } finally { await session?.close().catch(() => {}); await letGo(); }
     const sent = deps.send.snapshot?.();
     const held = (sent?.whole?.result?.notes ?? []).filter((note) => note?.kind === "held" && typeof note.connection === "string").map((note) => note.connection);
     const left = [...notCarried(sent, true), ...(Array.isArray(journal.stuck) ? journal.stuck : [])];
@@ -681,6 +732,9 @@ export function createOneHome(deps) {
       // local environment) nothing starts or counts as failing, and it looks again in a minute.
       if (deps.ownCopy?.() === false) { noted = "local_unavailable"; if (!heldOff) log("one home: the move waits until this computer's own copy runs"); heldOff = true; later(MINUTE); return; }
       heldOff = false;
+      const asks = await deps.choosing?.().catch(() => false) === true;
+      if (asks !== choosing) { choosing = asks; publish(); }
+      if (asks) return;
       journal = write({ v: 1, phase: "copy", cloud: { origin: cloud.origin, account: cloud.account, machine: cloud.machine, ...(cloud.id ? { id: cloud.id } : {}), ...(cloud.name ? { name: cloud.name } : {}) },
         startedAt: now() });
     }
@@ -718,7 +772,8 @@ export function createOneHome(deps) {
       else break;
     }
     const after = read();
-    if (after?.phase === "copy" && after.retryAt) later(after.retryAt - now());
+    // Not one already past: a copy that waits for another computer asks again on its own clock (queued).
+    if (after?.phase === "copy" && after.retryAt > now()) later(after.retryAt - now());
   }
 
   /** Goes on from where the journal is: at launch, on account changes and when a wait is over. One run at a time. */
@@ -731,7 +786,7 @@ export function createOneHome(deps) {
         try { await run(); } catch (error) { log(`one home: ${error?.message ?? error}`); later(MINUTE); }
       } while (again && !closed);
       const journal = read();
-      if (!journal || journal.paused || !MOVING.has(journal.phase)) await deps.release?.();
+      if (!journal || journal.paused || !MOVING.has(journal.phase)) { await letGo(); await deps.release?.(); }
     })().finally(() => { running = null; publish(); });
     return running;
   }

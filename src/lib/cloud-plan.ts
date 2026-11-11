@@ -19,7 +19,7 @@ export type CloudPlanView =
   | { kind: "signed-out" }
   | { kind: "removed" }
   | { kind: "connecting" }
-  | { kind: "free" }
+  | { kind: "free"; invited?: true }
   | { kind: "paid"; label: string; checking: boolean; trial?: true }
   | { kind: "attention"; label: string | null }
   | { kind: "purchase"; label: string | null; paidAt?: number }
@@ -42,11 +42,12 @@ export function cloudPlanView(account: CloudAccountState | null | undefined): Cl
   }
   if (entitlement?.plan === "pro") return { kind: "attention", label: cloudPlanLabel(entitlement.tier) };
   if (account.machine) return { kind: "attention", label: null };
-  return { kind: "free" };
+  // Invited into a team, with no Cloud of their own: their team comes first, and no plan is pushed at them.
+  return account.landing ? { kind: "free", invited: true } : { kind: "free" };
 }
 
 export function buyOfferAllowed(view: CloudPlanView): boolean {
-  return view.kind === "signed-out" || view.kind === "free";
+  return view.kind === "signed-out" || (view.kind === "free" && !view.invited);
 }
 
 /** What the X research card offers someone whose server has no plan credential yet: a paying desktop is still connecting

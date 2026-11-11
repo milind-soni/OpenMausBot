@@ -57,6 +57,20 @@ describe("a Cloud home's memory pressure in its health report", () => {
   });
 });
 
+describe("a Cloud home's speed in its health report", () => {
+  it("times a person's message to its engine's turn through the store and the bus, in a few numbers and fixed buckets", () => {
+    const w = world();
+    w.store.appendMessage(w.bot.threadId, { role: "user", kind: "text", text: "Sort my inbox, Tallyspoon", at: w.now() });
+    w.advance(700);
+    w.emit(w.bot.threadId, { type: "turn.started" });
+    const { speed } = w.health.report(undefined);
+    expect(speed).toMatchObject({ bootMs: null, wakeMs: null, turnStarts: [0, 1, 0, 0, 0, 0] });
+    expect(Object.keys(speed).sort()).toEqual(["bootMs", "psi", "steal", "turnStarts", "wakeMs", "windowS"]);
+    expect(JSON.stringify(speed)).not.toMatch(/Tallyspoon|inbox/);
+    expect(JSON.stringify(speed).length).toBeLessThan(200);
+  });
+});
+
 describe("a new Cloud's first hour in its health report", () => {
   it("carries the milestones and the Chief's counts, and null where there are none", () => {
     expect(world().health.report(undefined)).toMatchObject({ firstHour: null, value: null });

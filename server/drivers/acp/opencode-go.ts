@@ -25,7 +25,7 @@ import {
 import { openCodePromptUnreachedModel } from "./opencode-unreached.ts";
 import { parseOpenCodeLogLine } from "./quiet-status.ts";
 import type { ModelCatalog, ModelVariantOption, ProviderDriver, ProviderErrorCode } from "../../contracts.ts";
-import { execCli } from "../../procs.ts";
+import { execCliBoxed } from "../../procs.ts";
 import {
   catalogFromOpenCodeSession,
   DISCOVERY_TIMEOUT_MS,
@@ -56,7 +56,8 @@ const discoveryProbeCache = new Map<string, { expiresAt: number; result: Promise
 export type OpenCodeCatalogLoader = (
   environment: Record<string, string | undefined>,
   cli: string,
-  options?: { refresh?: boolean; settleMs?: number },
+  /** `allowEnv`: the keys the instance's own settings put in `environment`, which the reads keep in the bot box. */
+  options?: { refresh?: boolean; settleMs?: number; allowEnv?: readonly string[] },
 ) => Promise<ModelCatalog>;
 
 function localModelRecord(record: Record<string, unknown>): boolean {
@@ -185,12 +186,13 @@ export function parseOpenCodeModelsOutput(stdout: string): ModelCatalog | null {
 function runOpenCodeModelsVerbose(
   cli: string,
   environment: Record<string, string | undefined>,
+  allowEnv: readonly string[],
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    execCli(
+    execCliBoxed(
       cli,
       ["models", "--verbose"],
-      { timeout: 20_000, maxBuffer: 8 * 1024 * 1024, env: environment },
+      { timeout: 20_000, maxBuffer: 8 * 1024 * 1024, env: environment, box: { allowEnv } },
       (error, stdout, stderr) => {
         if (error) {
           reject(Object.assign(new Error(stderr?.trim() || error.message, { cause: error }), {
@@ -210,9 +212,9 @@ function runOpenCodeModelsVerbose(
  * processes refetches its catalog itself, in the background, at start. */
 const MODELS_REFRESH_TIMEOUT_MS = 75_000;
 
-function refreshOpenCodeModelCache(cli: string, environment: Record<string, string | undefined>): Promise<boolean> {
+function refreshOpenCodeModelCache(cli: string, environment: Record<string, string | undefined>, allowEnv: readonly string[]): Promise<boolean> {
   return new Promise((resolve) => {
-    execCli(cli, ["models", "--refresh"], { timeout: MODELS_REFRESH_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, env: environment }, (error) => resolve(!error));
+    execCliBoxed(cli, ["models", "--refresh"], { timeout: MODELS_REFRESH_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, env: environment, box: { allowEnv } }, (error) => resolve(!error));
   });
 }
 
@@ -236,15 +238,16 @@ function withEfforts(
 export async function discoverOpenCodeModels(
   environment: Record<string, string | undefined>,
   cli = "opencode",
-  options: { refresh?: boolean; settleMs?: number } = {},
+  options: { refresh?: boolean; settleMs?: number; allowEnv?: readonly string[] } = {},
 ): Promise<ModelCatalog> {
-  const settleMs = options.refresh && !await refreshOpenCodeModelCache(cli, environment)
+  const allowEnv = options.allowEnv ?? [];
+  const settleMs = options.refresh && !await refreshOpenCodeModelCache(cli, environment, allowEnv)
     ? options.settleMs ?? SELF_REFRESH_SETTLE_MS
     : 0;
   // A listing ends long before a catalog refetch would: it reads the cache, unless it waits for OpenCode 2's own refetch.
   const listing = settleMs ? environment : { ...environment, OPENCODE_DISABLE_MODELS_FETCH: "1" };
-  const probeSession = () => probeOpenCodeSession(cli, listing, DISCOVERY_TIMEOUT_MS, settleMs);
-  const readMetadata = () => runOpenCodeModelsVerbose(cli, listing).then(parseOpenCodeModels);
+  const probeSession = () => probeOpenCodeSession(cli, listing, DISCOVERY_TIMEOUT_MS, settleMs, allowEnv);
+  const readMetadata = () => runOpenCodeModelsVerbose(cli, listing, allowEnv).then(parseOpenCodeModels);
   let [session, verbose] = await Promise.allSettled([probeSession(), readMetadata()]);
   // Two OpenCode processes starting together in a fresh home race to create its database and one fails
   // (1 in 8 fresh homes). A timed-out half is not retried.
@@ -285,12 +288,13 @@ export async function canRunOpenCode(
   environment: Record<string, string | undefined>,
   cli: string,
   discover: OpenCodeCatalogLoader = discoverOpenCodeModels,
+  allowEnv: readonly string[] = [],
 ): Promise<boolean> {
   if (lastSuccessfulCatalog.get(cli)?.options.length) return true;
   const cached = discoveryProbeCache.get(cli);
   if (cached && cached.expiresAt > Date.now()) return cached.result;
   const entry = { expiresAt: Number.POSITIVE_INFINITY, result: Promise.resolve(false) };
-  entry.result = discover(environment, cli)
+  entry.result = discover(environment, cli, { allowEnv })
     .then((catalog) => catalog.options.length > 0, () => false)
     .finally(() => {
       entry.expiresAt = Date.now() + DISCOVERY_PROBE_TTL_MS;
@@ -710,21 +714,21 @@ const support = (
   },
   pickAuthMethod: () => null,
   authFailure: "continue",
-  isAuthenticated: async (env, config, instanceId) => {
+  isAuthenticated: async (env, config, instanceId, allowEnv) => {
     ownAccess.set(instanceId, ownOpenCodeAccess(env));
     return Boolean(env.OPENCODE_API_KEY)
       || hasStoredOpenCodeAuth(env)
-      || await canRunOpenCode(env, config.cli, loadCatalog);
+      || await canRunOpenCode(env, config.cli, loadCatalog, allowEnv);
   },
   classifyError: classifyOpenCodeError,
   promptUnreachedModel: openCodePromptUnreachedModel,
   limitFacts: openCodeLimitFacts,
   describeAccountError: describeOpenCodeAccountError,
-  resolveModels: async (environment, config, instanceId, fresh) => {
+  resolveModels: async (environment, config, instanceId, fresh, allowEnv) => {
     if (fresh) markOpenCodeCatalogRefreshed(instanceId, (sources.now ?? Date.now)());
     await refreshLiveModelLists(environment, { lists: sources.liveLists, fetch: sources.fetch, now: sources.now });
     declareLiveOpenCodeModels(environment, sources.liveLists);
-    return mergeLocalInject(await loadCatalog(environment, config.cli, { refresh: fresh === true }), environment);
+    return mergeLocalInject(await loadCatalog(environment, config.cli, { refresh: fresh === true, allowEnv }), environment);
   },
   buildPromptText: (turn) => turn.system ? `${turn.system}\n\n${turn.text}` : turn.text,
 });

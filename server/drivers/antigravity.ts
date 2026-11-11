@@ -27,21 +27,10 @@ import {
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
 import { VERIFICATION_TEMP_KEY, scheduleAntigravityTempSweep } from "./antigravity-temp.ts";
 import { augmentedPath } from "../env-path.ts";
+import { bundledEngineCatalog } from "../model-manifest/bundled.ts";
+import { currentEngineCatalog } from "../model-manifest/manifest.ts";
 
-export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = {
-  default: "gemini-3.8-flash",
-  options: [
-    {
-      id: "gemini-3.8-flash",
-      label: "Gemini 3.8 Flash",
-      variants: [
-        { id: "low", label: "Low" },
-        { id: "medium", label: "Medium" },
-        { id: "high", label: "High" },
-      ],
-    },
-  ],
-};
+export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = bundledEngineCatalog("antigravity");
 
 /** Bots saved before the thinking-level option hold ids like `gemini-3.8-flash-medium` or `gemini-4-argon-high`;
  * the official runtime offers only the base model with that option, so run the base at the saved level. A runtime
@@ -66,7 +55,7 @@ const support: AcpSupport = {
   driverKind: "antigravityAgent",
   // Named for what people look for: Google moved personal Gemini subscriptions (free, AI Pro, AI Ultra) from Gemini CLI to Antigravity on 2026-06-18.
   displayName: "Google Gemini (Antigravity)",
-  models: STATIC_ANTIGRAVITY_MODELS,
+  get models() { return currentEngineCatalog("antigravity"); },
   defaultCli: "agy", // migration alias: resolveAntigravityRuntime treats it as managed
   nativeSource: "antigravity.acp",
   loginNote: "Antigravity needs a Google account — choose Sign in with Google in engine setup",
@@ -107,7 +96,7 @@ const support: AcpSupport = {
     return probeAntigravityModels({
       runtime,
       profile,
-      fallbackDefault: STATIC_ANTIGRAVITY_MODELS.default,
+      fallbackDefault: currentEngineCatalog("antigravity").default,
     });
   },
 

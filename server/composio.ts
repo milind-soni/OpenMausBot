@@ -8,6 +8,7 @@ import {
   DEFAULT_BACKEND_ORIGIN,
   apiBase,
   canonicalToolkitSlug,
+  deleteConnectedAccount,
   inputError,
   keepAuthConfigPick,
   listConnectedAccounts,
@@ -33,7 +34,7 @@ import {
 } from "./connector-advertisement.ts";
 import { connectedAppGrantSlugs, serviceSlugFor, serviceSlugForCandidates } from "./connector-verdict.ts";
 import { parseMcpResponse, withToolsListFallback } from "./connector-tools-list.ts";
-import { brokerAccess, type BrokerAccess } from "./composio-broker-access.ts";
+import { brokerAccess, managedComposioBrokerOff, type BrokerAccess } from "./composio-broker-access.ts";
 export { applyManagedBrokerMessage, brokerAccess, setManagedBrokerAccess, type BrokerAccess } from "./composio-broker-access.ts";
 export { prepareProjectSession, trustedSessionMcpUrl } from "./composio-session.ts";
 
@@ -165,7 +166,7 @@ export function connectorSetup(
   managedHost: boolean = process.env.OMB_DESKTOP_PARENT === "1",
 ): ConnectorSetup {
   if (configured(cfg)) return "ready";
-  return managedHost ? "service-unavailable" : "needs-setup";
+  return managedHost && !managedComposioBrokerOff() ? "service-unavailable" : "needs-setup";
 }
 
 async function brokerRequest(path: string, init?: RequestInit, broker = brokerAccess()): Promise<Response> {
@@ -528,7 +529,7 @@ let connectorToolsCache: { at: number; identity: string; services: Record<string
 /** Cache key per backend, so a config switch never serves the previous backend's tools. */
 function connectorToolsIdentity(cfg: AppConfig, as?: BrokerAccess): string {
   const apiKey = as ? null : projectApiKey(cfg);
-  if (apiKey) return backendFingerprint("project-tools", apiBase(), apiKey);
+  if (apiKey) return backendFingerprint("project-tools", `${apiBase()}\0${cfg.composio?.userId ?? ""}`, apiKey);
   const broker = as ?? brokerAccess();
   return broker ? backendFingerprint("managed-tools", broker.url, broker.token) : "none";
 }
@@ -727,14 +728,6 @@ export async function removeService(cfg: AppConfig, slug: string, as?: BrokerAcc
   if (!id) return { removed: 0 };
   await deleteConnectedAccount(apiKey, id);
   return { removed: 1 };
-}
-
-async function deleteConnectedAccount(apiKey: string, id: string) {
-  const removed = await fetch(
-    `${apiBase()}/connected_accounts/${encodeURIComponent(id)}?revoke_on_delete=true`,
-    { method: "DELETE", headers: projectHeaders(apiKey), signal: AbortSignal.timeout(30_000) },
-  );
-  if (!removed.ok) throw new Error(await responseError(removed, `Composio disconnect: HTTP ${removed.status}`));
 }
 
 /** Disconnect exactly one account after proving it belongs to this user/toolkit. */

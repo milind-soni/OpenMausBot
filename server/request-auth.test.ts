@@ -236,7 +236,7 @@ describe("scopes", () => {
   it("lets a bot's maker without the admin scope say who it is and how it looks, never what it may do or whom it directs", () => {
     const profile = { name: "Scout", title: "Trips", soul: "Plans trips.", color: "teal", avatarCrop: "square", voice: "alloy", modelSelection: { instanceId: "claude", model: "m" } };
     expect(adminOnlyBotSetting(profile)).toBeNull();
-    for (const field of ["approvalMode", "autoApprove", "alwaysAllow", "chiefOfStaff", "managedSections", "computer", "cwd", "peers", "approvePeerComms",
+    for (const field of ["approvalMode", "autoApprove", "alwaysAllow", "chiefOfStaff", "managedSections", "computer", "cwd",
       "mcpServers", "browserProfile", "toolScope", "composio", "browser", "section", "visibility", "reportsTo", "preset", "defaultBot", "installedPackage"]) {
       expect(adminOnlyBotSetting({ ...profile, [field]: true }), field).toBe(field);
       expect(botProfileSettings({ ...profile, [field]: true }), field).toEqual(profile);
@@ -717,6 +717,12 @@ describe("loopback trust: owner on one person's machine, service on a shared wor
       expect(denied.status).toBe(403);
       expect(denied.error).toMatch(/shared server.*sign in/);
     }
+  });
+
+  it("lets a local check count the engines that can start a bot, as update.sh does, but no caller through a proxy", () => {
+    expect(check("GET", "/api/health/engines", { trust: "service" }).auth).toEqual({ kind: "loopback", scopes: ["client"], trust: "service" });
+    expect(check("POST", "/api/health/engines", { trust: "service" }).auth).toBeNull();
+    expect(check("GET", "/api/health/engines", { trust: "service", headers: { "x-forwarded-for": "203.0.113.9" } }).auth).toBeNull();
   });
 
   it("still admits a real session with its own scopes on a service-trust server", () => {

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createCleanWorkspace, DEFAULT_PROFILE, profileDir, profilesDir } from "./clean-workspace.mjs";
-import { createLocalProfiles, createProfileRegistry, MAX_PROFILES, PROFILES_FILE, profileName, SETTLE_MS } from "./local-profiles.mjs";
+import { createLocalProfiles, createProfileRegistry, MAX_PROFILES, PROFILES_FILE, profileName } from "./local-profiles.mjs";
 
 /** This computer's data folder on disk, with the one server the app runs at a time (`running`), the real profile swap
  * (clean-workspace.mjs) over it, the registry beside it and the home window's side of a profile on screen. */
@@ -149,14 +149,42 @@ test("a switch waits for the work under way in the workspace it leaves, says so 
   assert.equal(w.running, profileDir(w.dataDir, "work"));
 });
 
-test(`a switch waits at most ${SETTLE_MS / 1000} s: then the server stops as a quit stops it, and each cut turn says so there`, async (t) => {
+test("a switch waits with no time limit while the work goes on: nothing is cut short", async (t) => {
   const w = computer(t);
   w.profiles.create({ name: "Work" });
   await w.profiles.open(DEFAULT_PROFILE);
   w.busy = [{ name: "Scout", what: "bot" }];
+  w.onWait = () => { if (w.waits === 600) w.busy = []; };
   assert.equal(await w.profiles.open("work"), true);
-  assert.equal(w.waits, SETTLE_MS / 1000);
+  assert.equal(w.waits, 600, "ten minutes of Scout working, and it still waited");
+  assert.equal(w.running, profileDir(w.dataDir, "work"));
+  assert.equal(w.logs.some((line) => /still works/.test(line)), false);
+});
+
+test("a second click on the place that waits opens it at once: the server stops as a quit stops it, and each cut turn says so there", async (t) => {
+  const w = computer(t);
+  w.profiles.create({ name: "Work" });
+  await w.profiles.open(DEFAULT_PROFILE);
+  w.busy = [{ name: "Scout", what: "bot" }];
+  let again = null;
+  w.onWait = () => { if (w.waits === 2) again = w.profiles.open("work"); };
+  assert.equal(await w.profiles.open("work"), null, "the first click's wait ends");
+  assert.equal(await again, true);
+  assert.equal(w.waits, 2, "no more waiting after the second click");
+  assert.equal(w.running, profileDir(w.dataDir, "work"));
+  assert.equal(w.profiles.settling(), null);
   assert.match(w.logs.at(-1), /work opens though Scout still works/);
+
+  const local = computer(t, { home: "local" });
+  local.onScreen = "local";
+  local.profiles.create({ name: "Work" });
+  await local.profiles.open("work");
+  local.busy = [{ name: "Juno", what: "bot" }];
+  local.onWait = () => { if (local.waits === 1) again = local.profiles.computer(); };
+  assert.equal(await local.profiles.computer(), null);
+  assert.equal(await again, true, "This computer clicked again: back at once");
+  assert.equal(local.running, local.dataDir);
+  assert.match(local.logs.at(-1), /this computer opens though Juno still works/);
 });
 
 test("nothing to wait for when the frozen copy runs: My Cloud's first This Mac opens at once", async (t) => {

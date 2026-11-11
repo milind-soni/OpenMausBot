@@ -16,9 +16,9 @@ import { claudeAuthStatus } from "./claude-auth-status.ts";
 import { projectMcpServers } from "./claude-project-mcp.ts";
 import { botSettingsFor, withBotSettings } from "./claude-bot-settings.ts";
 import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
-import { claudeAuthFailure, claudeAuthRecovery } from "./claude-auth-recovery.ts";
-import { CLAUDE_MODEL_ID, STATIC_CLAUDE_MODELS, claudeModelExtras, endpointModelCatalog } from "./claude-model-extras.ts";
-import { claudeToolSearchSetting } from "./claude-tool-search.ts"; import { unusableBuiltIns } from "./claude-unusable-tools.ts"; import { EMAIL_READ_TOOL_NAMES } from "../../shared/email.ts";
+import { claudeAuthFailure, claudeAuthRecovery, claudeOAuthExpired } from "./claude-auth-recovery.ts"; import { AWS_CREDENTIAL_ENV_KEYS, bedrockResultError, withBedrockCredentialError } from "./claude-bedrock-aws.ts";
+import { CLAUDE_MODEL_ID, STATIC_CLAUDE_MODELS, claudeModelExtras, currentEngineCatalog, endpointModelCatalog, withCliVersionGate } from "./claude-model-extras.ts";
+import { claudeToolSearchSetting } from "./claude-tool-search.ts"; import { claudeDisabledNativeSkillRules, unusableBuiltIns } from "./claude-unusable-tools.ts"; import { EMAIL_READ_TOOL_NAMES } from "../../shared/email.ts";
 import { claudeElicitations } from "./claude-elicitation.ts";
 import { readCostHistory, recordCostState } from "./claude-cost-history.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
@@ -113,13 +113,13 @@ function claudeEnvironment(
   source: NodeJS.ProcessEnv = process.env,
   configDir?: string,
   instanceEnvironment: NodeJS.ProcessEnv = {},
-  endpoint = false,
+  endpoint = false, bedrock = false,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { BASH_MAX_TIMEOUT_MS: "600000", ...source, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error" };
   if (configDir?.trim()) env.CLAUDE_CONFIG_DIR = resolveClaudeConfigDir(configDir, env);
   else if (env.CLAUDE_CONFIG_DIR) env.CLAUDE_CONFIG_DIR = resolveClaudeConfigDir(undefined, env);
-  if (configDir?.trim() || endpoint) {
-    for (const key of CLAUDE_ACCOUNT_ENV_KEYS) {
+  if (configDir?.trim() || endpoint || bedrock) {
+    for (const key of bedrock ? [...CLAUDE_ACCOUNT_ENV_KEYS, ...AWS_CREDENTIAL_ENV_KEYS] : CLAUDE_ACCOUNT_ENV_KEYS) {
       // Subscription OAuth always comes from this account's own login, never the parent's.
       if (key.startsWith("CLAUDE_CODE_OAUTH_") || key.endsWith("_FILE_DESCRIPTOR") || !Object.hasOwn(instanceEnvironment, key)) {
         delete env[key];
@@ -272,7 +272,7 @@ export interface ClaudeConfig {
   permissionMode: "acceptEdits" | "auto" | "bypassPermissions";
   tools?: string[];
   disallowedTools?: string[];
-  requireApiKey?: boolean;
+  requireApiKey?: boolean; bedrock?: boolean;
 }
 
 export { STATIC_CLAUDE_MODELS };
@@ -285,7 +285,7 @@ async function resolveClaudeTurnModel(
   endpointModels?: string[],
 ): Promise<string | null | undefined> {
   if (endpointModels) return model && endpointModels.includes(model) ? model : endpointModels[0];
-  if (!model || decodeInjectId(model) || STATIC_CLAUDE_MODELS.options.some((option) => option.id === model)) {
+  if (!model || decodeInjectId(model) || currentEngineCatalog("claude").options.some((option) => option.id === model)) {
     return model;
   }
   return resolveInjectId(model, await probeLocalInjects(env)) ?? model;
@@ -302,7 +302,7 @@ export function readClaudeModelCatalog(env: Record<string, string | undefined> =
   }
 
   const { extras, envModel } = claudeModelExtras(settings, env);
-  const options = STATIC_CLAUDE_MODELS.options.map((option) => ({ ...option }));
+  const official = currentEngineCatalog("claude"), options = official.options.map((option) => ({ ...option }));
   const seen = new Set(options.map((option) => option.id));
   for (const extra of extras) {
     if (seen.has(extra.id)) continue;
@@ -311,7 +311,7 @@ export function readClaudeModelCatalog(env: Record<string, string | undefined> =
       ? { id: extra.id, label: extra.label, custom: true }
       : { id: extra.id, label: extra.label });
   }
-  return { default: STATIC_CLAUDE_MODELS.default, options };
+  return { default: official.default, options };
 }
 
 const PERM_PROXY_PATH = SPAWNED_PROXIES.permission;
@@ -643,7 +643,7 @@ function decodeConfig(raw: unknown): ClaudeConfig {
     permissionMode: (mode as ClaudeConfig["permissionMode"]) ?? "acceptEdits",
     ...(tools !== undefined ? { tools } : {}),
     ...(disallowedTools !== undefined ? { disallowedTools } : {}),
-    ...(o.requireApiKey === true ? { requireApiKey: true } : {}),
+    ...(o.requireApiKey === true ? { requireApiKey: true } : {}), ...(o.bedrock === true ? { bedrock: true } : {}),
   };
 }
 
@@ -775,19 +775,21 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
   async create(input: DriverCreateInput<ClaudeConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
     const environment = (model?: string | null) =>
-      claudeEnvironment(config.managed ? undefined : model, { ...process.env, ...input.environment }, config.configDir, input.environment, Boolean(config.endpointModels));
+      claudeEnvironment(config.managed ? undefined : model, { ...process.env, ...input.environment }, config.configDir, input.environment, Boolean(config.endpointModels), config.bedrock === true);
     const catalogEnv = environment();
     if (inheritsUserConfig(catalogEnv)) {
       console.error(`claude (${instanceId}): OMB_CLAUDE_INHERIT_USER_CONFIG=1 — bots inherit this machine's Claude Code MCP servers, skills, hooks and CLAUDE.md on every turn; remove it unless a bot needs a user-scope server`);
     }
+    let cliVersion: ClaudeCliVersion | null = null;
+    let cliVersionChecked = false;
     let models = config.managedModels ? { default: config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) }
-      : endpointModelCatalog(config.endpointModels) ?? STATIC_CLAUDE_MODELS;
+      : endpointModelCatalog(config.endpointModels) ?? currentEngineCatalog("claude");
     const orgBlocks = createOrgModelBlocks(() => engineHomes.everyHome(catalogEnv), (blocked) => { models = withOrgBlocks(models, blocked); });
     const refreshModels = async () => {
       if (config.managed || config.endpointModels) return;
       try {
         const resolved = await mergeLocalInject(readClaudeModelCatalog(catalogEnv), catalogEnv);
-        if (resolved.options.length) models = resolved; else unconfirmedModelCatalog(models);
+        if (resolved.options.length) models = withCliVersionGate(resolved, "claude", cliVersion); else unconfirmedModelCatalog(models);
         await orgBlocks.refresh(true);
       } catch { unconfirmedModelCatalog(models); }
       try { writeStartupModelCache(instanceId, models); } catch {}
@@ -799,8 +801,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       refresh: refreshModels,
     }))?.pending ?? null;
 
-    let cliVersion: ClaudeCliVersion | null = null;
-    let cliVersionChecked = false;
     // Whether `claude --help` lists --autocompact (2.1.129 rejects it despite the floor); a launch refusing it keeps it off for that version (every refusing version is remembered).
     let [cliHasAutocompact, cliHelpVersion]: [boolean | null, string | null] = [null, null], autocompactRefusedBy = new Set<string>();
     const readCliVersion = cliVersionProbe(config.cli);
@@ -1024,7 +1024,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const replaysUserMessages = cliVersion === null || versionAtLeast(cliVersion, CLAUDE_REPLAY_FLOOR);
       if (replaysUserMessages) args.push("--replay-user-messages");
       const isolated = !inheritsUserConfig(turnEnvironment);
-      const disallowed = [...(config.disallowedTools ?? []), ...unusableBuiltIns({ isolated, listsTools: config.tools !== undefined, guest: Boolean(turn.guestConfined) })];
+      const disallowed = [...(config.disallowedTools ?? []), ...unusableBuiltIns({ isolated, listsTools: config.tools !== undefined, guest: Boolean(turn.guestConfined) }), ...claudeDisabledNativeSkillRules(botId)];
       if (disallowed.length) args.push("--disallowedTools", disallowed.join(","));
       if (turn.toolScope !== undefined && (!isolated || turn.mcpFromUserConfig || cliVersion === null || !claudeCliSupports(cliVersion, "--strict-mcp-config"))) {
         throw new Error("Claude cannot confirm a restricted MCP configuration for this account. Disable inherited Claude MCP servers and use a current, identifiable Claude CLI before using tool selection.");
@@ -1522,7 +1522,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             }
             if ((o.is_api_error_message === true || typeof o.error === "string") && text.trim()) {
               if (session.turn) session.turn.explained = true;
-              if (!session.turn?.stopRequested) emit({ ...base(threadId, currentTurnId()), type: "runtime.error", ...claudeApiError(o, text) });
+              if (!session.turn?.stopRequested) emit({ ...base(threadId, currentTurnId()), type: "runtime.error", ...withBedrockCredentialError(config.bedrock, input.environment, text, claudeApiError(o, text)) });
               break;
             }
             if (session.turn) session.turn.answered = true;
@@ -1595,8 +1595,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             if (o.is_error === true && !session.turn?.authFailed && (session.turn?.limit ||
                 o.api_error === "usage_limit_reached" || USAGE_LIMIT.test(String(o.result ?? "")))) reachLimit(o, o.result);
             if (o.is_error === true && session.turn && !session.turn.settled && !session.turn.explained && !session.turn.stopRequested) {
-              session.turn.explained = true;
-              emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: claudeResultError(o) });
+              session.turn.explained = true; session.turn.authFailed = claudeOAuthExpired(String(o.result ?? ""));
+              emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: bedrockResultError(config.bedrock, input.environment, claudeResultError(o)), ...(session.turn.authFailed ? { setup: true } : {}) });
             }
             if (!config.managed) void orgBlocks.refresh();
             // result.usage is per turn "in streaming-input sessions" (2.1.282) even on a retained
@@ -1913,8 +1913,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const probe = await readCliVersion(env);
       if (!("version" in probe)) return { state: "unavailable", reason: probe.reason };
       const { version } = probe;
-      cliVersion = parseClaudeCliVersion(version);
-      cliVersionChecked = true;
+      [cliVersion, cliVersionChecked] = [parseClaudeCliVersion(version), true];
+      if (!config.managed && !config.endpointModels) models = withCliVersionGate(models, "claude", cliVersion);
       if (version !== cliHelpVersion) await readCliHelp(version, env);
       const update = claudeCliUpdate(version, config.cli);
       const warning = claudeInheritWarning(env);

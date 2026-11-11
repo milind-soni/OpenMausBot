@@ -1,6 +1,7 @@
 // Before connecting, the Connect sheet asks the address who it is: the server's public descriptor names it, and a
 // failure is sorted into one thing the person can fix.
 import { EXAMPLE_ADDRESS, isLoopbackHost, parseServerInput, serverTransport } from "./server-address.mjs";
+import { inTailscaleRange, isTailnetName } from "./tailnet.mjs";
 
 const DESCRIPTOR = "/.well-known/openmausbot/environment";
 /** A MausBot desktop app's Remote access (companion/src/routes.ts) refuses the descriptor with this until a phone pairs. */
@@ -22,9 +23,28 @@ export const CONNECT_PROBLEM_KEYS = Object.freeze({
   certificate: "native.connect.certificate",
   notMausBot: "native.connect.notMausBot",
   desktopApp: "native.connect.desktopApp",
+  desktopAppTailnet: "native.connect.desktopAppTailnet",
   loopback: "native.connect.loopback",
   localNetwork: "native.connect.localNetwork",
+  tailscaleOff: "native.connect.tailscaleOff",
+  otherTailnet: "native.connect.otherTailnet",
+  tailnetBlocked: "native.connect.tailnetBlocked",
+  tailnetSilent: "native.connect.tailnetSilent",
 });
+
+/**
+ * Why an address only a tailnet reaches did not answer: Tailscale is off on this computer, the name is not on this
+ * computer's tailnet (MagicDNS answers only names it knows), macOS refused (its Local Network permission, from macOS 15,
+ * covers Tailscale's addresses too, and is expected to fail at once with no route to host where a sleeping peer times
+ * out), or the computer there is asleep, offline or not sharing.
+ */
+function tailnetProblem(kind, platform, tailnet) {
+  if (kind === "desktopApp") return "desktopAppTailnet";
+  if (!tailnet) return "tailscaleOff";
+  if (kind === "dns") return "otherTailnet";
+  if (kind === "noRoute" && platform === "darwin") return "tailnetBlocked";
+  return "tailnetSilent";
+}
 
 /** Chromium's net errors (Electron 43 `session.fetch`) and Node's (undici) for the same causes. */
 function failureKind(error) {
@@ -33,6 +53,7 @@ function failureKind(error) {
   if (/ERR_CERT|CERT_|SELF_SIGNED|UNABLE_TO_VERIFY|ALTNAME|certificate/i.test(text)) return "certificate";
   if (/TimeoutError|TIMED_OUT|ETIMEDOUT|aborted/i.test(text)) return "timeout";
   if (/CONNECTION_REFUSED|ECONNREFUSED/i.test(text)) return "refused";
+  if (/ADDRESS_UNREACHABLE|EHOSTUNREACH|ENETUNREACH|NETWORK_ACCESS_DENIED/i.test(text)) return "noRoute";
   return "unreachable";
 }
 
@@ -91,7 +112,7 @@ async function describe(origin, fetchImpl, timeoutMs) {
  * certificate, notMausBot, desktopApp (another computer's MausBot desktop app, which can't be a server), loopback (an address on this computer that is this app's own workspace, or nothing at all).
  * `ownEnvironmentId()`: this app's own local workspace, so a "this computer" link copied off a server is caught.
  */
-export async function probeServer({ address, code = "", fetch: fetchImpl, ownEnvironmentId = async () => null, timeoutMs = 6_000, platform = process.platform }) {
+export async function probeServer({ address, code = "", fetch: fetchImpl, ownEnvironmentId = async () => null, timeoutMs = 6_000, platform = process.platform, tailnet = () => true }) {
   const parsed = parseServerInput(address, code);
   if (!parsed.ok) {
     const { ok: _ok, ...problem } = parsed;
@@ -99,16 +120,22 @@ export async function probeServer({ address, code = "", fetch: fetchImpl, ownEnv
   }
   let failure = null;
   for (const origin of parsed.candidates) {
-    const host = new URL(origin).host;
-    const loopback = isLoopbackHost(new URL(origin).hostname);
+    const { host, hostname } = new URL(origin);
+    const loopback = isLoopbackHost(hostname);
     const found = await describe(origin, fetchImpl, timeoutMs);
     if (!found.ok) {
+      const kind = found.kind === "noRoute" ? "unreachable" : found.kind;
       // macOS 15 blocks an app from the local network until the person allows it, and the request then just fails.
-      const blockedOnMac = platform === "darwin" && serverTransport(origin) === "private-http" && (found.kind === "unreachable" || found.kind === "timeout");
+      const blockedOnMac = platform === "darwin" && serverTransport(origin) === "private-http" && (kind === "unreachable" || kind === "timeout");
       // Once a candidate turned out to be another computer's desktop app, that's the problem to report.
       if (failure?.problem === "desktopApp") continue;
-      failure = loopback ? { problem: "loopback", host } : blockedOnMac ? { problem: "localNetwork", host }
-        : { problem: found.kind === "refused" || found.kind === "timeout" ? "unreachable" : found.kind, host, ...(found.kind === "refused" || found.kind === "timeout" ? { reason: found.kind } : {}) };
+      // A bare 100.64/10 address counts only on a computer that is on a tailnet: carrier NAT and other VPNs use that range.
+      const bare = hostname.replace(/^\[|\]$/g, "");
+      const tailnetHost = (isTailnetName(bare) || (inTailscaleRange(bare) && tailnet())) && found.kind !== "certificate" && found.kind !== "notMausBot";
+      const problem = loopback ? { problem: "loopback", host } : tailnetHost ? { problem: tailnetProblem(found.kind, platform, tailnet()), host } : blockedOnMac ? { problem: "localNetwork", host }
+        : { problem: kind === "refused" || kind === "timeout" ? "unreachable" : kind, host, ...(kind === "refused" || kind === "timeout" ? { reason: kind } : {}) };
+      // A later guess at a tailnet name that just didn't answer says less than whatever an earlier one said.
+      if (!(failure && problem.problem === "tailnetSilent")) failure = problem;
       continue;
     }
     if (loopback && found.environmentId === await ownEnvironmentId().catch(() => null)) return { outcome: "problem", problem: "loopback", host };
@@ -123,8 +150,8 @@ export async function probeServer({ address, code = "", fetch: fetchImpl, ownEnv
  * clipboard or Settings, which names the server in main's own dialog (`ask(found)`) first and throws a problem's sentence.
  * `open(found, name)` saves the server and opens its /pair page.
  */
-export function createServerConnect({ fetch: fetchImpl, ownEnvironmentId, ask, open, t }) {
-  const probe = (address, code = "") => probeServer({ address, code, fetch: fetchImpl, ownEnvironmentId });
+export function createServerConnect({ fetch: fetchImpl, ownEnvironmentId, ask, open, t, tailnet }) {
+  const probe = (address, code = "") => probeServer({ address, code, fetch: fetchImpl, ownEnvironmentId, tailnet });
   return {
     probe,
     async connect(address, code = "") {

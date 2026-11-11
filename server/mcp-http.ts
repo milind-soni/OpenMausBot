@@ -117,6 +117,8 @@ async function readSse(
   signal: AbortSignal,
   onEvent: (event: SseEvent) => "stop" | undefined,
   maxBytes = MAX_REMOTE_MCP_BYTES,
+  /** One POST's reply: a stateless server may hang up right after its last event, leaving off the closing blank line. */
+  lastEventAtEnd = false,
 ): Promise<void> {
   const reader = response.body?.getReader();
   if (!reader) throw new McpHttpError("protocol", "empty event stream");
@@ -129,7 +131,11 @@ async function readSse(
   try {
     for (;;) {
       const { value, done } = await reader.read();
-      if (done) return;
+      if (done) {
+        const last = lastEventAtEnd ? parseSseBlock(buffer + decoder.decode()) : null;
+        if (last) onEvent(last);
+        return;
+      }
       bytes += value.byteLength;
       if (bytes > maxBytes) throw new McpHttpError("protocol", "event stream too large");
       const chunk = decoder.decode(value, { stream: true });
@@ -311,7 +317,7 @@ export class RemoteMcpClient {
         if (!message) return undefined;
         found = message;
         return "stop";
-      }, this.maxBytes);
+      }, this.maxBytes, true);
       if (signal.aborted) throw new McpHttpError("network", "aborted");
       if (!found) throw new McpHttpError("protocol", "event stream ended without the response");
       return unwrap(found);

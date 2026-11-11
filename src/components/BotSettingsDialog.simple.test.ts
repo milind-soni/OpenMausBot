@@ -657,7 +657,7 @@ describe("the Details tab", () => {
 
   it("lists Find, Activity and the Inspector for this conversation as rows that run them, leaving Copy and Download to Share", () => {
     const rendered = botTab(makeBot());
-    expect([...rendered.html.matchAll(/data-panel-item="(\w+)"/g)].map((match) => match[1])).toEqual(["find", "activity", "inspector"]);
+    expect([...rendered.html.matchAll(/data-panel-item="([\w-]+)"/g)].map((match) => match[1])).toEqual(["find", "start-fresh", "activity", "inspector"]);
     expect(rendered.html).toContain(">Find in conversation<");
     const run = (key: string) => (rendered.nodes.find((node) => (node.props.item as { key?: string } | undefined)?.key === key)!.props.item as { onSelect: () => void }).onSelect();
     run("activity");
@@ -1225,7 +1225,12 @@ describe("the drill-in pages", () => {
     await Promise.resolve();
     expect(fixture.skills.refresh).toHaveBeenCalled();
     click(find(rendered, "data-panel-action", "remove-skill:triage"));
-    expect(fixture.skills.putAssignments).toHaveBeenCalledWith("triage", true);
+    expect(fixture.api).toHaveBeenCalledWith("/api/bots/scout/skills/triage", { method: "DELETE" });
+    expect(fixture.skills.putAssignments).not.toHaveBeenCalled();
+    fixture.skills.skills = [skill("pdf", true, "imported"), skill("engine-notes", true, "native")];
+    expect(has(body("skills"), "data-panel-action", "remove-skill:pdf")).toBe(false);
+    expect(has(body("skills"), "data-panel-action", "remove-skill:engine-notes")).toBe(false);
+    fixture.skills.skills = [shared, off];
 
     (find(rendered, "data-panel-form", "skill-import").props.onChange as (value: string) => void)("owner/repo");
     (find(body("skills"), "data-panel-form", "skill-import").props.onSubmit as () => void)();
