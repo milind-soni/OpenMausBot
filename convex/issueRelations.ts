@@ -2,6 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { canEdit, projectMember, requireMember } from "./lib/permissions";
 import type { Id } from "./_generated/dataModel";
+import { cleanLabels, projectLabels } from "./lib/labels";
 
 const kind = v.union(v.literal("blocks"), v.literal("parent"));
 export const list = query({
@@ -29,10 +30,14 @@ export const labels = mutation({
   handler: async (ctx, args) => {
     const task = await ctx.db.get(args.taskId);
     if (!task || !canEdit((await requireMember(ctx, task.projectId, args.sessionToken)).member)) throw new ConvexError("You have view-only access");
-    const labels = [...new Set(args.labels.map(label => label.trim()).filter(Boolean))];
-    if (labels.length > 20 || labels.some(label => label.length > 32)) throw new ConvexError("Use up to 20 labels of 32 characters each");
+    const labels = cleanLabels(args.labels, await projectLabels(ctx, task.projectId));
     await ctx.db.patch(task._id, { labels, updatedAt: Date.now() }); return null;
   },
+});
+/** Labels already used in the project, for suggestions while labelling an issue. */
+export const projectLabelOptions = query({
+  args: { sessionToken: v.string(), projectId: v.id("projects") }, returns: v.array(v.string()),
+  handler: async (ctx, args) => { await requireMember(ctx, args.projectId, args.sessionToken); return projectLabels(ctx, args.projectId); },
 });
 export const connect = mutation({
   args: { sessionToken: v.string(), fromTaskId: v.id("tasks"), toTaskId: v.id("tasks"), kind }, returns: v.null(),

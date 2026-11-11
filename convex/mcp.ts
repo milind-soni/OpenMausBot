@@ -11,6 +11,9 @@ import { addCommentRecord, createTaskRecord, moveTaskRecord, updateTaskRecord } 
 import { containsMention, mentionToken } from "../lib/issue-mentions";
 import { OAUTH_GRANT_PREFIX, PAT_PREFIX } from "../lib/mcp-tokens";
 import { compareTaskOrder } from "../lib/task-order";
+import { issueKey } from "../lib/github-references";
+import { taskBranch } from "../lib/task-branch";
+import { cleanLabels, projectLabels } from "./lib/labels";
 
 // Tools for the remote MCP server (app/api/mcp). Every call carries a connector token (OAuth grant or personal
 // access token, both stored as connectorGrants) and runs with the token owner's workspace and project permissions.
@@ -19,7 +22,6 @@ import { compareTaskOrder } from "../lib/task-order";
 type Ctx = QueryCtx | MutationCtx;
 type Access = Awaited<ReturnType<typeof authorize>>;
 
-const issueKey = (id: string) => `ORI-${id.slice(-4).toUpperCase()}`;
 const json = (value: unknown) => JSON.stringify(value);
 const fold = (value: string) => value.trim().toLowerCase();
 
@@ -61,12 +63,25 @@ async function resolveProject(ctx: Ctx, access: Access, ref: string) {
   return { project, member };
 }
 
-async function resolveIssue(ctx: Ctx, access: Access, ref: string, write = false) {
+/** An issue by id, or by its key (ORI-AB12) when exactly one issue the token can see has it. */
+async function findIssue(ctx: Ctx, access: Access, ref: string) {
   const id = ctx.db.normalizeId("tasks", ref.trim());
-  const task = id ? await ctx.db.get(id) : null;
+  if (id) return ctx.db.get(id);
+  if (!/^ORI-[0-9A-Z]{4}$/i.test(ref.trim())) return null;
+  const key = ref.trim().toUpperCase();
+  const found: Doc<"tasks">[] = [];
+  for (const { project } of await visibleProjects(ctx, access, true)) {
+    for (const task of await ctx.db.query("tasks").withIndex("by_project", q => q.eq("projectId", project._id)).take(5000)) if (issueKey(task._id) === key) found.push(task);
+    if (found.length > 1) throw new ConvexError(`${key} matches more than one issue. Use the issue id from list_issues.`);
+  }
+  return found[0] ?? null;
+}
+
+async function resolveIssue(ctx: Ctx, access: Access, ref: string, write = false) {
+  const task = await findIssue(ctx, access, ref);
   const project = task ? await ctx.db.get(task.projectId) : null;
   const member = project?.teamId === access.grant.teamId ? await projectMember(ctx, project, access.user) : null;
-  if (!task || !project || !member) throw new ConvexError(`Issue not found: ${ref}. Use the issue id from list_issues.`);
+  if (!task || !project || !member) throw new ConvexError(`Issue not found: ${ref}. Use the issue id or key from list_issues.`);
   if (write && !canEdit(member)) throw new ConvexError("You have read-only access to this project");
   return { task, project, member };
 }
@@ -131,6 +146,7 @@ export const projects = query({
     return json({ projects: await Promise.all(rows.map(async ({ project, member }) => ({
       id: project._id, name: project.name, ...(project.description ? { description: project.description } : {}), status: project.status,
       openIssues: project.openIssueCount ?? null, columns: (await boardColumns(ctx, project._id)).visible.map(columnSummary),
+      labels: await projectLabels(ctx, project._id, 50),
       ...(project.repoUrl ? { repository: project.repoUrl } : {}), ...(canEdit(member) ? {} : { readOnly: true }),
     }))) });
   }),
@@ -199,6 +215,10 @@ export const issue = query({
       ...issueSummary(slug, project, task, visible.find(c => c._id === columnFor(task))),
       description: task.description ?? "",
       createdAt: new Date(task.createdAt).toISOString(),
+      ...(project.repoUrl ? { branch: taskBranch(task) } : {}),
+      pullRequests: (await ctx.db.query("taskPullRequests").withIndex("by_taskId", q => q.eq("taskId", task._id)).take(20)).map(pr => ({
+        number: pr.number, url: pr.url, ...(pr.title ? { title: pr.title } : {}), state: pr.state, checks: pr.checks, review: pr.review, completesOnMerge: pr.closes !== false,
+      })),
       comments: comments.reverse().map(c => ({ id: c._id, author: c.authorName, email: c.authorEmail, body: c.body, createdAt: new Date(c.createdAt).toISOString() })),
     });
   }),
@@ -266,7 +286,7 @@ async function assigneeEmail(ctx: MutationCtx, access: Access, project: Doc<"pro
 const UNASSIGNED = new Set(["none", "unassigned"]);
 
 export const createIssue = mutation({
-  args: { ...token, project: v.string(), title: v.string(), description: v.optional(v.string()), column: v.optional(v.string()), priority: v.optional(priorityValidator), assignee: v.optional(v.string()), dueDate: v.optional(v.string()) },
+  args: { ...token, project: v.string(), title: v.string(), description: v.optional(v.string()), column: v.optional(v.string()), priority: v.optional(priorityValidator), assignee: v.optional(v.string()), dueDate: v.optional(v.string()), labels: v.optional(v.array(v.string())) },
   returns: v.string(),
   handler: (ctx, a) => guard(async () => {
     const access = await writer(ctx, a.token);
@@ -275,7 +295,9 @@ export const createIssue = mutation({
     const { visible } = await boardColumns(ctx, project._id);
     const column = a.column ? findColumn(visible, a.column) : undefined;
     const email = UNASSIGNED.has(fold(a.assignee ?? "me")) ? undefined : await assigneeEmail(ctx, access, project, a.assignee ?? "me");
+    const labels = a.labels ? cleanLabels(a.labels, await projectLabels(ctx, project._id)) : undefined;
     const taskId = await createTaskRecord(ctx, { projectId: project._id, columnId: column?._id, title: a.title, description: a.description, priority: a.priority ?? "medium", assignedToEmail: email, dueDate: a.dueDate || undefined }, access.user._id);
+    if (labels?.length) await ctx.db.patch(taskId, { labels });
     const task = (await ctx.db.get(taskId))!;
     const placed = await ctx.db.get(task.columnId);
     return json(issueSummary(await workspaceSlug(ctx, access.grant.teamId), project, task, placed ?? undefined));
@@ -283,7 +305,7 @@ export const createIssue = mutation({
 });
 
 export const updateIssue = mutation({
-  args: { ...token, issueId: v.string(), title: v.optional(v.string()), description: v.optional(v.string()), priority: v.optional(priorityValidator), assignee: v.optional(v.string()), dueDate: v.optional(v.string()) },
+  args: { ...token, issueId: v.string(), title: v.optional(v.string()), description: v.optional(v.string()), priority: v.optional(priorityValidator), assignee: v.optional(v.string()), dueDate: v.optional(v.string()), labels: v.optional(v.array(v.string())) },
   returns: v.string(),
   handler: (ctx, a) => guard(async () => {
     const access = await writer(ctx, a.token);
@@ -291,7 +313,9 @@ export const updateIssue = mutation({
     // "none" clears the assignee or due date (an empty value clears it in updateTaskRecord).
     const assignedToEmail = a.assignee === undefined ? undefined : UNASSIGNED.has(fold(a.assignee)) ? "" : await assigneeEmail(ctx, access, project, a.assignee);
     const dueDate = a.dueDate === undefined ? undefined : fold(a.dueDate) === "none" ? "" : a.dueDate;
+    const labels = a.labels ? cleanLabels(a.labels, await projectLabels(ctx, project._id)) : undefined;
     await updateTaskRecord(ctx, { projectId: project._id, taskId: task._id, title: a.title, description: a.description, priority: a.priority, assignedToEmail, dueDate }, access.user._id);
+    if (labels) await ctx.db.patch(task._id, { labels });
     return issueResult(ctx, access, task._id);
   }),
 });
