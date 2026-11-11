@@ -139,7 +139,7 @@ function MenuRows({
           >
             {item.icon && (
               <span
-                className={cn("flex shrink-0 items-center justify-center", item.large ? "size-8" : "size-4 [&>svg]:size-4", item.wrap && "h-[18px] self-start", item.active ? "text-accent" : "text-ink-secondary")}
+                className={cn("flex shrink-0 items-center justify-center", item.large ? "size-8" : "size-4 [&>svg]:size-4", item.wrap && (dense ? "h-5 self-start" : "h-[18px] self-start"), item.active ? "text-accent" : "text-ink-secondary")}
               >
                 {item.icon}
               </span>

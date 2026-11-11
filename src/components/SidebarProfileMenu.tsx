@@ -488,7 +488,8 @@ export function profileMenuItems({
   const present = (...items: Array<SidebarMenuItem | null | false>) => items.filter((item): item is SidebarMenuItem => Boolean(item));
   const out: SidebarMenuItem[] = [...accounts.filter((item) => item.key !== "accounts-sign-out"),
     ...(signOut ? [{ key: "sign-out", label: t("accounts.signOut"), icon: <LogOut size={16} />, onSelect: signOut }]
-      : signOutElsewhere ? [{ key: "sign-out", label: t("settings.account.fromHere", { place: signOutElsewhere.place }), icon: <LogOut size={16} />,
+      // The full words, as on Your account; a sentence this long wraps rather than being cut short.
+      : signOutElsewhere ? [{ key: "sign-out", label: t("settings.account.fromHere", { place: signOutElsewhere.place }), wrap: true, icon: <LogOut size={16} />,
         trailing: <ArrowUpRight size={12} aria-hidden="true" className="text-ink-tertiary" />, onSelect: signOutElsewhere.open }]
       : accounts.filter((item) => item.key === "accounts-sign-out"))];
   // Plan & billing follows Settings (Simple's own places sit between them); both modes end with Help, then Sign out.
@@ -536,7 +537,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   // A Cloud's page in the desktop window can't update the app: the row says where that happens, and goes there.
   const elsewhereUpdate: UpdateEntry | null = !desktopUpdate && !here && Boolean(window.ogb) && state.config?.cloudHome === true && openComputer ? {
     phase: "idle", pending: false, label: t("settings.updates.checkFrom", { place: t("rail.thisComputer") }),
-    item: { key: "update", label: t("settings.updates.checkFrom", { place: t("rail.thisComputer") }), icon: <RefreshCw size={16} />, trailing: <ArrowUpRight size={12} aria-hidden="true" className="text-ink-tertiary" />, onSelect: () => void openComputer("app").catch(() => {}) },
+    item: { key: "update", label: t("settings.updates.checkFrom", { place: t("rail.thisComputer") }), wrap: true, icon: <RefreshCw size={16} />, trailing: <ArrowUpRight size={12} aria-hidden="true" className="text-ink-tertiary" />, onSelect: () => void openComputer("app").catch(() => {}) },
   } : null;
   const update = desktopUpdate ?? elsewhereUpdate ?? serverUpdate;
   const [aboutOpen, setAboutOpen] = useState(false);
