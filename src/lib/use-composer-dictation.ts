@@ -5,6 +5,7 @@ import { useStore } from "@/state/store";
 import { t } from "./i18n";
 import { recordedSpeech } from "./recorded-speech";
 import { listensHere, speechBridge } from "./speech";
+import { sttDestination } from "../../shared/stt";
 
 export function useComposerDictation({ draftId, text, onText }: {
   draftId: string;
@@ -19,7 +20,7 @@ export function useComposerDictation({ draftId, text, onText }: {
   const [speechError, setSpeechError] = useState<ReactNode>(null);
   const draft = useRef({ id: draftId, text });
   draft.current = { id: draftId, text };
-  const session = useRef<{ draftId: string; base: string; bridge?: typeof bridge }>({ draftId: "", base: "" });
+  const session = useRef<{ draftId: string; base: string; bridge?: typeof bridge; destination?: string }>({ draftId: "", base: "" });
   const cancel = useRef<(() => void) | null>(null);
   const finish = useRef<(() => void) | null>(null);
   const stop = useCallback(() => {
@@ -68,7 +69,7 @@ export function useComposerDictation({ draftId, text, onText }: {
           : t(reason === "dictation-disabled" ? "composer.dictation.disabled" : "composer.dictation.failed")));
       }
     });
-    void bridge.speechStart().catch(() => {
+    void bridge.speechStart({ destination: session.current.destination }).catch(() => {
       if (!active) return;
       cancelSession();
       setSpeechError(t("composer.dictation.failed"));
@@ -92,7 +93,7 @@ export function useComposerDictation({ draftId, text, onText }: {
       if (finish.current) finish.current();
       else stop();
     } else {
-      session.current = { draftId, base: text, bridge };
+      session.current = { draftId, base: text, bridge, destination: sttDestination(config?.stt) };
       setRecording(true);
     }
   };

@@ -25,8 +25,8 @@ providers are independent.
 
 For Google, choose **Google (Gemini)** as the transcription provider. This fills
 Google's OpenAI-compatible API root; enter a separate Google AI Studio key and
-load its model catalog. Select an audio-input Gemini model. Google uses the SDK's
-`/chat/completions` audio-input format, documented in
+load its model catalog. Select an audio-input Gemini model. Google uses the
+OpenAI-compatible `/chat/completions` audio-input format, documented in
 [Google's OpenAI compatibility guide](https://ai.google.dev/gemini-api/docs/openai#audio-understanding),
 and does not use the multipart transcription endpoint above. The server asks
 for only the original-language transcript and rejects missing or truncated
@@ -51,7 +51,7 @@ Packaged desktop saves use the OS-backed credential store. Other server setups
 keep the key in their private config. Changing the API root revokes the old key,
 including a copy the desktop might inject after a restart. Save a new key for
 the new endpoint. No chat-provider key is reused. Provider failures expose a
-sanitized error, and uploads are bounded to 12 MiB with SDK retries disabled.
+sanitized error, and uploads are bounded to 12 MiB and failed requests are not retried.
 
 Run the isolated checks:
 
@@ -61,7 +61,7 @@ node --test electron/workspace-credentials-save.node-test.mjs electron/credentia
 ```
 
 The server test launches `launchVerificationServer` with a temporary home and a
-fake engine. An owned loopback transcription server inspects actual SDK uploads.
+fake engine. An owned loopback transcription server inspects the actual HTTP requests.
 It checks the model, WAV upload, credentials, keyless operation, saved settings,
 endpoint changes, sanitized errors and external credential storage. A restart
 with a synthetic stale OS credential verifies that it stays revoked. The fixture records its URL, data
@@ -69,15 +69,15 @@ directory and persistent log path; a companion `.stt.json` contains redacted
 verification evidence; `.stt-restart.json` records the restart checks. Cleanup
 removes only the fixture home and processes.
 
-Model discovery is an admin-only `POST /api/tts/models` using the SDK's model
-listing call. A draft key is used only for that request; it is never saved by
+Model discovery is an admin-only `POST /api/tts/models` using an HTTP request to the
+server's `/models` endpoint. A draft key is used only for that request; it is never saved by
 discovery. Saved keys are reused only for their bound provider and API root.
 The fixture checks multiple OpenAI, Groq and Google catalog entries, new model
 IDs, keyless local discovery and unchanged saved configuration. A companion
 `.stt-models.json` records these checks without keys. No audio inference is
 performed to load a catalog.
 
-The same fixture checks Google's SDK request, base64 WAV data, model and
+The same fixture checks Google's HTTP request, base64 WAV data, model and
 credential, missing-key readiness, sanitized errors without retries, and
 missing or truncated transcripts. A `.stt-google.json` file records these checks.
 

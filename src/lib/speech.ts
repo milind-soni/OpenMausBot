@@ -3,7 +3,6 @@ import type { ConfigStatus } from "@/state/store";
 import { desktopCapabilitiesNow } from "./desktop";
 import { recordedSpeech, type SpeechBridge } from "./recorded-speech";
 
-/** The page records the microphone itself unless Automatic can hand listening to Apple Speech in the Mac app. */
 export function usesRecordedSpeech(config?: ConfigStatus | null, capabilities = desktopCapabilitiesNow()): boolean {
   return (config?.stt?.provider ?? "auto") !== "auto" || capabilities.dictation.engine !== "apple-speech";
 }

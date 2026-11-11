@@ -28,6 +28,7 @@ import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { callCapabilityHelp, type CallCapabilityHelp } from "@/lib/call-capability";
 import { onCallStartRequest } from "@/lib/call-start-request";
 import { listensHere, speechBridge, usesRecordedSpeech } from "@/lib/speech";
+import { sttDestination } from "../../shared/stt";
 import { VoiceSetupDialog } from "./VoiceSetupDialog";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { MENU_SHEET } from "./menu-recipe";
@@ -470,7 +471,7 @@ export function CallOverlay({ bot }: { bot: Bot }) {
 
 function Call({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
-  const [bridge] = useState(() => speechBridge(state.config));
+  const [{ bridge, destination }] = useState(() => ({ bridge: speechBridge(state.config), destination: sttDestination(state.config?.stt) }));
   const speech = useSpeech();
   const initialPhase: Phase = bot.busy ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);
@@ -524,12 +525,12 @@ function Call({ bot }: { bot: Bot }) {
     move("listening");
     setHeard("");
     setNote(null);
-    void bridge?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
+    void bridge?.speechStart({ endpointMs: CALL_ENDPOINT_MS, destination }).catch(() => {
       if (alive.current && currentCall() === bot.id) {
         setNote(t("call.turns.micFailed"));
       }
     });
-  }, [bot.id, move, bridge]);
+  }, [bot.id, move, bridge, destination]);
 
   const say = useCallback(
     async (text: string) => {

@@ -22,6 +22,13 @@ export function isEndpointStt(provider: SttProvider | undefined): provider is "o
   return provider === "openai" || provider === "gemini";
 }
 
+/** The service recorded speech goes to. An upload made for another destination is refused, so a settings change mid-session cannot redirect audio. */
+export const STT_DESTINATION_HEADER = "x-omb-stt-destination";
+
+export function sttDestination(status: Pick<SttStatus, "provider" | "baseUrl"> | undefined): string {
+  return isEndpointStt(status?.provider) ? `${status.provider} ${status.baseUrl}` : "fish";
+}
+
 /** Public transcription settings expose readiness and a saved-key flag, never the credential. */
 export interface SttStatus {
   provider: SttProvider;

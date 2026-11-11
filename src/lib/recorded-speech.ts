@@ -1,3 +1,4 @@
+import { STT_DESTINATION_HEADER } from "../../shared/stt";
 import { api, ApiError } from "@/state/api";
 import { t } from "./i18n";
 
@@ -100,7 +101,7 @@ type Mic = { stream: MediaStream; context: AudioContext; source: MediaStreamAudi
 type Session =
   | { phase: "idle" }
   | { phase: "opening" }
-  | { phase: "listening"; mic: Mic; clip: ReturnType<typeof createClip> }
+  | { phase: "listening"; mic: Mic; clip: ReturnType<typeof createClip>; destination?: string }
   | { phase: "transcribing"; abort: AbortController };
 
 const transcriptListeners = new Set<(line: Line) => void>();
@@ -135,12 +136,12 @@ function micFailure(error: unknown): End {
   return { code: 1, reason: "microphone-failed" };
 }
 
-async function upload(gen: number, frames: Float32Array[], abort: AbortController) {
+async function upload(gen: number, frames: Float32Array[], abort: AbortController, destination: string | undefined) {
   try {
     const { text } = await api<{ text?: string }>("/api/tts/transcribe", {
       method: "POST",
       body: encodeWav(frames),
-      headers: { "content-type": "audio/wav" },
+      headers: { "content-type": "audio/wav", ...(destination === undefined ? {} : { [STT_DESTINATION_HEADER]: encodeURIComponent(destination) }) },
       signal: abort.signal,
       timeoutMs: UPLOAD_TIMEOUT_MS,
     });
@@ -158,7 +159,7 @@ async function upload(gen: number, frames: Float32Array[], abort: AbortControlle
 
 function finishCapture(gen: number) {
   if (gen !== generation || session.phase !== "listening") return;
-  const { mic, clip } = session;
+  const { mic, clip, destination } = session;
   release(mic);
   if (!clip.spoke) {
     session = { phase: "idle" };
@@ -166,7 +167,7 @@ function finishCapture(gen: number) {
   }
   const abort = new AbortController();
   session = { phase: "transcribing", abort };
-  void upload(gen, clip.frames(), abort);
+  void upload(gen, clip.frames(), abort, destination);
 }
 
 export const recordedSpeech: SpeechBridge = {
@@ -208,7 +209,7 @@ export const recordedSpeech: SpeechBridge = {
     mic.source.connect(mic.processor);
     mic.processor.connect(mic.context.destination);
     void mic.context.resume().catch(() => {});
-    session = { phase: "listening", mic, clip };
+    session = { phase: "listening", mic, clip, destination: options?.destination };
   },
   async speechStop() {
     teardown();

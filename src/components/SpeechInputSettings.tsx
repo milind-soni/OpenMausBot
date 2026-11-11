@@ -78,12 +78,10 @@ function SpeechInputForm() {
     const nextKey = key.trim() || (removeKey ? "" : undefined);
     const desktopKeySave = window.ogb?.setCredential && !window.ogb.remoteClient?.active ? window.ogb.setCredential : undefined;
     try {
-      let config = await api<ConfigStatus>("/api/config", {
-        method: "PUT",
-        body: JSON.stringify({ stt: { provider, baseUrl: baseUrl.trim(), model: model.trim(),
-          ...(!desktopKeySave && nextKey !== undefined ? { key: nextKey } : {}) } }),
-      });
-      if (desktopKeySave && nextKey !== undefined) config = await desktopKeySave("sttKey", nextKey, { provider, baseUrl: baseUrl.trim() });
+      const target = { provider, baseUrl: baseUrl.trim(), model: model.trim() };
+      const config = desktopKeySave && nextKey !== undefined
+        ? await desktopKeySave("sttKey", nextKey, target)
+        : await api<ConfigStatus>("/api/config", { method: "PUT", body: JSON.stringify({ stt: { ...target, ...(nextKey !== undefined ? { key: nextKey } : {}) } }) });
       dispatch({ type: "configStatus", config });
       setKey("");
       setRemoveKey(false);

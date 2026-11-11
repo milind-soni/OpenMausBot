@@ -4,6 +4,7 @@ import type { AppConfig } from "../config.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { voiceFailure } from "../tts/errors.ts";
 import { listSpeechModels, transcribe } from "../stt.ts";
+import { STT_DESTINATION_HEADER, sttDestination } from "../../shared/stt.ts";
 import { STT_INSECURE_KEY_ERROR, sttConfigSchema, sttKeySendable, sttNeedsKey, sttSavePatch, sttStatus, usableSttKey } from "../stt-config.ts";
 import * as tts from "../tts/index.ts";
 import { toUtterances, VOICE_FIRST_BLOCK_MAX_CHARS } from "../tts/speech-text.ts";
@@ -107,6 +108,11 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
       if (!sttStatus(cfg).configured) {
         req.resume();
         return json(res, 409, userError("serverError.voice.speechInputRequired"));
+      }
+      const destination = req.headers[STT_DESTINATION_HEADER];
+      if (typeof destination === "string" && destination !== encodeURIComponent(sttDestination(sttStatus(cfg)))) {
+        req.resume();
+        return json(res, 409, userError("serverError.voice.speechInputChanged"));
       }
       const declared = Number(req.headers["content-length"] ?? 0);
       if (declared > TRANSCRIBE_MAX_BYTES) {

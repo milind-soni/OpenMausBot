@@ -27,6 +27,15 @@ describe("Fish Audio transcribe", () => {
     expect(audio.size).toBe(3);
   });
 
+  it("stops the upload when the caller hangs up", async () => {
+    const fetchMock = stubFetch(200, { text: "late" });
+    const hangUp = new AbortController();
+    await transcribe(new Uint8Array(4), "audio/wav", "k", hangUp.signal);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    hangUp.abort();
+    expect(init.signal!.aborted).toBe(true);
+  });
+
   it("returns empty text when Fish heard nothing", async () => {
     stubFetch(200, {});
     expect(await transcribe(new Uint8Array(4), "audio/wav", "k")).toBe("");

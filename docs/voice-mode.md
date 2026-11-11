@@ -107,7 +107,7 @@ hand real work to specialists with `coordinate_bots` — no new machinery requir
   server's current catalog, and the model field also accepts custom IDs. Any other
   server works without a key, and an address with no path gets `/v1`. See
   [speech input setup and verification](verification/speech-input.md).
-  Google (Gemini) is another provider option, using the SDK's audio chat input
+  Google (Gemini) is another provider option, using Google's OpenAI-compatible audio chat input
   with a separate Google AI Studio key.
   The voice half works everywhere. Live
   calls (GPT-Live, `server/live-call.ts`) need no dictation, so they work in

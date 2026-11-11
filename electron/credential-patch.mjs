@@ -22,6 +22,7 @@ export const CREDENTIAL_PATCH = {
   sttKey: (value, options) => ({ stt: {
     ...(typeof options?.provider === "string" ? { provider: options.provider } : {}),
     ...(typeof options?.baseUrl === "string" ? { baseUrl: options.baseUrl } : {}),
+    ...(typeof options?.model === "string" ? { model: options.model } : {}),
     key: value,
   } }),
   jevApiKey: (value) => ({ decider: { key: value } }),

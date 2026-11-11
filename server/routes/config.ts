@@ -509,6 +509,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         if (!merged.ok) return json(res, 400, { error: merged.error });
         patch.opencodeGo = { ...patch.opencodeGo, providerKeys: merged.keys };
       }
+      if (patch.stt?.key?.trim() && !sttKeySendable({ ...cfg.stt, ...patch.stt })) return json(res, 400, { error: STT_INSECURE_KEY_ERROR });
       const browserCleanupRequests: BrowserCleanupRequest[] = [];
       if (profileControlConflict()) return json(res, 409, { error: "Release browser control before deleting its profile." });
       try {
@@ -535,7 +536,6 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         const spec = usedBrowserSessions.get(session) ?? (engineForSwitch.kind === "ready" ? browserSessionSpec(engineForSwitch.binaryPath, session, id) : null);
         return spec ? [{ session, spec }] : [];
       });
-      if (patch.stt?.key?.trim() && !sttKeySendable({ ...cfg.stt, ...patch.stt })) return json(res, 400, { error: STT_INSECURE_KEY_ERROR });
       let configWriteCommitted = false;
       const enginesBefore = engineLaunches(providerConfigs());
       const externalSecretStorage = url.searchParams.get("secretStorage") === "external";

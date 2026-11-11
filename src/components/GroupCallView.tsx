@@ -17,6 +17,7 @@ import { BotAvatar } from "./Avatar";
 import { CallTargetButton, type CallButtonPlacement } from "./CallView";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { pageCanRecord, speechBridge, usesRecordedSpeech } from "@/lib/speech";
+import { sttDestination } from "../../shared/stt";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 import { titledCard } from "./ApprovalCard";
@@ -73,7 +74,7 @@ function questionIn(messages: Message[]): Message | undefined {
 
 function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const { state, dispatch } = useStore();
-  const [bridge] = useState(() => speechBridge(state.config));
+  const [{ bridge, destination }] = useState(() => ({ bridge: speechBridge(state.config), destination: sttDestination(state.config?.stt) }));
   const speech = useSpeech();
   const initialPhase: Phase = group.working || group.busyBotId ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);
@@ -135,12 +136,12 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     setSpeakingMemberId(null);
     setHeard("");
     setNote(null);
-    void bridge?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
+    void bridge?.speechStart({ endpointMs: CALL_ENDPOINT_MS, destination }).catch(() => {
       if (alive.current && currentCall() === group.id) {
         setNote(t("call.turns.micFailed"));
       }
     });
-  }, [group.id, move, bridge]);
+  }, [group.id, move, bridge, destination]);
 
   const scheduleListen = useCallback(
     (force = false, delay = 140) => {

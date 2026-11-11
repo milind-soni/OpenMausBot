@@ -107,7 +107,7 @@ it("shows save failures and keeps the credential draft for retry", async () => {
   expect(host.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe("retry-key");
 });
 
-it("saves the endpoint before placing a desktop credential in the OS store", async () => {
+it("saves a desktop key and its endpoint in one credential write", async () => {
   const setCredential = vi.fn(async () => fixture.config);
   window.ogb = { setCredential } as unknown as Window["ogb"];
   try {
@@ -116,9 +116,24 @@ it("saves the endpoint before placing a desktop credential in the OS store", asy
     await input("password", "desktop-secret");
     await enterModel("whisper-fixture");
     await save();
-    expect(JSON.parse(fixture.api.mock.calls[0]![1].body)).toEqual({ stt: { provider: "openai", ...STT_PRESETS.groq, model: "whisper-fixture" } });
-    expect(setCredential).toHaveBeenCalledWith("sttKey", "desktop-secret", { provider: "openai", baseUrl: STT_PRESETS.groq.baseUrl });
-    expect(fixture.api.mock.invocationCallOrder[0]).toBeLessThan(setCredential.mock.invocationCallOrder[0]!);
+    expect(fixture.api).not.toHaveBeenCalled();
+    expect(setCredential).toHaveBeenCalledWith("sttKey", "desktop-secret", { provider: "openai", ...STT_PRESETS.groq, model: "whisper-fixture" });
+  } finally { delete window.ogb; }
+});
+
+it("leaves the saved endpoint alone when the desktop key write is refused", async () => {
+  const setCredential = vi.fn(async () => { throw new Error("A key can only be sent to an https:// address or a server on this computer."); });
+  window.ogb = { setCredential } as unknown as Window["ogb"];
+  try {
+    await select(0, "openai");
+    await select(1, "custom");
+    await input("url", "http://192.168.1.5:8000");
+    await input("password", "lan-key");
+    await enterModel("whisper");
+    await save();
+    expect(fixture.api).not.toHaveBeenCalled();
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(host.querySelector('[role="alert"]')!.textContent).toContain("https://");
   } finally { delete window.ogb; }
 });
 

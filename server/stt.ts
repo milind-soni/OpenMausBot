@@ -33,7 +33,7 @@ export async function listSpeechModels(cfg: AppConfig, signal?: AbortSignal): Pr
 
 export async function transcribe(cfg: AppConfig, audio: Uint8Array, mime: string, signal?: AbortSignal): Promise<string> {
   const status = sttStatus(cfg);
-  if (status.provider === "auto" || status.provider === "fish") return fish.transcribe(audio, mime, cfg.tts!.fishKey!);
+  if (status.provider === "auto" || status.provider === "fish") return fish.transcribe(audio, mime, cfg.tts!.fishKey!, signal);
   try {
     if (status.provider === "gemini") {
       const result = await sttFetch<{ choices?: { finish_reason?: string; message?: { content?: unknown } }[] }>(cfg, "/chat/completions", {

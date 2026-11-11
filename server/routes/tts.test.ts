@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { STT_DESTINATION_HEADER } from "../../shared/stt.ts";
 import type { AppConfig } from "../config.ts";
 import { addHeldSecretScrubber } from "../redact.ts";
 import { VOICE_FIRST_BLOCK_MAX_CHARS } from "../tts/speech-text.ts";
@@ -83,6 +84,21 @@ describe("transcribe route", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ text: "hi bot" }), { status: 200 })));
     const { answers } = await call("POST", "/api/tts/transcribe", {}, withKey, upload(Buffer.from("RIFF")));
     expect(answers).toEqual([[200, { text: "hi bot" }]]);
+  });
+
+  it("refuses a clip recorded for a destination that has since changed", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ text: "hi bot" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const local = { stt: { provider: "openai", baseUrl: "http://localhost:8000", model: "whisper" } } as AppConfig;
+    const recordedFor = (destination: string) => Object.assign(Readable.from([Buffer.from("RIFF")]), {
+      headers: { "content-type": "audio/wav", "content-length": "4", [STT_DESTINATION_HEADER]: encodeURIComponent(destination) },
+    }) as never;
+    const changed = await call("POST", "/api/tts/transcribe", {}, local, recordedFor("openai https://api.openai.com/v1"));
+    expect(changed.answers[0]![0]).toBe(409);
+    expect((changed.answers[0]![1] as { errorKey: string }).errorKey).toBe("serverError.voice.speechInputChanged");
+    expect(fetchMock).not.toHaveBeenCalled();
+    const same = await call("POST", "/api/tts/transcribe", {}, local, recordedFor("openai http://localhost:8000/v1"));
+    expect(same.answers).toEqual([[200, { text: "hi bot" }]]);
   });
 
   it("answers 502 with Fish's message when Fish fails", async () => {
