@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setLocale } from "@/lib/i18n";
+import { setLocale, t } from "@/lib/i18n";
 import type { AppSettingsSection } from "@/state/store";
 
 const fx = vi.hoisted(() => ({
@@ -121,5 +121,38 @@ describe("searching Settings for a key", () => {
     type("zzzz");
     expect(document.body.textContent).toContain("Nothing matches “zzzz”");
     expect(document.querySelector("[data-settings-key-result]")).toBeNull();
+  });
+});
+
+describe("searching Settings for tool calls", () => {
+  it.each(["en", "pt-br"] as const)("opens the existing switch from its translated search result (%s)", async (locale) => {
+    fx.advanced = false;
+    fx.config = { ...fx.config, features: { showToolCalls: false } };
+    fx.api.mockResolvedValue({ ...fx.config, features: { showToolCalls: true } });
+    setLocale(locale);
+    flushSync(() => root.render(createElement(SettingsModal)));
+    type(t("settings.toolCalls.title"));
+    const found = document.body.querySelector<HTMLButtonElement>("[data-settings-tool-calls-result]");
+    expect(found).not.toBeNull();
+    flushSync(() => found!.click());
+    expect(search().value).toBe("");
+    expect(fx.section).toBe("general");
+    const toggle = document.body.querySelector<HTMLButtonElement>(`[aria-label="${t("settings.toolCalls.aria")}"]`);
+    expect(toggle).not.toBeNull();
+    expect(toggle!.getAttribute("aria-checked")).toBe("false");
+    flushSync(() => toggle!.click());
+    await vi.waitFor(() => expect(toggle!.getAttribute("aria-checked")).toBe("true"));
+    expect(fx.api).toHaveBeenCalledWith("/api/config", {
+      method: "PATCH", body: JSON.stringify({ features: { showToolCalls: true } }),
+    });
+  });
+
+  it("keeps a remote client's server tool-call setting unavailable", () => {
+    fx.advanced = false;
+    vi.stubGlobal("ogb", { remoteClient: { active: true } });
+    flushSync(() => root.render(createElement(SettingsModal)));
+    type("tool calls");
+    expect(document.body.querySelector("[data-settings-tool-calls-result]")).toBeNull();
+    expect(document.body.querySelector('[aria-label="Show tool calls in chat"]')).toBeNull();
   });
 });
