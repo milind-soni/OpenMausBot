@@ -173,8 +173,11 @@ async function openAs(who: Who, size: readonly [string, string], query = "") {
     expect(offered, "and no Templates, which stay an admin's").not.toContain("Templates");
     await rui.shot("00-rui-user-plus-menu-desktop");
     await rui.evaluate(`[...document.querySelectorAll('[role="menu"] [role="menuitem"]')].find((item) => /^new bot$/i.test(item.textContent.trim())).click(); true`);
+    await rui.type("[data-new-bot-name] input", "Quotes");
+    await rui.click('[data-new-bot-name] button[type="submit"]');
     await expect.poll(async () => (await botsOf("rui")).filter((bot) => !before.has(bot.id)).length, { timeout: 60_000, interval: 500 }).toBe(1);
     quotes = (await botsOf("rui")).find((bot) => !before.has(bot.id))!;
+    expect(quotes.name).toBe("Quotes");
     expect(quotes.access, "Only people added, nobody added").toEqual({ everyone: "none", people: {} });
     expect([(quotes as Bot & { createdBy?: string }).createdBy, quotes.yourAccess], "he looks after it").toEqual([address("rui"), "edit"]);
     for (const admin of ["olive", "ada"] as const) expect((await botsOf(admin)).find((bot) => bot.id === quotes.id)?.yourAccess, admin).toBe("edit");
