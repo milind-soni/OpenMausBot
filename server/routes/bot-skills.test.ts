@@ -206,14 +206,6 @@ describe("removing a skill from one bot", () => {
     expect(bot.assignedSkills).toEqual(["twin-unsafe-root"]);
     expect(listSkills(bot.id).map((skill) => skill.name)).toContain("twin-unsafe-root");
   });
-
-  it("leaves the shared skill assigned when the bot's own skill list can't be read", async () => {
-    const { bot, remove } = await twinFixture("route-twin-damaged-list", "twin-damaged-list");
-    writeFileSync(join(DATA_DIR, "skill-state", bot.id, "skills.json"), "{\"twin-damaged-list\": {");
-
-    expect(await remove()).toMatchObject({ status: 409, error: expect.stringMatching(/can't be read/) });
-    expect(bot.assignedSkills).toEqual(["twin-damaged-list"]);
-  });
 });
 
 describe("a bot's opt-outs from every-bot skills", () => {

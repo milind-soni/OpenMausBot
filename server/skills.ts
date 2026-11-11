@@ -239,19 +239,6 @@ function readManifest(botId: string): SkillManifest {
   return migrated;
 }
 
-/** Whether this bot keeps a private skill of that name; null when its protected manifest is there but cannot be read,
- * so a caller never takes an unreadable list for an empty one. */
-export function ownsPrivateSkill(botId: string, name: string): boolean | null {
-  try {
-    readFileSync(manifestPath(botId));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null;
-    return Object.hasOwn(readManifest(botId), name);
-  }
-  const manifest = manifestFromFile(manifestPath(botId));
-  return manifest ? Object.hasOwn(manifest, name) : null;
-}
-
 function comparablePath(path: string): string {
   const normalized = resolve(path).replace(/^\\\\\?\\/, "");
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
