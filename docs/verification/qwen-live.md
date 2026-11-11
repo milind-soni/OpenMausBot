@@ -14,6 +14,12 @@ The server exposes only configured/key-target booleans, not the key value.
 The credential must belong to the selected region/workspace. Changing its
 credential target invalidates the previous binding.
 
+HTTP credential saves and removals through `/api/config` include a top-level
+`qwenKeyTarget: { region, workspace }` snapshot alongside `live.qwen.key`.
+The server returns 409 if that snapshot is missing or the destination changed
+before the write. Reload Call settings before retrying. The snapshot is not
+persisted; `keyFor` is always derived by the server.
+
 The on-disk native `live.provider` enum is unchanged for program-rollback
 compatibility. Qwen settings live under `live.qwen`; the public settings API
 reports the effective provider as `qwen` when enabled. There is no fallback to
@@ -62,6 +68,12 @@ stops immediately and the client waits up to three seconds for the matching
 server end state. An idle or expired
 call uses that end reason; missing final state remains a dropped call with a
 retry action.
+
+Silent PCM uploads do not reset the call's idle timeout. Provider-detected
+speech, bot work and pending result audio keep an active call from timing out;
+revocation and the playback-stall budget still apply. If a result finishes
+generating before its queued audio is sent, an interruption marks that result
+as incompletely spoken. Playback credits remain flow-control signals only.
 
 ## Repeatable offline checks
 

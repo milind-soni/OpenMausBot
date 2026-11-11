@@ -241,6 +241,47 @@ describe.skipIf(process.platform === "win32")("Qwen spoken sends during a real e
     } finally { writeFileSync(gate, "finish"); await api("POST", `/api/bots/${bot.id}/interrupt`); }
   }, 30_000);
 
+  it.each(["openai", "qwen"] as const)("keeps %s call history after the newest fresh-start divider", async providerName => {
+    const bot = await createBot();
+    let callId: string | undefined;
+    let qwen: Awaited<ReturnType<typeof startQwen>> | undefined;
+    try {
+      writeFileSync(gate, "finish");
+      const send = async (text: string) => {
+        expect((await api("POST", `/api/bots/${bot.id}/messages`, { text })).status).toBe(202);
+        await expect.poll(async () => (await lines(bot)).some(line => line.turnTerminal && line.text?.includes(text)), { timeout: 10_000 }).toBe(true);
+        await expect.poll(async () => (await botState(bot)).busy).toBe(false);
+      };
+      await send("FRESH_HISTORY_OLD_ONLY");
+      const reset = await api("POST", `/api/bots/${bot.id}/start-fresh`, { threadId: bot.threadId });
+      expect(reset.status).toBe(200);
+      expect(reset.body.message.compaction.fresh).toBe(true);
+      await send("FRESH_HISTORY_CURRENT");
+      expect((await lines(bot)).some(line => line.text === "FRESH_HISTORY_OLD_ONLY")).toBe(true);
+
+      let history: unknown;
+      if (providerName === "qwen") {
+        qwen = await startQwen(bot);
+        history = qwen.provider.commands.filter(event => event.type === "conversation.item.create").map(event => event.item);
+      } else {
+        expect((await api("PATCH", "/api/live/settings", { provider: "openai" })).status).toBe(200);
+        const count = openai.sessions.length;
+        const started = await api("POST", "/api/live/session", { botId: bot.id, client: "web", sdp: "v=0\r\n" });
+        expect(started.status, JSON.stringify(started.body)).toBe(201);
+        callId = started.body.call.callId;
+        const session = openai.sessions[count];
+        await openai.waitForAttach(session.id);
+        history = (session.body.session as { input?: unknown }).input;
+      }
+      expect(JSON.stringify(history)).toContain("FRESH_HISTORY_CURRENT");
+      expect(JSON.stringify(history)).not.toContain("FRESH_HISTORY_OLD_ONLY");
+    } finally {
+      await qwen?.close();
+      if (callId) expect((await api("POST", "/api/live/call/end", { callId })).status).toBe(200);
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+    }
+  }, 30_000);
+
   it("preserves OpenAI spoken steering into a continuation without a request ID", async () => {
     const bot = await createBot();
     let callId: string | undefined;

@@ -64,6 +64,7 @@ export class QwenLiveSocket implements LiveSocket {
   private readonly committed: string[] = [];
   private readonly notes: SpokenNote[] = [];
   private active: { id?: string; note?: SpokenNote; interrupted?: boolean } | null = null;
+  private bufferedReadout: SpokenNote | null = null;
   private readonly suppressedAudio = new Set<string>();
   private readonly retiredInputs = new Set<string>();
   private readonly retiredResponses = new Set<string>();
@@ -164,6 +165,10 @@ export class QwenLiveSocket implements LiveSocket {
     return true;
   }
 
+  hasPendingMedia(): boolean {
+    return this.readyState === 1 && (this.speaking !== null || this.audioBytes > 0);
+  }
+
   send(raw: string): void {
     const event = JSON.parse(raw) as Record<string, unknown>;
     if (event.type === "session.close") { this.close(); return; }
@@ -223,6 +228,7 @@ export class QwenLiveSocket implements LiveSocket {
     for (const tool of this.tools.values()) if (tool.timer) clearTimeout(tool.timer);
     for (const input of this.inputs.values()) if (input.timer) clearTimeout(input.timer);
     this.inputs.clear(); this.responses.clear(); this.tools.clear(); this.notes.length = 0; this.committed.length = 0;
+    this.bufferedReadout = null;
     this.suppressedAudio.clear(); this.retiredInputs.clear(); this.retiredResponses.clear(); this.retiredTools.clear();
     this.upstream.onopen = this.upstream.onmessage = this.upstream.onerror = this.upstream.onclose = null;
     try { this.upstream.close(code, reason); } catch {}
@@ -265,6 +271,7 @@ export class QwenLiveSocket implements LiveSocket {
     } else if (event.type === "input_audio_buffer.speech_started" && typeof event.item_id === "string") {
       if (this.retiredInputs.has(event.item_id) || this.inputs.has(event.item_id)) return;
       this.speaking = event.item_id;
+      this.emit({ type: "session.media.activity" });
       if (this.active) {
         this.active.interrupted = true;
         if (this.active.id) this.remember(this.suppressedAudio, this.active.id);
@@ -277,6 +284,7 @@ export class QwenLiveSocket implements LiveSocket {
       if (!input || input.stopped) return;
       input.stopped = true;
       if (this.speaking === event.item_id) this.speaking = null;
+      this.emit({ type: "session.media.activity" });
       this.awaitingTurn = event.reason !== "turn_invalid";
       input.end = Number(event.audio_end_ms) || input.start;
       if (event.reason === "turn_invalid") { this.retireInput(event.item_id); this.flush(); }
@@ -302,10 +310,8 @@ export class QwenLiveSocket implements LiveSocket {
       if (this.active?.id === response.id) {
         const active = this.active;
         if (active.note?.status === "completed" && (active.interrupted || response.status !== "completed")) {
-          const note = active.note;
-          this.notes.push({ ...note, status: "incomplete", result: `The previous result was not fully spoken. Do not claim it was delivered. Ask whether the person wants it read again; the result remains in the original chat. Result: ${note.result}` });
-          this.emit({ type: "session.playback.incomplete", request_id: note.requestId, thread_id: note.threadId });
-        }
+          this.incompleteReadout(active.note);
+        } else if (active.note?.status === "completed" && this.audioBytes > 0) this.bufferedReadout = active.note;
         this.active = null;
       }
       this.flush();
@@ -431,6 +437,8 @@ export class QwenLiveSocket implements LiveSocket {
   }
 
   private clearAudio(): void {
+    if (this.bufferedReadout) this.incompleteReadout(this.bufferedReadout);
+    this.bufferedReadout = null;
     if (this.audioTimer) clearTimeout(this.audioTimer);
     this.audioTimer = null; this.audioQueue.length = 0; this.audioBytes = 0;
     this.watchPlayback();
@@ -438,6 +446,11 @@ export class QwenLiveSocket implements LiveSocket {
     this.playbackRunning = false;
     if (this.playbackFlow) this.playbackEpoch += 1;
     this.media?.send(JSON.stringify({ type: "audio.clear", ...(this.playbackFlow ? { epoch: this.playbackEpoch } : {}) }));
+  }
+
+  private incompleteReadout(note: SpokenNote): void {
+    this.notes.push({ ...note, status: "incomplete", result: `The previous result was not fully spoken. Do not claim it was delivered. Ask whether the person wants it read again; the result remains in the original chat. Result: ${note.result}` });
+    this.emit({ type: "session.playback.incomplete", request_id: note.requestId, thread_id: note.threadId });
   }
 
   private drainAudio(): void {
@@ -458,6 +471,7 @@ export class QwenLiveSocket implements LiveSocket {
     this.audioBytes -= chunk.length;
     if (this.playbackFlow) this.playbackBytes -= chunk.length;
     try { this.media.send(chunk); } catch { this.close(1011, "audio playback failed"); return; }
+    if (!this.audioBytes) this.bufferedReadout = null;
     this.lastAudioAt = Date.now();
     this.watchPlayback(true);
     this.audioTimer = setTimeout(() => { this.audioTimer = null; this.drainAudio(); }, 20);

@@ -484,6 +484,116 @@ describe("LiveCallController lifecycle", () => {
     expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "idle" });
   });
 
+  it("hangs up an idle Qwen call while silent PCM keeps arriving", async () => {
+    const t = await setupQwenMedia();
+    t.settings.idleMinutes = 1;
+    const capture = setInterval(() => t.controller.inputMedia(t.callId, Buffer.alloc(640)), 20);
+    try {
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(t.controller.current()).toBeNull();
+      expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "idle" });
+      expect(t.provider.readyState).toBe(3);
+      expect(t.media.close).toHaveBeenCalledOnce();
+    } finally {
+      clearInterval(capture);
+      await t.controller.shutdown();
+    }
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps a Qwen call active for speech before timing out subsequent silence", async () => {
+    const t = await setupQwenMedia();
+    t.settings.idleMinutes = 1;
+    const capture = setInterval(() => t.controller.inputMedia(t.callId, Buffer.alloc(640)), 20);
+    try {
+      await vi.advanceTimersByTimeAsync(45_000);
+      t.provider.receive({ type: "input_audio_buffer.speech_started", item_id: "greeting", audio_start_ms: 44_000 });
+      t.provider.receive({ type: "input_audio_buffer.speech_stopped", item_id: "greeting", audio_end_ms: 45_000 });
+      t.provider.receive({ type: "input_audio_buffer.committed", item_id: "greeting" });
+      t.provider.receive({ type: "response.created", response: { id: "reply" } });
+      t.provider.receive({ type: "conversation.item.input_audio_transcription.completed", item_id: "greeting", transcript: "Hello." });
+      t.provider.receive({ type: "response.done", response: { id: "reply", status: "completed" } });
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect(t.controller.current()).toMatchObject({ status: "live" });
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(t.controller.current()).toBeNull();
+      expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "idle" });
+      expect(t.deps.send).not.toHaveBeenCalled();
+    } finally {
+      clearInterval(capture);
+      await t.controller.shutdown();
+    }
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps Qwen speech active until VAD stops, then times out without requiring final ASR", async () => {
+    const t = await setupQwenMedia();
+    t.settings.idleMinutes = 1;
+    try {
+      await vi.advanceTimersByTimeAsync(45_000);
+      t.provider.receive({ type: "input_audio_buffer.speech_started", item_id: "long-speech", audio_start_ms: 45_000 });
+      await vi.advanceTimersByTimeAsync(84_000);
+      expect(t.controller.current()).toMatchObject({ status: "live" });
+      t.provider.receive({ type: "input_audio_buffer.speech_stopped", item_id: "long-speech", audio_end_ms: 129_000 });
+      await vi.advanceTimersByTimeAsync(51_000);
+      expect(t.controller.current()).toMatchObject({ status: "live" });
+      await vi.advanceTimersByTimeAsync(IDLE_CHECK_MS);
+      expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "idle" });
+      expect(t.deps.send).not.toHaveBeenCalled();
+    } finally { await t.controller.shutdown(); }
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("counts Qwen speech between idle checks even before final ASR arrives", async () => {
+    const t = await setupQwenMedia();
+    t.settings.idleMinutes = 1;
+    try {
+      await vi.advanceTimersByTimeAsync(58_000);
+      t.provider.receive({ type: "input_audio_buffer.speech_started", item_id: "brief", audio_start_ms: 58_000 });
+      await vi.advanceTimersByTimeAsync(1000);
+      t.provider.receive({ type: "input_audio_buffer.speech_stopped", item_id: "brief", audio_end_ms: 59_000 });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(t.controller.current()).toMatchObject({ status: "live" });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "idle" });
+    } finally { await t.controller.shutdown(); }
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not idle out while Qwen result audio is still draining", async () => {
+    const t = await setupQwenMedia(owner, false);
+    t.settings.idleMinutes = 1;
+    expect(t.controller.bindMedia(t.callId, owner, t.media)).toBe(true);
+    try {
+      t.provider.receive({ type: "response.created", response: { id: "long-result" } });
+      for (let chunk = 0; chunk < 175; chunk++) t.provider.receive({ type: "response.audio.delta", response_id: "long-result", delta: Buffer.alloc(19_200).toString("base64") });
+      t.provider.receive({ type: "response.done", response: { id: "long-result", status: "completed" } });
+      await vi.advanceTimersByTimeAsync(75_000);
+      expect(t.controller.current()).toMatchObject({ status: "live" });
+      expect(t.media.send.mock.calls.reduce((bytes, [frame]) => bytes + (Buffer.isBuffer(frame) ? frame.length : 0), 0)).toBe(3_360_000);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "idle" });
+    } finally { await t.controller.shutdown(); }
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(["speech", "queued playback"])("revocation takes priority over Qwen %s at an idle check", async media => {
+    const t = await setupQwenMedia();
+    try {
+      if (media === "speech") t.provider.receive({ type: "input_audio_buffer.speech_started", item_id: "long-speech" });
+      else {
+        t.provider.receive({ type: "response.created", response: { id: "readout" } });
+        t.provider.receive({ type: "response.audio.delta", response_id: "readout", delta: Buffer.alloc(960).toString("base64") });
+      }
+      t.signedIn.mockReturnValue(false);
+      await vi.advanceTimersByTimeAsync(IDLE_CHECK_MS);
+      expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "signed-out" });
+      expect(t.provider.readyState).toBe(3);
+      expect(t.media.close).toHaveBeenCalledOnce();
+    } finally { await t.controller.shutdown(); }
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("does not hang up while the bot works, but does while an approval waits", async () => {
     const t = setup();
     await t.start();

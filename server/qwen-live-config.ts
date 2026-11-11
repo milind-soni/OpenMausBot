@@ -38,6 +38,14 @@ export function usableQwenKey(qwen: QwenLiveConfig | undefined): string | undefi
   return key && qwen?.keyFor === qwenKeyTarget(qwen) ? key : undefined;
 }
 
+export function requireQwenKeyTarget(current: QwenLiveConfig | undefined, patch: QwenLiveConfig | undefined, expected: unknown): void {
+  if (patch?.key === undefined) return;
+  const checked = z.object({ region: qwenRegionSchema, workspace: qwenWorkspaceSchema }).strict().safeParse(expected);
+  if (!checked.success || qwenKeyTarget(checked.data) !== qwenKeyTarget(current) || qwenKeyTarget(checked.data) !== qwenKeyTarget({ ...current, ...patch })) {
+    throw Object.assign(new Error("The Qwen key destination changed. Reload Call settings before saving or removing the key."), { status: 409 });
+  }
+}
+
 export function qwenSavePatch(current: QwenLiveConfig | undefined, patch: QwenLiveConfig): QwenLiveConfig {
   const { keyFor: _untrusted, ...asked } = patch;
   const next = { ...current, ...asked };

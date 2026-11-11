@@ -2,11 +2,25 @@ import { describe, expect, it } from "vitest";
 import { liveConfigSchema, liveSavePatch } from "./live-config.ts";
 import { liveCallEndpoint, liveCallKey, liveCallSettings, liveSettingsFor, liveSettingsSavePatch } from "./live-settings.ts";
 import { nestedKeyStatus } from "./key-hint.ts";
-import { qwenLiveEndpoint } from "./qwen-live-config.ts";
+import { qwenLiveEndpoint, requireQwenKeyTarget } from "./qwen-live-config.ts";
 import { redactSecrets } from "./redact.ts";
 import type { AppConfig } from "./config.ts";
 
 describe("Qwen Live configuration", () => {
+  it("requires the credential's captured destination for writes and clears without trusting keyFor", () => {
+    const current = { region: "ap-southeast-1" as const, workspace: "other-workspace", key: "kept-fixture", keyFor: "qwen:other-workspace.ap-southeast-1.maas.aliyuncs.com" };
+    for (const key of ["new-fixture", ""]) {
+      for (const expected of [undefined, { region: "cn-beijing", workspace: "" }, { region: "ap-southeast-1", workspace: "" }, { region: "ap-southeast-1", workspace: "other-workspace", keyFor: current.keyFor }]) {
+        expect(() => requireQwenKeyTarget(current, { key, keyFor: current.keyFor }, expected)).toThrow(expect.objectContaining({ status: 409 }));
+      }
+      expect(() => requireQwenKeyTarget(current, { key, workspace: "changed-workspace" }, { region: current.region, workspace: current.workspace })).toThrow(expect.objectContaining({ status: 409 }));
+      expect(() => requireQwenKeyTarget(current, { key, keyFor: "qwen:evil.invalid" }, { region: current.region, workspace: current.workspace })).not.toThrow();
+    }
+    expect(() => requireQwenKeyTarget(undefined, { key: "initial-fixture" }, { region: "cn-beijing", workspace: "" })).not.toThrow();
+    expect(() => requireQwenKeyTarget(current, { voice: "longanqian_v3.1" }, undefined)).not.toThrow();
+    expect(current.key).toBe("kept-fixture");
+  });
+
   it("persists the effective selection without poisoning the official provider enum or sharing native keys", () => {
     const original = { provider: "azure" as const, key: "native", keyFor: "azure:a.openai.azure.com", azureEndpoint: "https://a.openai.azure.com", voice: "marin" };
     const patch = liveSettingsSavePatch(original, { provider: "qwen", qwenRegion: "cn-beijing", qwenVoice: "longanqian_v3.1" });

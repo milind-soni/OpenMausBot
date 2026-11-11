@@ -11,6 +11,7 @@ export interface LiveSocket {
   close(code?: number, reason?: string): void;
   bindMedia?(media: LiveMediaConsumer, playbackFlow?: "credit-v1"): boolean;
   appendPcm?(pcm: Uint8Array): boolean;
+  hasPendingMedia?(): boolean;
   playbackCredit?(credit: LivePlaybackCredit): boolean;
   releaseDelegation?(id: string): void;
 }

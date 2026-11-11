@@ -278,9 +278,9 @@ describe("the keys page", () => {
       page();
       paste(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-qwen-desktop-key");
       await vi.waitFor(() => expect(row("liveKey")!.querySelector("[data-key-masked]")).not.toBeNull());
-      expect(fx.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ live: { qwen: { key: "fixture-qwen-desktop-key" } } }) });
+      expect(fx.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ live: { qwen: { key: "fixture-qwen-desktop-key" } }, qwenKeyTarget: { region: "cn-beijing", workspace: "" } }) });
       flushSync(() => row("liveKey")!.querySelector<HTMLButtonElement>("[data-key-remove]")!.click());
-      await vi.waitFor(() => expect(fx.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ live: { qwen: { key: "" } } }) }));
+      await vi.waitFor(() => expect(fx.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ live: { qwen: { key: "" } }, qwenKeyTarget: { region: "cn-beijing", workspace: "" } }) }));
       expect(setCredential).not.toHaveBeenCalled();
     } finally { window.ogb = original; }
   });
@@ -335,7 +335,7 @@ describe("the keys page", () => {
     page();
     paste(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-qwen-key-first");
     await vi.waitFor(() => expect(row("liveKey")!.querySelector("[data-key-masked]")).not.toBeNull());
-    expect(JSON.parse(fx.api.mock.calls[0][1].body)).toEqual({ live: { qwen: { key: "fixture-qwen-key-first" } } });
+    expect(JSON.parse(fx.api.mock.calls[0][1].body)).toEqual({ live: { qwen: { key: "fixture-qwen-key-first" } }, qwenKeyTarget: { region: "cn-beijing", workspace: "" } });
     expect(row("liveKey")!.textContent).toContain("Saved");
     expect(JSON.stringify(fx.config)).not.toContain("fixture-qwen-key");
     expect(host.innerHTML).not.toContain("fixture-qwen-key");
@@ -344,11 +344,31 @@ describe("the keys page", () => {
     type(replacement, "fixture-qwen-key-second");
     flushSync(() => row("liveKey")!.querySelector<HTMLButtonElement>("[data-key-save]")!.click());
     await vi.waitFor(() => expect(row("liveKey")!.querySelector("[data-key-masked]")).not.toBeNull());
-    expect(JSON.parse(fx.api.mock.calls[1][1].body)).toEqual({ live: { qwen: { key: "fixture-qwen-key-second" } } });
+    expect(JSON.parse(fx.api.mock.calls[1][1].body)).toEqual({ live: { qwen: { key: "fixture-qwen-key-second" } }, qwenKeyTarget: { region: "cn-beijing", workspace: "" } });
     flushSync(() => row("liveKey")!.querySelector<HTMLButtonElement>("[data-key-remove]")!.click());
     await vi.waitFor(() => expect(row("liveKey")!.querySelector("[data-key-masked]")).toBeNull());
-    expect(JSON.parse(fx.api.mock.calls[2][1].body)).toEqual({ live: { qwen: { key: "" } } });
+    expect(JSON.parse(fx.api.mock.calls[2][1].body)).toEqual({ live: { qwen: { key: "" } }, qwenKeyTarget: { region: "cn-beijing", workspace: "" } });
     expect(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!.value).toBe("");
+  });
+
+  it("captures the displayed destination before a key save waits and uses the new destination after a remote change", async () => {
+    const live = { configured: false, provider: "qwen", qwenRegion: "cn-beijing", qwenWorkspace: "old-space", qwenKeyConfigured: false, voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    let refuse!: (error: Error) => void;
+    fx.api.mockImplementationOnce(() => new Promise((_resolve, reject) => { refuse = reject; }));
+    page();
+    paste(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-key-old-destination");
+    expect(JSON.parse(fx.api.mock.calls[0][1].body)).toEqual({ live: { qwen: { key: "fixture-key-old-destination" } }, qwenKeyTarget: { region: "cn-beijing", workspace: "old-space" } });
+    const moved = { ...live, qwenRegion: "ap-southeast-1", qwenWorkspace: "new-space" };
+    flushSync(() => setConfig({ ...fx.config, live: moved }));
+    refuse(new Error("The Qwen key destination changed. Reload Call settings before saving or removing the key."));
+    await Promise.resolve();
+    expect(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!.value).toBe("");
+    expect(row("liveKey")!.querySelector("[data-key-destination]")!.textContent).toContain("new-space");
+    fx.api.mockResolvedValueOnce({ ...fx.config, live: { ...moved, configured: true, qwenKeyConfigured: true } });
+    paste(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-key-new-destination");
+    await vi.waitFor(() => expect(row("liveKey")!.querySelector("[data-key-masked]")).not.toBeNull());
+    expect(JSON.parse(fx.api.mock.calls[1][1].body)).toEqual({ live: { qwen: { key: "fixture-key-new-destination" } }, qwenKeyTarget: { region: "ap-southeast-1", workspace: "new-space" } });
   });
 
   it("discards a draft key on provider switch rather than offering it to the new provider", async () => {

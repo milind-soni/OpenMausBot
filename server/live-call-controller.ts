@@ -195,7 +195,6 @@ export class LiveCallController {
   inputMedia(callId: string, pcm: Uint8Array): boolean {
     const call = this.call;
     if (!call || call.state.callId !== callId || !call.mediaBound || this.deps.signedIn?.(call.auth) === false) return false;
-    this.touch(call);
     return call.socket?.appendPcm?.(pcm) ?? false;
   }
 
@@ -484,6 +483,7 @@ export class LiveCallController {
       this.maybeStatus(call);
       return;
     }
+    if (call.socket?.hasPendingMedia?.()) { this.touch(call); return; }
     const idleMs = this.deps.settings().idleMinutes * 60_000;
     if (this.now() - call.lastActivityAt >= idleMs) void this.hangUp(call, "idle");
   }
@@ -513,6 +513,9 @@ export class LiveCallController {
         call.heardThroughMs = Math.max(call.heardThroughMs, Number(event.end_ms) || 0);
         this.touch(call);
         if (call.approval && !call.approval.submitted) this.scheduleConsentCheck(call);
+        return;
+      case "session.media.activity":
+        if (call.endpoint.provider === "qwen") this.touch(call);
         return;
       case "session.output_transcript.delta":
         call.transcript.addOutput(Number(event.start_ms), Number(event.end_ms));

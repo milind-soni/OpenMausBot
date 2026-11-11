@@ -14,13 +14,13 @@ class Provider implements LiveSocket {
   close() { this.readyState = 3; }
   event(event: Record<string, unknown>) { this.onmessage?.({ data: JSON.stringify(event) }); }
 }
-function fixture() {
+function fixture(playbackFlow?: "credit-v1") {
   const provider = new Provider();
   const socket = new QwenLiveSocket({ upstream: provider, endpoint: { provider: "qwen", apiBase: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime", model: "qwen-audio-3.1-realtime-flash" }, key: "test-only", voice: "longanqian_v3.1", instructions: "fixture" });
   const media = { bufferedAmount: 0, send: vi.fn(), close: vi.fn() };
   const events: Record<string, unknown>[] = [];
   socket.onmessage = e => events.push(JSON.parse(String(e.data)));
-  provider.readyState = 1; provider.onopen?.({}); provider.event({ type: "session.updated" }); socket.bindMedia(media);
+  provider.readyState = 1; provider.onopen?.({}); provider.event({ type: "session.updated" }); socket.bindMedia(media, playbackFlow);
   const delivered = () => media.send.mock.calls.reduce((sum, [value]) => sum + (Buffer.isBuffer(value) ? value.length : 0), 0);
   return { socket, provider, media, delivered, events };
 }
@@ -49,6 +49,72 @@ it("does not start the next readout until generated audio has drained", async ()
   await vi.advanceTimersByTimeAsync(1_100);
   expect(f.provider.sent.filter(e => e.type === "response.create")).toHaveLength(2);
   f.socket.close();
+});
+
+it.each([undefined, "credit-v1"] as const)("marks an interrupted result incomplete after generation finishes with %s flow", playbackFlow => {
+  const f = fixture(playbackFlow);
+  try {
+    f.socket.send(JSON.stringify({ type: "session.commentary.append", thread_id: "thread", request_id: "request", status: "completed", content: "The code is 729." }));
+    f.provider.event({ type: "response.created", response: { id: "result" } });
+    f.provider.event({ type: "response.audio.delta", response_id: "result", delta: Buffer.alloc(48_000).toString("base64") });
+    f.provider.event({ type: "response.done", response: { id: "result", status: "completed" } });
+    expect(f.delivered()).toBeLessThan(48_000);
+    f.provider.event({ type: "input_audio_buffer.speech_started", item_id: "interruption", audio_start_ms: 100 });
+    expect(f.events.filter(event => event.type === "session.playback.incomplete")).toEqual([
+      { type: "session.playback.incomplete", request_id: "request", thread_id: "thread" },
+    ]);
+    f.provider.event({ type: "input_audio_buffer.speech_stopped", item_id: "interruption", audio_end_ms: 200 });
+    f.provider.event({ type: "input_audio_buffer.committed", item_id: "interruption" });
+    f.provider.event({ type: "response.created", response: { id: "greeting" } });
+    f.provider.event({ type: "response.done", response: { id: "greeting", status: "completed" } });
+    expect(JSON.stringify(f.provider.sent)).toContain("not fully spoken");
+    f.provider.event({ type: "response.done", response: { id: "result", status: "cancelled" } });
+    expect(f.events.filter(event => event.type === "session.playback.incomplete")).toHaveLength(1);
+  } finally { f.socket.close(); }
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("forgets a fully drained result and attributes a later interruption only to the queued result", async () => {
+  const f = fixture("credit-v1");
+  const note = (id: string) => f.socket.send(JSON.stringify({ type: "session.commentary.append", thread_id: "thread", request_id: id, status: "completed", content: id }));
+  const generated = (id: string) => {
+    f.provider.event({ type: "response.created", response: { id } });
+    f.provider.event({ type: "response.audio.delta", response_id: id, delta: Buffer.alloc(48_000).toString("base64") });
+    f.provider.event({ type: "response.done", response: { id, status: "completed" } });
+  };
+  try {
+    note("first"); generated("first"); note("second");
+    for (const seq of [1, 2]) {
+      expect(f.socket.playbackCredit({ type: "playback.credit", epoch: 0, seq, bytes: 24_000, contextState: "running" })).toBe(true);
+      await vi.advanceTimersByTimeAsync(600);
+    }
+    expect(f.delivered()).toBe(48_000);
+    expect(f.provider.sent.filter(event => event.type === "response.create")).toHaveLength(2);
+    expect(f.events.filter(event => event.type === "session.playback.incomplete")).toHaveLength(0);
+    generated("second");
+    f.provider.event({ type: "input_audio_buffer.speech_started", item_id: "interruption", audio_start_ms: 2000 });
+    expect(f.events.filter(event => event.type === "session.playback.incomplete")).toEqual([
+      { type: "session.playback.incomplete", request_id: "second", thread_id: "thread" },
+    ]);
+  } finally { f.socket.close(); }
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it.each([undefined, "credit-v1"] as const)("does not mark a fully drained result incomplete on later speech with %s flow", async playbackFlow => {
+  const f = fixture(playbackFlow);
+  try {
+    f.socket.send(JSON.stringify({ type: "session.commentary.append", thread_id: "thread", request_id: "request", status: "completed", content: "The code is 729." }));
+    f.provider.event({ type: "response.created", response: { id: "result" } });
+    f.provider.event({ type: "response.audio.delta", response_id: "result", delta: Buffer.alloc(960).toString("base64") });
+    f.provider.event({ type: "response.done", response: { id: "result", status: "completed" } });
+    if (playbackFlow) expect(f.socket.playbackCredit({ type: "playback.credit", epoch: 0, seq: 1, bytes: 960, contextState: "running" })).toBe(true);
+    await vi.advanceTimersByTimeAsync(40);
+    expect(f.delivered()).toBe(960);
+    f.provider.event({ type: "input_audio_buffer.speech_started", item_id: "next-turn", audio_start_ms: 100 });
+    expect(f.events.filter(event => event.type === "session.playback.incomplete")).toHaveLength(0);
+    expect(JSON.stringify(f.provider.sent)).not.toContain("not fully spoken");
+  } finally { f.socket.close(); }
+  expect(vi.getTimerCount()).toBe(0);
 });
 
 it("reports a fixed redacted reason when an explicit output limit is exceeded", () => {

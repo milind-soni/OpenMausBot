@@ -219,7 +219,7 @@ export function shownKeyEntry(id: KeyId, config: ConfigStatus | null | undefined
   const entry = keyEntry(id);
   if (id === "liveKey" && config?.live?.provider === "qwen") return {
     ...entry, name: "Qwen", env: [], labelKey: "call.live.qwen.key", purposeKey: "keys.purpose.liveKeyQwen",
-    target: { patch: (value) => ({ live: { qwen: { key: value } } }),
+    target: { patch: (value) => ({ live: { qwen: { key: value } }, qwenKeyTarget: { region: config.live?.qwenRegion ?? "cn-beijing", workspace: config.live?.qwenWorkspace ?? "" } }),
       saved: (status) => ({ configured: status.live?.qwenKeyConfigured === true }),
       placeholder: "sk-…", href: "https://bailian.console.aliyun.com", analytics: "qwen_live" },
   };
