@@ -1,12 +1,12 @@
 import { useEffect } from "react";
 
 import type { RoutineRun } from "@/lib/routines";
-import { api, useStore } from "./store";
+import { api } from "./store";
+import { useStoreDispatch, useStoreSelector } from "./store-select";
 
 /** Loads the runs scheduled from `start` up to where the app's window begins, once a view shows dates before it. */
 export function useRoutineRunsFrom(start: number): void {
-  const { state, dispatch } = useStore();
-  const since = state.routineRunsSince;
+  const since = useStoreSelector((state) => state.routineRunsSince), dispatch = useStoreDispatch();
   useEffect(() => {
     if (since === null || start >= since) return;
     let live = true;
@@ -19,10 +19,10 @@ export function useRoutineRunsFrom(start: number): void {
 
 /** The run that worked in this conversation; one older than the app's window is loaded when the thread is a run's. */
 export function useThreadRoutineRun(botId: string, threadId: string): RoutineRun | undefined {
-  const { state, dispatch } = useStore();
-  const run = state.routineRuns.find((candidate) => candidate.target === "bot" && candidate.botId === botId && candidate.threadId === threadId);
-  const marked = state.bots.find((bot) => bot.id === botId)?.tasks?.some((task) => task.threadId === threadId && task.routineRunId);
-  const missing = !run && Boolean(marked) && state.routineRunsSince !== null;
+  const dispatch = useStoreDispatch();
+  const run = useStoreSelector((state) => state.routineRuns.find((candidate) => candidate.target === "bot" && candidate.botId === botId && candidate.threadId === threadId));
+  const missing = useStoreSelector((state) => !run && state.routineRunsSince !== null &&
+    Boolean(state.bots.find((bot) => bot.id === botId)?.tasks?.some((task) => task.threadId === threadId && task.routineRunId)));
   useEffect(() => {
     if (!missing) return;
     let live = true;
