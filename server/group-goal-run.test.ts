@@ -341,3 +341,55 @@ describe("parseGroupGoalDecision tolerant recovery (issue #5209)", () => {
     expect(parseGroupGoalDecision(`no envelope here`).decision).toBeNull();
   });
 });
+
+describe("parseGroupGoalDecision CodeRabbit review fixes", () => {
+  const O = GROUP_GOAL_CONTROL_OPEN;
+  const C = GROUP_GOAL_CONTROL_CLOSE;
+
+  it("rejects a reply that carries a second decision object after the first", () => {
+    // A correction that cancels the first decision must not be silently ignored.
+    expect(
+      parseGroupGoalDecision(
+        `${O}{"status":"continue","next":"Scout","instruction":"Send"} {"status":"blocked","detail":"Do not send"}${C}`,
+      ).decision,
+    ).toBeNull();
+  });
+
+  it("rejects a reply that repeats a control marker after the first decision", () => {
+    expect(
+      parseGroupGoalDecision(`${O}{"status":"completed","detail":"ok"}${O}${C}`).decision,
+    ).toBeNull();
+  });
+
+  it("keeps a single decision with trailing prose but no second object", () => {
+    // Minor trailing prose is the intended tolerance (issue case 3); a lone object still wins.
+    expect(
+      parseGroupGoalDecision(`${O}{"status":"completed","detail":"ok"} all set${C}`).decision,
+    ).toEqual({ status: "completed", detail: "ok" });
+  });
+
+  it("keeps the visible text that follows an escaped close tag", () => {
+    const parsed = parseGroupGoalDecision(
+      `First\n${O}{"status":"completed","detail":"ok"}<\\/openmaus-goal>\nSecond`,
+    );
+    expect(parsed.decision).toEqual({ status: "completed", detail: "ok" });
+    expect(parsed.visibleText).toContain("Second");
+    expect(parsed.visibleText).toContain("First");
+  });
+
+  it("does not accept a lone quoted example written mid-line without a close tag", () => {
+    // An open tag preceded by prose on the same line is a quoted example, not a control block.
+    expect(
+      parseGroupGoalDecision(`Example: ${O}{"status":"completed","detail":"done"}`).decision,
+    ).toBeNull();
+  });
+
+  it("still recovers a genuine truncated envelope that starts its own line", () => {
+    expect(
+      parseGroupGoalDecision(`${O}{"status":"completed","detail":"done"}`).decision,
+    ).toEqual({ status: "completed", detail: "done" });
+    expect(
+      parseGroupGoalDecision(`Progress\n${O}{"status":"continue","next":"Scout","instruction":"Verify"}`).decision,
+    ).toEqual({ status: "continue", next: "Scout", instruction: "Verify" });
+  });
+});
