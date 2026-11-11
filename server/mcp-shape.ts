@@ -103,7 +103,7 @@ export class ResultStore {
 
   put(tool: string, value: unknown, bytes?: number): string {
     const handle = `r${this.#next++}`;
-    const size = bytes ?? (JSON.stringify(value)?.length ?? 0);
+    const size = bytes ?? Buffer.byteLength(JSON.stringify(value) ?? "", "utf8");
     this.#entries.set(handle, { tool, value, bytes: size });
     this.#bytes += size;
     for (const [oldest, held] of this.#entries) {
