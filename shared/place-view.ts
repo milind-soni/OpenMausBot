@@ -217,7 +217,7 @@ export const PLACE_WORDS: Record<PlaceActionId, string> = {
   "manage-computers": "Manage your cloud desktops in Settings → Bot desktops.",
   "try-again": "Try again.",
   "open-my-cloud": "Open My Cloud from the menu at the top of the sidebar.",
-  "add-boat-key": "Connect your Boat account in Settings → API keys.",
+  "add-boat-key": "Connect your Boat account in AI › Other services.",
   "turn-on-browser": "Turn on the built-in browser in the Screen panel.",
   "open-team-map": "Open Team map to manage it.",
   "open-vm-settings": "Check it in Settings → Bot desktops.",
