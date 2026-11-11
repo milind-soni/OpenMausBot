@@ -11,12 +11,14 @@ import { AppCopyNotice } from "./EngineAppCopy";
 import { forgetAppCopySwitches } from "@/state/engine-install";
 import { AccountsCard, AddAccount, accountGroupOf, accountsReady, type AccountGroup } from "./EngineAccounts";
 import { ClaudeEndpoints, CodexEndpoints } from "./ClaudeEndpoints";
+import { ClaudeBedrockEndpoints } from "./ClaudeBedrock";
 import { DEVICE_SIGN_IN_COPY, deviceSignInProvider } from "./DeviceSignIn";
 import { AntigravityFreeSpace } from "./AntigravityFreeSpace";
 import { CacheKeepWarmSettings } from "./CacheKeepWarmSettings";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
 import { SettingsDisclosureRow, SettingsGroup, SettingsRows } from "./SettingsPrimitives";
+import { OllamaModels, ollamaShortStatus } from "./OllamaStatusLine";
 import { InstanceProviderMark } from "./ProviderIcons";
 
 interface ProbeResult {
@@ -389,6 +391,7 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
       {policyNote}
       {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} description={instance.codexEndpoint ? t("agentEndpoints.codexHint") : undefined} unframed />}
       {engineReady(instance) && <ApiKeyEngineManage instance={instance} className="mt-3" />}
+      {engineReady(instance) && instance.serverKind === "ollama" && <OllamaModels instance={instance} className="mt-3" />}
       {/* The setup panel that first said so is gone once the engine is Ready. */}
       {engineReady(instance) && <AppCopyNotice instance={instance} className="mt-3" />}
       {instance.snapshot.update && <EngineUpdateNotice update={instance.snapshot.update} instance={instance} className="mt-3" quiet />}
@@ -416,6 +419,7 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
 
 function simpleStatus(instance: InstanceInfo, ready: boolean): string {
   if (ready) return instance.snapshot.authenticated === true && instance.snapshot.account?.email ? instance.snapshot.account.email : t("onboarding.engines.ready");
+  if (instance.snapshot.ollama) return ollamaShortStatus(instance.snapshot.ollama);
   return instance.snapshot.state === "available" && instance.snapshot.authenticated === false ? t("model.signInRequired") : t("onboarding.engines.needsSetup");
 }
 
@@ -518,7 +522,7 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
   const { state } = useStore();
   // Leaving Settings ends the "now uses the copy OpenMausBot installed" lines.
   useEffect(() => forgetAppCopySwitches, []);
-  const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i) || i.claudeEndpoint !== undefined || i.codexEndpoint !== undefined);
+  const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i) || i.claudeEndpoint !== undefined || i.claudeBedrock !== undefined || i.codexEndpoint !== undefined);
   // A provider's accounts share one card, which takes the place of its first account.
   const groups = new Map<AccountGroup, InstanceInfo[]>();
   for (const instance of listed) {
@@ -540,13 +544,13 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
     const group = groupOf(instance);
     return group
       ? <AccountsCard group={group} accounts={groups.get(group)!} bare={bare}
-        advanced={<>{group === "claude" ? <ClaudeEndpoints /> : <CodexEndpoints />}<EngineAdvanced instance={instance} /></>} />
+        advanced={<>{group === "claude" ? <><ClaudeEndpoints /><ClaudeBedrockEndpoints /></> : <CodexEndpoints />}<EngineAdvanced instance={instance} /></>} />
       : <EngineRow instance={instance} bare={bare} />;
   };
 
   if (simple && more) return <>
     <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} more={more} />
-    {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /></div>}
+    {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /><ClaudeBedrockEndpoints /></div>}
     {orphanCodexEndpoints && <div className="px-4"><CodexEndpoints /></div>}
   </>;
 
@@ -560,7 +564,7 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
         <RefreshEngines />
       </div>
       <EngineSections instances={rows} isReady={isReady} renderEngine={renderEngine} />
-      {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /></div>}
+      {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /><ClaudeBedrockEndpoints /></div>}
       {orphanCodexEndpoints && <div className="px-4"><CodexEndpoints /></div>}
       <HiddenEngines />
       <CacheKeepWarmSettings />

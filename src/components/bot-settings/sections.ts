@@ -37,7 +37,7 @@ export const BOT_SECTIONS: Array<{
   { id: "routines", label: "Routines", labelKey: "botSettings.sections.routines", icon: CalendarClock, keywords: ["schedule", "routines", "cron", "tasks"] },
   { id: "access", label: "Access", labelKey: "botSettings.sections.access", icon: Network, keywords: ["works on", "computer", "vm", "cloud", "vps", "folder", "workspace", "browser", "connected apps", "composio", "webhooks", "always allow", "grants", "tool selection", "tools", "mcp", "allow", "exclude"] },
   { id: "model", label: "Model", labelKey: "botSettings.sections.model", icon: Cpu, keywords: ["engine", "model", "provider", "cli", "effort"] },
-  { id: "permissions", label: "Permissions", labelKey: "botSettings.sections.permissions", icon: ShieldCheck, keywords: ["auto mode", "approve", "auto approve", "review", "routine approvals", "peers", "contact", "coordination", "chief of staff", "section"] },
+  { id: "permissions", label: "Permissions", labelKey: "botSettings.sections.permissions", icon: ShieldCheck, keywords: ["auto mode", "approve", "auto approve", "review", "routine approvals", "coordination", "chief of staff", "section"] },
   { id: "voice", label: "Voice & alerts", labelKey: "botSettings.sections.voice", icon: Mic, keywords: ["voice", "alerts", "notifications", "speak"] },
   { id: "visibility", label: "Who can see it", labelKey: "botSettings.visibility.title", icon: Eye, keywords: ["visibility", "who can see", "private", "people", "admins", "members", "access", "hide"] },
   { id: "history", label: "History", labelKey: "botSettings.sections.history", icon: History, keywords: ["history", "changes", "undo", "rollback", "log"] },

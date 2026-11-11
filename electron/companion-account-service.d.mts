@@ -12,6 +12,8 @@ export declare const COMPANION_INSTALLATION_CREDENTIAL_FIELD: string;
 export declare const COMPANION_INSTALLATION_EXPIRY_FIELD: string;
 export declare const COMPANION_ACCOUNT_CLEANUP_PENDING_FIELD: string;
 export declare const COMPANION_ENDPOINT_PAUSED_FIELD: string;
+export declare const COMPANION_TUNNEL_RETIRED_FIELD: string;
+export declare const COMPANION_TUNNEL_WAITING_FIELD: string;
 export declare const PHONE_UNUSED_RELEASE_MS: number;
 
 export type CredentialDocument = Record<string, unknown>;
@@ -21,6 +23,7 @@ export declare function resolveCompanionControlPlaneURL(options?: {
   environment?: NodeJS.ProcessEnv;
 }): string;
 export declare function companionAccountCleanupPending(credentials: CredentialDocument): boolean;
+export declare function companionTunnelRetired(credentials: CredentialDocument): boolean;
 /** true while a pairing window is open or a paired device was seen in the
  * last 30 days (or is connected, or has no known last-seen time); "unused"
  * when devices are paired but none was seen for 30 days; false only for a
@@ -36,6 +39,9 @@ export interface CompanionAccountState {
   message?: string;
   /** The address was given back after 30 days with no paired phone seen; prepare() brings it back. */
   paused?: true;
+  /** The secure address was ended for old phone apps: a phone that has not used the encrypted connection must be
+   * updated and paired again. */
+  tunnelRetired?: true;
 }
 
 export interface CompanionAccountService {
@@ -58,7 +64,8 @@ export declare function createCompanionAccountService(options: {
     derive: (current: CredentialDocument) => CredentialDocument,
     afterPersist?: (next: CredentialDocument) => Promise<void> | void,
   ) => Promise<unknown>;
-  identity: { name: string; platform: string; appVersion?: string };
+  /** `kind`: a self-hosted server says `server` on registration and when it asks for its address. */
+  identity: { name: string; platform: string; appVersion?: string; kind?: "desktop" | "server" };
   newClientInstanceId: () => string;
   activatePersistedEndpoint?: () => Promise<{ status: string; ready: boolean }>;
   stopManagedEndpoint?: () => Promise<void>;
@@ -77,6 +84,8 @@ export declare function createCompanionAccountService(options: {
   /** Hold the address only while something needs it (the desktop app). */
   onDemand?: boolean;
   managedEndpointNeeded?: () => Promise<boolean | "unused" | null>;
+  /** MausBot Relay: `capable` lets a "no" from managedEndpointNeeded hold even right after sign-in. */
+  relay?: { capable: () => boolean; legacyDevices: () => Promise<number | null> };
   releaseGraceMs?: number;
   releaseJitterMs?: number;
   /** One line per failed setup step: code, HTTP status, request id, retry delay. */

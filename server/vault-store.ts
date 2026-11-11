@@ -1,6 +1,6 @@
 // The Vault: saved logins and saved secrets. Sealed under a key of its own (a 0600 file beside it), never the browser
 // engine's, which every browser process gets in its environment. Neither file is ever backed up, exported or moved: a
-// saved value stays on its computer, unless the person sends that one login to their own Cloud with Also use on My Cloud
+// saved value stays on its computer, unless the person sends it to their own Cloud with Also use on My Cloud
 // (login-handoff.ts).
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -64,6 +64,9 @@ const fileSchema = z.object({
   onePassword: z.object({ token: z.string().min(1), connectedAt: z.number() }).optional(),
   /** Vault id → the bots that may use its logins; a vault not named here is for every bot. Kept across reconnects. */
   onePasswordGrants: z.record(z.string(), botsSchema).optional(),
+  /** Security: MCP server name → the items whose `vault:<id>` that server may read. Written only when a bot's secretRef
+   * is redeemed into the server (or a move carries the server), so a pointer planted in config.json reads nothing. */
+  mcpKeys: z.record(z.string(), z.array(z.string().min(1))).optional(),
 });
 
 type DiskLogin = z.infer<typeof diskLoginSchema>;
@@ -143,14 +146,17 @@ export class VaultStore {
   private readonly file: string;
   private readonly keyFile: string;
   private readonly now: () => number;
+  private readonly secretChanged: (id: string) => void;
   private cache: StoreFile | null = null;
   private unreadableWarned = false;
   version = 0;
 
-  constructor(options: { dataDir: string; now?: () => number }) {
+  /** `secretChanged`: a saved secret's value or who may use it changed, or it is gone. */
+  constructor(options: { dataDir: string; now?: () => number; secretChanged?: (id: string) => void }) {
     this.file = join(options.dataDir, LOGINS_FILE);
     this.keyFile = join(options.dataDir, LOGINS_KEY_FILE);
     this.now = options.now ?? Date.now;
+    this.secretChanged = options.secretChanged ?? (() => {});
   }
 
   private key(create: boolean): string | null {
@@ -283,6 +289,11 @@ export class VaultStore {
     }
   }
 
+  /** One saved secret with its value, for handing to a bot. */
+  secret(id: string): StoredSecret | null {
+    return this.read().secrets?.find((secret) => secret.id === id) ?? null;
+  }
+
   listSecrets(): VaultSecret[] {
     return (this.read().secrets ?? []).map(summarizeSecret).sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -296,6 +307,10 @@ export class VaultStore {
     return matches.sort((a, b) => Number(b.bots !== "all") - Number(a.bots !== "all") || b.updatedAt - a.updatedAt)[0] ?? null;
   }
 
+  secretNamesFor(botId: string): Array<{ name: string; refOnly?: true }> {
+    return (this.read().secrets ?? []).filter((secret) => loginUsableBy(secret, botId)).map(({ name, refOnly }) => ({ name, ...(refOnly ? { refOnly } : {}) }));
+  }
+
   /** The same name saved again for the same bots replaces its value; otherwise it is a new secret. */
   saveSecret(input: NewSecret): VaultSecret {
     const data = this.read();
@@ -306,6 +321,7 @@ export class VaultStore {
       const { refOnly: _refOnly, ...rest } = same;
       const updated: StoredSecret = { ...rest, value: input.value, updatedAt: at, ...(input.refOnly ? { refOnly: true } : {}) };
       this.write({ ...data, secrets: secrets.map((secret) => secret.id === same.id ? updated : secret) });
+      this.secretChanged(same.id);
       return summarizeSecret(updated);
     }
     const secret: StoredSecret = {
@@ -313,6 +329,22 @@ export class VaultStore {
     };
     this.write({ ...data, secrets: [...secrets, secret] });
     return summarizeSecret(secret);
+  }
+
+  /** A secret arriving from this person's other computer, under the id it has there: an MCP server's `vault:<id>` moves
+   * with it. Sent again, it replaces the one it came from. */
+  receiveSecret(input: NewSecret & { id: string }): VaultSecret {
+    const data = this.read();
+    const secrets = data.secrets ?? [];
+    const at = this.now();
+    const current = secrets.find((secret) => secret.id === input.id);
+    const received: StoredSecret = {
+      id: input.id, name: input.name, value: input.value, source: input.source, bots: input.bots, ...(input.refOnly ? { refOnly: true } : {}),
+      createdAt: current?.createdAt ?? at, updatedAt: at, ...(current?.lastUsedAt === undefined ? {} : { lastUsedAt: current.lastUsedAt }),
+    };
+    this.write({ ...data, secrets: current ? secrets.map((secret) => secret.id === input.id ? received : secret) : [...secrets, received] });
+    this.secretChanged(input.id);
+    return summarizeSecret(received);
   }
 
   updateSecret(id: string, patch: SecretPatch): VaultSecret | null {
@@ -327,6 +359,7 @@ export class VaultStore {
       updatedAt: this.now(),
     };
     this.write({ ...data, secrets: data.secrets.map((secret) => secret.id === id ? next : secret) });
+    this.secretChanged(id);
     return summarizeSecret(next);
   }
 
@@ -334,7 +367,51 @@ export class VaultStore {
     const data = this.read();
     if (!data.secrets?.some((secret) => secret.id === id)) return false;
     this.write({ ...data, secrets: data.secrets.filter((secret) => secret.id !== id) });
+    this.secretChanged(id);
     return true;
+  }
+
+  /** A deleted bot leaves every secret kept to it; a secret kept only to it goes with it. */
+  forgetBot(botId: string): void {
+    const data = this.read();
+    if (!data.secrets) return;
+    const touched: string[] = [];
+    const at = this.now();
+    const secrets = data.secrets.flatMap((secret) => {
+      if (secret.bots === "all" || !secret.bots.includes(botId)) return [secret];
+      touched.push(secret.id);
+      const bots = secret.bots.filter((id) => id !== botId);
+      return bots.length ? [{ ...secret, bots, updatedAt: at }] : [];
+    });
+    if (!touched.length) return;
+    this.write({ ...data, secrets });
+    for (const id of touched) this.secretChanged(id);
+  }
+
+  /** The items this MCP server may read a `vault:<id>` key from. */
+  mcpServerKeys(server: string): string[] {
+    return this.read().mcpKeys?.[server] ?? [];
+  }
+
+  /** The MCP servers given this item's key. */
+  serversUsingKey(id: string): string[] {
+    return Object.entries(this.read().mcpKeys ?? {}).filter(([, ids]) => ids.includes(id)).map(([server]) => server);
+  }
+
+  /** `server` may read these items' `vault:<id>` keys from now on; what it could read before is kept. */
+  grantMcpKeys(server: string, ids: readonly string[]): void {
+    if (!ids.length) return;
+    const data = this.read();
+    const { [server]: current = [], ...others } = data.mcpKeys ?? {};
+    this.write({ ...data, mcpKeys: { ...others, [server]: [...new Set([...current, ...ids])] } });
+  }
+
+  forgetMcpServer(server: string): void {
+    const data = this.read();
+    if (!data.mcpKeys?.[server]) return;
+    const { [server]: _gone, ...others } = data.mcpKeys;
+    const { mcpKeys: _keys, ...rest } = data;
+    this.write(Object.keys(others).length ? { ...rest, mcpKeys: others } : rest);
   }
 
   onePasswordToken(): string | null {

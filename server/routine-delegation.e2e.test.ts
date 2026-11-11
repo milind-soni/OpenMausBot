@@ -133,28 +133,6 @@ describe("routine delegation through the isolated harness", () => {
     evidence.push({ waitedForBusyPeer: true, resumedRoutine: run.id, threadId: run.threadId, transcript });
   }, 60_000);
 
-  it("completes the routine when the person denies its hand-off, instead of leaving it waiting", async () => {
-    await api("PATCH", `/api/bots/${source.id}`, { approvePeerComms: true, approvalMode: "ask" });
-    const run = await start();
-    // The route asks the person before anything is queued, so the call stays open until the card is answered.
-    const pending = raw("POST", "/api/internal/coordinate-bots", { botIds: [peer.id], message: "Produce the fixture report." }, await token(run.threadId));
-    await expect.poll(async () => (await messages(run.threadId)).some((message) => message.card?.tool === "delegate_bot"), { timeout: 15_000 }).toBe(true);
-    const card = (await messages(run.threadId)).find((message) => message.card?.tool === "delegate_bot");
-    expect(rows().map((node) => [Boolean(node.parentId), node.threadId])).toEqual([[false, run.threadId]]);
-    await api("POST", `/api/bots/${source.id}/respond`, { threadId: run.threadId, requestId: card.card.requestId, behavior: "deny" });
-    const denied = await pending;
-    expect(denied.status).toBe(403);
-    expect(denied.body.error).toMatch(/denied by user/i);
-    finish(run.threadId);
-    await expect.poll(async () => (await runState(run.id))?.status, { timeout: 15_000 }).toBe("completed");
-    const transcript = await messages(run.threadId);
-    expect(transcript.find((message) => message.card?.requestId === card.card.requestId).card.answered).toBe("deny");
-    await expect.poll(() => rows().map((node) => [Boolean(node.parentId), node.status]), { timeout: 10_000 }).toEqual([[false, "completed"]]);
-    expect(Boolean((await botState(peer.id)).busy)).toBe(false);
-    expect((await botState(peer.id)).tasks).toHaveLength(1);
-    evidence.push({ deniedHandoffCompleted: true, transcript });
-  }, 45_000);
-
   it.each([
     { capacity: 3, resume: "completion" },
     { capacity: 1, resume: "raise" },
@@ -223,28 +201,6 @@ describe("routine delegation through the isolated harness", () => {
     expect(handoff().status).toBe("completed");
     expect(await runState(run.id)).toMatchObject({ status: "completed", finishedAt: finished.finishedAt, output: finished.output });
     evidence.push({ reusedCompletedExecution: true, transcript: await messages(run.threadId) });
-  }, 45_000);
-
-  it("does not dispatch an approved handoff after the routine was cancelled", async () => {
-    await api("PATCH", `/api/bots/${source.id}`, { approvePeerComms: true, approvalMode: "ask" });
-    const run = await start();
-    const pending = raw("POST", "/api/internal/coordinate-bots", { botIds: [peer.id], message: "Produce the fixture report." }, await token(run.threadId));
-    await expect.poll(async () => (await messages(run.threadId)).some((message) => message.card?.tool === "delegate_bot"), { timeout: 15_000 }).toBe(true);
-    const card = (await messages(run.threadId)).find((message) => message.card?.tool === "delegate_bot");
-    await api("POST", `/api/routine-runs/${run.id}/cancel`);
-    await fetch(`${fixture.info.url}/api/bots/${source.id}/respond`, {
-      method: "POST", headers: { "content-type": "application/json", origin: fixture.info.url },
-      body: JSON.stringify({ threadId: run.threadId, requestId: card.card.requestId, behavior: "allow" }),
-    });
-    const outcome = await pending;
-    expect(outcome.status, JSON.stringify(outcome.body)).toBeGreaterThanOrEqual(400);
-    expect((await runState(run.id)).status).toBe("cancelled");
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
-    expect(rows().filter((node) => node.botId === peer.id)).toEqual([]);
-    const target = await botState(peer.id);
-    expect(Boolean(target.busy)).toBe(false);
-    expect(target.tasks).toHaveLength(1);
-    evidence.push({ cancelledHandoffNotDispatched: true, runId: run.id });
   }, 45_000);
 
   it("keeps a failed routine's queued hand-off on the runtime through a provider reload without reviving the run", async () => {

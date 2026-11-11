@@ -1,0 +1,6 @@
+{
+  "$schema": "./announcements.schema.json",
+  "version": 1,
+  "updatedAt": "2026-11-11T00:00:00Z",
+  "cards": []
+}

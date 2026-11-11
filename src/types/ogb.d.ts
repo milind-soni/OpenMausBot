@@ -117,6 +117,7 @@ const __APP_VERSION__: string;
   interface Window {
     ogb?: {
       platform: NodeJS.Platform;
+      softwareRendering?: boolean;
       /** This app's own version, and whether this page is this app's own: false on a server added in the Server menu,
        * whose page carries that server's version. Absent in desktop builds before it. */
       app?: { version: string; ownPage: boolean };
@@ -441,14 +442,22 @@ const __APP_VERSION__: string;
       /** Points this computer's file manager at a file a bot linked outside
        * its workspace, without opening or reading it. Local app only. */
       revealInFolder?(filePath: string): Promise<"shown" | "missing" | "invalid">;
+      /** Opens a folder (never a file) in Finder or Explorer; "not-folder" means keep the page's own handling. */
+      openFolder?(folderPath: string): Promise<"opened" | "not-folder" | "missing" | "invalid" | "failed">;
       /** Opens this app's logs folder in Explorer or Finder and says where it is. */
       openLogsFolder?(): Promise<{ folder: string; opened: boolean; error?: string }>;
       /** This app's own login item, which opens the window. `available`: false in a build that cannot add one. */
       openAtLogin?: { state(): Promise<{ available: boolean; on: boolean }>; set(on: boolean): Promise<{ available: boolean; on: boolean }> };
+      /** Saved keys this launch could not read (this app's own page only). `reset` asks the person, moves the unreadable
+       * file aside and restarts; it resolves "cancelled" when they say no, "quitting" (doing nothing) when the app began
+       * to quit while they decided, "failed" (after telling them) when the file could not be moved, and "readable"
+       * (doing nothing) when the keys could be read. */
+      credentialStore?: { unreadable(): Promise<boolean>; reset(): Promise<"reset" | "cancelled" | "quitting" | "failed" | "readable"> };
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey" | "geminiImageApiKey",
+        name: "openaiApiKey" | "anthropicApiKey" | "openrouterApiKey" | "mistralApiKey" | "cerebrasApiKey" | "groqApiKey" | "greenferenceApiKey" | "modelgoApiKey" | "metaApiKey" | "deepseekApiKey" | "openaiCompatApiKey" | "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey" | "geminiImageApiKey",
         value: string,
+        options?: { everyClaudeBot?: false },
       ): Promise<ConfigStatus>;
       /** In-app auto-update (packaged app only; dormant in dev). Updates
        * download by themselves. On this computer's page and the person's own
@@ -531,6 +540,9 @@ export interface CompanionAccountState {
   /** The HTTPS address was given back after 30 days with no paired phone
    * seen. Opening the phone page calls prepare(), which brings it back. */
   paused?: boolean;
+  /** The secure address was ended for old phone apps: a phone that has not used the encrypted connection must be
+   * updated and paired again. */
+  tunnelRetired?: boolean;
 }
 
 export type AndroidUsbDevice = {

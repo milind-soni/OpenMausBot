@@ -1,6 +1,7 @@
 import type { InstanceConfig } from "./contracts.ts";
-import { CLAUDE_MODEL_ID, STATIC_CLAUDE_MODELS } from "./drivers/claude-model-extras.ts";
+import { CLAUDE_MODEL_ID } from "./drivers/claude-model-extras.ts";
 import { STATIC_CODEX_MODELS } from "./drivers/codex-catalog.ts";
+import { currentEngineCatalog } from "./model-manifest/manifest.ts";
 import { isLoopback, providerModelsUrl } from "./provider-key-check.ts";
 
 const OFFICIAL_URL = { codex: "https://api.openai.com/v1", claude: "https://api.anthropic.com" } as const;
@@ -26,7 +27,7 @@ export function hasExplicitModel(entry: InstanceConfig): boolean {
 }
 
 export function officialModels(codex: boolean): string[] {
-  const catalog = codex ? STATIC_CODEX_MODELS : STATIC_CLAUDE_MODELS;
+  const catalog = codex ? STATIC_CODEX_MODELS : currentEngineCatalog("claude");
   return [...new Set([catalog.default, ...catalog.options.map(option => option.id)])];
 }
 

@@ -57,9 +57,9 @@ function rawConfig(entry: InstanceConfig): Record<string, unknown> {
     ? entry.config as Record<string, unknown> : {};
 }
 
-/** A Claude instance the person pointed at another host, rather than a named Claude account. */
+/** A Claude instance the person pointed at another host, rather than a named Claude account or Bedrock. */
 export function isClaudeEndpoint(entry: InstanceConfig | undefined): boolean {
-  return entry?.driver === "claudeAgent" && Array.isArray(rawConfig(entry).endpointModels);
+  return entry?.driver === "claudeAgent" && Array.isArray(rawConfig(entry).endpointModels) && rawConfig(entry).bedrock !== true;
 }
 
 export type { ClaudeEndpointInfo };
@@ -115,7 +115,7 @@ function endpointModels(fields: EndpointFields): string[] {
 /** The installed binary, not another account's environment: an endpoint has no login of its own. */
 function inheritedCli(instances: InstanceConfigMap): string | undefined {
   for (const entry of Object.values(instances)) {
-    if (entry.driver !== "claudeAgent" || isClaudeEndpoint(entry)) continue;
+    if (entry.driver !== "claudeAgent" || isClaudeEndpoint(entry) || rawConfig(entry).bedrock === true) continue;
     const cli = rawConfig(entry).cli;
     if (typeof cli === "string" && cli) return cli;
   }

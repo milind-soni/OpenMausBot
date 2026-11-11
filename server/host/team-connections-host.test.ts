@@ -34,7 +34,7 @@ const ROSTER = [
   { person: ADA, email: "ada@acme.test", role: "member" as const }, { person: CLEO, email: "cleo@acme.test", role: "member" as const },
 ];
 
-function setup(options: { team?: boolean; requester?: Record<string, string>; servers?: Record<string, unknown>; roster?: typeof ROSTER } = {}) {
+function setup(options: { team?: boolean; requester?: Record<string, string>; servers?: Record<string, unknown>; roster?: typeof ROSTER; fullAccess?: (botId: string, threadId: string) => boolean } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-team-connections-"));
   const requester = { "ada-chat": ADA, "cleo-chat": CLEO, "room-chat": ADA, "main-chat": ADA, "work-chat": ADA, "ada-work": ADA, "cleo-work": CLEO, ...options.requester };
   const cfg = { mcpServers: options.servers ?? {
@@ -47,7 +47,7 @@ function setup(options: { team?: boolean; requester?: Record<string, string>; se
     mcpIntegration: vi.fn(async (_cfg: AppConfig, context: { commsToken: string; as?: unknown }) => ({ command: "node", args: ["bridge"], env: { TOKEN: context.commsToken, AS: context.as ? "own" : "team" } })),
     connectedServices: vi.fn(async (_cfg: AppConfig, as?: { token: string }) => (as?.token === ADA_ACCESS.token || as?.token === CLEO_ACCESS.token
       ? { gmail: { connected: true, pending: false, status: "ACTIVE", accounts: [{ id: "ca_1", status: "ACTIVE", alias: "own@gmail.example" }] } } : {})),
-    connectedServiceSlugs: vi.fn(async () => ["google_search_console"] as readonly string[]),
+    verifiedConnectedServiceSlugs: vi.fn(async () => ["google_search_console"] as readonly string[]),
     authorizeService: vi.fn(),
     removeService: vi.fn(),
   };
@@ -64,6 +64,7 @@ function setup(options: { team?: boolean; requester?: Record<string, string>; se
     })),
     isOwnerLive: () => true,
     ...(options.roster ? { roster: () => options.roster! } : {}),
+    ...(options.fullAccess ? { fullAccess: options.fullAccess } : {}),
     brokerUrl: () => ADA_ACCESS.url,
     composio: composio as never,
   });
@@ -219,6 +220,23 @@ describe("apps each person connects", () => {
     expect(await host.callRefusal({ threadId: "cleo-chat", generation: "gen-1" }, [{ slug: "GMAIL_FETCH_EMAILS" }]), "Cleo's chat never reaches Ada's Gmail").toMatch(/Connect your Gmail/);
   });
 
+  it("offers a bot with app grants the apps' sandbox only in a turn at Full access, never while its scopes limit its apps", async () => {
+    const { host, composio } = setup({ fullAccess: (_botId, threadId) => threadId === "work-chat" });
+    const scout = { id: "scout", name: "Scout", connectorTools: { gmail: { tools: "*" as const } } };
+    await host.appsIntegrations(scout, "main-chat", "g1");
+    await host.appsIntegrations(scout, "work-chat", "g2");
+    await host.appsIntegrations({ id: "mausbot", name: "MausBot" }, "work-chat", "g3");
+    await host.appsIntegrations({ ...scout, connectorScopes: { apps: { gmail: "read" } } }, "work-chat", "g4");
+    const offered = composio.mcpIntegration.mock.calls.map(([, context]) => context as typeof context & { connectorTools?: unknown })
+      .filter((context) => !context.as).map((context) => context.connectorTools);
+    expect(offered).toEqual([
+      { gmail: { tools: "*" } },
+      { gmail: { tools: "*" }, composio: { tools: ["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMOTE_BASH_TOOL"] } },
+      undefined,
+      { gmail: { tools: "*" } },
+    ]);
+  });
+
   it("refuses a person's app through the team's bridge, and a team app through her own", async () => {
     const { host, dataDir } = setup({ requester: { "main-chat": "" } });
     adaConnected(host, dataDir);
@@ -244,8 +262,22 @@ describe("apps each person connects", () => {
     const { host, composio } = setup();
     host.scopes.set("app", "google_search_console", "person");
     expect(await host.callRefusal({ threadId: "room-chat", generation: "g" }, [{ slug: "COMPOSIO_PROXY_EXECUTE" }])).toMatch(/Google Search Console is connected by each person/);
-    composio.connectedServiceSlugs.mockResolvedValue([]);
+    composio.verifiedConnectedServiceSlugs.mockResolvedValue([]);
     expect(await host.callRefusal({ threadId: "room-chat", generation: "g" }, [{ slug: "COMPOSIO_PROXY_EXECUTE" }])).toBeNull();
+  });
+
+  it("refuses opaque team calls when inventory discovery fails, then checks the recovered inventory", async () => {
+    const { host, composio } = setup();
+    host.scopes.set("app", "gmail", "person");
+    const cap = { threadId: "room-chat", generation: "g" };
+    const calls = [{ slug: "COMPOSIO_PROXY_EXECUTE" }];
+    composio.verifiedConnectedServiceSlugs.mockResolvedValue(["gmail"]);
+    expect(await host.callRefusal(cap, calls)).toMatch(/can't run here.*Gmail/);
+    composio.verifiedConnectedServiceSlugs.mockRejectedValueOnce(new Error("synthetic inventory timeout"));
+    expect(await host.callRefusal(cap, calls)).toMatch(/can't run here.*inventory could not be verified/);
+    expect(await host.callRefusal(cap, calls)).toMatch(/can't run here.*Gmail/);
+    composio.verifiedConnectedServiceSlugs.mockResolvedValue([]);
+    expect(await host.callRefusal(cap, calls)).toBeNull();
   });
 
   it("answers a connection card for a person's app with the one plain line, never a card", () => {

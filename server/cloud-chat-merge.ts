@@ -59,7 +59,7 @@ export function activePath(rows: readonly Message[], leaf: string | null): Messa
 
 /** A conversation's own context summary describes the other computer's session, so it is not added to one both have. */
 function withoutSummaries(thread: ThreadRows, have: ReadonlySet<string>): ThreadRows {
-  const dropped = new Map(thread.rows.filter((row) => !have.has(row.id) && row.kind === "compaction").map((row) => [row.id, row.parentId ?? null]));
+  const dropped = new Map(thread.rows.filter((row) => !have.has(row.id) && row.kind === "compaction" && !row.compaction?.fresh).map((row) => [row.id, row.parentId ?? null]));
   if (!dropped.size) return thread;
   const above = (id: string | null) => { for (let hops = 0; id !== null && dropped.has(id) && hops <= dropped.size; hops++) id = dropped.get(id)!; return id; };
   return {

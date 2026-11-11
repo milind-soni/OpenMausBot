@@ -220,6 +220,24 @@ describe("OpenAICompatDriver", () => {
     await inst.dispose();
   });
 
+  it("keeps the desktop store's workspace key away from an instance with its own URL", async () => {
+    vi.stubEnv("OMB_DESKTOP_PARENT", "1");
+    process.env.OPENAI_COMPAT_API_KEY = "sk-or-STORE";
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      seen.push(JSON.stringify(init?.headers ?? {}));
+      return new Response('{"data":[]}', { headers: { "content-type": "application/json" } });
+    }));
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "router", displayName: "Router", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://third-party.example.test/v1" }), environment: {},
+    });
+    await inst.refreshModels?.();
+    await inst.snapshot();
+    expect(JSON.stringify(seen)).not.toContain("STORE");
+    await inst.dispose();
+  });
+
   it("rejects remote HTTP computer use before starting tools or a completion request", async () => {
     const request = vi.fn(async (_url: string | URL | Request) => new Response('{"data":[]}', { headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", request);
@@ -262,6 +280,30 @@ describe("OpenAICompatDriver", () => {
     recorder.stop();
     await inst.dispose();
   }, 20_000);
+
+  it.each([
+    ["a network failure", () => { throw new TypeError("fetch failed"); }],
+    ["a provider 503", () => new Response("overloaded", { status: 503 })],
+  ])("retries %s instead of failing the turn", async (_label, firstAnswer) => {
+    const reply = 'data: {"choices":[{"index":0,"delta":{"content":"done"}}]}\n\ndata: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n';
+    let completions = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      completions += 1;
+      return completions === 1 ? firstAnswer() : new Response(reply, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }));
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "compat-retry", displayName: "Compat", enabled: true,
+      config: { url: "https://api.example.com/v1", apiKeyEnv: "OPENAI_COMPAT_API_KEY" }, environment: { OPENAI_COMPAT_API_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+    await inst.adapter.sendTurn({ threadId: "thread", text: "hi", model: "vendor/model" });
+    expect(await recorder.until((event) => event.type === "turn.retrying")).toMatchObject({ attempt: 1 });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+    expect(completions).toBe(2);
+    recorder.stop();
+    await inst.dispose();
+  });
 
   it("exposes a refreshed model catalog", async () => {
     vi.stubGlobal(

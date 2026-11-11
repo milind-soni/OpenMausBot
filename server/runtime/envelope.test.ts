@@ -1,7 +1,8 @@
+import { addHeldSecretScrubber, HELD_SECRET_MASK } from "../../shared/redact.ts";
 import { describe, expect, it } from "vitest";
 
 import { CONSENT_RULE } from "../peer-provenance.ts";
-import { composeAddition, composeEnvelope, composeQuestion, composeReport, composeResume, composeRootTurn, ENVELOPE_MARK, escapeEnvelope } from "./envelope.ts";
+import { composeAddition, composeEnvelope, composeQuestion, composeReport, composeResume, composeRootTurn, ENVELOPE_MARK, envelopeNote, escapeEnvelope } from "./envelope.ts";
 import type { Assignment, EnvelopeNames } from "./types.ts";
 
 const base: Assignment = {
@@ -470,6 +471,48 @@ describe("composeEnvelope at Full access: nothing a bot can settle waits on the 
       .endsWith('\n\nNobody was asked, at this level: go on with your default, "CSV", and say in one plain line what you chose.')).toBe(true);
     expect(composeEnvelope(assignment({ answer: "", answeredBy: { kind: "default" } }), names)
       .endsWith("\n\nNobody was asked, at this level: pick the sensible default yourself, and say in one plain line what you chose.")).toBe(true);
+  });
+
+  it("carries a long answer whole, also in the note the thread shows and on resume", () => {
+    const answer = `Use the fork. ${"You work best with a clear brief. ".repeat(120)}End of answer.`;
+    const long = assignment({ question: "Which repo?", answer, answeredBy: { kind: "bot", botId: "chief" } });
+    const chief = { ...names, answerer: "Chief" };
+    const line = `@Chief answered: "${answer.trim()}".`;
+    expect(answer.length).toBeGreaterThan(3_900);
+    const envelope = composeEnvelope(long, chief);
+    expect(envelope.endsWith(`\n\nYour question was: "Which repo?". ${line}`)).toBe(true);
+    expect(envelopeNote(envelope)).toContain(line);
+    expect(composeResume(long, chief, [])).toContain(line);
+  });
+
+  it("still bounds a long default pick to the short quote", () => {
+    const answer = `Pick A. ${"x".repeat(1_000)}TAIL`;
+    const envelope = composeEnvelope(assignment({ answer, answeredBy: { kind: "default" } }), names);
+    expect(envelope).toContain("go on with your default, \"Pick A. ");
+    expect(envelope).not.toContain("TAIL");
+    expect(envelope.length).toBeLessThan(envelope.indexOf("go on with your default") + 600);
+  });
+
+  it("keeps the end of an answer that redaction made more than twice as long", () => {
+    const answer = `${"--token=x ".repeat(1000)}END`;
+    const envelope = composeEnvelope(assignment({ question: "Done?", answer, answeredBy: { kind: "bot", botId: "chief" } }), { ...names, answerer: "Chief" });
+    expect(envelope.length).toBeGreaterThan(answer.length * 2);
+    expect(envelope).toContain(`END".`);
+  });
+
+  it("keeps the end of an answer just under the 12 000-character storage limit that redaction made longer", () => {
+    const removeScrubber = addHeldSecretScrubber((text) => text.replaceAll("code 42", `code ${HELD_SECRET_MASK}`));
+    try {
+      const body = "Sent code 42. ".repeat(100);
+      const answer = `${body}${"x".repeat(11_999 - body.length - 5)} End.`;
+      expect(answer.length).toBe(11_999);
+      const envelope = composeEnvelope(assignment({ question: "Done?", answer, answeredBy: { kind: "bot", botId: "chief" } }), { ...names, answerer: "Chief" });
+      expect(envelope).toContain(`End.".`);
+      expect(envelope).toContain(`code ${HELD_SECRET_MASK}`);
+      expect(envelope).not.toContain("code 42");
+    } finally {
+      removeScrubber();
+    }
   });
 });
 

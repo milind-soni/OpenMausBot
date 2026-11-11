@@ -769,7 +769,7 @@ describe("ChatMarkdown attachments", () => {
       text: "[macOS](file:///Users/milind/report.md) [Windows](C:/Users/Maus/report.md)",
       message: { threadId: "thread-1", messageId: "message-1" },
     }));
-    expect(html).toContain('title="Save a copy"');
+    expect(html).toContain('title="Preview: report.md"');
     expect(html).not.toContain("/Users/milind/report.md");
     expect(html).not.toContain("C:/Users/Maus/report.md");
   });
@@ -811,7 +811,7 @@ describe("ChatMarkdown attachments", () => {
         text: "[Report](C:\\Users\\Maus\\.openmausbot\\report.md)\n\n![Chart](C:\\Users\\Maus\\.openmausbot\\chart.png)",
         message: { threadId: "thread-1", messageId: "message-1" },
       }));
-      expect(html).toContain('title="Save a copy"');
+      expect(html).toContain('title="Preview: report.md"');
       expect(html).not.toContain('href=""');
       expect(html).not.toContain("Image unavailable");
       expect(save.mock.calls[0]?.[0]).toBe("C:\\Users\\Maus\\.openmausbot\\report.md");
@@ -1421,6 +1421,9 @@ describe("Simple mode's code block", () => {
     expect(plate.split(" ")).toEqual(expect.arrayContaining(["opacity-0", "group-hover/code:opacity-100", "focus-within:opacity-100", "touch:opacity-100"]));
     expect(html).toContain('aria-label="Copy code"');
     expect(html).toContain('aria-label="More"');
+    // A finger-sized target on touch screens, and a ring on the menu's button for the keyboard.
+    expect(html.match(/<button[^>]*aria-label="Copy code"[^>]*>/)?.[0]).toContain("touch:size-11");
+    expect(html.match(/<button[^>]*aria-label="More"[^>]*>/)?.[0]).toContain("focus-visible:ring-2");
     expect(html).toMatch(/<pre class="[^"]*leading-5 px-3 py-2 text-ink-secondary/);
   });
 

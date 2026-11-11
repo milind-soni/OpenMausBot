@@ -36,7 +36,8 @@ export function groupGoalCompletionTurnId(
 const bounded = (value: unknown, max: number): string =>
   typeof value === "string" ? value.trim().slice(0, max) : "";
 
-function visibleCoordinatorText(text: string): string {
+/** A reply without its private goal envelopes; a turn outside the goal's own (a teammate's result waking the lead) can write one too. */
+export function visibleCoordinatorText(text: string): string {
   let visible = text;
   for (;;) {
     const closeAt = visible.indexOf(GROUP_GOAL_CONTROL_CLOSE);

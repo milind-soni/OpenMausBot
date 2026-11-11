@@ -74,7 +74,7 @@ function railKeepsItsSize() {
 if (typeof window !== "undefined") {
   for (const type of ["resize", "DOMContentLoaded"]) window.addEventListener(type, () => { leaveRailRoom(); railKeepsItsSize(); });
 }
-const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame"]);
+const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
 const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
 function updaterOffered() {
@@ -143,6 +143,8 @@ function invokeWithPlainError(channel, ...args) {
 
 const bridge = {
   platform: process.platform,
+  /** Linux without a GPU (electron/linux-gpu.mjs): the page drops its backdrop blurs. */
+  softwareRendering: process.argv.includes("--omb-software-rendering=1"),
   /** This app's version, and whether this page is this app's own (served by this computer, not a server from the Server menu). */
   app: { version: appVersion, ownPage: isLocalPage },
   // Safe on a cloud page: the person chooses in a native menu, or a circle of the rail main listed (only for this app's
@@ -266,6 +268,7 @@ const bridge = {
     keepAwake: (enabled) => ipcRenderer.invoke("companion:keep-awake", enabled),
     refreshTailscale: () => ipcRenderer.invoke("companion:refresh-tailscale"),
     setTailscale: (on) => ipcRenderer.invoke("companion:tailscale", on === true),
+    setTailscaleComputers: (on) => ipcRenderer.invoke("companion:tailscale-computers", on === true),
     setRoute: (route, on) => ipcRenderer.invoke("companion:route", String(route), on === true),
     dismissNotice: (route) => ipcRenderer.invoke("companion:notice-dismiss", String(route)),
     pairing: (open, expectedToken) => ipcRenderer.invoke("companion:pairing", open, expectedToken),
@@ -409,6 +412,7 @@ const bridge = {
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
   saveFile: (filePath) => invokeWithPlainError("desktop:save-file", filePath),
   revealInFolder: (filePath) => ipcRenderer.invoke("desktop:reveal-file", filePath),
+  openFolder: (folderPath) => ipcRenderer.invoke("desktop:open-folder", folderPath),
   openHtmlInBrowser: (source, name) => invokeWithPlainError("desktop:open-html", source, name),
   // This app's own logs folder (server.log, desktop-crashes.log, updater.log); the page names no path.
   openLogsFolder: () => ipcRenderer.invoke("desktop:open-logs"),
@@ -417,7 +421,12 @@ const bridge = {
     set: on => on !== true || isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("open-at-login:set", on === true) : Promise.reject(new Error("Turn on the switch to open OpenMausBot at login.")),
   },
-  setCredential: (name, value) => ipcRenderer.invoke("credential:set", name, value),
+  setCredential: (name, value, options) => ipcRenderer.invoke("credential:set", name, value, options),
+  // Saved keys this launch could not read, and "Reset saved keys" (main asks the person first, then restarts).
+  credentialStore: {
+    unreadable: () => ipcRenderer.invoke("credential-store:unreadable"),
+    reset: () => ipcRenderer.invoke("credential-store:reset"),
+  },
 
   updater: {
     check: () => ipcRenderer.invoke("update:check"),
@@ -527,6 +536,15 @@ const bridge = {
     teamBringMove: botId => navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:team-bring-move", String(botId)) : Promise.reject(new Error("Choose Move to move the bot.")),
     teamBringStatus: () => ipcRenderer.invoke("cloud-send:team-bring-status"),
+    // Which of this computer's bots move to My Cloud: asked on either page, and only from the person's click on My Cloud's.
+    botMoveState: () => ipcRenderer.invoke("cloud-send:bot-move-state"),
+    botChoices: () => ipcRenderer.invoke("cloud-send:bot-choices"),
+    moveBots: ids => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:move-bots", Array.isArray(ids) ? ids.map(String) : []) : Promise.reject(new Error("Choose which bots move.")),
+    moveEverything: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:move-everything") : Promise.reject(new Error("Choose which bots move.")),
+    botMoveRetry: () => ipcRenderer.invoke("cloud-send:bot-move-retry"),
+    openMyCloud: () => ipcRenderer.invoke("cloud-send:open-my-cloud"),
     // Settings → MausBot Cloud, Advanced: "Keep this computer's bots on this computer".
     keepHere: () => ipcRenderer.invoke("one-home:keep"),
     setKeepHere: on => isLocalPage || navigator.userActivation?.isActive === true

@@ -18,6 +18,8 @@ import type { LocaleKey } from "@/locales";
 import type { CloudSendNotice } from "../../../electron/cloud-send.mjs";
 import { openBot, useStore } from "@/state/store";
 import { useCloudName } from "./parts";
+import { teamPeoplePage } from "@/components/SidebarPeople";
+import { useTeamPeople } from "@/state/team-people";
 import { WelcomeBring, type BringOutcome } from "./WelcomeBring";
 import { WelcomeDone, WelcomeEngine, WelcomeFiles } from "./WelcomeSteps";
 
@@ -63,6 +65,7 @@ export function CloudWelcome() {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const welcome = useCloudWelcome();
+  const people = useTeamPeople();
   const record = withEarlyHints(state.config?.onboarding, welcome.early);
   const name = useCloudName();
   const [view, setView] = useState<WelcomeView>(() => requestedView(takeWelcomeRequest()) ?? welcomeView(record));
@@ -160,7 +163,7 @@ export function CloudWelcome() {
       onFinish={finishBring} />;
   } else if (view === "engine") content = <WelcomeEngine name={name} headingRef={heading} onFinish={() => finish("engine")} />;
   else if (view === "files") content = <WelcomeFiles name={name} headingRef={heading} onFinish={() => finish("files")} />;
-  else content = <WelcomeDone name={name} bot={bot} headingRef={heading} onSayHi={sayHi} onJob={giveJob} />;
+  else content = <WelcomeDone name={name} bot={bot} headingRef={heading} onSayHi={sayHi} onJob={giveJob} invite={people?.me?.role === "owner" ? teamPeoplePage(state.config?.team) : null} />;
 
   return <main data-cloud-welcome={view} className="@container/welcome relative flex h-full min-w-0 flex-1 flex-col bg-app">
     <WindowDragStrip />

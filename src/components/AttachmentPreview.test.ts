@@ -1,6 +1,10 @@
-import { createElement } from "react";
+// @vitest-environment happy-dom
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 import {
   AttachedFileChips,
@@ -17,6 +21,7 @@ import {
   requestMessageFile,
   safeDownloadFilename,
   saveFailureText,
+  useLocalFileSave,
   wrappedImageIndex,
 } from "./AttachmentPreview";
 
@@ -217,6 +222,69 @@ describe("a file over the download limit", () => {
           code: "file_too_large",
           message: "This file is 612 MB, over the 500 MB limit for opening files from chat. The file itself is still saved as reel.mp4.",
         });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("a folder linked in a message", () => {
+  const folderPath = "/work/Reports";
+  const listing = { name: "Reports", entries: [{ name: "q3.pdf", bytes: 2048, mime: "application/pdf" }], truncated: false };
+  const authorized = () => new Response(JSON.stringify(listing), { status: 200, headers: { "content-type": "application/json", "x-openmausbot-folder": "1" } });
+  const refused = () => new Response(JSON.stringify({ error: "the linked file is outside this conversation's workspace", code: "outside_workspace" }), { status: 403, headers: { "content-type": "application/json" } });
+
+  async function clickLink(answer: () => Response) {
+    vi.stubGlobal("fetch", vi.fn(async () => answer()));
+    const seen: { current: ReturnType<typeof useLocalFileSave> | null } = { current: null };
+    const Probe = () => {
+      seen.current = useLocalFileSave(folderPath, undefined, { threadId: "thread-1", messageId: "message-1" });
+      return null;
+    };
+    const root = createRoot(document.createElement("div"));
+    await act(async () => { root.render(createElement(Probe)); });
+    await act(async () => { await seen.current!.save(); });
+    const result = { state: seen.current!.state, folder: seen.current!.folder };
+    await act(async () => { root.unmount(); });
+    return result;
+  }
+
+  it("opens in the file manager once the route authorized it, with no listing", async () => {
+    const openFolder = vi.fn(async () => "opened");
+    vi.stubGlobal("ogb", { openFolder, remoteClient: { active: false } });
+    try {
+      expect(await clickLink(authorized)).toEqual({ state: "idle", folder: null });
+      expect(openFolder).toHaveBeenCalledWith(folderPath);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("shows the listing when the desktop would not open it", async () => {
+    const openFolder = vi.fn(async () => "not-folder");
+    vi.stubGlobal("ogb", { openFolder, remoteClient: { active: false } });
+    try {
+      expect(await clickLink(authorized)).toEqual({ state: "idle", folder: listing });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("shows the listing where there is no desktop bridge", async () => {
+    vi.stubGlobal("ogb", undefined);
+    try {
+      expect(await clickLink(authorized)).toEqual({ state: "idle", folder: listing });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("never reaches the desktop when the route refuses the link", async () => {
+    const openFolder = vi.fn(async () => "opened");
+    vi.stubGlobal("ogb", { openFolder, remoteClient: { active: false } });
+    try {
+      expect(await clickLink(refused)).toEqual({ state: "failed", folder: null });
+      expect(openFolder).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
     }

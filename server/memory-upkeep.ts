@@ -5,6 +5,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { CaptureBuffer, captureItemLimit, capturePrompt, captureSize, newCandidates, parseCandidates, statedInConversation, worthCapturing, type Candidate, type CaptureBatch, type CaptureTurn } from "./memory-capture.ts";
 import { DREAM_FIRST_LOOKBACK_MS, DREAM_MIN_CONVERSATIONS, dreamPrompt, parseDream, type DreamConversation } from "./memory-dream.ts";
+import { checkDreamFacts } from "./memory-fact-checks.ts";
 import { factIdentity, lineFactIdentity, notebookIdentities } from "./memory-entries.ts";
 import { mergeTopicText } from "./memory-topics.ts";
 import { isForgotten } from "./profile-learned.ts";
@@ -762,6 +763,8 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       return late;
     }
     const dreamt = parseDream(answer, conversations.length, notebook.length);
+    dreamt.learned = dreamt.learned.filter((item) => checkDreamFacts(item.text, item.from, item.evidence, conversations) && !isForgotten(item.text));
+    dreamt.outdated = dreamt.outdated.filter((item) => checkDreamFacts(item.now, item.from, item.evidence, conversations) && !isForgotten(item.now));
     const source = `dream across ${conversations.length} chats`;
     // Re-read inside the write: if the notes changed after the prompt, its line numbers are stale.
     const written = writing(botId, () => {

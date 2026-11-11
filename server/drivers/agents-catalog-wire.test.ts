@@ -49,12 +49,11 @@ function profiles(): Record<string, Profile> {
   for (const name of ["skills+shared+voice", "skills+shared+voice+non-chief"]) {
     all[`${name}+cloud-home`] = { env: { ...all[name]!.env, OMB_CLOUD_HOME: "1" } };
   }
-  all["skills+shared+voice+escalations"] = { env: { ...all["skills+shared+voice"]!.env, OMB_ESCALATIONS: "1" } };
   // Research is on only with a treg key or a Cloud plan and the bot's switch; the fullest profile carries it.
-  all["skills+shared+voice+escalations+x"] = { env: { ...all["skills+shared+voice+escalations"]!.env, OMB_X_RESEARCH: "1", OMB_RESEARCH: "1" } };
+  all["skills+shared+voice+x"] = { env: { ...all["skills+shared+voice"]!.env, OMB_X_RESEARCH: "1", OMB_RESEARCH: "1" } };
   // A Team Cloud mounts message_person; the fullest profile carries it.
-  all["skills+shared+voice+escalations+x+team"] = { env: { ...all["skills+shared+voice+escalations+x"]!.env, OMB_TEAM_PEOPLE: "1" } };
-  all["skills+shared+voice+escalations+x+team+images"] = { env: { ...all["skills+shared+voice+escalations+x+team"]!.env, OMB_IMAGE_GENERATION: "1" } };
+  all["skills+shared+voice+x+team"] = { env: { ...all["skills+shared+voice+x"]!.env, OMB_TEAM_PEOPLE: "1" } };
+  all["skills+shared+voice+x+team+images"] = { env: { ...all["skills+shared+voice+x+team"]!.env, OMB_IMAGE_GENERATION: "1" } };
   all["default+legacy-switches"] = {
     env: { ...all.default!.env, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1", OMB_ACTIVE_WAITS: "0" },
   };
@@ -79,7 +78,7 @@ const RESEARCH_TOOLS = ["x_search", "research_search", "research_endpoint", "res
 /** Only on the person's own Cloud: never on the fullest profile, a Team Cloud's. */
 const OWN_CLOUD_TOOLS = ["ask_for_computer"];
 /** The fullest profile, checked in whole; every other one is pinned by tool names, bytes and sha256. */
-const FULL = "skills+shared+voice+escalations+x+team+images";
+const FULL = "skills+shared+voice+x+team+images";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
@@ -104,13 +103,12 @@ const BUDGET_BASELINE: Record<string, number> = {
   "default+legacy-switches": 60451,
   "default+mausbot": 61102,
   "skills+shared+voice+mausbot": 67224,
-  "skills+shared+voice+escalations": 67403,
-  "skills+shared+voice+escalations+x": 71242,
-  "skills+shared+voice+escalations+x+team": 71242,
+  "skills+shared+voice+x": 71242,
+  "skills+shared+voice+x+team": 71242,
   "default+no-computer-pick": 59239,
   "default+room": 57595,
   "non-chief+room": 48379,
-  "skills+shared+voice+escalations+x+team+images": 72015,
+  "skills+shared+voice+x+team+images": 72015,
   "default+images": 61224,
 };
 
@@ -247,13 +245,6 @@ describe("agents proxy tools/list golden", () => {
     }
   });
 
-  it("mounts raise_escalation only where chief escalations are on", () => {
-    const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
-    expect(names(wires["skills+shared+voice+escalations"]!).filter((tool) => tool !== "raise_escalation")).toEqual(names(wires["skills+shared+voice"]!));
-    for (const [name, profile] of Object.entries(PROFILES)) {
-      expect(names(wires[name]!).includes("raise_escalation"), name).toBe(profile.env.OMB_ESCALATIONS === "1");
-    }
-  });
 
   it("mounts message_person everywhere: every plan's bots can reach the person's Inbox", () => {
     const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
@@ -335,7 +326,7 @@ describe("agents proxy tools/list golden", () => {
     const names = (name: string) => toolsOf(wires[name]!).map((tool) => tool.name);
     expect(names("default+no-computer-pick")).toEqual(names("default").filter((tool) => tool !== "select_computer"));
     for (const name of ["default", "non-chief"]) {
-      expect(names(`${name}+room`), name).toEqual(names(name).filter((tool) => !["select_computer", "wait_until", "list_waits", "cancel_wait"].includes(tool)));
+      expect(names(`${name}+room`), name).toEqual(names(name).filter((tool) => !["select_computer", "wait_until", "list_waits", "cancel_wait", "burst"].includes(tool)));
     }
     for (const [name, profile] of Object.entries(PROFILES)) {
       expect(names(name).includes("select_computer"), name).toBe(profile.env.OMB_COMPUTER_SELECTION === "1");

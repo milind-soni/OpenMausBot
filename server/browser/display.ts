@@ -24,6 +24,18 @@ export function parseDisplay(text: string): ScreenSpec | null {
   return { width: Number(match[1]), height: Number(match[2]), deviceScaleFactor: Math.round(scale * 100) / 100 };
 }
 
+/** Cinnamon, GNOME and KDE set a HiDPI or fractional scale as Xft.dpi (96 being 1x), not GDK_SCALE; the app's own window
+ *  draws at that scale, so a page at 1x would look blurry in it. */
+async function xftScale(runCommand: Run): Promise<number> {
+  try {
+    const dpi = Number(/^Xft\.dpi:\s*(\d+(?:\.\d+)?)\s*$/mu.exec(await runCommand("xrdb", ["-query"], 5_000))?.[1]);
+    const scale = Math.round((dpi / 96) * 100) / 100;
+    return scale > 1 && scale <= 4 ? scale : 1;
+  } catch {
+    return 1;
+  }
+}
+
 export async function displayScreen(host: HostKind, { platform = process.platform, env = process.env, runCommand = run }: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv; runCommand?: Run } = {}): Promise<ScreenSpec> {
   const named = parseDisplay(env.OMB_BROWSER_SCREEN?.trim() ?? "");
   if (named) return named;
@@ -34,9 +46,11 @@ export async function displayScreen(host: HostKind, { platform = process.platfor
     if (platform === "linux" && (env.DISPLAY || env.WAYLAND_DISPLAY)) {
       const lines = (await runCommand("xrandr", ["--current"], 5_000)).split("\n").filter((line) => / connected /u.test(line));
       const pixels = parseDisplay(lines.find((line) => / primary /u.test(line)) ?? lines[0] ?? "");
-      const scale = Number(env.GDK_SCALE);
       if (!pixels) return SERVER_SCREEN;
-      if (!(Number.isInteger(scale) && scale > 1 && scale <= 4)) return pixels;
+      const gdkScale = Number(env.GDK_SCALE);
+      // An explicit GDK_SCALE wins, 1 included. Under Wayland, XWayland's RandR size can already be logical, so Xft.dpi is only read in an X11 session.
+      const x11 = !env.WAYLAND_DISPLAY && env.XDG_SESSION_TYPE !== "wayland";
+      const scale = Number.isInteger(gdkScale) && gdkScale >= 1 && gdkScale <= 4 ? gdkScale : x11 ? await xftScale(runCommand) : 1;
       return { width: Math.round(pixels.width / scale), height: Math.round(pixels.height / scale), deviceScaleFactor: scale };
     }
   } catch {}

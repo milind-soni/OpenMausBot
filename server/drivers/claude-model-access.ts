@@ -53,8 +53,8 @@ export function claudeAccountFiles(env: Record<string, string | undefined>): str
 export function withOrgBlocks(catalog: ModelCatalog, blocked: ReadonlySet<string>): ModelCatalog {
   const options: ModelCatalog["options"] = catalog.options.map(({ orgBlocked: _stale, ...option }) =>
     !option.custom && blocked.has(claudeModelKey(option.id)) ? { ...option, orgBlocked: true as const } : option);
-  const usable = (id: string) => options.some((option) => option.id === id && !option.orgBlocked);
-  const fallback = options.find((option) => !option.orgBlocked && !option.custom)?.id;
+  const usable = (id: string) => options.some((option) => option.id === id && !option.orgBlocked && !option.needsCliUpdate);
+  const fallback = options.find((option) => !option.orgBlocked && !option.needsCliUpdate && !option.custom)?.id;
   return { ...catalog, default: usable(catalog.default) ? catalog.default : fallback ?? catalog.default, options };
 }
 

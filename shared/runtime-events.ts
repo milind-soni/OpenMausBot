@@ -204,6 +204,8 @@ export type RuntimeEvent = RuntimeEventBase &
     /** Something the person should know that did not fail the turn — for
      * example, a saved model the engine no longer offers was replaced. */
     | { type: "runtime.notice"; message: string; text?: ServerText }
+    /** The engine condensed the conversation into its own summary (Claude Code's compact_boundary); the chat marks it. */
+    | { type: "context.compacted" }
   );
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;

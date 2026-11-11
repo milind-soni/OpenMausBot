@@ -390,7 +390,7 @@ describe("ACP turns (fake CLI)", () => {
     // The stall watchdog sees no tool left running, so the turn's own silence limit applies.
     let now = 0;
     const limits: number[] = [];
-    const dog = new TurnWatchdog({ stallMs: 10, toolStallMs: 1_000, checkMs: 60_000, now: () => now, onStall: (_turn, silentMs) => limits.push(silentMs) });
+    const dog = new TurnWatchdog({ stallMs: 10, toolStallMs: 1_000, parkedStallMs: 10_000, checkMs: 60_000, now: () => now, onStall: (_turn, silentMs) => limits.push(silentMs) });
     dog.watch("t-finished-tools", "bot");
     for (const event of recorder.events) dog.observe(event);
     now = 10;
