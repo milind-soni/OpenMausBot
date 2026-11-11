@@ -7,7 +7,7 @@ const turn = { ok: true, contextTokens: 200_000 };
 const warm: KeepWarmPingResult = { ok: true, input: 4, cacheRead: 100_000, cacheWrite: 20, output: 2, costUsd: 0.01, model: "claude-opus-5-5" };
 const instances: CacheKeepWarm[] = [];
 
-function fixture() {
+function fixture(windowMs = 3 * 60 * 60_000) {
   vi.useFakeTimers();
   const holds: Array<{ target: KeepWarmTarget; until: number | null }> = [];
   const booked: KeepWarmTarget[] = [];
@@ -15,7 +15,7 @@ function fixture() {
   const keepWarm = createCacheKeepWarm({
     now: () => Date.now(),
     after: (ms, fn) => { const timer = setTimeout(fn, ms); return { cancel: () => clearTimeout(timer) }; },
-    windowMs: () => 3 * 60 * 60_000,
+    windowMs: () => windowMs,
     ineligible: () => null,
     busy: () => false,
     overBudget: () => false,
@@ -71,4 +71,31 @@ describe.each([
     h.keepWarm.noteTurnCompleted(replacement, turn);
     expect(h.keepWarm.status(target.threadId)?.last).toBeUndefined();
   });
+
+  it.each(["expires", "is canceled"])("drops the previous target's ping after its window %s", async (ending) => {
+    const h = fixture(PING_AFTER_MS + 1_000);
+    h.keepWarm.noteTurnCompleted(target, turn);
+    await vi.advanceTimersByTimeAsync(PING_AFTER_MS);
+    await h.settle();
+    expect(h.keepWarm.status(target.threadId)?.last).toBeDefined();
+    if (ending === "expires") await vi.advanceTimersByTimeAsync(1_000);
+    else h.keepWarm.cancelBot(target.botId);
+    expect(h.keepWarm.status(target.threadId)).toBeUndefined();
+    h.keepWarm.noteTurnCompleted(replacement, turn);
+    expect(h.keepWarm.status(target.threadId)).toMatchObject({ state: "warm" });
+    expect(h.keepWarm.status(target.threadId)?.last).toBeUndefined();
+  });
+});
+
+it("preserves the last ping when the same target starts a new window", async () => {
+  const h = fixture(PING_AFTER_MS + 1_000);
+  h.keepWarm.noteTurnCompleted(target, turn);
+  await vi.advanceTimersByTimeAsync(PING_AFTER_MS);
+  await h.settle();
+  const last = h.keepWarm.status(target.threadId)?.last;
+  expect(last).toBeDefined();
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(h.keepWarm.status(target.threadId)).toBeUndefined();
+  h.keepWarm.noteTurnCompleted({ ...target }, turn);
+  expect(h.keepWarm.status(target.threadId)?.last).toEqual(last);
 });
