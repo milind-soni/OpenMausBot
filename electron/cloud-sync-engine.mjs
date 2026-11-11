@@ -4,9 +4,9 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { RESERVE_BYTES, clashPath, neverFromCloud, validWirePath, windowsProblem } from "./cloud-sync-rules.mjs";
+import { RESERVE_BYTES, clashPath, foldKey, neverFromCloud, validWirePath, windowsProblem } from "./cloud-sync-rules.mjs";
 import { planOutputs, planShare } from "./cloud-sync-plan.mjs";
-import { scanPc, sha256File } from "./cloud-sync-scan.mjs";
+import { caseInsensitive, scanPc, sha256File } from "./cloud-sync-scan.mjs";
 import { SyncAuthError } from "./cloud-sync-client.mjs";
 import { CloudAsleepError } from "./cloud-power.mjs";
 
@@ -114,6 +114,20 @@ export async function fetchOutputs({ client, state, folder, local, platform = pr
   const { entries: pc, temps } = await scanPc(local, base, { now });
   for (const temp of temps) if (now() - temp.mtimeMs > TEMP_STALE_MS) fs.rmSync(temp.file, { force: true });
   const listed = (await client.files(folder.id)).filter((file) => validWirePath(file.path) && !neverFromCloud(file.path) && !(platform === "win32" && windowsProblem(file.path)));
+  if (caseInsensitive(local, platform)) {
+    const names = new Map();
+    for (const file of listed) {
+      const parts = file.path.split("/");
+      for (let length = 1; length <= parts.length; length++) {
+        const name = parts.slice(0, length).join("/"), key = foldKey(name);
+        const previous = names.get(key);
+        if (previous !== undefined && previous !== name) {
+          throw new Error(`${JSON.stringify(previous)} and ${JSON.stringify(name)} have the same name on this computer. Rename one on My Cloud before syncing.`);
+        }
+        names.set(key, name);
+      }
+    }
+  }
   const cloud = new Map(listed.map((file) => [file.path, file]));
   const { downloads, records } = planOutputs({ base, pc, cloud });
   const ctx = { client, state, folder, local, pc, cloud, now, trashItem, markDownloaded, freeBytes, result };
