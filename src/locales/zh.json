@@ -5756,7 +5756,6 @@
   "settings.section.backups": "备份",
   "settings.section.import": "导入",
   "settings.import.appsTitle": "从你的 AI 应用导入",
-  "settings.import.appsSubtitle": "从这台电脑上的 Claude Code、Codex、Cursor、Claude Desktop 和 Gemini 导入技能和 MCP 工具。导入的工具默认关闭；不会读取登录信息或历史记录。",
   "settings.import.appsLooking": "正在这台电脑上查找…",
   "settings.import.appsNothing": "你的 AI 应用里没有可导入的新内容。",
   "settings.import.appsLocalOnly": "只有运行 {app} 的那台电脑上的桌面版，才能导入该电脑上的技能和工具。",

@@ -5777,7 +5777,6 @@
   "settings.section.backups": "バックアップ",
   "settings.section.import": "インポート",
   "settings.import.appsTitle": "お使いの AI アプリから",
-  "settings.import.appsSubtitle": "このコンピューター上の Claude Code、Codex、Cursor、Claude Desktop、Gemini からスキルと MCP ツールを取り込みます。ツールはオフの状態で取り込まれ、ログイン情報や履歴は読み取りません。",
   "settings.import.appsLooking": "このコンピューターを検索しています…",
   "settings.import.appsNothing": "AI アプリから取り込める新しい項目はありません。",
   "settings.import.appsLocalOnly": "そのコンピューターのスキルとツールを取り込めるのは、{app} を実行しているコンピューターのデスクトップアプリだけです。",

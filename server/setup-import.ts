@@ -15,6 +15,7 @@ import { parseSkillMd, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/
 import { importedSkillIntact, readImportedSkills, storeImportedSkills, type ImportedSkillEntry, type ImportedSkillInput } from "./imported-skills.ts";
 import { scanSkillFolder } from "./skill-folder.ts";
 import { importedMcpServerName, isRemoteMcpServer, MAX_MCP_SERVERS, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
+import { parse as parseYaml } from "yaml";
 import { parseToml } from "./toml-lite.ts";
 
 /** The file operations finding and copying use, so tests can see every path touched. Each answers null on failure. */
@@ -91,7 +92,7 @@ export function thisMachine(): SetupMachine {
   return { home: homedir(), platform: process.platform, env: process.env, fs: nodeFs };
 }
 
-type ToolFormat = "claudeJson" | "json" | "toml";
+type ToolFormat = "claudeJson" | "json" | "toml" | "yaml";
 
 const CONFIG_MAX_BYTES = 1024 * 1024;
 /** ~/.claude.json also keeps every project's history, so it can be large; only its mcpServers member is parsed. */
@@ -106,19 +107,34 @@ export function setupPaths(machine: Pick<SetupMachine, "home" | "platform" | "en
     : platform === "win32" ? join(absolute(env.APPDATA) ?? join(home, "AppData", "Roaming"), "Claude")
       : join(home, ".config", "Claude");
   const codexLabel = codexHome === join(home, ".codex") ? "~/.codex/skills" : "$CODEX_HOME/skills";
+  // Hermes Agent (hermes_constants.get_hermes_home) and OpenClaw (docs.openclaw.ai/help/environment) homes.
+  const hermesDefault = platform === "win32" ? join(absolute(env.LOCALAPPDATA) ?? join(home, "AppData", "Local"), "hermes") : join(home, ".hermes");
+  const hermesHome = absolute(env.HERMES_HOME) ?? hermesDefault;
+  const hermesLabel = hermesHome === hermesDefault ? (platform === "win32" ? "%LOCALAPPDATA%/hermes/skills" : "~/.hermes/skills") : "$HERMES_HOME/skills";
+  const openclawHome = absolute(env.OPENCLAW_STATE_DIR) ?? join(home, ".openclaw");
+  const openclawLabel = openclawHome === join(home, ".openclaw") ? "~/.openclaw" : "$OPENCLAW_STATE_DIR";
   return {
     codexHome,
+    hermesHome,
+    openclawHome,
     skills: [
       { source: "claudeCode", root: join(home, ".claude", "skills"), label: "~/.claude/skills" },
       { source: "codex", root: join(codexHome, "skills"), label: codexLabel },
-    ] satisfies Array<{ source: SkillSource; root: string; label: string }>,
+      // Hermes files skills under category folders, and lists the ones it ships (not the person's) in .bundled_manifest.
+      { source: "hermes", root: join(hermesHome, "skills"), label: hermesLabel, nested: true, bundled: join(hermesHome, "skills", ".bundled_manifest") },
+      { source: "openclaw", root: join(openclawHome, "skills"), label: `${openclawLabel}/skills`, nested: true },
+      { source: "openclaw", root: join(openclawHome, "workspace", "skills"), label: `${openclawLabel}/workspace/skills`, nested: true },
+    ] satisfies Array<{ source: SkillSource; root: string; label: string; nested?: boolean; bundled?: string }>,
     tools: [
       { source: "claudeCode", path: join(home, ".claude.json"), format: "claudeJson", max: CLAUDE_JSON_MAX_BYTES },
       { source: "claudeDesktop", path: join(desktop, "claude_desktop_config.json"), format: "json", max: CONFIG_MAX_BYTES },
       { source: "cursor", path: join(home, ".cursor", "mcp.json"), format: "json", max: CONFIG_MAX_BYTES },
       { source: "codex", path: join(codexHome, "config.toml"), format: "toml", max: CONFIG_MAX_BYTES },
       { source: "gemini", path: join(home, ".gemini", "settings.json"), format: "json", max: CONFIG_MAX_BYTES },
-    ] satisfies Array<{ source: SetupSource; path: string; format: ToolFormat; max: number }>,
+      { source: "hermes", path: join(hermesHome, "config.yaml"), format: "yaml", max: CONFIG_MAX_BYTES, key: "mcp_servers" },
+      // OpenClaw's config is JSON5; the comments and trailing commas the json format already strips are what it adds in practice.
+      { source: "openclaw", path: absolute(env.OPENCLAW_CONFIG_PATH) ?? join(openclawHome, "openclaw.json"), format: "json", max: CONFIG_MAX_BYTES, key: "mcp.servers" },
+    ] satisfies Array<{ source: SetupSource; path: string; format: ToolFormat; max: number; key?: string }>,
   };
 }
 
@@ -215,7 +231,7 @@ function placesFor(machine: SetupMachine): Places {
     return [...new Set([...spellings, ...(found ? [found.path] : [])])];
   };
   const paths = setupPaths(machine);
-  const toolHomes = [join(machine.home, ".claude"), paths.codexHome, join(machine.home, ".gemini"), join(machine.home, ".cursor")].flatMap(forms);
+  const toolHomes = [join(machine.home, ".claude"), paths.codexHome, join(machine.home, ".gemini"), join(machine.home, ".cursor"), paths.hermesHome, paths.openclawHome].flatMap(forms);
   const roots = new Map<string, string>();
   for (const { root } of paths.skills) {
     const found = locate(machine, { homes, darwin }, root);
@@ -235,28 +251,47 @@ function skillFolderAllowed(places: Places, real: string): boolean {
 
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
+const MANIFEST_MAX_BYTES = 256 * 1024;
+
+/** The skills Hermes seeded from its own install: one `name:hash` line each (tools/skills_sync.py). */
+function bundledSkillNames(machine: SetupMachine, manifest: string): Set<string> {
+  const bytes = machine.fs.read(manifest, MANIFEST_MAX_BYTES, false);
+  const text = bytes ? utf8(bytes) : null;
+  if (!text) return new Set();
+  return new Set(text.split(/\r?\n/).map((line) => line.split(":")[0]!.trim()).filter(Boolean));
+}
+
 /** Skill folders with a valid SKILL.md, Claude Code's first; a name found twice keeps its first folder. */
 function findSkills(machine: SetupMachine): FoundSkill[] {
   const places = placesFor(machine);
   const found: FoundSkill[] = [];
   const names = new Set<string>();
-  for (const { source, root, label } of setupPaths(machine).skills) {
+  for (const skillRoot of setupPaths(machine).skills) {
+    const { source, root, label } = skillRoot;
     const real = places.roots.get(root);
     if (!real) continue;
-    // Dot folders hold the tools' own built-in skills (Codex's .system), not the person's.
-    const folders = (machine.fs.readdir(real) ?? []).filter((folder) => !folder.startsWith(".")).sort().slice(0, MAX_SKILL_FOLDERS);
-    for (const folder of folders) {
-      const dir = locate(machine, places, join(real, folder));
-      if (!dir?.info.isDirectory() || !skillFolderAllowed(places, dir.path)) continue;
+    const shipped = "bundled" in skillRoot && skillRoot.bundled ? bundledSkillNames(machine, skillRoot.bundled) : new Set<string>();
+    // Dot folders hold the tools' own built-in skills (Codex's .system, Hermes' .hub), not the person's.
+    const listed = (dir: string) => (machine.fs.readdir(dir) ?? []).filter((folder) => !folder.startsWith(".")).sort();
+    let budget = MAX_SKILL_FOLDERS;
+    const visit = (relativeFolder: string, deeper: boolean) => {
+      if (budget-- <= 0) return;
+      const dir = locate(machine, places, join(real, relativeFolder));
+      if (!dir?.info.isDirectory() || !skillFolderAllowed(places, dir.path)) return;
       const bytes = machine.fs.read(join(dir.path, "SKILL.md"), SKILL_FILE_MAX_BYTES, false);
-      const text = bytes ? utf8(bytes) : null;
+      if (!bytes) {
+        if (deeper) for (const inner of listed(dir.path)) visit(join(relativeFolder, inner), false);
+        return;
+      }
+      const text = utf8(bytes);
       const parsed = text === null ? null : parseSkillMd(text);
-      if (!parsed || "error" in parsed || names.has(parsed.name)) continue;
+      if (!parsed || "error" in parsed || names.has(parsed.name) || shipped.has(parsed.name)) return;
       names.add(parsed.name);
       found.push({
-        name: parsed.name, source, parsed, folder: dir.path, root, origin: join(root, folder), label: `${label}/${folder}`, text: text!, sha256: sha256(text!),
+        name: parsed.name, source, parsed, folder: dir.path, root, origin: join(root, relativeFolder), label: `${label}/${relativeFolder.split(/[\\/]/).join("/")}`, text: text!, sha256: sha256(text!),
       });
-    }
+    };
+    for (const folder of listed(real)) visit(folder, "nested" in skillRoot && skillRoot.nested === true);
   }
   return found;
 }
@@ -571,7 +606,9 @@ function pasteEntry(source: SetupSource, raw: Record<string, unknown>): Record<s
     if (typeof raw.httpUrl === "string") return remote("http", raw.httpUrl);
     if (typeof raw.url === "string") return remote(raw.type === "http" ? "http" : "sse", raw.url);
   } else if (typeof raw.url === "string") {
-    return remote(typeof raw.type === "string" && /sse/i.test(raw.type) ? "sse" : "http", raw.url);
+    // OpenClaw names it transport ("streamable-http" or "sse"); the others, type.
+    const kind = typeof raw.type === "string" ? raw.type : typeof raw.transport === "string" ? raw.transport : "";
+    return remote(/sse/i.test(kind) ? "sse" : "http", raw.url);
   }
   const env = textValues(raw.env);
   return {
@@ -600,8 +637,12 @@ function toolEntries(machine: SetupMachine, tool: ReturnType<typeof setupPaths>[
       const servers = topLevelJsonMember(text, "mcpServers");
       return isRecord(servers) ? servers : null;
     }
-    const parsed: unknown = tool.format === "toml" ? parseToml(text) : JSON.parse(withoutTrailingCommas(withoutJsonComments(text)));
-    const servers = isRecord(parsed) ? parsed[tool.format === "toml" ? "mcp_servers" : "mcpServers"] : undefined;
+    const parsed: unknown = tool.format === "toml" ? parseToml(text)
+      : tool.format === "yaml" ? parseYaml(text, { maxAliasCount: 100 })
+        : JSON.parse(withoutTrailingCommas(withoutJsonComments(text)));
+    const key = "key" in tool && tool.key ? tool.key : tool.format === "toml" ? "mcp_servers" : "mcpServers";
+    let servers: unknown = parsed;
+    for (const part of key.split(".")) servers = isRecord(servers) ? servers[part] : undefined;
     return isRecord(servers) ? servers : null;
   } catch {
     return null;

@@ -241,8 +241,15 @@ already use** step (`server/setup-import.ts`). On the computer running
 OpenMausBot, and only for the desktop app's own window there, it reads the
 `mcpServers` of Claude Code (only the top-level key of `~/.claude.json`),
 Claude Desktop, Cursor (`~/.cursor/mcp.json`) and Gemini CLI
-(`~/.gemini/settings.json`), and the `[mcp_servers.*]` tables of Codex's
-`config.toml`. Each server goes through the import parser, switched off;
+(`~/.gemini/settings.json`), the `[mcp_servers.*]` tables of Codex's
+`config.toml`, the `mcp_servers:` of Hermes Agent's `config.yaml`
+(`$HERMES_HOME`, else `~/.hermes`, or `%LOCALAPPDATA%\hermes` on Windows) and
+the `mcp.servers` of OpenClaw's `openclaw.json` (`$OPENCLAW_CONFIG_PATH`, else
+`$OPENCLAW_STATE_DIR` or `~/.openclaw`; its JSON5 comments and trailing commas
+are accepted, and a config that still can't be read brings no tools).
+OpenClaw's `transport: "sse"` stays SSE; `streamable-http` comes in as HTTP.
+Neither tool's `.env`, `auth.json`, `mcp-tokens/`, `secrets.json`,
+`credentials/`, sessions, state databases or memory files are ever opened. Each server goes through the import parser, switched off;
 one already here by command or address is left alone, a different server
 under a name already taken is skipped and named in the result, a name
 OpenMausBot keeps for itself (`browser`, `computer`, `data`…) gets an `mcp-`
@@ -254,7 +261,9 @@ Claude bots already run them. Token variables (Codex `bearer_token_env_var`)
 are not resolved: add the token as a header when you test the server.
 
 The step also brings in the person's own skills (`~/.claude/skills`,
-`~/.codex/skills`). Each one is copied once, read-only except on Windows, into
+`~/.codex/skills`, Hermes Agent's `skills/` with its category folders, and
+OpenClaw's `skills/` and `workspace/skills/`). The skills Hermes ships itself,
+listed in its `skills/.bundled_manifest`, are left out. Each one is copied once, read-only except on Windows, into
 `<data>/imported-skills` (`server/imported-skills.ts`), and every bot uses
 that copy on every engine that works with files: the bot the tour sets up,
 and any bot made later with New bot, the API, a template, a Chief
