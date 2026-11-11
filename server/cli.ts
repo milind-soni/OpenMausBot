@@ -25,6 +25,7 @@ import { parseAllowList } from "./account-signin.ts";
 import { appendAdminAction, flushAdminActivity, sharedSignIn } from "./admin-activity.ts";
 import { bindDecisionRetention, decisionRetentionDays } from "./decision-log.ts";
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
+import { reportableServerVersion, serverVersion } from "./environment.ts";
 import { resolveLoopbackTrust } from "./request-auth.ts";
 import { restartPolicy } from "./restart.ts";
 import { writeFileAtomic } from "./atomic.ts";
@@ -246,16 +247,6 @@ export function defaultIo(): CliIo {
   };
 }
 
-export function serverVersion(here = HERE): string {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(resolve(here, "..", "package.json"), "utf8"));
-    const version = typeof parsed === "object" && parsed !== null ? Reflect.get(parsed, "version") : undefined;
-    return typeof version === "string" && version ? version : "0.0.0";
-  } catch {
-    return "0.0.0";
-  }
-}
-
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** On a service-trust server: the secret `serve` handed the server it started, which opens its pairing route. */
@@ -438,7 +429,7 @@ export async function runStatus(options: CliOptions, io: CliIo = defaultIo()): P
     const sessions = await api(options.port, "/api/auth/sessions").catch(() => null);
     if (Array.isArray(sessions?.body?.sessions)) io.log(`Paired   ${sessions.body.sessions.length} device${sessions.body.sessions.length === 1 ? "" : "s"}   ${cliCommand("devices")}`);
   }
-  const account = options.json ? null : describeTunnelAccount(createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() }).credentials.read());
+  const account = options.json ? null : describeTunnelAccount(createTunnelAccount({ dataDir: options.dataDir, version: reportableServerVersion() }).credentials.read());
   if (!options.json && fleetCredential()) io.log(`MausBot web address: managed by the fleet (${FLEET_CREDENTIAL_ENV} is set)`);
   else if (account?.address) io.log(`MausBot web address: ${account.address} (signed in as ${account.email ?? "?"}; serve it with ${cliCommand("serve --tunnel")})`);
   return body ? 0 : 1;
@@ -510,7 +501,7 @@ export async function runAccess(options: CliOptions, io: CliIo = defaultIo()): P
 }
 
 export async function runLogin(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
-  const account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion(), relayOnly: options.relay === true });
+  const account = createTunnelAccount({ dataDir: options.dataDir, version: reportableServerVersion(), relayOnly: options.relay === true });
   if (fleetCredential()) io.log(`note: ${FLEET_CREDENTIAL_ENV} is set, so serve --tunnel will use that credential rather than this account`);
   if (account.credentials.status === "unavailable") {
     io.error(`${account.credentials.file} exists but could not be read; fix or remove it, then try again`);
@@ -553,7 +544,7 @@ export async function runLogin(options: CliOptions, io: CliIo = defaultIo()): Pr
 }
 
 export async function runLogout(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
-  const account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() });
+  const account = createTunnelAccount({ dataDir: options.dataDir, version: reportableServerVersion() });
   const before = describeTunnelAccount(account.credentials.read());
   if (!before.email) {
     io.log("this machine is not signed in");
@@ -644,12 +635,12 @@ async function planTunnel(options: CliOptions, log: (line: string) => void, reco
   if (credential) {
     log(`tunnel: using the installation credential from ${FLEET_CREDENTIAL_ENV}`);
     try {
-      access = await fleetAccess({ credential, version: serverVersion() });
+      access = await fleetAccess({ credential, version: reportableServerVersion() });
     } catch (error) {
       return { error: `--tunnel: ${message(error)}` };
     }
   } else {
-    account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion(), recovery, log: (line) => log(`tunnel: ${line}`) });
+    account = createTunnelAccount({ dataDir: options.dataDir, version: reportableServerVersion(), recovery, log: (line) => log(`tunnel: ${line}`) });
     if (account.credentials.status === "unavailable") return fail(`${account.credentials.file} exists but could not be read; fix or remove it`);
     if (!describeTunnelAccount(account.credentials.read()).email) {
       return fail(`no account on this machine yet: run ${cliCommand("login")} first, then ${cliCommand("serve --tunnel")}`);
@@ -957,7 +948,7 @@ export async function runOnboardingCommand(
     if (interactive && options.pair && !options.local && (options.command === "setup" || !saved)) {
       io.log("\nOne optional step: connect your phone. You can skip this and start chatting here.");
       const result = await (flow.phoneSetup ?? runPhoneSetup)(launch, prompts, {
-        accountReady: (value) => !!describeTunnelAccount(createTunnelAccount({ dataDir: value.dataDir, version: serverVersion() }).credentials.read()).email,
+        accountReady: (value) => !!describeTunnelAccount(createTunnelAccount({ dataDir: value.dataDir, version: reportableServerVersion() }).credentials.read()).email,
         login: (value, ui) => runLogin(value, {
           log: ui.log, error: ui.log,
           ask: (question) => /code/i.test(question) ? ui.secret(question) : ui.ask(question),

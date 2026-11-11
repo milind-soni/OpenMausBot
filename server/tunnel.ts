@@ -128,7 +128,7 @@ const STOPPED_TUNNEL: ManagedTunnelState = { status: "stopped", ready: false };
 /** A server's operator owns its environment, so OMB_CONTROL_PLANE_URL is always honoured here (the desktop: dev builds only). */
 export function createTunnelAccount(options: {
   dataDir: string;
-  version: string;
+  version: string | undefined;
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
   machineName?: string;

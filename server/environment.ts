@@ -146,6 +146,14 @@ export function serverVersion(root = SERVER_ROOT): string {
   return "unknown";
 }
 
+const RELEASE_VERSION = /^\d+\.\d+\.\d+(?:[-+].*)?$/;
+
+/** The version to tell the control plane, or none: it records what it is told, and stops serving a public address to a
+ * version below its minimum, so a version this server could not read must not stand in for the release it runs. */
+export function reportableServerVersion(version = serverVersion()): string | undefined {
+  return RELEASE_VERSION.test(version) ? version : undefined;
+}
+
 export type ServerInstall = "npx" | "global" | "docker" | "source";
 
 /** How this server was started: the Docker image (OMB_CLI_PREFIX, or Docker's own /.dockerenv), a checkout, npx, or a

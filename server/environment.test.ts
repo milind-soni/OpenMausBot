@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { environmentDescriptor, loadEnvironmentId, serverInstall, serverVersion } from "./environment.ts";
+import { environmentDescriptor, loadEnvironmentId, reportableServerVersion, serverInstall, serverVersion } from "./environment.ts";
 
 const dirs: string[] = [];
 
@@ -189,5 +189,24 @@ describe("environment identity", () => {
     process.env.OMB_APP_VERSION = "0.1.120";
     expect(serverVersion(bundle)).toBe("0.1.120");
     delete process.env.OMB_APP_VERSION;
+  });
+
+  it("reads the version of the self-hosted image, which ships dist-server/package.json and no /app/package.json", () => {
+    delete process.env.OMB_APP_VERSION;
+    const app = mkdtempSync(join(tmpdir(), "omb-app-"));
+    dirs.push(app);
+    const bundle = join(app, "dist-server");
+    mkdirSync(bundle);
+    writeFileSync(join(bundle, "package.json"), '{"type":"module","version":"0.1.153"}\n');
+    expect(existsSync(join(app, "package.json"))).toBe(false);
+    expect(serverVersion(bundle)).toBe("0.1.153");
+    expect(reportableServerVersion(serverVersion(bundle))).toBe("0.1.153");
+  });
+
+  it("reports only a release version to the control plane", () => {
+    expect(reportableServerVersion("0.1.153")).toBe("0.1.153");
+    expect(reportableServerVersion("0.2.0-beta.1")).toBe("0.2.0-beta.1");
+    expect(reportableServerVersion("unknown")).toBeUndefined();
+    expect(reportableServerVersion("")).toBeUndefined();
   });
 });
