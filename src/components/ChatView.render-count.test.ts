@@ -106,7 +106,7 @@ describe("a chat on screen", () => {
     // The header's mascot motion is one for the whole app: A's first frame takes it from B, a change B does show.
     await send({ kind: "bot", bot: { ...announced("a", "Ada"), busy: true, activity: "working" } });
     const before = counts();
-    await send({ kind: "bot", bot: { ...announced("a", "Ada"), busy: true, activity: "working", title: "Still working" } });
+    await send({ kind: "bot", bot: { ...announced("a", "Ada"), busy: true, activity: "working", description: "Still working" } });
     await send(reply("a-thread", "a1"));
     await send({ kind: "message.patch", threadId: "a-thread", message: { id: "a1", at: 1, role: "bot", kind: "text", text: "a1, longer" } });
     await send({ kind: "runtime", event: { type: "turn.started", eventId: "e1", provider: "codex", threadId: "a-thread", turnId: "t1", createdAt: "2026-11-11T00:00:00.000Z" } });
@@ -120,6 +120,12 @@ describe("a chat on screen", () => {
     flushSync(() => dispatch({ type: "connected", value: true }));
     await settle();
     expect(counts()).toEqual(before);
+  });
+
+  it("draws its composer again when another bot's title changes, which the @-mention menu shows", async () => {
+    const before = counts();
+    await send({ kind: "bot", bot: { ...announced("a", "Ada"), busy: false, activity: "idle", title: "Researcher" } });
+    expect(renders.composer).toBeGreaterThan(before.composer);
   });
 
   it("draws again for its own bot's reply", async () => {
