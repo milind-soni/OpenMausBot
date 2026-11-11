@@ -1128,7 +1128,8 @@ and Fly restarts the machine. The one exception: after a restore commits
 (`server/restart.ts`) and the launcher starts only the server again.
 
 The machine's secrets (`OMB_CLOUD_BOOTSTRAP_SECRET` and the relay tokens
-`OMB_CLOUD_BOAT_TOKEN`, `OMB_CLOUD_VOICE_TOKEN`, `OMB_CLOUD_DECIDER_TOKEN`, `OMB_CLOUD_X_TOKEN`)
+`OMB_CLOUD_BOAT_TOKEN`, `OMB_CLOUD_VOICE_TOKEN`, `OMB_CLOUD_DECIDER_TOKEN`, `OMB_CLOUD_X_TOKEN`,
+`OMB_CLOUD_HOSTING_TOKEN`)
 arrive as the launcher's environment, from the Fly app secrets the Admin
 sets. The launcher never puts them in a child's environment, because
 `/proc/<pid>/environ` keeps a process's starting environment for anything
@@ -1439,6 +1440,8 @@ For each service the Admin has configured, it also sets:
 | `OMB_CLOUD_DECIDER_TOKEN` | secret | This machine's decision relay token (`omb_decide_…`). It is not a Jev key and works only through the relay. |
 | `OMB_CLOUD_X_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/x`, the Admin's treg relay; the client calls `<OMB_CLOUD_X_URL>/call/<endpoint>` for the X tools' eight endpoints, `/research/search`, `/research/endpoints/<id>` and `/research/call/<id>` for the research tools, and `GET /usage` for the month's calls on the Apps page's X card (`GET /api/x/status`). The home asks `GET /research/search` with no job at start, which spends nothing: a 400 means research is on, an off answer hides the research tools (x_search stays) until an hour later or a restart, and a research call refused as off does the same. A person's own treg key (Settings → API keys) wins over it and goes straight to treg. |
 | `OMB_CLOUD_X_TOKEN` | secret | This machine's X research relay token (`omb_x_…`). Not a treg key; it works only through the relay, within the plan's monthly X research calls. A signed-in desktop gets its own (`omb_xd_…`) from `POST /api/cloud/desktop/services/x` and hands it to its server in memory. |
+| `OMB_CLOUD_HOSTING_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/hosting/v1`, the Admin's app hosting relay, set only where the Admin has included app hosting on and the plan is paid. The server lists the Cloud's apps and the plan's count (`GET /apps`), publishes a bot's folder (`PUT /apps/<key>`, then each file the relay asks for) and deletes (`DELETE /apps/<key>`); `server/host/included-hosting.ts`. Absent: bots publish to the person's own Netlify account, as on a computer. |
+| `OMB_CLOUD_HOSTING_TOKEN` | secret | This machine's app hosting relay token (`omb_host_…`). Not a Netlify token; it works only through the relay, within the plan's apps and monthly publishes. Bots never get it: they call `publish_app`, and the server publishes. |
 
 A service is included only when both its URL and its token are set
 (`server/included-services.ts`). The real Boat, ElevenLabs and Jev keys stay

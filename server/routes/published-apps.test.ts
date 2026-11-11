@@ -20,6 +20,7 @@ const VISIBLE = { marker: "ada's view" } as unknown as VisibleSet;
 async function fixture() {
   const apps = {
     list: vi.fn(async () => [APP]),
+    allowance: vi.fn(async (): Promise<{ used: number; max: number } | null> => null),
     lists: vi.fn(async (_visible: VisibleSet, _auth: RequestAuth, url: string) => url.startsWith(APP.url)),
     remove: vi.fn(async (_visible: VisibleSet, _auth: RequestAuth, id: string) => id === APP.id
       ? { status: 200 as const, body: { ok: true as const } } : { status: 404 as const, body: { error: "No such published app.", code: "gone" as const } }),
@@ -56,6 +57,13 @@ describe("the Published apps routes", () => {
     const { apps, call } = await fixture();
     expect(await call("GET", "/api/published-apps")).toEqual({ status: 200, body: { apps: [APP] } });
     expect(apps.list).toHaveBeenCalledWith(VISIBLE, AUTH);
+  });
+
+  it("adds how many of the plan's included apps are in use, only where there is such a plan", async () => {
+    const { apps, call } = await fixture();
+    apps.allowance.mockResolvedValueOnce({ used: 3, max: 10 });
+    expect(await call("GET", "/api/published-apps")).toEqual({ status: 200, body: { apps: [APP], included: { used: 3, max: 10 } } });
+    expect((await call("GET", "/api/published-apps")).body).not.toHaveProperty("included");
   });
 
   it("checks framing only for an address in the viewer's own list", async () => {

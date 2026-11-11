@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { PAGE_MAX_BYTES, PAGE_MAX_FILES } from "../shared/published-page.ts";
 import { parseSkillMd, scanSkillText } from "../shared/skill-md.ts";
+import { DEFAULT_HOSTING_LIMITS } from "./host/included-hosting.ts";
 import { loadBundledSkills, selectBundledSkills } from "./skill-library.ts";
 import { startFakeNetlify, type FakeNetlify } from "./testing/fake-netlify.ts";
 
@@ -58,7 +59,7 @@ describe("publish-to-netlify skill guide", () => {
   });
 
   it("states the rules a bot must keep, with the real tool names and limits", () => {
-    expect(guide.split("\n").length).toBeLessThanOrEqual(165);
+    expect(guide.split("\n").length).toBeLessThanOrEqual(185);
     for (const tool of ["request_credential", "publish_page", "show_html", "select_computer", "copy_to_computer", "copy_from_computer", "exec_status"]) expect(guide, tool).toContain(tool);
     expect(guide).toContain(`up to ${PAGE_MAX_BYTES / 1024 / 1024} MB and ${PAGE_MAX_FILES} files`);
     expect(guide).toContain("https://app.netlify.com/user/applications#personal-access-tokens");
@@ -78,6 +79,23 @@ describe("publish-to-netlify skill guide", () => {
     expect(guide).toMatch(/--make-public[^.]*only after they say/);
     expect(guide).toMatch(/Early Access/);
     expect(guide).toMatch(/Never promise that it is always on/);
+  });
+
+  it("puts the plan's included hosting first, and says when the person's own Netlify account is the way", () => {
+    for (const tool of ["publish_app", "check_app_hosting"]) expect(guide, tool).toContain(tool);
+    const included = guide.slice(guide.indexOf("## Included hosting first"), guide.indexOf("## The token, once"));
+    expect(included).toMatch(/use it first/);
+    expect(included).toMatch(/no token card/);
+    expect(included).toMatch(/needs no Netlify account/);
+    expect(included).toContain(`up to ${DEFAULT_HOSTING_LIMITS.maxBytes / 1024 / 1024} MB and ${DEFAULT_HOSTING_LIMITS.maxFiles} files an app, ${DEFAULT_HOSTING_LIMITS.maxFileBytes / 1024 / 1024} MB a file`);
+    expect(included).toMatch(/how many of the plan's apps are in use \("3 of 10"\)/);
+    expect(included).toMatch(/public at once/);
+    expect(included).toMatch(/show_html/);
+    expect(included).toMatch(/Publish only when they say yes/);
+    expect(included).toMatch(/plan's apps or this month's publishes are used up/);
+    expect(included).toMatch(/with the numbers it gave, and offer their own account/);
+    expect(included).toMatch(/functions, a database, a server, redirects, or more than its sizes/);
+    expect(included).toMatch(/already has a site on their account \(keep its link\)/);
   });
 });
 
@@ -296,6 +314,21 @@ describe("publish-to-netlify helper, end to end against a stand-in on loopback",
     const broken = await run(["--dir", join(project, "dist"), "--token-file", tokenFile, "--project", elsewhere]);
     expect(String(broken.json.error)).toMatch(/has no valid siteId/);
     expect(fake.requests.filter((request) => request === "POST /api/v1/sites")).toHaveLength(2);
+  });
+
+  it("leaves a project whose app is on the plan's included hosting alone: no deploy, check, change or delete", async () => {
+    const included = join(home, "workspace", "included");
+    mkdirSync(included, { recursive: true });
+    const record = JSON.stringify({ version: 1, hosting: "included", appKey: "app-5d0c1b7e9a3f4c62b8e1d2a4f6c80913", siteId: "app-5d0c1b7e9a3f4c62b8e1d2a4f6c80913", url: "https://mb-3f9c2a17d04e8b65.netlify.app/" });
+    writeFileSync(join(included, helper.SITE_FILE), record);
+    const before = fake.requests.length;
+    for (const args of [["--dir", join(project, "dist")], ["--check"], ["--make-public"], ["--delete"]]) {
+      const answer = await run([...args, "--token-file", tokenFile, "--project", included]);
+      expect(answer.json, args[0]).toEqual({ ok: false, error: "this project's app is on the Cloud plan's included hosting (https://mb-3f9c2a17d04e8b65.netlify.app/), not on Netlify; "
+        + "update or delete it with publish_app, or publish to Netlify from another project folder (--project)" });
+    }
+    expect(fake.requests).toHaveLength(before);
+    expect(readFileSync(join(included, helper.SITE_FILE), "utf8")).toBe(record);
   });
 
   it("reports a new account's site as deployed but private, and opens it only when asked to", async () => {
