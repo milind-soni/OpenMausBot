@@ -1,15 +1,11 @@
 import { BodyTooLarge, readBoundedJson } from "@/lib/http-body";
 import { callJson, callOptions } from "@/lib/call-http";
 import { errorText } from "@/lib/error-text";
-import {
-  joinLocalVoice,
-  leaveLocalVoice,
-  listLocalVoiceParticipants,
-  requireLocalWorkspace,
-  sessionTokenFromRequest,
-  updateLocalVoicePresence,
-} from "@/lib/localRealtime";
+import { api } from "@/convex/_generated/api";
+import { getConvexClient, withRetry, workspaceScope } from "@/lib/workspace-session";
+import type { LocalVoiceParticipant } from "@/lib/chat-types";
 
+// Call presence. Clients poll and heartbeat; Convex (convex/workspaceCalls.ts) holds the state, so any instance answers.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -19,8 +15,9 @@ function errorResponse(error: unknown, status = 400) {
 
 export async function GET(request: Request) {
   try {
-    const user = await requireLocalWorkspace(request);
-    return callJson({ participants: await listLocalVoiceParticipants(user), hosted: "origin-local" });
+    const { sessionToken, teamId } = workspaceScope(request);
+    const rows = await withRetry(() => getConvexClient().query(api.workspaceCalls.participants, { sessionToken, teamId }));
+    return callJson({ participants: rows.map(row => JSON.parse(row) as LocalVoiceParticipant), hosted: "origin-local" });
   } catch (error) {
     return errorResponse(error, 401);
   }
@@ -36,16 +33,15 @@ export async function POST(request: Request) {
       teamId?: string;
       screenSharing?: boolean;
     };
-    const user = await requireLocalWorkspace(request, body);
+    const { sessionToken, teamId } = workspaceScope(request, body);
+    const convex = getConvexClient();
     if (body.action === "leave") {
-      await leaveLocalVoice(user);
+      await withRetry(() => convex.mutation(api.workspaceCalls.leave, { sessionToken, teamId }));
       return callJson({ ok: true, hosted: "origin-local" });
     }
-    if (body.action === "update") {
-      const participant = await updateLocalVoicePresence(user, !!body.audioEnabled, !!body.videoEnabled, !!body.screenSharing);
-      return callJson({ userId: participant.userId, joinedAt: participant.joinedAt, hosted: "origin-local" });
-    }
-    const participant = await joinLocalVoice(user, !!body.audioEnabled, !!body.videoEnabled, !!body.screenSharing);
+    const participant = await withRetry(() => convex.mutation(api.workspaceCalls.join, {
+      sessionToken, teamId, audioEnabled: !!body.audioEnabled, videoEnabled: !!body.videoEnabled, screenSharing: !!body.screenSharing, heartbeat: body.action === "update",
+    }));
     return callJson({ userId: participant.userId, joinedAt: participant.joinedAt, hosted: "origin-local" });
   } catch (error) {
     return errorResponse(error);

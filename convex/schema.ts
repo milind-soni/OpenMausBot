@@ -18,6 +18,7 @@ import { pulseTables } from "./pulseTables";
 import { integrationTables, repoVisibility } from "./integrationTables";
 import { storageScope, uploadTarget } from "./lib/storageValidators";
 import { githubLifecycleTables, githubSyncState } from "./githubLifecycleTables";
+import { serverStoreTables } from "./serverStoreTables";
 import {
   assetTypeValidator,
   callSignalKindValidator,
@@ -39,6 +40,7 @@ export default defineSchema({
   ...featureTables,
   ...agentsTables,
   ...realtimeTables,
+  ...serverStoreTables,
   ...modelHostsTables,
   ...broadcastTables,
   ...campaignTables,

@@ -17,7 +17,7 @@ async function createOnGitHub<T>(key: string, path: string, token: string, body:
   try { return await githubRequest<T>(path, token, { method: "POST", body: JSON.stringify(body) }); }
   catch (error) {
     // Definitive rejections can be retried; unknown network outcomes retain their intent marker.
-    if (error instanceof GitHubHttpError && [400, 401, 403, 404, 422, 429].includes(error.status)) saveGitHubJob(key, "working");
+    if (error instanceof GitHubHttpError && [400, 401, 403, 404, 422, 429].includes(error.status)) await saveGitHubJob(key, "working");
     throw error;
   }
 }
@@ -28,10 +28,10 @@ export async function contextWithToken(projectId: string, taskId?: string) {
   let token: string | undefined;
   if (repo) {
     const name = `${repo.owner}/${repo.repo}`.toLowerCase();
-    const existing = githubConnectionInfo(projectId, name);
+    const existing = await githubConnectionInfo(projectId, name);
     if (existing) {
       context = await integrationBridge<Context>("context", { projectId, taskId, credentialOwner: existing.connectedBy });
-      if (context.credentialAllowed) token = githubConnectionToken(projectId, name);
+      if (context.credentialAllowed) token = await githubConnectionToken(projectId, name);
     }
   }
   if (!token && context.project.githubWorkspaceAccess && context.connection) token = await workspaceGitHubToken(context.connection.teamId, context.connection.connectedBy);
@@ -42,18 +42,18 @@ export async function contextWithToken(projectId: string, taskId?: string) {
 
 export async function createProjectRepository(projectId: string, manual = false): Promise<{ state: "ready" | "working" | "awaiting_connection" | "error"; repoUrl?: string; error?: string }> {
   const key = `repo:${projectId}`;
-  if (!lockGitHubJob(key)) return { state: "working" };
+  if (!await lockGitHubJob(key)) return { state: "working" };
   try {
     const context = await integrationBridge<Context>("context", { projectId });
-    if (context.project.status && context.project.status !== "active") { saveGitHubJob(key, "waiting"); return { state: "error", error: "Reactivate the project before creating a repository" }; }
-    if (context.project.repoUrl) { saveGitHubJob(key, "done"); return { state: "ready", repoUrl: context.project.repoUrl }; }
+    if (context.project.status && context.project.status !== "active") { await saveGitHubJob(key, "waiting"); return { state: "error", error: "Reactivate the project before creating a repository" }; }
+    if (context.project.repoUrl) { await saveGitHubJob(key, "done"); return { state: "ready", repoUrl: context.project.repoUrl }; }
     if (!context.connection || (!manual && !context.connection.autoCreate)) {
       await integrationBridge("repoResult", { projectId, state: "awaiting_connection" });
-      saveGitHubJob(key, "waiting"); return { state: "awaiting_connection" };
+      await saveGitHubJob(key, "waiting"); return { state: "awaiting_connection" };
     }
     const token = await workspaceGitHubToken(context.connection.teamId, context.connection.connectedBy);
     if (!token) throw new Error("Reconnect GitHub in workspace settings");
-    const previous = readGitHubJob(key);
+    const previous = await readGitHubJob(key);
     let repo: { id: number; html_url: string; description: string; owner: { login: string }; private: boolean } | undefined;
     const name = `${context.project.name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "").slice(0, 70) || "project"}-${projectId.slice(-6)}`;
     const marker = `Origin project: ${projectId}`;
@@ -67,20 +67,20 @@ export async function createProjectRepository(projectId: string, manual = false)
       }
     }
     if (!repo) {
-      saveGitHubJob(key, "working", { started: true, name });
+      await saveGitHubJob(key, "working", { started: true, name });
       const description = [context.project.description?.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").trim().slice(0, 200), marker].filter(Boolean).join(" | ");
       repo = await createOnGitHub(key, "/user/repos", token, { name, description, private: true, has_issues: true, auto_init: true });
-      saveGitHubJob(key, "working", { repo });
+      await saveGitHubJob(key, "working", { repo });
     }
     if (!repo) throw new Error("GitHub did not return a repository");
     if (repo.owner.login.toLowerCase() !== context.connection.login.toLowerCase() || !repo.private) throw new Error("GitHub returned an unexpected repository owner or visibility. Review it on GitHub before linking.");
     await integrationBridge("repoResult", { projectId, state: "ready", repoUrl: repo.html_url, repoId: repo.id });
-    saveGitHubJob(key, "done", { repo });
+    await saveGitHubJob(key, "done", { repo });
     return { state: "ready", repoUrl: repo.html_url };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Repository creation failed";
-    const previous = readGitHubJob(key);
-    saveGitHubJob(key, "error", previous?.payload ? JSON.parse(previous.payload) : undefined);
+    const previous = await readGitHubJob(key);
+    await saveGitHubJob(key, "error", previous?.payload ? JSON.parse(previous.payload) : undefined);
     await integrationBridge("repoResult", { projectId, state: "error", error: message });
     return { state: "error", error: message };
   }
@@ -102,9 +102,9 @@ export async function createGitHubTask(projectId: string, taskId: string) {
     ? "GitHub is connected. A workspace admin must enable this repository in the project's Repo tab."
     : "A workspace admin needs to reconnect GitHub in Settings > Integrations");
   const key = `issue:${taskId}:${repoUrl.toLowerCase()}`;
-  if (!lockGitHubJob(key)) throw new Error("This issue is already being created. Wait a moment before retrying.");
+  if (!await lockGitHubJob(key)) throw new Error("This issue is already being created. Wait a moment before retrying.");
   try {
-    const previous = readGitHubJob(key);
+    const previous = await readGitHubJob(key);
     let issue: GitHubIssue | undefined;
     const marker = `<!-- origin-task:${taskId} -->`;
     if (previous?.payload) {
@@ -117,16 +117,16 @@ export async function createGitHubTask(projectId: string, taskId: string) {
       }
     }
     if (!issue) {
-      saveGitHubJob(key, "working", { started: true });
+      await saveGitHubJob(key, "working", { started: true });
       issue = await createOnGitHub<GitHubIssue>(key, `/repos/${repo.owner}/${repo.repo}/issues`, token, { title: task.title, body: `${task.description || ""}\n\n${marker}`.trim() });
-      saveGitHubJob(key, "working", { issue });
+      await saveGitHubJob(key, "working", { issue });
     }
     await link(projectId, taskId, repoUrl, issue);
-    saveGitHubJob(key, "done", { issue });
+    await saveGitHubJob(key, "done", { issue });
     return { ok: true, issueNumber: issue.number, issueUrl: issue.html_url, message: `Created GitHub issue #${issue.number}` };
   } catch (error) {
-    const previous = readGitHubJob(key);
-    saveGitHubJob(key, "error", previous?.payload ? JSON.parse(previous.payload) : undefined);
+    const previous = await readGitHubJob(key);
+    await saveGitHubJob(key, "error", previous?.payload ? JSON.parse(previous.payload) : undefined);
     throw error;
   }
 }
@@ -145,12 +145,12 @@ export async function syncGitHubEvent(repoUrl: string, number: number) {
 
 export async function syncGitHubPage() {
   const cursorKey = "sync-cursor";
-  const old = readGitHubJob(cursorKey);
+  const old = await readGitHubJob(cursorKey);
   const cursor = old?.payload ? JSON.parse(old.payload).cursor : null;
   const page = await integrationBridge<{ rows: Target[]; nextCursor: string | null }>("targets", { cursor: cursor || null });
   await Promise.all(page.rows.map(async target => {
     try { await syncTarget(target); }
     catch (error) { console.warn("GitHub issue sync failed", target.taskId, error instanceof Error ? error.message : "Unknown error"); }
   }));
-  saveGitHubJob(cursorKey, "done", { cursor: page.nextCursor });
+  await saveGitHubJob(cursorKey, "done", { cursor: page.nextCursor });
 }

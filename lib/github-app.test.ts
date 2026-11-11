@@ -11,7 +11,7 @@ vi.mock("./integration-bridge", () => ({ integrationBridge: vi.fn() }));
 const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
 afterEach(() => { vi.resetAllMocks(); vi.unstubAllGlobals(); });
 function config() {
-  vi.mocked(githubAppConfig).mockReturnValue({ appId: 1, privateKey: keys.privateKey.export({ type: "pkcs8", format: "pem" }).toString(), clientId: "fake", clientSecret: "fake" });
+  vi.mocked(githubAppConfig).mockResolvedValue({ appId: 1, privateKey: keys.privateKey.export({ type: "pkcs8", format: "pem" }).toString(), clientId: "fake", clientSecret: "fake" });
 }
 function authorizeProject() {
   vi.mocked(integrationBridge).mockResolvedValue({ project: { repoUrl: "https://github.com/test/prs", githubWorkspaceAccess: true }, connection: { teamId: "team-1", login: "test", connectedBy: "user-1" } });
@@ -19,7 +19,7 @@ function authorizeProject() {
 }
 test("App JWT uses a bounded lifetime and installation tokens are repo/permission scoped", async () => {
   config();
-  const jwt = appJwt(), [header, payload, sig] = jwt.split(".");
+  const jwt = await appJwt(), [header, payload, sig] = jwt.split(".");
   expect(verify("RSA-SHA256", Buffer.from(`${header}.${payload}`), keys.publicKey, Buffer.from(sig, "base64url"))).toBe(true);
   const claims = JSON.parse(Buffer.from(payload, "base64url").toString());
   expect(claims.exp - claims.iat).toBe(600);
@@ -32,8 +32,8 @@ test("App JWT uses a bounded lifetime and installation tokens are repo/permissio
 test("old permissions give guided reapproval; missing signing credentials fail without OAuth fallback", async () => {
   config(); vi.mocked(githubRequest).mockResolvedValueOnce({ id: 42, permissions: { contents: "read", issues: "write", pull_requests: "read" } });
   await expect(installationFor("https://github.com/test/prs")).rejects.toThrow("accept the new permissions");
-  vi.mocked(githubAppConfig).mockReturnValue({ clientId: "fake", clientSecret: "fake" });
-  expect(() => appJwt()).toThrow("GITHUB_APP_PRIVATE_KEY");
+  vi.mocked(githubAppConfig).mockResolvedValue({ clientId: "fake", clientSecret: "fake" });
+  await expect(appJwt()).rejects.toThrow("GITHUB_APP_PRIVATE_KEY");
 });
 test("unexpected repository scope rejected and App request tokens revoked on failure", async () => {
   config();

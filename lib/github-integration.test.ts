@@ -1,12 +1,7 @@
 // @vitest-environment node
 /// <reference types="vite/client" />
 import { createHmac, randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
-import path from "node:path";
-import { tmpdir } from "node:os";
-import { convexTest } from "convex-test";
-import { afterAll, afterEach, expect, test, vi } from "vitest";
-import schema from "../convex/schema";
+import { afterEach, expect, test, vi } from "vitest";
 import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { createSession } from "../convex/lib/auth";
@@ -15,17 +10,17 @@ import { NextRequest } from "next/server";
 import { integrationBridge } from "./integration-bridge";
 import { githubRequest, saveGitHubApp, saveGitHubJob, saveWorkspaceGitHub, workspaceGitHubInfo, workspaceGitHubToken } from "./github-workspace";
 import { createGitHubTask, createProjectRepository, syncGitHubPage } from "./github-sync";
-import { saveGitHubConnection, githubConnectionToken, deleteGitHubConnection, integrationDb } from "./githubConnection";
+import { saveGitHubConnection, githubConnectionToken, deleteGitHubConnection } from "./githubConnection";
+import { convexStore, signedBridge } from "../testing/convex-store";
 import { POST } from "../app/api/github/webhook/route";
 
-vi.mock("./integration-bridge", () => ({ integrationBridge: vi.fn(), originUrl: () => "http://127.0.0.1:1" }));
+vi.mock("./integration-bridge", async importOriginal => ({ ...await importOriginal<typeof import("./integration-bridge")>(), integrationBridge: vi.fn(), originUrl: () => "http://127.0.0.1:1" }));
 vi.mock("./github-workspace", async importOriginal => ({ ...await importOriginal<typeof import("./github-workspace")>(), githubRequest: vi.fn() }));
 const backend = vi.hoisted(() => ({ client: null as unknown as ConvexHttpClient }));
 vi.mock("next/server", async importOriginal => ({ ...await importOriginal<typeof import("next/server")>(), after: vi.fn() }));
-vi.mock("./localRealtime", async importOriginal => ({
-  ...await importOriginal<typeof import("./localRealtime")>(),
+vi.mock("./workspace-session", async importOriginal => ({
+  ...await importOriginal<typeof import("./workspace-session")>(),
   getConvexClient: () => backend.client,
-  limitLocalAction: vi.fn(),
   requireLocalUser: async (sessionToken: string) => {
     const user = await backend.client.query(api.auth.me, { sessionToken });
     if (!user) throw new Error("Your session has expired. Sign in again.");
@@ -39,18 +34,12 @@ vi.mock("./localRealtime", async importOriginal => ({
     return { ...user, teamId, workspaceRole: access.role, slug: access.slug };
   },
 }));
-const directory = mkdtempSync(path.join(tmpdir(), "origin-pg3-github-"));
-process.env.ORIGIN_LOCAL_DATA_DIR = directory;
-const modules = import.meta.glob(["../convex/**/*.ts", "!../convex/**/*.test.ts"]);
 const secret = "pg3-synthetic-signing-secret";
-afterAll(() => { integrationDb().close(); rmSync(directory, { recursive: true, force: true }); delete process.env.ORIGIN_LOCAL_DATA_DIR; });
 afterEach(() => vi.unstubAllGlobals());
 
 async function fixture() {
-  const db = integrationDb();
-  for (const { name } of db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[]) db.exec(`DELETE FROM "${name}"`);
   vi.mocked(integrationBridge).mockClear();
-  const t = convexTest(schema, modules);
+  const t = convexStore();
   backend.client = { query: t.query, mutation: t.mutation, action: t.action } as unknown as ConvexHttpClient;
   const owner = await t.run(async ctx => {
     const id = await ctx.db.insert("users", { email: "owner@pg3.test", name: "Owner", role: "user", status: "active", passwordHash: "unused", salt: "unused", iterations: 1, createdAt: Date.now(), updatedAt: Date.now() });
@@ -69,11 +58,13 @@ async function fixture() {
       case "webhookTargets": return JSON.parse(await t.query(internal.integrations.webhookTargets, input as never));
       case "targets": return JSON.parse(await t.query(internal.integrations.targets, input as never));
       case "githubDelivery": return t.mutation(internal.taskPRs.delivery, input as never);
-      default: throw new Error(`Unexpected bridge ${operation}`);
+      default:
+        if (operation.startsWith("store.")) return signedBridge(t, operation, args);
+        throw new Error(`Unexpected bridge ${operation}`);
     }
   });
-  saveGitHubApp({ clientId: "fixture", clientSecret: "fixture", webhookSecret: secret });
-  saveGitHubConnection(projectId, "z4mbo/origin-pr-sandbox", "z4mbo", "fixture-repo-token", owner.id);
+  await saveGitHubApp({ clientId: "fixture", clientSecret: "fixture", webhookSecret: secret });
+  await saveGitHubConnection(projectId, "z4mbo/origin-pr-sandbox", "z4mbo", "fixture-repo-token", owner.id);
   let remote = { number: 42, html_url: "https://github.com/z4mbo/origin-pr-sandbox/issues/42", state: "open", updated_at: "2026-10-15T10:00:00Z", body: `<!-- origin-task:${taskId} -->` };
   vi.mocked(githubRequest).mockImplementation(async (endpoint, token, init) => {
     expect(token).toBe("fixture-repo-token");
@@ -130,9 +121,9 @@ test("PG3 O-119/O-120: signed webhook, dedupe, invalid delivery/HMAC, polling an
 
 test("PG3 O-112/O-113: encrypted repo connection is owner-bound; revoked admin cannot create an issue", async () => {
   const f = await fixture();
-  expect(githubConnectionToken(f.projectId, "z4mbo/origin-pr-sandbox")).toBe("fixture-repo-token");
-  expect(githubConnectionToken(f.projectId, "z4mbo/other")).toBeUndefined();
-  expect(JSON.stringify(integrationDb().prepare("SELECT * FROM github_connections").all())).not.toContain("fixture-repo-token");
+  expect(await githubConnectionToken(f.projectId, "z4mbo/origin-pr-sandbox")).toBe("fixture-repo-token");
+  expect(await githubConnectionToken(f.projectId, "z4mbo/other")).toBeUndefined();
+  expect(await f.t.run(async ctx => JSON.stringify(await ctx.db.query("githubProjectConnections").take(10)))).not.toContain("fixture-repo-token");
   await f.t.run(async ctx => {
     const membership = await ctx.db.query("teamMembers").withIndex("by_user", q => q.eq("userId", f.owner.id)).first();
     await ctx.db.patch(membership!._id, { role: "viewer" });
@@ -140,8 +131,8 @@ test("PG3 O-112/O-113: encrypted repo connection is owner-bound; revoked admin c
   vi.mocked(githubRequest).mockClear();
   await expect(createGitHubTask(f.projectId, f.taskId)).rejects.toThrow(/reconnect/);
   expect(githubRequest).not.toHaveBeenCalled();
-  deleteGitHubConnection(f.projectId);
-  expect(githubConnectionToken(f.projectId, "z4mbo/origin-pr-sandbox")).toBeUndefined();
+  await deleteGitHubConnection(f.projectId);
+  expect(await githubConnectionToken(f.projectId, "z4mbo/origin-pr-sandbox")).toBeUndefined();
 });
 
 test("PG3 O-114/O-115: automatic private repo intent reconciles a lost response without another POST", async () => {
@@ -149,7 +140,7 @@ test("PG3 O-114/O-115: automatic private repo intent reconciles a lost response 
   await f.t.mutation(api.integrations.configure, { sessionToken: f.owner.sessionToken, teamId: f.teamId, login: "z4mbo", autoCreate: false });
   expect(await f.t.query(api.integrations.status, { sessionToken: f.owner.sessionToken, teamId: f.teamId })).toMatchObject({ autoCreate: false });
   await f.t.mutation(api.integrations.configure, { sessionToken: f.owner.sessionToken, teamId: f.teamId, login: "z4mbo", autoCreate: true });
-  saveWorkspaceGitHub(f.teamId, "z4mbo", 1, f.owner.id, { access_token: "fixture-workspace-token" });
+  await saveWorkspaceGitHub(f.teamId, "z4mbo", 1, f.owner.id, { access_token: "fixture-workspace-token" });
   const projectId = await f.t.mutation(api.projects.create, { sessionToken: f.owner.sessionToken, teamId: f.teamId, name: "Auto private PG3 project" });
   expect(await f.t.query(api.projects.get, { sessionToken: f.owner.sessionToken, projectId })).toMatchObject({ githubRepoState: "pending" });
   const repo = { id: 123, html_url: "https://github.com/z4mbo/fixture", description: `Origin project: ${projectId}`, owner: { login: "z4mbo" }, private: true };
@@ -167,7 +158,7 @@ test("PG3 O-114/O-115: automatic private repo intent reconciles a lost response 
   expect(await createProjectRepository(projectId)).toMatchObject({ state: "ready", repoUrl: repo.html_url });
   expect(posts).toBe(1);
   expect(await f.t.query(api.projects.get, { sessionToken: f.owner.sessionToken, projectId })).toMatchObject({ githubRepoState: "ready", githubRepoId: repo.id });
-  saveGitHubJob(`repo:${projectId}`, "done");
+  await saveGitHubJob(`repo:${projectId}`, "done");
 });
 
 test("PG3 O-121: compatibility snapshot import preserves issue/PR fields and manual issue fallback", async () => {
@@ -195,8 +186,8 @@ test("PG3 R2 O-111 HTTP OAuth state/cookie/PKCE, installation retry, refresh, re
   const f = await fixture();
   const oauth = await import("../app/api/github/oauth/[step]/route");
   const workspace = await import("../app/api/github/workspace/route");
-  integrationDb().exec("DELETE FROM github_app");
-  saveGitHubApp({ clientId: "fixture-id", clientSecret: "fixture-secret", slug: "fixture-app" });
+  await f.t.run(async ctx => { for (const row of await ctx.db.query("githubAppRegistrations").take(5)) await ctx.db.delete(row._id); });
+  await saveGitHubApp({ clientId: "fixture-id", clientSecret: "fixture-secret", slug: "fixture-app" });
   const context = (step: string) => ({ params: Promise.resolve({ step }) });
   const start = async () => {
     const response = await oauth.POST(new NextRequest(`http://127.0.0.1:1/api/github/oauth/start?teamId=${f.teamId}&projectId=${f.projectId}`, { method: "POST", headers: { authorization: `Bearer ${f.owner.sessionToken}` } }), context("start"));
@@ -235,7 +226,7 @@ test("PG3 R2 O-111 HTTP OAuth state/cookie/PKCE, installation retry, refresh, re
   expect(exchanges[0].code_verifier).toHaveLength(43);
   const { createHash } = await import("node:crypto");
   expect(createHash("sha256").update(exchanges[0].code_verifier).digest("base64url")).toBe(first.challenge);
-  expect(workspaceGitHubInfo(f.teamId)).toMatchObject({ login: "z4mbo", connected_by: f.owner.id });
+  expect(await workspaceGitHubInfo(f.teamId)).toMatchObject({ login: "z4mbo", connectedBy: f.owner.id });
   expect(await workspaceGitHubToken(f.teamId, f.owner.id)).toBe("fixture-refreshed");
   expect(refreshes).toBe(1);
   expect((await callback(state, cookie)).headers.get("location")).toContain("connection-failed");
@@ -243,7 +234,7 @@ test("PG3 R2 O-111 HTTP OAuth state/cookie/PKCE, installation retry, refresh, re
   expect((await callback(reconnect.state, reconnect.cookie)).headers.get("location")).toContain("github=connected");
   const disconnected = await workspace.DELETE(new Request(`http://127.0.0.1:1/api/github/workspace?teamId=${f.teamId}`, { method: "DELETE", headers: { authorization: `Bearer ${f.owner.sessionToken}` } }));
   expect(disconnected.status).toBe(200);
-  expect(workspaceGitHubInfo(f.teamId)).toBeNull();
+  expect(await workspaceGitHubInfo(f.teamId)).toBeNull();
   expect(await f.t.query(api.projects.get, { sessionToken: f.owner.sessionToken, projectId: f.projectId })).toMatchObject({ repoUrl: "https://github.com/z4mbo/origin-pr-sandbox" });
   const stale = await start();
   vi.stubGlobal("fetch", vi.fn(async () => {
@@ -254,12 +245,12 @@ test("PG3 R2 O-111 HTTP OAuth state/cookie/PKCE, installation retry, refresh, re
     return Response.json({ access_token: "must-not-store-revoked-token" });
   }));
   expect((await callback(stale.state, stale.cookie)).headers.get("location")).toContain("connection-failed");
-  expect(workspaceGitHubInfo(f.teamId)).toBeNull();
+  expect(await workspaceGitHubInfo(f.teamId)).toBeNull();
 });
 
 test("PG3 R2 O-112 HTTP token connection validates account/repo, admin, encryption and disconnect", async () => {
   const f = await fixture();
-  deleteGitHubConnection(f.projectId);
+  await deleteGitHubConnection(f.projectId);
   const route = await import("../app/api/github/connection/route");
   const request = (method: string, token = "fixture-private-token-123456", sessionToken = f.owner.sessionToken) => new Request(`http://127.0.0.1:1/api/github/connection?projectId=${f.projectId}`, { method, headers: { authorization: `Bearer ${sessionToken}` }, ...(method === "POST" ? { body: JSON.stringify({ token }) } : {}) });
   const fetcher = vi.fn(async (url: string | URL | Request) => String(url).endsWith("/user") ? Response.json({ login: "z4mbo" }) : Response.json({ full_name: "z4mbo/origin-pr-sandbox" }));
@@ -274,14 +265,14 @@ test("PG3 R2 O-112 HTTP token connection validates account/repo, admin, encrypti
   expect(connected.status).toBe(200);
   expect(JSON.stringify(await connected.json())).not.toContain("fixture-private-token");
   expect(await (await route.GET(request("GET"))).json()).toMatchObject({ connection: { login: "z4mbo", source: "project" } });
-  expect(githubConnectionToken(f.projectId, "z4mbo/origin-pr-sandbox")).toBe("fixture-private-token-123456");
+  expect(await githubConnectionToken(f.projectId, "z4mbo/origin-pr-sandbox")).toBe("fixture-private-token-123456");
   expect((await route.DELETE(request("DELETE"))).status).toBe(200);
   expect(await (await route.GET(request("GET"))).json()).toEqual({ connection: null });
 });
 
 test("PG3 R2 O-112 token connection cannot store credentials after membership revocation during verification", async () => {
   const f = await fixture();
-  deleteGitHubConnection(f.projectId);
+  await deleteGitHubConnection(f.projectId);
   const route = await import("../app/api/github/connection/route");
   vi.stubGlobal("fetch", vi.fn(async () => {
     await f.t.run(async ctx => {
@@ -292,7 +283,7 @@ test("PG3 R2 O-112 token connection cannot store credentials after membership re
   }));
   const response = await route.POST(new Request(`http://127.0.0.1:1/api/github/connection?projectId=${f.projectId}`, { method: "POST", headers: { authorization: `Bearer ${f.owner.sessionToken}` }, body: JSON.stringify({ token: "must-not-store-revoked-token" }) }));
   expect(response.status).toBe(400);
-  expect(githubConnectionToken(f.projectId, "z4mbo/origin-pr-sandbox")).toBeUndefined();
+  expect(await githubConnectionToken(f.projectId, "z4mbo/origin-pr-sandbox")).toBeUndefined();
 });
 
 test("PG3 R2 O-113 repository approval checks current admin/repo; failed provisioning can retry with error cleared", async () => {

@@ -3,6 +3,7 @@ import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { BodyTooLarge, readBoundedText } from "../lib/http-body";
 import { upload, uploadOptions } from "./storage";
+import { storeOperation } from "./serverStore";
 
 const http = httpRouter();
 http.route({ path: "/uploads", method: "POST", handler: upload });
@@ -22,6 +23,11 @@ http.route({ path: "/integrations", method: "POST", handler: httpAction(async (c
     const p = JSON.parse(body);
     if (typeof p.at !== "number" || Math.abs(Date.now() - p.at) > 60000) return new Response("Expired", { status: 401 });
     let result: unknown;
+    if (typeof p.operation === "string" && /^(store|mcp|migrate)\./.test(p.operation)) {
+      const handled = await storeOperation(ctx, p.operation, p.args && typeof p.args === "object" ? p.args : {});
+      if (!handled) return new Response("Unknown operation", { status: 400 });
+      return Response.json(handled.result);
+    }
     switch (p.operation) {
       case "prHumanContext": result = JSON.parse(await ctx.runMutation(internal.taskPRs.humanContext, p.args)); break;
       case "prFinalize": result = JSON.parse(await ctx.runMutation(internal.taskPRs.finalize, p.args)); break;

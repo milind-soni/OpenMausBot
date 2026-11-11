@@ -1,7 +1,8 @@
 import { BodyTooLarge, readBoundedJson } from "@/lib/http-body";
 import { githubProject } from "@/lib/githubLocal";
 import { createGitHubTask } from "@/lib/github-sync";
-import { getConvexClient, limitLocalAction, sessionTokenFromRequest } from "@/lib/localRealtime";
+import { getConvexClient, sessionTokenFromRequest } from "@/lib/workspace-session";
+import { limitAction } from "@/lib/server-store";
 import { api } from "@/convex/_generated/api";
 import { createTaskPR } from "@/lib/github-prs";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -14,7 +15,7 @@ export async function POST(request: Request) {
     if (typeof body.projectId !== "string" || typeof body.taskId !== "string") throw new Error("Project and issue required");
     const sessionToken = sessionTokenFromRequest(request, body);
     const { user, project, token } = await githubProject(sessionToken, body.projectId, true);
-    limitLocalAction(`github-create:${user._id}`, 20, 60000);
+    await limitAction(`github-create:${user._id}`, 20, 60000);
     if (!token && project.teamId && project.repoUrl && !project.githubWorkspaceAccess) {
       const client = getConvexClient();
       const workspace = await client.query(api.integrations.status, { sessionToken, teamId: project.teamId });

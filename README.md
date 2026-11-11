@@ -39,7 +39,7 @@ Checks: `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`, `npm r
    npx convex env set ORIGIN_SIGNUP_MODE invite   # optional, after creating your account
    ```
 
-   `ORIGIN_SEALING_KEY` encrypts stored GitHub credentials; keep it stable.
+   `ORIGIN_SEALING_KEY` encrypts stored GitHub and MCP credentials; keep it stable.
 
 2. Copy `.env.example` to `.env`, fill in the Convex URLs, `ORIGIN_PUBLIC_URL` and the same `ORIGIN_INTEGRATION_SECRET`, then:
 
@@ -47,7 +47,7 @@ Checks: `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`, `npm r
    docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
    ```
 
-   The app listens on `127.0.0.1:3000`; put an HTTPS reverse proxy in front that overwrites `X-Real-IP`, set `ORIGIN_TRUSTED_PROXY=1`, and persist the `origin-data` volume. Deploy the Convex backend before a new web image. Details, email, TURN and the pre-deploy checklist: [deploy/README.md](deploy/README.md).
+   The app listens on `127.0.0.1:3000`; put an HTTPS reverse proxy in front that overwrites `X-Real-IP` and set `ORIGIN_TRUSTED_PROXY=1`. The web app is stateless (everything lives in Convex), so it needs no volume and can run as several replicas or on Vercel (`vercel.json`). Deploy the Convex backend before a new web build. Details, Vercel, email, TURN and the pre-deploy checklist: [deploy/README.md](deploy/README.md).
 
 ## Connect AI agents (MCP)
 

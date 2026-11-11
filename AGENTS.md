@@ -3,7 +3,7 @@
 Next.js 16 web app (`app/`, `components/`, `lib/`) with a Convex backend (`convex/`).
 
 - The Convex schema (`convex/schema.ts`, `convex/*Tables.ts`) must keep every table and field the production deployment has, so existing data stays valid. Only add optional fields or new tables.
-- Chat, attachments, call signaling and integration credentials live in the Next server's local store (`ORIGIN_LOCAL_DATA_DIR`); the server reaches Convex internals through the signed `/integrations` HTTP action (`ORIGIN_INTEGRATION_SECRET`).
+- The Next server is stateless (it runs on Vercel): no local files, sqlite or in-memory locks. Chat, attachments and call signaling go through session-checked Convex functions (`convex/workspaceChat.ts`, `convex/workspaceCalls.ts`); GitHub and MCP OAuth credentials, rate limits and leases go through the signed `/integrations` HTTP action (`ORIGIN_INTEGRATION_SECRET`, `lib/server-store.ts` → `convex/serverStore.ts`), where secrets are sealed with `ORIGIN_SEALING_KEY`.
 - Develop against a local Convex deployment only. Run `npm run typecheck`, `npm run lint`, `npm test` and `npm run build` before committing.
 
 <!-- convex-ai-start -->

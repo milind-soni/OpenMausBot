@@ -1,16 +1,11 @@
 import { BodyTooLarge, readBoundedJson } from "@/lib/http-body";
 import { callJson, callOptions } from "@/lib/call-http";
-import {
-  ackLocalVoiceSignals,
-  listLocalVoiceSignals,
-  requireLocalWorkspace,
-  sendLocalVoiceSignal,
-  sessionTokenFromRequest,
-  type LocalVoiceSignal,
-} from "@/lib/localRealtime";
-import type { Id } from "@/convex/_generated/dataModel";
+import { api } from "@/convex/_generated/api";
 import { errorText } from "@/lib/error-text";
+import { getConvexClient, withRetry, workspaceScope } from "@/lib/workspace-session";
+import type { LocalVoiceSignal } from "@/lib/chat-types";
 
+// WebRTC signaling by polling: offers, answers and ICE candidates queue in Convex until the recipient acknowledges them.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -20,8 +15,9 @@ function errorResponse(error: unknown, status = 400) {
 
 export async function GET(request: Request) {
   try {
-    const user = await requireLocalWorkspace(request);
-    return callJson({ signals: await listLocalVoiceSignals(user), hosted: "origin-local" });
+    const { sessionToken, teamId } = workspaceScope(request);
+    const rows = await withRetry(() => getConvexClient().query(api.workspaceCalls.signals, { sessionToken, teamId }));
+    return callJson({ signals: rows.map(row => JSON.parse(row) as LocalVoiceSignal), hosted: "origin-local" });
   } catch (error) {
     return errorResponse(error, 401);
   }
@@ -32,16 +28,20 @@ export async function POST(request: Request) {
     const body = await readBoundedJson(request) as {
       sessionToken?: string;
       teamId?: string;
-      toUserId?: Id<"users">;
+      toUserId?: string;
       kind?: LocalVoiceSignal["kind"];
       payload?: string;
       fromJoinedAt?: number;
       toJoinedAt?: number;
     };
-    const user = await requireLocalWorkspace(request, body);
+    const { sessionToken, teamId } = workspaceScope(request, body);
     if (!body.toUserId || !body.kind) throw new Error("Signal target and kind required");
-    const signal = await sendLocalVoiceSignal(user, body.toUserId, body.kind, body.payload || "", body.fromJoinedAt, body.toJoinedAt);
-    return callJson({ signal, hosted: "origin-local" });
+    const signal = await getConvexClient().mutation(api.workspaceCalls.signal, {
+      sessionToken, teamId, toUserId: String(body.toUserId), kind: String(body.kind), payload: typeof body.payload === "string" ? body.payload : "",
+      ...(typeof body.fromJoinedAt === "number" ? { fromJoinedAt: body.fromJoinedAt } : {}),
+      ...(typeof body.toJoinedAt === "number" ? { toJoinedAt: body.toJoinedAt } : {}),
+    });
+    return callJson({ signal: signal === null ? null : JSON.parse(signal) as LocalVoiceSignal, hosted: "origin-local" });
   } catch (error) {
     return errorResponse(error);
   }
@@ -50,8 +50,9 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const body = await readBoundedJson(request) as { sessionToken?: string; teamId?: string; signalIds?: string[] };
-    const user = await requireLocalWorkspace(request, body);
-    await ackLocalVoiceSignals(user, body.signalIds || []);
+    const { sessionToken, teamId } = workspaceScope(request, body);
+    const signalIds = Array.isArray(body.signalIds) ? body.signalIds.slice(0, 120).map(String) : [];
+    await getConvexClient().mutation(api.workspaceCalls.ack, { sessionToken, teamId, signalIds });
     return callJson({ ok: true, hosted: "origin-local" });
   } catch (error) {
     return errorResponse(error);

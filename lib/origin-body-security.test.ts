@@ -14,19 +14,19 @@ import { POST as upload } from "../app/api/local-chat/files/route";
 import { readIntegrationRequest, signIntegration } from "./integration-bridge";
 
 const work = vi.hoisted(() => vi.fn());
-vi.mock("./localRealtime", () => ({
+vi.mock("./workspace-session", async importOriginal => ({
+  ...await importOriginal<typeof import("./workspace-session")>(),
   requireLocalWorkspace: async () => ({ teamId: "fixture", _id: "fixture", workspaceRole: "owner" }),
-  requireLocalChat: async () => ({ teamId: "fixture", _id: "fixture", workspaceRole: "owner" }),
-  getConvexClient: work, limitLocalAction: vi.fn(), sessionTokenFromRequest: vi.fn(), TooManyRequests: class extends Error {},
-  sendLocalMessage: work, editLocalMessage: work, openDirectConversation: work, markConversationRead: work,
-  sendLocalVoiceSignal: work, ackLocalVoiceSignals: work, joinLocalVoice: work, updateLocalVoicePresence: work,
+  requireLocalUser: async () => ({ _id: "fixture" }),
+  getConvexClient: () => ({ query: work, mutation: work, action: work }),
 }));
+vi.mock("./server-store", () => ({ store: work, limitAction: vi.fn(), limitReached: vi.fn(), withLease: work, TooManyRequests: class extends Error {} }));
 vi.mock("./githubLocal", () => ({ githubProject: async () => ({ project: { _id: "fixture", memberRole: "admin", repoUrl: "https://github.com/example/repo" }, user: { _id: "fixture" } }), parseGitHubRepo: () => ({ owner: "example", repo: "repo" }), githubHeaders: work }));
 vi.mock("./github-workspace", () => ({ lockGitHubJob: work, saveGitHubJob: work }));
-vi.mock("./githubConnection", () => ({ saveGitHubConnection: work }));
+vi.mock("./githubConnection", () => ({ saveGitHubConnection: work, githubConnectionInfo: work }));
 vi.mock("./github-sync", () => ({ createGitHubTask: work, createProjectRepository: work, syncGitHubPage: work }));
 vi.mock("./github-prs", () => ({ createTaskPR: work, syncPRPage: work }));
-vi.mock("./mcp-oauth", () => ({ validateMcpAuthorization: work, validateMcpClient: work, issueMcpCode: work, authorizationError: work, maintainMcpOAuth: work, OAuthError: Error }));
+vi.mock("./mcp-oauth", () => ({ validateMcpAuthorization: work, validateMcpClient: work, issueMcpCode: work, authorizationError: work, OAuthError: Error }));
 vi.mock("./invite-mail", () => ({ sendInviteMail: work }));
 afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); });
 
@@ -37,7 +37,7 @@ test.each([
   ["signal", signal, "POST", 128000], ["ack", ack, "DELETE", 128000],
   ["participant", participant, "POST", 128000], ["issue", issue, "POST", 128000],
   ["connection", connection, "POST", 128000], ["feedback", feedback, "POST", 12000],
-  ["tick", tick, "POST", 100000], ["upload", upload, "POST", 16 * 1024 * 1024],
+  ["tick", tick, "POST", 100000], ["upload", upload, "POST", 4000],
 ] as const)("%s cancels an oversized chunked request before business effects", async (name, handler, method, max) => {
   vi.stubEnv("ORIGIN_PUBLIC_URL", "http://origin.test");
   let cancelled = false, reads = 0;
@@ -45,7 +45,7 @@ test.each([
     pull(controller) { if (++reads <= 8) controller.enqueue(new Uint8Array(Math.ceil(max / 2))); else controller.close(); },
     cancel() { cancelled = true; },
   });
-  const response = await handler(new Request(`http://origin.test/${name}`, { method, body, headers: { origin: "http://origin.test", "content-type": "application/json" }, duplex: "half" } as RequestInit));
+  const response = await handler(new Request(`http://origin.test/${name}?teamId=fixture`, { method, body, headers: { origin: "http://origin.test", "content-type": "application/json", authorization: "Bearer fixture-session" }, duplex: "half" } as RequestInit));
   expect(response.status).toBe(413);
   expect(cancelled).toBe(true); expect(reads).toBeLessThan(8); expect(work).not.toHaveBeenCalled();
 });

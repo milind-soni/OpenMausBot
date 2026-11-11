@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync, createWriteStream } from 'node:fs';
@@ -87,12 +87,15 @@ try {
   await ready(`${process.env.NEXT_PUBLIC_CONVEX_URL}/version`, watcher);
   process.env.ORIGIN_INTEGRATION_SECRET = randomBytes(32).toString('hex');
   const secretFile = `${data}/integration.env`;
-  await writeFile(secretFile, `ORIGIN_INTEGRATION_SECRET=${process.env.ORIGIN_INTEGRATION_SECRET}\n`, { mode: 0o600 });
+  // The local deployment seals integration secrets (MCP OAuth, GitHub) with ORIGIN_SEALING_KEY. Keep an existing key so
+  // data sealed by earlier runs stays readable; create one only on a fresh deployment.
+  let sealing = '';
+  try { sealing = execFileSync(process.execPath, [convex, 'env', 'get', 'ORIGIN_SEALING_KEY'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* not set yet */ }
+  await writeFile(secretFile, `ORIGIN_INTEGRATION_SECRET=${process.env.ORIGIN_INTEGRATION_SECRET}\n${sealing ? '' : `ORIGIN_SEALING_KEY=${randomBytes(32).toString('base64')}\n`}`, { mode: 0o600 });
   await command(convex, ['env', 'set', '--from-file', secretFile, '--force'], 'integration');
   await rm(secretFile, { force: true });
   process.env.ORIGIN_E2E_APP_URL = `http://127.0.0.1:${process.env.ORIGIN_E2E_PORT || await port()}`;
   process.env.ORIGIN_PUBLIC_URL = process.env.ORIGIN_SITE_URL = process.env.ORIGIN_E2E_APP_URL;
-  process.env.ORIGIN_LOCAL_DATA_DIR = data;
   // Deliberately no GitHub/SMTP/model credentials. The fixtures use only local transports.
   const next = resolve('node_modules/next/dist/bin/next');
   const development = process.env.ORIGIN_E2E_DEV === '1';

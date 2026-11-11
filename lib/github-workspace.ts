@@ -1,27 +1,21 @@
 import { createHash, randomBytes } from "node:crypto";
-import { integrationDb, openIntegration, sealIntegration } from "./githubConnection";
 import { githubHeaders } from "./github-repo";
 import { originUrl } from "./integration-bridge";
+import { store, withLease } from "./server-store";
+
+// The instance's GitHub App, each workspace's GitHub connection, OAuth states and job markers. Everything is stored in
+// Convex (convex/serverStore.ts); secrets are sealed there with ORIGIN_SEALING_KEY and never written to disk here.
 
 export type GitHubAppConfig = { clientId: string; clientSecret: string; slug?: string; webhookSecret?: string; appId?: number; privateKey?: string };
 type TokenRecord = { access_token: string; refresh_token?: string; expires_at?: number };
-type Connection = { team: string; login: string; account_id: number; connected_by: string; encrypted: string };
+type StoredToken = { login: string; accountId: number; version: number; token: TokenRecord };
 export type GithubState = { teamId: string; sessionToken: string; userId: string; slug: string; mode: "connect" | "setup"; verifier: string; installationAttempted?: boolean; projectId?: string };
 
-function db() {
-  const database = integrationDb();
-  database.exec(`CREATE TABLE IF NOT EXISTS github_workspace (team TEXT PRIMARY KEY, login TEXT NOT NULL, account_id INTEGER NOT NULL, connected_by TEXT NOT NULL, encrypted TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS github_app (id INTEGER PRIMARY KEY CHECK(id=1), encrypted TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS github_oauth_states (hash TEXT PRIMARY KEY, browser_hash TEXT NOT NULL, encrypted TEXT NOT NULL, expires INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS github_jobs (key TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT, updated INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS instance_operator (id INTEGER PRIMARY KEY CHECK(id=1), user_id TEXT NOT NULL, recorded INTEGER NOT NULL);`);
-  return database;
-}
 const hashSecret = (value: string) => createHash("sha256").update(value).digest("hex");
-export function githubAppConfig(): GitHubAppConfig | null {
-  const row = db().prepare("SELECT encrypted FROM github_app WHERE id=1").get() as { encrypted: string } | undefined;
+export async function githubAppConfig(): Promise<GitHubAppConfig | null> {
+  const saved = await store<string | null>("store.githubApp");
   const credentials = { appId: process.env.GITHUB_APP_ID ? Number(process.env.GITHUB_APP_ID) : undefined, privateKey: process.env.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, "\n") };
-  if (row) { const saved = JSON.parse(openIntegration(row.encrypted, "github-app")); return { ...saved, appId: credentials.appId ?? saved.appId, privateKey: credentials.privateKey ?? saved.privateKey }; }
+  if (saved) { const config = JSON.parse(saved) as GitHubAppConfig; return { ...config, appId: credentials.appId ?? config.appId, privateKey: credentials.privateKey ?? config.privateKey }; }
   return process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET ? { ...credentials, clientId: process.env.GITHUB_CLIENT_ID, clientSecret: process.env.GITHUB_CLIENT_SECRET, webhookSecret: process.env.GITHUB_WEBHOOK_SECRET } : null;
 }
 /** ORIGIN_ADMIN_EMAILS (comma separated, lowercased): an optional operator lock on registering the App. */
@@ -32,44 +26,53 @@ function instanceAdminEmails() {
  * Who may register the instance's GitHub App with the manifest flow while none is configured: any owner or admin of
  * their workspace. An operator who opens sign-up to strangers can restrict it to named accounts with ORIGIN_ADMIN_EMAILS.
  */
-export function canSetupGitHubApp(user: { email: string }, workspaceRole: string) {
-  if (githubAppConfig() || !["owner", "admin"].includes(workspaceRole)) return false;
+export async function canSetupGitHubApp(user: { email: string }, workspaceRole: string, config?: GitHubAppConfig | null) {
+  if (!["owner", "admin"].includes(workspaceRole) || (config === undefined ? await githubAppConfig() : config)) return false;
   const admins = instanceAdminEmails();
   return !admins.length || admins.includes(user.email.trim().toLowerCase());
 }
 /** Stores the App registered by the manifest flow. Returns false when another admin registered one first. */
 export function saveGitHubApp(config: GitHubAppConfig) {
-  const result = db().prepare("INSERT INTO github_app VALUES(1,?) ON CONFLICT(id) DO NOTHING").run(sealIntegration(JSON.stringify(config), "github-app"));
-  return Number(result.changes) === 1;
+  return store<boolean>("store.githubAppSave", { config: JSON.stringify(config) });
 }
 export function workspaceGitHubInfo(team: string) {
-  const row = db().prepare("SELECT team,login,account_id,connected_by FROM github_workspace WHERE team=?").get(team) as Omit<Connection, "encrypted"> | undefined;
-  return row || null;
+  return store<{ login: string; accountId: number; connectedBy: string } | null>("store.githubWorkspaceInfo", { teamId: team });
 }
-export function saveWorkspaceGitHub(team: string, login: string, accountId: number, connectedBy: string, token: TokenRecord) {
-  db().prepare("INSERT INTO github_workspace VALUES(?,?,?,?,?) ON CONFLICT(team) DO UPDATE SET login=excluded.login,account_id=excluded.account_id,connected_by=excluded.connected_by,encrypted=excluded.encrypted")
-    .run(team, login, accountId, connectedBy, sealIntegration(JSON.stringify(token), `github-team:${team}`));
+export async function saveWorkspaceGitHub(team: string, login: string, accountId: number, connectedBy: string, token: TokenRecord) {
+  await store("store.githubWorkspaceSave", { teamId: team, login, accountId, connectedBy, token });
 }
-export function disconnectWorkspaceGitHub(team: string) { db().prepare("DELETE FROM github_workspace WHERE team=?").run(team); }
-const refreshing = new Map<string, Promise<string>>();
+export async function disconnectWorkspaceGitHub(team: string) { await store("store.githubWorkspaceDelete", { teamId: team }); }
+
+const fresh = (token: TokenRecord) => !token.expires_at || token.expires_at > Date.now() + 60000;
+const readToken = (team: string, connectedBy: string) => store<StoredToken | null>("store.githubWorkspaceToken", { teamId: team, connectedBy });
+
+/**
+ * The workspace's GitHub user token, refreshed when it is about to expire. GitHub refresh tokens are single use, so one
+ * instance refreshes under a shared lease while others wait for the new token; the save is compare-and-set, so a
+ * disconnect or reconnect during the refresh is never overwritten with the old authorization.
+ */
 export async function workspaceGitHubToken(team: string, connectedBy: string) {
-  const row = db().prepare("SELECT * FROM github_workspace WHERE team=? AND connected_by=?").get(team, connectedBy) as Connection | undefined;
+  const row = await readToken(team, connectedBy);
   if (!row) return undefined;
-  const token: TokenRecord = JSON.parse(openIntegration(row.encrypted, `github-team:${team}`));
-  if (!token.expires_at || token.expires_at > Date.now() + 60000) return token.access_token;
-  const existing = refreshing.get(team); if (existing) return existing;
-  const refresh = (async () => {
-    const config = githubAppConfig();
-    if (!config || !token.refresh_token) throw new Error("Reconnect GitHub in workspace settings");
-    const next = await exchangeGitHubToken({ client_id: config.clientId, client_secret: config.clientSecret, grant_type: "refresh_token", refresh_token: token.refresh_token });
-    // A disconnect/reconnect during refresh must not restore an old authorization.
-    const current = db().prepare("SELECT encrypted FROM github_workspace WHERE team=? AND connected_by=?").get(team, connectedBy) as { encrypted: string } | undefined;
-    if (current?.encrypted !== row.encrypted) throw new Error("GitHub connection changed");
-    saveWorkspaceGitHub(team, row.login, row.account_id, row.connected_by, next);
+  if (fresh(row.token)) return row.token.access_token;
+  const refreshed = await withLease(`github-refresh:${team}`, 30000, async () => {
+    const current = await readToken(team, connectedBy);
+    if (!current) throw new Error("Reconnect GitHub in workspace settings");
+    if (fresh(current.token)) return current.token.access_token;
+    const config = await githubAppConfig();
+    if (!config || !current.token.refresh_token) throw new Error("Reconnect GitHub in workspace settings");
+    const next = await exchangeGitHubToken({ client_id: config.clientId, client_secret: config.clientSecret, grant_type: "refresh_token", refresh_token: current.token.refresh_token });
+    if (!await store<boolean>("store.githubWorkspaceSave", { teamId: team, login: current.login, accountId: current.accountId, connectedBy, token: next, expectedVersion: current.version })) throw new Error("GitHub connection changed");
     return next.access_token;
-  })();
-  refreshing.set(team, refresh);
-  try { return await refresh; } finally { refreshing.delete(team); }
+  });
+  if (!refreshed.busy) return refreshed.value;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const current = await readToken(team, connectedBy);
+    if (!current) return undefined;
+    if (fresh(current.token)) return current.token.access_token;
+  }
+  throw new Error("GitHub is refreshing this workspace's connection. Try again in a moment.");
 }
 export async function exchangeGitHubToken(params: Record<string, string>): Promise<TokenRecord> {
   const response = await fetch("https://github.com/login/oauth/access_token", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify(params), signal: AbortSignal.timeout(15000) });
@@ -77,26 +80,25 @@ export async function exchangeGitHubToken(params: Record<string, string>): Promi
   if (!response.ok || !data.access_token || data.error) throw new Error("GitHub authorization failed. Please reconnect.");
   return { access_token: data.access_token, refresh_token: data.refresh_token, expires_at: data.expires_in ? Date.now() + data.expires_in * 1000 : undefined };
 }
-export function createGithubState(value: Omit<GithubState, "verifier">) {
+export async function createGithubState(value: Omit<GithubState, "verifier">) {
   const state = randomBytes(32).toString("base64url"), browser = randomBytes(32).toString("base64url"), verifier = randomBytes(32).toString("base64url");
-  db().prepare("DELETE FROM github_oauth_states WHERE expires < ?").run(Date.now());
-  db().prepare("INSERT INTO github_oauth_states VALUES(?,?,?,?)").run(hashSecret(state), hashSecret(browser), sealIntegration(JSON.stringify({ ...value, verifier }), `github-state:${hashSecret(state)}`), Date.now() + 15 * 60000);
+  await store("store.githubStateCreate", { stateHash: hashSecret(state), browserHash: hashSecret(browser), value: JSON.stringify({ ...value, verifier }), expiresAt: Date.now() + 15 * 60000 });
   return { state, browser, challenge: createHash("sha256").update(verifier).digest("base64url") };
 }
-export function consumeGithubState(state: string, browser: string, mode: GithubState["mode"]) {
-  const row = db().prepare("DELETE FROM github_oauth_states WHERE hash=? AND browser_hash=? AND expires>? RETURNING encrypted").get(hashSecret(state), hashSecret(browser), Date.now()) as { encrypted: string } | undefined;
-  if (!row) throw new Error("GitHub connection request expired. Start again from Settings.");
-  const result: GithubState = JSON.parse(openIntegration(row.encrypted, `github-state:${hashSecret(state)}`));
+export async function consumeGithubState(state: string, browser: string, mode: GithubState["mode"]) {
+  const value = await store<string | null>("store.githubStateTake", { stateHash: hashSecret(state), browserHash: hashSecret(browser), consume: true });
+  if (!value) throw new Error("GitHub connection request expired. Start again from Settings.");
+  const result: GithubState = JSON.parse(value);
   if (result.mode !== mode) throw new Error("Invalid connection request");
   return result;
 }
-export function peekGithubState(state: string, browser: string) {
-  const row = db().prepare("SELECT encrypted FROM github_oauth_states WHERE hash=? AND browser_hash=? AND expires>?").get(hashSecret(state), hashSecret(browser), Date.now()) as { encrypted: string } | undefined;
-  if (!row) throw new Error("GitHub connection request expired");
-  return JSON.parse(openIntegration(row.encrypted, `github-state:${hashSecret(state)}`)) as GithubState;
+export async function peekGithubState(state: string, browser: string) {
+  const value = await store<string | null>("store.githubStateTake", { stateHash: hashSecret(state), browserHash: hashSecret(browser), consume: false });
+  if (!value) throw new Error("GitHub connection request expired");
+  return JSON.parse(value) as GithubState;
 }
-export function githubAuthorizeUrl(state: string, challenge: string) {
-  const config = githubAppConfig(); if (!config) throw new Error("GitHub App setup is required");
+export async function githubAuthorizeUrl(state: string, challenge: string) {
+  const config = await githubAppConfig(); if (!config) throw new Error("GitHub App setup is required");
   const params = new URLSearchParams({ client_id: config.clientId, redirect_uri: `${originUrl()}/api/github/oauth/callback`, state, code_challenge: challenge, code_challenge_method: "S256" });
   if (!config.slug) params.set("scope", "repo");
   return `https://github.com/login/oauth/authorize?${params}`;
@@ -123,13 +125,14 @@ export async function githubRequest<T>(path: string, token: string, init: Reques
   return response.json();
 }
 
+/** Idempotency markers for GitHub side effects and sync cursors, shared by every instance. */
 export function readGitHubJob(key: string) {
-  return db().prepare("SELECT state,payload,updated FROM github_jobs WHERE key=?").get(key) as { state: string; payload: string | null; updated: number } | undefined;
+  return store<{ state: string; payload: string | null; updated: number } | null>("store.githubJobRead", { key }).then(row => row ?? undefined);
 }
-export function saveGitHubJob(key: string, state: string, payload?: unknown) {
-  db().prepare("INSERT INTO github_jobs VALUES(?,?,?,?) ON CONFLICT(key) DO UPDATE SET state=excluded.state,payload=excluded.payload,updated=excluded.updated").run(key, state, payload === undefined ? null : JSON.stringify(payload), Date.now());
+export async function saveGitHubJob(key: string, state: string, payload?: unknown) {
+  await store("store.githubJobSave", { key, state, payload: payload === undefined ? null : JSON.stringify(payload) });
 }
+/** Takes the job's 90-second lease unless another instance holds a fresh one. */
 export function lockGitHubJob(key: string) {
-  const row = db().prepare("INSERT INTO github_jobs VALUES(?,'working',NULL,?) ON CONFLICT(key) DO UPDATE SET state='working',updated=excluded.updated WHERE github_jobs.state!='working' OR github_jobs.updated<? RETURNING key").get(key, Date.now(), Date.now() - 90000);
-  return Boolean(row);
+  return store<boolean>("store.githubJobLock", { key });
 }

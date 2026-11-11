@@ -10,9 +10,9 @@ import { chatTextParts } from "@/lib/chat-text";
 import { chatTrigger, insertChatTag } from "@/lib/chat-composer";
 import { containsMention, mentionToken } from "@/lib/issue-mentions";
 import { checklistItem } from "@/lib/comment-checklist";
-import { localApi } from "@/lib/client-api";
+import { uploadLocalFile } from "@/lib/client-api";
 import { validateAttachmentFiles } from "@/lib/dropped-content";
-import type { ChatReference } from "@/lib/localRealtime";
+import type { ChatReference } from "@/lib/chat-types";
 import { displayName } from "@/lib/format";
 import { useMemberProfile, useWorkspace } from "./workspace-context";
 import { useChatSuggestions, type ChatSuggestion } from "./use-chat-suggestions";
@@ -115,8 +115,7 @@ export function IssueCommentComposer({ projectId, taskId, sessionToken, members 
       validateAttachmentFiles(files);
       if (attachments.length + files.length > 8) throw new Error("Attach up to 8 files per comment");
       for (const file of files) {
-        const form = new FormData(); form.set("file", file);
-        const result = await localApi<{ file: Attachment }>(`/api/local-chat/files?teamId=${workspace._id}&projectId=${projectId}`, sessionToken, { method: "POST", body: form });
+        const result = { file: await uploadLocalFile(`/api/local-chat/files?teamId=${workspace._id}&projectId=${projectId}`, sessionToken, file) as Attachment };
         setAttachments(current => [...current, result.file]);
       }
     } catch (error) { setError(errorText(error, "Could not upload file")); }

@@ -3,11 +3,14 @@ import { createServer } from "node:net";
 import { afterEach, expect, test, vi } from "vitest";
 import { sendInviteMail } from "./invite-mail";
 
-vi.mock("./githubConnection", async () => {
-  const { DatabaseSync } = await import("node:sqlite");
-  const db = new DatabaseSync(":memory:");
-  return { integrationDb: () => db };
-});
+import { convexStore, signedBridge, type Backend } from "../testing/convex-store";
+
+// Delivery claims live in Convex, so a retry on any instance sees the first one.
+const backend = vi.hoisted(() => ({ current: null as Backend | null }));
+vi.mock("./integration-bridge", async importOriginal => ({
+  ...await importOriginal<typeof import("./integration-bridge")>(),
+  integrationBridge: (operation: string, args: unknown) => signedBridge((backend.current ??= convexStore()), operation, args),
+}));
 afterEach(() => vi.unstubAllEnvs());
 
 test("PG1 O-012: actual loopback SMTP delivery, explicit failure and same-request duplicate suppression", async () => {

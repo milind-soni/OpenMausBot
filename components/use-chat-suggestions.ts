@@ -4,7 +4,7 @@ import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import type { ChatTrigger } from "@/lib/chat-composer";
-import type { ChatReference } from "@/lib/localRealtime";
+import type { ChatReference } from "@/lib/chat-types";
 import { taskKey } from "@/lib/project-issues";
 import type { ChatMember } from "./chat-shell";
 import { memberName } from "./user-avatar";

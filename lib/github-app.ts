@@ -8,8 +8,8 @@ const prPermissions = { contents: "write", pull_requests: "write", checks: "read
 export const permissionNotice = "Tasks as pull requests needs Contents: write, Pull requests: write and Checks: read. The App owner must save these permissions and subscribe to pull_request, pull_request_review, check_suite and check_run (keep issues). Then open GitHub Settings > Applications > Installed GitHub Apps > Origin > Configure and accept the new permissions. Existing issue sync continues with the current permissions.";
 type Installation = { id: number; account?: { id: number; login: string }; suspended_at?: string | null; permissions: Record<string, string> };
 
-export function appJwt() {
-  const config = githubAppConfig();
+export async function appJwt() {
+  const config = await githubAppConfig();
   if (!config?.appId || !config.privateKey) throw new Error("The App owner must configure GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY on the Origin server for PRs. Existing issue sync is available.");
   const now = Math.floor(Date.now() / 1000);
   const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
@@ -23,7 +23,7 @@ export function repositoryPath(repoUrl: string) {
   return `/repos/${repo.owner}/${repo.repo}`;
 }
 export async function installationFor(repoUrl: string) {
-  const installation = await githubRequest<Installation>(`${repositoryPath(repoUrl)}/installation`, appJwt());
+  const installation = await githubRequest<Installation>(`${repositoryPath(repoUrl)}/installation`, await appJwt());
   if (installation.suspended_at || Object.entries(prPermissions).some(([key, level]) => installation.permissions[key] !== level && installation.permissions[key] !== "write")) throw new Error(permissionNotice);
   return installation;
 }
@@ -32,7 +32,7 @@ export async function installationFor(repoUrl: string) {
 export async function installationToken(repoUrl: string, pushOnly = false) {
   const repo = parseGitHubRepo(repoUrl)!;
   const installation = await installationFor(repoUrl);
-  const result = await githubRequest<{ token: string; expires_at: string; permissions: Record<string, string>; repositories: { full_name: string }[] }>(`/app/installations/${installation.id}/access_tokens`, appJwt(), {
+  const result = await githubRequest<{ token: string; expires_at: string; permissions: Record<string, string>; repositories: { full_name: string }[] }>(`/app/installations/${installation.id}/access_tokens`, await appJwt(), {
     method: "POST", body: JSON.stringify({ repositories: [repo.repo], permissions: pushOnly ? { contents: "write" } : prPermissions }),
   });
   if (!result.token || !Number.isFinite(Date.parse(result.expires_at)) || Date.parse(result.expires_at) <= Date.now() || Date.parse(result.expires_at) > Date.now() + 65 * 60000 || result.repositories?.length !== 1 || result.repositories[0].full_name.toLowerCase() !== `${repo.owner}/${repo.repo}`.toLowerCase()) {

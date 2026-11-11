@@ -1,44 +1,61 @@
 import { BodyTooLarge, readBoundedJson } from "@/lib/http-body";
 import { NextResponse } from "next/server";
-import { editLocalMessage, flushChatNotifications, getConvexClient, listLocalMessages, localMessageContext, requireLocalChat, searchLocalMessages, sendLocalMessage, sessionTokenFromRequest, type ChatReference } from "@/lib/localRealtime";
-import { after } from "next/server";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { errorText } from "@/lib/error-text";
+import { getConvexClient, workspaceScope } from "@/lib/workspace-session";
+import type { ChatReference, LocalChatMessage } from "@/lib/chat-types";
+
+// Workspace and direct chat. Convex (convex/workspaceChat.ts) checks the session, workspace and conversation on every
+// call, validates mentions, references and attachments, and queues mention notifications in the same transaction.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 function failure(error: unknown) { return NextResponse.json({ error: errorText(error, "Request failed") }, { status: error instanceof BodyTooLarge ? 413 : 400 }); }
+const parse = (payloads: string[]) => payloads.map(payload => JSON.parse(payload) as LocalChatMessage);
+
 export async function GET(request: Request) {
-  try { const user = await requireLocalChat(request); const params = new URL(request.url).searchParams; const focus = params.get("focus"); const search = params.get("search"); const before = Number(params.get("before")) || undefined; const messages = search ? await searchLocalMessages(user, search, before) : focus ? await localMessageContext(user, focus) : await listLocalMessages(user, before); return NextResponse.json({ messages, hasMore: messages.length === 100 }); } catch (error) { return failure(error); }
+  try {
+    const scope = workspaceScope(request);
+    const params = new URL(request.url).searchParams;
+    const focus = params.get("focus"), search = params.get("search"), before = Number(params.get("before")) || undefined;
+    const convex = getConvexClient();
+    const messages = parse(search
+      ? await convex.mutation(api.workspaceChat.search, { ...scope, search, ...(before ? { before } : {}) })
+      : await convex.query(api.workspaceChat.list, { ...scope, ...(focus ? { focus } : before ? { before } : {}) }));
+    return NextResponse.json({ messages, hasMore: messages.length === 100 });
+  } catch (error) { return failure(error); }
 }
+
 export async function POST(request: Request) {
   try {
     const body = await readBoundedJson(request) as { sessionToken?: string; teamId?: string; body?: string; attachmentIds?: string[]; references?: ChatReference[]; replyTo?: string; mentionUserIds?: Id<"users">[] };
-    const user = await requireLocalChat(request, body);
-    const sessionToken = sessionTokenFromRequest(request, body);
-    if (body.mentionUserIds && (!Array.isArray(body.mentionUserIds) || body.mentionUserIds.length > 20)) throw new Error("Too many mentions");
-    const members = await getConvexClient().query(api.workspaces.members, { sessionToken, teamId: user.teamId });
-    if (user.conversation && !user.conversation.slice(3).split(":").every(id => members.some(member => member.userId === id))) throw new Error("This member is no longer in the workspace");
-    const mentions = [...new Set(body.mentionUserIds || [])].map(id => { const member = members.find(m => m.userId === id); if (!member?.userId) throw new Error("Mention must belong to this workspace"); return { userId: member.userId, name: member.username || member.name }; });
-    const notifyUserIds: Id<"users">[] = [];
-    if (body.references) {
-      if (!Array.isArray(body.references) || body.references.length > 12) throw new Error("Too many references");
-      body.references = await Promise.all(body.references.map(async reference => {
-        const projectId = reference.projectId as Id<"projects">;
-        const project = await getConvexClient().query(api.projects.get, { sessionToken, projectId });
-        if (project.teamId !== user.teamId) throw new Error("Reference must belong to this workspace");
-        if (reference.type === "project") return { type: "project" as const, projectId, id: projectId, label: project.name };
-        if (reference.type !== "issue") throw new Error("Unknown reference");
-        const { task } = await getConvexClient().query(api.tasks.details, { sessionToken, projectId, taskId: reference.id as Id<"tasks"> });
-        const assignee = members.find(m => m.email === task.assignedToEmail); if (assignee?.userId) notifyUserIds.push(assignee.userId);
-        return { type: "issue" as const, projectId, id: task._id, label: task.title };
-      }));
-    }
-    const message = await sendLocalMessage(user, body.body || "", { ...body, mentions, notifyUserIds });
-    after(async () => { try { await flushChatNotifications(); } catch { console.warn("Chat notification delivery deferred"); } });
-    return NextResponse.json({ message });
+    const scope = workspaceScope(request, body);
+    if (body.mentionUserIds !== undefined && !Array.isArray(body.mentionUserIds)) throw new Error("Too many mentions");
+    if (body.references !== undefined && !Array.isArray(body.references)) throw new Error("Too many references");
+    if (body.attachmentIds !== undefined && !Array.isArray(body.attachmentIds)) throw new Error("Attachment not found");
+    const payload = await getConvexClient().mutation(api.workspaceChat.send, {
+      ...scope,
+      body: typeof body.body === "string" ? body.body : "",
+      ...(body.attachmentIds ? { attachmentIds: body.attachmentIds.map(String) } : {}),
+      ...(body.references ? { references: body.references.map(reference => ({ type: String(reference?.type), id: String(reference?.id), projectId: String(reference?.projectId) })) } : {}),
+      ...(typeof body.replyTo === "string" ? { replyTo: body.replyTo } : {}),
+      ...(body.mentionUserIds ? { mentionUserIds: body.mentionUserIds.map(String) } : {}),
+    });
+    return NextResponse.json({ message: JSON.parse(payload) as LocalChatMessage });
   } catch (error) { return failure(error); }
 }
+
 export async function PATCH(request: Request) {
-  try { const body = await readBoundedJson(request); const user = await requireLocalChat(request, body); return NextResponse.json({ message: await editLocalMessage(user, body.id, body) }); } catch (error) { return failure(error); }
+  try {
+    const body = await readBoundedJson(request) as { id?: unknown; body?: unknown; reaction?: unknown; pinned?: unknown; delete?: unknown };
+    const payload = await getConvexClient().mutation(api.workspaceChat.edit, {
+      ...workspaceScope(request, body as { sessionToken?: unknown }),
+      id: String(body.id ?? ""),
+      ...(typeof body.body === "string" ? { body: body.body } : {}),
+      ...(typeof body.reaction === "string" ? { reaction: body.reaction } : {}),
+      ...(typeof body.pinned === "boolean" ? { pinned: body.pinned } : {}),
+      ...(body.delete === true ? { delete: true } : {}),
+    });
+    return NextResponse.json({ message: payload === null ? null : JSON.parse(payload) as LocalChatMessage });
+  } catch (error) { return failure(error); }
 }

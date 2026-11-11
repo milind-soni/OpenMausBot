@@ -1,5 +1,11 @@
 # Upgrading production from the desktop backend
 
+> Later release: the web frontend no longer has a local store. Chat, attachments, calls and integration credentials
+> live in Convex, the frontend runs statelessly (Vercel), and `/data/origin` is imported once with
+> `scripts/migrate-local-store-to-convex.ts`. See [README.md section 8](README.md#8-move-from-the-local-store-to-convex-one-time).
+> The notes below describe the earlier desktop-to-web upgrade; where they mention the Next server's store or
+> `/data/origin`, read Convex.
+
 Production Convex runs `desktop-archive:backend/convex`. This release keeps that schema byte for byte and pushes the
 web app's `convex/` on top. The steps below were rehearsed on a local copy (2026-11-01). Nothing was run against
 production.

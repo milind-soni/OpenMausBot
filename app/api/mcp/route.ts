@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { api } from "@/convex/_generated/api";
-import { getConvexClient, limitLocalAction } from "@/lib/localRealtime";
+import { getConvexClient } from "@/lib/workspace-session";
 import { BodyTooLarge, readBoundedJson } from "@/lib/http-body";
 import { mcpResourceMetadata, mcpScopes, resolveMcpToken } from "@/lib/mcp-oauth";
 import { isPatFormat, PAT_PREFIX } from "@/lib/mcp-tokens";
 import { mcpAuthBlocked, recordMcpAuthFailure } from "@/lib/mcp-rate-limit";
+import { limitAction, limitReached } from "@/lib/server-store";
 import { serveMcp } from "@/lib/mcp-server";
 
 // Remote MCP server, Streamable HTTP without sessions: protocol revision 2026-07-28 (server/discover, per-request
@@ -22,10 +23,8 @@ function unauthorized(error = "invalid_token") {
 }
 
 type Auth = { token: string; write: boolean; key: string };
-const tooMany = () => Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "Too many requests" } }, { status: 429, headers: { ...cors, "Retry-After": "60" } });
-// PATs verified recently skip the failed-authentication gate, so a flood of bad tokens cannot lock them out.
-const knownPats = new Map<string, number>();
 const KNOWN_PAT_TTL = 10 * 60000;
+const tooMany = () => Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "Too many requests" } }, { status: 429, headers: { ...cors, "Retry-After": "60" } });
 
 /**
  * Resolves the bearer without calling Convex for anything that cannot be valid: malformed personal access tokens
@@ -35,28 +34,26 @@ async function authenticate(request: Request): Promise<Auth | Response> {
   const header = request.headers.get("authorization") || "";
   const bearer = /^Bearer\s+(\S+)$/i.exec(header)?.[1];
   if (!bearer) return unauthorized("");
-  const fail = () => { recordMcpAuthFailure(request); return unauthorized(); };
+  const fail = async () => { await recordMcpAuthFailure(request); return unauthorized(); };
   let resolved: { connectorToken: string; write: boolean; key: string };
   if (bearer.startsWith(PAT_PREFIX)) {
     if (!isPatFormat(bearer)) return fail();
     const key = createHash("sha256").update(bearer).digest("hex").slice(0, 24);
-    if ((knownPats.get(key) ?? 0) < Date.now() && mcpAuthBlocked(request)) return tooMany();
+    // A PAT verified within the last ten minutes skips the failed-authentication gate, so a flood of bad tokens
+    // cannot lock it out. The marker is a shared rate-limit window, so every instance sees it.
+    if (!await limitReached(`mcp-known-pat:${key}`, 1) && await mcpAuthBlocked(request)) return tooMany();
     resolved = { connectorToken: bearer, write: true, key };
   } else {
-    // OAuth tokens resolve locally; only valid ones reach Convex.
-    try { const grant = resolveMcpToken(bearer); resolved = { connectorToken: grant.connectorToken, write: grant.write, key: grant.grantId }; }
-    catch { return mcpAuthBlocked(request) ? tooMany() : fail(); }
+    // OAuth tokens resolve from their hash; only valid ones reach the connector check.
+    try { const grant = await resolveMcpToken(bearer); resolved = { connectorToken: grant.connectorToken, write: grant.write, key: grant.grantId }; }
+    catch { return await mcpAuthBlocked(request) ? tooMany() : fail(); }
   }
-  try { limitLocalAction(`mcp:${resolved.key}`, 240, 60000); } catch { return tooMany(); }
+  try { await limitAction(`mcp:${resolved.key}`, 240, 60000); } catch { return tooMany(); }
   try {
     const access = await getConvexClient().query(api.connectors.verify, { token: resolved.connectorToken });
-    if (bearer.startsWith(PAT_PREFIX)) {
-      knownPats.set(resolved.key, Date.now() + KNOWN_PAT_TTL);
-      if (knownPats.size > 10000) for (const [key, expires] of knownPats) if (expires < Date.now()) knownPats.delete(key);
-    }
+    if (bearer.startsWith(PAT_PREFIX)) await limitAction(`mcp-known-pat:${resolved.key}`, 1, KNOWN_PAT_TTL).catch(() => {});
     return { token: resolved.connectorToken, write: resolved.write && access.write, key: resolved.key };
   } catch {
-    knownPats.delete(resolved.key);
     return fail();
   }
 }

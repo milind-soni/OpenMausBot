@@ -38,31 +38,31 @@ async function openPR(repoUrl: string, taskId: string, branch: string, title: st
   if (!head.object.sha) throw new Error("Push the task branch first");
   const marker = `<!-- origin-task:${taskId} -->`;
   const key = `pr:${taskId}:${repo.toLowerCase()}:${branch}`;
-  if (!lockGitHubJob(key)) throw new Error("PR operation in progress; retry the same request ID");
+  if (!await lockGitHubJob(key)) throw new Error("PR operation in progress; retry the same request ID");
   try {
-    const previous = readGitHubJob(key), saved = previous?.payload ? JSON.parse(previous.payload) : {};
+    const previous = await readGitHubJob(key), saved = previous?.payload ? JSON.parse(previous.payload) : {};
     const matches = await githubRequest<{ number: number; body?: string; head: { ref: string } }[]>(`${path}/pulls?state=all&head=${encodeURIComponent(`${owner}:${branch}`)}&per_page=100`, token);
     let number = saved.number as number | undefined;
     if (!number) number = matches.find(pr => pr.head.ref === branch && pr.body?.includes(marker))?.number;
     if (!number && saved.started) throw new Error("Previous PR creation result is uncertain; reconciliation or owner inspection required before retrying");
     if (!number) {
-      saveGitHubJob(key, "working", { started: true });
+      await saveGitHubJob(key, "working", { started: true });
       try {
         const pr = await githubRequest<{ number: number }>(`${path}/pulls`, token, { method: "POST", body: JSON.stringify({ head: branch, base, title, body: `${body}\n\n${marker}`.trim(), draft }) });
         number = pr.number;
-        saveGitHubJob(key, "working", { number });
+        await saveGitHubJob(key, "working", { number });
       } catch (error) {
-        if (error instanceof GitHubHttpError && [400, 401, 403, 404, 422, 429].includes(error.status)) saveGitHubJob(key, "working");
+        if (error instanceof GitHubHttpError && [400, 401, 403, 404, 422, 429].includes(error.status)) await saveGitHubJob(key, "working");
         throw error;
       }
     }
     const snapshot = await readPRSnapshot(repoUrl, number, token);
     if (snapshot.branch !== branch) throw new Error("GitHub returned an unexpected task branch");
-    saveGitHubJob(key, "done", { number });
+    await saveGitHubJob(key, "done", { number });
     return snapshot;
   } catch (error) {
-    const previous = readGitHubJob(key);
-    saveGitHubJob(key, "error", previous?.payload ? JSON.parse(previous.payload) : undefined);
+    const previous = await readGitHubJob(key);
+    await saveGitHubJob(key, "error", previous?.payload ? JSON.parse(previous.payload) : undefined);
     throw error;
   }
 }
@@ -91,7 +91,7 @@ export async function createTaskPR(sessionToken: string, projectId: string, task
   const context = await integrationBridge<Context>("prHumanContext", { sessionToken, projectId, taskId, choosePR: true });
   const repoUrl = context.project.repoUrl!;
   const key = `draft-task:${taskId}:${repoUrl.toLowerCase()}`;
-  if (!lockGitHubJob(key)) throw new Error("Task PR creation in progress; retry shortly");
+  if (!await lockGitHubJob(key)) throw new Error("Task PR creation in progress; retry shortly");
   try {
     const snapshot = await withInstallation(projectId, repoUrl, async appToken => {
       const current = await integrationBridge<Context>("prHumanContext", { sessionToken, projectId, taskId });
@@ -102,7 +102,7 @@ export async function createTaskPR(sessionToken: string, projectId: string, task
     });
     const result = await integrationBridge<OpenedPR>("prFinalize", { sessionToken, projectId, taskId, snapshot });
     return { ...result, ok: true, message: `Linked draft PR #${result.number}` };
-  } finally { saveGitHubJob(key, "done"); }
+  } finally { await saveGitHubJob(key, "done"); }
 }
 
 async function syncPRTarget(target: Target, eventHeadSha?: string) {
@@ -119,7 +119,7 @@ export async function syncPREvent(repoUrl: string, numbers: number[], headSha?: 
   for (const target of targets) await syncPRTarget(target, headSha);
 }
 export async function syncPRPage() {
-  const key = "pr-sync-cursor", saved = readGitHubJob(key);
+  const key = "pr-sync-cursor", saved = await readGitHubJob(key);
   const { cursor = null, state = "draft" } = saved?.payload ? JSON.parse(saved.payload) : {};
   const page = await integrationBridge<{ rows: Target[]; nextCursor: string | null }>("prTargets", { cursor, state });
   const results = await Promise.allSettled(page.rows.map(t => syncPRTarget(t)));
@@ -128,7 +128,7 @@ export async function syncPRPage() {
   const failed = results.filter(r => r.status === "rejected").length;
   if (failed) console.warn(`GitHub PR reconciliation: ${failed} targets need retry or App permission approval`);
   // Closed-unmerged PRs can be reopened even when their webhook is missed.
-  saveGitHubJob(key, "done", { cursor: page.nextCursor, state: page.nextCursor ? state : state === "draft" ? "open" : state === "open" ? "closed" : "draft" });
+  await saveGitHubJob(key, "done", { cursor: page.nextCursor, state: page.nextCursor ? state : state === "draft" ? "open" : state === "open" ? "closed" : "draft" });
 }
 
 type PullRequestPayload = { repository: { full_name: string }; pull_request: Record<string, unknown> & { title?: unknown; body?: unknown; user?: { login?: unknown; id?: unknown } | null } };

@@ -5,7 +5,7 @@ import { useMutation } from "convex/react";
 import { Loader2, Paperclip } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { localApi } from "@/lib/client-api";
+import { uploadLocalFile } from "@/lib/client-api";
 import { validateAttachmentFiles } from "@/lib/dropped-content";
 import { useWorkspace } from "./workspace-context";
 import { useFileDrop } from "./use-file-drop";
@@ -26,8 +26,7 @@ export function IssueFileUpload({ projectId, taskId, sessionToken, disabled, onL
     try {
       validateAttachmentFiles(files);
       for (const file of files) {
-        const form = new FormData(); form.set("file", file);
-        const { file: saved } = await localApi<{ file: { id: string; name: string; contentType: string; size: number } }>(`/api/local-chat/files?teamId=${workspace._id}&projectId=${projectId}`, sessionToken, { method: "POST", body: form });
+        const saved = await uploadLocalFile(`/api/local-chat/files?teamId=${workspace._id}&projectId=${projectId}`, sessionToken, file);
         await attach({ projectId, taskId, sessionToken, name: saved.name, type: /^image\/(png|jpeg|gif|webp)$/.test(saved.contentType) ? "image" : "file", localFileId: saved.id, contentType: saved.contentType, size: saved.size });
       }
     } catch (error) { report(errorText(error, "Could not attach file")); }
