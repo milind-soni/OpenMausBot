@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { DATA_DIR } from "../config.ts";
+import { retryOnWindowsFileLock } from "./antigravity-runtime.ts";
 
 const UNPACK_PREFIX = "_MEI";
 const CLAIM_PREFIX = ".omb-removing-";
@@ -246,7 +247,9 @@ async function claimAndRemove(directory: string, countBytes: boolean): Promise<n
   }
   const { bytes } = countBytes ? await folderBytes(claimed) : { bytes: 0 };
   try {
-    await rm(claimed, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+    // Retry the whole folder, never inside it: Node's maxRetries repeats at every folder level, so one file it
+    // may never delete (EPERM on Windows) is tried (retries+1)^depth times while abandoned siblings keep running.
+    await retryOnWindowsFileLock(() => rm(claimed, { recursive: true, force: true }), { attempts: 4, delayMs: 200 });
     return bytes;
   } catch {
     return null;
