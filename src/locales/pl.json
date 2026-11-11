@@ -6862,8 +6862,6 @@
   "stt.save": "Zapisz wejście głosowe",
   "stt.saving": "Zapisywanie…",
   "stt.saveFailed": "Nie udało się zapisać ustawień wejścia głosowego.",
-  "stt.googleKey": "Klucz API Google AI Studio",
-  "stt.googleHint": "Google transkrybuje nagrania swoimi modelami Gemini obsługującymi dźwięk. Dźwięk trafia na skonfigurowany serwer zgodny z Google. Zapisz tu osobny klucz Google AI Studio; zmiana dostawcy lub adresu usuwa zapisany klucz.",
   "stt.chooseModel": "Wybierz lub wpisz model obsługujący dźwięk",
   "stt.loadModels": "Wczytaj modele",
   "stt.loadingModels": "Wczytywanie modeli…",

@@ -3328,8 +3328,6 @@
   "stt.save": "Enregistrer la saisie vocale",
   "stt.saving": "Enregistrement…",
   "stt.saveFailed": "Impossible d'enregistrer les réglages de saisie vocale.",
-  "stt.googleKey": "Clé API Google AI Studio",
-  "stt.googleHint": "Google transcrit les enregistrements avec ses modèles Gemini compatibles audio. L'audio part vers le serveur compatible Google configuré. Enregistrez ici une clé Google AI Studio distincte ; changer de fournisseur ou d'adresse efface la clé enregistrée.",
   "stt.chooseModel": "Choisissez ou saisissez un modèle compatible audio",
   "stt.loadModels": "Charger les modèles",
   "stt.loadingModels": "Chargement des modèles…",

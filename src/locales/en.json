@@ -10268,8 +10268,6 @@
   "stt.save": "Save speech input",
   "stt.saving": "Saving…",
   "stt.saveFailed": "Could not save speech input settings.",
-  "stt.googleKey": "Google AI Studio API key",
-  "stt.googleHint": "Google transcribes recordings through its audio-capable Gemini models. Audio goes to the configured Google-compatible server. Save a separate Google AI Studio key here; changing the provider or address clears the saved key.",
   "stt.chooseModel": "Select or enter an audio-capable model",
   "stt.loadModels": "Load models",
   "stt.loadingModels": "Loading models…",

@@ -10,7 +10,7 @@ function validBaseUrl(value: string): boolean {
   } catch { return false; }
 }
 
-/** `baseUrl` is an OpenAI-compatible API root; one without a path gets `/v1`. Gemini uses audio input through chat completions. `key` is required only by Gemini and the OpenAI and Groq presets; no chat credential is reused. */
+/** `baseUrl` is an OpenAI-compatible API root; one without a path gets `/v1`. `key` is required only by the OpenAI and Groq presets; no chat credential is reused. */
 export const sttConfigSchema = z.object({
   provider: z.enum(STT_PROVIDERS).optional(),
   baseUrl: z.string().trim().max(2048).refine(validBaseUrl, "Use an http:// or https:// API base URL without credentials, query or fragment.").optional(),
@@ -20,12 +20,12 @@ export const sttConfigSchema = z.object({
 });
 
 export function sttBaseUrl(config: SttConfig | undefined): string {
-  const root = (config?.baseUrl?.trim() || (config?.provider === "gemini" ? STT_PRESETS.google.baseUrl : STT_PRESETS.openai.baseUrl)).replace(/\/+$/, "");
+  const root = (config?.baseUrl?.trim() || STT_PRESETS.openai.baseUrl).replace(/\/+$/, "");
   return URL.parse(root)?.pathname === "/" ? `${root}/v1` : root;
 }
 
 function sttKeyTarget(config: SttConfig | undefined): string {
-  return `${config?.provider === "gemini" ? "gemini:" : ""}${sttBaseUrl(config)}`;
+  return sttBaseUrl(config);
 }
 
 export function sttSavePatch(current: SttConfig | undefined, patch: SttConfig): SttConfig {
@@ -57,7 +57,7 @@ export function sttConfigWithEnv(config: SttConfig | undefined, env: NodeJS.Proc
 const KEYED_ROOTS = new Set<string>([STT_PRESETS.openai.baseUrl, STT_PRESETS.groq.baseUrl]);
 
 export function sttNeedsKey(cfg: SttConfig | undefined): boolean {
-  return cfg?.provider === "gemini" || KEYED_ROOTS.has(sttBaseUrl(cfg));
+  return KEYED_ROOTS.has(sttBaseUrl(cfg));
 }
 
 export function sttStatus(cfg: Pick<AppConfig, "stt" | "tts">): SttStatus {

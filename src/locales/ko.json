@@ -7441,8 +7441,6 @@
   "stt.save": "음성 입력 저장",
   "stt.saving": "저장하는 중…",
   "stt.saveFailed": "음성 입력 설정을 저장하지 못했어요.",
-  "stt.googleKey": "Google AI Studio API 키",
-  "stt.googleHint": "Google은 오디오를 지원하는 Gemini 모델로 녹음을 텍스트로 바꿔요. 오디오는 설정한 Google 호환 서버로 가요. 여기에 별도의 Google AI Studio 키를 저장하세요. 제공자나 주소를 바꾸면 저장된 키가 지워져요.",
   "stt.chooseModel": "오디오 지원 모델을 고르거나 입력하세요",
   "stt.loadModels": "모델 불러오기",
   "stt.loadingModels": "모델을 불러오는 중…",

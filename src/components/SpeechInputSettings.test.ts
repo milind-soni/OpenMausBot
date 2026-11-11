@@ -59,30 +59,6 @@ it("fills the Groq preset and saves its transcription model and a separate key",
   expect(host.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe("");
 });
 
-it("fills Google settings and discards the previous provider's draft key", async () => {
-  await select(0, "openai");
-  await input("password", "openai-only-key");
-  await select(0, "gemini");
-  expect(host.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe(STT_PRESETS.google.baseUrl);
-  expect(host.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe("");
-  expect(host.querySelectorAll("select")).toHaveLength(1);
-  await input("password", "google-input-key");
-  await enterModel("gemini-fixture-audio");
-  await save();
-  expect(JSON.parse(fixture.api.mock.calls[0]![1].body)).toEqual({ stt: { provider: "gemini", ...STT_PRESETS.google, model: "gemini-fixture-audio", key: "google-input-key" } });
-  await select(0, "openai");
-  expect(host.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe(STT_PRESETS.openai.baseUrl);
-  expect(host.querySelector<HTMLInputElement>('input:not([type])')!.value).toBe("");
-});
-
-it("does not offer another provider's saved key at the same URL as a usable Google key", async () => {
-  fixture.config = { stt: { provider: "openai", baseUrl: STT_PRESETS.google.baseUrl, model: "whisper-1", configured: true, keyConfigured: true } };
-  await act(async () => root.render(createElement(SpeechInputSettings)));
-  await select(0, "gemini");
-  expect(host.querySelector<HTMLInputElement>('input[type="password"]')!.placeholder).toBe("Google AI Studio API key");
-  expect(host.querySelector('input[type="checkbox"]')).toBeNull();
-});
-
 it("discards a draft credential when its destination changes and permits a keyless local server", async () => {
   await select(0, "openai");
   await input("password", "openai-secret");
@@ -138,8 +114,8 @@ it("leaves the saved endpoint alone when the desktop key write is refused", asyn
   } finally { delete window.ogb; }
 });
 
-it.each(["openai", "groq", "google"])("loads %s models with the draft credential without saving configuration", async (service) => {
-  await select(0, service === "google" ? "gemini" : "openai");
+it.each(["openai", "groq"])("loads %s models with the draft credential without saving configuration", async (service) => {
+  await select(0, "openai");
   if (service === "groq") await select(1, "groq");
   const candidates = [`${service}-chat-model`, `${service}-whisper-large`];
   fixture.api.mockResolvedValueOnce({ models: candidates });
@@ -148,7 +124,7 @@ it.each(["openai", "groq", "google"])("loads %s models with the draft credential
   expect(fixture.api).toHaveBeenCalledOnce();
   expect(fixture.api.mock.calls[0]![0]).toBe("/api/tts/models");
   expect(JSON.parse(fixture.api.mock.calls[0]![1].body)).toEqual({ stt: {
-    provider: service === "google" ? "gemini" : "openai", baseUrl: STT_PRESETS[service as keyof typeof STT_PRESETS].baseUrl, key: `${service}-draft-key`,
+    provider: "openai", baseUrl: STT_PRESETS[service as keyof typeof STT_PRESETS].baseUrl, key: `${service}-draft-key`,
   } });
   expect([...host.querySelectorAll("datalist option")].map((option) => option.getAttribute("value"))).toEqual(candidates);
   expect(fixture.dispatch).not.toHaveBeenCalled();
@@ -180,12 +156,12 @@ it("keeps manual model entry available after discovery fails", async () => {
   expect(JSON.parse(fixture.api.mock.calls[1]![1].body).stt.model).toBe("my-new-audio-model");
 });
 
-it("discards a late model catalog when the provider changes", async () => {
+it("discards a late model catalog when the address changes", async () => {
   await select(0, "openai");
   let finish!: (value: { models: string[] }) => void;
   fixture.api.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
   await act(async () => host.querySelector<HTMLButtonElement>("[data-stt-load-models]")!.click());
-  await select(0, "gemini");
+  await select(1, "groq");
   await act(async () => finish({ models: ["wrong-provider-model"] }));
   expect(host.querySelectorAll("datalist option")).toHaveLength(0);
 });

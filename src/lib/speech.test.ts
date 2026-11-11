@@ -23,7 +23,7 @@ describe("speechBridge", () => {
     vi.stubGlobal("window", { ogb });
     microphone();
     cacheDesktopCapabilities(withDictation(APPLE));
-    for (const provider of ["openai", "fish", "gemini"] as const) {
+    for (const provider of ["openai", "fish"] as const) {
       const config = { stt: { provider, configured: true } } as ConfigStatus;
       expect(speechBridge(config)).toBe(recordedSpeech);
       expect(listensHere(withDictation(APPLE), config)).toBe(true);

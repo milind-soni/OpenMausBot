@@ -102,19 +102,11 @@ function SpeechInputForm() {
           <Select value={provider} onChange={(event) => {
             const next = STT_PROVIDERS.find((name) => name === event.target.value);
             if (next) setProvider(next);
-            if (next === "gemini") {
-              setBaseUrl(STT_PRESETS.google.baseUrl);
-              setModel("");
-            } else if (next === "openai" && provider === "gemini") {
-              setBaseUrl(STT_PRESETS.openai.baseUrl);
-              setModel("");
-            }
             setKey("");
             setRemoveKey(false);
           }}>
             <option value="auto">{t("stt.automatic")}</option>
             <option value="fish">Fish Audio</option>
-            <option value="gemini">Google (Gemini)</option>
             <option value="openai">{t("stt.compatible")}</option>
           </Select>
         </label>
@@ -140,13 +132,12 @@ function SpeechInputForm() {
           {modelError && <p role="alert" className="text-danger">{modelError}</p>}
           <label className="grid gap-1">{t("stt.key")}
             <input className={FIELD_CLASS} type="password" autoComplete="off" value={key}
-              placeholder={savedKeyUsable ? t("stt.keySaved") : provider === "gemini" ? t("stt.googleKey") : t("stt.keyOptional")}
+              placeholder={savedKeyUsable ? t("stt.keySaved") : t("stt.keyOptional")}
               onChange={(event) => setKey(event.target.value)} />
           </label>
           {saved?.keyIgnored && provider === saved.provider && !key.trim() && <p role="status" className="text-ink-secondary">{t("stt.keyIgnored")}</p>}
           {savedKeyMatches && <label className="flex items-center gap-2"><input type="checkbox" checked={removeKey} onChange={(event) => setRemoveKey(event.target.checked)} />{t("stt.removeKey")}</label>}
-          <p className="text-ink-secondary">{t(provider === "gemini" ? "stt.googleHint" : "stt.endpointHint")}</p>
-          {provider === "gemini" && <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noreferrer" className="text-accent hover:underline">{t("stt.googleKey")}</a>}
+          <p className="text-ink-secondary">{t("stt.endpointHint")}</p>
         </>}
         {provider === "fish" && <p className="text-ink-secondary">{t("stt.fishHint")}</p>}
         {error && <p role="alert" className="text-danger">{error}</p>}

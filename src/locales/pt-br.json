@@ -10268,8 +10268,6 @@
   "stt.save": "Salvar entrada de voz",
   "stt.saving": "Salvando…",
   "stt.saveFailed": "Não foi possível salvar as configurações de entrada de voz.",
-  "stt.googleKey": "Chave de API do Google AI Studio",
-  "stt.googleHint": "O Google transcreve as gravações com os modelos Gemini que aceitam áudio. O áudio vai para o servidor compatível com o Google configurado. Salve aqui uma chave separada do Google AI Studio. Mudar o provedor ou o endereço apaga a chave salva.",
   "stt.chooseModel": "Escolha ou digite um modelo que aceite áudio",
   "stt.loadModels": "Carregar modelos",
   "stt.loadingModels": "Carregando modelos…",

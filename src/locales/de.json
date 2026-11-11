@@ -3487,8 +3487,6 @@
   "stt.save": "Spracheingabe speichern",
   "stt.saving": "Wird gespeichert…",
   "stt.saveFailed": "Die Einstellungen zur Spracheingabe konnten nicht gespeichert werden.",
-  "stt.googleKey": "Google AI Studio API-Schlüssel",
-  "stt.googleHint": "Google transkribiert Aufnahmen mit seinen audiofähigen Gemini-Modellen. Audio geht an den eingestellten Google-kompatiblen Server. Speichere hier einen eigenen Google AI Studio-Schlüssel; wenn du Anbieter oder Adresse änderst, wird der gespeicherte Schlüssel gelöscht.",
   "stt.chooseModel": "Audiofähiges Modell wählen oder eingeben",
   "stt.loadModels": "Modelle laden",
   "stt.loadingModels": "Modelle werden geladen…",

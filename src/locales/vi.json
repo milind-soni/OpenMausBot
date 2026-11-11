@@ -5601,8 +5601,6 @@
   "stt.save": "Lưu nhập bằng giọng nói",
   "stt.saving": "Đang lưu…",
   "stt.saveFailed": "Không thể lưu cài đặt nhập bằng giọng nói.",
-  "stt.googleKey": "Khóa API Google AI Studio",
-  "stt.googleHint": "Google chuyển bản ghi âm thành văn bản bằng các mô hình Gemini hỗ trợ âm thanh. Âm thanh được gửi đến máy chủ tương thích Google đã cấu hình. Hãy lưu một khóa Google AI Studio riêng tại đây; đổi nhà cung cấp hoặc địa chỉ sẽ xóa khóa đã lưu.",
   "stt.chooseModel": "Chọn hoặc nhập một mô hình hỗ trợ âm thanh",
   "stt.loadModels": "Tải mô hình",
   "stt.loadingModels": "Đang tải mô hình…",

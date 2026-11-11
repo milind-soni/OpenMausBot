@@ -7660,8 +7660,6 @@
   "stt.save": "保存语音输入",
   "stt.saving": "正在保存…",
   "stt.saveFailed": "无法保存语音输入设置。",
-  "stt.googleKey": "Google AI Studio API 密钥",
-  "stt.googleHint": "Google 使用支持音频的 Gemini 模型转写录音。音频会发送到所配置的 Google 兼容服务器。请在这里另外保存一个 Google AI Studio 密钥；更改服务商或地址会清除已保存的密钥。",
   "stt.chooseModel": "选择或输入支持音频的模型",
   "stt.loadModels": "加载模型",
   "stt.loadingModels": "正在加载模型…",

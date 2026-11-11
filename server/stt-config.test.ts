@@ -3,19 +3,11 @@ import { sttConfigSchema, sttConfigWithEnv, sttKeySendable, sttSavePatch, sttSta
 import { STT_PRESETS } from "../shared/stt.ts";
 
 describe("speech input configuration", () => {
-  it("requires an explicitly chosen Google model and a separate transcription key", () => {
-    expect(sttStatus({ stt: { provider: "gemini" }, tts: { geminiKey: "speech-output-key" } })).toMatchObject({
-      provider: "gemini", ...STT_PRESETS.google, model: "", configured: false, keyConfigured: false,
+  it("offers transcription servers only, not a chat model that listens", () => {
+    expect(sttConfigSchema.safeParse({ provider: "gemini" }).success).toBe(false);
+    expect(sttStatus({ stt: { provider: "openai" }, tts: { geminiKey: "speech-output-key" } })).toMatchObject({
+      provider: "openai", ...STT_PRESETS.openai, model: "", configured: false, keyConfigured: false,
     });
-    expect(sttStatus({ stt: { provider: "gemini", key: "google-input-key" } }).configured).toBe(false);
-    expect(sttStatus({ stt: { provider: "gemini", key: "google-input-key", model: "gemini-audio-choice" } }).configured).toBe(true);
-    expect(sttStatus({ stt: { provider: "gemini", baseUrl: "http://localhost:8080/v1" } }).configured).toBe(false);
-  });
-  it("revokes a key when the provider changes even if the base URL stays the same", () => {
-    const current = { provider: "openai" as const, baseUrl: "http://localhost:8080/v1", key: "openai-key" };
-    const changed = sttSavePatch(current, { provider: "gemini" });
-    expect(changed).toMatchObject({ key: "", keyFor: "nowhere" });
-    expect(usableSttKey({ ...current, ...changed })).toBeUndefined();
   });
   it("only accepts API roots without embedded credentials or URL parameters", () => {
     for (const baseUrl of ["file:///tmp", "https://user:secret@example.com/v1", "https://example.com/v1?key=secret", "https://example.com/v1#fragment", "not a URL"]) {

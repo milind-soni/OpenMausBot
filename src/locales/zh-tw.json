@@ -9974,8 +9974,6 @@
   "stt.save": "儲存語音輸入",
   "stt.saving": "正在儲存…",
   "stt.saveFailed": "無法儲存語音輸入設定。",
-  "stt.googleKey": "Google AI Studio API 金鑰",
-  "stt.googleHint": "Google 會用支援音訊的 Gemini 模型轉錄錄音。音訊會傳送到設定的 Google 相容伺服器。請在這裡另外儲存一把 Google AI Studio 金鑰；變更供應商或位址會清除已儲存的金鑰。",
   "stt.chooseModel": "選擇或輸入支援音訊的模型",
   "stt.loadModels": "載入模型",
   "stt.loadingModels": "正在載入模型…",

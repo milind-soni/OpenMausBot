@@ -5601,8 +5601,6 @@
   "stt.save": "Ses girişini kaydet",
   "stt.saving": "Kaydediliyor…",
   "stt.saveFailed": "Ses girişi ayarları kaydedilemedi.",
-  "stt.googleKey": "Google AI Studio API anahtarı",
-  "stt.googleHint": "Google, kayıtları ses destekli Gemini modelleriyle yazıya döker. Ses, ayarlanan Google uyumlu sunucuya gider. Buraya ayrı bir Google AI Studio anahtarı kaydedin; sağlayıcıyı veya adresi değiştirmek kayıtlı anahtarı siler.",
   "stt.chooseModel": "Ses destekli bir model seçin veya girin",
   "stt.loadModels": "Modelleri yükle",
   "stt.loadingModels": "Modeller yükleniyor…",

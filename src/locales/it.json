@@ -6724,8 +6724,6 @@
   "stt.save": "Salva input vocale",
   "stt.saving": "Salvataggio…",
   "stt.saveFailed": "Impossibile salvare le impostazioni dell'input vocale.",
-  "stt.googleKey": "Chiave API di Google AI Studio",
-  "stt.googleHint": "Google trascrive le registrazioni con i suoi modelli Gemini che supportano l'audio. L'audio va al server compatibile con Google configurato. Salva qui una chiave Google AI Studio separata; cambiando fornitore o indirizzo la chiave salvata viene cancellata.",
   "stt.chooseModel": "Scegli o inserisci un modello che supporta l'audio",
   "stt.loadModels": "Carica modelli",
   "stt.loadingModels": "Caricamento modelli…",

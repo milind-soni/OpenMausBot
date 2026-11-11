@@ -23,16 +23,6 @@ Recordings go only to the selected transcription service; there is no automatic
 fallback to a different service after a failure. Transcription and spoken-reply
 providers are independent.
 
-For Google, choose **Google (Gemini)** as the transcription provider. This fills
-Google's OpenAI-compatible API root; enter a separate Google AI Studio key and
-load its model catalog. Select an audio-input Gemini model. Google uses the
-OpenAI-compatible `/chat/completions` audio-input format, documented in
-[Google's OpenAI compatibility guide](https://ai.google.dev/gemini-api/docs/openai#audio-understanding),
-and does not use the multipart transcription endpoint above. The server asks
-for only the original-language transcript and rejects missing or truncated
-responses. Changing between Google and another provider revokes the key even
-when the API root stays the same.
-
 For fully offline or private transcription, install any speech model the
 person likes behind a server that implements `POST /audio/transcriptions` (for
 example speaches, LocalAI, or whisper.cpp's server with an OpenAI-compatible
@@ -71,15 +61,11 @@ removes only the fixture home and processes.
 
 Model discovery is an admin-only `POST /api/tts/models` using an HTTP request to the
 server's `/models` endpoint. A draft key is used only for that request; it is never saved by
-discovery. Saved keys are reused only for their bound provider and API root.
-The fixture checks multiple OpenAI, Groq and Google catalog entries, new model
+discovery. Saved keys are reused only for their bound API root.
+The fixture checks multiple OpenAI and Groq catalog entries, new model
 IDs, keyless local discovery and unchanged saved configuration. A companion
 `.stt-models.json` records these checks without keys. No audio inference is
 performed to load a catalog.
-
-The same fixture checks Google's HTTP request, base64 WAV data, model and
-credential, missing-key readiness, sanitized errors without retries, and
-missing or truncated transcripts. A `.stt-google.json` file records these checks.
 
 Renderer tests mount the real settings form and check presets, separate keys,
 keyless local setup, errors and the desktop credential-save order. Recorder
@@ -92,9 +78,7 @@ a sentence, and check its text in the composer before sending. Repeat in a Take
 turns call. Check OpenAI and Groq presets with their own keys, then a local server
 with its network disabled. Switch back to Automatic on macOS and check native
 dictation. Verify a rejected key gives a readable error without exposing the key.
-Select Google (Gemini), enter a Google AI Studio key and repeat dictation and a
-Take turns call. This verifies real Google access and transcript quality, which
-the stand-in cannot establish. Run a local Whisper server, select it by its
+Run a local Whisper server, select it by its
 localhost address without a path or key, disconnect the network and dictate.
 Open the server's page in a browser (localhost or https) and take turns with a
 compatible server selected.
