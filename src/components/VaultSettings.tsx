@@ -45,6 +45,7 @@ function rowsOf(logins: LoginSummary[], secrets: Array<VaultSecret | LinkedSecre
 export function VaultSettings() {
   const { state, dispatch } = useStore();
   const ownerOrAdmin = useOwnerOrAdmin();
+  const member = ownerOrAdmin === false && Boolean(state.config?.team);
   const bots = state.bots.map((bot) => ({ id: bot.id, name: bot.name }));
   const [logins, setLogins] = useState<LoginSummary[] | null>(null);
   const [secrets, setSecrets] = useState<Array<VaultSecret | LinkedSecret>>([]);
@@ -76,9 +77,9 @@ export function VaultSettings() {
     }
     catch (cause) { setError(cause instanceof Error && cause.message ? cause.message : t("settings.vault.loadError")); }
   };
-  useEffect(() => { if (ownerOrAdmin) void load(); }, [ownerOrAdmin]);
+  useEffect(() => { if (ownerOrAdmin || member) void load(); }, [ownerOrAdmin, member]);
 
-  if (ownerOrAdmin === false) {
+  if (ownerOrAdmin === false && !member) {
     return <Card title={t("settings.vault.title")} subtitle={t("settings.vault.adminOnly")} />;
   }
 
@@ -116,8 +117,8 @@ export function VaultSettings() {
   };
   const rowButtons = (id: string, kind: "login" | "secret", name: string, onChange: () => void) => (
     <div className="flex shrink-0 gap-1">
-      <button type="button" className={ROW_BUTTON} disabled={busy} onClick={onChange}
-        aria-label={kind === "login" ? t("settings.logins.changeFor", { site: name }) : t("settings.vault.secret.changeFor", { name })}>{t("settings.logins.change")}</button>
+      {!member && <button type="button" className={ROW_BUTTON} disabled={busy} onClick={onChange}
+        aria-label={kind === "login" ? t("settings.logins.changeFor", { site: name }) : t("settings.vault.secret.changeFor", { name })}>{t("settings.logins.change")}</button>}
       <button type="button" className={ROW_BUTTON} disabled={busy} onClick={() => void remove(id, kind)}
         aria-label={deleting === id ? t("settings.logins.deleteConfirm") : kind === "login" ? t("settings.logins.deleteFor", { site: name }) : t("settings.vault.secret.deleteFor", { name })}>
         <Trash2 size={13} />{deleting === id ? t("settings.logins.deleteConfirm") : t("settings.logins.delete")}
@@ -200,8 +201,8 @@ export function VaultSettings() {
   return (
     <div className="flex flex-col gap-6" aria-busy={logins === null || busy} data-vault>
       <SettingsGroup label={t("settings.vault.saved")} block="saved-list"
-        description={state.config?.cloudHome === true ? <span data-logins-cloud-own>{t("settings.logins.cloudOwn")}</span> : undefined}
-        actions={<div className="relative">
+        description={member ? t("settings.vault.memberSubtitle") : state.config?.cloudHome === true ? <span data-logins-cloud-own>{t("settings.logins.cloudOwn")}</span> : undefined}
+        actions={member ? undefined : <div className="relative">
           <button type="button" className="ui-button gap-1" disabled={logins === null} aria-expanded={menu} onClick={() => setMenu(!menu)}
             onKeyDown={(event) => { if (event.key === "Escape") setMenu(false); }}>
             {t("settings.vault.add")}<ChevronDown size={12} aria-hidden="true" />
@@ -214,11 +215,11 @@ export function VaultSettings() {
             </div>
           )}
         </div>}
-        footnote={<>{t("settings.vault.limitsShort")}{" "}<LearnMore onClick={() => setMore((open) => !open)} />{more && <span className="mt-1 block">{t("settings.logins.limits")}</span>}</>}>
+        footnote={member ? undefined : <>{t("settings.vault.limitsShort")}{" "}<LearnMore onClick={() => setMore((open) => !open)} />{more && <span className="mt-1 block">{t("settings.logins.limits")}</span>}</>}>
         {!empty && (
           <div className="flex flex-wrap items-center gap-3 px-4">
-            <Segmented label={t("settings.vault.filter")} attr="data-vault-filter" value={filter} onChange={setFilter}
-              options={[{ value: "all", label: t("settings.vault.filter.all") }, { value: "logins", label: t("settings.vault.filter.logins") }, { value: "secrets", label: t("settings.vault.filter.secrets") }]} />
+            {!member && <Segmented label={t("settings.vault.filter")} attr="data-vault-filter" value={filter} onChange={setFilter}
+              options={[{ value: "all", label: t("settings.vault.filter.all") }, { value: "logins", label: t("settings.vault.filter.logins") }, { value: "secrets", label: t("settings.vault.filter.secrets") }]} />}
             <input data-vault-search type="text" value={query} onChange={(event) => setQuery(event.target.value)} autoComplete="off" spellCheck={false}
               placeholder={t("settings.vault.search")} aria-label={t("settings.vault.search")} className={`${SETTINGS_INPUT} ms-auto h-7 max-w-[200px]`} />
           </div>
@@ -244,7 +245,7 @@ export function VaultSettings() {
           {adding === "secret" && <div className="p-4"><SecretForm bots={bots} onCancel={() => setAdding(null)} onSaved={async () => { setAdding(null); await load(); }} /></div>}
           {adding === "env" && <div className="p-4"><EnvImportForm bots={bots} onCancel={() => setAdding(null)} onSaved={load} /></div>}
           {logins === null && !error && <SettingsEmptyRow>{t("settings.vault.loading")}</SettingsEmptyRow>}
-          {empty && !adding && <SettingsEmptyRow>{t("settings.vault.emptyShort")}</SettingsEmptyRow>}
+          {empty && !adding && <SettingsEmptyRow>{t(member ? "settings.vault.memberEmpty" : "settings.vault.emptyShort")}</SettingsEmptyRow>}
           {!empty && logins !== null && rows.length === 0 && <div data-vault-none className="contents"><SettingsEmptyRow>{t("settings.vault.noMatch")}</SettingsEmptyRow></div>}
           {rows.length > 0 && (
             <ul className="divide-y-[0.5px] divide-(--settings-edge) px-4" data-logins-list>
@@ -255,7 +256,7 @@ export function VaultSettings() {
         {keysOff.length > 0 && <p role="status" className="px-4 text-[12px] leading-4 text-warning" data-vault-keys-off>{t("settings.vault.secret.keyOff", { servers: keysOff.join(", ") })}</p>}
         {error && <p role="alert" className="px-4 text-[12px] leading-4 text-danger">{error}</p>}
       </SettingsGroup>
-      <SettingsGroup label={t("settings.vault.elsewhere")} block="vault-more">
+      {!member && <SettingsGroup label={t("settings.vault.elsewhere")} block="vault-more">
         <SettingsRows>
           <div data-vault-keys className="contents">
             <SettingsLinkRow title={t("settings.vault.keys.title")} subtitle={t("settings.vault.keys.hintShort", { app: productName() })} onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })} />
@@ -263,7 +264,7 @@ export function VaultSettings() {
           <OnePasswordConnection status={onePassword} disabled={logins === null} bots={bots} botNames={botNames}
             onChange={async (next) => { setOnePassword(next); await load(); }} />
         </SettingsRows>
-      </SettingsGroup>
+      </SettingsGroup>}
     </div>
   );
 }

@@ -11,7 +11,7 @@ import { revealPhonePairing, takePairOnOpen } from "../lib/phone-pairing";
 import { SettingRow, SettingsGroup, SettingsRows } from "./SettingsPrimitives";
 import { Layer } from "./Layer";
 import { StepRow } from "./PhoneDevicesSection";
-import { StoreLinks } from "./PhoneAppDialog";
+import { StoreLinks } from "./PhoneAppLinks";
 import { Smartphone, X } from "lucide-react";
 import { productName } from "@/lib/brand";
 import { Select } from "./Select";
@@ -183,8 +183,8 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
               ) : null}
               <div className="flex flex-col gap-1" data-pair-instructions="">
                 {offer.url ? <>
-                  <p className="text-[13px] leading-[18px] text-ink">{t("phone.code.scanThis", { app: productName() })}</p>
-                  <p className="text-[12px] leading-4 text-ink-secondary">{t("phone.code.notCamera", { app: productName() })}</p>
+                  <p className="text-[13px] leading-[18px] text-ink">{t("phone.code.scanInApp", { app: productName() })}</p>
+                  <p className="text-[12px] leading-4 text-ink-secondary">{t("remote.serverPairing.camera")}</p>
                 </> : <p className="text-[13px] leading-[18px] text-ink">{t("phone.code.typeThis", { app: productName() })}</p>}
               </div>
               <div className="flex flex-col gap-1">

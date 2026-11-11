@@ -69,7 +69,7 @@ async function extractFrame(video: TurnVideoInput, atSeconds: number, outPath: s
     "-i", video.path,
     "-frames:v", "1",
     "-q:v", "4",
-    "-vf", "scale='min(1024,iw)':-2",
+    "-vf", "scale=w='min(1024,iw)':h='min(1024,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
     "-y", outPath,
   ], FFMPEG_TIMEOUT_MS);
 }

@@ -192,7 +192,9 @@ function ReplayAppTourButton({ label = t("settings.welcome.appTour") }: { label?
 
 /** The two tours, one row each, each with its one Replay. */
 export function ReplayTourRow() {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
+  // A team member's app has no tours of its own to replay.
+  if (state.config?.team) return null;
   return <>
     <SettingRow title={t("settings.welcome.appTour")} subtitle={t("settings.welcome.appTourLine")}>
       <ReplayAppTourButton label={t("settings.welcome.replayShort")} />

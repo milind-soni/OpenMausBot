@@ -246,7 +246,7 @@ function DraftSection({ active, draft, defaultsMode, owner }: { active: Section;
         <option value="">{t("teamSettings.general")}</option>{[...new Set([...(state.sections ?? []), ...state.bots.map(bot => bot.section ?? "")])].filter(Boolean).map(name => <option key={name}>{name}</option>)}
       </Select>
     </label>
-    {owner && team && <label className="block text-[13px] text-ink-secondary" data-new-bot-reports-to>{t("lookedAfter.newBot")}
+    {owner && team && <label className="block text-[13px] text-ink-secondary" data-new-bot-reports-to>{t("lookedAfter.owner")}
       <Select size="lg" className="mt-1.5 w-full" value={owner.value ?? ""} onChange={event => owner.choose(event.target.value)}>
         {team.people.map(person => <option key={person.email} value={person.email}>{person.you ? t("owner.you", { name: person.name }) : person.name}</option>)}
       </Select>

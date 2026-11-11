@@ -32,7 +32,8 @@ import {
   phonePairingSettingsAction,
 } from "@/lib/phone-pairing";
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
-import { PHONE_APPS, PhoneAppDialog, type PhoneAppConnect } from "./PhoneAppDialog";
+import { PhoneAppDialog, type PhoneAppConnect } from "./PhoneAppDialog";
+import { PHONE_APPS } from "./PhoneAppLinks";
 import type { UpdaterState } from "@/lib/updater";
 import type { SidebarMenuItem } from "./SidebarPopoverMenu";
 import { moveMenuItems } from "./AccountMove";
@@ -280,13 +281,13 @@ describe("Get the phone app", () => {
   };
   const to = (key: string, subtitle: string): PhoneAppConnect => ({ key, subtitle, onSelect: () => {} });
 
-  it("links each store in words, with no code to scan (the pairing code is the only one), and points on to Connect your phone where this window can pair", () => {
+  it("links the App Store and Android with no code to scan, and points on to Connect your phone where this window can pair", () => {
     const html = render([to("here", "to this computer")]);
-    expect(html).toContain('data-phone-app="ios"');
-    expect(html).toContain('data-phone-app="android"');
-    expect(html.match(/<svg/g)).toBeNull();
-    expect(html).toMatch(/data-phone-app="ios"[^>]*>App Store</);
-    expect(html).toMatch(/data-phone-app="android"[^>]*>Android</);
+    expect(html).toContain("On your phone, install MausBot from the App Store, or download it for Android.");
+    expect(html).toMatch(/<button[^>]*data-phone-app="ios"[^>]*>App Store<\/button>/);
+    expect(html).toMatch(/<button[^>]*data-phone-app="android"[^>]*>Android<\/button>/);
+    expect(html).not.toContain("<svg");
+    expect(html.indexOf('data-phone-app="android"')).toBeLessThan(html.indexOf("Connect your phone"));
     expect(html).toContain("Connect your phone");
     expect(html).toContain("to this computer");
     expect(render()).not.toContain("Connect your phone");

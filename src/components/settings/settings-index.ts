@@ -42,22 +42,24 @@ export interface SettingsPage {
 }
 
 const notClient = (ctx: SettingsContext) => !ctx.client;
+/** What only an admin can use: a team's member isn't offered it at all (the installation's AI, desktops, spending, data). */
+const adminPage = (ctx: SettingsContext) => !ctx.client && !(ctx.team && !ctx.admin);
 
 export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "overview", owner: "place", labelKey: "settings.page.overview", synonyms: ["overview", "place", "status", "version", "domain", "address", "sidebar"], when: () => true },
   { id: "phone", owner: "place", labelKey: "settings.section.phoneDevices", icon: Smartphone, when: notClient,
     synonyms: ["phone", "pair", "pairing", "qr", "code", "iphone", "android", "mobile", "tablet", "device", "devices", "wifi", "wi-fi", "anywhere", "relay", "remote", "companion", "tailscale", "connect your phone", "get the phone app", "pair a device", "this server", "remote access"] },
-  { id: "ai", owner: "place", labelKey: "settings.group.ai", icon: Sparkles, when: notClient,
+  { id: "ai", owner: "place", labelKey: "settings.group.ai", icon: Sparkles, when: adminPage,
     synonyms: ["ai", "models", "model providers", "providers", "engines", "api keys", "keys", "key", "claude", "codex", "openai", "anthropic", "ollama", "lm studio", "local model"] },
   { id: "bots", owner: "place", labelKey: "settings.page.bots", icon: Bot, when: notClient,
     synonyms: ["all bots", "bots", "about you", "about me", "profile", "new bots", "defaults", "effort", "limits", "rules"] },
-  { id: "desktops", owner: "place", labelKey: "settings.page.desktops", icon: Monitor, when: notClient,
+  { id: "desktops", owner: "place", labelKey: "settings.page.desktops", icon: Monitor, when: adminPage,
     synonyms: ["bot desktops", "computer", "desktop", "desktops", "browser", "built-in browser", "private desktop", "sandbox", "docker", "podman", "container", "vps", "own server", "cloud desktops"] },
   { id: "vault", owner: "place", labelKey: "settings.section.vault", icon: LockKeyhole, when: notClient,
     synonyms: ["vault", "password", "passwords", "login", "logins", "secrets", "1password", "2fa"] },
-  { id: "usage", owner: "place", labelKey: "settings.page.spending", icon: Coins, when: notClient,
+  { id: "usage", owner: "place", labelKey: "settings.page.spending", icon: Coins, when: adminPage,
     synonyms: ["spending", "usage", "cost", "costs", "tokens", "money", "runs", "export csv"] },
-  { id: "data", owner: "place", labelKey: "settings.page.data", icon: Archive, when: notClient,
+  { id: "data", owner: "place", labelKey: "settings.page.data", icon: Archive, when: adminPage,
     synonyms: ["data", "backup", "backups", "export", "import", "restore", "storage", "attachments", "activity", "audit"] },
   { id: "people", owner: "place", labelKey: "settings.section.people", icon: Users,
     when: (ctx) => !ctx.client && ctx.admin && (ctx.team || (!ctx.desktop && !ctx.cloud)),

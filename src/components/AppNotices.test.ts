@@ -453,6 +453,15 @@ describe("Boat's credit offer", () => {
   };
   afterEach(() => { BOAT_OFFER.until = null; });
 
+  it("never reaches a Team Cloud's member", async () => {
+    fresh(); storage.delete(STAR_NOTICE);
+    f.state.config.team = { id: "team-acme", name: "Acme" };
+    viewer = { hosted: false, canSave: false };
+    expect(await launch()).not.toContain(html(TITLE));
+    delete f.state.config.team; viewer = LOCAL_VIEWER;
+    expect(await relaunch(), "off a team as before").toContain(html(TITLE));
+  });
+
   it("shows once to someone who used the app before this launch: what Boat gives, that they claim it themselves, Get Boat, the claim and Not now", async () => {
     fresh(); storage.delete(STAR_NOTICE);
     const shown = await launch();
@@ -1457,6 +1466,14 @@ describe("ModelGo's sponsor card", () => {
     due(); session.clear();
     f.state.config.managedPolicy = { organizationName: "Team", team: true, companyModelsOnly: false, allowedEngines: ["codex"] };
     expect(await relaunch(), "a Team Cloud's rules are no organization-managed desktop").toContain(TITLE);
+  });
+
+  it("never reaches a Team Cloud's member; its Owner and Admins, who choose its providers, still see it", async () => {
+    f.state.config.team = { id: "team-acme", name: "Acme" };
+    viewer = { hosted: false, canSave: false };
+    expect(await launch(), "a member").not.toContain(TITLE);
+    viewer = { hosted: false, canSave: true };
+    expect(await relaunch(), "an admin").toContain(TITLE);
   });
 
   it("after an update, What's new takes the launch and the card follows it in that same launch once it closes, then never again", async () => {

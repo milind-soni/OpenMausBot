@@ -3,7 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ api: vi.fn(), dispatch: vi.fn(), admin: true as boolean | null, config: null as { cloudHome?: boolean } | null }));
+const fixture = vi.hoisted(() => ({ api: vi.fn(), dispatch: vi.fn(), admin: true as boolean | null, config: null as { cloudHome?: boolean; team?: { id: string; name: string } } | null }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   api: fixture.api,
@@ -202,6 +202,23 @@ describe("Settings → Vault: logins", () => {
     await render();
     expect(fixture.api).not.toHaveBeenCalled();
     expect(host.textContent).toContain("Only an admin of this installation can see and change the Vault.");
+  });
+
+  it("shows a Team Cloud member only the secrets they gave bots in their own chats, which they can delete and nothing more", async () => {
+    fixture.admin = false;
+    fixture.config = { team: { id: "acme", name: "Acme" } };
+    const own = { id: "s9", name: "Stripe secret key", source: "card", bots: ["pepper"], createdAt: 1, updatedAt: 1 };
+    fixture.api.mockResolvedValueOnce({ logins: [], secrets: [own], onePassword: OFF }).mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ logins: [], secrets: [], onePassword: OFF });
+    await render();
+    expect(fixture.api).toHaveBeenCalledWith("/api/vault");
+    expect(host.textContent).toContain("Only you can use them, in your own chats with that bot");
+    expect([...host.querySelectorAll("[data-secret-row]")].map((row) => row.textContent)).toEqual([expect.stringContaining("Saved from a chat · Pepper")]);
+    for (const absent of ["Add", "Change Stripe secret key"]) expect(button(absent), absent).toBeUndefined();
+    for (const selector of ["[data-onepassword]", "[data-vault-keys]", "[data-vault-filter]"]) expect(host.querySelector(selector), selector).toBeNull();
+    await click("Delete Stripe secret key");
+    await click("Delete for good");
+    expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/vault/secrets/s9", { method: "DELETE" });
+    expect(host.textContent).toContain("A key you type into a bot's card in your own chat shows here.");
   });
 });
 

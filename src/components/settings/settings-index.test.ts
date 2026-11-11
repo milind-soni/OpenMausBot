@@ -50,6 +50,13 @@ describe("the pages", () => {
     expect(ids(fullContext({ plan: false }))).not.toContain("plan");
   });
 
+  it("offers a team's member none of the installation's admin pages, and a team's admin all of them", () => {
+    for (const page of ["ai", "desktops", "usage", "data"] as const) {
+      expect(ids(PEOPLE["a team member"])).not.toContain(page);
+      expect(ids(PEOPLE["a team admin"])).toContain(page);
+    }
+  });
+
   it("drops the place's pages and Plan & billing for a paired client, which keeps This app", () => {
     expect(ids(fullContext({ client: true }))).toEqual(["overview", "account", "app", "general", "appearance"]);
   });

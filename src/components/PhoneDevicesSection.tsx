@@ -3,7 +3,7 @@ import { t } from "@/lib/i18n";
 import { X } from "lucide-react";
 import { SettingsSkeletonCard } from "./settings/SettingsStates";
 import { cn } from "@/lib/cn";
-import { StoreLinks } from "./PhoneAppDialog";
+import { StoreLinks } from "./PhoneAppLinks";
 import type { CompanionAccountState } from "../types/ogb";
 import {
   PhoneSetupFlowView,

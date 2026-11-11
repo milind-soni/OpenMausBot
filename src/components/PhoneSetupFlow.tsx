@@ -1038,18 +1038,12 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
       <h2 className="mt-3 text-[18px] font-semibold text-ink">
         {c.pairingExpired ? t("phone.code.expired") : t("phone.code.title")}
       </h2>
-      <p className="mt-1 text-[13px] text-ink-secondary">
-        {c.pairingExpired ? t("phone.code.expiredDetail") : t("phone.code.detail")}
-      </p>
-      {!c.pairingExpired && c.pairingLink && (
-        <div className="mt-4 rounded-2xl bg-white p-3.5" aria-label={t("phone.code.qrAria")}>
-          <QRCodeSVG value={c.pairingLink} size={180} level="M" bgColor="#ffffff" fgColor="#111111" />
-        </div>
-      )}
+      {c.pairingExpired && <p className="mt-1 text-[13px] text-ink-secondary">{t("phone.code.expiredDetail")}</p>}
       {!c.pairingExpired && c.pairingLink && (
         <>
-          <p className="mt-3 text-[13px] leading-[18px] text-ink">{t("phone.code.scanThis", { app: productName() })}</p>
-          <p className="mt-1 text-[12px] leading-4 text-ink-secondary">{t("phone.code.notCamera", { app: productName() })}</p>
+          <div className="mt-4 rounded-2xl bg-white p-3.5" aria-label={t("phone.code.qrAria")}><QRCodeSVG value={c.pairingLink} size={180} level="M" bgColor="#ffffff" fgColor="#111111" /></div>
+          <p className="mt-3 text-[13px] text-ink-secondary">{t("phone.code.scanInApp", { app: productName() })}</p>
+          <p className="mt-1 text-[12px] text-ink-tertiary">{t("phone.code.notCamera", { app: productName() })}</p>
         </>
       )}
       {!c.pairingExpired && manualCodeMode === "direct" && c.state?.pairing && (
