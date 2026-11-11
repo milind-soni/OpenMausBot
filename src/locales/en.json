@@ -9803,6 +9803,7 @@
   "server.runOwner.onlyAskerStops": "Only {name} or an admin can stop this.",
   "server.runOwner.notYourQueued": "Only the person who sent this message can remove it.",
   "server.runOwner.waitsItsTurn": "This message waits its turn and runs after the request that is running now.",
+  "server.runOwner.onlyAskerRetries": "Only {name} or an admin can run this request again.",
   "server.routines.held.planCancelled": "Your routines are paused because the plan was cancelled. To keep one running until the plan ends, turn it back on in Routines.",
   "server.routines.held.noEngine": "Your routines are paused: none of your AI accounts is signed in here any more. They turn back on by themselves when you sign in again.",
   "server.routines.held.noConnections": "Your routines are paused: every connected app and MCP server was removed. They turn back on when you connect one, or turn one back on in Routines.",
