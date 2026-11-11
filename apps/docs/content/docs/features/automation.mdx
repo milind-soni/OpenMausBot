@@ -50,7 +50,7 @@ Right-click a folder or open its **…** menu, then choose **Mark folder as read
 
 ## Webhook triggers
 
-Webhooks start the same queued task executor from an external HTTP request. They are independent from schedules and use a dedicated receiver on `127.0.0.1:8800` by default.
+Webhooks start the same queued task executor from an external HTTP request. They are independent from schedules and use a dedicated receiver on `127.0.0.1:8800` by default. With `OMB_LAN=1`, the receiver listens on every IPv4 address like the main server, and answers only connections whose both ends are private addresses. An ingress controller in the same private network (for example in Kubernetes) can then route `/hooks` to it without a proxy beside the server.
 
 The receiver exposes only health and secret hook routes. It does not expose the broader MausBot API.
 

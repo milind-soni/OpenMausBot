@@ -291,6 +291,35 @@ describe("requests with a wrong secret", () => {
   }, 60_000);
 });
 
+describe("OMB_LAN", () => {
+  it("keeps the receiver on loopback unless OMB_LAN=1, then opens it to private peers like the main server", async () => {
+    const loopback = await listenWebhookIngress(manager, { port: 0, env: {} });
+    const httpListeners = loopback.server.listenerCount("connection");
+    try {
+      expect(loopback.host).toBe("127.0.0.1");
+    } finally {
+      await new Promise<void>((resolve) => loopback.server.close(() => resolve()));
+    }
+    const lan = await listenWebhookIngress(manager, { port: 0, env: { OMB_LAN: "1" } });
+    try {
+      expect(lan.host).toBe("0.0.0.0");
+      expect(lan.baseUrl).toBe(`http://127.0.0.1:${lan.port}`);
+      expect(lan.server.listenerCount("connection")).toBe(httpListeners + 1);
+      const filter = lan.server.listeners("connection").at(-1) as (socket: unknown) => void;
+      const socket = (localAddress: string, remoteAddress: string) => ({ localAddress, remoteAddress, destroyed: false, destroy() { this.destroyed = true; } });
+      const stranger = socket("10.42.0.7", "203.0.113.9");
+      const ingressPeer = socket("10.42.0.7", "10.42.1.3");
+      filter(stranger);
+      filter(ingressPeer);
+      expect([stranger.destroyed, ingressPeer.destroyed]).toEqual([true, false]);
+      const health = await fetch(`http://127.0.0.1:${lan.port}/health`);
+      expect(health.status).toBe(200);
+    } finally {
+      await new Promise<void>((resolve) => lan.server.close(() => resolve()));
+    }
+  });
+});
+
 describe("advertised base URL", () => {
   it("hands senders the public base instead of the loopback listener", async () => {
     const proxied = await listenWebhookIngress(manager, { port: 0, publicBaseUrl: "https://bots.example.com/" });

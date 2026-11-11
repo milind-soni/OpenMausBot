@@ -84,7 +84,9 @@ can paste it as is.
 ### Already have cloudflared, Caddy or nginx in front
 
 Point your tunnel or proxy at `http://127.0.0.1:8799` (webhooks:
-`http://127.0.0.1:8800`). Keep the original `Host`, set `X-Forwarded-Proto`,
+`http://127.0.0.1:8800`). If the proxy is on another host in your private
+network, such as a Kubernetes ingress controller, set `OMB_LAN=1`: both ports
+then listen on every IPv4 address and answer only private peers. Keep the original `Host`, set `X-Forwarded-Proto`,
 and don't buffer the event stream ([details](#putting-a-proxy-in-front)).
 Then:
 

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { parseJson, type JsonValue } from "./schema.ts";
 import type { WebhookManager } from "./webhooks.ts";
 import { IDLE_HTTP_SERVER } from "./due-timer.ts";
+import { listenHost } from "./lan-address.ts";
 
 export const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
 const statusErrorSchema = z.object({ status: z.number().int().optional() });
@@ -188,9 +189,8 @@ function listenOn(server: Server, where: number | string, host?: string): Promis
 
 export async function listenWebhookIngress(
   manager: WebhookManager,
-  options: { host?: string; port: number; socketPath?: string; publicBaseUrl?: string; claimRequest?: () => () => void; door?: IngressDoor },
+  options: { host?: string; port: number; socketPath?: string; publicBaseUrl?: string; claimRequest?: () => () => void; door?: IngressDoor; env?: NodeJS.ProcessEnv },
 ): Promise<WebhookIngress> {
-  const host = options.host ?? "127.0.0.1";
   const advertised = options.publicBaseUrl === undefined ? undefined : advertisedWebhookBase(options.publicBaseUrl);
   const handle = createWebhookIngressHandler(manager, options.claimRequest, options.door);
   const receive = (req: IncomingMessage, res: ServerResponse) => {
@@ -201,6 +201,8 @@ export async function listenWebhookIngress(
     });
   };
   const server = createServer(IDLE_HTTP_SERVER, receive);
+  // OMB_LAN=1 opens the receiver the way it opens the main server: every IPv4 address, private peers only.
+  const host = options.host ?? listenHost(server, options.env);
   await listenOn(server, options.port, host);
   const address = serverAddressSchema.safeParse(server.address());
   if (!address.success) {
@@ -224,7 +226,7 @@ export async function listenWebhookIngress(
     ...(socketServer ? { socketServer } : {}),
     host,
     port: address.data.port,
-    baseUrl: advertised ?? `http://${host}:${address.data.port}`,
+    baseUrl: advertised ?? `http://${host === "0.0.0.0" ? "127.0.0.1" : host}:${address.data.port}`,
   };
 }
 
