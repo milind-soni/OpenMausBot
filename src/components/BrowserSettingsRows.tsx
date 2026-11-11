@@ -4,7 +4,7 @@ import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } fro
 import { t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { api, useStore, type ConfigStatus } from "@/state/store";
-import { SettingRow, Switch } from "./SettingsPrimitives";
+import { MoreText, SettingRow, Switch } from "./SettingsPrimitives";
 
 /** Saves one config change through PATCH /api/config, one at a time, and shows the server's answer or its error. */
 function useConfigSave() {
@@ -40,13 +40,15 @@ export function BuiltInBrowserRow() {
 
   return (
     <SettingRow
-    title={t("settings.experimental.browserAria")}
+    title={t("settings.browser.rowTitle")}
+    // While it's on, the line says how it stands (Ready, or that it installs on first use), not what the switch does.
     subtitle={desktopBrowser
         ? browser
-        ? t("settings.experimental.browserOn")
-        : t("settings.experimental.browserOff")
+        ? t("settings.ai.ready")
+        : t("settings.browser.offShort")
         : browserBlockedOnWindows
         ? t("settings.experimental.browserWindows")
+        : browserInstallable ? (browser ? t("settings.browser.installsFirst") : t("settings.browser.notInstalledShort"))
         : browserUnavailableReason(state.config)}
     message={error ? <p role="alert" className="text-danger">{error}</p> : null}
     >
@@ -72,8 +74,8 @@ export function ServerSitesRow() {
 
   return (
     <SettingRow
-      title={t("settings.browser.serverSites")}
-      subtitle={t("settings.browser.serverSitesDetail")}
+      title={t("settings.browser.localSites")}
+      subtitle={t("settings.browser.localSitesPlain")}
       message={error ? <p role="alert" className="text-danger">{error}</p> : null}
     >
       <Switch
@@ -94,12 +96,9 @@ export function NewBrowserSettings() {
   const { saving, error, save } = useConfigSave();
 
   return (
-    <div className="mt-4 border-t border-hairline/30 pt-4" data-testid="new-browser-settings">
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-[14px] font-medium text-ink">{t("settings.experimental.newBrowser")}</div>
-          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t("settings.experimental.newBrowserDetail")}</div>
-        </div>
+    <div data-testid="new-browser-settings" className="contents">
+      <SettingRow title={t("settings.experimental.newBrowser")} tag={t("settings.early.tag")} subtitle={<MoreText short={t("settings.experimental.newBrowserShort")} long={t("settings.experimental.newBrowserDetail")} />}
+        message={error ? <span role="alert" className="text-danger">{error}</span> : undefined}>
         <Switch
           checked={on}
           aria-label={t("settings.experimental.newBrowserAria")}
@@ -107,8 +106,7 @@ export function NewBrowserSettings() {
           onClick={() => void save({ browserEngine: { engine: on ? "agent-browser" : "chrome" } })}
           className="disabled:cursor-wait disabled:opacity-50"
         />
-      </div>
-      {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
+      </SettingRow>
     </div>
   );
 }

@@ -35,6 +35,7 @@ export function knownPublishedApp(href: string): PublishedApp | undefined {
   let url: URL;
   try { url = new URL(href); } catch { return undefined; }
   return known.find((app) => {
+    if (!app.url) return false;
     const base = new URL(app.url);
     return url.origin === base.origin && url.pathname.startsWith(base.pathname);
   });
