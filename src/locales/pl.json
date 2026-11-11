@@ -6287,7 +6287,6 @@
   "homeLine.left": "Nie jesteś już w {name}.",
   "teamMove.menu": "Przenieś do {team}",
   "teamMove.title": "Przenieść {bot} do {team}?",
-  "teamMove.everyone": "Wszyscy w {team} mogą używać {bot}. Tylko administratorzy {team} mogą to zmienić.",
   "teamMove.goes": "Przenosi się z {bot}: instrukcje, umiejętności, pliki, rutyny i twoje czaty z {bot}",
   "teamMove.private": "Twoje czaty pozostają tam prywatne: tylko ty możesz je widzieć.",
   "teamMove.staysOnMyCloud": "Zostaje na My Cloud: to, co {bot} pamięta, twoje połączenia i MausBot",

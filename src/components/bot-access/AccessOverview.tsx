@@ -9,15 +9,14 @@ import { useStore, type Bot } from "@/state/store";
 import { ownerOf, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
 import { BotAvatar } from "../Avatar";
 import { PersonFace } from "../TeamOwner";
-import { accessOfBot, nameOf, personOf, saveAccess, withPerson } from "./access";
+import { accessOfBot, saveAccess, withPerson } from "./access";
 import { UndoToast, useTeamName } from "./ShareBotButton";
 import { ShareBotDialog } from "./ShareBotDialog";
-import { EntryFace } from "./ShareControls";
+import { PeopleStack } from "./PeopleStack";
 
 type Change = { botId: string; before: BotAccess; after: BotAccess; text: string };
 type Listing = "bot" | "person";
 
-const STACK_SHOWN = 4;
 const ROW = "flex w-full min-w-0 items-center gap-3 px-3 py-2 text-start";
 const LIST = "flex flex-col divide-y divide-hairline/30 overflow-hidden rounded-xl border border-hairline/40 bg-card";
 
@@ -134,20 +133,6 @@ function BotList({ bots, anyBots, team, onOpen }: { bots: Bot[]; anyBots: boolea
         );
       })}
     </ul>
-  );
-}
-
-function PeopleStack({ entries, team }: { entries: string[]; team: TeamPeople }) {
-  if (!entries.length) return null;
-  const names = entries.map((entry) => nameOf(entry, team)).join(", ");
-  const beyond = entries.length - STACK_SHOWN;
-  return (
-    <span role="img" aria-label={names} title={names} data-access-stack={entries.length} className="flex shrink-0 -space-x-0.5 rtl:space-x-reverse">
-      {entries.slice(0, STACK_SHOWN).map((entry) => (
-        <span key={entry} className="flex rounded-full ring-2 ring-card"><EntryFace person={personOf(entry, team)} size={22} /></span>
-      ))}
-      {beyond > 0 && <span className="flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-card px-1 text-[11px] font-medium text-ink-secondary ring-2 ring-card">+{beyond}</span>}
-    </span>
   );
 }
 

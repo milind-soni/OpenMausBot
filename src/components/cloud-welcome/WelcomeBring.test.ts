@@ -9,7 +9,7 @@ const bring = (team: boolean) => renderToStaticMarkup(createElement(WelcomeBring
 describe("the first setup step's promise", () => {
   it("on a Team Cloud, never says the bots on this computer come here by themselves", () => {
     const html = bring(true);
-    expect(html).toContain("Acme is your team’s: its bots are shared with everyone in Acme, and your own bots stay where they are.");
+    expect(html).toContain("Acme is your team’s: a bot you make or bring here is yours until you share it, and your own bots stay where they are.");
     expect(html).not.toContain("come here by themselves");
   });
 

@@ -67,7 +67,7 @@ export function WelcomeBring({ name, desktop, older = false, cloudHasWork, sent 
       </>
       : <button type="button" className={PRIMARY} onClick={() => onFinish("skipped")}>{t("onboarding.continue")}</button>;
   return <section aria-labelledby="cloud-welcome-step" data-welcome-step="bring" className="flex flex-col gap-5">
-    <StepHeading headingRef={headingRef} title={t("cloudWelcome.bring.title", { name })} sub={t(team ? "cloudWelcome.bring.subTeamShared" : "cloudWelcome.bring.sub", { name })} />
+    <StepHeading headingRef={headingRef} title={t("cloudWelcome.bring.title", { name })} sub={t(team ? "cloudWelcome.bring.subTeamYours" : "cloudWelcome.bring.sub", { name })} />
     {older && <p role="note" data-bring-update className="text-[13px] leading-relaxed text-ink">{t("cloudWelcome.bring.update")}</p>}
     {team && desktop && <BringMyCloud />}
     {cloudHasWork

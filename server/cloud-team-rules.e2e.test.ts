@@ -107,10 +107,10 @@ beforeAll(async () => {
   team = fx.team!;
   owner = (await team.pair(OWNER)).token!;
   ada = (await team.pair(ADA)).token!;
-  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout" });
+  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   botId = created.body.bot.id;
-  peerId = (await team.as(owner, "POST", "/api/bots", { name: "Helper" })).body.bot.id;
+  peerId = (await team.as(owner, "POST", "/api/bots", { name: "Helper", visibility: "everyone" })).body.bot.id;
   expect((await team.as(owner, "POST", "/api/mcp/servers", { name: "orders", type: "http", url: gateway.url })).status).toBe(201);
   expect((await team.as(owner, "PATCH", "/api/mcp/servers/orders", { enabled: true })).status).toBe(200);
 }, hostTimeout(120_000));

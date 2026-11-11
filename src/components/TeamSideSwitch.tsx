@@ -5,7 +5,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { openBot, useStore, type AppState, type Bot, type Group } from "@/state/store";
-import { setTeamSide, showTeamSide, sideOfThread, teamSide, teamSideView, useTeamSide, type TeamSide } from "@/state/team-side";
+import { listedSide, setTeamSide, showTeamSide, sideOfThread, teamSide, teamSideView, useTeamSide, type TeamSide } from "@/state/team-side";
 import { markTeamPrivateChatsLineSaid, sharedChatAudience } from "./TeamPrivateChatsLine";
 
 const SIDES = [{ side: "me", label: "teamSide.me", Icon: Lock }, { side: "team", label: "teamSide.team", Icon: Users }] as const;
@@ -29,11 +29,11 @@ export function useTeamSideLists(state: Pick<AppState, "bots" | "groups" | "conf
   return last.current.view;
 }
 
-/** The side of the conversation a bot has on screen, on a team's Cloud; null anywhere else. */
+/** The side the conversation a bot has on screen is listed on, on a team's Cloud; null anywhere else. */
 export function useConversationSide(bot: Bot): TeamSide | null {
   const { state } = useStore();
   const { team } = useTeamSide();
-  return state.config?.team && team ? sideOfThread(bot, bot.threadId) : null;
+  return state.config?.team && team ? listedSide(bot, bot.threadId) : null;
 }
 
 function hintDue(teamId: string): boolean {
@@ -126,7 +126,8 @@ export function TeamAudienceLabel({ bot, group }: { bot?: Bot; group?: Group }) 
   const { team } = useTeamSide();
   noteStart(state, team);
   const teamName = state.config?.team?.name;
-  const side: TeamSide | null = !team || !teamName ? null : group ? "team" : bot ? sideOfThread(bot, bot.threadId) : null;
+  const readers: TeamSide | null = !team || !teamName ? null : group ? "team" : bot ? sideOfThread(bot, bot.threadId) : null;
+  const side: TeamSide | null = readers && bot && !group ? listedSide(bot, bot.threadId) : readers;
   const shown = group?.threadId ?? bot?.threadId;
   const person = team?.person;
   useEffect(() => {
@@ -148,11 +149,11 @@ export function TeamAudienceLabel({ bot, group }: { bot?: Bot; group?: Group }) 
     if (landing) openBot(dispatch, landing, showThreads);
     else showTeamSide(side, team);
   }, [team?.teamId, person, shown, side, bot?.switchingTo]);
-  if (!side || !teamName) return null;
-  const Icon = side === "me" ? Lock : Users;
-  const label = side === "me" ? t("team.privateHeader") : group ? t("teamSide.groupAudience") : sharedChatAudience(teamName, bot?.onlyPeopleAdded);
+  if (!readers || !teamName) return null;
+  const Icon = readers === "me" ? Lock : Users;
+  const label = readers === "me" ? t("team.privateHeader") : group ? t("teamSide.groupAudience") : sharedChatAudience(teamName, bot?.onlyPeopleAdded);
   return (
-    <div role="note" data-team-audience={side} className="relative z-[1] flex items-center gap-1 px-2 pb-1 text-[12px] leading-4 text-ink-secondary">
+    <div role="note" data-team-audience={readers} className="relative z-[1] flex items-center gap-1 px-2 pb-1 text-[12px] leading-4 text-ink-secondary">
       <Icon size={12} aria-hidden="true" className="shrink-0" /><span className="truncate">{label}</span>
     </div>
   );

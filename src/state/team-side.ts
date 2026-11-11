@@ -2,12 +2,16 @@
 // "Team", the conversations everyone who sees a bot or a group chat reads. Which side a conversation belongs to is the
 // server's answer (`private` on the task), never the position of the switch.
 import { useSyncExternalStore } from "react";
+import { accessFromVisibility, type BotAccess } from "../../shared/bot-access";
+import { botOwner } from "../../shared/bot-owner";
+import type { BotVisibility } from "../../shared/wire";
 import { onTeamChats, ownChatOf, ownChatStarted, teamChats, type TeamChats } from "./team-chats";
 
 export type TeamSide = "me" | "team";
 
 type SideTask = { threadId: string; private?: unknown; sharedChat?: unknown; unread?: boolean; routineRunId?: unknown; archivedAt?: unknown };
-type SideBot = { id: string; threadId: string; tasks?: SideTask[]; yourAccess?: string; defaultBot?: { person?: unknown }; hidden?: boolean; messages?: unknown[] };
+type SharedBot = { yourAccess?: string; access?: BotAccess; visibility?: BotVisibility; createdBy?: string; reportsTo?: string; defaultBot?: { person?: string } };
+type SideBot = SharedBot & { id: string; threadId: string; tasks?: SideTask[]; hidden?: boolean; messages?: unknown[] };
 type SideGroup = { id: string; unread?: boolean };
 
 /**
@@ -22,25 +26,41 @@ export function sideOfThread(bot: Pick<SideBot, "tasks" | "defaultBot">, threadI
   return task?.sharedChat !== true && (task?.private === true || ownChatStarted(threadId)) ? "me" : "team";
 }
 
+/**
+ * Whether anyone but whoever looks after the bot and the admins can use it, as far as this copy of it says. Someone who
+ * can edit a bot is sent its sharing; anyone else who has the bot was given it, so it is shared with them.
+ */
+export function sharedWithOthers(bot: SharedBot): boolean {
+  if (bot.defaultBot?.person) return false;
+  if (bot.yourAccess === "view" || bot.yourAccess === "chat") return true;
+  const access = bot.access ?? accessFromVisibility(bot.visibility);
+  const owner = botOwner(bot);
+  return access.everyone !== "none" || Object.keys(access.people).some((entry) => entry !== owner);
+}
+
+/** The side a conversation is listed on. A bot nobody else can use is under "Just me" whole, its main chat included:
+ * "Team" lists only what is shared with someone. What the conversation says of its readers stays `sideOfThread`'s. */
+export const listedSide = (bot: SharedBot & Pick<SideBot, "tasks">, threadId: string): TeamSide => (sharedWithOthers(bot) ? sideOfThread(bot, threadId) : "me");
+
 /** The bot's shared chat, as the server names it; null for a bot that has none (a person's own MausBot). */
 export const teamThreadOf = (bot: Pick<SideBot, "tasks" | "defaultBot">): string | null =>
   bot.defaultBot?.person ? null : bot.tasks?.find((task) => task.sharedChat === true && task.private !== true)?.threadId ?? null;
 
 /** The bot's conversations of one side, for a list. */
-export const tasksOfSide = <T extends SideTask>(bot: Pick<SideBot, "defaultBot"> & { tasks?: T[] }, side: TeamSide): T[] =>
-  (bot.tasks ?? []).filter((task) => sideOfThread(bot, task.threadId) === side);
+export const tasksOfSide = <T extends SideTask>(bot: SharedBot & { tasks?: T[] }, side: TeamSide): T[] =>
+  (bot.tasks ?? []).filter((task) => listedSide(bot, task.threadId) === side);
 
-/** Whether the bot is listed on a side: under "Team" with its shared chat; under "Just me" when the person can chat
- * with it privately, or already has a conversation of their own with it. */
+/** Whether the bot is listed on a side: under "Team" with its shared chat, when it is shared with someone; under
+ * "Just me" when the person can chat with it privately, or already has a conversation of their own with it. */
 export function botOnSide(bot: SideBot, team: TeamChats, side: TeamSide): boolean {
-  if (side === "team") return teamThreadOf(bot) !== null;
+  if (side === "team") return teamThreadOf(bot) !== null && sharedWithOthers(bot);
   return Boolean(bot.defaultBot?.person) || bot.yourAccess !== "view" || ownChatOf(bot, team) !== null;
 }
 
 /** A bot as one side lists it: that side's conversations only, and nothing of the other side's on its row: no unread
  * mark, no working line, no words in its preview. */
 export function botForSide<T extends SideBot>(bot: T, side: TeamSide): T {
-  const onScreenHere = sideOfThread(bot, bot.threadId) === side;
+  const onScreenHere = listedSide(bot, bot.threadId) === side;
   const tasks = tasksOfSide(bot, side);
   const elsewhere = onScreenHere ? {} : { busy: false, activity: undefined, waitingForTeammates: false, ...(bot.messages ? { messages: [] } : {}) };
   return { ...bot, tasks: bot.tasks && tasks, unread: tasks.some(marksUnread), ...elsewhere } as T;
@@ -126,5 +146,5 @@ export function useTeamSide(): { team: TeamChats | null; side: TeamSide } {
 
 /** The shared chat, when opening this bot should land on "Team": the side the sidebar shows. */
 export function teamThreadToOpen(bot: SideBot, team: TeamChats | null): string | null {
-  return team && teamSide(team) === "team" ? teamThreadOf(bot) : null;
+  return team && teamSide(team) === "team" && sharedWithOthers(bot) ? teamThreadOf(bot) : null;
 }

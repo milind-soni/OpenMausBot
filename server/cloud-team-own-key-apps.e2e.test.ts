@@ -42,7 +42,7 @@ beforeAll(async () => {
   owner = (await team.pair(OWNER)).token!;
   ada = (await team.pair(ADA)).token!;
   cleo = (await team.pair(CLEO)).token!;
-  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout" });
+  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   bot = created.body.bot;
   expect((await team.as(owner, "PUT", "/api/team/connection-scopes", { kind: "app", id: "gmail", scope: "person" })).body).toEqual({ scopes: { apps: ["gmail"], mcp: [] } });
