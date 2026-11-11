@@ -96,11 +96,11 @@ hand real work to specialists with `coordinate_bots` — no new machinery requir
 
 - **Take-turns speech input is configurable.** Automatic uses the on-device
   macOS helper in the Mac app and Fish Audio everywhere else, browsers included.
-  Settings → General → Speech input can select Fish Audio or an OpenAI-compatible
+  Settings → General → Speech input (Advanced mode) can select Fish Audio or an OpenAI-compatible
   transcription server. The page recorder (`src/lib/recorded-speech.ts`) trims
   silence and uploads WAV clips through `POST /api/tts/transcribe`. For offline,
   private transcription, run any Whisper server that speaks OpenAI's
-  `/audio/transcriptions` on the server's own computer and choose Custom or local
+  `/audio/transcriptions` on the server's own computer and choose Your own
   server with its localhost address; audio then never leaves that computer.
   A browser page records only when it is secure (https or localhost).
   OpenAI and Groq presets fill the API root and need a key; Load models fetches each

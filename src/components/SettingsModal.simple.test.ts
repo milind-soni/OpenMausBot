@@ -211,10 +211,10 @@ describe("Settings in Simple mode", () => {
     expect(placement(open("updates"), "MARKER:updatesConsent;")).toBe("shown");
     const everyPage = ["general", "engines", "companion", "usage", "updates"].map((section) => open(section as AppSettingsSection)).join("");
     for (const gone of ["Group turns", "Tool time limit", "Parallel threads", "Automatic recovery", "Event log cleanup",
-      "Interface font", "Chat width", "Pinned bots as circles", "Universal pins", "Tool calls", "This run", "Keep prompt cache warm"]) {
+      "Interface font", "Chat width", "Pinned bots as circles", "Universal pins", "Tool calls", "This run", "Keep prompt cache warm", "Speech input"]) {
       expect(everyPage, gone).not.toContain(`>${gone}<`);
     }
-    expect(SIMPLE_ADVANCED_ONLY.map((key) => t(key))).toEqual(["Interface font", "Chat width", "Pinned bots as circles", "Universal pins", "This run"]);
+    expect(SIMPLE_ADVANCED_ONLY.map((key) => t(key))).toEqual(["Interface font", "Chat width", "Pinned bots as circles", "Universal pins", "This run", "Speech input"]);
     expect(SIMPLE_MORE_LIMITS.map((key) => t(key))).toEqual(["Group turns", "Tool time limit", "Parallel threads", "Automatic recovery", "Event log cleanup",
       "Keep prompt cache warm", "Repeat computer tasks without AI"]);
   });

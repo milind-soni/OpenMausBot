@@ -120,7 +120,7 @@ function SpeechInputForm() {
             </Select>
           </label>}
           <label className="grid gap-1">{t("stt.baseUrl")}
-            <input className={FIELD_CLASS} type="url" value={baseUrl} placeholder="http://localhost:8000/v1"
+            <input className={FIELD_CLASS} type="url" value={baseUrl} placeholder="http://localhost:8000"
               onChange={(event) => setBaseUrl(event.target.value)} />
           </label>
           <label className="grid gap-1">{t("stt.model")}

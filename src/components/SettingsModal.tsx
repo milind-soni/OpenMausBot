@@ -126,7 +126,7 @@ export type SimpleSettingsPage = {
 
 export const SIMPLE_PAGES: SimpleSettingsPage[] = [
   { id: "general", labelKey: "settings.section.general", icon: Settings, sections: ["general", "appearance", "people", "import", "organization", "activity"],
-    keywords: ["speech input", "transcription", "stt", "whisper", "microphone", "groq", "dictation", "account", "theme", "looks", "open at login", "startup", "analytics", "advanced mode", "more settings", "limits", "timeout"] },
+    keywords: ["account", "theme", "looks", "open at login", "startup", "analytics", "advanced mode", "more settings", "limits", "timeout"] },
   { id: "botAccess", labelKey: "settings.section.botAccess", icon: Users, sections: ["botAccess"] },
   { id: "ai", labelKey: "settings.group.ai", icon: Sparkles, sections: ["engines", "connections"], keywords: ["new bots", "defaults", "effort"] },
   { id: "computer", labelKey: "settings.simple.page.computer", icon: Monitor, sections: ["companion", "desktopWorkspaces", "computer", "logins"] },

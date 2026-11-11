@@ -1,7 +1,9 @@
 # Speech input
 
-In Settings → General → Speech input, choose OpenAI-compatible server, then
-OpenAI, Groq, or Custom or local server. Set the API base URL; one with no path
+Speech input is in Settings → General in Advanced mode only; the Simple General
+page leaves it out, and its search points to Advanced mode. Choose **OpenAI, Groq
+or your own server** as the speech service, then OpenAI, Groq, or **Your own
+server**. Set the server address (the API root); one with no path
 (`http://localhost:8000`) gets `/v1`. The OpenAI and Groq presets need a key; any
 other server is used without one when the key is left blank. A key is sent only
 to an https address or to a server on this computer (localhost, 127.0.0.1,
@@ -32,8 +34,8 @@ providers are independent.
 For fully offline or private transcription, install any speech model the
 person likes behind a server that implements `POST /audio/transcriptions` (for
 example speaches, LocalAI, or whisper.cpp's server with an OpenAI-compatible
-path), start it on the computer running OpenMausBot's server, and choose Custom
-or local server with its address, such as `http://localhost:8000`, and no key.
+path), start it on the computer running OpenMausBot's server, and choose Your
+own server with its address, such as `http://localhost:8000`, and no key.
 Audio then never leaves that computer.
 
 Automatic preserves Apple Speech in the Mac app and Fish Audio elsewhere,
