@@ -41,6 +41,7 @@
 //     (default 30000) as 2.1.306 does; hold "busy" | "idle" | "network" also keeps a stand-in child process that burns CPU,
 //     sleeps, or holds a loopback TCP connection, as the call's command would
 //   FAKE_CLAUDE_TOOL_CALLS_FILE  path of the same JSON, read again each turn (a warm process's turns differ); missing: none
+//   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (stream-script.ts)
 //   FAKE_CLAUDE_STREAM_CADENCE  "chars:ms" (happy mode): stream each scripted reply as
 //     text_delta chunks of `chars` chars every `ms` ms before its assistant message
 //   FAKE_CLAUDE_USES_CLOUD_COMPUTER  1: first take one screenshot through the `computer` MCP server
@@ -96,6 +97,7 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, readFileSync, renameS
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { runRoomHandoffAgent } from "./room-handoff-agent.ts";
+import { playStreamScript, streamScript } from "./stream-script.ts";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 const streamCadence = (() => {
@@ -1128,6 +1130,35 @@ const playTurn = (prompt: JsonValue, late = false) => {
     turnRunning = false;
     finishIfDone();
   };
+
+  const script = streamScript(promptText(prompt));
+  if (script) {
+    const streamEvent = (event: unknown) => out({ type: "stream_event", event, parent_tool_use_id: null, session_id: sessionId });
+    playStreamScript(script, {
+      cancelled: () => false,
+      chunk: (step, piece) => streamEvent({ type: "content_block_delta", index: 0,
+        delta: "think" in step ? { type: "thinking_delta", thinking: piece } : { type: "text_delta", text: piece } }),
+      end: (step) => {
+        if ("say" in step) out({ type: "assistant", message: { content: [{ type: "text", text: step.say }], usage } });
+        if (!("tool" in step)) return;
+        const id = `tu-${process.pid}-${++toolUseCount}`;
+        out({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "Bash", input: { command: step.tool } }], usage } });
+        out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: false, content: "ok" }] } });
+      },
+      done: (failure) => {
+        if (failure) {
+          out({ type: "assistant", message: { model: "<synthetic>", stop_reason: "stop_sequence", content: [{ type: "text", text: failure }] }, error: "unknown", is_api_error_message: true });
+          out({ type: "result", subtype: "success", is_error: true, stop_reason: "stop_sequence", terminal_reason: "api_error", result: failure });
+          turnRunning = false;
+          finishIfDone();
+          return;
+        }
+        if (steered.length) out({ type: "assistant", message: { content: [{ type: "text", text: `Noted: ${steered.join(" | ")}` }], usage } });
+        finish();
+      },
+    });
+    return;
+  }
 
   if (mode === "slow-write") {
     const total = Number(process.env.FAKE_CLAUDE_WRITE_BYTES) || 16_384;
