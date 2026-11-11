@@ -696,12 +696,9 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const [creatingProject, setCreatingProject] = useState(false);
   const [threadsOpen, setThreadsOpen] = useSearchDisclosure(`bot:${bot.id}`, showThreads ? query : "", searchMatchesThreads(query, bot.tasks, bot.projects));
   useEffect(() => { if (reveal && showThreads) setThreadsOpen(true); }, [reveal, showThreads]);
-  const taskCount = bot.tasks?.filter((task) => !task.routineRunId).length ?? 1;
-  const hasThreadList = taskCount > 1 || (bot.projects?.length ?? 0) > 0 || Boolean(query);
-  const [singleThreadOpen, setSingleThreadOpen] = useState(false);
-  const inlineOpen = hasThreadList ? threadsOpen : singleThreadOpen;
-  const iconOnly = density === "icons";
-  const popupMode = advanced && showThreads && hoverThreads && !iconOnly && ((bot.tasks?.filter((task) => !task.routineRunId).length ?? 0) > 0 || (bot.projects?.length ?? 0) > 0);
+  const taskCount = bot.tasks?.filter((task) => !task.routineRunId).length ?? 1, hasThreadList = taskCount > 1 || (bot.projects?.length ?? 0) > 0 || Boolean(query);
+  const [singleThreadOpen, setSingleThreadOpen] = useState(false), inlineOpen = hasThreadList ? threadsOpen : singleThreadOpen;
+  const iconOnly = density === "icons", popupMode = advanced && showThreads && hoverThreads && !iconOnly && ((bot.tasks?.filter((task) => !task.routineRunId).length ?? 0) > 0 || (bot.projects?.length ?? 0) > 0);
   useEffect(() => { if (!popupMode) { cancelClose(); setPopover(null); } }, [popupMode]);
   const expanded = showThreads && !popupMode && !iconOnly && inlineOpen && (hasThreadList || taskCount === 1);
   useEffect(() => { if (iconOnly) setRenaming(false); }, [iconOnly]);
