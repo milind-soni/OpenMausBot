@@ -9,6 +9,7 @@ import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
 import { ensureMemoryIndex } from "./message-db-memory-index.ts";
+import { cjkSearchText, cjkTokenParts, ensureSearchIndex, ftsPhrase, hasCjk, withoutSearchMarks } from "./cjk-search.ts";
 import { attentionSelect } from "./message-db-attention.ts";
 import { MessageSearchWorker } from "./message-search-worker.ts";
 import { searchMessagesInDatabase, type SearchHit } from "./message-search-query.ts";
@@ -115,38 +116,20 @@ export function describeMissingFts5(error: unknown): Error | null {
 }
 
 function ensureRecallIndex(db: DatabaseSync): void {
-  const existed = db
-    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'")
-    .get();
   try {
-    db.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-        text, content='messages', content_rowid='rowid', tokenize='unicode61'
-      );
-    `);
+    ensureSearchIndex(db, { table: "messages", fts: "messages_fts", view: "messages_search", triggerPrefix: "messages_fts" });
   } catch (error) {
     throw describeMissingFts5(error) ?? error;
   }
-  db.exec(`
-    CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
-      INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
-    END;
-    CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
-      INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
-    END;
-    CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE ON messages BEGIN
-      INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
-      INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
-    END;
-  `);
-  if (!existed) db.exec("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')");
 }
 
 // INSERT OR REPLACE skips the delete trigger (SQLite fires it only with recursive triggers on), so upsert to keep FTS in step.
 const UPSERT_MESSAGE =
-  "INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?) " +
+  "INSERT INTO messages (thread_id, id, at, role, kind, text, json, search_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
   "ON CONFLICT(thread_id, id) DO UPDATE SET at = excluded.at, role = excluded.role, kind = excluded.kind, " +
-  "text = excluded.text, json = excluded.json";
+  "text = excluded.text, json = excluded.json, search_text = excluded.search_text";
+const messageRow = (threadId: string, message: Message) =>
+  [threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message), cjkSearchText(message.text)] as const;
 
 const ACTIVE_LEAF = "SELECT active_leaf_id FROM thread_state WHERE thread_id = ?";
 function db(): DatabaseSync {
@@ -425,9 +408,7 @@ function importLegacy(threadId: string, legacyFile: string): ThreadRows {
   const insert = db().prepare(UPSERT_MESSAGE);
   db().exec("BEGIN");
   try {
-    for (const message of messages) {
-      insert.run(threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message));
-    }
+    for (const message of messages) insert.run(...messageRow(threadId, message));
     setActiveLeaf(threadId, activeLeafId);
     db().exec("COMMIT");
   } catch (error) {
@@ -444,7 +425,7 @@ function importLegacy(threadId: string, legacyFile: string): ThreadRows {
 }
 
 export function insertMessage(threadId: string, message: Message): void {
-  prepared(UPSERT_MESSAGE).run(threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message));
+  prepared(UPSERT_MESSAGE).run(...messageRow(threadId, message));
 }
 
 /** `relinked`: adds `messages` to a conversation that has rows; each row it names changes only its parentId, and an id it already has fails the whole import. */
@@ -454,9 +435,9 @@ export function importThread(threadId: string, messages: Message[], activeLeafId
         database.prepare("SELECT 1 FROM thread_state WHERE thread_id = ?").get(threadId))) {
       throw new Error("Cannot import over an existing conversation");
     }
-    const insert = relinked && database.prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    const insert = relinked && database.prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json, search_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     for (const message of messages) {
-      if (insert) insert.run(threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message));
+      if (insert) insert.run(...messageRow(threadId, message));
       else insertMessage(threadId, message);
     }
     const link = database.prepare("UPDATE messages SET json = json_set(json, '$.parentId', ?) WHERE thread_id = ? AND id = ?");
@@ -473,7 +454,7 @@ export function appendMessage(threadId: string, message: Message): void {
 }
 
 export function updateMessage(threadId: string, message: Message): void {
-  prepared("UPDATE messages SET at = ?, role = ?, kind = ?, text = ?, json = ? WHERE thread_id = ? AND id = ?").run(message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message), threadId, message.id);
+  prepared("UPDATE messages SET at = ?, role = ?, kind = ?, text = ?, json = ?, search_text = ? WHERE thread_id = ? AND id = ?").run(message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message), cjkSearchText(message.text), threadId, message.id);
 }
 
 export function workingGoalRunMessages(): Array<{ threadId: string; message: Message }> {
@@ -745,12 +726,13 @@ function ftsQuery(query: string, mode: SearchMode = "all"): string | null {
     const terms = recallTerms(query).map(recallMatchTerm).filter(Boolean);
     return terms.length ? terms.join(" OR ") : null;
   }
-  return (content.length ? content : tokens).map((token) => `"${token}"`).join(" ");
+  return (content.length ? content : tokens).map(ftsPhrase).join(" ");
 }
 
 /** FTS5's unicode61 tokenizer cannot tell "-10" from "10" or "c++" from "c", even quoted, so punctuation terms are skipped. */
 export function recallMatchTerm(term: string): string | null {
   if (!/^[\p{L}\p{N}]+$/u.test(term)) return null;
+  if (hasCjk(term)) return ftsPhrase(term);
   if (!/^\p{L}{4,}$/u.test(term)) return `"${term}"`;
   const stem = term.length > 4 && term.endsWith("s") && !term.endsWith("ss") ? term.slice(0, -1) : term;
   return `"${stem}"*`;
@@ -762,16 +744,23 @@ const RECALL_FILLER = new Set(
   "about again also any anything can could does don't know me my please remember remind should tell there they us would hi hello hey thanks thank ok okay yes yeah no i'm im i've i'll i'd you're quick just".split(" "),
 );
 
+const trimToken = (raw: string) => raw.replace(/"/g, "").replace(/^[\s.,;:!?()[\]{}'`“”‘’]+|[\s.,;:!?()[\]{}'`“”‘’]+$/g, "").toLowerCase();
+
+/** Words first, then the CJK bigrams, each list capped on its own so a long Chinese message cannot crowd out the words. */
 export function recallTerms(query: string): string[] {
   const out: string[] = [];
+  const bigrams: string[] = [];
   for (const raw of query.split(/[\s、。！？；：，（）【】《》〈〉「」『』]+|(?<=\p{L})[/,;:.—–-]+(?=\p{L})/u)) {
-    const token = raw.replace(/"/g, "").replace(/^[\s.,;:!?()[\]{}'`“”‘’]+|[\s.,;:!?()[\]{}'`“”‘’]+$/g, "").toLowerCase();
-    if (token.length < 2 && !/\d/.test(token)) continue;
-    if (!/[\p{L}\p{N}]/u.test(token)) continue;
-    if (STOP_WORDS.has(token) || RECALL_FILLER.has(token)) continue;
-    if (!out.includes(token)) out.push(token);
+    const parts = hasCjk(raw) ? cjkTokenParts(raw.toLowerCase()) : { other: [raw], bigrams: [] };
+    for (const pair of parts.bigrams) if (!bigrams.includes(pair)) bigrams.push(pair);
+    for (const token of parts.other.map(trimToken)) {
+      if (token.length < 2 && !/\d/.test(token)) continue;
+      if (!/[\p{L}\p{N}]/u.test(token)) continue;
+      if (STOP_WORDS.has(token) || RECALL_FILLER.has(token)) continue;
+      if (!out.includes(token)) out.push(token);
+    }
   }
-  return out.slice(0, 16);
+  return [...out.slice(0, 16), ...bigrams.slice(0, 24)];
 }
 
 const SNIPPET_TOKENS = 48;
@@ -854,7 +843,7 @@ export function recallMessages(query: string, threadIds: readonly string[], limi
       at: row.at,
       role: row.role,
       ...(row.kind === "digest" ? { kind: "digest" as const } : {}),
-      snippet: row.snippet.replace(/\s+/g, " ").trim(),
+      snippet: withoutSearchMarks(row.snippet).replace(/\s+/g, " ").trim(),
       ...(row.from_name ? { from: row.from_name } : {}),
       ...(peer ? { peer } : {}),
     };
@@ -936,10 +925,11 @@ export interface MemoryFileStat {
 export function indexMemoryFile(botId: string, path: string, text: string, stat: { mtimeMs: number; bytes: number }): void {
   db()
     .prepare(
-      "INSERT INTO memory_files (bot_id, path, text, mtime_ms, bytes) VALUES (?, ?, ?, ?, ?) " +
-        "ON CONFLICT(bot_id, path) DO UPDATE SET text = excluded.text, mtime_ms = excluded.mtime_ms, bytes = excluded.bytes",
+      "INSERT INTO memory_files (bot_id, path, text, mtime_ms, bytes, search_text) VALUES (?, ?, ?, ?, ?, ?) " +
+        "ON CONFLICT(bot_id, path) DO UPDATE SET text = excluded.text, mtime_ms = excluded.mtime_ms, bytes = excluded.bytes, " +
+        "search_text = excluded.search_text",
     )
-    .run(botId, path, text, Math.trunc(stat.mtimeMs), stat.bytes);
+    .run(botId, path, text, Math.trunc(stat.mtimeMs), stat.bytes, cjkSearchText(text));
 }
 
 export function removeMemoryFile(botId: string, path: string): void {
@@ -978,7 +968,7 @@ export function recallMemory(query: string, botId: string, limit = 12, mode: Sea
     )
     // SAFETY: the SELECT names exactly these three columns; snippet() is never null
     .all(match, botId, limit) as Array<{ path: string; mtime_ms: number; snippet: string }>;
-  return rows.map((row) => ({ file: row.path, at: row.mtime_ms, snippet: row.snippet.replace(/\s+/g, " ").trim() }));
+  return rows.map((row) => ({ file: row.path, at: row.mtime_ms, snippet: withoutSearchMarks(row.snippet).replace(/\s+/g, " ").trim() }));
 }
 
 /** Await before maintenance replaces the database or shutdown releases its lease. */

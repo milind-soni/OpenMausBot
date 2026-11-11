@@ -115,6 +115,22 @@ describe("the engine list", () => {
   });
 });
 
+describe("whether the server can start a bot", () => {
+  it("counts the engines that are available and names none of them", async () => {
+    const { call } = await serve({
+      describeInstances: async () => [
+        { instanceId: "claude", snapshot: { state: "available" } },
+        { instanceId: "codex", snapshot: { state: "needs-login" } },
+        { instanceId: "custom-1", snapshot: { state: "available" } },
+        { instanceId: "broken" },
+      ],
+    });
+    expect(await call("GET", "/api/health/engines")).toEqual({ app: "openmausbot", engines: 2 });
+    const none = await serve({ describeInstances: async () => [{ instanceId: "codex", snapshot: { state: "unavailable" } }] });
+    expect(await none.call("GET", "/api/health/engines")).toEqual({ app: "openmausbot", engines: 0 });
+  });
+});
+
 describe("an engine's check", () => {
   it("goes through the server's tested-AI record, so the welcome's test also settles the new-bot default", async () => {
     const asked: string[] = [];

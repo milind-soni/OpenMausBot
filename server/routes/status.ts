@@ -16,6 +16,7 @@ import type { Store } from "../store.ts";
 import { readThreadEvents } from "../thread-events.ts";
 import { parseUsageRange } from "../usage-ledger.ts";
 import type { ConfigStatus } from "./config.ts";
+import type { PrivateRecords } from "../host/private-records.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -31,13 +32,12 @@ export interface StatusRouteDeps {
   browserEngineInstallError: { set(error: string | null): void };
   /** On a Team Cloud: false for someone else's private chat, whose words never reach this session's lists. */
   threadShown?(auth: RequestAuth): (threadId: string) => boolean;
+  /** On a Team Cloud: the decision and admin rows as this reader may see them (host/private-records.ts). */
+  records?: Pick<PrivateRecords, "decisionRow" | "adminActionShown">;
+  /** Whether bots run in the bot box: the MausBot connector reads it on a server its owner runs, on or off and nothing more. */
+  boxOn?(): boolean;
 }
 
-/** A decision in a conversation the reader may not see keeps its when, which bot, which tool and what was decided (the
- * activity a team's admin sees), never its words or where. */
-function readable(rows: DecisionRow[], shown: (threadId: string) => boolean): DecisionRow[] {
-  return rows.map((row) => shown(row.threadId) ? row : { ...row, threadId: "", summary: undefined, rule: undefined, requestId: undefined });
-}
 
 export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
   const {
@@ -47,12 +47,13 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
     const shown = deps.threadShown?.(auth) ?? (() => true);
+    const decision = deps.records?.decisionRow(auth) ?? ((row: DecisionRow) => row);
     // The packaged app's port fallback: the forked child proves it is ours by echoing its pid.
     if (method === "GET" && path === "/api/health") {
       return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR), capabilities: {
         guardedMessages: 1, guardedRequests: 1, guardedFullAccess: 1, guardedOnBehalfOf: 1,
         ...(sharedWorkspaceFullAccessEnabled() ? { sharedWorkspaceFullAccess: 1 } : {}),
-      } });
+      }, ...(deps.boxOn ? { box: deps.boxOn() ? "on" : "off" } : {}) });
     }
     // JSON-only, so a form posted from another local page cannot start the install. One install at a time.
     if (method === "POST" && path === "/api/browser-engine/install") {
@@ -177,7 +178,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
       if (parsedLimit !== undefined && (!Number.isInteger(parsedLimit) || parsedLimit <= 0)) {
         return json(res, 400, { error: "limit must be a positive whole number" });
       }
-      return json(res, 200, { decisions: readable(readDecisions(DATA_DIR, parsedLimit ?? 200), shown) });
+      return json(res, 200, { decisions: readDecisions(DATA_DIR, parsedLimit ?? 200).map(decision) });
     }
     if (method === "GET" && (path === "/api/admin-activity" || path === "/api/admin-activity.csv")) {
       const fromParam = url.searchParams.get("from") || new Date(Date.now() - 29 * 24 * 60 * 60_000).toISOString().slice(0, 10);
@@ -185,7 +186,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
       if (!range) return json(res, 400, { error: "from and to must be dates (YYYY-MM-DD), from no later than to, at most a year apart" });
       const what = parseActivityWhat(url.searchParams.get("what"));
       if (!what) return json(res, 400, { error: "what must be all, approvals, decisions, config, people, session, webhook, mcp, engine, bot, budget or visibility" });
-      const entries = activityEntries(readable(readDecisionRange(DATA_DIR, range), shown), readAdminActivityRange(DATA_DIR, range), {
+      const entries = activityEntries(readDecisionRange(DATA_DIR, range).map(decision), readAdminActivityRange(DATA_DIR, range).filter(deps.records?.adminActionShown(auth) ?? (() => true)), {
         what,
         who: (url.searchParams.get("who") ?? "").slice(0, 200),
       });
@@ -220,7 +221,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
         "content-disposition": `attachment; filename="decisions-${stamp(range.from)}-${stamp(range.to)}.csv"`,
         "cache-control": "no-store",
       });
-      res.end(decisionsCsv(readable(readDecisionRange(DATA_DIR, range), shown)));
+      res.end(decisionsCsv(readDecisionRange(DATA_DIR, range).map(decision)));
       return;
     }
 

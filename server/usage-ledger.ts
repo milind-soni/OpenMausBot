@@ -217,6 +217,10 @@ export function queuedTurnTrigger(item: { trigger?: UsageTrigger; sender?: Resol
   return item.sender ? { kind: "user", label: item.sender.name } : { kind: "owner" };
 }
 
+/** On a Team Cloud, every routine in someone else's private chat as anyone else reads it (host/private-records.ts): one
+ * line with no name and no id. */
+export const PRIVATE_ROUTINE = { routineId: "private", label: "Private routine" } as const;
+
 export function triggerKey(trigger: UsageTrigger): string {
   switch (trigger.kind) {
     case "user":
@@ -239,7 +243,7 @@ export function triggerLabel(trigger: UsageTrigger): string {
     case "owner":
       return "This computer";
     case "routine":
-      return `Routine: ${trigger.label ?? trigger.routineId ?? "unknown"}`;
+      return trigger.routineId === PRIVATE_ROUTINE.routineId ? PRIVATE_ROUTINE.label : `Routine: ${trigger.label ?? trigger.routineId ?? "unknown"}`;
     case "helper":
       return "Helper model";
     default:

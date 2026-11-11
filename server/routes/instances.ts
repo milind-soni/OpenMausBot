@@ -127,6 +127,13 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       if (asked && !address) return json(res, 400, { error: "Enter an http or https address, such as http://127.0.0.1:11434." });
       return json(res, 200, { status: address ? await probeOllama(address) : await findOllama() });
     }
+    // How many engines could start a bot now, never which: the check an update makes that the new version still can
+    // (deploy/update.sh), which a shared server lets a local caller without a session make (SERVICE_ALLOW).
+    if (method === "GET" && path === "/api/health/engines") {
+      const described = await describeInstances();
+      const available = Array.isArray(described) ? described.filter((instance) => Object(Object(instance).snapshot).state === "available").length : 0;
+      return json(res, 200, { app: "openmausbot", engines: available });
+    }
     const companyMutation = /^\/api\/instances\/(company\.[\w.-]+)(?:\/|$)/.exec(path);
     if (hostedModels && path.startsWith("/api/instances/") && method !== "GET") return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
     if (companyMutation && method !== "GET") return json(res, 403, { error: "Company accounts are read-only here. Manage this connection in desktop Settings." });

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AUTH_WAIT_MS, AuthChallenges } from "./auth.ts";
 import { CdpConnection, type CdpSession, type Params } from "./connection.ts";
 import { DriverError, isUnanswered } from "./errors.ts";
+import { Dialogs } from "./dialogs.ts";
 import { FrameTree } from "./frames.ts";
 import { methodRefusal } from "./policy.ts";
 import type { CdpTransport } from "./transport.ts";
@@ -79,6 +80,67 @@ describe("HTTP authentication challenges", () => {
   });
 });
 
+describe("prompts whose renderer session went away", () => {
+  it("closes a detached renderer's dialog and reports its closure once", () => {
+    const { session, emit, detach } = eventSession();
+    const dialogs = new Dialogs();
+    const unwatch = dialogs.watch(session);
+    const closed: string[] = [];
+    dialogs.onClose((dialog) => closed.push(dialog.message));
+    emit("Page.javascriptDialogOpening", { type: "confirm", message: "Old renderer" });
+    detach();
+    expect(dialogs.pending).toBeNull();
+    unwatch();
+    expect(closed).toEqual(["Old renderer"]);
+  });
+
+  it("does not clear another watched renderer's dialog", () => {
+    const first = eventSession();
+    const second = eventSession();
+    const dialogs = new Dialogs();
+    dialogs.watch(first.session);
+    const unwatch = dialogs.watch(second.session);
+    second.emit("Page.javascriptDialogOpening", { type: "prompt", message: "Current renderer" });
+    first.detach();
+    expect(dialogs.pending?.message).toBe("Current renderer");
+    unwatch();
+    expect(dialogs.pending).toBeNull();
+  });
+
+  it("clears detached authentication state and its cancellation timer", async () => {
+    vi.useFakeTimers();
+    const { session, sent, emit, detach } = eventSession();
+    const auth = new AuthChallenges();
+    const unwatch = auth.watch(session);
+    const changes: Array<string | null> = [];
+    auth.onChange((challenge) => changes.push(challenge?.realm ?? null));
+    emit("Fetch.authRequired", { requestId: "a1", authChallenge: { source: "Server", realm: "Old renderer" } });
+    expect(vi.getTimerCount()).toBe(1);
+    detach();
+    expect(auth.pending).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+    unwatch();
+    await vi.advanceTimersByTimeAsync(AUTH_WAIT_MS);
+    expect(sent).toEqual([]);
+    expect(changes).toEqual(["Old renderer", null]);
+  });
+
+  it("keeps another renderer's authentication challenge until its watch ends", () => {
+    vi.useFakeTimers();
+    const first = eventSession();
+    const second = eventSession();
+    const auth = new AuthChallenges();
+    auth.watch(first.session);
+    const unwatch = auth.watch(second.session);
+    second.emit("Fetch.authRequired", { requestId: "a2", authChallenge: { source: "Server", realm: "Current renderer" } });
+    first.detach();
+    expect(auth.pending?.realm).toBe("Current renderer");
+    unwatch();
+    expect(auth.pending).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
 describe("a tab whose session went away", () => {
   it("has no main frame left, rather than a stale one", () => {
     const { session, detach } = eventSession();
@@ -101,6 +163,40 @@ describe("a tab that already showed a document when it was set up", () => {
     expect(lifecycle.reached("load")).toBe(true);
     lifecycle.adopt("L2", false);
     expect(lifecycle.loaderId).toBe("L1");
+  });
+});
+
+describe("the current document's lifecycle", () => {
+  it("ignores late events from the previous loader after a new init", () => {
+    const { session, emit } = eventSession();
+    const lifecycle = new Lifecycle(session, "main");
+    lifecycle.adopt("old", true);
+    emit("Page.lifecycleEvent", { frameId: "main", loaderId: "new", name: "init" });
+    emit("Page.lifecycleEvent", { frameId: "main", loaderId: "old", name: "load" });
+    expect(lifecycle.loaderId).toBe("new");
+    expect(lifecycle.reached("load", "new")).toBe(false);
+    emit("Page.lifecycleEvent", { frameId: "main", loaderId: "new", name: "load" });
+    expect(lifecycle.reached("load", "new")).toBe(true);
+  });
+
+  it("keeps a restored document loaded when the previous loader reports network idle", () => {
+    const { session, emit } = eventSession();
+    const lifecycle = new Lifecycle(session, "main");
+    lifecycle.adopt("old", true);
+    emit("Page.frameNavigated", { frame: { id: "main", loaderId: "restored" }, type: "BackForwardCacheRestore" });
+    emit("Page.lifecycleEvent", { frameId: "main", loaderId: "old", name: "networkIdle" });
+    expect(lifecycle.loaderId).toBe("restored");
+    expect(lifecycle.reached("load")).toBe(true);
+    expect(lifecycle.reached("domcontentloaded")).toBe(true);
+  });
+
+  it("still adopts the first observed loader and ignores subframe events", () => {
+    const { session, emit } = eventSession();
+    const lifecycle = new Lifecycle(session, "main");
+    emit("Page.lifecycleEvent", { frameId: "main", loaderId: "initial", name: "load" });
+    emit("Page.lifecycleEvent", { frameId: "child", loaderId: "child-loader", name: "init" });
+    expect(lifecycle.loaderId).toBe("initial");
+    expect(lifecycle.reached("load")).toBe(true);
   });
 });
 

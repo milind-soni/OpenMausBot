@@ -55,6 +55,8 @@ const PERIOD_LABEL_KEYS: Record<UsagePeriod, LocaleKey> = {
 const LIVE_REFRESH_MS = 2_000;
 
 export function usageGroupLabel(groupBy: UsageGroupBy, group: Pick<UsageGroup, "key" | "label">): string {
+  if (group.key === "routine:private") return t("usage.history.privateRoutine");
+  if (group.key === "bot:private") return t("usage.history.privateBot");
   if (groupBy === "routine") return group.key === "manual" ? t("usage.history.notRoutine") : group.label;
   if (groupBy === "department") return group.label || t("usage.history.noDepartment");
   if (groupBy !== "user") return group.label;
