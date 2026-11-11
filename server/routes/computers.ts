@@ -1,6 +1,6 @@
 import { z, type ZodString } from "zod";
 import * as boat from "../boat.ts";
-import type { ComputerControl, ControlSnapshot } from "../computer-control.ts";
+import type { ComputerControl } from "../computer-control.ts";
 import { isValidSshAlias, localVmMaxInstances, localVmMode, type AppConfig } from "../config.ts";
 import {
   containerComputerAction,
@@ -68,7 +68,7 @@ export interface ComputerRouteDeps {
   botHasActiveTurn(botId: string): boolean;
   /** The control key whose lease opens this conversation's Local VM to a phone. */
   localVmLeaseKey(bot: BotRecord, threadId?: string): string;
-  botComputerControlSnapshot(botId: string): ControlSnapshot;
+  botComputerControlSnapshot(botId: string): ReturnType<ComputerControl["snapshot"]>;
   computerPreviewBot(botId: string, url: URL): BotRecord | null;
   computerPreviewSurface(bot: BotRecord, threadId?: string): Promise<string | undefined>;
   claimTeamComputerLifecycle(computer: TeamComputerRecord): () => void;
