@@ -3,6 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { STT_PRESETS } from "../../shared/stt";
+import { t } from "@/lib/i18n";
 
 const fixture = vi.hoisted(() => ({
   api: vi.fn(), dispatch: vi.fn(),
@@ -140,7 +141,7 @@ it("leaves the saved endpoint alone when the desktop key write is refused", asyn
 it.each(["openai", "groq", "google"])("loads %s models with the draft credential without saving configuration", async (service) => {
   await select(0, service === "google" ? "gemini" : "openai");
   if (service === "groq") await select(1, "groq");
-  const candidates = [`${service}-audio-one`, `${service}-future-model`];
+  const candidates = [`${service}-chat-model`, `${service}-whisper-large`];
   fixture.api.mockResolvedValueOnce({ models: candidates });
   await input("password", `${service}-draft-key`);
   await act(async () => host.querySelector<HTMLButtonElement>("[data-stt-load-models]")!.click());
@@ -151,7 +152,14 @@ it.each(["openai", "groq", "google"])("loads %s models with the draft credential
   } });
   expect([...host.querySelectorAll("datalist option")].map((option) => option.getAttribute("value"))).toEqual(candidates);
   expect(fixture.dispatch).not.toHaveBeenCalled();
-  expect(host.querySelector<HTMLInputElement>('input:not([type])')!.value).toBe(candidates[0]);
+  expect(host.querySelector<HTMLInputElement>('input:not([type])')!.value).toBe(`${service}-whisper-large`);
+});
+
+it("leaves the model empty when no loaded model is named for transcription", async () => {
+  await select(0, "openai");
+  fixture.api.mockResolvedValueOnce({ models: ["gpt-4o", "llama-3"] });
+  await act(async () => host.querySelector<HTMLButtonElement>("[data-stt-load-models]")!.click());
+  expect(host.querySelector<HTMLInputElement>('input:not([type])')!.value).toBe("");
 });
 
 it("keeps a typed model when models load", async () => {
@@ -180,6 +188,14 @@ it("discards a late model catalog when the provider changes", async () => {
   await select(0, "gemini");
   await act(async () => finish({ models: ["wrong-provider-model"] }));
   expect(host.querySelectorAll("datalist option")).toHaveLength(0);
+});
+
+it("says why a saved key is not used", async () => {
+  fixture.config = { stt: { provider: "openai", baseUrl: "https://stt.example.com/v1", model: "whisper", configured: true, keyConfigured: false, keyIgnored: true } };
+  await act(async () => root.render(createElement(SpeechInputSettings)));
+  expect(host.querySelector('[role="status"]')!.textContent).toBe(t("stt.keyIgnored"));
+  await input("password", "fresh-key");
+  expect(host.querySelector('[role="status"]')).toBeNull();
 });
 
 it("keeps a key typed before the address is edited", async () => {

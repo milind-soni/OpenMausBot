@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { currentCall } from "./call";
 import { isMacPlatform } from "./keyboard-shortcuts";
-import { speechBridge } from "./speech";
-import { useStore } from "@/state/store";
+import type { SpeechBridge } from "./recorded-speech";
 
 type ModifierEvent = Pick<KeyboardEvent, "altKey" | "ctrlKey" | "code" | "repeat">;
 
@@ -18,8 +17,11 @@ export function isPushToTalkPress(event: ModifierEvent): boolean {
   return modifier && event.altKey && event.ctrlKey && !event.repeat;
 }
 
-export function usePushToTalk(targetId: string, enabled: boolean, onError: () => void): boolean {
-  const config = useStore().state.config;
+/** `bridge` and `destination` are the call's own, fixed when it opened, so a held key records where the call listens. */
+export function usePushToTalk(
+  targetId: string, enabled: boolean, onError: () => void, speech: { bridge: SpeechBridge | Window["ogb"]; destination: string },
+): boolean {
+  const { bridge, destination } = speech;
   const [active, setActive] = useState(false);
   const held = useRef(false);
   const enabledRef = useRef(enabled);
@@ -34,7 +36,6 @@ export function usePushToTalk(targetId: string, enabled: boolean, onError: () =>
   }, [enabled]);
 
   useEffect(() => {
-    const bridge = speechBridge(config);
     if (!bridge?.speechFinish) return;
 
     const finish = () => {
@@ -55,7 +56,7 @@ export function usePushToTalk(targetId: string, enabled: boolean, onError: () =>
       event.preventDefault();
       held.current = true;
       setActive(true);
-      void bridge.speechStart().catch(() => {
+      void bridge.speechStart({ destination }).catch(() => {
         held.current = false;
         setActive(false);
         onErrorRef.current();
@@ -77,7 +78,7 @@ export function usePushToTalk(targetId: string, enabled: boolean, onError: () =>
       window.removeEventListener("blur", onBlur);
       held.current = false;
     };
-  }, [targetId, config?.stt?.provider]);
+  }, [targetId, bridge, destination]);
 
   return active;
 }

@@ -12,6 +12,9 @@ export function SpeechInputSettings() {
   return <AdminOnly><SpeechInputForm /></AdminOnly>;
 }
 
+/** Catalogs list chat models too; only a model named for transcription is filled in for the person. */
+const TRANSCRIPTION_MODEL = /whisper|transcri|\basr\b|\bstt\b/i;
+
 function SpeechInputForm() {
   const { state, dispatch } = useStore();
   const saved = state.config?.stt;
@@ -57,7 +60,7 @@ function SpeechInputForm() {
       if (request.signal.aborted) return;
       setModels(result.models);
       if (!result.models.length) setModelError(t("stt.noModels"));
-      else setModel((current) => current.trim() ? current : result.models[0]);
+      else setModel((current) => current.trim() || (result.models.find((id) => TRANSCRIPTION_MODEL.test(id)) ?? ""));
     } catch (error) {
       if (!request.signal.aborted) setModelError(error instanceof Error ? error.message : t("stt.modelsFailed"));
     } finally {
@@ -140,6 +143,7 @@ function SpeechInputForm() {
               placeholder={savedKeyUsable ? t("stt.keySaved") : provider === "gemini" ? t("stt.googleKey") : t("stt.keyOptional")}
               onChange={(event) => setKey(event.target.value)} />
           </label>
+          {saved?.keyIgnored && provider === saved.provider && !key.trim() && <p role="status" className="text-ink-secondary">{t("stt.keyIgnored")}</p>}
           {savedKeyMatches && <label className="flex items-center gap-2"><input type="checkbox" checked={removeKey} onChange={(event) => setRemoveKey(event.target.checked)} />{t("stt.removeKey")}</label>}
           <p className="text-ink-secondary">{t(provider === "gemini" ? "stt.googleHint" : "stt.endpointHint")}</p>
           {provider === "gemini" && <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noreferrer" className="text-accent hover:underline">{t("stt.googleKey")}</a>}

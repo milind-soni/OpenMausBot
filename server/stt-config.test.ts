@@ -52,6 +52,14 @@ describe("speech input configuration", () => {
       expect(sttStatus({ stt: { provider: "openai", ...preset, model: "whisper-1" } }).configured).toBe(false);
     }
   });
+  it("says when a key from the environment is not used for the saved address", () => {
+    const env = { OMB_STT_API_KEY: "operator-key" };
+    const revoked = sttConfigWithEnv({ provider: "openai", baseUrl: "https://stt.example.com/v1", model: "whisper", keyFor: "nowhere" }, env);
+    expect(sttStatus({ stt: revoked })).toMatchObject({ keyConfigured: false, keyIgnored: true });
+    const bound = sttConfigWithEnv({ provider: "openai", baseUrl: "https://stt.example.com/v1", model: "whisper" }, env);
+    expect(sttStatus({ stt: bound })).not.toHaveProperty("keyIgnored");
+    expect(sttStatus({ stt: bound }).keyConfigured).toBe(true);
+  });
   it("sends a key only over https or to this computer", () => {
     for (const baseUrl of ["https://stt.example.com/v1", "http://localhost:8000", "http://127.0.0.1:8000/v1", "http://[::1]:8000/v1"]) {
       expect(sttKeySendable({ provider: "openai", baseUrl }), baseUrl).toBe(true);

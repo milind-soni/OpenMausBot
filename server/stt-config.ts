@@ -69,5 +69,6 @@ export function sttStatus(cfg: Pick<AppConfig, "stt" | "tts">): SttStatus {
   return {
     provider, baseUrl, model, keyConfigured,
     configured: isEndpointStt(provider) ? endpointReady : Boolean(cfg.tts?.fishKey?.trim()),
+    ...(isEndpointStt(provider) && cfg.stt?.key?.trim() && !keyConfigured ? { keyIgnored: true as const } : {}),
   };
 }

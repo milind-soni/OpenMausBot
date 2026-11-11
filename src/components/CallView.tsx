@@ -27,7 +27,7 @@ import { callStarted } from "@/lib/product-events";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { callCapabilityHelp, type CallCapabilityHelp } from "@/lib/call-capability";
 import { onCallStartRequest } from "@/lib/call-start-request";
-import { listensHere, speechBridge, usesRecordedSpeech } from "@/lib/speech";
+import { listensHere, speechBridge, speechRecognizer } from "@/lib/speech";
 import { sttDestination } from "../../shared/stt";
 import { VoiceSetupDialog } from "./VoiceSetupDialog";
 import { openBotSettings } from "./bot-panel/panel-link";
@@ -409,6 +409,7 @@ export function CallModeMenu({ id, mode, onChoose, onClose, placement = "header"
   onClose: () => void;
 }) {
   const { state } = useStore();
+  const { capabilities } = useDesktopCapabilities();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     ref.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
@@ -446,7 +447,7 @@ export function CallModeMenu({ id, mode, onChoose, onClose, placement = "header"
             <span className="min-w-0 flex-1">
               <span className={cn("block text-[14px] leading-[18px]", unavailable ? "text-ink-tertiary" : "text-ink")}>{t(entry.label)}</span>
               <span className="mt-0.5 block text-[12px] leading-[1.4] text-ink-secondary">
-                {unavailable ? `${unavailable.label}. ${unavailable.reason}` : callModeHint(entry.id, { cloudHome, serverSpeech: usesRecordedSpeech(state.config) })}
+                {unavailable ? `${unavailable.label}. ${unavailable.reason}` : callModeHint(entry.id, { cloudHome }, speechRecognizer(state.config, capabilities))}
               </span>
             </span>
             {mode === entry.id && <Check size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />}
@@ -471,7 +472,8 @@ export function CallOverlay({ bot }: { bot: Bot }) {
 
 function Call({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
-  const [{ bridge, destination }] = useState(() => ({ bridge: speechBridge(state.config), destination: sttDestination(state.config?.stt) }));
+  const { capabilities } = useDesktopCapabilities();
+  const [{ bridge, destination }] = useState(() => ({ bridge: speechBridge(state.config, capabilities), destination: sttDestination(state.config?.stt) }));
   const speech = useSpeech();
   const initialPhase: Phase = bot.busy ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);
@@ -479,7 +481,7 @@ function Call({ bot }: { bot: Bot }) {
   const [note, setNote] = useState<string | null>(null);
   const pushToTalk = usePushToTalk(bot.id, phase === "listening", () => {
     setNote(t("call.turns.pushToTalkFailed"));
-  });
+  }, { bridge, destination });
 
   const messages = visibleMessages(bot);
   const approval = pendingApprovals(messages)[0];

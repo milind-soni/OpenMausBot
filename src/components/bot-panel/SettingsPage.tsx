@@ -7,7 +7,7 @@ import { mcpServersForBot, useMcpServers } from "@/lib/mcp-servers";
 import { CALL_MODES, callModeHint, effectiveCallMode, setCallMode, useCallMode, type CallMode } from "@/lib/call-mode";
 import { callCapabilityHelp } from "@/lib/call-capability";
 import { requestNotificationPermission } from "@/lib/notify";
-import { listensHere, usesRecordedSpeech } from "@/lib/speech";
+import { listensHere, speechRecognizer } from "@/lib/speech";
 import { firstSentence } from "@/lib/soul";
 import { currentTaskBot, useStore, type Bot } from "@/state/store";
 import type { ApprovalMode } from "../../../shared/approval-mode";
@@ -86,7 +86,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
     value: entry.id,
     label: t(entry.label),
     disabled: entry.id === "turns" && turnsHelp !== null,
-    tooltip: entry.id === "turns" && turnsHelp ? `${turnsHelp.label}. ${turnsHelp.reason}` : entry.id === "live" ? t("call.mode.liveHint") : callModeHint("turns", { serverSpeech: usesRecordedSpeech(state.config) }),
+    tooltip: entry.id === "turns" && turnsHelp ? `${turnsHelp.label}. ${turnsHelp.reason}` : entry.id === "live" ? t("call.mode.liveHint") : callModeHint("turns", {}, speechRecognizer(state.config, capabilities)),
   }));
 
   const replyOptions: SegmentOption<ReplyStyle>[] = REPLY_STYLES.map((style) => ({

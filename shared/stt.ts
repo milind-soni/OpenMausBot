@@ -36,4 +36,6 @@ export interface SttStatus {
   model: string;
   configured: boolean;
   keyConfigured: boolean;
+  /** A key is saved, or set in OMB_STT_API_KEY, but not sent: it was saved for another address, or this address is plain http to another computer. */
+  keyIgnored?: true;
 }

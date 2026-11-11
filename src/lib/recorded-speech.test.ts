@@ -155,6 +155,16 @@ describe("Fish Audio listener", () => {
     expect(contextsClosed).toBe(1);
   });
 
+  it("uploads the clip naming the destination it was recorded for", async () => {
+    await recordedSpeech.speechStart({ endpointMs: 850, destination: "openai http://localhost:8000/v1" });
+    feed(loud, 10);
+    feed(quiet, 14);
+    await settle();
+    expect(sent.api.mock.calls[0]![1].headers).toEqual({
+      "content-type": "audio/wav", "x-omb-stt-destination": encodeURIComponent("openai http://localhost:8000/v1"),
+    });
+  });
+
   it("ends a turn that heard no speech without sending anything", async () => {
     await recordedSpeech.speechStart({ endpointMs: 850 });
     feed(quiet, 20);

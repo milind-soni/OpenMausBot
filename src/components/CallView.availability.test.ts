@@ -99,8 +99,8 @@ describe("call capability guidance", () => {
     const fish = capabilities({ available: true, engine: "fish-audio", onDevice: false }, "win32");
     pageMicrophone();
     expect(callCapabilityHelp(fish, speechInput("auto", false))).toEqual({
-      label: "Set up speech input to take turns on calls",
-      reason: "Configure Speech input in Settings, or add a Fish Audio key in Settings \u2192 API keys.",
+      label: "Add a Fish Audio key to take turns on calls",
+      reason: "On this computer, Take turns hears you through Fish Audio speech-to-text. Add a Fish Audio key in Settings \u2192 API keys.",
     });
     expect(callCapabilityHelp(fish, speechInput("auto", true))).toBeNull();
   });

@@ -4,7 +4,7 @@ import type { AppConfig } from "../config.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { voiceFailure } from "../tts/errors.ts";
 import { listSpeechModels, transcribe } from "../stt.ts";
-import { STT_DESTINATION_HEADER, sttDestination } from "../../shared/stt.ts";
+import { isEndpointStt, STT_DESTINATION_HEADER, sttDestination } from "../../shared/stt.ts";
 import { STT_INSECURE_KEY_ERROR, sttConfigSchema, sttKeySendable, sttNeedsKey, sttSavePatch, sttStatus, usableSttKey } from "../stt-config.ts";
 import * as tts from "../tts/index.ts";
 import { toUtterances, VOICE_FIRST_BLOCK_MAX_CHARS } from "../tts/speech-text.ts";
@@ -27,7 +27,7 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
       const parsed = sttConfigSchema.safeParse(body.stt);
       if (!parsed.success) return json(res, 400, { error: "Invalid speech input settings." });
       const stt = { ...cfg.stt, ...sttSavePatch(cfg.stt, parsed.data) };
-      if (stt.provider !== "openai" && stt.provider !== "gemini") return json(res, 400, { error: "Choose a speech input server first." });
+      if (!isEndpointStt(stt.provider)) return json(res, 400, { error: "Choose a speech input server first." });
       if (parsed.data.key?.trim() && !sttKeySendable(stt)) return json(res, 400, { error: STT_INSECURE_KEY_ERROR });
       if (sttNeedsKey(stt) && !usableSttKey(stt)) return json(res, 409, { error: "Enter the speech input API key to load models." });
       try {
@@ -105,14 +105,15 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
         req.resume();
         return json(res, 400, { error: "content-type must be audio/wav" });
       }
-      if (!sttStatus(cfg).configured) {
-        req.resume();
-        return json(res, 409, userError("serverError.voice.speechInputRequired"));
-      }
       const destination = req.headers[STT_DESTINATION_HEADER];
-      if (typeof destination === "string" && destination !== encodeURIComponent(sttDestination(sttStatus(cfg)))) {
+      const refusal = (settings: AppConfig) => !sttStatus(settings).configured
+        ? userError(isEndpointStt(sttStatus(settings).provider) ? "serverError.voice.speechInputRequired" : "serverError.voice.fishKeyRequired")
+        : destination !== encodeURIComponent(sttDestination(sttStatus(settings))) ? userError("serverError.voice.speechInputChanged")
+        : null;
+      const refusedEarly = refusal(cfg);
+      if (refusedEarly) {
         req.resume();
-        return json(res, 409, userError("serverError.voice.speechInputChanged"));
+        return json(res, 409, refusedEarly);
       }
       const declared = Number(req.headers["content-length"] ?? 0);
       if (declared > TRANSCRIBE_MAX_BYTES) {
@@ -131,12 +132,15 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
         req.on("error", reject);
       });
       if (!audio) return json(res, 413, { error: `audio exceeds ${TRANSCRIBE_MAX_BYTES} bytes` });
+      const settings: AppConfig = { ...cfg, stt: { ...cfg.stt }, tts: { ...cfg.tts } };
+      const refusedLate = refusal(settings);
+      if (refusedLate) return json(res, 409, refusedLate);
       try {
         const abort = new AbortController();
         const cancel = () => abort.abort();
         res.on?.("close", cancel);
         try {
-          return json(res, 200, { text: await transcribe(cfg, audio, mime, abort.signal) });
+          return json(res, 200, { text: await transcribe(settings, audio, mime, abort.signal) });
         } finally {
           res.off?.("close", cancel);
         }

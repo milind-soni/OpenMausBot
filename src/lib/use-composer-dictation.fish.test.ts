@@ -7,6 +7,7 @@ import { t } from "./i18n";
 
 const fixture = vi.hoisted(() => ({
   config: { savedKeys: { fishAudioKey: { configured: true } } } as unknown,
+  engine: "fish-audio",
 }));
 const fish = vi.hoisted(() => {
   const listeners = { line: undefined as undefined | ((line: unknown) => void), end: undefined as undefined | ((info: unknown) => void) };
@@ -23,8 +24,7 @@ vi.mock("./recorded-speech", () => ({ recordedSpeech: fish }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: fixture.config } }) }));
 vi.mock("@/components/DesktopCapabilities", async () => {
   const { initialDesktopCapabilities } = await import("./desktop");
-  const capabilities = { ...initialDesktopCapabilities(), dictation: { available: true, engine: "fish-audio", onDevice: false } };
-  return { useDesktopCapabilities: () => ({ capabilities, ready: true }) };
+  return { useDesktopCapabilities: () => ({ capabilities: { ...initialDesktopCapabilities(), dictation: { available: true, engine: fixture.engine, onDevice: false } }, ready: true }) };
 });
 
 import { cacheDesktopCapabilities, initialDesktopCapabilities } from "./desktop";
@@ -43,6 +43,7 @@ describe("composer dictation through Fish Audio", () => {
     cacheDesktopCapabilities({ ...initialDesktopCapabilities(), dictation: { available: true, engine: "fish-audio", onDevice: false } });
     vi.stubGlobal("navigator", { mediaDevices: { getUserMedia: vi.fn() } });
     fixture.config = { savedKeys: { fishAudioKey: { configured: true } } };
+    fixture.engine = "fish-audio";
     typed = [];
     vi.clearAllMocks();
     const onText = (text: string) => typed.push(text);
@@ -62,7 +63,7 @@ describe("composer dictation through Fish Audio", () => {
 
   it("finishes and transcribes when the mic is clicked off, keeping the session until its end arrives", () => {
     toggle();
-    expect(fish.speechStart).toHaveBeenCalledOnce();
+    expect(fish.speechStart).toHaveBeenCalledExactlyOnceWith({ destination: "fish" });
     toggle();
     expect(fish.speechFinish).toHaveBeenCalledOnce();
     expect(fish.speechStop).not.toHaveBeenCalled();
@@ -93,7 +94,7 @@ describe("composer dictation through Fish Audio", () => {
     expect(dictation.recording).toBe(true);
     const native = { speechStart: vi.fn(async () => {}), speechStop: vi.fn(async () => {}), onSpeechTranscript: () => () => {}, onSpeechEnd: () => () => {} };
     vi.stubGlobal("window", Object.assign(window, { ogb: native }));
-    cacheDesktopCapabilities({ ...initialDesktopCapabilities(), dictation: { available: true, engine: "apple-speech", onDevice: true } });
+    fixture.engine = "apple-speech";
     await act(async () => root.render(createElement(probe)));
     expect(fish.speechStop).toHaveBeenCalledOnce();
     expect(native.speechStart).not.toHaveBeenCalled();

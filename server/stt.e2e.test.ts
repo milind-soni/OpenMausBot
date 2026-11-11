@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchVerificationServer, verificationServerArgs, verificationServerEnvironment, type VerificationServer } from "../scripts/control-omb.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
-import type { SttStatus } from "../shared/stt.ts";
+import { STT_DESTINATION_HEADER, sttDestination, type SttStatus } from "../shared/stt.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 
 let fixture: VerificationServer;
@@ -71,8 +71,10 @@ async function settings(stt: unknown, external = false) {
 }
 
 async function transcribe(type = "audio/wav") {
+  const config = await (await fetch(`${fixture.info.url}/api/config`, { headers: { origin: fixture.info.url } })).json() as { stt: SttStatus };
   const res = await fetch(`${fixture.info.url}/api/tts/transcribe`, {
-    method: "POST", headers: { "content-type": type, origin: fixture.info.url }, body: "RIFF-fixture-audio",
+    method: "POST", body: "RIFF-fixture-audio",
+    headers: { "content-type": type, origin: fixture.info.url, [STT_DESTINATION_HEADER]: encodeURIComponent(sttDestination(config.stt)) },
   });
   return { status: res.status, body: await res.json() };
 }

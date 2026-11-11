@@ -16,7 +16,7 @@ import { cn } from "@/lib/cn";
 import { BotAvatar } from "./Avatar";
 import { CallTargetButton, type CallButtonPlacement } from "./CallView";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { pageCanRecord, speechBridge, usesRecordedSpeech } from "@/lib/speech";
+import { canListenHere, speechBridge } from "@/lib/speech";
 import { sttDestination } from "../../shared/stt";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
@@ -33,7 +33,7 @@ export function GroupCallButton({ group, members, placement, fill, ink }: { grou
   const { capabilities, ready } = useDesktopCapabilities();
   const config = useStore().state.config;
   if (group.dm) return null;
-  if (ready && !capabilities.dictation.available && !(usesRecordedSpeech(config, capabilities) && pageCanRecord())) return null;
+  if (ready && !canListenHere(capabilities, config)) return null;
   return (
     <CallTargetButton
       placement={placement}
@@ -74,7 +74,8 @@ function questionIn(messages: Message[]): Message | undefined {
 
 function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const { state, dispatch } = useStore();
-  const [{ bridge, destination }] = useState(() => ({ bridge: speechBridge(state.config), destination: sttDestination(state.config?.stt) }));
+  const { capabilities } = useDesktopCapabilities();
+  const [{ bridge, destination }] = useState(() => ({ bridge: speechBridge(state.config, capabilities), destination: sttDestination(state.config?.stt) }));
   const speech = useSpeech();
   const initialPhase: Phase = group.working || group.busyBotId ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);
@@ -83,7 +84,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const [speakingMemberId, setSpeakingMemberId] = useState<string | null>(null);
   const pushToTalk = usePushToTalk(group.id, phase === "listening", () => {
     setNote(t("call.turns.pushToTalkFailed"));
-  });
+  }, { bridge, destination });
 
   const messages = group.messages;
   const approval = pendingApprovals(messages)[0];

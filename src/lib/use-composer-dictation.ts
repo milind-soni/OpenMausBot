@@ -14,7 +14,7 @@ export function useComposerDictation({ draftId, text, onText }: {
 }) {
   const { capabilities } = useDesktopCapabilities();
   const config = useStore().state.config;
-  const bridge = speechBridge(config);
+  const bridge = speechBridge(config, capabilities);
   const ready = listensHere(capabilities, config);
   const [recording, setRecording] = useState(false);
   const [speechError, setSpeechError] = useState<ReactNode>(null);
@@ -87,7 +87,7 @@ export function useComposerDictation({ draftId, text, onText }: {
   }, [recording, draftId, onText, bridge]);
 
   const toggle = () => {
-    if (!ready || !speechBridge(config)) {
+    if (!ready || !bridge) {
       setSpeechError(t("composer.dictation.unavailable"));
     } else if (recording) {
       if (finish.current) finish.current();
