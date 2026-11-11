@@ -13,6 +13,9 @@ import {
   Laptop,
   LifeBuoy,
   Loader2,
+  LogOut,
+  MessageSquare,
+  Sparkles,
   RefreshCw,
   Settings as SettingsIcon,
   Smartphone,
@@ -27,17 +30,16 @@ import { usePhonePlaceState, type PhonePlaceState } from "./settings/phone-statu
 import { useSettingsPlace } from "./settings/settings-place";
 import { AccountMoveStatus, useAccountMove, type AccountMoveKind } from "./AccountMove";
 import { InitialsAvatar } from "./Avatar";
-import { DiscordIcon } from "./DiscordIcon";
 import { AboutDialog } from "./AboutDialog";
 import { CloudTile } from "./cloud-buy/parts";
 import { usageBridge } from "./CloudUsageMeter";
 import { useCloudPlanSnapshot } from "./CloudTrialNotice";
 import type { WorkspacePlace } from "./DesktopWorkspaceSwitcher";
 import { railShown, usePlaces } from "@/lib/places";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import { useAutomationsNeedYou } from "./SidebarFooterNav";
 import { useCloudFilesReady } from "@/lib/cloud-files";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
-import { ShortcutHint } from "./ShortcutHint";
 import { api, useStore, type Action, type AppSettingsSection } from "@/state/store";
 import { serverCheckPhase, serverUpdateRow, type ServerUpdateCheck, type ServerUpdatePhase } from "@/lib/server-update";
 import type { CloudAccountBridge, CloudAccountState } from "../../electron/cloud-account.mjs";
@@ -48,7 +50,10 @@ import { cn } from "@/lib/cn";
 import { meterPercent, resetLine } from "@/lib/usage-meter";
 import type { CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import { activeLocale, t } from "@/lib/i18n";
-import { FEEDBACK_URL, HELP_CENTER_URL, appVersion, openExternalLink } from "@/lib/app-links";
+import { FEEDBACK_URL, HELP_CENTER_URL, RELEASES_URL, appVersion, openExternalLink } from "@/lib/app-links";
+import { pageIsThisComputer } from "@/lib/companion-bridge";
+import { cloudPlanLabel } from "@/lib/cloud-plan";
+import { shortcutLabel } from "./ShortcutHint";
 import { useOtherServerName } from "@/lib/other-server";
 import { isOwnerOrAdmin, profileForSession, readSessionState, type SessionState } from "@/lib/session";
 import {
@@ -394,11 +399,16 @@ export function cloudUsageSummary(plan: CloudPlanSnapshot | null): UsageSummary 
   return null;
 }
 
+/** A key hint at a menu row's end: plain 12/16 tertiary text, the same for every row. */
+function keyHint(label: string | null | undefined): React.ReactNode {
+  return label ? <span aria-hidden="true" className="shrink-0 text-[12px] leading-4 text-ink-tertiary">{label}</span> : undefined;
+}
+
 /** ⌘, opens Settings from the app's own menu; a browser has no such key. */
 function settingsKeyHint(): React.ReactNode {
   const platform = typeof window === "undefined" ? undefined : window.ogb?.platform;
   if (!platform) return undefined;
-  return <span aria-hidden="true" className="shrink-0 text-[12px] leading-4 text-ink-tertiary">{platform === "darwin" ? "⌘," : "Ctrl+,"}</span>;
+  return keyHint(platform === "darwin" ? "⌘," : "Ctrl+,");
 }
 
 export interface AccountHeader {
@@ -425,6 +435,8 @@ export function profileMenuItems({
   onAbout,
   onHelp,
   onFeedback,
+  onWhatsNew,
+  signOut = null,
 }: {
   phone: SidebarMenuItem | null;
   update: SidebarMenuItem | null;
@@ -443,6 +455,9 @@ export function profileMenuItems({
   onAbout: () => void;
   onHelp: () => void;
   onFeedback: () => void;
+  onWhatsNew?: () => void;
+  /** the last row while someone is signed in, where signing out can work from this page */
+  signOut?: (() => void) | null;
 }): SidebarMenuItem[] {
   const raised: SidebarMenuItem | null = update && updateTop ? {
     ...update,
@@ -453,18 +468,21 @@ export function profileMenuItems({
   } : null;
   const help: SidebarMenuItem[] = [
     { key: "help", label: t("sidebar.menu.help"), icon: <HelpCircle size={16} />, onSelect: onHelp },
-    { key: "shortcuts", label: t("sidebar.menu.shortcuts"), icon: <Keyboard size={16} />, trailing: <ShortcutHint id="shortcuts-cheat-sheet" />, onSelect: onShortcuts },
-    { key: "feedback", label: t("sidebar.menu.feedback"), icon: <DiscordIcon size={16} />, onSelect: onFeedback },
+    ...(onWhatsNew ? [{ key: "whats-new", label: t("sidebar.menu.whatsNew"), icon: <Sparkles size={16} />, onSelect: onWhatsNew }] : []),
+    { key: "shortcuts", label: t("sidebar.menu.shortcuts"), icon: <Keyboard size={16} />, trailing: keyHint(shortcutLabel("shortcuts-cheat-sheet")), onSelect: onShortcuts },
+    { key: "feedback", label: t("sidebar.menu.feedback"), icon: <MessageSquare size={16} />, onSelect: onFeedback },
     ...(update && !raised ? [{ ...update, separatorBefore: true }] : []),
-    { key: "about", label: t("sidebar.menu.about"), icon: <Info size={16} />, separatorBefore: !(update && !raised), onSelect: onAbout },
+    { key: "about", label: t("sidebar.menu.aboutApp", { app: productName() }), icon: <Info size={16} />, separatorBefore: !(update && !raised), onSelect: onAbout },
   ];
   const account: SidebarMenuItem = { key: "account", label: header.name, subtitle: header.line, icon: header.avatar, large: true, chevron: true, onSelect: header.onOpen };
   const settings: SidebarMenuItem = { key: "settings", label: t("sidebar.menu.settings"), icon: <SettingsIcon size={16} />, trailing: settingsKeyHint(), onSelect: onSettings };
   const support: SidebarMenuItem = { key: "support", label: t("sidebar.menu.helpShort"), icon: <LifeBuoy size={16} />, submenu: help, onSelect: () => {} };
   const present = (...items: Array<SidebarMenuItem | null | false>) => items.filter((item): item is SidebarMenuItem => Boolean(item));
+  const out: SidebarMenuItem[] = [...accounts.filter((item) => item.key !== "accounts-sign-out"),
+    ...(signOut ? [{ key: "sign-out", label: t("accounts.signOut"), icon: <LogOut size={16} />, onSelect: signOut }] : accounts.filter((item) => item.key === "accounts-sign-out"))];
   const groups = simple
-    ? [move, present(raised), [account], present(phone, settings), simple.tools, present(plan, switchPlace, support), accounts]
-    : [move, present(raised), [account], present(phone, settings, plan, switchPlace, support), accounts];
+    ? [move, present(raised), [account], present(phone, settings), simple.tools, present(plan, switchPlace, support), out]
+    : [move, present(raised), [account], present(phone, settings), present(plan, switchPlace, support), out];
   return groups.filter((group) => group.length > 0)
     .flatMap((group, at) => group.map((item, index) => (at > 0 && index === 0 ? { ...item, separatorBefore: true } : item)));
 }
@@ -492,13 +510,23 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   const { state, dispatch } = useStore();
   const simple = account !== undefined;
   const [menuOpen, setMenuOpen] = useState(false);
-  const cloudUsage = cloudUsageSummary(useCloudPlanSnapshot(usageBridge(state.config?.cloudHome === true)));
+  const advancedMode = useAdvancedMode();
+  const automationsNeedYou = useAutomationsNeedYou();
+  const planSnapshot = useCloudPlanSnapshot(usageBridge(state.config?.cloudHome === true) ?? (window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudPlan));
+  const cloudUsage = cloudUsageSummary(planSnapshot);
   const phoneState = usePhonePlaceState(menuOpen);
   const place = useSettingsPlace();
   const summary = useAccountSummary();
   const desktopUpdate = useUpdateItem();
   const serverUpdate = useServerUpdateItem(!window.ogb?.updater);
-  const update = desktopUpdate ?? serverUpdate;
+  const here = pageIsThisComputer();
+  const openComputer = window.ogb?.rail?.openComputer;
+  // A Cloud's page in the desktop window can't update the app: the row says where that happens, and goes there.
+  const elsewhereUpdate: UpdateEntry | null = !desktopUpdate && !here && Boolean(window.ogb) && state.config?.cloudHome === true && openComputer ? {
+    phase: "idle", pending: false, label: t("sidebar.menu.checkFromHere", { place: t("rail.thisComputer") }),
+    item: { key: "update", label: t("sidebar.menu.checkFromHere", { place: t("rail.thisComputer") }), icon: <RefreshCw size={16} />, onSelect: () => void openComputer("app").catch(() => {}) },
+  } : null;
+  const update = desktopUpdate ?? elsewhereUpdate ?? serverUpdate;
   const [aboutOpen, setAboutOpen] = useState(false);
   const [session, setSession] = useState<SessionState | null>(null);
   const triggerRef = useRef<HTMLSpanElement>(null);
@@ -523,7 +551,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   const move = useAccountMove(state.config?.cloudHome === true, { onOpen: () => openSettings("plan"), onPairPhone: () => dispatch(phonePairingSettingsAction()) });
   const accounts = useAccounts();
   const openSource = desktop && !window.ogb?.cloudAccount && !window.ogb?.cloudPlan;
-  const planLine = !desktop ? undefined : cloudUsage ? t("sidebar.menu.plan.used", { plan: summary.plan ?? "Pro", percent: cloudUsage.value.replace(/\D+/g, "") })
+  const planLine = !desktop ? undefined : cloudUsage ? t("sidebar.menu.plan.used", { plan: summary.plan ?? cloudPlanLabel(planSnapshot?.tier), percent: cloudUsage.value.replace(/\D+/g, "") })
     : summary.signedIn === false || summary.plan === t("settings.account.free") ? t("sidebar.menu.plan.free") : summary.plan ?? undefined;
 
   const items = profileMenuItems({
@@ -533,22 +561,23 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
     move: move.items,
     header: {
       name,
-      line: accountLine(summary, { browser: !desktop, place: place.name, openSource }),
-      avatar: <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={32} fontSize={13} />,
+      line: accountLine({ ...summary, email: summary.email ?? (summary.plan ? profile?.email ?? null : null) }, { browser: !desktop, place: place.name, openSource }),
+      avatar: <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={32} fontSize={13} className="bg-ink/[0.08]" />,
       onOpen: () => openSettings("account"),
     },
     plan: planHere ? { key: "plan", label: t("settings.page.plan"), ...(planLine ? { subtitle: planLine } : {}), icon: <CreditCard size={16} />, onSelect: () => openSettings("plan") } : null,
     switchPlace: !besideRail && desktop && !remote && window.ogb?.workspaces && account?.place.switchable
       ? { key: "switch-place", label: t("sidebar.menu.switchPlace"), icon: <ArrowLeftRight size={16} />, chevron: true, onSelect: account.place.openMenu } : null,
     accounts: accountMenuItems(accounts),
-    ...(account ? { simple: {
+    // Simple's own places to go, at every width: the phone's round avatar has them too.
+    ...(account || (circle && !advancedMode) ? { simple: {
       tools: toolMenuItems({
         activeView: state.activeView,
-        automationsNeedYou: account.automationsNeedYou,
+        automationsNeedYou: account?.automationsNeedYou ?? automationsNeedYou,
         onAutomations: () => dispatch({ type: "showRoutines", view: "list" }),
         onTeamMap: () => dispatch({ type: "showTeamMap" }),
         onFiles: filesReady ? () => dispatch({ type: "showFiles" }) : undefined,
-        archived: account.archived,
+        archived: account?.archived,
       }),
     } } : {}),
     onSettings: () => openSettings("overview"),
@@ -559,6 +588,11 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
     onAbout: () => setAboutOpen(true),
     onHelp: () => void openExternalLink(HELP_CENTER_URL),
     onFeedback: () => void openExternalLink(FEEDBACK_URL),
+    onWhatsNew: () => void openExternalLink(RELEASES_URL),
+    signOut: accounts.view?.active ? null
+      : !desktop && session?.kind === "session" ? () => { void api("/api/auth/logout", { method: "POST" }).finally(() => location.reload()); }
+      : desktop && !remote && window.ogb?.cloudAccount && summary.signedIn ? () => { void window.ogb?.cloudAccount?.signOut().catch(() => {}); }
+      : null,
   });
   const noteworthy = update && updateNoteworthy(update.phase, update.pending) && !updateHasButton(update.phase);
   const needsYou = account?.automationsNeedYou === true;
@@ -572,9 +606,10 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   return (
     <>
       <SidebarPopoverMenu
+        width={272}
         items={items}
         ariaLabel={name}
-        onOpenChange={simple ? setMenuOpen : undefined}
+        onOpenChange={setMenuOpen}
         triggerClassName={iconOnly || simple ? cn("shrink-0", circle || simple ? "rounded-full" : "rounded-xl") : "w-full"}
         triggerTitle={iconOnly || simple ? label : undefined}
         triggerLabel={label}
@@ -610,7 +645,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
             )}
           >
             <span className="relative flex shrink-0">
-              <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={28} />
+              <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={28} className="bg-ink/[0.08]" />
               {moveDot && <span aria-hidden data-account-dot={moveDot} className={cn("absolute -right-0.5 -top-0.5 size-2 rounded-full ring-2 ring-app", DOT_COLOR[moveDot])} />}
             </span>
             <span className="flex min-w-0 flex-1 flex-col">

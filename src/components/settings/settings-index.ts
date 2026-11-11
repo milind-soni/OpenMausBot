@@ -164,7 +164,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "sidebar-picture", page: "overview", anchor: "sidebar", labelKey: "placeLook.sidebarPicture", sectionKey: "settings.overview.sidebar", topFor: ["wallpaper", "background", "sidebar image"], synonyms: ["picture", "banner", "image"] },
   { id: "show-helper", page: "overview", anchor: "sidebar", labelKey: "settings.search.showHelper", sectionKey: "settings.overview.sidebar", synonyms: ["helper", "starter", "default bot"] },
   { id: "providers", page: "ai", anchor: "providers", labelKey: "settings.ai.providers", topFor: ["ollama", "lm studio", "local model", "model providers"], synonyms: ["models", "engines", "claude", "codex", "sign in", "subscription", "cli"] },
-  { id: "keys", page: "ai", anchor: "ai-keys", labelKey: "settings.section.connections", topFor: ["api keys", "api key"], synonyms: ["keys", "key", "openai", "anthropic", "xai", "openrouter", "router", "base url", "mistral", "groq", "cerebras", "deepseek", "opencode", "composio", "elevenlabs"] },
+  { id: "keys", page: "ai", anchor: "ai-keys", labelKey: "settings.ai.otherServices", topFor: ["api keys", "api key"], synonyms: ["keys", "key", "openai", "anthropic", "xai", "openrouter", "router", "base url", "mistral", "groq", "cerebras", "deepseek", "opencode", "composio", "elevenlabs"] },
   { id: "backup-model", page: "ai", anchor: "backup-model", labelKey: "settings.recovery.title", sectionKey: "settings.ai.backupModel", advanced: true, synonyms: ["backup model", "fallback", "recovery"] },
   { id: "routing", page: "ai", anchor: "routing", labelKey: "settings.ai.routing", advanced: true, synonyms: ["decision and extraction", "decision", "extraction", "routing", "who answers", "jev", "typesafe", "cloudflare", "workers ai"] },
   { id: "images", page: "ai", anchor: "images", labelKey: "settings.ai.images", advanced: true, synonyms: ["image generation", "images", "generate", "picture"] },
@@ -172,8 +172,8 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "away-emails", page: "bots", anchor: "about-you", labelKey: "settings.profile.awayEmails", sectionKey: "settings.bots.aboutYou", synonyms: ["away", "emails", "email me"] },
   { id: "new-bots", page: "bots", anchor: "new-bots", labelKey: "settings.bots.newBots", synonyms: ["defaults", "effort", "reasoning", "preset", "share as preset"] },
   { id: "limits", page: "bots", anchor: "limits", labelKey: "settings.simple.more.limits", advanced: true, synonyms: ["group turns", "timeout", "tool time limit", "parallel threads", "concurrency", "keep warm"] },
-  { id: "parallel", page: "bots", anchor: "limits", labelKey: "settings.threads.title", sectionKey: "settings.simple.more.limits", advanced: true, synonyms: ["parallel", "threads", "concurrency"] },
-  { id: "group-turns", page: "bots", anchor: "limits", labelKey: "settings.roomTurns.title", sectionKey: "settings.simple.more.limits", advanced: true, synonyms: ["group", "turns"] },
+  { id: "parallel", page: "bots", anchor: "parallel", labelKey: "settings.threads.title", sectionKey: "settings.simple.more.limits", advanced: true, synonyms: ["parallel", "threads", "concurrency"] },
+  { id: "group-turns", page: "bots", anchor: "group-turns", labelKey: "settings.roomTurns.title", sectionKey: "settings.simple.more.limits", advanced: true, synonyms: ["group", "turns"] },
   { id: "skills", page: "bots", anchor: "skills", labelKey: "settings.section.skills", when: (ctx) => ctx.skills, synonyms: ["skills", "library"] },
   { id: "early", page: "bots", anchor: "early", labelKey: "settings.bots.early", advanced: true, synonyms: ["experimental", "early", "preview", "write their own skills"] },
   { id: "all-bots", page: "bots", labelKey: "settings.page.bots", topFor: ["all bots"] },
@@ -220,6 +220,10 @@ export interface SearchHit {
   score: number;
 }
 
+const PAGE_TOP: Partial<Record<SettingsPageId, readonly string[]>> = {
+  phone: ["phone", "phones", "pair", "pairing", "qr", "phone pairing", "mobile"],
+};
+
 const norm = (text: string) => text.toLocaleLowerCase().replace(/\s+/g, " ").trim();
 
 function score(query: string, label: string, words: readonly string[], topFor: readonly string[]): number {
@@ -243,8 +247,10 @@ export function searchSettings(rawQuery: string, ctx: SettingsContext, label: (e
   const hits: SearchHit[] = [];
   const pages = visiblePages(ctx);
   for (const page of pages) {
-    const value = score(query, pageLabel(page), page.synonyms, []);
-    if (value) hits.push({ entry: { id: `page:${page.id}`, page: page.id, labelKey: page.labelKey }, elsewhere: false, score: value - 1 });
+    // A page named by the word itself ("phone", "pair") comes before its own rows.
+    const top = PAGE_TOP[page.id] ?? [];
+    const value = top.includes(query) ? 101 : score(query, pageLabel(page), page.synonyms, []) - 1;
+    if (value > 0) hits.push({ entry: { id: `page:${page.id}`, page: page.id, labelKey: page.labelKey }, elsewhere: false, score: value });
   }
   for (const entry of SETTINGS_INDEX) {
     const value = score(query, label(entry), entry.synonyms ?? [], entry.topFor ?? []);

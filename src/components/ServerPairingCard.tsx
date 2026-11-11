@@ -10,8 +10,9 @@ import { codeUntil, lastSeen } from "../lib/pairing-time";
 import { revealPhonePairing, takePairOnOpen } from "../lib/phone-pairing";
 import { SettingRow, SettingsGroup, SettingsRows } from "./SettingsPrimitives";
 import { Layer } from "./Layer";
-import { StepRow, StoreButtons } from "./PhoneDevicesSection";
-import { Smartphone } from "lucide-react";
+import { StepRow } from "./PhoneDevicesSection";
+import { StoreLinks } from "./PhoneAppDialog";
+import { Smartphone, X } from "lucide-react";
 import { productName } from "@/lib/brand";
 import { Select } from "./Select";
 import { cn } from "@/lib/cn";
@@ -165,36 +166,43 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     <Layer modal>
       <div role="dialog" aria-modal="true" aria-label={t("phone.pair.dialogTitle", { place: placeName })} data-settings-look="simple" data-pair-dialog="code"
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onMouseDown={(event) => event.target === event.currentTarget && setOffer(null)}>
-        <div className="flex max-h-full w-full max-w-[440px] flex-col gap-4 overflow-y-auto rounded-2xl border-[0.5px] border-(--settings-edge) bg-app p-6 shadow-xl">
-          <div className="text-[16px] font-semibold leading-[22px] text-ink">{t("phone.pair.dialogTitle", { place: placeName })}</div>
+        <div className="relative flex max-h-full w-full max-w-[440px] flex-col gap-4 overflow-y-auto rounded-2xl border-[0.5px] border-(--settings-edge) bg-app p-6 shadow-xl">
+          <button type="button" onClick={() => setOffer(null)} aria-label={t("common.close")}
+            className="ui-icon-button absolute right-3 top-3 size-8 cursor-pointer rounded-full text-ink-secondary hover:bg-menu-hover hover:text-ink">
+            <X size={16} aria-hidden="true" />
+          </button>
+          <div className="pr-8 text-[16px] font-semibold leading-[22px] text-ink">{t("phone.pair.dialogTitle", { place: placeName })}</div>
           {expired ? (
             <p className="text-[13px] leading-[18px] text-ink-secondary">{t("remote.serverPairing.expired")}</p>
           ) : (
-            <div className="flex flex-col items-center gap-4">
+            <div className="flex flex-col items-start gap-4">
               {offer.url ? (
                 <div className="rounded-[12px] border-[0.5px] border-(--settings-edge) bg-white p-3">
                   <QRCodeSVG value={offer.url} size={200} level="M" bgColor="#ffffff" fgColor="#111111" />
                 </div>
               ) : null}
-              <div className="flex flex-col items-center gap-1 text-center">
+              <div className="flex flex-col gap-1" data-pair-instructions="">
+                {offer.url ? <>
+                  <p className="text-[13px] leading-[18px] text-ink">{t("phone.code.scanThis", { app: productName() })}</p>
+                  <p className="text-[12px] leading-4 text-ink-secondary">{t("phone.code.notCamera", { app: productName() })}</p>
+                </> : <p className="text-[13px] leading-[18px] text-ink">{t("phone.code.typeThis", { app: productName() })}</p>}
+              </div>
+              <div className="flex flex-col gap-1">
                 <div className="text-[20px] font-medium leading-7 tracking-[0.08em] text-ink tabular-nums" data-pairing-code="">{offer.code}</div>
                 <div className="text-[12px] leading-4 text-ink-secondary">{codeUntil(offer.expiresAt)}</div>
               </div>
-              <p className="text-center text-[13px] leading-[18px] text-ink-secondary">{t(cloudHome ? "phone.pair.cloudPersonal" : "remote.serverPairing.subtitle", { app: productName() })}</p>
-              {offer.url ? (
-                <button type="button" onClick={() => void copyLink()} className="ui-button">
-                  {t(copied === "copied" ? "remote.serverPairing.copied" : copied === "failed" ? "common.copyFailed" : "remote.serverPairing.copyLink")}
-                </button>
-              ) : (
-                <p className="text-[12px] leading-4 text-ink-secondary">{offer.hint ?? t("remote.serverPairing.noLink")}</p>
-              )}
+              <p className="text-[13px] leading-[18px] text-ink-secondary">{t(cloudHome ? "phone.pair.cloudPersonal" : "remote.serverPairing.subtitle", { app: productName() })}</p>
             </div>
           )}
-          <div className="flex justify-end gap-2">
+          <div className="flex items-center justify-end gap-2">
+            {!expired && offer.url && (
+              <button type="button" onClick={() => void copyLink()} className="ui-button mr-auto">
+                {t(copied === "copied" ? "remote.serverPairing.copied" : copied === "failed" ? "common.copyFailed" : "remote.serverPairing.copyLink")}
+              </button>
+            )}
             {expired && <button type="button" className="ui-button" onClick={() => void create()}>{t("remote.serverPairing.create")}</button>}
             <button type="button" className="ui-button ui-button-primary" onClick={() => setOffer(null)}>{t("devices.pair.done")}</button>
           </div>
-          <p className="text-[12px] leading-4 text-ink-secondary">{t("phone.pair.foot")}</p>
         </div>
       </div>
     </Layer>
@@ -214,7 +222,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   ) : null;
   const pairRow = (
     <StepRow step={listed.length ? 1 : 2} title={t("phone.pair.step")} reason={pairingCodes ? null : t("remote.serverPairing.portalShort")}
-      subtitle={cloudHome ? t("phone.pair.stepLineCloud", { app: productName(), place: placeName }) : t("phone.pair.stepLine", { app: productName() })}>
+      subtitle={t("phone.pair.stepLine", { app: productName() })}>
       {choices}{pairButton}
     </StepRow>
   );
@@ -225,7 +233,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       {listed.length === 0 ? (
         <SettingsGroup label={t("phone.pair.section")} block="pair">
           <SettingsRows icons>
-            {pairingCodes && <StepRow step={1} title={t("phone.pair.getApp")} subtitle={t("phone.pair.getAppLine")}><StoreButtons /></StepRow>}
+            {pairingCodes && <StepRow step={1} title={t("phone.pair.getApp")} subtitle={<StoreLinks />}>{null}</StepRow>}
             {pairRow}
           </SettingsRows>
           {!simple && pairingCodes && !cloudHome && computerName !== null && <SettingsRows><ComputerNameRow saved={computerName} onSaved={setComputerName} className="px-4 py-3" /></SettingsRows>}
@@ -254,7 +262,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
           </SettingsGroup>
           {pairingCodes && (
             <SettingsGroup label={t("phone.pair.getApp")} block="get-app">
-              <SettingsRows><SettingRow title={t("phone.pair.forPhones", { app: productName() })}><StoreButtons /></SettingRow></SettingsRows>
+              <SettingsRows><SettingRow title={t("phone.pair.forPhones", { app: productName() })} subtitle={<StoreLinks />}>{null}</SettingRow></SettingsRows>
             </SettingsGroup>
           )}
         </>

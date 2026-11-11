@@ -1767,6 +1767,18 @@ async function openCloudEntry() {
   return true;
 }
 
+/** "Switch to This computer" from a Cloud's settings: This computer opens, with Settings on the same page. */
+function openComputerSettings(page) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const settings = page ? `/?desktop-settings=${encodeURIComponent(page)}` : "/";
+  if (senderIsLocal({ sender: mainWindow.webContents })) {
+    if (page) mainWindow.webContents.send("app:open-settings", page);
+    return;
+  }
+  persistEnvironments(withActive(environmentsState, LOCAL_ID));
+  navigateMainWindow(`${rendererOrigin()}${settings}`);
+}
+
 function openWorkspaceSettings(computerId) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const id = typeof computerId === "string" ? computerId : null;
@@ -2625,7 +2637,7 @@ const showStartPlace = () => openStartPlace({ home: homeWindow, places: homePlac
 const placeInbox = createPlaceInboxWatch({ places: () => [{ id: LOCAL_ID, local: true }, ...environmentsState.environments.filter(entry => entry.kind !== "local" && entry.origin)], activeId: () => environmentsState.activeId, local: localServerRequest, cloudFetch: (...args) => session.defaultSession.fetch(...args), asleep: origin => homeWindow.asleepAt(origin), shown: () => !desktopRemoteAccess && serverReady && Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()), changed: () => railChanged() });
 const localProfiles = createLocalProfiles({ registry: createProfileRegistry({ dataDir: desktopDataDir }), clean: cleanWorkspace, dataDir: desktopDataDir, allowed: () => app.isPackaged && !desktopRemoteAccess, home: () => (homeWindow.cloudOrigin() ? "cloud" : ownHome?.origin() || cleanWorkspace.marker().frozen ? null : "local"), window: { openProfile: id => homeWindow.openProfile(id), profile: () => homeWindow.profile(), showCloud: () => showHome({ place: "cloud" }) }, showLocal: () => { homeWindow.cancel(); persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(rendererOrigin()); }, onLocal: () => Boolean(mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })), busy: async () => { const said = await (await localServerRequest("/api/move/freeze", { signal: AbortSignal.timeout(5_000) })).json(); return typeof said?.busy === "string" ? { name: said.busy, what: said.what } : null; }, trash: dir => shell.trashItem(dir), reserved: () => nativeT(process.platform === "darwin" ? "rail.thisMac" : "rail.thisPc"), remember: homePlaces.remember, changed: () => railChanged(), log: slog }); const railList = () => { ownHome?.refresh(); const settling = localProfiles.settling(); return railPlaces({ saved: environmentsState, waiting: placeInbox.waiting, home: homeWindow.cloudOrigin() ?? ownHome?.origin() ?? null, mine: myCloud(), state: desktopRemoteAccess ? null : cloudAccount?.state(), offers: entry => !desktopRemoteAccess && ownHome?.offers(entry) === true, accounts: accountRing.waiting(), profiles: localProfiles.places({ activeLocal: environmentsState.activeId === LOCAL_ID }), computerSettling: settling && settling.id === null ? settling.name : null }); };
 // The rail as the window's own chrome (chrome-rail.mjs): this app's page beside every place's page, the one that lists.
-const placeSwitch = createPlaceSwitch({ changed: () => railChanged(), stop: () => homeWindow.stopOpening(), kept: () => homePlaces.remembered(), pageSettled: () => { const page = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null; if (page?.isLoadingMainFrame()) return new Promise(done => { page.once("did-stop-loading", done); page.once("destroyed", done); }); } }); const chromeRail = createChromeRail({ createView: options => new WebContentsView(options), preload: path.join(__dirname, "preload.cjs"), log: slog, prefs: () => desktopPrefs, changed: () => rail.changed(),
+const placeSwitch = createPlaceSwitch({ changed: () => railChanged(), stop: () => homeWindow.stopOpening(), kept: () => homePlaces.remembered(), pageSettled: () => { const page = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null; if (page?.isLoadingMainFrame()) return new Promise(done => { page.once("did-stop-loading", done); page.once("destroyed", done); }); } }); const chromeRail = createChromeRail({ createView: options => new WebContentsView(options), preload: path.join(__dirname, "preload.cjs"), log: slog, prefs: () => desktopPrefs, changed: () => rail.changed(), openComputer: (page) => openComputerSettings(page),
   args: () => [...desktopCompanionRendererArguments(rendererOrigin(), desktopRemoteAccess), ...(app.isPackaged && !desktopRemoteAccess ? ["--omb-company-desktop=1"] : []), `--omb-app-version=${app.getVersion()}`],
   url: () => `${rendererOrigin()}${CHROME_RAIL_PATH}`, wanted: () => !desktopRemoteAccess && (serverReady || placeSwitch.target() !== null) && railList().length > 0 });
 chromeRail.install(ipcMain);

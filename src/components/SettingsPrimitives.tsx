@@ -7,6 +7,8 @@ import { t } from "@/lib/i18n";
 /** True inside the Settings window: every primitive draws the one Settings look (cards with edges, 44/64 px rows). */
 export const SettingsLook = createContext(false);
 
+const InCard = createContext(false);
+
 export const SIMPLE_CARD = "settings-card rounded-[12px] border-[0.5px] border-(--settings-edge) bg-menu";
 
 export function Switch({
@@ -46,6 +48,17 @@ export function Card({
   subtitle?: string;
   children?: React.ReactNode;
 }) {
+  const nested = useContext(InCard);
+  if (useContext(SettingsLook) && nested) {
+    // Never a card in a card: a Card inside another is a titled part of it, set off by a divider.
+    return (
+      <section className="flex flex-col gap-2 border-t-[0.5px] border-(--settings-edge) pt-4 first:border-t-0 first:pt-0" data-settings-subcard="">
+        {title && <h4 className="text-[13px] font-medium leading-[18px] text-ink">{title}</h4>}
+        {subtitle && <p className="text-[13px] leading-[18px] text-ink-secondary">{subtitle}</p>}
+        {children}
+      </section>
+    );
+  }
   if (useContext(SettingsLook)) {
     return (
       <section className="flex flex-col gap-2">
@@ -55,7 +68,7 @@ export function Card({
             {subtitle && <p className="text-[13px] leading-[18px] text-ink-secondary">{subtitle}</p>}
           </div>
         )}
-        {children && <div className={cn(SIMPLE_CARD, "p-4")}>{children}</div>}
+        {children && <div className={cn(SIMPLE_CARD, "flex flex-col gap-4 p-4")}><InCard.Provider value={true}>{children}</InCard.Provider></div>}
       </section>
     );
   }
@@ -75,6 +88,8 @@ export function SettingRow({
   message,
   className,
   tag,
+  leading,
+  inert,
 }: {
   title: string;
   subtitle?: React.ReactNode;
@@ -83,19 +98,31 @@ export function SettingRow({
   className?: string;
   /** a short word after the title, such as Advanced or Early */
   tag?: string;
+  /** the 32 px leading slot of an icon card: a device, a provider, a step */
+  leading?: ReactNode;
+  /** the row applies here but can't be changed from this page: control at 40%, quiet text and the reason under it */
+  inert?: ReactNode;
 }) {
   const titleId = useId();
   if (useContext(SettingsLook)) {
+    const quiet = inert != null && inert !== false;
     return (
-      <div role="group" aria-labelledby={titleId} data-setting-row="" className={cn("flex min-h-11 flex-col justify-center px-4 py-3", className)}>
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-          <div className="flex min-w-[min(100%,15rem)] flex-1 flex-col gap-0.5">
-            <div id={titleId} className="flex items-center gap-1.5 text-[14px] leading-5 text-ink">{title}{tag && <SettingsTag>{tag}</SettingsTag>}</div>
-            {subtitle && <div className="text-[13px] leading-[18px] text-pretty text-ink-secondary">{subtitle}</div>}
+      <div role="group" aria-labelledby={titleId} aria-disabled={quiet || undefined} data-setting-row="" data-settings-inert={quiet ? "" : undefined}
+        className={cn("flex min-h-11 items-center gap-3 px-4 py-3", className)}>
+        {leading !== undefined && <span data-settings-slot="" className="flex size-8 shrink-0 items-center justify-center self-center @max-[480px]/rows:-mt-1.5 @max-[480px]/rows:self-start">{leading}</span>}
+        <div className="flex min-w-0 flex-1 flex-col justify-center">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <div className="flex min-w-[min(100%,7rem)] flex-1 flex-col gap-0.5">
+              <div id={titleId} className={cn("flex items-center gap-1.5 text-[14px] leading-5", quiet ? "text-ink-secondary" : "text-ink")}>{title}{tag && <SettingsTag>{tag}</SettingsTag>}</div>
+              {subtitle && <div className="text-[13px] leading-[18px] text-pretty text-ink-secondary">{subtitle}</div>}
+            </div>
+            {children != null && children !== false && (
+              <div className={cn("ml-auto flex shrink-0 items-center gap-2", quiet && "pointer-events-none opacity-40")} {...(quiet ? { inert: true } : {})}>{children}</div>
+            )}
           </div>
-          {children != null && children !== false && <div className="ml-auto flex shrink-0 items-center gap-2">{children}</div>}
+          {message && <div className="mt-1 text-[12px] leading-4 text-ink-secondary">{message}</div>}
+          {quiet && <div data-settings-reason="" className="mt-1 text-[12px] leading-4 text-ink-secondary">{inert}</div>}
         </div>
-        {message && <div className="mt-1 text-[12px] leading-4 text-ink-secondary">{message}</div>}
       </div>
     );
   }
@@ -108,7 +135,7 @@ export function SettingRow({
         </div>
         <div className="min-w-0 sm:max-w-[240px]">{children}</div>
       </div>
-      {message && <div className="mt-2 text-[12px]">{message}</div>}
+      {(message || inert) && <div className="mt-2 text-[12px]">{message}{inert}</div>}
     </div>
   );
 }
@@ -148,36 +175,72 @@ export function SettingsGroup({ label, block, actions, footnote, description, ch
 }
 
 export function SettingsRows({ children, icons = false }: { children: ReactNode; icons?: boolean }) {
-  return <div data-settings-rows="" data-settings-icons={icons ? "" : undefined} className={cn(SIMPLE_CARD, "flex flex-col overflow-hidden empty:hidden")}>{children}</div>;
+  return <div data-settings-rows="" data-settings-icons={icons ? "" : undefined} className={cn(SIMPLE_CARD, "@container/rows flex flex-col overflow-hidden empty:hidden")}>{children}</div>;
 }
 
 /** A row that goes somewhere: the whole row is the button, with a value and a chevron (an arrow when it leaves Settings). */
-export function SettingsLinkRow({ title, subtitle, value, badge, external = false, onClick, data }: {
+export function SettingsLinkRow({ title, subtitle, value, badge, leading, external = false, onClick, data }: {
   title: string;
   subtitle?: ReactNode;
   value?: ReactNode;
   badge?: ReactNode;
+  /** the 32 px leading slot, in an icon card */
+  leading?: ReactNode;
   external?: boolean;
   onClick: () => void;
   data?: Record<string, string>;
 }) {
   return (
     <button type="button" onClick={onClick} {...data}
-      className="group flex min-h-11 w-full cursor-pointer items-center gap-6 px-4 py-3 text-left transition-colors hover:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none">
+      className="group flex min-h-11 w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none">
+      {leading !== undefined && <span data-settings-slot="" className="flex size-8 shrink-0 items-center justify-center">{leading}</span>}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="text-[14px] leading-5 text-ink">{title}</span>
-        {subtitle && <span className="text-[13px] leading-[18px] text-ink-secondary">{subtitle}</span>}
+        {subtitle && <span className="text-[13px] leading-[18px] text-pretty text-ink-secondary">{subtitle}</span>}
       </span>
-      <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[13px] leading-5 text-ink-secondary">
+      <span className="ml-3 flex shrink-0 items-center gap-1.5 text-[13px] leading-5 text-ink-secondary">
         {badge}
         {value}
         {external ? <ArrowUpRight size={12} aria-hidden="true" className="text-ink-tertiary" />
-          : <ChevronRight size={14} aria-hidden="true" className="text-ink-tertiary rtl:-scale-x-100" />}
+          : <ChevronRight size={14} aria-hidden="true" className="-mr-1 text-ink-tertiary rtl:-scale-x-100" />}
       </span>
     </button>
   );
 }
 
+/** A row that opens more rows in its own card: the chevron turns, and what it reveals joins the card under a divider.
+ * Use it inside SettingsRows; it replaces every native details triangle. */
+export function SettingsFoldRow({ id, title, subtitle, value, leading, open, onToggle, children }: {
+  id: string;
+  title: string;
+  subtitle?: ReactNode;
+  value?: ReactNode;
+  leading?: ReactNode;
+  open: boolean;
+  onToggle: () => void;
+  children?: ReactNode;
+}) {
+  return <>
+    <div data-settings-disclosure={id} data-settings-fold="">
+      <button type="button" aria-expanded={open} onClick={onToggle}
+        className="group flex min-h-11 w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none">
+        {leading !== undefined && <span data-settings-slot="" className="flex size-8 shrink-0 items-center justify-center">{leading}</span>}
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="text-[14px] leading-5 text-ink">{title}</span>
+          {subtitle && <span className="text-[13px] leading-[18px] text-pretty text-ink-secondary">{subtitle}</span>}
+        </span>
+        <span className="ml-3 flex shrink-0 items-center gap-1.5 text-[13px] leading-5 text-ink-secondary">
+          {value}
+          <ChevronRight size={14} aria-hidden="true" className={cn("-mr-1 text-ink-tertiary transition-transform duration-150 motion-reduce:transition-none rtl:-scale-x-100", open && "rotate-90")} />
+        </span>
+      </button>
+    </div>
+    {/* The revealed rows are the card's own rows (each gets the card's divider), so they are not wrapped. */}
+    {open && children}
+  </>;
+}
+
+/** A fold row alone in its own card (no section title): what it opens joins that same card. */
 export function SettingsDisclosureRow({ id, title, subtitle, trailing, block, open, onToggle, children }: {
   id: string;
   title: string;
@@ -188,30 +251,68 @@ export function SettingsDisclosureRow({ id, title, subtitle, trailing, block, op
   onToggle: () => void;
   children: ReactNode;
 }) {
-  const regionId = useId();
   return (
-    <section data-settings-disclosure={id} data-settings-block={block} className="flex scroll-mt-4 flex-col gap-3">
-      <div className={SIMPLE_CARD}>
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={regionId}
-          onClick={onToggle}
-          className="group flex min-h-11 w-full cursor-pointer items-center gap-6 rounded-[12px] px-4 py-3 text-left transition-colors hover:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none"
-        >
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="text-[14px] leading-5 text-ink">{title}</span>
-            {subtitle && <span className="text-[13px] leading-[18px] text-ink-secondary">{subtitle}</span>}
-          </span>
-          <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[13px] leading-5 text-ink-secondary">
-            {trailing}
-            <ChevronRight size={14} aria-hidden="true" className={cn("text-ink-tertiary transition-transform duration-150 motion-reduce:transition-none", open && "rotate-90")} />
-          </span>
-        </button>
-      </div>
-      <div id={regionId} hidden={!open} className="flex flex-col gap-6">{children}</div>
+    <section data-settings-block={block} className="flex scroll-mt-4 flex-col">
+      <SettingsRows>
+        <SettingsFoldRow id={id} title={title} subtitle={subtitle} value={trailing} open={open} onToggle={onToggle}>{children}</SettingsFoldRow>
+      </SettingsRows>
     </section>
   );
+}
+
+/** The 32 px leading slot's circle: an 18 px mark on ink 5%. */
+export function SettingsMark({ children }: { children: ReactNode }) {
+  return <span aria-hidden="true" className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary [&_svg]:size-[18px] [&_img]:size-[18px]">{children}</span>;
+}
+
+/** "● Ready": a 6 px dot before a short status word. */
+export function StatusDot({ tone }: { tone: "success" | "warning" | null }) {
+  if (!tone) return null;
+  return <span aria-hidden="true" className={cn("mr-1.5 inline-block size-1.5 shrink-0 rounded-full align-middle", tone === "success" ? "bg-success" : "bg-warning")} />;
+}
+
+/** One line of plain rows' text when a list has nothing in it yet. */
+export function SettingsEmptyRow({ children }: { children: ReactNode }) {
+  return <div data-settings-empty="" className="flex min-h-11 items-center px-4 py-3 text-[13px] leading-[18px] text-ink-secondary">{children}</div>;
+}
+
+/** A stacked field: a 13/18 500 label 6 above a 32 px field (the label holds the field, so it names it). */
+export function SettingsField({ label, children, hint }: { label: ReactNode; children: ReactNode; hint?: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5" data-settings-field="">
+      <label className="flex flex-col gap-1.5">
+        <span className="text-[13px] font-medium leading-[18px] text-ink">{label}</span>
+        {children}
+      </label>
+      {hint && <div className="text-[12px] leading-4 text-ink-secondary">{hint}</div>}
+    </div>
+  );
+}
+export const SETTINGS_INPUT = "h-8 w-full rounded-lg border-[0.5px] border-(--settings-edge) bg-app px-2.5 text-[13px] leading-5 text-ink outline-none placeholder:text-ink-tertiary focus:border-ink/25 focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-focus disabled:opacity-40";
+export const SETTINGS_INLINE_INPUT = "h-7 w-20 rounded-lg border-[0.5px] border-(--settings-edge) bg-app px-2 text-right text-[13px] leading-5 tabular-nums text-ink outline-none focus:border-ink/25 focus-visible:outline-2 focus-visible:outline-focus disabled:opacity-40";
+
+/** The one segmented control: a 28 px pill track; the chosen part is a card-coloured pill with an edge. */
+export function Segmented<T extends string>({ value, options, onChange, label }: {
+  value: T; options: Array<{ value: T; label: string }>; onChange: (value: T) => void; label: string;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} data-settings-segmented="" className="inline-flex h-7 items-center rounded-full bg-ink/[0.05] p-0.5">
+      {options.map((option) => (
+        <button key={option.value} type="button" role="radio" aria-checked={value === option.value} onClick={() => onChange(option.value)}
+          className={cn("h-6 cursor-pointer rounded-full px-3 text-[13px] leading-5 transition-colors focus-visible:outline-2 focus-visible:outline-focus",
+            value === option.value ? "bg-menu font-medium text-ink shadow-[inset_0_0_0_0.5px_var(--settings-edge)]" : "text-ink-secondary hover:text-ink")}>
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Learn more, as a link at the end of a description. */
+export function LearnMore({ onClick, href, label }: { onClick?: () => void; href?: string; label?: string }) {
+  const text = label ?? t("settings.learnMore");
+  if (href) return <a href={href} target="_blank" rel="noreferrer" className="text-accent-text hover:underline focus-visible:underline">{text}</a>;
+  return <button type="button" onClick={onClick} className="cursor-pointer text-accent-text hover:underline focus-visible:underline">{text}</button>;
 }
 
 export function CommandLine({ command, copyLabel = "Copy command" }: { command: string; copyLabel?: string }) {

@@ -280,13 +280,13 @@ describe("Get the phone app", () => {
   };
   const to = (key: string, subtitle: string): PhoneAppConnect => ({ key, subtitle, onSelect: () => {} });
 
-  it("draws a code to scan for each, and points on to Connect your phone where this window can pair", () => {
+  it("links each store in words, with no code to scan (the pairing code is the only one), and points on to Connect your phone where this window can pair", () => {
     const html = render([to("here", "to this computer")]);
     expect(html).toContain('data-phone-app="ios"');
     expect(html).toContain('data-phone-app="android"');
-    expect(html.match(/<svg/g)?.length).toBe(2);
-    expect(html).toContain("Open in the App Store");
-    expect(html).toContain("Download the APK");
+    expect(html.match(/<svg/g)).toBeNull();
+    expect(html).toMatch(/data-phone-app="ios"[^>]*>App Store</);
+    expect(html).toMatch(/data-phone-app="android"[^>]*>Android</);
     expect(html).toContain("Connect your phone");
     expect(html).toContain("to this computer");
     expect(render()).not.toContain("Connect your phone");
@@ -315,10 +315,10 @@ describe("profileMenuItems", () => {
     ...patch,
   });
 
-  it("starts with your account, then Phone & devices and Settings, Plan & billing and Help", () => {
+  it("starts with your account, then Phone & devices and Settings, then Plan & billing and Help after a divider", () => {
     const items = build();
     expect(items.map((item) => item.key)).toEqual(["account", "phone-devices", "settings", "plan", "support"]);
-    expect(items.filter((item) => item.separatorBefore).map((item) => item.key)).toEqual(["phone-devices"]);
+    expect(items.filter((item) => item.separatorBefore).map((item) => item.key)).toEqual(["phone-devices", "plan"]);
     expect(items.find((item) => item.key === "support")!.submenu!.map((item) => item.key)).toEqual(["help", "shortcuts", "feedback", "about"]);
     expect(items[0]).toMatchObject({ label: "Ada Lovelace", subtitle: "Pro · ada@example.com", large: true, chevron: true });
   });
@@ -475,8 +475,8 @@ describe("Simple mode's account menu", () => {
 
   it("puts the move's row first in Advanced's account menu too, under its own divider", () => {
     const move = [{ key: "cloud-move", label: "Moving to My Cloud…", title: "Moving your bots to My Cloud… 34 of 120 chats", onSelect: noop }];
-    expect(groups(build({ simple: undefined, move }))).toEqual([["cloud-move"], ["account"], ["phone-devices", "settings", "plan", "support"]]);
-    expect(groups(build({ simple: undefined }))).toEqual([["account"], ["phone-devices", "settings", "plan", "support"]]);
+    expect(groups(build({ simple: undefined, move }))).toEqual([["cloud-move"], ["account"], ["phone-devices", "settings"], ["plan", "support"]]);
+    expect(groups(build({ simple: undefined }))).toEqual([["account"], ["phone-devices", "settings"], ["plan", "support"]]);
   });
 
   it("draws a person instead of a question mark for someone with no name, at the trigger's own size", () => {

@@ -40,10 +40,12 @@ async function render() {
   await act(async () => root.render(createElement(VaultSettings)));
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 }
-const button = (label: string) => [...host.querySelectorAll("button")].find((candidate) => (candidate.getAttribute("aria-label") ?? candidate.textContent) === label)!;
+const button = (label: string) => [...document.body.querySelectorAll("button")].find((candidate) => (candidate.getAttribute("aria-label") ?? candidate.textContent) === label)!;
+/** The password manager's token is asked for in a small dialog over Settings. */
+const inDialog = (label: string) => [...document.body.querySelectorAll("[data-settings-dialog] button")].find((candidate) => candidate.textContent === label) as HTMLButtonElement;
 async function click(label: string) { await act(async () => button(label).click()); }
 async function type(name: string, value: string) {
-  const input = host.querySelector<HTMLInputElement>(`input[name="${name}"]`)!;
+  const input = document.body.querySelector<HTMLInputElement>(`input[name="${name}"]`)!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
     input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -143,11 +145,13 @@ describe("Settings → Vault: logins", () => {
       .mockResolvedValueOnce({ onePassword: OFF })
       .mockResolvedValueOnce({ logins: [], onePassword: OFF });
     await render();
-    expect(host.querySelector("[data-onepassword]")!.textContent).toContain("create a service account that can read one vault only");
-    const field = host.querySelector<HTMLInputElement>('input[name="onePasswordToken"]')!;
+    expect(host.querySelector('input[name="onePasswordToken"]'), "no token field on the page itself").toBeNull();
+    await click("Connect 1Password");
+    expect(document.body.querySelector("[data-settings-dialog]")!.textContent).toContain("create a service account that can read one vault only");
+    const field = document.body.querySelector<HTMLInputElement>('input[name="onePasswordToken"]')!;
     expect(field.type).toBe("password");
     await type("onePasswordToken", "ops_fake-typed-token");
-    await click("Connect 1Password");
+    await act(async () => inDialog("Connect 1Password").click());
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/1password", { method: "POST", body: JSON.stringify({ token: "ops_fake-typed-token" }) });
     expect(host.querySelector("[data-onepassword]")!.textContent).toContain("Connected to Shared with OMB · 1 logins, keys and secrets");
@@ -158,7 +162,8 @@ describe("Settings → Vault: logins", () => {
     await click("Disconnect");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(fixture.api).toHaveBeenNthCalledWith(4, "/api/logins/1password", { method: "DELETE" });
-    expect(host.querySelector<HTMLInputElement>('input[name="onePasswordToken"]')!.value).toBe("");
+    await click("Connect 1Password");
+    expect(document.body.querySelector<HTMLInputElement>('input[name="onePasswordToken"]')!.value).toBe("");
   });
 
   it("keeps a 1Password vault to the bots chosen for it, on the same screen", async () => {
@@ -185,8 +190,9 @@ describe("Settings → Vault: logins", () => {
   it("says why 1Password refused a token", async () => {
     fixture.api.mockResolvedValueOnce({ logins: [], onePassword: OFF }).mockRejectedValueOnce(new Error("1Password did not accept the token."));
     await render();
-    await type("onePasswordToken", "ops_fake-wrong");
     await click("Connect 1Password");
+    await type("onePasswordToken", "ops_fake-wrong");
+    await act(async () => inDialog("Connect 1Password").click());
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(host.querySelector("[data-onepassword] [role=alert]")!.textContent).toBe("1Password did not accept the token.");
   });

@@ -59,7 +59,7 @@ export function SettingsPageHeader({ page, ctx, place, scrolled, narrow, missing
   const intro = INTRO[page.id];
   const title = page.id === "account" ? t("settings.page.account") : pageLabel(page, place, ctx.desktop);
   return (
-    <header data-settings-header="" className={cn("sticky top-0 z-10 flex flex-col gap-1 bg-(--settings-sheet) pb-5", narrow ? "px-4 pt-1" : "pt-4",
+    <header data-settings-header="" className={cn("sticky top-0 z-10 flex flex-col gap-1 bg-(--settings-sheet) pb-5", narrow ? "px-8 pt-1" : "pl-4 pt-4",
       scrolled && "shadow-[0_0.5px_0_var(--settings-edge)]")}>
       {!narrow && <h2 id="settings-page-title" className="truncate pr-12 text-[18px] font-semibold leading-6 tracking-[-0.01em] text-ink">{title}</h2>}
       <ScopeLine page={page} ctx={ctx} place={place} />

@@ -11,14 +11,15 @@ import type { LocaleKey } from "@/locales";
 import { AccountsSheet } from "./AccountMenu";
 import { Card, SettingRow, SettingsGroup, SettingsLinkRow, SettingsRows } from "./SettingsPrimitives";
 import { productName } from "@/lib/brand";
-import { ProCompareRow } from "./ProIntroduction";
-import { CloudCancelPlan, type CloudRenewalActions } from "./CloudCancelPlan";
+import { type CloudRenewalActions } from "./CloudCancelPlan";
+import { CancelPlanRow, KeepPlanButton, endedLine, planLayout, planTitle } from "./settings/plan-parts";
+import type { UpgradeUi } from "./CloudUsageMeter";
+import type { CloudUsage } from "../../electron/cloud-home.mjs";
 import { StagingMark } from "./cloud-buy/parts";
 import { CloudSetupSteps } from "./CloudSetupSteps";
 import { useCloudSendNotice } from "./CloudSendStrip";
 import { OpenFilesButton } from "./OpenFilesButton";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
-import { PausedBotsButton } from "./AwakeBotsPicker";
 
 export { cloudPlanLabel };
 
@@ -61,6 +62,14 @@ function cloudHomeCard({ machine, busy, failed, onConnect, trial = false, waking
     : machine.status === "provisioning" && machine.setup?.slow ? t("cloudHome.slow")
     : team && machine.status === "provisioning" ? t("cloudHome.team.provisioning") : t(MACHINE_TEXT[machine.status]));
   const label = team?.name ? t("cloudBuy.setup.open", { name: team.name }) : t("settings.plan.openCloud", { place: t("cloudSetup.myCloud") });
+  if (connectable && !moving) {
+    // A Cloud that can open is one link row: its state as the value, the row the way in.
+    return <div data-cloud-home={machine.status} data-cloud-team={team ? true : undefined} data-cloud-waking={waking ? true : undefined} className="contents">
+      <SettingsLinkRow title={label} subtitle={team?.name ? t("cloudHome.team.ready", { name: team.name }) : t("settings.plan.cloudReadyLine")}
+        value={t(waking ? "settings.plan.cloudWaking" : "settings.plan.cloudReady")} external onClick={() => { if (!busy) onConnect(); }} data={{ "data-plan-open-cloud": "" }} />
+      {failed && <p role="alert" className="px-4 pb-3 text-[12px] leading-4 text-danger">{t("cloudHome.connectFailed")}</p>}
+    </div>;
+  }
   return <div data-cloud-home={machine.status} data-cloud-team={team ? true : undefined} data-cloud-unreachable={unreachable?.cause} data-cloud-waking={waking && connectable ? true : undefined} data-cloud-moving={moving && !unreachable ? true : undefined}>
     <SettingRow title={team ? team.name ?? t("cloudHome.team.title") : t("cloudSetup.myCloud")} subtitle={<p role="status">{text}</p>}
       message={<>
@@ -111,7 +120,7 @@ function dashboardLabel(account: CloudAccountState, view: CloudPlanView): string
   return t("cloudAccount.dashboard");
 }
 
-export function CloudPlanOnCloud({ bridge, onConnectPhone }: { bridge: CloudPlanBridge; onConnectPhone?: () => void }) {
+export function CloudPlanOnCloud({ bridge, usage = null, upgrade }: { bridge: CloudPlanBridge; usage?: CloudUsage | null; upgrade?: UpgradeUi }) {
   const [plan, setPlan] = useState<CloudPlanSnapshot | null>(null), [failed, setFailed] = useState(false), [refused, setRefused] = useState(false);
   const [reads, setReads] = useState(0);
   useEffect(() => {
@@ -121,31 +130,27 @@ export function CloudPlanOnCloud({ bridge, onConnectPhone }: { bridge: CloudPlan
   }, [bridge, reads]);
   const renewal: CloudRenewalActions | null = bridge.cancel && bridge.keep ? { cancel: survey => bridge.cancel!(survey), keep: () => bridge.keep!() } : null;
   if (refused) {
-    return <Card title={t("settings.section.cloudAccount")}>
-      <p data-cloud-plan="elsewhere" className="text-[13px] text-ink-secondary">{t("cloudAccount.onCloudNone")}</p>
-    </Card>;
+    return <SettingsGroup label={t("settings.simple.billing.plan")} block="plan"><SettingsRows>
+      <div data-cloud-plan="elsewhere" className="contents"><SettingRow title={t("cloudAccount.onCloudNone")}>{null}</SettingRow></div>
+    </SettingsRows></SettingsGroup>;
   }
   const label = cloudPlanLabel(plan?.tier);
-  const home = plan?.home === true;
-  const line = plan?.status === "paid" ? t(trialRunning(plan.trial) ? "cloudAccount.trialPlan" : "cloudAccount.pro", { plan: label }) : plan?.status === "attention" ? t("cloudAccount.inactive", { plan: plan.tier ? label : "MausBot Cloud" })
-    : plan?.status === "checking" ? t("cloudAccount.lastPlan", { plan: label }) : plan?.status === "signin" ? (plan.tier ? t("cloudAccount.planName", { plan: label }) : null)
-      : plan ? t(home ? "cloudAccount.onCloudNoneHome" : "cloudAccount.onCloudNone") : null;
+  const cancelled = plan?.renewal?.cancelled === true;
+  const title = plan?.status === "paid" ? planTitle(label, plan.renewal, trialRunning(plan.trial))
+    : plan?.status === "attention" ? t("cloudAccount.inactive", { plan: plan.tier ? label : t("settings.simple.billing.plan") })
+    : plan?.status === "checking" ? t("cloudAccount.lastPlan", { plan: label }) : plan?.status === "signin" && plan.tier ? t("cloudAccount.planName", { plan: label })
+    : plan ? t(plan.home === true ? "cloudAccount.onCloudNoneHome" : "cloudAccount.onCloudNone") : t("cloudAccount.loading");
   const act = (action: () => Promise<void>) => { setFailed(false); void action().catch(() => setFailed(true)); };
-  return <Card title={t("settings.section.cloudAccount")} subtitle={t(home ? "cloudAccount.onCloudHome" : "cloudAccount.onCloud")}>
-    <div data-cloud-plan={plan?.status ?? "loading"} className="flex flex-col items-start gap-3">
-      {line ? <p role="status" className="text-[15px] font-medium text-ink">{line}</p> : !plan && <p role="status" className="text-[13px] text-ink-secondary">{t("cloudAccount.loading")}</p>}
-      {plan?.status === "signin" && <p className="text-[13px] text-ink-secondary">{t("cloudAccount.onCloudSignIn")}</p>}
-      {trialLines(plan?.trial, plan?.credit)}
-      <div className="flex flex-wrap gap-2">
-        {plan?.status === "signin" && bridge.signIn && <button type="button" className="ui-button ui-button-primary" onClick={() => act(() => bridge.signIn!())}>{t("cloudAccount.signInAgain")}</button>}
-        <button type="button" className="ui-button" onClick={() => act(() => bridge.manage())}>{(plan?.trial && !plan.renewal?.cancelled && cloudTrialView(plan.trial).action?.label) || t("cloudAccount.manageInBrowser")}</button>
-        {plan && onConnectPhone && <button type="button" className="ui-button" onClick={onConnectPhone}>{t("cloudPhone.action")}</button>}
-        <PausedBotsButton />
-      </div>
-      {plan?.renewal && <CloudCancelPlan renewal={plan.renewal} actions={renewal} onChanged={() => setReads(count => count + 1)} />}
-      {failed && <p role="alert" className="text-[13px] text-danger">{t("cloudAccount.actionFailed")}</p>}
-    </div>
-  </Card>;
+  const primary = plan?.status === "signin" && bridge.signIn
+    ? <button type="button" className="ui-button ui-button-primary" onClick={() => act(() => bridge.signIn!())}>{t("cloudAccount.signInAgain")}</button>
+    : cancelled && renewal ? <KeepPlanButton actions={renewal} onChanged={() => setReads((count) => count + 1)} />
+    : plan ? <button type="button" className="ui-button ui-button-primary" data-plan-manage="" onClick={() => act(() => bridge.manage())}>{(plan.trial && !plan.renewal?.cancelled && cloudTrialView(plan.trial).action?.label) || t("settings.plan.manage")}</button> : null;
+  return <div data-cloud-plan={plan?.status ?? "loading"} className="contents">
+    {planLayout({ title, primary, usage, upgrade,
+      subtitle: plan?.status === "signin" ? t("cloudAccount.onCloudSignIn") : cancelled && plan?.renewal ? endedLine(plan.renewal) : undefined,
+      message: <>{trialLines(plan?.trial, plan?.credit)}{failed && <p role="alert" className="text-danger">{t("cloudAccount.actionFailed")}</p>}</>,
+      cancel: plan?.renewal && renewal ? <CancelPlanRow renewal={plan.renewal} actions={renewal} onChanged={() => setReads((count) => count + 1)} /> : undefined })}
+  </div>;
 }
 
 /** Security: the public native snapshot carries no credential and cannot activate a plan. */
@@ -162,9 +167,11 @@ export function TeamPeopleCard({ team }: { team: { name: string; cloudPage?: str
 
 /** One MausBot account, shown as two pages: `account` (who is signed in, sign in and out) and `plan` (the plan, its Cloud
  * and cancelling it). */
-export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamHome, onConnectPhone, onAddCloud, onSignIn, part = "plan", advanced = true }: {
-  linkRequest?: number; cloudHome?: boolean; teamHome?: { name: string; cloudPage?: string }; onConnectPhone?: () => void; onAddCloud?: () => void; onSignIn?: () => void;
+export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamHome, onAddCloud, onSignIn, part = "plan", advanced = true, usage = null, upgrade }: {
+  linkRequest?: number; cloudHome?: boolean; teamHome?: { name: string; cloudPage?: string }; onAddCloud?: () => void; onSignIn?: () => void;
   part?: "account" | "plan"; advanced?: boolean;
+  /** Plan & billing's This week, from the plan bridge */
+  usage?: CloudUsage | null; upgrade?: UpgradeUi;
 } = {}) {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudAccount;
   const { platform } = useDesktopCapabilities().capabilities.host;
@@ -229,7 +236,7 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamH
     const plan = window.ogb?.remoteClient?.active || !cloudHome ? undefined : window.ogb?.cloudPlan;
     if (part === "account") return null;
     return cloudHome && teamHome ? null
-      : plan ? <CloudPlanOnCloud bridge={plan} onConnectPhone={onConnectPhone} /> : <p className="px-4 text-[13px] text-ink-secondary">{t("cloudAccount.desktopOnly")}</p>;
+      : plan ? <CloudPlanOnCloud bridge={plan} usage={usage} upgrade={upgrade} /> : <p className="px-4 text-[13px] text-ink-secondary">{t("cloudAccount.desktopOnly")}</p>;
   }
   const view = cloudPlanView(account);
   const signed = account && ["connected", "unavailable", "reauth-required"].includes(account.status);
@@ -279,28 +286,30 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamH
     </>;
   }
 
+  const cancelled = account?.status === "connected" && account.renewal?.cancelled === true;
   const primary = signedOut || (view.kind === "free" && buyOfferAllowed(view))
     ? onAddCloud && buyOfferAllowed(view) && <button type="button" disabled={busy} className="ui-button ui-button-primary" data-plan-add="" onClick={onAddCloud}>{startLabel}</button>
     : view.kind === "reauth"
       ? <button type="button" disabled={busy} className="ui-button ui-button-primary" onClick={() => void perform(() => bridge.signInAgain())}>{t("cloudAccount.signInAgain")}</button>
-      : signed && <button type="button" disabled={busy} className="ui-button ui-button-primary" onClick={() => void perform(() => bridge.openDashboard())}>{view.kind === "free" ? t("cloudAccount.dashboard") : dashboardLabel(account, view)}</button>;
+      : cancelled && renewal ? <KeepPlanButton actions={renewal} onChanged={() => void perform(() => bridge.state())} />
+      : signed && <button type="button" disabled={busy} className="ui-button ui-button-primary" data-plan-manage="" onClick={() => void perform(() => bridge.openDashboard())}>{view.kind === "free" ? t("cloudAccount.dashboard") : dashboardLabel(account, view)}</button>;
+  const title = !account || view.kind === "unknown" ? t("cloudAccount.loading")
+    : view.kind === "signed-out" ? t("cloudAccount.free")
+    : view.kind === "paid" && account.status === "connected" ? planTitle(view.label, account.renewal, trialRunning(account.trial))
+    : line ?? t("settings.simple.billing.plan");
   return <>
-    <SettingsGroup label={t("settings.simple.billing.plan")} block="plan" footnote={moneyBack}>
-      <SettingsRows>
-        {(!account || view.kind === "unknown") && <SettingRow title={t("cloudAccount.loading")}>{null}</SettingRow>}
-        {view.kind === "signed-out" && <SettingRow title={t("cloudAccount.free")} subtitle={t("settings.plan.offer")}>{primary}</SettingRow>}
-        {signed && <SettingRow title={line ?? t("settings.simple.billing.plan")}
-          subtitle={view.kind === "paid" && view.checking ? t("cloudAccount.checking") : message ?? undefined}
-          message={<>{account.staging && <StagingMark className="mb-1" />}{account.status === "connected" ? trialLines(account.trial, account.credit) : null}</>}>{primary}</SettingRow>}
-        <ProCompareRow />
+    {planLayout({ title, primary: primary || undefined, usage, upgrade, footnote: moneyBack,
+      subtitle: view.kind === "signed-out" ? t("settings.plan.offer") : cancelled && account?.status === "connected" && account.renewal ? endedLine(account.renewal)
+        : view.kind === "paid" && view.checking ? t("cloudAccount.checking") : message ?? undefined,
+      message: signed ? <>{account.staging && <StagingMark className="mb-1" />}{account.status === "connected" ? trialLines(account.trial, account.credit) : null}</> : undefined,
+      links: <>
         {signedOut && <SettingsLinkRow title={t("settings.plan.haveOne")} onClick={() => onSignIn ? onSignIn() : void perform(() => bridge.begin())} />}
         {machine && (onTeamPlan
           ? cloudHomeCard({ machine, busy, failed: homeFailed, onConnect: () => { if (team) openTeam(team.id); }, team: { name: team?.name ?? null } })
           : cloudHomeCard({ machine, busy, failed: homeFailed, onConnect: connectHome, trial: Boolean(account?.trial), waking: account?.waking === true, moving }))}
-        {signed && account.status === "connected" && account.renewal && <div className="px-4 py-3"><CloudCancelPlan renewal={account.renewal} actions={renewal} /></div>}
-      </SettingsRows>
-      {errorLine}
-    </SettingsGroup>
+      </>,
+      cancel: signed && account.status === "connected" && account.renewal && renewal ? <CancelPlanRow renewal={account.renewal} actions={renewal} onChanged={() => void perform(() => bridge.state())} /> : undefined })}
+    {errorLine}
     {phoneFailed && <p role="alert" className="px-4 text-[12px] text-danger">{t("cloudPhone.failed")}</p>}
   </>;
 }

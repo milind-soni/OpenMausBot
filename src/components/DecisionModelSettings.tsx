@@ -5,7 +5,7 @@ import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { Card, SettingRow, Switch } from "./SettingsPrimitives";
+import { Card, SettingRow, SettingsTag, Switch } from "./SettingsPrimitives";
 import { Select } from "./Select";
 import { WorkersAiKeyCard } from "./WorkersAiKeyCard";
 import { openKeySettings } from "./keys/key-focus";
@@ -360,9 +360,7 @@ export function DecisionModelSettings() {
           {COMING_SOON.map((label) => (
             <li key={label} data-testid="decider-coming-soon" aria-disabled="true" className="flex items-center justify-between gap-4 border-t border-hairline/40 py-2 opacity-50">
               <span className="text-[13px] text-ink-secondary">{t(label)}</span>
-              <span className="rounded bg-control px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-secondary">
-                {t("decider.jobs.comingSoon")}
-              </span>
+              <SettingsTag>{t("decider.jobs.comingSoon")}</SettingsTag>
             </li>
           ))}
         </ul>

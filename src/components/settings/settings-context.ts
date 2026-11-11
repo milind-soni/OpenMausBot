@@ -62,7 +62,7 @@ export interface OtherPlace {
 
 /** The person's other places, in rail order: from the rail where this page has it, else from this computer's list of
  * environments (the window's own rail keeps its list to itself). */
-export function useOtherPlaces(): OtherPlace[] {
+export function useOtherPlaces(page?: string): OtherPlace[] {
   const { places } = usePlaces();
   const [listed, setListed] = useState<OtherPlace[]>([]);
   const environments = typeof window === "undefined" || window.ogb?.remoteClient?.active ? undefined : window.ogb?.environments;
@@ -86,6 +86,11 @@ export function useOtherPlaces(): OtherPlace[] {
     return places.filter((place) => !place.active).map((place) => ({
       key: place.id, name: place.name, kind: place.kind, color: place.color ?? null, open: () => void open?.(place.id),
     }));
+  }
+  // A Cloud's page in the desktop window can't read the rail's list, but This computer is always on it.
+  const openComputer = typeof window === "undefined" || window.ogb?.remoteClient?.active ? undefined : window.ogb?.rail?.openComputer;
+  if (listed.length === 0 && openComputer && !pageIsThisComputer()) {
+    return [{ key: "computer", name: t("rail.thisComputer"), kind: "computer", color: null, open: () => void openComputer(page).catch(() => {}) }];
   }
   return listed;
 }

@@ -1637,9 +1637,11 @@ body {
 }
 /* On a phone Settings is a sheet: it fills the width, rises from the bottom and rounds only its top corners. */
 @media (max-width: 767.98px) {
+  /* The window's rail of places is a view of its own drawn over this page's left edge: the sheet starts beside it, and
+     below the window's top bar where the window draws one. */
   .glass-popup-frame[data-settings-sheet] {
     align-items: flex-end;
-    padding: 12px 0 0;
+    padding: var(--settings-narrow-top, 12px) 0 0 var(--rail-beside, 0px);
   }
   .glass-popup-frame[data-settings-sheet] > .glass-popup {
     width: 100%;
@@ -1765,16 +1767,28 @@ body {
 [data-settings-look] .settings-quiet:enabled:hover { color: var(--color-ink); background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
 [data-settings-look] .settings-quiet[data-danger]:enabled:hover { color: var(--color-danger); }
 /* Rows in a card part with a hairline that starts where their text starts: 16 in, 60 in a card whose rows lead with an icon. */
-[data-settings-rows] > :not([hidden]) ~ :not([hidden]) {
+/* A row wrapped in a `display: contents` element (for a data hook) parts from the one above all the same. */
+[data-settings-rows] > :not([hidden]) ~ :not([hidden], .contents),
+[data-settings-rows] > :not([hidden]) ~ .contents > :first-child {
   background-image: linear-gradient(var(--settings-edge), var(--settings-edge));
   background-repeat: no-repeat;
   background-size: calc(100% - 32px) 0.5px;
   background-position: 16px 0;
 }
-[data-settings-rows][data-settings-icons] > :not([hidden]) ~ :not([hidden]) {
+[data-settings-rows][data-settings-icons] > :not([hidden]) ~ :not([hidden], .contents),
+[data-settings-rows][data-settings-icons] > :not([hidden]) ~ .contents > :first-child {
   background-size: calc(100% - 76px) 0.5px;
   background-position: 60px 0;
 }
+/* Narrow Midnight remaps the app's surfaces for the phone layout; Settings keeps the desktop sheet and card colours. */
+@media (max-width: 767.98px) {
+  :root[data-skin="midnight"] [data-settings-look] {
+    --color-app: #121212;
+    --color-menu: #1f1f1f;
+  }
+}
+/* Descriptions wrap without leaving one word alone on a line. */
+[data-settings-look] :is(p, span, div) { text-wrap: pretty; }
 [data-settings-highlight] {
   animation: settings-highlight 1.2s ease-out;
 }

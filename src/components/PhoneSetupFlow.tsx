@@ -1046,6 +1046,12 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
           <QRCodeSVG value={c.pairingLink} size={180} level="M" bgColor="#ffffff" fgColor="#111111" />
         </div>
       )}
+      {!c.pairingExpired && c.pairingLink && (
+        <>
+          <p className="mt-3 text-[13px] leading-[18px] text-ink">{t("phone.code.scanThis", { app: productName() })}</p>
+          <p className="mt-1 text-[12px] leading-4 text-ink-secondary">{t("phone.code.notCamera", { app: productName() })}</p>
+        </>
+      )}
       {!c.pairingExpired && manualCodeMode === "direct" && c.state?.pairing && (
         <div className="mt-4 w-full max-w-[320px] rounded-xl bg-inset px-4 py-3 text-[13px] text-ink-secondary">
           <div>{t("phone.code.typeIntro", { app: productName() })}</div>

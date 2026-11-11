@@ -76,7 +76,7 @@ describe("pairing devices from a hosted server's settings", () => {
     const cloud = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: admin, cloudHome: true, placeName: "My Cloud" }));
     expect(cloud).toContain(">Pair a phone<");
     expect(cloud).not.toContain("Chat and approvals only");
-    expect(cloud).toContain("My Cloud is always on.");
+    expect(cloud, "the nav already says Always on; step 2 says only what to do").toContain("Then scan the pairing code with the MausBot app.");
     const elsewhere = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: admin }));
     expect(elsewhere).toContain("Chat and approvals only");
     const devices = [

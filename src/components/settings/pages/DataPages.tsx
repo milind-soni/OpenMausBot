@@ -35,8 +35,8 @@ export function DataPage() {
     <MoveSection />
     <SettingsGroup label={t("settings.data.storage")} block="storage">
       <SettingsRows><AttachmentStorageSettings /></SettingsRows>
-      {ctx.advanced && <ThreadCleanupSettings />}
     </SettingsGroup>
+    {ctx.advanced && <ThreadCleanupSettings />}
     {!ctx.desktop && ctx.admin && <SettingsGroup label={t("settings.section.activity")} block="activity"><ActivitySection /></SettingsGroup>}
   </>;
 }

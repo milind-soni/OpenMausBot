@@ -179,7 +179,10 @@ export function SidebarPopoverMenu({
   triggerTour,
   onOpenChange,
   renderTrigger,
+  width,
 }: {
+  /** a fixed width (the account menu's 272) in place of the content's */
+  width?: number;
   placement?: "above" | "below";
   align?: "start" | "end";
   items: SidebarMenuItem[];
@@ -266,7 +269,12 @@ export function SidebarPopoverMenu({
       const trigger = triggerRef.current, menu = menuRef.current;
       if (!trigger || !menu) return;
       const viewport = { width: window.innerWidth, height: window.innerHeight };
-      if (anchored) setPosition(anchoredMenuPosition(trigger.getBoundingClientRect(), { width: menu.offsetWidth, height: menu.offsetHeight }, viewport, isRtl(trigger), align));
+      // The window's rail of places is drawn over the page's left edge: a menu never opens under it.
+      const rail = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--rail-beside")) || 0;
+      if (anchored) {
+        const at = anchoredMenuPosition(trigger.getBoundingClientRect(), { width: menu.offsetWidth, height: menu.offsetHeight }, viewport, isRtl(trigger), align);
+        setPosition({ ...at, left: Math.max(at.left, rail + EDGE_MARGIN) });
+      }
       const sub = subRef.current, row = subRowRef.current;
       if (sub && row) {
         setSubPosition(submenuPosition(menu.getBoundingClientRect(), row.getBoundingClientRect(), { width: sub.offsetWidth, height: sub.offsetHeight }, viewport, isRtl(trigger)));
@@ -357,7 +365,7 @@ export function SidebarPopoverMenu({
       onKeyDown={(event) => onMenuKey(event, false)}
       onPointerMove={(event) => intent.move({ x: event.clientX, y: event.clientY }, Boolean(submenu && subRowRef.current?.contains(event.target as Node)))}
       onPointerLeave={() => intent.leaveMenu()}
-      style={anchored ? { position: "fixed", left: position?.left ?? 0, top: position?.top ?? 0, minWidth: MENU_MIN_WIDTH, width: "max-content", maxWidth: `min(${MENU_MAX_WIDTH}px, calc(100vw - ${EDGE_MARGIN * 2}px))`, maxHeight: `calc(100vh - ${EDGE_MARGIN * 2}px)`, visibility: position ? undefined : "hidden" } : undefined}
+      style={anchored ? { position: "fixed", left: position?.left ?? 0, top: position?.top ?? 0, minWidth: width ? undefined : MENU_MIN_WIDTH, width: width ? `min(${width}px, calc(100vw - var(--rail-beside, 0px) - ${EDGE_MARGIN * 2}px))` : "max-content", maxWidth: width ? undefined : `min(${MENU_MAX_WIDTH}px, calc(100vw - ${EDGE_MARGIN * 2}px))`, maxHeight: `calc(100vh - ${EDGE_MARGIN * 2}px)`, visibility: position ? undefined : "hidden" } : undefined}
       className={cn(
         sheetClass,
         anchored ? "z-[60] overflow-y-auto" : "absolute z-40",

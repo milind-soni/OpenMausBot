@@ -38,7 +38,7 @@ beforeEach(() => {
 describe("Phone & devices", () => {
   it("with nothing paired and no way in on, shows one task: get the app, then pair, with the ways in folded into one row", () => {
     const html = page(true);
-    expect(html).toMatch(/Pair a phone[\s\S]*?data-step-row="1"[\s\S]*?Get the app[\s\S]*?Get for iPhone[\s\S]*?Get for Android[\s\S]*?data-step-row="2"[\s\S]*?Pair[\s\S]*?Then scan the pairing code with the MausBot app\./);
+    expect(html).toMatch(/Pair a phone[\s\S]*?data-step-row="1"[\s\S]*?Get the app[\s\S]*?App Store[\s\S]*?Android[\s\S]*?data-step-row="2"[\s\S]*?Pair[\s\S]*?Then scan the pairing code with the MausBot app\./);
     expect(html.match(/data-phone-pairing-action/g), "exactly one button is the pairing door").toHaveLength(1);
     expect(html).toMatch(/data-phone-pairing-action=""[^>]*>Pair a phone</);
     expect(html).toContain("How your phone reaches this computer");
@@ -46,6 +46,7 @@ describe("Phone & devices", () => {
     expect(html).not.toContain('data-route-row="wifi"');
     expect(html).not.toContain("Nothing paired yet.");
     expect(html).not.toContain("code</");
+    expect(html, "no store code to scan: the pairing code is the only one").not.toMatch(/<svg[^>]*qr|Scan with your phone's camera/i);
   });
 
   it("is the same page in Advanced, with the ways in open and More ways in under them", () => {
@@ -61,12 +62,12 @@ describe("Phone & devices", () => {
     f.state = state({ routes: routes({ wifi: true, tailscale: true }) });
     let html = page(true);
     expect(html).toMatch(/Same Wi-Fi[\s\S]*?data-route-row="wifi"[\s\S]*?aria-checked="true"[\s\S]*?On · waiting for a paired device/);
-    expect(html).toMatch(/<details[^>]*open=""/);
+    expect(html).toMatch(/data-settings-disclosure="more-ways"[\s\S]*?aria-expanded="true"[\s\S]*?More ways in/);
     f.state = state({ enabled: true, routes: routes({ wifi: true }), devices: [phone] });
     html = page(true);
     expect(html).toContain("Ada's iPhone");
     expect(html).toMatch(/Paired[\s\S]*?>Pair a phone<[\s\S]*?Ada's iPhone/);
-    expect(html).toMatch(/On · since[^<]*Nov[^<]*7/);
+    expect(html, "a switch that is on needs no line saying so").not.toContain("On · since");
     expect(html).not.toContain("data-reach-fold");
   });
 });
@@ -75,12 +76,17 @@ describe("Pair a device", () => {
   const dialog = (overrides: Partial<CompanionState> = {}, props: Record<string, unknown> = {}) =>
     renderToStaticMarkup(createElement(PairDeviceDialog, { c: c(), state: state(overrides), onClose: () => {}, ...props })).replaceAll("&#x27;", "'");
 
-  it("asks how the phone will reach this computer, with the app's switches, before anything listens", () => {
+  it("asks how the phone will reach this computer, as two choices with Same Wi-Fi first, before anything listens", () => {
     const html = dialog();
     expect(html).toContain('data-pair-dialog="consent"');
     expect(html).toContain("Pair a phone with This computer");
     expect(html).toContain("How will your phone reach this computer?");
-    expect(html.match(/role="switch"/g)).toHaveLength(2);
+    expect(html.match(/type="radio"/g)).toHaveLength(2);
+    const input = (route: string) => html.match(new RegExp(`<input[^>]*value="${route}"[^>]*>`))![0];
+    expect(input("wifi")).toContain('checked=""');
+    expect(input("relay"), "signed out: Anywhere can't be chosen yet, and says why").toContain('disabled=""');
+    expect(html).toContain("Needs a free MausBot sign-in");
+    expect(html).toContain('aria-label="Close"');
     expect(html).not.toContain('type="checkbox"');
     expect(html).toContain(">Turn on and show code<");
     expect(html).toContain("You can turn these off any time in Phone &amp; devices.");

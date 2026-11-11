@@ -25,11 +25,11 @@ import { ProfileFields } from "../../ProfileSettings";
 import { RoomTurnTimeoutSettings } from "../../RoomTurnTimeoutSettings";
 import { SavedStepsRow } from "../../SavedStepsRow";
 import { Card, SettingRow, SettingsDisclosureRow, SettingsGroup, SettingsLinkRow, SettingsRows } from "../../SettingsPrimitives";
+import { DesktopKinds } from "../DesktopKinds";
 import { SkillsSection } from "../../SkillsSection";
 import { ThreadConcurrencySettings } from "../../ThreadConcurrencySettings";
-import { useSidebarPhoneStatus } from "../../SidebarPhoneButton";
+import { usePhonePlaceState } from "../phone-status";
 import { KeysPage } from "../../keys/KeysPage";
-import { useKeyFocus } from "../../keys/key-focus";
 import { BrowserProfilesRow, ExperimentalFeaturesRow, NewBotEffortRow } from "../../AppSettingsRows";
 import { ServerUpdateRow } from "../../ServerUpdateRow";
 import { versionLine } from "../settings-context";
@@ -64,20 +64,21 @@ export function OverviewPage() {
   const { ctx, place, go } = useSettingsShell();
   const { state, dispatch } = useStore();
   const [note, dismiss] = useGroupedNote();
-  const phone = useSidebarPhoneStatus();
+  const phone = usePhonePlaceState(!ctx.client);
   const team = state.config?.team;
-  const phoneValue = !ctx.here ? undefined : phone.pairedCount > 0 ? t("settings.glance.phonePaired", { count: phone.pairedCount }) : t("settings.glance.notSetUp");
+  const phoneValue = phone.kind === "paired" || phone.kind === "attention" ? t("settings.glance.phonePaired", { count: phone.count })
+    : phone.kind === "none" ? t("settings.glance.notSetUp") : undefined;
   const engines = state.instances.filter((instance) => instance.snapshot.state === "available").length;
   return <>
     {note && (
       <SettingsRows>
-        <div className="flex min-h-11 items-center gap-6 px-4 py-3" data-settings-grouped-note="">
+        <div className="flex min-h-11 items-center gap-6 py-2 pl-4 pr-2" data-settings-grouped-note="">
           <p className="min-w-0 flex-1 text-[14px] leading-5 text-ink">{t("settings.overview.grouped", { place: place.name })}</p>
-          <button type="button" aria-label={t("settings.dismiss")} onClick={dismiss} className="ui-icon-button size-7 shrink-0 rounded-full text-ink-secondary hover:text-ink"><X size={16} aria-hidden="true" /></button>
+          <button type="button" aria-label={t("settings.dismiss")} onClick={dismiss} className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-ink-secondary hover:bg-menu-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-focus"><X size={14} aria-hidden="true" /></button>
         </div>
       </SettingsRows>
     )}
-    {!ctx.here && !ctx.client && !window.ogb?.updater && <SettingsGroup block="version"><SettingsRows><ServerUpdateRow title={versionLine()} /></SettingsRows></SettingsGroup>}
+    {place.kind === "server" && !ctx.client && !window.ogb?.updater && <SettingsGroup label={t("settings.updates.title")} block="version"><SettingsRows><ServerUpdateRow title={versionLine()} /></SettingsRows></SettingsGroup>}
     <SettingsGroup label={t("settings.overview.glance")} block="glance">
       <SettingsRows>
         {!ctx.client && <SettingsLinkRow title={t("settings.section.phoneDevices")} value={phoneValue} onClick={() => go("phone")} data={{ "data-glance": "phone" }} />}
@@ -95,19 +96,16 @@ export function OverviewPage() {
 }
 
 export function AiPage() {
-  const { ctx, anchor } = useSettingsShell();
-  const keyFocus = useKeyFocus();
-  const [more, setMore] = useState(ctx.advanced);
-  const [keys, setKeys] = useState(ctx.advanced || anchor === "ai-keys");
-  useEffect(() => { if (keyFocus || anchor === "ai-keys") setKeys(true); }, [keyFocus, anchor]);
+  const { anchor } = useSettingsShell();
+  const [more, setMore] = useState(false);
   return <>
     <AdminOnly>
       <div data-settings-block="providers" className="flex scroll-mt-4 flex-col gap-6">
         <EnginesSettings simple more={{ id: "ai-more", open: more, onToggle: () => setMore((open) => !open) }} />
       </div>
-      <SettingsDisclosureRow id="ai-keys" block="ai-keys" title={t("settings.section.connections")} subtitle={t("settings.ai.keysLine")} open={keys} onToggle={() => setKeys((open) => !open)}>
-        <KeysPage />
-      </SettingsDisclosureRow>
+      <SettingsGroup label={t("settings.ai.otherServices")} block="ai-keys">
+        <KeysPage bare exclude={anchor === "ai-keys" ? [] : ["ai"]} />
+      </SettingsGroup>
       <AdvancedSection anchor="backup-model"><SettingsGroup label={t("settings.ai.backupModel")} block="backup-model"><AutomaticRecoverySettings /></SettingsGroup></AdvancedSection>
       <AdvancedSection anchor="routing"><SettingsGroup label={t("settings.ai.routing")} block="routing"><DecisionModelSettings /></SettingsGroup></AdvancedSection>
       <AdvancedSection anchor="images"><SettingsGroup label={t("settings.ai.images")} block="images"><ImageGenerationSettings /></SettingsGroup></AdvancedSection>
@@ -131,30 +129,36 @@ export function BotsPage() {
     <SettingsGroup label={t("settings.bots.newBots")} block="new-bots">
       <SettingsRows><NewBotEffortRow /><DefaultBotSettings simple /></SettingsRows>
     </SettingsGroup>
-    {(
-      <AdvancedSection anchor="limits"><SettingsGroup label={t("settings.simple.more.limits")} block="limits">
-        <div className="flex flex-col gap-6">
-          <Card title={t("settings.roomTurns.title")} subtitle={t("settings.roomTurns.subtitle")}><RoomTurnTimeoutSettings /></Card>
-          <Card title={t("settings.mcpCalls.title")} subtitle={t("settings.mcpCalls.subtitle")}><McpCallTimeoutSettings /></Card>
-          <ThreadConcurrencySettings />
-          <CacheKeepWarmSettings />
-        </div>
-      </SettingsGroup></AdvancedSection>
-    )}
+    <AdvancedSection anchor="limits" also={["parallel", "group-turns", "tool-time", "keep-warm"]}><SettingsGroup label={t("settings.simple.more.limits")} block="limits">
+      <SettingsRows>
+        <div data-settings-block="group-turns" className="contents"><RoomTurnTimeoutSettings /></div>
+        <div data-settings-block="tool-time" className="contents"><McpCallTimeoutSettings /></div>
+        <ThreadConcurrencySettings />
+        <div data-settings-block="keep-warm" className="contents"><CacheKeepWarmSettings /></div>
+      </SettingsRows>
+    </SettingsGroup></AdvancedSection>
     {skillsLibraryEnabled(state.config) && <div data-settings-block="skills"><SkillsSection /></div>}
     <AdvancedSection anchor="early"><div data-settings-block="early"><ExperimentalFeaturesRow /></div></AdvancedSection>
   </>;
 }
 
 export function DesktopsPage() {
+  const { ctx, anchor } = useSettingsShell();
+  const [details, setDetails] = useState(anchor === "desktop-details");
   return <>
     <SettingsGroup label={t("settings.experimental.browser")} block="browser">
       <SettingsRows><BuiltInBrowserRow /><ServerSitesRow /></SettingsRows>
     </SettingsGroup>
+    <AdminOnly><DesktopKinds /></AdminOnly>
     <BrowserProfilesRow />
-    <div data-settings-block="desktops" className="flex scroll-mt-4 flex-col gap-6">
-      <AdminOnly><LocalComputerSection /></AdminOnly>
-    </div>
+    {ctx.advanced && (
+      <AdminOnly>
+        <SettingsDisclosureRow id="desktop-details" block="desktop-details" title={t("settings.desktops.detailsTitle")} subtitle={t("settings.desktops.detailsLine")}
+          open={details} onToggle={() => setDetails((open) => !open)}>
+          <div className="flex flex-col gap-6 px-4 py-4"><LocalComputerSection /></div>
+        </SettingsDisclosureRow>
+      </AdminOnly>
+    )}
     <AdvancedSection anchor="automation"><SettingsGroup label={t("settings.desktops.automation")} block="automation"><SettingsRows><SavedStepsRow /></SettingsRows></SettingsGroup></AdvancedSection>
   </>;
 }
@@ -162,5 +166,5 @@ export function DesktopsPage() {
 export function MoveSection() {
   const { ctx } = useSettingsShell();
   if (!ctx.here || !window.ogb?.cloudSendPage) return null;
-  return <div data-settings-block="move" className="flex flex-col gap-2 empty:hidden"><CloudKeepHere bridge={window.ogb.cloudSendPage} /></div>;
+  return <CloudKeepHere bridge={window.ogb.cloudSendPage} />;
 }

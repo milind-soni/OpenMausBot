@@ -24,15 +24,15 @@ export function EveryBotRules() {
   if (confirmed === undefined) return null;
 
   return (
-    <div className="flex flex-col gap-2">
-      <label htmlFor="profile-every-bot-rules" className="text-[14px] text-ink">{t("settings.profile.everyBotRules")}</label>
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor="profile-every-bot-rules" className="text-[13px] font-medium leading-[18px] text-ink">{t("settings.profile.everyBotRules")}</label>
       <textarea id="profile-every-bot-rules" value={value} rows={4} maxLength={24_000}
         placeholder={t("settings.profile.everyBotRulesPlaceholder")}
         onChange={(event) => edit(event.target.value)}
         onBlur={() => void flush()}
-        className="min-h-[96px] w-full resize-y rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
+        className="min-h-[96px] w-full resize-none rounded-lg border-[0.5px] border-(--settings-edge) bg-app px-2.5 py-1.5 text-[13px] leading-5 text-ink placeholder:text-ink-tertiary focus:border-ink/25 focus:outline-none"
       />
-      <div className="min-h-4 text-[12px]" role="status">
+      <div className="text-[12px] leading-4 empty:hidden" role="status">
         {status === "saving" && <span className="text-ink-secondary">{t("settings.profile.saving")}</span>}
         {status === "saved" && <span className="text-success">{t("settings.profile.saved")}</span>}
         {status === "error" && <span className="text-danger">{t("settings.profile.saveError")} {" "}

@@ -17,6 +17,8 @@ export interface ChromeRailBridge {
   onState?(callback: (state: ChromeRailState) => void): () => void;
   expand?(on: boolean): Promise<void>;
   onSkin?(callback: (skin: string) => void): () => void;
+  /** From the person's click on a page beside the rail: This computer opens, with Settings on that page when one is named. */
+  openComputer?(page?: string): Promise<void>;
   /** Whether the page beside the rail draws the window's frame, as main hears it. */
   onFramed?(callback: (framed: boolean) => void): () => void;
 }

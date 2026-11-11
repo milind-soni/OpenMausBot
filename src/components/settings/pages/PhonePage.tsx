@@ -4,6 +4,7 @@ import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
 import { PhoneDevicesSection } from "../../PhoneDevicesSection";
 import { PlaceMark } from "../../PlacesRail";
+import { PlaceBadge } from "../SettingsNav";
 import { ServerPairingCard } from "../../ServerPairingCard";
 import { SettingsGroup, SettingsLinkRow, SettingsRows } from "../../SettingsPrimitives";
 import { useCloudPhoneDestination } from "../../SidebarProfileMenu";
@@ -40,13 +41,14 @@ function PairWithCloud() {
 
 function OtherPlaces() {
   const { ctx } = useSettingsShell();
-  const others = useOtherPlaces();
-  if (!ctx.desktop || others.length === 0) return null;
+  const others = useOtherPlaces("phone");
+  if (!ctx.desktop || ctx.client || others.length === 0) return null;
   return (
     <SettingsGroup label={t("settings.otherPlaces")} block="other-places">
       <SettingsRows icons>
         {others.map((place) => (
-          <SettingsLinkRow key={place.key} title={place.name} badge={<PlaceMark place={place} size={20} />} external onClick={place.open} data={{ "data-other-place": place.key }} />
+          <SettingsLinkRow key={place.key} title={place.name} leading={<PlaceBadge place={{ kind: place.kind === "computer" ? "computer" : "cloud", name: place.name, color: place.color }} size={24} />}
+            external onClick={place.open} data={{ "data-other-place": place.key }} />
         ))}
       </SettingsRows>
     </SettingsGroup>

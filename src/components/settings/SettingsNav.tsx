@@ -1,5 +1,7 @@
 import { useRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { ArrowUpRight, ChevronRight, Search, X } from "lucide-react";
+import { ArrowUpRight, ChevronRight, Laptop, Search, X } from "lucide-react";
+import { cloudColor } from "@/lib/cloud-look";
+import { placeInitials } from "@/lib/places";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { productName } from "@/lib/brand";
@@ -13,15 +15,27 @@ import { Switch, SettingsTag } from "../SettingsPrimitives";
 import { accountLine, useAccountSummary, useYou } from "./account-summary";
 import { usePhonePlaceState } from "./phone-status";
 import type { SettingsPlace } from "./settings-context";
-import { OWNERS, type SearchHit, type SettingsContext, type SettingsOwner, type SettingsPage, type SettingsPageId } from "./settings-index";
+import { OWNERS, pageById, type SearchHit, type SettingsContext, type SettingsOwner, type SettingsPage, type SettingsPageId } from "./settings-index";
 import { useUpdaterState } from "@/lib/updater";
 import { keySection, type KeyEntry } from "../keys/key-catalog";
 import { HELP_CENTER_URL, appVersion } from "@/lib/app-links";
 
 export const NAV_ITEM = "relative flex h-8 w-full shrink-0 cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-[13px] leading-5 text-ink transition-colors motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus";
 
-export function PlaceBadge({ place, size }: { place: SettingsPlace; size: number }) {
-  return <PlaceMark place={{ kind: place.kind === "server" ? "cloud" : place.kind, name: place.name, color: place.color, ...(place.named ? { named: true as const } : {}) }} size={size} />;
+/** A place's badge as its rail circle draws it; with no colour of its own (This computer, or a Cloud in a browser) it is a
+ * quiet filled tile with an edge, so it never vanishes on the sheet. */
+export function PlaceBadge({ place, size }: { place: Pick<SettingsPlace, "kind" | "name" | "color"> & { named?: boolean }; size: number }) {
+  if (cloudColor(place.color)) {
+    return <PlaceMark place={{ kind: place.kind === "server" ? "cloud" : place.kind, name: place.name, color: place.color, ...(place.named ? { named: true as const } : {}) }} size={size} />;
+  }
+  const glyph = size <= 14 ? 10 : size <= 20 ? 12 : 14;
+  return (
+    <span aria-hidden="true" data-place-badge={place.kind}
+      className="grid shrink-0 place-items-center bg-ink/[0.06] font-semibold leading-none text-ink-secondary shadow-[inset_0_0_0_0.5px_var(--settings-edge)]"
+      style={{ width: size, height: size, borderRadius: Math.round(size * 0.3), fontSize: Math.max(7, Math.round(size * 0.4)) }}>
+      {place.kind === "computer" && !place.named ? <Laptop size={glyph} strokeWidth={1.75} /> : placeInitials(place.name)}
+    </span>
+  );
 }
 
 export function AppIcon({ size }: { size: number }) {
@@ -30,7 +44,7 @@ export function AppIcon({ size }: { size: number }) {
 
 export function YouAvatar({ size }: { size: number }) {
   const { profile } = useYou();
-  return <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={size} fontSize={Math.round(size * 0.42)} />;
+  return <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={size} fontSize={Math.round(size * 0.42)} className="bg-ink/[0.08]" />;
 }
 
 /** The place's one status line under its name: bots on This computer, power on a Cloud. */
@@ -87,9 +101,9 @@ function PageItem({ page, label, current, dot, onOpen }: { page: SettingsPage; l
     <button type="button" data-settings-page={page.id} data-settings-section={page.id} aria-current={current ? "page" : undefined} onClick={onOpen}
       className={cn(NAV_ITEM, current ? "bg-menu-active font-medium" : "hover:bg-menu-hover")}>
       <span className="flex w-6 shrink-0 justify-center">{Icon && <Icon size={16} strokeWidth={1.75} aria-hidden="true" className={current ? "text-ink" : "text-ink-secondary"} />}</span>
-      <span className="grid min-w-0 flex-1">
-        <span className="truncate [grid-area:1/1]">{label}</span>
-        <span aria-hidden="true" className="invisible h-0 truncate font-medium [grid-area:1/1]">{label}</span>
+      <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)]" title={label}>
+        <span className="min-w-0 truncate [grid-area:1/1]">{label}</span>
+        <span aria-hidden="true" className="invisible h-0 min-w-0 truncate font-medium [grid-area:1/1]">{label}</span>
       </span>
       {dot && <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", dot === "success" ? "bg-success" : "bg-warning")} />}
     </button>
@@ -154,7 +168,10 @@ function moveFocus(event: ReactKeyboardEvent<HTMLElement>) {
 }
 
 export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, onKey, onQuery, onOpen, onHit, onClose, narrow }: NavProps) {
-  const account = useAccountSummary();
+  const summary = useAccountSummary();
+  const { profile } = useYou();
+  // Until main shares the account with a Cloud's page, its email is the one the place knows you by.
+  const account = { ...summary, email: summary.email ?? (summary.plan ? profile?.email ?? null : null) };
   const placeLine = usePlaceSubLine(place);
   const appLine = useAppSubLine(ctx.desktop);
   const phone = usePhonePlaceState(!ctx.client);
@@ -265,15 +282,17 @@ function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place
   const entry = hit.entry;
   const label = hitLabel(hit, place, ctx.desktop);
   const location = searchLocation(hit, place, ctx);
+  const Icon = entry.jump ? null : pageById(entry.page).icon;
   return (
     <button type="button" data-settings-hit={entry.id} onClick={() => onHit(hit)}
       className="flex w-full cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
+      <span className="flex h-5 w-6 shrink-0 items-center justify-center text-ink-secondary">{Icon && <Icon size={16} strokeWidth={1.75} aria-hidden="true" />}</span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex items-center gap-1.5 text-[13px] leading-5 text-ink">
           <span className="truncate">{highlight(label, query)}</span>
           {entry.advanced && !ctx.advanced && <SettingsTag>{t("settings.simple.advanced")}</SettingsTag>}
         </span>
-        <span className="truncate text-[12px] leading-4 text-ink-secondary">{location}</span>
+        {location && <span className="line-clamp-2 text-[12px] leading-4 text-ink-secondary">{location}</span>}
       </span>
       {entry.jump && <ArrowUpRight size={12} aria-hidden="true" className="mt-1 shrink-0 text-ink-tertiary" />}
     </button>
@@ -298,10 +317,13 @@ export function searchLocation(hit: SearchHit, place: SettingsPlace, ctx: Settin
   if (entry.jump === "automations") return t("settings.search.opensAutomations");
   if (entry.jump === "shortcuts") return t("settings.search.opensShortcuts");
   const owner = PAGE_OWNER[entry.page];
-  const ownerName = hit.elsewhere ? t("rail.thisComputer") : ownerLabel(owner, place, ctx.desktop);
+  // The place on screen goes without saying; another place, your account and this app are named.
+  const ownerName = hit.elsewhere ? t("rail.thisComputer") : owner === "place" ? null : ownerLabel(owner, place, ctx.desktop);
   const pageKey = PAGE_KEY[entry.page];
-  const parts = [ownerName];
+  const parts: string[] = ownerName ? [ownerName] : [];
   if (pageKey && !entry.id.startsWith("page:")) parts.push(t(pageKey));
-  if (entry.sectionKey) parts.push(t(entry.sectionKey));
+  const label = hitLabel(hit, place, ctx.desktop);
+  if (entry.sectionKey && t(entry.sectionKey) !== label) parts.push(t(entry.sectionKey));
+  if (parts.length === 0 && entry.id.startsWith("page:")) return owner === "place" ? place.name : "";
   return parts.join(" › ");
 }

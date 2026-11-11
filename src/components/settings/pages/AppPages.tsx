@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { productName } from "@/lib/brand";
-import { FEEDBACK_URL, HELP_CENTER_URL, openExternalLink } from "@/lib/app-links";
+import { FEEDBACK_URL, HELP_CENTER_URL, appVersion, openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
 import { AboutDialog } from "../../AboutDialog";
@@ -17,7 +17,7 @@ import { NotificationRows } from "../../NotificationSettingsRows";
 import { OpenAtLoginRow } from "../../OpenAtLoginRow";
 import { PinnedPanelsSettings } from "../../PinnedPanelsSettings";
 import { RemoteComputerSection } from "../../RemoteComputerSection";
-import { SettingRow, SettingsGroup, SettingsLinkRow, SettingsRows } from "../../SettingsPrimitives";
+import { SettingRow, SettingsGroup, SettingsLinkRow, SettingsRows, Switch } from "../../SettingsPrimitives";
 import { SkinPicker } from "../../SkinPicker";
 import { TalkShortcutRow } from "../../TalkShortcutRow";
 import { useSkinChoice, ThemeRow } from "../../ThemeRow";
@@ -26,23 +26,7 @@ import { resolveSkin, SKINS } from "@/lib/skins";
 import { versionLine } from "../settings-context";
 import { useSettingsShell } from "../settings-shell";
 import { PlaceBadge } from "../SettingsNav";
-import { useSwitchToComputer } from "./AccountPages";
-
-/** A row that applies here but can't be changed from this page: it stays, quiet, with the reason and the way there. */
-export function InertRow({ title, reason }: { title: string; reason?: string }) {
-  const computer = useSwitchToComputer();
-  const why = reason ?? (computer ? t("settings.inert.fromHere", { place: computer.name }) : undefined);
-  return (
-    <div role="group" aria-disabled="true" data-settings-inert="" title={why} className="flex min-h-11 flex-col justify-center gap-1 px-4 py-3">
-      <div className="text-[14px] leading-5 text-ink-secondary">{title}</div>
-      {why && (
-        <div className="text-[12px] leading-4 text-ink-secondary">
-          {why}{computer && <>{" "}<button type="button" className="cursor-pointer text-accent-text hover:underline" onClick={computer.open}>{t("settings.inert.switchHere", { place: computer.name })}</button></>}
-        </div>
-      )}
-    </div>
-  );
-}
+import { InertRow, useSwitchToComputer } from "../inert";
 
 const elsewhere = (bridge: unknown, ctx: { desktop: boolean; here: boolean; client: boolean }) => ctx.desktop && !ctx.client && !ctx.here && !bridge;
 
@@ -51,17 +35,22 @@ export function AppPage() {
   const { dispatch } = useStore();
   const [about, setAbout] = useState(false);
   const desk = ctx.desktop && !ctx.client;
+  const computer = useSwitchToComputer();
   return <>
     {ctx.desktop && (
       <SettingsGroup label={t("settings.updates.title")} block="updates">
         <SettingsRows>
-          {window.ogb?.updater ? <UpdatesRow title={versionLine()} /> : <InertRow title={t("settings.updates.check")} />}
+          {window.ogb?.updater ? <UpdatesRow title={versionLine()} />
+            : <InertRow title={versionLine()} reason={t("settings.inert.checkFromHere", { place: computer.name })}
+              control={<button type="button" className="ui-button" tabIndex={-1}>{t("settings.updates.check")}</button>} />}
         </SettingsRows>
       </SettingsGroup>
     )}
     {ctx.desktop && (
-      <SettingsGroup label={t("settings.app.computers")} block="your-computers">
-        {window.ogb?.environments ? <ConnectedWorkspacesSettings /> : !ctx.client && <SettingsRows><InertRow title={t("connectedWorkspaces.localTitle")} /></SettingsRows>}
+      <SettingsGroup label={t("settings.app.computers")} description={t("settings.app.computersLine")} block="your-computers">
+        {window.ogb?.environments ? <ConnectedWorkspacesSettings /> : !ctx.client && (
+          <SettingsRows><InertRow title={t("connectedWorkspaces.localTitle")} control={<button type="button" className="ui-button" tabIndex={-1}>{t("connectedWorkspaces.newEnvironment")}</button>} /></SettingsRows>
+        )}
         <RemoteComputerSection hideWhenUnavailable legacyOnly />
       </SettingsGroup>
     )}
@@ -71,12 +60,13 @@ export function AppPage() {
         <SettingsLinkRow title={t("sidebar.menu.feedback")} external onClick={() => void openExternalLink(FEEDBACK_URL)} />
         <SettingsLinkRow title={t("sidebar.menu.shortcuts")} onClick={() => { dispatch({ type: "toggleAppSettings", open: false }); dispatch({ type: "toggleShortcuts", open: true }); }} />
         {!ctx.client && <ReplayTourRow />}
-        {desk && (window.ogb?.exportDiagnostics ? <DiagnosticsRow simple /> : <InertRow title={t("settings.app.diagnostics")} />)}
+        {desk && (window.ogb?.exportDiagnostics ? <DiagnosticsRow simple /> : <InertRow title={t("settings.app.diagnostics")}
+          control={<button type="button" className="ui-button" tabIndex={-1}>{t("settings.diagnostics.export")}</button>} />)}
       </SettingsRows>
     </SettingsGroup>
     <SettingsGroup label={t("sidebar.menu.about")} block="about">
       <SettingsRows>
-        <SettingsLinkRow title={t("settings.app.about", { app: productName() })} value={versionLine()} onClick={() => setAbout(true)} />
+        <SettingsLinkRow title={t("settings.app.about", { app: productName() })} value={appVersion()} onClick={() => setAbout(true)} />
       </SettingsRows>
     </SettingsGroup>
     <AboutDialog open={about} onClose={() => setAbout(false)} />
@@ -91,7 +81,7 @@ export function GeneralPage() {
         <LanguageRow simple />
         <SendKeyRow simple />
         <FollowUpRow simple />
-        {window.ogb?.talkShortcut ? <TalkShortcutRow /> : elsewhere(window.ogb?.talkShortcut, ctx) && ctx.cloud ? <InertRow title={t("settings.search.talk")} /> : null}
+        {window.ogb?.talkShortcut ? <TalkShortcutRow /> : elsewhere(window.ogb?.talkShortcut, ctx) && ctx.cloud ? <InertRow title={t("settings.search.talk")} control={<span className="text-[13px] leading-5 text-ink-secondary">{t("settings.general.talkOff")}</span>} /> : null}
       </SettingsRows>
     </SettingsGroup>
     <SettingsGroup label={t("notifications.title")} block="notifications"
@@ -100,7 +90,7 @@ export function GeneralPage() {
     </SettingsGroup>
     {ctx.desktop && !ctx.client && (
       <SettingsGroup label={t("settings.general.startup")} block="startup">
-        <SettingsRows>{window.ogb?.openAtLogin ? <OpenAtLoginRow simple /> : <InertRow title={t("settings.openAtLogin.title")} />}</SettingsRows>
+        <SettingsRows>{window.ogb?.openAtLogin ? <OpenAtLoginRow simple /> : <InertRow title={t("settings.openAtLogin.title")} control={<Switch checked={false} tabIndex={-1} aria-label={t("settings.openAtLogin.title")} />} />}</SettingsRows>
       </SettingsGroup>
     )}
     <SettingsGroup label={t("settings.general.privacy")} block="privacy">
@@ -149,7 +139,7 @@ export function AppearancePage() {
         {ctx.advanced && <PinnedCirclesRow />}
         {ctx.advanced && <UniversalPinsRow />}
       </SettingsRows>
-      {ctx.advanced && <PinnedPanelsSettings />}
     </SettingsGroup>
+    {ctx.advanced && <PinnedPanelsSettings />}
   </>;
 }
