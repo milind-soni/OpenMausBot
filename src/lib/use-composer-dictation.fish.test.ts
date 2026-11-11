@@ -63,7 +63,7 @@ describe("composer dictation through Fish Audio", () => {
 
   it("finishes and transcribes when the mic is clicked off, keeping the session until its end arrives", () => {
     toggle();
-    expect(fish.speechStart).toHaveBeenCalledExactlyOnceWith({ destination: "fish" });
+    expect(fish.speechStart).toHaveBeenCalledExactlyOnceWith({ destination: "fish", endpointMs: 1500 });
     toggle();
     expect(fish.speechFinish).toHaveBeenCalledOnce();
     expect(fish.speechStop).not.toHaveBeenCalled();
@@ -73,6 +73,14 @@ describe("composer dictation through Fish Audio", () => {
     expect(typed).toEqual(["hello"]);
     expect(dictation.recording).toBe(false);
     expect(fish.speechStop).not.toHaveBeenCalled();
+  });
+
+  it("ends by itself after a pause, leaving no placeholder when nothing was heard", () => {
+    toggle();
+    flushSync(() => fish.listeners.line!({ partial: true, text: "…" }));
+    flushSync(() => fish.listeners.end!({ code: 0, reason: "completed" }));
+    expect(typed).toEqual([]);
+    expect(dictation.recording).toBe(false);
   });
 
   it("discards the clip when dictation is stopped some other way", () => {

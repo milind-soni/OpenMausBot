@@ -7,6 +7,9 @@ import { recordedSpeech } from "./recorded-speech";
 import { listensHere, speechBridge } from "./speech";
 import { sttDestination } from "../../shared/stt";
 
+/** Writers pause longer than talkers, so a recorded dictation ends after a longer quiet than a call turn. */
+const COMPOSER_ENDPOINT_MS = 1500;
+
 export function useComposerDictation({ draftId, text, onText }: {
   draftId: string;
   text: string;
@@ -47,7 +50,7 @@ export function useComposerDictation({ draftId, text, onText }: {
     cancel.current = cancelSession;
     finish.current = bridge === recordedSpeech ? () => void recordedSpeech.speechFinish() : null;
     const offTranscript = bridge.onSpeechTranscript((line) => {
-      if (!active || draft.current.id !== draftId) return;
+      if (!active || draft.current.id !== draftId || (line.partial && bridge === recordedSpeech)) return;
       if (draft.current.text !== lastText) {
         cancelSession();
         return;
@@ -69,7 +72,10 @@ export function useComposerDictation({ draftId, text, onText }: {
           : t(reason === "dictation-disabled" ? "composer.dictation.disabled" : "composer.dictation.failed")));
       }
     });
-    void bridge.speechStart({ destination: session.current.destination }).catch(() => {
+    void bridge.speechStart({
+      destination: session.current.destination,
+      ...(bridge === recordedSpeech ? { endpointMs: COMPOSER_ENDPOINT_MS } : {}),
+    }).catch(() => {
       if (!active) return;
       cancelSession();
       setSpeechError(t("composer.dictation.failed"));
