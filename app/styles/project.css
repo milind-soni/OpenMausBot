@@ -9,8 +9,8 @@
   display: flex;
   flex: none;
   align-items: center;
-  gap: var(--space-4);
-  height: 48px;
+  gap: var(--space-3);
+  height: 44px;
   margin: 0 calc(var(--space-6) * -1);
   padding: 0 var(--space-3) 0 var(--space-6);
   border-bottom: 1px solid var(--border-1);
@@ -20,7 +20,7 @@
 .project-identity .project-icon { width: 16px; height: 16px; color: var(--text-2); }
 .project-identity h1 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); font-size: var(--text-base); font-weight: var(--weight-semibold); letter-spacing: -0.005em; }
 /* A hairline between the project name and its tabs, as in Linear's view header. */
-.project-identity::after { content: ""; flex: none; width: 1px; height: 16px; margin-left: var(--space-2); background: var(--border-2); }
+.project-identity::after { content: ""; flex: none; width: 1px; height: 16px; margin-left: var(--space-1); background: var(--border-2); }
 
 .project-tabs { display: flex; flex: 1; align-items: center; gap: var(--space-1); min-width: 0; height: 100%; }
 /* 2px of padding keeps the focus ring of the first and last pill inside the scroll box. */
@@ -30,7 +30,7 @@
 .project-tab-scroll[data-fade-start] { mask-image: linear-gradient(to right, transparent, #000 28px); }
 .project-tab-scroll[data-fade-start][data-fade-end] { mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
 
-/* Capsule tabs: icon + label, the open one sits on a filled pill. No underline. */
+/* Capsule tabs, as Linear's Overview / Documents / Members: 28px pills, 16px icon + 13px label, the open one filled. */
 .project-tab {
   position: relative;
   display: inline-flex;
@@ -38,18 +38,18 @@
   align-items: center;
   gap: 6px;
   height: var(--control-sm);
-  padding: 0 10px 0 8px;
+  padding: 0 11px 0 9px;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-full);
   background: transparent;
-  color: var(--text-2);
+  color: var(--text-3);
   font-size: var(--text-base);
   font-weight: var(--weight-medium);
   white-space: nowrap;
-  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
+  transition: background var(--duration-instant) var(--ease-standard), color var(--duration-instant) var(--ease-standard), border-color var(--duration-instant) var(--ease-standard);
   -webkit-tap-highlight-color: transparent;
 }
-.project-tab > svg { flex: none; color: var(--text-3); transition: color var(--duration-fast) var(--ease-standard); }
+.project-tab > svg { flex: none; width: 16px; height: 16px; color: var(--text-3); transition: color var(--duration-instant) var(--ease-standard); }
 @media (hover: hover) {
   .project-tab:hover { background: var(--hover); color: var(--text-1); }
   .project-tab:hover > svg { color: var(--text-2); }
@@ -70,10 +70,10 @@
   height: var(--control-sm);
   padding: 0;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--text-3);
-  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+  transition: background var(--duration-instant) var(--ease-standard), color var(--duration-instant) var(--ease-standard);
 }
 .project-settings-tab[aria-selected="true"], .project-settings-tab[aria-selected="true"]:hover { border-color: var(--border-2); background: var(--selected); color: var(--text-1); }
 

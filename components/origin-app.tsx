@@ -338,6 +338,7 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
             <span>Inbox</span>
             {(notifications.summary?.unread || 0) > 0 && <small className="nav-unread" aria-label={`${notifications.summary!.unread}${notifications.summary!.more ? "+" : ""} unread notifications`}>{notifications.summary!.unread}{notifications.summary!.more ? "+" : ""}</small>}
           </button>
+          <span className="sidebar-label">Workspace</span>
           <button aria-current={mainView === "chat" ? "page" : undefined} className={clsx("nav-item", mainView === "chat" && "active")} type="button" onClick={() => openView("chat")}>
             <MessageCircle size={16} />
             <span>Chat</span>

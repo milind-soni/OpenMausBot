@@ -23,6 +23,12 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
   { group: "Issues", label: "Copy issue URL", keys: ["Mod", "Shift", ","] },
   { group: "Issues", label: "Copy git branch name", keys: ["Mod", "Shift", "."] },
   { group: "Issues", label: "Issue menu", keys: ["Shift", "F10"] },
+  { group: "Views", label: "All issues", keys: ["1"] },
+  { group: "Views", label: "Active issues", keys: ["2"] },
+  { group: "Views", label: "Backlog", keys: ["3"] },
+  { group: "Views", label: "Filter issues", keys: ["F"] },
+  { group: "Views", label: "Display options", keys: ["Shift", "V"] },
+  { group: "Views", label: "Toggle list and board", keys: ["Mod", "B"] },
   { group: "Views", label: "Board layout", keys: ["B"] },
   { group: "Views", label: "List layout", keys: ["L"] },
 ];

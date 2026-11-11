@@ -1,7 +1,7 @@
 "use client";
-import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
+import { useImperativeHandle, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type Ref, type ReactNode, type RefObject } from "react";
 import clsx from "clsx";
-import { Check, ChevronLeft, ChevronRight, CircleDot, Columns3, List, ListFilter, Search, SlidersHorizontal, Tag, UserRound, X } from "lucide-react";
+import { ArrowUpDown, Check, ChevronLeft, ChevronRight, CircleDot, Columns3, List, ListFilter, Rows3, Search, SlidersHorizontal, Tag, UserRound, X } from "lucide-react";
 import { DISPLAY_PROPERTIES, GROUPINGS, NO_LABEL, ORDERINGS, PRIORITY_ORDER, UNASSIGNED, activeFilterCount, toggleFilter, type FilterKey, type IssueFilters, type IssueViewState } from "@/lib/issue-view";
 import { filterCommands } from "@/lib/command-menu";
 import { useAnchoredPopover } from "./use-anchored-popover";
@@ -39,8 +39,11 @@ function usePopover(width: number) {
   return { open, setOpen, close, trigger, menu, focus };
 }
 
+/** Lets a keyboard shortcut of the view (F, Shift+V) open a popover as its button would. */
+export type PopoverOpener = { open: () => void };
+
 /** Linear's Filter menu: pick a property, then tick values. Several values of one property match any of them. */
-export function FilterMenu({ filters, sources, onChange }: { filters: IssueFilters; sources: FilterSources; onChange: (filters: IssueFilters) => void }) {
+export function FilterMenu({ filters, sources, onChange, opener }: { filters: IssueFilters; sources: FilterSources; onChange: (filters: IssueFilters) => void; opener?: Ref<PopoverOpener> }) {
   const { open: shown, setOpen, close, trigger, menu, focus } = usePopover(260);
   const [category, setCategory] = useState<FilterKey | null>(null);
   const [query, setQuery] = useState("");
@@ -55,8 +58,9 @@ export function FilterMenu({ filters, sources, onChange }: { filters: IssueFilte
     else if (event.key === "ArrowLeft" && category && index >= 0) { event.preventDefault(); open(null); }
     else if (event.key === "Tab") setOpen(false);
   };
+  useImperativeHandle(opener, () => ({ open: () => { setCategory(null); setQuery(""); setOpen(true); } }), [setOpen]);
   return <div className="view-control">
-    <button ref={trigger} type="button" className={clsx("ghost-button compact view-control-trigger", count > 0 && "is-active")} aria-haspopup="menu" aria-expanded={shown} title="Filter" onClick={() => { if (shown) close(false); else { setCategory(null); setQuery(""); setOpen(true); } }}>
+    <button ref={trigger} type="button" className={clsx("view-button view-control-trigger", count > 0 && "is-active")} aria-haspopup="menu" aria-expanded={shown} aria-keyshortcuts="F" title="Filter (F)" onClick={() => { if (shown) close(false); else { setCategory(null); setQuery(""); setOpen(true); } }}>
       <ListFilter size={14} /><span>Filter</span>{count > 0 && <small>{count}</small>}
     </button>
     {shown && <div ref={menu} popover="manual" role="menu" aria-label="Filter issues" className="origin-dropdown view-popover filter-popover" onKeyDown={move}>
@@ -82,42 +86,61 @@ export function FilterMenu({ filters, sources, onChange }: { filters: IssueFilte
   </div>;
 }
 
-/** The active filters as removable chips under the toolbar ("Labels: Bug, Feature ×"). */
-export function FilterChips({ filters, sources, onChange }: { filters: IssueFilters; sources: FilterSources; onChange: (filters: IssueFilters) => void }) {
+/**
+ * The filter bar under the header, as Linear draws it: one formula chip per property ("Labels | is any of | Bug,
+ * Feature | ×"), a button to add another, and how the filters combine on the right.
+ */
+export function FilterChips({ filters, sources, onChange, onAdd }: { filters: IssueFilters; sources: FilterSources; onChange: (filters: IssueFilters) => void; onAdd?: () => void }) {
   if (!activeFilterCount(filters)) return null;
-  return <div className="filter-chips" aria-label="Active filters">
-    {CATEGORIES.filter(item => (filters[item.key] as string[]).length).map(item => {
-      const values = filters[item.key] as string[];
-      const options = values.map(value => optionsFor(item.key, sources).find(option => option.value === value) ?? { value, label: value, icon: null });
-      return <span key={item.key} className="filter-chip" data-filter={item.key}>
-        {item.icon}<span><strong>{item.label}</strong> {values.length > 1 ? "is any of" : "is"} {item.key === "labels"
-          ? options.map((option, index) => <span key={option.value} className="filter-chip-value">{index > 0 && ", "}{option.icon}{option.label}</span>)
-          : options.map(option => option.label).join(", ")}</span>
-        <button type="button" aria-label={`Remove ${item.label.toLowerCase()} filter`} onClick={() => onChange({ ...filters, [item.key]: [] })}><X size={12} /></button>
-      </span>;
-    })}
+  return <div className="filter-bar" role="group" aria-label="Active filters">
+    <div className="filter-chips">
+      {CATEGORIES.filter(item => (filters[item.key] as string[]).length).map(item => {
+        const values = filters[item.key] as string[];
+        const options = values.map(value => optionsFor(item.key, sources).find(option => option.value === value) ?? { value, label: value, icon: null });
+        return <span key={item.key} className="filter-chip" data-filter={item.key}>
+          <span className="filter-chip-part filter-chip-key">{item.icon}<strong>{item.label}</strong></span>
+          <span className="filter-chip-part filter-chip-op">{values.length > 1 ? (item.key === "labels" ? "include any of" : "is any of") : (item.key === "labels" ? "include" : "is")}</span>
+          <span className="filter-chip-part filter-chip-values">{values.length > 2
+            ? <>{options.slice(0, 1).map(option => <span key={option.value} className="filter-chip-value">{option.icon}{option.label}</span>)}<span className="filter-chip-more">+{values.length - 1}</span></>
+            : options.map((option, index) => <span key={option.value} className="filter-chip-value">{index > 0 && <span className="filter-chip-comma">, </span>}{option.icon}{option.label}</span>)}</span>
+          <button type="button" className="filter-chip-remove" aria-label={`Remove ${item.label.toLowerCase()} filter`} onClick={() => onChange({ ...filters, [item.key]: [] })}><X size={12} /></button>
+        </span>;
+      })}
+      {onAdd && <button type="button" className="icon-button filter-add" aria-label="Add filter" title="Add filter (F)" onClick={onAdd}><ListFilter size={14} /></button>}
+    </div>
+    <span className="filter-bar-mode">Match all filters</span>
     <button type="button" className="filter-clear" onClick={() => onChange({ statuses: [], priorities: [], assignees: [], labels: [] })}>Clear</button>
   </div>;
 }
 
-/** Display options: layout, grouping and ordering, empty groups, sub-issues, and which properties rows and cards show. */
-export function DisplayOptions({ view, onChange, archive }: { view: IssueViewState; onChange: (view: IssueViewState) => void; archive: boolean }) {
-  const { open, setOpen, close, trigger, menu, focus } = usePopover(300);
+/**
+ * Display options, after Linear's: List / Board tiles, grouping and ordering, then what shows (completed issues in All
+ * issues, sub-issues, empty groups) and which properties rows and cards carry. Shift+V opens it.
+ */
+export function DisplayOptions({ view, onChange, archive, opener }: { view: IssueViewState; onChange: (view: IssueViewState) => void; archive: boolean; opener?: Ref<PopoverOpener> }) {
+  const { open, setOpen, close, trigger, menu, focus } = usePopover(320);
   const set = (patch: Partial<IssueViewState>) => onChange({ ...view, ...patch });
+  useImperativeHandle(opener, () => ({ open: () => setOpen(true) }), [setOpen]);
+  const board = view.layout === "board";
   return <div className="view-control">
-    <button ref={trigger} type="button" className="ghost-button compact view-control-trigger" aria-haspopup="dialog" aria-expanded={open} title="Display options" onClick={() => open ? close(false) : setOpen(true)}>
+    <button ref={trigger} type="button" className="view-button view-control-trigger" aria-haspopup="dialog" aria-expanded={open} aria-keyshortcuts="Shift+V" title="Display options (Shift V)" onClick={() => open ? close(false) : setOpen(true)}>
       <SlidersHorizontal size={14} /><span>Display</span>
     </button>
     {open && <div ref={menu} popover="manual" role="dialog" aria-label="Display options" className="origin-dropdown view-popover display-popover" onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); } }}>
-      <div className="display-layout" role="group" aria-label="Layout">
-        <button ref={focus as RefObject<HTMLButtonElement>} type="button" aria-pressed={view.layout === "list"} disabled={archive} onClick={() => set({ layout: "list" })}><List size={14} />List</button>
-        <button type="button" aria-pressed={view.layout === "board"} disabled={archive} onClick={() => set({ layout: "board" })}><Columns3 size={14} />Board</button>
+      <div className="display-section">
+        <div className="display-layout" role="group" aria-label="Layout">
+          <button ref={focus as RefObject<HTMLButtonElement>} type="button" aria-pressed={view.layout === "list"} disabled={archive} onClick={() => set({ layout: "list" })}><List size={16} /><span>List</span></button>
+          <button type="button" aria-pressed={board} disabled={archive} onClick={() => set({ layout: "board" })}><Columns3 size={16} /><span>Board</span></button>
+        </div>
+        <div className="display-row"><span className="display-label"><Rows3 size={14} />{board ? "Columns" : "Grouping"}</span>{board ? <span className="display-fixed">Status</span> : <IssueSelect label="Grouping" caption="Grouping" value={view.grouping} onChange={value => set({ grouping: value as IssueViewState["grouping"] })} options={GROUPINGS.map(option => ({ value: option.value, label: option.label }))} />}</div>
+        <div className="display-row"><span className="display-label"><ArrowUpDown size={14} />Ordering</span><IssueSelect label="Ordering" caption="Ordering" value={view.ordering} onChange={value => set({ ordering: value as IssueViewState["ordering"] })} options={ORDERINGS.map(option => ({ value: option.value, label: option.label }))} /></div>
       </div>
-      <div className="display-row"><span>Grouping</span>{view.layout === "board" ? <span className="display-fixed">Status</span> : <IssueSelect label="Grouping" caption="Grouping" value={view.grouping} onChange={value => set({ grouping: value as IssueViewState["grouping"] })} options={GROUPINGS.map(option => ({ value: option.value, label: option.label }))} />}</div>
-      <div className="display-row"><span>Ordering</span><IssueSelect label="Ordering" caption="Ordering" value={view.ordering} onChange={value => set({ ordering: value as IssueViewState["ordering"] })} options={ORDERINGS.map(option => ({ value: option.value, label: option.label }))} /></div>
-      <label className="display-row display-switch"><span>{view.layout === "board" ? "Show empty columns" : "Show empty groups"}</span><input type="checkbox" role="switch" checked={view.showEmptyGroups} onChange={event => set({ showEmptyGroups: event.target.checked })} /></label>
-      <label className="display-row display-switch"><span>Show sub-issues</span><input type="checkbox" role="switch" checked={view.showSubIssues} onChange={event => set({ showSubIssues: event.target.checked })} /></label>
-      <div className="display-properties">
+      <div className="display-section">
+        {view.tab === "all" && <Switch label="Show completed issues" checked={view.showCompleted} onChange={showCompleted => set({ showCompleted })} />}
+        <Switch label="Show sub-issues" checked={view.showSubIssues} onChange={showSubIssues => set({ showSubIssues })} />
+        <Switch label={board ? "Show empty columns" : "Show empty groups"} checked={view.showEmptyGroups} onChange={showEmptyGroups => set({ showEmptyGroups })} />
+      </div>
+      <div className="display-section display-properties">
         <span>Display properties</span>
         <div>{DISPLAY_PROPERTIES.map(property => {
           const on = view.properties.includes(property.value);
@@ -126,4 +149,8 @@ export function DisplayOptions({ view, onChange, archive }: { view: IssueViewSta
       </div>
     </div>}
   </div>;
+}
+
+function Switch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return <label className="display-row display-switch"><span>{label}</span><input type="checkbox" role="switch" checked={checked} onChange={event => onChange(event.target.checked)} /></label>;
 }

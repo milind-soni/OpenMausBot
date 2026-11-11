@@ -5,18 +5,41 @@
 .board-section { --lane-width: 300px; --lane-min: 256px; --lane-strip: 40px; position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .board-section > .notice { align-self: flex-start; margin-bottom: var(--space-2); }
 
-/* Toolbar. */
-.board-header { display: flex; flex: none; align-items: center; gap: var(--space-2); min-height: 44px; padding: var(--space-2) 0; }
-.board-header-actions { display: flex; align-items: center; gap: var(--space-1); margin-left: auto; min-width: 0; }
+/* Issues header: a 44px band with the view tabs on the left and Filter, layout, Display and Create on the right. */
+.board-header { display: flex; flex: none; align-items: center; gap: var(--space-2); height: 44px; margin: 0 calc(var(--space-6) * -1) var(--space-3); padding: 0 var(--space-3) 0 var(--space-6); border-bottom: 1px solid var(--border-1); }
+.board-section:has(> .filter-bar) > .board-header { margin-bottom: 0; border-bottom: 0; }
+.board-section > .filter-bar { margin-bottom: var(--space-3); border-bottom: 1px solid var(--border-1); }
+.board-header-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; min-width: 0; }
 .board-header-actions > .member-picker { max-width: 168px; }
 .board-header-actions .member-picker-trigger { color: var(--text-2); }
 .board-header-actions .member-picker-trigger:hover { color: var(--text-1); }
-.board-header-actions > .issue-layout-switch { margin: 0 var(--space-1); }
-.issue-layout-switch button { width: 28px; padding: 0; justify-content: center; }
+.board-header-actions > .icon-button, .board-filter-control > .icon-button { width: var(--control-sm); min-width: var(--control-sm); height: var(--control-sm); color: var(--text-3); }
+.board-header-divider { flex: none; width: 1px; height: 16px; margin: 0 2px; background: var(--border-2); }
+.board-header-actions > .project-create-issue { margin-left: 2px; }
+
+/* View tabs (All issues / Active / Backlog): quiet capsules; the open one is filled with a hairline. */
+.view-tabs { display: flex; flex: 0 1 auto; align-items: center; gap: 2px; min-width: 0; }
+.view-tab { display: inline-flex; flex: none; align-items: center; height: 26px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--radius-full); background: transparent; color: var(--text-3); font-size: var(--text-base); font-weight: var(--weight-medium); white-space: nowrap; transition: background var(--duration-instant) var(--ease-standard), color var(--duration-instant) var(--ease-standard), border-color var(--duration-instant) var(--ease-standard); -webkit-tap-highlight-color: transparent; }
+@media (hover: hover) { .view-tab:hover { background: var(--hover); color: var(--text-1); } }
+.view-tab[aria-selected="true"], .view-tab[aria-selected="true"]:hover { border-color: var(--border-2); background: var(--selected); color: var(--text-1); }
+.view-tab:focus-visible, .view-archive:focus-visible, .icon-segment button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; box-shadow: none; }
+.view-tab-short { display: none; }
+.view-archive.icon-button { width: 26px; min-width: 26px; height: 26px; border-radius: var(--radius-full); color: var(--text-3); }
+.view-archive.icon-button.selected { border: 1px solid var(--border-2); background: var(--selected); color: var(--text-1); }
+
+/* List / Board: two icons in one hairline box, as Linear's layout switch. */
+.icon-segment { display: inline-flex; flex: none; align-items: center; gap: 1px; height: var(--control-sm); padding: 1px; border: 1px solid var(--border-2); border-radius: var(--radius-sm); background: var(--surface-2); }
+.icon-segment button { display: grid; place-items: center; width: 28px; height: 100%; padding: 0; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-3); transition: background var(--duration-instant) var(--ease-standard), color var(--duration-instant) var(--ease-standard); }
+@media (hover: hover) { .icon-segment button:hover:not(:disabled) { color: var(--text-1); } }
+.icon-segment button[aria-pressed="true"] { background: var(--surface-5); color: var(--text-1); }
 /* Completed has one layout; the switch stays in place, disabled, so the controls beside it never move. */
 .issue-layout-switch.is-idle button:disabled { opacity: 0.4; cursor: default; }
-.issue-layout-switch.is-idle .active { background: transparent; box-shadow: none; }
-.board-header-actions > .project-create-issue { margin-left: var(--space-1); }
+
+/* Completed issues (the archive beside the tabs). */
+.archive-caption { display: flex; align-items: center; gap: var(--space-2); height: 32px; padding: 0 var(--space-3); color: var(--text-1); font-size: var(--text-base); font-weight: var(--weight-medium); }
+.archive-caption > svg { color: var(--green); }
+.archive-caption > small { color: var(--text-3); font-size: var(--text-sm); font-weight: var(--weight-regular); font-variant-numeric: tabular-nums; }
+.archive-caption > .archive-lane-link { margin-left: auto; }
 .board-filter-control { position: relative; display: flex; min-width: 0; }
 .board-filter-popover { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; display: flex; align-items: center; gap: var(--space-2); width: 280px; padding: 0 var(--space-1) 0 var(--space-3); border: 1px solid var(--border-2); border-radius: var(--radius-md); background: var(--surface-3); box-shadow: var(--shadow-md); color: var(--text-3); animation: o-pop var(--duration) var(--ease-out); }
 .board-filter-popover input { min-height: 36px; padding: 0; border: 0; background: transparent; box-shadow: none; }
@@ -130,6 +153,8 @@
 .task-card:focus-visible { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
 .task-card.is-selected, .task-card.has-menu { border-color: color-mix(in srgb, var(--accent) 55%, var(--border-2)); background: color-mix(in srgb, var(--accent) 6%, var(--surface-3)); }
 .task-card.done .task-top strong { color: var(--text-3); }
+/* Completed cards in All issues: present, a step quieter. */
+.task-card.done:not(.is-completing) .task-meta { opacity: 0.6; }
 .task-card.is-completing .task-top strong { text-decoration: line-through; text-decoration-color: var(--text-3); }
 .task-card.is-collapsing { overflow: hidden; pointer-events: none; }
 .task-card-head { display: flex; align-items: center; gap: var(--space-2); min-height: 20px; }
@@ -213,6 +238,7 @@ button.task-assignee:hover { box-shadow: 0 0 0 2px var(--border-3); color: var(-
   .board-header button { position: relative; }
   .board-header button::before { content: ""; position: absolute; inset: -10px 0; }
   .board-header .icon-button::before, .board-header .issue-layout-switch button::before { inset: -4px; }
+  .board-header .view-tab::before { inset: -9px 0; }
   .board-header .project-create-issue::before { inset: -7px -7px -7px -5px; } /* ::before insets start inside the 1px border. */
   .board-header .member-picker-trigger::before { inset: -5px; }
   .board-header .board-search-chip button::before { inset: -6px 0; }
@@ -324,17 +350,20 @@ button.task-assignee.with-name:hover { box-shadow: none; border-color: var(--bor
 /* Mobile. */
 @media (max-width: 760px) {
   .board-section { --lane-strip: 44px; }
-  .board-header { flex-wrap: nowrap; gap: var(--space-1); }
-  .board-header-actions { gap: var(--space-2); }
+  .board-header { flex-wrap: nowrap; gap: var(--space-1); margin: 0 calc(var(--space-4) * -1) var(--space-2); padding: 0 var(--space-2) 0 var(--space-3); }
+  .board-header-actions { gap: 2px; }
+  .board-header-divider, .view-archive.icon-button { display: none; }
+  .view-tab { padding: 0 8px; }
+  .view-tab-long { display: none; }
+  .view-tab-short { display: inline; }
   .board-header-actions > .member-picker { max-width: 44px; }
   .board-header-actions .member-picker-trigger > span:not(.origin-user-avatar), .board-header-actions .member-picker-trigger > svg:last-child { display: none; }
   .board-header-actions .member-picker-trigger { justify-content: center; width: 36px; min-height: 36px; padding: 0; }
   .board-header-actions > .member-picker { flex: none; }
   /* Board and List become one toggle that shows the other layout. */
-  .board-header-actions > .issue-layout-switch { margin: 0; padding: 0; border: 0; background: transparent; }
+  .board-header-actions > .issue-layout-switch { height: auto; margin: 0; padding: 0; border: 0; background: transparent; }
   .issue-layout-switch button[aria-pressed="true"] { display: none; }
   .issue-layout-switch button, .issue-layout-switch button:hover { width: 36px; height: 36px; color: var(--text-2); }
-  .board-header .segmented-control button { padding: 0 6px; }
   .board-header-actions .icon-button { width: 36px; min-width: 36px; height: 36px; }
   /* An active search gets its own row under the toolbar, so the query stays readable. */
   .board-header:has(.board-search-chip) { flex-wrap: wrap; row-gap: var(--space-1); }
@@ -345,7 +374,8 @@ button.task-assignee.with-name:hover { box-shadow: none; border-color: var(--bor
   .project-create-issue > span { display: none; }
   /* Filter and Display fold to their icons so the toolbar stays one row at 390px. */
   .board-header .view-control-trigger > span { display: none; }
-  .board-header .view-control-trigger { width: 36px; min-height: 36px; padding: 0; justify-content: center; }
+  .board-header .view-control-trigger { position: relative; width: 36px; height: 36px; padding: 0; justify-content: center; border-color: transparent; background: transparent; }
+  .board-header .view-control-trigger > small { position: absolute; top: 2px; right: 0; min-width: 14px; height: 14px; padding: 0 3px; }
   .empty-lane:has(> .lane-jump) > .lane-empty-text { display: none; }
   .empty-lane > .lane-jump { display: inline-flex; min-height: 44px; color: var(--text-2); }
   /* Every control keeps its size; nothing in the row shrinks under its neighbour at 360px. */
@@ -397,11 +427,7 @@ button.task-assignee.with-name:hover { box-shadow: none; border-color: var(--bor
 
 /* Narrow Android phones (360px): tighter gaps; below that the counts give way. */
 @media (max-width: 380px) {
-  .board-header-actions { gap: var(--space-1); }
-  .board-header .segmented-control button { padding: 0 5px; }
-}
-@media (max-width: 359px) {
-  .board-header .segmented-control button > span { display: none; }
+  .view-tab { padding: 0 6px; }
 }
 
 /* Status rings follow the lane colors. */

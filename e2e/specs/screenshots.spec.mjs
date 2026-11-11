@@ -1,6 +1,7 @@
-// Screenshots of the Linear-polish round: ORIGIN_SHOTS_DIR=/tmp/shots npm run e2e -- --grep "polish screenshots".
+// Screenshots of the Linear-polish rounds: ORIGIN_SHOTS_DIR=/tmp/shots npm run e2e -- --grep "polish screenshots".
+// With ORIGIN_LINEAR_REFS=/path/to/linear-refs it also composes Origin | Linear side-by-sides (compare-*.png).
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test, expect } from '../support/fixtures.mjs';
 
@@ -8,6 +9,16 @@ import { test, expect } from '../support/fixtures.mjs';
 const shots = process.env.ORIGIN_SHOTS_DIR;
 if (shots) mkdirSync(shots, { recursive: true });
 const shot = (target, name, options = {}) => target.screenshot({ path: resolve(shots, name), animations: 'disabled', ...options });
+const refs = process.env.ORIGIN_LINEAR_REFS;
+/** Origin's shot on the left, the official Linear reference on the right, at the same height. */
+async function compare(page, name, origin, linear, caption) {
+  if (!refs || !existsSync(resolve(refs, linear))) return;
+  const data = file => `data:image/png;base64,${readFileSync(file).toString('base64')}`;
+  await page.setViewportSize({ width: 1600, height: 640 });
+  await page.setContent(`<style>body{margin:0;background:#08090a;color:#9a9ba2;font:13px Inter,system-ui,sans-serif}main{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px}figure{margin:0;display:grid;gap:8px}img{width:100%;height:560px;object-fit:contain;object-position:left top;border:1px solid #26272b;border-radius:8px;background:#0e0f11}</style>
+    <main><figure><img src="${data(resolve(shots, origin))}"><figcaption>Origin · ${caption}</figcaption></figure><figure><img src="${data(resolve(refs, linear))}"><figcaption>Linear (official docs) · ${linear}</figcaption></figure></main>`);
+  await page.screenshot({ path: resolve(shots, name) });
+}
 const day = offset => { const d = new Date(Date.now() + offset * 86400000); return d.toISOString().slice(0, 10); };
 
 test('polish screenshots', async ({ clients, f }) => {
@@ -30,35 +41,52 @@ test('polish screenshots', async ({ clients, f }) => {
   const crash = await make(f.member, progress, 'Crash when pasting images into comments', { priority: 'high', labels: ['Bug'], estimate: 1, assignedToEmail: f.member.email, dueDate: day(-2), description: 'Pasting a PNG from the clipboard into a comment closes the tab on Chrome 131.' });
   await f.member.api.m('tasks:addComment', { ...f.project, taskId: crash, body: 'Reproduced on Chrome and Arc. Firefox is fine.' }).catch(() => undefined);
 
+  const done = await make(f.member, todo, 'Draft the release notes for 0.9', { labels: ['Improvement'], estimate: 1 });
+  await f.member.api.m('tasks:updateTask', { ...f.project, taskId: done, done: true });
+
   const page = await clients.login(f.admin, f.url());
   const card = title => page.locator('.task-card').filter({ hasText: title });
   await expect(card('Login button misaligned on Safari')).toBeVisible();
-  await expect(page.locator('[data-column-title="Backlog"]')).toBeVisible();
   await page.mouse.move(1, 1);
+  // Board in the Active view (the default): no Backlog column, no completed issues.
+  await expect(page.getByRole('tab', { name: 'Active' })).toHaveAttribute('aria-selected', 'true');
   await shot(page, 'board.png');
+  await shot(page.locator('.workspace-app .sidebar'), 'nav-sidebar.png');
   await shot(page.locator('.project-navigation'), 'nav-issues.png');
+  await shot(page, 'view-tabs.png', { clip: { x: 240, y: 0, width: 1200, height: 112 } });
 
   // Hover and a card close-up.
   await card('Crash when pasting images into comments').hover();
   await shot(page.locator('[data-column-title="In progress"]'), 'cards-hover.png');
   await shot(card('Login button misaligned on Safari'), 'card-labels.png');
 
+  // Display popover.
+  await page.mouse.move(1, 1);
+  await page.keyboard.press('Shift+V');
+  await expect(page.getByRole('dialog', { name: 'Display options' })).toBeVisible();
+  await shot(page, 'display-popover.png', { clip: { x: 840, y: 0, width: 600, height: 620 } });
+  await page.keyboard.press('Escape');
+
+  // Filter bar: a label filter and an assignee filter as formula chips.
+  await page.keyboard.press('f');
+  await page.getByRole('menuitem', { name: /^Labels/ }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Bug' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Feature' }).click();
+  await page.keyboard.press('Escape');
+  await page.getByRole('menuitem', { name: /^Priority/ }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'High' }).click();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.filter-chip')).toHaveCount(2);
+  await page.mouse.move(1, 1);
+  await shot(page, 'filter-bar.png', { clip: { x: 240, y: 0, width: 1200, height: 420 } });
+  await page.getByRole('button', { name: 'Clear', exact: true }).click();
+
   // Label picker from the card's labels.
   await card('Keyboard shortcut cheat sheet').locator('.label-chips-button').click();
   await expect(page.locator('.label-picker-popover')).toBeVisible();
   await shot(page, 'label-picker.png');
   await page.keyboard.press('Escape');
-
-  // Label filter.
-  await page.getByRole('button', { name: 'Filter' }).click();
-  await page.getByRole('menuitem', { name: /^Labels/ }).click();
-  await page.getByRole('menuitemcheckbox', { name: 'Bug' }).click();
-  await page.keyboard.press('Escape');
-  await page.keyboard.press('Escape');
-  await expect(page.locator('.filter-chip')).toBeVisible();
-  await page.mouse.move(1, 1);
-  await shot(page, 'label-filter.png');
-  await page.getByRole('button', { name: 'Remove labels filter' }).click();
 
   // Card menu with the estimate submenu.
   await card('Add CSV export for issues').click({ button: 'right' });
@@ -67,23 +95,37 @@ test('polish screenshots', async ({ clients, f }) => {
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
 
-  // List view.
+  // Backlog and All issues.
+  await page.getByRole('tab', { name: 'Backlog' }).click();
+  await page.mouse.move(1, 1);
+  await shot(page, 'board-backlog.png');
+  await page.getByRole('tab', { name: 'All issues' }).click();
+  await expect(card('Draft the release notes for 0.9')).toBeVisible();
+  await page.mouse.move(1, 1);
+  await shot(page, 'board-all.png');
+
+  // List view (All issues: completed rows last in their group).
   await page.getByRole('button', { name: 'List view' }).click();
   await expect(page.locator('.issue-table')).toBeVisible();
   await page.mouse.move(1, 1);
   await shot(page, 'list.png');
+  await page.getByRole('tab', { name: 'Active' }).click();
+  await page.mouse.move(1, 1);
+  await shot(page, 'list-active.png');
   await page.getByRole('button', { name: 'Board view' }).click();
+
+  // Completed issues (the quiet archive beside the tabs).
+  await page.getByRole('button', { name: 'Completed issues', exact: true }).click();
+  await expect(page.locator('.archive-row')).toHaveCount(1);
+  await page.mouse.move(1, 1);
+  await shot(page, 'completed.png');
+  await page.getByRole('button', { name: 'Completed issues', exact: true }).click();
 
   // Command palette and shortcuts.
   await card('Login button misaligned on Safari').focus();
   await page.keyboard.press('Control+k');
   await expect(page.getByRole('dialog', { name: 'Command menu' })).toBeVisible();
   await shot(page, 'command-palette.png');
-  await page.keyboard.press('Escape');
-  await card('Login button misaligned on Safari').focus();
-  await page.keyboard.press('Shift+E');
-  await expect(page.getByRole('dialog', { name: 'Command menu' })).toBeVisible();
-  await shot(page, 'estimate-shortcut.png');
   await page.keyboard.press('Escape');
   await page.locator('body').click({ position: { x: 5, y: 500 } });
   await page.keyboard.press('?');
@@ -110,7 +152,7 @@ test('polish screenshots', async ({ clients, f }) => {
   await shot(page, 'code-empty.png');
 
   // Inbox.
-  await page.getByRole('button', { name: /^Inbox/ }).first().click().catch(() => page.getByRole('link', { name: /^Inbox/ }).first().click());
+  await page.getByRole('button', { name: /^Inbox/ }).first().click();
   await page.waitForTimeout(600);
   await shot(page, 'inbox.png');
 
@@ -159,8 +201,21 @@ test('polish screenshots', async ({ clients, f }) => {
   await owner.keyboard.press('ArrowRight');
   await shot(owner.locator('.project-navigation'), 'nav-focus.png');
 
-  // Phone width: the pills fold to icons beside the open one.
+  // Phone width: the pills fold to icons beside the open one; the view tabs stay on one row with the actions.
   const phone = await clients.login(f.admin, f.url(), { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await expect(phone.locator('.task-card').first()).toBeVisible();
   await shot(phone, 'phone-board.png');
+  await phone.getByRole('button', { name: 'Open navigation' }).click();
+  await phone.waitForTimeout(400);
+  await shot(phone, 'phone-nav.png');
+
+  // Origin | Linear side-by-sides from the official docs images.
+  const sheet = await clients.login(f.admin, f.url());
+  await compare(sheet, 'compare-sidebar.png', 'nav-sidebar.png', 'docs-team-pages.png', 'sidebar');
+  await compare(sheet, 'compare-view-tabs.png', 'view-tabs.png', 'docs-filters.png', 'view tabs + header');
+  await compare(sheet, 'compare-display.png', 'display-popover.png', 'docs-display-options.png', 'Display popover');
+  await compare(sheet, 'compare-filter-bar.png', 'filter-bar.png', 'docs-filters.png', 'filter bar');
+  await compare(sheet, 'compare-header.png', 'view-tabs.png', 'docs-custom-views-board.png', 'header cluster');
+  await compare(sheet, 'compare-board.png', 'board.png', 'docs-board-layout.png', 'board');
+  await compare(sheet, 'compare-list.png', 'list-active.png', 'docs-filters.png', 'list');
 });

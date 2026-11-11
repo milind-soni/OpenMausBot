@@ -32,6 +32,8 @@ type IssueItemProps = {
   menuOpen: boolean;
   onOpen: (taskId: Task["_id"]) => void;
   onComplete: (task: Task) => void;
+  /** A completed issue's check reopens it (All issues). */
+  reopen?: boolean;
   onMenu: OnMenu;
   /** Opens the due date popover anchored to the clicked chip. */
   onDueDate: OnDueDate;
@@ -74,8 +76,8 @@ const pointAt = (event: ReactMouseEvent): TaskMenuAnchor => ({ left: event.clien
  * With `reopen`, a done issue's tick stays pressable and calls `onComplete` again to reopen it (Inbox, profiles), and
  * the control is its own Tab stop (those rows have no card menu to reach it from).
  */
-export function CompleteCheck<T extends { title: string }>({ task, done, canEdit, onComplete, reopen = false, className }: { task: T; done: boolean; canEdit: boolean; onComplete: (task: T) => void; reopen?: boolean; className?: string }) {
-  return <button className={clsx("check-button", className)} type="button" tabIndex={reopen ? undefined : -1} aria-label={done ? `${reopen ? "Reopen" : "Completed"} ${task.title}` : `Complete ${task.title}`} disabled={!canEdit || (done && !reopen)} onClick={event => { event.stopPropagation(); onComplete(task); }}>
+export function CompleteCheck<T extends { title: string }>({ task, done, canEdit, onComplete, reopen = false, tabbable = reopen, className }: { task: T; done: boolean; canEdit: boolean; onComplete: (task: T) => void; reopen?: boolean; tabbable?: boolean; className?: string }) {
+  return <button className={clsx("check-button", className)} type="button" tabIndex={tabbable ? undefined : -1} aria-label={done ? `${reopen ? "Reopen" : "Completed"} ${task.title}` : `Complete ${task.title}`} disabled={!canEdit || (done && !reopen)} onClick={event => { event.stopPropagation(); onComplete(task); }}>
     {done ? <span className="check-done"><Check size={10} strokeWidth={3} /></span> : <span className="check-box" />}
   </button>;
 }
@@ -143,7 +145,7 @@ export function AssigneeChip({ task, assignee, canEdit, onMenu, withName = false
  * place. Inner controls are pointer targets only (tabIndex -1): keyboard users get the same actions from the menu
  * (Shift+F10 / context-menu key) and the issue view.
  */
-export const IssueCard = memo(function IssueCard({ task, pullRequest, assignee, canEdit, tabStop, selected, completing, dragState, keyboardMoving, menuOpen, onOpen, onComplete, onMenu, onDueDate, onLabels, onKeyDown, onFocus, onPointerDown, onHandleKeyDown, onHandleClick, onHandleBlur, properties }: IssueCardProps) {
+export const IssueCard = memo(function IssueCard({ task, pullRequest, assignee, canEdit, tabStop, selected, completing, dragState, keyboardMoving, menuOpen, onOpen, onComplete, reopen = false, onMenu, onDueDate, onLabels, onKeyDown, onFocus, onPointerDown, onHandleKeyDown, onHandleClick, onHandleBlur, properties }: IssueCardProps) {
   const key = taskKey(task._id);
   const done = task.done || Boolean(completing);
   return (
@@ -173,7 +175,7 @@ export const IssueCard = memo(function IssueCard({ task, pullRequest, assignee, 
         {shows(properties, "assignee") && <AssigneeChip task={task} assignee={assignee} canEdit={canEdit} onMenu={onMenu} />}
       </div>
       <div className="task-top">
-        <CompleteCheck task={task} done={done} canEdit={canEdit} onComplete={onComplete} />
+        <CompleteCheck task={task} done={done} canEdit={canEdit} onComplete={onComplete} reopen={reopen} tabbable={false} />
         <strong ref={tapTarget}>{task.title}</strong>
       </div>
       <div className="task-meta">
@@ -191,13 +193,13 @@ export const IssueCard = memo(function IssueCard({ task, pullRequest, assignee, 
 /**
  * One list row: the same Tab stop, keys, menu (right-click, Shift+F10, long-press) and quick-edit chips as a card.
  */
-export const IssueRow = memo(function IssueRow({ task, assignee, status, canEdit, tabStop, selected, completing, menuOpen, onOpen, onComplete, onMenu, onDueDate, onLabels, onKeyDown, onFocus, onPointerDown, properties, pullRequest }: IssueItemProps & { status?: { title: string; label: string }; pullRequest?: LinkedPullRequest }) {
+export const IssueRow = memo(function IssueRow({ task, assignee, status, canEdit, tabStop, selected, completing, menuOpen, onOpen, onComplete, reopen = false, onMenu, onDueDate, onLabels, onKeyDown, onFocus, onPointerDown, properties, pullRequest }: IssueItemProps & { status?: { title: string; label: string }; pullRequest?: LinkedPullRequest }) {
   const key = taskKey(task._id);
   const done = task.done || Boolean(completing);
   return (
     <tr
       data-task-id={task._id}
-      className={clsx(canEdit && "can-press", selected && "is-selected", menuOpen && "has-menu", completing && "is-completing")}
+      className={clsx(canEdit && "can-press", task.done && "done", selected && "is-selected", menuOpen && "has-menu", completing && "is-completing")}
       tabIndex={tabStop ? 0 : -1}
       aria-label={`${key} ${task.title}`}
       aria-current={selected ? "true" : undefined}
@@ -212,7 +214,7 @@ export const IssueRow = memo(function IssueRow({ task, assignee, status, canEdit
       }}
     >
       <td className="col-issue">
-        <CompleteCheck task={task} done={done} canEdit={canEdit} onComplete={onComplete} />
+        <CompleteCheck task={task} done={done} canEdit={canEdit} onComplete={onComplete} reopen={reopen} tabbable={false} />
         <span className="issue-table-title" ref={tapTarget}>{shows(properties, "id") && <small className="issue-key">{key}</small>}<span>{task.title}</span>{shows(properties, "pullRequest") && <GitHubIssueIndicator number={task.githubIssueNumber} pullRequest={pullRequest} />}</span>
         {shows(properties, "labels") && <LabelsChip task={task} canEdit={canEdit} onLabels={onLabels} max={3} className="issue-row-labels" />}
       </td>

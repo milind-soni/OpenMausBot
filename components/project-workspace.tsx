@@ -186,9 +186,9 @@ function ProjectHeader({ project, tab, onSelect, onIntent }: { project: ProjectW
     <div className="project-identity"><ProjectIcon project={project} /><h1>{project.name}</h1></div>
     <div className="project-tabs" role="tablist" aria-label="Project" onKeyDown={onKeyDown} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusKey(null); }}>
       <div ref={scroller} className="project-tab-scroll" data-fade-start={edges.start || undefined} data-fade-end={edges.end || undefined}>
-        {tabs.map(({ key, label, icon: Icon }) => <button key={key} type="button" className="project-tab" {...tabProps(key)}><Icon size={14} strokeWidth={1.75} aria-hidden="true" /><span>{label}</span></button>)}
+        {tabs.map(({ key, label, icon: Icon }) => <button key={key} type="button" className="project-tab" {...tabProps(key)}><Icon size={16} strokeWidth={1.75} aria-hidden="true" /><span>{label}</span></button>)}
       </div>
-      <button type="button" className="project-settings-tab" aria-label="Settings" title="Settings" {...tabProps("settings")}><Settings size={15} strokeWidth={1.75} /></button>
+      <button type="button" className="project-settings-tab" aria-label="Settings" title="Settings" {...tabProps("settings")}><Settings size={16} strokeWidth={1.75} /></button>
     </div>
   </header>;
 }

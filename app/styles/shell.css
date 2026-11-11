@@ -58,7 +58,9 @@
 
 .sidebar-content { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; width: 100%; }
 .sidebar-nav, .sidebar-section { position: relative; z-index: 1; }
-.sidebar-nav { display: flex; flex: none; flex-direction: column; gap: 1px; padding-bottom: var(--space-4); }
+.sidebar-nav { display: flex; flex: none; flex-direction: column; gap: 1px; padding-bottom: var(--space-3); }
+/* Section labels (Workspace, Projects): small, muted, no chrome. */
+.sidebar-label { display: flex; align-items: center; height: 28px; margin-top: var(--space-3); padding: 0 var(--space-2); color: var(--text-3); font-size: var(--text-sm); font-weight: var(--weight-medium); }
 .nav-item, .project-button {
   position: relative;
   display: flex;
@@ -75,24 +77,30 @@
   font-size: var(--text-base);
   font-weight: var(--weight-medium);
   text-align: left;
-  transition: background var(--duration-fast), color var(--duration-fast);
+  transition: background var(--duration-instant) var(--ease-standard), color var(--duration-instant) var(--ease-standard);
 }
-.nav-item > svg, .project-button .project-icon { width: 16px; height: 16px; color: var(--text-3); transition: color var(--duration-fast); }
+.nav-item > svg, .project-button .project-icon { flex: none; width: 16px; height: 16px; color: var(--text-3); transition: color var(--duration-instant) var(--ease-standard); }
 .nav-item > span { flex: 1; }
 @media (hover: hover) { .nav-item:hover, .project-button:hover { background: var(--hover); color: var(--text-1); } }
 .nav-item:active, .project-button:active, .profile-chip:active { background: var(--active); }
-.nav-item.active, .project-button.active { background: var(--surface-4); color: var(--text-1); }
+/* The open place: a subtle filled pill, as Linear's sidebar. */
+.nav-item.active, .project-button.active { background: var(--selected); color: var(--text-1); }
+.sidebar-content > .nav-glider { background: var(--selected); }
 .nav-item.active > svg, .project-button.active .project-icon { color: var(--text-1); }
 .sidebar-content:has(> .nav-glider[data-visible="true"]) :is(.nav-item, .project-button).active { background: transparent; }
 .nav-item small, .project-issue-count { color: var(--text-3); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
 .nav-item > small.nav-live { display: inline-flex; align-items: center; gap: 4px; color: var(--green); }
 .nav-item > small.nav-live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
-.nav-item > small.nav-unread { min-width: 18px; padding: 0 5px; border-radius: var(--radius-full); background: var(--accent-soft); color: var(--accent-text); font-weight: var(--weight-medium); line-height: 18px; text-align: center; }
+/* Unread count: a plain number on the right, a step brighter than the other counts. */
+.nav-item > small.nav-unread { min-width: 16px; color: var(--text-2); font-weight: var(--weight-medium); text-align: right; }
 
 .sidebar-section { display: flex; flex: 1; flex-direction: column; min-height: 0; gap: 1px; }
 .sidebar-section-head { display: flex; align-items: center; gap: 2px; height: 28px; flex: none; padding-right: 2px; }
-.section-toggle { display: flex; align-items: center; gap: 4px; height: 24px; padding: 0 6px 0 var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-3); font-size: var(--text-sm); font-weight: var(--weight-medium); }
-.section-toggle:hover { color: var(--text-1); }
+.section-toggle { display: flex; align-items: center; gap: 4px; height: 24px; padding: 0 6px 0 var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-3); font-size: var(--text-sm); font-weight: var(--weight-medium); transition: color var(--duration-instant) var(--ease-standard), background var(--duration-instant) var(--ease-standard); }
+.section-toggle:hover { background: var(--hover); color: var(--text-1); }
+.sidebar-section-head .icon-create, .sidebar-section-head .project-sort > .icon-button { opacity: 0; transition: opacity var(--duration-instant) var(--ease-standard); }
+.sidebar-section:is(:hover, :focus-within) .sidebar-section-head :is(.icon-create, .project-sort > .icon-button) { opacity: 1; }
+@media (hover: none) { .sidebar-section-head .icon-create, .sidebar-section-head .project-sort > .icon-button { opacity: 1; } }
 .sidebar-section-head > .section-toggle { flex-direction: row-reverse; margin-right: auto; }
 .sidebar-section-head > .section-toggle svg, .project-group-toggle svg { width: 12px; height: 12px; }
 .icon-create { display: grid; place-items: center; width: 24px; min-width: 24px; height: 24px; min-height: 0; padding: 0; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-3); }

@@ -8,18 +8,42 @@ export type IssueGrouping = "status" | "priority" | "assignee" | "label" | "none
 export type IssueOrdering = "manual" | "priority" | "estimate" | "dueDate" | "created" | "updated" | "title";
 export type DisplayProperty = "id" | "status" | "priority" | "assignee" | "labels" | "estimate" | "dueDate" | "pullRequest" | "created";
 export type IssueFilters = { statuses: string[]; priorities: Priority[]; assignees: string[]; labels: string[] };
+/**
+ * The project's issue views, as Linear's team pages: All issues, Active and Backlog. Origin keeps its own model:
+ * Backlog is the draft column, and completed is a flag on the issue (no Done column).
+ */
+export type IssueTab = "all" | "active" | "backlog";
 export type IssueViewState = {
   version?: number;
+  tab: IssueTab;
   layout: IssueLayout;
   grouping: IssueGrouping;
   ordering: IssueOrdering;
   showEmptyGroups: boolean;
   showSubIssues: boolean;
+  /** All issues only: completed issues stay in their column, after the open ones. */
+  showCompleted: boolean;
   properties: DisplayProperty[];
   filters: IssueFilters;
 };
 export type FilterKey = keyof IssueFilters;
 export type ViewTask = { _id: string; title: string; priority: Priority; assignedToEmail?: string; labels?: string[]; dueDate?: string; estimate?: number; createdAt: number; updatedAt: number; order: number };
+
+/** The view tabs in order, with their single-key shortcut. */
+export const ISSUE_TABS: { value: IssueTab; label: string; key: string }[] = [
+  { value: "all", label: "All issues", key: "1" }, { value: "active", label: "Active", key: "2" }, { value: "backlog", label: "Backlog", key: "3" },
+];
+
+/**
+ * Whether an issue belongs to a view tab. `draft` is whether its column is the draft (Backlog) column.
+ * All issues: everything, completed included unless Display hides them. Active: open issues outside the Backlog.
+ * Backlog: open issues in the Backlog column.
+ */
+export function inIssueTab(task: { done?: boolean }, draft: boolean, tab: IssueTab, showCompleted = true): boolean {
+  if (tab === "all") return !task.done || showCompleted;
+  if (task.done) return false;
+  return tab === "backlog" ? draft : !draft;
+}
 
 export const GROUPINGS: { value: IssueGrouping; label: string }[] = [
   { value: "status", label: "Status" }, { value: "priority", label: "Priority" }, { value: "assignee", label: "Assignee" }, { value: "label", label: "Label" }, { value: "none", label: "No grouping" },
@@ -40,7 +64,8 @@ export const NO_LABEL = "";
 
 export const DEFAULT_VIEW: IssueViewState = {
   version: 2,
-  layout: "board", grouping: "status", ordering: "manual", showEmptyGroups: false, showSubIssues: true,
+  tab: "active",
+  layout: "board", grouping: "status", ordering: "manual", showEmptyGroups: false, showSubIssues: true, showCompleted: true,
   properties: ["id", "status", "priority", "assignee", "estimate", "dueDate", "labels", "pullRequest"],
   filters: { statuses: [], priorities: [], assignees: [], labels: [] },
 };
@@ -58,11 +83,13 @@ export function readIssueView(raw: unknown, legacyLayout?: string | null): Issue
   for (let next = version + 1; next <= VIEW_VERSION; next++) for (const added of ADDED_PROPERTIES[next] ?? []) if (!properties.includes(added)) properties.push(added);
   return {
     version: VIEW_VERSION,
+    tab: pick(value.tab, ISSUE_TABS, DEFAULT_VIEW.tab),
     layout: value.layout === "list" || value.layout === "board" ? value.layout : legacyLayout === "list" ? "list" : "board",
     grouping: pick(value.grouping, GROUPINGS, DEFAULT_VIEW.grouping),
     ordering: pick(value.ordering, ORDERINGS, DEFAULT_VIEW.ordering),
     showEmptyGroups: typeof value.showEmptyGroups === "boolean" ? value.showEmptyGroups : DEFAULT_VIEW.showEmptyGroups,
     showSubIssues: typeof value.showSubIssues === "boolean" ? value.showSubIssues : DEFAULT_VIEW.showSubIssues,
+    showCompleted: typeof value.showCompleted === "boolean" ? value.showCompleted : DEFAULT_VIEW.showCompleted,
     properties: Array.isArray(value.properties) ? properties : DEFAULT_VIEW.properties,
     filters: {
       statuses: strings(filters.statuses),

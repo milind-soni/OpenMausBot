@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 import { useMutation, useQuery } from "convex/react";
 import type { OptimisticLocalStore } from "convex/browser";
 import clsx from "clsx";
-import { ArrowRight, Check, CheckCircle2, Circle, Columns3, List, MoreHorizontal, PencilLine, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { Archive, ArrowRight, Check, CheckCircle2, Circle, Columns3, List, MoreHorizontal, PencilLine, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { formatDate } from "@/lib/format";
@@ -26,8 +26,8 @@ import { IssueComposer, TaskModal } from "./lazy-views";
 import { IssueDeleteDialog, IssueToastHost, dismissIssueToast, showIssueToast, subscribeCreatedIssue, type OpenReference, type ProjectWithUi } from "./issue-shared";
 import { IssueSelect } from "./issue-select";
 import { DelayedSkeleton } from "./delayed-skeleton";
-import { DEFAULT_VIEW, activeFilterCount, groupIssues, matchesFilters, readIssueView, sortIssues, type DisplayProperty, type IssueViewState } from "@/lib/issue-view";
-import { DisplayOptions, FilterChips, FilterMenu, filterSources } from "./issue-filters";
+import { DEFAULT_VIEW, ISSUE_TABS, activeFilterCount, groupIssues, inIssueTab, matchesFilters, readIssueView, sortIssues, type DisplayProperty, type IssueTab, type IssueViewState } from "@/lib/issue-view";
+import { DisplayOptions, FilterChips, FilterMenu, filterSources, type PopoverOpener } from "./issue-filters";
 import { useIssueNavigation } from "./issue-navigation";
 import { LabelPopover, useWorkspaceLabels } from "./issue-labels";
 import { suggestLabels } from "@/lib/command-menu";
@@ -78,13 +78,21 @@ function updateTaskOnBoard(store: OptimisticLocalStore, args: UpdateTaskArgs) {
 
 const isDone = (column: Column) => column.isDone ?? column.title.toLowerCase() === "done";
 
-/** Active cards of a board lane in display order; cards whose column is hidden show in Todo (or the first lane). */
-function activeLaneTasks(board: { columns: Column[]; tasks: Task[] }, columnId: string, matches: (task: Task) => boolean) {
+/**
+ * Cards of a board lane in display order; cards whose column is hidden show in Todo (or the first lane). With
+ * `withDone` (All issues), the lane's completed issues follow its open ones.
+ */
+function laneTasks(board: { columns: Column[]; tasks: Task[] }, columnId: string, matches: (task: Task) => boolean, withDone = false) {
   const columns = board.columns.filter(column => !isDone(column));
   const ids = new Set<string>(columns.map(column => column._id));
   const fallback = columns.find(column => column.title.toLowerCase() === "todo") || columns[0];
-  return board.tasks.filter(task => !task.done && matches(task) && (ids.has(task.columnId) ? task.columnId : fallback?._id) === columnId);
+  const inLane = (task: Task) => (ids.has(task.columnId) ? task.columnId : fallback?._id) === columnId && matches(task);
+  const open = board.tasks.filter(task => !task.done && inLane(task));
+  return withDone ? [...open, ...board.tasks.filter(task => task.done && inLane(task))] : open;
 }
+const activeLaneTasks = (board: { columns: Column[]; tasks: Task[] }, columnId: string, matches: (task: Task) => boolean) => laneTasks(board, columnId, matches);
+/** Sorted issues with the completed ones kept after the open ones. */
+const orderIssues = (tasks: Task[], ordering: IssueViewState["ordering"]) => ordering === "manual" ? tasks : [...sortIssues(tasks.filter(task => !task.done), ordering), ...sortIssues(tasks.filter(task => task.done), ordering)];
 
 const layoutKey = (projectId: string) => `origin.issueLayout.${projectId}`;
 const viewKey = (projectId: string) => `origin.issueView.${projectId}`;
@@ -137,6 +145,15 @@ function revealInBoard(element: HTMLElement) {
   }
 }
 
+/** What an empty view says, per tab. */
+function ViewEmpty({ tab, filtered, canEdit }: { tab: IssueTab; filtered: boolean; canEdit: boolean }) {
+  if (filtered) return <EmptyBlock icon={Circle} title="No matching issues" body="Change the search or filters to see more." />;
+  const create = canEdit ? " Press C to create one." : "";
+  if (tab === "backlog") return <EmptyBlock icon={Circle} title="Backlog is empty" body={`Nothing parked. Backlog issues stay in Origin until they move to another column.${create}`} />;
+  if (tab === "active") return <EmptyBlock icon={Circle} title="No active issues" body={`Nothing in motion.${create}`} />;
+  return <EmptyBlock icon={Circle} title="No issues" body={canEdit ? "Press C to create one." : undefined} />;
+}
+
 function EmptyBlock({ icon: Icon, title, body }: { icon: typeof Circle; title: string; body?: string }) {
   return <div className="empty-block"><Icon size={20} /><h3>{title}</h3>{body && <p>{body}</p>}</div>;
 }
@@ -157,20 +174,27 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
   const createColumn = useMutation(api.tasks.createColumn);
   const updateColumn = useMutation(api.tasks.updateColumn);
 
-  const [view, setViewState] = useState<IssueViewState>(() => readView(projectId));
-  const setView = (next: IssueViewState) => {
-    setViewState(next);
-    try { localStorage.setItem(viewKey(projectId), JSON.stringify(next)); localStorage.setItem(layoutKey(projectId), next.layout); } catch { /* storage unavailable: keep it for this visit */ }
-  };
+  const [view, setView] = useState<IssueViewState>(() => readView(projectId));
+  useEffect(() => {
+    try { localStorage.setItem(viewKey(projectId), JSON.stringify(view)); localStorage.setItem(layoutKey(projectId), view.layout); } catch { /* storage unavailable: keep it for this visit */ }
+  }, [projectId, view]);
+  /** Changes part of the view from the latest state (keyboard handlers outlive a render). */
+  const patchView = (patch: (current: IssueViewState) => Partial<IssueViewState>) => setView(current => ({ ...current, ...patch(current) }));
   const layout = view.layout;
-  const setLayout = (next: "board" | "list") => setView({ ...view, layout: next });
+  const setLayout = (next: "board" | "list") => patchView(() => ({ layout: next }));
   const properties = useMemo(() => new Set<DisplayProperty>(view.properties), [view.properties]);
   const navigation = useIssueNavigation();
   const workspaceLabels = useWorkspaceLabels();
   const parents = useQuery(api.issueRoutes.projectParents, view.showSubIssues ? "skip" : { projectId, sessionToken });
   const subIssueIds = useMemo(() => new Set<string>((parents ?? []).map(row => row.taskId)), [parents]);
   const [boardNotice, setBoardNotice] = useState("");
+  /** Completed issues, newest first: a quiet destination beside the view tabs, not a tab of its own. */
   const [archive, setArchive] = useState(false);
+  const setTab = (tab: IssueTab) => { setArchive(false); patchView(() => ({ tab })); };
+  // All issues keeps completed issues in place (after the open ones), unless Display hides them.
+  const withDone = !archive && view.tab === "all" && view.showCompleted;
+  const filterOpener = useRef<PopoverOpener>(null);
+  const displayOpener = useRef<PopoverOpener>(null);
   // The open issue lives in the URL; opening one from the board adds a history entry so Back closes it.
   const [selectedTaskId, setSelectedTaskId] = useState<Id<"tasks"> | null>(initialTaskId ?? null);
   const pushedIssue = useRef<string | null>(null);
@@ -268,10 +292,12 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
   function matchesView(task: Task) {
     if (!matchesIssue(task, filter)) return false;
     if (!view.showSubIssues && subIssueIds.has(task._id)) return false;
-    if (!activeFilterCount(view.filters) || !board) return true;
+    if (!board) return true;
     const columns = board.columns.filter(column => !isDone(column));
-    const status = columns.some(column => column._id === task.columnId) ? task.columnId : (columns.find(column => column.title.toLowerCase() === "todo") || columns[0])?._id ?? "";
-    return matchesFilters(task, view.filters, status);
+    const status = columns.find(column => column._id === task.columnId) ?? columns.find(column => column.title.toLowerCase() === "todo") ?? columns[0];
+    // The view tab: Active leaves out the Backlog and completed issues, Backlog shows only the Backlog column.
+    if (!archive && !inIssueTab(task, Boolean(status && isDraftColumn(status)), view.tab, view.showCompleted)) return false;
+    return !activeFilterCount(view.filters) || matchesFilters(task, view.filters, status?._id ?? "");
   }
   const dnd = useIssueDrag({
     rootRef: boardScroll,
@@ -311,11 +337,16 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
       event.preventDefault();
       if (action === "create") { if (online) onCreateIssue(); }
       else if (action === "search") setFilterOpen(true);
-      else setLayout(action);
+      else if (action === "filter") filterOpener.current?.open();
+      else if (action === "display") displayOpener.current?.open();
+      else if (action === "toggle-layout") patchView(current => ({ layout: current.layout === "board" ? "list" : "board" }));
+      else if (action === "board" || action === "list") setLayout(action);
+      else setTab(action.slice(4) as IssueTab);
     };
-    window.addEventListener("keydown", handle);
-    return () => window.removeEventListener("keydown", handle);
-    // setLayout only writes state and storage.
+    // Capture: the issues view owns F here (Filter), ahead of the workspace's F for search.
+    window.addEventListener("keydown", handle, true);
+    return () => window.removeEventListener("keydown", handle, true);
+    // setLayout, setTab and patchView only update state from its latest value.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canEdit, online, onCreateIssue, projectId]);
 
@@ -375,6 +406,8 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
   for (const person of [...(board.assignees || []), ...(projectMembers || [])]) people.set(person.email, { email: person.email, name: person.name, username: person.username, avatarUrl: person.avatarUrl });
   const assigneeOf = (task: Task): CardPerson | null => task.assignedToEmail ? people.get(task.assignedToEmail) ?? { email: task.assignedToEmail, name: task.assignedToName } : null;
   const visualColumns = presentColumns(board.columns.filter(column => !isDone(column)));
+  // The lanes (and list status groups) of the open view tab.
+  const laneColumns = archive || view.tab === "all" ? visualColumns : visualColumns.filter(column => isDraftColumn(column) === (view.tab === "backlog"));
   // Rows keep their identity while the board result is unchanged, so memoized cards do not re-render.
   const pullRequests = new Map((board.pullRequests ?? []).map(pr => [pr.taskId as string, pr]));
   const matches = matchesView;
@@ -383,14 +416,14 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
   const columnForTask = (task: Task) => visibleColumnIds.has(task.columnId) ? task.columnId : fallbackColumn?._id;
   const toneOf = (column: Column) => isDraftColumn(column) ? "draft" : laneTone(column.title);
   const archivedTasks = board.tasks.filter(task => task.done && matches(task)).sort((a, b) => (b.completedAt ?? b.updatedAt) - (a.completedAt ?? a.updatedAt));
-  const visibleTasks = (columnId: string) => view.ordering === "manual" ? activeLaneTasks(board, columnId, matches) : sortIssues(activeLaneTasks(board, columnId, matches), view.ordering);
-  const listGroups = groupIssues(sortIssues(visualColumns.flatMap(column => activeLaneTasks(board, column._id, matches)), view.ordering), view.grouping, {
-    statuses: visualColumns.map(column => ({ id: column._id, title: column.title })),
+  const visibleTasks = (columnId: string) => orderIssues(laneTasks(board, columnId, matches, withDone), view.ordering);
+  const listGroups = groupIssues(orderIssues(sortIssues(laneColumns.flatMap(column => laneTasks(board, column._id, matches, withDone)), view.ordering), view.ordering), view.grouping, {
+    statuses: laneColumns.map(column => ({ id: column._id, title: column.title })),
     statusOf: task => columnForTask(task as Task) ?? "",
     people: [...people.values()].map(person => ({ email: person.email, name: person.name || person.email })),
     labels: (workspaceLabels?.labels ?? []).filter(label => !label.archived).map(label => label.name),
   }, view.showEmptyGroups);
-  const activeTasks = layout === "list" ? [...new Map(listGroups.flatMap(group => group.tasks).map(task => [task._id, task])).values()] : visualColumns.flatMap(column => visibleTasks(column._id));
+  const activeTasks = layout === "list" ? [...new Map(listGroups.flatMap(group => group.tasks).map(task => [task._id, task])).values()] : laneColumns.flatMap(column => visibleTasks(column._id));
   const focusable = archive ? archivedTasks : activeTasks;
   const tabStopId = focusable.some(task => task._id === focusId) ? focusId : focusable[0]?._id ?? null;
   /** Column cards with the dragged card shown in its target slot. */
@@ -413,15 +446,17 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
     const hadFocus = Boolean(document.activeElement?.closest(`[data-task-id="${CSS.escape(task._id)}"]`));
     setCompleting(current => ({ ...current, [task._id]: "checked" }));
     const clear = () => setCompleting(current => { const rest = { ...current }; delete rest[task._id]; return rest; });
+    // In All issues the completed card stays where it is, checked.
+    const stays = withDone;
     const commit = () => {
-      const next = neighbourOf(task._id);
+      const next = stays ? null : neighbourOf(task._id);
       updateTask({ projectId, sessionToken, taskId: task._id, done: true })
         .then(() => clear())
         .then(() => showToast("Completed", () => void updateTask({ projectId, sessionToken, taskId: task._id, done: false }).then(() => { dismissIssueToast(); focusCard(task._id); }).catch(report("Could not reopen issue"))))
         .catch(error => { clear(); cardElement(boardScroll.current, task._id)?.getAnimations().forEach(animation => animation.cancel()); report("Could not complete issue")(error); });
       if (hadFocus || document.activeElement === document.body) focusCard(next);
     };
-    if (reduced) { later(commit, 150); return; }
+    if (reduced || stays) { later(commit, stays ? COLLAPSE_MS : 150); return; }
     later(() => {
       const found = cardElement(boardScroll.current, task._id);
       // Cards fold away; list rows simply leave.
@@ -541,7 +576,7 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
     if (!target) { setBoardNotice("Add a workflow column before reopening an issue"); return; }
     // The row leaves the completed list: keep focus on the list.
     const hadFocus = fromMenu || Boolean(document.activeElement?.closest(`[data-task-id="${CSS.escape(task._id)}"]`)) || document.activeElement === document.body;
-    const next = neighbourOf(task._id);
+    const next = withDone ? task._id : neighbourOf(task._id);
     try {
       if (!visibleColumnIds.has(task.columnId)) await moveTask({ projectId, sessionToken, taskId: task._id, columnId: target as Id<"columns"> });
       await updateTask({ projectId, sessionToken, taskId: task._id, done: false });
@@ -578,31 +613,52 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
     catch (error) { setBoardNotice(errorText(error, "Could not rename column")); }
   };
   const filtered = Boolean(filter || activeFilterCount(view.filters));
-  const sources = filterSources({ statuses: visualColumns.map(column => ({ id: column._id, title: column.title })), people: [...people.values()], labels: (workspaceLabels?.labels ?? []).filter(label => !label.archived) });
+  /** The check on an open issue completes it; on a completed one (All issues) it reopens it. */
+  const toggleDone = (task: Task) => { if (task.done) void reopen(task); else complete(task); };
+  const sources = filterSources({ statuses: laneColumns.map(column => ({ id: column._id, title: column.title })), people: [...people.values()], labels: (workspaceLabels?.labels ?? []).filter(label => !label.archived) });
   const statusOf = (task: Task) => visualColumns.find(column => column._id === columnForTask(task));
 
-  const toolbar = (
+  const tabs = <div className="view-tabs" role="tablist" aria-label="Issue views" onKeyDown={event => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    const at = ISSUE_TABS.findIndex(item => item.value === view.tab);
+    const next = ISSUE_TABS[(at + (event.key === "ArrowRight" ? 1 : -1) + ISSUE_TABS.length) % ISSUE_TABS.length]!;
+    event.preventDefault();
+    setTab(next.value);
+    requestAnimationFrame(() => event.currentTarget.querySelector<HTMLElement>(`[data-view="${next.value}"]`)?.focus());
+  }}>
+    {ISSUE_TABS.map(item => {
+      const selected = !archive && view.tab === item.value;
+      return <button key={item.value} type="button" role="tab" className="view-tab" data-view={item.value} aria-selected={selected} tabIndex={selected || (archive && item.value === view.tab) ? 0 : -1} aria-keyshortcuts={item.key} title={`${item.label} (${item.key})`} onClick={() => setTab(item.value)}>{item.value === "all" ? <><span className="view-tab-long">All issues</span><span className="view-tab-short">All</span></> : item.label}</button>;
+    })}
+  </div>;
+  const toolbar = <>
     <div className="board-header">
-      <div className="segmented-control"><span className="segment-glider" aria-hidden="true" /><button className={!archive ? "active" : ""} onClick={() => setArchive(false)}>Active<span>{board.tasks.filter(t => !t.done && matches(t)).length}</span></button><button className={archive ? "active" : ""} onClick={() => setArchive(true)}>Completed<span>{board.tasks.filter(t => t.done && matches(t)).length}</span></button></div>
+      {tabs}
+      <button type="button" className={clsx("icon-button view-archive", archive && "selected")} aria-pressed={archive} aria-label="Completed issues" title="Completed issues, most recent first" onClick={() => setArchive(!archive)}><Archive size={14} /></button>
       <div className="board-header-actions">
         <div className="board-filter-control" ref={filterBox}>
           {filter && !filterOpen
             ? <span className="board-search-chip"><button type="button" aria-label={`Search: ${filter}`} onClick={() => setFilterOpen(true)}><Search size={13} /><span>{filter}</span></button><button type="button" aria-label="Clear search" onClick={() => { setFilter(""); filterButton.current?.focus(); }}><X size={13} /></button></span>
-            : <button ref={filterButton} className={clsx("icon-button", filterOpen && "selected")} aria-label="Search issues" title="Search (/)" aria-expanded={filterOpen} onClick={() => setFilterOpen(!filterOpen)}><Search size={15} /></button>}
+            : <button ref={filterButton} className={clsx("icon-button", filterOpen && "selected")} aria-label="Search issues" title="Search (/)" aria-expanded={filterOpen} onClick={() => setFilterOpen(!filterOpen)}><Search size={14} /></button>}
           {filterOpen && <div className="board-filter-popover"><Search size={14} /><input autoFocus value={filter} onChange={event => setFilter(event.target.value)} placeholder="Search issues" aria-label="Search project issues" onKeyDown={event => { if (event.key === "Escape" || event.key === "Enter") { event.preventDefault(); setFilterOpen(false); requestAnimationFrame(() => filterButton.current?.focus()); } }} />{filter && <button className="icon-button" aria-label="Clear search" onClick={() => setFilter("")}><X size={14} /></button>}</div>}
         </div>
-        <FilterMenu filters={view.filters} sources={sources} onChange={filters => setView({ ...view, filters })} />
-        <DisplayOptions view={view} onChange={setView} archive={archive} />
-        <div className={clsx("segmented-control issue-layout-switch", archive && "is-idle")} role="group" aria-label="Issue layout"><button aria-label="Board view" aria-pressed={layout === "board"} className={layout === "board" ? "active" : ""} disabled={archive} onClick={() => setLayout("board")} title="Board (B)"><Columns3 size={14} /></button><button aria-label="List view" aria-pressed={layout === "list"} className={layout === "list" ? "active" : ""} disabled={archive} onClick={() => setLayout("list")} title="List (L)"><List size={14} /></button></div>
+        <FilterMenu filters={view.filters} sources={sources} onChange={filters => patchView(() => ({ filters }))} opener={filterOpener} />
+        <span className="board-header-divider" aria-hidden="true" />
+        <div className={clsx("icon-segment issue-layout-switch", archive && "is-idle")} role="group" aria-label="Issue layout">
+          <button type="button" aria-label="List view" aria-pressed={!archive && layout === "list"} disabled={archive} onClick={() => setLayout("list")} title="List (L · Ctrl B)"><List size={14} /></button>
+          <button type="button" aria-label="Board view" aria-pressed={!archive && layout === "board"} disabled={archive} onClick={() => setLayout("board")} title="Board (B · Ctrl B)"><Columns3 size={14} /></button>
+        </div>
+        <DisplayOptions view={view} onChange={next => setView(next)} archive={archive} opener={displayOpener} />
         {canEdit && <button disabled={!online} title={!online ? RECONNECT_TO_CREATE : "Create issue (C)"} className="primary-button compact project-create-issue" onClick={onCreateIssue}><Plus size={14} /><span>Create issue</span></button>}
       </div>
-      <FilterChips filters={view.filters} sources={sources} onChange={filters => setView({ ...view, filters })} />
     </div>
-  );
+    <FilterChips filters={view.filters} sources={sources} onChange={filters => patchView(() => ({ filters }))} onAdd={() => filterOpener.current?.open()} />
+  </>;
 
   const archiveView = (
     <div className="archive-list">
-      {!archivedTasks.length && <EmptyBlock icon={CheckCircle2} title={filtered ? "No matching issues" : "No completed issues"} />}
+      <div className="archive-caption"><CheckCircle2 size={14} /><span>Completed</span><small>{archivedTasks.length}</small><button type="button" className="archive-lane-link" onClick={() => setArchive(false)}>Back to {ISSUE_TABS.find(item => item.value === view.tab)!.label}</button></div>
+      {!archivedTasks.length && <EmptyBlock icon={CheckCircle2} title={filtered ? "No matching issues" : "No completed issues"} body={filtered ? "Change the search or filters to see more." : "Finish something first."} />}
       {archivedTasks.map(task => <div
         key={task._id}
         className={clsx("archive-row", canEdit && "can-press", selectedTaskId === task._id && "is-selected", menu?.taskId === task._id && "has-menu")}
@@ -631,11 +687,11 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
   const listView = (
     <div className="issue-table-scroll">
       <table className="issue-table">
-        <caption className="sr-only">Active project issues</caption>
+        <caption className="sr-only">{ISSUE_TABS.find(item => item.value === view.tab)!.label}</caption>
         <thead><tr><th scope="col">Issue</th>{properties.has("status") && <th scope="col" className="col-status">Status</th>}{properties.has("priority") && <th scope="col" className="col-priority">Priority</th>}{properties.has("estimate") && <th scope="col" className="col-estimate">Estimate</th>}{properties.has("assignee") && <th scope="col" className="col-assignee">Assignee</th>}{properties.has("dueDate") && <th scope="col" className="col-due">Due</th>}{properties.has("created") && <th scope="col" className="col-created">Created</th>}</tr></thead>
         {listGroups.map(group => <Fragment key={group.key || "none"}>
           {view.grouping !== "none" && <tbody className="issue-group"><tr className="issue-group-row"><th scope="rowgroup" colSpan={columnCount}>
-            <div className="issue-group-head"><span>{view.grouping === "status" && <StatusIcon title={isDraftColumn(visualColumns.find(column => column._id === group.key) ?? { title: group.title }) ? "Draft" : group.title} />}<strong>{group.title}</strong><small>{group.tasks.length}</small>{properties.has("estimate") && totalEstimate(group.tasks) > 0 && <small className="lane-estimate" title={`${totalEstimate(group.tasks)} points`}><EstimateIcon />{totalEstimate(group.tasks)}</small>}</span>
+            <div className="issue-group-head"><span>{view.grouping === "status" && <StatusIcon title={isDraftColumn(laneColumns.find(column => column._id === group.key) ?? { title: group.title }) ? "Draft" : group.title} />}<strong>{group.title}</strong><small>{group.tasks.length}</small>{properties.has("estimate") && totalEstimate(group.tasks) > 0 && <small className="lane-estimate" title={`${totalEstimate(group.tasks)} points`}><EstimateIcon />{totalEstimate(group.tasks)}</small>}</span>
             {canEdit && online && view.grouping === "status" && <button type="button" className="icon-button" aria-label={`Add issue to ${group.title}`} onClick={() => setLaneCreate(group.key as Id<"columns">)}><Plus size={14} /></button>}</div>
           </th></tr></tbody>}
           <tbody>{group.tasks.map(task => {
@@ -652,8 +708,9 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
               selected={selectedTaskId === task._id}
               completing={completing[task._id]}
               menuOpen={menu?.taskId === task._id}
+              reopen={canEdit && task.done}
               onOpen={openIssuePage}
-              onComplete={complete}
+              onComplete={toggleDone}
               onMenu={(item, menuView, anchor, from) => openMenu(item._id, menuView, anchor, from)}
               onDueDate={(item, from) => setDatePick({ taskId: item._id, anchor: { current: from } })}
               onLabels={openLabels}
@@ -664,14 +721,14 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
           })}</tbody>
         </Fragment>)}
       </table>
-      {!activeTasks.length && <EmptyBlock icon={Circle} title={filtered ? "No matching issues" : "No active issues"} body={filtered ? "Change the search or filters to see more." : canEdit ? "Press C to create an issue." : undefined} />}
+      {!activeTasks.length && <ViewEmpty tab={view.tab} filtered={filtered} canEdit={canEdit} />}
     </div>
   );
 
   /** A phone shows one lane: while searching, an empty lane points to the nearest lane with matches. */
-  const matchCounts = filtered ? visualColumns.map(column => visibleTasks(column._id).length) : [];
+  const matchCounts = filtered ? laneColumns.map(column => visibleTasks(column._id).length) : [];
   const nearestMatch = (index: number) => {
-    for (let step = 1; step < visualColumns.length; step++) for (const at of [index + step, index - step]) if (matchCounts[at]) return at;
+    for (let step = 1; step < laneColumns.length; step++) for (const at of [index + step, index - step]) if (matchCounts[at]) return at;
     return -1;
   };
   const jumpToLane = (columnId: string) => {
@@ -683,13 +740,14 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
   };
   const boardView = (
     <div className={clsx("kanban-scroll", drag?.mode === "pointer" && "is-dragging")}>
-      {visualColumns.map((column, columnIndex) => {
+      {!laneColumns.length && <ViewEmpty tab={view.tab} filtered={false} canEdit={false} />}
+      {laneColumns.map((column, columnIndex) => {
         const tasks = displayTasks(column._id);
         const jump = filtered && !tasks.length ? nearestMatch(columnIndex) : -1;
         const tone = toneOf(column);
         const statusTitle = tone === "draft" ? "Draft" : column.title;
         // Only lanes that were empty from the start fold; a lane emptied by the search or filter stays open and says so.
-        const collapsed = !view.showEmptyGroups && Boolean(foldLanes?.has(column._id)) && !openLanes.has(column._id) && !activeLaneTasks(board, column._id, () => true).length && drag?.target.columnId !== column._id && renaming !== column._id;
+        const collapsed = !view.showEmptyGroups && Boolean(foldLanes?.has(column._id)) && !openLanes.has(column._id) && !activeLaneTasks(board, column._id, () => true).length && !tasks.length && drag?.target.columnId !== column._id && renaming !== column._id;
         const canDelete = visualColumns.length > 1 && !isDraftColumn(column);
         return (
           <div
@@ -721,7 +779,7 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
                 </div>
                 <div className="task-list">
                   {tasks.length === 0 ? <div className="empty-lane">{filtered
-                    ? <><span className="lane-empty-text">No matching issues</span>{jump >= 0 && <button type="button" className="archive-lane-link lane-jump" onClick={() => jumpToLane(visualColumns[jump]._id)}>{matchCounts[jump]} {matchCounts[jump] === 1 ? "match" : "matches"} in {visualColumns[jump].title}<ArrowRight size={14} /></button>}</>
+                    ? <><span className="lane-empty-text">No matching issues</span>{jump >= 0 && <button type="button" className="archive-lane-link lane-jump" onClick={() => jumpToLane(laneColumns[jump]._id)}>{matchCounts[jump]} {matchCounts[jump] === 1 ? "match" : "matches"} in {laneColumns[jump].title}<ArrowRight size={14} /></button>}</>
                     : canEdit && online ? <button className="archive-lane-link" onClick={() => setLaneCreate(column._id)}><Plus size={14} />Add issue</button> : "No issues"}</div> : null}
                   {tasks.map(task => <IssueCard
                     key={task._id}
@@ -736,8 +794,9 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
                     keyboardMoving={drag?.mode === "keyboard" && drag.taskId === task._id}
                     menuOpen={menu?.taskId === task._id}
                     properties={properties}
+                    reopen={canEdit && task.done}
                     onOpen={openIssuePage}
-                    onComplete={complete}
+                    onComplete={toggleDone}
                     onMenu={(item, menuView, anchor, from) => openMenu(item._id, menuView, anchor, from)}
                     onDueDate={(item, from) => setDatePick({ taskId: item._id, anchor: { current: from } })}
                     onLabels={openLabels}
@@ -753,7 +812,7 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
           </div>
         );
       })}
-      {canEdit && <div className={clsx("kanban-add-column", addingColumn && "is-editing")}>
+      {canEdit && view.tab !== "backlog" && <div className={clsx("kanban-add-column", addingColumn && "is-editing")}>
         {addingColumn
           ? <form onSubmit={event => { event.preventDefault(); void addColumn(new FormData(event.currentTarget).get("title") as string); }}>
             <input name="title" autoFocus maxLength={60} placeholder="Column name" aria-label="Column name" onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setAddingColumn(false); } }} onBlur={event => { if (!event.currentTarget.value.trim()) setAddingColumn(false); }} />
