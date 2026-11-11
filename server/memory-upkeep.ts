@@ -596,11 +596,16 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
         }
         existing.set(name.toLowerCase(), name);
         const savedLines = after.split("\n");
-        const savedEntries = parseMemoryEntries(after).filter((entry) => !entry.struck && !isExpired(entry, today));
+        const parsedEntries = parseMemoryEntries(after);
+        const datedLines = new Set<number>();
+        for (const saved of parsedEntries) for (let line = saved.line; line < saved.end; line++) datedLines.add(line);
+        const undated = new Set(savedLines.filter((_, line) => !datedLines.has(line)).map(lineFactIdentity));
+        const savedEntries = parsedEntries.filter((entry) => !entry.struck && !isExpired(entry, today));
         for (const { topic, entry } of moves) {
           if (topic !== wanted) continue;
           const details = sourceLines.slice(entry.line + 1, entry.end).join("\n");
-          if (entry.end === entry.line + 1 || savedEntries.some((saved) =>
+          const plainNote = entry.end === entry.line + 1 && entry.until === null && undated.has(factIdentity(entry.body));
+          if (plainNote || savedEntries.some((saved) =>
             factIdentity(saved.body) === factIdentity(entry.body)
               && saved.until === entry.until
               && savedLines.slice(saved.line + 1, saved.end).join("\n") === details)) {

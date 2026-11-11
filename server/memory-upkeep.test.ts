@@ -572,9 +572,11 @@ describe("the upkeep loop", () => {
     expect(readMemoryTopic(BOT.id, "project.md")).toBe(topic);
   });
 
-  it.each(["2026-09-07", "2026-09-26"])("keeps a permanent entry when its topic copy expires on %s", async (until) => {
+  it.each(["2026-09-07", "2026-09-26"].flatMap((until) => [
+    { until, details: "  deploy --current\n" },
+    { until, details: "" },
+  ]))("keeps a permanent entry when its topic copy expires on $until (details: $details)", async ({ until, details }) => {
     ensureWorkspace(BOT.id);
-    const details = "  deploy --current\n";
     const source = `- 2026-09-25 · Deployment steps\n${details}`;
     writeMemoryFile(BOT.id, source);
     writeMemoryTopic(BOT.id, "project.md", `- 2026-09-01 · Deployment steps · until ${until}\n${details}`);
@@ -583,6 +585,17 @@ describe("the upkeep loop", () => {
     await flushMemoryJournal(BOT.id);
     expect(report.organized ?? 0).toBe(0);
     expect(memory()).toBe(source);
+  });
+
+  it("retains both code blocks when their identical headings hide meaningful whitespace differences", async () => {
+    const source = "- 2026-09-25 · Cedar command\n  ```sh\n  printf 'a b'\n  ```\n";
+    const topic = "- 2026-09-20 · Cedar command\n  ```sh\n  printf 'a  b'\n  ```\n";
+    writeMemoryFile(BOT.id, source);
+    writeMemoryTopic(BOT.id, "cedar.md", topic);
+    organizeAnswer = '{"moves":[{"i":0,"topic":"cedar"}]}';
+    expect((await upkeep().tidy(BOT.id)).organized ?? 0).toBe(0);
+    expect(memory()).toBe(source);
+    expect(readMemoryTopic(BOT.id, "cedar.md")).toBe(topic);
   });
 
   it("moves detail the bot wrote itself out of MEMORY.md into topics, keeping core facts", async () => {
