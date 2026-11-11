@@ -10,6 +10,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { DATA_LIMITS, DATA_RESULTS_SCHEMA } from "../../shared/data-surface.ts";
 import { CLOSE_DRAIN_MS, EXTENSION_INSTALL_TIMEOUT_MS, Lane, closeNames, createDataEngine, dataEngine, drainLanes, duckdbDirectory, instanceSettings, levenshtein, likePattern, loadExtensions, type DataEngineOptions } from "./engine.ts";
 import { DataFailure, type BotDatabase, type DataEngine } from "./types.ts";
+import { DataSheetStore } from "./sheet.ts";
 
 const root = mkdtempSync(join(tmpdir(), "omb-data-engine-"));
 const outOfTree = join(root, "duckdb-resources");
@@ -277,6 +278,17 @@ describe("a bot's database", () => {
     await db.dropResult("gone");
     await db.dropResult("gone");
     expect((await failure(db.run(`SELECT * FROM ${DATA_RESULTS_SCHEMA}.gone`, bot))).error.code).toBe("table_not_found");
+  });
+
+  it("keeps an earlier query result when the sheet reopens before the next query", async () => {
+    const database = await engine().forBot("query-names");
+    const options = { botId: "query-names", dir: join(root, "bots", "query-names") };
+    const first = new DataSheetStore(options).nextResultName();
+    await database.materialise("SELECT 11 AS value", first, bot);
+    const second = new DataSheetStore(options).nextResultName();
+    await database.materialise("SELECT 22 AS value", second, bot);
+    expect((await database.run(`SELECT * FROM ${DATA_RESULTS_SCHEMA}.${first}`, panel)).rows).toEqual([[11]]);
+    expect((await database.run(`SELECT * FROM ${DATA_RESULTS_SCHEMA}.${second}`, panel)).rows).toEqual([[22]]);
   });
 
   it("drops a result on the panel's connection without waiting behind the bot's statement", async () => {
