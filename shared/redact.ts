@@ -88,15 +88,16 @@ export const HELD_SECRET_MASK = "••••••";
 
 interface HeldSecretScrubber {
   scrub: (text: string) => string;
-  /** The length of the longest value it holds, in any form; 0 when it holds none. */
+  /** The length of the longest value it holds, in any form, that a stream could cut partway (see
+   * `longestSplittableForm`); 0 when it holds none. */
   longest: () => number;
 }
 
 const heldSecretScrubbers = new Set<HeldSecretScrubber>();
 
-/** Register a scrubber for held secret values, with the length of the longest one it holds; returns its removal. A
- * stream holds back that many characters whatever they are, so a value is masked whole and nothing about it shows
- * before. */
+/** Register a scrubber for held secret values, with the length of the longest one a stream could cut partway; returns
+ * its removal. A stream holds back that many characters whatever they are, so such a value is masked whole and nothing
+ * about it shows before. */
 export function addHeldSecretScrubber(scrub: (text: string) => string, longest: () => number): () => void {
   const entry: HeldSecretScrubber = { scrub, longest };
   heldSecretScrubbers.add(entry);
@@ -110,7 +111,8 @@ export function scrubHeldSecrets(text: string): string {
   return out;
 }
 
-/** The length of the longest held value; Infinity when a scrubber cannot say (a stream then holds everything back). */
+/** The length of the longest held value a stream could cut partway; Infinity when a scrubber cannot say (a stream then
+ * holds everything back). */
 export function heldSecretLongest(): number {
   let longest = 0;
   for (const scrubber of heldSecretScrubbers) {
@@ -120,10 +122,15 @@ export function heldSecretLongest(): number {
   return longest;
 }
 
-/** The longest of `forms`, for a scrubber's `longest`. */
-export function longestForm(forms: Iterable<string>): number {
+/** Printable ASCII with no whitespace: a stream never cuts inside a run of it (shared/stream-hold.ts), so a value made
+ * only of it is whole whenever any of it is sent, and is masked whole. */
+const UNSPLITTABLE = /^[\x21-\x7e]*$/;
+
+/** The longest of `forms` that a stream could cut partway (one with whitespace or a character outside printable
+ * ASCII), for a scrubber's `longest`; forms of printable ASCII alone need no held-back tail. */
+export function longestSplittableForm(forms: Iterable<string>): number {
   let longest = 0;
-  for (const form of forms) if (form.length > longest) longest = form.length;
+  for (const form of forms) if (form.length > longest && !UNSPLITTABLE.test(form)) longest = form.length;
   return longest;
 }
 

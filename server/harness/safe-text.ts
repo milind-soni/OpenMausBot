@@ -88,7 +88,9 @@ function heldBack(longest: number): number {
  * anyway. */
 function beforeWholeHeld(text: string, end: number, longest: number): number {
   if (longest < 2 || !Number.isFinite(longest) || end <= 0 || end >= text.length) return end;
-  const masked = scrubHeldSecrets(text.slice(0, Math.min(text.length, end + longest - 1)));
+  const upTo = text.slice(0, Math.min(text.length, end + longest - 1));
+  const masked = scrubHeldSecrets(upTo);
+  if (masked === upTo) return end;
   for (let cut = end; cut > 0; cut--) if (masked.startsWith(scrubHeldSecrets(text.slice(0, cut)))) return cut;
   return 0;
 }
@@ -99,7 +101,10 @@ export function safeEnd(text: string): number {
   const longest = heldSecretLongest();
   const held = Math.max(0, text.length - heldBack(longest));
   const end = Math.min(heldTailStart(text), held < text.length ? wordSafeCut(text, held) : held);
-  return beforeWholeHeld(text, shortOfOpen(text, end), longest);
+  // A cut before something still open may fall inside a run of printable ASCII: back to the run's start, so a held
+  // value made only of such characters is never sent in part.
+  const open = shortOfOpen(text, end);
+  return beforeWholeHeld(text, open < end ? wordSafeCut(text, open) : end, longest);
 }
 
 /** How much of `text`, now complete, may be sent: all of it but anything still open. */

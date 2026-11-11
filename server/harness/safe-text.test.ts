@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { RuntimeEvent } from "../contracts.ts";
-import { addHeldSecretScrubber, redactSecretsInText } from "../redact.ts";
+import { addHeldSecretScrubber, longestSplittableForm, redactSecretsInText } from "../redact.ts";
+import { secretForms } from "../vault-store.ts";
 import { heldTailStart } from "../../shared/stream-hold.ts";
 import { publicReplyEvent, SafeText, safeEnd, savedReplyText } from "./safe-text.ts";
 
@@ -244,6 +245,59 @@ describe("overlapping held values", () => {
 
   it("never sends the start of a chain of three", () => {
     check(["Aaaaaaaaabbbbbbb", "bbbbbbb cccc", "cccc dddd"], `x Aaaaaaaaabbbbbbb cccc dddd ${"zz ".repeat(30)}`);
+  });
+});
+
+describe("held values a stream cannot cut partway", () => {
+  /** Held the way the server holds its own: its length counts only if a stream could cut it partway. */
+  const holdLikeServer = (...values: string[]) => {
+    unregister = addHeldSecretScrubber(
+      (text) => values.reduce((out, value) => out.split(value).join("••••••"), text),
+      () => longestSplittableForm(values.flatMap(secretForms)),
+    );
+  };
+  const TOKEN = `ops_${"eyJhbGciOiJFUzI1NiIsImtpZCI6".repeat(30)}`;
+
+  it("adds no lag for a long plain-ASCII token, and still never sends any of it before it is whole", () => {
+    holdLikeServer(TOKEN);
+    expect(safeEnd("Plenty of ordinary words here, and more of them. ")).toBe(49);
+    const { frames, sent } = pieces(`Your token: ${TOKEN} and that is all. ${MORE}`, 1);
+    let so = "";
+    for (const frame of frames) {
+      so += frame;
+      expect(so).not.toContain("ops_eyJ");
+    }
+    expect(sent).toMatch(/^Your token: •••••• and that is all\. and a few/);
+  });
+
+  it("keeps a plain-ASCII value whole even when something still open cuts the text right after it", () => {
+    holdLikeServer("Tr0ub4dor&3");
+    expect(deltaText(new SafeText().delta(words("Use Tr0ub4dor&<SYSTEM_MESSAGE>x y z ")))).toBe("Use ");
+  });
+
+  it("holds back for a held value with a space in it, from the moment it is held", () => {
+    holdLikeServer(TOKEN);
+    expect(safeEnd("日".repeat(100))).toBe(100 - 24);
+    unregister!();
+    holdLikeServer(TOKEN, "abcd efgh ijkl");
+    expect(safeEnd("日".repeat(100))).toBe(100 - 31);
+  });
+
+  it("is the same for a right first guess and a wrong one at a plain-ASCII value, with no lag", () => {
+    const run = (guess: string) => {
+      holdLikeServer("Tr0ub4dor&3");
+      try {
+        const safe = new SafeText();
+        const frames = [...`Repeat: —${guess}${"—".repeat(30)} done `].map((char) => deltaText(safe.delta(words(char))));
+        return { sizes: frames.map((frame) => frame.length), text: frames.join("").replaceAll(guess, "<guess>") };
+      } finally {
+        unregister!();
+        unregister = null;
+      }
+    };
+    const right = run("Tr0u");
+    expect(right).toEqual(run("Tr0v"));
+    expect(right.text).toContain("<guess>");
   });
 });
 

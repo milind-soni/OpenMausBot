@@ -365,16 +365,19 @@ describe("the held-secret scrubber", () => {
     expect(held.scrub("Code 492039 accepted")).toBe("Code 492039 accepted");
   });
 
-  it("says how long its longest held value or live code is, in any form", () => {
+  it("says how long its longest held value a stream could cut partway is: one with a space or beyond plain ASCII", () => {
     let now = 0;
     const held = new HeldSecrets(new VaultStore({ dataDir: dir }), () => now);
     expect(held.longest()).toBe(0);
     held.remember("4920391234567", "code");
-    expect(held.longest()).toBe(13);
-    held.remember("p&ss", "password");
-    expect(held.longest(), "its HTML form, p&amp;ss, is longer still").toBe(13);
+    held.remember("p&ss-Tr0ub4dor&3", "password");
+    expect(held.longest(), "printable ASCII alone is never cut partway").toBe(0);
+    held.remember("pass wörd", "password");
+    expect(held.longest(), "its HTML form, the longest with a space").toBe("pass wörd".length);
+    held.remember("abcd efgh ijkl mnop", "password");
+    expect(held.longest()).toBe(19);
     now = 6 * 60_000;
-    expect(held.longest()).toBe("p&amp;ss".length);
+    expect(held.longest()).toBe(19);
   });
 
   it("masks a password filled from elsewhere for the rest of the run, and ignores values too short to be one", () => {
