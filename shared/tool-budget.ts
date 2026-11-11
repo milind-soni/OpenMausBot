@@ -14,6 +14,6 @@ export interface ToolBudget {
 /** What one server's tool count alone does to a chat-engine turn: past the limit it can only be searched, and from half of
  * it on it pushes other servers into the search. */
 export function chatToolBudgetFit(tools: number, limit: number = CHAT_TOOL_LIMIT): "fits" | "crowds" | "exceeds" {
-  if (tools >= limit) return "exceeds";
+  if (tools > limit) return "exceeds";
   return tools * 2 >= limit ? "crowds" : "fits";
 }
