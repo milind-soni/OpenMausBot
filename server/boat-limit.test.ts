@@ -12,7 +12,7 @@ describe("a refused cloud computer start, from the Admin's answer to the bot and
     const refused = boatRefusal(429, "boat create", envelope(TRIAL_HOURS, { reason: "hours_used", trial: true, plan: "Pro", limit: 20, used: 20, resetsAt: "2026-11-14T09:00:00.000Z" }), true);
     expect(cloudFailureOf(refused)).toEqual({ message: TRIAL_HOURS, code: "limit_reached", status: 429,
       limit: { reason: "hours_used", trial: true, plan: "Pro", limit: 20, used: 20, resetsAt: "2026-11-14T09:00:00.000Z" } });
-    expect(cloudLimitText(refused)).toBe("This Cloud's free trial cloud computer hours are used up; its full allowance starts with its first payment on 14 Nov.");
+    expect(cloudLimitText(refused)).toBe("This Cloud's free trial cloud computer hours are used up; they come back on 14 Nov.");
     expect(cloudLimitFields(refused)).toEqual({ cloudLimit: { reason: "hours_used", trial: true, plan: "Pro", limit: 20, used: 20, resetsAt: "2026-11-14T09:00:00.000Z" } });
   });
 

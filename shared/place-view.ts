@@ -550,7 +550,7 @@ export function cloudLimitSentence(failure: CloudFailure): string | null {
   switch (limit?.reason) {
     case "hours_used":
       return limit.trial
-        ? `This Cloud's free trial cloud computer hours are used up; its full allowance starts with its first payment${limit.resets ? ` on ${limit.resets}` : ""}.`
+        ? `This Cloud's free trial cloud computer hours are used up${limit.resets ? `; they come back on ${limit.resets}` : ""}.`
         : `This Cloud's cloud computer hours for this month are used up${limit.resets ? `; they reset on ${limit.resets}` : ""}.`;
     case "at_once":
       return "This Cloud already has as many cloud computers running as its plan allows.";
