@@ -28,6 +28,9 @@
 #   5    nothing was changed: the version asked for is older than the one running, or either version cannot be told
 #   130  interrupted (Ctrl-C) before the new version started: nothing was changed, and the server was started again
 set -uo pipefail
+# SECURITY: the files this writes beside the Compose file (compose.yaml, Caddyfile) are what root starts; their modes never
+# come from the caller's umask. .env and the journal keep their own, tighter ones.
+umask 022
 # An SSH session that drops sends SIGHUP, and a `| tee` that dies with it would send SIGPIPE: neither may stop an
 # update half-way. Output to a terminal that has gone is lost; .update/update.log keeps it.
 trap '' HUP PIPE
