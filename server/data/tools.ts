@@ -520,14 +520,18 @@ export function planLoad(input: LoadInput): LoadPlan[] {
       if (!entry.isFile()) continue;
       const reader = readerFor(extensionOf(entry.name), undefined);
       if (!reader || reader === "sqlite" || reader === "xlsx") continue;
-      (families.get(reader) ?? families.set(reader, new Set()).get(reader)!).add(extensionOf(entry.name).toLowerCase());
+      // Keep compression in the suffix even though it does not select the reader.
+      const suffix = (extensionOf(entry.name) + (COMPRESSION.exec(entry.name)?.[0] ?? "")).toLowerCase();
+      (families.get(reader) ?? families.set(reader, new Set()).get(reader)!).add(suffix);
     }
     if (!families.size) throw fail("source_unsupported", `${local} holds no csv, tsv, json or parquet files.`);
     const stem = input.name ?? basename(local);
     // DuckDB globs take forward slashes on every platform and no braces: one glob per extension.
     const folder = local.replace(/\\/g, "/");
     return [...families.entries()].map(([reader, exts]) => {
-      const globs = [...exts].map((ext) => `${folder}/**/*${ext}`);
+      // One case-independent pattern per suffix avoids both missing .CSV on
+      // Linux and overlapping .csv/.CSV patterns on case-insensitive filesystems.
+      const globs = [...exts].map((ext) => `${folder}/**/*${ext.replace(/[a-z]/g, (letter) => `[${letter}${letter.toUpperCase()}]`)}`);
       return { kind: "folder" as const, source: local, stem: families.size === 1 ? stem : `${stem}_${reader}`, reader: readerExpression(reader, globs.length === 1 ? globs[0]! : globs, input, true), warnings };
     });
   }

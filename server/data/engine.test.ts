@@ -4,12 +4,14 @@ import { rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { cpus, tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { DATA_LIMITS, DATA_RESULTS_SCHEMA } from "../../shared/data-surface.ts";
 import { CLOSE_DRAIN_MS, EXTENSION_INSTALL_TIMEOUT_MS, Lane, closeNames, createDataEngine, dataEngine, drainLanes, duckdbDirectory, instanceSettings, levenshtein, likePattern, loadExtensions, type DataEngineOptions } from "./engine.ts";
 import { DataFailure, type BotDatabase, type DataEngine } from "./types.ts";
+import { planLoad } from "./tools.ts";
 
 const root = mkdtempSync(join(tmpdir(), "omb-data-engine-"));
 const outOfTree = join(root, "duckdb-resources");
@@ -250,6 +252,24 @@ describe("a bot's database", () => {
     expect(some.rows).toEqual([["0"], ["1"], ["2"]]);
     expect(some.rowCount).toBe(100);
     expect(some.truncated).toBe(true);
+  });
+
+  it.each([
+    { label: "compressed files", names: ["one.csv.gz", "nested/two.csv.gz"] },
+    { label: "uppercase extensions", names: ["one.CSV", "nested/two.CSV"] },
+    { label: "mixed names", names: ["one.csv", "two.CSV", "nested/three.csv.gz"] },
+  ])("loads every discovered CSV in a folder with $label", async ({ names }) => {
+    await ready;
+    const source = mkdtempSync(join(root, "load-folder-"));
+    mkdirSync(join(source, "nested"));
+    for (const [index, name] of names.entries()) {
+      const csv = `amount\n${index + 1}\n`;
+      writeFileSync(join(source, name), name.endsWith(".gz") ? gzipSync(csv) : csv);
+    }
+    const plans = planLoad({ source, kind: "folder" });
+    expect(plans).toHaveLength(1);
+    const result = await db.run(`SELECT count(*)::INTEGER, sum(amount)::INTEGER FROM ${plans[0]!.reader}`, bot);
+    expect(result.rows).toEqual([[names.length, names.length * (names.length + 1) / 2]]);
   });
 
   it("returns JSON cells: big numbers and decimals as text, dates as DuckDB prints them, blobs by size, nested values as JSON text", async () => {
