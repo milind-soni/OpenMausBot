@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ProviderAuthenticationStart } from "./contracts.ts";
+import type { ProviderAuthenticationStart, ProviderAuthenticationStatus } from "./contracts.ts";
 import { ProviderAuthSessions } from "./provider-auth-sessions.ts";
 
 function fixture() {
@@ -11,13 +11,26 @@ function fixture() {
   const sessions = new ProviderAuthSessions({ signedIn });
   const instance = {
     instanceId: "engine", startAuthentication: vi.fn(async () => waiting),
-    getAuthentication: vi.fn(async () => waiting), completeAuthentication: vi.fn(async () => undefined),
+    getAuthentication: vi.fn(async (): Promise<ProviderAuthenticationStatus> => waiting), completeAuthentication: vi.fn(async () => undefined),
     cancelAuthentication: vi.fn(async () => undefined), signOut: vi.fn(async () => undefined),
   };
   return { sessions, instance, waiting, signedIn };
 }
 
 describe("obsolete provider sign-in results", () => {
+  it("keeps the cancelled status readable by the owner after cancellation finishes", async () => {
+    const { sessions, instance, waiting, signedIn } = fixture();
+    await sessions.start(instance, "owner");
+    await sessions.cancel("engine", "owner", "original");
+    instance.getAuthentication.mockResolvedValue({ ...waiting, phase: "cancelled", authorizationUrl: null });
+    await expect(sessions.status("engine", "owner", "original")).resolves.toMatchObject({
+      phase: "cancelled", authorizationUrl: null,
+    });
+    expect(signedIn).not.toHaveBeenCalled();
+    expect(sessions.active).toBe(false);
+    await expect(sessions.status("engine", "another-owner", "original")).rejects.toMatchObject({ status: 404 });
+  });
+
   it.each(["cancel", "signOut"] as const)("does not announce a successful poll after %s", async (action) => {
     const { sessions, instance, waiting, signedIn } = fixture();
     await sessions.start(instance, "owner");
