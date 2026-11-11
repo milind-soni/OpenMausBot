@@ -24,6 +24,7 @@ it("keeps selected chats in the popup and closes it when a chat is opened", asyn
   const popup = () => document.querySelector<HTMLElement>('[data-recent-chats-popup="atlas"]');
   const button = (text: string) => [...popup()!.querySelectorAll("button")].find((item) => item.textContent?.trim() === text)!;
   expect(popup()).not.toBeNull();
+  expect(popup()!.style.zIndex).toBe("45");
   await act(async () => { button("Select threads").click(); });
   const first = popup()!.querySelector<HTMLElement>('[role="checkbox"]')!;
   await act(async () => { first.click(); });

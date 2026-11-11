@@ -58,6 +58,6 @@ export function useRecentChatsPopup() {
 
 export function RecentChatsPopup({ popupRef, botId, position, onEnter, onLeave, children }: { popupRef: RefObject<HTMLDivElement | null>; botId: string; position: Position; onEnter: () => void; onLeave: () => void; children: ReactNode }) {
   return createPortal(<div ref={popupRef} tabIndex={-1} data-recent-chats-popup={botId} onMouseEnter={onEnter} onMouseLeave={onLeave}
-    style={{ position: "fixed", left: position.left, top: position.top, width: "min(320px, calc(100vw - 16px))", maxHeight: `min(70vh, ${window.innerHeight - position.top - 8}px)`, zIndex: 100 }}
+    style={{ position: "fixed", left: position.left, top: position.top, width: "min(320px, calc(100vw - 16px))", maxHeight: `min(70vh, ${window.innerHeight - position.top - 8}px)`, zIndex: 45 }}
     className="overflow-y-auto rounded-xl border border-edge bg-panel p-2 shadow-xl">{children}</div>, document.body);
 }
