@@ -519,7 +519,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
 /** Pair: one row in a plain card. Where to get the phone app is said in plain words, with no link: the desktop app never
  * opens a store or a download. */
 export function PairRow({ reason, place, children }: { reason?: string | null; place?: string; children: React.ReactNode }) {
-  const line = t("phone.pair.installPlain", { app: productName() });
+  const line = t("phone.code.installAndScan", { app: productName() });
   return (
     <SettingRow title={t("phone.pair.step")} subtitle={place ? `${line} ${t("phone.pair.alwaysOn", { place })}` : line}
       message={reason ?? undefined}>

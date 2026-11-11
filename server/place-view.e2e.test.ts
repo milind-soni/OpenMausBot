@@ -16,6 +16,7 @@ const refusal = (status: number, code: string, message: string) =>
   ({ status, body: { ok: false, type: "sandbox.error", status, code, message, error: { code, message, status } } });
 const HOURS = refusal(429, "limit_reached", "Your Pro plan's 50 cloud computer hours for October are used up. They reset on 1 November.");
 const AT_ONCE = refusal(429, "limit_reached", "Your Personal plan includes 1 cloud computer at once. Delete one to start another.");
+const TRIAL_HOURS = refusal(429, "limit_reached", "Your Pro free trial's 20 cloud computer hours are used up. Your full allowance starts with your first payment on 14 Nov.");
 const DOWN = refusal(503, "service_unavailable", "Cloud computers are temporarily unavailable. Try again later.");
 
 describe("a cloud computer that can't start, against the real server", () => {
@@ -166,6 +167,18 @@ describe("a cloud computer that can't start, against the real server", () => {
     await idle(bot.id);
     expect(creates).toBe(1);
     expect(boxes).toEqual([]);
+  }, 90_000);
+
+  it("J5b: a free trial's hours used up get the plan's card too, from an Admin that sends only its words", async () => {
+    await start();
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Trial Bot" });
+    await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" });
+    createAnswer = TRIAL_HOURS;
+    await send(bot.id, bot.threadId, "Open the desktop.");
+    const row = await failedRow(bot.threadId);
+    expect(row.tool.name).toBe("error: The free trial's cloud desktop hours are used up. The full allowance starts with the first payment. See your plan on the Plan page.");
+    expect(row.tool.place).toEqual({ state: "cc-no-hours", params: { bot: "Trial Bot", trial: true }, source: "works-on" });
+    await idle(bot.id);
   }, 90_000);
 
   it("J6: at once names the bot that holds the plan's cloud computer", async () => {

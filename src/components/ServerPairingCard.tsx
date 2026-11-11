@@ -178,7 +178,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
               ) : null}
               <div className="flex flex-col gap-1" data-pair-instructions="">
                 {offer.url ? <>
-                  <p className="text-[13px] leading-[18px] text-ink">{t("phone.code.scanInApp", { app: productName() })}</p>
+                  <p className="text-[13px] leading-[18px] text-ink">{t("phone.code.installAndScan", { app: productName() })}</p>
                   <p className="text-[12px] leading-4 text-ink-secondary">{t("remote.serverPairing.camera")}</p>
                 </> : <p className="text-[13px] leading-[18px] text-ink">{t("phone.code.typeThis", { app: productName() })}</p>}
               </div>

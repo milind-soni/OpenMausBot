@@ -4,9 +4,9 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { RESERVE_BYTES, clashPath, neverFromCloud, validWirePath, windowsProblem } from "./cloud-sync-rules.mjs";
+import { RESERVE_BYTES, clashPath, foldKey, neverFromCloud, validWirePath, windowsProblem } from "./cloud-sync-rules.mjs";
 import { planOutputs, planShare } from "./cloud-sync-plan.mjs";
-import { scanPc, sha256File } from "./cloud-sync-scan.mjs";
+import { caseInsensitive, scanPc, sha256File } from "./cloud-sync-scan.mjs";
 import { SyncAuthError } from "./cloud-sync-client.mjs";
 import { CloudAsleepError } from "./cloud-power.mjs";
 
@@ -85,7 +85,7 @@ export async function shareFolder({ client, state, folder, local, now = Date.now
       if (answer?.ok || answer?.conflict) state.dropBase(folder.id, wire);
     });
   }
-  result.status = result.pendingDeletes ? "confirm-deletes" : result.waitingBytes ? "waiting" : result.done < result.files ? "copying" : result.problem ? "problem" : "synced";
+  result.status = result.pendingDeletes ? "confirm-deletes" : result.waitingBytes ? "waiting" : result.problem ? "problem" : result.done < result.files ? "copying" : "synced";
   return result;
 }
 
@@ -113,7 +113,8 @@ export async function fetchOutputs({ client, state, folder, local, platform = pr
   const base = state.base(folder.id);
   const { entries: pc, temps } = await scanPc(local, base, { now });
   for (const temp of temps) if (now() - temp.mtimeMs > TEMP_STALE_MS) fs.rmSync(temp.file, { force: true });
-  const listed = (await client.files(folder.id)).filter((file) => validWirePath(file.path) && !neverFromCloud(file.path) && !(platform === "win32" && windowsProblem(file.path)));
+  let listed = (await client.files(folder.id)).filter((file) => validWirePath(file.path) && !neverFromCloud(file.path) && !(platform === "win32" && windowsProblem(file.path)));
+  if (caseInsensitive(local, platform)) listed = withoutNameClashes(listed, result);
   const cloud = new Map(listed.map((file) => [file.path, file]));
   const { downloads, records } = planOutputs({ base, pc, cloud });
   const ctx = { client, state, folder, local, pc, cloud, now, trashItem, markDownloaded, freeBytes, result };
@@ -124,8 +125,23 @@ export async function fetchOutputs({ client, state, folder, local, platform = pr
     if (await receive(ctx, action) === "full") { result.waitingBytes += action.size; return; }
     result.done++;
   });
-  result.status = result.waitingBytes ? "waiting" : result.done < result.files ? "copying" : result.problem ? "problem" : "synced";
+  result.status = result.waitingBytes ? "waiting" : result.problem ? "problem" : result.done < result.files ? "copying" : "synced";
   return result;
+}
+
+/** On a disk where two Cloud paths name the same file, keep the first by path, leave the other on My Cloud and say so. */
+function withoutNameClashes(listed, result) {
+  const kept = new Map();
+  const dropped = new Set();
+  for (const file of [...listed].sort((a, b) => (a.path < b.path ? -1 : 1))) {
+    const parts = file.path.split("/");
+    const names = parts.map((_, index) => parts.slice(0, index + 1).join("/"));
+    const clash = names.find((name) => kept.has(foldKey(name)) && kept.get(foldKey(name)) !== name);
+    if (clash === undefined) { for (const name of names) kept.set(foldKey(name), name); continue; }
+    dropped.add(file);
+    result.problem ??= `${JSON.stringify(kept.get(foldKey(clash)))} and ${JSON.stringify(clash)} have the same name on this computer. Rename one on My Cloud.`;
+  }
+  return listed.filter((file) => !dropped.has(file));
 }
 
 /** Where a wire path lives in this folder: never outside it, and never through a link or a file in the way. */

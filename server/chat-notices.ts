@@ -31,6 +31,8 @@ export const CHAT_NOTICE = {
   "chat.notice.acpStopFailed": "{provider} ignored Stop and its process could not be ended",
   "chat.notice.toolCount": "{provider} refused this turn because this model takes at most {limit} tools and this bot offers more, even with its tool lists trimmed, so nothing ran. Turn off some of this bot's apps or MCP servers, or switch the bot to another model.",
   "chat.notice.toolCountUnknown": "{provider} refused this turn because this model takes at most a limited number of tools and this bot offers more, even with its tool lists trimmed, so nothing ran. Turn off some of this bot's apps or MCP servers, or switch the bot to another model.",
+  "chat.notice.modelNoRoute": "{provider} can't use the model {model} here, so choose another model for this bot.",
+  "chat.notice.modelNoRouteUnnamed": "{provider} can't use this bot's model here, so choose another model for this bot.",
   "chat.notice.goalRetry": "{name}'s turn did not settle ({why}) — retrying once.",
   "chat.notice.part.providerFailed": "provider failed",
   "chat.notice.part.dispatchFailed": "dispatch failed",

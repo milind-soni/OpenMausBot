@@ -173,8 +173,13 @@ export function createCloudSync(options: { dataDir: string; root?: string; now?:
         try {
           for await (const chunk of body) {
             if (written + chunk.length > PART_MAX || upload.received + written + chunk.length > upload.size) throw new SyncError(413, { error: "part too large" });
-            writeSync(fd, chunk, 0, chunk.length, upload.received + written);
-            written += chunk.length;
+            let offset = 0;
+            while (offset < chunk.length) {
+              const count = writeSync(fd, chunk, offset, chunk.length - offset, upload.received + written);
+              if (count === 0) throw new Error("The upload could not be written to My Cloud.");
+              offset += count;
+              written += count;
+            }
           }
         } finally { closeSync(fd); }
         upload.received += written;

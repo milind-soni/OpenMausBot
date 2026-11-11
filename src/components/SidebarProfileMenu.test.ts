@@ -23,7 +23,7 @@ import {
   updateLabel,
   updatePhase,
 } from "./SidebarProfileMenu";
-import { ANDROID_APK_URL, DOCS_URL, FEEDBACK_URL, HELP_CENTER_URL, IOS_APP_STORE_URL, platformLabel } from "@/lib/app-links";
+import { DOCS_URL, FEEDBACK_URL, HELP_CENTER_URL, platformLabel } from "@/lib/app-links";
 import { profileForSession } from "@/lib/session";
 import {
   cloudPhoneDestination,
@@ -33,7 +33,6 @@ import {
 } from "@/lib/phone-pairing";
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
 import { PhoneAppDialog, type PhoneAppConnect } from "./PhoneAppDialog";
-import { PHONE_APPS } from "./PhoneAppLinks";
 import type { UpdaterState } from "@/lib/updater";
 import type { SidebarMenuItem } from "./SidebarPopoverMenu";
 import { moveMenuItems } from "./AccountMove";
@@ -264,13 +263,7 @@ describe("choosing where the phone connects", () => {
   });
 });
 
-describe("Get the phone app", () => {
-  it("offers iPhone and Android with the links the website and Cloud page use", () => {
-    expect(PHONE_APPS.map((app) => [app.id, app.url])).toEqual([["ios", IOS_APP_STORE_URL], ["android", ANDROID_APK_URL]]);
-    expect(IOS_APP_STORE_URL).toBe("https://apps.apple.com/in/app/mausbot/id6803387923");
-    expect(ANDROID_APK_URL).toBe("https://github.com/milind-soni/OpenMausBot/releases/download/android-v1.5.0/OpenMausBot.apk");
-  });
-
+describe("the Connect your phone choice", () => {
   const render = (connect?: PhoneAppConnect[]) => {
     vi.stubGlobal("window", { addEventListener: () => {}, removeEventListener: () => {} });
     try {
@@ -281,17 +274,12 @@ describe("Get the phone app", () => {
   };
   const to = (key: string, subtitle: string): PhoneAppConnect => ({ key, subtitle, onSelect: () => {} });
 
-  it("links the App Store and Android with no code to scan, and points on to Connect your phone where this window can pair", () => {
-    const html = render([to("here", "to this computer")]);
-    expect(html).toContain("On your phone, install MausBot from the App Store, or download it for Android.");
-    expect(html).toMatch(/<button[^>]*data-phone-app="ios"[^>]*>App Store<\/button>/);
-    expect(html).toMatch(/<button[^>]*data-phone-app="android"[^>]*>Android<\/button>/);
-    expect(html).not.toContain("<svg");
-    expect(html.indexOf('data-phone-app="android"')).toBeLessThan(html.indexOf("Connect your phone"));
+  it("offers only places to pair with: no store link, download or code", () => {
+    const html = render([to("cloud", "to the Cloud (always on)"), to("here", "to this computer")]);
     expect(html).toContain("Connect your phone");
     expect(html).toContain("to this computer");
-    expect(render()).not.toContain("Connect your phone");
-    expect(render([])).not.toContain("Connect your phone");
+    expect(html).not.toMatch(/App Store|Google Play|apps\.apple\.com|play\.google\.com|\.apk|<svg|<a /);
+    expect(render([])).not.toContain("data-phone-app-connect");
   });
 
   it("offers every destination the menu does, in the same order", () => {
@@ -416,6 +404,15 @@ describe("Simple mode's account menu", () => {
     items[3]!.onSelect();
     expect(open).toHaveBeenCalledOnce();
     expect(toolMenuItems({ activeView: "chat", automationsNeedYou: false, onAutomations: noop, onTeamMap: noop, archived: { count: 0, open } }).map((item) => item.key)).toEqual(["automations", "team-map"]);
+  });
+
+  it("has Published apps among the tools, after Files and before Archived bots, lit while its page is open", () => {
+    const openApps = vi.fn();
+    const items = toolMenuItems({ activeView: "published-apps", automationsNeedYou: false, onAutomations: noop, onTeamMap: noop, onFiles: noop, onPublishedApps: openApps, archived: { count: 1, open: noop } });
+    expect(items.map((item) => [item.key, item.label, item.active])).toEqual([["automations", "Automations", false], ["team-map", "Team map", false], ["files", "Files", false],
+      ["published-apps", "Published apps", true], ["archived", "Archived bots", undefined]]);
+    items[3]!.onSelect();
+    expect(openApps).toHaveBeenCalledOnce();
   });
 
   it("names the account button after the person and whatever its dot is raised for", () => {
