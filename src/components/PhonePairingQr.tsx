@@ -5,7 +5,6 @@ import { QRCodeSVG } from "qrcode.react";
 import { t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";
 import { productName } from "@/lib/brand";
-import { PhoneAppLinks } from "./PhoneAppLinks";
 import type { PhoneSetupController } from "./PhoneSetupFlow";
 
 /** A fresh code while this screen is open; the previous one stays valid to its two-minute end, so a phone mid-scan
@@ -49,7 +48,7 @@ export function PhonePairingQr({ c, signedIn }: { c: PhoneSetupController; signe
       <div className="rounded-2xl bg-white p-3.5 transition-opacity duration-150" aria-label={t("phone.code.qrAria")}>
         <QRCodeSVG key={state.pairing?.token} value={c.pairingLink} size={320} level="L" marginSize={1} bgColor="#ffffff" fgColor="#111111" />
       </div>
-      <p className="mt-4 text-[13px] text-ink-secondary">{t("phone.code.scanInApp", { app: productName() })}</p>
+      <p className="mt-4 text-[13px] text-ink-secondary">{t("phone.code.installAndScan", { app: productName() })}</p>
       <p className="mt-1 text-[12px] text-ink-tertiary">{t("phone.code.notCamera", { app: productName() })}</p>
       <div className="mt-5 w-full px-2">
         <RouteRow on={Boolean(lan)} label={t("phone.code.e2e.wifi")} value={lan ?? ""} />
@@ -72,7 +71,6 @@ export function PhonePairingQr({ c, signedIn }: { c: PhoneSetupController; signe
       <div className="mt-5 flex w-full px-2">
         <button onClick={copy} className="text-[12px] text-ink-secondary hover:text-ink">{t("phone.code.e2e.copyLink")}</button>
       </div>
-      <PhoneAppLinks className="mt-4 w-full px-2 text-left text-[12px] text-ink-secondary" />
       {copied && (
         <div role="status" className="mt-3 rounded-lg bg-inset px-3 py-1.5 text-[12px] text-ink">{t("phone.code.e2e.copied")}</div>
       )}

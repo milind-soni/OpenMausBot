@@ -2,7 +2,6 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 import { t } from "@/lib/i18n";
-import { PhoneAppLinks } from "./PhoneAppLinks";
 
 export interface PhoneAppConnect {
   key: string;
@@ -40,12 +39,10 @@ export function PhoneAppDialog({ open, onClose, connect = [] }: { open: boolean;
         className="max-h-full w-full max-w-[460px] overflow-y-auto rounded-2xl border border-hairline/50 bg-panel p-6 shadow-2xl"
       >
         <h2 id="phone-app-dialog-title" className="text-[17px] font-semibold text-ink">
-          {t("phoneApp.title")}
+          {t("sidebar.menu.connectPhone")}
         </h2>
-        <PhoneAppLinks className="mt-1 text-[13px] leading-relaxed text-ink-secondary" />
         {connect.length ? (
-          <div className="mt-5 flex flex-col gap-2">
-            <p className="text-[13px] leading-relaxed text-ink-secondary">{t("phoneApp.next")}</p>
+          <div className="mt-4 flex flex-col gap-2">
             {connect.map((destination, index) => (
               <button
                 key={destination.key}

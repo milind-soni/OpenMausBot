@@ -22,7 +22,7 @@ import { SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQue
 import { preloadConnectedApps } from "@/lib/connected-apps";
 import {
   ActivityPanel, BotSettingsDialog, CloudAddDialog, ComputerPanel, FilesView, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace,
-  PluginsPanel, preloadScreens, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, SettingsModal, TeamMapPage, TriggersPage,
+  PluginsPanel, preloadScreens, PublishedAppsPage, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, SettingsModal, TeamMapPage, TriggersPage,
 } from "@/components/lazy-screens";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useRoomPanelShown } from "@/lib/room-panel";
@@ -78,6 +78,7 @@ import { useChiefStepOpen } from "@/lib/default-bot";
 import { useSessionEnded } from "@/lib/session-ended";
 import { PairPage } from "./pair/PairPage";
 import { WebPanelPage } from "@/components/WebPanelPage";
+import { AppPreviewPanel } from "@/components/published-apps/AppPreviewPanel";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
@@ -371,6 +372,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <FilesView />
       ) : state.activeView === "web-panel" ? (
         <WebPanelPage />
+      ) : state.activeView === "published-apps" ? (
+        <PublishedAppsPage />
       ) : state.activeView === "routines" ? (
         <TriggersPage onBack={closeCalendar} onOpenRoom={openCalendarRoom} />
       ) : !remoteClient && localVmWorkspaceBotId ? (
@@ -426,6 +429,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           />
         )
       )}
+      <AppPreviewPanel />
       {roomPanelOpen && group && (
         <RoomPanel key={`room:${group.id}`} group={group} overlay={notificationFeed && state.notificationsOpen && !twoSidePanelsFit} />
       )}
