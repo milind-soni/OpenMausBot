@@ -110,15 +110,14 @@ label.file-button:has(input:focus-visible) { outline: 2px solid var(--focus); ou
 .muted-project-list .project-icon { color: var(--text-3); }
 
 /* Integrations. */
-.integration-section { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-4); }
-.integration-section > :not(.integration-heading, .integration-actions) { grid-column: 1 / -1; }
-.integration-heading { display: flex; align-items: center; gap: var(--space-3); color: var(--text-1); }
-.integration-heading > svg { flex: none; color: var(--text-2); }
-.integration-heading > div { flex: 1; min-width: 0; }
-.integration-heading strong { display: block; font-size: var(--text-md); font-weight: var(--weight-semibold); }
-.integration-heading span { display: block; margin-top: 2px; color: var(--text-3); font-size: var(--text-sm); }
-.integration-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2); }
-.integration-actions > p { margin: 0; }
+.integration-row { min-height: 56px; }
+.integration-row > .spin { flex: none; color: var(--text-3); }
+.integration-row small { white-space: normal; }
+.integration-actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2); }
+.integration-links { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.integration-links a { display: inline-flex; align-items: center; gap: 4px; color: var(--text-3); font-size: var(--text-sm); }
+@media (hover: hover) { .integration-links a:hover { color: var(--text-1); } }
+.settings-note { margin: 0; color: var(--text-3); font-size: var(--text-sm); line-height: var(--leading); }
 
 /* Agents. */
 .agent-settings { display: grid; gap: var(--space-4); min-width: 0; }
@@ -135,6 +134,14 @@ label.file-button:has(input:focus-visible) { outline: 2px solid var(--focus); ou
 .agent-snippet { position: relative; border: 1px solid var(--border-2); border-radius: var(--radius-md); background: var(--surface-2); }
 .agent-snippet pre { margin: 0; padding: var(--space-3) 44px var(--space-3) var(--space-3); border: 0; background: transparent; color: var(--text-1); font: var(--text-sm)/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-snippet .icon-button { position: absolute; top: 6px; right: 6px; }
+.agent-tools { display: grid; margin: 0; }
+.agent-tools > div { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: var(--space-3); padding: 6px 0; border-bottom: 1px solid var(--border-1); }
+.agent-tools > div:last-child { border-bottom: 0; }
+.agent-tools dt { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.agent-tools code { color: var(--text-1); font: var(--text-sm)/1.5 var(--font-mono); }
+.agent-tools dt span { color: var(--text-3); font-size: var(--text-xs); }
+.agent-tools dd { margin: 0; color: var(--text-3); font-size: var(--text-sm); line-height: 1.5; }
+.settings-note code { color: var(--text-2); font: var(--text-xs)/1 var(--font-mono); }
 .agent-token-form { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: var(--space-2); }
 .agent-token-form select { width: auto; }
 .agent-new-token { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-1) var(--space-2); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3); border: 1px solid rgba(92, 197, 143, 0.3); border-radius: var(--radius-md); background: var(--green-soft); animation: o-drop var(--duration-slow) var(--ease-out); }
@@ -199,11 +206,12 @@ label.file-button:has(input:focus-visible) { outline: 2px solid var(--focus); ou
   .invite-form > input { flex-basis: 100%; }
   .invite-form > select { flex: 0 0 112px; }
   .invite-form > button { flex: 1; }
-  .integration-section { grid-template-columns: minmax(0, 1fr); }
-  .integration-actions { justify-content: flex-start; }
+  .integration-row { flex-wrap: wrap; }
+  .integration-actions { justify-content: flex-start; width: 100%; padding-left: 36px; }
   /* Every client stays in view down to 360px: two rows of three instead of a row that scrolls off the edge. */
   .agent-clients { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .agent-clients button { min-width: 0; padding: 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agent-tools > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .agent-token-form { grid-template-columns: 1fr 1fr; }
   .agent-token-form input, .agent-token-form button { grid-column: 1 / -1; }
   .agent-token-form select { width: 100%; }

@@ -1,8 +1,8 @@
 import { githubAppConfig } from "@/lib/github-workspace";
 import { syncGitHubEvent } from "@/lib/github-sync";
-import { syncPREvent } from "@/lib/github-prs";
+import { handlePullRequestPayload, handlePushPayload, syncPREvent } from "@/lib/github-prs";
 import { integrationBridge } from "@/lib/integration-bridge";
-import { parseGitHubEvent, verifyGitHubSignature } from "@/lib/github-webhook";
+import { GITHUB_EVENTS, parseGitHubEvent, verifyGitHubSignature } from "@/lib/github-webhook";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   const body = Buffer.concat(chunks).toString("utf8");
   if (!verifyGitHubSignature(body, request.headers.get("x-hub-signature-256") ?? "", secret)) return new Response("Unauthorized", { status: 401 });
   const kind = request.headers.get("x-github-event") ?? "";
-  if (!["issues", "pull_request", "pull_request_review", "check_suite", "check_run"].includes(kind)) return Response.json({ accepted: true });
+  if (!(GITHUB_EVENTS as readonly string[]).includes(kind)) return Response.json({ accepted: true });
   let event;
   try { event = parseGitHubEvent(body, kind, request.headers.get("x-github-delivery") ?? ""); }
   catch { return new Response("Invalid event", { status: 400 }); }
@@ -28,9 +28,16 @@ export async function POST(request: Request) {
   try {
     const lease = await integrationBridge<number | null>("githubDelivery", { deliveryId, fingerprint });
     if (lease === null) return Response.json({ accepted: true, duplicate: true });
-    // Acknowledge only after syncing; a crash leaves a recoverable lease.
+    // The signed payload is the source of truth for links and lifecycle; acknowledge only after it is stored, so a
+    // failure leaves a lease GitHub's redelivery (or the reconcile tick) can pick up.
     if (kind === "issues") await syncGitHubEvent(event.repoUrl, event.numbers[0]);
-    else await syncPREvent(event.repoUrl, event.numbers, event.headSha);
+    else if (kind === "pull_request" || kind === "pull_request_review") await handlePullRequestPayload(event.payload);
+    else if (kind === "push") await handlePushPayload(event.payload);
+    else {
+      // Check results need the App's installation token; without it the reconcile tick retries, so don't fail the delivery.
+      try { await syncPREvent(event.repoUrl, event.numbers, event.headSha); }
+      catch (error) { console.warn("GitHub check sync deferred", error instanceof Error ? error.message : "Unknown error"); }
+    }
     await integrationBridge("githubDelivery", { deliveryId, fingerprint, finishLease: lease });
     return Response.json({ accepted: true });
   } catch { return Response.json({ error: "GitHub sync pending; retry delivery or reconcile" }, { status: 503 }); }

@@ -143,4 +143,34 @@ describe("MCP tools", () => {
     const error = await f.t.mutation(api.mcp.createIssue, { token: f.ownerToken, project: "Shared", title: "x", column: "Nope" }).catch(e => e);
     expect(error.data).toContain("Column not found: Nope");
   });
+
+  test("labels: set on create, replaced or cleared on update, reusing the project's spelling; listed per project", async () => {
+    const f = await fixture();
+    const member = await f.token(f.member);
+    const created = JSON.parse(await f.t.mutation(api.mcp.createIssue, { token: member, project: "Shared", title: "Labelled", labels: ["Bug", " backend ", "bug"] }));
+    expect(created.labels).toEqual(["Bug", "backend"]);
+    const updated = JSON.parse(await f.t.mutation(api.mcp.updateIssue, { token: member, issueId: created.id, labels: ["BUG", "Frontend"] }));
+    expect(updated.labels).toEqual(["Bug", "Frontend"]);
+    const projects = JSON.parse(await f.t.query(api.mcp.projects, { token: member })).projects;
+    expect(projects[0].labels).toEqual(expect.arrayContaining(["Bug", "Frontend"]));
+    const cleared = JSON.parse(await f.t.mutation(api.mcp.updateIssue, { token: member, issueId: created.id, labels: [] }));
+    expect(cleared.labels).toBeUndefined();
+    await expect(f.t.mutation(api.mcp.updateIssue, { token: member, issueId: created.id, labels: Array.from({ length: 21 }, (_, n) => `l${n}`) })).rejects.toThrow("up to 20 labels");
+    const readOnly = await f.token(f.member, false);
+    await expect(f.t.mutation(api.mcp.updateIssue, { token: readOnly, issueId: created.id, labels: ["x"] })).rejects.toThrow();
+  });
+
+  test("get_issue finds an issue by key only among issues the token can see, with its branch and linked pull requests", async () => {
+    const f = await fixture();
+    const member = await f.token(f.member);
+    const created = JSON.parse(await f.t.mutation(api.mcp.createIssue, { token: member, project: "Shared", title: "Keyed" }));
+    await f.t.run(async ctx => {
+      await ctx.db.patch(f.shared, { repoUrl: "https://github.com/acme/widgets" });
+      await ctx.db.insert("taskPullRequests", { projectId: f.shared, taskId: created.id, requesterUserId: f.member.id, number: 4, url: "https://github.com/acme/widgets/pull/4", branch: "b", state: "open", checks: "success", review: "approved", title: "Keyed work", linkSource: "reference", closes: false, updatedAt: 1 });
+    });
+    // The Secret issue has the same key in this test runtime, but the member cannot see it.
+    const issue = JSON.parse(await f.t.query(api.mcp.issue, { token: member, issueId: created.key.toLowerCase() }));
+    expect(issue).toMatchObject({ id: created.id, branch: expect.stringContaining(created.key), pullRequests: [{ number: 4, state: "open", title: "Keyed work", completesOnMerge: false }] });
+    await expect(f.t.query(api.mcp.issue, { token: f.ownerToken, issueId: created.key })).rejects.toThrow("more than one issue");
+  });
 });

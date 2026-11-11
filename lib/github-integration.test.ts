@@ -195,6 +195,7 @@ test("PG3 R2 O-111 HTTP OAuth state/cookie/PKCE, installation retry, refresh, re
   const f = await fixture();
   const oauth = await import("../app/api/github/oauth/[step]/route");
   const workspace = await import("../app/api/github/workspace/route");
+  integrationDb().exec("DELETE FROM github_app");
   saveGitHubApp({ clientId: "fixture-id", clientSecret: "fixture-secret", slug: "fixture-app" });
   const context = (step: string) => ({ params: Promise.resolve({ step }) });
   const start = async () => {

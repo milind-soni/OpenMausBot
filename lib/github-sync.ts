@@ -22,7 +22,7 @@ async function createOnGitHub<T>(key: string, path: string, token: string, body:
   }
 }
 
-async function contextWithToken(projectId: string, taskId?: string) {
+export async function contextWithToken(projectId: string, taskId?: string) {
   let context = await integrationBridge<Context>("context", { projectId, taskId });
   const repo = parseGitHubRepo(context.project.repoUrl);
   let token: string | undefined;

@@ -29,6 +29,9 @@ http.route({ path: "/integrations", method: "POST", handler: httpAction(async (c
       case "prEventTargets": result = await ctx.runQuery(internal.taskPRs.eventTargets, p.args); break;
       case "prBeginSync": result = await ctx.runMutation(internal.taskPRs.beginSync, p.args); break;
       case "prSync": result = await ctx.runMutation(internal.taskPRs.sync, p.args); break;
+      case "prRepositoryProjects": result = await ctx.runQuery(internal.taskPRs.repositoryProjects, p.args); break;
+      case "prLinkReferences": result = await ctx.runMutation(internal.taskPRs.linkReferences, p.args); break;
+      case "commitClosers": result = await ctx.runMutation(internal.taskPRs.completeFromCommits, p.args); break;
       case "githubDelivery": result = await ctx.runMutation(internal.taskPRs.delivery, p.args); break;
       case "context": result = JSON.parse(await ctx.runQuery(internal.integrations.context, p.args)); break;
       case "targets": result = JSON.parse(await ctx.runQuery(internal.integrations.targets, p.args)); break;

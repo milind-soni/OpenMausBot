@@ -18,6 +18,17 @@ const columnDoc = v.object({ ...schema.tables.columns.validator.fields, _id: v.i
 const taskDoc = v.object({ ...schema.tables.tasks.validator.fields, _id: v.id("tasks"), _creationTime: v.number() });
 const commentDoc = v.object({ ...schema.tables.taskComments.validator.fields, _id: v.id("taskComments"), _creationTime: v.number() });
 const assetDoc = v.object({ ...schema.tables.taskAssets.validator.fields, _id: v.id("taskAssets"), _creationTime: v.number() });
+const boardPullRequest = v.object({ taskId: v.id("tasks"), number: v.number(), url: v.string(), state: v.union(v.literal("draft"), v.literal("open"), v.literal("closed"), v.literal("merged")) });
+const PR_RANK = { open: 0, draft: 1, merged: 2, closed: 3 } as const;
+/** One pull request per issue for the board: an open one first, then the newest merged, then closed. */
+function boardPullRequests(rows: Doc<"taskPullRequests">[]) {
+  const best = new Map<Id<"tasks">, Doc<"taskPullRequests">>();
+  for (const row of rows) {
+    const current = best.get(row.taskId);
+    if (!current || PR_RANK[row.state] < PR_RANK[current.state] || (PR_RANK[row.state] === PR_RANK[current.state] && row.updatedAt > current.updatedAt)) best.set(row.taskId, row);
+  }
+  return [...best.values()].map(row => ({ taskId: row.taskId, number: row.number, url: row.url, state: row.state }));
+}
 const person = {
   email: v.string(), name: v.string(), username: v.optional(v.string()), avatarUrl: v.union(v.string(), v.null()),
 };
@@ -58,12 +69,13 @@ function requireDueDate(value?: string) {
 
 export const board = query({
   args: { projectId: v.id("projects"), sessionToken: v.string() },
-  returns: v.object({ columns: v.array(columnDoc), tasks: v.array(taskDoc), assignees: v.array(v.object(person)) }),
+  returns: v.object({ columns: v.array(columnDoc), tasks: v.array(taskDoc), assignees: v.array(v.object(person)), pullRequests: v.array(boardPullRequest) }),
   handler: async (ctx, args) => {
     const { project } = await requireMember(ctx, args.projectId, args.sessionToken);
-    const [columns, tasks] = await Promise.all([
+    const [columns, tasks, prs] = await Promise.all([
       ctx.db.query("columns").withIndex("by_project_order", (q) => q.eq("projectId", args.projectId)).collect(),
       ctx.db.query("tasks").withIndex("by_project", (q) => q.eq("projectId", args.projectId)).collect(),
+      ctx.db.query("taskPullRequests").withIndex("by_projectId_and_number", q => q.eq("projectId", args.projectId)).order("desc").take(1000),
     ]);
     const assignees = await Promise.all([...new Set(tasks.flatMap(task => task.assignedToEmail ? [task.assignedToEmail] : []))].map(async email => {
       const user = await ctx.db.query("users").withIndex("by_email", q => q.eq("email", email)).unique();
@@ -75,6 +87,7 @@ export const board = query({
       columns: columns.sort(compareWorkflowColumns),
       tasks: tasks.sort(compareTaskOrder),
       assignees,
+      pullRequests: boardPullRequests(prs),
     };
   },
 });

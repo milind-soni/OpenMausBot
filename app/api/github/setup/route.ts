@@ -9,7 +9,7 @@ export async function POST(request: Request) {
   try {
     const user = await requireLocalWorkspace(request);
     if (githubAppConfig()) throw new Error("GitHub App is already configured");
-    if (!await canSetupGitHubApp(user, user.workspaceRole)) throw new Error("Only the instance operator can set up the GitHub App");
+    if (!canSetupGitHubApp(user, user.workspaceRole)) throw new Error("Only a workspace owner or admin can set up GitHub");
     limitLocalAction(`github-setup:${user._id}`, 3, 60000);
     const { state, browser } = createGithubState({ teamId: user.teamId, userId: user._id, sessionToken: sessionTokenFromRequest(request), slug: user.slug, mode: "setup" });
     const origin = originUrl();
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
       setup_url: `${origin}/api/github/oauth/install`, request_oauth_on_install: false,
       hook_attributes: { url: `${origin}/api/github/webhook`, active: true },
       default_permissions: { administration: "write", issues: "write", contents: "write", pull_requests: "write", checks: "read", metadata: "read" },
-      default_events: ["issues", "pull_request", "pull_request_review", "check_suite", "check_run"],
+      default_events: ["issues", "pull_request", "pull_request_review", "check_suite", "check_run", "push"],
     } });
     response.cookies.set("origin.github", browser, { httpOnly: true, secure: origin.startsWith("https:"), sameSite: "lax", path: "/api/github", maxAge: 900 });
     return response;

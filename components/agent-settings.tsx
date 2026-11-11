@@ -1,13 +1,14 @@
 "use client";
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { Bot, Check, Copy, KeyRound, Loader2, Plug, Trash2 } from "lucide-react";
+import { Check, Copy, KeyRound, Loader2, Plug, Trash2 } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import { useWorkspace } from "./workspace-context";
 import { localAppOrigin } from "@/lib/client-api";
 import { errorText } from "@/lib/error-text";
 import { formatDate } from "@/lib/format";
 import { ConfirmButton } from "./settings-controls";
+import { MCP_TOOLS } from "@/lib/mcp-tools";
 
 const CLIENTS = ["Claude Code", "Codex", "OpenCode", "omp", "T3 Code", "ChatGPT"] as const;
 type Client = typeof CLIENTS[number];
@@ -61,6 +62,12 @@ export function AgentSettings({ sessionToken }: { sessionToken: string }) {
     </div>
 
     <section className="settings-group">
+      <h4>Tools</h4>
+      <p className="settings-note">Agents act as you, with your project access. To work an issue, an agent takes the branch name from <code>get_issue</code> or writes “Closes ORI-AB12” in its pull request; Origin links the PR and completes the issue when it merges.</p>
+      <dl className="agent-tools">{MCP_TOOLS.map(tool => <div key={tool.name}><dt><code>{tool.name}</code>{tool.write && <span>write</span>}</dt><dd>{tool.description}</dd></div>)}</dl>
+    </section>
+
+    <section className="settings-group">
       <h4>Access tokens</h4>
       <form className="agent-token-form" onSubmit={submit}>
         <input aria-label="Token name" placeholder="Name" value={name} maxLength={60} required onChange={e => setName(e.target.value)} />
@@ -75,7 +82,7 @@ export function AgentSettings({ sessionToken }: { sessionToken: string }) {
     <section className="settings-group">
       <h4>Connected{active?.length ? <span className="settings-count">{active.length}</span> : null}</h4>
       <div className="settings-list connector-grants">
-        {active?.map(g => <div className="settings-list-row connector-grant" key={g._id}><span className="settings-row-icon"><Bot size={15} /></span><div><strong>{g.name}</strong><small>{g.write ? "Read & write" : "Read only"} · Expires {formatDate(g.expiresAt)}</small></div><ConfirmButton label={`Revoke ${g.name}`} confirmLabel="Revoke" disabled={busy} icon={<Trash2 size={14} />} onConfirm={() => void attempt(async () => { await revoke({ sessionToken, teamId: workspace._id, grantId: g._id }); })} /></div>)}
+        {active?.map(g => <div className="settings-list-row connector-grant" key={g._id}><span className="settings-row-icon"><Plug size={15} /></span><div><strong>{g.name}</strong><small>{g.write ? "Read & write" : "Read only"} · Expires {formatDate(g.expiresAt)}</small></div><ConfirmButton label={`Revoke ${g.name}`} confirmLabel="Revoke" disabled={busy} icon={<Trash2 size={14} />} onConfirm={() => void attempt(async () => { await revoke({ sessionToken, teamId: workspace._id, grantId: g._id }); })} /></div>)}
         {active && !active.length && <p className="settings-empty">No agents connected</p>}
       </div>
     </section>

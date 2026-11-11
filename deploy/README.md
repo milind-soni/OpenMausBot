@@ -62,7 +62,7 @@ Persist `/data/origin`. It contains chat history, attachment files, call state, 
 
 ## 3. Connect GitHub
 
-One GitHub App serves every workspace on the instance, so only the instance operator may register it. Set `ORIGIN_ADMIN_EMAILS` in `.env` to the operators' account emails (comma-separated; `ORIGIN_LEGACY_OWNER_EMAIL` also counts). When neither is set, the operator is the owner of the first workspace created on the instance, recorded the first time it is looked up (the `instance_operator` row in `integrations.sqlite`), so deleting or handing over that workspace later does not change it. Origin does not verify email addresses, so create the operator accounts before you open sign-up. While no App is configured, the operator registers it from **Settings > Integrations** using the GitHub manifest flow; everyone else sees GitHub as not available yet. The App is stored encrypted in `/data/origin` and takes precedence over the `GITHUB_CLIENT_*` variables; to replace a registered App, stop the app, delete the `github_app` row from `integrations.sqlite` in the persisted `/data/origin` volume (`sqlite3 <path>/integrations.sqlite "DELETE FROM github_app"`), start it again and reconnect each workspace. To use an existing App instead, set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and `GITHUB_WEBHOOK_SECRET`, plus `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` (PEM, `\n` for newlines) for issues as pull requests; `deploy/docker-compose.yml` passes them through from `.env`. Configure the App on GitHub (`https://origin.example.com` stands for your `ORIGIN_PUBLIC_URL`) exactly as the manifest flow would:
+One GitHub App serves every workspace on the instance. While none is configured, any workspace owner or admin registers it from **Settings > Integrations** with GitHub's manifest flow; once one exists nobody can replace it from the app. On an instance where strangers can sign up and create workspaces, register the App before opening sign-up, or set `ORIGIN_ADMIN_EMAILS` in `.env` (comma-separated) to limit registration to those owners and admins. `ORIGIN_LEGACY_OWNER_EMAIL` no longer affects GitHub setup. The App is stored encrypted in `/data/origin` and takes precedence over the `GITHUB_CLIENT_*` variables; to replace a registered App, stop the app, delete the `github_app` row from `integrations.sqlite` in the persisted `/data/origin` volume (`sqlite3 <path>/integrations.sqlite "DELETE FROM github_app"`), start it again and reconnect each workspace. To use an existing App instead, set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and `GITHUB_WEBHOOK_SECRET`, plus `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` (PEM, `\n` for newlines) for issues as pull requests; `deploy/docker-compose.yml` passes them through from `.env`. Configure the App on GitHub (`https://origin.example.com` stands for your `ORIGIN_PUBLIC_URL`) exactly as the manifest flow would:
 
 | App setting | Value |
 | --- | --- |
@@ -72,10 +72,12 @@ One GitHub App serves every workspace on the instance, so only the instance oper
 | Setup URL | `https://origin.example.com/api/github/oauth/install` |
 | Webhook | active, URL `https://origin.example.com/api/github/webhook`, secret = `GITHUB_WEBHOOK_SECRET` |
 | Repository permissions | Administration, Contents, Issues, Pull requests: read and write; Checks, Metadata: read |
-| Events | Issues, Pull request, Pull request review, Check suite, Check run |
-| Where can it be installed | Any account (members connect their own personal accounts) |
+| Events | Issues, Pull request, Pull request review, Check suite, Check run, Push |
+| Where can it be installed | Any account |
 
-Then install the App on the accounts that own the repositories and finish account authorization for each workspace from **Settings > Integrations**.
+Then install the App on the accounts or organizations that own the repositories and connect each workspace from **Settings > Integrations**. A repository works for a workspace once an admin approves it in the project's Repo tab and the workspace's GitHub connection can read it.
+
+Apps registered before the `push` event was added: open the App's settings on GitHub, subscribe to **Push**, and accept the change under **Installed GitHub Apps**. Without it, PRs still link and complete issues on merge; only `Closes ORI-…` in commits pushed straight to the default branch is missed.
 
 Repository creation uses the connected administrator's personal account and creates private repositories. For an existing repository, an admin must approve workspace access. A fine-grained project token is an optional alternative; never ask ordinary members for a server-wide token.
 

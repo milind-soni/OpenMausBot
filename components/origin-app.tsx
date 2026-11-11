@@ -8,7 +8,7 @@ import { ChatView, CreateWorkspaceDialog, InboxView, IssueComposer, MemberProfil
 import { useLocalVoiceParticipants } from "./use-voice-participants";
 import { taskKey } from "../lib/project-issues";
 import clsx from "clsx";
-import { FolderPlus, Check, ChevronDown, ChevronRight, CircleDot, CircleAlert, ImageUp, Inbox, Loader2, LogOut, Menu, MessageCircle, PenTool, Plus, Search, Settings2, Sparkles, PanelLeftClose, PanelLeftOpen, SquarePen, Video, X } from "lucide-react";
+import { FolderPlus, Check, ChevronDown, ChevronRight, CircleDot, CircleAlert, ImageUp, Inbox, Loader2, LogOut, Menu, MessageCircle, PenTool, Plus, Search, Settings2, PanelLeftClose, PanelLeftOpen, SquarePen, Video, X, type LucideIcon } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState, type CSSProperties } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
@@ -71,7 +71,7 @@ function orderSidebarProjects(projects: ProjectWithUi[]) {
 function LoadingState({ label = "Loading" }: { label?: string }) {
   return <ContentSkeleton label={label} kind={label.includes("board") || label.includes("project") ? "board" : "list"} rows={4} />;
 }
-function EmptyBlock({ icon: Icon, title, body }: { icon: typeof Sparkles; title: string; body: string }) {
+function EmptyBlock({ icon: Icon, title, body }: { icon: LucideIcon; title: string; body: string }) {
   return (
     <div className="empty-block">
       <Icon size={22} />
@@ -157,7 +157,7 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
     localStorage.setItem("origin.workspace", workspace.slug);
     const params = new URLSearchParams(window.location.search);
     const githubStatus = params.get("github");
-    if (githubStatus) setShellNotice(githubStatus === "connected" ? "GitHub connected to this workspace." : githubStatus === "app-ready" ? "GitHub App ready. Open Settings > Integrations to connect your workspace." : "GitHub connection was not completed. Try again from Settings > Integrations.");
+    if (githubStatus) setShellNotice(githubStatus === "connected" ? "GitHub connected to this workspace." : githubStatus === "app-ready" ? "GitHub App ready. Open Settings > Integrations to connect your workspace." : githubStatus === "setup-failed" ? "GitHub App setup was not completed. Try again from Settings > Integrations." : "GitHub connection was not completed. Try again from Settings > Integrations.");
     const view = toolView(params.get("view"));
     if (view) setMainView(view);
     const project = params.get("project");

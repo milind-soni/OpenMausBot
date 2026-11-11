@@ -10,13 +10,9 @@ import { GET as workspaceGET } from "../app/api/github/workspace/route";
 import { createGithubState, githubAppConfig, saveGitHubApp } from "./github-workspace";
 import { integrationDb } from "./githubConnection";
 
-const current = vi.hoisted(() => ({ role: "owner", email: "operator@pg3.test", userId: "operator-user", legacy: "", operator: "operator-user" as string | null | Error }));
+const current = vi.hoisted(() => ({ role: "owner", email: "operator@pg3.test", userId: "operator-user", legacy: "" }));
 vi.mock("../convex/lib/auth", async importOriginal => ({ ...await importOriginal<typeof import("../convex/lib/auth")>(), get DEFAULT_OWNER_EMAIL() { return current.legacy; } }));
-vi.mock("./integration-bridge", async importOriginal => ({ ...await importOriginal<typeof import("./integration-bridge")>(), integrationBridge: async (operation: string) => {
-  if (operation !== "instanceOperator") throw new Error(`unexpected ${operation}`);
-  if (current.operator instanceof Error) throw current.operator;
-  return current.operator ? { userId: current.operator } : null;
-} }));
+vi.mock("./integration-bridge", async importOriginal => ({ ...await importOriginal<typeof import("./integration-bridge")>(), integrationBridge: async (operation: string) => { throw new Error(`unexpected ${operation}`); } }));
 vi.mock("./localRealtime", () => ({
   localDataDir: () => process.env.ORIGIN_LOCAL_DATA_DIR!,
   limitLocalAction: vi.fn(),
@@ -35,9 +31,9 @@ const directory = mkdtempSync(path.join(tmpdir(), "origin-pg3-setup-"));
 process.env.ORIGIN_LOCAL_DATA_DIR = directory;
 afterAll(() => { integrationDb().close(); rmSync(directory, { recursive: true, force: true }); delete process.env.ORIGIN_LOCAL_DATA_DIR; });
 afterEach(() => {
-  current.role = "owner"; current.email = "operator@pg3.test"; current.userId = "operator-user"; current.legacy = ""; current.operator = "operator-user";
+  current.role = "owner"; current.email = "operator@pg3.test"; current.userId = "operator-user"; current.legacy = "";
   vi.unstubAllEnvs();
-  integrationDb().exec("DELETE FROM github_app; DELETE FROM github_oauth_states; DELETE FROM instance_operator");
+  integrationDb().exec("DELETE FROM github_app; DELETE FROM github_oauth_states");
   vi.unstubAllGlobals();
 });
 const manifest = () => POST(new Request("http://localhost:3000/api/github/setup?teamId=fixture-team", { method: "POST" }));
@@ -50,90 +46,63 @@ const conversion = () => vi.fn(async () => Response.json({ client_id: "fixture-i
 const workspaceStatus = async () => (await workspaceGET(new Request("http://localhost:3000/api/github/workspace?teamId=fixture-team"))).json();
 const stranger = () => { current.userId = "stranger-user"; current.email = "stranger@evil.test"; };
 
-test("GitHub App setup: on an open-signup instance a stranger who owns their own workspace is refused", async () => {
-  stranger();
-  for (const role of ["owner", "admin", "member", "viewer"]) {
-    current.role = role;
-    expect((await manifest()).status).toBe(403);
-    expect(await workspaceStatus()).toMatchObject({ configured: false, canSetup: false });
-  }
-});
-
-test("GitHub App setup: without ORIGIN_ADMIN_EMAILS only the first workspace's owner, as owner/admin, gets the manifest", async () => {
-  for (const role of ["owner", "admin"]) {
-    current.role = role;
-    const response = await manifest();
-    expect(response.status).toBe(200);
-    expect(response.headers.get("set-cookie")).toContain("HttpOnly");
-    expect(await response.json()).toMatchObject({ action: expect.stringContaining("https://github.com/settings/apps/new?state="), manifest: { default_permissions: { contents: "write", pull_requests: "write", checks: "read" }, default_events: expect.arrayContaining(["issues", "pull_request", "check_run"]) } });
-    expect(await workspaceStatus()).toMatchObject({ canSetup: true });
-  }
-  for (const role of ["member", "viewer", "removed"]) {
-    current.role = role;
-    expect((await manifest()).status).toBe(403);
-  }
-  current.role = "owner";
-  integrationDb().exec("DELETE FROM instance_operator");
-  for (const operator of [null, new Error("Integration update failed (503)")]) {
-    current.operator = operator;
+test("GitHub App setup: any workspace owner or admin gets the manifest while no App exists; members and viewers do not", async () => {
+  for (const who of [() => undefined, stranger]) {
+    who();
+    for (const role of ["owner", "admin"]) {
+      current.role = role;
+      const response = await manifest();
+      expect(response.status).toBe(200);
+      expect(response.headers.get("set-cookie")).toContain("HttpOnly");
+      expect(await response.json()).toMatchObject({ action: expect.stringContaining("https://github.com/settings/apps/new?state="), manifest: { default_permissions: { contents: "write", pull_requests: "write", checks: "read" }, default_events: expect.arrayContaining(["pull_request", "push", "issues"]) } });
+      expect(await workspaceStatus()).toMatchObject({ configured: false, canSetup: true });
+    }
+    for (const role of ["member", "viewer"]) {
+      current.role = role;
+      expect((await manifest()).status).toBe(403);
+      expect(await workspaceStatus()).toMatchObject({ canSetup: false });
+    }
+    current.role = "removed";
     expect((await manifest()).status).toBe(403);
   }
 });
 
-test("GitHub App setup: the fallback operator is recorded once and survives the first workspace being deleted", async () => {
-  current.operator = new Error("Integration update failed (503)");
-  expect((await manifest()).status).toBe(403);
-  current.operator = null;
-  expect((await manifest()).status).toBe(403);
-  current.operator = "operator-user";
-  expect((await manifest()).status).toBe(200);
-  // The first workspace is deleted: the bridge would now name the next-oldest workspace's owner (or fail).
-  for (const next of ["stranger-user", null, new Error("Integration update failed (503)")]) {
-    current.operator = next;
-    expect((await manifest()).status).toBe(200);
-    stranger(); current.role = "owner";
-    expect((await manifest()).status).toBe(403);
-    expect(await workspaceStatus()).toMatchObject({ canSetup: false });
-    current.userId = "operator-user"; current.email = "operator@pg3.test";
-  }
-  expect(integrationDb().prepare("SELECT user_id FROM instance_operator").all()).toEqual([{ user_id: "operator-user" }]);
-  vi.stubEnv("ORIGIN_ADMIN_EMAILS", "stranger@evil.test");
-  expect((await manifest()).status).toBe(403);
-  stranger(); current.role = "member";
-  expect((await manifest()).status).toBe(200);
-});
-
-test("GitHub App setup: ORIGIN_ADMIN_EMAILS names the operators (any role) and replaces the first-workspace rule", async () => {
-  vi.stubEnv("ORIGIN_ADMIN_EMAILS", " Ops@PG3.test , second@pg3.test,");
-  expect((await manifest()).status).toBe(403);
-  current.email = "ops@pg3.test"; current.userId = "ops-user"; current.role = "member";
-  expect((await manifest()).status).toBe(200);
-  current.email = "SECOND@pg3.test"; current.role = "viewer";
-  expect((await manifest()).status).toBe(200);
-  current.role = "removed";
-  expect((await manifest()).status).toBe(403);
-});
-
-test("GitHub App setup: ORIGIN_LEGACY_OWNER_EMAIL is still an operator; nobody can once an App exists", async () => {
+test("GitHub App setup: the legacy owner email no longer gates setup, and nobody can once an App exists", async () => {
   current.legacy = "legacy@pg3.test";
-  expect((await manifest()).status).toBe(403);
-  current.email = "legacy@pg3.test"; current.userId = "legacy-user"; current.role = "member";
   expect((await manifest()).status).toBe(200);
-  current.role = "removed";
-  expect((await manifest()).status).toBe(403);
-  current.role = "owner";
   saveGitHubApp({ clientId: "existing", clientSecret: "existing-secret" });
   expect((await manifest()).status).toBe(403);
   expect(await workspaceStatus()).toMatchObject({ configured: true, canSetup: false });
 });
 
-test("GitHub App setup: the callback re-checks the operator, so a stranger's state cannot save an App", async () => {
-  stranger();
+test("GitHub App setup: ORIGIN_ADMIN_EMAILS, when set, limits setup to those owners and admins", async () => {
+  vi.stubEnv("ORIGIN_ADMIN_EMAILS", " Ops@PG3.test , second@pg3.test,");
+  expect((await manifest()).status).toBe(403);
+  current.email = "ops@pg3.test"; current.userId = "ops-user";
+  expect((await manifest()).status).toBe(200);
+  current.email = "SECOND@pg3.test"; current.role = "admin";
+  expect((await manifest()).status).toBe(200);
+  current.role = "member";
+  expect((await manifest()).status).toBe(403);
+});
+
+test("GitHub App setup: the callback re-checks the role, so a demoted admin's state cannot save an App", async () => {
   const request = callback(), fetcher = conversion();
+  current.role = "member";
   vi.stubGlobal("fetch", fetcher);
-  expect((await GET(request)).headers.get("location")).toContain("setup-failed");
+  expect((await GET(request)).headers.get("location")).toBe("http://localhost:3000/pg3?github=setup-failed");
   expect(fetcher).not.toHaveBeenCalled();
   expect(githubAppConfig()).toBeNull();
+});
+
+test("GitHub App setup: two admins finishing at once keep the first App", async () => {
+  const late = callback();
+  vi.stubGlobal("fetch", conversion());
+  expect((await GET(callback())).headers.get("location")).toContain("app-ready");
+  expect((await GET(late)).headers.get("location")).toContain("setup-failed");
+  // Both passed the role check before either saved: the store itself refuses the second App.
+  expect(saveGitHubApp({ clientId: "second", clientSecret: "second-secret" })).toBe(false);
+  expect(githubAppConfig()).toMatchObject({ clientId: "fixture-id" });
 });
 
 test("PG3 O-110: manifest conversion persists encrypted credentials once with cookie and state binding", async () => {

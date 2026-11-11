@@ -2,9 +2,11 @@
 import { generateKeyPairSync, verify } from "node:crypto";
 import { afterEach, expect, test, vi } from "vitest";
 import { appJwt, installationFor, installationToken, projectInstallationToken, withInstallation } from "./github-app";
-import { githubAppConfig, githubRequest, workspaceGitHubInfo } from "./github-workspace";
+import { githubAppConfig, githubRequest } from "./github-workspace";
+import { canReadRepository } from "./github-access";
 import { integrationBridge } from "./integration-bridge";
-vi.mock("./github-workspace", () => ({ githubAppConfig: vi.fn(), githubRequest: vi.fn(), workspaceGitHubInfo: vi.fn() }));
+vi.mock("./github-workspace", () => ({ githubAppConfig: vi.fn(), githubRequest: vi.fn() }));
+vi.mock("./github-access", () => ({ canReadRepository: vi.fn() }));
 vi.mock("./integration-bridge", () => ({ integrationBridge: vi.fn() }));
 const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
 afterEach(() => { vi.resetAllMocks(); vi.unstubAllGlobals(); });
@@ -13,7 +15,7 @@ function config() {
 }
 function authorizeProject() {
   vi.mocked(integrationBridge).mockResolvedValue({ project: { repoUrl: "https://github.com/test/prs", githubWorkspaceAccess: true }, connection: { teamId: "team-1", login: "test", connectedBy: "user-1" } });
-  vi.mocked(workspaceGitHubInfo).mockReturnValue({ team: "team-1", login: "test", account_id: 99, connected_by: "user-1" });
+  vi.mocked(canReadRepository).mockResolvedValue(true);
 }
 test("App JWT uses a bounded lifetime and installation tokens are repo/permission scoped", async () => {
   config();
@@ -43,20 +45,24 @@ test("unexpected repository scope rejected and App request tokens revoked on fai
   await expect(withInstallation("project-1", "https://github.com/test/prs", async () => { throw new Error("failure"); })).rejects.toThrow("failure");
   expect(fetch).toHaveBeenCalledWith("https://api.github.com/installation/token", expect.objectContaining({ method: "DELETE" }));
 });
-test("a workspace cannot mint App credentials for another installation or a disconnected account", async () => {
+test("an App installed on any account works, but only for a repository the workspace's own connection can read", async () => {
   config(); authorizeProject();
-  vi.mocked(githubRequest).mockResolvedValueOnce({ id: 42, account: { id: 100, login: "other-team" }, permissions: { contents: "write", pull_requests: "write", checks: "read" } });
-  await expect(projectInstallationToken("project-1", "https://github.com/test/prs", true)).rejects.toThrow("does not belong");
-  expect(githubRequest).toHaveBeenCalledTimes(1); // No access token was minted.
-  vi.mocked(workspaceGitHubInfo).mockReturnValue(null);
-  await expect(projectInstallationToken("project-1", "https://github.com/test/prs", true)).rejects.toThrow("connect GitHub");
+  vi.mocked(canReadRepository).mockResolvedValue(false);
+  await expect(projectInstallationToken("project-1", "https://github.com/test/prs", true)).rejects.toThrow("cannot read the repository");
+  expect(githubRequest).not.toHaveBeenCalled(); // No App credential was used.
+  vi.mocked(integrationBridge).mockResolvedValue({ project: { repoUrl: "https://github.com/test/prs", githubWorkspaceAccess: false } });
+  vi.mocked(canReadRepository).mockResolvedValue(true);
+  await expect(projectInstallationToken("project-1", "https://github.com/test/prs", true)).rejects.toThrow("approves this repository");
+  authorizeProject();
+  vi.mocked(githubRequest).mockResolvedValueOnce({ id: 42, account: { id: 100, login: "some-org" }, permissions: { contents: "write", pull_requests: "write", checks: "read" } }).mockResolvedValueOnce({ token: "fixture-org", expires_at: new Date(Date.now() + 3600000).toISOString(), repositories: [{ full_name: "test/prs" }] });
+  expect(await projectInstallationToken("project-1", "https://github.com/test/prs", true)).toMatchObject({ token: "fixture-org" });
 });
 
 test("disconnecting GitHub during minting revokes the token before handing it to a host", async () => {
   config(); authorizeProject();
-  vi.mocked(integrationBridge).mockResolvedValueOnce({ project: { repoUrl: "https://github.com/test/prs", githubWorkspaceAccess: true }, connection: { teamId: "team-1", login: "test", connectedBy: "user-1" } }).mockResolvedValueOnce({ project: { repoUrl: "https://github.com/test/prs", githubWorkspaceAccess: true }, connection: null });
+  vi.mocked(canReadRepository).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   vi.mocked(githubRequest).mockResolvedValueOnce({ id: 42, account: { id: 99, login: "test" }, permissions: { contents: "write", pull_requests: "write", checks: "read" } }).mockResolvedValueOnce({ token: "fixture-disconnected", expires_at: new Date(Date.now() + 3600000).toISOString(), repositories: [{ full_name: "test/prs" }] });
   const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 })); vi.stubGlobal("fetch", fetch);
-  await expect(projectInstallationToken("project-1", "https://github.com/test/prs", true)).rejects.toThrow("connect GitHub");
+  await expect(projectInstallationToken("project-1", "https://github.com/test/prs", true)).rejects.toThrow("connection changed");
   expect(fetch).toHaveBeenCalledWith("https://api.github.com/installation/token", expect.objectContaining({ method: "DELETE", headers: expect.objectContaining({ Authorization: "Bearer fixture-disconnected" }) }));
 });

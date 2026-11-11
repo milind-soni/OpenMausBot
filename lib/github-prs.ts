@@ -4,6 +4,7 @@ import { GitHubHttpError, githubRequest, lockGitHubJob, readGitHubJob, saveGitHu
 import { repositoryPath, withInstallation } from "./github-app";
 import { githubPR, checksSummary, toSnapshot, type PRSnapshot } from "./github-pr-snapshot";
 import { taskBranch } from "./task-branch";
+import { verifiedRepositoryProjects } from "./github-access";
 export { taskBranch } from "./task-branch";
 
 type Context = { project: Doc<"projects">; task: Doc<"tasks">; existingPR?: Doc<"taskPullRequests"> | null };
@@ -128,4 +129,40 @@ export async function syncPRPage() {
   if (failed) console.warn(`GitHub PR reconciliation: ${failed} targets need retry or App permission approval`);
   // Closed-unmerged PRs can be reopened even when their webhook is missed.
   saveGitHubJob(key, "done", { cursor: page.nextCursor, state: page.nextCursor ? state : state === "draft" ? "open" : state === "open" ? "closed" : "draft" });
+}
+
+type PullRequestPayload = { repository: { full_name: string }; pull_request: Record<string, unknown> & { title?: unknown; body?: unknown; user?: { login?: unknown; id?: unknown } | null } };
+
+/**
+ * A `pull_request` (or `pull_request_review`) webhook: links the PR to the issues its branch, title and body refer to
+ * and applies its state from the signed payload, so linking and merge completion need no API call. Check and review
+ * results are then refreshed with the App's installation token when it is available.
+ */
+export async function handlePullRequestPayload(raw: unknown) {
+  const payload = raw as PullRequestPayload;
+  const repo = payload.repository.full_name, repoUrl = `https://github.com/${repo}`;
+  const pr = payload.pull_request;
+  const snapshot = toSnapshot(githubPR.parse(pr), repo, "unknown", "unknown");
+  const projectIds = await verifiedRepositoryProjects(repoUrl);
+  if (!projectIds.length) return;
+  const author = pr.user && typeof pr.user.login === "string" ? { authorLogin: pr.user.login.slice(0, 100), ...(Number.isSafeInteger(pr.user.id) ? { authorId: pr.user.id as number } : {}) } : {};
+  await integrationBridge("prLinkReferences", {
+    repoUrl, projectIds, title: typeof pr.title === "string" ? pr.title.slice(0, 1000) : "", ...(typeof pr.body === "string" ? { body: pr.body.slice(0, 20000) } : {}), ...author, snapshot,
+  });
+  try { await syncPREvent(repoUrl, [snapshot.number]); }
+  catch (error) { console.warn("GitHub PR checks deferred", error instanceof Error ? error.message : "Unknown error"); }
+}
+
+type PushPayload = { ref?: unknown; repository: { full_name: string; default_branch?: unknown }; commits?: { message?: unknown; timestamp?: unknown }[] };
+
+/** A `push` to the default branch: commits whose message closes an issue (`Closes ORI-ABCD`, `Fixes #12`) complete it. */
+export async function handlePushPayload(raw: unknown) {
+  const payload = raw as PushPayload;
+  if (typeof payload.repository.default_branch !== "string" || payload.ref !== `refs/heads/${payload.repository.default_branch}`) return;
+  const commits = (Array.isArray(payload.commits) ? payload.commits : []).slice(0, 100).flatMap(commit => typeof commit.message === "string" && /\b(close|fix|resolve|complete)/i.test(commit.message)
+    ? [{ message: commit.message.slice(0, 5000), timestamp: Date.parse(String(commit.timestamp)) || Date.now() }] : []);
+  if (!commits.length) return;
+  const repoUrl = `https://github.com/${payload.repository.full_name}`;
+  const projectIds = await verifiedRepositoryProjects(repoUrl);
+  if (projectIds.length) await integrationBridge("commitClosers", { repoUrl, projectIds, commits });
 }

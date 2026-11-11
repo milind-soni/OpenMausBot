@@ -1,12 +1,12 @@
 import { createSign } from "node:crypto";
-import { githubAppConfig, githubRequest, workspaceGitHubInfo } from "./github-workspace";
+import { githubAppConfig, githubRequest } from "./github-workspace";
+import { canReadRepository } from "./github-access";
 import { parseGitHubRepo } from "./github-repo";
 import { integrationBridge } from "./integration-bridge";
 
 const prPermissions = { contents: "write", pull_requests: "write", checks: "read" } as const;
 export const permissionNotice = "Tasks as pull requests needs Contents: write, Pull requests: write and Checks: read. The App owner must save these permissions and subscribe to pull_request, pull_request_review, check_suite and check_run (keep issues). Then open GitHub Settings > Applications > Installed GitHub Apps > Origin > Configure and accept the new permissions. Existing issue sync continues with the current permissions.";
 type Installation = { id: number; account?: { id: number; login: string }; suspended_at?: string | null; permissions: Record<string, string> };
-type Account = { id: number; login: string };
 
 export function appJwt() {
   const config = githubAppConfig();
@@ -22,17 +22,16 @@ export function repositoryPath(repoUrl: string) {
   if (!repo || [repo.owner, repo.repo].some(part => part === "." || part === "..")) throw new Error("GitHub repository required");
   return `/repos/${repo.owner}/${repo.repo}`;
 }
-export async function installationFor(repoUrl: string, account?: Account) {
+export async function installationFor(repoUrl: string) {
   const installation = await githubRequest<Installation>(`${repositoryPath(repoUrl)}/installation`, appJwt());
-  if (account && (installation.account?.id !== account.id || installation.account.login.toLowerCase() !== account.login.toLowerCase())) throw new Error("Repository App installation does not belong to this workspace's connected GitHub account");
   if (installation.suspended_at || Object.entries(prPermissions).some(([key, level]) => installation.permissions[key] !== level && installation.permissions[key] !== "write")) throw new Error(permissionNotice);
   return installation;
 }
 // Tokens are held only in process memory and expire in one hour (GitHub's lifetime).
 // Hosts revoke their push token immediately after git push. Never persist/return it to a model.
-export async function installationToken(repoUrl: string, pushOnly = false, account?: Account) {
+export async function installationToken(repoUrl: string, pushOnly = false) {
   const repo = parseGitHubRepo(repoUrl)!;
-  const installation = await installationFor(repoUrl, account);
+  const installation = await installationFor(repoUrl);
   const result = await githubRequest<{ token: string; expires_at: string; permissions: Record<string, string>; repositories: { full_name: string }[] }>(`/app/installations/${installation.id}/access_tokens`, appJwt(), {
     method: "POST", body: JSON.stringify({ repositories: [repo.repo], permissions: pushOnly ? { contents: "write" } : prPermissions }),
   });
@@ -42,21 +41,26 @@ export async function installationToken(repoUrl: string, pushOnly = false, accou
   }
   return { token: result.token, expiresAt: result.expires_at };
 }
+/**
+ * An installation token for a project's approved repository. The App may be installed on any account or organization;
+ * what binds the repository to this workspace is that the workspace's own GitHub credential can read it.
+ */
 export async function projectInstallationToken(projectId: string, repoUrl: string, pushOnly = false) {
-  const account = await projectAccount(projectId, repoUrl);
-  const credentials = await installationToken(repoUrl, pushOnly, account);
+  await requireApprovedRepository(projectId, repoUrl);
+  if (!await canReadRepository(projectId, repoUrl)) throw new Error("This workspace's GitHub connection cannot read the repository. Reconnect GitHub in Settings > Integrations.");
+  const credentials = await installationToken(repoUrl, pushOnly);
+  // The repository or its approval can change while the token is minted; never hand out a token for the old one.
   try {
-    const current = await projectAccount(projectId, repoUrl);
-    if (current.id !== account.id || current.login.toLowerCase() !== account.login.toLowerCase()) throw new Error("GitHub connection changed during authorization");
+    await requireApprovedRepository(projectId, repoUrl);
+    if (!await canReadRepository(projectId, repoUrl, true)) throw new Error("GitHub connection changed during authorization");
     return credentials;
-  } catch (error) { await revokeInstallationToken(credentials.token); throw error; }
+  }
+  catch (error) { await revokeInstallationToken(credentials.token); throw error; }
 }
-async function projectAccount(projectId: string, repoUrl: string): Promise<Account> {
-  const context = await integrationBridge<{ project: { repoUrl?: string; githubWorkspaceAccess?: boolean }; connection: { teamId: string; login: string; connectedBy: string } | null }>("context", { projectId });
-  const connection = context.connection, saved = connection && workspaceGitHubInfo(connection.teamId);
+async function requireApprovedRepository(projectId: string, repoUrl: string) {
+  const context = await integrationBridge<{ project: { repoUrl?: string; githubWorkspaceAccess?: boolean } }>("context", { projectId });
   const expected = parseGitHubRepo(repoUrl), current = parseGitHubRepo(context.project.repoUrl);
-  if (!context.project.githubWorkspaceAccess || !expected || !current || `${expected.owner}/${expected.repo}`.toLowerCase() !== `${current.owner}/${current.repo}`.toLowerCase() || !connection || !saved || saved.connected_by !== connection.connectedBy || saved.login.toLowerCase() !== connection.login.toLowerCase()) throw new Error("An active workspace admin must connect GitHub and authorize this repository before using the App for PRs");
-  return { id: saved.account_id, login: saved.login };
+  if (!context.project.githubWorkspaceAccess || !expected || !current || `${expected.owner}/${expected.repo}`.toLowerCase() !== `${current.owner}/${current.repo}`.toLowerCase()) throw new Error("A workspace admin approves this repository in the project's Repo tab first");
 }
 export async function withInstallation<T>(projectId: string, repoUrl: string, fn: (token: string) => Promise<T>): Promise<T> {
   const { token } = await projectInstallationToken(projectId, repoUrl);

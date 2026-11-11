@@ -6,7 +6,7 @@ import { CalendarDays, Check, MoreHorizontal, UserRound } from "lucide-react";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { displayName, formatDue } from "@/lib/format";
 import { taskKey } from "@/lib/project-issues";
-import { GitHubIssueIndicator } from "./github-issue-indicator";
+import { GitHubIssueIndicator, type LinkedPullRequest } from "./github-issue-indicator";
 import { PriorityIcon, StatusIcon } from "./issue-icons";
 import { UserAvatar } from "./user-avatar";
 import type { TaskMenuAnchor, TaskMenuView } from "./task-actions-menu";
@@ -37,6 +37,8 @@ type IssueItemProps = {
 };
 
 export type IssueCardProps = IssueItemProps & {
+  /** The pull request linked to the issue, if any (from the board query). */
+  pullRequest?: LinkedPullRequest;
   dragState?: "placeholder" | "moving";
   keyboardMoving: boolean;
   onHandleKeyDown: (event: ReactKeyboardEvent<HTMLElement>, taskId: string) => void;
@@ -104,12 +106,22 @@ export function AssigneeChip({ task, assignee, canEdit, onMenu, withName = false
   return assignee ? <span className={clsx("task-assignee", withName && "with-name")} title={!withName ? name : undefined}>{face}{label}</span> : null;
 }
 
+/** Up to two labels on a card, then a count; the issue view shows and edits them all. */
+function CardLabels({ labels }: { labels?: string[] }) {
+  if (!labels?.length) return null;
+  const rest = labels.length - 2;
+  return <span className="task-labels" aria-label={`Labels: ${labels.join(", ")}`}>
+    {labels.slice(0, 2).map(label => <span key={label} className="task-label" aria-hidden="true">{label}</span>)}
+    {rest > 0 && <span className="task-label" aria-hidden="true">+{rest}</span>}
+  </span>;
+}
+
 /**
  * One board card. The card is a single Tab stop that opens the issue; its chips edit priority, due date and assignee in
  * place. Inner controls are pointer targets only (tabIndex -1): keyboard users get the same actions from the menu
  * (Shift+F10 / context-menu key) and the issue view.
  */
-export const IssueCard = memo(function IssueCard({ task, assignee, canEdit, tabStop, selected, completing, dragState, keyboardMoving, menuOpen, onOpen, onComplete, onMenu, onDueDate, onKeyDown, onFocus, onPointerDown, onHandleKeyDown, onHandleClick, onHandleBlur }: IssueCardProps) {
+export const IssueCard = memo(function IssueCard({ task, pullRequest, assignee, canEdit, tabStop, selected, completing, dragState, keyboardMoving, menuOpen, onOpen, onComplete, onMenu, onDueDate, onKeyDown, onFocus, onPointerDown, onHandleKeyDown, onHandleClick, onHandleBlur }: IssueCardProps) {
   const key = taskKey(task._id);
   const done = task.done || Boolean(completing);
   return (
@@ -134,7 +146,7 @@ export const IssueCard = memo(function IssueCard({ task, assignee, canEdit, tabS
       }}
     >
       <div className="task-card-head">
-        <span className="task-code issue-key" ref={tapTarget}>{key}<GitHubIssueIndicator number={task.githubIssueNumber} /></span>
+        <span className="task-code issue-key" ref={tapTarget}>{key}<GitHubIssueIndicator number={task.githubIssueNumber} pullRequest={pullRequest} /></span>
         {canEdit && <button className="drag-handle" type="button" tabIndex={-1} aria-label={`Move ${task.title}`} aria-pressed={keyboardMoving} onKeyDown={event => onHandleKeyDown(event, task._id)} onClick={event => onHandleClick(event, task._id)} onBlur={() => onHandleBlur(task._id)} />}
         <AssigneeChip task={task} assignee={assignee} canEdit={canEdit} onMenu={onMenu} />
       </div>
@@ -145,6 +157,7 @@ export const IssueCard = memo(function IssueCard({ task, assignee, canEdit, tabS
       <div className="task-meta">
         <PriorityChip task={task} canEdit={canEdit} onMenu={onMenu} />
         <DueChip task={task} canEdit={canEdit} onDueDate={onDueDate} />
+        <CardLabels labels={task.labels} />
         {canEdit && <button type="button" tabIndex={-1} className="icon-button task-menu-button task-actions" aria-label={`Issue options for ${task.title}`} aria-haspopup="menu" aria-expanded={menuOpen} onClick={event => { event.stopPropagation(); onMenu(task, "root", box(event.currentTarget), event.currentTarget); }}><MoreHorizontal size={14} /></button>}
       </div>
     </article>
