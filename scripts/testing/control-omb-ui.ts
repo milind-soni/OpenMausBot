@@ -29,6 +29,11 @@ const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 export const UI_TOOLS_DIR = join(ROOT, ".omb-scratch", "verify-tools");
 /** Verbs that change the fixture or the page; they take the explicit handle, never discovery. */
 export const UI_MUTATING = new Set(["click", "type", "press", "flag", "eval"]);
+export const ENABLE_ADVANCED_UI = `(() => {
+  localStorage.setItem("omb-advanced-mode", "1");
+  window.dispatchEvent(new StorageEvent("storage", { key: "omb-advanced-mode", storageArea: localStorage }));
+  return true;
+})()`;
 /** The sidebar's Tools section starts open, and a click on its header closes it. */
 export const OPEN_SIDEBAR_TOOLS = "(() => { document.querySelector('[data-tour=tools] button[aria-expanded=false]')?.click(); return true; })()";
 

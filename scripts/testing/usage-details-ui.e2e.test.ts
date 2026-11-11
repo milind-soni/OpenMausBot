@@ -6,7 +6,7 @@ import { expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import { runControlOmb } from "../control-omb.ts";
-import { agentBrowser, sessionEnv, UI_TOOLS_DIR, type UiHandle } from "./control-omb-ui.ts";
+import { ENABLE_ADVANCED_UI, agentBrowser, sessionEnv, UI_TOOLS_DIR, type UiHandle } from "./control-omb-ui.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env }));
@@ -28,6 +28,7 @@ if (!enabled) console.log("skipping usage details UI: set OMB_UI_E2E=1 to instal
     }, { timeout: 600_000, interval: 250 }).toBe(true);
     const handle = info!;
     const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", handle.ui, ...args]) as Promise<Record<string, any>>;
+    await ui("eval", "--js", ENABLE_ADVANCED_UI);
     await ui("type", "--name", "Message Pepper", "--text", "Check the fixture usage");
     await ui("press", "--keys", "Enter");
     const settled = await ui("wait-settle", "--timeout", "60");
@@ -45,7 +46,7 @@ if (!enabled) console.log("skipping usage details UI: set OMB_UI_E2E=1 to instal
     // Header actions stay usable in the consolidated menu, including a
     // denied clipboard. Only this disposable browser's clipboard is stubbed.
     const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
-    await evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async () => { throw new Error('fixture denial'); } }); true`);
+    await evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async () => { throw new Error('fixture denial'); } }); document.execCommand = () => false; true`);
     await ui("click", "--name", "Copy as Markdown");
     await expect.poll(() => evaluate("document.querySelector('[role=menu] [role=status]')?.textContent")).toBe("Couldn't copy. Use Download instead.");
     await evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async text => { window.copiedTranscript = text; } }); true`);
@@ -92,16 +93,17 @@ if (!enabled) console.log("skipping usage details UI: set OMB_UI_E2E=1 to instal
     await expect.poll(() => evaluate("document.querySelector('[data-sidebar]').getBoundingClientRect().width")).toBe(80);
     expect(await evaluate("localStorage.getItem('openmausbot.sidebarDensity')")).toBe(density);
     await ui("screenshot", "--out", `${handle.logPath}.settings-1100.png`);
-    expect(await evaluate("Boolean(document.querySelector('[role=dialog]'))")).toBe(true);
+    await expect.poll(() => evaluate("Boolean(document.querySelector('[role=dialog]'))")).toBe(true);
     await ui("press", "--keys", "Escape");
     await expect.poll(() => evaluate("document.querySelector('[data-sidebar]').getBoundingClientRect().width")).toBe(320);
     await ui("click", "--name", "More");
     await ui("click", "--name", "Inspector");
+    await expect.poll(() => evaluate("Boolean(document.querySelector('[aria-label=Inspector]'))")).toBe(true);
     await ui("click", "--name", "More");
     const withInspector = await ui("snapshot", "--interactive");
     const usageWithInspector = Object.entries(withInspector.refs as Record<string, { name: string; role: string }>).find(([, entry]) => entry.role === "menuitem" && entry.name.startsWith("Usage"))!;
     await ui("click", "--ref", `@${usageWithInspector[0]}`);
-    await expect.poll(() => evaluate("getComputedStyle(document.querySelector('[role=dialog]')).position")).toBe("absolute");
+    await expect.poll(() => evaluate("document.querySelector('[role=dialog]') && getComputedStyle(document.querySelector('[role=dialog]')).position")).toBe("absolute");
     expect(await evaluate("document.querySelector('main').getBoundingClientRect().width")).toBeGreaterThan(400);
     await ui("screenshot", "--out", `${handle.logPath}.two-panels-1100.png`);
     await agentBrowser(browser.binary, sessionEnv(browser), ["set", "viewport", "1600", "900"]);
