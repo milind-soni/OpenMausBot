@@ -692,7 +692,7 @@ const support = (
   ownMcpOverHttp: true,
   // OpenCode 1.18.27's build agent lists 13 tools of its own (bash, read, edit, task, skill…); room for a newer CLI's.
   engineTools: 24,
-  resolveTurnModel: (model, env) => model ? declareTypedOpenCodeModel(env, model) ?? ensureOpenCodeInjectModel(model, env) : model,
+  resolveTurnModel: (model, env, catalog) => model ? declareTypedOpenCodeModel(env, model, catalog.options) ?? ensureOpenCodeInjectModel(model, env) : model,
   transformEnv: (env, config, instanceId, instanceEnvironment) => {
     withholdProviderKeysWhenManaged(env, config, instanceId, instanceEnvironment);
     declareLiveOpenCodeModels(env, sources.liveLists);

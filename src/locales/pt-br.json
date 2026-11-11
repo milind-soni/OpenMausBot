@@ -9486,6 +9486,8 @@
   "chat.notice.acpStopFailed": "{provider} ignorou “Parar” e não foi possível encerrar seu processo",
   "chat.notice.toolCount": "{provider} recusou esta sessão porque o limite de ferramentas deste modelo é {limit} e este bot oferece mais, mesmo com as listas reduzidas. Nada foi executado. Desligue alguns apps ou servidores MCP deste bot, ou mude para outro modelo.",
   "chat.notice.toolCountUnknown": "{provider} recusou esta sessão porque este modelo aceita um número limitado de ferramentas e este bot oferece mais, mesmo com as listas reduzidas. Nada foi executado. Desligue alguns apps ou servidores MCP deste bot, ou mude para outro modelo.",
+  "chat.notice.modelNoRoute": "{provider} não consegue usar o modelo {model} aqui, então escolha outro modelo para este bot.",
+  "chat.notice.modelNoRouteUnnamed": "{provider} não consegue usar o modelo deste bot aqui, então escolha outro modelo para este bot.",
   "chat.notice.goalRetry": "A sessão de {name} não terminou como esperado ({why}) — tentando mais uma vez.",
   "chat.notice.part.providerFailed": "o provedor falhou",
   "chat.notice.part.dispatchFailed": "não foi possível iniciar",

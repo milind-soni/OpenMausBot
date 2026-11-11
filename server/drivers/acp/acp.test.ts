@@ -2840,6 +2840,31 @@ describe("ACP turns (fake CLI)", () => {
         expect(cleared.mock.calls.some(([handle]) => handle === timer)).toBe(true);
       });
 
+      describe("a model OpenCode has no route to", () => {
+        // OpenCode 2.2.5's answer for a model declared under a provider it has no SDK package for.
+        const noRoute = { code: -32603, message: "Internal error: Unsupported package for chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017: unknown", data: { service: "session", errorName: "provider.no-route" } };
+
+        it("hands the turn to the bot's backup, as nothing reached a model", async () => {
+          await refusePrompt(noRoute);
+          releaseFailure();
+          const failed = await instance.adapter.sendTurn({ threadId: "no-route-backup", text: "go", startupRecovery: true }).catch((error) => error);
+          expect(failed).toBeInstanceOf(TurnNotStartedError);
+          expect(recorder.events.some((event) => event.type === "runtime.error" || event.type === "turn.completed")).toBe(false);
+        });
+
+        it("without a backup, fails in one plain sentence naming the model", async () => {
+          await refusePrompt(noRoute);
+          releaseFailure();
+          const ack = await instance.adapter.sendTurn({ threadId: "no-route-alone", text: "go" });
+          expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === ack.turnId))
+            .toMatchObject({ ok: false, stopReason: "rpc_error" });
+          expect(recorder.events.filter((event) => event.type === "runtime.error" && event.turnId === ack.turnId)).toEqual([expect.objectContaining({
+            message: "Select Model Test can't use the model chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017 here, so choose another model for this bot.",
+            text: { key: "chat.notice.modelNoRoute", params: { provider: "Select Model Test", model: "chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017" } },
+          })]);
+        });
+      });
+
       it("fails normally for another prompt error before any activity", async () => {
         await refusePrompt({ code: -32603, message: "Internal error: Invalid API key.", data: { service: "session", errorName: "APIError" } });
         releaseFailure();
