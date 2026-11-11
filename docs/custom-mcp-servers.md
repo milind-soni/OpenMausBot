@@ -276,9 +276,23 @@ and out of the tools' own folders outside their skills. A copy whose files
 change afterwards is left out until it is brought in again. A turn whose
 engine already loads the folder a skill came from leaves the copy out, so
 nothing is listed twice: Claude Code with **Also use my Claude Code skills**
-on, and Codex on the person's own `CODEX_HOME`. The copies travel with
-backups and Copy to My Cloud. The step never opens credential, session or
-history files, and it is skipped when there is nothing new.
+on, and Codex on the person's own `CODEX_HOME` (a ChatGPT plan's linked one
+included). The copies travel with backups and Copy to My Cloud. The step never
+opens credential, session or history files, and it is skipped when there is
+nothing new.
+
+Skills an engine loads by itself show in **Bot Settings → Skills** with a
+switch for that bot: for Codex, `$CODEX_HOME/skills`, `~/.agents/skills` and
+`/etc/codex/skills`. Switching one off passes Codex that skill's `SKILL.md`
+path for the bot's turns, so a same-named skill in the turn's own
+`.agents/skills` stays on, and `[[skills.config]]` entries in `config.toml`
+keep applying. A skill brought in from this computer and switched off is kept
+out the same way, from the folder it came from. If the bot's saved switches
+(`<data>/skill-state/<bot id>/native-skills.json`) are there but can't be read,
+the page shows every such skill off, switches can't be changed, and the bot's
+Claude and Codex turns don't start, saying which file to fix or delete;
+deleting it resets those switches to on (skills from this computer switched
+off for the bot stay off).
 
 Open a bot’s **Tools → Access → MCP servers** to narrow the enabled global
 servers offered to it. Existing bots keep all enabled global servers until you

@@ -96,7 +96,7 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
         if ("error" in result) return json(res, 409, { error: result.error });
         return json(res, 200, { skill: result });
       }
-      if (bot && listBotSkills(bot).some((skill) => skill.name === m![2] && (skill as { origin?: string }).origin === "native")) {
+      if (bot && listBotSkills(bot).some((skill) => skill.name === m![2] && "origin" in skill && skill.origin === "native")) {
         const result = setNativeSkillEnabled(bot.id, m[2]!, parsed.data.enabled);
         if ("error" in result) return json(res, 409, { error: result.error });
         const skill = listBotSkills(bot).find((entry) => entry.name === m![2]);
