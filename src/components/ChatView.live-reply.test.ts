@@ -143,3 +143,36 @@ describe("a streaming reply's end", () => {
     expect(liveRows()[0]!.textContent, "coming back shows it again, still growing").toContain("Private words");
   });
 });
+
+describe("a turn of several messages from an engine that names no items", () => {
+  it("streams each message after the last, swaps each for its saved one, and leaves nothing behind", () => {
+    engine({ type: "turn.started" });
+    render(bot([ask]));
+    say("Checking your calendar ");
+    say("first. ");
+    engine({ type: "item.completed", itemType: "assistant_text", text: "Checking your calendar first." } as Partial<RuntimeEvent>);
+    const first: Message = { id: "m1", role: "bot", kind: "text", at: started + 5_000, text: "Checking your calendar first.", turnId: "t1", parentId: "ask" };
+    act(() => noteLiveReplyMessage(THREAD, first));
+    engine({ type: "item.started", itemType: "tool", itemId: "c1", title: "ls -la" } as Partial<RuntimeEvent>);
+    const step: Message = { id: "s1", role: "bot", kind: "activity", at: started + 5_000, tool: { name: "ls -la", itemId: "c1" }, turnId: "t1", parentId: "m1" };
+    say("Monday is ");
+    expect(occurrences("Checking your calendar first."), "the first message stays drawn until the transcript has it").toBe(1);
+    render(bot([ask, first, step]));
+    expect(occurrences("Checking your calendar first.")).toBe(1);
+    expect(liveRows()).toHaveLength(1);
+    expect(liveRows()[0]!.textContent, "the second message stands alone").not.toContain("Checking");
+    say("free. ");
+    engine({ type: "item.completed", itemType: "assistant_text", text: "Monday is free." } as Partial<RuntimeEvent>);
+    const second: Message = { id: "m2", role: "bot", kind: "text", at: started + 5_000, text: "Monday is free.", turnId: "t1", parentId: "s1" };
+    act(() => noteLiveReplyMessage(THREAD, second));
+    engine({ type: "turn.completed", ok: true } as Partial<RuntimeEvent>);
+    expect(occurrences("Monday is free.")).toBe(1);
+    render(bot([ask, first, step, second], false));
+    expect(liveRows()).toHaveLength(0);
+    expect(occurrences("Checking your calendar first.")).toBe(1);
+    expect(occurrences("Monday is free.")).toBe(1);
+    const order = [...log().querySelectorAll("[data-mid]")].map((row) => row.getAttribute("data-mid"));
+    expect(order.indexOf("m1")).toBeLessThan(order.indexOf("m2"));
+  });
+});
+

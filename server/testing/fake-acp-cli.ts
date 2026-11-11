@@ -6,6 +6,8 @@
 //     (FAKE_ACP_REJECT_LIVE_LOAD_DSH=1: with dsh 0.2's -32602 "session is already active" instead of -32000)
 //   FAKE_ACP_CACHED_LIVE_LOAD  a live session/load is acknowledged but keeps the old MCP credentials, like Qwen
 //   FAKE_ACP_TEXT_REPLY  answer every session/prompt with only this text
+//   FAKE_ACP_STREAM  "chars:ms": answer each session/prompt with FAKE_ACP_STREAM_REPLIES (JSON array of messages) as
+//     agent_message_chunk frames of `chars` chars every `ms` ms, one completed tool_call between messages
 //   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt
 //     | abort-in-prompt (a sign-in link, then a TCMalloc CHECK line on stderr, then exit 134 as bubblewrap reports SIGABRT) | hang
 //     | hang-initialize | unkeyed-tool | finished-tools (tool_call frames that arrive already completed or failed, one updated again)
@@ -1076,6 +1078,25 @@ function handle(msg: any) {
             : { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } },
         );
       };
+      const cadence = /^(\d+):(\d+)$/.exec(process.env.FAKE_ACP_STREAM ?? "");
+      if (cadence) {
+        const replies = JSON.parse(process.env.FAKE_ACP_STREAM_REPLIES ?? "[]") as string[];
+        const [chars, ms] = [Number(cadence[1]), Number(cadence[2])];
+        const update = (u: Record<string, unknown>) => out({ jsonrpc: "2.0", method: "session/update", params: { update: u } });
+        const play = (index: number, at: number) => {
+          const text = replies[index];
+          if (text === undefined) return complete();
+          if (at === 0 && index > 0) {
+            update({ sessionUpdate: "tool_call", toolCallId: `stream-tool-${index}`, title: "ls", rawInput: { command: "ls" } });
+            update({ sessionUpdate: "tool_call_update", toolCallId: `stream-tool-${index}`, status: "completed" });
+          }
+          update({ sessionUpdate: "agent_message_chunk", content: { text: text.slice(at, at + chars) } });
+          if (at + chars < text.length) setTimeout(() => play(index, at + chars), ms);
+          else setTimeout(() => play(index + 1, 0), ms);
+        };
+        play(0, 0);
+        return;
+      }
       if (mode === "quiet-then-answer") {
         const lines: string[] = process.env.FAKE_ACP_QWEN_LOG ? JSON.parse(process.env.FAKE_ACP_QWEN_LOG) : [];
         let logTimer: ReturnType<typeof setInterval> | null = null;

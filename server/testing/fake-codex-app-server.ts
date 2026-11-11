@@ -23,6 +23,8 @@
 //   FAKE_CODEX_COMMAND  the happy turn's one call, this command (default: "ls -la" and a web search);
 //     FAKE_CODEX_COMMAND_OUTPUT  JSON chunks it prints as item/commandExecution/outputDelta notifications, one every
 //     FAKE_CODEX_COMMAND_OUTPUT_MS (default all at once); FAKE_CODEX_COMMAND_GATE  the turn finishes once this file exists
+//   FAKE_CODEX_STREAM  "chars:ms": each turn answers with FAKE_CODEX_STREAM_REPLIES (JSON array of messages), each an
+//     agentMessage streamed as deltas of `chars` chars every `ms` ms, with one command between messages
 //   FAKE_CODEX_PATCH_BYTES  each turn first writes web/index.html by apply_patch, streamed as two
 //     item/fileChange/patchUpdated notifications (codex-cli 0.160.1's schema) of half and all this many bytes
 //   FAKE_CODEX_IGNORE_FEATURES  "1": config/read reports no `-c features.*` override
@@ -419,6 +421,34 @@ const finishTurn = () => {
     out({ jsonrpc: "2.0", id: 100, method: "execCommandApproval", params: { command: "echo too late" } });
     process.stdout.uncork();
   }
+};
+
+const playStreamedTurn = (cadence: string) => {
+  const [chars, ms] = cadence.split(":").map(Number) as [number, number];
+  const replies = JSON.parse(process.env.FAKE_CODEX_STREAM_REPLIES ?? "[]") as string[];
+  const play = (index: number, at: number) => {
+    const text = replies[index];
+    if (text === undefined) {
+      notify("turn/completed", { turn: { status: "completed" } });
+      return;
+    }
+    const id = `m${index + 1}`;
+    if (at === 0) {
+      if (index > 0) {
+        notify("item/started", { item: { id: `c${index}`, type: "commandExecution", command: "ls -la" } });
+        notify("item/completed", { item: { id: `c${index}`, type: "commandExecution", status: "completed", aggregatedOutput: "README.md", exitCode: 0 } });
+      }
+      notify("item/started", { item: { id, type: "agentMessage", text: "" } });
+    }
+    notify("item/agentMessage/delta", { itemId: id, delta: text.slice(at, at + chars) });
+    if (at + chars < text.length) {
+      setTimeout(() => play(index, at + chars), ms);
+      return;
+    }
+    notify("item/completed", { item: { id, type: "agentMessage", text } });
+    setTimeout(() => play(index + 1, 0), ms);
+  };
+  play(0, 0);
 };
 
 const playRoomPlanTurn = (msg: any, planPath: string) => {
@@ -868,6 +898,10 @@ process.stdin.on("data", (chunk) => {
         }
         if (mode === "early-turn-events") finishTurn();
         out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+        if (process.env.FAKE_CODEX_STREAM) {
+          playStreamedTurn(process.env.FAKE_CODEX_STREAM);
+          break;
+        }
         if (mode === "early-turn-events") break;
         if (process.env.FAKE_CODEX_ECHO_INPUT === "1") {
           const prompt = { type: "userMessage", id: "u1", content: msg.params?.input ?? [] };

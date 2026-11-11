@@ -259,6 +259,31 @@ fake Codex app-server, and `FAKE_CODEX_COMMAND`, `FAKE_CODEX_COMMAND_OUTPUT`
 script its command. A bot moved to the `codex` instance then shows `last
 output just now` and the command's last two lines in the card.
 
+## A reply as it streams
+
+The bot's words appear as they arrive, and the saved message takes the
+streamed bubble's place in the same frame. To watch it slowly with each engine
+shape, script a slow stream:
+
+```sh
+FAKE_CLAUDE_STREAM_CADENCE=3:110 FAKE_CLAUDE_REPLIES='["# Plan\n\nFirst part..."]' \
+  node --experimental-strip-types scripts/control-omb.ts ui launch
+FAKE_CODEX_STREAM=3:90 FAKE_CODEX_STREAM_REPLIES='["First message.", "Second message."]' \
+  node --experimental-strip-types scripts/control-omb.ts ui launch --engine codex
+FAKE_ACP_STREAM=3:90 FAKE_ACP_STREAM_REPLIES='["First message.", "Second message."]' \
+  node --experimental-strip-types scripts/control-omb.ts ui launch --engine acp
+```
+
+The Codex and ACP fakes run one command between messages, as a real turn of
+text, a tool and more text does; move Pepper to them with
+`PATCH /api/bots/<id>` and `{"modelSelection":{"instanceId":"codex","model":"gpt-fake-default"}}`
+or `{"instanceId":"myAgent","model":"fixture-fast"}`. Expected: each message
+grows in its own bubble, a code block's actions appear once its fence closes,
+and after the turn the transcript holds each message once and no
+`[data-mid^="live:"]` row. The permanent checks are
+`src/state/live-reply.test.ts`, `src/components/ChatView.live-reply.test.ts`
+and `src/components/ChatMarkdown.streaming.test.ts`.
+
 The before-and-after screenshots were removed because they showed real example
 data; run the `scripts/control-omb.ts ui launch` command above to see the
 working line and the Now card.

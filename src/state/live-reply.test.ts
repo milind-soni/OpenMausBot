@@ -165,3 +165,79 @@ describe("a reply as it streams", () => {
     expect(row!.id.startsWith("live:")).toBe(true);
   });
 });
+
+describe("engines that send their words with no item id (Codex, OpenCode, Hermes and other ACP agents)", () => {
+  const save = (id: string, threadId = "t") => noteLiveReplyMessage(threadId, { id, role: "bot", kind: "text", turnId: "turn-1" });
+  const tool = (itemId: string) => {
+    note({ type: "item.started", itemType: "tool", itemId, title: "ls -la" } as Partial<RuntimeEvent>);
+    note({ type: "item.completed", itemType: "tool", itemId, ok: true } as Partial<RuntimeEvent>);
+  };
+
+  it("keeps a turn's messages apart across a tool: never glued, doubled, lost or left behind", () => {
+    note({ type: "turn.started" });
+    delta("Checking the ");
+    delta("folder first. ");
+    expect(shown()).toEqual(["Checking the folder first. "]);
+    complete("Checking the folder first.");
+    save("m1");
+    tool("c1");
+    delta("Found three ");
+    expect(shown(), "the saved message's frame is in; the transcript has not drawn it yet").toEqual(["Checking the folder first.", "Found three "]);
+    expect(shown("t", [{ id: "m1" }]), "drawn: only the new message streams").toEqual(["Found three "]);
+    delta("files. ");
+    complete("Found three files.");
+    save("m2");
+    note({ type: "turn.completed", ok: true } as Partial<RuntimeEvent>);
+    const transcript = [{ id: "m1" }, { id: "m2" }];
+    const { rows, settled } = liveReplyRows(liveReplies("t"), transcript);
+    expect(rows).toEqual([]);
+    settleLiveReplies("t", settled);
+    expect(liveReplies("t"), "nothing stale after the saved messages land").toEqual([]);
+  });
+
+  it("keeps two messages in a row apart when no tool runs between them", () => {
+    delta("First thought. ");
+    complete("First thought.");
+    save("m1");
+    delta("Second thought ");
+    expect(liveReplies("t").map((item) => item.text)).toEqual(["First thought.", "Second thought "]);
+  });
+
+  it("drops words that were only whitespace when a tool starts, so they never prefix the next message", () => {
+    delta("\n\n");
+    tool("c1");
+    delta("Result: ok ");
+    expect(liveReplies("t").map((item) => item.text)).toEqual(["Result: ok "]);
+  });
+
+  it("drops a finished message the server did not save as soon as the engine moves on", () => {
+    delta("<SYSTEM_NOTE>internal ");
+    complete("<SYSTEM_NOTE>internal</SYSTEM_NOTE>");
+    tool("c1");
+    expect(liveReplies("t"), "no row lingers through the rest of the turn").toEqual([]);
+    delta("Visible answer ");
+    complete("Visible answer.");
+    delta("Next ");
+    expect(liveReplies("t").map((item) => item.text), "an unsaved finished item gives way to the next one").toEqual(["Next "]);
+  });
+
+  it("shows the engine's finished text, not the deltas, once an item completes", () => {
+    delta("Draft wording ");
+    complete("Final wording.");
+    expect(shown()).toEqual(["Final wording."]);
+  });
+
+  it("swaps each streamed message for its own saved one even when the transcript draws them late", () => {
+    delta("One. ");
+    complete("One.");
+    save("m1");
+    tool("c1");
+    delta("Two. ");
+    complete("Two.");
+    save("m2");
+    expect(liveReplies("t").map((item) => item.savedAs)).toEqual(["m1", "m2"]);
+    expect(shown("t", [{ id: "m1" }])).toEqual(["Two."]);
+    expect(shown("t", [{ id: "m1" }, { id: "m2" }])).toEqual([]);
+  });
+});
+

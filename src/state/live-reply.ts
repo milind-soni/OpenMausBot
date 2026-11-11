@@ -59,6 +59,7 @@ function firstSeen(eventId: string): boolean {
   return true;
 }
 
+const isSaved = (item: LiveReplyItem) => item.savedAs !== undefined;
 const sameTurn = (item: LiveReplyItem, turnId: string | undefined) => !turnId || !item.turnId || item.turnId === turnId;
 const kept = (items: readonly LiveReplyItem[], keep: (item: LiveReplyItem) => boolean) => {
   const next = items.filter(keep);
@@ -81,7 +82,8 @@ export function noteLiveReplyEvent(event: RuntimeEvent): void {
       put(threadId, { ...current, items: [...items.slice(0, -1), { ...open, text: open.text + event.delta }] });
       return;
     }
-    const settled = kept(items, (item) => item.done);
+    // The server saves a finished item before it sends anything later, so one still unsaved by now never will be.
+    const settled = kept(items, isSaved);
     const fresh: LiveReplyItem = { key: event.eventId, ...(event.turnId ? { turnId: event.turnId } : {}), text: event.delta, at: Date.now(), done: false };
     put(threadId, { ...current, items: [...settled, fresh] });
   } else if (event.type === "item.completed" && event.itemType === "assistant_text") {
@@ -90,9 +92,13 @@ export function noteLiveReplyEvent(event: RuntimeEvent): void {
     const open = items.at(-1);
     const next = open && !open.done && sameTurn(open, event.turnId) ? [...items.slice(0, -1), { ...open, text: event.text, done: true }] : items;
     put(threadId, { items: next, skipping: false });
+  } else if (event.type === "item.started" && event.itemType === "tool") {
+    // Engines finish their words before a tool starts: an item still open here was only whitespace, and the words
+    // after the tool are a new message.
+    put(threadId, { ...current, items: kept(items, isSaved) });
   } else if (event.type === "turn.started" || isTurnEnd(event)) {
     if (gapped) boundarySinceGap.add(threadId);
-    put(threadId, { items: kept(items, (item) => item.savedAs !== undefined), skipping: false });
+    put(threadId, { items: kept(items, isSaved), skipping: false });
   }
 }
 
@@ -116,7 +122,7 @@ export function stopLiveReply(threadId: string): void {
     put(threadId, { items: EMPTY, skipping: true });
     return;
   }
-  put(threadId, { items: kept(current.items, (item) => item.savedAs !== undefined), skipping: true });
+  put(threadId, { items: kept(current.items, isSaved), skipping: true });
 }
 
 /** The live stream restarted without the frames it missed: no thread's open item can be completed from here. */
@@ -124,7 +130,7 @@ export function forgetLiveReplies(): void {
   gapped = true;
   boundarySinceGap.clear();
   for (const [threadId, current] of Array.from(threads)) {
-    put(threadId, { ...current, items: kept(current.items, (item) => item.savedAs !== undefined) });
+    put(threadId, { ...current, items: kept(current.items, isSaved) });
   }
 }
 
