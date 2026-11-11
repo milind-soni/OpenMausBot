@@ -3,11 +3,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { setLocale } from "@/lib/i18n";
+import type { Bot } from "@/state/store";
 
-const storeFixture = vi.hoisted(() => ({ config: null as unknown }));
+const storeFixture = vi.hoisted(() => ({ config: null as unknown, bots: [] as Bot[], dispatch: vi.fn() }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: { ...original.initialState, config: storeFixture.config }, dispatch: vi.fn() }) };
+  return { ...original, useStore: () => ({ state: { ...original.initialState, config: storeFixture.config, bots: storeFixture.bots }, dispatch: storeFixture.dispatch }) };
 });
 
 import {
@@ -32,6 +33,7 @@ import {
 } from "./LocalComputerSection";
 import { computerInventoryRequest } from "@/lib/computer-requests";
 import { VpsComputersCard } from "./VpsComputersCard";
+import { LocalVmBotSelection, localVmBotComputerPatch } from "./LocalVmBotSelection";
 
 const cloudVm: LocalVmInventoryInstance = {
   botId: "cloud-bot",
@@ -54,7 +56,11 @@ const ownedCloudComputer: CloudComputerInventoryInstance = {
   inUse: false,
 };
 
-afterEach(() => setLocale("en"));
+afterEach(() => {
+  setLocale("en");
+  storeFixture.bots = [];
+  storeFixture.dispatch.mockReset();
+});
 
 describe("computer inventory request wiring", () => {
   it("keeps every mount and refresh request observation-only", () => {
@@ -569,12 +575,52 @@ describe("Settings → Computers on an OMB Cloud home", () => {
     expect(cards()).toEqual(expect.arrayContaining(["Cloud desktops", "Private desktops", "Setup"]));
   });
 
+  it("shows the central bot checklist beside the existing Shared and Per bot controls", () => {
+    storeFixture.bots = [{ id: "scout", name: "Scout", computer: "vm" } as Bot];
+    const markup = renderToStaticMarkup(createElement(LocalComputerSection));
+
+    expect(markup).toContain("Bots using Local VM");
+    expect(markup).toContain('data-local-vm-bot="scout"');
+    expect(markup).toContain(">Shared</button>");
+    expect(markup).toContain(">Per bot</button>");
+    expect(markup).not.toContain(">Pool</button>");
+  });
+
   it("shows no Local VM, and no steps to install one, where it cannot exist", () => {
     storeFixture.config = { cloudHome: true };
     const titles = cards();
     expect(titles).toContain("Cloud desktops");
     expect(titles).not.toContain("Private desktops");
     expect(titles).not.toContain("Setup");
+  });
+});
+
+describe("Local VM bot selection", () => {
+  it("lists each bot's destination and checks only bots assigned to Local VM", () => {
+    storeFixture.bots = [
+      { id: "research", name: "Research", computer: "vm" } as Bot,
+      { id: "writer", name: "Writer", computer: "cloud" } as Bot,
+      { id: "planner", name: "Planner" } as Bot,
+      { id: "archived", name: "Archived", computer: "vm", hidden: true } as Bot,
+    ];
+    const markup = renderToStaticMarkup(createElement(LocalVmBotSelection));
+    const checkbox = (botId: string) => new RegExp(`<input[^>]*data-local-vm-bot="${botId}"[^>]*>`).exec(markup)?.[0] ?? "";
+
+    expect(markup).toContain("Bots using Local VM");
+    expect(markup).toContain("Use a Local VM for Research");
+    expect(markup).toContain("Current destination: Cloud desktop");
+    expect(markup).toContain("Current destination: Auto");
+    expect(checkbox("research")).toContain('checked=""');
+    expect(checkbox("writer")).not.toContain("checked");
+    expect(checkbox("planner")).not.toContain("checked");
+    expect(markup).not.toContain("Use a Local VM for Archived");
+    expect(checkbox("archived")).toBe("");
+    expect(localVmBotComputerPatch(true)).toEqual({ computer: "vm" });
+    expect(localVmBotComputerPatch(false)).toEqual({ computer: null });
+  });
+
+  it("omits the checklist when there are no bots", () => {
+    expect(renderToStaticMarkup(createElement(LocalVmBotSelection))).toBe("");
   });
 });
 

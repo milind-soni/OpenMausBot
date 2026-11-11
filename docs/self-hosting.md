@@ -1029,6 +1029,14 @@ the public address. `serve` checks the address answers as this server and
 says so on its Reach line. [`deploy/Caddyfile`](../deploy/Caddyfile)
 is the reference implementation.
 
+## Choosing which bots use a Local VM
+
+In **App Settings → Computers**, check a bot under **Bots using Local VM** to
+set its destination to Local VM. Unchecking a selected bot returns it to Auto.
+Shared bots use one desktop; Per bot gives each selected bot a separate
+desktop. The existing maximum per-bot desktop setting (default 2, range 1–8)
+still applies in Per bot mode and is not changed by the checklist.
+
 ## Opening a desktop from another device
 
 In a paired admin browser, as in the desktop app, **Take control** turns the

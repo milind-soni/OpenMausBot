@@ -22,7 +22,7 @@ import { cn } from "@/lib/cn";
 import { localizeComputerProblem } from "@/lib/computer-messages";
 import { computerInventoryRequest, jsonPostRequest, type ComputerApiRequest } from "@/lib/computer-requests";
 import { useStore } from "@/state/store";
-import { VpsComputersCard } from "./VpsComputersCard"; import { KeysLink } from "./keys/KeysLink";
+import { VpsComputersCard } from "./VpsComputersCard"; import { KeysLink } from "./keys/KeysLink"; import { LocalVmBotSelection } from "./LocalVmBotSelection";
 
 type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate";
 
@@ -1168,7 +1168,7 @@ export function LocalComputerSection() {
   const ready = status?.ready === true;
   const existing = status?.container !== "missing";
   const needsRecreate = Boolean(
-    existing &&
+    status?.mode === "shared" && existing &&
       (!status?.imageMatches ||
         !status?.managed ||
         status?.network === "unsafe" ||
@@ -1267,11 +1267,11 @@ export function LocalComputerSection() {
         title={t("vm.isolation.title")}
         subtitle={t("vm.isolation.subtitle")}
       >
-        <div className="flex overflow-hidden rounded-lg border border-hairline/40">
+        <div role="group" aria-label={t("vm.isolation.title")} className="flex overflow-hidden rounded-lg border border-hairline/40">
           {(["shared", "per-bot"] as const).map((mode, index) => (
             <button
               key={mode}
-              type="button"
+              type="button" aria-pressed={status?.mode === mode}
               disabled={!status || policyPending}
               onClick={() => void savePolicy(mode, status?.max_instances ?? 2)}
               className={cn(
@@ -1307,7 +1307,7 @@ export function LocalComputerSection() {
         />
         {policyPending && <div className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-secondary"><Loader2 size={12} className="animate-spin" /> {t("vm.saving")}</div>}
       </Card>
-
+      <LocalVmBotSelection />
       <Card title={t("vm.setup.title")} subtitle={t("vm.setup.subtitle")}>
         <div className="flex flex-col gap-4">
           <Step n={1} title={t("vm.setup.step1")} done={Boolean(status?.runtime)}>
@@ -1390,7 +1390,7 @@ export function LocalComputerSection() {
                 <p className="text-[13px] leading-relaxed text-ink-secondary">{t("vm.setup.idleHint")}</p>
               </>
             ) : null}
-            {c?.run && <details className="text-[12px] text-ink-secondary"><summary className="cursor-pointer">{t("vm.setup.showCommand")}</summary><div className="mt-2"><CommandLine command={c.run} /></div></details>}
+            {status?.mode === "shared" && c?.run && <details className="text-[12px] text-ink-secondary"><summary className="cursor-pointer">{t("vm.setup.showCommand")}</summary><div className="mt-2"><CommandLine command={c.run} /></div></details>}
           </Step>
         </div>
       </Card>
