@@ -129,7 +129,7 @@ describe("workspace webhook settings and delivery", () => {
     await expect(save(f.sessionToken, "ftp://hooks.test", "s".repeat(32))).rejects.toThrow("http");
     await save(f.sessionToken, "https://hooks.test/team", "s".repeat(32));
     await save(f.sessionToken, "https://hooks.test/team2");
-    expect(await f.t.query(api.issueWebhooks.get, { sessionToken: f.sessionToken, teamId: f.teamId })).toEqual({ url: "https://hooks.test/team2", canManage: true, globalDefault: false, sealing: true });
+    expect(await f.t.query(api.issueWebhooks.get, { sessionToken: f.sessionToken, teamId: f.teamId })).toEqual({ url: "https://hooks.test/team2", canManage: true, globalDefault: false, sealing: true, hasAuthorization: false });
     expect(await f.t.query(api.issueWebhooks.get, { sessionToken: f.member.session, teamId: f.teamId })).toMatchObject({ url: null, canManage: false });
     const row = await f.t.run(ctx => ctx.db.query("issueWebhooks").first());
     expect(row!.sealedSecret).not.toContain("ssss");
@@ -156,6 +156,28 @@ describe("workspace webhook settings and delivery", () => {
     expect(Object.fromEntries(["content-type", "x-origin-event", "x-origin-delivery", "x-origin-signature"].map(name => [name, request.headers.get(name)]))).toEqual({
       "content-type": "application/json", "x-origin-event": "issue.created", "x-origin-delivery": job!.deliveryId, "x-origin-signature": await signIssueWebhook(body, secret),
     });
+  });
+
+  test("a saved authorization is sent as a Bearer header next to the HMAC signature", async () => {
+    const f = await fixture();
+    const secret = "w".repeat(36);
+    const authorization = "routine-test-token-value-not-for-production";
+    await f.t.mutation(api.issueWebhooks.save, { sessionToken: f.sessionToken, teamId: f.teamId, url: "https://hooks.test/team", secret, authorization });
+    expect(await f.t.query(api.issueWebhooks.get, { sessionToken: f.sessionToken, teamId: f.teamId })).toMatchObject({ hasAuthorization: true, url: "https://hooks.test/team" });
+    await f.t.mutation(api.tasks.createTask, { sessionToken: f.sessionToken, projectId: f.projectId, title: "Authorized", priority: "medium" });
+    const [job] = await f.deliveries();
+    const sent: Request[] = [];
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => { sent.push(new Request(input, init)); return new Response("ok"); });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await f.t.action(internal.issueWebhooks.deliver, job!);
+    expect(sent).toHaveLength(1);
+    const request = sent[0]!;
+    expect(request.headers.get("authorization")).toBe(`Bearer ${authorization}`);
+    expect(request.headers.get("x-origin-signature")).toBe(await signIssueWebhook(job!.body, secret));
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain(authorization);
+    const row = await f.t.run(ctx => ctx.db.query("issueWebhooks").first());
+    expect(row!.sealedAuthorization).toBeTruthy();
+    expect(row!.sealedAuthorization).not.toContain(authorization);
   });
 
   test("a failed delivery is retried a little later and never throws", async () => {

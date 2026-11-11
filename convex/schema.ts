@@ -129,6 +129,8 @@ export default defineSchema({
     teamId: v.id("teams"),
     url: v.string(),
     sealedSecret: v.string(),
+    /** Optional Bearer token, sealed separately; sent as `Authorization: Bearer …` in addition to the HMAC signature. */
+    sealedAuthorization: v.optional(v.string()),
     updatedBy: v.id("users"),
     updatedAt: v.number(),
   }).index("by_teamId", ["teamId"]),

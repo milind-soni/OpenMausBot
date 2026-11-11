@@ -3,8 +3,9 @@
  * signature. Shared by Convex (convex/issueWebhooks.ts), scripts/origin-webhook-test.mjs and the tests, so it imports
  * nothing and uses only WebCrypto.
  *
- * Headers: `X-Origin-Event` (issue.created | issue.updated | issue.delegated), `X-Origin-Delivery` (the event id) and
- * `X-Origin-Signature: sha256=<hex>`, the HMAC-SHA256 of the raw body under the webhook secret (like GitHub's).
+ * Headers: `X-Origin-Event` (issue.created | issue.updated | issue.delegated), `X-Origin-Delivery` (the event id),
+ * `X-Origin-Signature: sha256=<hex>` (HMAC-SHA256 of the raw body under the webhook secret, like GitHub's), and
+ * optionally `Authorization: Bearer <token>` when the workspace saved one (in addition to the signature).
  *
  * issue.delegated fires when an issue is delegated to an agent, or the agent is removed. Its `issue.delegate` is the
  * agent now on the issue (null when removed) and `changes.delegate` names the agent before and after. Other events

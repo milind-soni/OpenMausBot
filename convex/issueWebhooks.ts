@@ -7,7 +7,7 @@ import { ISSUE_WEBHOOK_MIN_SECRET, issueWebhookUrlError, postIssueWebhook, signI
 
 // Outgoing issue webhooks. Issue writes (convex/lib/issueEvents.ts) build the payload in the mutation and schedule
 // `deliver`, which signs and POSTs it, so a slow or failing endpoint never fails the issue change. A workspace's own
-// URL and secret (Settings > Workspace) win over the deployment's ORIGIN_ISSUE_WEBHOOK_URL / _SECRET.
+// URL, signing secret and optional Bearer token (Settings > Workspace) win over the deployment's ORIGIN_ISSUE_WEBHOOK_URL / _SECRET.
 
 const purpose = (teamId: string) => `issue-webhook:${teamId}`;
 const ADMIN_ROLES = new Set(["owner", "admin"]);
@@ -23,18 +23,18 @@ export function globalIssueWebhook() {
 
 export const get = query({
   args: { sessionToken: v.string(), teamId: v.id("teams") },
-  returns: v.object({ url: v.union(v.string(), v.null()), canManage: v.boolean(), globalDefault: v.boolean(), sealing: v.boolean() }),
+  returns: v.object({ url: v.union(v.string(), v.null()), canManage: v.boolean(), globalDefault: v.boolean(), sealing: v.boolean(), hasAuthorization: v.boolean() }),
   handler: async (ctx, a) => {
     const { member } = await requireTeamMember(ctx, a.teamId, a.sessionToken);
     const canManage = ADMIN_ROLES.has(member.role);
     const row = canManage ? await ctx.db.query("issueWebhooks").withIndex("by_teamId", q => q.eq("teamId", a.teamId)).unique() : null;
-    return { url: row?.url ?? null, canManage, globalDefault: Boolean(globalIssueWebhook()), sealing: sealingConfigured() };
+    return { url: row?.url ?? null, canManage, globalDefault: Boolean(globalIssueWebhook()), sealing: sealingConfigured(), hasAuthorization: Boolean(canManage && row?.sealedAuthorization) };
   },
 });
 
 /** Saves the workspace's webhook. The secret may be left out to keep the saved one. */
 export const save = mutation({
-  args: { sessionToken: v.string(), teamId: v.id("teams"), url: v.string(), secret: v.optional(v.string()) },
+  args: { sessionToken: v.string(), teamId: v.id("teams"), url: v.string(), secret: v.optional(v.string()), authorization: v.optional(v.string()) },
   returns: v.null(),
   handler: async (ctx, a) => {
     const { user } = await requireTeamAdmin(ctx, a.teamId, a.sessionToken);
@@ -46,10 +46,18 @@ export const save = mutation({
     const secret = a.secret?.trim();
     if (!secret && !row) throw new ConvexError("Enter a signing secret");
     if (secret && (secret.length < ISSUE_WEBHOOK_MIN_SECRET || secret.length > 512)) throw new ConvexError(`Use a secret of at least ${ISSUE_WEBHOOK_MIN_SECRET} characters`);
-    if (secret && !sealingConfigured()) throw new ConvexError(SEALING_MISSING);
+    if ((secret || a.authorization) && !sealingConfigured()) throw new ConvexError(SEALING_MISSING);
+    const authorization = a.authorization === undefined ? undefined : a.authorization.trim();
+    if (authorization && (authorization.length < 1 || authorization.length > 512)) throw new ConvexError("Use an authorization token of at most 512 characters");
     const sealedSecret = secret ? await seal(secret, purpose(a.teamId)) : row!.sealedSecret;
-    if (row) await ctx.db.patch(row._id, { url, sealedSecret, updatedBy: user._id, updatedAt: Date.now() });
-    else await ctx.db.insert("issueWebhooks", { teamId: a.teamId, url, sealedSecret, updatedBy: user._id, updatedAt: Date.now() });
+    const sealedAuthorization = authorization === undefined
+      ? row?.sealedAuthorization
+      : authorization
+        ? await seal(authorization, `issue-webhook-authorization:${a.teamId}`)
+        : undefined;
+    const fields = { url, sealedSecret, updatedBy: user._id, updatedAt: Date.now(), ...(authorization !== undefined || !row ? { sealedAuthorization } : {}) };
+    if (row) await ctx.db.patch(row._id, fields);
+    else await ctx.db.insert("issueWebhooks", { teamId: a.teamId, ...fields });
     return null;
   },
 });
@@ -67,10 +75,10 @@ export const remove = mutation({
 
 export const target = internalQuery({
   args: { teamId: v.id("teams") },
-  returns: v.union(v.null(), v.object({ url: v.string(), sealedSecret: v.string() })),
+  returns: v.union(v.null(), v.object({ url: v.string(), sealedSecret: v.string(), sealedAuthorization: v.optional(v.string()) })),
   handler: async (ctx, a) => {
     const row = await ctx.db.query("issueWebhooks").withIndex("by_teamId", q => q.eq("teamId", a.teamId)).unique();
-    return row ? { url: row.url, sealedSecret: row.sealedSecret } : null;
+    return row ? { url: row.url, sealedSecret: row.sealedSecret, ...(row.sealedAuthorization ? { sealedAuthorization: row.sealedAuthorization } : {}) } : null;
   },
 });
 
@@ -84,8 +92,12 @@ export const deliver = internalAction({
   handler: async (ctx, a) => {
     const row = await ctx.runQuery(internal.issueWebhooks.target, { teamId: a.teamId });
     let destination = globalIssueWebhook();
+    let authorization: string | undefined;
     if (row) {
-      try { destination = { url: row.url, secret: await unseal(row.sealedSecret, purpose(a.teamId)) }; }
+      try {
+        destination = { url: row.url, secret: await unseal(row.sealedSecret, purpose(a.teamId)) };
+        if (row.sealedAuthorization) authorization = await unseal(row.sealedAuthorization, `issue-webhook-authorization:${a.teamId}`);
+      }
       catch { console.warn(`Issue webhook ${a.deliveryId}: the workspace secret cannot be unsealed; save it again in Settings.`); return null; }
     }
     if (!destination) return null;
@@ -94,7 +106,13 @@ export const deliver = internalAction({
     try {
       const status = await postIssueWebhook(destination.url, {
         body: a.body,
-        headers: { "Content-Type": "application/json", "X-Origin-Event": a.event, "X-Origin-Delivery": a.deliveryId, "X-Origin-Signature": await signIssueWebhook(a.body, destination.secret) },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Origin-Event": a.event,
+          "X-Origin-Delivery": a.deliveryId,
+          "X-Origin-Signature": await signIssueWebhook(a.body, destination.secret),
+          ...(authorization ? { Authorization: `Bearer ${authorization}` } : {}),
+        },
       });
       if (status >= 200 && status < 300) return null;
       outcome = `HTTP ${status}`;

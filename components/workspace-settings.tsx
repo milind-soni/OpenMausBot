@@ -116,26 +116,27 @@ function IssueWebhookSettings({ sessionToken }: { sessionToken: string }) {
   const workspace = useWorkspace();
   const config = useQuery(api.issueWebhooks.get, { sessionToken, teamId: workspace._id });
   const save = useMutation(api.issueWebhooks.save), remove = useMutation(api.issueWebhooks.remove);
-  const [url, setUrl] = useState<string | null>(null), [secret, setSecret] = useState("");
+  const [url, setUrl] = useState<string | null>(null), [secret, setSecret] = useState(""), [authorization, setAuthorization] = useState("");
   const [notice, setNotice] = useState<FormNotice>(null);
   const [busy, setBusy] = useState(false);
   if (!config?.canManage) return null;
   const shownUrl = url ?? config.url ?? "";
   const attempt = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true); setNotice(null);
-    try { await fn(); setUrl(null); setSecret(""); setNotice({ tone: "success", text: done }); }
+    try { await fn(); setUrl(null); setSecret(""); setAuthorization(""); setNotice({ tone: "success", text: done }); }
     catch (error) { setNotice({ tone: "danger", text: errorText(error, "Could not save webhook") }); }
     finally { setBusy(false); }
   };
-  return <form className="settings-group" onSubmit={event => { event.preventDefault(); if (!busy) void attempt(() => save({ sessionToken, teamId: workspace._id, url: shownUrl, ...(secret ? { secret } : {}) }), "Webhook saved"); }}>
+  return <form className="settings-group" onSubmit={event => { event.preventDefault(); if (!busy) void attempt(() => save({ sessionToken, teamId: workspace._id, url: shownUrl, ...(secret ? { secret } : {}), ...(authorization ? { authorization } : {}) }), "Webhook saved"); }}>
     <h4>Issue webhook</h4>
-    <p className="settings-note">Origin sends <code>issue.created</code>, <code>issue.updated</code> (status or completion changes) and <code>issue.delegated</code> (an agent put on or taken off an issue) as JSON, signed in <code>X-Origin-Signature</code> with HMAC-SHA256 of the body.{config.globalDefault && !config.url ? " Until you set one, the server’s default webhook is used." : ""}</p>
+    <p className="settings-note">Origin sends <code>issue.created</code>, <code>issue.updated</code> (status or completion changes) and <code>issue.delegated</code> (an agent put on or taken off an issue) as JSON, signed in <code>X-Origin-Signature</code> with HMAC-SHA256 of the body. An optional bearer token is sent as <code>Authorization: Bearer …</code> and is never shown again after you save it.{config.globalDefault && !config.url ? " Until you set one, the server’s default webhook is used." : ""}</p>
     <label>URL<input type="url" inputMode="url" autoComplete="off" spellCheck={false} placeholder="https://" maxLength={2000} value={shownUrl} onChange={event => setUrl(event.target.value)} required /></label>
     <label>Signing secret<input type="password" autoComplete="new-password" spellCheck={false} minLength={32} maxLength={512} placeholder={config.url ? "Saved. Enter a new one to replace it" : "At least 32 characters"} value={secret} onChange={event => setSecret(event.target.value)} required={!config.url} /></label>
+    <label>Authorization bearer token<input type="password" autoComplete="new-password" spellCheck={false} maxLength={512} placeholder={config.hasAuthorization ? "Saved. Enter a new one to replace it" : "Optional. Sent as Authorization: Bearer"} value={authorization} onChange={event => setAuthorization(event.target.value)} /></label>
     <FormStatus notice={notice} />
     <div className="settings-actions">
       {config.url && <ConfirmButton className="ghost-button compact danger" label="Remove webhook" text="Remove" confirmLabel="Confirm" disabled={busy} icon={<Trash2 size={14} />} onConfirm={() => void attempt(() => remove({ sessionToken, teamId: workspace._id }), "Webhook removed")} />}
-      <button className="primary-button compact" disabled={busy || !shownUrl.trim() || (!config.url && !secret) || (shownUrl === config.url && !secret)}>{busy && <Loader2 size={14} className="spin" />}Save</button>
+      <button className="primary-button compact" disabled={busy || !shownUrl.trim() || (!config.url && !secret) || (shownUrl === config.url && !secret && !authorization)}>{busy && <Loader2 size={14} className="spin" />}Save</button>
     </div>
   </form>;
 }
