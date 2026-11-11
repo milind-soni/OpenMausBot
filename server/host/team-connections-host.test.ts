@@ -220,13 +220,13 @@ describe("apps each person connects", () => {
     expect(await host.callRefusal({ threadId: "cleo-chat", generation: "gen-1" }, [{ slug: "GMAIL_FETCH_EMAILS" }]), "Cleo's chat never reaches Ada's Gmail").toMatch(/Connect your Gmail/);
   });
 
-  it("offers a bot with app grants and no per-app scopes the apps' sandbox only in a turn at Full access", async () => {
+  it("offers a bot with app grants the apps' sandbox only in a turn at Full access, never while its scopes limit its apps", async () => {
     const { host, composio } = setup({ fullAccess: (_botId, threadId) => threadId === "work-chat" });
     const scout = { id: "scout", name: "Scout", connectorTools: { gmail: { tools: "*" as const } } };
     await host.appsIntegrations(scout, "main-chat", "g1");
     await host.appsIntegrations(scout, "work-chat", "g2");
     await host.appsIntegrations({ id: "mausbot", name: "MausBot" }, "work-chat", "g3");
-    await host.appsIntegrations({ ...scout, connectorScopes: { apps: { gmail: "read" as const } } }, "work-chat", "g4");
+    await host.appsIntegrations({ ...scout, connectorScopes: { apps: { gmail: "read" } } }, "work-chat", "g4");
     const offered = composio.mcpIntegration.mock.calls.map(([, context]) => context as typeof context & { connectorTools?: unknown })
       .filter((context) => !context.as).map((context) => context.connectorTools);
     expect(offered).toEqual([

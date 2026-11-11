@@ -632,7 +632,7 @@ old one; no identifiers) answers:
 ### Releasing tunnels
 
 A running desktop keeps its connector up, so idle reclaim never sees its tunnel as idle. These rules give tunnels back
-once the relay has replaced them. Each switch is off in `wrangler.jsonc`; all need migration `0015`. The cron only
+once the relay has replaced them. Each switch is off in `wrangler.jsonc`; all need migrations `0015` and `0016`. The cron only
 marks rows `deleting` (at most 20 a run, every reason together) and the cleanup sweep removes them; the row and its
 hostname stay, so a later provisioning call returns the same address.
 
@@ -672,6 +672,19 @@ hostname stay, so a later provisioning call returns the same address.
   removal still refused as connected after its rounds does not count as waiting: it backs off (5 minutes up to 24
   hours) and retries while the sweep and the marking go on. A marked row is a final delete: its owner is answered
   `409 endpoint_busy` until the sweep has removed it.
+- **Self-hosted servers.** A server (`openmausbot serve --tunnel`, a fleet container with `OMB_INSTALLATION_CREDENTIAL`)
+  has no phone relay of its own: its tunnel is its public address (web UI, the desktop app's connection to it,
+  webhooks). Provisioning never answers a server `relay_capable` (no `retired`, no `full`; at the limit it gets
+  `503 endpoint_capacity`), and the cron never marks a server's tunnel for `relay_proven` or `legacy_cutoff`. The
+  version cutoff still applies (`426`, and `min_version`). A server that uses the relay and does not ask for a tunnel
+  simply has none. An installation is a server when it says so: optional `kind: "desktop" | "server"` on
+  `POST /v1/installations`, `POST .../self/endpoint` and `POST .../self/relay-token`, stored in `installations.kind`
+  (migration `0016`; the latest report wins). The request schemas are strict, so this Worker must accept `kind` before
+  any client release sends it. An installation that has never said is judged by what every release up to 0.1.152
+  does: the desktop reports `legacyDevices` whenever its companion runs and asks for relay tokens, a server does
+  neither. So `POST .../endpoint` without `legacyDevices`, from an installation with no `relay_adoption` row, is
+  treated as a server. A desktop that has never asked for a relay token and provisions while its companion is off is
+  treated the same way, and gets a tunnel as before the cutoff.
 - **Coming back.** `POST /v1/installations/self/endpoint` creates a tunnel again, with the same hostname, when the
   desktop reports an old phone (outside the cutoff), or the relay cannot carry it: `RELAY_DISABLED: "1"`, a lower
   `RELAY_ROLLOUT_PERCENT`, or `relay_blocked_at`. With the relay switched off the cron releases nothing on the
@@ -696,7 +709,7 @@ hostname stay, so a later provisioning call returns the same address.
   the last two days below `TUNNEL_MIN_APP_VERSION`, or below `RELAY_CAPABLE_MIN_VERSION` while no minimum is set. `capacity.reclaim.preview` is
   `{ "offlineDays": 1, "eligible": 37 }` once every account has finished a full pass at the preview period (about 50
   minutes per 1,000 tunnels), and `eligible: null` until then.
-- **Order.** Apply migration `0015` and deploy with everything off. Read `tunnelRelease`. Raise
+- **Order.** Apply migrations `0015` and `0016` and deploy with everything off. Read `tunnelRelease`. Raise
   `RELAY_TUNNEL_RELEASE_PERCENT` 10, 50, 100. After the desktop release that explains the cutoff is out, set
   `TUNNEL_REASON_MIN_VERSION` to that release, then raise `TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT` 10, then 100, and last
   set `TUNNEL_MIN_APP_VERSION`.

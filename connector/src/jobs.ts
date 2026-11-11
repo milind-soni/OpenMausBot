@@ -1,18 +1,23 @@
 // Each job type of the protocol, and nothing else: what runs for a job is fixed here, and its arguments were checked
 // (protocol.ts checkJob) before it got here.
+import type { AdoptedHome } from "./adopted-home.ts";
 import { auditArgs, type AuditEvent, type AuditLog, type AuditSource } from "./audit.ts";
+import { customerRunRefusal } from "./customer-run.ts";
 import { asJobError } from "./failure.ts";
 import type { Home } from "./home.ts";
 import { errorText, type Log } from "./log.ts";
 import { policyRefusal, readPolicy } from "./policy.ts";
-import type { ConnectorIdentity, HostHealth, Job, JobArgs, JobReply, JobResults, JobType } from "./protocol.ts";
+import type { ConnectorIdentity, HostHealth, Job, JobArgs, JobReply, JobResults, JobType, ServerMode } from "./protocol.ts";
 
 /** Jobs that change the home, its data or the connector; they wait for each other. */
 const CHANGES: ReadonlySet<JobType> = new Set(["start", "stop", "restart", "update", "backup", "restore", "export-disk", "import-disk", "self-update"]);
 const MAX_WAITING = 8;
 
 export interface RunnerDeps {
-  home: Home;
+  /** On a server MausBot operates: the home the connector makes and keeps running. */
+  home?: Home;
+  /** On a customer-run server: the home its owner installed. Every job goes to it, and `home` is never used. */
+  adopted?: AdoptedHome;
   hostHealth: () => Promise<HostHealth>;
   identity: () => ConnectorIdentity;
   /** The Admin's origin, and the `Authorization` a transfer for a job sends it. */
@@ -21,34 +26,66 @@ export interface RunnerDeps {
   selfUpdate: (job: Job<"self-update">) => Promise<JobReply | null>;
 }
 
-export function jobRunner(deps: RunnerDeps): (job: Job) => Promise<JobReply | null> {
+export function jobRunner(deps: RunnerDeps): (job: Job, by?: AuditSource) => Promise<JobReply | null> {
   let waiting = 0;
-  const run = async (job: Job): Promise<JobReply | null> => {
+  const run = async (job: Job, by: AuditSource): Promise<JobReply | null> => {
     const ok = <T extends JobType>(result: JobResults[T]): JobReply => ({ id: job.id, ok: true, result });
     try {
+      const adopted = deps.adopted;
+      if (adopted) {
+        const refusal = customerRunRefusal(job.type, by);
+        if (refusal) return { id: job.id, ok: false, error: { code: "refused_by_mode", message: refusal } };
+        switch (job.type) {
+          case "start":
+            return ok(await adopted.start());
+          case "stop":
+            return ok(await adopted.stop());
+          case "restart":
+            return ok(await adopted.restart());
+          case "update":
+            return ok(await adopted.update(job.id, (job.args as JobArgs["update"]).image));
+          case "backup":
+            return ok(await adopted.backup(job.id, by));
+          case "restore":
+            return ok(await adopted.restore(job.id, (job.args as JobArgs["restore"]).backupId));
+          case "status": {
+            await adopted.refreshHealth();
+            const { backups, snapshot } = await adopted.copies();
+            return ok({ home: await adopted.report(), connector: deps.identity(), backups, snapshot });
+          }
+          case "host-health":
+            return ok({ host: await deps.hostHealth() });
+          case "self-update":
+            return await deps.selfUpdate(job as Job<"self-update">);
+          default:
+            return { id: job.id, ok: false, error: { code: "refused_by_mode", message: "This server is run by its owner." } };
+        }
+      }
+      const home = deps.home;
+      if (!home) return { id: job.id, ok: false, error: { code: "no_home", message: "This connector was started without a home to run." } };
       switch (job.type) {
         case "start": {
           const { image, env } = job.args as JobArgs["start"];
-          return ok(await deps.home.start(job.id, image, env));
+          return ok(await home.start(job.id, image, env));
         }
         case "stop":
-          return ok(await deps.home.stop());
+          return ok(await home.stop());
         case "restart":
-          return ok(await deps.home.restart());
+          return ok(await home.restart());
         case "update":
-          return ok(await deps.home.update(job.id, (job.args as JobArgs["update"]).image));
+          return ok(await home.update(job.id, (job.args as JobArgs["update"]).image));
         case "backup":
-          return ok(await deps.home.backup(job.id));
+          return ok(await home.backup(job.id));
         case "restore":
-          return ok(await deps.home.restore(job.id, (job.args as JobArgs["restore"]).backupId));
+          return ok(await home.restore(job.id, (job.args as JobArgs["restore"]).backupId));
         case "export-disk":
-          return ok(await deps.home.exportDisk(job.id, deps.admin()));
+          return ok(await home.exportDisk(job.id, deps.admin()));
         case "import-disk":
-          return ok(await deps.home.importDisk(job.id, (job.args as JobArgs["import-disk"]).url, deps.admin()));
+          return ok(await home.importDisk(job.id, (job.args as JobArgs["import-disk"]).url, deps.admin()));
         case "status": {
-          await deps.home.refreshHealth();
-          const { backups, snapshot } = await deps.home.copies();
-          return ok({ home: await deps.home.report(), connector: deps.identity(), backups, snapshot });
+          await home.refreshHealth();
+          const { backups, snapshot } = await home.copies();
+          return ok({ home: await home.report(), connector: deps.identity(), backups, snapshot });
         }
         case "host-health":
           return ok({ host: await deps.hostHealth() });
@@ -59,12 +96,12 @@ export function jobRunner(deps: RunnerDeps): (job: Job) => Promise<JobReply | nu
       return { id: job.id, ok: false, error: asJobError(error) };
     }
   };
-  return async (job) => {
-    if (!CHANGES.has(job.type)) return run(job);
+  return async (job, by = "admin") => {
+    if (!CHANGES.has(job.type)) return run(job, by);
     if (waiting >= MAX_WAITING) return { id: job.id, ok: false, error: { code: "busy", message: `${MAX_WAITING} jobs are already waiting on this server; send this one again later.` } };
     waiting += 1;
     try {
-      return await run(job);
+      return await run(job, by);
     } finally {
       waiting -= 1;
     }
@@ -82,7 +119,18 @@ export interface Desk {
   submit(job: Job, by: AuditSource): Promise<JobReply | null>;
 }
 
-export function jobDesk(deps: { run: (job: Job) => Promise<JobReply | null>; audit: AuditLog; log: Log; policyFile?: string }): Desk {
+export interface DeskDeps {
+  run: (job: Job, by: AuditSource) => Promise<JobReply | null>;
+  audit: AuditLog;
+  log: Log;
+  policyFile?: string;
+  /** Absent: `operated`. On a customer-run server a job outside that mode's lists is refused: one list for MausBot, a longer one for root on the server. */
+  mode?: ServerMode;
+  /** The server's admin has paused remote management: every job from MausBot is refused until they resume it. */
+  paused?: () => boolean;
+}
+
+export function jobDesk(deps: DeskDeps): Desk {
   const record = (event: AuditEvent): boolean => {
     try {
       deps.audit.append(event);
@@ -97,13 +145,17 @@ export function jobDesk(deps: { run: (job: Job) => Promise<JobReply | null>; aud
       if (!record({ event: "job", by, id: job.id, type: job.type, args: auditArgs(job) }) && !READS.has(job.type)) {
         return { id: job.id, ok: false, error: { code: "audit_unavailable", message: `The audit log at ${deps.audit.file} cannot be written, so nothing was done. Run the install command again to repair it.` } };
       }
-      const refusal = by === "admin" && deps.policyFile ? policyRefusal(job, readPolicy(deps.policyFile), deps.policyFile) : null;
-      if (refusal) {
-        const refused: JobReply = { id: job.id, ok: false, error: { code: "refused_by_policy", message: refusal } };
+      const refuse = (code: "refused_by_mode" | "paused" | "refused_by_policy", message: string): JobReply => {
+        const refused: JobReply = { id: job.id, ok: false, error: { code, message } };
         record(resultEvent(by, job.type, refused));
         return refused;
-      }
-      const reply = await deps.run(job);
+      };
+      const outsideMode = deps.mode === "customer-run" ? customerRunRefusal(job.type, by) : null;
+      if (outsideMode) return refuse("refused_by_mode", outsideMode);
+      if (by === "admin" && deps.paused?.()) return refuse("paused", "This server's admin has paused remote management. They resume it with: mausbot-connector resume");
+      const refusal = by === "admin" && deps.policyFile ? policyRefusal(job, readPolicy(deps.policyFile), deps.policyFile) : null;
+      if (refusal) return refuse("refused_by_policy", refusal);
+      const reply = await deps.run(job, by);
       if (reply) record(resultEvent(by, job.type, reply));
       return reply;
     },

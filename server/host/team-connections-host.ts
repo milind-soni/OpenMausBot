@@ -15,7 +15,7 @@ import type * as Composio from "../composio.ts";
 import type { AppConfig } from "../config.ts";
 import type { McpServerSpec } from "../contracts.ts";
 import { advertisedGrants } from "../connector-advertisement.ts";
-import { serviceSlugFor } from "../connector-verdict.ts";
+import { appSandboxAllowed, serviceSlugFor } from "../connector-verdict.ts";
 import { type McpOAuthManager, type McpRefreshOutcome, type McpSignInPhase, withMcpSignIn, withoutPendingSignIn } from "../mcp-oauth.ts";
 import { isRemoteMcpServer, parseStoredMcpServer, type McpOAuthClientConfig } from "../mcp-registry.ts";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
@@ -59,7 +59,8 @@ export interface TeamConnectionsHostDeps {
   onPersonChanged?(person: string, kind: "app" | "mcp", id: string): void;
   /** The connected-apps service a member's own installation is made on; null: none here. */
   brokerUrl(): string | null;
-  /** Whether this bot's turn in this conversation runs at Full access: its tools/list then offers the apps' sandbox. */
+  /** Whether this bot's turn in this conversation runs at Full access: its tools/list then offers the apps' sandbox, unless its
+   * scopes limit its apps. */
   fullAccess?(botId: string, threadId: string): boolean;
   composio: Pick<typeof Composio, "configured" | "mcpIntegration" | "connectedServices" | "verifiedConnectedServiceSlugs" | "authorizeService" | "removeService">;
 }
@@ -259,7 +260,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     async appsIntegrations(bot: Bot, threadId: string, generation: string, names: "dotted" | "plain" = "plain"): Promise<{ composio?: Integration; composioOwn?: Integration }> {
       const cfg = deps.cfg();
       const out: { composio?: Integration; composioOwn?: Integration } = {};
-      const base = { harnessUrl: deps.harnessUrl, botId: bot.id, threadId, connectorTools: advertisedGrants(bot.connectorTools, bot.connectorScopes === undefined && deps.fullAccess?.(bot.id, threadId) === true) };
+      const base = { harnessUrl: deps.harnessUrl, botId: bot.id, threadId, connectorTools: advertisedGrants(bot.connectorTools, appSandboxAllowed(bot) && deps.fullAccess?.(bot.id, threadId) === true) };
       const shared = await deps.composio.mcpIntegration(cfg, { ...base, commsToken: deps.mint({ botId: bot.id, threadId, generation }) });
       if (shared) out.composio = await withAppTools(shared, bot, names);
       const person = personApps().length ? turnPerson(threadId, generation) : null;
