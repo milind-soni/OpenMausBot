@@ -162,6 +162,8 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
     // Without it the server also scans /opt/homebrew/bin, /usr/local/bin and the
     // login shell's PATH, finding a developer's own engine CLIs that CI lacks.
     OMB_TEST_SEALED_PATH: "1",
+    // The project's live announcement cards would sit over the corner the UI tests click in.
+    OMB_DISABLE_ANNOUNCEMENTS: "1",
   });
   // The fake engines' knobs are the one thing a caller may script into the child.
   for (const [key, value] of Object.entries(parentEnv)) {
