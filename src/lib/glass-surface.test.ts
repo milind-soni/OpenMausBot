@@ -95,7 +95,7 @@ describe("glass surface", () => {
     for (const file of ["settings/SettingsWindow.tsx", "PluginsPanel.tsx"]) {
       const source = readFileSync(join(src, "components", file), "utf8");
       expect(source, file).toContain('className="glass-popup-frame"');
-      expect(source, file).toContain("style={glassPopupFrameStyle()}");
+      expect(source, file).toMatch(/style=\{(\{ \.\.\.)?glassPopupFrameStyle\(\)/);
       expect(source, file).toMatch(/className="glass-surface glass-popup /);
       expect(source, file).not.toMatch(/100dvh/);
     }
