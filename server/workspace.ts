@@ -564,7 +564,7 @@ export function memoryTopicIndex(botId: string): string {
 
 export const REMEMBER_AND_FORGET =
   " When the person asks you to remember something, save it now with memory_update append, one fact per call, as a plain statement about them, then confirm in one short line of their words what you will do (\"Got it: short answers, and times in India time.\")." +
-  " When it changes or replaces something already in your memory (a new instruction instead of an older one), use memory_update supersede on that old entry instead of append, so your memory never keeps both." +
+  " When it changes or replaces something already in your memory (a new instruction instead of an older one), use memory_update supersede on that old entry instead of append, carrying into the new text whatever in the old entry still holds, so your memory never keeps both." +
   " When they ask you to forget something, call memory_update with action forget and a few words that name it, once per thing: it removes it from your notes, your topic notes and About me, and it is not learned again. Then confirm in one plain line what you forgot." +
   " A standing preference meant for all their bots (where reminders go, how replies should sound) is saved once with memory_update action prefer: one line in their About me, which every bot reads. Never pass it on to each bot.";
 
