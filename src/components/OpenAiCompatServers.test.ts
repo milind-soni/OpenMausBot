@@ -446,6 +446,10 @@ describe("a server's default model", () => {
     field(draw()!)!.props.onBlur!({ target: { value: "a\nb" } });
     await Promise.resolve();
     expect(fixture.api).not.toHaveBeenCalled();
-    expect(nodes(draw()).some((node) => node.props.children === "Enter a model ID of 1 to 200 characters, without control characters.")).toBe(true);
+    const message = "Enter a model ID of 1 to 200 characters, without control characters.";
+    const alert = nodes(draw()).find((node) => node.props.children === message);
+    expect((alert?.props as { role?: string } | undefined)?.role).toBe("alert");
+    field(draw()!)!.props.onChange!({ target: { value: "qwen3" } });
+    expect(nodes(draw()).some((node) => node.props.children === message)).toBe(false);
   });
 });

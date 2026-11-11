@@ -120,17 +120,19 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
     if (value === null) delete next[instanceId];
     else next[instanceId] = value;
     setModelDrafts(next);
+    if (error?.at === instanceId) setError(null);
   };
 
   const saveModel = (server: InstanceInfo & { url?: string }, text: string) => {
     if (!text.trim()) return setModelDraft(server.instanceId, null);
     const id = modelIdFrom(text);
-    if (!id) return setError({ text: t("apiInstances.modelInvalid") });
+    if (!id) return setError({ text: t("apiInstances.modelInvalid"), at: server.instanceId });
     if (id === server.models.default) return setModelDraft(server.instanceId, null);
     run(
       "other",
       () => saveSettings(server.instanceId, { model: id }),
       () => { if (server.models.options.length > 0) setModelDraft(server.instanceId, null); },
+      server.instanceId,
     );
   };
 
@@ -181,7 +183,7 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
                 value={server.models.default}
                 onChange={(event) => event.target.value === CUSTOM_MODEL
                   ? setModelDraft(server.instanceId, server.models.default)
-                  : run("other", () => saveSettings(server.instanceId, { model: event.target.value }))}
+                  : run("other", () => saveSettings(server.instanceId, { model: event.target.value }), undefined, server.instanceId)}
                 disabled={busy !== null}
                 aria-label={t("apiInstances.modelFor", { name: server.displayName })}
                 title={t("apiInstances.modelHint")}
@@ -231,6 +233,7 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
               <Trash2 size={13} aria-hidden="true" />
             </button>
           </div>
+          {error?.at === server.instanceId && editing !== server.instanceId && <div role="alert" className="mt-1 text-[12px] leading-4 text-danger">{error.text}</div>}
           {editing === server.instanceId && (
             <div className="mt-1.5 flex flex-col gap-1.5">
               <input value={editText} onChange={(e) => setEditText(e.target.value)} placeholder={t("apiInstances.models")}
