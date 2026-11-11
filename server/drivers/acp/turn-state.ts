@@ -6,6 +6,7 @@ import { noticeFailure } from "../../chat-notices.ts";
 import { errorReplyFailure, type ErrorReplyFailure } from "../engine-errors.ts";
 import type { AcpConfig } from "./core.ts";
 import type { AcpHost, AcpLink } from "./host.ts";
+import type { AcpTurnSteering } from "./steer.ts";
 
 export type AcpAskFinish = (
   behavior: string,
@@ -37,6 +38,7 @@ export interface AcpTurn {
   stopQuietWatch: (() => void) | null;
   flushAssistantText: () => void;
   receiveModelVariants: (result: any) => void;
+  steering?: AcpTurnSteering;
 }
 
 export interface AcpSession {
@@ -61,6 +63,8 @@ export interface AcpSession {
   dead: boolean;
   readonly stderr: string;
   current: AcpTurn | null;
+  /** The slash commands the agent last advertised for this session. */
+  commands?: ReadonlySet<string>;
   fallbackNotice?: string;
   launchModel?: string;
 }
