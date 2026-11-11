@@ -2104,7 +2104,6 @@
   "relay.reply": "{name} 回复了",
   "relay.assistant": "{name} 的助理回答了",
   "sidebar.people.title": "成员",
-  "sidebar.people.you": "{name}（你）",
   "sidebar.people.yourInbox": "你的收件箱：发给你的一切都在这里",
   "sidebar.people.yourInboxWaiting": "你的收件箱：待你处理，{count}",
   "sidebar.people.invite": "邀请他人",
