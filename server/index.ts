@@ -336,6 +336,7 @@ import { engineProcessGone, stallLimitMs, TurnWatchdog } from "./turn-watchdog.t
 import { TurnResources, type TurnOwner } from "./turn-resources.ts";
 import { createPhoneHold } from "./phone-screen/hold.ts"; import { createPhoneGate } from "./routes/phone-gate.ts";
 import { endHoldUnlessOn, usbPhoneOffered, usbPhoneTakeoverEnabled } from "./phone-screen/flag.ts";
+import { createPhoneScreenRoutes } from "./routes/phone-screen.ts";
 import {
   ensureWorkspace,
   workspaceLocationsPrompt,
@@ -2079,7 +2080,7 @@ const turnPromptBytes = new Map<string, { stable: number; volatile: number }>();
 let providerFleetReloading = false;
 const turnResources = new TurnResources(); engineMemory.useTurnOrder(createTurnOrder({ turn: (threadId) => directRequestOwners.get(threadId), unattended: (threadId) => isUnattended(store.botByThread(threadId)?.id, threadId), running: (threadId) => coordinator.runningIn(threadId), roomLine: (threadId) => [...(groupTurnOperations.get(store.groupByThread(threadId)?.id ?? "") ?? [])].some((operation) => operation.threadId === threadId && operation.requestMessageId !== undefined) })); const waitWords = createWaitWords({ language: (threadId) => threadLanguage(threadId), starter: () => cloudPlanTier.starter(), held: (threadId, why) => coordinator.held(threadId, why), changed: () => broadcast({ kind: "config", ...configStatus() }) }); engineMemory.useWaits(waitWords);
 const sharedComputerControl = new SharedComputerControl(turnResources, (owner) => store.botByThread(owner.threadId)?.name);
-const phoneHold = createPhoneHold({ onChange: (held) => phoneGate.holdChanged(held) });
+const phoneHold = createPhoneHold({ onChange: (held) => { phoneGate.holdChanged(held); phoneScreen.holdChanged(held); } });
 const phoneGate = createPhoneGate({ enabled: usbPhoneTakeoverOn, hold: phoneHold, resources: turnResources, claim: claimTurnResource }); onConfigSaved((_before, after) => endHoldUnlessOn(phoneHold, after));
 const turnResourceOwners = new Map<string, TurnOwner>();
 const turnComputerResources = new Map<string, { owner: TurnOwner; resource: string }>();
@@ -4639,6 +4640,7 @@ function audienceChanged(): void {
 }
 // Before any revocation callback: Cloud boot can revoke sessions before routes are registered.
 const upgrades = createUpgrades();
+const phoneScreen = createPhoneScreenRoutes({ upgrades, hold: phoneHold, enabled: usbPhoneTakeoverOn, live: (auth) => auth.kind === "loopback" || sessions.isLive(auth.session.id), dataDir: DATA_DIR });
 const desktopViewer = createDesktopViewer({
   upgrades,
   target: (id) => {
@@ -4671,7 +4673,7 @@ const desktopViewer = createDesktopViewer({
 });
 function closeSessionStreams(sessionId: string): void {
   browserLive.closeForOwner(sessionId);
-  desktopViewer.closeForOwner(sessionId);
+  desktopViewer.closeForOwner(sessionId); phoneScreen.closeForOwner(sessionId);
   for (const client of sseClients) {
     if (client.sessionId === sessionId) client.close();
   }
@@ -11792,6 +11794,7 @@ function configStatus() {
       roomMemoryCapture: roomMemoryCaptureEnabled(cfg),
       parallelRoomJobs: parallelRoomJobsEnabled(cfg),
       llmThreadTitles: llmThreadTitlesEnabled(cfg), savedSteps: savedStepsEnabled(cfg), savedStepsHere: savedSteps.here(),
+      usbPhoneTakeover: HAS_USB_PORT ? usbPhoneTakeoverEnabled(cfg) : undefined,
     },
     onboarding: {
       completedAt: cfg.onboarding?.completedAt ?? "",
@@ -12421,7 +12424,7 @@ ROUTES.push(createStatusRoutes({
   browserEngineInstallError: { set: (error) => { browserEngineInstallError = error; } },
 }));
 
-ROUTES.push(desktopViewer.route);
+ROUTES.push(desktopViewer.route, phoneScreen.route);
 ROUTES.push(createBrowserViewerRoutes({
   upgrades, viewers: browserLive, dataDir: DATA_DIR, person: (auth) => (auth.kind === "session" ? actorKey(auth) : "local-owner"),
   audience: (auth, threadId) => teamHost.viewerBrowserAudience({ threadId, sees: (id) => visibleTo(viewerFor(auth)).thread(id), person: auth.kind === "session" ? actorKey(auth) : null }),
@@ -15463,6 +15466,7 @@ const gracefulShutdown = createGracefulShutdown({
       webhookIngress?.server.close(); webhookIngress?.socketServer?.close();
       tunnelListener?.close(); void tailnetShare.close(); phoneRelay?.stop(); stopCloudHomeConnectedApps();
     },
+    () => phoneScreen.closeAll(),
     async () => { await managedDesktop.close(); await registry.disposeAll(); },
     async () => { await dataEngine.closeAll().catch((error) => console.warn("data: close failed", error)); },
     async () => {

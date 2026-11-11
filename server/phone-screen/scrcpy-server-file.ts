@@ -34,16 +34,17 @@ async function stage(file: string, source: typeof SCRCPY_SERVER, fetchImpl: type
   const saved = await savedDigest(file);
   if (saved === source.sha256) return file;
   if (saved !== undefined) await rm(file, { force: true });
-  const byHand = `To use a copy you downloaded yourself, save scrcpy-server ${source.version} as ${file}.`;
+  // A person reads this as a WebSocket close reason, which RFC 6455 cuts at 123 bytes: the cause and the path come before the URL.
+  const failed = (cause: string) => `Download failed (${cause}): save scrcpy-server ${source.version} as ${file} from ${source.url}.`;
   let bytes: Buffer;
   try {
     bytes = await download(source.url, fetchImpl);
   } catch (error) {
-    throw new Error(`Could not download scrcpy-server ${source.version} from ${source.url}: ${error instanceof Error ? error.message : String(error)}. ${byHand}`);
+    throw new Error(failed(error instanceof Error ? error.message : String(error)));
   }
   const digest = sha256(bytes);
   if (digest !== source.sha256) {
-    throw new Error(`The scrcpy-server ${source.version} downloaded from ${source.url} has SHA-256 ${digest}, not the expected ${source.sha256}, so it was not saved. ${byHand}`);
+    throw new Error(`${failed("wrong SHA-256")} The download has SHA-256 ${digest}, not the expected ${source.sha256}, so it was not saved.`);
   }
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   writeFileAtomic(file, bytes, { mode: 0o600 });
