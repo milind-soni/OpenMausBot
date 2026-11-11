@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { cliVersionProbe } from "./cli-version-probe.ts";
 import { cliVersionReader, type execCli } from "./procs.ts";
@@ -84,4 +87,27 @@ it("reports an unrecognized failure without claiming the CLI is missing or expos
   expect(cliVersionReader("codex")(new Error("private diagnostic"), "private output")).toEqual({
     reason: "`codex` could not report its version. Check that it starts in a terminal, then check again.",
   });
+});
+
+it("does not report one copy's version for another copy that PATH now finds first", async () => {
+  const root = mkdtempSync(join(tmpdir(), "omb-cli-probe-"));
+  try {
+    const [newer, older] = ["newer", "older"].map((name) => {
+      const dir = join(root, name);
+      mkdirSync(dir);
+      for (const file of ["claude", "claude.cmd"]) writeFileSync(join(dir, file), "");
+      return dir;
+    });
+    const failed = Object.assign(new Error("fixture process failure"), { code: 1 });
+    const run = vi.fn<typeof execCli>()
+      .mockImplementationOnce((_cli, _args, _options, callback) => callback(null, "2.1.321"))
+      .mockImplementationOnce((_cli, _args, _options, callback) => callback(failed, ""))
+      .mockImplementation((_cli, _args, _options, callback) => callback(null, "2.1.197"));
+    const probe = cliVersionProbe("claude", run);
+    expect(await probe({ PATH: newer })).toEqual({ version: "2.1.321" });
+    expect(await probe({ PATH: [older, newer].join(delimiter) })).toEqual({ reason: expect.stringContaining("could not report its version") });
+    expect(await probe({ PATH: [older, newer].join(delimiter) })).toEqual({ version: "2.1.197" });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
