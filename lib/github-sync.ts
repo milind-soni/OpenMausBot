@@ -99,7 +99,7 @@ export async function createGitHubTask(projectId: string, taskId: string) {
   const repoUrl = `https://github.com/${repo.owner}/${repo.repo}`;
   if (task.githubIssueNumber) return { ok: true, issueNumber: task.githubIssueNumber, issueUrl: task.githubIssueUrl, message: `Already linked to GitHub #${task.githubIssueNumber}` };
   if (!token) throw new Error(connection && !project.githubWorkspaceAccess
-    ? "GitHub is connected. A workspace admin must enable this repository in the project's Repo tab."
+    ? "GitHub is connected. A workspace admin must enable this repository in the project's Code tab."
     : "A workspace admin needs to reconnect GitHub in Settings > Integrations");
   const key = `issue:${taskId}:${repoUrl.toLowerCase()}`;
   if (!await lockGitHubJob(key)) throw new Error("This issue is already being created. Wait a moment before retrying.");

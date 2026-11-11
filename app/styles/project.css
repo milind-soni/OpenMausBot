@@ -1,16 +1,16 @@
 /* Project view: header with project identity, the in-project tab menu, per-tab panels, project settings. */
 .project-shell { position: relative; display: flex; flex-direction: column; min-height: 100%; }
 
-/* Header bar: icon + name, tabs, settings at the end. */
+/* Header bar: icon + name, capsule tabs, settings at the end. */
 .project-navigation {
   position: sticky;
   top: 0;
   z-index: 10;
   display: flex;
   flex: none;
-  align-items: stretch;
-  gap: var(--space-5);
-  height: 52px;
+  align-items: center;
+  gap: var(--space-4);
+  height: 48px;
   margin: 0 calc(var(--space-6) * -1);
   padding: 0 var(--space-3) 0 var(--space-6);
   border-bottom: 1px solid var(--border-1);
@@ -18,80 +18,64 @@
 }
 .project-identity { display: flex; flex: 0 1 auto; align-items: center; gap: var(--space-2); min-width: 0; max-width: 240px; }
 .project-identity .project-icon { width: 16px; height: 16px; color: var(--text-2); }
-.project-identity h1 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); font-size: var(--text-md); font-weight: var(--weight-semibold); letter-spacing: -0.005em; }
+.project-identity h1 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); font-size: var(--text-base); font-weight: var(--weight-semibold); letter-spacing: -0.005em; }
+/* A hairline between the project name and its tabs, as in Linear's view header. */
+.project-identity::after { content: ""; flex: none; width: 1px; height: 16px; margin-left: var(--space-2); background: var(--border-2); }
 
-.project-tabs { display: flex; flex: 1; align-items: stretch; gap: var(--space-2); min-width: 0; }
-.project-tab-scroll { position: relative; display: flex; flex: 1; align-items: stretch; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+.project-tabs { display: flex; flex: 1; align-items: center; gap: var(--space-1); min-width: 0; height: 100%; }
+/* 2px of padding keeps the focus ring of the first and last pill inside the scroll box. */
+.project-tab-scroll { position: relative; display: flex; flex: 1; align-items: center; gap: 2px; min-width: 0; padding: 2px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
 .project-tab-scroll::-webkit-scrollbar { display: none; }
 .project-tab-scroll[data-fade-end] { mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
 .project-tab-scroll[data-fade-start] { mask-image: linear-gradient(to right, transparent, #000 28px); }
 .project-tab-scroll[data-fade-start][data-fade-end] { mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
 
+/* Capsule tabs: icon + label, the open one sits on a filled pill. No underline. */
 .project-tab {
   position: relative;
   display: inline-flex;
   flex: none;
   align-items: center;
   gap: 6px;
-  padding: 0 var(--space-3);
-  border: 0;
+  height: var(--control-sm);
+  padding: 0 10px 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-3);
+  color: var(--text-2);
   font-size: var(--text-base);
   font-weight: var(--weight-medium);
   white-space: nowrap;
-  transition: color var(--duration-fast) var(--ease-out);
+  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
   -webkit-tap-highlight-color: transparent;
 }
-/* Hover pill sits inside the full-height hit area; only devices that really hover get it, so a tap leaves no pill. */
-.project-tab::before { content: ""; position: absolute; inset: 12px 2px; z-index: -1; border-radius: var(--radius-sm); background: transparent; transition: background var(--duration-fast) var(--ease-out); }
+.project-tab > svg { flex: none; color: var(--text-3); transition: color var(--duration-fast) var(--ease-standard); }
 @media (hover: hover) {
-  .project-tab:hover { color: var(--text-1); }
-  .project-tab:hover::before { background: var(--hover); }
-  .project-tab:active::before { background: var(--active); }
+  .project-tab:hover { background: var(--hover); color: var(--text-1); }
+  .project-tab:hover > svg { color: var(--text-2); }
+  .project-tab:active { background: var(--active); }
   .project-settings-tab:hover { background: var(--hover); color: var(--text-1); }
   .project-settings-tab:active { background: var(--active); }
 }
-.project-tab[aria-selected="true"] { color: var(--text-1); }
-.project-tab:focus-visible { outline: none; }
-.project-tab:focus-visible::before { box-shadow: inset 0 0 0 2px var(--focus); }
-.project-tab > span:first-child { position: relative; }
-.project-tab-scroll { isolation: isolate; }
-
-/* Sliding active indicator along the bar's bottom edge. */
-.project-tab-indicator {
-  position: absolute;
-  left: 0;
-  bottom: -1px;
-  width: 0;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
-  background: var(--text-1);
-  opacity: 0;
-  pointer-events: none;
-}
-.project-tab-indicator[data-visible="true"] { opacity: 1; }
-.project-tab-indicator[data-animate="true"] { transition: transform var(--duration-slow) var(--ease-out), width var(--duration-slow) var(--ease-out); }
+.project-tab[aria-selected="true"], .project-tab[aria-selected="true"]:hover { border-color: var(--border-2); background: var(--selected); color: var(--text-1); }
+.project-tab[aria-selected="true"] > svg { color: var(--text-1); }
+.project-tab:focus-visible, .project-settings-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; box-shadow: none; }
 
 .project-settings-tab {
   position: relative;
   display: grid;
   flex: none;
   place-items: center;
-  align-self: center;
-  width: var(--control);
-  height: var(--control);
+  width: var(--control-sm);
+  height: var(--control-sm);
   padding: 0;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-3);
-  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
 }
-.project-settings-tab:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--focus); }
-.project-settings-tab[aria-selected="true"] { background: var(--surface-4); color: var(--text-1); }
-.project-settings-tab svg { transition: transform var(--duration-slow) var(--ease-out); }
-.project-settings-tab[aria-selected="true"] svg { transform: rotate(45deg); }
+.project-settings-tab[aria-selected="true"], .project-settings-tab[aria-selected="true"]:hover { border-color: var(--border-2); background: var(--selected); color: var(--text-1); }
 
 /* Panels. */
 /* Toolbars sit in a 44px row right under the header, level with the Issues toolbar; other content brings its own top space. */
@@ -109,6 +93,7 @@
 .project-empty { display: grid; flex: 1; justify-items: center; align-content: center; gap: var(--space-2); min-height: 280px; padding: var(--space-10) var(--space-4) max(var(--space-10), 10vh); text-align: center; color: var(--text-3); animation: project-panel-in var(--duration-slow) var(--ease-out); }
 .project-empty-icon { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: var(--space-1); border: 1px solid var(--border-2); border-radius: var(--radius-lg); background: var(--surface-2); color: var(--text-2); }
 .project-empty h2 { margin: 0; color: var(--text-1); font-size: var(--text-md); font-weight: var(--weight-medium); }
+.project-empty-hint { max-width: 400px; margin: 0; color: var(--text-3); font-size: var(--text-sm); line-height: var(--leading); }
 .project-empty > .primary-button, .project-empty > .ghost-button { margin-top: var(--space-2); }
 .project-empty > .notice { max-width: 420px; }
 
@@ -174,26 +159,29 @@
 .icon-button.copied, .copied-icon { color: var(--green); }
 
 @media (max-width: 760px) {
-  .project-navigation { height: 48px; margin: 0 calc(var(--space-4) * -1); padding: 0 var(--space-2) 0 var(--space-1); gap: var(--space-1); background: var(--bg); }
+  .project-navigation { height: 48px; margin: 0 calc(var(--space-4) * -1); padding: 0 var(--space-2) 0 var(--space-2); gap: var(--space-1); background: var(--bg); }
   .project-identity { display: none; }
-  .project-tab { flex: 1 0 auto; justify-content: center; padding: 0 var(--space-2); font-size: var(--text-md); }
-  .project-tab::before { inset: 8px 0; }
-  .project-settings-tab { width: 40px; height: 40px; }
+  .project-tab { flex: 1 0 auto; justify-content: center; height: 32px; padding: 0 var(--space-2); }
+  .project-settings-tab { width: 36px; height: 36px; }
   .project-settings { padding-top: var(--space-3); }
   .project-member-add { grid-template-columns: minmax(0, 1fr) auto; }
   .project-member-add > select:first-child { grid-column: 1 / -1; }
   .project-danger-row { padding-left: var(--space-3); }
   .project-settings-section { padding: var(--space-5) 0; }
 }
-/* 360px Android: all five tabs fit beside the gear. */
-@media (max-width: 380px) {
-  .project-tab { padding: 0 6px; font-size: var(--text-base); }
+/* Phones: the five pills keep their labels down to 400px; below that the open pill keeps its label, the rest show icons. */
+@media (max-width: 480px) {
+  .project-tab:not([aria-selected="true"]) > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .project-tab:not([aria-selected="true"]) { padding: 0 var(--space-2); }
+  .project-tab > svg { width: 16px; height: 16px; }
 }
 @media (pointer: coarse) {
   .project-settings-tab { width: 44px; height: 44px; }
+  .project-tab { height: 36px; }
+  .project-tab::after { content: ""; position: absolute; inset: -4px 0; }
   .icon-picker-grid { grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) {
   .project-panel, .project-empty { animation: none; }
-  .project-tab-indicator[data-animate="true"], .project-settings-tab svg { transition: none; }
+  .project-tab, .project-tab > svg, .project-settings-tab { transition: none; }
 }
