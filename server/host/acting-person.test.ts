@@ -209,6 +209,9 @@ describe("what work in one person's private chat hands back", () => {
   it("to a chat others read: only where the result is, never the result or what was observed", () => {
     expect(privateHandBack(done, place(null))).toEqual({ ok: true, text: "Done. The result is in Helper's chat with Ada." });
     expect(privateHandBack({ ok: false, text: "Gmail said the board's thread is gone." }, place(null)).text).toBe("It stopped before it finished. The result is in Helper's chat with Ada.");
+    const approval: Parameters<typeof privateHandBack>[0] = privateHandBack({ ok: true, text: "Did not run.", approvalAsk: "Approve “Bash: cat salary.csv”?" }, place(null));
+    expect(approval.approvalAsk, "an unanswered approval names no private action").toBe("Helper has a question for Ada, in Helper's chat with Ada.");
+    expect(approval.privateQuestion).toBe(true);
     expect(privateHandBack(done, place(BEN)).text, "another person's private chat reads none of hers").toBe("Done. The result is in Helper's chat with Ada.");
   });
 

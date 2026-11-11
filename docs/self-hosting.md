@@ -28,6 +28,7 @@ For server feature switches, defaults and configuration-file instructions, see
 | Tailscale on the server and your devices | `npx openmausbot serve --tailscale` | `https://<machine>.<tailnet>.ts.net/pair#code=…` |
 | Only this network (home or office) | `npx openmausbot serve --lan` | `http://192.168.1.20:8799/pair#code=…` |
 | Nothing at all | `npx openmausbot login`, then `npx openmausbot serve --tunnel` | `https://c-….openmausbot.com/pair#code=…` |
+| Only the phone app, from anywhere (a machine with no tunnel address, for now) | `npx openmausbot login --relay`, then `npx openmausbot serve --relay` | a QR for the MausBot app ([MausBot Relay](phone-relay-server.md)) |
 
 `--lan` can be added to any of the others. Plain `http://` is only for a
 private network: the desktop app accepts it on LAN addresses, Tailscale
@@ -176,7 +177,7 @@ npx openmausbot pair
 | `Reach    ✗ https://… answers as a different server.` | The address leads to another MausBot server. | Point the tunnel at this machine's port. |
 | `Reach    … https://… doesn't answer yet` (`--domain`) | DNS isn't pointing here yet, or ports 80 and 443 are closed. | Fix the A record and open the ports; the certificate follows. |
 | `--lan: this machine has no private network address…` | A VPS with only a public address. | Use `--public-url`, `--domain` or `--tailscale`. |
-| `--tailscale: HTTPS certificates are off for this tailnet…` | Tailscale can't serve HTTPS yet. | Turn on HTTPS certificates at https://login.tailscale.com/admin/dns, then run `serve --tailscale` again. |
+| `tailscale: HTTPS certificates are off for this tailnet, so this server listens on http://…` | Tailscale can't serve HTTPS yet, so the server listens on its own tailnet address. It works, and only your tailnet reaches it. | For an `https://` address, turn on HTTPS certificates at https://login.tailscale.com/admin/dns, then run `serve --tailscale` again. |
 | `No MausBot server is running here. Start it: … serve` | `pair` found no server on this port. | Start it, or pass the server's `--port` and `--data-dir`. |
 | `Get a pairing code: openmausbot pair` and no code | The server runs as a service or under `docker compose logs`, where codes stay out of logs. | Run that command in a terminal. |
 | "This shared server takes no pairing commands from this machine." | The server runs with `OMB_LOOPBACK_TRUST=service`. | Let people sign in with their email (`openmausbot access add you@example.com`), or pair from a signed-in admin's Settings. |
@@ -237,8 +238,11 @@ too.
   binding ports 80 and 443 as a normal user needs one privilege grant. When
   Caddy reports the refusal, `serve` prints the exact `setcap` command to run
   once.
-- **`--tailscale`**: needs Tailscale signed in and HTTPS certificates enabled
-  for the tailnet (admin console → DNS). `serve` checks both, and checks that
+- **`--tailscale`**: needs Tailscale signed in. With HTTPS certificates off
+  for the tailnet (admin console → DNS), or `tailscale serve` not allowed for
+  this user, the server listens on this machine's own tailnet addresses at
+  `http://<name>:<port>` and answers only tailnet peers that use that exact
+  name. Otherwise `serve` checks that
   no other MausBot server already answers on this machine's name. Then it
   runs `tailscale serve --https=443 http://127.0.0.1:8799` in the foreground,
   so the share ends when `serve` stops. A marker file in the data dir lets the
@@ -979,6 +983,14 @@ nothing there changes.
 On the Workspaces screen, creating a client workspace shows the same kind of
 link for that workspace's admin, so a client gets one address, one workspace
 and one link.
+
+## Announcements from the project
+
+When someone opens the app, the server downloads the project's public announcements file from GitHub
+(`raw.githubusercontent.com`, at most once an hour, a plain GET with nothing of yours in it) and its pages may show one of
+its cards in the corner: product news, a tip, or a sponsor's offer, each once per person
+([docs/announcements.md](announcements.md)). Set `OMB_DISABLE_ANNOUNCEMENTS=1` in the server's environment to never
+download it and never show those cards.
 
 ## Attachment storage
 

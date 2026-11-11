@@ -133,6 +133,12 @@ describe("CI path scope", () => {
     expect(selectCiScope([file])).toEqual({ areas: ["desktop"], checks: checks("server") });
   });
 
+  it("runs nothing beyond static, which validates them, for the announcements file, its schema and pictures", () => {
+    expect(selectCiScope(["announcements/announcements.json", "announcements/announcements.schema.json", "announcements/images/phone.png"]))
+      .toEqual({ areas: ["announcements"], checks: [] });
+    expect(selectCiScope(["announcements/announcements.json", "docs/announcements.md"])).toEqual({ areas: ["announcements", "docs"], checks: ["docs-tests"] });
+  });
+
   it("runs only the control-plane job for the control plane", () => {
     expect(selectCiScope(["cloudflare/control-plane/src/index.ts"])).toEqual({ areas: ["control-plane"], checks: ["control-plane"] });
   });
@@ -189,6 +195,7 @@ describe("CI outputs", () => {
     expect(VITEST_SUBSETS["locale-tests"].files).toEqual([
       "src/",
       "electron/cua-launch.test.mjs",
+      "electron/cua-watch-restart.test.mjs",
       "electron/cua-windows-isolation.test.mjs",
       "electron/menu.test.mjs",
       "electron/updater.test.mjs",
@@ -242,6 +249,7 @@ describe("CI outputs", () => {
       "server/host/brief-words.test.ts",
       "server/host/lending-lifts.test.ts",
       "server/lent-folders.e2e.test.ts",
+      "server/move-chosen-bots.e2e.test.ts",
       "server/one-home-keep.e2e.test.ts",
       "server/one-home-outdated.e2e.test.ts",
       "server/one-home-retry.e2e.test.ts",

@@ -396,6 +396,11 @@ describe("cloudHomePrompt", () => {
     expect(none).toContain("say so in one sentence");
     expect(none).not.toMatch(/run_command|shared_computer/u);
   });
+  it("names every computer's status with the tools on, and says nothing about them without", () => {
+    const known = [{ name: "ASH-MBP", platform: "darwin" as const, online: true, lent: true, lastSeenAt: 1 }, { name: "OFFICE-PC", platform: "win32" as const, online: false, lent: true, lastSeenAt: Date.UTC(2026, 9, 1, 8, 0) }];
+    expect(cloudHomePrompt(true, [], known)).toContain("Their computers right now: ASH-MBP (Mac): online; OFFICE-PC (PC): offline since 2026-10-01 08:00 UTC.");
+    expect(cloudHomePrompt(false, [], known)).not.toContain("Their computers right now");
+  });
   it("says the bot runs in the cloud, offers what works there, and never asks for a place that cannot exist", () => {
     for (const tools of [true, false]) {
       const text = cloudHomePrompt(tools);

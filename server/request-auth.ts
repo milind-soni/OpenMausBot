@@ -180,7 +180,7 @@ export function requestOrigin(req: IncomingMessage): string | null {
 }
 
 /** Every header a reverse proxy uses to name its client, so one that sets only X-Real-IP is still not loopback. */
-const PROXY_HEADERS = [
+export const PROXY_HEADERS = [
   "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "forwarded",
   "x-real-ip", "cf-connecting-ip", "true-client-ip", "x-client-ip",
 ] as const;
@@ -366,6 +366,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/respond$/ },
   { methods: ["POST"], path: /^\/api\/threads\/[\w-]+\/respond$/ },
   { methods: ["POST"], path: /^\/api\/threads\/[\w-]+\/undo$/ }, // whoever may answer the card: see the handler
+  { methods: ["GET"], path: /^\/api\/bursts\/[\w-]+$/ }, // whoever sees the chat: see the handler
+  { methods: ["POST"], path: /^\/api\/bursts\/[\w-]+\/(?:run|cancel|retry|edit)$/ }, // whoever may answer the card: see the handler
   { methods: ["PATCH"], path: /^\/api\/bots\/[\w-]+\/cards\/[\w-]+$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/(?:resume|dismiss)$/ },
   // A secret only the conversation's own person may type in: kept behind the card, never in Settings (routes/secret-cards.ts).
@@ -449,6 +451,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/team\/people$/ },
   // the workspace's banner picture: everyone signed in here sees it; changing it (PUT, DELETE) is an admin's
   { methods: ["GET"], path: /^\/api\/workspace\/banner$/ },
+  // the project's announcement cards, the same public file for everyone (routes/announcements.ts)
+  { methods: ["GET"], path: /^\/api\/announcements$/ },
   // a teammate's picture: the handler serves it to the team's own members only
   { methods: ["GET"], path: /^\/api\/team\/people\/p_[\w-]{22}\/picture$/ },
   { methods: ["PUT"], path: /^\/api\/bots\/[\w-]+\/reports-to$/ },

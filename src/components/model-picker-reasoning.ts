@@ -2,9 +2,18 @@ import { useEffect, useRef, type RefObject } from "react";
 import type { AppState, Bot, InstanceInfo, ModelSelection } from "@/state/store";
 import type { ModelVariantOption } from "../../shared/runtime-events";
 import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 
-export const variantLabel = (option: ModelVariantOption, driverKind?: string): string =>
-  option.id === "default" && driverKind === "opencodeGo" ? t("model.variant.openCodeDefault") : option.label;
+/** The chat engine's variants are thinking levels with these ids; other engines name their own. */
+const CHAT_ENGINE_VARIANTS: Readonly<Record<string, LocaleKey>> = {
+  off: "model.effort.off", on: "model.variant.on", none: "model.effort.none", low: "model.effort.low",
+  medium: "model.effort.medium", high: "model.effort.high", xhigh: "model.effort.xhigh", max: "model.effort.max",
+};
+
+export const variantLabel = (option: ModelVariantOption, driverKind?: string): string => {
+  if (option.id === "default" && driverKind === "opencodeGo") return t("model.variant.openCodeDefault");
+  return driverKind === "openai-compat" && Object.hasOwn(CHAT_ENGINE_VARIANTS, option.id) ? t(CHAT_ENGINE_VARIANTS[option.id]!) : option.label;
+};
 
 /** ACP variant ids are opaque; their model/session declares the available choices. */
 export function variantChoices(state: Pick<AppState, "instances" | "modelVariantSessions">, selection: ModelSelection, threadId: string | undefined) {

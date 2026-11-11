@@ -92,6 +92,7 @@ export function resolveCompanionControlPlaneURL({
 export function companionAccountCleanupPending(credentials) {
   return credentials?.[COMPANION_ACCOUNT_CLEANUP_PENDING_FIELD] === true;
 }
+/** The control plane ended this signed-in computer's secure address for old phone apps ("retired"), and none came back. */ export const companionTunnelRetired = (credentials) => Boolean(storedAccount(credentials)) && !managedCompanionTunnelAccess(credentials) && credentials?.[COMPANION_TUNNEL_RETIRED_FIELD] === true;
 
 function storedAccount(credentials) {
   const email = normalizeAccountEmail(ownString(credentials, COMPANION_ACCOUNT_EMAIL_FIELD));
@@ -338,8 +339,7 @@ export function createCompanionAccountService({
     const account = storedAccount(document);
     const persistedAccess = managedCompanionTunnelAccess(document);
     const available = healthy || Boolean(account);
-    const paused = Boolean(account) && !persistedAccess && document[COMPANION_ENDPOINT_PAUSED_FIELD] === true;
-    const tunnelRetired = Boolean(account) && !persistedAccess && document[COMPANION_TUNNEL_RETIRED_FIELD] === true;
+    const paused = Boolean(account) && !persistedAccess && document[COMPANION_ENDPOINT_PAUSED_FIELD] === true, tunnelRetired = companionTunnelRetired(document);
     if (!healthy) {
       return publicState({
         available,
@@ -512,7 +512,7 @@ export function createCompanionAccountService({
       clientInstanceId,
       name: identity.name,
       platform: identity.platform,
-      appVersion: identity.appVersion,
+      appVersion: identity.appVersion, ...(identity.kind ? { kind: identity.kind } : {}),
     });
     // Persist the verified installation before provisioning, or each Retry rotates the credential until rate-limited.
     try {
@@ -531,7 +531,7 @@ export function createCompanionAccountService({
     };
     if (onDemand && (await currentNeed()) === false) return withoutTunnel();
     let relayOnly = null;
-    const endpoint = await client.ensureEndpoint(installation.credential, { appVersion: identity.appVersion, ...(await relay.legacyDevices().then((count) => (count === null ? {} : { legacyDevices: count }))) })
+    const endpoint = await client.ensureEndpoint(installation.credential, { appVersion: identity.appVersion, ...(identity.kind ? { kind: identity.kind } : {}), ...(await relay.legacyDevices().then((count) => (count === null ? {} : { legacyDevices: count }))) })
       .catch((error) => {
         if (error?.code !== "relay_capable") throw error;
         relayOnly = error.tunnel ?? "none";

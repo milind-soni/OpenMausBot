@@ -268,6 +268,7 @@ const bridge = {
     keepAwake: (enabled) => ipcRenderer.invoke("companion:keep-awake", enabled),
     refreshTailscale: () => ipcRenderer.invoke("companion:refresh-tailscale"),
     setTailscale: (on) => ipcRenderer.invoke("companion:tailscale", on === true),
+    setTailscaleComputers: (on) => ipcRenderer.invoke("companion:tailscale-computers", on === true),
     setRoute: (route, on) => ipcRenderer.invoke("companion:route", String(route), on === true),
     dismissNotice: (route) => ipcRenderer.invoke("companion:notice-dismiss", String(route)),
     pairing: (open, expectedToken) => ipcRenderer.invoke("companion:pairing", open, expectedToken),
@@ -542,6 +543,15 @@ const bridge = {
     teamBringMove: botId => navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:team-bring-move", String(botId)) : Promise.reject(new Error("Choose Move to move the bot.")),
     teamBringStatus: () => ipcRenderer.invoke("cloud-send:team-bring-status"),
+    // Which of this computer's bots move to My Cloud: asked on either page, and only from the person's click on My Cloud's.
+    botMoveState: () => ipcRenderer.invoke("cloud-send:bot-move-state"),
+    botChoices: () => ipcRenderer.invoke("cloud-send:bot-choices"),
+    moveBots: ids => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:move-bots", Array.isArray(ids) ? ids.map(String) : []) : Promise.reject(new Error("Choose which bots move.")),
+    moveEverything: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:move-everything") : Promise.reject(new Error("Choose which bots move.")),
+    botMoveRetry: () => ipcRenderer.invoke("cloud-send:bot-move-retry"),
+    openMyCloud: () => ipcRenderer.invoke("cloud-send:open-my-cloud"),
     // Settings → MausBot Cloud, Advanced: "Keep this computer's bots on this computer".
     keepHere: () => ipcRenderer.invoke("one-home:keep"),
     setKeepHere: on => isLocalPage || navigator.userActivation?.isActive === true

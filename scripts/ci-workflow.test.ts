@@ -49,6 +49,12 @@ describe("CI concurrency", () => {
     );
   });
 
+  it("validates the model manifest before anything lands on main", () => {
+    const step = workflow.jobs.static.steps.find((candidate: { name?: string }) => candidate.name === "Validate the model manifest");
+    expect(step.run).toContain("scripts/check-model-manifest.mjs");
+    expect(workflow.on.pull_request).toBeDefined();
+  });
+
   it("runs the full lane every night", () => {
     expect(workflow.on.schedule).toEqual([{ cron: expect.stringMatching(/^\d+ \d+ \* \* \*$/) }]);
   });

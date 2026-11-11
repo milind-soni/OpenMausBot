@@ -45,6 +45,7 @@ import { ADVANCED_MODE_KEY, setAdvancedMode } from "@/lib/interface-mode";
 import { SIMPLE_MODE_PROMPT_KEY } from "@/lib/simple-mode-prompt";
 import { ADVANCED_BACK_KEY } from "@/lib/new-look";
 import { api } from "@/state/store";
+import { forgetAnnouncementCards, seenKey } from "@/lib/announcements";
 
 const DAY = 86_400_000, NOW = new Date(2026, 9, 9, 12).getTime();
 const plans = [
@@ -140,6 +141,8 @@ const launchCardsSeen = () => { desk.saved = { seen: [WHATS_NEW_NOTICE] }; stora
 const hints = () => f.state.config.onboarding.hintsSeen as string[];
 
 beforeEach(() => {
+  // The page's announcement cards live beside the component for the session; no test inherits another's.
+  forgetAnnouncementCards();
   vi.clearAllMocks(); vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   storage = new Map(); f.values = []; f.index = 0; f.effects = []; f.updater = null; f.brand = "default"; f.dispatch = vi.fn(); now = NOW; desk = desktopMachine();
   setLocale("en"); viewer = LOCAL_VIEWER; account = signedOut; snapshot = { status: "none" }; offer = TRIAL_OFFER;
@@ -1530,4 +1533,262 @@ describe("ModelGo's sponsor card", () => {
     expect(launchNotice()).toBe(WHATS_NEW_NOTICE);
   });
 
+});
+
+describe("cards from the announcements file", () => {
+  const card = (id: string, extra: Record<string, unknown> = {}) => ({ id, kind: "product", label: "New", title: `Title of ${id}`, body: `Body of ${id}.`,
+    primary: { label: `Open ${id}`, action: { open_url: `https://example.com/${id}` } }, ends: new Date(NOW + 30 * DAY).toISOString(), ...extra });
+  let feed: unknown[];
+  const events = () => vi.mocked(track).mock.calls.filter(([name]) => name === "announcement").map(([, props]) => props);
+  beforeEach(() => {
+    forgetAnnouncementCards(); feed = [card("phone-app")];
+    const config = vi.mocked(api).getMockImplementation()!;
+    vi.mocked(api).mockImplementation(async (path, init) => path === "/api/announcements" ? { cards: feed } : config(path, init));
+  });
+
+  it("shows the first card for this person as a corner card: its label, title, body and button, and Not now", async () => {
+    const shown = await launch();
+    for (const text of ["New", "Title of phone-app", "Body of phone-app.", "Open phone-app", "Not now"]) expect(shown).toContain(text);
+    expect(shown).toContain('data-notice="announcement"'); expect(shown).not.toContain('aria-modal="true"');
+    expect(events()).toEqual([{ id: "phone-app", kind: "product", action: "shown" }]);
+    expect(await settle()).toContain("Title of phone-app");
+    expect(events(), "one shown event, however often it draws").toHaveLength(1);
+  });
+
+  it("its button opens the file's address outside the app, as it is, and the card is gone for good on every record", async () => {
+    await launch(); press("Open phone-app"); await flush();
+    expect(window.ogb!.openExternal).toHaveBeenCalledWith("https://example.com/phone-app");
+    expect(events().at(-1)).toEqual({ id: "phone-app", kind: "product", action: "primary" });
+    expect(render()).toBe("");
+    expect(storage.get(seenKey("phone-app"))).toBe("1"); expect(hints()).toContain(seenKey("phone-app")); expect(desk.saved?.seen).toContain(seenKey("phone-app"));
+    expect(await relaunch()).not.toContain("Title of phone-app");
+  });
+
+  it("a button for one of the app's places opens it in the app, and only that", async () => {
+    feed = [card("keys-tip", { kind: "tip", primary: { label: "Open API keys", action: { open: "api_keys" } }, secondary: { label: "Connect apps", action: { open: "connected_apps" } } })];
+    expect(await launch()).not.toContain("Not now");
+    press("Connect apps");
+    expect(f.dispatch).toHaveBeenCalledWith({ type: "togglePlugins", open: true, surface: "apps" });
+    expect(events().at(-1)).toEqual({ id: "keys-tip", kind: "tip", action: "secondary" });
+    expect(window.ogb!.openExternal).not.toHaveBeenCalled();
+  });
+
+  it("one card a launch: the next waits for the next launch", async () => {
+    feed = [card("first-card"), card("second-card")];
+    await launch(); press("Not now"); await flush();
+    expect(events().at(-1)).toEqual({ id: "first-card", kind: "product", action: "close" });
+    expect(await settle(), "the same page").toBe("");
+    expect(await launch(), "the same launch").toBe("");
+    expect(await relaunch()).toContain("Title of second-card");
+  });
+
+  it("follows the built-in sponsor card in its launch once that closes, never beside it", async () => {
+    storage.delete(MODELGO_OFFER_NOTICE);
+    const first = await launch();
+    expect(first).toContain("ModelGo"); expect(first).not.toContain("Title of phone-app");
+    press("Not now"); await flush();
+    const after = await settle();
+    expect(after).toContain("Title of phone-app"); expect(after).not.toContain("ModelGo");
+    expect(launchNotice()).toBe(MODELGO_OFFER_NOTICE);
+  });
+
+  it("follows a closed What's new in the same launch, then no other remote card that launch", async () => {
+    feed = [card("first-card"), card("second-card")];
+    returning(); desk.saved = null; storage.delete(WHATS_NEW_NOTICE); storage.set(CLOUD_INTRO, "1");
+    const popup = await launch();
+    expect(popup).toContain("Meet the new MausBot Cloud"); expect(popup, "never two at once").not.toContain("Title of first-card");
+    expect(events()).toEqual([]);
+    press("Not now"); await flush();
+    const after = await settle();
+    expect(after, "right after What's new closes").toContain("Title of first-card"); expect(after).not.toContain("Meet the new MausBot Cloud");
+    expect(launchNotice(), "What's new keeps the launch").toBe(WHATS_NEW_NOTICE);
+    expect(await launch(), "a reload in the same launch").toContain("Title of first-card");
+    press("Not now"); await flush();
+    expect(await settle(), "one remote card a launch").toBe("");
+    expect(await launch(), "nor after a reload").toBe("");
+    expect(await relaunch()).toContain("Title of second-card");
+  });
+
+  it("never over a notice to act on: the move popup keeps the corner, and the card follows it once closed", async () => {
+    storage.delete(GROK_MOVE_NOTICE); returning();
+    vi.stubGlobal("document", { activeElement: null, body: null, documentElement: { dataset: {} }, getElementById: () => null,
+      querySelector: (selector: string) => selector === "[data-grok-move-popup]" ? { querySelectorAll: () => [] } : null, querySelectorAll: () => [] });
+    const grok = await launch();
+    expect(grok).toContain("data-grok-move-popup"); expect(grok).not.toContain("Title of phone-app");
+    expect(await settle(), "it stays up alone").not.toContain("Title of phone-app");
+    press("Not now"); await flush();
+    expect(await settle(), "after the move's popup").toContain("Title of phone-app");
+  });
+
+  it("a card left up keeps the corner: a card that arrives meanwhile waits for it to close", async () => {
+    returning(); storage.delete(STAR_NOTICE); storage.set(CLOUD_INTRO, "1"); feed = [];
+    expect(await launch()).toContain("Enjoying MausBot?");
+    feed = [card("phone-app")]; forgetAnnouncementCards();
+    const still = await settle();
+    expect(still, "the star took the launch and is still up").toContain("Enjoying MausBot?"); expect(still).not.toContain("Title of phone-app");
+    press("Not now"); await flush();
+    expect(await settle()).toContain("Title of phone-app");
+  });
+
+  it("not after another remote card in the same launch, even with a third card due", async () => {
+    feed = [card("first-card"), card("second-card"), card("third-card")];
+    expect(await launch()).toContain("Title of first-card");
+    expect(launchNotice()).toBe("announcement");
+    press("Not now"); await flush();
+    expect(await settle()).toBe("");
+    expect(await launch(), "a reload").toBe("");
+  });
+
+  it("never in the launch the welcome took, nor over a live call", async () => {
+    f.state.liveCall = { status: "active" };
+    expect(await launch()).not.toContain("Title of phone-app");
+    f.state.liveCall = undefined; session.clear(); markWelcomeFinished();
+    expect(await launch()).not.toContain("Title of phone-app");
+  });
+
+  it("its words are text: markup in the file shows as written and runs nothing", async () => {
+    feed = [card("markup", { body: "<img src=x onerror=alert(1)><b>bold</b>" })];
+    const shown = await launch();
+    expect(shown).toContain("&lt;img src=x onerror=alert(1)&gt;&lt;b&gt;bold&lt;/b&gt;");
+    expect(shown).not.toContain("<b>");
+  });
+
+  it("follows the person's language, falling back to English", async () => {
+    feed = [card("translated", { title: { en: "English title", de: "Deutscher Titel" } })];
+    setLocale("de");
+    expect(await launch()).toContain("Deutscher Titel");
+  });
+
+  it("skips a card for someone else and a card it cannot read, and shows nothing on a branded build", async () => {
+    feed = [card("cloud-only", { audience: { surfaces: ["cloud"] } }), card("future-key", { audience: { country: ["de"] } }), card("broken", { primary: { label: "Go", action: { eval: "x" } } }), card("for-desktop")];
+    expect(await launch()).toContain("Title of for-desktop");
+    f.brand = "file"; forgetAnnouncementCards(); storage.set(seenKey("for-desktop"), "1"); feed = [card("branded")];
+    expect(await relaunch()).not.toContain("Title of branded");
+  });
+
+  describe("a sponsor's card", () => {
+    const sponsor = (id: string) => card(id, { kind: "sponsor", label: "Sponsor" });
+
+    it("one a week: a second sponsor waits while a product card may show", async () => {
+      feed = [sponsor("sponsor-one"), sponsor("sponsor-two"), card("product-news")];
+      expect(await launch()).toContain("Title of sponsor-one");
+      press("Not now"); await flush();
+      expect(await relaunch()).toContain("Title of product-news");
+      press("Not now"); await flush();
+      expect(await relaunch()).toBe("");
+      now += 7 * DAY;
+      expect(await relaunch()).toContain("Title of sponsor-two");
+    });
+
+    it("never where an organization restricts providers, nor to a Team Cloud's members who are not its owner or an admin", async () => {
+      feed = [sponsor("sponsor-one"), card("product-news")];
+      f.state.config.managedPolicy = { organizationName: "Acme", companyModelsOnly: false, allowedEngines: ["claudeAgent"] };
+      expect(await launch()).toContain("Title of product-news");
+      f.state.config.managedPolicy = undefined; storage.set(seenKey("product-news"), "1");
+      viewer = { hosted: true, canSave: false, cloudHome: true }; f.state.config.cloudHome = true; f.state.config.team = { id: "t", name: "Team" };
+      f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), "cloud-setup-hidden"]; showWindow(VPS);
+      expect(await relaunch(), "a member").toBe("");
+      viewer = { hosted: true, canSave: true, cloudHome: true };
+      expect(await relaunch(), "the team's owner or an admin").toContain("Title of sponsor-one");
+    });
+  });
+});
+
+describe("Update MausBot on your phone", () => {
+  const TITLE = "Update MausBot on your phone", MODELGO = "ModelGo is now in MausBot";
+  const OLD = { id: "0f8c2a41-1111-4222-8333-444455556666", name: "Ada's iPhone", createdAt: 1, lastSeenAt: 1, cloudDesktopAccess: false };
+  const NEW = { id: "5b5b5b5b-1111-4222-8333-444455556666", name: "Work phone", createdAt: 1, lastSeenAt: 1, cloudDesktopAccess: false, e2eAt: 2 };
+  const OTHER = { ...OLD, id: "7c7c7c7c-1111-4222-8333-444455556666", name: "Old Android" };
+  let devices: unknown[], retired: boolean;
+  let companion: ReturnType<typeof vi.fn>, linked: ReturnType<typeof vi.fn>;
+  /** This computer's phone link and its account, as Settings → Phone & devices reads them through the same two bridges. */
+  const bridgesOn = () => {
+    companion = vi.fn(async () => ({ enabled: true, keepAwake: false, port: 1, devices, pairing: null }));
+    linked = vi.fn(async () => ({ available: true, status: "ready", ...(retired ? { tunnelRetired: true } : {}) }));
+    Object.assign(window.ogb as Record<string, unknown>, { companion: { state: companion }, companionAccount: { state: linked } });
+  };
+  beforeEach(() => { devices = [OLD, NEW]; retired = true; bridgesOn(); });
+
+  it("shows once this computer's link ended and a paired phone has an older app: the phone, what to do, Open Phone & devices and Not now", async () => {
+    const shown = await launch();
+    expect(shown).toContain(TITLE); expect(shown).toContain('data-notice="phone-update"');
+    for (const text of ["Ada&#x27;s iPhone has an older version of the MausBot app, which can no longer connect to this computer away from your Wi-Fi.",
+      "Update the app on that phone, then open it once on the same Wi-Fi as this computer. If that doesn&#x27;t reconnect it, pair it again.",
+      "Open Phone &amp; devices", "Not now"]) expect(shown).toContain(text);
+    expect(shown).not.toContain("Work phone");
+    expect(launchNotice()).toBe("phone-app-update");
+  });
+
+  it("Open Phone & devices opens pairing in Settings, and the card is done for that phone", async () => {
+    await launch();
+    tree().find(node => node.type === "button" && node.props.children === "Open Phone & devices")!.props.onClick(); await flush();
+    expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "companion", phonePairing: true });
+    expect(hints()).toContain("phone-app-update:0f8c2a41");
+    expect(render()).toBe("");
+    expect(await relaunch()).not.toContain(TITLE);
+  });
+
+  it("after Not now it stays away, until another phone with an older app is paired: then once more, for that phone", async () => {
+    await launch(); press("Not now"); await flush();
+    expect(render()).toBe(""); expect(await relaunch()).not.toContain(TITLE);
+    devices = [OLD, OTHER]; bridgesOn();
+    expect(await relaunch()).toContain("Old Android has an older version");
+    press("Not now"); await flush();
+    expect(await relaunch()).not.toContain(TITLE);
+  });
+
+  it("names how many phones when more than one has an older app", async () => {
+    devices = [OLD, OTHER]; bridgesOn();
+    expect(await launch()).toContain("2 of your phones have an older version of the MausBot app");
+  });
+
+  it("never when no paired phone has an older app, nor when this computer's link was not ended", async () => {
+    devices = [NEW]; bridgesOn();
+    expect(await launch(), "every phone updated and paired again").not.toContain(TITLE);
+    expect(linked, "the account is asked only for a phone with an older app").not.toHaveBeenCalled();
+    devices = []; bridgesOn();
+    expect(await relaunch(), "no phone").not.toContain(TITLE);
+    devices = [OLD]; retired = false; bridgesOn();
+    expect(await relaunch(), "the link was not ended").not.toContain(TITLE);
+    linked.mockRejectedValue(new Error("only on the local page")); retired = true;
+    expect(await relaunch(), "an account it can't read").not.toContain(TITLE);
+  });
+
+  it("only on this computer's own page of the desktop app, never on My Cloud or a server's page", async () => {
+    f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), "cloud-setup-hidden"];
+    viewer = { hosted: false, canSave: true, cloudHome: true }; f.state.config.cloudHome = true; showWindow(MY_CLOUD); bridgesOn();
+    expect(await relaunch(), "My Cloud").not.toContain(TITLE);
+    viewer = { hosted: true, canSave: true }; f.state.config.cloudHome = false; showWindow(VPS); bridgesOn();
+    expect(await relaunch(), "a server's page").not.toContain(TITLE);
+    expect(companion).not.toHaveBeenCalled();
+    vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+    expect(await relaunch(), "a plain browser").not.toContain(TITLE);
+  });
+
+  it("shows on a branded build too, as Settings → Phone & devices explains it there", async () => {
+    f.brand = "file";
+    expect(await launch()).toContain(TITLE);
+  });
+
+  it("is a notice to act on: ahead of the sponsor's card, which follows once it is closed, and behind the Grok Bot popup", async () => {
+    storage.delete(MODELGO_OFFER_NOTICE);
+    expect(await launch()).toContain(TITLE);
+    press("Not now"); await flush();
+    expect(await settle(), "then the sponsor's card, in the same launch").toContain(MODELGO);
+    storage.delete(GROK_MOVE_NOTICE); session.clear(); f.state.config.onboarding.hintsSeen = withTourFinished(undefined); storage.delete("phone-app-update:0f8c2a41");
+    const first = await launch();
+    expect(first, "the Grok Bot popup goes first").not.toContain(TITLE);
+    expect(launchNotice()).toBe(GROK_MOVE_NOTICE);
+  });
+
+  it("waits while it can't tell yet, and over a live call", async () => {
+    let answer = (_value: unknown) => {};
+    companion.mockImplementation(() => new Promise(resolve => { answer = resolve; }));
+    storage.delete(MODELGO_OFFER_NOTICE);
+    expect(await launch(), "nothing lower shows meanwhile").toBe("");
+    answer({ enabled: true, devices, pairing: null }); await flush();
+    expect(await settle()).toContain(TITLE);
+    session.clear(); bridgesOn(); f.state.liveCall = { status: "active" };
+    expect(await launch(), "a live call").toBe("");
+  });
 });

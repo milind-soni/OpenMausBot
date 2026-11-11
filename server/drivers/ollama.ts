@@ -1,6 +1,7 @@
 // Ollama's own API (docs/api.md in github.com/ollama/ollama): /api/tags lists the pulled models with their size and
 // details, /api/version answers with a version, and /api/show names a model's capabilities ("tools", "vision") from
 // v0.6.4. A default install takes no key on these routes or on the OpenAI-compatible ones under /v1.
+import type { LocalModel, LocalModelThinking as OllamaThinking, OllamaState, OllamaStatus } from "../../shared/local-model.ts";
 import { isContextName } from "./ollama-context.ts";
 
 export const OLLAMA_PORT = "11434";
@@ -11,31 +12,8 @@ export const OLLAMA_PLACEHOLDER_KEY = "ollama";
 export const OLLAMA_PULL_COMMAND = "ollama pull llama3.2";
 
 /** A pulled model, as /api/tags and /api/show describe it. */
-export interface OllamaModel {
-  name: string;
-  /** Bytes on disk. */
-  bytes?: number;
-  /** As Ollama writes it, such as "3.2B". */
-  parameters?: string;
-  /** As Ollama writes it, such as "Q4_K_M". */
-  quantization?: string;
-  /** Absent when the server does not say (before v0.6.4). */
-  tools?: boolean;
-  vision?: boolean;
-}
-
-/** `ready`: running with models. `no-models`: running, nothing pulled. `not-running`: nothing listens there.
- * `unreachable`: no answer in time, the host or network is unknown, or something else answers there. */
-export type OllamaState = "ready" | "no-models" | "not-running" | "unreachable";
-
-export interface OllamaStatus {
-  state: OllamaState;
-  url: string;
-  version?: string;
-  models: OllamaModel[];
-  /** Why an `unreachable` server could not be used. */
-  problem?: "timeout" | "network" | "not-ollama";
-}
+export type OllamaModel = LocalModel;
+export type { OllamaState, OllamaStatus };
 
 /** The server's own address: the base URL without the /v1 the OpenAI-compatible routes sit under. */
 export function ollamaOrigin(baseUrl: string): string {
@@ -75,11 +53,29 @@ export function ollamaTags(payload: unknown): OllamaModel[] | null {
   return models;
 }
 
+function thinkingControls(described: unknown): OllamaThinking {
+  const values = described && typeof described === "object" ? (described as { values?: unknown }).values : undefined;
+  const choices = Array.isArray(values)
+    ? values.flatMap((value) => value === false ? ["off"] : value === true ? ["on"] : text(value) ? [text(value)!] : [])
+    : [];
+  return choices.length ? { choices, described: true } : { choices: ["off", "on"], described: false };
+}
+
 /** What /api/show says a model can do; empty when the server predates capabilities. */
-export function showCapabilities(show: unknown): Pick<OllamaModel, "tools" | "vision"> {
-  const capabilities = show && typeof show === "object" ? (show as { capabilities?: unknown }).capabilities : undefined;
+export function showCapabilities(show: unknown): Pick<OllamaModel, "tools" | "vision" | "thinking"> {
+  const { capabilities, thinking } = (show && typeof show === "object" ? show : {}) as { capabilities?: unknown; thinking?: unknown };
   if (!Array.isArray(capabilities) || !capabilities.every((entry) => typeof entry === "string")) return {};
-  return { tools: capabilities.includes("tools"), vision: capabilities.includes("vision") };
+  const controls = capabilities.includes("thinking") ? thinkingControls(thinking) : undefined;
+  return { tools: capabilities.includes("tools"), vision: capabilities.includes("vision"), ...(controls && controls.choices.length > 1 ? { thinking: controls } : {}) };
+}
+
+/** The `reasoning_effort` a thinking choice sends on /v1, undefined to leave the model's default. Ollama v0.12.6, which
+ * lists no controls in /api/show, refuses a level on any model without named levels, so "on" stays unsent there. */
+export function thinkingEffort(thinking: OllamaThinking | undefined, choice: string | undefined): string | undefined {
+  if (!thinking || !choice || !thinking.choices.includes(choice)) return undefined;
+  if (choice === "off") return "none";
+  if (choice === "on") return thinking.described ? "high" : undefined;
+  return choice;
 }
 
 /** False only for a model /api/show says cannot chat. */
@@ -157,12 +153,12 @@ export async function probeOllama(url: string, options: ProbeOptions = {}): Prom
 }
 
 /** What stops an Ollama from answering, for the engine list; null when it can, or when something else answers there. */
-export function ollamaUnavailable(status: OllamaStatus): string | null {
+export function ollamaUnavailable(status: OllamaStatus, addedAsOllama = false): string | null {
   switch (status.state) {
     case "ready": return null;
     case "no-models": return `Ollama has no models yet. Run \`${OLLAMA_PULL_COMMAND}\`, then check again.`;
     case "not-running": return `Ollama isn't running at ${status.url}. Open the Ollama app or run \`ollama serve\`.`;
-    case "unreachable": return status.problem === "not-ollama" ? null
+    case "unreachable": return status.problem === "not-ollama" ? addedAsOllama ? `Something answers at ${status.url}, but it isn't Ollama.` : null
       : `Can't reach Ollama at ${status.url}${status.problem === "timeout" ? ": it did not answer in time" : ""}. Check the address and that this computer can reach it.`;
   }
 }

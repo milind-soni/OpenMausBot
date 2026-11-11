@@ -32,6 +32,9 @@ export const AREA_CHECKS = {
   // The Windows CUA job starts these the way the installed app does, then lends the PC's screen through them.
   "windows-computer-control": [...SERVER_CHECKS, "windows-cua"],
   "control-plane": ["control-plane"],
+  // The announcements file and its pictures: static validates them (scripts/check-announcements.mjs), and nothing else
+  // reads them but the server's bundled copy, which that check covers.
+  announcements: [],
   // The relay is its own package with its own lockfile; nothing outside relay/ reaches it except the shared vectors,
   // which it keeps a pinned copy of.
   relay: ["relay"],
@@ -52,6 +55,7 @@ export const VITEST_SUBSETS = {
     files: [
       "src/",
       "electron/cua-launch.test.mjs",
+      "electron/cua-watch-restart.test.mjs",
       "electron/cua-windows-isolation.test.mjs",
       "electron/menu.test.mjs",
       "electron/updater.test.mjs",
@@ -105,6 +109,7 @@ export const VITEST_SUBSETS = {
       "server/host/brief-words.test.ts",
       "server/host/lending-lifts.test.ts",
       "server/lent-folders.e2e.test.ts",
+      "server/move-chosen-bots.e2e.test.ts",
       "server/one-home-keep.e2e.test.ts",
       "server/one-home-outdated.e2e.test.ts",
       "server/one-home-retry.e2e.test.ts",
@@ -207,6 +212,7 @@ const AREAS = [
   [/^electron\/(?:cua|cua-failure|cua-connection|capabilities|screen-status|shared-cua-connection|shared-computer-access|lent-screen-tools|lent-screen-failures|paced-typing)\.[cm]js$/, "windows-computer-control"],
   [/^(?:electron|build)\/|^(?:electron-builder\.yml|index\.html|rail\.html)$/, "desktop"],
   [/^cloudflare\/control-plane\//, "control-plane"],
+  [/^announcements\//, "announcements"],
   [/^relay\//, "relay"],
 ];
 
