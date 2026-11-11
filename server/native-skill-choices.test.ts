@@ -18,7 +18,7 @@ const choicesFile = (botId: string) => join(DATA_DIR, "skill-state", botId, "nat
 
 afterEach(() => {
   if (!DATA_DIR.startsWith(join(tmpdir(), "omb-test-home-"))) throw new Error(`refusing to clean ${DATA_DIR}: not this test's home`);
-  for (const dir of [join(DATA_DIR, "skill-state"), join(DATA_DIR, "imported-skills"), join(HOME, ".agents"), CODEX_HOME, join(HOME, "repo"), join(HOME, "brought")]) {
+  for (const dir of [join(DATA_DIR, "skill-state"), join(DATA_DIR, "imported-skills"), join(HOME, ".agents"), CODEX_HOME, join(HOME, "repo"), join(HOME, "brought"), process.env.OMB_CODEX_ADMIN_SKILLS_DIR!]) {
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -29,10 +29,9 @@ function plant(root: string, name: string): string {
   writeFileSync(join(root, name, "SKILL.md"), skillMd(name));
   return join(root, name, "SKILL.md");
 }
-/** The path tables of a skills.config override, limited to this test's home: /etc/codex/skills belongs to the machine. */
 const paths = (args: string[]) => (args[1] ?? "").replace(/^skills\.config=\[|\]$/g, "").split("},{")
   .map((table) => /path=("(?:[^"\\]|\\.)*")/.exec(table)?.[1]).filter((path): path is string => path !== undefined)
-  .map((path) => JSON.parse(path) as string).filter((path) => path.startsWith(HOME)).sort();
+  .map((path) => JSON.parse(path) as string).sort();
 function damage(botId: string) {
   mkdirSync(join(DATA_DIR, "skill-state", botId), { recursive: true });
   writeFileSync(choicesFile(botId), "{\"off\": [");
@@ -70,13 +69,14 @@ describe("Codex skills.config overrides for a bot's switched-off skills", () => 
   it("selects each switched-off user skill by its SKILL.md path, leaving same-named repository skills alone", () => {
     const agents = plant(join(HOME, ".agents", "skills"), "pdf");
     const legacy = plant(join(CODEX_HOME, "skills"), "pdf");
+    const admin = plant(process.env.OMB_CODEX_ADMIN_SKILLS_DIR!, "pdf");
     plant(join(HOME, "repo", ".agents", "skills"), "pdf");
     plant(join(HOME, ".agents", "skills"), "rex");
     setNativeSkillEnabled("bot-a", "pdf", false);
 
     const args = codexDisabledNativeSkillArgs("bot-a", env);
     expect(args[0]).toBe("-c");
-    expect(paths(args)).toEqual([agents, legacy].sort());
+    expect(paths(args)).toEqual([agents, legacy, admin].sort());
     expect(args[1]).not.toContain("name=");
     expect(codexDisabledNativeSkillArgs("bot-b", env)).toEqual([]);
     expect(codexTurnConfigArgs({ botId: "bot-a", guestConfined: true }, env)).toEqual([...GUEST_CONFINED_CODEX_ARGS, ...args]);

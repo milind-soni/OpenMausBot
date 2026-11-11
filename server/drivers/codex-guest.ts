@@ -43,7 +43,6 @@ export function codexDisabledNativeSkillArgs(botId: string | undefined, env: Rec
   return ["-c", `skills.config=[${tables}]`];
 }
 
-/** Guest confinement and per-bot native skill disables for one Codex turn. */
 export function codexTurnConfigArgs(turn: { guestConfined?: boolean; botId?: string }, env: Record<string, string | undefined>): string[] {
   return [
     ...(turn.guestConfined ? GUEST_CONFINED_CODEX_ARGS : []),

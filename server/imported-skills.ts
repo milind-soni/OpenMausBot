@@ -438,11 +438,13 @@ export function nativeSkillFolders(
 }
 
 /** The folders codex-cli (0.163.0–0.167.0) loads user and admin skills from, in its own order: $CODEX_HOME/skills (a
- * ChatGPT-plan instance links the person's into its own home), ~/.agents/skills and /etc/codex/skills. It also reads
- * `.agents/skills` from the turn's folder up to the repository root, where OpenMausBot links a bot's granted skills. */
+ * ChatGPT-plan instance links the person's into its own home), ~/.agents/skills and /etc/codex/skills
+ * (`OMB_CODEX_ADMIN_SKILLS_DIR` names another, as the tests do). It also reads `.agents/skills` from the turn's folder up
+ * to the repository root, where OpenMausBot links a bot's granted skills. */
 export function codexSkillRoots(home: string, codexHome: string | undefined): string[] {
   const own = codexHome && isAbsolute(codexHome) ? codexHome : join(home, ".codex");
-  return [join(own, "skills"), join(home, ".agents", "skills"), ...(process.platform === "win32" ? [] : ["/etc/codex/skills"])];
+  const admin = process.env.OMB_CODEX_ADMIN_SKILLS_DIR || (process.platform === "win32" ? null : "/etc/codex/skills");
+  return [join(own, "skills"), join(home, ".agents", "skills"), ...(admin ? [admin] : [])];
 }
 
 /** After the bot's own skills, with a budget of its own, so bringing many in never pushes the bot's own out. `unlisted`
