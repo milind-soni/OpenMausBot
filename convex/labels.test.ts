@@ -28,8 +28,8 @@ describe("label helpers", () => {
     expect(() => cleanLabels(["x".repeat(33)])).toThrow();
   });
   test("defaults are only missing when no label of that name exists, in any case", () => {
-    expect(missingDefaultLabels([]).map(label => label.name)).toEqual(["Feature", "Bug", "Improvement"]);
-    expect(missingDefaultLabels(["bug", "FEATURE"]).map(label => label.name)).toEqual(["Improvement"]);
+    expect(missingDefaultLabels([]).map(label => label.name)).toEqual(["Feature", "Bug", "Improvement", "Needs spec"]);
+    expect(missingDefaultLabels(["bug", "FEATURE", "needs SPEC"]).map(label => label.name)).toEqual(["Improvement"]);
     expect(colorForLabel("bug")).toBe("#eb5757");
     expect(colorForLabel("Backend")).toBe(colorForLabel("backend"));
     expect(labelKey("  Front   End ")).toBe("front end");
@@ -37,20 +37,21 @@ describe("label helpers", () => {
 });
 
 describe("workspace label registry", () => {
-  test("lists Feature, Bug and Improvement before anything is stored", async () => {
+  test("lists Feature, Bug, Improvement and Needs spec before anything is stored", async () => {
     const f = await fixture();
     const { labels } = await f.t.query(api.labels.list, { sessionToken: f.sessionToken, teamId: f.teamId });
-    expect(labels.map(label => [label.name, label.color, label._id])).toEqual([["Bug", "#eb5757", null], ["Feature", "#bb87fc", null], ["Improvement", "#4ea7fc", null]]);
+    expect(labels.map(label => [label.name, label.color, label._id])).toEqual([["Bug", "#eb5757", null], ["Feature", "#bb87fc", null], ["Improvement", "#4ea7fc", null], ["Needs spec", "#d4a72c", null]]);
+    expect(labels.find(label => label.name === "Needs spec")?.description).toContain("acceptance criteria");
   });
 
   test("seeding defaults is idempotent and respects existing labels in any case", async () => {
     const f = await fixture();
     await f.t.mutation(api.labels.create, { sessionToken: f.sessionToken, teamId: f.teamId, name: "bug", color: "#4cb782" });
-    expect(await f.t.mutation(api.labels.ensureDefaults, { sessionToken: f.sessionToken, teamId: f.teamId })).toBe(2);
+    expect(await f.t.mutation(api.labels.ensureDefaults, { sessionToken: f.sessionToken, teamId: f.teamId })).toBe(3);
     expect(await f.t.mutation(api.labels.ensureDefaults, { sessionToken: f.sessionToken, teamId: f.teamId })).toBe(0);
     await f.t.mutation(internal.labels.backfillDefaults, {});
     const rows = await f.stored();
-    expect(rows.map(row => row.name).sort()).toEqual(["Feature", "Improvement", "bug"]);
+    expect(rows.map(row => row.name).sort()).toEqual(["Feature", "Improvement", "Needs spec", "bug"]);
     expect(rows.find(row => row.key === "bug")?.color).toBe("#4cb782");
   });
 

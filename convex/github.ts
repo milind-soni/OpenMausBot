@@ -5,6 +5,7 @@ import { canEdit, changeOpenIssueCount, requireMember, touchProject } from "./li
 import { DEFAULT_OWNER_EMAIL } from "./lib/auth";
 import { recordCompletion } from "./lib/completions";
 import { isDraftColumn } from "./lib/columns";
+import { issueCreated, issueStatusChanged } from "./lib/issueEvents";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 
@@ -319,8 +320,9 @@ export const upsertRepoSnapshot = internalMutation({
           await ctx.db.patch(existing._id, { ...patch, ...(issue.state === "open" ? { githubIssueReopenRequested: undefined,
             ...(existing.githubIssueState === "closed" ? { completionPullRequest: undefined } : {}) } : {}) });
           if (existing.done !== patch.done) await changeOpenIssueCount(ctx, args.projectId, patch.done ? -1 : 1);
+          await issueStatusChanged(ctx, existing);
         } else {
-          await ctx.db.insert("tasks", {
+          const taskId = await ctx.db.insert("tasks", {
             teamId: (await ctx.db.get(args.projectId))?.teamId,
             projectId: args.projectId,
             columnId: patch.columnId,
@@ -339,6 +341,7 @@ export const upsertRepoSnapshot = internalMutation({
           });
           nextOrder += 1;
           await changeOpenIssueCount(ctx, args.projectId, patch.done ? 0 : 1);
+          await issueCreated(ctx, taskId);
         }
       }
     }

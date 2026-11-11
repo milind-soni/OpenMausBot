@@ -119,6 +119,18 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_ownerUserId", ["ownerUserId"]).index("by_slug", ["slug"]).index("by_deletingAt", ["deletingAt"]),
 
+  /**
+   * A workspace's issue webhook (convex/issueWebhooks.ts): where issue.created and issue.updated events go. The secret
+   * is sealed with ORIGIN_SEALING_KEY. Without a row, the deployment's ORIGIN_ISSUE_WEBHOOK_URL applies.
+   */
+  issueWebhooks: defineTable({
+    teamId: v.id("teams"),
+    url: v.string(),
+    sealedSecret: v.string(),
+    updatedBy: v.id("users"),
+    updatedAt: v.number(),
+  }).index("by_teamId", ["teamId"]),
+
   /** One per member of a deleted workspace, so each of their computers removes its local copy; outlives the workspace on purpose. */
   deletedWorkspaces: defineTable({
     email: v.string(),
@@ -231,6 +243,8 @@ export default defineSchema({
     githubTaskMode: v.optional(v.union(v.literal("issue"), v.literal("pull_request"))),
     ...agentAttribution,
     labels: v.optional(v.array(v.string())),
+    /** A checklist on the issue itself (lib/acceptance-criteria.ts), at most 50 items. */
+    acceptanceCriteria: v.optional(v.array(v.object({ text: v.string(), checked: v.boolean() }))),
     milestoneId: v.optional(v.id("milestones")),
     teamId: v.optional(v.id("teams")),
     completedAt: v.optional(v.number()),

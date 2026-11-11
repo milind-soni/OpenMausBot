@@ -53,7 +53,8 @@ test("a 2026-07-28 client discovers the server and calls tools without a 400 or 
   const client = await connect({ mode: "auto" });
   expect(client.getNegotiatedProtocolVersion()).toBe("2026-07-28");
   const tools = await client.listTools();
-  expect(tools.tools.map(tool => tool.name)).toEqual(["get_workspace", "list_projects", "list_issues", "get_issue", "get_inbox", "list_members", "create_issue", "update_issue", "move_issue", "add_comment"]);
+  expect(tools.tools.map(tool => tool.name)).toEqual(["get_workspace", "list_projects", "list_issues", "get_issue", "get_inbox", "list_members", "list_assets", "get_asset", "vault_list", "vault_get", "list_repos", "list_pull_requests",
+    "create_issue", "update_issue", "move_issue", "add_comment", "add_acceptance_criteria", "update_acceptance_criteria"]);
   // Settings > Agents lists the same catalog the server registers.
   expect(tools.tools.map(tool => ({ name: tool.name, description: tool.description }))).toEqual(MCP_TOOLS.map(({ name, description }) => ({ name, description })));
   expect(tools.tools.find(tool => tool.name === "update_issue")!.inputSchema.properties).toHaveProperty("labels");

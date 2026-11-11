@@ -85,6 +85,20 @@
 .sub-issue-add input { flex: 1; min-height: 30px; padding: 0; border: 0; background: transparent; box-shadow: none; }
 .sub-issue-add input:focus { box-shadow: none; }
 
+/* Acceptance criteria (components/acceptance-criteria.tsx): the sub-issue list's frame with a checkbox per row. */
+.acceptance-criteria { margin-top: var(--space-5); }
+.criterion-row { display: flex; align-items: center; gap: var(--space-2); min-height: 36px; padding: 0 var(--space-2); }
+.criterion-row:hover { background: var(--hover); }
+.criterion-row > input[type="checkbox"] { flex: none; width: 15px; height: 15px; margin: 0; }
+.criterion-text { flex: 1; min-width: 0; padding: var(--space-2) 0; border: 0; background: transparent; color: var(--text-1); font-size: var(--text-base); line-height: 1.4; text-align: left; overflow-wrap: anywhere; cursor: text; }
+span.criterion-text { cursor: default; }
+.criterion-text.is-done { color: var(--text-3); text-decoration: line-through; }
+.criterion-input { flex: 1; min-height: 30px; padding: 0; border: 0; background: transparent; box-shadow: none; font-size: var(--text-base); }
+.criterion-input:focus { box-shadow: none; }
+.criterion-remove { flex: none; opacity: 0; }
+.criterion-row:hover .criterion-remove, .criterion-remove:focus-visible { opacity: 1; }
+@media (hover: none) { .criterion-remove { opacity: 1; } }
+
 /* Labels: a color dot and a name, everywhere a label shows. */
 .label-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
 .label-chips { display: inline-flex; flex-wrap: nowrap; align-items: center; gap: var(--space-1); min-width: 0; overflow: hidden; }

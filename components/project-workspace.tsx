@@ -11,6 +11,7 @@ import { normalizeProjectEmoji } from "@/lib/project-emoji";
 import { BoardTab } from "./project-issues";
 import { AssetsPanel, FeedbackView, IssueComposer, ProjectMembers, TaskModal, VaultPanel } from "./lazy-views";
 import { RepositorySettings } from "./repository-settings";
+import { ProjectPullRequests } from "./project-pull-requests";
 import { ProjectIcon, ProjectIconPicker } from "./project-icon";
 import { ProjectEmpty } from "./project-empty";
 import { DelayedSkeleton } from "./delayed-skeleton";
@@ -19,7 +20,7 @@ import { ConfirmButton } from "./confirm-button";
 import { useWorkspace } from "./workspace-context";
 import type { AuthUser } from "./origin-app";
 
-export type TabKey = "issues" | "assets" | "vault" | "repo" | "feedback" | "settings";
+export type TabKey = "issues" | "pulls" | "assets" | "vault" | "repo" | "feedback" | "settings";
 type ProjectIconType = "default" | "emoji" | "icon" | "image";
 type GitHubSnapshot = {
   repo: string;
@@ -35,6 +36,7 @@ type AvatarUser = { username?: string; name: string; email: string; avatarUrl?: 
 
 export const tabs: Array<{ key: Exclude<TabKey, "settings">; label: string }> = [
   { key: "issues", label: "Issues" },
+  { key: "pulls", label: "Pull requests" },
   { key: "assets", label: "Assets" },
   { key: "vault", label: "Vault" },
   { key: "repo", label: "Repo" },
@@ -116,6 +118,7 @@ function TabWarmers({ projectId, sessionToken, teamId, warm }: { projectId: Id<"
   const scope = { projectId, sessionToken };
   useQuery(api.tasks.board, warm.has("issues") ? scope : "skip");
   useQuery(api.members.people, warm.has("issues") || warm.has("settings") ? scope : "skip");
+  useQuery(api.taskPRs.projectPullRequests, warm.has("pulls") ? scope : "skip");
   useQuery(api.design.list, warm.has("assets") ? scope : "skip");
   useQuery(api.credentials.list, warm.has("vault") ? scope : "skip");
   useQuery(api.commits.list, warm.has("repo") ? scope : "skip");
@@ -131,7 +134,8 @@ export function ProjectWorkspace({ projectId, sessionToken, user, initialTaskId,
   const [warm, setWarm] = useState<ReadonlySet<TabKey>>(() => new Set<TabKey>(["issues", tab]));
   const [issueOpen, setIssueOpen] = useState(false);
   const [pendingTask, setPendingTask] = useState(initialTaskId);
-  const [feedbackTask, setFeedbackTask] = useState<Id<"tasks"> | null>(null);
+  // An issue opened over a tab other than Issues (Feedback, Pull requests).
+  const [peekTask, setPeekTask] = useState<Id<"tasks"> | null>(null);
   const project = useQuery(api.projects.get, { projectId, sessionToken });
 
   const warmTab = useCallback((key: TabKey) => setWarm(current => current.has(key) ? current : new Set([...current, key])), []);
@@ -170,13 +174,14 @@ export function ProjectWorkspace({ projectId, sessionToken, user, initialTaskId,
       {project.status !== "active" && <ProjectStateBanner project={project} sessionToken={sessionToken} />}
       <div key={tab} className="project-panel" data-tab={tab} role="tabpanel" id="project-panel" aria-labelledby={`project-tab-${tab}`}>
         {tab === "issues" && <BoardTab key={projectId} project={project} projectId={projectId} sessionToken={sessionToken} userEmail={user.email} canEdit={canEdit} onCreateIssue={() => setIssueOpen(true)} initialTaskId={pendingTask} onOpenReference={onOpenReference} />}
+        {tab === "pulls" && <ProjectPullRequests project={project} sessionToken={sessionToken} onOpenIssue={setPeekTask} />}
         {tab === "assets" && <AssetsPanel projectId={projectId} sessionToken={sessionToken} canEdit={canEdit} />}
         {tab === "vault" && <VaultPanel projectId={projectId} sessionToken={sessionToken} canEdit={canEdit} />}
         {tab === "repo" && <RepoTab project={project} sessionToken={sessionToken} />}
-        {tab === "feedback" && <FeedbackView key={projectId} projectId={projectId} projectName={project.name} sessionToken={sessionToken} canEdit={canEdit} onOpenTask={(_, taskId) => setFeedbackTask(taskId)} />}
+        {tab === "feedback" && <FeedbackView key={projectId} projectId={projectId} projectName={project.name} sessionToken={sessionToken} canEdit={canEdit} onOpenTask={(_, taskId) => setPeekTask(taskId)} />}
         {tab === "settings" && <SettingsTab project={project} sessionToken={sessionToken} />}
       </div>
-      {feedbackTask && <TaskModal project={project} projectId={projectId} sessionToken={sessionToken} taskId={feedbackTask} canEdit={canEdit} onClose={() => setFeedbackTask(null)} />}
+      {peekTask && <TaskModal project={project} projectId={projectId} sessionToken={sessionToken} taskId={peekTask} canEdit={canEdit} onClose={() => setPeekTask(null)} />}
       {issueOpen && <IssueComposer sessionToken={sessionToken} activeProjectId={projectId} projects={[project]} onClose={() => setIssueOpen(false)} onCreated={() => openTab("issues")} />}
     </div>
   </>);

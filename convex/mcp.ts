@@ -7,13 +7,17 @@ import { hashToken } from "./lib/auth";
 import { canEdit, projectMember, projectPeople, requireTeamMember } from "./lib/permissions";
 import { compareWorkflowColumns, isDoneColumn, isDraftColumn, normalizeColumnTitle } from "./lib/columns";
 import { priorityValidator } from "./lib/validators";
-import { addCommentRecord, createTaskRecord, moveTaskRecord, updateTaskRecord } from "./tasks";
+import { addCommentRecord, changeCriteriaRecord, createTaskRecord, moveTaskRecord, updateTaskRecord } from "./tasks";
+import { linkedPullRequests, repoName } from "./taskPRs";
+import { vaultService } from "../lib/vault-services";
+import { repositorySlug } from "../lib/issue-webhook";
 import { containsMention, mentionToken } from "../lib/issue-mentions";
 import { OAUTH_GRANT_PREFIX, PAT_PREFIX } from "../lib/mcp-tokens";
 import { compareTaskOrder } from "../lib/task-order";
 import { issueKey } from "../lib/github-references";
 import { taskBranch } from "../lib/task-branch";
 import { cleanLabels, projectLabels } from "./lib/labels";
+import { addCriteria } from "../lib/acceptance-criteria";
 
 // Tools for the remote MCP server (app/api/mcp). Every call carries a connector token (OAuth grant or personal
 // access token, both stored as connectorGrants) and runs with the token owner's workspace and project permissions.
@@ -98,6 +102,7 @@ function issueSummary(slug: string, project: Doc<"projects">, task: Doc<"tasks">
     column: column?.title ?? null, status: task.done ? "completed" : "open", priority: task.priority,
     assignee: task.assignedToEmail ? { name: task.assignedToName || task.assignedToEmail, email: task.assignedToEmail } : null,
     dueDate: task.dueDate ?? null, ...(task.labels?.length ? { labels: task.labels } : {}),
+    acceptanceCriteria: task.acceptanceCriteria ?? [],
     ...(task.githubIssueUrl ? { github: task.githubIssueUrl } : {}),
     updatedAt: new Date(task.updatedAt).toISOString(), url: `/${slug}?project=${project._id}&issue=${task._id}`,
   };
@@ -286,7 +291,7 @@ async function assigneeEmail(ctx: MutationCtx, access: Access, project: Doc<"pro
 const UNASSIGNED = new Set(["none", "unassigned"]);
 
 export const createIssue = mutation({
-  args: { ...token, project: v.string(), title: v.string(), description: v.optional(v.string()), column: v.optional(v.string()), priority: v.optional(priorityValidator), assignee: v.optional(v.string()), dueDate: v.optional(v.string()), labels: v.optional(v.array(v.string())) },
+  args: { ...token, project: v.string(), title: v.string(), description: v.optional(v.string()), column: v.optional(v.string()), priority: v.optional(priorityValidator), assignee: v.optional(v.string()), dueDate: v.optional(v.string()), labels: v.optional(v.array(v.string())), acceptanceCriteria: v.optional(v.array(v.string())) },
   returns: v.string(),
   handler: (ctx, a) => guard(async () => {
     const access = await writer(ctx, a.token);
@@ -295,9 +300,8 @@ export const createIssue = mutation({
     const { visible } = await boardColumns(ctx, project._id);
     const column = a.column ? findColumn(visible, a.column) : undefined;
     const email = UNASSIGNED.has(fold(a.assignee ?? "me")) ? undefined : await assigneeEmail(ctx, access, project, a.assignee ?? "me");
-    const labels = a.labels ? cleanLabels(a.labels, await projectLabels(ctx, project._id)) : undefined;
-    const taskId = await createTaskRecord(ctx, { projectId: project._id, columnId: column?._id, title: a.title, description: a.description, priority: a.priority ?? "medium", assignedToEmail: email, dueDate: a.dueDate || undefined }, access.user._id);
-    if (labels?.length) await ctx.db.patch(taskId, { labels });
+    const acceptanceCriteria = a.acceptanceCriteria?.length ? addCriteria([], a.acceptanceCriteria) : undefined;
+    const taskId = await createTaskRecord(ctx, { projectId: project._id, columnId: column?._id, title: a.title, description: a.description, priority: a.priority ?? "medium", assignedToEmail: email, dueDate: a.dueDate || undefined, labels: a.labels, acceptanceCriteria }, access.user._id);
     const task = (await ctx.db.get(taskId))!;
     const placed = await ctx.db.get(task.columnId);
     return json(issueSummary(await workspaceSlug(ctx, access.grant.teamId), project, task, placed ?? undefined));
@@ -314,8 +318,8 @@ export const updateIssue = mutation({
     const assignedToEmail = a.assignee === undefined ? undefined : UNASSIGNED.has(fold(a.assignee)) ? "" : await assigneeEmail(ctx, access, project, a.assignee);
     const dueDate = a.dueDate === undefined ? undefined : fold(a.dueDate) === "none" ? "" : a.dueDate;
     const labels = a.labels ? cleanLabels(a.labels, await projectLabels(ctx, project._id)) : undefined;
-    await updateTaskRecord(ctx, { projectId: project._id, taskId: task._id, title: a.title, description: a.description, priority: a.priority, assignedToEmail, dueDate }, access.user._id);
     if (labels) await ctx.db.patch(task._id, { labels });
+    await updateTaskRecord(ctx, { projectId: project._id, taskId: task._id, title: a.title, description: a.description, priority: a.priority, assignedToEmail, dueDate }, access.user._id);
     return issueResult(ctx, access, task._id);
   }),
 });
@@ -358,6 +362,186 @@ export const addComment = mutation({
     const mentions = (await projectPeople(ctx, project)).filter(p => containsMention(a.body, mentionToken(p))).slice(0, 20).map(p => ({ userId: p.userId, token: mentionToken(p) }));
     const commentId = await addCommentRecord(ctx, { projectId: project._id, taskId: task._id, body: a.body, mentions }, access.user, project);
     return json({ id: commentId, issueId: task._id, mentioned: mentions.map(m => m.token) });
+  }),
+});
+
+export const addAcceptanceCriteria = mutation({
+  args: { ...token, issueId: v.string(), items: v.array(v.string()) }, returns: v.string(),
+  handler: (ctx, a) => guard(async () => {
+    const access = await writer(ctx, a.token);
+    const { task } = await resolveIssue(ctx, access, a.issueId, true);
+    await changeCriteriaRecord(ctx, task, { add: a.items });
+    return issueResult(ctx, access, task._id);
+  }),
+});
+
+export const updateAcceptanceCriteria = mutation({
+  args: {
+    ...token, issueId: v.string(),
+    changes: v.optional(v.array(v.object({ index: v.optional(v.number()), match: v.optional(v.string()), text: v.optional(v.string()), checked: v.optional(v.boolean()), remove: v.optional(v.boolean()) }))),
+    replace: v.optional(v.array(v.object({ text: v.string(), checked: v.optional(v.boolean()) }))),
+  },
+  returns: v.string(),
+  handler: (ctx, a) => guard(async () => {
+    const access = await writer(ctx, a.token);
+    const { task } = await resolveIssue(ctx, access, a.issueId, true);
+    if ((a.changes === undefined) === (a.replace === undefined)) throw new ConvexError("Give either changes or replace");
+    await changeCriteriaRecord(ctx, task, a.replace ? { replace: a.replace } : { edits: a.changes! });
+    return issueResult(ctx, access, task._id);
+  }),
+});
+
+// Assets: project library files (designAssets) and issue attachments (taskAssets). Library files stored in Convex get
+// the same signed URL the Assets tab shows; files attached to issues stay behind Origin's sign-in, so their url is null
+// and `issue.url` opens the issue that has them.
+
+type AssetRow = { id: string; name: string; kind: string; url: string | null; project: string; projectId: string; issue: { id: string; key: string; title: string; url: string } | null; contentType?: string; size?: number; folder?: string; notes?: string; createdAt: string };
+
+async function libraryAsset(ctx: QueryCtx, project: Doc<"projects">, asset: Doc<"designAssets">, notes = false): Promise<AssetRow> {
+  return {
+    id: asset._id, name: asset.name, kind: asset.type, url: asset.storageId ? await ctx.storage.getUrl(asset.storageId) : asset.url ?? null,
+    project: project.name, projectId: project._id, issue: null,
+    ...(asset.contentType ? { contentType: asset.contentType } : {}), ...(asset.size !== undefined ? { size: asset.size } : {}), ...(asset.folder ? { folder: asset.folder } : {}),
+    ...(notes && asset.notes ? { notes: asset.notes } : {}), createdAt: new Date(asset.createdAt).toISOString(),
+  };
+}
+
+function issueAsset(slug: string, project: Doc<"projects">, task: Doc<"tasks">, asset: Doc<"taskAssets">, notes = false): AssetRow {
+  return {
+    id: asset._id, name: asset.name, kind: asset.type, url: asset.localFileId ? null : asset.url || null,
+    project: project.name, projectId: project._id, issue: { id: task._id, key: issueKey(task._id), title: task.title, url: `/${slug}?project=${project._id}&issue=${task._id}` },
+    ...(asset.contentType ? { contentType: asset.contentType } : {}), ...(asset.size !== undefined ? { size: asset.size } : {}),
+    ...(notes && asset.notes ? { notes: asset.notes } : {}), createdAt: new Date(asset.createdAt).toISOString(),
+  };
+}
+
+export const assets = query({
+  args: { ...token, project: v.optional(v.string()), issueId: v.optional(v.string()), limit: v.optional(v.number()) }, returns: v.string(),
+  handler: (ctx, a) => guard(async () => {
+    const access = await authorize(ctx, a.token);
+    const slug = await workspaceSlug(ctx, access.grant.teamId);
+    const limit = Math.max(1, Math.min(200, Math.floor(a.limit ?? 50)));
+    const rows: AssetRow[] = [];
+    if (a.issueId) {
+      const { task, project } = await resolveIssue(ctx, access, a.issueId);
+      for (const asset of await ctx.db.query("taskAssets").withIndex("by_task", q => q.eq("taskId", task._id)).take(200)) rows.push(issueAsset(slug, project, task, asset));
+    } else {
+      for (const { project } of a.project ? [await resolveProject(ctx, access, a.project)] : await visibleProjects(ctx, access)) {
+        for (const asset of await ctx.db.query("designAssets").withIndex("by_project", q => q.eq("projectId", project._id)).take(500)) rows.push(await libraryAsset(ctx, project, asset));
+        const tasks = new Map<Id<"tasks">, Doc<"tasks"> | null>();
+        for (const asset of await ctx.db.query("taskAssets").withIndex("by_project", q => q.eq("projectId", project._id)).take(500)) {
+          if (!tasks.has(asset.taskId)) tasks.set(asset.taskId, await ctx.db.get(asset.taskId));
+          const task = tasks.get(asset.taskId);
+          if (task?.projectId === project._id) rows.push(issueAsset(slug, project, task, asset));
+        }
+      }
+    }
+    rows.sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+    return json({ assets: rows.slice(0, limit), ...(rows.length > limit ? { more: rows.length - limit } : {}) });
+  }),
+});
+
+export const asset = query({
+  args: { ...token, assetId: v.string() }, returns: v.string(),
+  handler: (ctx, a) => guard(async () => {
+    const access = await authorize(ctx, a.token);
+    const missing = new ConvexError(`Asset not found: ${a.assetId}. Use an id from list_assets.`);
+    const libraryId = ctx.db.normalizeId("designAssets", a.assetId.trim());
+    const issueAssetId = ctx.db.normalizeId("taskAssets", a.assetId.trim());
+    const row = libraryId ? await ctx.db.get(libraryId) : issueAssetId ? await ctx.db.get(issueAssetId) : null;
+    const project = row ? await ctx.db.get(row.projectId) : null;
+    if (!row || !project || project.teamId !== access.grant.teamId || !await projectMember(ctx, project, access.user)) throw missing;
+    if (libraryId) return json(await libraryAsset(ctx, project, row as Doc<"designAssets">, true));
+    const attachment = row as Doc<"taskAssets">;
+    const task = await ctx.db.get(attachment.taskId);
+    if (!task || task.projectId !== project._id) throw missing;
+    return json(issueAsset(await workspaceSlug(ctx, access.grant.teamId), project, task, attachment, true));
+  }),
+});
+
+// Vault: only items a member marked "agents may use" (credentials.setAgentUse) in projects the token owner belongs to,
+// and the owner's own personal items marked the same way. Values are end-to-end encrypted with the Vault passphrase:
+// Convex returns the sealed envelope only for allowed items, and the MCP route (lib/mcp-vault.ts) opens it with the
+// passphrase the agent passes, for that call only. Nothing here ever sees or logs a plaintext value.
+
+type VaultRow = Doc<"credentials"> | Doc<"personalCredentials">;
+function vaultSummary(item: VaultRow, project: Doc<"projects"> | null) {
+  const service = item.kind === "service" ? vaultService(item.service) : undefined;
+  return {
+    id: item._id, name: item.title, kind: item.kind ?? "password", service: service?.id ?? null,
+    env: service?.fields.map(field => field.env) ?? [], scope: project ? "project" : "personal",
+    project: project?.name ?? null, projectId: project?._id ?? null, ...(item.username ? { username: item.username } : {}),
+    updatedAt: new Date(item.updatedAt).toISOString(),
+  };
+}
+
+export const vaultItems = query({
+  args: { ...token, project: v.optional(v.string()) }, returns: v.string(),
+  handler: (ctx, a) => guard(async () => {
+    const access = await authorize(ctx, a.token);
+    const items = [];
+    for (const { project } of a.project ? [await resolveProject(ctx, access, a.project)] : await visibleProjects(ctx, access)) {
+      for (const item of await ctx.db.query("credentials").withIndex("by_project", q => q.eq("projectId", project._id)).take(500)) if (item.agentUse) items.push(vaultSummary(item, project));
+    }
+    if (!a.project) for (const item of await ctx.db.query("personalCredentials").withIndex("by_userId", q => q.eq("userId", access.user._id)).take(500)) if (item.agentUse) items.push(vaultSummary(item, null));
+    return json({ items, note: "Only items a member allowed agents to use are listed. vault_get needs the Vault passphrase to read a value." });
+  }),
+});
+
+export const vaultItem = query({
+  args: { ...token, itemId: v.string() }, returns: v.string(),
+  handler: (ctx, a) => guard(async () => {
+    const access = await authorize(ctx, a.token);
+    const projectItemId = ctx.db.normalizeId("credentials", a.itemId.trim());
+    const personalItemId = ctx.db.normalizeId("personalCredentials", a.itemId.trim());
+    let item: VaultRow | null = null, project: Doc<"projects"> | null = null;
+    if (projectItemId) {
+      item = await ctx.db.get(projectItemId);
+      project = item ? await ctx.db.get((item as Doc<"credentials">).projectId) : null;
+      if (!project || project.teamId !== access.grant.teamId || !await projectMember(ctx, project, access.user)) item = null;
+    } else if (personalItemId) {
+      item = await ctx.db.get(personalItemId);
+      if (item && (item as Doc<"personalCredentials">).userId !== access.user._id) item = null;
+    }
+    if (!item) throw new ConvexError(`Vault item not found: ${a.itemId}. Use an id from vault_list.`);
+    if (!item.agentUse) throw new ConvexError(`Agents may not use "${item.title}". A member can allow agent use for it in the Vault.`);
+    return json({ ...vaultSummary(item, project), sealed: { ciphertext: item.ciphertext, iv: item.iv, salt: item.salt, iterations: item.iterations, kdf: item.kdf } });
+  }),
+});
+
+// Repositories and the pull requests linked to their issues (taskPRs.linkedPullRequests, as in the Pull requests tab).
+
+export const repositories = query({
+  args: token, returns: v.string(),
+  handler: (ctx, a) => guard(async () => {
+    const access = await authorize(ctx, a.token);
+    const rows = (await visibleProjects(ctx, access)).filter(({ project }) => project.repoUrl);
+    return json({ repositories: rows.map(({ project }) => ({ project: project.name, projectId: project._id, repo: repositorySlug(project.repoUrl) ?? repoName(project.repoUrl) ?? project.repoUrl, url: project.repoUrl })) });
+  }),
+});
+
+export const pullRequests = query({
+  args: { ...token, project: v.optional(v.string()), state: v.optional(v.union(v.literal("open"), v.literal("merged"), v.literal("closed"), v.literal("all"))), limit: v.optional(v.number()) },
+  returns: v.string(),
+  handler: (ctx, a) => guard(async () => {
+    const access = await authorize(ctx, a.token);
+    const slug = await workspaceSlug(ctx, access.grant.teamId);
+    const state = a.state ?? "open";
+    const limit = Math.max(1, Math.min(100, Math.floor(a.limit ?? 25)));
+    const results = [];
+    for (const { project } of a.project ? [await resolveProject(ctx, access, a.project)] : await visibleProjects(ctx, access)) {
+      for (const pr of await linkedPullRequests(ctx, project._id)) {
+        if (state !== "all" && (state === "open" ? pr.state !== "open" && pr.state !== "draft" : pr.state !== state)) continue;
+        results.push({
+          number: pr.number, title: pr.title, state: pr.state, url: pr.url, repo: pr.repository, branch: pr.branch,
+          checks: pr.checks, review: pr.review, ...(pr.mergeable !== null ? { mergeable: pr.mergeable } : {}), ...(pr.author ? { author: pr.author } : {}),
+          project: project.name, projectId: project._id, updatedAt: new Date(pr.updatedAt).toISOString(),
+          issues: pr.issues.map(issue => ({ id: issue.taskId, key: issue.key, title: issue.title, completed: issue.done, completesOnMerge: issue.completesOnMerge, url: `/${slug}?project=${project._id}&issue=${issue.taskId}` })),
+        });
+      }
+    }
+    results.sort((x, y) => y.updatedAt.localeCompare(x.updatedAt));
+    return json({ pullRequests: results.slice(0, limit) });
   }),
 });
 

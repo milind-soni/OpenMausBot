@@ -5,9 +5,9 @@ import { localApi } from "@/lib/client-api";
 
 type PullRequest = Pick<Doc<"taskPullRequests">, "_id" | "url" | "number" | "state" | "checks" | "review" | "mergeable" | "title" | "closes">;
 
-const PR_ICON = { draft: GitPullRequestDraft, open: GitPullRequest, merged: GitMerge, closed: GitPullRequestClosed } as const;
-const CHECKS: Record<string, string> = { success: "checks pass", failure: "checks fail", pending: "checks running" };
-const REVIEW: Record<string, string> = { approved: "approved", changes_requested: "changes requested", review_required: "review required" };
+export const PR_ICON = { draft: GitPullRequestDraft, open: GitPullRequest, merged: GitMerge, closed: GitPullRequestClosed } as const;
+export const CHECKS: Record<string, string> = { success: "checks pass", failure: "checks fail", pending: "checks running" };
+export const REVIEW: Record<string, string> = { approved: "approved", changes_requested: "changes requested", review_required: "review required" };
 
 /**
  * Pull requests linked to an issue, one line each: state, title, then only the facts that need attention. Each opens

@@ -32,6 +32,29 @@
 .repository-state.merged, .repository-state.closed { color: var(--violet); }
 .repository-empty { margin: 0; padding: var(--space-6) 0; color: var(--text-3); font-size: var(--text-sm); }
 
+/* Pull requests tab (components/project-pull-requests.tsx): linked PRs with the issues they move. */
+.pull-requests { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.pull-requests-toolbar { flex-wrap: wrap; }
+.pull-requests-toolbar .segmented-control button > span { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.pull-requests-rule { flex: 1; min-width: 0; color: var(--text-3); font-size: var(--text-sm); text-align: right; }
+.pull-requests-hint { max-width: 420px; margin: 0; font-size: var(--text-sm); }
+.pull-request-list { display: grid; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--border-1); }
+.pull-request-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: start; column-gap: var(--space-2); padding: var(--space-2); border-bottom: 1px solid var(--border-1); transition: background var(--duration-fast); }
+@media (hover: hover) { .pull-request-row:hover { background: var(--hover); } }
+.pull-request-main { display: grid; gap: 3px; min-width: 0; }
+.pull-request-title { overflow: hidden; color: var(--text-1); font-weight: var(--weight-medium); line-height: 1.4; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+@media (hover: hover) { .pull-request-title:hover { text-decoration: underline; text-underline-offset: 3px; } }
+.pull-request-main .repository-meta a { color: inherit; text-decoration: none; }
+.pull-request-issues { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-1); max-width: 220px; padding-top: 1px; }
+.pull-request-issue { height: 22px; padding: 0 var(--space-2); border: 1px solid var(--border-2); border-radius: var(--radius-full); background: transparent; color: var(--text-2); font-size: var(--text-xs); }
+.pull-request-issue:hover { border-color: var(--border-3); background: var(--hover); color: var(--text-1); }
+.pull-request-issue .is-done { color: var(--text-3); text-decoration: line-through; }
+@media (max-width: 760px) {
+  .pull-requests-rule { flex-basis: 100%; order: 3; text-align: left; }
+  .pull-request-row { grid-template-columns: 16px minmax(0, 1fr); }
+  .pull-request-issues { grid-column: 2; justify-content: flex-start; max-width: none; padding-top: var(--space-1); }
+}
+
 /* Repository dialog. */
 .repo-settings { display: grid; gap: 0; }
 .repo-settings-section { display: grid; gap: var(--space-3); padding: var(--space-4) 0; border-top: 1px solid var(--border-1); }

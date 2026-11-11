@@ -74,7 +74,6 @@ export function IssueComposer({
   const members = useQuery(api.members.people, projectId ? { sessionToken, projectId } : "skip");
   const me = useQuery(api.auth.me, { sessionToken });
   const create = useMutation(api.tasks.createTask);
-  const saveLabels = useMutation(api.issueRelations.labels);
   const ensureColumns = useMutation(api.tasks.ensureDefaultColumns);
   const columns = board?.columns.filter((c) => !(c.isDone ?? c.title.toLowerCase() === "done")) || [];
   const selectedColumn = columns.find((c) => c._id === draft.columnId) || columns.find(column => !isDraftColumn(column)) || columns[0];
@@ -118,9 +117,9 @@ export function IssueComposer({
         priority: draft.priority,
         ...(draft.assignee ? { assignedToEmail: draft.assignee } : {}),
         ...(draft.dueDate ? { dueDate: draft.dueDate } : {}),
+        // With the issue, so issue.created carries them and Needs spec joins rather than replaces them.
+        ...(draft.labels.length ? { labels: draft.labels } : {}),
       });
-      // Labels go on right after; the issue exists either way, so a label error does not lose it.
-      if (draft.labels.length) await saveLabels({ sessionToken, taskId, labels: draft.labels }).catch(() => undefined);
       dirty.current = false;
       writeDraft(projectId, null);
       onCreated(projectId, taskId);

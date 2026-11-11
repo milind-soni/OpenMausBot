@@ -1,6 +1,7 @@
 import { ConvexError } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
+import { NEEDS_SPEC_LABEL } from "../../lib/acceptance-criteria";
 
 export const MAX_LABELS = 20;
 export const MAX_LABEL_LENGTH = 32;
@@ -33,12 +34,16 @@ export async function projectLabels(ctx: QueryCtx, projectId: Id<"projects">, li
   return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, limit).map(([label]) => label);
 }
 
-/** Linear's starter labels; every workspace has them unless someone archived or renamed them. */
-export const DEFAULT_LABELS = [
+/**
+ * Linear's starter labels, plus Needs spec for rough notes (applied and removed by lib/acceptance-criteria.ts
+ * needsSpecLabels). Every workspace has them unless someone archived or renamed them.
+ */
+export const DEFAULT_LABELS: readonly { name: string; color: string; description?: string }[] = [
   { name: "Feature", color: "#bb87fc" },
   { name: "Bug", color: "#eb5757" },
   { name: "Improvement", color: "#4ea7fc" },
-] as const;
+  { name: NEEDS_SPEC_LABEL, color: "#d4a72c", description: "Rough note; needs a description and acceptance criteria." },
+];
 
 export const LABEL_COLORS = ["#95a2b3", "#bb87fc", "#eb5757", "#4ea7fc", "#4cb782", "#f2c94c", "#f2994a", "#e879a6", "#26b5ce", "#8d8df0"] as const;
 export const MAX_WORKSPACE_LABELS = 250;
@@ -85,8 +90,22 @@ export async function workspaceLabelRows(ctx: QueryCtx, teamId: Id<"teams">) {
 export async function ensureDefaultLabels(ctx: MutationCtx, teamId: Id<"teams">) {
   const missing = missingDefaultLabels((await workspaceLabelRows(ctx, teamId)).map(row => row.name));
   const now = Date.now();
-  for (const label of missing) await ctx.db.insert("issueLabels", { teamId, name: label.name, key: labelKey(label.name), color: label.color, archived: false, createdAt: now, updatedAt: now });
+  for (const label of missing) await ctx.db.insert("issueLabels", { teamId, name: label.name, key: labelKey(label.name), color: label.color, ...(label.description ? { description: label.description } : {}), archived: false, createdAt: now, updatedAt: now });
   return missing.length;
+}
+
+/**
+ * Makes sure the workspace has the Needs spec label before it is applied automatically. False when someone archived
+ * it: the workspace opted out, so it is not applied.
+ */
+export async function needsSpecAvailable(ctx: MutationCtx, teamId: Id<"teams">) {
+  const key = labelKey(NEEDS_SPEC_LABEL);
+  const row = await ctx.db.query("issueLabels").withIndex("by_teamId_and_key", q => q.eq("teamId", teamId).eq("key", key)).unique();
+  if (row) return !row.archived;
+  const preset = DEFAULT_LABELS.find(label => labelKey(label.name) === key)!;
+  const now = Date.now();
+  await ctx.db.insert("issueLabels", { teamId, name: preset.name, key, color: preset.color, description: preset.description, archived: false, createdAt: now, updatedAt: now });
+  return true;
 }
 
 /**

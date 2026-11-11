@@ -243,6 +243,7 @@ async function purgeWorkspace(ctx: MutationCtx, team: Doc<"teams">) {
     () => drain(n => ctx.db.query("teamCallLines").withIndex("by_team_room_line", q => q.eq("teamId", teamId)).take(n)),
     () => drain(n => ctx.db.query("projectPresence").withIndex("by_team_updatedAt", q => q.eq("teamId", teamId)).take(n)),
     () => drain(n => ctx.db.query("teamGitHub").withIndex("by_teamId", q => q.eq("teamId", teamId)).take(n)),
+    () => drain(n => ctx.db.query("issueWebhooks").withIndex("by_teamId", q => q.eq("teamId", teamId)).take(n)),
     () => drain(n => ctx.db.query("sharedKeys").withIndex("by_teamId_and_integration", q => q.eq("teamId", teamId)).take(n)),
   ]);
   if (!done) return false;
