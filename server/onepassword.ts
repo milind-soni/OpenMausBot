@@ -237,7 +237,10 @@ export class OnePasswordLogins implements VaultProvider {
       const counted: Array<Omit<OnePasswordVault, "bots">> = [];
       for (const vault of vaults) {
         let items = 0;
-        const wanted = (await client.items(vault.id)).filter((item) => item.category === "Login" || SECRET_CATEGORIES.has(item.category)).slice(0, MAX_ITEMS);
+        const listed = await client.items(vault.id);
+        // Website logins and secret items come first, so Logins without a website never push one out of MAX_ITEMS.
+        const wanted = [...listed.filter((item) => isLogin(item) || SECRET_CATEGORIES.has(item.category)),
+          ...listed.filter((item) => item.category === "Login" && !isLogin(item))].slice(0, MAX_ITEMS);
         for (let start = 0; start < wanted.length; start += FIELDS_BATCH) {
           const batch = wanted.slice(start, start + FIELDS_BATCH);
           // Every value in this answer is dropped here and read again when a bot uses it.

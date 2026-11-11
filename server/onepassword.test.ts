@@ -82,7 +82,7 @@ describe("1Password logins", () => {
       { id: "v2", title: "Finance", items: 1, bots: "all" },
       { id: "v1", title: "Shared with OMB", items: 2, bots: "all" },
     ] });
-    expect(calls).toEqual(["createClient OpenMausBot", "vaults.list", "items.list v2", "items.getAll v2 f1", "items.list v1", "items.getAll v1 i1,i2,i3,i4,i5,i6,i7,i8,i10,i11"]);
+    expect(calls).toEqual(["createClient OpenMausBot", "vaults.list", "items.list v2", "items.getAll v2 f1", "items.list v1", "items.getAll v1 i1,i2,i4,i5,i6,i7,i8,i11,i3,i10"]);
     const rows = source.list();
     expect(rows.map((row) => [row.site, row.hosts, row.username, row.hasTotp, row.source, row.bots])).toEqual([
       ["example.com", ["accounts.example.com"], "alice@example.com", true, "1password", "all"],
@@ -272,6 +272,16 @@ describe("1Password secrets", () => {
     expect(await read("Plain token")).toBe(PLAIN_TOKEN);
     for (const name of ["Partner API username", "Partner API password", "No website", "Example"]) expect(findLinkedSecret([source], name, "pepper")).toBeNull();
     expect(source.list().map((row) => row.site)).not.toContain("");
+  });
+
+  it("never lets Logins without a website push a website login out of the item limit", async () => {
+    const noSite = Array.from({ length: 500 }, (_, n) => ({ id: `n${n}`, title: `No site ${n}`, urls: [], username: "x", password: "fake-x-pass" }));
+    const { sdk } = fakeOnePasswordSdk({ token: TOKEN, vaults: { v1: { title: "Big", items: [
+      ...noSite, { id: "w1", title: "Website", urls: ["https://late.example.com"], username: "late", password: "fake-late-pass" },
+    ] } } });
+    const source = new OnePasswordLogins({ token: () => TOKEN, grants: () => ({}), connect: (value) => sdkOnePasswordClient(sdk, value, "9.9.9") });
+    expect((await source.refresh()).items).toBe(1);
+    expect(source.list().map((row) => row.site)).toEqual(["example.com"]);
   });
 
   it("says plainly when a secret left 1Password, and when 1Password can't be read", async () => {
