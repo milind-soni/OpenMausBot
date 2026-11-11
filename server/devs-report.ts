@@ -157,6 +157,22 @@ function diagnose(input: DevsReportInput, redact: (text: string) => string): str
   return firstChars(redact(lines.join("\n")), DEVS_REPORT_LIMITS.diagnostics);
 }
 
+/** What a Contact support request may carry when the person includes it: the app's own facts and its recent warnings and
+ * errors, redacted, never a conversation or a file. */
+export interface SupportDiagnosticsInput {
+  installId: string; appVersion: string; runsOn: string; os: string; node: string; uptimeSeconds: number; language?: string; now: number; log: string[];
+}
+export function supportDiagnostics(input: SupportDiagnosticsInput, secrets: readonly string[] = environmentSecrets()): string {
+  const redact = (text: string) => redactReportText(text, secrets);
+  const log = input.log.slice(-DEVS_REPORT_LIMITS.logLines).map((line) => oneLine(redact(line), DEVS_REPORT_LIMITS.logLineChars));
+  const lines = [
+    "MausBot support request diagnostics", `Sent: ${iso(input.now)}`, `App version: ${singleLine(input.appVersion)}`, `Runs on: ${input.runsOn}`, `OS: ${input.os}`,
+    `Node: ${input.node}`, `Server uptime: ${duration(input.uptimeSeconds)}`, ...(input.language ? [`Language: ${input.language}`] : []), `Install: ${input.installId}`,
+    "", "## Server warnings and errors, newest last", ...(log.length ? log : ["(none since the server started)"]),
+  ];
+  return firstChars(redact(lines.join("\n")), DEVS_REPORT_LIMITS.diagnostics);
+}
+
 export function buildDevsReport(input: DevsReportInput, secrets: readonly string[] = environmentSecrets()): DevsReportPayload {
   const redact = (text: string) => redactReportText(text, secrets);
   const contact = contactAddress(input.contactEmail);

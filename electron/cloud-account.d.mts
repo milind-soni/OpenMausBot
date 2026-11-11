@@ -63,6 +63,8 @@ export interface CloudAccountState {
   waking?: true;
   /** Connected: the plan's renewal, only while this account pays for a plan that runs: what Cancel and Keep act on (display only). */
   renewal?: import("./cloud-list.mjs").CloudRenewal;
+  /** Connected, while this account may contact support (a paid plan of its own or its team's): where to write, and whether the form is on. */
+  support?: { email: string; form: boolean };
 }
 /** The cancel sheet's reasons. */
 export type CloudCancelAnswer = "feature" | "price" | "setup" | "broken" | "later" | "other";
@@ -227,6 +229,9 @@ export interface CloudPlanSnapshot {
   room?: import("./cloud-home.mjs").CloudRoom;
   /** Verified, while this account pays for a plan that runs: what Cancel and Keep act on. */
   renewal?: import("./cloud-list.mjs").CloudRenewal;
+  /** Verified, while this account may contact support (a paid plan of its own or its team's): where to write, whether the form is
+   * on, and the signed-in address its reply-to starts with. */
+  support?: { email: string; form: boolean; account: string | null };
 }
 export interface CloudPlanBridge {
   state(): Promise<CloudPlanSnapshot>;
@@ -244,6 +249,8 @@ export interface CloudPlanBridge {
   /** The room card's Not now, and Restart now after its upgrade (only from the person's click). Absent on an older app. */
   roomNotNow?(id: string): Promise<boolean>;
   restartNow?(): Promise<"restarting" | "current" | "failed">;
+  /** Contact support (electron/support-request.mjs): only from the person's click; main names the place and sends it on its sign-in. Absent on an older app. */
+  support?(input: import("./support-request.mjs").SupportInput): Promise<import("./support-request.mjs").SupportResult>;
 }
 
 export declare const CLOUD_ORIGIN: string;
@@ -356,6 +363,8 @@ export interface CloudAccountClient {
   /** This sign-in's own X research relay access while its plan is paid; null without one. */
   xResearchAccess(): Promise<{ url: string; token: string } | null>;
   pagesAccess(): Promise<{ url: string; token: string } | null>;
+  /** One Contact support request on this sign-in: the intake's status and answer, null when it wasn't reached. */
+  supportRequest(body: import("./support-request.mjs").SupportBody): Promise<{ status: number; body: unknown } | null>;
   /** GET /api/cloud/desktop/updates-consent, as the Admin answers it (updates-consent.mjs parseAccountConsent reads it). */
   updatesConsent(): Promise<unknown>;
   recordUpdatesConsent(status: import("./updates-consent.mjs").UpdatesConsentStatus, textVersion: string): Promise<void>;

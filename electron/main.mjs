@@ -2591,7 +2591,7 @@ const updaterPageOffered = event => {
 ipcMain.on("update:offered", event => {
   try { event.returnValue = updaterPageOffered(event) === true; } catch { event.returnValue = false; }
 });
-installCloudPlanIpc({ ipcMain, pageSender: cloudPageSender, account: () => cloudAccount, client: () => ensureCloudAccount(), notices: () => cloudTrialNotices(), homePage: event => homeWindow.homePage(event), otherCloud: ownCloudPage });
+installCloudPlanIpc({ ipcMain, pageSender: cloudPageSender, account: () => cloudAccount, client: () => ensureCloudAccount(), notices: () => cloudTrialNotices(), homePage: event => homeWindow.homePage(event), otherCloud: ownCloudPage, support: { store: jsonFile(path.join(app.getPath("userData"), "support-outbox.json")), appVersion: app.getVersion(), log: slog } });
 
 const savedWorkspace = id => {
   const env = environmentsState.environments.find(entry => entry.id === id);

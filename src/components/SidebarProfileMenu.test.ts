@@ -370,6 +370,19 @@ describe("profileMenuItems", () => {
     expect(items.find((item) => item.key === "account")!.label).toBe("OpenMausBot Cloud");
   });
 
+  it("puts Contact support first in Help only when it is offered (a paid Cloud or Team plan); everyone else's Help is as it was", () => {
+    const contact = vi.fn();
+    const help = (items: SidebarMenuItem[]) => items.find((item) => item.key === "support")!.submenu!;
+    expect(help(build({ onContactSupport: contact })).map((item) => [item.key, item.label])).toEqual([["contact-support", "Contact support"], ["help", "Help Center"],
+      ["feedback", "Send Feedback"], ["shortcuts", "Keyboard shortcuts"], ["about", "About"]]);
+    help(build({ onContactSupport: contact }))[0]!.onSelect();
+    expect(contact).toHaveBeenCalledOnce();
+    expect(help(build({ onContactSupport: undefined })).map((item) => item.key)).toEqual(["help", "feedback", "shortcuts", "about"]);
+    const simple = build({ onContactSupport: contact, simple: { tools: [], places: [] } });
+    expect(help(simple)[0]!.key).toBe("contact-support");
+    expect(help(build({ simple: { tools: [], places: [] } })).map((item) => item.key)).not.toContain("contact-support");
+  });
+
   it("only offers what this window has: no usage on a remote server, no account without one", () => {
     const items = build({ usage: false, account: null });
     expect(items.map((item) => item.key)).toEqual(["connect-phone", "support", "settings"]);

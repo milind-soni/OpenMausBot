@@ -522,8 +522,12 @@ function pageIpc(overrides = {}) {
       cancelPlan: async (...args) => { calls.push(["cancel", ...args]); return { outcome: "failed" }; },
       keepPlan: async (...args) => { calls.push(["keep", ...args]); return { outcome: "failed" }; },
       roomNotNow: async (...args) => { calls.push(["room-not-now", ...args]); return true; },
-      restartNow: async (...args) => { calls.push(["restart-now", ...args]); return "restarting"; } }),
+      restartNow: async (...args) => { calls.push(["restart-now", ...args]); return "restarting"; },
+      supportRequest: async (body) => { calls.push(["support", body]); return { status: 201, body: { id: "report-1", priority: true } }; } }),
     homeWindow: { homePage: () => false },
+    // Contact support's outbox file, kept in memory here.
+    jsonFile: () => { let saved; return { read: () => { if (saved === undefined) throw new Error("none"); return saved; }, write: (value) => { saved = value; } }; },
+    path: { join: (...parts) => parts.join("/") }, app: { getPath: () => "/user-data", getVersion: () => "0.1.153" }, slog: () => {},
     ...overrides,
   });
   vm.runInContext(PAGE_IPC, context);
@@ -541,14 +545,15 @@ test("no page gets a control over lending this computer: not My Cloud's, another
 
 test("Settings on the person's own Cloud shows the plan read only, says when it is home, and can open the Plan page or sign in again; never switch away", async () => {
   const page = preload(CLOUD);
-  assert.deepEqual(Object.keys(page.bridge.cloudPlan), ["state", "manage", "signIn", "noticeSeen", "upgradePreview", "upgrade", "cancel", "keep", "roomNotNow", "restartNow"]);
+  assert.deepEqual(Object.keys(page.bridge.cloudPlan), ["state", "manage", "signIn", "noticeSeen", "upgradePreview", "upgrade", "cancel", "keep", "roomNotNow", "restartNow", "support"]);
+  await assert.rejects(page.bridge.cloudPlan.support({ topic: "other", message: "Hi", replyTo: "me@example.test" }), /Choose Send/);
   assert.equal(page.bridge.cloudAccount, undefined, "no account, credential or address reaches the Cloud's page");
   await page.bridge.cloudPlan.state({ origin: "https://evil.example.test" });
   await assert.rejects(page.bridge.cloudPlan.manage(), /Choose Manage/);
   const ipc = pageIpc();
   const event = { sender: ipc.cloudContents, senderFrame: ipc.cloudFrame };
   assert.deepEqual(Object.keys(Object.fromEntries(ipc.handlers)), ["cloud-plan:state", "cloud-plan:notice-seen", "cloud-plan:manage",
-    "cloud-plan:upgrade-preview", "cloud-plan:upgrade", "cloud-plan:cancel", "cloud-plan:keep", "cloud-plan:room-not-now", "cloud-plan:restart-now"]);
+    "cloud-plan:upgrade-preview", "cloud-plan:upgrade", "cloud-plan:cancel", "cloud-plan:keep", "cloud-plan:room-not-now", "cloud-plan:restart-now", "cloud-plan:support"]);
   assert.deepEqual(plain(await ipc.handlers.get("cloud-plan:state")(event, { tier: "personal" })), { status: "paid", tier: "max" });
   ipc.context.homeWindow = { homePage: (asked) => asked === event };
   assert.deepEqual(plain(await ipc.handlers.get("cloud-plan:state")(event)), { status: "paid", tier: "max", home: true });
@@ -566,6 +571,23 @@ test("Settings on the person's own Cloud shows the plan read only, says when it 
   assert.deepEqual(plain(await ipc.handlers.get("cloud-plan:state")(event)), { status: "checking", tier: "max", home: true });
   ipc.context.rememberedHome = { accountId: "someone-else", origin: CLOUD };
   assert.throws(() => ipc.handlers.get("cloud-plan:state")(event), /only available/);
+});
+
+test("Contact support goes from main on the sign-in, from this app's own pages only, with the place main names, never one the page says", async () => {
+  const ipc = pageIpc();
+  const event = { sender: ipc.cloudContents, senderFrame: ipc.cloudFrame };
+  const input = { topic: "broken", message: "My bots stopped.", replyTo: " Me@Example.test ", diagnostics: "MausBot 0.1.153", place: "6f1c2a8e-3b4d-4c5e-8f9a-0b1c2d3e4f5a", priority: false };
+  assert.deepEqual(plain(await ipc.handlers.get("cloud-plan:support")(event, input)), { outcome: "sent", id: "report-1" });
+  assert.deepEqual(ipc.calls, [["support", { kind: "support", topic: "broken", message: "My bots stopped.", replyTo: "me@example.test", appVersion: "0.1.153",
+    platform: `${process.platform} ${process.arch}, desktop app`, place: "my-cloud", diagnostics: "MausBot 0.1.153" }]]);
+  await assert.rejects(async () => ipc.handlers.get("cloud-plan:support")(event, { ...input, replyTo: "not an address" }), /reply to/);
+  for (const sender of [{ sender: ipc.cloudContents, senderFrame: { url: "https://other.example.test/" } }, { sender: {}, senderFrame: ipc.cloudFrame }]) {
+    assert.throws(() => ipc.handlers.get("cloud-plan:support")(sender, input), /only available/);
+  }
+  assert.equal(ipc.calls.length, 1);
+  // A signed-in account that may contact support: its page's plan says so, with the address its reply-to starts with.
+  ipc.account.support = { email: "help@example.test", form: true };
+  assert.deepEqual(plain(await ipc.handlers.get("cloud-plan:state")(event)).support, { email: "help@example.test", form: true, account: "person@example.test" });
 });
 
 test("main shows the switcher at home only with somewhere else to go: My Cloud alone has none", () => {
