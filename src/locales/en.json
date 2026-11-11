@@ -6500,6 +6500,7 @@
   "place.view.ccNoHours.short": "No hours left",
   "place.view.ccNoHours.line": "This month's {hours} cloud desktop hours are used up. They come back on 1 {month}.",
   "place.view.ccNoHours.lineUnknown": "This month's cloud desktop hours are used up.",
+  "place.view.ccNoHours.lineTrial": "The free trial's cloud desktop hours are used up. The full allowance starts with the first payment.",
   "place.view.ccAtOnce.short": "In use",
   "place.view.ccAtOnce.lineOne": "Your {plan} plan includes 1 cloud desktop, and {holders} has it.",
   "place.view.ccAtOnce.lineMany": "Your {plan} plan includes {max} cloud desktops, and {holders} have them.",

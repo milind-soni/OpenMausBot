@@ -2208,6 +2208,7 @@
   "place.view.ccAsleep.line": "Der Cloud-Desktop von {bot} schläft. Er wacht in ein paar Sekunden auf, wenn {bot} ihn braucht.",
   "place.view.ccNoHours.line": "Die {hours} Cloud-Desktop-Stunden dieses Monats sind aufgebraucht. Am 1. {month} gibt es neue.",
   "place.view.ccNoHours.lineUnknown": "Die Cloud-Desktop-Stunden dieses Monats sind aufgebraucht.",
+  "place.view.ccNoHours.lineTrial": "Die Cloud-Desktop-Stunden der kostenlosen Testphase sind aufgebraucht. Das volle Kontingent beginnt mit der ersten Zahlung.",
   "place.view.ccAtOnce.lineOne": "Dein Tarif {plan} enthält 1 Cloud-Desktop, und {holders} nutzt ihn.",
   "place.view.ccAtOnce.lineMany": "Dein Tarif {plan} enthält {max} Cloud-Desktops, und {holders} nutzen sie.",
   "place.view.ccAtOnce.lineUnknown": "Alle Cloud-Desktops deines Tarifs sind in Gebrauch.",
