@@ -34,12 +34,14 @@ vi.mock("./DesktopCapabilities", async () => {
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => true }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false, setAdvancedMode: () => {} }));
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: fixture.team ? { ...original.initialState, config: { team: { id: "acme", name: "Acme" } } } : original.initialState, dispatch: vi.fn() }) };
 });
 
 import { Sidebar } from "./Sidebar";
+const drawSidebar = (Sidebar as unknown as { type: (props: import("react").ComponentProps<typeof Sidebar>) => import("react").ReactNode }).type;
 
 type Props = { children?: ReactNode; onClick?: () => void; role?: string; [key: string]: unknown };
 function nodes(value: ReactNode): ReactElement<Props>[] {
@@ -56,7 +58,7 @@ function words(value: ReactNode): string {
 }
 function render() {
   fixture.index = 0;
-  return nodes(Sidebar({ open: true, onClose: () => {} }));
+  return nodes(drawSidebar({ open: true, onClose: () => {} }));
 }
 function plusMenu(admin: boolean | null, team = false) {
   fixture.values = [];

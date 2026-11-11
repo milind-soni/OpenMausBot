@@ -155,6 +155,9 @@ export interface WireTask extends InboxTask {
   /** Set when a bot, not a person, opened this thread. */ openedBy?: TaskOpenedBy;
   /** On a team's server: one person's conversation, seen by them alone (never by another member or an admin). */
   private?: true;
+  /** On a team's server: a private conversation its person shared, never private again. `sharedWith`: shared with one person,
+   * the other reader as this viewer sees them (`byYou` to the one who shared it); nobody else, an admin included, is sent it. */
+  shared?: true; sharedWith?: { name: string; byYou?: true };
   /** Team Cloud, where several people write, while it works: whose request runs (they or an Owner or Admin stop it). */ askedBy?: ResolvedSender;
   /** Set by close_thread; absent while the thread is open. */
   closedBy?: TaskClosedBy;

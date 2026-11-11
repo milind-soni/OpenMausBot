@@ -77,6 +77,7 @@ const store = vi.hoisted(() => ({
   },
   dispatch: (() => {}) as (action: unknown) => void,
 }));
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", () => ({ useStore: () => store }));
 // Scrolling a hit into view needs the real DOM; this suite checks the window around it.
 vi.mock("@/lib/focus-message", () => ({ useFocusMessage: () => {} }));

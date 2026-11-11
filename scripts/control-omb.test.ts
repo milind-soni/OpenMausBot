@@ -55,6 +55,19 @@ describe("the fixture's Live call environment", () => {
   });
 });
 
+describe("the fixture's included app hosting relay", () => {
+  it("passes a loopback stand-in and its token through together, and neither for any other address", () => {
+    expect(childEnv({ OMB_CLOUD_HOSTING_URL: " http://127.0.0.1:4400/api/cloud/services/hosting/v1 ", OMB_CLOUD_HOSTING_TOKEN: "omb_host_fixture" }))
+      .toMatchObject({ OMB_CLOUD_HOSTING_URL: "http://127.0.0.1:4400/api/cloud/services/hosting/v1", OMB_CLOUD_HOSTING_TOKEN: "omb_host_fixture" });
+    for (const url of ["https://cloud.openmausbot.com/api/cloud/services/hosting/v1", "http://localhost:4400/api/cloud/services/hosting/v1", "http://192.0.2.1:4400", "http://127.0.0.1:4400/../x?y", ""]) {
+      const env = childEnv({ OMB_CLOUD_HOSTING_URL: url, OMB_CLOUD_HOSTING_TOKEN: "omb_host_real" });
+      expect(env, url).not.toHaveProperty("OMB_CLOUD_HOSTING_URL");
+      expect(env, url).not.toHaveProperty("OMB_CLOUD_HOSTING_TOKEN");
+    }
+    expect(childEnv({ OMB_CLOUD_HOSTING_URL: "http://127.0.0.1:4400/api/cloud/services/hosting/v1" })).not.toHaveProperty("OMB_CLOUD_HOSTING_URL");
+  });
+});
+
 describe("the fixture's X research relay", () => {
   it("passes a loopback relay stub and its token through, the token only with the stub", () => {
     expect(childEnv({ OMB_CLOUD_X_URL: " http://127.0.0.1:4200/api/cloud/services/x ", OMB_CLOUD_X_TOKEN: "omb_x_fixture" }))

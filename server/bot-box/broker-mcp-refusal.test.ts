@@ -60,7 +60,8 @@ describe.skipIf(process.platform === "win32")("an MCP server that refuses a boxe
     const result = await callTool(mounted);
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toContain('The MCP server "mail" needs a sign-in');
-    expect(result.content[0]!.text).toContain("Call mcp_server with action sign_in and name mail");
+    expect(result.content[0]!.text, "no connected app given: the words stay as they were").toBe('The MCP server "mail" needs a sign-in before its tools work, and nobody has signed in (HTTP 401), so nothing ran. '
+      + "Don't retry. Call mcp_server with action sign_in and name mail, then end your turn; if you can't, tell the person to sign in to mail in Apps, MCP servers.");
     expect(server!.calls).toEqual([]);
 
     const grant = brokeredServer(path, "mail", target);
@@ -129,7 +130,8 @@ describe("the answer to a refused call", () => {
 
   it("points to the app already connected, with no card", () => {
     const text = textOf(refusedCallAnswer("mail", false, CALL, { slug: "googlecalendar", label: "Google Calendar", connected: true }));
-    expect(text).toBe(`${REFUSED} Google Calendar is already connected as a connected app here, so use the connected app's Google Calendar tools instead of this MCP server. Don't show a connect card for it.`);
+    expect(text).toBe(`${REFUSED} Google Calendar is already connected as a connected app here, so use the connected app's Google Calendar tools instead of this MCP server. `
+      + `Don't show a connect card for it. If you don't have those tools, call ${SIGN_IN.slice("Call ".length)}`);
     expect(text).not.toContain("COMPOSIO_MANAGE_CONNECTIONS");
   });
 

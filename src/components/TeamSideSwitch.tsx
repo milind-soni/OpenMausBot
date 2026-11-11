@@ -151,7 +151,8 @@ export function TeamAudienceLabel({ bot, group }: { bot?: Bot; group?: Group }) 
   }, [team?.teamId, person, shown, side, bot?.switchingTo]);
   if (!readers || !teamName) return null;
   const Icon = readers === "me" ? Lock : Users;
-  const label = readers === "me" ? t("team.privateHeader") : group ? t("teamSide.groupAudience") : sharedChatAudience(teamName, bot?.onlyPeopleAdded);
+  const sharedWith = bot?.tasks?.find((task) => task.threadId === bot.threadId)?.sharedWith?.name;
+  const label = readers === "me" ? t("team.privateHeader") : group ? t("teamSide.groupAudience") : sharedChatAudience(teamName, bot?.onlyPeopleAdded, sharedWith);
   return (
     <div role="note" data-team-audience={readers} className="relative z-[1] flex items-center gap-1 px-2 pb-1 text-[12px] leading-4 text-ink-secondary">
       <Icon size={12} aria-hidden="true" className="shrink-0" /><span className="truncate">{label}</span>

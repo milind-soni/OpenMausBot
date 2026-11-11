@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
-import { Card, Switch } from "./SettingsPrimitives";
+import { SettingRow, Switch } from "./SettingsPrimitives";
+import { productName } from "@/lib/brand";
 import { Select } from "./Select";
 
 type KeepWarm = NonNullable<ConfigStatus["cacheKeepWarm"]>;
@@ -36,27 +37,21 @@ export function CacheKeepWarmSettings() {
   };
   const windows: number[] = KEEP_WARM_WINDOWS.includes(current.windowMinutes as typeof KEEP_WARM_WINDOWS[number])
     ? [...KEEP_WARM_WINDOWS] : [...KEEP_WARM_WINDOWS, current.windowMinutes].sort((a, b) => a - b);
-  return (
-    <Card title={t("settings.keepWarm.title")} subtitle={t("settings.keepWarm.subtitle")}>
-      <div className="mt-3 flex items-center justify-between gap-4">
-        <label htmlFor="cache-keepwarm-enabled" className="text-[13px] font-medium text-ink">{t("settings.keepWarm.enable")}</label>
-        <Switch id="cache-keepwarm-enabled" checked={current.enabled} disabled={saving}
-          aria-describedby="cache-keepwarm-help cache-keepwarm-cost"
-          onClick={() => void save({ ...current, enabled: !current.enabled })} />
-      </div>
-      <p id="cache-keepwarm-help" className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("settings.keepWarm.help")}</p>
-      <p id="cache-keepwarm-cost" className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("settings.keepWarm.cost")}</p>
-      <div className="mt-3 flex items-center justify-between gap-4">
-        <label htmlFor="cache-keepwarm-window" className="text-[13px] font-medium text-ink">{t("settings.keepWarm.window")}</label>
-        <Select id="cache-keepwarm-window" value={current.windowMinutes} disabled={saving || !current.enabled}
+  return <>
+    <SettingRow title={t("settings.keepWarm.title")} subtitle={t("settings.keepWarm.short")}
+      message={error ? <span role="alert" className="text-danger">{error}</span> : saving ? <span role="status" className="sr-only">{t("settings.threads.saving")}</span> : undefined}>
+      <Switch id="cache-keepwarm-enabled" checked={current.enabled} disabled={saving} aria-label={t("settings.keepWarm.enable")} title={`${t("settings.keepWarm.help", { app: productName() })} ${t("settings.keepWarm.cost")}`}
+        onClick={() => void save({ ...current, enabled: !current.enabled })} />
+    </SettingRow>
+    {current.enabled && (
+      <SettingRow title={t("settings.keepWarm.window")}>
+        <Select id="cache-keepwarm-window" aria-label={t("settings.keepWarm.window")} value={current.windowMinutes} disabled={saving}
           onChange={(event) => void save({ ...current, windowMinutes: Number(event.target.value) })}>
           {windows.map((minutes) => (
             <option key={minutes} value={minutes}>{t("settings.keepWarm.hours", { hours: Number((minutes / 60).toFixed(2)) })}</option>
           ))}
         </Select>
-      </div>
-      {saving && <span role="status" className="sr-only">{t("settings.threads.saving")}</span>}
-      {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
-    </Card>
-  );
+      </SettingRow>
+    )}
+  </>;
 }

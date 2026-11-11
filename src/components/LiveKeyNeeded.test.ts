@@ -22,7 +22,7 @@ it("says one plain thing, names OpenAI, and offers only the way to Settings → 
   const html = renderToStaticMarkup(createElement(LiveKeyNeeded));
   expect(html).toContain('<h2 id="live-key-title"');
   expect(html).toContain("Live calls use your own OpenAI key. Add it in Settings → API keys.");
-  expect(html).toContain(">Open API keys</button>");
+  expect(html).toContain(">Open AI › Other services</button>");
   expect(html.match(/<button/g)).toHaveLength(1);
   expect(html).toContain("The OpenAI key stays on your computer.");
   for (const gone of ["Pro", "plan", "<input", "$15"]) expect(html).not.toContain(gone);
@@ -50,7 +50,7 @@ it("with Azure chosen, asks for the endpoint, deployment and resource key in pla
   expect(html).toContain('placeholder="gpt-live-1"');
   expect(html).toContain('aria-label="Azure OpenAI key for Live calls"');
   expect(html).toContain("The Azure key stays on your computer.");
-  expect(html).not.toContain("Open API keys");
+  expect(html).not.toContain("Open AI › Other services");
   expect(html).not.toContain("OpenAI key stays");
 });
 

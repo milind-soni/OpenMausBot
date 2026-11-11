@@ -10,9 +10,10 @@ const GMAIL: KnownApp = { slug: "gmail", label: "Gmail" };
 const CALENDAR: KnownApp = { slug: "googlecalendar", label: "Google Calendar" };
 
 const BY_HOST: Record<string, KnownApp> = { "gmailmcp.googleapis.com": GMAIL, "calendarmcp.googleapis.com": CALENDAR };
+/** At any other address, only a name that is the app's own: "gmail-filters" or "gcal2notion" is another tool. */
 const BY_NAME: ReadonlyArray<readonly [RegExp, KnownApp]> = [
-  [/^gmail(?![a-z])/i, GMAIL],
-  [/^(?:google[-_ ]?calendar|gcal(?:endar)?)(?![a-z])/i, CALENDAR],
+  [/^gmail(?:[-_]mcp)?$/i, GMAIL],
+  [/^(?:google[-_]?calendar|gcal(?:endar)?)(?:[-_]mcp)?$/i, CALENDAR],
 ];
 
 export function knownMcpServerApp(name: string, url: string): KnownApp | null {

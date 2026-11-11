@@ -9,7 +9,7 @@ import { onTeamChats, ownChatOf, ownChatStarted, teamChats, type TeamChats } fro
 
 export type TeamSide = "me" | "team";
 
-type SideTask = { threadId: string; private?: unknown; sharedChat?: unknown; unread?: boolean; routineRunId?: unknown; archivedAt?: unknown };
+type SideTask = { threadId: string; private?: unknown; shared?: unknown; sharedChat?: unknown; unread?: boolean; routineRunId?: unknown; archivedAt?: unknown };
 type SharedBot = { yourAccess?: string; access?: BotAccess; visibility?: BotVisibility; createdBy?: string; reportsTo?: string; defaultBot?: { person?: string } };
 type SideBot = SharedBot & { id: string; threadId: string; tasks?: SideTask[]; hidden?: boolean; messages?: unknown[] };
 type SideGroup = { id: string; unread?: boolean };
@@ -23,7 +23,7 @@ type SideGroup = { id: string; unread?: boolean };
 export function sideOfThread(bot: Pick<SideBot, "tasks" | "defaultBot">, threadId: string): TeamSide {
   if (bot.defaultBot?.person) return "me";
   const task = bot.tasks?.find((candidate) => candidate.threadId === threadId);
-  return task?.sharedChat !== true && (task?.private === true || ownChatStarted(threadId)) ? "me" : "team";
+  return task?.sharedChat !== true && (task?.private === true || (ownChatStarted(threadId) && task?.shared !== true)) ? "me" : "team";
 }
 
 /**

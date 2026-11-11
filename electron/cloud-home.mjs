@@ -342,7 +342,7 @@ export function withCloudHome(state, machine, makeId, look = null) {
 
 /** The one-time code goes in the hash, never a query. `route`: a path of the Cloud's own to land on after signing in. */
 export function cloudHomeConnectUrl(target, now, open = null, route = null) {
-  const params = new URLSearchParams(open === "phone" ? { "desktop-settings": "phone" } : {});
+  const params = new URLSearchParams(open === "phone" ? { "desktop-settings": "phone", pair: "open" } : {});
   const back = typeof route === "string" && /^\/(?!\/)/.test(route) ? route : null;
   if (target.grant && target.grant.origin === target.origin && target.grant.expiresAt > now) {
     if (back) params.set("next", back);

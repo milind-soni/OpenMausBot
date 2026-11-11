@@ -8,7 +8,7 @@ and a level for each person added. Admins and the bot's owner always edit. The c
 
 ```sh
 pnpm exec vitest run server/cloud-team-bot-access.e2e.test.ts server/bot-access.test.ts server/host/access-requests.test.ts \
-  server/bot-visibility.test.ts src/components/bot-access src/state/team-chats.test.ts src/components/SettingsModal.groups.test.ts
+  server/bot-visibility.test.ts src/components/bot-access src/state/team-chats.test.ts src/components/settings/settings-index.test.ts
 ```
 
 - `server/cloud-team-bot-access.e2e.test.ts` starts a real Team Cloud (`OMB_CLOUD_ROLE=team`) with the Owner (Olive),
@@ -36,8 +36,8 @@ pnpm exec vitest run server/cloud-team-bot-access.e2e.test.ts server/bot-access.
   MausBot) with its owner, a plain summary and a stack of faces (+N past four); a row opens the Share dialog; the search
   takes a bot's name or owner; By person lists each User, and opening one gives their bots at the same level menus, with
   Remove only for their own access; the empty states; "Ask Cara to chat" asks and says so, "Ask an admin to chat" when
-  nobody on the team owns the bot. `src/components/SettingsModal.groups.test.ts` and
-  `src/components/SettingsModal.simple.test.ts` show the page to a team's admins only, as its own page in both modes.
+  nobody on the team owns the bot. `src/components/settings/settings-index.test.ts` and
+  `src/components/settings/SettingsWindow.test.ts` show People, with its Bot access section, to a team's admins only, in both modes.
 - `src/components/bot-access/ShareBotDialog.dom.test.ts` drives the dialog: the owner first, each level on a real menu
   with its check, nothing below what everyone gets, a change sent at once with Undo putting it back, adding a teammate
   from the keyboard, removing one, general access and its level, Make owner behind a confirmation and only for whoever

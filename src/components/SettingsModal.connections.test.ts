@@ -26,10 +26,10 @@ afterEach(() => {
 
 describe("Settings → Connections", () => {
   it.each(["router", "OpenRouter", "base URL", "API key", "OpenAI", "Anthropic", "Groq"])("is found by searching for %s", async (typed) => {
-    const { SECTIONS, sectionMatches } = await import("./SettingsModal");
-    const connections = SECTIONS.find((entry) => entry.id === "connections")!;
-    // The modal lowercases and trims what was typed before matching.
-    expect(sectionMatches(connections, typed.trim().toLowerCase())).toBe(true);
+    const { fullContext, searchSettings } = await import("./settings/settings-index");
+    const { t } = await import("@/lib/i18n");
+    const hits = searchSettings(typed, fullContext(), (entry) => t(entry.labelKey), (page) => t(page.labelKey));
+    expect(hits.some((hit) => hit.entry.page === "ai" && hit.entry.anchor === "ai-keys")).toBe(true);
   });
 
   it("points OpenCode users at `opencode auth login` for other providers", async () => {

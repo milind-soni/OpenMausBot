@@ -10,7 +10,7 @@ vi.mock("react", async (original) => ({
   useRef: (initial: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = { current: initial }; return f.values[index]; },
   useEffect: (effect: EffectCallback) => { f.effects.push(effect); },
 }));
-vi.mock("../lib/phone-pairing", () => ({ revealPhonePairing: (root: unknown) => { if (!root) return false; f.revealed.push(root); return true; } }));
+vi.mock("../lib/phone-pairing", () => ({ takePairOnOpen: () => false, revealPhonePairing: (root: unknown) => { if (!root) return false; f.revealed.push(root); return true; } }));
 import { ServerPairingCard } from "./ServerPairingCard";
 
 const admin = { kind: "session" as const, id: "s", label: "Mac", scopes: ["admin", "client"], expiresAt: 1 };

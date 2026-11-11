@@ -160,22 +160,19 @@ describe("one name per thing", () => {
     expect([myCloud, thisComputer, serverMenuLocal]).toEqual([e["cloudSetup.myCloud"], "place.local", "place.local"]);
     type Text = (key: string) => string;
     const label = (key: string) => (text: Text) => text(key);
-    const cloud = () => myCloud!;
     const settings = (section: string) => (text: Text) => `${text("settings.title")} → ${text(section)}`;
     const withoutEllipsis = (key: string) => (text: Text) => text(key).replace(/…$/, "");
     const pointers: Array<[string, Array<(text: Text) => string>]> = [
-      ["cloudHome.connectHelp", [label("place.local")]],
-      ["cloudPhone.step1", [cloud]],
       ["cloudAccount.onCloudSignIn", [label("cloudAccount.signInAgain")]],
-      ["cloudAccount.storageFailed", [label("cloudAccount.signOut")]],
-      ["cloudAccount.codeExpired", [label("cloudAccount.signIn")]],
+      ["cloudAccount.storageFailed", [label("settings.account.signOutShort")]],
+      ["cloudAccount.codeExpired", [label("settings.account.signIn")]],
       ["computer.routines.offWarning", [label("routines.runsOn.boat")]],
       ["native.dialog.org.consHosted", [label("native.menu.server")]],
       ["native.dialog.unreachable.detail", [label("native.menu.server")]],
       ["native.boot.folderMissing.body", [label("native.menu.server")]],
       ["native.boot.unhealthy.body", [label("native.menu.server")]],
       ["native.dialog.connectFailed.detail", [withoutEllipsis("native.menu.connect")]],
-      ["native.dialog.share.detail", [settings("settings.section.desktopWorkspaces")]],
+      ["native.dialog.share.detail", [settings("settings.app.computers")]],
     ];
     const staleIn = (text: Text, prefix: string) => pointers.flatMap(([key, labels]) => labels.map((of) => of(text))
       .filter((shown) => !text(key).includes(shown)).map((shown) => `${prefix}${key} → ${shown}`));

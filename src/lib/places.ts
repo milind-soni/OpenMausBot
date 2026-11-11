@@ -86,12 +86,9 @@ export async function makeHome(id: string): Promise<true | string> {
  * list main gave it (two places or more). */
 export const railShown = (state: RailState): boolean => state.beside === true || state.places.length > 0;
 
-/** This computer's circle: This computer, or a workspace of its own (a profile): its own name, else as the app names this
- * computer elsewhere, This Mac or This PC. */
-export function computerName(place: Pick<RailPlace, "profile"> & Partial<Pick<RailPlace, "named" | "name">>, platform: string | undefined = typeof window === "undefined" ? undefined : window.ogb?.platform): string {
-  if (!place.profile) return t("rail.thisComputer");
-  if (place.named && place.name) return place.name;
-  return t(platform === "darwin" ? "rail.thisMac" : "rail.thisPc");
+/** This computer's circle: This computer, or a workspace of its own (a profile) under its own name. */
+export function computerName(place: Pick<RailPlace, "profile"> & Partial<Pick<RailPlace, "named" | "name">>): string {
+  return place.profile && place.named && place.name ? place.name : t("rail.thisComputer");
 }
 
 /** A new workspace's first name: Work, then Personal, then Workspace 2, 3 and on, whichever no place here has yet. */

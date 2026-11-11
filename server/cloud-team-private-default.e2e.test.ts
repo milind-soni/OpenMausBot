@@ -277,6 +277,34 @@ describe("a team bot is its maker's until they share it", () => {
     expect((await as("ada", "DELETE", `/api/bots/${adas.id}`)).status, "an admin deletes any team bot, shared or not").toBe(200);
   });
 
+  it("sharing a conversation of a private bot never widens who reaches the bot", async () => {
+    const own = await made("rui", { name: "Rui's notebook" });
+    const opened = await as("rui", "POST", `/api/bots/${own.id}/tasks`, { title: "Pricing ideas" });
+    expect(opened.status, JSON.stringify(opened.body)).toBe(201);
+    const threadId = opened.body.task.threadId as string;
+    const share = `/api/bots/${own.id}/tasks/${threadId}/share`;
+    const offered = await as("rui", "GET", share);
+    expect(offered.status, JSON.stringify(offered.body)).toBe(200);
+    expect((offered.body.people as Array<{ email: string }>).map((person) => person.email).sort(), "only people who can use the bot: its admins").toEqual([ADA.email, OLIVE.email]);
+    const refused = await as("rui", "POST", share, { with: { email: MARTA.email } });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(409);
+    const unseen = async () => {
+      await hiddenFrom("marta", own);
+      expect((await as("marta", "GET", `/api/threads/${threadId}/messages?limit=5`)).status).toBe(404);
+    };
+    await unseen();
+
+    expect((await as("rui", "POST", share, { with: { email: ADA.email } })).status).toBe(200);
+    expect((await as("ada", "GET", `/api/threads/${threadId}/messages?limit=5`)).status, "the admin it was shared with reads it").toBe(200);
+    expect((await as("olive", "GET", `/api/threads/${threadId}/messages?limit=5`)).status, "another admin does not").toBe(404);
+    await unseen();
+    expect((await botOf("rui", own.id))?.access, "the bot is still shared with nobody").toEqual(PRIVATE);
+
+    expect((await as("rui", "POST", share, { with: "team" })).status).toBe(200);
+    expect((await as("olive", "GET", `/api/threads/${threadId}/messages?limit=5`)).status, "the team's, for a private bot, is whoever looks after it and the admins").toBe(200);
+    await unseen();
+  });
+
   it("what was shared before stays shared across a restart, and what was private stays private", async () => {
     const before = Object.fromEntries((await bots("olive")).map((bot) => [bot.id, bot.access]));
     const martas = (await bots("marta")).map((bot) => bot.id).sort();
