@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Plus, RotateCw } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { keySaved } from "@/lib/product-events";
 import { addedServers } from "@/lib/openai-compat-endpoints";
-import { cn } from "@/lib/cn";
 import type { OllamaStatus } from "../../shared/local-model";
 import { KEY_FIELD } from "./keys/KeyRow";
 import { OllamaStatusLine } from "./OllamaStatusLine";
@@ -88,16 +87,14 @@ export function OllamaServer({ visible }: { visible: boolean }) {
           aria-label={t("ollama.address")}
           spellCheck={false}
           disabled={busy}
-          className={cn(KEY_FIELD, "font-mono")}
+          className={KEY_FIELD}
         />
         <p className="text-[12px] leading-4 text-ink-secondary">{t("ollama.addressHint")}</p>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <button type="button" onClick={add} disabled={!canAdd} className="ui-button">
-            {busy ? <Loader2 size={12} aria-hidden="true" className="animate-spin" /> : <Plus size={12} aria-hidden="true" />}
             {busy ? t("ollama.adding") : t("ollama.add")}
           </button>
-          <button type="button" onClick={() => check(address.trim())} disabled={checking || busy} className="ui-button">
-            <RotateCw size={12} aria-hidden="true" />
+          <button type="button" onClick={() => check(address.trim())} disabled={checking || busy} className="settings-quiet cursor-pointer">
             {t("common.checkAgain")}
           </button>
         </div>

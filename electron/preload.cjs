@@ -209,6 +209,10 @@ const bridge = {
       ipcRenderer.on("rail:state", handler);
       return () => ipcRenderer.removeListener("rail:state", handler);
     },
+    // "Switch to This computer" on a Cloud's settings: only from the person's click, and only a settings page's name.
+    openComputer: (page) => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("rail:open-computer", typeof page === "string" && /^[a-z-]{1,32}$/.test(page) ? page : "")
+      : Promise.reject(new Error("Choose Switch to This computer.")),
     ...(isLocalPage ? {
       expand: (on) => ipcRenderer.invoke("rail:expand", on === true),
       onSkin: (cb) => {

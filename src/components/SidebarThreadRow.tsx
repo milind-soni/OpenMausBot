@@ -18,10 +18,11 @@ import { Select } from "./Select";
 import { WorkingTimer } from "./WorkingIndicator";
 import { useHeldText } from "./SidebarWorkingStep";
 import { localizedTaskTitle } from "@/lib/task-title";
+import { ShareRowItems } from "./conversation-share/ShareRowItems";
 
 export { isSnoozed, orderedThreadList };
 
-type ThreadRowTask = Pick<Task, "threadId" | "title" | "sharedChat" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates" | "link" | "turnStartedAt"> & {
+type ThreadRowTask = Pick<Task, "threadId" | "title" | "sharedChat" | "private" | "shared" | "sharedWith" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates" | "link" | "turnStartedAt"> & {
   queued?: boolean;
   pinned?: boolean;
   createdAt?: number;
@@ -372,6 +373,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
       onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setMenu(null); actionRef.current?.focus(); } }}>
       <button type="button" onClick={copyLink} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Link2 size={16} />{t("task.copyLink")}</button>
       {!task.sharedChat && <button type="button" onClick={startRename} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Pencil size={16} />{t("task.renameAria")}</button>}
+      <ShareRowItems botId={ownerId} task={task} onPicked={() => setMenu(null)} />
       {onRegenerateTitle && !task.sharedChat && <button type="button" disabled={regenerating} aria-busy={regenerating} onClick={regenerateTitle} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40">{regenerating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}{regenerating ? t("task.regeneratingTitle") : t("task.regenerateTitle")}</button>}
       {onMove && Boolean(folders?.length) && <label className="block rounded-md px-2 py-1.5 text-[13px] text-ink"><span className="mb-1 flex items-center gap-2 text-ink-secondary"><FolderInput size={16} />{t("folder.move")}</span>
         <Select size="sm" className="w-full" aria-label={t("folder.moveNamed", { title: task.title })} value={folders?.some((folder) => folder.id === task.projectId) ? task.projectId : ""}

@@ -63,7 +63,7 @@ describe("Settings → General: Product updates by email", () => {
   it("reflects the account's answer, and turning it off withdraws; on again is one tap when signed in", async () => {
     current = { ...base, signedIn: true, status: "opted_in", email: "person@example.test" };
     await show();
-    expect(host.textContent).toContain("Product updates by email");
+    expect(host.textContent).toContain("Get MausBot updates");
     expect(host.textContent).toContain("Sent to person@example.test.");
     expect(toggle()!.getAttribute("aria-checked")).toBe("true");
     await click(toggle()!);

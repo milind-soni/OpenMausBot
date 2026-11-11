@@ -31,7 +31,7 @@ Nothing here needs a real MausBot Cloud account, a payment or the Electron app.
   sidebar's top row, right after the macOS traffic lights (on the same spot
   either way: the app's preload tells the page how far it moved, in
   `--rail-beside`), or with the "Show your computers" switch in Settings
-  (Simple: General → Appearance; Advanced: Appearance). Both are there only
+  (Simple and Advanced: This app → Appearance → Layout). Both are there only
   while the window has a rail. The choice is this desktop's (`railHidden` in
   desktop-prefs.json), never a server's or a place's.
 - The page beside the rail offers that button through `window.ogb.rail`

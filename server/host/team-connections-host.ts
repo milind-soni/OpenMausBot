@@ -25,8 +25,9 @@ import { projectApiKey } from "../composio-session.ts";
 import { appLabel, asPerson, ConnectionScopes, isProjectAccess, PeopleConnections, personAppOf, SCOPES_FILE, type PersonAppsAccess } from "../team-connections.ts";
 import { APP_TOOL_NAMES_ENV, APP_TOOLS_ENV, appToolsFor } from "../connector-app-tools.ts";
 import type { ConnectorScopes } from "../../shared/connector-scopes.ts";
+import { allowsTool, canUseMcpServer, type ToolScope } from "../../shared/tool-scope.ts";
 
-type Bot = { id: string; name: string; connectorTools?: Parameters<typeof Composio.mcpIntegration>[1]["connectorTools"]; connectorScopes?: ConnectorScopes };
+type Bot = { id: string; name: string; connectorTools?: Parameters<typeof Composio.mcpIntegration>[1]["connectorTools"]; connectorScopes?: ConnectorScopes; composio?: boolean; toolScope?: ToolScope };
 type Integration = { command: string; args: string[]; env: Record<string, string> };
 type McpBot = { id: string; name: string; mcpServers?: string[] };
 
@@ -101,8 +102,9 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
    * is used at once, and read again in the background once it is a minute old. Only an installation's first answer is
    * waited for, at most a few seconds, and a failed first read is tried again soon; `primeApps` reads the team's at start. */
   const connectedApps = new Map<string, { at: number; apps: string[] | null; reading: Promise<void> | null }>();
+  const appsKey = (as?: PersonAppsAccess) => isProjectAccess(as) ? `project\u0000${as.composio.userId}` : as ? createHash("sha256").update(as.url).update("\u0000").update(as.token).digest("hex") : "";
   const appsConnected = async (as?: PersonAppsAccess): Promise<string[]> => {
-    const key = isProjectAccess(as) ? `project\u0000${as.composio.userId}` : as ? createHash("sha256").update(as.url).update("\u0000").update(as.token).digest("hex") : "";
+    const key = appsKey(as);
     const entry = connectedApps.get(key) ?? { at: -Infinity, apps: null, reading: null };
     connectedApps.set(key, entry);
     if (!entry.reading && Date.now() - entry.at >= (entry.apps ? APPS_FRESH_MS : APPS_RETRY_MS)) {
@@ -274,16 +276,21 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
       return out;
     },
 
-    /** For a turn with the team's connected-apps bridge: the connected app an MCP server that wants a sign-in can be swapped
-     * for, or null where this bot could not use that app: a `person` app, one its scopes or grants leave out, or one
-     * `blocked` refuses. */
-    async mcpServerApps(bot: Bot, blocked: (slug: string) => string | undefined): Promise<(name: string, url: string) => McpServerApp | null> {
-      const connected = await appsConnected(), apps = personApps();
+    /** For a turn's URL MCP servers: the connected app a server that wants a sign-in can be swapped for, or null where this bot
+     * could not use that app: no connected-apps bridge in the turn or none its tool selection allows, a `person` app, one
+     * its scopes or grants leave out, or one `blocked` refuses; a card only where it may call COMPOSIO_MANAGE_CONNECTIONS.
+     * Undefined when no server stands for an app. Never waits: the apps connected are the ones read last. */
+    mcpServerApps(bot: Bot, input: { servers: Record<string, McpServerSpec>; bridged: boolean; blocked(slug: string): string | undefined }): ((name: string, url: string) => McpServerApp | null) | undefined {
+      if (!input.bridged || bot.composio === false || !canUseMcpServer(bot.toolScope, "composio")) return undefined;
+      if (!Object.entries(input.servers).some(([name, spec]) => "url" in spec && typeof spec.url === "string" && knownMcpServerApp(name, spec.url))) return undefined;
+      const connected = connectedApps.get(appsKey())?.apps ?? [], apps = personApps();
+      const card = allowsTool(bot.toolScope, { kind: "mcp", server: "composio", name: "COMPOSIO_MANAGE_CONNECTIONS" });
       return (name, url) => {
         const known = knownMcpServerApp(name, url);
-        if (!known || apps.includes(known.slug) || blocked(known.slug)) return null;
+        if (!known || apps.includes(known.slug) || input.blocked(known.slug)) return null;
         if ((bot.connectorScopes && !bot.connectorScopes.apps[known.slug]) || (bot.connectorTools && !bot.connectorTools[known.slug])) return null;
-        return { ...known, connected: connected.includes(known.slug) };
+        const isConnected = connected.includes(known.slug);
+        return isConnected || card ? { ...known, connected: isConnected } : null;
       };
     },
 

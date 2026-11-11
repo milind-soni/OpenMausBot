@@ -56,6 +56,7 @@ import { cloudIntentDue, cloudIntentShown, useCloudIntent } from "@/lib/cloud-in
 import { CloudSetup } from "@/components/CloudSetup";
 import { CloudWelcome } from "@/components/cloud-welcome/CloudWelcome";
 import { TeamWelcome } from "@/components/TeamWelcome";
+import { ConversationShareDialogs } from "@/components/conversation-share/ConversationShareDialogs";
 import { invitedToTeam, teamWelcomeDue, useTeamWelcomeRecord } from "@/lib/team-welcome";
 import { WelcomeKeeper } from "@/components/cloud-welcome/WelcomeKeeper";
 import { EmptyChatShell } from "@/components/onboarding/EmptyChatShell";
@@ -147,6 +148,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   cloudAddOpened.current ||= Boolean(state.cloudAdd);
   const [localVmWorkspaceBotId, setLocalVmWorkspaceBotId] = useState<string | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const closeDrawer = useCallback(() => { setDrawerOpen(false); menuButtonRef.current?.focus(); }, []);
   const previousViewRef = useRef(state.activeView);
   const calendarOriginRef = useRef<"chat" | "team-map" | "web-panel">("chat");
   const loading = loadingLine({ connected: state.connected, hydrated: state.hydrated === true, developer: import.meta.env.DEV });
@@ -335,6 +337,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     <div className={cn("flex h-full flex-col", framed && "bg-frame")}>
       <WindowFrameBar notifications={notificationTray} />
       <BotLimitPopup />
+      <ConversationShareDialogs />
       {!framed && strips}
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button
@@ -366,10 +369,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {!calendarFocus && <Sidebar
         collapseToIcons={collapseSidebar}
         open={drawerOpen}
-        onClose={() => {
-          setDrawerOpen(false);
-          menuButtonRef.current?.focus();
-        }}
+        onClose={closeDrawer}
       />}
       {state.activeView === "team-map" ? (
         <TeamMapPage />

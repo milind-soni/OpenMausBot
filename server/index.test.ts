@@ -11194,7 +11194,7 @@ describe("harness HTTP API", () => {
       });
       expect(unavailableCloud.status).toBe(409);
       expect(await unavailableCloud.json()).toMatchObject({
-        error: expect.stringMatching(/^Bots here can get their own cloud desktops from Boat, a paid service\. Connect your Boat account in Settings → API keys\./),
+        error: expect.stringMatching(/^Bots here can get their own cloud desktops from Boat, a paid service\. Connect your Boat account in AI › Other services\./),
       });
 
       const proposed = await fetch(`${BASE}/api/internal/trigger-requests`, {

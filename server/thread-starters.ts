@@ -55,6 +55,13 @@ export class ThreadStarters {
     return moved;
   }
 
+  /** A conversation whose person left the team, handed to the one it was shared with. */
+  handTo(threadId: string, person: string): void {
+    if (!KEY.test(person) || !this.starters.has(threadId)) return;
+    this.starters.set(threadId, person);
+    writeFileAtomic(this.file, JSON.stringify(Object.fromEntries(this.starters)) + "\n", { mode: 0o600 });
+  }
+
   /** Record once; a thread keeps the person it was first opened for. */
   set(threadId: string, person: string | undefined): void {
     if (!person || !KEY.test(person) || !THREAD.test(threadId) || this.starters.has(threadId)) return;
