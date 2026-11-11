@@ -353,7 +353,7 @@ function TaskModalContent({
             dueDate={fields.dueDate} onDueDateChange={value => setField("dueDate", value)} done={details.task.done}
             errors={{ status: errors.status, ...Object.fromEntries(Object.entries(FIELD_ERROR_KEY).map(([field, key]) => [key, errors[field as keyof Fields]])) }}
             disabled={!canEdit}>
-            <div className="issue-property" data-field="labels"><span>Labels</span><IssueLabels sessionToken={sessionToken} taskId={taskId} canEdit={canEdit} /></div>
+            <div className="issue-property" data-field="labels"><span>Labels</span><IssueLabels sessionToken={sessionToken} taskId={taskId} projectId={projectId} canEdit={canEdit} /></div>
             {(linkedGitHubUrl || !!prs?.length) && <div className="issue-property" data-field="github"><span>GitHub</span><div className="issue-github-links">
               {linkedGitHubUrl && <a className="issue-github-link" href={linkedGitHubUrl} target="_blank" rel="noreferrer"><CircleDot size={14} /><span>{githubIssueNumber ? `#${githubIssueNumber}` : "Issue"}</span><small>{repo ? `${repo.owner}/${repo.repo}` : ""}</small><ExternalLink size={12} /></a>}
               {prs && <TaskPullRequests prs={prs} />}
