@@ -71,6 +71,22 @@ export async function queueGitHubSync(ctx: MutationCtx, taskId: Id<"tasks">) {
 }
 
 /** Call before deleting an issue: its GitHub issue is closed (not deleted, see convex/githubIssueSync.ts). */
+
+/** After a workspace reconnects GitHub, pending mirrors should retry now instead of waiting out backoff. */
+export async function retryPendingMirrorsForTeam(ctx: MutationCtx, teamId: Id<"teams">) {
+  const projectIds = new Set((await ctx.db.query("projects").withIndex("by_team", q => q.eq("teamId", teamId)).take(500)).map(project => project._id));
+  if (!projectIds.size) return 0;
+  const rows = await ctx.db.query("githubIssueMirrors").withIndex("by_pending_and_nextAt", q => q.eq("pending", true)).take(500);
+  let retried = 0;
+  for (const row of rows) {
+    if (!projectIds.has(row.projectId)) continue;
+    await markPending(ctx, row.projectId, row.taskId, row.deleted, false);
+    retried++;
+  }
+  if (retried) await kick(ctx);
+  return retried;
+}
+
 export async function queueGitHubDelete(ctx: MutationCtx, task: Doc<"tasks">) {
   const repoUrl = task.githubIssueUrl?.split("/issues/")[0];
   if (task.githubIssueNumber && repoUrl) return markPending(ctx, task.projectId, task._id, { repoUrl, number: task.githubIssueNumber });

@@ -200,3 +200,31 @@ test("migration: dry run only counts; the real run queues each missing issue onc
   expect(await f.task(open)).toMatchObject({ githubIssueNumber: 1 });
   expect(await f.t.action(internal.githubIssueSync.backfillMissingIssues, {})).toMatchObject({ eligible: 0 });
 });
+
+test("reconnecting GitHub retries backed-off issue mirrors immediately", async () => {
+  const f = await fixture();
+  const taskId = await f.t.mutation(api.tasks.createTask, { sessionToken: f.owner.sessionToken, projectId: f.projectId, columnId: f.active, title: "Needs a GitHub issue", priority: "low", labels: ["Bug"] });
+  const queued = await f.t.run(ctx => ctx.db.query("githubIssueMirrors").withIndex("by_taskId", q => q.eq("taskId", taskId)).unique());
+  expect(queued).toMatchObject({ pending: true });
+  // The worker already failed and backed off (as after a missing GitHub connection).
+  await f.t.mutation(internal.githubIssueSync.finish, { taskId, revision: queued!.revision, error: "A workspace admin needs to reconnect GitHub in Settings > Integrations" });
+  const before = await f.t.run(ctx => ctx.db.query("githubIssueMirrors").withIndex("by_taskId", q => q.eq("taskId", taskId)).unique());
+  expect(before).toMatchObject({ pending: true, attempts: 1 });
+  expect(before!.nextAt).toBeGreaterThan(Date.now());
+  expect(await f.task(taskId)).toMatchObject({ githubSyncState: "error" });
+  expect((await f.task(taskId))?.githubIssueNumber ?? null).toBeNull();
+
+  // Still in backoff: a tick would not claim this row yet.
+  await syncGitHubOutbox();
+  expect(f.posts()).toHaveLength(0);
+  expect(await f.t.run(ctx => ctx.db.query("githubIssueMirrors").withIndex("by_taskId", q => q.eq("taskId", taskId)).unique())).toMatchObject({ pending: true, attempts: 1, nextAt: before!.nextAt });
+
+  await f.t.mutation(api.integrations.configure, { sessionToken: f.owner.sessionToken, teamId: f.teamId, login: "z4mbo" });
+  const after = await f.t.run(ctx => ctx.db.query("githubIssueMirrors").withIndex("by_taskId", q => q.eq("taskId", taskId)).unique());
+  expect(after).toMatchObject({ pending: true, attempts: 0 });
+  expect(after!.nextAt).toBeLessThanOrEqual(Date.now());
+
+  await syncGitHubOutbox();
+  expect(f.posts()).toHaveLength(1);
+  expect(await f.task(taskId)).toMatchObject({ githubIssueNumber: 1, githubIssueState: "open", githubSyncState: "synced", title: "Needs a GitHub issue", labels: ["Bug"] });
+});
