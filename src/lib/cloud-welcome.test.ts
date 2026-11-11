@@ -3,7 +3,7 @@ vi.mock("@/state/store", async (original) => ({ ...await original<typeof import(
 import { api } from "@/state/store";
 import { CLOUD_SETUP_HIDDEN, CLOUD_WELCOME_DONE, welcomeStepHint } from "./cloud-setup";
 import {
-  cloudFirstRun, cloudWelcomeShown, cloudWelcomeVisible, endWelcomeHere, keepFinishedWelcome, markWelcomeSeen, noteWelcomeHints, resetCloudWelcome,
+  cloudFirstRun, cloudWelcomeShown, cloudWelcomeVisible, dropFinishedWelcome, endWelcomeHere, keepFinishedWelcome, markWelcomeSeen, noteWelcomeHints, resetCloudWelcome,
   returnToWelcome, saveWelcomeHints, stepAsideWelcome, takeWelcomeRequest, useCloudWelcome, WELCOME_SAVE_RETRY_MS, welcomeCredit,
   withEarlyHints,
 } from "./cloud-welcome";
@@ -49,10 +49,13 @@ describe("the welcome in this session", () => {
     return value!;
   };
 
-  it("a finished list recorded as it shows stays on this page, and is gone once the person leaves it", async () => {
+  it("a finished list recorded as it shows stays on screen, and is gone once the person ends it or leaves that screen", async () => {
     expect(cloudWelcomeShown("ended", await read()), "a welcome that ended before this page").toBe(false);
     keepFinishedWelcome();
     expect(cloudWelcomeShown("ended", await read())).toBe(true);
+    dropFinishedWelcome();
+    expect(cloudWelcomeShown("ended", await read()), "they opened another screen").toBe(false);
+    keepFinishedWelcome();
     endWelcomeHere();
     expect(cloudWelcomeShown("ended", await read())).toBe(false);
   });

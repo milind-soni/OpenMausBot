@@ -9,7 +9,7 @@ import {
   CLOUD_SETUP_MOVE_SKIPPED, CLOUD_WELCOME_DONE, CLOUD_WELCOME_SHOWN, WELCOME_STEPS, welcomeStepFinished, welcomeStepHint, welcomeView, welcomeViewAfter,
   type WelcomeStep, type WelcomeView,
 } from "@/lib/cloud-setup";
-import { endWelcomeHere, keepFinishedWelcome, markWelcomeSeen, saveWelcomeHints, stepAsideWelcome, takeWelcomeRequest, useCloudWelcome, withEarlyHints } from "@/lib/cloud-welcome";
+import { dropFinishedWelcome, endWelcomeHere, keepFinishedWelcome, markWelcomeSeen, saveWelcomeHints, stepAsideWelcome, takeWelcomeRequest, useCloudWelcome, withEarlyHints } from "@/lib/cloud-welcome";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { hintSeen, type OnboardingStatus } from "@/lib/onboarding";
@@ -101,13 +101,15 @@ export function CloudWelcome() {
     heading.current?.focus();
   }, [view]);
 
-  // A team's Owner reads the finished list once: it is recorded as it shows, and stays on this page until they leave it.
+  // A team's Owner reads the finished list once: it is recorded as it shows, and stays on screen until they leave it.
+  const finishedOnTeam = view === "done" && team && !hintSeen(record, CLOUD_WELCOME_DONE);
+  const saved = state.config?.onboarding;
   useEffect(() => {
-    if (view !== "done" || !team || hintSeen(record, CLOUD_WELCOME_DONE)) return;
+    if (!finishedOnTeam) return;
     keepFinishedWelcome();
-    remember([CLOUD_WELCOME_DONE]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, team]);
+    void saveWelcomeHints(saved, [CLOUD_WELCOME_DONE], dispatch);
+  }, [finishedOnTeam, saved, dispatch]);
+  useEffect(() => dropFinishedWelcome, []);
 
   const anchor = useRef<string | null>(null);
   const reanchor = useRef(false);

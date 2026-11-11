@@ -17,7 +17,7 @@ interface Snapshot {
   seen: boolean;
   /** The welcome ended here but the Cloud could not save it: this device keeps it until the Cloud does. */
   doneHere: boolean;
-  /** Its last page is on screen and already recorded as done: it stays until the person leaves it. */
+  /** Its last page is on screen and already recorded as done: it stays until the person leaves that screen. */
   finishing: boolean;
 }
 
@@ -61,6 +61,7 @@ export function takeWelcomeRequest(): string | null {
 export function endWelcomeHere(): void { update({ ended: true }); }
 export function markWelcomeSeen(): void { if (!snapshot.seen) update({ seen: true }); }
 export function keepFinishedWelcome(): void { if (!snapshot.finishing) update({ finishing: true }); }
+export function dropFinishedWelcome(): void { if (snapshot.finishing) update({ finishing: false }); }
 export function noteWelcomeHints(ids: readonly string[]): void {
   update({ early: [...new Set([...snapshot.early, ...ids])] });
 }

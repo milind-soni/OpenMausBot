@@ -465,7 +465,7 @@ function SettingsDialog() {
         ? <SimpleLooksPage toolCalls={!remoteActive} onBack={() => { setSubPage(null); setReveal("appearance"); }} />
         : subPage === "more"
           ? <SimpleMorePage sections={moreSections} onOpen={(id) => { setSubPage(null); openSection(id); }} onBack={() => { setSubPage(null); setReveal("more"); }} />
-          : <SimpleGeneralPage has={has} peopleOpen={section === "people"} onLooks={() => setSubPage("looks")} onMore={has("general") ? () => setSubPage("more") : undefined} />;
+          : <SimpleGeneralPage has={has} peopleOpen={section === "people"} onLooks={() => setSubPage("looks")} onMore={has("general") && !(state.config?.team && ownerOrAdmin === false) ? () => setSubPage("more") : undefined} />;
       case "ai": return <SimpleAiPage has={has} disclose={disclose} connections={renderSection("connections")} />;
       case "computer": return <SimpleComputerPage has={has} remoteAccess={remoteAccess} servers={<ConnectedWorkspacesSettings />} disclose={disclose} />;
       case "billing": return <SimpleBillingPage has={has} disclose={disclose} cloudAccount={renderSection("cloudAccount")} />;

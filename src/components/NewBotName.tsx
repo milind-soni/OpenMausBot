@@ -14,7 +14,13 @@ export function NewBotNameHost() {
     setNewBotNameAsker(() => new Promise((resolve) => { setName(""); setAnswer(() => resolve); }));
     return () => setNewBotNameAsker(null);
   }, []);
-  useEffect(() => { if (answer) input.current?.focus(); }, [answer]);
+  const open = answer !== null;
+  useEffect(() => {
+    if (!open) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    input.current?.focus();
+    return () => { if (opener?.isConnected) opener.focus(); };
+  }, [open]);
   if (!answer) return null;
   const done = (value: string | null) => { setAnswer(null); answer(value); };
   const create = () => { if (name.trim()) done(name.trim()); };
@@ -26,6 +32,11 @@ export function NewBotNameHost() {
         onKeyDown={(event) => {
           if (imeComposing(event.nativeEvent)) { event.stopPropagation(); return; }
           if (event.key === "Escape") { event.stopPropagation(); done(null); }
+          if (event.key !== "Tab") return;
+          const controls = [...event.currentTarget.querySelectorAll<HTMLElement>("input, button:enabled")];
+          const first = controls[0], last = controls.at(-1);
+          if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+          else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
         }}>
         <h2 id="new-bot-name-title" className="mb-3 text-[17px] font-semibold">{t("sidebar.newBotSimple")}</h2>
         <label className="block text-[13px] text-ink-secondary">{t("botSettings.simple.name")}

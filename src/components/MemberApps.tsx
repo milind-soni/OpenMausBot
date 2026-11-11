@@ -23,8 +23,19 @@ export function MemberApps() {
   const [error, setError] = useState<string | null>(null);
   const dialog = useRef<HTMLDivElement>(null);
   const said = (cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause));
-  const load = useCallback(() => api<{ apps?: OwnApp[] }>("/api/team/my-connections")
-    .then((answer) => setApps(Array.isArray(answer.apps) ? answer.apps : []), (cause) => { setApps((current) => current ?? []); said(cause); }), []);
+  const reads = useRef(0);
+  const load = useCallback(() => {
+    const read = ++reads.current;
+    return api<{ apps?: OwnApp[] }>("/api/team/my-connections").then((answer) => {
+      if (read !== reads.current) return;
+      setApps(Array.isArray(answer.apps) ? answer.apps : []);
+      setError(null);
+    }, (cause) => {
+      if (read !== reads.current) return;
+      setApps((current) => current ?? []);
+      said(cause);
+    });
+  }, []);
   const close = useCallback(() => dispatch({ type: "togglePlugins", open: false }), [dispatch]);
   useEffect(() => {
     void load();

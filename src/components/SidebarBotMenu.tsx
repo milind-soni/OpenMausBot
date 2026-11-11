@@ -242,7 +242,7 @@ export function BotContextMenu({
       </button>
     );
     const moveToSection = mayMove ? flyoutButton("move", moveRef, <FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection")) : null;
-    const rename = onRename && mayRename(bot, team) && item(<SquarePen size={16} className="text-ink-secondary" />, t("sidebar.bot.rename"), () => onRename(bot.id));
+    const rename = onRename && (team ? mayRename(bot, team) : !state.config?.team) && item(<SquarePen size={16} className="text-ink-secondary" />, t("sidebar.bot.rename"), () => onRename(bot.id));
     const editProfile = item(<Pencil size={16} className="text-ink-secondary" />, t("sidebar.bot.simple.editProfile"), () => {
       openForSettings();
       if (!state.settingsOpen) dispatch({ type: "toggleSettings", open: true });
