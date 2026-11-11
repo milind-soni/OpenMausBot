@@ -82,7 +82,7 @@ describe("the included hosting client", () => {
     mkdirSync(join(dataDir, "workspaces", "mira", "bakery"), { recursive: true });
     mkdirSync(join(dataDir, "workspaces", "mira", "rota"), { recursive: true });
     mkdirSync(join(dataDir, "workspaces", "otto", "bakery"), { recursive: true });
-    symlinkSync(join(dataDir, "workspaces", "mira", "bakery"), join(dataDir, "workspaces", "mira", "alias"));
+    symlinkSync(join(dataDir, "workspaces", "mira", "bakery"), join(dataDir, "workspaces", "mira", "alias"), process.platform === "win32" ? "junction" : "dir");
     const key = await made.keyFor("mira", join(dataDir, "workspaces", "mira", "bakery"));
     expect(key).toMatch(/^app-[0-9a-f]{32}$/);
     expect(await made.keyFor("mira", join(dataDir, "workspaces", "mira", "bakery", "."))).toBe(key);

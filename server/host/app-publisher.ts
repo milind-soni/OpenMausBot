@@ -53,8 +53,10 @@ export function needsOwnNetlify(path: string): string | null {
 export interface AppFile { path: string; data: Buffer; sha1: string }
 const MAX_DEPTH = 24;
 
-/** Every publishable plain file under `dir`, with the ones left out. `dir` is canonical. */
-export async function collectAppFiles(dir: string, limits: HostingAllowance["limits"]): Promise<{ files: AppFile[]; bytes: number; skipped: string[] }> {
+/** Every publishable plain file under `folder`, with the ones left out. Paths are relative to it, with `/` between parts. */
+export async function collectAppFiles(folder: string, limits: HostingAllowance["limits"]): Promise<{ files: AppFile[]; bytes: number; skipped: string[] }> {
+  // Each file is checked to be inside this folder by its resolved path, so the folder is compared in the same form.
+  const dir = await realpath(folder);
   const files: AppFile[] = [], skipped: string[] = [];
   let listed = 0;
   const walk = async (folder: string, depth: number): Promise<void> => {

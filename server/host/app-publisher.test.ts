@@ -12,6 +12,12 @@ import { SITE_FILE } from "./netlify-sites.ts";
 const TOKEN = "omb_host_publisher_test_token_0123456789abcdef";
 const PAGE = (title: string) => `<!doctype html><title>${title}</title><link rel="stylesheet" href="style.css"><h1>${title}</h1>`;
 
+/** Windows makes a file link only with a privilege CI lacks; a folder junction needs none. */
+const FILE_LINKS = process.platform !== "win32";
+const folderLink = (target: string, path: string) => symlinkSync(target, path, process.platform === "win32" ? "junction" : "dir");
+/** Windows cannot create a file whose name holds `?`. */
+const ODD_NAMES = process.platform !== "win32";
+
 let dataDir = "", fake: FakeAppHosting, warnings: string[];
 let credential: { token: string; api: string; included: boolean } | null;
 const workspace = (botId: string) => join(dataDir, "workspaces", botId);
@@ -198,15 +204,21 @@ describe("what never leaves the bot's folder", () => {
   it("leaves out dotfiles, env files, keys, node_modules and links, and says which", async () => {
     site("mira", "bakery");
     write("otto", "notes.txt", "otto's private notes");
-    for (const path of [".env", ".git/config", ".openmausbot-secrets/netlify", "prod.env", "server.pem", "id_rsa", "credentials.json", "node_modules/pkg/index.js", "Thumbs.db", "what?.html"]) write("mira", `bakery/${path}`, "SECRET");
+    for (const path of [".env", ".git/config", ".openmausbot-secrets/netlify", "prod.env", "server.pem", "id_rsa", "credentials.json", "node_modules/pkg/index.js", "Thumbs.db", ...(ODD_NAMES ? ["what?.html"] : [])]) write("mira", `bakery/${path}`, "SECRET");
     write("mira", "bakery/.well-known/security.txt", "Contact: hello@example.test");
-    symlinkSync(join(workspace("otto"), "notes.txt"), join(workspace("mira"), "bakery", "linked.txt"));
-    symlinkSync(workspace("otto"), join(workspace("mira"), "bakery", "linked-folder"));
+    if (FILE_LINKS) symlinkSync(join(workspace("otto"), "notes.txt"), join(workspace("mira"), "bakery", "linked.txt"));
+    folderLink(workspace("otto"), join(workspace("mira"), "bakery", "linked-folder"));
     const answer = await publisher().publisher.publish({ botId: "mira", roots: roots("mira"), path: "bakery", title: "Bakery order page" });
     expect(answer.body).toMatchObject({ ok: true, live: true, files: 3 });
-    expect((answer.body.skipped as string[]).sort()).toEqual([".env", ".git", ".openmausbot-secrets", "Thumbs.db", "credentials.json", "id_rsa", "linked-folder", "linked.txt", "node_modules", "prod.env", "server.pem", "what?.html"]);
+    expect((answer.body.skipped as string[]).sort()).toEqual([".env", ".git", ".openmausbot-secrets", "Thumbs.db", "credentials.json", "id_rsa", "linked-folder", ...(FILE_LINKS ? ["linked.txt"] : []),
+      "node_modules", "prod.env", "server.pem", ...(ODD_NAMES ? ["what?.html"] : [])]);
     expect(Object.keys([...fake.apps.values()][0]!.files).sort()).toEqual([".well-known/security.txt", "index.html", "style.css"]);
     expect(fake.uploads.sort()).toEqual([".well-known/security.txt", "index.html", "style.css"]);
+  });
+
+  it("never takes a name a published path can't hold, whatever the computer lets a folder contain", () => {
+    for (const path of ["what?.html", "a#b.html", "docs/what?.html", "a\\b\\.env"]) expect(publishable(path), path).toBe(false);
+    for (const path of ["what.html", "docs/a b.html", "a-b_c.html"]) expect(publishable(path), path).toBe(true);
   });
 
   it("keeps the same file filter as the publish helper", async () => {
@@ -220,7 +232,7 @@ describe("what never leaves the bot's folder", () => {
   it("refuses a folder outside the bot's own: another bot's, a path that climbs out, a link out", async () => {
     site("otto", "private-site", "Otto's draft");
     site("mira", "bakery");
-    symlinkSync(join(workspace("otto"), "private-site"), join(workspace("mira"), "borrowed"));
+    folderLink(join(workspace("otto"), "private-site"), join(workspace("mira"), "borrowed"));
     const { publisher: made } = publisher();
     for (const path of [join(workspace("otto"), "private-site"), "../otto/private-site", "bakery/../../otto/private-site", "borrowed", dataDir, "/"]) {
       const answer = await made.publish({ botId: "mira", roots: roots("mira"), path, title: "Mine now" });
@@ -233,16 +245,18 @@ describe("what never leaves the bot's folder", () => {
     expect(existsSync(join(workspace("otto"), "private-site", SITE_FILE))).toBe(false);
   });
 
-  it("never reads through a file that is a link, even one that points inside the folder", async () => {
+  it("never reads through a link, even one that points inside the bot's own folder, and names paths with /", async () => {
     site("mira", "bakery");
+    write("mira", "bakery/assets/img/logo.svg", "<svg/>");
     write("mira", "notes/private.txt", "not for the web");
-    symlinkSync(join(workspace("mira"), "notes", "private.txt"), join(workspace("mira"), "bakery", "notes.txt"));
+    if (FILE_LINKS) symlinkSync(join(workspace("mira"), "notes", "private.txt"), join(workspace("mira"), "bakery", "notes.txt"));
+    folderLink(join(workspace("mira"), "notes"), join(workspace("mira"), "bakery", "more"));
     const collected = await collectAppFiles(join(workspace("mira"), "bakery"), DEFAULT_HOSTING_LIMITS);
-    expect(collected.files.map((file) => file.path)).toEqual(["index.html", "style.css"]);
-    expect(collected.skipped).toEqual(["notes.txt"]);
+    expect(collected.files.map((file) => file.path)).toEqual(["assets/img/logo.svg", "index.html", "style.css"]);
+    expect(collected.skipped).toEqual(["more", ...(FILE_LINKS ? ["notes.txt"] : [])]);
   });
 
-  it("replaces a record the bot swapped for a link instead of writing through it", async () => {
+  it.skipIf(!FILE_LINKS)("replaces a record the bot swapped for a link instead of writing through it", async () => {
     site("mira", "bakery");
     const target = write("otto", "config.json", "{\"otto\":true}");
     symlinkSync(target, join(workspace("mira"), "bakery", SITE_FILE));
