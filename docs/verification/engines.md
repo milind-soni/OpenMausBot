@@ -49,6 +49,18 @@ prove real OAuth login or native Windows execution.
   provider.
 - Model-picker rendering is Electron UI and remains outside this first map.
 
+## OMP (Oh My Pi)
+
+Install with `npm install -g @oh-my-pi/pi-coding-agent`, then run `omp login` or configure a provider in `~/.omp/agent/models.yml`. OpenMausBot launches `omp acp`, discovers its advertised models and per-model thinking choices, and resumes each thread's native OMP session. OMP remains responsible for its own provider credentials and approvals; OpenMausBot answers ACP permission requests through the normal approval cards.
+
+```sh
+pnpm exec vitest run server/drivers/acp/omp.test.ts server/drivers/acp/custom-model-catalog.test.ts server/runtime/capabilities.test.ts server/drivers/tool-scope-coverage.test.ts server/agents-bridge-switch.test.ts server/engine-updates.test.ts server/built-in-instances.test.ts src/lib/analytics-allowlist.test.ts server/engine-memory.test.ts
+```
+
+The contract tests use the repository's fake ACP CLI and disposable folders. They cover fresh and existing fleets, catalogs larger than 128 models without per-model discovery prompts, temporary discovery-session cleanup, model selection, local credential forwarding and denied permissions. Model discovery uses `PI_CODING_AGENT_SESSION_DIR` in a temporary directory so refreshes do not add empty sessions to the person's OMP history.
+
+The real 18.13.1 CLI was also checked with isolated homes and keyless synthetic providers: ACP initialization and authentication, model and thinking selection, a 2,000-model catalog, discovery-session isolation, a streamed turn through the production driver, and a second turn after recreating that driver with the same native session. The loopback provider received both turns and the resumed request contained the first turn's history. These checks do not prove a real provider account, a paid turn, native Windows behavior or packaged desktop integration.
+
 ## Slow or empty CLI version responses
 
 ```sh

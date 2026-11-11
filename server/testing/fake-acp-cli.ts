@@ -225,6 +225,7 @@ const dumpEnv = Object.fromEntries(
     "PATH",
     "HOME",
     "USERPROFILE",
+    "PI_CODING_AGENT_SESSION_DIR",
     "TEMP",
     "TMP",
     "SystemRoot",

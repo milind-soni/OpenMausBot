@@ -47,7 +47,7 @@ recreating a removed fixture directory.
 6. Expand Kimi to find **Install Kimi on this server**, and OpenCode to find
    **Update OpenCode on this server**. Click each and confirm the fixture error
    appears with its button usable again. Terminal commands remain under
-   **Prefer a terminal?**. These clicks never perform a real installation.
+   **Prefer a terminal?**. Check that OMP appears as a custom engine beside Pi. These clicks never perform a real installation.
 7. Expand Claude and use **Add another Claude account** inside its card. Enter
    an account name, collapse/reopen the card, and confirm the draft remains.
    Cancel, then repeat with **Add another ChatGPT account** in the ChatGPT card.

@@ -136,7 +136,7 @@ describe("which engines a turn is bridged on", () => {
   it.each([
     // ACP agents keep their own permissions, Grok among them
     ["grokAgent"], ["geminiAgent"], ["qwenAgent"], ["kimiAgent"], ["droidAgent"], ["cursorAgent"], ["clineAgent"], ["copilotAgent"], ["hermesAgent"],
-    ["opencodeGo"], ["antigravityAgent"], ["customAcp"],
+    ["opencodeGo"], ["antigravityAgent"], ["customAcp"], ["ompAgent"],
     // not shown to qualify, and anything nobody has heard of
     ["museCode"], ["someFutureDriver"], [""],
   ])("does not bridge %s", (driverKind) => {
