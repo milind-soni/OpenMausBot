@@ -87,22 +87,6 @@ function space(dataDir: string): { freeBytes: number; volumeBytes: number } | nu
 
 const staging = (dataDir: string) => join(dataDir, "tmp", "move-files");
 const partialPath = (dataDir: string, sha256: string, size: number) => join(staging(dataDir), `${sha256}-${size}.partial`);
-const publications = new Map<string, Promise<void>>();
-
-async function publishInOrder<T>(target: string, publish: () => Promise<T>): Promise<T> {
-  const directory = await stat(dirname(target), { bigint: true }).catch(() => null);
-  // Directory identity covers case and Unicode aliases without guessing a volume's path rules.
-  // Filesystems without a usable identity share a conservative fallback queue.
-  const key = directory && directory.ino !== 0n ? `${directory.dev}:${directory.ino}` : "unidentified-directory";
-  const previous = key === "unidentified-directory"
-    ? Promise.all(publications.values())
-    : Promise.all([publications.get(key), publications.get("unidentified-directory")]);
-  const result = previous.then(publish);
-  const settled = result.then(() => {}, () => {});
-  publications.set(key, settled);
-  try { return await result; }
-  finally { if (publications.get(key) === settled) publications.delete(key); }
-}
 
 /** Partial files a move left more than a day ago. */
 async function tidyPartials(dataDir: string, now = Date.now()): Promise<void> {
@@ -170,20 +154,11 @@ async function readPart(dataDir: string, { path, offset, length }: z.infer<typeo
 /** One part of a file: 200 `{ received }` until the last, then 201 `{ stored }`, or 409 `{ conflict }` when the path holds a
  * file the move may not replace; 409 `{ received }` when the part does not start where My Cloud's copy ends. */
 async function takePart(deps: MoveFilesDeps, req: IncomingMessage, query: z.infer<typeof putSchema>): Promise<{ status: number; body: Record<string, unknown> }> {
-  const { path, size, sha256 } = query;
+  const { path, size, sha256, offset, mode, expect } = query;
   const botId = /^(?:workspaces|task-workspaces)\/([\w-]{1,128})\//u.exec(path)?.[1];
   if (!movedFilePath(path) || !botId) return { status: 400, body: { error: "not a bot file a move carries" } };
   if (!deps.bots().some((bot) => bot.id === botId)) return { status: 409, body: { error: "This file's bot is not on My Cloud yet." } };
-  if (size === 0) {
-    const partial = join(staging(deps.dataDir), `${randomUUID()}.partial`);
-    try { return await takePartAt(deps, req, query, partial); }
-    finally { await unlink(partial).catch(() => {}); }
-  }
-  return takePartAt(deps, req, query, partialPath(deps.dataDir, sha256, size));
-}
-
-async function takePartAt(deps: MoveFilesDeps, req: IncomingMessage, query: z.infer<typeof putSchema>, partial: string): Promise<{ status: number; body: Record<string, unknown> }> {
-  const { path, size, sha256, offset } = query;
+  const partial = partialPath(deps.dataDir, sha256, size);
   await mkdir(staging(deps.dataDir), { recursive: true, mode: 0o700 });
   const held = (await stat(partial).catch(() => null))?.size ?? 0;
   if (offset !== held) { await rawBody(req, 0); return { status: 409, body: { received: held } }; }
@@ -196,35 +171,22 @@ async function takePartAt(deps: MoveFilesDeps, req: IncomingMessage, query: z.in
   const received = held + bytes.length;
   if (received < size) return { status: 200, body: { received } };
   if (await sha256Of(partial) !== sha256) { await unlink(partial).catch(() => {}); return { status: 422, body: { error: "the file arrived different from what was sent" } }; }
-  if (!(await realFolders(deps.dataDir, path))) return { status: 409, body: { conflict: true } };
   const target = join(deps.dataDir, path);
-  return publishInOrder(target, () => publishPart(deps.dataDir, target, partial, query));
-}
-
-async function publishPart(dataDir: string, target: string, partial: string, { path, mode, expect, sha256 }: z.infer<typeof putSchema>): Promise<{ status: number; body: Record<string, unknown> }> {
-  if (!(await realFolders(dataDir, path))) return { status: 409, body: { conflict: true } };
+  if (!(await realFolders(deps.dataDir, path))) return { status: 409, body: { conflict: true } };
   const there = await lstat(target).catch(() => null);
   if (there && !there.isFile()) return { status: 409, body: { conflict: true } };
   if (there && await sha256Of(target) === sha256) { await unlink(partial).catch(() => {}); return { status: 201, body: { stored: false } }; }
   if (mode === "replace" && there && expect && await sha256Of(target) === expect) {
-    const placed = join(staging(dataDir), `${randomUUID()}.placing`);
+    const placed = join(staging(deps.dataDir), `${randomUUID()}.placing`);
     await link(partial, placed);
-    try { await rename(placed, target); }
-    finally { await unlink(placed).catch(() => {}); }
+    await rename(placed, target);
     await unlink(partial).catch(() => {});
     return { status: 201, body: { stored: true } };
   }
   if (there) return { status: 409, body: { conflict: true } };
   try { await link(partial, target); }
   catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      const current = await lstat(target).catch(() => null);
-      if (current?.isFile() && await sha256Of(target) === sha256) {
-        await unlink(partial).catch(() => {});
-        return { status: 201, body: { stored: false } };
-      }
-      return { status: 409, body: { conflict: true } };
-    }
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return { status: 409, body: { conflict: true } };
     throw error;
   }
   await unlink(partial).catch(() => {});
