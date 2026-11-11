@@ -39,7 +39,8 @@ on there lasts until that page reloads. In a browser, switch it off on each serv
 - URLs, hosts and addresses. PostHog's own `$current_url`, `$host`, `$pathname`, `$referrer`, `$referring_domain`,
   campaign parameters (`utm_*`, `gclid` and the like) and their `$initial_*` and `$session_entry_*` copies are removed
   before an event leaves the app.
-- File paths, and ids of any kind: bot, room, conversation, instance, account or computer.
+- File paths, and ids of any kind: bot, room, conversation, instance, account or computer. (An `announcement` event
+  names the card, by the id the public announcements file gives it, never anything of yours.)
 - Instructions, prompts, message content, model output and error messages.
 
 ## Allowed values
@@ -162,6 +163,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `product_hunt_card` | You act on the Product Hunt card | `action`: `upvote`, `not_now`, `close` |
 | `boat_offer` | Boat's credit offer: its one-time card is shown or you act on it, or you act on it on the Boat card in Settings → API keys | `action`: `shown` (the card only), `get_boat`, `claim` (the drafted email to Boat opened), `not_now`, `close`; `place`: `card`, `settings` |
 | `modelgo_offer` | ModelGo, a sponsor: its one-time popup or its first-run option is shown, or you act on the popup, the first-run option or the ModelGo row in Settings → API keys | `action`: `shown` (the popup and the first-run option), `get_key` (ModelGo's site opened), `add_key` (Settings: a key was saved there; first run: you opened the ModelGo row to add one; never the popup), `not_now`, `close` (the popup only); `place`: `popup`, `onboarding`, `settings` |
+| `announcement` | A card from the project's public announcements file (sponsor offers, product news, tips; [Announcements](https://github.com/milind-soni/OpenMausBot/blob/main/docs/announcements.md)) is shown, or you act on it | `id`: the card's own id from that file, the same for everyone who sees the card; `kind`: `sponsor`, `product`, `tip`; `action`: `shown`, `primary` (its main button), `secondary` (its second button), `close` (Not now, the X or Escape) |
 | `simple_mode_prompt` | The Simple mode popup, shown once in each browser after an update when nothing else is on screen, is shown, its Simple mode switch is flipped, or it is closed (Done, the X, Escape or a click outside) | `action`: `shown`, `toggled`, `closed`; `mode`: `simple`, `advanced`, the mode it was shown or closed in, or the one a flip turned on |
 | `new_look_notice` | The notice that Simple is now the only look, shown once in each browser that was on Advanced mode, when nothing else is on screen, is shown or closed (Done, the X, Escape or a click outside) | `action`: `shown`, `closed` |
 | `advanced_back_notice` | The notice that Advanced mode is back, shown once in each browser that was on Advanced mode before Simple became the only look and is put back on it, when nothing else is on screen, is shown or closed (Done, the X, Escape or a click outside) | `action`: `shown`, `closed` |
