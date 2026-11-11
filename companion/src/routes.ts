@@ -94,6 +94,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/api\/bots$/ },
   { method: "POST", path: /^\/api\/bots$/ },
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+$/ },
+  // The desktop's own delete. A paired phone can remove one bot it can see,
+  // including through a public tunnel. The harness still refuses the default bot.
+  { method: "DELETE", path: /^\/api\/bots\/[\w-]+$/ },
   // Display order only; the harness accepts just the bots the device can see.
   { method: "PUT", path: /^\/api\/bots\/order$/ },
   // Can only file visible bots; cannot alter execution policy.
