@@ -5,7 +5,7 @@ import { cn } from "@/lib/cn";
 import { t, tFromServer } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
-import { titledCard, titledCardAction, toolLabel } from "./ApprovalCard";
+import { isProposalCard, titledCard, titledCardAction, toolLabel } from "./ApprovalCard";
 import { ASK_QUIET_ANSWER, ASK_QUIET_BUTTON, ASK_SECONDARY_BUTTON, AskDetail, AskHeader, askPrimary, type Asker } from "./AskCard";
 import { approvalDetailText, outboundSummary } from "@/lib/approval-summary";
 import { reviewedSkillSha256 } from "../../shared/skill-request";
@@ -14,6 +14,7 @@ import { useInboxOrigin } from "./InboxLine";
 import { yourComputerAsk } from "@/lib/your-computer";
 import { computerAskWords } from "@/lib/computer-ask";
 import { DESKTOP_DOWNLOAD_URL } from "../../shared/computer-ask";
+import { hasNativeAutoReview, type ApprovalMode } from "../../shared/approval-mode";
 
 interface ApprovalLabels {
   [tool: string]: LocaleKey;
@@ -59,6 +60,27 @@ export function pendingApprovals(messages: Message[]): Pending[] {
       held: m.card!.held,
       heldCode: m.card!.heldCode,
     }));
+}
+
+/** Engine step prompts (a command, a file change, a tool call) the person already answered here: what Approve for me
+ * and Always allow can take off their hands. Proposals, questions, sends and computer asks don't count. */
+export function answeredStepPrompts(messages: Message[]): number {
+  return messages.filter((m) => {
+    const card = m.kind === "options" ? m.card : undefined;
+    return Boolean(card?.requestId && card.tool && card.answered && !card.autoApplied && card.requestType !== "question" &&
+      !card.questionRequest && !card.computerAsk && !card.yourComputer && !card.outboundRequest && !isProposalCard(card));
+  }).length;
+}
+
+/** Answered step prompts after which the card says how to be asked less. */
+const ASKED_OFTEN_AFTER = 3;
+
+/** A one-line hint once a conversation at Ask or Auto-accept edits has asked often, naming only the ways this card and
+ * engine offer; it changes nothing by itself. */
+export function askedOftenHint(mode: ApprovalMode, driverKind: string | undefined, answered: number, botName: string, canAlwaysAllow: boolean): string | undefined {
+  if (answered < ASKED_OFTEN_AFTER || (mode !== "ask" && mode !== "edits")) return undefined;
+  if (hasNativeAutoReview(driverKind)) return t(canAlwaysAllow ? "approval.askedOften.approveForMe" : "approval.askedOften.approveForMeOnly", { name: botName });
+  return canAlwaysAllow ? t("approval.askedOften.alwaysAllow") : undefined;
 }
 
 export function spokenApprovalPrompt(pending: Pending, requester: string): string {
@@ -154,6 +176,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   asker,
   actions,
   more,
+  hint,
 }: {
   pending: Pending;
   count: number;
@@ -163,6 +186,8 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   asker?: Asker;
   actions?: ReactNode;
   more?: ReactNode;
+  /** How to be asked less, once this conversation asked often. */
+  hint?: string;
   locale?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -230,6 +255,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
           <span>{heldNote}</span>
         </p>
       ))}
+      {hint && <p dir="auto" data-asked-often className="mt-2 break-words text-[13px] leading-[18px] text-ink-secondary">{hint}</p>}
       <div className="mt-3 flex flex-wrap items-center justify-end gap-2">{actions}</div>
       <div id={detailsId} hidden={!open} className="mt-3 space-y-2">
         {hidden && (

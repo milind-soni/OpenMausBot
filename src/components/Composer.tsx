@@ -66,7 +66,7 @@ import {
 } from "@/lib/composer-attachments";
 import { goalCoordinatorForComposer, jevRoomRoutingOn, openTaskWorking, roomRouteForComposer } from "@/lib/group-routing";
 import { composerPlaceholder, sendLabels, SIMPLE_COMPOSER, SIMPLE_CONTROL, slotColors } from "./composer-simple"; import { ComposerSendButton } from "./ComposerSendButton";
-import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
+import { askedOftenHint, answeredStepPrompts, PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
 import { GroupCallButton } from "./GroupCallView";
 import { ApprovalChip, ComposerPlusMenu, GoalToggle, TeachTaskButton } from "./ComposerPlusMenu";
@@ -480,6 +480,9 @@ export function Composer({
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const modeBot = group ? undefined : bot;
   const { choice: approvalChoice, dialogs: approvalDialogs } = useThreadApproval(modeBot);
+  const askedOften = approval && !approval.message.inbox && modeBot && approvalChoice
+    ? askedOftenHint(approvalModeFor(modeBot), approvalChoice.driverKind, answeredStepPrompts(visibleMessages(modeBot)), modeBot.name, Boolean(approval.allowKey || approval.allowSession))
+    : undefined;
   const uploadImage = useCallback((file: File) => uploadDraftImage(draftId, file), [draftId]);
   const pickFiles = async (picked: FileList | null) => {
     if (!picked?.length) return;
@@ -726,6 +729,7 @@ export function Composer({
               botName={approvalBot?.name} asker={approvalBot}
               count={approvals.length}
               index={0}
+              hint={askedOften}
               locale={activeLocale()}
               actions={<PendingApprovalActions part="primary" pending={approval} threadId={threadId} bot={approvalBot} onCancelTurn={interruptTurn} />}
               more={approval.message.inbox ? undefined : <PendingApprovalActions part="more" pending={approval} threadId={threadId} bot={approvalBot} onCancelTurn={interruptTurn} />}

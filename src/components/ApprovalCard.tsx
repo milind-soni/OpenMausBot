@@ -89,8 +89,13 @@ export function titledCardAction(card: OptionCardData): string {
   return card.options[0] ?? t("approval.action.confirm");
 }
 
+/** A bot's proposal (a routine, skill, profile or model change, or a titled request), not an engine step. */
+export function isProposalCard(card: OptionCardData): boolean {
+  return Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || titledCard(card));
+}
+
 export function approvalCardOutcome(card: OptionCardData): string | undefined {
-  const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || titledCard(card));
+  const isProposal = isProposalCard(card);
   if (card.expired === true || staleRoutineCard(card)) return t(isProposal || !card.tool ? "approval.status.expired" : "approval.status.timedOut");
   if (!card.answered) return undefined;
   if (card.undone === true) return t("approval.status.undone");
