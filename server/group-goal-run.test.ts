@@ -244,7 +244,7 @@ describe("one goal-run loop for a room and a one-on-one chat", () => {
   });
 });
 
-describe("parseGroupGoalDecision tolerant recovery (issue #5209)", () => {
+describe("parseGroupGoalDecision recovers a decision whose close tag is missing, escaped or trailed by prose", () => {
   const O = GROUP_GOAL_CONTROL_OPEN;
   const C = GROUP_GOAL_CONTROL_CLOSE;
 
@@ -342,7 +342,7 @@ describe("parseGroupGoalDecision tolerant recovery (issue #5209)", () => {
   });
 });
 
-describe("parseGroupGoalDecision CodeRabbit review fixes", () => {
+describe("parseGroupGoalDecision still refuses contradictory or quoted decisions", () => {
   const O = GROUP_GOAL_CONTROL_OPEN;
   const C = GROUP_GOAL_CONTROL_CLOSE;
 

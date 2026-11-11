@@ -168,7 +168,6 @@ export function parseGroupGoalDecision(text: string): ParsedGroupGoalDecision {
   return fail();
 }
 
-
 /** A goal run never recruits somebody outside the room. */
 export function selectGroupGoalCoordinator<Member extends GoalRunMember>(
   members: Member[],
