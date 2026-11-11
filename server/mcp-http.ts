@@ -150,7 +150,7 @@ async function readSse(
     }
   } finally {
     signal.removeEventListener("abort", onAbort);
-    await reader.cancel().catch(() => {});
+    void reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }
@@ -170,7 +170,7 @@ async function readBounded(response: Response, maxBytes = MAX_REMOTE_MCP_BYTES):
       text += decoder.decode(value, { stream: true });
     }
   } finally {
-    await reader.cancel().catch(() => {});
+    void reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }
