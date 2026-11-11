@@ -24,6 +24,9 @@ too) into areas, and runs only the jobs some area can affect:
 | control plane | `cloudflare/control-plane/` | the control-plane job |
 | everything | anything else: `.github/` workflows, `package.json`, the lockfile and workspace, tsconfig, vite and vitest config, `third_party/`, `scripts/` code, unknown paths | every job |
 
+`static` also validates `server/model-manifest/model-manifest.json` with `scripts/check-model-manifest.mjs`: installs
+download that file from main within hours of a change, so it is checked on every event and fails on any invalid edit.
+
 The build is the `build` job: typecheck, Electron syntax check and UI build,
 about three minutes, beside the shards rather than ahead of them. Several areas
 run the union of their jobs. Why the mapping is what it is:

@@ -56,6 +56,9 @@ export interface CloudSendSnapshot {
   arrived: CloudSendArrived;
   cloudVersion: string | null;
   localVersion: string | null;
+  /** A move's check under way: its step, `done` of `total` there, the bots it checks, and until when it waits for a My
+   * Cloud that did not answer. */
+  checking?: { step: string; done: number; total: number; bots: number; until?: number } | null;
 }
 
 /** What My Cloud's own page is told: names of this computer's bots that wait, and counts, never logins' sites. */
@@ -87,6 +90,8 @@ export interface CloudSendNotice {
   move?: import("./one-home.mjs").OneHomeView;
   /** On My Cloud's page: a bot moving into a team, while its line shows; absent from an older desktop. */
   teamMove?: import("./team-move.mjs").TeamMoveView;
+  /** On this computer's page: some of its bots on their way to My Cloud. */
+  botMove?: BotMoveView;
 }
 export type CloudSendTold = { at: number; reason: string; failed: number; seen: boolean; sent: CloudSendCounts; final?: boolean } & CloudSendFailure;
 export interface CloudSendArrived extends CloudSendCounts { chats: { conversations: number; messages: number } }
@@ -115,11 +120,26 @@ export interface CloudSendPageBridge {
   teamRetry?(): Promise<import("./team-move.mjs").TeamMoveView | null>;
   /** Shows that team's page, where the bot now lives. */
   openTeam?(teamId: string): Promise<void>;
+  /** On this computer's page: whether its bots can move to My Cloud now, and which are on their way. */
+  botMoveState?(): Promise<BotMoveState>;
+  /** The bots of this computer's a person can choose to move, asked on either page. */
+  botChoices?(): Promise<{ bots: Array<{ id: string; name: string }> }>;
+  /** Moves these bots to My Cloud; the others stay here and go on working. */
+  moveBots?(ids: string[]): Promise<BotMoveState>;
+  /** Moves everything to My Cloud: this computer's one-time move. */
+  moveEverything?(): Promise<BotMoveState>;
+  botMoveRetry?(): Promise<BotMoveView | null>;
+  /** Shows My Cloud in this window. */
+  openMyCloud?(): Promise<void>;
   /** The switch "Keep this computer's bots on this computer"; absent from an older desktop. */
   keepHere?(): Promise<KeepHereState>;
   /** Turns it (a real click on My Cloud's page). */
   setKeepHere?(on: boolean): Promise<KeepHereState>;
 }
+
+/** Some of this computer's bots moving to My Cloud (bot-move-main.mjs). `bot`: the first of them, `bots`: how many go. */
+export interface BotMoveView { bot: { id: string; name: string }; team: { id: string; name: string }; phase: "moving" | "failed" | "done"; bots?: number }
+export interface BotMoveState { available: boolean; moving: string[] }
 
 /** The switch "Keep this computer's bots on this computer" (one-home-main.mjs). `shown`: this person has a Cloud of their
  * own the move applies to; `moved`: this computer's bots live on My Cloud, so turning it on brings them home; `coming`:
@@ -127,7 +147,8 @@ export interface CloudSendPageBridge {
 export interface KeepHereState { shown: boolean; on: boolean; moved: boolean; coming: boolean }
 
 export interface CloudSendSession {
-  call(method: string, route: string, body?: unknown): Promise<{ status: number; ok: boolean; body: any }>;
+  /** `timeoutMs`: how long this request may take, sized to the work it asks for. */
+  call(method: string, route: string, body?: unknown, options?: { timeoutMs?: number }): Promise<{ status: number; ok: boolean; body: any }>;
   upload(route: string, bytes: Uint8Array, type: string): Promise<{ status: number; ok: boolean; body: any }>;
   /** The answer as it came, for a download; only the owner sessions main opens have it. */
   fetch?(route: string, init?: RequestInit): Promise<Response>;
@@ -177,7 +198,8 @@ export interface CloudMoveCheck {
 }
 
 export function createCloudSend(deps: {
-  local(route: string, init?: { method?: string }): Promise<Response>;
+  /** `timeoutMs`: how long a request that lists much may take on this computer's own server. */
+  local(route: string, init?: { method?: string; timeoutMs?: number }): Promise<Response>;
   cloud: {
     origin(): string | null;
     asleep(): boolean;
@@ -191,6 +213,10 @@ export function createCloudSend(deps: {
   onChange?(snapshot: CloudSendSnapshot): void;
   t?(key: string, params?: Record<string, string | number>): string;
   now?(): number;
+  /** How a check waits before it asks a slow Cloud again; setTimeout's by default. */
+  sleep?(ms: number): Promise<void>;
+  /** How long a move waits for a Cloud that does not answer: `stallMs` and `waits` in a check, `blips` in a pass. */
+  patience?: { stallMs?: number; waits?: number[]; blips?: number[] };
   /** How long a move waits for My Cloud to run the engines whose keys it just took. */
   engineWaitMs?: number;
   /** My Cloud's plan disk and the Admin's grow, so a move makes room for the files it carries. */
@@ -204,7 +230,8 @@ export function createCloudSend(deps: {
   /** `reason: "move"`: everything this computer has, apps and keys first; `final`: the pass after this computer stopped,
    * which carries the sign-ins that refresh themselves and lets go of this computer's copies. */
   send(options?: { keys?: string[] | null; force?: string[]; reason?: string; final?: boolean }): Promise<CloudSendOutcome>;
-  check(): Promise<CloudMoveCheck>;
+  /** `scope`: only the bots a move of some of them carries. `stopped`: the person stopped the move, so a check waiting for My Cloud ends now. */
+  check(options?: { scope?: string; stopped?(): boolean }): Promise<CloudMoveCheck>;
   /** Each automation a move carried ("routine:<id>", "call:<id>", "webhook:<id>", "app-event:<id>") and whether it was
    * on here when it went. */
   switches(): Record<string, boolean>;

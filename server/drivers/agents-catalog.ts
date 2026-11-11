@@ -310,6 +310,20 @@ const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: "burst",
+    description: "Propose running many independent parts of one job in parallel threads of yours, with one merged result back here. Use it when the person says to burst something, or a request is clearly many independent items. Split the job into items yourself unless they gave a list. A card shows the plan; nothing runs until the person presses Run, so end your turn after calling this.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        task: { type: "string", description: "What this burst is for, one short line." },
+        instructions: { type: "string", description: "Complete instructions every part gets; a part does not see this conversation." },
+        items: { type: "array", items: { type: "string" }, minItems: 2, description: "One entry per part: its slice of the job." },
+      },
+      required: ["task", "instructions", "items"],
+    },
+  },
+  {
     name: "list_models",
     description: "The ids start_thread's model_selection takes, a short list per engine; current is yours. more counts what search finds. unusable says why not; unavailable engines can't run now. Copy ids exactly.",
     inputSchema: {
@@ -897,7 +911,7 @@ const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
 
 const LOCAL_VM_TOOL_NAMES = new Set(["vm_exec"]);
 /** Refused in a room's thread (routes/waits.ts), and list_waits, since a room holds no wait. */
-const ROOM_REFUSED_TOOL_NAMES = WAIT_TOOL_NAMES;
+const ROOM_REFUSED_TOOL_NAMES = new Set([...WAIT_TOOL_NAMES, "burst"]);
 const CLOUD_HOME_SURFACE = {
   type: "string", enum: ["auto", "cloud", "browser"],
   description: "auto = suitable configured computer, cloud = the bot's cloud computer, browser = built-in browser. Omit to list. This server runs in the cloud: the user's own computer and a Local VM are not places here.",

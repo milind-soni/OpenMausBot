@@ -9958,5 +9958,12 @@
   "agentEndpoints.codexTitle": "Codex direct API",
   "agentEndpoints.codexHint": "使用 API 金鑰執行原生 Codex 代理：可連接 OpenAI，或支援 Responses API 的閘道。每個連線都有各自的金鑰和 Codex 設定，費用由該 URL 背後的供應商計收。",
   "settings.simple.account.noNameHint": "尚未設定",
-  "settings.simple.account.yourName": "你的名稱"
+  "settings.simple.account.yourName": "你的名稱",
+  "phoneUpdate.title": "請更新手機上的 MausBot",
+  "phoneUpdate.body": "{phone} 上的 MausBot 應用程式是舊版本，離開你的 Wi-Fi 後已無法連線到這台電腦。請在那支手機上更新應用程式，然後在與這台電腦相同的 Wi-Fi 下開啟一次。如果仍無法重新連線，請重新配對。",
+  "phoneUpdate.bodyMany": "你有 {count} 支手機上的 MausBot 應用程式是舊版本，離開你的 Wi-Fi 後已無法連線到這台電腦。請在每支手機上更新應用程式，然後在與這台電腦相同的 Wi-Fi 下開啟一次。如果仍無法重新連線，請重新配對。",
+  "phoneUpdate.open": "開啟「手機和裝置」",
+  "remote.devices.pairAgain": "重新配對",
+  "remote.devices.retired": "這支手機上的 MausBot 應用程式是舊版本。請更新應用程式，然後在與這台電腦相同的 Wi-Fi 下開啟一次。如果仍無法重新連線，請在這裡重新配對。",
+  "remote.devices.retiredNotice": "手機現在透過 MausBot Relay 連線到這台電腦，舊的安全連結已經關閉。使用舊版 MausBot 應用程式的手機，離開你的 Wi-Fi 後已無法連線。請在那支手機上更新 MausBot 應用程式，然後在與這台電腦相同的 Wi-Fi 下開啟一次。如果仍無法重新連線，請在這裡重新配對。"
 }

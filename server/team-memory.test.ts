@@ -21,6 +21,15 @@ afterEach(async () => {
 });
 
 describe("propose", () => {
+  it("refuses an over-long field and says how to send it again, naming the limit", () => {
+    expect(() => memory.propose("", { kind: "term", name: "OMB", detail: "x".repeat(601) }, source))
+      .toThrow("detail is over its 600-character limit, so nothing was done. Keep the fact, its context and why it matters, then send it again.");
+    expect(() => memory.propose("", { kind: "term", name: "x".repeat(121), detail: "ok" }, source)).toThrow("name is over its 120-character limit");
+    expect(() => memory.propose("", { kind: "term", name: "OMB", detail: "ok", aliases: ["x".repeat(121)] }, source)).toThrow("one of the aliases is over its 120-character limit");
+    expect(() => memory.propose("", { kind: "term", name: "  ", detail: "ok" }, source)).toThrow("name is required");
+    expect(memory.list("")).toEqual([]);
+  });
+
   it.each(["{broken", '{"version":1,"sections":{"Team":[{"invalid":true}]}}'])("preserves an unreadable existing file instead of replacing it: %s", (bytes) => {
     const file = join(dir, "team-memory.json");
     writeFileSync(file, bytes);

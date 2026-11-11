@@ -1531,3 +1531,102 @@ describe("ModelGo's sponsor card", () => {
   });
 
 });
+
+describe("Update MausBot on your phone", () => {
+  const TITLE = "Update MausBot on your phone", MODELGO = "ModelGo is now in MausBot";
+  const OLD = { id: "0f8c2a41-1111-4222-8333-444455556666", name: "Ada's iPhone", createdAt: 1, lastSeenAt: 1, cloudDesktopAccess: false };
+  const NEW = { id: "5b5b5b5b-1111-4222-8333-444455556666", name: "Work phone", createdAt: 1, lastSeenAt: 1, cloudDesktopAccess: false, e2eAt: 2 };
+  const OTHER = { ...OLD, id: "7c7c7c7c-1111-4222-8333-444455556666", name: "Old Android" };
+  let devices: unknown[], retired: boolean;
+  let companion: ReturnType<typeof vi.fn>, linked: ReturnType<typeof vi.fn>;
+  /** This computer's phone link and its account, as Settings → Phone & devices reads them through the same two bridges. */
+  const bridgesOn = () => {
+    companion = vi.fn(async () => ({ enabled: true, keepAwake: false, port: 1, devices, pairing: null }));
+    linked = vi.fn(async () => ({ available: true, status: "ready", ...(retired ? { tunnelRetired: true } : {}) }));
+    Object.assign(window.ogb as Record<string, unknown>, { companion: { state: companion }, companionAccount: { state: linked } });
+  };
+  beforeEach(() => { devices = [OLD, NEW]; retired = true; bridgesOn(); });
+
+  it("shows once this computer's link ended and a paired phone has an older app: the phone, what to do, Open Phone & devices and Not now", async () => {
+    const shown = await launch();
+    expect(shown).toContain(TITLE); expect(shown).toContain('data-notice="phone-update"');
+    for (const text of ["Ada&#x27;s iPhone has an older version of the MausBot app, which can no longer connect to this computer away from your Wi-Fi.",
+      "Update the app on that phone, then open it once on the same Wi-Fi as this computer. If that doesn&#x27;t reconnect it, pair it again.",
+      "Open Phone &amp; devices", "Not now"]) expect(shown).toContain(text);
+    expect(shown).not.toContain("Work phone");
+    expect(launchNotice()).toBe("phone-app-update");
+  });
+
+  it("Open Phone & devices opens pairing in Settings, and the card is done for that phone", async () => {
+    await launch();
+    tree().find(node => node.type === "button" && node.props.children === "Open Phone & devices")!.props.onClick(); await flush();
+    expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "companion", phonePairing: true });
+    expect(hints()).toContain("phone-app-update:0f8c2a41");
+    expect(render()).toBe("");
+    expect(await relaunch()).not.toContain(TITLE);
+  });
+
+  it("after Not now it stays away, until another phone with an older app is paired: then once more, for that phone", async () => {
+    await launch(); press("Not now"); await flush();
+    expect(render()).toBe(""); expect(await relaunch()).not.toContain(TITLE);
+    devices = [OLD, OTHER]; bridgesOn();
+    expect(await relaunch()).toContain("Old Android has an older version");
+    press("Not now"); await flush();
+    expect(await relaunch()).not.toContain(TITLE);
+  });
+
+  it("names how many phones when more than one has an older app", async () => {
+    devices = [OLD, OTHER]; bridgesOn();
+    expect(await launch()).toContain("2 of your phones have an older version of the MausBot app");
+  });
+
+  it("never when no paired phone has an older app, nor when this computer's link was not ended", async () => {
+    devices = [NEW]; bridgesOn();
+    expect(await launch(), "every phone updated and paired again").not.toContain(TITLE);
+    expect(linked, "the account is asked only for a phone with an older app").not.toHaveBeenCalled();
+    devices = []; bridgesOn();
+    expect(await relaunch(), "no phone").not.toContain(TITLE);
+    devices = [OLD]; retired = false; bridgesOn();
+    expect(await relaunch(), "the link was not ended").not.toContain(TITLE);
+    linked.mockRejectedValue(new Error("only on the local page")); retired = true;
+    expect(await relaunch(), "an account it can't read").not.toContain(TITLE);
+  });
+
+  it("only on this computer's own page of the desktop app, never on My Cloud or a server's page", async () => {
+    f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), "cloud-setup-hidden"];
+    viewer = { hosted: false, canSave: true, cloudHome: true }; f.state.config.cloudHome = true; showWindow(MY_CLOUD); bridgesOn();
+    expect(await relaunch(), "My Cloud").not.toContain(TITLE);
+    viewer = { hosted: true, canSave: true }; f.state.config.cloudHome = false; showWindow(VPS); bridgesOn();
+    expect(await relaunch(), "a server's page").not.toContain(TITLE);
+    expect(companion).not.toHaveBeenCalled();
+    vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+    expect(await relaunch(), "a plain browser").not.toContain(TITLE);
+  });
+
+  it("shows on a branded build too, as Settings → Phone & devices explains it there", async () => {
+    f.brand = "file";
+    expect(await launch()).toContain(TITLE);
+  });
+
+  it("is a notice to act on: ahead of the sponsor's card, which follows once it is closed, and behind the Grok Bot popup", async () => {
+    storage.delete(MODELGO_OFFER_NOTICE);
+    expect(await launch()).toContain(TITLE);
+    press("Not now"); await flush();
+    expect(await settle(), "then the sponsor's card, in the same launch").toContain(MODELGO);
+    storage.delete(GROK_MOVE_NOTICE); session.clear(); f.state.config.onboarding.hintsSeen = withTourFinished(undefined); storage.delete("phone-app-update:0f8c2a41");
+    const first = await launch();
+    expect(first, "the Grok Bot popup goes first").not.toContain(TITLE);
+    expect(launchNotice()).toBe(GROK_MOVE_NOTICE);
+  });
+
+  it("waits while it can't tell yet, and over a live call", async () => {
+    let answer = (_value: unknown) => {};
+    companion.mockImplementation(() => new Promise(resolve => { answer = resolve; }));
+    storage.delete(MODELGO_OFFER_NOTICE);
+    expect(await launch(), "nothing lower shows meanwhile").toBe("");
+    answer({ enabled: true, devices, pairing: null }); await flush();
+    expect(await settle()).toContain(TITLE);
+    session.clear(); bridgesOn(); f.state.liveCall = { status: "active" };
+    expect(await launch(), "a live call").toBe("");
+  });
+});

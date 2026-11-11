@@ -131,6 +131,7 @@ export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
   let open = 0;
   return orderedThreadList(tasks).filter((task) => {
     if (task.pinned === true) return true;
+    if (task.openedBy?.burstId) return task.threadId === activeId || demandsAttention(task, activeId);
     if (isArchived(task)) return task.threadId === activeId;
     return task.closedBy || isSnoozed(task)
       ? demandsAttention(task, activeId)

@@ -177,7 +177,7 @@ npx openmausbot pair
 | `Reach    ✗ https://… answers as a different server.` | The address leads to another MausBot server. | Point the tunnel at this machine's port. |
 | `Reach    … https://… doesn't answer yet` (`--domain`) | DNS isn't pointing here yet, or ports 80 and 443 are closed. | Fix the A record and open the ports; the certificate follows. |
 | `--lan: this machine has no private network address…` | A VPS with only a public address. | Use `--public-url`, `--domain` or `--tailscale`. |
-| `--tailscale: HTTPS certificates are off for this tailnet…` | Tailscale can't serve HTTPS yet. | Turn on HTTPS certificates at https://login.tailscale.com/admin/dns, then run `serve --tailscale` again. |
+| `tailscale: HTTPS certificates are off for this tailnet, so this server listens on http://…` | Tailscale can't serve HTTPS yet, so the server listens on its own tailnet address. It works, and only your tailnet reaches it. | For an `https://` address, turn on HTTPS certificates at https://login.tailscale.com/admin/dns, then run `serve --tailscale` again. |
 | `No MausBot server is running here. Start it: … serve` | `pair` found no server on this port. | Start it, or pass the server's `--port` and `--data-dir`. |
 | `Get a pairing code: openmausbot pair` and no code | The server runs as a service or under `docker compose logs`, where codes stay out of logs. | Run that command in a terminal. |
 | "This shared server takes no pairing commands from this machine." | The server runs with `OMB_LOOPBACK_TRUST=service`. | Let people sign in with their email (`openmausbot access add you@example.com`), or pair from a signed-in admin's Settings. |
@@ -238,8 +238,11 @@ too.
   binding ports 80 and 443 as a normal user needs one privilege grant. When
   Caddy reports the refusal, `serve` prints the exact `setcap` command to run
   once.
-- **`--tailscale`**: needs Tailscale signed in and HTTPS certificates enabled
-  for the tailnet (admin console → DNS). `serve` checks both, and checks that
+- **`--tailscale`**: needs Tailscale signed in. With HTTPS certificates off
+  for the tailnet (admin console → DNS), or `tailscale serve` not allowed for
+  this user, the server listens on this machine's own tailnet addresses at
+  `http://<name>:<port>` and answers only tailnet peers that use that exact
+  name. Otherwise `serve` checks that
   no other MausBot server already answers on this machine's name. Then it
   runs `tailscale serve --https=443 http://127.0.0.1:8799` in the foreground,
   so the share ends when `serve` stops. A marker file in the data dir lets the

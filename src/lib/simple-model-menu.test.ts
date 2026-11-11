@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { InstanceInfo, ModelSelection } from "@/state/store";
+import { favoriteKey, favoriteModels, forgetFavoriteModelsForTest, toggleFavoriteModel } from "./favorite-models";
 import { modelName, simpleModelMenu, SIMPLE_SEARCH_AFTER } from "./simple-model-menu";
 
 vi.hoisted(() => {
@@ -50,6 +51,40 @@ const rows = (built: Menu, index = 0) => {
   return body.kind === "models" ? body.rows.map((row) => row.label) : [];
 };
 const body = (built: Menu, index = 0) => built.groups[index]!.body;
+
+describe("a starred model", () => {
+  const stored = new Map<string, string>();
+  beforeEach(() => {
+    stored.clear();
+    forgetFavoriteModelsForTest();
+    vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value) });
+  });
+
+  it("comes first among its provider's suggestions, and counts against them", () => {
+    toggleFavoriteModel("claude", "haiku-5");
+    expect(rows(menu([claude()]))).toEqual(["Haiku 5", "Fable 5.1", "Fable 5", "Opus 5.5"]);
+  });
+
+  it("stays out of another provider, and goes back when unstarred", () => {
+    toggleFavoriteModel("codex", "haiku-5");
+    expect(rows(menu([claude()]))).toEqual(["Fable 5.1", "Fable 5", "Opus 5.5", "Opus 5"]);
+    toggleFavoriteModel("claude", "haiku-5");
+    toggleFavoriteModel("claude", "haiku-5");
+    expect(rows(menu([claude()]))).toEqual(["Fable 5.1", "Fable 5", "Opus 5.5", "Opus 5"]);
+  });
+
+  it("survives a reload, and a saved list that makes no sense counts as none", () => {
+    toggleFavoriteModel("claude", "haiku-5");
+    forgetFavoriteModelsForTest();
+    expect(favoriteModels().has(favoriteKey("claude", "haiku-5"))).toBe(true);
+    stored.set("omb-favorite-models", "{not json");
+    forgetFavoriteModelsForTest();
+    expect(favoriteModels().size).toBe(0);
+    stored.set("omb-favorite-models", JSON.stringify({ a: 1 }));
+    forgetFavoriteModelsForTest();
+    expect(favoriteModels().size).toBe(0);
+  });
+});
 
 describe("Ollama in the Simple model menu", () => {
   const ollama = engine("openaiCompat", "openai-compat", "Ollama", "api", [
@@ -264,6 +299,25 @@ describe("the Simple model menu", () => {
       .toEqual([["Sonnet 5", true]]);
     expect(found.results).toBe(1);
     expect(menu([claude(), codex, many], { query: "zzz" })).toMatchObject({ groups: [], results: 0 });
+  });
+});
+
+describe("a model that needs a newer CLI", () => {
+  const gated = claudeModels.map((option) => option.id === "opus-5-5" ? { ...option, needsCliUpdate: "2.1.321" } : option);
+  const pick = (model: string) => ({ instanceId: "claude", model });
+  const menuOn = (model: string) => simpleModelMenu({
+    instances: [claude({}, gated)], listed: [claude({}, gated)], selection: pick(model),
+    bot: { name: "Scout", selection: pick(model) }, query: "", expanded: new Set(["claude"]), probing: new Set(), loading: false,
+  });
+
+  it("stays listed but cannot be picked", () => {
+    const body = menuOn("sonnet-5").groups[0]!.body;
+    if (body.kind !== "models") throw new Error("expected the models");
+    expect(body.rows.filter((row) => row.blocked).map((row) => row.option.id)).toEqual(["opus-5-5"]);
+  });
+
+  it("offers the update on the current row instead of failing the turn", () => {
+    expect(menuOn("opus-5-5").current).toMatchObject({ warning: true, blocked: true, meta: "Update Claude" });
   });
 });
 
