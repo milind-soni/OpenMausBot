@@ -1,4 +1,8 @@
 import nativeText from "./native-text.cjs";
+
+const qwenKeyTarget = (target) => typeof target?.region === "string" && typeof target?.workspace === "string"
+  ? { qwenKeyTarget: { region: target.region, workspace: target.workspace } } : {};
+
 export const CREDENTIAL_PATCH = {
   openaiApiKey: (value) => ({ openai: { key: value } }),
   // everyClaudeBot travels with the key, so no moment exists where a first key moves every signed-in Claude bot onto API billing.
@@ -26,6 +30,7 @@ export const CREDENTIAL_PATCH = {
   customImageApiKey: (value) => ({ imageGen: { customApiKey: value } }),
   geminiImageApiKey: (value) => ({ imageGen: { geminiKey: value } }),
   openaiLiveKey: (value) => ({ live: { key: value } }),
+  qwenLiveKey: (value, options) => ({ live: { qwen: { key: value } }, ...qwenKeyTarget(options?.qwenKeyTarget) }),
   tregApiKey: (value) => ({ treg: { key: value } }),
   postizApiKey: (value) => ({ postiz: { key: value } }),
 };

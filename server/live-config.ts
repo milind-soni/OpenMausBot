@@ -55,7 +55,8 @@ export function liveSavePatch(current: LiveConfig | undefined, patch: LiveConfig
   const { keyFor: _fromRequest, ...asked } = patch;
   if (asked.qwen) asked.qwen = qwenSavePatch(current?.qwen, asked.qwen);
   if (asked.provider !== undefined && current?.qwen && asked.qwen?.enabled !== true) {
-    asked.qwen = { ...current.qwen, ...asked.qwen, enabled: false };
+    const { key: _stored, ...qwen } = current.qwen;
+    asked.qwen = { ...qwen, ...asked.qwen, enabled: false };
   }
   const target = liveKeyTarget({ ...current, ...asked });
   if (asked.key?.trim()) {
@@ -72,6 +73,12 @@ export function liveConfigWithEnv(live: LiveConfig | undefined, env: NodeJS.Proc
     // A different key from the environment is not the one `keyFor` was saved for.
     if (next.key?.trim() && next.key.trim() !== envKey.trim()) delete next.keyFor;
     next.key = envKey;
+  }
+  const qwenKey = env.OMB_QWEN_LIVE_KEY;
+  if (qwenKey !== undefined) {
+    const qwen = { ...next.qwen, key: qwenKey };
+    if (next.qwen?.key?.trim() && next.qwen.key.trim() !== qwenKey.trim()) delete qwen.keyFor;
+    next.qwen = qwen;
   }
   const provider = env.OMB_LIVE_PROVIDER?.trim().toLowerCase();
   if (provider === "openai" || provider === "azure") next.provider = provider;

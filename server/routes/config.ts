@@ -571,6 +571,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.imageGen?.customApiKey !== undefined) persisted.imageGen.customApiKey = "";
           if (persisted.imageGen?.geminiKey !== undefined) persisted.imageGen.geminiKey = "";
           if (persisted.live?.key !== undefined) persisted.live.key = "";
+          if (persisted.live?.qwen?.key !== undefined) persisted.live.qwen.key = "";
           if (persisted.treg?.key !== undefined) persisted.treg.key = "";
           if (persisted.postiz?.key !== undefined) persisted.postiz.key = "";
           saveConfig(persisted);

@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer } from "../scripts/control-omb.ts";
+import { CREDENTIAL_PATCH } from "../electron/credential-patch.mjs";
+import { createSecureCredentialState, type CredentialDocument } from "../electron/secure-credential-state.mjs";
 import type { LiveSettings } from "../shared/wire.ts";
 
 it("saves, replaces and clears the settings Qwen credential through the real config API without exposing it or changing the native key", async () => {
@@ -76,6 +78,49 @@ it("refuses stale Qwen credential saves and removals after another client change
     expect(disk().live.qwen).not.toHaveProperty("qwenKeyTarget");
     expect((await api("PUT", "/api/config", { live: { qwen: { key: "" } }, qwenKeyTarget: currentTarget })).status).toBe(200);
     expect(disk().live.qwen.key).toBe("");
+    console.info(JSON.stringify(fixture.info));
+  } finally { await fixture.close(); }
+}, 30_000);
+
+it("keeps a desktop's Qwen key out of config.json and rolls the encrypted store back when the destination is stale", async () => {
+  const fixture = await launchVerificationServer();
+  const disk = () => readFileSync(join(fixture.info.dataDir, "config.json"), "utf8");
+  const settings = async () => ((await (await fetch(`${fixture.info.url}/api/config`, { signal: AbortSignal.timeout(10_000) })).json()) as { live: LiveSettings }).live;
+  const persisted: CredentialDocument[] = [];
+  const store = createSecureCredentialState({}, async (credentials) => { persisted.push(credentials); });
+  const save = (value: string, qwenKeyTarget?: { region: string; workspace: string }) => store.update(
+    (credentials) => { if (value) credentials.qwenLiveKey = value; else delete credentials.qwenLiveKey; return credentials; },
+    async () => {
+      const response = await fetch(`${fixture.info.url}/api/config?secretStorage=external`, { method: "PUT", headers: { "content-type": "application/json" },
+        body: JSON.stringify(CREDENTIAL_PATCH.qwenLiveKey(value, { qwenKeyTarget })), signal: AbortSignal.timeout(10_000) });
+      const body = await response.json() as { error?: string };
+      if (!response.ok) throw Object.assign(new Error(body.error), { status: response.status });
+    });
+  const current = { region: "ap-southeast-1", workspace: "fixture-space" };
+  try {
+    expect((await fetch(`${fixture.info.url}/api/live/settings`, { method: "PATCH", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "qwen", qwenRegion: current.region, qwenWorkspace: current.workspace }), signal: AbortSignal.timeout(10_000) })).status).toBe(200);
+    await save("qwen-desktop-fixture-1", current);
+    expect(store.read()).toEqual({ qwenLiveKey: "qwen-desktop-fixture-1" });
+    expect(disk()).not.toContain("qwen-desktop-fixture");
+    expect(JSON.parse(disk()).live.qwen).toMatchObject({ key: "", keyFor: "qwen:fixture-space.ap-southeast-1.maas.aliyuncs.com" });
+    expect(await settings()).toMatchObject({ provider: "qwen", qwenKeyConfigured: true });
+
+    const before = disk();
+    for (const stale of [{ region: "cn-beijing", workspace: "" }, undefined]) {
+      await expect(save("qwen-desktop-stale-fixture", stale)).rejects.toMatchObject({ status: 409 });
+      await expect(save("", stale)).rejects.toMatchObject({ status: 409 });
+    }
+    expect(store.read()).toEqual({ qwenLiveKey: "qwen-desktop-fixture-1" });
+    expect(persisted.at(-1)).toEqual({ qwenLiveKey: "qwen-desktop-fixture-1" });
+    expect(disk()).toBe(before);
+    expect(await settings()).toMatchObject({ qwenKeyConfigured: true });
+
+    await save("", current);
+    expect(store.read()).toEqual({});
+    expect(JSON.parse(disk()).live.qwen).toMatchObject({ key: "", keyFor: "nowhere" });
+    expect(await settings()).toMatchObject({ qwenKeyConfigured: false });
+    expect(disk()).not.toContain("qwen-desktop");
     console.info(JSON.stringify(fixture.info));
   } finally { await fixture.close(); }
 }, 30_000);

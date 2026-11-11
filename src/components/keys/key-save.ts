@@ -6,7 +6,7 @@ import type { KeyResult } from "@/lib/analytics-allowlist";
 import { PROVIDER_CREDENTIAL_TARGETS } from "../../../shared/credential-request";
 import { keyEntry, type DesktopSlot, type DesktopSlotOptions, type KeyId, type KeyTarget, type TestableProvider } from "./key-catalog";
 
-const HOST_SERVER_KEEPS: ReadonlySet<string> = new Set([...PROVIDER_CREDENTIAL_TARGETS, "openaiCompatApiKey"]);
+const HOST_SERVER_KEEPS: ReadonlySet<string> = new Set([...PROVIDER_CREDENTIAL_TARGETS, "openaiCompatApiKey", "qwenLiveKey"]);
 
 /** Saves into the desktop's encrypted store, or undefined when this page must use the server's config instead: an AI
  * provider key typed through a desktop paired to another computer belongs to that computer's server, not this store. */

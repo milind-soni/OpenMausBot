@@ -217,12 +217,14 @@ export function keyEntry(id: KeyId): KeyEntry {
 /** With Azure OpenAI chosen for Live calls, the row for their key is about the Azure resource: required, and no OpenAI key. */
 export function shownKeyEntry(id: KeyId, config: ConfigStatus | null | undefined): KeyEntry {
   const entry = keyEntry(id);
-  if (id === "liveKey" && config?.live?.provider === "qwen") return {
-    ...entry, name: "Qwen", env: [], labelKey: "call.live.qwen.key", purposeKey: "keys.purpose.liveKeyQwen",
-    target: { patch: (value) => ({ live: { qwen: { key: value } }, qwenKeyTarget: { region: config.live?.qwenRegion ?? "cn-beijing", workspace: config.live?.qwenWorkspace ?? "" } }),
-      saved: (status) => ({ configured: status.live?.qwenKeyConfigured === true }),
-      placeholder: "sk-…", href: "https://bailian.console.aliyun.com", analytics: "qwen_live" },
-  };
+  if (id === "liveKey" && config?.live?.provider === "qwen") {
+    const qwenKeyTarget = { region: config.live?.qwenRegion ?? "cn-beijing", workspace: config.live?.qwenWorkspace ?? "" };
+    return { ...entry, name: "Qwen", env: ["OMB_QWEN_LIVE_KEY"], labelKey: "call.live.qwen.key", purposeKey: "keys.purpose.liveKeyQwen",
+      target: { patch: (value) => ({ live: { qwen: { key: value } }, qwenKeyTarget }), slot: "qwenLiveKey", storeOptions: () => ({ qwenKeyTarget }),
+        saved: (status) => ({ configured: status.live?.qwenKeyConfigured === true }),
+        placeholder: "sk-…", href: "https://bailian.console.aliyun.com", analytics: "qwen_live" },
+    };
+  }
   if (id !== "liveKey" || config?.live?.provider !== "azure" || !entry.target) return entry;
   const { shape: _openAiShape, ...target } = entry.target;
   return { ...entry, name: "Azure OpenAI", labelKey: "call.live.azureKeyField", purposeKey: "keys.purpose.liveKeyAzure", target: { ...target, placeholder: "…", href: "https://portal.azure.com" } };

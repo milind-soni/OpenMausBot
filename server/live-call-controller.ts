@@ -274,6 +274,7 @@ export class LiveCallController {
   async shutdown(): Promise<void> {
     const call = this.call;
     if (!call || call.state.status === "ended") return;
+    call.pendingEnd = "shutdown";
     this.command(call, { type: "session.close" });
     this.finish(call, "shutdown");
   }
@@ -639,10 +640,8 @@ export class LiveCallController {
       call.pendingSends -= 1;
       if (!call.pendingSends && call.state.status === "live" && this.call === call) {
         for (const [messageId, answer] of call.earlyAnswers) {
-          if (answer.requestMessageId && call.pendingCall.has(answer.requestMessageId)) {
-            call.earlyAnswers.delete(messageId);
-            this.onAnswer(call, answer);
-          }
+          call.earlyAnswers.delete(messageId);
+          this.onAnswer(call, answer);
         }
         if (call.pendingIdleSettlement) this.settleIdleWork(call);
       }
@@ -781,13 +780,12 @@ export class LiveCallController {
     const batch = answerBatch(call, request);
     const forCall = batch.some((id) => call.pendingCall.has(id)) || (call.endpoint.provider !== "qwen" && (call.claimNextTerminal || (request === undefined && call.pendingCall.size > 0)));
     const typed = !forCall && request !== undefined ? call.typedTexts.get(request) : undefined;
-    if ((!forCall && typed === undefined) || (call.endpoint.provider === "qwen" && call.pendingSends && forCall)) {
-      if (call.endpoint.provider === "qwen" && call.pendingSends) {
-        if (call.earlyAnswers.size >= 64) this.finish(call, "error", "The call reached its pending result limit.");
-        else call.earlyAnswers.set(message.id, message);
-      }
+    if (call.endpoint.provider === "qwen" && call.pendingSends) {
+      if (call.earlyAnswers.size >= 64) this.finish(call, "error", "The call reached its pending result limit.");
+      else call.earlyAnswers.set(message.id, message);
       return;
     }
+    if (!forCall && typed === undefined) return;
     if (!forCall && !this.deps.settings().readTypedReplies) {
       // Off means nothing about a typed exchange reaches OpenAI, not even as context.
       releaseDelegations(call, settleRequests(call, batch));

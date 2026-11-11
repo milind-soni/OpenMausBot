@@ -264,23 +264,53 @@ describe("the keys page", () => {
     render(); page();
     expect(row("liveKey")!.querySelector<HTMLInputElement>('input[aria-label="Custom voice ID"]')!.value).toBe("fixture-custom-voice");
   });
-  it("saves and clears Qwen through the server even when an older desktop bridge exists", async () => {
-    const live = { configured: false, provider: "qwen", qwenKeyConfigured: false, voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+  it("saves, replaces and clears Qwen through the desktop's encrypted store with the destination it showed", async () => {
+    const live = { configured: false, provider: "qwen", qwenRegion: "ap-southeast-1", qwenWorkspace: "fixture-space", qwenKeyConfigured: false, voice: "marin", readTypedReplies: true, idleMinutes: 5 };
     setConfig({ ...fx.config, live });
-    fx.api.mockImplementation(async (_path: string, init: RequestInit) => {
-      const key = JSON.parse(String(init.body)).live.qwen.key;
-      return { ...fx.config, live: { ...live, configured: !!key, qwenKeyConfigured: !!key } };
-    });
-    const setCredential = vi.fn(async () => { throw new Error("Older desktop does not know Qwen"); });
+    const setCredential = vi.fn(async (_slot: string, value: string) => ({ ...fx.config, live: { ...live, configured: !!value, qwenKeyConfigured: !!value } }));
     const original = window.ogb;
     window.ogb = { setCredential } as never;
     try {
       page();
       paste(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-qwen-desktop-key");
       await vi.waitFor(() => expect(row("liveKey")!.querySelector("[data-key-masked]")).not.toBeNull());
-      expect(fx.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ live: { qwen: { key: "fixture-qwen-desktop-key" } }, qwenKeyTarget: { region: "cn-beijing", workspace: "" } }) });
       flushSync(() => row("liveKey")!.querySelector<HTMLButtonElement>("[data-key-remove]")!.click());
-      await vi.waitFor(() => expect(fx.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ live: { qwen: { key: "" } }, qwenKeyTarget: { region: "cn-beijing", workspace: "" } }) }));
+      await vi.waitFor(() => expect(row("liveKey")!.querySelector("[data-key-masked]")).toBeNull());
+      const destination = { qwenKeyTarget: { region: "ap-southeast-1", workspace: "fixture-space" } };
+      expect(setCredential.mock.calls).toEqual([["qwenLiveKey", "fixture-qwen-desktop-key", destination], ["qwenLiveKey", "", destination]]);
+      expect(fx.api).not.toHaveBeenCalled();
+    } finally { window.ogb = original; }
+  });
+
+  it("refuses a Qwen key an older desktop bridge cannot keep encrypted, and never falls back to plaintext config", async () => {
+    const live = { configured: false, provider: "qwen", qwenKeyConfigured: false, voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    const setCredential = vi.fn(async () => { throw new Error("Unsupported credential"); });
+    const original = window.ogb;
+    window.ogb = { setCredential } as never;
+    try {
+      page();
+      paste(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-qwen-old-bridge-key");
+      await vi.waitFor(() => expect(row("liveKey")!.textContent).toContain("Unsupported credential"));
+      expect(setCredential).toHaveBeenCalledOnce();
+      expect(fx.api).not.toHaveBeenCalled();
+      expect(row("liveKey")!.querySelector("[data-key-masked]")).toBeNull();
+      expect(row("liveKey")!.textContent).not.toContain("Saved");
+    } finally { window.ogb = original; }
+  });
+
+  it("sends a Qwen key typed on a desktop paired to another computer to that computer's server", async () => {
+    const live = { configured: false, provider: "qwen", qwenKeyConfigured: false, voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    fx.api.mockImplementation(async () => ({ ...fx.config, live: { ...live, configured: true, qwenKeyConfigured: true } }));
+    const setCredential = vi.fn();
+    const original = window.ogb;
+    window.ogb = { setCredential, remoteClient: { active: true } } as never;
+    try {
+      page();
+      paste(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-qwen-remote-key");
+      await vi.waitFor(() => expect(row("liveKey")!.querySelector("[data-key-masked]")).not.toBeNull());
+      expect(fx.api).toHaveBeenCalledExactlyOnceWith("/api/config", { method: "PUT", body: JSON.stringify({ live: { qwen: { key: "fixture-qwen-remote-key" } }, qwenKeyTarget: { region: "cn-beijing", workspace: "" } }) });
       expect(setCredential).not.toHaveBeenCalled();
     } finally { window.ogb = original; }
   });

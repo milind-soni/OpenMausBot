@@ -42,6 +42,7 @@ process.on("message", (message) => {
           process.send?.({ fixture: "qwen-steering", event: "steer-ack-held", threadId, outcome });
           await pending.wait;
           pending.held = false;
+          if (pending.fail) throw new Error("fixture steering acknowledgement lost");
         }
         return outcome;
       };
@@ -53,6 +54,7 @@ process.on("message", (message) => {
   }
   const pending = fixtureSteerAcks.get(message.threadId);
   if (message.action === "release-steer-ack" && pending) { pending.hold = false; pending.release(); }
+  if (message.action === "lose-steer-ack" && pending) { pending.hold = false; pending.fail = true; pending.release(); }
   process.send?.({ fixture: "qwen-steering", id: message.id,
     requestMessageId: directRequestOwners.get(message.threadId)?.messageId ?? null,
     steerCalls: pending?.calls ?? 0, ackHeld: pending?.held ?? false });

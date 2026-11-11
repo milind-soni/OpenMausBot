@@ -20,10 +20,23 @@ The server returns 409 if that snapshot is missing or the destination changed
 before the write. Reload Call settings before retrying. The snapshot is not
 persisted; `keyFor` is always derived by the server.
 
+The packaged desktop app keeps the Qwen key in its OS-encrypted store
+(`qwenLiveKey`), as it does the OpenAI Live key. The page passes the same
+snapshot to `credential:set`; the store is written first and rolled back if the
+server refuses the save. `config.json` keeps only an empty `live.qwen.key`
+tombstone beside `keyFor`, and a plaintext key from an older version moves into
+the store at launch. The stored copy returns as `OMB_QWEN_LIVE_KEY`, which bots
+never inherit, and is usable only while `keyFor` still matches the selected
+destination: after the destination changes or the key is removed, a restart
+cannot revive it. A desktop paired to another computer saves the key on that
+computer's server. A desktop bridge that does not know `qwenLiveKey` refuses
+the save rather than writing plaintext.
+
 The on-disk native `live.provider` enum is unchanged for program-rollback
 compatibility. Qwen settings live under `live.qwen`; the public settings API
 reports the effective provider as `qwen` when enabled. There is no fallback to
-an OpenAI key, environment credential or arbitrary/redirected provider host.
+an OpenAI key, an OpenAI environment credential or an arbitrary/redirected
+provider host.
 
 A preset is not proof of provider availability forever. The catalog contains
 69 voices accepted by a Beijing Flash `session.update` handshake during local

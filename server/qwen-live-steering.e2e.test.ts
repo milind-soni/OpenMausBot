@@ -36,7 +36,7 @@ describe.skipIf(process.platform === "win32")("Qwen spoken sends during a real e
   };
   const botState = async (bot: Bot) => (await api("GET", "/api/bots")).body.bots.find((value: Bot) => value.id === bot.id);
   const lines = async (bot: Bot): Promise<Line[]> => (await botState(bot)).messages;
-  const command = (bot: Bot, action: "continuation" | "owner" | "hold-steer-ack" | "release-steer-ack" | "steer-state", text = "fixture continuation") => new Promise<{ requestMessageId: string | null; steerCalls: number; ackHeld: boolean }>((resolve, reject) => {
+  const command = (bot: Bot, action: "continuation" | "owner" | "hold-steer-ack" | "release-steer-ack" | "lose-steer-ack" | "steer-state", text = "fixture continuation") => new Promise<{ requestMessageId: string | null; steerCalls: number; ackHeld: boolean }>((resolve, reject) => {
     const id = ++requestNumber;
     const timer = setTimeout(() => { child.off("message", received); reject(new Error(`fixture IPC timed out: ${output.slice(-1_000)}`)); }, 5_000);
     const received = (message: any) => {
@@ -220,6 +220,49 @@ describe.skipIf(process.platform === "win32")("Qwen spoken sends during a real e
         .toMatchObject({ request_id: originalId, result: expect.stringContaining(spoken) });
       expect(results(call.provider, "delayed-steering").filter(result => result.status === "completed")).toHaveLength(1);
       expect(results(call.provider, "delayed-steering").some(result => result.request_id === laterId)).toBe(false);
+      expect((await lines(bot)).filter(line => line.text === spoken)).toHaveLength(1);
+      expect(JSON.stringify(call.provider.commands)).not.toContain(LIVE_COPY.noAnswer);
+    } finally {
+      await command(bot, "release-steer-ack");
+      writeFileSync(gate, "finish");
+      await call?.close();
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+    }
+  }, 40_000);
+
+  it.each(["steered", "indeterminate"] as const)("gives a typed request's result to the spoken request whose %s receipt comes after it", async outcome => {
+    const bot = await createBot();
+    const spoken = `spoken addition to the typed request ${outcome}`;
+    let call: Awaited<ReturnType<typeof startQwen>> | undefined;
+    try {
+      call = await startQwen(bot);
+      const typed = await api("POST", `/api/bots/${bot.id}/messages`, { text: `typed request during the call ${outcome}`, sendId: `typed-fixture-${outcome}-0001` });
+      expect(typed.status).toBe(202);
+      await working(bot);
+      const typedId = (await command(bot, "owner")).requestMessageId;
+      expect(typedId).toBe(typed.body.message.id);
+      await command(bot, "hold-steer-ack");
+      speak(call.provider, "typed-steering", spoken);
+      await expect.poll(async () => (await command(bot, "steer-state")).ackHeld, { timeout: 10_000 }).toBe(true);
+      await expect.poll(() => existsSync(steered)).toBe(true);
+      writeFileSync(gate, "finish");
+      await expect.poll(async () => (await lines(bot)).find(line => line.turnTerminal && line.requestMessageId === typedId), { timeout: 10_000 })
+        .toMatchObject({ text: expect.stringContaining(spoken) });
+      await expect.poll(async () => (await botState(bot)).busy).toBe(false);
+      if (outcome === "steered") {
+        rmSync(gate, { force: true });
+        expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "unrelated later request" })).status).toBe(202);
+        expect((await botState(bot)).busy).toBe(true);
+        await command(bot, "release-steer-ack");
+      } else await command(bot, "lose-steer-ack");
+      await expect.poll(async () => (await lines(bot)).filter(line => line.text === spoken)).toHaveLength(1);
+      expect((await lines(bot)).find(line => line.text === spoken)).toMatchObject({ steered: true, via: "call", callId: call.callId });
+      await expect.poll(() => results(call!.provider, "typed-steering").find(result => result.status === "completed"), { timeout: 10_000 })
+        .toMatchObject({ request_id: typedId, result: expect.stringContaining(spoken) });
+      writeFileSync(gate, "finish");
+      await expect.poll(async () => (await botState(bot)).busy, { timeout: 10_000 }).toBe(false);
+      expect(results(call.provider, "typed-steering").filter(result => result.status === "completed")).toHaveLength(1);
+      expect((await command(bot, "steer-state")).steerCalls).toBe(1);
       expect((await lines(bot)).filter(line => line.text === spoken)).toHaveLength(1);
       expect(JSON.stringify(call.provider.commands)).not.toContain(LIVE_COPY.noAnswer);
     } finally {

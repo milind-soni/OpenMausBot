@@ -72,11 +72,11 @@ function setup(overrides: Partial<LiveCallDeps> = {}) {
   return { controller, deps, sockets, frames, logs, settings, queue, listeners, emit, message, patch, setActivity, start, socket: () => sockets.at(-1)! };
 }
 
-async function setupQwenMedia(auth: RequestAuth = owner, bind = true) {
+async function setupQwenMedia(auth: RequestAuth = owner, bind = true, overrides: Partial<LiveCallDeps> = {}) {
   const provider = new FakeSocket("unused", "fixture");
   const endpoint: LiveEndpoint = { provider: "qwen", apiBase: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime", model: "qwen-audio-3.1-realtime-flash" };
   const signedIn = vi.fn(() => true);
-  const t = setup({ signedIn, createSession: input => createQwenLiveSession({ ...input, bot: { name: "Fixture" }, history: [], upstream: provider }) });
+  const t = setup({ ...overrides, signedIn, createSession: input => createQwenLiveSession({ ...input, bot: { name: "Fixture" }, history: [], upstream: provider }) });
   t.settings.provider = "qwen"; t.settings.endpoint = endpoint;
   const { call } = await t.controller.start({ auth, ...BOT, sdp: "", client: "web", transports: ["ws-pcm"] });
   provider.open(); provider.receive({ type: "session.updated" });
@@ -124,6 +124,20 @@ describe("LiveCallController lifecycle", () => {
     expect(f.controller.playbackCredit(f.callId, credit)).toBe(false);
     expect(f.controller.clientFailure(f.callId, { type: "client.failure", code: "audio-context", contextState: "closed", bufferedBytes: 0, queuedMs: 0, frameAgeMs: 0 })).toBe(false);
     expect(f.logs.some(line => line.includes("source=client-untrusted"))).toBe(false);
+  });
+  it("records a Qwen call that the server shuts down as shutdown, though the adapter closes synchronously", async () => {
+    const f = await setupQwenMedia(owner, true, { recordCall: vi.fn() });
+    await f.controller.shutdown();
+    const ended = f.frames.at(-1);
+    expect(ended).toMatchObject({ status: "ended", endReason: "shutdown" });
+    expect(ended?.error).toBeUndefined();
+    expect(vi.mocked(f.deps.recordCall!).mock.calls.map(([input]) => input.record.endReason)).toEqual(["shutdown"]);
+    expect(f.logs.filter(line => line.includes("end=")).map(line => /end=(\S+)/.exec(line)?.[1])).toEqual(["shutdown"]);
+    expect(f.controller.current()).toBeNull();
+    expect(f.media.close).toHaveBeenCalledOnce();
+    expect(f.provider.readyState).toBe(3);
+    expect(f.listeners.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
   });
   it("refuses direct unbound, wrong-call, signed-out and non-finite client diagnostics without logging their contents", async () => {
     const f = await setupQwenMedia(owner, false);
@@ -894,6 +908,52 @@ describe("Qwen delegation release", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(t.release.mock.calls.map(([id]) => id).sort()).toEqual(["d1", "d2"]);
     expect(t.socket().appends("commentary")).toHaveLength(1);
+    await t.controller.shutdown();
+  });
+
+  it.each([true, false])("gives a typed request's early result to the spoken request steered into it, once, with typed readout %s", async readTypedReplies => {
+    let accept!: (value: { kind: "steered"; messageId: string; requestMessageId: string }) => void;
+    const send = vi.fn(() => new Promise<{ kind: "steered"; messageId: string; requestMessageId: string }>(resolve => { accept = resolve; }));
+    const t = await live({ personKey: () => "caller", send });
+    t.settings.readTypedReplies = readTypedReplies;
+    t.message({ id: "typed", role: "user", text: "Typed request", sender: { id: "caller", name: "Caller" }, sendId: "typed-send" });
+    t.setActivity("working");
+    await t.delegate("d1", "spoken addition");
+    t.message({ id: "answer", requestMessageId: "typed", turnTerminal: true, text: "Typed result with the spoken addition." });
+    t.setActivity("idle");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.socket().appends("commentary")).toHaveLength(0);
+    expect(t.release).not.toHaveBeenCalled();
+    accept({ kind: "steered", messageId: "steer", requestMessageId: "typed" });
+    await vi.advanceTimersByTimeAsync(0);
+    t.patch({ id: "answer", requestMessageId: "typed", turnTerminal: true, text: "Typed result with the spoken addition." });
+    t.setActivity("working"); t.setActivity("idle");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.socket().appends("commentary")).toEqual([expect.objectContaining({ content: "Typed result with the spoken addition.", delegation_id: "d1", request_id: "typed", status: "completed" })]);
+    expect(t.release).toHaveBeenCalledExactlyOnceWith("d1");
+    expect(JSON.stringify(t.socket().sent)).not.toContain(LIVE_COPY.noAnswer);
+    expect(send).toHaveBeenCalledOnce();
+    await t.controller.shutdown();
+  });
+
+  it.each([true, false])("still treats an unrelated typed result that arrives during a pending send as typed, with readout %s", async readTypedReplies => {
+    let accept!: (value: { kind: "started"; messageId: string }) => void;
+    const t = await live({ personKey: () => "caller", send: vi.fn(() => new Promise<{ kind: "started"; messageId: string }>(resolve => { accept = resolve; })) });
+    t.settings.readTypedReplies = readTypedReplies;
+    t.message({ id: "typed", role: "user", text: "Typed request", sender: { id: "caller", name: "Caller" }, sendId: "typed-send" });
+    await t.delegate("d1");
+    t.message({ id: "typed-answer", requestMessageId: "typed", turnTerminal: true, text: "Typed answer." });
+    await vi.advanceTimersByTimeAsync(0);
+    accept({ kind: "started", messageId: "m1" });
+    await vi.advanceTimersByTimeAsync(0);
+    const typed = t.socket().appends("commentary").filter(event => event.request_id === "typed");
+    if (readTypedReplies) expect(typed).toEqual([expect.objectContaining({ delegation_id: null, content: expect.stringContaining("Typed answer.") })]);
+    else expect(typed).toEqual([]);
+    expect(t.release).not.toHaveBeenCalled();
+    t.message({ id: "answer", requestMessageId: "m1", turnTerminal: true, text: "Spoken result." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.socket().appends("commentary").filter(event => event.delegation_id === "d1")).toEqual([expect.objectContaining({ content: "Spoken result.", request_id: "m1" })]);
+    expect(t.release).toHaveBeenCalledExactlyOnceWith("d1");
     await t.controller.shutdown();
   });
 

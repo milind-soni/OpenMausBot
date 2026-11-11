@@ -827,7 +827,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
     [patch.imageGen?.customApiKey, "OMB_CUSTOM_IMAGE_KEY"],
     [patch.imageGen?.geminiKey, "OMB_GEMINI_IMAGE_KEY"],
-    [patch.live?.key, "OMB_OPENAI_LIVE_KEY"],
+    [patch.live?.key, "OMB_OPENAI_LIVE_KEY"], [patch.live?.qwen?.key, "OMB_QWEN_LIVE_KEY"],
   ];
   for (const [value, name] of secrets) {
     if (value === undefined) continue;
@@ -936,6 +936,7 @@ export function saveConfig(
     for (const [sectionKey, sectionValue] of Object.entries(section as Record<string, unknown>)) {
       if (sectionValue === null) delete merged[sectionKey];
     }
+    if (key === "live" && checkedPatch.live?.qwen) merged.qwen = { ...jsonObjectSchema.safeParse(current.data?.qwen).data, ...checkedPatch.live.qwen };
     disk[key] = merged;
   }
   keepImageModels();

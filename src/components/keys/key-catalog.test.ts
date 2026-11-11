@@ -4,7 +4,7 @@ import { setLocale, t } from "@/lib/i18n";
 import type { ConfigStatus } from "@/state/store";
 import { WORKSPACE_CREDENTIAL_ENV } from "../../../server/credential-env.ts";
 import { CREDENTIAL_TARGETS, credentialConfigPatch, desktopCredentialSlot, isConfigCredentialTarget } from "../../../shared/credential-request";
-import { KEY_CATALOG, KEY_SECTIONS, keyEntry, keyForInstance, keyMatches, looksLikeOtherKey, savedState, type KeyId } from "./key-catalog";
+import { KEY_CATALOG, KEY_SECTIONS, keyEntry, keyForInstance, keyMatches, looksLikeOtherKey, savedState, shownKeyEntry, type KeyEntry, type KeyId } from "./key-catalog";
 
 const NOT_A_PERSONS_KEY: Record<string, string> = {
   OMB_ANTHROPIC_API_URL: "the address the Anthropic key goes to, set by a hosted install",
@@ -22,6 +22,8 @@ const NOT_A_PERSONS_KEY: Record<string, string> = {
   OMB_BOAT_API: "the Boat address, not a credential",
 };
 
+const shown = (entry: KeyEntry) => [entry, shownKeyEntry(entry.id, { live: { provider: "qwen" } } as ConfigStatus)];
+const homeOf = (env: string) => KEY_CATALOG.filter((entry) => shown(entry).some((row) => row.env.includes(env)));
 const electron = (file: string) => readFileSync(new URL(`../../../electron/${file}`, import.meta.url), "utf8");
 
 beforeEach(() => setLocale("en"));
@@ -29,7 +31,7 @@ beforeEach(() => setLocale("en"));
 describe("every credential has one home on the keys page", () => {
   it("files each workspace credential under exactly one row, in one section", () => {
     for (const env of WORKSPACE_CREDENTIAL_ENV) {
-      const rows = KEY_CATALOG.filter((entry) => entry.env.includes(env)).map((entry) => entry.id);
+      const rows = homeOf(env).map((entry) => entry.id);
       if (env in NOT_A_PERSONS_KEY) expect(rows, env).toEqual([]);
       else expect(rows, env).toHaveLength(1);
     }
@@ -42,9 +44,10 @@ describe("every credential has one home on the keys page", () => {
     const patched = [...electron("credential-patch.mjs").matchAll(/^ {2}(\w+): \(value\) =>/gm)].map(([, name]) => name!);
     expect(stored.length).toBeGreaterThan(10);
     for (const { name, env } of stored) {
-      const home = KEY_CATALOG.find((entry) => entry.env.includes(env));
+      const home = homeOf(env)[0];
       expect(home, name).toBeDefined();
-      if (home?.target) expect(home.target.slot, name).toBe(name);
+      const row = shown(home!).find((variant) => variant.env.includes(env));
+      if (row?.target) expect(row.target.slot, name).toBe(name);
     }
     const homed = (name: string) => KEY_CATALOG.some((entry) => entry.target?.slot === name)
       || stored.some((row) => row.name === name && KEY_CATALOG.some((entry) => entry.env.includes(row.env)));

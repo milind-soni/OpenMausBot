@@ -52,6 +52,7 @@ export function qwenSavePatch(current: QwenLiveConfig | undefined, patch: QwenLi
   const target = qwenKeyTarget(next);
   if (!target) throw Object.assign(new Error("Invalid Qwen Live target."), { status: 400 });
   if (asked.key?.trim()) return { ...next, key: asked.key.trim(), keyFor: target };
+  const { key: _stored, ...settings } = next;
   return asked.key !== undefined || target !== qwenKeyTarget(current)
-    ? { ...next, key: "", keyFor: "nowhere" } : { ...next, keyFor: current?.keyFor };
+    ? { ...settings, key: "", keyFor: "nowhere" } : { ...settings, keyFor: current?.keyFor };
 }
