@@ -21,6 +21,17 @@ function fixture(answer: (slug: string, args: Record<string, unknown>) => unknow
 }
 
 describe("complete calendar reads", () => {
+  it.each([false, true])("reads Composio's snake-case calendar token (nested: %s)", async (nested) => {
+    const { read, calls } = fixture((slug, args) => {
+      if (slug !== CALENDARS_TOOL) return { items: [event(String(args.calendarId))] };
+      const data = args.page_token ? { items: [{ id: "team", selected: true, accessRole: "reader" }] }
+        : { items: [primary], next_page_token: "next-calendar-page" };
+      return nested ? { response_data: data } : data;
+    });
+    expect((await read()).map((one) => one.calendarId)).toEqual(["primary", "team"]);
+    expect(calls.filter((one) => one.slug === CALENDARS_TOOL)[1]!.args).toEqual({ page_token: "next-calendar-page" });
+  });
+
   it("reads later calendar and event pages with each tool's parameter spelling", async () => {
     const { read, calls } = fixture((slug, args) => {
       if (slug === CALENDARS_TOOL) return args.page_token

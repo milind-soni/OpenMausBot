@@ -269,7 +269,7 @@ export function emailsFromData(data: unknown): EmailHeader[] {
 
 /** Gmail or Calendar's page token for more results, or undefined on the last page. */
 export function nextPageOf(data: unknown): string | undefined {
-  const token = [record(data), record(record(data)?.response_data)].map((body) => body?.nextPageToken).find((value) => typeof value === "string" && value);
+  const token = [record(data), record(record(data)?.response_data)].flatMap((body) => [body?.nextPageToken, body?.next_page_token]).find((value) => typeof value === "string" && value);
   return typeof token === "string" ? token : undefined;
 }
 
