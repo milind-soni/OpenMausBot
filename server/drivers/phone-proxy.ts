@@ -5,13 +5,27 @@ import { createInterface } from "node:readline";
 import { delimiter, join } from "node:path";
 import { homedir } from "node:os";
 
+import { CONTROL_ACT_WITHIN_MS, CONTROL_WAIT_MS } from "../control-client.ts";
+
 type Json = Record<string, unknown>;
 type Device = { serial: string; state: string; model: string; connection: "usb" | "network" | "emulator" };
 type UiNode = { text: string; description: string; id: string; className: string; bounds: [number, number, number, number] };
 type ClaimOutcome = { ok: true } | { ok: false; message: string };
+/** `midCall`: the call has already claimed the phone once, so it has no time left to wait for a person to hand it back. */
+type EnsureClaim = (midCall?: boolean) => Promise<ClaimOutcome>;
+type Adb = typeof runAdb;
+type OnDevice = (serial: string, args: string[], binary?: boolean) => Promise<Buffer>;
 
 const MAX_ADB_OUTPUT = 16 * 1024 * 1024;
 const PHONE_BUSY_TEXT = "Another thread is using the phone. This call was not performed. Pause phone work until that thread finishes, then read the screen again before acting.";
+const PHONE_PERSON_TEXT = "A person has taken control of the phone, so this call was NOT performed. Do not act until they hand it back. " +
+  `To wait, call read_screen: each phone call waits up to ${CONTROL_WAIT_MS / 1000} seconds and returns as soon as they hand the phone back. ` +
+  "Meanwhile you may work on anything that does not need the phone.";
+const PHONE_HANDED_BACK_TEXT = "The person has handed the phone back. This call was NOT performed: the screen may have changed. Call read_screen, then continue the task.";
+const PHONE_WAITED_TEXT = "The phone is free now, but this call had to wait for it, so it was NOT performed. " +
+  "Call again: the next call goes through at once. If you meant to tap or type from an earlier read_screen, call read_screen again first: the screen may have changed while you waited.";
+/** Past the harness's longest answer, so a claim it still legitimately holds is never cut off. */
+const CLAIM_TIMEOUT_MS = CONTROL_WAIT_MS + 10_000;
 const PACKAGE = /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/;
 const COMPONENT = /^([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+)\/\S+$/;
 const SAFE_TEXT = /^[A-Za-z0-9 _.,@-]+$/;
@@ -120,13 +134,13 @@ export function parseDevices(output: string): Device[] {
   return devices;
 }
 
-async function usbDevices() {
+async function usbDevices(adb: Adb) {
   if (!resolveAdbPath()) return [];
-  return parseDevices((await runAdb(["devices", "-l"])).toString("utf8")).filter((device) => device.connection === "usb");
+  return parseDevices((await adb(["devices", "-l"])).toString("utf8")).filter((device) => device.connection === "usb");
 }
 
-async function readySerial(requested?: unknown): Promise<string> {
-  const devices = await usbDevices();
+async function readySerial(adb: Adb, requested?: unknown): Promise<string> {
+  const devices = await usbDevices(adb);
   const serial = typeof requested === "string" && requested ? requested : process.env.PH_ANDROID_SERIAL;
   const candidates = serial ? devices.filter((device) => device.serial === serial) : devices;
   if (!candidates.length) throw new Error("No physical USB Android device is connected");
@@ -137,12 +151,15 @@ async function readySerial(requested?: unknown): Promise<string> {
   return device.serial;
 }
 
-async function onDevice(serial: string, args: string[], binary = false) {
-  return runAdb(["-s", serial, ...args], { binary });
-}
+// A call runs several commands and a person may take the phone between two of them, so each one asks again.
+const claimedDevice = (ensureClaim: EnsureClaim, adb: Adb): OnDevice => async (serial, args, binary = false) => {
+  const claim = await ensureClaim(true);
+  if (!claim.ok) throw new Error(claim.message);
+  return adb(["-s", serial, ...args], { binary });
+};
 
 type Shell = (...command: string[]) => Promise<string>;
-const deviceShell = (serial: string): Shell => async (...command) => (await onDevice(serial, ["shell", ...command])).toString("utf8");
+const deviceShell = (onDevice: OnDevice, serial: string): Shell => async (...command) => (await onDevice(serial, ["shell", ...command])).toString("utf8");
 
 export async function typePhoneText(shell: Shell, text: string): Promise<string> {
   if (!text || [...text].length > 256) throw new Error("Android text must be 1 to 256 characters");
@@ -199,7 +216,7 @@ export function launchTarget(name: string, packages: string[]) {
     : `No installed launchable app matches ${JSON.stringify(name)}. open_app knows English names and package names; call list_apps without a query and pass the package name.`);
 }
 
-async function launchablePackages(serial: string) {
+async function launchablePackages(onDevice: OnDevice, serial: string) {
   const output = await onDevice(serial, [
     "shell", "cmd", "package", "query-activities", "--brief",
     "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER",
@@ -239,15 +256,13 @@ export function parseUiNodes(xml: string): UiNode[] {
   return nodes;
 }
 
-async function readNodes(serial: string) {
+async function readNodes(onDevice: OnDevice, serial: string) {
   const streamed = (await onDevice(serial, ["shell", "uiautomator", "dump", "/dev/tty"])).toString("utf8");
   const streamedStart = streamed.indexOf("<?xml");
   if (streamedStart >= 0) return parseUiNodes(streamed.slice(streamedStart));
 
   const remotePath = "/data/local/tmp/openmaus-window.xml";
-  await onDevice(serial, ["shell", "uiautomator", "dump", remotePath]);
-  const saved = (await onDevice(serial, ["shell", "cat", remotePath])).toString("utf8");
-  void onDevice(serial, ["shell", "rm", "-f", remotePath]).catch(() => undefined);
+  const saved = (await onDevice(serial, ["shell", `rm -f ${remotePath}; uiautomator dump ${remotePath} >/dev/null && cat ${remotePath}; status=$?; rm -f ${remotePath}; exit $status`])).toString("utf8");
   const savedStart = saved.indexOf("<?xml");
   return parseUiNodes(savedStart >= 0 ? saved.slice(savedStart) : saved);
 }
@@ -280,23 +295,29 @@ const textResult = (text: string, isError = false): ToolResult => ({ content: [{
 export function createPhoneClaim(
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
-): () => Promise<ClaimOutcome> {
+): EnsureClaim {
   const url = env.OMB_HARNESS_URL?.trim();
   const token = env.OMB_PHONE_TOKEN?.trim();
   if (!url || !token) {
     return async () => ({ ok: true });
   }
-  return async () => {
+  return async (midCall = false) => {
     try {
+      const asked = Date.now();
       const response = await fetchImpl(new URL("/api/internal/phone/claim", url), {
         method: "POST",
         redirect: "error",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: "{}",
-        signal: AbortSignal.timeout(10_000),
+        body: midCall ? '{"wait":false}' : "{}",
+        signal: AbortSignal.timeout(CLAIM_TIMEOUT_MS),
       });
-      if (response.ok) return { ok: true };
+      if (response.ok) return Date.now() - asked > CONTROL_ACT_WITHIN_MS ? { ok: false, message: PHONE_WAITED_TEXT } : { ok: true };
       if (response.status === 409) return { ok: false, message: PHONE_BUSY_TEXT };
+      if (response.status === 423) {
+        const reason = ((await response.json().catch(() => null)) as { reason?: unknown } | null)?.reason;
+        if (reason === "person") return { ok: false, message: PHONE_PERSON_TEXT };
+        if (reason === "handed-back") return { ok: false, message: PHONE_HANDED_BACK_TEXT };
+      }
       if (response.status === 401 || response.status === 403) {
         return { ok: false, message: "This turn no longer has phone access. Start a new turn to use the phone." };
       }
@@ -307,28 +328,28 @@ export function createPhoneClaim(
   };
 }
 
-async function callTool(name: string, args: Json): Promise<ToolResult> {
+async function callTool(name: string, args: Json, adb: Adb, onDevice: OnDevice): Promise<ToolResult> {
   if (name === "status") {
-    const adb = resolveAdbPath();
-    const devices = adb ? await usbDevices() : [];
-    return textResult(JSON.stringify({ available: Boolean(adb), devices }, null, 2));
+    const available = Boolean(resolveAdbPath());
+    const devices = available ? await usbDevices(adb) : [];
+    return textResult(JSON.stringify({ available, devices }, null, 2));
   }
-  const serial = await readySerial(args.serial);
-  if (name === "read_screen") return textResult(nodeLines(await readNodes(serial)));
+  const serial = await readySerial(adb, args.serial);
+  if (name === "read_screen") return textResult(nodeLines(await readNodes(onDevice, serial)));
   if (name === "screenshot") {
     const png = await onDevice(serial, ["exec-out", "screencap", "-p"], true);
     if (!png.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))) throw new Error("Android returned an invalid screenshot");
     return { content: [{ type: "text", text: `Android screenshot from ${serial}` }, { type: "image", data: png.toString("base64"), mimeType: "image/png" }] };
   }
   if (name === "list_apps") {
-    const packages = await launchablePackages(serial);
+    const packages = await launchablePackages(onDevice, serial);
     const query = typeof args.query === "string" ? args.query : "";
     return textResult((query ? findPackages(query, packages) : packages).join("\n") || "No matching launchable app found");
   }
   if (name === "open_app") {
     const appName = String(args.name ?? "").trim();
     if (!appName) throw new Error("name is required");
-    const target = launchTarget(appName, await launchablePackages(serial));
+    const target = launchTarget(appName, await launchablePackages(onDevice, serial));
     await onDevice(serial, ["shell", "monkey", "-p", target, "-c", "android.intent.category.LAUNCHER", "1"]);
     return textResult(`Opened ${appName} (${target})`);
   }
@@ -336,7 +357,7 @@ async function callTool(name: string, args: Json): Promise<ToolResult> {
     const query = String(args.text ?? "").trim().toLowerCase();
     if (!query) throw new Error("text is required");
     const exact = args.exact === true;
-    const hits = (await readNodes(serial)).filter((node) => {
+    const hits = (await readNodes(onDevice, serial)).filter((node) => {
       const labels = [node.text, node.description].filter(Boolean).map((value) => value.toLowerCase());
       return labels.some((label) => exact ? label === query : label.includes(query));
     });
@@ -370,7 +391,7 @@ async function callTool(name: string, args: Json): Promise<ToolResult> {
     await onDevice(serial, ["shell", "input", "swipe", ...point.map((value) => String(Math.round(value))), "260"]);
     return textResult(`Swiped ${direction}`);
   }
-  if (name === "type_text") return textResult(await typePhoneText(deviceShell(serial), String(args.text ?? "")));
+  if (name === "type_text") return textResult(await typePhoneText(deviceShell(onDevice, serial), String(args.text ?? "")));
   if (name === "press") {
     const key = String(args.key ?? "").toLowerCase();
     if (!KEYCODES[key]) throw new Error("Unsupported Android key");
@@ -380,11 +401,21 @@ async function callTool(name: string, args: Json): Promise<ToolResult> {
   throw new Error(`Unknown phone tool: ${name}`);
 }
 
+export async function callPhoneTool(name: string, args: Json, ensureClaim: EnsureClaim, adb: Adb = runAdb): Promise<ToolResult> {
+  const claim = await ensureClaim();
+  if (!claim.ok) return textResult(claim.message, true);
+  try {
+    return await callTool(name, args, adb, claimedDevice(ensureClaim, adb));
+  } catch (error) {
+    return textResult(error instanceof Error ? error.message : String(error), true);
+  }
+}
+
 const send = (message: Json) => process.stdout.write(`${JSON.stringify(message)}\n`);
 const ok = (id: unknown, result: unknown) => send({ jsonrpc: "2.0", id, result });
 const rpcError = (id: unknown, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
 
-async function handle(message: Json, ensureClaim: () => Promise<ClaimOutcome>) {
+async function handle(message: Json, ensureClaim: EnsureClaim) {
   const id = message.id;
   const method = message.method;
   const params = (message.params ?? {}) as Json;
@@ -395,13 +426,7 @@ async function handle(message: Json, ensureClaim: () => Promise<ClaimOutcome>) {
   if (method === "tools/call") {
     const name = String(params.name ?? "");
     if (!TOOLS.some((tool) => tool.name === name)) return rpcError(id, -32602, `Unknown tool: ${name}`);
-    const claim = await ensureClaim();
-    if (!claim.ok) return ok(id, textResult(claim.message, true));
-    try {
-      return ok(id, await callTool(name, (params.arguments ?? {}) as Json));
-    } catch (error) {
-      return ok(id, textResult(error instanceof Error ? error.message : String(error), true));
-    }
+    return ok(id, await callPhoneTool(name, (params.arguments ?? {}) as Json, ensureClaim));
   }
   if (id !== undefined) rpcError(id, -32601, `Method not found: ${String(method)}`);
 }
