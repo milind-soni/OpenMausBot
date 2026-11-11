@@ -505,26 +505,13 @@ export interface InstanceInfo extends InstanceEndpointInfo {
   freeUpSpace?: boolean; replyWaitMinutes?: number; modelsUnconfirmed?: true; /** The app updated its own copy of this engine to this version lately. */ autoUpdated?: { version: string; at: number };
 }
 
-export type AppSettingsSection =
-  | "general"
-  | "desktopWorkspaces"
-  | "organization"
-  | "cloudAccount"
-  | "appearance"
-  | "experimental"
-  | "connections"
-  | "decisionModel" | "imageGeneration"
-  | "engines"
-  | "companion"
-  | "remote"
-  | "computer"
-  | "logins"
-  | "usage"
-  | "people" | "botAccess"
-  | "activity"
-  | "backups"
-  | "workspaces"
+/** A Settings page (`SettingsPageId`) or an older page name that `settings-index.ts` sends to its new page and section. */
+export type AppSettingsSection = SettingsPageId
+  | "desktopWorkspaces" | "organization" | "cloudAccount" | "experimental" | "connections" | "decisionModel" | "imageGeneration"
+  | "engines" | "companion" | "remote" | "computer" | "logins" | "botAccess" | "activity" | "backups" | "workspaces"
   | "skills" | "import" | "updates";
+export type SettingsPageId = "overview" | "phone" | "ai" | "bots" | "desktops" | "vault" | "usage" | "data" | "people"
+  | "installations" | "account" | "plan" | "app" | "general" | "appearance";
 
 export type BotSettingsSection =
   | "overview"
@@ -563,7 +550,7 @@ export interface AppState {
   liveCallVersion: number;
   liveCallLookupSeq: number;
   selectedId: string;
-  activeView: "chat" | "team-map" | "routines" | "files" | "web-panel";
+  activeView: "chat" | "team-map" | "routines" | "files" | "web-panel" | "published-apps";
   /** Folders a finished move left on this computer, for Files to offer sharing. */
   filesSuggest: string[] | null; webPanelId?: string;
   routines: Routine[];
@@ -645,7 +632,7 @@ export type Action =
   | { type: "botsOrdered"; botIds: string[] }
   | { type: "sectionDeleted"; section: string; sections: string[] }
   | { type: "showRoutines"; section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string; runStatus?: RoutineRunStatusFilter }
-  | { type: "showTeamMap" } | { type: "showWebPanel"; id: string }
+  | { type: "showTeamMap" } | { type: "showPublishedApps" } | { type: "showWebPanel"; id: string }
   | { type: "showFiles"; suggest?: string[] }
   | { type: "showChat" }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[]; since?: number }
@@ -991,10 +978,10 @@ export function reducer(state: AppState, action: Action): AppState {
     case "showChat":
       return state.activeView === "chat" ? state : { ...state, activeView: "chat" };
     case "showTeamMap":
-    case "showFiles": case "showWebPanel":
+    case "showFiles": case "showWebPanel": case "showPublishedApps":
       return {
         ...state,
-        activeView: action.type === "showFiles" ? "files" : action.type === "showWebPanel" ? "web-panel" : "team-map",
+        activeView: action.type === "showFiles" ? "files" : action.type === "showWebPanel" ? "web-panel" : action.type === "showPublishedApps" ? "published-apps" : "team-map",
         filesSuggest: action.type === "showFiles" && action.suggest?.length ? action.suggest : null, webPanelId: action.type === "showWebPanel" ? action.id : state.webPanelId,
         settingsOpen: false, computerOpen: false, inspectorOpen: false, activityOpen: false, appSettingsOpen: false, pluginsOpen: false,
       };
@@ -1539,7 +1526,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         appSettingsOpen: open,
         activityOpen: open ? false : state.activityOpen,
-        appSettingsSection: action.section ?? state.appSettingsSection,
+        appSettingsSection: action.section ?? (open ? "overview" : state.appSettingsSection),
         appSettingsCloudLink: action.cloudLink && open ? state.appSettingsCloudLink + 1 : 0,
         appSettingsPhonePairing: action.phonePairing && open ? state.appSettingsPhonePairing + 1 : 0,
         settingsOpen: open ? false : state.settingsOpen,
@@ -1884,7 +1871,7 @@ export const initialState: AppState = {
   notificationsPinned: false,
   notifications: [],
   appSettingsOpen: false,
-  appSettingsSection: "general",
+  appSettingsSection: "overview",
   appSettingsCloudLink: 0,
   appSettingsPhonePairing: 0,
   shortcutsOpen: false,
@@ -2253,7 +2240,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
 
     const wrapped: React.Dispatch<Action> = (action) => {
-      if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles", "showWebPanel"].includes(action.type)) selectionRevision.current++;
+      if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles", "showWebPanel", "showPublishedApps"].includes(action.type)) selectionRevision.current++;
       // Pin before any await or optimistic state change.
       action = pinBotThreadAction(action, stateRef.current.bots);
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };

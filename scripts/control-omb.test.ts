@@ -27,6 +27,15 @@ describe("the fixture's fake engine knobs", () => {
   });
 });
 
+describe("the fixture's Netlify stand-in", () => {
+  it("lets only a loopback stand-in's API address cross, so a fixture never lists or deletes on Netlify", () => {
+    expect(childEnv({ OMB_NETLIFY_API_URL: " http://127.0.0.1:4010/api/v1 " }).OMB_NETLIFY_API_URL).toBe("http://127.0.0.1:4010/api/v1");
+    for (const url of ["https://api.netlify.com/api/v1", "http://localhost:4010/api/v1", "http://127.0.0.1:4010", "http://127.0.0.1:4010/api/v1@evil.test", "http://192.0.2.1:4010/api/v1", ""]) {
+      expect(childEnv({ OMB_NETLIFY_API_URL: url }), url).not.toHaveProperty("OMB_NETLIFY_API_URL");
+    }
+  });
+});
+
 describe("the fixture's Live call environment", () => {
   it("passes a loopback fake GPT-Live and its key through", () => {
     expect(childEnv({ OMB_OPENAI_LIVE_URL: " http://127.0.0.1:4100 ", OMB_OPENAI_LIVE_KEY: "sk-fake" }))
@@ -43,6 +52,19 @@ describe("the fixture's Live call environment", () => {
       expect(env, url).not.toHaveProperty("OMB_OPENAI_LIVE_KEY");
     }
     expect(childEnv({ OMB_OPENAI_LIVE_KEY: "sk-real" })).not.toHaveProperty("OMB_OPENAI_LIVE_KEY");
+  });
+});
+
+describe("the fixture's included app hosting relay", () => {
+  it("passes a loopback stand-in and its token through together, and neither for any other address", () => {
+    expect(childEnv({ OMB_CLOUD_HOSTING_URL: " http://127.0.0.1:4400/api/cloud/services/hosting/v1 ", OMB_CLOUD_HOSTING_TOKEN: "omb_host_fixture" }))
+      .toMatchObject({ OMB_CLOUD_HOSTING_URL: "http://127.0.0.1:4400/api/cloud/services/hosting/v1", OMB_CLOUD_HOSTING_TOKEN: "omb_host_fixture" });
+    for (const url of ["https://cloud.openmausbot.com/api/cloud/services/hosting/v1", "http://localhost:4400/api/cloud/services/hosting/v1", "http://192.0.2.1:4400", "http://127.0.0.1:4400/../x?y", ""]) {
+      const env = childEnv({ OMB_CLOUD_HOSTING_URL: url, OMB_CLOUD_HOSTING_TOKEN: "omb_host_real" });
+      expect(env, url).not.toHaveProperty("OMB_CLOUD_HOSTING_URL");
+      expect(env, url).not.toHaveProperty("OMB_CLOUD_HOSTING_TOKEN");
+    }
+    expect(childEnv({ OMB_CLOUD_HOSTING_URL: "http://127.0.0.1:4400/api/cloud/services/hosting/v1" })).not.toHaveProperty("OMB_CLOUD_HOSTING_URL");
   });
 });
 

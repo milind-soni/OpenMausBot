@@ -10,7 +10,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { PAGE_MAX_BYTES, PAGE_MAX_FILES } from "../shared/published-page.ts";
 import { parseSkillMd, scanSkillText } from "../shared/skill-md.ts";
+import { DEFAULT_HOSTING_LIMITS } from "./host/included-hosting.ts";
 import { loadBundledSkills, selectBundledSkills } from "./skill-library.ts";
+import { workspaceLocationsPrompt } from "./workspace.ts";
 import { startFakeNetlify, type FakeNetlify } from "./testing/fake-netlify.ts";
 
 const SKILL_DIR = join(process.cwd(), "skills", "publish-to-netlify");
@@ -46,6 +48,21 @@ describe("publish-to-netlify skill guide", () => {
     expect(readdirSync(SKILL_DIR).sort()).toEqual(["SKILL.md", "deploy.mjs", "manifest.json", "site-record.md"]);
   });
 
+  it("loads the helper whatever line endings a checkout gave it", async () => {
+    const source = readFileSync(HELPER, "utf8");
+    expect(source.startsWith("#!")).toBe(false);
+    const folder = mkdtempSync(join(tmpdir(), "netlify-skill-crlf-"));
+    try {
+      const copy = join(folder, "deploy.mjs");
+      writeFileSync(copy, source.replace(/\r?\n/g, "\r\n"));
+      const loaded = await import(pathToFileURL(copy).href) as Helper;
+      expect(loaded.publishable("index.html")).toBe(true);
+      expect(loaded.publishable(".env")).toBe(false);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
   it("mounts when a bot is asked to put a site or app online, and not for a page or a report", () => {
     for (const text of ["Deploy this to Netlify", "build me a todo web app and deploy it", "make a website for my bakery", "publish the site so customers can see it",
       "turn this into a live app", "can you host it somewhere?"]) {
@@ -58,7 +75,7 @@ describe("publish-to-netlify skill guide", () => {
   });
 
   it("states the rules a bot must keep, with the real tool names and limits", () => {
-    expect(guide.split("\n").length).toBeLessThanOrEqual(165);
+    expect(guide.split("\n").length).toBeLessThanOrEqual(200);
     for (const tool of ["request_credential", "publish_page", "show_html", "select_computer", "copy_to_computer", "copy_from_computer", "exec_status"]) expect(guide, tool).toContain(tool);
     expect(guide).toContain(`up to ${PAGE_MAX_BYTES / 1024 / 1024} MB and ${PAGE_MAX_FILES} files`);
     expect(guide).toContain("https://app.netlify.com/user/applications#personal-access-tokens");
@@ -78,6 +95,35 @@ describe("publish-to-netlify skill guide", () => {
     expect(guide).toMatch(/--make-public[^.]*only after they say/);
     expect(guide).toMatch(/Early Access/);
     expect(guide).toMatch(/Never promise that it is always on/);
+  });
+
+  it("keeps a project where every conversation with the bot finds it, and looks for it before starting another", () => {
+    const where = guide.slice(guide.indexOf("## Where the project lives"), guide.indexOf("## Included hosting first"));
+    expect(where).toContain("`<sharedBotFolder>/sites/<short-name>/`");
+    expect(where).toMatch(/not in this\s+conversation's folder/);
+    expect(where).toMatch(/Before you create a project, look for it/);
+    expect(where).toContain(helper.SITE_FILE);
+    expect(where).toMatch(/never start a second copy/);
+    expect(where).toMatch(/--project/);
+    expect(where).toMatch(/private chat/);
+    expect(workspaceLocationsPrompt("bot-1", "/work")).toContain("sharedBotFolder");
+  });
+
+  it("puts the plan's included hosting first, and says when the person's own Netlify account is the way", () => {
+    for (const tool of ["publish_app", "check_app_hosting"]) expect(guide, tool).toContain(tool);
+    const included = guide.slice(guide.indexOf("## Included hosting first"), guide.indexOf("## The token, once"));
+    expect(included).toMatch(/use it first/);
+    expect(included).toMatch(/no token card/);
+    expect(included).toMatch(/needs no Netlify account/);
+    expect(included).toContain(`up to ${DEFAULT_HOSTING_LIMITS.maxBytes / 1024 / 1024} MB and ${DEFAULT_HOSTING_LIMITS.maxFiles} files an app, ${DEFAULT_HOSTING_LIMITS.maxFileBytes / 1024 / 1024} MB a file`);
+    expect(included).toMatch(/how many of the plan's apps are in use \("3 of 10"\)/);
+    expect(included).toMatch(/public at once/);
+    expect(included).toMatch(/show_html/);
+    expect(included).toMatch(/Publish only when they say yes/);
+    expect(included).toMatch(/plan's apps or this month's publishes are used up/);
+    expect(included).toMatch(/with the numbers it gave, and offer their own account/);
+    expect(included).toMatch(/functions, a database, a server, redirects, or more than its sizes/);
+    expect(included).toMatch(/already has a site on their account \(keep its link\)/);
   });
 });
 
@@ -105,12 +151,14 @@ describe("publish-to-netlify helper: what may be uploaded", () => {
       writeFileSync(join(site, ".env"), "KEY=1");
       writeFileSync(join(site, ".openmausbot-secrets", "t1", "card"), "nfp_secret");
       writeFileSync(join(root, "outside.txt"), "private");
-      symlinkSync(join(root, "outside.txt"), join(site, "linked.txt"));
-      symlinkSync(root, join(site, "up"));
+      // Windows makes a file link only with a privilege CI lacks; a folder junction needs none.
+      const fileLinks = process.platform !== "win32";
+      if (fileLinks) symlinkSync(join(root, "outside.txt"), join(site, "linked.txt"));
+      symlinkSync(root, join(site, "up"), process.platform === "win32" ? "junction" : "dir");
 
       const { files, skipped } = helper.collectFiles(site);
       expect(files.map((file) => file.path)).toEqual(["assets/a b.css", "assets/copy.css", "index.html"]);
-      expect(skipped.sort()).toEqual([".env", ".openmausbot-secrets", "linked.txt", "up"]);
+      expect(skipped.sort()).toEqual([".env", ".openmausbot-secrets", ...(fileLinks ? ["linked.txt"] : []), "up"]);
       const { digest, bySha } = helper.buildDigest(files);
       expect(digest).toEqual({ "/assets/a b.css": sha1("body{}"), "/assets/copy.css": sha1("body{}"), "/index.html": sha1("<h1>hi</h1>") });
       expect(bySha.get(sha1("body{}"))?.path).toBe("assets/a b.css");
@@ -178,7 +226,7 @@ describe("publish-to-netlify helper, end to end against a stand-in on loopback",
   let tokenFile: string;
 
   const run = (args: string[], env: Record<string, string> = {}, cwd = project) => new Promise<{ code: number; stdout: string; stderr: string; json: Record<string, unknown> }>((done) => {
-    execFile(process.execPath, [HELPER, ...args], { cwd, env: { PATH: process.env.PATH ?? "", HOME: home, OMB_NETLIFY_API_URL: fake.url, ...env } }, (error, stdout, stderr) => {
+    execFile(process.execPath, [HELPER, ...args], { cwd, env: { PATH: process.env.PATH ?? "", HOME: home, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}), OMB_NETLIFY_API_URL: fake.url, ...env } }, (error, stdout, stderr) => {
       done({ code: error ? Number(error.code) : 0, stdout, stderr, json: JSON.parse(stdout.trim() || "{}") as Record<string, unknown> });
     });
   });
@@ -296,6 +344,38 @@ describe("publish-to-netlify helper, end to end against a stand-in on loopback",
     const broken = await run(["--dir", join(project, "dist"), "--token-file", tokenFile, "--project", elsewhere]);
     expect(String(broken.json.error)).toMatch(/has no valid siteId/);
     expect(fake.requests.filter((request) => request === "POST /api/v1/sites")).toHaveLength(2);
+  });
+
+  it("lets a second conversation with the bot update the same site, from the project in the bot's shared folder", async () => {
+    const shared = join(home, "workspaces", "bot-1", "sites", "bakery"), monday = join(home, "task-workspaces", "bot-1", "monday"), friday = join(home, "task-workspaces", "bot-1", "friday");
+    for (const folder of [shared, monday, friday]) mkdirSync(folder, { recursive: true });
+    writeFileSync(join(shared, "index.html"), "<h1>Bakery</h1>");
+    const sitesBefore = fake.requests.filter((request) => request === "POST /api/v1/sites").length;
+    const first = await run(["--dir", shared, "--project", shared, "--token-file", tokenFile, "--title", "Bakery"], {}, monday);
+    expect(first.json).toMatchObject({ ok: true, created: true, live: true });
+    expect(readdirSync(monday)).toEqual([]);
+
+    writeFileSync(join(shared, "index.html"), "<h1>Bakery, now with cakes</h1>");
+    const second = await run(["--dir", shared, "--project", shared, "--token-file", tokenFile], {}, friday);
+    expect(second.json).toMatchObject({ ok: true, created: false, live: true, siteId: first.json.siteId, url: first.json.url, uploaded: 1 });
+    expect(fake.requests.filter((request) => request === "POST /api/v1/sites")).toHaveLength(sitesBefore + 1);
+    expect(readdirSync(friday)).toEqual([]);
+    expect(JSON.parse(readFileSync(join(shared, helper.SITE_FILE), "utf8"))).toMatchObject({ siteId: first.json.siteId, title: "Bakery" });
+  });
+
+  it("leaves a project whose app is on the plan's included hosting alone: no deploy, check, change or delete", async () => {
+    const included = join(home, "workspace", "included");
+    mkdirSync(included, { recursive: true });
+    const record = JSON.stringify({ version: 1, hosting: "included", appKey: "app-5d0c1b7e9a3f4c62b8e1d2a4f6c80913", siteId: "app-5d0c1b7e9a3f4c62b8e1d2a4f6c80913", url: "https://mb-3f9c2a17d04e8b65.netlify.app/" });
+    writeFileSync(join(included, helper.SITE_FILE), record);
+    const before = fake.requests.length;
+    for (const args of [["--dir", join(project, "dist")], ["--check"], ["--make-public"], ["--delete"]]) {
+      const answer = await run([...args, "--token-file", tokenFile, "--project", included]);
+      expect(answer.json, args[0]).toEqual({ ok: false, error: "this project's app is on the Cloud plan's included hosting (https://mb-3f9c2a17d04e8b65.netlify.app/), not on Netlify; "
+        + "update or delete it with publish_app, or publish to Netlify from another project folder (--project)" });
+    }
+    expect(fake.requests).toHaveLength(before);
+    expect(readFileSync(join(included, helper.SITE_FILE), "utf8")).toBe(record);
   });
 
   it("reports a new account's site as deployed but private, and opens it only when asked to", async () => {

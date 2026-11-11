@@ -8,6 +8,7 @@ import { DATA_DIR, type AppConfig } from "./config.ts";
 import { loadEnvironmentId } from "./environment.ts";
 import { boatCredential, boatProviderApi, type ServiceCredential } from "./included-services.ts";
 import { relayBody, relayPath } from "./boat-relay.ts";
+import { cloudLimitFromBody, type CloudLimit } from "../shared/place-view.ts";
 import {
   blockedUntilBoatFinishes,
   boatDeletionOperation,
@@ -942,11 +943,9 @@ export function boatErrorMessage(status: number, what: string, body?: any, inclu
   return theirs ? `${what} failed: ${theirs}` : `${what} failed (${status})`;
 }
 
-export function boatRefusal(status: number, what: string, body?: any, included = false): Error & { boatStatus: number; boatCode?: string } {
-  const code = body?.error?.code ?? body?.code;
-  return Object.assign(new Error(boatErrorMessage(status, what, body, included)), {
-    boatStatus: status, ...(typeof code === "string" && /^[a-z0-9_]{1,64}$/.test(code) ? { boatCode: code } : {}),
-  });
+export function boatRefusal(status: number, what: string, body?: any, included = false): Error & { boatStatus: number; boatCode?: string; boatLimit?: CloudLimit } {
+  const code = body?.error?.code ?? body?.code, boatCode = typeof code === "string" && /^[a-z0-9_]{1,64}$/.test(code) ? code : undefined, boatLimit = cloudLimitFromBody(body);
+  return Object.assign(new Error(boatErrorMessage(status, what, body, included)), { boatStatus: status, ...(boatCode ? { boatCode } : {}), ...(boatLimit ? { boatLimit } : {}) });
 }
 
 /** boat.dev trial accounts refuse the eight-hour auto-stop with `trial_auto_stop_required`; retry once at the advertised maximum (documented: two hours). */

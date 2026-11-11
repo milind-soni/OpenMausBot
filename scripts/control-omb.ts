@@ -189,6 +189,10 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   // A loopback stand-in for Postiz Cloud only (server/testing/fake-postiz.ts): no test signs in to the real one.
   const postizUrl = parentEnv.OMB_POSTIZ_CLOUD_URL?.trim() ?? "";
   if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(postizUrl)) childEnv.OMB_POSTIZ_CLOUD_URL = postizUrl;
+  // A loopback stand-in for Netlify only (server/testing/fake-netlify.ts): the Published apps page then lists and
+  // deletes sites there, never on Netlify.
+  const netlifyUrl = parentEnv.OMB_NETLIFY_API_URL?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}\/api\/v1$/.test(netlifyUrl)) childEnv.OMB_NETLIFY_API_URL = netlifyUrl;
   // A loopback connected-apps service only (server/testing/broker-fake.ts): its token never reaches the real one.
   const brokerUrl = parentEnv.OMB_COMPOSIO_BROKER_URL?.trim() ?? "";
   if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(brokerUrl) && parentEnv.OMB_COMPOSIO_BROKER_TOKEN) {
@@ -201,6 +205,12 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   if (/^http:\/\/127\.0\.0\.1:\d{1,5}(?:\/[A-Za-z0-9_-]+)*$/.test(xUrl)) {
     childEnv.OMB_CLOUD_X_URL = xUrl;
     if (parentEnv.OMB_CLOUD_X_TOKEN) childEnv.OMB_CLOUD_X_TOKEN = parentEnv.OMB_CLOUD_X_TOKEN;
+  }
+  // Included app hosting against a loopback stand-in only (server/testing/fake-app-hosting.ts): its token crosses only with it.
+  const hostingUrl = parentEnv.OMB_CLOUD_HOSTING_URL?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}(?:\/[A-Za-z0-9_-]+)*$/.test(hostingUrl) && parentEnv.OMB_CLOUD_HOSTING_TOKEN) {
+    childEnv.OMB_CLOUD_HOSTING_URL = hostingUrl;
+    childEnv.OMB_CLOUD_HOSTING_TOKEN = parentEnv.OMB_CLOUD_HOSTING_TOKEN;
   }
   // @devs reports reach a loopback fake only, else a closed port: never the MausBot team.
   const bugReportUrl = parentEnv.OMB_BUG_REPORT_URL?.trim() ?? "";

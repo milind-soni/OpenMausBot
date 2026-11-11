@@ -290,6 +290,22 @@ describe("apps each person connects", () => {
     expect(host.connectRefusal({ threadId: "ada-chat", generation: "g", connectorsFor: ADA }, ["slack"])).toMatch(/Slack is Acme's, connected once for everyone by its owner or an admin/);
     expect(setup({ team: false }).host.connectRefusal({ threadId: "ada-chat", generation: "g" }, ["gmail"])).toBeNull();
   });
+
+  it("swaps an MCP server that wants a sign-in for its connected app only where this bot may use that app", async () => {
+    const { host, composio } = setup({ team: false });
+    composio.connectedServices.mockImplementation(async () => ({ googlecalendar: { connected: true, pending: false, status: "ACTIVE", accounts: [] } }) as never);
+    const open = () => undefined;
+    const lookup = await host.mcpServerApps({ id: "scout", name: "Scout" }, open);
+    expect(lookup("gmail", "https://mail.example/mcp")).toEqual({ slug: "gmail", label: "Gmail", connected: false });
+    expect(lookup("calendar", "https://calendarmcp.googleapis.com/mcp/v1")).toEqual({ slug: "googlecalendar", label: "Google Calendar", connected: true });
+    expect(lookup("mail", "https://mail.example/mcp"), "an unknown server").toBeNull();
+    expect((await host.mcpServerApps({ id: "scout", name: "Scout" }, (slug) => (slug === "gmail" ? "Gmail is off here." : undefined)))("gmail", ""), "refused by policy").toBeNull();
+    expect((await host.mcpServerApps({ id: "scout", name: "Scout", connectorScopes: { apps: { slack: "write" } } }, open))("gmail", ""), "outside its scopes").toBeNull();
+    expect((await host.mcpServerApps({ id: "scout", name: "Scout", connectorTools: { slack: { tools: "*" } } }, open))("gmail", ""), "outside its grants").toBeNull();
+    const team = setup();
+    team.host.scopes.set("app", "gmail", "person");
+    expect((await team.host.mcpServerApps({ id: "scout", name: "Scout" }, open))("gmail", ""), "a person's app on a Team Cloud").toBeNull();
+  });
 });
 
 const BOT = { id: "bot-1", name: "Bot" };

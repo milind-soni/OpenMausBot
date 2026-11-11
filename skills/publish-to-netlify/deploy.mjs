@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
@@ -182,6 +181,9 @@ function readSiteRecord(file) {
   }
   const record = JSON.parse(text);
   if (typeof record?.siteId !== "string" || !/^[\w-]{1,80}$/.test(record.siteId)) throw new Error(`${file} has no valid siteId; fix or delete it`);
+  if (record.hosting === "included") {
+    throw new Error(`this project's app is on the Cloud plan's included hosting${record.url ? ` (${record.url})` : ""}, not on Netlify; update or delete it with publish_app, or publish to Netlify from another project folder (--project)`);
+  }
   return record;
 }
 
