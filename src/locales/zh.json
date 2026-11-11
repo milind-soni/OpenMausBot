@@ -7935,5 +7935,6 @@
   "settings.simple.themes.followHint": "跟随电脑：亮时用 Daylight，暗时用 Midnight。",
   "settings.theme.lightOrDark": "浅色或深色",
   "settings.userBubbles.simpleTitle": "用机器人的颜色显示我的消息",
-  "sidebar.nav.publishedApps": "已发布的应用"
+  "sidebar.nav.publishedApps": "已发布的应用",
+  "settings.simple.themes.browse": "浏览主题"
 }

@@ -23,8 +23,9 @@ function usedKeys(): string[] {
   const keys = new Set<string>();
   for (const file of files()) {
     const text = readFileSync(file, "utf8");
-    for (const pattern of [/\bt\(\s*"([A-Za-z0-9_.]+)"/g, /labelKey: "([A-Za-z0-9_.]+)"/g]) {
-      for (const match of text.matchAll(pattern)) if (Object.hasOwn(en, match[1]!)) keys.add(match[1]!);
+    // t("key"), labelKey: "key", and the two keys of t(flag ? "one" : "other").
+    for (const pattern of [/\bt\(\s*"([A-Za-z0-9_.]+)"/g, /labelKey: "([A-Za-z0-9_.]+)"/g, /\bt\(\s*[^,()"]*\?\s*"([A-Za-z0-9_.]+)"\s*:\s*"([A-Za-z0-9_.]+)"/g]) {
+      for (const match of text.matchAll(pattern)) for (const key of match.slice(1)) if (key && Object.hasOwn(en, key)) keys.add(key);
     }
   }
   return [...keys].sort();

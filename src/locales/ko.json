@@ -7722,5 +7722,10 @@
   "settings.theme.lightOrDark": "라이트 또는 다크",
   "settings.userBubbles.simpleTitle": "내 메시지에 봇 색상 사용",
   "sidebar.account.moving": "내 클라우드로 이동 중…",
-  "sidebar.nav.publishedApps": "게시한 앱"
+  "sidebar.nav.publishedApps": "게시한 앱",
+  "settings.followUp.subtitle": "끼워 넣으면 봇이 지금 하는 일에 메시지를 더하고, 대기열에 넣으면 턴이 끝난 뒤 실행합니다. {key}는 메시지 하나에 대해 다른 방식을 쓰며, 보내기 옆 화살표로 턴을 다시 시작할 수도 있습니다. 이 기기에서만.",
+  "settings.simple.followUp": "{key}는 메시지 하나에 대해 다른 방식을 씁니다.",
+  "settings.simple.themes.browse": "테마 둘러보기",
+  "sidebar.account.moveAndAutomationsNeedYou": "내 클라우드 이동과 자동화가 확인을 기다립니다",
+  "sidebar.account.moveNeedsYou": "내 클라우드 이동이 확인을 기다립니다"
 }

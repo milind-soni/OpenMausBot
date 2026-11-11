@@ -7185,5 +7185,21 @@
   "sidebar.update.readyShort": "Aktualizacja gotowa",
   "sidebar.update.restartAction": "Uruchom ponownie",
   "sidebar.update.retryAction": "Ponów",
-  "sidebar.nav.publishedApps": "Opublikowane aplikacje"
+  "sidebar.nav.publishedApps": "Opublikowane aplikacje",
+  "defaultBot.show.subtitle": "Twój pomocnik do wszystkiego w aplikacji. Ukryty dalej pracuje, a wyszukiwanie wciąż go znajduje.",
+  "settings.followUp.subtitle": "Włączenie dodaje wiadomość do tego, co bot teraz robi; kolejka uruchamia ją po końcu tury. {key} robi to drugie dla pojedynczej wiadomości, a strzałka obok Wyślij może też zacząć turę od nowa. Tylko na tym urządzeniu.",
+  "settings.openAtLogin.subtitle": "Otwiera {app} po zalogowaniu się do tego komputera, aby boty i rutyny były gotowe bez ręcznego otwierania.",
+  "settings.simple.advancedMode": "Pokazuje każde ustawienie, także narzędzia dla twórców. Nic nie jest usuwane w żadnym przypadku.",
+  "settings.simple.analytics": "Anonimowe zdarzenia użycia. Nigdy Twoje wiadomości, pliki ani klucze. Twój e-mail tylko wtedy, gdy podano go podczas konfiguracji lub na ekranie planu Cloud.",
+  "settings.simple.analyticsLink": "Zobacz wszystko, co wysyła",
+  "settings.simple.defaultBot": "Twój pomocnik. Ukryty dalej pracuje, a wyszukiwanie wciąż go znajduje.",
+  "settings.simple.followUp": "{key} robi to drugie dla pojedynczej wiadomości.",
+  "settings.simple.language.system": "Jak w systemie",
+  "settings.simple.notificationFeed": "Dzwonek po prawej, który trzyma Twoje ostatnie 500 powiadomień.",
+  "settings.simple.notificationSounds": "Odtwarza dźwięk, gdy bot skończy lub cię potrzebuje.",
+  "settings.simple.openAtLogin": "Startuje po zalogowaniu, aby boty były gotowe.",
+  "settings.simple.sendKey": "Wybierz Shift+Enter lub {key}, jeśli Enter zatwierdza wpisany tekst, jak przy japońskim wprowadzaniu.",
+  "settings.simple.themes.browse": "Przeglądaj motywy",
+  "sidebar.account.moveAndAutomationsNeedYou": "Przenosiny do Mojej chmury i automatyzacje cię potrzebują",
+  "sidebar.account.moveNeedsYou": "Przenosiny do Mojej chmury cię potrzebują"
 }

@@ -6422,5 +6422,20 @@
   "sidebar.update.readyShort": "Actualización lista",
   "sidebar.update.restartAction": "Reiniciar",
   "sidebar.update.retryAction": "Reintentar",
-  "sidebar.nav.publishedApps": "Apps publicadas"
+  "sidebar.nav.publishedApps": "Apps publicadas",
+  "settings.followUp.subtitle": "Meterlo añade tu mensaje a lo que el bot hace ahora; ponerlo en cola lo ejecuta cuando termina el turno. {key} hace lo otro para un solo mensaje, y la flecha junto a Enviar también puede reiniciar el turno. Solo en este dispositivo.",
+  "settings.openAtLogin.subtitle": "Abre {app} cuando inicias sesión en este ordenador, para que tus bots y rutinas estén listos sin abrirlo tú.",
+  "settings.simple.advancedMode": "Muestra todos los controles, incluidas herramientas para creadores. No se borra nada en ningún caso.",
+  "settings.simple.analytics": "Eventos de uso anónimos. Nunca tus mensajes, archivos ni claves. Tu email solo si lo compartiste al configurar o en una pantalla de plan de Cloud.",
+  "settings.simple.analyticsLink": "Ver todo lo que envía",
+  "settings.simple.defaultBot": "Tu ayudante. Oculto, sigue trabajando y la búsqueda lo sigue encontrando.",
+  "settings.simple.followUp": "{key} hace lo otro para un solo mensaje.",
+  "settings.simple.language.system": "Seguir el sistema",
+  "settings.simple.notificationFeed": "Una campana a la derecha que guarda tus últimas 500 notificaciones.",
+  "settings.simple.notificationSounds": "Suena cuando un bot termina o te necesita.",
+  "settings.simple.openAtLogin": "Se inicia cuando inicias sesión, para que tus bots estén listos.",
+  "settings.simple.sendKey": "Elige Mayús+Intro o {key} si Intro confirma el texto escrito, como en la escritura japonesa.",
+  "settings.simple.themes.browse": "Ver temas",
+  "sidebar.account.moveAndAutomationsNeedYou": "La mudanza a Mi Nube y las automatizaciones te necesitan",
+  "sidebar.account.moveNeedsYou": "La mudanza a Mi Nube te necesita"
 }

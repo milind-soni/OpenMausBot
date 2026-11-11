@@ -7241,5 +7241,20 @@
   "sidebar.update.readyShort": "Обновление готово",
   "sidebar.update.restartAction": "Перезапустить",
   "sidebar.update.retryAction": "Повторить",
-  "sidebar.nav.publishedApps": "Опубликованные приложения"
+  "sidebar.nav.publishedApps": "Опубликованные приложения",
+  "settings.followUp.subtitle": "Добавление вносит сообщение в то, что бот делает сейчас; очередь запускает его после окончания хода. {key} делает другое для одного сообщения, а стрелка рядом с «Отправить» может также перезапустить ход. Только на этом устройстве.",
+  "settings.openAtLogin.subtitle": "Открывает {app} при входе в этот компьютер, чтобы боты и рутины были готовы без ручного запуска.",
+  "settings.simple.advancedMode": "Показывает все настройки, включая инструменты для разработчиков. Ничего не удаляется в любом случае.",
+  "settings.simple.analytics": "Анонимные события использования. Никогда ваши сообщения, файлы или ключи. Ваша почта — только если вы поделились ею при настройке или на экране плана Cloud.",
+  "settings.simple.analyticsLink": "Посмотреть всё, что отправляется",
+  "settings.simple.defaultBot": "Ваш помощник. Скрытый, он продолжает работать, и поиск всё равно его находит.",
+  "settings.simple.followUp": "{key} делает другое для одного сообщения.",
+  "settings.simple.language.system": "Как в системе",
+  "settings.simple.notificationFeed": "Колокольчик справа, который хранит ваши последние 500 уведомлений.",
+  "settings.simple.notificationSounds": "Звучит, когда бот закончил или нуждается в вас.",
+  "settings.simple.openAtLogin": "Запускается при входе, чтобы ваши боты были готовы.",
+  "settings.simple.sendKey": "Выберите Shift+Enter или {key}, если Enter подтверждает набранный текст, как при японском вводе.",
+  "settings.simple.themes.browse": "Посмотреть темы",
+  "sidebar.account.moveAndAutomationsNeedYou": "Переезд в Моё облако и автоматизации ждут вас",
+  "sidebar.account.moveNeedsYou": "Переезд в Моё облако ждёт вас"
 }

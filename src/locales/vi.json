@@ -5923,5 +5923,22 @@
   "sidebar.update.readyShort": "Bản cập nhật đã sẵn sàng",
   "sidebar.update.restartAction": "Khởi động lại",
   "sidebar.update.retryAction": "Thử lại",
-  "sidebar.nav.publishedApps": "Ứng dụng đã xuất bản"
+  "sidebar.nav.publishedApps": "Ứng dụng đã xuất bản",
+  "settings.analytics.link": "Xem mọi thứ được gửi đi",
+  "settings.analytics.subtitle": "Sự kiện sản phẩm ẩn danh và mỗi ngày một lần đếm những gì đã thiết lập: nhà cung cấp nào có khóa (không bao giờ là khóa) và bao nhiêu bot, phòng, quy trình và máy tính. Không bao giờ gửi cuộc trò chuyện, lời nhắc, nội dung tệp, tên hay địa chỉ. Email của bạn chỉ được đính kèm nếu bạn đã chia sẻ khi thiết lập, hoặc khi bạn chọn nâng cấp, quản lý hay so sánh gói trên cửa sổ Cloud Pro lúc đã đăng nhập MausBot Cloud (email tài khoản Cloud của bạn).",
+  "settings.followUp.subtitle": "Đưa vào sẽ thêm tin nhắn vào việc bot đang làm; xếp hàng sẽ chạy khi lượt kết thúc. {key} làm cách còn lại cho một tin nhắn, và mũi tên cạnh Gửi cũng có thể bắt đầu lại lượt. Chỉ trên thiết bị này.",
+  "settings.openAtLogin.subtitle": "Mở {app} khi bạn đăng nhập vào máy tính này, để bot và quy trình sẵn sàng mà không cần tự mở.",
+  "settings.simple.advancedMode": "Hiện mọi điều khiển, kể cả công cụ cho người xây dựng. Không có gì bị xóa.",
+  "settings.simple.analytics": "Sự kiện sử dụng ẩn danh. Không bao giờ có tin nhắn, tệp hay khóa của bạn. Email chỉ khi bạn đã chia sẻ lúc thiết lập hoặc trên màn hình gói Cloud.",
+  "settings.simple.analyticsLink": "Xem mọi thứ được gửi đi",
+  "settings.simple.defaultBot": "Trợ lý của bạn. Khi ẩn, nó vẫn làm việc và tìm kiếm vẫn thấy nó.",
+  "settings.simple.followUp": "{key} làm cách còn lại cho một tin nhắn.",
+  "settings.simple.language.system": "Theo hệ thống",
+  "settings.simple.notificationFeed": "Một chiếc chuông bên phải giữ 500 thông báo gần nhất của bạn.",
+  "settings.simple.notificationSounds": "Phát âm thanh khi bot xong việc hoặc cần bạn.",
+  "settings.simple.openAtLogin": "Khởi động khi bạn đăng nhập, để bot của bạn sẵn sàng.",
+  "settings.simple.sendKey": "Chọn Shift+Enter hoặc {key} nếu Enter xác nhận văn bản đã gõ, như khi nhập tiếng Nhật.",
+  "settings.simple.themes.browse": "Xem chủ đề",
+  "sidebar.account.moveAndAutomationsNeedYou": "Việc chuyển sang Cloud của tôi và tự động hóa cần bạn",
+  "sidebar.account.moveNeedsYou": "Việc chuyển sang Cloud của tôi cần bạn"
 }

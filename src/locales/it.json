@@ -7047,5 +7047,20 @@
   "sidebar.update.readyShort": "Aggiornamento pronto",
   "sidebar.update.restartAction": "Riavvia",
   "sidebar.update.retryAction": "Riprova",
-  "sidebar.nav.publishedApps": "App pubblicate"
+  "sidebar.nav.publishedApps": "App pubblicate",
+  "settings.followUp.subtitle": "Inserirlo aggiunge il tuo messaggio a ciò che il bot sta facendo; metterlo in coda lo esegue alla fine del turno. {key} fa l'altra cosa per un solo messaggio, e la freccia accanto a Invia può anche riavviare il turno. Solo su questo dispositivo.",
+  "settings.openAtLogin.subtitle": "Apre {app} quando accedi a questo computer, così bot e routine sono pronti senza aprirlo tu.",
+  "settings.simple.advancedMode": "Mostra ogni controllo, compresi gli strumenti per chi costruisce. Non si cancella nulla in nessun caso.",
+  "settings.simple.analytics": "Eventi d'uso anonimi. Mai i tuoi messaggi, file o chiavi. La tua email solo se l'hai condivisa durante la configurazione o in una schermata del piano Cloud.",
+  "settings.simple.analyticsLink": "Vedi tutto ciò che invia",
+  "settings.simple.defaultBot": "Il tuo aiutante. Nascosto, continua a lavorare e la ricerca lo trova comunque.",
+  "settings.simple.followUp": "{key} fa l'altra cosa per un solo messaggio.",
+  "settings.simple.language.system": "Segui il sistema",
+  "settings.simple.notificationFeed": "Una campanella a destra che tiene le tue ultime 500 notifiche.",
+  "settings.simple.notificationSounds": "Suona quando un bot finisce o ha bisogno di te.",
+  "settings.simple.openAtLogin": "Si avvia quando accedi, così i tuoi bot sono pronti.",
+  "settings.simple.sendKey": "Scegli Maiusc+Invio o {key} se Invio conferma il testo digitato, come nella scrittura giapponese.",
+  "settings.simple.themes.browse": "Sfoglia i temi",
+  "sidebar.account.moveAndAutomationsNeedYou": "Il trasferimento nel Mio Cloud e le automazioni ti aspettano",
+  "sidebar.account.moveNeedsYou": "Il trasferimento nel Mio Cloud ti aspetta"
 }

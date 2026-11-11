@@ -5923,5 +5923,22 @@
   "sidebar.update.readyShort": "Güncelleme hazır",
   "sidebar.update.restartAction": "Yeniden başlat",
   "sidebar.update.retryAction": "Tekrar dene",
-  "sidebar.nav.publishedApps": "Yayınlanan uygulamalar"
+  "sidebar.nav.publishedApps": "Yayınlanan uygulamalar",
+  "settings.analytics.link": "Gönderdiği her şeyi gör",
+  "settings.analytics.subtitle": "Anonim ürün olayları ve günde bir kez neyin kurulu olduğunun sayımı: hangi sağlayıcıların anahtarı var (asla anahtarın kendisi) ve kaç bot, oda, rutin ve bilgisayar. Asla konuşmalar, istemler, dosya içerikleri, adlar veya adresler. E-postan yalnızca kurulumda paylaştıysan ya da MausBot Cloud'a giriş yapmışken Cloud Pro penceresinde yükseltme, yönetme veya plan karşılaştırmayı seçersen eklenir (Cloud hesabının e-postası).",
+  "settings.followUp.subtitle": "Ekleme mesajını botun şu an yaptığına katar; sıraya alma tur bitince çalıştırır. {key} tek bir mesaj için diğerini yapar, Gönder'in yanındaki ok da turu yeniden başlatabilir. Yalnızca bu cihazda.",
+  "settings.openAtLogin.subtitle": "Bu bilgisayarda oturum açtığında {app} uygulamasını açar, böylece botların ve rutinlerin sen açmadan hazır olur.",
+  "settings.simple.advancedMode": "Geliştirici araçları dahil her ayarı gösterir. Hiçbir şey silinmez.",
+  "settings.simple.analytics": "Anonim kullanım olayları. Asla mesajların, dosyaların veya anahtarların. E-postan yalnızca kurulumda veya bir Cloud plan ekranında paylaştıysan.",
+  "settings.simple.analyticsLink": "Gönderdiği her şeyi gör",
+  "settings.simple.defaultBot": "Yardımcın. Gizliyken çalışmaya devam eder ve arama onu yine bulur.",
+  "settings.simple.followUp": "{key} tek bir mesaj için diğerini yapar.",
+  "settings.simple.language.system": "Sistemi izle",
+  "settings.simple.notificationFeed": "Sağda son 500 bildirimini tutan bir zil.",
+  "settings.simple.notificationSounds": "Bir bot bitirdiğinde veya sana ihtiyaç duyduğunda ses çalar.",
+  "settings.simple.openAtLogin": "Oturum açtığında başlar, böylece botların hazır olur.",
+  "settings.simple.sendKey": "Enter yazılan metni onaylıyorsa, Japonca girişte olduğu gibi, Shift+Enter veya {key} seç.",
+  "settings.simple.themes.browse": "Temalara göz at",
+  "sidebar.account.moveAndAutomationsNeedYou": "Cloud'uma taşınma ve otomasyonlar seni bekliyor",
+  "sidebar.account.moveNeedsYou": "Cloud'uma taşınma seni bekliyor"
 }
