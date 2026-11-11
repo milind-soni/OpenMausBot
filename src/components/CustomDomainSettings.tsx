@@ -149,7 +149,7 @@ export function CustomDomainSettings() {
           </SettingRow>
           {open && (
             <form data-custom-domain-settings="" onSubmit={(event) => { event.preventDefault(); if (domain.trim() && !busy) void save(false); }} className="flex flex-col gap-2 px-4 pb-4 pt-3">
-              <SettingsField label={t("settings.domain.label")} hint={error ? <span role="alert" className="text-danger">{error}</span> : notice ? <span role="status">{notice}</span> : t("settings.domain.httpsFirst")}>
+              <SettingsField label={t("settings.domain.title")} hint={error ? <span role="alert" className="text-danger">{error}</span> : notice ? <span role="status">{notice}</span> : t("settings.domain.httpsFirst")}>
                 <input id="custom-domain" type="text" value={domain} disabled={busy !== null} onChange={(event) => { setDomain(event.target.value); setNotice(null); setError(null); }}
                   placeholder="bots.yourcompany.com" autoCapitalize="none" autoCorrect="off" spellCheck={false} className={SETTINGS_INPUT} />
               </SettingsField>
