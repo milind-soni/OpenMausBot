@@ -57,9 +57,11 @@ async function openAs(who: Who, size: readonly [string, string], query = "") {
   await browser("open", new URL("/package.json", preview.previewUrl).href);
   await evaluate(`(() => { for (const notice of ${JSON.stringify(NOTICES)}) localStorage.setItem(notice, "1"); return true; })()`);
   await browser("open", `${preview.previewUrl}${query}`);
+  await evaluate(`(() => { window.__pageErrors = []; window.addEventListener("error", (event) => window.__pageErrors.push(String(event.error?.stack ?? event.message).slice(0, 1500))); return true; })()`);
   const until = (js: string, timeout = 60_000) => expect.poll(() => evaluate<boolean>(`Boolean(${js})`), { timeout, interval: 400 }).toBe(true).catch(async (cause: unknown) => {
     await browser("screenshot", join(SHOTS, `failed-${who}.png`)).catch(() => {});
-    throw cause;
+    const errors = await evaluate<string>("JSON.stringify(window.__pageErrors ?? null) + ' at ' + location.href").catch(() => "the page did not answer");
+    throw new Error(`${js} never held for ${who}; page errors: ${errors}`, { cause });
   });
   const click = async (selector: string) => {
     await until(`document.querySelector(${JSON.stringify(selector)})`);
