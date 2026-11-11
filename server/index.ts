@@ -3517,7 +3517,6 @@ const publicBotQueuedMessages = () => queuedSteerSnapshot((botId, threadId) => B
 type GroupTurnOperation = {
   id: string;
   threadId: string;
-  botIds: Set<string>;
   cancelled: boolean;
   cancellation: AbortController;
   providerHandshakePending: boolean;
@@ -3535,7 +3534,6 @@ const roomMemberContexts = new RoomContextTracker({
   heldUntil: (threadId) => cacheKeepWarmStatus(threadId)?.until,
   expired: (threadId) => { const room = store.groupByThread(threadId); if (room) broadcast({ kind: "group", group: publicGroupState(room) }); },
 });
-/** Holds a member for the thread it was handed to until that turn marks the bot busy. */
 const roomMemberLock = new RoomMemberLock();
 
 function groupThreadIsWorking(groupId: string, threadId: string): boolean {
@@ -3801,7 +3799,7 @@ function noteQueuedBehindPerson(node: HandoffView): void {
 function runRoomNode(node: HandoffView, group: GroupRecord, bot: BotRecord, signal: AbortSignal, parent: HandoffView | undefined,
   turn: (operation: GroupTurnOperation, result: GroupTurnOrchestration["result"], coordination: NonNullable<GroupTurnOrchestration["coordination"]>) => Promise<unknown>,
 ): Promise<HostTurnResult> {
-  const operation = Object.assign(beginGroupTurnOperation(group.id, node.threadId, [bot.id]), { handedFor: actingPeople.handedRun(node.id), speaking: false });
+  const operation = Object.assign(beginGroupTurnOperation(group.id, node.threadId), { handedFor: actingPeople.handedRun(node.id), speaking: false });
   return new Promise<HostTurnResult>(resolve => {
     let done = false;
     const finish = (outcome: HostTurnResult) => {
@@ -4140,12 +4138,10 @@ function publicGroupState(record: GroupRecord): WireGroup {
 function beginGroupTurnOperation(
   groupId: string,
   threadId: string,
-  botIds: Iterable<string> = [],
 ): GroupTurnOperation {
   const operation = {
     id: randomUUID(),
     threadId,
-    botIds: new Set(botIds),
     cancelled: false,
     cancellation: new AbortController(),
     providerHandshakePending: false,
@@ -4214,7 +4210,6 @@ async function waitForGroupMemberBot(
   operation: GroupTurnOperation,
   onWaiting: (detail: string) => void,
 ): Promise<GroupMemberBotWaitResult> {
-  operation.botIds.delete(bot.id);
   const initial = claimGroupMemberBot(bot.id, operation);
   if (initial !== "busy") return initial;
   onWaiting(`${bot.name} is finishing another conversation.`);
@@ -4384,7 +4379,6 @@ async function waitForChatRoomMember(
   switch (availability) {
     case "ready":
       if (waitChip) store.patchMessage(threadId, waitChip.id, { tool: { ...waitTool, ok: true } });
-      operation.botIds.add(bot.id);
       return "run";
     case "cancelled":
       return "stop";
@@ -4469,12 +4463,10 @@ function groupProviderHandshakeSettled(operation: GroupTurnOperation): void {
 }
 
 function activeGroupTurnForBot(botId: string): { group: GroupRecord; threadId: string } | null {
+  const claimedThread = roomMemberLock.holder(botId);
+  const claimedGroup = claimedThread ? store.groupByThread(claimedThread) : undefined;
+  if (claimedGroup && claimedThread) return { group: claimedGroup, threadId: claimedThread };
   for (const group of store.groups) {
-    for (const operation of groupTurnOperations.get(group.id) ?? []) {
-      if (!operation.cancelled && operation.botIds.has(botId)) {
-        return { group, threadId: operation.threadId };
-      }
-    }
     for (const [threadId, speaker] of groupSpeakers) {
       if (speaker.botId !== botId) continue;
       const ownsThread = group.dm
@@ -9620,11 +9612,16 @@ function goalRunLive(groupId: string, threadId: string, runId: string): boolean 
     !operation.cancelled && operation.threadId === threadId && operation.goalRun?.runId === runId && !operation.goalRun.finished);
 }
 
+function releaseRoomMember(botId: string, threadId: string): void {
+  if (roomMemberLock.release(botId, threadId)) drainQueuedSends();
+}
+
 async function runGroupMemberTurn(...args: Parameters<typeof runClaimedGroupMemberTurn>): Promise<boolean> {
   try {
     return await runClaimedGroupMemberTurn(...args);
   } finally {
-    roomMemberLock.release(args[2], args[1]);
+    const [, threadId, botId] = args;
+    releaseRoomMember(botId, threadId);
   }
 }
 
@@ -9930,7 +9927,6 @@ async function runClaimedGroupMemberTurn(
     return true;
   }
   store.setActivity(bot.id, "working");
-  roomMemberLock.release(bot.id, threadId);
   // Claim cleanup ownership before browser preparation can yield; the finally releases exactly this setup, never a newer turn.
   roomSpeaker = { botId: bot.id, name: bot.name, color: bot.color, since: Date.now() };
   groupSpeakers.set(threadId, roomSpeaker);
@@ -10515,6 +10511,7 @@ async function runClaimedGroupMemberTurn(
     hop < MAX_GROUP_HOPS &&
     replyText.trim()
   ) {
+    releaseRoomMember(bot.id, threadId);
     const members = group.memberIds
       .map((id) => store.bot(id))
       .filter((b): b is NonNullable<typeof b> => Boolean(b) && b!.id !== bot.id);
@@ -10666,7 +10663,6 @@ async function runGroupGoalStep(args: {
             if (claimed) return;
             claimed = true;
             run.turnCount += 1;
-            args.operation.botIds.add(args.bot.id);
             updateGroupGoalRunProgress(
               args.operation,
               `${args.bot.name} is working on team turn ${run.turnCount} of ${run.maxTurns}.`,
@@ -10686,8 +10682,6 @@ async function runGroupGoalStep(args: {
         stopReason: result.stopReason,
       };
     } finally {
-        // An idle waiter must never redirect the bot's Stop button away from unrelated direct work.
-      args.operation.botIds.delete(args.bot.id);
       if (coordinatorTurn) goalTurns.end(args.threadId, coordinatorTurn, result.outcome);
     }
   }
@@ -10887,11 +10881,7 @@ function startGroupTurn(
   };
   if (!autoRoute) startTitle(goalCoordinator ?? responders[0]!);
 
-  const operation = beginGroupTurnOperation(
-    groupId,
-    threadId,
-    goalCoordinator || autoRoute ? [] : responders.map((responder) => responder.id),
-  );
+  const operation = beginGroupTurnOperation(groupId, threadId);
   // Only a person's own chat line; cloudHomeLendingRefusal still proves it is the owner's.
   if (!goalCoordinator && message.role === "user" && !message.via && (!options.trigger || options.trigger.kind === "user" || options.trigger.kind === "owner")) {
     operation.requestMessageId = message.id;
@@ -10935,7 +10925,6 @@ function startGroupTurn(
           round = picked;
           routedBy = { provider: route.provider, probability: Math.round(route.probability * 100) / 100 };
         }
-        for (const responder of round) operation.botIds.add(responder.id);
         if (round[0]) startTitle(round[0]);
       }
       const spoken = new Set<string>();

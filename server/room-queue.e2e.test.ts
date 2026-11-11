@@ -90,6 +90,48 @@ it("shows a round of @mentioned members waiting on the one replying", async () =
   }
 }, 90_000);
 
+it("lets a member waiting to speak take a direct handoff before its room turn", async () => {
+  const session = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
+  const cli = (...args: string[]) => runControlOmb([...args, "--url", session.info.url]) as Promise<any>;
+  const file = (name: string) => join(session.info.dataDir, name);
+  try {
+    const first = (await cli("new-bot", "--name", "First")).bot;
+    const second = (await cli("new-bot", "--name", "Second")).bot;
+    const lead = (await cli("new-bot", "--name", "Lead")).bot;
+    const room = (await cli("new-channel", "--name", "Studio", "--members", `${first.id},${second.id}`)).channel;
+    const brief = "An independent job for Second";
+    writeFileSync(file("room-plan.json"), JSON.stringify({
+      [first.id]: { reply: "First in the room", gateFile: file("first.gate"), readyFile: file("first.ready") },
+      [second.id]: { turns: [
+        { reply: "Direct job done", gateFile: file("direct.gate"), readyFile: file("direct.ready") },
+        { reply: "Second in the room", readyFile: file("second.ready") },
+      ] },
+      [lead.id]: { steps: [{ arguments: { bot_ids: [second.id], message: brief } }], reply: "Assigned", resumeReply: "Reviewed" },
+    }));
+    await cli("send-channel", "--channel", room.id, "--text", "@First @Second take turns");
+    await expect.poll(() => existsSync(file("first.ready")), { timeout: 15_000 }).toBe(true);
+    await cli("send", "--bot", lead.id, "--text", "Assign independent work to Second");
+    const job = () => readHandoffs(session.info.dataDir).find(n => n.parentId && n.botId === second.id && n.text === brief);
+    await expect.poll(() => job()?.status, { timeout: 15_000 }).toBe("running");
+    await expect.poll(() => existsSync(file("direct.ready")), { timeout: 15_000 }).toBe(true);
+
+    writeFileSync(file("first.gate"), "release");
+    const messages = () => cli("messages", "--channel", room.id, "--limit", "20");
+    await expect.poll(async () => JSON.stringify(await messages()), { timeout: 15_000 }).toContain("Second is finishing another conversation");
+    expect(existsSync(file("second.ready"))).toBe(false);
+
+    writeFileSync(file("direct.gate"), "release");
+    expect((await cli("wait", "--channel", room.id, "--timeout", "30")).status).toBe("settled");
+    expect((await cli("wait", "--bot", lead.id, "--timeout", "30")).status).toBe("settled");
+    expect(job()?.status).toBe("completed");
+    const transcript = JSON.stringify(await messages());
+    expect(transcript).toContain("First in the room");
+    expect(transcript).toContain("Second in the room");
+  } finally {
+    await session.close();
+  }
+}, 90_000);
+
 it("with parallel room jobs on, runs each member's job in its own thread at once and posts the results back into the room", async () => {
   const session = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
   const env = { OPENMAUSBOT_URL: session.info.url };
