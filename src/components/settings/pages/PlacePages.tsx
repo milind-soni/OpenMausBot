@@ -34,6 +34,7 @@ import { BrowserProfilesRow, ExperimentalFeaturesRow, NewBotEffortRow } from "..
 import { useServerUpdateItem } from "../../SidebarProfileMenu";
 import { versionLine } from "../settings-context";
 import { useSettingsShell } from "../settings-shell";
+import { AdvancedSection } from "../AdvancedSection";
 
 const GROUPED_NOTE = "omb-settings-grouped-note";
 const GROUPED_DAYS = 30;
@@ -117,9 +118,9 @@ export function AiPage() {
       <SettingsDisclosureRow id="ai-keys" block="ai-keys" title={t("settings.section.connections")} subtitle={t("settings.ai.keysLine")} open={keys} onToggle={() => setKeys((open) => !open)}>
         <KeysPage />
       </SettingsDisclosureRow>
-      {ctx.advanced && <SettingsGroup label={t("settings.ai.backupModel")} block="backup-model"><AutomaticRecoverySettings /></SettingsGroup>}
-      {ctx.advanced && <SettingsGroup label={t("settings.ai.routing")} block="routing"><DecisionModelSettings /></SettingsGroup>}
-      {ctx.advanced && <SettingsGroup label={t("settings.ai.images")} block="images"><ImageGenerationSettings /></SettingsGroup>}
+      <AdvancedSection anchor="backup-model"><SettingsGroup label={t("settings.ai.backupModel")} block="backup-model"><AutomaticRecoverySettings /></SettingsGroup></AdvancedSection>
+      <AdvancedSection anchor="routing"><SettingsGroup label={t("settings.ai.routing")} block="routing"><DecisionModelSettings /></SettingsGroup></AdvancedSection>
+      <AdvancedSection anchor="images"><SettingsGroup label={t("settings.ai.images")} block="images"><ImageGenerationSettings /></SettingsGroup></AdvancedSection>
     </AdminOnly>
   </>;
 }
@@ -138,23 +139,22 @@ export function BotsPage() {
     <SettingsGroup label={t("settings.bots.newBots")} block="new-bots">
       <SettingsRows><NewBotEffortRow /><DefaultBotSettings simple /></SettingsRows>
     </SettingsGroup>
-    {ctx.advanced && (
-      <SettingsGroup label={t("settings.simple.more.limits")} block="limits">
+    {(
+      <AdvancedSection anchor="limits"><SettingsGroup label={t("settings.simple.more.limits")} block="limits">
         <div className="flex flex-col gap-6">
           <Card title={t("settings.roomTurns.title")} subtitle={t("settings.roomTurns.subtitle")}><RoomTurnTimeoutSettings /></Card>
           <Card title={t("settings.mcpCalls.title")} subtitle={t("settings.mcpCalls.subtitle")}><McpCallTimeoutSettings /></Card>
           <ThreadConcurrencySettings />
           <CacheKeepWarmSettings />
         </div>
-      </SettingsGroup>
+      </SettingsGroup></AdvancedSection>
     )}
     {skillsLibraryEnabled(state.config) && <div data-settings-block="skills"><SkillsSection /></div>}
-    {ctx.advanced && <div data-settings-block="early"><ExperimentalFeaturesRow /></div>}
+    <AdvancedSection anchor="early"><div data-settings-block="early"><ExperimentalFeaturesRow /></div></AdvancedSection>
   </>;
 }
 
 export function DesktopsPage() {
-  const { ctx } = useSettingsShell();
   return <>
     <SettingsGroup label={t("settings.experimental.browser")} block="browser">
       <SettingsRows><BuiltInBrowserRow /><ServerSitesRow /></SettingsRows>
@@ -163,7 +163,7 @@ export function DesktopsPage() {
     <div data-settings-block="desktops" className="flex scroll-mt-4 flex-col gap-6">
       <AdminOnly><LocalComputerSection /></AdminOnly>
     </div>
-    {ctx.advanced && <SettingsGroup label={t("settings.desktops.automation")} block="automation"><SettingsRows><SavedStepsRow /></SettingsRows></SettingsGroup>}
+    <AdvancedSection anchor="automation"><SettingsGroup label={t("settings.desktops.automation")} block="automation"><SettingsRows><SavedStepsRow /></SettingsRows></SettingsGroup></AdvancedSection>
   </>;
 }
 

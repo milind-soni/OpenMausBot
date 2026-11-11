@@ -11,6 +11,9 @@ import { LicenseExpiryBanner } from "../LicenseExpiryBanner";
 import { shortcutLabel } from "../ShortcutHint";
 import { SettingsLook } from "../SettingsPrimitives";
 import { SettingsPageBody } from "./pages/SettingsPageBody";
+import { useSwitchToComputer } from "./pages/AccountPages";
+import { KEY_CATALOG, keyMatches, type KeyEntry } from "../keys/key-catalog";
+import { openKeySettings } from "../keys/key-focus";
 import { useSettingsContext, useSettingsPlace } from "./settings-context";
 import { pageById, resolveSettingsTarget, searchSettings, visiblePages, type SearchHit, type SettingsPageId } from "./settings-index";
 import { SettingsShellContext, type SettingsShell } from "./settings-shell";
@@ -65,6 +68,9 @@ export function SettingsWindow() {
   const hits = useMemo(() => searchSettings(query, ctx, (entry) => hitLabel({ entry, elsewhere: false, score: 0 }, place, ctx.desktop),
     (candidate) => pageLabel(candidate, place, ctx.desktop)), [query, ctx, place]);
 
+  const keyHits = useMemo(() => (ctx.client || !query.trim() ? [] : KEY_CATALOG.filter((entry) => keyMatches(entry, query.trim().toLowerCase())).slice(0, 8)), [ctx.client, query]);
+  const openKey = (entry: KeyEntry) => { setQuery(""); setNarrowPage(true); dispatch(entry.uses ? openKeySettings(entry.uses, entry.id) : openKeySettings(entry.id)); };
+  const computer = useSwitchToComputer();
   const close = () => dispatch({ type: "toggleAppSettings", open: false });
   const go = (next: SettingsPageId, nextAnchor?: string) => {
     setNarrowPage(true);
@@ -78,7 +84,7 @@ export function SettingsWindow() {
     if (entry.jump === "automations") { close(); dispatch({ type: "showRoutines", view: "list" }); return; }
     if (entry.jump === "shortcuts") { close(); dispatch({ type: "toggleShortcuts", open: true }); return; }
     if (entry.jump === "bot") { close(); return; }
-    if (hit.elsewhere) { void window.ogb?.workspaces?.menu?.(); return; }
+    if (hit.elsewhere) { computer?.open(); return; }
     go(entry.page, entry.anchor);
   };
 
@@ -150,8 +156,8 @@ export function SettingsWindow() {
             )}
             <div className="flex min-h-0 flex-1">
               {(!narrow || showList) && (
-                <SettingsNav ctx={ctx} place={place} pages={pages} current={target.page} query={query} hits={hits} narrow={narrow}
-                  onQuery={setQuery} onOpen={(next) => go(next)} onHit={openHit} onClose={close} />
+                <SettingsNav ctx={ctx} place={place} pages={pages} current={narrow ? null : target.page} query={query} hits={hits} narrow={narrow}
+                  onQuery={setQuery} onOpen={(next) => go(next)} onHit={openHit} keyHits={keyHits} onKey={openKey} onClose={close} />
               )}
               {(!narrow || !showList) && (
                 <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">

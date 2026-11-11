@@ -122,6 +122,12 @@ export function resolveSettingsTarget(requested: AppSettingsSection, ctx: Settin
   return { page: "overview", missing: target.page };
 }
 
+/** A context with every page showing, for tests and previews to narrow down. */
+export const fullContext = (over: Partial<SettingsContext> = {}): SettingsContext => ({
+  desktop: true, here: true, cloud: false, team: false, client: false, admin: true, places: false, plan: true,
+  organization: false, environments: true, installations: false, skills: false, advanced: false, ...over,
+});
+
 /** One row, section or page search can open. `label` beats `labelKey` where the name is not a string of the app's. */
 export interface SettingsIndexEntry {
   id: string;
@@ -158,9 +164,9 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "sidebar-picture", page: "overview", anchor: "sidebar", labelKey: "placeLook.sidebarPicture", sectionKey: "settings.overview.sidebar", topFor: ["wallpaper", "background", "sidebar image"], synonyms: ["picture", "banner", "image"] },
   { id: "show-helper", page: "overview", anchor: "sidebar", labelKey: "settings.search.showHelper", sectionKey: "settings.overview.sidebar", synonyms: ["helper", "starter", "default bot"] },
   { id: "providers", page: "ai", anchor: "providers", labelKey: "settings.ai.providers", topFor: ["ollama", "lm studio", "local model", "model providers"], synonyms: ["models", "engines", "claude", "codex", "sign in", "subscription", "cli"] },
-  { id: "keys", page: "ai", anchor: "ai-keys", labelKey: "settings.section.connections", topFor: ["api keys", "api key"], synonyms: ["keys", "key", "openai", "anthropic", "xai", "openrouter", "mistral", "groq", "composio", "voice", "elevenlabs"] },
+  { id: "keys", page: "ai", anchor: "ai-keys", labelKey: "settings.section.connections", topFor: ["api keys", "api key"], synonyms: ["keys", "key", "openai", "anthropic", "xai", "openrouter", "router", "base url", "mistral", "groq", "cerebras", "deepseek", "opencode", "composio", "elevenlabs"] },
   { id: "backup-model", page: "ai", anchor: "backup-model", labelKey: "settings.recovery.title", sectionKey: "settings.ai.backupModel", advanced: true, synonyms: ["backup model", "fallback", "recovery"] },
-  { id: "routing", page: "ai", anchor: "routing", labelKey: "settings.ai.routing", advanced: true, synonyms: ["decision and extraction", "decision", "extraction", "routing", "who answers"] },
+  { id: "routing", page: "ai", anchor: "routing", labelKey: "settings.ai.routing", advanced: true, synonyms: ["decision and extraction", "decision", "extraction", "routing", "who answers", "jev", "typesafe", "cloudflare", "workers ai"] },
   { id: "images", page: "ai", anchor: "images", labelKey: "settings.ai.images", advanced: true, synonyms: ["image generation", "images", "generate", "picture"] },
   { id: "about-you", page: "bots", anchor: "about-you", labelKey: "settings.bots.aboutYou", topFor: ["name", "my name", "photo", "avatar", "picture", "profile", "profile picture", "about me"], synonyms: ["rules", "rules for every bot"] },
   { id: "away-emails", page: "bots", anchor: "about-you", labelKey: "settings.profile.awayEmails", sectionKey: "settings.bots.aboutYou", synonyms: ["away", "emails", "email me"] },

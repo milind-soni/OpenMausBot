@@ -1722,7 +1722,7 @@ describe("Update MausBot on your phone", () => {
   it("Open Phone & devices opens pairing in Settings, and the card is done for that phone", async () => {
     await launch();
     tree().find(node => node.type === "button" && node.props.children === "Open Phone & devices")!.props.onClick(); await flush();
-    expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "companion", phonePairing: true });
+    expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "phone", phonePairing: true });
     expect(hints()).toContain("phone-app-update:0f8c2a41");
     expect(render()).toBe("");
     expect(await relaunch()).not.toContain(TITLE);

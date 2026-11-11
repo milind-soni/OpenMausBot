@@ -1849,9 +1849,6 @@ body {
   box-shadow: 0 24px 64px -16px rgb(28 28 28 / 0.28), 0 2px 8px rgb(28 28 28 / 0.06);
 }
 @media (min-width: 768px) {
-  .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] {
-    padding: 24px;
-  }
   .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] > .glass-popup {
     width: min(920px, 100%);
     height: min(720px, 100%);

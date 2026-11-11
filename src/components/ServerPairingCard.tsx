@@ -229,6 +229,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
             {pairRow}
           </SettingsRows>
           {!simple && pairingCodes && !cloudHome && computerName !== null && <SettingsRows><ComputerNameRow saved={computerName} onSaved={setComputerName} className="px-4 py-3" /></SettingsRows>}
+          {!pairingCodes && <p data-server-pairing-portal className="px-4 text-[12px] leading-4 text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
         </SettingsGroup>
       ) : (
         <>

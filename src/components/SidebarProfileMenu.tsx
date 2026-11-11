@@ -24,7 +24,7 @@ import {
 import { accountMenuItems, AccountsSheet, useAccounts } from "./AccountMenu";
 import { accountLine, useAccountSummary } from "./settings/account-summary";
 import { usePhonePlaceState, type PhonePlaceState } from "./settings/phone-status";
-import { useSettingsPlace } from "./settings/settings-context";
+import { useSettingsPlace } from "./settings/settings-place";
 import { AccountMoveStatus, useAccountMove, type AccountMoveKind } from "./AccountMove";
 import { InitialsAvatar } from "./Avatar";
 import { DiscordIcon } from "./DiscordIcon";

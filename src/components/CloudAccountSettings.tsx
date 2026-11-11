@@ -61,12 +61,15 @@ function cloudHomeCard({ machine, busy, failed, onConnect, trial = false, waking
     : machine.status === "provisioning" && machine.setup?.slow ? t("cloudHome.slow")
     : team && machine.status === "provisioning" ? t("cloudHome.team.provisioning") : t(MACHINE_TEXT[machine.status]));
   const label = team?.name ? t("cloudBuy.setup.open", { name: team.name }) : t("settings.plan.openCloud", { place: t("cloudSetup.myCloud") });
-  return <div data-cloud-home={machine.status} data-cloud-team={team ? true : undefined} data-cloud-unreachable={unreachable?.cause} data-cloud-waking={waking && connectable ? true : undefined} data-cloud-moving={moving && !unreachable ? true : undefined} className="flex flex-col">
-    {connectable && !moving
-      ? <SettingsLinkRow title={label} subtitle={waking || team ? text : undefined} external onClick={() => { if (!busy) onConnect(); }} />
-      : <SettingRow title={label} subtitle={<span role="status">{text}</span>} message={machine.status === "provisioning" && machine.setup ? <CloudSetupSteps step={machine.setup.step} /> : undefined}>{null}</SettingRow>}
-    {connectable && !team && cloudFilesBridge() && <div className="px-4 pb-3"><OpenFilesButton label={t("cloudHome.filesLink")} className="text-[13px] leading-5 text-accent-text hover:underline" /></div>}
-    {failed && !unreachable && <p role="alert" className="px-4 pb-3 text-[12px] leading-4 text-danger">{t("cloudHome.connectFailed")}</p>}
+  return <div data-cloud-home={machine.status} data-cloud-team={team ? true : undefined} data-cloud-unreachable={unreachable?.cause} data-cloud-waking={waking && connectable ? true : undefined} data-cloud-moving={moving && !unreachable ? true : undefined}>
+    <SettingRow title={team ? team.name ?? t("cloudHome.team.title") : t("cloudSetup.myCloud")} subtitle={<p role="status">{text}</p>}
+      message={<>
+        {machine.status === "provisioning" && machine.setup && <CloudSetupSteps step={machine.setup.step} />}
+        {connectable && !team && cloudFilesBridge() && <OpenFilesButton label={t("cloudHome.filesLink")} className="text-[12px] leading-4 text-accent-text hover:underline" />}
+        {failed && !unreachable && <p role="alert" className="text-danger">{t("cloudHome.connectFailed")}</p>}
+      </>}>
+      {connectable && !moving && <button type="button" disabled={busy} className="ui-button" onClick={onConnect}>{label}</button>}
+    </SettingRow>
   </div>;
 }
 
@@ -243,25 +246,25 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamH
 
   if (part === "account") {
     return <>
-      <SettingsGroup label={t("settings.account.mausbot", { app: productName() })} block="mausbot-account"
-        footnote={signed && view.kind === "free" && !confirm ? <>{t(window.ogb?.accounts ? "cloudAccount.otherEmailOrTeam" : "cloudAccount.otherEmail")}{" "}
-          <button type="button" data-cloud-other-email disabled={busy} className="text-accent-text hover:underline" onClick={() => (window.ogb?.accounts ? setAddingEmail(true) : setConfirm(true))}>{t(window.ogb?.accounts ? "cloudAccount.addOtherEmail" : "cloudAccount.useOtherEmail")}</button></> : undefined}>
+      <SettingsGroup label={t("settings.account.mausbot", { app: productName() })} block="mausbot-account">
         <SettingsRows>
           {(!account || view.kind === "unknown") && <SettingRow title={t("cloudAccount.loading")}>{!account && <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.state())}>{t("organization.refresh")}</button>}</SettingRow>}
-          {signedOut && <SettingRow title={t("settings.account.signInTitle", { app: productName() })} subtitle={t("settings.account.signInBody")} message={message}>
+          {signedOut && <SettingRow title={t("settings.account.signInTitle", { app: productName() })} subtitle={t("settings.account.signInBody")} message={message && <p role="status">{message}</p>}>
             <button type="button" disabled={busy} className="ui-button ui-button-primary" data-account-sign-in="" onClick={() => onSignIn ? onSignIn() : void perform(() => bridge.begin())}>{t("settings.account.signIn")}</button>
           </SettingRow>}
-          {account?.status === "connecting" && <SettingRow title={t("cloudAccount.browser")} subtitle={enrollment ? t("cloudAccount.codeUntil", { time: time(enrollment.expiresAt) }) : undefined}
+          {account?.status === "connecting" && <SettingRow title={t("cloudAccount.browser")} subtitle={enrollment ? `${t("cloudAccount.codeCheck")} ${t("cloudAccount.codeUntil", { time: time(enrollment.expiresAt) })}` : undefined}
             message={enrollment && <code data-cloud-code dir="ltr" className="select-all text-[20px] font-medium leading-7 tracking-[0.08em] text-ink">{enrollment.userCode}</code>}>
             <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.reopen())}>{t("organization.reopen")}</button>
             <button type="button" disabled={busy} className="settings-quiet cursor-pointer" onClick={() => void perform(() => bridge.cancel())}>{t("organization.cancel")}</button>
           </SettingRow>}
-          {signed && <SettingRow title={account.account?.email ?? t("settings.account.signedIn")} subtitle={message ?? t("settings.account.signedIn")}>
+          {signed && <SettingRow title={account.account?.email ?? t("settings.account.signedIn")} subtitle={message ? <p role="status">{message}</p> : t("settings.account.signedIn")}>
             {view.kind === "reauth"
               ? <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.signInAgain())}>{t("cloudAccount.signInAgain")}</button>
               : advanced && <button type="button" disabled={busy} className="settings-quiet cursor-pointer" onClick={() => void perform(() => bridge.refresh())}>{t("organization.refresh")}</button>}
           </SettingRow>}
         </SettingsRows>
+        {signed && view.kind === "free" && !confirm && <p className="px-4 text-[12px] leading-4 text-ink-secondary">{t(window.ogb?.accounts ? "cloudAccount.otherEmailOrTeam" : "cloudAccount.otherEmail")}{" "}
+          <button type="button" data-cloud-other-email disabled={busy} className="cursor-pointer text-accent-text hover:underline" onClick={() => (window.ogb?.accounts ? setAddingEmail(true) : setConfirm(true))}>{t(window.ogb?.accounts ? "cloudAccount.addOtherEmail" : "cloudAccount.useOtherEmail")}</button></p>}
         {errorLine}
       </SettingsGroup>
       {addingEmail && <AccountsSheet adding="" onClose={() => setAddingEmail(false)} />}
@@ -285,7 +288,7 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamH
     <SettingsGroup label={t("settings.simple.billing.plan")} block="plan" footnote={moneyBack}>
       <SettingsRows>
         {(!account || view.kind === "unknown") && <SettingRow title={t("cloudAccount.loading")}>{null}</SettingRow>}
-        {signedOut && <SettingRow title={t("cloudAccount.free")} subtitle={t("settings.plan.offer")}>{primary}</SettingRow>}
+        {view.kind === "signed-out" && <SettingRow title={t("cloudAccount.free")} subtitle={t("settings.plan.offer")}>{primary}</SettingRow>}
         {signed && <SettingRow title={line ?? t("settings.simple.billing.plan")}
           subtitle={view.kind === "paid" && view.checking ? t("cloudAccount.checking") : message ?? undefined}
           message={<>{account.staging && <StagingMark className="mb-1" />}{account.status === "connected" ? trialLines(account.trial, account.credit) : null}</>}>{primary}</SettingRow>}

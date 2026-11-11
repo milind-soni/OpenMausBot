@@ -65,7 +65,7 @@ describe("Preset bots in the real renderer", () => {
     await click("You");
     await click("Settings");
     // New bot defaults sit on the AI page.
-    await expect.poll(() => evaluate("(() => { document.querySelector('[data-settings-page=\"ai\"]')?.click(); return Boolean(document.querySelector('[data-new-bot-share]')); })()"), { timeout: 10_000 }).toBe(true);
+    await expect.poll(() => evaluate("(() => { document.querySelector('[data-settings-page=\"bots\"]')?.click(); return Boolean(document.querySelector('[data-new-bot-share]')); })()"), { timeout: 10_000 }).toBe(true);
     await click("Share as preset…");
     await expect.poll(snapshot, { timeout: 20_000 }).toContain("What's in the file");
     let dialog = await snapshot();

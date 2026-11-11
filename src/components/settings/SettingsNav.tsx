@@ -15,6 +15,7 @@ import { usePhonePlaceState } from "./phone-status";
 import type { SettingsPlace } from "./settings-context";
 import { OWNERS, type SearchHit, type SettingsContext, type SettingsOwner, type SettingsPage, type SettingsPageId } from "./settings-index";
 import { useUpdaterState } from "@/lib/updater";
+import { keySection, type KeyEntry } from "../keys/key-catalog";
 import { HELP_CENTER_URL, appVersion } from "@/lib/app-links";
 
 export const NAV_ITEM = "relative flex h-8 w-full shrink-0 cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-[13px] leading-5 text-ink transition-colors motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus";
@@ -63,18 +64,19 @@ export function pageLabel(page: SettingsPage, place: SettingsPlace, desktop: boo
   return t(page.labelKey);
 }
 
-function IdentityRow({ page, current, badge, name, line, onOpen }: {
-  page: SettingsPageId; current: boolean; badge: ReactNode; name: string; line: string; onOpen: () => void;
+function IdentityRow({ page, current, badge, name, line, onOpen, narrow }: {
+  page: SettingsPageId; current: boolean; badge: ReactNode; name: string; line: string; onOpen: () => void; narrow: boolean;
 }) {
   return (
     <button type="button" data-settings-page={page} data-settings-section={page} data-settings-identity="" aria-current={current ? "page" : undefined} onClick={onOpen}
-      className={cn("flex h-11 w-full shrink-0 cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus",
+      className={cn("flex w-full shrink-0 cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-left", narrow ? "h-12" : "h-11", " transition-colors motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus",
         current ? "bg-menu-active" : "hover:bg-menu-hover")}>
       <span className="flex size-6 shrink-0 items-center justify-center overflow-hidden rounded-[6px]">{badge}</span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-[14px] font-medium leading-[18px] text-ink">{name}</span>
         <span className="truncate text-[12px] leading-4 text-ink-secondary">{line}</span>
       </span>
+      {narrow && <ChevronRight size={14} aria-hidden="true" className="shrink-0 text-ink-tertiary rtl:-scale-x-100" />}
     </button>
   );
 }
@@ -98,12 +100,15 @@ export interface NavProps {
   ctx: SettingsContext;
   place: SettingsPlace;
   pages: SettingsPage[];
-  current: SettingsPageId;
+  current: SettingsPageId | null;
   query: string;
   hits: SearchHit[];
   onQuery: (query: string) => void;
   onOpen: (page: SettingsPageId) => void;
   onHit: (hit: SearchHit) => void;
+  /** keys from the key catalog, opened at their own field */
+  keyHits: KeyEntry[];
+  onKey: (entry: KeyEntry) => void;
   onClose: () => void;
   narrow: boolean;
 }
@@ -148,7 +153,7 @@ function moveFocus(event: ReactKeyboardEvent<HTMLElement>) {
   items[next]?.focus();
 }
 
-export function SettingsNav({ ctx, place, pages, current, query, hits, onQuery, onOpen, onHit, onClose, narrow }: NavProps) {
+export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, onKey, onQuery, onOpen, onHit, onClose, narrow }: NavProps) {
   const account = useAccountSummary();
   const placeLine = usePlaceSubLine(place);
   const appLine = useAppSubLine(ctx.desktop);
@@ -170,12 +175,12 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, onQuery, 
           onFirst={() => listRef.current?.querySelector<HTMLElement>("button[data-settings-hit], button[data-settings-page]")?.focus()} />
       </div>
       <div ref={listRef} onKeyDown={moveFocus} className={cn("settings-scroll flex min-h-0 flex-1 flex-col overflow-y-auto", narrow ? "px-2 pb-4 pt-1" : "px-3 pb-3 pt-3")}>
-        {searching ? <SearchResults ctx={ctx} place={place} hits={hits} query={query} onHit={onHit} /> : OWNERS.map((owner, index) => {
+        {searching ? <SearchResults ctx={ctx} place={place} hits={hits} keyHits={keyHits} onKey={onKey} query={query} onHit={onHit} /> : OWNERS.map((owner, index) => {
           const group = pages.filter((page) => page.owner === owner && page.id !== lines[owner].page);
           const identity = lines[owner];
           return (
             <div key={owner} role="group" aria-label={identity.name} data-settings-group={owner} className={cn("flex flex-col gap-0.5", index > 0 && "mt-4")}>
-              <IdentityRow page={identity.page} current={current === identity.page} badge={identity.badge} name={identity.name} line={identity.line} onOpen={() => onOpen(identity.page)} />
+              <IdentityRow page={identity.page} current={current === identity.page} badge={identity.badge} name={identity.name} line={identity.line} narrow={narrow} onOpen={() => onOpen(identity.page)} />
               <div className="mt-0.5 flex flex-col gap-0.5">
                 {group.map((page) => narrow ? (
                   <button key={page.id} type="button" data-settings-page={page.id} data-settings-section={page.id} onClick={() => onOpen(page.id)}
@@ -209,10 +214,12 @@ function AdvancedModeFooter({ narrow }: { narrow: boolean }) {
   );
 }
 
-function SearchResults({ ctx, place, hits, query, onHit }: { ctx: SettingsContext; place: SettingsPlace; hits: SearchHit[]; query: string; onHit: (hit: SearchHit) => void }) {
+function SearchResults({ ctx, place, hits, keyHits, onKey, query, onHit }: {
+  ctx: SettingsContext; place: SettingsPlace; hits: SearchHit[]; keyHits: KeyEntry[]; onKey: (entry: KeyEntry) => void; query: string; onHit: (hit: SearchHit) => void;
+}) {
   const here = hits.filter((hit) => !hit.elsewhere).slice(0, 8);
   const elsewhere = hits.filter((hit) => hit.elsewhere).slice(0, 8);
-  if (here.length === 0 && elsewhere.length === 0) {
+  if (here.length === 0 && elsewhere.length === 0 && keyHits.length === 0) {
     return (
       <div data-settings-no-match="" className="flex flex-col items-center gap-1 px-2 py-6 text-center">
         <p className="text-[13px] leading-[18px] text-ink-secondary">{t("settings.noMatch", { query: query.trim() })}</p>
@@ -223,6 +230,13 @@ function SearchResults({ ctx, place, hits, query, onHit }: { ctx: SettingsContex
   return (
     <div className="flex flex-col gap-0.5" data-settings-results="">
       {here.map((hit) => <HitRow key={`h:${hit.entry.id}`} ctx={ctx} place={place} hit={hit} query={query} onHit={onHit} />)}
+      {keyHits.map((entry) => (
+        <button key={`k:${entry.id}`} type="button" data-settings-key-result={entry.id} onClick={() => onKey(entry)}
+          className="flex w-full cursor-pointer flex-col rounded-lg px-2 py-1.5 text-left hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
+          <span className="truncate text-[13px] leading-5 text-ink">{highlight(t(entry.labelKey), query)}</span>
+          <span className="truncate text-[12px] leading-4 text-ink-secondary">{[place.name, t("settings.group.ai"), t(keySection(entry).titleKey)].join(" › ")}</span>
+        </button>
+      ))}
       {elsewhere.length > 0 && (
         <>
           <div className="px-2 pb-1 pt-3 text-[12px] leading-4 text-ink-secondary">{t("settings.search.otherPlaces")}</div>
