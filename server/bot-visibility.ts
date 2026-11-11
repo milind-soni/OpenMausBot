@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { accessFromVisibility, entryMatches, higherLevel, sharedLevel, type BotAccess, type BotAccessLevel } from "../shared/bot-access.ts";
 import { botOwner, type OwnedBot } from "../shared/bot-owner.ts";
+import { defaultBotPerson } from "../shared/default-bot.ts";
 import type { BotVisibility } from "../shared/wire.ts";
 import { audienceIncludes, type Audience } from "./audience.ts";
 import { SHARED_CHAT_TITLE } from "../shared/wire.ts";
@@ -224,18 +225,26 @@ export class VisibleSet {
   }
 
   bot(id: string): boolean {
-    if (this.everything || this.viewer.kind === "all") return true;
+    if (this.everything) return true;
     let seen = this.botMemo.get(id);
     if (seen === undefined) {
       const bot = this.bots.get(id);
-      seen = Boolean(bot && viewerSees(this.viewer, bot.visibility));
+      seen = bot && this.someoneElsesOwn(bot) ? false : this.viewer.kind === "all" || Boolean(bot && viewerSees(this.viewer, bot.visibility));
       this.botMemo.set(id, seen);
     }
     return seen;
   }
 
+  /** Security invariant: on a Team Cloud a person's own MausBot exists for that person alone. No other member and no
+   * admin, the Owner included, sees it, whatever its stored sharing says; only a session-less local service does. */
+  private someoneElsesOwn(bot: VisibilityBot): boolean {
+    const person = this.audiences ? defaultBotPerson(bot) : "";
+    return Boolean(person) && this.viewer.email !== undefined && person !== this.viewer.email.trim().toLowerCase();
+  }
+
   group(id: string): boolean {
-    if (this.everything || this.viewer.kind === "all") return true;
+    if (this.everything) return true;
+    if (this.viewer.kind === "all") return !this.groups.get(id)?.memberIds.some((member) => !this.bot(member));
     const group = this.groups.get(id);
     if (!group) return false;
     const members = group.memberIds.filter((member) => this.bots.has(member));
@@ -333,7 +342,7 @@ export type PathSubject =
 
 export function pathSubject(path: string): PathSubject | null {
   let m = /^\/api\/bots\/([\w-]+)(?:\/|$)/.exec(path);
-  if (m) return { kind: "bot", id: m[1]! };
+  if (m && m[1] !== "order") return { kind: "bot", id: m[1]! };
   m = /^\/api\/threads\/([\w-]+)(?:\/|$)/.exec(path);
   if (m) return { kind: "thread", id: m[1]! };
   m = /^\/api\/groups\/([\w-]+)(?:\/|$)/.exec(path);

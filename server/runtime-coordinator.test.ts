@@ -91,10 +91,10 @@ const begun = (w: World, source: RoomAddress, generation: string, sourceText = "
 };
 
 const send = (w: World, source: RoomAddress, generation: string, parentId: string | undefined, target: RoomAddress, text: string,
-  opts: { rework?: boolean; batchKey?: string; sourceText?: string } = {}) => {
+  opts: { rework?: boolean; batchKey?: string; fanOut?: string; sourceText?: string } = {}) => {
   if (!parentId) begun(w, source, generation, opts.sourceText);
   return w.coordinator.enqueue(source, generation, parentId, target, text, { rework: opts.rework ?? false,
-    requestBatchKey: opts.batchKey });
+    requestBatchKey: opts.batchKey, ...(opts.fanOut ? { fanOut: opts.fanOut } : {}) });
 };
 
 const ended = (w: World, generation: string, ok = true) =>
@@ -453,7 +453,53 @@ describe("RuntimeCoordinator: refusals in the legacy words", () => {
     await deep.host.release(node.id, { ok: true, text: "done" });
     const tight = world(undefined, { requests: 1 });
     send(tight, chief, "gen-1", undefined, builder, "Build it");
-    expect(() => send(tight, chief, "gen-1", undefined, tester, "Test it")).toThrow("Room handoff budget exhausted");
+    expect(() => send(tight, chief, "gen-1", undefined, tester, "Test it")).toThrow(/limit of 1 hand-offs.*nobody can reset it, the person included/s);
+  });
+
+  it("counts one call to several teammates as one request against the budget", () => {
+    const w = world(undefined, { requests: 1 });
+    const { node: first } = send(w, chief, "gen-1", undefined, builder, "Review it", { fanOut: "call-1" });
+    const { node: second } = send(w, chief, "gen-1", undefined, tester, "Review it", { fanOut: "call-1" });
+    expect([first.status, second.status]).toEqual(["queued", "queued"]);
+    expect(() => send(w, chief, "gen-1", undefined, { botId: "scout", threadId: "scout-work" }, "Review it", { fanOut: "call-2" })).toThrow(/limit of 1 hand-offs/);
+  });
+
+  it("parks handed-off work a person started on an approval nobody answered, and carries the answer into its next turn", async () => {
+    const asked = { ok: true, text: "Could not run the checks.", approvalAsk: "Approve it?\nDefault: Try again" };
+    const w = world((node) => node.botId === "builder" && node.executions === 1 ? asked : undefined);
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Run the checks");
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(node.id)).toMatchObject({ status: "waiting", question: "Approve it?\nDefault: Try again" });
+    expect(w.host.parks.map(p => p.question)).toEqual(["Approve it?\nDefault: Try again"]);
+    expect(w.host.reports).toEqual([]);
+    expect(w.coordinator.answerNode(node.id, "Try again")).toBe(true);
+    w.coordinator.tick(); await flush();
+    expect(w.host.runs.filter(r => r.node.botId === "builder").at(-1)!.text).toContain("The person answered: \"Try again\"");
+    expect(w.coordinator.node(node.id)?.status).toBe("completed");
+  });
+
+  it("parks a turn that failed for want of the approval too, but not a stalled one", async () => {
+    const failed = { ok: false, text: "One or more tool operations failed or were denied", approvalAsk: "Approve it?" };
+    const w = world((node) => node.botId === "builder" ? failed : node.botId === "tester" ? { ...failed, stalled: true } : undefined);
+    const { node: denied } = send(w, chief, "gen-1", undefined, builder, "Run the checks");
+    const { node: stuck } = send(w, chief, "gen-1", undefined, tester, "Run the checks");
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(denied.id)?.status).toBe("waiting");
+    expect(w.coordinator.node(stuck.id)).toMatchObject({ status: "failed", outcome: "stalled" });
+  });
+
+  it("leaves a bot's own question, and work no person started, on their usual path", async () => {
+    const own = world(() => ({ ok: true, text: "NEEDS INPUT: Which region?", approvalAsk: "Approve it?" }));
+    const { node } = send(own, chief, "gen-1", undefined, builder, "Run the checks");
+    own.coordinator.tick(); await flush();
+    expect(own.coordinator.node(node.id)?.question).toBe("Which region?");
+
+    const routine = world((n) => n.botId === "builder" ? { ok: true, text: "It did not run.", approvalAsk: "Approve it?" } : undefined);
+    routine.coordinator.beginTurn({ id: "gen-1", address: chief, brief: "Nightly", level: "ask",
+      opener: { requester: { kind: "routine_run", runId: "run-1" }, origin: { kind: "routine", source: "routine" } } });
+    const { node: nightly } = routine.coordinator.enqueue(chief, "gen-1", undefined, builder, "Run the checks");
+    routine.coordinator.tick(); await flush();
+    expect(routine.coordinator.node(nightly.id)).toMatchObject({ status: "completed", result: "It did not run." });
   });
 
   it("lets one Chief turn brief a room of 25 visitors and starts every one of them", async () => {

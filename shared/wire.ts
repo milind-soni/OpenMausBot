@@ -26,7 +26,7 @@ import type { QuestionRequestCardData } from "./ask-question.ts";
 import type { AutomationLine, RoutineRunCardData } from "./routine-run.ts";
 import type { WidgetPayload } from "./widget.ts";
 import type { AppFromRef, AppPayload, AppPointedRef } from "./app.ts";
-import type { GroupGoalRunCardData } from "./group-goal-run.ts";
+import type { GroupGoalRunCardData } from "./group-goal-run.ts"; import type { BurstCardData } from "./burst.ts";
 import type { RuntimeEvent } from "./runtime-events.ts";
 import type { NotificationLogEntry } from "./notification.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
@@ -92,7 +92,7 @@ export interface TaskOpenedBy {
   /** What kind of conversation the opener made this: "pair" is the one
    * durable conversation between two bots; "work" closes itself once its
    * result has been reported. */
-  kind?: "pair" | "work";
+  kind?: "pair" | "work"; /** The burst this thread is one part of: it is listed under that burst's card, not on its own. */ burstId?: string;
   /** The opener's own conversation this "work" thread was opened from.
    * Everything that conversation later sends this bot continues here. */
   threadId?: string;
@@ -454,7 +454,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget" | "app";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "burst" | "digest" | "compaction" | "call" | "widget" | "app";
   text?: string;
   digest?: TurnDigest;
   /** kind "compaction" with no `compaction` record: the engine condensed its own session. A marker for people, never context. */
@@ -494,7 +494,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** signin rows: the bot asked the person to sign in to a site themselves. */
   signIn?: SignInRequestCardData;
   /** One idempotently updated status card for a routine run. */
-  routineRun?: RoutineRunCardData;
+  routineRun?: RoutineRunCardData; /** The card a burst shows in its parent chat: first a preview, then its progress. */ burst?: BurstCardData;
   automation?: AutomationLine;
   /** Terminal receipt for a bounded multi-bot channel goal. */
   goalRun?: GroupGoalRunCardData;

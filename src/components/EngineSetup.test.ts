@@ -364,4 +364,18 @@ describe("Ollama setup", () => {
     expect(markup).toContain("Ollama isn&#x27;t running at http://127.0.0.1:11434");
     expect(markup).not.toContain("API key");
   });
+
+  it("says it in the app's own words when the engine names the problem, with the command to run", () => {
+    vi.stubGlobal("window", { ogb: { platform: "darwin" } });
+    const ollama: InstanceInfo = {
+      instanceId: "openaiCompat", driverKind: "openai-compat", displayName: "Ollama", access: "api", serverKind: "ollama",
+      models: { default: "", options: [] },
+      snapshot: { state: "unavailable", reason: "Ollama has no models yet.", ollama: { state: "no-models", url: "http://127.0.0.1:11434" } },
+    };
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: ollama })));
+    expect(markup).toContain('data-ollama-state="no-models"');
+    expect(markup).toContain("ollama pull llama3.2");
+    expect(markup).toContain("Check again");
+    expect(markup).not.toContain("Ollama has no models yet.");
+  });
 });

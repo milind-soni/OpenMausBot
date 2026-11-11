@@ -1537,10 +1537,9 @@ export class RoutineManager {
     }
   }
 
-  /** Lands at the end of the running save batch (server/save-batch.ts); what a caller rolls back on failure uses save. */
-  private saveLater() { saveSoon(this, () => this.save()); }
+  /** Lands at the end of the running save batch (server/save-batch.ts); what a caller rolls back on failure uses save. */ private saveLater() { saveSoon(this, () => this.save()); }
   private save() {
-    this.progress.written(); if (this.unreadable) return;
+    if (this.unreadable) { this.progress.written(); return; }
     // Evict only terminal receipts: an active one owns cancellation, timeout and event routing.
     let excess = this.runs.length - MAX_RUNS;
     for (let index = 0; index < this.runs.length && excess > 0;) {
@@ -1563,5 +1562,6 @@ export class RoutineManager {
       ...(this.ownerNotices.length ? { ownerNotices: this.ownerNotices } : {}),
       ...(this.holds.length ? { holds: this.holds } : {}),
     } satisfies RoutineFile));
+    this.progress.written();
   }
 }

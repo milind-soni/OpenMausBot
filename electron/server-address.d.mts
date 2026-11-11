@@ -1,5 +1,6 @@
 export declare const PAIRING_CODE_ALPHABET: string;
 export declare const PAIRING_CODE_LENGTH: number;
+export declare const DEFAULT_PORT: number;
 export declare const EXAMPLE_ADDRESS: string;
 
 export type PairingCodeProblem = "emailCode" | "oldCode" | "scriptKey" | "notACode";

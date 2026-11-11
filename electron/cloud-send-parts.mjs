@@ -41,6 +41,7 @@ export const EMPTY = "-";
 export const MOVE_LINE = "one-home";
 /** What My Cloud's page closes the line of a bot moving into a team by. */
 export const TEAM_MOVE_LINE = "team-move";
+export const BOT_MOVE_LINE = "bot-move";
 /** Logins, 1Password and saved secrets are compared by when they changed, never by their secrets: two sides that both
  * have one were set up on their own, and from then on a change here goes. */
 const CONTENT_COMPARED = new Set(["bot", "skill", "setting", ...MOVE_KINDS]);
@@ -67,7 +68,7 @@ const HASH = /^[\w:.-]{1,80}$/u;
 export function parseSendSummary(value) {
   if (!record(value) || value.v !== 1 || !Array.isArray(value.items)) return null;
   const items = [];
-  for (const item of value.items.slice(0, 20_000)) {
+  for (const item of value.items.slice(0, 200_000)) {
     if (!record(item) || typeof item.key !== "string" || !KEY.test(item.key) || !KINDS.includes(item.kind) || !record(item.parts)) continue;
     const parts = Object.fromEntries(Object.entries(item.parts).filter(([part, hash]) => PART.test(part) && typeof hash === "string" && HASH.test(hash)));
     items.push({

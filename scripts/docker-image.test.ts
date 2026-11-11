@@ -339,6 +339,9 @@ describe("container images", () => {
     for (const [file, caddyfile] of [["../compose.yaml", "../deploy/local/Caddyfile"], ["../deploy/docker-compose.yml", "../deploy/Caddyfile"]]) {
       const { services, volumes } = parse(readFileSync(new URL(file, import.meta.url), "utf8"));
       expect(services.caddy.network_mode, file).toBeUndefined();
+      // `OMB_PHONE_RELAY=1` in .env reaches the server, never Caddy.
+      expect(Object.keys(services.omb.environment), file).toContain("OMB_PHONE_RELAY");
+      expect(Object.keys(services.caddy.environment ?? {}), file).not.toContain("OMB_PHONE_RELAY");
       expect(services.omb.ports, file).toBeUndefined();
       expect(services.caddy.ports.length, file).toBeGreaterThan(0);
       expect(services.omb.volumes, file).toContain("edge:/run/openmausbot");

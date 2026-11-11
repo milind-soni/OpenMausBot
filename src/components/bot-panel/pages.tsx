@@ -140,6 +140,7 @@ export function RoutinesPage({ bot, derived }: PageContext) {
       <RoutineList
         routines={derived.botRoutines}
         runs={state.routineRuns}
+        pausedBots={state.config?.pausedBots}
         loading={state.routinesLoadState === "loading" && derived.botRoutines.length === 0}
         error={state.routinesLoadState === "error"}
         onOpen={setEditing}
@@ -368,15 +369,12 @@ export function SkillsPage({ bot }: PageContext) {
 
   const remove = async (skill: ManagedSkill) => {
     if (skills.working) return;
-    if (!window.confirm(t("botPanel.skills.removeConfirm", { name: skill.name }))) return;
+    if (!window.confirm(t(skill.origin === "library" ? "skills.unassignConfirm" : "botPanel.skills.removeConfirm", { name: skill.name }))) return;
     skills.setWorking(skill.name);
     skills.setError("");
     try {
-      if (skill.origin === "library") await skills.putAssignments(skill.name, true);
-      else {
-        await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, { method: "DELETE" });
-        await skills.refresh();
-      }
+      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, { method: "DELETE" });
+      await skills.refresh();
     } catch (cause) {
       skills.setError(errorText(cause, t("botPanel.skills.removeFailed")));
     } finally {
@@ -427,7 +425,7 @@ export function SkillsPage({ bot }: PageContext) {
             checked={skillSwitchOn(skill)}
             disabled={Boolean(skills.working)}
             onChange={() => void skills.toggle(skill)}
-            extra={<TrashButton data-panel-action={`remove-skill:${skill.name}`} label={t("botPanel.skills.remove", { name: skill.name })} disabled={Boolean(skills.working)} onClick={() => void remove(skill)} />}
+            extra={skill.origin === "imported" || skill.origin === "native" ? undefined : <TrashButton data-panel-action={`remove-skill:${skill.name}`} label={t("botPanel.skills.remove", { name: skill.name })} disabled={Boolean(skills.working)} onClick={() => void remove(skill)} />}
           />
         ))}
         {skills.error && !skills.reviewing && <NoteRow tone="warn">{skills.error}</NoteRow>}

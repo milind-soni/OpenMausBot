@@ -73,6 +73,11 @@
 //   FAKE_ACP_CANCEL_STOP_REASON  the stopReason a cancelled hanging prompt answers (default cancelled; OpenCode answers end_turn)
 //   FAKE_ACP_HANG_ONCE_FILE  with FAKE_ACP_HANG_ON, only the first matching prompt hangs; it writes this file
 //   FAKE_ACP_HOLD_FILE  while this file exists, a session/prompt waits before it is answered
+//   FAKE_ACP_MODE=hermes-steer  hermes-agent's ACP `/steer`: sessions advertise `steer`; a prompt says "working. ", waits for
+//     FAKE_ACP_GATE_FILE, then says "done" and every steer it took; `/steer <text>` during it answers "⏩ Steer queued for
+//     the active turn: …" (FAKE_ACP_STEER_FAIL=1: "⚠️ Steer failed: …"; =rpc: a JSON-RPC error), and with no prompt running it runs <text>
+//     as a prompt that says "ran: <text>". FAKE_ACP_STEER_HOLD_FILE holds a `/steer` while it exists;
+//     FAKE_ACP_HERMES_COMMANDS lists the commands sessions advertise (default help,steer,queue).
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -660,6 +665,63 @@ function heldByHoldFile(msg: any): boolean {
   return true;
 }
 
+function advertiseHermesCommands(sessionId: string) {
+  out({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "available_commands_update",
+    availableCommands: (process.env.FAKE_ACP_HERMES_COMMANDS ?? "help,steer,queue").split(",").map((name) => ({ name, description: name })) } } });
+}
+
+let hermesTurn: { steers: string[] } | null = null;
+/** hermes-agent's prompt, `/steer` included, as acp_adapter/server.py and commands.py answer them. */
+function hermesPrompt(msg: any) {
+  const text = (Array.isArray(msg.params?.prompt) ? msg.params.prompt : []).map((block: any) => block?.text ?? "").join("").trim();
+  const say = (line: string) => out({ jsonrpc: "2.0", method: "session/update",
+    params: { sessionId: msg.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: line } } } });
+  const steer = /^\/steer\s+([\s\S]+)$/.exec(text)?.[1]?.trim();
+  const held = process.env.FAKE_ACP_STEER_HOLD_FILE;
+  if (steer !== undefined && held && existsSync(held)) {
+    const poll = setInterval(() => {
+      if (existsSync(held)) return;
+      clearInterval(poll);
+      hermesPrompt(msg);
+    }, 50);
+    return;
+  }
+  if (steer !== undefined && hermesTurn) {
+    recordMethod("session/prompt.steer");
+    if (process.env.FAKE_ACP_STEER_FAIL === "rpc") {
+      out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "unsupported_control" } });
+      return;
+    }
+    if (process.env.FAKE_ACP_STEER_FAIL === "1") say("⚠️ Steer failed: the agent is compressing its context");
+    else {
+      hermesTurn.steers.push(steer);
+      say(`⏩ Steer queued for the active turn: ${steer.slice(0, 80)}${steer.length > 80 ? "..." : ""}\n`);
+    }
+    result(msg.id, { stopReason: "end_turn" });
+    return;
+  }
+  if (steer !== undefined) {
+    say(`ran: ${steer}`);
+    result(msg.id, { stopReason: "end_turn", _meta: { inputTokens: 3, outputTokens: 2 } });
+    return;
+  }
+  const turn = { steers: [] as string[] };
+  hermesTurn = turn;
+  say("working. ");
+  const finish = () => {
+    hermesTurn = null;
+    say(`done${turn.steers.length ? `; steered: ${turn.steers.join(" | ")}` : ""}`);
+    result(msg.id, { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } });
+  };
+  const gate = process.env.FAKE_ACP_GATE_FILE;
+  if (!gate || existsSync(gate)) return finish();
+  const poll = setInterval(() => {
+    if (!existsSync(gate)) return;
+    clearInterval(poll);
+    finish();
+  }, 50);
+}
+
 /** Applies one ACP message while preserving the fake CLI's launcher-owned MCP behavior. */
 function handle(msg: any) {
   if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined) && msg.id === pendingAskQuestionId) {
@@ -773,6 +835,7 @@ function handle(msg: any) {
         ...(opts ? { configOptions: opts } : {}),
         ...(mdls ? { models: mdls } : {}),
       }, "session/new", liveSession);
+      if (mode === "hermes-steer") advertiseHermesCommands(liveSession);
       break;
     }
     case "session/close":
@@ -815,6 +878,7 @@ function handle(msg: any) {
       const mdls = sessionModels();
       liveSession = typeof msg.params?.sessionId === "string" ? msg.params.sessionId : liveSession;
       resultAndConfigUpdates(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) }, "session/load", msg.params.sessionId);
+      if (mode === "hermes-steer") advertiseHermesCommands(msg.params.sessionId);
       break;
     }
     case "session/resume": {
@@ -946,6 +1010,10 @@ function handle(msg: any) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.prompt.json`, JSON.stringify(msg.params?.prompt ?? null, null, 2));
       }
       if (failRpc(msg)) return;
+      if (mode === "hermes-steer") {
+        hermesPrompt(msg);
+        return;
+      }
       if (process.env.FAKE_ACP_TOOL_LIMIT) {
         const limit = Number(process.env.FAKE_ACP_TOOL_LIMIT);
         const handshake = process.env.FAKE_ACP_MCP_HANDSHAKE ? JSON.parse(process.env.FAKE_ACP_MCP_HANDSHAKE) : GROK_MCP_HANDSHAKE;

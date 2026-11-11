@@ -6,9 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { augmentedPath } from "../env-path.ts";
 import { MESSAGE_FILE_MAX_BYTES } from "../message-file.ts";
 import { Ajv2020 } from "ajv/dist/2020.js";
-import { ChatToolSessionError, SAVED_RESULTS_FOLDER, SAVED_RESULTS_KEPT, chatToolNotices, directServers, mountChatTools, trimmedToolsNotice, type ChatToolSession } from "./chat-mcp-tools.ts";
+import { ChatMcpClient, ChatToolSessionError, SAVED_RESULTS_FOLDER, SAVED_RESULTS_KEPT, chatToolNotices, directServers, mcpStartupMs, mountChatTools, trimmedToolsNotice, type ChatToolSession } from "./chat-mcp-tools.ts";
 import { EXECUTOR_LIKE_TOOLS } from "../testing/executor-like-tools.ts";
 import type { ToolScope } from "../../shared/tool-scope.ts";
+import type { SendTurnInput } from "../contracts.ts";
 import { catalogServer, CUA_DRIVER_WINDOWS_TOOLS, syntheticToolNames } from "../testing/cua-driver-tools.ts";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
@@ -305,30 +306,165 @@ describe("Chat MCP session", () => {
   it.each([
     ["too many tools", `reply(message, {tools:Array.from({length:2001},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
     ["invalid RPC", `process.stdout.write('{"result":1}\\n');`],
-  ])("still fails startup for a harness mount and awaits child cleanup for %s", async (_label, response) => {
+  ])("fails startup when the agents server can't start, naming it, and awaits child cleanup for %s", async (_label, response) => {
     const f = fixture(`if (message.method === "tools/list") { ${response} continue; }`);
-    await expect(f.mount(true, true)).rejects.toThrow(/MCP/);
+    await expect(mountChatTools({ agents: f.server } as SendTurnInput["integrations"], f.controller.signal)).rejects.toThrow(/^MCP server "agents" didn't start: MCP/);
     expect(alive(f.read().pid)).toBe(false);
   });
 
-  it("rejects untrusted transport error text without leaking it", async () => {
+  describe("a built-in the turn can go on without", () => {
+    const broken = `if (message.method === "tools/list") { process.stdout.write('{"result":1}\\n'); continue; }`;
+    it.each([
+      ["computer", "hostComputer"],
+      ["browser", "browser"],
+      ["email", "email"],
+      ["device", "device"],
+      ["data", "data"],
+    ] as const)("%s is left out and the turn says so, while the others still mount", async (server, key) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const dead = fixture(broken), agents = fixture();
+        // This desktop's own computer is the optional one; a Local VM is not (below).
+        const integrations = key === "hostComputer" ? { localComputer: { ...dead.server, scope: "local-computer" as const } } : { [key]: dead.server };
+        const session = await mountChatTools({ ...integrations, agents: agents.server } as SendTurnInput["integrations"], dead.controller.signal, true);
+        sessions.push(session);
+        expect(session.skipped).toEqual([{ server, reason: expect.stringMatching(/MCP/) }]);
+        expect(chatToolNotices(session).join(" ")).toContain(`MCP server "${server}" was skipped for this turn`);
+        expect(session.definitions.map((tool) => tool.function.name)).toEqual(["agents_write"]);
+        expect(alive(dead.read().pid)).toBe(false);
+      } finally { warn.mockRestore(); }
+    });
+  });
+
+  describe("a server the turn must not run without", () => {
+    const broken = `if (message.method === "tools/list") { process.stdout.write('{"result":1}\\n'); continue; }`;
+    it("fails setup, naming it, when a Local VM can't start, and leaves no server running", async () => {
+      const vm = fixture(broken), other = fixture();
+      await expect(mountChatTools({ localComputer: vm.server, data: other.server } as SendTurnInput["integrations"], vm.controller.signal, true))
+        .rejects.toThrow(/^MCP server "computer" didn't start: MCP/);
+      expect(alive(vm.read().pid)).toBe(false);
+      await vi.waitFor(() => expect(alive(other.read().pid)).toBe(false));
+    });
+
+    it.each([
+      ["a Local VM", "computer", (server: Record<string, unknown>) => ({ localComputer: server })],
+      ["the agents server", "agents", (server: Record<string, unknown>) => ({ agents: server })],
+    ] as const)("ends the turn's session when %s fails during a call, instead of going on without it", async (_label, name, integrationsOf) => {
+      const failing = fixture(`if (message.method === "tools/call") { process.exit(3); }`), other = fixture();
+      const session = await mountChatTools({ ...integrationsOf(failing.server), data: other.server } as SendTurnInput["integrations"], failing.controller.signal, true);
+      sessions.push(session);
+      await expect(session.execute(`${name}_write`, { value: "x" }, failing.controller.signal)).rejects.toBeInstanceOf(ChatToolSessionError);
+      expect(() => session.validate("data_write", { value: "y" })).toThrow(ChatToolSessionError);
+      await vi.waitFor(() => expect(alive(other.read().pid)).toBe(false));
+    });
+
+    it("goes on without this desktop's own computer when it fails during a call", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const failing = fixture(`if (message.method === "tools/call") { process.exit(3); }`), other = fixture();
+        const session = await mountChatTools({ localComputer: { ...failing.server, scope: "local-computer" }, data: other.server } as SendTurnInput["integrations"], failing.controller.signal, true);
+        sessions.push(session);
+        await expect(session.execute("computer_write", { value: "x" }, failing.controller.signal)).resolves.toMatchObject({ ok: false });
+        await expect(session.execute("data_write", { value: "y" }, failing.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:y" });
+      } finally { warn.mockRestore(); }
+    });
+  });
+
+  describe("a server that fails during a turn", () => {
+    const warnings = () => vi.spyOn(console, "warn").mockImplementation(() => {});
+    async function pair(body: string, env: Record<string, string> = {}) {
+      const failing = fixture(body), healthy = fixture();
+      const session = await mountChatTools({ custom: { audit: { ...failing.server, env: { ...failing.server.env, ...env } }, other: healthy.server } }, failing.controller.signal);
+      sessions.push(session);
+      return { failing, healthy, session, signal: failing.controller.signal };
+    }
+
+    it("takes only that server, says which and why, masks its stderr, and leaves the other tools working", async () => {
+      const warn = warnings();
+      try {
+        const token = "fixture-configured-value-77";
+        const { failing, session, signal } = await pair(`if (message.method === "tools/call") { process.stderr.write("early line\\nboom with " + process.env.API_TOKEN + " and sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123\\n"); setTimeout(() => process.exit(3), 20); return; }`, { API_TOKEN: token });
+        const result = await session.execute("audit_write", { value: "x" }, signal);
+        expect(result.ok).toBe(false);
+        expect(result.text).toContain("MCP server exited before the session closed.");
+        expect(result.text).toContain("It last said: boom with [redacted]");
+        expect(result.text).toContain('That was the MCP server "audit". It is stopped for the rest of this turn');
+        expect(result.text).not.toContain(token);
+        expect(result.text).not.toContain("abcdefghijklmnopqrstuvwxyz0123");
+        expect(alive(failing.read().pid)).toBe(false);
+
+        await expect(session.execute("other_write", { value: "y" }, signal)).resolves.toMatchObject({ ok: true, text: "recorded:y" });
+        expect(() => session.validate("other_write", { value: "y" })).not.toThrow();
+      } finally { warn.mockRestore(); }
+    });
+
+    it("never runs a call again on a server that stopped, and says why", async () => {
+      const warn = warnings();
+      try {
+        const { failing, session, signal } = await pair(`if (message.method === "tools/call") { process.exit(3); }`);
+        await session.execute("audit_write", { value: "x" }, signal);
+        const again = await session.execute("audit_write", { value: "x" }, signal);
+        expect(again.ok).toBe(false);
+        expect(again.text).toContain('MCP server exited before the session closed. That was the MCP server "audit"');
+        expect(failing.read().calls.filter((call) => call.method === "tools/call")).toHaveLength(1);
+      } finally { warn.mockRestore(); }
+    });
+
+    it("says so on the next call when the server stopped between calls", async () => {
+      const warn = warnings();
+      try {
+        const { session, signal } = await pair(`if (message.method === "tools/list") { reply(message, {tools:[{name:"write",description:"Fixture write",inputSchema:schema}]}); setTimeout(() => process.exit(0), 20); continue; }`);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        const result = await session.execute("audit_write", { value: "x" }, signal);
+        expect(result).toMatchObject({ ok: false, text: expect.stringContaining("MCP server exited before the session closed") });
+      } finally { warn.mockRestore(); }
+    });
+
+    it("still ends the turn's session when the person stops it", async () => {
+      const f = fixture(`if (message.method === "tools/call") { return; }`);
+      const session = await f.mount();
+      const stop = new AbortController();
+      const pending = session.execute("audit_write", { value: "x" }, stop.signal);
+      await vi.waitFor(() => expect(f.read().calls.some((call) => call.method === "tools/call")).toBe(true));
+      stop.abort();
+      await expect(pending).rejects.toBeInstanceOf(ChatToolSessionError);
+      expect(() => session.validate("audit_write", { value: "x" })).toThrow(ChatToolSessionError);
+    });
+  });
+
+  describe("how long a server gets to start", () => {
+    it("is about half a minute on a Cloud home and eight seconds elsewhere", () => {
+      expect(mcpStartupMs({ OMB_CLOUD_ROLE: "home" })).toBe(30_000);
+      expect(mcpStartupMs({ OMB_CLOUD_ROLE: "team" })).toBe(30_000);
+      expect(mcpStartupMs({})).toBe(8_000);
+    });
+
+    // tools/list needs a budget that outlasts the child's own start, or the overrun would land in initialize.
+    it.each([["initialize", 150], ["tools/list", 2_500]] as const)("reports an overrun in %s as a startup timeout, not as a request whose outcome is uncertain", async (method, budget) => {
+      const f = fixture(`if (message.method === "${method}") { return; }`);
+      const client = new ChatMcpClient(f.server);
+      await expect(client.tools(f.controller.signal, undefined, budget)).rejects.toThrow(/^MCP startup timed out$/);
+      await client.close();
+    });
+  });
+
+  it("keeps a server that refused a call, without leaking what it said", async () => {
     const f = fixture(`if (message.method === "tools/call") { send({jsonrpc:"2.0",id:message.id,error:{code:-1,message:"secret-fixture-key"}}); continue; }`);
     const session = await f.mount();
-    const result = await session.execute("audit_write", { value: "test" }, f.controller.signal).catch((error: Error) => error);
-    expect(result).toBeInstanceOf(ChatToolSessionError);
-    expect(String(result)).toContain("MCP request failed");
-    expect(String(result)).not.toContain("secret-fixture-key");
-    expect(alive(f.read().pid)).toBe(false);
+    const result = await session.execute("audit_write", { value: "test" }, f.controller.signal);
+    expect(result).toMatchObject({ ok: false, text: 'MCP request failed; inspect the configured integration That was the MCP server "audit".' });
+    expect(result.text).not.toContain("secret-fixture-key");
+    expect(alive(f.read().pid)).toBe(true);
   });
 
   it("rejects malformed tool content instead of accepting an empty successful result", async () => {
     const f = fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:42}]}); continue; }`);
     const session = await f.mount();
-    const pending = session.execute("audit_write", {value:"test"}, f.controller.signal);
-    await expect(pending).rejects.toBeInstanceOf(ChatToolSessionError);
-    await expect(pending).rejects.toThrow("invalid content");
-    expect(alive(f.read().pid)).toBe(false);
-    expect(() => session.validate("audit_write", {value:"test"})).toThrow(ChatToolSessionError);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(session.execute("audit_write", {value:"test"}, f.controller.signal)).resolves.toMatchObject({ ok: false, text: expect.stringContaining("invalid content") });
+      expect(alive(f.read().pid)).toBe(false);
+    } finally { warn.mockRestore(); }
   });
 
   it("keeps schema errors recoverable without dispatching or closing the transport", async () => {
@@ -1037,13 +1173,13 @@ describe("Chat MCP schema validation", () => {
   it("keeps a bounded frame limit for image-enabled custom servers", async () => {
     const f = fixture('if(message.method === "tools/call") { process.stdout.write("x".repeat(32*1024*1024+1)); continue; }');
     const session = await f.mount(true);
-    await expect(session.execute("audit_write", { value: "large" }, f.controller.signal)).rejects.toThrow(/frame|limit/i);
+    await expect(session.execute("audit_write", { value: "large" }, f.controller.signal)).resolves.toMatchObject({ ok: false, text: expect.stringMatching(/frame|limit/i) });
   });
 
   it("rejects malformed image results without claiming execution success", async () => {
     const f = fixture('if(message.method === "tools/call") { reply(message,{content:[{type:"image",mimeType:"image/png",data:"not-base64"}]}); continue; }');
     const session = await f.mount(true);
-    await expect(session.execute("audit_write", { value: "screenshot" }, f.controller.signal)).rejects.toThrow("Invalid or oversized MCP image");
+    await expect(session.execute("audit_write", { value: "screenshot" }, f.controller.signal)).resolves.toMatchObject({ ok: false, text: expect.stringContaining("Invalid or oversized MCP image") });
   });
   it.each([
     { type: "object", properties: { value: { type: "string", minLength: 2 } }, required: ["value"] },
@@ -1165,7 +1301,7 @@ describe("Chat MCP schema validation", () => {
     const f = fixture(delayed);
     const short = await mountChatTools({ custom: { audit: f.server } }, f.controller.signal, false, undefined, 100);
     sessions.push(short);
-    await expect(short.execute("audit_write", { value: "x" }, f.controller.signal)).rejects.toThrow("MCP request timed out");
+    await expect(short.execute("audit_write", { value: "x" }, f.controller.signal)).resolves.toMatchObject({ ok: false, text: expect.stringContaining("MCP request timed out") });
     await expect(f.read().calls.filter((call) => call.method === "tools/call")).toHaveLength(1);
 
     const long = await mountChatTools({ custom: { audit: f.server } }, f.controller.signal, false, undefined, 5_000);

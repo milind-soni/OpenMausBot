@@ -3349,7 +3349,6 @@
   "vm.isolation.shared": "Paylaşılan",
   "vm.isolation.perBot": "Bot başına",
   "vm.isolation.max": "Maksimum bot başına masaüstü",
-  "vm.isolation.maxDetail": "Depolama ve ana makine kaynak kullanımını sınırlar; çalışan her masaüstü en fazla 4 GB bellek ve 2 CPU kullanabilir.",
   "vm.isolation.maxAria": "Maksimum bot başına masaüstü",
   "vm.idle.label": "Boşta kalan masaüstlerini şu süreden sonra durdur:",
   "vm.idle.detail": "Paylaşılan ve bot başına masaüstleri için geçerlidir. Sırası devam eden bir masaüstü asla durdurulmaz. Boşta kalma durumunda kapatma, dosyaları ve yüklü uygulamaları korur.",
@@ -5583,5 +5582,12 @@
   "settings.simple.more.title": "Diğer ayarlar",
   "settings.simple.more.subtitle": "Yedekler, sınırlar ve nadiren değiştirdiğiniz ayarlar.",
   "settings.simple.more.limits": "Sınırlar",
-  "settings.simple.more.open": "Aç"
+  "settings.simple.more.open": "Aç",
+  "phoneUpdate.title": "Telefonunuzda MausBot'u güncelleyin",
+  "phoneUpdate.body": "{phone} cihazında MausBot uygulamasının eski bir sürümü var ve artık Wi-Fi ağınızın dışından bu bilgisayara bağlanamıyor. O telefonda uygulamayı güncelleyin, ardından bu bilgisayarla aynı Wi-Fi ağındayken bir kez açın. Yeniden bağlanmazsa yeniden eşleştirin.",
+  "phoneUpdate.bodyMany": "{count} telefonunuzda MausBot uygulamasının eski bir sürümü var ve artık Wi-Fi ağınızın dışından bu bilgisayara bağlanamıyor. Her telefonda uygulamayı güncelleyin, ardından bu bilgisayarla aynı Wi-Fi ağındayken bir kez açın. Yeniden bağlanmazsa yeniden eşleştirin.",
+  "phoneUpdate.open": "Telefon ve cihazlar'ı aç",
+  "remote.devices.pairAgain": "Yeniden eşleştir",
+  "remote.devices.retired": "Bu telefonda MausBot uygulamasının eski bir sürümü var. Uygulamayı güncelleyin, ardından bu bilgisayarla aynı Wi-Fi ağındayken bir kez açın. Yeniden bağlanmazsa burada yeniden eşleştirin.",
+  "remote.devices.retiredNotice": "Telefonlar artık bu bilgisayara MausBot Relay üzerinden ulaşıyor ve eski güvenli bağlantı kapatıldı. MausBot uygulamasının eski bir sürümüne sahip bir telefon artık Wi-Fi ağınızın dışından bağlanamıyor. O telefonda MausBot uygulamasını güncelleyin, ardından bu bilgisayarla aynı Wi-Fi ağındayken bir kez açın. Yeniden bağlanmazsa burada yeniden eşleştirin."
 }

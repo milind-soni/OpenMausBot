@@ -3349,7 +3349,6 @@
   "vm.isolation.shared": "Dùng chung",
   "vm.isolation.perBot": "Riêng cho từng bot",
   "vm.isolation.max": "Số desktop tối đa cho từng bot",
-  "vm.isolation.maxDetail": "Giới hạn dung lượng lưu trữ và mức sử dụng tài nguyên của máy host; mỗi desktop đang chạy có thể sử dụng tối đa 4 GB và 2 CPU.",
   "vm.isolation.maxAria": "Số desktop tối đa cho từng bot",
   "vm.idle.label": "Dừng desktop không hoạt động sau",
   "vm.idle.detail": "Áp dụng cho desktop dùng chung và riêng cho từng bot. Desktop đang chạy một lượt sẽ không bao giờ bị dừng. Tắt máy khi không hoạt động vẫn giữ nguyên các tệp và ứng dụng đã cài đặt.",
@@ -5583,5 +5582,12 @@
   "settings.simple.more.title": "Cài đặt khác",
   "settings.simple.more.subtitle": "Sao lưu, giới hạn và các cài đặt bạn ít khi thay đổi.",
   "settings.simple.more.limits": "Giới hạn",
-  "settings.simple.more.open": "Mở"
+  "settings.simple.more.open": "Mở",
+  "phoneUpdate.title": "Cập nhật MausBot trên điện thoại",
+  "phoneUpdate.body": "{phone} đang dùng phiên bản cũ của ứng dụng MausBot, nên không thể kết nối với máy tính này khi ở ngoài Wi-Fi của bạn nữa. Hãy cập nhật ứng dụng trên điện thoại đó, rồi mở nó một lần khi ở cùng Wi-Fi với máy tính này. Nếu vẫn không kết nối lại, hãy ghép nối lại.",
+  "phoneUpdate.bodyMany": "{count} điện thoại của bạn đang dùng phiên bản cũ của ứng dụng MausBot, nên không thể kết nối với máy tính này khi ở ngoài Wi-Fi của bạn nữa. Hãy cập nhật ứng dụng trên từng điện thoại, rồi mở nó một lần khi ở cùng Wi-Fi với máy tính này. Nếu vẫn không kết nối lại, hãy ghép nối lại.",
+  "phoneUpdate.open": "Mở Điện thoại và thiết bị",
+  "remote.devices.pairAgain": "Ghép nối lại",
+  "remote.devices.retired": "Điện thoại này đang dùng phiên bản cũ của ứng dụng MausBot. Hãy cập nhật ứng dụng, rồi mở nó một lần khi ở cùng Wi-Fi với máy tính này. Nếu vẫn không kết nối lại, hãy ghép nối lại tại đây.",
+  "remote.devices.retiredNotice": "Giờ điện thoại kết nối với máy tính này qua MausBot Relay, và liên kết bảo mật cũ đã bị tắt. Điện thoại dùng phiên bản cũ của ứng dụng MausBot không thể kết nối khi ở ngoài Wi-Fi của bạn nữa. Hãy cập nhật ứng dụng MausBot trên điện thoại đó, rồi mở nó một lần khi ở cùng Wi-Fi với máy tính này. Nếu vẫn không kết nối lại, hãy ghép nối lại tại đây."
 }

@@ -3948,7 +3948,6 @@
   "vm.isolation.subtitle": "Condiviso mantiene il comportamento originale a un solo desktop. Per bot dà a ogni bot un proprio container, una cartella, una porta del visore, una concessione e un timer di inattività.",
   "vm.isolation.shared": "Condiviso",
   "vm.isolation.max": "Numero massimo di desktop per bot",
-  "vm.isolation.maxDetail": "Limita lo spazio e l'uso delle risorse dell'host; ogni desktop in esecuzione può usare fino a 4 GB e 2 CPU.",
   "vm.isolation.maxAria": "Numero massimo di desktop per bot",
   "vm.idle.label": "Ferma i desktop inattivi dopo",
   "vm.idle.detail": "Vale per i desktop condivisi e per bot. Un desktop con un turno in corso non viene mai fermato. Lo spegnimento per inattività conserva i file e le app installate.",
@@ -6704,5 +6703,12 @@
   "settings.simple.more.title": "Altre impostazioni",
   "settings.simple.more.subtitle": "Backup, limiti e impostazioni che cambi di rado.",
   "settings.simple.more.limits": "Limiti",
-  "settings.simple.more.open": "Apri"
+  "settings.simple.more.open": "Apri",
+  "phoneUpdate.title": "Aggiorna MausBot sul telefono",
+  "phoneUpdate.body": "{phone} ha una versione precedente dell'app MausBot, che non può più collegarsi a questo computer fuori dalla tua Wi-Fi. Aggiorna l'app su quel telefono, poi aprila una volta sulla stessa Wi-Fi di questo computer. Se non si ricollega, abbinalo di nuovo.",
+  "phoneUpdate.bodyMany": "{count} dei tuoi telefoni hanno una versione precedente dell'app MausBot, che non può più collegarsi a questo computer fuori dalla tua Wi-Fi. Aggiorna l'app su ogni telefono, poi aprila una volta sulla stessa Wi-Fi di questo computer. Se non si ricollega, abbinalo di nuovo.",
+  "phoneUpdate.open": "Apri Telefono e dispositivi",
+  "remote.devices.pairAgain": "Abbina di nuovo",
+  "remote.devices.retired": "Questo telefono ha una versione precedente dell'app MausBot. Aggiorna l'app, poi aprila una volta sulla stessa Wi-Fi di questo computer. Se non si ricollega, abbinalo di nuovo qui.",
+  "remote.devices.retiredNotice": "Ora i telefoni raggiungono questo computer tramite MausBot Relay, e il vecchio collegamento sicuro è stato disattivato. Un telefono con una versione precedente dell'app MausBot non può più collegarsi fuori dalla tua Wi-Fi. Aggiorna l'app MausBot su quel telefono, poi aprila una volta sulla stessa Wi-Fi di questo computer. Se non si ricollega, abbinalo di nuovo qui."
 }
