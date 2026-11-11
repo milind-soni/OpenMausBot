@@ -7,6 +7,7 @@ import "./styles/shell.css";
 import "./styles/project.css";
 import "./styles/board.css";
 import "./styles/issue.css";
+import "./styles/issue-page.css";
 import "./styles/inbox.css";
 import "./styles/chat.css";
 import "./styles/call.css";

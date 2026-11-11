@@ -21,9 +21,12 @@ export const VaultPanel = lazyComponent(() => import("./project-library").then(m
 export const FeedbackView = lazyComponent(() => import("./feedback-view").then(module => module.FeedbackView), <DelayedSkeleton label="Loading feedback" />);
 export const VoiceChatView = lazyComponent(() => import("./call-view").then(module => module.VoiceChatView));
 export const ProjectMembers = lazyComponent(() => import("./project-members").then(module => module.ProjectMembers));
+export const IssueRouteView = lazyComponent(() => import("./issue-route-view").then(module => module.IssueRouteView), <ContentSkeleton label="Opening issue" />);
+export const CommandMenu = lazyComponent(() => import("./command-menu").then(module => module.CommandMenu));
+export const ShortcutsDialog = lazyComponent(() => import("./command-menu").then(module => module.ShortcutsDialog));
 
 // Most used first: an issue, a new issue, then the other views.
-const preloads: Array<() => Promise<unknown>> = [TaskModal, IssueComposer, InboxView, ChatView, AssetsPanel, VaultPanel, FeedbackView, ProjectMembers, VoiceChatView, WorkspaceSettings, MemberProfile, CreateWorkspaceDialog].map(view => view.preload);
+const preloads: Array<() => Promise<unknown>> = [IssueRouteView, TaskModal, IssueComposer, CommandMenu, InboxView, ChatView, AssetsPanel, VaultPanel, FeedbackView, ProjectMembers, VoiceChatView, WorkspaceSettings, MemberProfile, CreateWorkspaceDialog, ShortcutsDialog].map(view => view.preload);
 
 let scheduled = false;
 /** Fetches every deferred view in the background, one after another, once the page is idle. */

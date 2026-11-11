@@ -3,7 +3,7 @@ import { errorText } from "@/lib/error-text";
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { ChevronRight, Circle, Loader2 } from "lucide-react";
+import { ChevronRight, Circle, Loader2, Tag } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { isDraftColumn } from "@/lib/origin-columns";
@@ -14,17 +14,19 @@ import { IssueSelect } from "./issue-select";
 import { ProjectIcon } from "./project-icon";
 import { rankSearchResults } from "@/lib/search-ranking";
 import { RECONNECT_TO_CREATE, useWorkspaceOnline } from "./workspace-connection";
+import { LabelChips, LabelPicker } from "./issue-labels";
+import { suggestLabels } from "@/lib/command-menu";
 
 type Priority = "low" | "medium" | "high";
-type Draft = { title: string; description: string; columnId: string; priority: Priority; assignee: string; dueDate: string };
+type Draft = { title: string; description: string; columnId: string; priority: Priority; assignee: string; dueDate: string; labels: string[] };
 
-const EMPTY_DRAFT: Draft = { title: "", description: "", columnId: "", priority: "medium", assignee: "", dueDate: "" };
+const EMPTY_DRAFT: Draft = { title: "", description: "", columnId: "", priority: "medium", assignee: "", dueDate: "", labels: [] };
 const draftKey = (projectId: string) => `origin.issueDraft.${projectId}`;
 /** Unsent issue drafts live in this browser, one per project, so closing the composer never loses typed text. */
 function readDraft(projectId: string): Draft | null {
   try {
     const value = JSON.parse(localStorage.getItem(draftKey(projectId)) || "null") as Partial<Draft> | null;
-    return value && (value.title || value.description) ? { ...EMPTY_DRAFT, ...value } : null;
+    return value && (value.title || value.description) ? { ...EMPTY_DRAFT, ...value, labels: Array.isArray(value.labels) ? value.labels.filter(label => typeof label === "string") : [] } : null;
   } catch { return null; }
 }
 function writeDraft(projectId: string, draft: Draft | null) {
@@ -72,6 +74,7 @@ export function IssueComposer({
   const members = useQuery(api.members.people, projectId ? { sessionToken, projectId } : "skip");
   const me = useQuery(api.auth.me, { sessionToken });
   const create = useMutation(api.tasks.createTask);
+  const saveLabels = useMutation(api.issueRelations.labels);
   const ensureColumns = useMutation(api.tasks.ensureDefaultColumns);
   const columns = board?.columns.filter((c) => !(c.isDone ?? c.title.toLowerCase() === "done")) || [];
   const selectedColumn = columns.find((c) => c._id === draft.columnId) || columns.find(column => !isDraftColumn(column)) || columns[0];
@@ -116,6 +119,8 @@ export function IssueComposer({
         ...(draft.assignee ? { assignedToEmail: draft.assignee } : {}),
         ...(draft.dueDate ? { dueDate: draft.dueDate } : {}),
       });
+      // Labels go on right after; the issue exists either way, so a label error does not lose it.
+      if (draft.labels.length) await saveLabels({ sessionToken, taskId, labels: draft.labels }).catch(() => undefined);
       dirty.current = false;
       writeDraft(projectId, null);
       onCreated(projectId, taskId);
@@ -194,7 +199,14 @@ export function IssueComposer({
               dueDate={draft.dueDate}
               onDueDateChange={dueDate => update({ dueDate })}
               disabled={busy}
-            />
+            >
+              <LabelPicker value={draft.labels} onChange={labels => update({ labels })} suggestions={suggestLabels(`${draft.title} ${draft.description}`, draft.labels)} disabled={busy}
+                className="composer-labels" trigger={() => draft.labels.length ? <LabelChips labels={draft.labels} max={3} /> : <><Tag size={13} /><span>Labels</span></>} />
+            </IssueFields>
+            {suggestLabels(`${draft.title} ${draft.description}`, draft.labels).length > 0 && <div className="composer-label-suggestions" aria-label="Suggested labels">
+              <span>Suggested</span>
+              {suggestLabels(`${draft.title} ${draft.description}`, draft.labels).map(label => <button key={label} type="button" className="ghost-button compact" onClick={() => update({ labels: [...draft.labels, label] })}><LabelChips labels={[label]} /></button>)}
+            </div>}
             <footer className="issue-composer-footer">
               {error ? <div role="alert" className="issue-field-error">{error}</div> : <span />}
               <button type="submit" className="primary-button compact issue-create-submit" aria-keyshortcuts="Control+Enter Meta+Enter" title={!online ? RECONNECT_TO_CREATE : undefined} disabled={!online || busy || !selectedColumn}>

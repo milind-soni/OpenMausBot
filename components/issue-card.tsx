@@ -4,12 +4,14 @@ import { memo, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as Reac
 import clsx from "clsx";
 import { CalendarDays, Check, MoreHorizontal, UserRound } from "lucide-react";
 import type { Doc } from "@/convex/_generated/dataModel";
-import { displayName, formatDue } from "@/lib/format";
+import { displayName, formatDate, formatDue } from "@/lib/format";
 import { taskKey } from "@/lib/project-issues";
 import { GitHubIssueIndicator, type LinkedPullRequest } from "./github-issue-indicator";
 import { PriorityIcon, StatusIcon } from "./issue-icons";
 import { UserAvatar } from "./user-avatar";
 import type { TaskMenuAnchor, TaskMenuView } from "./task-actions-menu";
+import { LabelChips } from "./issue-labels";
+import type { DisplayProperty } from "@/lib/issue-view";
 
 type Task = Doc<"tasks">;
 export type CardPerson = { email: string; name?: string; username?: string; avatarUrl?: string | null };
@@ -34,7 +36,10 @@ type IssueItemProps = {
   onKeyDown: (event: ReactKeyboardEvent<HTMLElement>, task: Task) => void;
   onFocus: (taskId: string) => void;
   onPointerDown: (event: ReactPointerEvent<HTMLElement>, taskId: string) => void;
+  /** Display options: which properties show (all when omitted). */
+  properties?: ReadonlySet<DisplayProperty>;
 };
+const shows = (properties: ReadonlySet<DisplayProperty> | undefined, property: DisplayProperty) => !properties || properties.has(property);
 
 export type IssueCardProps = IssueItemProps & {
   /** The pull request linked to the issue, if any (from the board query). */
@@ -106,22 +111,13 @@ export function AssigneeChip({ task, assignee, canEdit, onMenu, withName = false
   return assignee ? <span className={clsx("task-assignee", withName && "with-name")} title={!withName ? name : undefined}>{face}{label}</span> : null;
 }
 
-/** Up to two labels on a card, then a count; the issue view shows and edits them all. */
-function CardLabels({ labels }: { labels?: string[] }) {
-  if (!labels?.length) return null;
-  const rest = labels.length - 2;
-  return <span className="task-labels" aria-label={`Labels: ${labels.join(", ")}`}>
-    {labels.slice(0, 2).map(label => <span key={label} className="task-label" aria-hidden="true">{label}</span>)}
-    {rest > 0 && <span className="task-label" aria-hidden="true">+{rest}</span>}
-  </span>;
-}
 
 /**
  * One board card. The card is a single Tab stop that opens the issue; its chips edit priority, due date and assignee in
  * place. Inner controls are pointer targets only (tabIndex -1): keyboard users get the same actions from the menu
  * (Shift+F10 / context-menu key) and the issue view.
  */
-export const IssueCard = memo(function IssueCard({ task, pullRequest, assignee, canEdit, tabStop, selected, completing, dragState, keyboardMoving, menuOpen, onOpen, onComplete, onMenu, onDueDate, onKeyDown, onFocus, onPointerDown, onHandleKeyDown, onHandleClick, onHandleBlur }: IssueCardProps) {
+export const IssueCard = memo(function IssueCard({ task, pullRequest, assignee, canEdit, tabStop, selected, completing, dragState, keyboardMoving, menuOpen, onOpen, onComplete, onMenu, onDueDate, onKeyDown, onFocus, onPointerDown, onHandleKeyDown, onHandleClick, onHandleBlur, properties }: IssueCardProps) {
   const key = taskKey(task._id);
   const done = task.done || Boolean(completing);
   return (
@@ -146,18 +142,19 @@ export const IssueCard = memo(function IssueCard({ task, pullRequest, assignee, 
       }}
     >
       <div className="task-card-head">
-        <span className="task-code issue-key" ref={tapTarget}>{key}<GitHubIssueIndicator number={task.githubIssueNumber} pullRequest={pullRequest} /></span>
+        <span className="task-code issue-key" ref={tapTarget}>{shows(properties, "id") && key}{shows(properties, "pullRequest") && <GitHubIssueIndicator number={task.githubIssueNumber} pullRequest={pullRequest} />}</span>
         {canEdit && <button className="drag-handle" type="button" tabIndex={-1} aria-label={`Move ${task.title}`} aria-pressed={keyboardMoving} onKeyDown={event => onHandleKeyDown(event, task._id)} onClick={event => onHandleClick(event, task._id)} onBlur={() => onHandleBlur(task._id)} />}
-        <AssigneeChip task={task} assignee={assignee} canEdit={canEdit} onMenu={onMenu} />
+        {shows(properties, "assignee") && <AssigneeChip task={task} assignee={assignee} canEdit={canEdit} onMenu={onMenu} />}
       </div>
       <div className="task-top">
         <CompleteCheck task={task} done={done} canEdit={canEdit} onComplete={onComplete} />
         <strong ref={tapTarget}>{task.title}</strong>
       </div>
       <div className="task-meta">
-        <PriorityChip task={task} canEdit={canEdit} onMenu={onMenu} />
-        <DueChip task={task} canEdit={canEdit} onDueDate={onDueDate} />
-        <CardLabels labels={task.labels} />
+        {shows(properties, "priority") && <PriorityChip task={task} canEdit={canEdit} onMenu={onMenu} />}
+        {shows(properties, "dueDate") && <DueChip task={task} canEdit={canEdit} onDueDate={onDueDate} />}
+        {shows(properties, "labels") && <LabelChips labels={task.labels} max={2} className="task-labels" />}
+        {shows(properties, "created") && <span className="task-created">{formatDate(task.createdAt)}</span>}
         {canEdit && <button type="button" tabIndex={-1} className="icon-button task-menu-button task-actions" aria-label={`Issue options for ${task.title}`} aria-haspopup="menu" aria-expanded={menuOpen} onClick={event => { event.stopPropagation(); onMenu(task, "root", box(event.currentTarget), event.currentTarget); }}><MoreHorizontal size={14} /></button>}
       </div>
     </article>
@@ -167,7 +164,7 @@ export const IssueCard = memo(function IssueCard({ task, pullRequest, assignee, 
 /**
  * One list row: the same Tab stop, keys, menu (right-click, Shift+F10, long-press) and quick-edit chips as a card.
  */
-export const IssueRow = memo(function IssueRow({ task, assignee, status, canEdit, tabStop, selected, completing, menuOpen, onOpen, onComplete, onMenu, onDueDate, onKeyDown, onFocus, onPointerDown }: IssueItemProps & { status?: { title: string; label: string } }) {
+export const IssueRow = memo(function IssueRow({ task, assignee, status, canEdit, tabStop, selected, completing, menuOpen, onOpen, onComplete, onMenu, onDueDate, onKeyDown, onFocus, onPointerDown, properties, pullRequest }: IssueItemProps & { status?: { title: string; label: string }; pullRequest?: LinkedPullRequest }) {
   const key = taskKey(task._id);
   const done = task.done || Boolean(completing);
   return (
@@ -189,12 +186,14 @@ export const IssueRow = memo(function IssueRow({ task, assignee, status, canEdit
     >
       <td className="col-issue">
         <CompleteCheck task={task} done={done} canEdit={canEdit} onComplete={onComplete} />
-        <span className="issue-table-title" ref={tapTarget}><small className="issue-key">{key}</small><span>{task.title}</span></span>
+        <span className="issue-table-title" ref={tapTarget}>{shows(properties, "id") && <small className="issue-key">{key}</small>}<span>{task.title}</span>{shows(properties, "pullRequest") && <GitHubIssueIndicator number={task.githubIssueNumber} pullRequest={pullRequest} />}</span>
+        {shows(properties, "labels") && <LabelChips labels={task.labels} max={3} className="issue-row-labels" />}
       </td>
-      <td className="col-status">{status && <StatusChip task={task} title={status.title} label={status.label} canEdit={canEdit} onMenu={onMenu} />}</td>
-      <td className="col-priority"><PriorityChip task={task} canEdit={canEdit} onMenu={onMenu} /></td>
-      <td className="col-assignee"><AssigneeChip task={task} assignee={assignee} canEdit={canEdit} onMenu={onMenu} withName /></td>
-      <td className="col-due"><DueChip task={task} canEdit={canEdit} onDueDate={onDueDate} empty /></td>
+      {shows(properties, "status") && <td className="col-status">{status && <StatusChip task={task} title={status.title} label={status.label} canEdit={canEdit} onMenu={onMenu} />}</td>}
+      {shows(properties, "priority") && <td className="col-priority"><PriorityChip task={task} canEdit={canEdit} onMenu={onMenu} /></td>}
+      {shows(properties, "assignee") && <td className="col-assignee"><AssigneeChip task={task} assignee={assignee} canEdit={canEdit} onMenu={onMenu} withName /></td>}
+      {shows(properties, "dueDate") && <td className="col-due"><DueChip task={task} canEdit={canEdit} onDueDate={onDueDate} empty /></td>}
+      {shows(properties, "created") && <td className="col-created">{formatDate(task.createdAt)}</td>}
     </tr>
   );
 });
