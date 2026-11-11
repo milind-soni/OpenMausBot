@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,7 @@ import {
   applyPiLocalCatalog,
   decodePiFrame,
   ensurePiInjectModel,
+  ensurePiInstanceAgentDir,
   fetchPiModels,
   parsePiCatalog,
   PiDriver,
@@ -1267,6 +1268,39 @@ describe("ensurePiInjectModel", () => {
       modelId: "MiniMax-M3-4bit",
     });
     expect(readFileSync(path, "utf8")).toBe("not json");
+  });
+});
+
+describe("ensurePiInstanceAgentDir", () => {
+  let home: string;
+  beforeEach(() => { home = mkdtempSync(join(tmpdir(), "omb-pi-home-")); });
+  afterEach(async () => { await removeTempDir(home); });
+
+  it("creates the instance dir and symlinks auth.json + models.json from the operator dir", () => {
+    const operatorDir = mkdtempSync(join(tmpdir(), "omb-pi-op-"));
+    writeFileSync(join(operatorDir, "auth.json"), '{"token":"test"}');
+    writeFileSync(join(operatorDir, "models.json"), '{"providers":{}}');
+    const instanceDir = ensurePiInstanceAgentDir("inst-" + randomUUID(), operatorDir, { HOME: home });
+    expect(existsSync(instanceDir)).toBe(true);
+    expect(lstatSync(join(instanceDir, "auth.json")).isSymbolicLink()).toBe(true);
+    expect(realpathSync(join(instanceDir, "auth.json"))).toBe(realpathSync(join(operatorDir, "auth.json")));
+    expect(lstatSync(join(instanceDir, "models.json")).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(instanceDir, "AGENTS.md"))).toBe(false);
+  });
+
+  it("is idempotent: calling twice does not throw", () => {
+    const operatorDir = mkdtempSync(join(tmpdir(), "omb-pi-op2-"));
+    writeFileSync(join(operatorDir, "auth.json"), '{"token":"x"}');
+    const id = "inst-idem-" + randomUUID();
+    ensurePiInstanceAgentDir(id, operatorDir, { HOME: home });
+    expect(() => ensurePiInstanceAgentDir(id, operatorDir, { HOME: home })).not.toThrow();
+  });
+
+  it("skips symlinks for operator files that do not exist", () => {
+    const operatorDir = mkdtempSync(join(tmpdir(), "omb-pi-op3-"));
+    const instanceDir = ensurePiInstanceAgentDir("inst-nofiles-" + randomUUID(), operatorDir, { HOME: home });
+    expect(existsSync(join(instanceDir, "auth.json"))).toBe(false);
+    expect(existsSync(join(instanceDir, "models.json"))).toBe(false);
   });
 });
 
