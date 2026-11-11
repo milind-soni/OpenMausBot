@@ -68,6 +68,7 @@ function harness(get: () => { world: HomeWorld; shots: string }) {
     Boolean, 10_000, selector);
   /** A right-click on a tile, then its menu as React drew it. */
   const menu = async (id: string) => {
+    await until(() => rail<boolean>("!document.querySelector('[data-rail-menu]')"), Boolean, 10_000, "the previous menu to close");
     await rail(`document.querySelector('[data-rail-place="${id}"]').dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }))`);
     await until(() => rail<boolean>(`Boolean(document.querySelector('[data-rail-menu="${id}"]'))`), Boolean, 10_000, `${id}'s menu`);
   };

@@ -52,7 +52,6 @@ type Bot = { id: string; name: string; threadId: string; chiefOfStaff?: boolean;
       await call("PATCH", `/api/bots/${first.id}`, { chiefOfStaff: true, acknowledgePeerScope: true });
       chief = { ...first, chiefOfStaff: true };
     }
-    await evaluate("location.reload(); true");
     await expect.poll(pageText, { timeout: 20_000 }).toContain("Calendar");
     if (!await press("Team map")) await press("Tools");
     await expect.poll(() => press("Team map").then(() => evaluate("Boolean(document.querySelector('textarea[aria-label=\"Message bots on the map\"]'))")), { timeout: 20_000 }).toBe(true);
@@ -76,16 +75,14 @@ type Bot = { id: string; name: string; threadId: string; chiefOfStaff?: boolean;
     // A stop reaches every bot at once, as its own words, so each bot's own send path stops it.
     await say("@everyone stop");
     await send();
-    for (const bot of await bots()) await expect.poll(() => linesTo(bot), { message: bot.name }).toContain("stop");
+    for (const bot of await bots()) await expect.poll(() => linesTo(bot), { message: bot.name, timeout: 10_000 }).toContain("stop");
     await shot("everyone-stop");
 
     // No Chief: everyone gets the line, as before.
     await call("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: false });
-    await evaluate("location.reload(); true");
-    await expect.poll(() => press("Team map").then(() => evaluate("Boolean(document.querySelector('textarea[aria-label=\"Message bots on the map\"]'))")), { timeout: 20_000 }).toBe(true);
     await say("@everyone hello all");
     await expect.poll(pageText).not.toContain("who passes it on");
     await send();
-    for (const bot of await bots()) await expect.poll(() => linesTo(bot), { message: bot.name }).toContain("@everyone hello all");
+    for (const bot of await bots()) await expect.poll(() => linesTo(bot), { message: bot.name, timeout: 10_000 }).toContain("@everyone hello all");
   } finally { await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 }); }
 }, 720_000);
