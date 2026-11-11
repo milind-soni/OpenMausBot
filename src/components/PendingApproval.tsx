@@ -75,12 +75,21 @@ export function answeredStepPrompts(messages: Message[]): number {
 /** Answered step prompts after which the card says how to be asked less. */
 const ASKED_OFTEN_AFTER = 3;
 
+/** How the card's Always allow lasts: for good ("key") or only until the engine session ends ("session"). */
+export type AlwaysAllowScope = "key" | "session";
+
 /** A one-line hint once a conversation at Ask or Auto-accept edits has asked often, naming only the ways this card and
  * engine offer; it changes nothing by itself. */
-export function askedOftenHint(mode: ApprovalMode, driverKind: string | undefined, answered: number, botName: string, canAlwaysAllow: boolean): string | undefined {
+export function askedOftenHint(mode: ApprovalMode, driverKind: string | undefined, answered: number, botName: string, always: AlwaysAllowScope | undefined): string | undefined {
   if (answered < ASKED_OFTEN_AFTER || (mode !== "ask" && mode !== "edits")) return undefined;
-  if (hasNativeAutoReview(driverKind)) return t(canAlwaysAllow ? "approval.askedOften.approveForMe" : "approval.askedOften.approveForMeOnly", { name: botName });
-  return canAlwaysAllow ? t("approval.askedOften.alwaysAllow") : undefined;
+  if (hasNativeAutoReview(driverKind)) {
+    // Qwen's reviewer blocks the steps it judges risky instead of asking about them.
+    const lead = t(driverKind === "qwenAgent" ? "approval.askedOften.approveForMeBlocks" : "approval.askedOften.approveForMe", { name: botName });
+    if (!always) return lead;
+    return `${lead} ${t(always === "key" ? "approval.askedOften.orAlwaysAllow" : "approval.askedOften.orAlwaysAllowSession")}`;
+  }
+  if (!always) return undefined;
+  return t(always === "key" ? "approval.askedOften.alwaysAllow" : "approval.askedOften.alwaysAllowSession");
 }
 
 export function spokenApprovalPrompt(pending: Pending, requester: string): string {

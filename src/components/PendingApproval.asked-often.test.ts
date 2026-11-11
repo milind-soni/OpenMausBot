@@ -30,36 +30,52 @@ describe("asked-often hint on the approval card", () => {
   });
 
   it("suggests Approve for me after three answered prompts at Ask, where the engine has its own reviewer", () => {
-    expect(askedOftenHint("ask", "claudeAgent", 2, "Scout", true)).toBeUndefined();
-    const hint = askedOftenHint("ask", "claudeAgent", 3, "Scout", true);
+    expect(askedOftenHint("ask", "claudeAgent", 2, "Scout", "key")).toBeUndefined();
+    const hint = askedOftenHint("ask", "claudeAgent", 3, "Scout", "key");
     expect(hint).toContain("Approve for me");
     expect(hint).toContain("Scout");
     expect(hint).toContain("Always allow");
-    expect(askedOftenHint("edits", "claudeAgent", 5, "Scout", true)).toContain("Approve for me");
+    expect(askedOftenHint("edits", "claudeAgent", 5, "Scout", "key")).toContain("Approve for me");
   });
 
   it("offers only Always allow where the engine has no reviewer", () => {
-    const hint = askedOftenHint("ask", "openaiChat", 4, "Scout", true);
+    const hint = askedOftenHint("ask", "openaiChat", 4, "Scout", "key");
     expect(hint).toContain("Always allow");
     expect(hint).not.toContain("Approve for me");
   });
 
   it("names Always allow only when the card offers it", () => {
-    const hint = askedOftenHint("ask", "codex", 3, "Scout", false);
+    const hint = askedOftenHint("ask", "codex", 3, "Scout", undefined);
     expect(hint).toContain("Approve for me");
     expect(hint).not.toContain("Always allow");
-    expect(askedOftenHint("ask", "openaiChat", 3, "Scout", false)).toBeUndefined();
+    expect(askedOftenHint("ask", "openaiChat", 3, "Scout", undefined)).toBeUndefined();
+  });
+
+  it("says a session-only Always allow lasts until the session ends", () => {
+    const alone = askedOftenHint("ask", "openaiChat", 3, "Scout", "session");
+    expect(alone).toContain("Always allow this session");
+    expect(alone).toContain("until the session ends");
+    expect(alone).not.toContain("won't ask about it again.");
+    expect(askedOftenHint("ask", "codex", 3, "Scout", "session")).toContain("until the session ends");
+  });
+
+  it("tells a Qwen bot's owner that Approve for me blocks risky steps instead of asking", () => {
+    const hint = askedOftenHint("ask", "qwenAgent", 3, "Scout", undefined);
+    expect(hint).toContain("Approve for me");
+    expect(hint).toContain("blocked");
+    expect(hint).not.toContain("asked only about risky steps");
+    expect(askedOftenHint("ask", "claudeAgent", 3, "Scout", undefined)).toContain("asked only about risky steps");
   });
 
   it("says nothing at Approve for me, Full access or Custom", () => {
-    for (const mode of ["auto", "full", "custom"] as const) expect(askedOftenHint(mode, "claudeAgent", 10, "Scout", true)).toBeUndefined();
+    for (const mode of ["auto", "full", "custom"] as const) expect(askedOftenHint(mode, "claudeAgent", 10, "Scout", "key")).toBeUndefined();
   });
 
   it("shows the hint line on the card only when given", () => {
     const [pending] = pendingApprovals([prompt()]);
     const plain = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending, count: 1, index: 0 }));
     expect(plain).not.toContain("data-asked-often");
-    const hinted = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending, count: 1, index: 0, hint: askedOftenHint("ask", "codex", 3, "Scout", true) }));
+    const hinted = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending, count: 1, index: 0, hint: askedOftenHint("ask", "codex", 3, "Scout", "key") }));
     expect(hinted).toContain("data-asked-often");
     expect(hinted).toContain("Approve for me");
   });

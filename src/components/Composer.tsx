@@ -481,7 +481,7 @@ export function Composer({
   const modeBot = group ? undefined : bot;
   const { choice: approvalChoice, dialogs: approvalDialogs } = useThreadApproval(modeBot);
   const askedOften = approval && !approval.message.inbox && modeBot && approvalChoice
-    ? askedOftenHint(approvalModeFor(modeBot), approvalChoice.driverKind, answeredStepPrompts(visibleMessages(modeBot)), modeBot.name, Boolean(approval.allowKey || approval.allowSession))
+    ? askedOftenHint(approvalModeFor(modeBot), approvalChoice.driverKind, answeredStepPrompts(visibleMessages(modeBot)), modeBot.name, approval.allowKey ? "key" : approval.allowSession ? "session" : undefined)
     : undefined;
   const uploadImage = useCallback((file: File) => uploadDraftImage(draftId, file), [draftId]);
   const pickFiles = async (picked: FileList | null) => {
