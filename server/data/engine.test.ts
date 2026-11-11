@@ -8,7 +8,7 @@ import type { DuckDBConnection } from "@duckdb/node-api";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { DATA_LIMITS, DATA_RESULTS_SCHEMA } from "../../shared/data-surface.ts";
-import { CLOSE_DRAIN_MS, EXTENSION_INSTALL_TIMEOUT_MS, Lane, closeNames, createDataEngine, dataEngine, drainLanes, duckdbDirectory, instanceSettings, levenshtein, likePattern, loadExtensions, type DataEngineOptions } from "./engine.ts";
+import { CLOSE_DRAIN_MS, EXTENSION_INSTALL_TIMEOUT_MS, Lane, closeNames, createDataEngine, dataEngine, drainLanes, duckdbDirectory, instanceSettings, levenshtein, likePattern, loadExtensions, quoteIdentifier, type DataEngineOptions } from "./engine.ts";
 import { DataFailure, type BotDatabase, type DataEngine } from "./types.ts";
 
 const root = mkdtempSync(join(tmpdir(), "omb-data-engine-"));
@@ -365,6 +365,19 @@ describe("a bot's database", () => {
     const query = await db.describe("SELECT id FROM sales WHERE id < 10", bot);
     expect(query.rowCount).toBe(10);
     expect(query.columns[0]).toMatchObject({ name: "id", max: "9" });
+  });
+
+  it.each(["分析", "report/2026", 'Revenue "USD"', "select from report", " padded "])("describes a quoted table named %j without treating its name as SQL", async (name) => {
+    await ready;
+    await db.run(`CREATE TABLE ${quoteIdentifier(name)} AS SELECT 17 AS amount`, bot);
+    const described = await db.describe(`main . ${quoteIdentifier(name)}`, bot);
+    expect(described).toMatchObject({ rowCount: 1, columns: [{ name: "amount", min: "17", max: "17" }] });
+  });
+
+  it("still describes an existing unquoted display name with spaces", async () => {
+    await ready;
+    await db.run('CREATE TABLE "Old display name" AS SELECT 19 AS amount', bot);
+    expect(await db.describe("Old display name", bot)).toMatchObject({ rowCount: 1, columns: [{ name: "amount", min: "19" }] });
   });
 
   it("profiles at most describeColumnsMax columns and lists the rest by type only", async () => {
