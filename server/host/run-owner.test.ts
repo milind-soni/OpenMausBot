@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RequestAuth } from "../request-auth.ts";
-import { arrivalDecision, createRunOwners, mayJoinRun, mayRemoveQueued, mayStop, routeRunOwners, type RunOwnersDeps } from "./run-owner.ts";
+import { arrivalDecision, createRunOwners, mayJoinRun, mayRemoveQueued, mayRetry, mayStop, routeRunOwners, type RunOwnersDeps } from "./run-owner.ts";
 
 const PRIYA = "p_priyapriyapriyapriyapr";
 const TOM = "p_tomtomtomtomtomtomtomt";
@@ -36,6 +36,17 @@ describe("the rule", () => {
     expect(mayRemoveQueued({ shared: true, sender: { name: "Tom", id: TOM }, by: { person: PRIYA, admin: true } })).toBe(false);
     expect(mayRemoveQueued({ shared: true, sender: { name: "Slack" }, by: { person: TOM, admin: false } })).toBe(false);
     expect(mayRemoveQueued({ shared: true, by: { person: TOM, admin: true } })).toBe(true);
+  });
+
+  it("lets a request's writer or an admin run it again, and anyone one no person wrote", () => {
+    const sender = { name: "Priya", id: PRIYA };
+    expect(mayRetry({ shared: true, sender, by: { person: PRIYA, admin: false } })).toBe(true);
+    expect(mayRetry({ shared: true, sender, by: { person: TOM, admin: false } })).toBe(false);
+    expect(mayRetry({ shared: true, sender, by: { admin: false } })).toBe(false);
+    expect(mayRetry({ shared: true, sender, by: { person: TOM, admin: true } })).toBe(true);
+    expect(mayRetry({ shared: true, sender: { name: "Slack" }, by: { person: TOM, admin: false } })).toBe(true);
+    expect(mayRetry({ shared: true, by: { person: TOM, admin: false } })).toBe(true);
+    expect(mayRetry({ shared: false, sender, by: { person: TOM, admin: false } })).toBe(true);
   });
 
   it("joins waiting lines to the run only when the asker adds their own", () => {
@@ -82,6 +93,13 @@ describe("who asked", () => {
     expect(dev.shownSender("t", { name: "dev@acme.test", id: TOM })).toEqual({ name: "Dev", id: TOM });
   });
 
+  it("names the request's writer when someone else may not run it again", () => {
+    const sender = { name: "priya@acme.test", id: PRIYA };
+    expect(owners(undefined).retryRefusal("t", sender, { person: TOM, admin: false })).toBe("Only Priya or an admin can run this request again.");
+    expect(owners(undefined).retryRefusal("t", sender, { person: PRIYA, admin: false })).toBeNull();
+    expect(owners(undefined).retryRefusal("t", sender, { person: TOM, admin: true })).toBeNull();
+  });
+
   it("names the asker in the refusal", () => {
     expect(owners({ messageId: "m1" }).stopRefusal("t", { person: TOM, admin: false })).toBe("Only Priya or an admin can stop this.");
     expect(owners({ messageId: "m1" }).stopRefusal("t", { person: PRIYA, admin: false })).toBeNull();
@@ -96,5 +114,7 @@ describe("a route built without the rule", () => {
     expect(owners.stopRefusal(auth, "t")).toBeNull();
     expect(owners.removeRefusal(auth, "t", { name: "Tom", id: TOM })).toBeNull();
     expect(owners.joinRefusal(auth, "t", [{ name: "Tom", id: TOM }])).toBeNull();
+    expect(owners.retryRefusal(auth, "t", { name: "Tom", id: TOM })).toBeNull();
+    expect(owners.decidesRetry("t")).toBe(false);
   });
 });
