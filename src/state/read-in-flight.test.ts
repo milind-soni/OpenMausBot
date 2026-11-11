@@ -45,13 +45,15 @@ let root: Root;
 let cursor = 0;
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0)); };
 const stream = () => FixtureEventSource.opened.at(-1)!;
-const unreadFrame = (): ServerFrame => ({
+// The server stamps a task with its newest message's time; `newer: false` re-announces the newest one already sent.
+let newestAt = 1_000;
+const unreadFrame = (newer: boolean): ServerFrame => ({
   kind: "bot",
-  bot: { ...bot, unread: true, tasks: [{ ...bot.tasks![0]!, unread: true }] },
+  bot: { ...bot, unread: true, tasks: [{ ...bot.tasks![0]!, unread: true, updatedAt: newer ? ++newestAt : newestAt }] },
 } as ServerFrame);
 // Each frame is applied before the next arrives, as when they come in separate paints.
-const sendUnread = () => {
-  stream().send(unreadFrame(), `run:${++cursor}`);
+const sendUnread = (newer = true) => {
+  stream().send(unreadFrame(newer), `run:${++cursor}`);
   flushSync(() => dispatch({ type: "connected", value: true }));
 };
 
@@ -125,5 +127,30 @@ describe("marking the shown chat read while a read is in flight", () => {
     reads[start]!.answer();
     await settle();
     expect(reads).toHaveLength(start + 1);
+  });
+
+  it("sends no follow-up for unread frames that carry no newer message than the open read covers", async () => {
+    const start = reads.length;
+    sendUnread();
+    sendUnread(false);
+    sendUnread(false);
+    await settle();
+    expect(reads).toHaveLength(start + 1);
+    reads[start]!.answer();
+    await settle();
+    expect(reads, "the open read already covered that message").toHaveLength(start + 1);
+  });
+
+  it("covers the newest message seen with the follow-up, so a re-announcement of it during the follow-up adds nothing", async () => {
+    const start = reads.length;
+    sendUnread();
+    sendUnread();
+    reads[start]!.answer();
+    await settle();
+    expect(reads).toHaveLength(start + 2);
+    sendUnread(false);
+    reads[start + 1]!.answer();
+    await settle();
+    expect(reads).toHaveLength(start + 2);
   });
 });
