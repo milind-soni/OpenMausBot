@@ -1997,6 +1997,29 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       resetPathCacheForTests();
     }
   });
+  it.skipIf(process.platform === "win32")("passes none of the old copy's flags when the newly found copy's version check fails, and checks it again next turn", async () => {
+    const dump = join(scratch, "path-swap-fail.json"), failedOnce = join(scratch, "older-version-failed");
+    const newer = join(scratch, "newer-f"), older = join(scratch, "older-f");
+    mkdirSync(newer); mkdirSync(older);
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    // The older copy: its first --version fails, and it refuses --system-prompt-snapshot like 2.1.197 does.
+    writeFileSync(join(older, "claude"), `#!/bin/sh\n[ "$1" = --version ] && [ ! -e "${failedOnce}" ] && { : > "${failedOnce}"; exit 1; }\nfor a in "$@"; do [ "$a" = --system-prompt-snapshot ] && { echo "error: unknown option '$a'" >&2; exit 1; }; done\nFAKE_CLAUDE_VERSION=2.1.197 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, { FAKE_CLAUDE_DUMP: dump }, { cli: "claude" });
+      expect(await instance.snapshot()).toMatchObject({ version: "2.1.321 (Claude Code)" });
+      registerPathDir(older);
+      for (const threadId of ["t-swap-fail-1", "t-swap-fail-2"]) {
+        await instance.adapter.sendTurn({ threadId, text: "hi" });
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId)).toMatchObject({ ok: true });
+        expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--system-prompt-snapshot");
+      }
+      expect(existsSync(failedOnce)).toBe(true);
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
   it("withholds --autocompact from a CLI above the floor whose --help does not list it", async () => {
     // 2.1.129 clears the 2.1.122 floor yet rejects the flag ("unknown option")
     const dump = join(scratch, "no-autocompact-cli.json");

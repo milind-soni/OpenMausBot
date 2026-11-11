@@ -805,11 +805,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     let [cliHasAutocompact, cliHelpVersion]: [boolean | null, string | null] = [null, null], autocompactRefusedBy = new Set<string>(), cliProbedAt: string | undefined;
     const readCliVersion = cliVersionProbe(config.cli);
     const ensureCliVersion = async (env: NodeJS.ProcessEnv): Promise<void> => { // and again once PATH finds another copy (an nvm one ahead of Homebrew's)
-      const at = findCliCandidates(config.cli, env.PATH ?? "")[0], reprobed = cliVersionChecked;
+      const at = findCliCandidates(config.cli, env.PATH ?? "")[0], reprobed = cliVersionChecked, seen = cliProbedAt !== undefined;
       if (reprobed && at === cliProbedAt) { await helpRead?.done; return; } // a help read for this copy may still be running
       const probe = await readCliVersion(env);
-      if ("version" in probe) [cliVersion, cliVersionChecked, cliProbedAt] = [parseClaudeCliVersion(probe.version), true, at];
-      if (reprobed && "version" in probe && probe.version !== cliHelpVersion) await readCliHelp(probe.version, env);
+      if ("version" in probe) [cliVersion, cliVersionChecked, cliProbedAt] = [parseClaudeCliVersion(probe.version), true, at]; else if (reprobed) [cliVersion, cliVersionChecked, cliHasAutocompact, cliHelpVersion] = [null, false, null, null]; // another copy that could not be checked: none of the old copy's flags, check again next turn
+      if (seen && "version" in probe && probe.version !== cliHelpVersion) await readCliHelp(probe.version, env);
     };
     let helpRead: { version: string; done: Promise<void> } | null = null;
     const readCliHelp = (version: string, env: NodeJS.ProcessEnv): Promise<void> => {
