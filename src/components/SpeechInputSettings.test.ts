@@ -2,12 +2,12 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { STT_PRESETS } from "../../shared/stt";
+import { STT_PRESETS, type SttStatus } from "../../shared/stt";
 import { t } from "@/lib/i18n";
 
 const fixture = vi.hoisted(() => ({
   api: vi.fn(), dispatch: vi.fn(),
-  config: { stt: { provider: "auto", baseUrl: "https://api.openai.com/v1", model: "whisper-1", configured: false, keyConfigured: false } },
+  config: { stt: { provider: "auto", baseUrl: "https://api.openai.com/v1", model: "whisper-1", configured: false, keyConfigured: false } } as { stt: SttStatus },
 }));
 vi.mock("@/state/store", () => ({ api: fixture.api, useStore: () => ({ state: { config: fixture.config }, dispatch: fixture.dispatch }) }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
