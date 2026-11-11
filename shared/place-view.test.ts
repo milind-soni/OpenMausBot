@@ -245,9 +245,9 @@ describe("the Admin's limit, read and told to the bot", () => {
     expect(told(undefined, "Your Pro plan's 50 cloud computer hours for October are used up. They reset on 1 November."))
       .toBe("This Cloud's cloud computer hours for this month are used up; they reset on 1 November.");
     expect(told({ reason: "hours_used", trial: true, resetsAt: "2026-11-14T09:00:00.000Z" }))
-      .toBe("This Cloud's free trial cloud computer hours are used up; its full allowance starts with its first payment on 14 Nov.");
+      .toBe("This Cloud's free trial cloud computer hours are used up; they come back on 14 Nov.");
     expect(told(undefined, "Your Pro free trial's 20 cloud computer hours are used up. Your full allowance starts with your first payment on 14 Nov."))
-      .toBe("This Cloud's free trial cloud computer hours are used up; its full allowance starts with its first payment on 14 Nov.");
+      .toBe("This Cloud's free trial cloud computer hours are used up; they come back on 14 Nov.");
     expect(told({ reason: "hours_used" })).toBe("This Cloud's cloud computer hours for this month are used up.");
     for (const message of ["Your Personal plan includes 1 cloud computer at once. Delete one to start another.", "Your Pro free trial includes 2 cloud computers at once. Delete 2 to start one again."]) {
       expect(told(undefined, message)).toBe("This Cloud already has as many cloud computers running as its plan allows.");
