@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { codexLimitResetsAt } from "./drivers/codex-errors.ts";
 import { engineLimitFromUsage, LimitResetClock, nearLimitNote, UNNAMED_LIMIT_MS } from "./limit-resets.ts";
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
-import { parseClaudeUsage, parseCodexUsage, parseOpenCodeUsage, type PlanProviderRow, type PlanUsageReport, type PlanWindows } from "./plan-usage.ts";
+import { parseClaudeUsage, parseCodexUsage, parseCopilotUsage, parseOpenCodeUsage, type PlanProviderRow, type PlanUsageReport, type PlanWindows } from "./plan-usage.ts";
 
 const NOW = Date.parse("2026-10-19T10:00:00Z");
 const HOUR = 3_600_000;
@@ -16,8 +16,8 @@ const iso = (at: number) => new Date(at).toISOString();
 
 /** A plan-usage row for one driver, named as the usage panel names it. */
 function row(id: string, driver: PlanProviderRow["driver"], windows: PlanWindows): PlanProviderRow {
-  const name = driver === "claude" ? "Claude" : driver === "codex" ? "Codex" : driver === "opencode" ? "OpenCode" : "Grok";
-  return { id, name, driver, ok: true, error: null, ...windows };
+  const name = driver === "claude" ? "Claude" : driver === "codex" ? "Codex" : driver === "copilot" ? "GitHub Copilot" : driver === "opencode" ? "OpenCode" : "Grok";
+  return { id, name, driver, ok: true, error: null, reason: null, ...windows };
 }
 /** As the Claude usage endpoint answers (utilization, resets_at). */
 const claude = (fiveHour: [number, number | null], weekly: [number, number | null]) => row("claude", "claude", parseClaudeUsage({
@@ -117,6 +117,11 @@ describe("engineLimitFromUsage", () => {
     ]);
     const weeklyOnly = row("claude", "claude", parseClaudeUsage({ seven_day: { utilization: 30, resets_at: null } }));
     expect(engineLimitFromUsage(weeklyOnly)).toMatchObject({ window: "weekly", windows: [{ window: "weekly", usedPercent: 30, resetsAt: null }] });
+  });
+
+  it("does not hold Copilot when its premium requests run out, since it keeps answering with included models", () => {
+    const spent = parseCopilotUsage({ quota_reset_date_utc: iso(NOW + 300 * HOUR), quota_snapshots: { premium_interactions: { percent_remaining: 0 } } });
+    expect(engineLimitFromUsage(row("githubCopilot", "copilot", spent))).toBeNull();
   });
 });
 

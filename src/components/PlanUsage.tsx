@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
-import { Card, SIMPLE_CARD } from "./SettingsPrimitives";
+import { quietPlanRow } from "@/lib/plan-usage";
+import { setSidebarPlanUsage, useSidebarPlanUsage } from "@/lib/sidebar-preferences";
+import { Card, SIMPLE_CARD, Switch } from "./SettingsPrimitives";
 import { UsageSummaryCard } from "./CloudUsageMeter";
 import { formatPlanSpend, type PlanSpend } from "@/lib/plan-spend";
 
@@ -15,6 +17,7 @@ interface PlanWindow {
 }
 
 interface PlanExtra {
+  kind?: "monthly";
   label: string;
   remainingPercent: number;
   usedPercent: number;
@@ -34,6 +37,7 @@ interface PlanProvider {
   plan: string | null;
   ok: boolean;
   error: string | null;
+  reason?: string | null;
   fiveHour: PlanWindow;
   weekly: PlanWindow;
   extra: PlanExtra[];
@@ -87,6 +91,7 @@ function usageTone(used: number): string {
 function windowLabel(label: string): string {
   if (label === "5-hour") return t("planUsage.fiveHour");
   if (label === "Weekly") return t("planUsage.weekly");
+  if (label === "Monthly") return t("planUsage.monthly");
   if (label === "Monthly spend") return t("planUsage.monthlySpend");
   return label;
 }
@@ -210,6 +215,15 @@ export function busiestWeekly(report: Pick<PlanUsageReport, "providers"> | null)
   return busiest;
 }
 
+export function busiestMonthly(report: Pick<PlanUsageReport, "providers"> | null): { provider: PlanProvider; extra: PlanExtra } | null {
+  let busiest: { provider: PlanProvider; extra: PlanExtra } | null = null;
+  for (const provider of report?.providers ?? []) {
+    const extra = provider.ok ? provider.extra.find((entry) => entry.kind === "monthly") : undefined;
+    if (extra && (!busiest || extra.usedPercent > busiest.extra.usedPercent)) busiest = { provider, extra };
+  }
+  return busiest;
+}
+
 export function PlanUsageSummary() {
   const { report, now } = usePlanUsage();
   if (!report) return null;
@@ -220,6 +234,16 @@ export function PlanUsageSummary() {
     const used = Math.round(Math.min(100, Math.max(0, spending.budget.usedPercent)));
     return <UsageSummaryCard kind="plan" title={t("settings.simple.billing.monthlySpend", { provider: name })} percent={used} label={`${name}: ${t("planUsage.used", { used })}`}
       note={spending.budget.spend ? formatPlanSpend(spending.budget.spend) : null} />;
+  }
+  const monthly = busiest ? null : busiestMonthly(report);
+  if (monthly) {
+    const percent = Math.round(Math.min(100, Math.max(0, monthly.extra.usedPercent)));
+    const when = formatResetDistance(monthly.extra.resetsAt, now);
+    const name = providerLabel(monthly.provider);
+    return (
+      <UsageSummaryCard kind="plan" title={t("settings.simple.billing.monthly", { provider: name })} percent={percent} label={`${name}: ${t("planUsage.used", { used: percent })}`}
+        note={when ? t("planUsage.resetsIn", { when }) : null} />
+    );
   }
   if (!busiest) {
     return <section data-usage-summary="own-ai" className={cn(SIMPLE_CARD, "px-4 py-3.5 text-[14px] leading-5 text-ink-secondary")}>{t("settings.simple.billing.ownAi")}</section>;
@@ -233,12 +257,25 @@ export function PlanUsageSummary() {
   );
 }
 
+export function SidebarPlanUsageSwitch() {
+  const shown = useSidebarPlanUsage();
+  const id = useId();
+  return (
+    <div className="flex min-w-0 items-center gap-2 text-[13px] text-ink-secondary">
+      <Switch id={id} checked={shown} onClick={() => setSidebarPlanUsage(!shown)} />
+      <label htmlFor={id} className="cursor-pointer truncate">{t("planUsage.inSidebar")}</label>
+    </div>
+  );
+}
+
 export function PlanUsage() {
   const { report, loading, error, now, load } = usePlanUsage();
+  const providers = report?.providers.filter((provider) => !quietPlanRow(provider)) ?? [];
 
   return (
     <Card title={t("planUsage.title")} subtitle={t("planUsage.subtitle")}>
-      <div className="mb-3 flex justify-end">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <SidebarPlanUsageSwitch />
         <button
           type="button"
           onClick={() => void load(true)}
@@ -252,12 +289,12 @@ export function PlanUsage() {
       </div>
       {loading && !report && <p role="status" className="text-[13px] text-ink-secondary">{t("planUsage.loading")}</p>}
       {error && <p role="alert" className="mb-3 text-[13px] text-danger">{error}</p>}
-      {report && report.providers.length === 0 && (
+      {report && providers.length === 0 && (
         <p className="text-[13px] text-ink-secondary">{t("planUsage.empty")}</p>
       )}
-      {report && report.providers.length > 0 && (
+      {report && providers.length > 0 && (
         <div className="flex flex-col gap-4">
-          {report.providers.map((provider) => (
+          {providers.map((provider) => (
             <div key={provider.id} className="border-t border-hairline/30 pt-3 first:border-t-0 first:pt-0">
               <div className="mb-2 flex min-w-0 items-baseline gap-2">
                 <span className="truncate text-[14px] font-medium text-ink">{providerLabel(provider)}</span>

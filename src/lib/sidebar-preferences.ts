@@ -18,6 +18,7 @@ export const SIMPLE_SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder
 export const PINNED_CIRCLES_KEY = "openmausbot.pinnedCircles";
 export const UNIVERSAL_PINS_KEY = "openmausbot.universalPins";
 export const PINNED_CIRCLE_ORDER_KEY = "openmausbot.pinnedCircleOrder.v1";
+export const SIDEBAR_PLAN_USAGE_KEY = "openmausbot.sidebarPlanUsage";
 
 /** What the sidebar's key keeps for the column of avatars. The values an older app kept there ("compact", "icons") open
  * the sidebar as it is. */
@@ -377,6 +378,47 @@ export function setUniversalPins(enabled: boolean): void {
 
 export function useUniversalPins(): boolean {
   return useSyncExternalStore(subscribeUniversalPins, loadUniversalPins, () => false);
+}
+
+let sessionPlanUsage: boolean | undefined;
+const planUsageListeners = new Set<() => void>();
+
+function onPlanUsageStorage(event: StorageEvent): void {
+  if (event.key !== SIDEBAR_PLAN_USAGE_KEY && event.key !== null) return;
+  sessionPlanUsage = undefined;
+  for (const listener of planUsageListeners) listener();
+}
+
+function subscribePlanUsage(listener: () => void): () => void {
+  planUsageListeners.add(listener);
+  if (planUsageListeners.size === 1 && typeof window !== "undefined" && typeof window.addEventListener === "function") window.addEventListener("storage", onPlanUsageStorage);
+  return () => {
+    planUsageListeners.delete(listener);
+    if (planUsageListeners.size === 0 && typeof window !== "undefined" && typeof window.removeEventListener === "function") window.removeEventListener("storage", onPlanUsageStorage);
+  };
+}
+
+export function loadSidebarPlanUsage(storage?: Pick<Storage, "getItem"> | null): boolean {
+  if (storage === undefined && sessionPlanUsage !== undefined) return sessionPlanUsage;
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    return target?.getItem(SIDEBAR_PLAN_USAGE_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+export function setSidebarPlanUsage(shown: boolean): void {
+  sessionPlanUsage = shown;
+  try {
+    globalThis.localStorage?.setItem(SIDEBAR_PLAN_USAGE_KEY, shown ? "true" : "false");
+  } catch {
+  }
+  for (const listener of planUsageListeners) listener();
+}
+
+export function useSidebarPlanUsage(): boolean {
+  return useSyncExternalStore(subscribePlanUsage, loadSidebarPlanUsage, loadSidebarPlanUsage);
 }
 
 

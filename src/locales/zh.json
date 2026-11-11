@@ -3762,6 +3762,8 @@
   "planUsage.subtitle": "每个已登录提供方的剩余额度；若该方案有 5 小时和每周时间窗，也会显示。",
   "planUsage.fiveHour": "5 小时",
   "planUsage.weekly": "每周",
+  "planUsage.monthly": "每月",
+  "planUsage.inSidebar": "在侧边栏显示",
   "planUsage.left": "剩余 {remaining}%",
   "planUsage.used": "已用 {used}%",
   "planUsage.monthlySpend": "每月支出",

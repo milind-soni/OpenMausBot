@@ -3603,6 +3603,8 @@
   "planUsage.subtitle": "로그인한 각 제공자의 남은 허용량이에요. 요금제에 있으면 5시간 단위와 주간 단위로 보여 줘요.",
   "planUsage.fiveHour": "5시간",
   "planUsage.weekly": "주간",
+  "planUsage.monthly": "월간",
+  "planUsage.inSidebar": "사이드바에 표시",
   "planUsage.left": "{remaining}% 남음",
   "planUsage.used": "{used}% 사용",
   "planUsage.monthlySpend": "월 사용액",

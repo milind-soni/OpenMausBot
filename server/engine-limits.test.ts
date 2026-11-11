@@ -14,7 +14,7 @@ const AT = "2026-11-02T10:00:00.000Z";
 const closed = { available: false, remainingPercent: null, usedPercent: null, resetsAt: null };
 const open = (used: number, resetsAt: string | null = "2026-11-02T12:00:00.000Z") => ({ available: true, usedPercent: used, remainingPercent: 100 - used, resetsAt });
 const row = (id: string, extra: Partial<PlanProviderRow> = {}): PlanProviderRow => ({
-  id, name: id, driver: "claude", plan: "max", ok: true, error: null, fiveHour: open(40.25), weekly: open(70), extra: [], models: [], ...extra,
+  id, name: id, driver: "claude", plan: "max", ok: true, error: null, reason: null, fiveHour: open(40.25), weekly: open(70), extra: [], models: [], ...extra,
 });
 const instance = (instanceId: string, driverKind = "claudeAgent", displayName: string | undefined = "Claude", enabled = true): EngineLimitInstance => ({ instanceId, driverKind, displayName, enabled });
 const ready: ProviderSnapshot = { state: "available", authenticated: true, billing: "subscription" };
