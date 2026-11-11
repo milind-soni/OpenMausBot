@@ -147,7 +147,8 @@ describe("openmausbot pair", () => {
     const message = (failure as Error).message;
     expect(message).toContain("The OpenMausBot desktop app runs this server");
     expect(message).toContain("Settings → Remote access");
-    expect(message).toContain("openmausbot serve");
+    // A terminal `serve` would not get the keys the app keeps in its own credential store, so it is not offered.
+    expect(message).not.toContain("openmausbot serve");
     expect(message).not.toContain("server refused to mint a pairing code");
   });
 
