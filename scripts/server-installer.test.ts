@@ -19,7 +19,7 @@ const BOX_PASSED = '{"box":"bwrap","total":31,"passed":31,"failed":[],"results":
 const BOX_FAILED = '{"box":"bwrap","total":31,"passed":30,"failed":["config-hidden"],"results":[{"id":"config-hidden","ok":false}]}';
 const FILES = "https://raw.githubusercontent.com/milind-soni/OpenMausBot";
 const SOURCE = `${FILES}/v0.1.151`;
-const REAL_TOOLS = ["sed", "awk", "grep", "cat", "head", "tail", "tr", "sort", "cut", "mkdir", "mktemp", "chmod", "chown", "mv", "rm", "dirname", "sh", "stat"];
+const REAL_TOOLS = ["sed", "awk", "grep", "cat", "head", "tail", "tr", "sort", "cut", "mkdir", "mktemp", "chmod", "chown", "mv", "rm", "dirname", "sh", "stat", "install", "find"];
 
 /** A server that passes every check: Ubuntu 24.04, x86-64, 4 cores, 8 GB, 80 GB free, Docker 27, free ports, a domain that points here. */
 const HEALTHY = {
@@ -38,6 +38,8 @@ interface Server {
   apparmor?: string | null;
   /** Leave these stand-ins out, as on a server without the tool. */
   without?: string[];
+  /** The umask the installer is started with, as a root shell may have it. */
+  umask?: string;
 }
 
 /** Stand-ins for every tool install.sh asks about the machine, written once: what each answers comes from the run's FAKE_ settings. */
@@ -147,7 +149,8 @@ function run(args: string[], server: Server = {}, kept?: { dir: string }) {
   writeFileSync(join(sysroot, "proc", "meminfo"), `MemTotal:       ${server.memoryKb ?? 8_100_000} kB\nMemFree:         1000000 kB\n`);
   writeFileSync(join(sysroot, "proc", "sys", "user", "max_user_namespaces"), `${server.userns?.max ?? "63000"}\n`);
   if (server.userns?.clone !== undefined) writeFileSync(join(sysroot, "proc", "sys", "kernel", "unprivileged_userns_clone"), `${server.userns.clone}\n`);
-  const result = spawnSync("/bin/sh", [SCRIPT, ...args], {
+  const command = server.umask ? ["-c", `umask ${server.umask}; exec /bin/sh "$0" "$@"`, SCRIPT, ...args] : [SCRIPT, ...args];
+  const result = spawnSync("/bin/sh", command, {
     encoding: "utf8",
     env: { PATH: bin, FAKE_LOG: log, OMB_INSTALL_SYSROOT: sysroot, OMB_INSTALL_DIR: install, MAUSBOT_ADMIN_URL: "https://admin.example.test", ...HEALTHY, ...server.env },
     timeout: 60_000,
@@ -421,6 +424,24 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(noCertificate.status).toBe(1);
     expect(noCertificate.stderr).toContain("MausBot is running, but https://maus.example.com did not answer within 10 seconds, usually because the certificate could not be issued.");
     expect(noCertificate.all).not.toContain("MausBot is running at");
+  });
+
+  it("gives what it makes fixed modes whatever the umask it is started with, and closes a folder others could change", () => {
+    const mode = (path: string) => statSync(path).mode & 0o777;
+    const first = run(["--domain", "maus.example.com"], { umask: "000" });
+    expect(first.status, first.all).toBe(0);
+    const expected: Record<string, number> = {
+      "": 0o755, "compose.yaml": 0o644, Caddyfile: 0o644, ".env": 0o600, data: 0o700, "update.sh": 0o755,
+      caddy: 0o755, "caddy/data": 0o755, "caddy/config": 0o755,
+    };
+    for (const [path, want] of Object.entries(expected)) expect(mode(join(first.install, path)).toString(8), path || "the install's folder").toBe(want.toString(8));
+    chmodSync(first.install, 0o777);
+    chmodSync(join(first.install, "data"), 0o777);
+    const again = run([], { umask: "000" }, { dir: first.dir });
+    expect(again.status, again.all).toBe(0);
+    expect(mode(first.install)).toBe(0o755);
+    expect(mode(join(first.install, "data"))).toBe(0o755);
+    expect(again.stdout).toContain(`  note  ${first.install} could be changed by others on this server; now only its owner can change it.`);
   });
 
   it("--uninstall stops the server and keeps the data, saying where it is", () => {

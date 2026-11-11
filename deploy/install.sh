@@ -841,7 +841,7 @@ place_button() {
 # The sandbox's host preparation and Compose settings are this repository's own (deploy/box, connector/profiles),
 # fetched and used as they are, all four from the same place.
 fetch_sandbox() {
-  mkdir -p "$INSTALL_DIR/box/profiles"
+  install -d -m 755 "$INSTALL_DIR/box" "$INSTALL_DIR/box/profiles"
   fetch deploy/box/prepare-host.sh "$INSTALL_DIR/box/prepare-host.sh" 755 &&
     fetch deploy/box/compose.box.yaml "$INSTALL_DIR/compose.box.yaml" &&
     fetch "connector/profiles/$SECCOMP" "$INSTALL_DIR/box/profiles/$SECCOMP" &&
@@ -968,10 +968,21 @@ wait_https() {
   return 1
 }
 
+# An install's folder, or its data, that others may write to (made by hand, or by an installer before this one) is closed
+# to them: root runs what is in it.
+close_to_others() { # folder
+  if [ -n "$(find "$1" -prune \( -perm -020 -o -perm -002 \) 2>/dev/null)" ]; then
+    chmod go-w "$1"
+    note "$1 could be changed by others on this server; now only its owner can change it."
+  fi
+}
+
 install_server() {
   say ""
   say "Installing MausBot in $INSTALL_DIR..."
-  mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/caddy/data" "$INSTALL_DIR/caddy/config"
+  if [ -d "$INSTALL_DIR" ]; then close_to_others "$INSTALL_DIR"; fi
+  if [ -d "$INSTALL_DIR/data" ]; then close_to_others "$INSTALL_DIR/data"; fi
+  install -d -m 755 "$INSTALL_DIR" "$INSTALL_DIR/caddy" "$INSTALL_DIR/caddy/data" "$INSTALL_DIR/caddy/config"
   write_compose
   write_caddyfile
   write_settings
@@ -1105,6 +1116,10 @@ run_uninstall() {
 }
 
 main() {
+  # SECURITY: what this makes in the install's folder is run by root later (compose.yaml, update.sh), so its modes are
+  # set here and by each write, never left to the caller's umask: a root shell with umask 000 would make them writable
+  # by everyone on the server.
+  umask 022
   settings
   parse "$@"
   case "$MODE" in
