@@ -29,7 +29,7 @@ export function useSettingsContext(): SettingsContext {
     team,
     client,
     admin,
-    places: railShown(places) || known > 1,
+    places: known > 1 || (!ogb?.environments && railShown(places)),
     plan: desktop ? Boolean(ogb?.cloudAccount || (ogb?.cloudPlan && cloud)) : cloud && !team && admin,
     organization: Boolean(ogb?.organization) && !client,
     environments: Boolean(ogb?.environments),
