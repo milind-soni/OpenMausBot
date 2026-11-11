@@ -30,7 +30,7 @@ export function StoreLinks() {
     const app = part === marks.appStore ? PHONE_APPS[0] : part === marks.android ? PHONE_APPS[1] : null;
     return app
       ? <a key={app.id} href={app.url} data-phone-app={app.id} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); void openExternalLink(app.url); }}
-        className="text-accent-text hover:underline focus-visible:underline">{app.label}</a>
+        className="whitespace-nowrap text-accent-text hover:underline focus-visible:underline">{app.label}</a>
       : part;
   })}</>;
 }

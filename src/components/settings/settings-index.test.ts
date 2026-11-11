@@ -28,8 +28,10 @@ describe("the pages", () => {
     expect(ids(fullContext())).toEqual([...PLACE_PAGES, "account", "plan", "app", "general", "appearance"]);
   });
 
-  it.each(Object.entries(PEOPLE))("keeps the same place pages, in the same order, for %s", (_who, ctx) => {
-    expect(ids(ctx).filter((id) => PLACE_PAGES.includes(id))).toEqual(PLACE_PAGES);
+  it.each(Object.entries(PEOPLE))("keeps the same place pages, in the same order, for %s", (who, ctx) => {
+    // A team's member is offered none of the installation's admin pages (AI, Desktops, Spending, Data).
+    const expected = who === "a team member" ? PLACE_PAGES.filter((id) => !["ai", "desktops", "usage", "data"].includes(id)) : PLACE_PAGES;
+    expect(ids(ctx).filter((id) => PLACE_PAGES.includes(id))).toEqual(expected);
   });
 
   it("is the same in Simple and Advanced: Advanced only adds rows", () => {

@@ -125,11 +125,12 @@ describe("the Settings window", () => {
     expect(render("appearance")).not.toContain("Window frame");
   });
 
-  it("keeps a team member's AI page to one note, and shows People to admins only", () => {
+  it("offers a team's member no AI page (an old link lands on Overview and says so), and shows People to admins only", () => {
     vi.stubGlobal("window", {});
     fixture.config = { cloudHome: true, team: { name: "Acme" } };
     fixture.admin = false;
-    expect(render("ai")).toContain("Only an admin of this installation can change this.");
+    expect(render("ai")).toContain("AI isn&#x27;t on Acme.");
+    expect(navPages(render("overview"))).not.toContain("ai");
     expect(navPages(render("overview"))).not.toContain("people");
     fixture.admin = true;
     expect(navPages(render("overview"))).toContain("people");
