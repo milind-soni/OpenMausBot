@@ -209,7 +209,7 @@ export async function synthesize(
   return { bytes: new Uint8Array(await res.arrayBuffer()), mime: "audio/mpeg" };
 }
 
-export async function transcribe(audio: Uint8Array, mime: string, key: string): Promise<string> {
+export async function transcribe(audio: Uint8Array, mime: string, key: string, signal?: AbortSignal): Promise<string> {
   const form = new FormData();
   form.append("audio", new Blob([audio as Uint8Array<ArrayBuffer>], { type: mime }), "speech.wav");
   form.append("ignore_timestamps", "true");
@@ -222,7 +222,7 @@ export async function transcribe(audio: Uint8Array, mime: string, key: string): 
       headers: { authorization: `Bearer ${key}`, model: "transcribe-1-pro" },
       body: form,
       redirect: "error",
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.any([AbortSignal.timeout(60_000), ...(signal ? [signal] : [])]),
     });
   } catch {
     throw userErrorThrown("serverError.voice.fishTranscribeConnection");

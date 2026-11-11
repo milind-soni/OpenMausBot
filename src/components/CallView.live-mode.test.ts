@@ -4,10 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, StoreProvider, type Bot } from "@/state/store";
 
-vi.mock("./DesktopCapabilities", () => ({
+vi.mock("./DesktopCapabilities", async () => {
+  const { initialDesktopCapabilities } = await import("@/lib/desktop");
   // capabilities still loading: a take-turns call cannot start yet
-  useDesktopCapabilities: () => ({ capabilities: null, ready: false }),
-}));
+  return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities(), ready: false }) };
+});
 
 import { CallButton, CallOverlay, CallTargetButton } from "./CallView";
 import { setCallMode } from "@/lib/call-mode";

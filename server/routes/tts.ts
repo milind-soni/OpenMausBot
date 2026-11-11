@@ -2,8 +2,10 @@
 // ElevenLabs Voice Library voice to My Voices, speaking a line, and hearing speech. Scopes are keyed by path in server/request-auth.ts.
 import type { AppConfig } from "../config.ts";
 import { redactSecretsInText } from "../redact.ts";
-import * as fish from "../tts/fish.ts";
 import { voiceFailure } from "../tts/errors.ts";
+import { listSpeechModels, transcribe } from "../stt.ts";
+import { isEndpointStt, STT_DESTINATION_HEADER, sttDestination } from "../../shared/stt.ts";
+import { STT_INSECURE_KEY_ERROR, sttConfigSchema, sttKeySendable, sttNeedsKey, sttSavePatch, sttStatus, usableSttKey } from "../stt-config.ts";
 import * as tts from "../tts/index.ts";
 import { toUtterances, VOICE_FIRST_BLOCK_MAX_CHARS } from "../tts/speech-text.ts";
 import { userError, userErrorFields } from "../user-errors.ts";
@@ -20,6 +22,20 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
   return async ({ req, res, url, path, method, json, readBody }) => {
     if (!path.startsWith("/api/tts/")) return PASS;
     const cfg = deps.config();
+    if (method === "POST" && path === "/api/tts/models") {
+      const body = await readBody(req);
+      const parsed = sttConfigSchema.safeParse(body.stt);
+      if (!parsed.success) return json(res, 400, { error: "Invalid speech input settings." });
+      const stt = { ...cfg.stt, ...sttSavePatch(cfg.stt, parsed.data) };
+      if (!isEndpointStt(stt.provider)) return json(res, 400, { error: "Choose a speech input server first." });
+      if (parsed.data.key?.trim() && !sttKeySendable(stt)) return json(res, 400, { error: STT_INSECURE_KEY_ERROR });
+      if (sttNeedsKey(stt) && !usableSttKey(stt)) return json(res, 409, { error: "Enter the speech input API key to load models." });
+      try {
+        return json(res, 200, { models: await listSpeechModels({ ...cfg, stt }) });
+      } catch (error) {
+        return json(res, 502, { error: error instanceof Error ? error.message : "Could not load speech input models." });
+      }
+    }
     if (method === "POST" && path === "/api/tts/prepare") {
       const body = await readBody(req);
       // Replies speak while they are still being written, from text no stored message has scrubbed yet: held secrets
@@ -89,10 +105,15 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
         req.resume();
         return json(res, 400, { error: "content-type must be audio/wav" });
       }
-      const key = cfg.tts?.fishKey;
-      if (!key) {
+      const destination = req.headers[STT_DESTINATION_HEADER];
+      const refusal = (settings: AppConfig) => !sttStatus(settings).configured
+        ? userError(isEndpointStt(sttStatus(settings).provider) ? "serverError.voice.speechInputRequired" : "serverError.voice.fishKeyRequired")
+        : destination !== encodeURIComponent(sttDestination(sttStatus(settings))) ? userError("serverError.voice.speechInputChanged")
+        : null;
+      const refusedEarly = refusal(cfg);
+      if (refusedEarly) {
         req.resume();
-        return json(res, 409, userError("serverError.voice.fishKeyRequired"));
+        return json(res, 409, refusedEarly);
       }
       const declared = Number(req.headers["content-length"] ?? 0);
       if (declared > TRANSCRIBE_MAX_BYTES) {
@@ -111,8 +132,18 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
         req.on("error", reject);
       });
       if (!audio) return json(res, 413, { error: `audio exceeds ${TRANSCRIBE_MAX_BYTES} bytes` });
+      const settings: AppConfig = { ...cfg, stt: { ...cfg.stt }, tts: { ...cfg.tts } };
+      const refusedLate = refusal(settings);
+      if (refusedLate) return json(res, 409, refusedLate);
       try {
-        return json(res, 200, { text: await fish.transcribe(audio, mime, key) });
+        const abort = new AbortController();
+        const cancel = () => abort.abort();
+        res.on?.("close", cancel);
+        try {
+          return json(res, 200, { text: await transcribe(settings, audio, mime, abort.signal) });
+        } finally {
+          res.off?.("close", cancel);
+        }
       } catch (e) {
         return json(res, 502, { error: e instanceof Error ? e.message : String(e), ...userErrorFields(e) });
       }

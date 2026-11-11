@@ -181,7 +181,7 @@ describe("scopes", () => {
       ["POST", "/api/bots/x/apps/m/rpc/extra"], ["DELETE", "/api/bots/x/apps/m/context"],
       ["PATCH", "/api/logins/1password/vaults/v1"], ["GET", "/api/bots/x/sign-in-cards/m/done"],
       ["GET", "/api/bots/x/queue/q/steer"], ["POST", "/api/bots/x/queue/q/steer/more"], ["POST", "/api/groups/g/queue/q/steer/more"],
-      ["POST", "/api/tts/voices/add"],
+        ["POST", "/api/tts/voices/add"], ["POST", "/api/tts/models"],
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
   });
 

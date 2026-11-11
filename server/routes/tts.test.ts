@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { STT_DESTINATION_HEADER } from "../../shared/stt.ts";
 import type { AppConfig } from "../config.ts";
 import { addHeldSecretScrubber } from "../redact.ts";
 import { VOICE_FIRST_BLOCK_MAX_CHARS } from "../tts/speech-text.ts";
@@ -61,7 +62,7 @@ describe("transcribe route", () => {
   afterEach(() => vi.unstubAllGlobals());
   const withKey = { tts: { fishKey: "fish-key" } } as AppConfig;
   const upload = (bytes: Buffer, type = "audio/wav") =>
-    Object.assign(Readable.from([bytes]), { headers: { "content-type": type, "content-length": String(bytes.byteLength) } }) as never;
+    Object.assign(Readable.from([bytes]), { headers: { "content-type": type, "content-length": String(bytes.byteLength), [STT_DESTINATION_HEADER]: "fish" } }) as never;
 
   it("refuses anything but WAV audio", async () => {
     const { answers } = await call("POST", "/api/tts/transcribe", {}, withKey, upload(Buffer.from("x"), "application/json"));
@@ -85,6 +86,47 @@ describe("transcribe route", () => {
     expect(answers).toEqual([[200, { text: "hi bot" }]]);
   });
 
+  it("refuses a clip recorded for a destination that has since changed", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ text: "hi bot" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const local = { stt: { provider: "openai", baseUrl: "http://localhost:8000", model: "whisper" } } as AppConfig;
+    const recordedFor = (destination: string) => Object.assign(Readable.from([Buffer.from("RIFF")]), {
+      headers: { "content-type": "audio/wav", "content-length": "4", [STT_DESTINATION_HEADER]: encodeURIComponent(destination) },
+    }) as never;
+    const changed = await call("POST", "/api/tts/transcribe", {}, local, recordedFor("openai https://api.openai.com/v1"));
+    expect(changed.answers[0]![0]).toBe(409);
+    expect((changed.answers[0]![1] as { errorKey: string }).errorKey).toBe("serverError.voice.speechInputChanged");
+    expect(fetchMock).not.toHaveBeenCalled();
+    const same = await call("POST", "/api/tts/transcribe", {}, local, recordedFor("openai http://localhost:8000/v1"));
+    expect(same.answers).toEqual([[200, { text: "hi bot" }]]);
+  });
+
+  it("rechecks the destination after the upload is read, so a change during the upload cannot redirect it", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ text: "hi bot" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const live = { stt: { provider: "openai", baseUrl: "http://localhost:8000", model: "whisper" } } as AppConfig;
+    async function* uploadWhileSettingsChange() {
+      live.stt = { provider: "openai", baseUrl: "https://api.openai.com/v1", model: "whisper-1", key: "k", keyFor: "https://api.openai.com/v1" };
+      yield Buffer.from("RIFF");
+    }
+    const req = Object.assign(Readable.from(uploadWhileSettingsChange()), {
+      headers: { "content-type": "audio/wav", "content-length": "4", [STT_DESTINATION_HEADER]: encodeURIComponent("openai http://localhost:8000/v1") },
+    }) as never;
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, live, req);
+    expect(answers[0]![0]).toBe(409);
+    expect((answers[0]![1] as { errorKey: string }).errorKey).toBe("serverError.voice.speechInputChanged");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a clip that does not name its destination", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ text: "hi bot" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const req = Object.assign(Readable.from([Buffer.from("RIFF")]), { headers: { "content-type": "audio/wav", "content-length": "4" } }) as never;
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, withKey, req);
+    expect(answers[0]![0]).toBe(409);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("answers 502 with Fish's message when Fish fails", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ message: "nope" }), { status: 401 })));
     const { answers } = await call("POST", "/api/tts/transcribe", {}, withKey, upload(Buffer.from("RIFF")));
@@ -96,7 +138,7 @@ describe("transcribe route", () => {
 it("keeps the English network refusal and its translation fields", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
   try {
-    const req = Object.assign(Readable.from([Buffer.from("RIFF")]), { headers: { "content-type": "audio/wav", "content-length": "4" } });
+    const req = Object.assign(Readable.from([Buffer.from("RIFF")]), { headers: { "content-type": "audio/wav", "content-length": "4", [STT_DESTINATION_HEADER]: "fish" } });
     const { answers } = await call("POST", "/api/tts/transcribe", {}, { tts: { fishKey: "fish-key" } } as AppConfig, req as never);
     expect(answers).toEqual([[502, {
       error: "Couldn't reach Fish Audio to hear you — check your connection.",

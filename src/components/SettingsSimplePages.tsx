@@ -53,7 +53,7 @@ export type SimpleDisclosureId = "ai-more" | "ai-keys" | "computer-elsewhere" | 
 export type Disclose = (id: SimpleDisclosureId) => { id: SimpleDisclosureId; open: boolean; onToggle: () => void };
 
 export const SIMPLE_ADVANCED_ONLY: readonly LocaleKey[] = [
-  "settings.font.title", "settings.chatWidth.title", "settings.pinnedCircles.title", "settings.universalPins.title", "settings.runCard.title",
+  "settings.font.title", "settings.chatWidth.title", "settings.pinnedCircles.title", "settings.universalPins.title", "settings.runCard.title", "stt.title",
 ];
 
 export const SIMPLE_MORE_LIMITS: readonly LocaleKey[] = [

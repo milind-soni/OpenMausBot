@@ -2,6 +2,7 @@
 import type { EffortLevel, LiveSettings } from "../../shared/wire";
 import type { ImageProvider } from "../../shared/image-generation";
 import type { OnboardingStatus } from "@/lib/onboarding";
+import type { SttStatus } from "../../shared/stt";
 import type { ModelSelection } from "./store";
 
 /** A saved credential: whether it is set and, for admins, its last four characters. The key itself never comes back. */
@@ -13,6 +14,7 @@ export interface ImageSlotStatus { provider: ImageProvider; model: string; confi
 
 /** GET /api/config — configured flags only; secrets are never echoed. */
 export interface ConfigStatus {
+  stt?: SttStatus;
   /** The workspace's banner picture (GET /api/workspace/banner), by a version that changes with it; null without one. */
   workspaceBanner?: import("@/lib/place-banner").BannerSummary | null;
   xai?: SavedKey;
