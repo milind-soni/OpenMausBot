@@ -91,8 +91,20 @@ describe("useExternalChatLinks", () => {
     expect(dispatch).not.toHaveBeenCalled();
 
     render(loaded, dispatch);
-    expect(dispatch).toHaveBeenCalled();
+    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+      { type: "select", id: "scout" },
+      { type: "switchTask", botId: "scout", threadId: "scout-main" },
+      { type: "revealThread", threadId: "scout-main" },
+    ]);
     expect(fixture.link).toBeNull();
+  });
+
+  it("says so when the web address names a thread this person can't see", () => {
+    vi.stubGlobal("window", { location: { pathname: "/", search: "?thread=elsewhere", hash: "" }, history: { replaceState: vi.fn() } });
+    const dispatch = vi.fn();
+    render(loading, dispatch);
+    render(loaded, dispatch);
+    expect(dispatch.mock.calls.map(([action]) => action)).toContainEqual({ type: "notice", notice: { kind: "thread-gone", botName: null } });
   });
 
   it("does nothing without the desktop bridge", () => {
