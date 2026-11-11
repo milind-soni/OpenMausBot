@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { freezeAnswer, installOneHome } from "./one-home-main.mjs";
 import nativeText from "./native-text.cjs";
 
@@ -151,4 +155,41 @@ test("the team bring handlers receive the same dynamic translator as one home", 
     language = "pt-br";
     await assert.rejects(move({}, "atlas-bot-1"), { message: "pt-br:native.teamMove.openTeam" });
   } finally { main.close(); }
+});
+
+test("a first move waits for the person's choice, asked on whichever page is open; with one bot there is nothing to choose", async () => {
+  const CLOUD = "https://omb-t-1.fly.dev";
+  const folder = mkdtempSync(join(tmpdir(), "omb-move-choice-"));
+  const launch = (bots) => {
+    const handlers = new Map();
+    let kept = null, url = "http://127.0.0.1:4100/";
+    const main = installOneHome({
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, cloudPage: (event) => event.page ?? null, server: () => null, home: () => ({ origin: CLOUD, grant: async () => ({ origin: CLOUD, code: "x" }) }),
+      cookieFetch: async () => json({}, 401), reconnect: async () => false, power: { asleep: () => false }, file: () => join(folder, "cloud-send.json"),
+      window: () => ({ isDestroyed: () => false, webContents: { on: () => {}, send: () => {}, get mainFrame() { return { url }; } } }), localOrigin: () => "http://127.0.0.1:4100", fetch: async () => json({}, 404),
+      localRequest: async (route) => (route === "/api/bots?messages=0" ? json({ bots }) : json({ frozen: false })),
+      account: () => ({ state: () => ({ status: "connected", account: { id: "acct-1", email: "person@example.test" }, machine: { status: "ready", origin: CLOUD, moves: true } }), pairHome: async () => { throw new Error("not in this test"); } }),
+      journalFile: () => join(folder, `${bots.length}-one-home.json`), tempRoot: () => folder, journal: { read: () => kept, write: (value) => { kept = value; } }, keep: { read: () => null, write: () => {} }, chooses: true,
+    });
+    return { main, ask: (channel, page, ...args) => handlers.get(channel)({ page }, ...args), kept: () => kept, show: (next) => { url = next; } };
+  };
+  const named = (count) => Array.from({ length: count }, (_, i) => ({ id: `b${i}`, name: `Bot ${i}` }));
+  const asked = launch([...named(3), { id: "maus", name: "Maus", defaultBot: { v: 1 } }]);
+  const alone = launch([...named(1), { id: "maus", name: "Maus", defaultBot: { v: 1 } }]);
+  try {
+    await asked.main.kick();
+    assert.equal(asked.kept(), null, "nothing starts by itself");
+    assert.deepEqual(asked.ask("cloud-send:notice", "local").move, { phase: "choose" });
+    asked.show(`${CLOUD}/`);
+    assert.deepEqual(asked.ask("cloud-send:notice", "cloud").move, { phase: "choose" }, "someone back from buying My Cloud is looking at it, and is asked there");
+    assert.deepEqual((await asked.ask("cloud-send:bot-choices", "cloud")).bots.map((bot) => bot.id), ["b0", "b1", "b2"], "this computer's bots, whichever page asks");
+    assert.throws(() => asked.ask("cloud-send:bot-move-state", "cloud"), /only available on this computer's page/u);
+    assert.throws(() => asked.ask("cloud-send:move-everything", null), /only available/u);
+    asked.ask("cloud-send:move-everything", "cloud");
+    await asked.main.kick();
+    assert.equal(asked.kept()?.phase, "copy", "Move everything starts the one-time move");
+
+    await alone.main.kick();
+    assert.equal(alone.kept()?.phase, "copy", "with one bot there is nothing to choose");
+  } finally { asked.main.close(); alone.main.close(); rmSync(folder, { recursive: true, force: true }); }
 });

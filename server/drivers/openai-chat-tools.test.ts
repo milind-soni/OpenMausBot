@@ -498,11 +498,11 @@ describe("optional built-in question compatibility", () => {
     });
     await f.start({ integrations: undefined });
     expect(await f.completed()).toMatchObject({ ok: false });
-    expect(f.requests).toHaveLength(1);
-    expect(f.requests[0].tools?.map(tool => tool.function.name)).toEqual(["ask_user"]);
+    expect(f.requests).toHaveLength(status === 429 || status === 500 ? 3 : 1);
+    for (const request of f.requests) expect(request.tools?.map(tool => tool.function.name)).toEqual(["ask_user"]);
   });
 
-  it("does not retry network failures or strip tools mounted by the person", async () => {
+  it("retries a network failure as the same request, and never strips tools mounted by the person", async () => {
     for (const network of [false, true]) {
       const f = await fixture((_body, response) => {
         if (network) return response.destroy(new Error("tools are not supported"));
@@ -511,8 +511,8 @@ describe("optional built-in question compatibility", () => {
       });
       await f.start(network ? { integrations: undefined } : {});
       expect(await f.completed()).toMatchObject({ ok: false });
-      expect(f.requests).toHaveLength(1);
-      if (!network) expect(f.requests[0].tools?.some(tool => tool.function.name === "audit_write")).toBe(true);
+      expect(f.requests).toHaveLength(network ? 3 : 1);
+      for (const request of f.requests) expect(request.tools?.some(tool => tool.function.name === (network ? "ask_user" : "audit_write"))).toBe(true);
       expect(f.effects()).toEqual([]);
     }
   });

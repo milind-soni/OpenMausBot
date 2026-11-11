@@ -100,6 +100,11 @@ jobs:
         run: pnpm exec vitest run scripts/ci-scope.test.ts scripts/ci-linux-lanes.test.ts scripts/ci-workflow.test.ts scripts/testing/verification-docs.test.ts
       - name: Validate locale catalogs
         run: pnpm i18n:check
+      - name: Validate the model manifest
+        # Installs download this file from main within hours of a change, so a bad edit must not land.
+        env:
+          MANIFEST_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: node scripts/check-model-manifest.mjs --against "$MANIFEST_BASE"
       - run: pnpm check:contrast
       - run: pnpm lint
       - name: Validate the announcements file

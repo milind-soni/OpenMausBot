@@ -48,6 +48,10 @@ export function createOwnThreads(deps: {
       const requester = asked?.parentId === undefined ? undefined : deps.node(asked.parentId);
       return Boolean(asked && requester && requester.botId === botId && own(requester, asked));
     },
+    /** "ask" when running on `selection` crosses to an engine where this bot's permission level does not carry over. */
+    approvalFor(bot: BotRecord, selection: ModelSelection): "ask" | undefined {
+      return modelSwitchNeedsAsk(approvalModeFor(bot), deps.registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, deps.registry.cliTarget(selection.instanceId)?.driverKind) ? "ask" : undefined;
+    },
     inherited(botId: string, parentThreadId: string): { modelSelection?: ModelSelection; approvalMode?: "ask" } {
       const bot = store.bot(botId);
       const modelSelection = bot && store.taskByThread(bot.id, parentThreadId)?.modelSelection;

@@ -93,6 +93,9 @@ describe("trace helpers", () => {
     expect(usageGroupLabel("user", { key: "routine:r1", label: "Routine: Morning digest" })).toBe("Routine: Morning digest");
     expect(usageGroupLabel("user", { key: "user:ada@example.test", label: "ada@example.test" })).toBe("ada@example.test");
     expect(usageGroupLabel("routine", { key: "manual", label: "Not from a routine" })).toBe("Not from a routine");
+    expect(usageGroupLabel("routine", { key: "routine:private", label: "Private routine" })).toBe("Private routine");
+    expect(usageGroupLabel("user", { key: "routine:private", label: "Private routine" })).toBe("Private routine");
+    expect(usageGroupLabel("bot", { key: "bot:private", label: "Private bot" })).toBe("Private bot");
   });
 
   it("ranks models by tokens, so a subscription model with no price still shows", () => {

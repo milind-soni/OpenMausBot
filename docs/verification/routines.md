@@ -183,6 +183,16 @@ never kill processes by name or delete a broad temporary root.
 
 ## Automated regressions
 
+The automation notification regression creates a failed run followed by six
+successful runs, restarts the isolated server, and checks that the list explains
+the unread failure and the panel shows it beyond the five newest runs. Opening
+the panel marks the failure seen; a second restart must keep the dot cleared.
+It retains screenshots under `.omb-scratch/automations-journey/notification*`.
+
+```sh
+OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/automations-journey.ui.e2e.test.ts -t explains.an.old.automation.notification
+```
+
 In the editor's Advanced section, recurring routines offer **Skip this
 occurrence** (the default) or **Queue one run**. The queued scheduled run waits
 for the same routine to finish, including the assignments its run still has

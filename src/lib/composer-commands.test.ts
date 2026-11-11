@@ -6,8 +6,7 @@ import {
   replaceComposerSlashTrigger,
   skillSlashCommands,
   slashCommandMatches,
-  type ComposerSlashCommandId,
-} from "./composer-commands";
+  type ComposerSlashCommandId, builtInCommandText } from "./composer-commands";
 import { enabledSlashSkills } from "./use-slash-skills";
 
 describe("composer slash commands", () => {
@@ -115,5 +114,14 @@ describe("composer slash commands", () => {
       { name: "bare", description: "" },
     ]);
     expect(enabledSlashSkills(null)).toEqual([]);
+  });
+});
+
+describe("burst", () => {
+  it("leaves /burst in the composer for the person to finish, and /goal only flips the mode", () => {
+    expect(builtInCommandText("burst")).toBe("/burst ");
+    expect(builtInCommandText("learn")).toBe("/learn ");
+    expect(builtInCommandText("setup")).toBe("/setup ");
+    expect(builtInCommandText("goal")).toBe("");
   });
 });

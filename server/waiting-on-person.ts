@@ -65,6 +65,16 @@ export class UnansweredApprovals {
     if (!noted.actions.length) this.byThread.delete(threadId);
   }
 
+  /** What parks work handed on after an approval went unanswered: a question that lasts past this turn. The person's answer
+   * lets the bot try again, and the engine's own prompt still gates the action. Undefined when none went unanswered. */
+  ask(threadId: string, turnId: string | undefined, who: string, language?: string): string | undefined {
+    const noted = this.byThread.get(threadId);
+    if (!noted || noted.turnId !== turnId || !noted.actions.length) return undefined;
+    // withDefault reads the first "Default:", so an action's own words must not look like one.
+    const actions = noted.actions.map(action => `“${action.replace(/\bdefault:/gi, "default :")}”`).join(", ");
+    return `${serverLine(language, noted.actions.length === 1 ? "server.teammates.approvalAsk.one" : "server.teammates.approvalAsk.many", { who, actions })}\nDefault: ${serverLine(language, "server.teammates.approvalAsk.retry")}`;
+  }
+
   annotate(threadId: string, turnId: string | undefined, text: string, ok: boolean): string {
     const noted = this.byThread.get(threadId);
     if (!noted || noted.turnId !== turnId) return text;

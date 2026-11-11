@@ -64,6 +64,71 @@ function setup(over: Partial<PlaceInboxDeps> = {}, dataDir = mkdtempSync(join(tm
   return { inbox, store, said, cards, sent, handed, guests, bots, listeners, ask, dataDir, tick: (ms: number) => { clock += ms; } };
 }
 
+describe("finished work reaches the inbox once", () => {
+  const work = (threadId: string, text = "Pricing page updated.") => ({ botId: "mira", threadId, text });
+  const asked = { botId: "eli", threadId: "eli-main" };
+  const summary = { kind: "done", botId: "eli", botName: "Eli", threadId: "eli-main", title: "Done", body: "All three pages are live." } as Notification;
+  const infoRows = (f: ReturnType<typeof setup>) => f.inbox.view(OWNER).rows.filter((row) => row.tab === "info");
+
+  it("files handed-off work as an unread line, opening its own thread, and sends nothing", () => {
+    const f = setup();
+    f.inbox.handedResult(work("mira-pricing"), asked);
+    expect(infoRows(f)).toMatchObject([{ kind: "result", from: { name: "Mira", botId: "mira" }, workingFor: { name: "Eli" }, text: "Pricing page updated.", unread: true,
+      origin: { botId: "mira", threadId: "mira-pricing" } }]);
+    expect(f.sent).toEqual([]);
+    expect(f.inbox.count(OWNER)).toBe(1);
+  });
+
+  it("keeps one row per job: the next teammate's result and then the summary replace it", () => {
+    const f = setup();
+    f.inbox.handedResult(work("mira-pricing"), asked);
+    f.tick(1);
+    f.inbox.handedResult(work("mira-launch", "Launch post drafted."), asked);
+    expect(infoRows(f).map((row) => row.text)).toEqual(["Launch post drafted."]);
+    f.tick(1);
+    f.inbox.route(summary, { summary: true });
+    expect(infoRows(f)).toMatchObject([{ kind: "result", from: { name: "Eli" }, text: "All three pages are live.", origin: { threadId: "eli-main" } }]);
+  });
+
+  it("leaves what the person already read, other jobs and routine reports alone", () => {
+    const f = setup();
+    f.inbox.handedResult(work("mira-pricing"), asked);
+    f.inbox.markRead(OWNER, infoRows(f)[0]!.id);
+    f.inbox.handedResult(work("mira-launch", "Second."), { botId: "eli", threadId: "eli-launch" });
+    f.inbox.route({ kind: "done", botId: "eli", botName: "Eli", threadId: "eli-main", title: "Done", body: "Weekly report." } as Notification, { routine: true });
+    f.tick(1);
+    f.inbox.route(summary, { summary: true });
+    expect(infoRows(f).map((row) => row.text).sort()).toEqual(["All three pages are live.", "Pricing page updated.", "Second.", "Weekly report."]);
+  });
+
+  it("adds no line for a muted bot, an empty reply or a plain turn's done, and a restart keeps the row", () => {
+    const f = setup();
+    f.bots.mira!.notifications = false;
+    f.inbox.handedResult(work("mira-pricing"), asked);
+    f.bots.mira!.notifications = true;
+    f.inbox.handedResult(work("mira-pricing", "   "), asked);
+    f.inbox.route({ kind: "done", botId: "eli", botName: "Eli", threadId: "eli-main", title: "Done", body: "Plain." } as Notification);
+    expect(infoRows(f)).toEqual([]);
+
+    f.inbox.handedResult(work("mira-pricing"), asked);
+    const reopened = setup({}, f.dataDir);
+    expect(infoRows(reopened).map((row) => row.text)).toEqual(["Pricing page updated."]);
+    reopened.inbox.route(summary, { summary: true });
+    expect(infoRows(reopened).map((row) => row.text)).toEqual(["All three pages are live."]);
+  });
+
+  it("files a resumed answer's results notice under the same job, and keeps a guest's work theirs", () => {
+    const f = setup();
+    f.inbox.route({ kind: "delegation-settled", botId: "eli", botName: "Eli", threadId: "eli-main", title: "Results", body: "Results from Mira" } as Notification, { summary: true });
+    f.inbox.route({ kind: "delegation-settled", botId: "eli", botName: "Eli", threadId: "eli-main", title: "Results", body: "ignored" } as Notification);
+    expect(infoRows(f).map((row) => row.text)).toEqual(["Results from Mira"]);
+    f.guests.set("guest-chat", "p_guest");
+    f.inbox.handedResult(work("mira-pricing", "For the guest."), { botId: "eli", threadId: "guest-chat" });
+    expect(f.inbox.view(GUEST).rows.map((row) => row.text)).toEqual(["For the guest."]);
+    expect(infoRows(f).map((row) => row.text)).toEqual(["Results from Mira"]);
+  });
+});
+
 describe("who is asking for the inbox", () => {
   const session = { kind: "session", session: { id: "s" } } as unknown as RequestAuth;
   const ownerShell = { kind: "loopback", trust: "owner" } as unknown as RequestAuth;

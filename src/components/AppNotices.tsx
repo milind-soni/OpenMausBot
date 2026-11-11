@@ -14,7 +14,7 @@ import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, clou
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits, firstChatQuiet, firstReplyPending } from "@/lib/corner-popup";
-import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, MODELGO_OFFER_NOTICE, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
+import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, MODELGO_OFFER_NOTICE, nextNotice, noticeSeen, PHONE_UPDATE_NOTICE, phoneUpdateHint, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
 import { useTwoPlaces } from "@/lib/two-places";
 import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { useAdvancedBackDue, useNewLookDue } from "@/lib/new-look";
@@ -24,6 +24,7 @@ import { reportWhatsNew, WHATS_NEW_SOURCES, whatsNewAudience, whatsNewView, type
 import { cloudSignInDue, onboardingCloudOffered, welcomeFinishedThisLaunch, type WelcomeViewer } from "@/lib/onboarding";
 import { launchDialogShown, markLaunchDialog } from "@/lib/launch-dialogs";
 import { useUpdaterState } from "@/lib/updater";
+import { phonePairingSettingsAction } from "@/lib/phone-pairing";
 import { activeLocale, t } from "@/lib/i18n";
 import { AnnouncementCard, announcementPlaceAction } from "./AnnouncementCard";
 import { BoatOfferCard, reportBoatOffer, type BoatOfferAction } from "./BoatOffer";
@@ -41,6 +42,7 @@ import { localDesktopPage } from "./onboarding/WelcomeGate";
 import { UpdatesConsentDialog, updatesConsentBridge, useUpdatesConsent } from "./UpdatesConsent";
 import { useMausBotWelcomeDue } from "./MausBotWelcome";
 import { NewLookNotice, reportNewLook } from "./NewLookNotice";
+import { PhoneUpdateCard, phonesToTell, useRetiredLinkPhones } from "./PhoneUpdateNotice";
 import { reportSimpleModePrompt, SimpleModePrompt } from "./SimpleModePrompt";
 import { TwoPlacesCard } from "./TwoPlacesCard";
 import { WhatsNewPopup } from "./whats-new/WhatsNewPopup";
@@ -106,6 +108,8 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   // Bots in two places: this computer's page only, where main knows what lives here.
   const two = useTwoPlaces();
   const twoFact = !local || two.suggest === null ? false : two.suggest === undefined ? null : true;
+  // Phones whose older app lost its way in: this computer's own page only, never a Cloud, a server's page or client mode.
+  const linkPhones = useRetiredLinkPhones(!remote && local);
   useEffect(() => {
     if (!bridge) return;
     let active = true, updated = false;
@@ -224,13 +228,17 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     : picked === "wait" || !viewer || organization === null || moving === null || firstChat === null || mausBotFirst || (state.liveCall && state.liveCall.status !== "ended") || (desktop && !desktopState) ? null : true;
   const remembering = { desktop, liveIds: new Set(remoteCards.map(card => card.id)), save: (hintsSeen: string[]) => void api("/api/config", { method: "PUT", body: JSON.stringify({ onboarding: { hintsSeen } }) })
     .then(config => dispatch({ type: "configStatus", config })).catch(() => {}) };
+  const retiredPhones = phonesToTell(linkPhones, record);
+  const phoneNow = retiredPhones?.length === 0 ? false
+    : retiredPhones === undefined || !viewer || mausBotFirst || (state.liveCall && state.liveCall.status !== "ended") ? null : true;
   const launch = launchNotice();
   // After a closed popup only the product-updates question and ModelGo's card may follow in this launch (nextNotice's
   // FOLLOWERS); nothing else does.
   const notice = waits ? null
     : firstChatQuiet(state) ? (grokNow === true && (launch === null || launch === GROK_MOVE_NOTICE) ? GROK_MOVE_NOTICE : null)
-    : cards || whatsNewHere || consentHere || simpleDue || boatHere || modelgoHere || announcementNow !== false || twoFact !== false || grokNow !== false ? nextNotice({
+    : cards || whatsNewHere || consentHere || simpleDue || boatHere || modelgoHere || announcementNow !== false || twoFact !== false || grokNow !== false || phoneNow !== false ? nextNotice({
     [GROK_MOVE_NOTICE]: grokNow,
+    [PHONE_UPDATE_NOTICE]: phoneNow,
     // As the What's new popup: never in the launch whose welcome just finished, nor over MausBot's first-launch card.
     [SIMPLE_MODE_NOTICE]: !simpleDue || afterWelcome === true ? false : afterWelcome === null || mausBotFirst || simpleBlocked ? null : true,
     [WHATS_NEW_NOTICE]: whatsNewDue === false || whatsNewState === "none" || moving || afterWelcome === true ? false
@@ -303,6 +311,12 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
       if (action === "start") setGrokOpen(true);
     };
     return <GrokMovePopup onDone={done} />;
+  }
+
+  if (notice === PHONE_UPDATE_NOTICE && retiredPhones?.length) {
+    const done = () => { close(); const patch = dismissNotices(record, retiredPhones.map(phone => phoneUpdateHint(phone.id)));
+      if (patch) void api("/api/config", { method: "PUT", body: JSON.stringify(patch) }).then(config => dispatch({ type: "configStatus", config })).catch(() => {}); };
+    return <PhoneUpdateCard phones={retiredPhones} onOpen={() => { done(); dispatch(phonePairingSettingsAction()); }} onDismiss={done} />;
   }
 
   if (notice === SIMPLE_MODE_NOTICE) {

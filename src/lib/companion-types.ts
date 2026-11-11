@@ -20,6 +20,16 @@ export interface PhoneDevice {
 /** Same Wi-Fi, Anywhere through MausBot, Tailscale, and the HTTPS address. */
 export type CompanionRoute = "wifi" | "relay" | "tailscale" | "https";
 
+export interface TailnetShareState {
+  on: boolean;
+  /** The address another computer opens; null while nothing answers there. */
+  origin: string | null;
+  /** Tailscale's own certificate fronts it; otherwise it is plain http inside WireGuard. */
+  https: boolean;
+  /** Why nothing answers: "not-listening", or the state Tailscale reported. */
+  problem: string | null;
+}
+
 export interface CompanionState {
   enabled: boolean;
   keepAwake: boolean;
@@ -31,11 +41,13 @@ export interface CompanionState {
   tailscale?: string;
   tailnetName?: string;
   /** Each way into this computer and whether the person turned it on. Absent on older builds. */
-  routes?: Record<CompanionRoute, { on: boolean; since: number | null; name?: string | null }>;
+  routes?: Record<CompanionRoute, { on: boolean; since: number | null; name?: string | null; computers?: boolean }>;
   /** Routes the update kept on that the person has not been told about yet. */
   notices?: CompanionRoute[];
   /** Why Tailscale could not be turned on or checked just now. */
   tailscaleProblem?: "not-installed" | "no-cli" | "not-running" | "needs-permission" | "signed-out";
+  /** This computer's own server on the tailnet, for the person's other computers. Absent on older builds. */
+  tailnetShare?: TailnetShareState;
   lan?: string | null;
   hosts?: string[];
   endpoints?: CompanionEndpoint[];
@@ -58,6 +70,8 @@ export type CompanionBridge = {
   refreshTailscale: () => Promise<CompanionState>;
   /** The rest are absent on an app build before per-route switches. */
   setTailscale?: (on: boolean) => Promise<CompanionState>;
+  /** Whether the person's other computers may open this one over Tailscale. */
+  setTailscaleComputers?: (on: boolean) => Promise<CompanionState>;
   setRoute?: (route: CompanionRoute, on: boolean) => Promise<CompanionState>;
   dismissNotice?: (route: CompanionRoute) => Promise<CompanionState>;
   pairing: (open: boolean, expectedToken?: string) => Promise<CompanionState>;

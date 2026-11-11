@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { assertBotHere, botMoveRefusal, createBotMoves } from "./bot-moves.ts";
+import { assertBotHere, botMoveRefusal, createBotMoves, MY_CLOUD_TEAM } from "./bot-moves.ts";
 import type { BotRecord } from "./store.ts";
 import { WaitManager } from "./waits.ts";
 
@@ -98,5 +98,50 @@ describe("My Cloud holding a bot while it moves into a team", () => {
     moves.moved("scout", ACME);
     expect(waits.all().map((wait) => wait.botId)).toEqual(["pip"]);
     expect(settled).toEqual([["the report", "cancelled"], ["the invoice", "cancelled"]]);
+  });
+});
+
+describe("a bot moving from this computer to My Cloud", () => {
+  const MY_CLOUD = { id: MY_CLOUD_TEAM, name: "My Cloud" };
+  function here() {
+    const bots = new Map<string, Record<string, unknown>>([["scout", { id: "scout", name: "Scout" }], ["pip", { id: "pip", name: "Pip" }], ["maus", { id: "maus", name: "Maus", defaultBot: { v: 1 } }]]);
+    const groups = [{ id: "both", memberIds: ["scout", "pip"], dm: false }, { id: "alone", memberIds: ["scout", "maus"], dm: false }];
+    const routines = [{ id: "brief", botId: "scout", enabled: true }];
+    const removed: string[] = [];
+    const moves = createBotMoves({
+      store: { bot: (id) => (bots.get(id) as unknown as BotRecord) ?? null, patchBot: (id, patch) => Object.assign(bots.get(id)!, patch) as unknown as BotRecord, groups,
+        patchGroup: (id, patch) => Object.assign(groups.find((group) => group.id === id)!, patch) },
+      routines: () => ({ listRoutines: () => routines as never, update: (id: string, patch: { enabled?: boolean }) => Object.assign(routines.find((routine) => routine.id === id)!, patch) as never, removeForBot: (botId: string) => { removed.push(botId); } }),
+      webhooks: () => null, appEvents: () => null, waits: () => null, busy: () => false,
+    });
+    return { moves, bots, groups, routines, removed };
+  }
+
+  it("keeps its routines here, off, leaves a room some of whose bots stay, and keeps a room all of whose bots left", async () => {
+    const { moves, bots, groups, routines, removed } = here();
+    await moves.hold("scout", MY_CLOUD);
+    moves.moved("scout", MY_CLOUD);
+    expect(removed, "My Cloud ending brings it back with them").toEqual([]);
+    expect(routines[0]!.enabled).toBe(false);
+    expect(bots.get("scout")).toMatchObject({ hidden: true, movedTo: { state: "moved" } });
+    expect(groups.find((group) => group.id === "both")!.memberIds, "the room goes on here without it").toEqual(["pip"]);
+    expect(groups.find((group) => group.id === "alone")!.memberIds, "only the helper every place has is left").toEqual(["scout", "maus"]);
+  });
+
+  it("is here again as it went if My Cloud ends, its automations left off", async () => {
+    const { moves, bots, routines } = here();
+    await moves.hold("scout", MY_CLOUD);
+    moves.moved("scout", MY_CLOUD);
+    expect(moves.back("scout")).toEqual({ released: true });
+    expect(bots.get("scout")).toMatchObject({ hidden: false, movedTo: undefined });
+    expect(routines[0]!.enabled).toBe(false);
+    expect(moves.back("pip"), "a bot that never left has nothing to come back from").toEqual({ released: true });
+  });
+
+  it("a bot that went into a team never comes back this way", async () => {
+    const { moves } = here();
+    await moves.hold("pip", ACME);
+    moves.moved("pip", ACME);
+    expect("refused" in moves.back("pip")).toBe(true);
   });
 });

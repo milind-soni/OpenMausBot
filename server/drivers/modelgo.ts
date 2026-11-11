@@ -110,7 +110,7 @@ export const ModelgoDriver: ProviderDriver<ModelgoConfig> = {
       unavailableReason: "No ModelGo API key — open Settings → API keys.",
       serverUnavailable: async () => {
         await firstRefresh;
-        return apiKey && !catalog.options.length ? "ModelGo listed no models for this key. Check the key in the ModelGo console, then check again." : null;
+        return apiKey && !catalog.options.length ? { reason: "ModelGo listed no models for this key. Check the key in the ModelGo console, then check again." } : null;
       },
       timeoutMs: 180_000, billing: "metered", includeUsageInCompleted: true,
       nativeLog: {

@@ -7,7 +7,7 @@ import { ArrowRightLeft, Loader2, Users } from "lucide-react";
 import type { TeamMoveView } from "../../electron/team-move.mjs";
 import type { Bot } from "@/state/store";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { ipcErrorText, teamMoveLine, teamMoveRefusalText } from "@/lib/cloud-send";
+import { ipcErrorText, MY_CLOUD_TEAM, teamMoveLine, teamMoveRefusalText } from "@/lib/cloud-send";
 import { t } from "@/lib/i18n";
 
 type Team = { id: string; name: string; ready: boolean };
@@ -81,7 +81,7 @@ export function useMoveToTeam({ blocked }: { blocked: (bot: Bot) => string | und
 
 /** What a bot moved into a team leaves on My Cloud: one line that opens it there. */
 export function MovedBotRows({ bots }: { bots: readonly Bot[] }) {
-  const moved = bots.filter((bot) => bot.movedTo?.state === "moved");
+  const moved = bots.filter((bot) => bot.movedTo?.state === "moved" && bot.movedTo.team.id !== MY_CLOUD_TEAM);
   if (!moved.length) return null;
   const page = bridge();
   return <div className="flex flex-col px-2 pb-1" data-moved-bots>
