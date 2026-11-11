@@ -45,6 +45,27 @@ describe("My Cloud takes a file", () => {
   }
   const file = (path: string, text: string, mode = "new", extra: Record<string, string> = {}) => ({ path, size: Buffer.byteLength(text), sha256: sha(text), mode, ...extra });
 
+  it("stores an empty file and accepts a retry without losing it", async () => {
+    const f = file("task-workspaces/b1/empty/.gitkeep", "");
+    expect(await send({ ...f, offset: 0 }, "")).toEqual({ status: 201, body: { stored: true } });
+    expect(readFileSync(join(data, f.path))).toEqual(Buffer.alloc(0));
+    expect(await send({ ...f, offset: 0 }, "")).toEqual({ status: 201, body: { stored: false } });
+    expect(await listBotFiles(data, ["b1"])).toContainEqual({ path: f.path, size: 0, sha256: sha("") });
+    expect(readdirSync(join(data, "tmp", "move-files")).filter((name) => name.endsWith(".partial"))).toEqual([]);
+  });
+
+  it("only replaces a file with an empty one when its expected hash still matches", async () => {
+    const path = "workspaces/b1/cleared.txt";
+    mkdirSync(join(data, "workspaces", "b1"), { recursive: true });
+    writeFileSync(join(data, path), "keep until the sender agrees");
+    const f = file(path, "");
+    expect(await send({ ...f, offset: 0 }, "")).toEqual({ status: 409, body: { conflict: true } });
+    expect(await send({ ...f, mode: "replace", expect: sha("another version"), offset: 0 }, "")).toEqual({ status: 409, body: { conflict: true } });
+    expect(readFileSync(join(data, path), "utf8")).toBe("keep until the sender agrees");
+    expect(await send({ ...f, mode: "replace", expect: sha("keep until the sender agrees"), offset: 0 }, "")).toEqual({ status: 201, body: { stored: true } });
+    expect(readFileSync(join(data, path))).toEqual(Buffer.alloc(0));
+  });
+
   it("in parts, from where its copy ends, and only whole and as sent", async () => {
     const text = "first part|second part";
     const f = file("workspaces/b1/notes.md", text);
