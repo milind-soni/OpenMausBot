@@ -41,7 +41,7 @@ member's own click (`savedNetlifyToken`, in `server/host/netlify-sites.test.ts`)
 pnpm exec vitest run src/components/published-apps src/lib/published-links.test.ts
 ```
 
-`preview.security.test.ts` holds the frame's sandbox (`allow-scripts allow-same-origin allow-forms allow-popups`, a
+`src/components/published-apps/preview.security.test.ts` holds the frame's sandbox (`allow-scripts allow-same-origin allow-forms allow-popups`, a
 card's picture only the first two), that the app's own origin and anything but a plain web address is never framed,
 that the preview registers no message listener and passes nothing into the frame, and that the desktop window keeps
 its preload out of frames.
