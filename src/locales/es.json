@@ -3688,7 +3688,6 @@
   "vm.isolation.shared": "Compartido",
   "vm.isolation.perBot": "Por bot",
   "vm.isolation.max": "Máximo de escritorios por bot",
-  "vm.isolation.maxDetail": "Limita el almacenamiento y el uso de recursos del host; cada escritorio en ejecución puede usar hasta 4 GB y 2 CPU.",
   "vm.isolation.maxAria": "Máximo de escritorios por bot",
   "vm.idle.label": "Detener los escritorios inactivos tras",
   "vm.idle.detail": "Se aplica a los escritorios compartidos y por bot. Un escritorio con un turno en curso nunca se detiene. El apagado por inactividad conserva sus archivos y apps instaladas.",

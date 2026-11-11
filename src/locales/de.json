@@ -1739,7 +1739,6 @@
   "vm.isolation.shared": "Gemeinsam",
   "vm.isolation.perBot": "Pro Bot",
   "vm.isolation.max": "Maximale Desktops pro Bot",
-  "vm.isolation.maxDetail": "Begrenzt Speicher- und Host-Ressourcenverbrauch; jeder laufende Desktop darf bis zu 4 GB und 2 CPUs nutzen.",
   "vm.isolation.maxAria": "Maximale Desktops pro Bot",
   "vm.saving": "Wird gespeichert…",
   "vm.unmanagedError": "Dieser Container wird nicht von {app} verwaltet und kann hier nicht entfernt werden.",
