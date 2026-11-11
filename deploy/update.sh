@@ -43,8 +43,8 @@ WAIT_S=${OMB_UPDATE_WAIT_S:-120}
 ENGINE_WAIT_S=${OMB_UPDATE_ENGINE_WAIT_S:-120}
 POLL_S=${OMB_UPDATE_POLL_S:-5}
 # Set by update-runner.sh: an update the server asked for (the app's Update server button). Whatever runs as the server's
-# user can ask, so such a run trusts nothing the server says, labels its copy of the data as the runner's, and removes
-# only the runner's own earlier copies, never one a person's run made.
+# user can ask, so such a run trusts nothing the server says, writes nothing through a link in the install's folder,
+# labels its copy of the data as the runner's, and keeps the runner's two newest copies and every copy a person's run made.
 BY_RUNNER=${OMB_UPDATE_BY_RUNNER:-}
 RUNNER_COPY="com.mausbot.by=runner"
 # The runner's own folder: a person's run here lets the button try again a version it gave up on (update-runner.sh).
@@ -202,8 +202,9 @@ phase() {
 }
 
 file_owner() { stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null; }
-# SECURITY: root runs this in a folder its owner can change (a checkout), at a person's sudo or at the server's request.
-# Nothing is written through a link there, nor into a .update that belongs to anyone but this user or the folder's owner.
+# SECURITY: at the server's request, root runs this in a folder its owner can change (a checkout): then nothing is written
+# through a link there, nor into a .update that belongs to anyone but this user or the folder's owner. A person's own run
+# is theirs to decide, links included.
 unsafe_path() {
   local path owner
   for path in "$STATE" "$JOURNAL" "$JOURNAL.tmp" "$LAST" "$LAST.tmp" "$LOCK" "$LOG" "$STATE/env.before" "$STATE/env.absent" \
@@ -219,7 +220,7 @@ unsafe_path() {
 
 take_lock() {
   local unsafe
-  if unsafe=$(unsafe_path); then
+  if [ "$BY_RUNNER" = 1 ] && unsafe=$(unsafe_path); then
     printf '%s\n' "$DIR/$unsafe, so nothing was changed: this script does not write through it. Remove it, then run this again."
     exit 4
   fi
@@ -274,12 +275,19 @@ copy_aside() { # data backup image: copy, then check the copy against the data, 
   docker run --rm --network none --user 0:0 --label com.mausbot.role=update-helper -v "$1:/from:ro" -v "$2:/to" --entrypoint cp "$3" -a /from/. /to/ || return 1
   helper "$3" "$1:/from:ro" "$2:/to:ro" -- "$VERIFY"'same /from /to'
 }
-# Every copy of this install's data but the one this update made, dropped once that one has been checked; on a run the
-# server asked for, only the runner's own earlier copies.
+# Every copy of this install's data but the one this update made, dropped once that one has been checked. On a run the
+# server asked for, only the runner's own, and never the newest one before this: a server that damaged its data and then
+# asked would otherwise leave only the damaged copy.
 drop_older_copies() {
-  local volume only=()
-  [ "$BY_RUNNER" = 1 ] && only=(--filter "label=$RUNNER_COPY")
-  for volume in $(docker volume ls -q --filter "label=$BACKUP_ROLE" --filter "label=com.mausbot.data=$J_data" ${only[@]+"${only[@]}"} 2>/dev/null); do
+  local volume keep=1
+  if [ "$BY_RUNNER" = 1 ]; then
+    for volume in $(docker volume ls -q --filter "label=$BACKUP_ROLE" --filter "label=com.mausbot.data=$J_data" --filter "label=$RUNNER_COPY" 2>/dev/null | LC_ALL=C sort -r); do
+      [ "$volume" = "$J_backup" ] && continue
+      if [ "$keep" -gt 0 ]; then keep=$((keep - 1)); else docker volume rm -f "$volume" >>"$LOG" 2>&1; fi
+    done
+    return 0
+  fi
+  for volume in $(docker volume ls -q --filter "label=$BACKUP_ROLE" --filter "label=com.mausbot.data=$J_data" 2>/dev/null); do
     [ "$volume" = "$J_backup" ] || docker volume rm -f "$volume" >>"$LOG" 2>&1
   done
 }
@@ -869,8 +877,6 @@ phase swap
 # The new copy is checked, and from here on an interruption puts it back: the copy from the update before may go now,
 # and with it the way back to that one.
 rm -f "$LAST"
-# SECURITY: on a run the server asked for, a person's own copy stays: a server that damaged its own data and then asked
-# would otherwise leave this copy, of the damaged data, as the only one.
 drop_older_copies
 say "Starting $(new_name)…"
 if old_installer_layout; then

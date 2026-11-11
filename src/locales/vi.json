@@ -5631,5 +5631,6 @@
   "serverUpdate.goBack": "Để quay về phiên bản trước: {command}",
   "serverUpdate.reason.notRetried": "Bản cập nhật lên v{version} đã không chạy được trên máy chủ này, nên ứng dụng sẽ không thử lại. Để tự thử, chạy trên máy chủ: {command}",
   "serverUpdate.reason.stale": "update.sh trên máy chủ mới hơn bản sao mà nút đang dùng. Trên máy chủ, chạy: {command}",
-  "serverUpdate.reason.unreleased": "Máy chủ này đang chạy bản dựng từ main, ứng dụng không cập nhật bản này. Để chuyển sang phiên bản ổn định, chạy trên máy chủ: {command}"
+  "serverUpdate.reason.unreleased": "Máy chủ này đang chạy bản dựng từ main, ứng dụng không cập nhật bản này. Máy chủ chuyển sang phiên bản ổn định khi phiên bản đó mới hơn bản dựng; trên máy chủ, chạy: {command}",
+  "serverUpdate.reason.unsafe": "Thư mục cài đặt, hoặc một thư mục phía trên, có thể bị người khác ngoài root thay đổi, nên nút không chạy gì. Hãy sửa, rồi trên máy chủ chạy: {command}"
 }

@@ -10007,5 +10007,6 @@
   "serverUpdate.goBack": "要回到之前的版本：{command}",
   "serverUpdate.reason.notRetried": "更新到 v{version} 之前在此伺服器上沒有成功，所以應用程式不會再試。要手動嘗試，請在伺服器上執行：{command}",
   "serverUpdate.reason.stale": "伺服器上的 update.sh 比按鈕使用的副本更新。請在伺服器上執行：{command}",
-  "serverUpdate.reason.unreleased": "此伺服器執行的是 main 的建置版本，應用程式不會更新它。要切換到穩定版，請在伺服器上執行：{command}"
+  "serverUpdate.reason.unreleased": "此伺服器執行的是 main 的建置版本，應用程式不會更新它。穩定版比該建置新時，它就會切換到穩定版；請在伺服器上執行：{command}",
+  "serverUpdate.reason.unsafe": "安裝資料夾或其上層資料夾可以被 root 以外的人修改，所以按鈕不會執行任何操作。請修正後在伺服器上執行：{command}"
 }

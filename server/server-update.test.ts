@@ -64,7 +64,8 @@ describe("what the host's runner wrote", () => {
     expect(readHostFacts(box.dir)).toMatchObject({ runner: { layout: "installer" }, writable: true, last: { run: 3 } });
     expect(readHostFacts(undefined)).toEqual({ runner: null, writable: false, last: null });
     expect(readHostFacts(host({ runnerFile: null }).dir).runner).toBeNull();
-    if (process.getuid?.() !== 0) expect(readHostFacts(host({ writable: false }).dir).writable).toBe(false);
+    // Folder modes are POSIX's; the server runs in a Linux container.
+    if (process.platform !== "win32" && process.getuid?.() !== 0) expect(readHostFacts(host({ writable: false }).dir).writable).toBe(false);
   });
 });
 
@@ -83,7 +84,7 @@ describe("the button's state", () => {
 
   it("never offers the button for a build of main: it says so, with the command that moves it to stable", () => {
     expect(status({ facts: { ...runner, runner: { ...runner.runner!, release: false } } })).toMatchObject({
-      mode: "command", why: "unreleased", command: "cd /opt/openmausbot && sudo ./update.sh --allow-older",
+      mode: "command", why: "unreleased", command: "cd /opt/openmausbot && sudo ./update.sh",
     });
   });
 
@@ -137,6 +138,15 @@ describe("a request", () => {
     await flushAdminActivity(box.data);
     const rows = readAdminActivityRange(box.data, { from: new Date(Date.now() - 60_000), to: new Date(Date.now() + 60_000) });
     expect(rows).toEqual([expect.objectContaining({ category: "config", action: "update.server", target: { kind: "server", name: "0.1.150 → 0.1.151" }, actor: admin })]);
+  });
+
+  it("asks the host to check its remembered answer again when that named an older version than this server's check", async () => {
+    const stale = host({ last: "run=3\nstate=done\nresult=updated\nat=1700000000\nran=0\nversion=0.1.150\n" });
+    expect((await updater(stale).request(admin)).status).toBe(202);
+    expect(existsSync(join(stale.dir, "request", "fresh"))).toBe(true);
+    const current = host({ last: "run=3\nstate=done\nresult=updated\nat=1700000000\nran=0\nversion=0.1.151\n" });
+    expect((await updater(current).request(admin)).status).toBe(202);
+    expect(existsSync(join(current.dir, "request", "fresh"))).toBe(false);
   });
 
   it("is one at a time: a second press while one runs is answered with the running one", async () => {

@@ -22,9 +22,10 @@ export type ServerUpdateOutcome =
 
 /** Why an update changed nothing (`not-changed`), as the host's runner said it. */
 /** `not-retried`: the stable version rolled back on this server before, and is not tried again from the app. `stale`: a
- * checkout's update.sh is newer than root's copy the button runs. `unreleased`: the server runs a build of main. */
+ * checkout's update.sh is newer than root's copy the button runs. `unreleased`: the server runs a build of main. `unsafe`:
+ * the install's folder, or one above it, can be changed by someone other than root and its owner. */
 export type ServerUpdateReason =
-  | "busy" | "refused" | "older" | "held" | "too-soon" | "no-updater" | "failed" | "not-retried" | "stale" | "unreleased";
+  | "busy" | "refused" | "older" | "held" | "too-soon" | "no-updater" | "failed" | "not-retried" | "stale" | "unreleased" | "unsafe";
 
 export interface ServerUpdateRun {
   outcome: ServerUpdateOutcome;

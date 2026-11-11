@@ -109,7 +109,7 @@ describe("the Update server row", () => {
   const button = (patch: Partial<ServerUpdateStatus> = {}): ServerUpdateStatus => ({
     mode: "button", current: "0.1.150", latest: "0.1.151", available: true, activeTurns: 0,
     command: "cd /opt/openmausbot && sudo ./update.sh", rollback: "cd /opt/openmausbot && sudo ./update.sh --rollback",
-    logs: "cd /opt/openmausbot && sudo docker compose logs --tail 50 omb", ...patch,
+    logs: "cd /opt/openmausbot && sudo docker compose logs --tail 50 omb", setup: "cd /opt/openmausbot && sudo ./update-runner.sh --install", ...patch,
   });
   const view = (input: Partial<Parameters<typeof serverUpdateView>[0]>) => serverUpdateView({ check: behind, status: button(), bundle: "0.1.150", app: null, ...input });
 
@@ -127,10 +127,11 @@ describe("the Update server row", () => {
   });
 
   it("says a build of main is not one the app updates, with the command that moves it to stable", () => {
-    expect(view({ status: button({ mode: "command", why: "unreleased", command: "cd /opt/openmausbot && sudo ./update.sh --allow-older" }) })).toEqual({
+    expect(view({ status: button({ mode: "command", why: "unreleased", command: "cd /opt/openmausbot && sudo ./update.sh" }) })).toEqual({
       label: "Version 0.1.151 is available for this server", action: null, busy: false,
-      subtitle: "This server runs a build of main, which the app doesn't update. To move it to the stable version, on the server run: cd /opt/openmausbot && sudo ./update.sh --allow-older",
+      subtitle: "This server runs a build of main, which the app doesn't update. It moves to the stable version once that is newer than the build; on the server run: cd /opt/openmausbot && sudo ./update.sh",
     });
+    expect(JSON.stringify(view({ status: button({ mode: "command", why: "unreleased", command: "x" }) }))).not.toContain("--allow-older");
   });
 
   it("shows nothing to press for this computer's app or a Cloud we run", () => {
@@ -182,6 +183,9 @@ describe("the Update server row", () => {
     );
     expect(view({ status: button({ setup: "cd /srv/deploy && sudo ./update-runner.sh --install", run: { outcome: "not-changed", reason: "stale", from: "0.1.150", at: 1 } }) }).note).toBe(
       "The server wasn't changed. The server's update.sh is newer than the copy the button uses. On the server, run: cd /srv/deploy && sudo ./update-runner.sh --install",
+    );
+    expect(view({ status: button({ run: { outcome: "not-changed", reason: "unsafe", from: "0.1.150", at: 1 } }) }).note).toBe(
+      "The server wasn't changed. The install's folder, or a folder above it, can be changed by someone other than root, so the button runs nothing. Fix that, then on the server run: cd /opt/openmausbot && sudo ./update-runner.sh --install",
     );
     expect(view({ status: button({ run: { outcome: "not-started", from: "0.1.150", at: 1 } }) }).note).toBe(
       "The server didn't start the update. On the server, run: systemctl status openmausbot-update.path",

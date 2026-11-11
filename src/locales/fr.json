@@ -3359,5 +3359,6 @@
   "serverUpdate.goBack": "Pour revenir à la version d'avant : {command}",
   "serverUpdate.reason.notRetried": "La mise à jour vers la v{version} n'a pas marché sur ce serveur, donc l'app ne la retentera pas. Pour essayer à la main, lancez sur le serveur : {command}",
   "serverUpdate.reason.stale": "Le update.sh du serveur est plus récent que la copie qu'utilise le bouton. Sur le serveur, lancez : {command}",
-  "serverUpdate.reason.unreleased": "Ce serveur utilise une build de main, que l'app ne met pas à jour. Pour le passer à la version stable, lancez sur le serveur : {command}"
+  "serverUpdate.reason.unreleased": "Ce serveur utilise une build de main, que l'app ne met pas à jour. Il passe à la version stable dès qu'elle est plus récente que la build ; sur le serveur, lancez : {command}",
+  "serverUpdate.reason.unsafe": "Le dossier de l'installation, ou un dossier au-dessus, peut être modifié par quelqu'un d'autre que root, donc le bouton n'exécute rien. Corrigez cela, puis sur le serveur lancez : {command}"
 }

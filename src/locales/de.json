@@ -3518,5 +3518,6 @@
   "serverUpdate.goBack": "Zurück zur Version davor: {command}",
   "serverUpdate.reason.notRetried": "Das Update auf v{version} hat auf diesem Server schon einmal nicht funktioniert, deshalb versucht die App es nicht noch einmal. Um es von Hand zu versuchen, führe auf dem Server aus: {command}",
   "serverUpdate.reason.stale": "Die update.sh des Servers ist neuer als die Kopie, die der Button nutzt. Führe auf dem Server aus: {command}",
-  "serverUpdate.reason.unreleased": "Dieser Server nutzt einen Build von main, den die App nicht aktualisiert. Um ihn auf die stabile Version zu bringen, führe auf dem Server aus: {command}"
+  "serverUpdate.reason.unreleased": "Dieser Server nutzt einen Build von main, den die App nicht aktualisiert. Er wechselt auf die stabile Version, sobald diese neuer ist als der Build; führe auf dem Server aus: {command}",
+  "serverUpdate.reason.unsafe": "Der Ordner der Installation oder ein Ordner darüber kann von jemand anderem als root geändert werden, deshalb führt der Button nichts aus. Behebe das und führe dann auf dem Server aus: {command}"
 }

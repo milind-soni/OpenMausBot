@@ -64,6 +64,7 @@ function install(options: { stable?: Image; running?: Image; updater?: "real" | 
   }
   if (options.runnerCopy) {
     mkdirSync(join(fake, "volumes", RUNNER_COPY), { recursive: true });
+    writeFileSync(join(fake, "volumes", RUNNER_COPY, "the-last-good-data.txt"), "good");
     labels[RUNNER_COPY] = ["com.mausbot.role=update-backup", "com.mausbot.project=deploy", "com.mausbot.data=deploy_data", `com.mausbot.image=${running.id}`, "com.mausbot.by=runner"];
   }
   writeFileSync(join(fake, "state.json"), JSON.stringify({
@@ -73,6 +74,8 @@ function install(options: { stable?: Image; running?: Image; updater?: "real" | 
   const setStable = (image: Image) => writeFileSync(join(root, "stable.json"), JSON.stringify({ channel: "stable", version: image.version, image: image.refs.find((ref) => ref.includes("@sha256:")) }));
   setStable(stable);
   writeFileSync(join(state, "status", "runner"), `layout=compose\ndir=${deploy}\nheld=no\n`);
+  // The test's own user owns the checkout and cannot run Docker: trusted, as --install --trust-folder-owner leaves it.
+  writeFileSync(join(state, "trust"), `dir=${deploy}\n`);
   writeFileSync(join(state, "status", "last"), "run=0\nstate=done\nresult=updated\nat=0\nran=0\n");
   const request = join(state, "request", "request");
   const policy = join(root, "policy.json");
@@ -226,16 +229,25 @@ describe.skipIf(!posix)("deploy/update-runner.sh", () => {
     expect(boaster.last()?.result).toBe("refused");
   });
 
-  it("keeps a person's own copy of the data when the server asked, and only its own newest copy beside it", () => {
+  it("keeps a person's own copy of the data when the server asked, and the runner's two newest copies", () => {
     const box = install({ earlierCopy: true, runnerCopy: true });
+    // A server that damaged its own data, then asked as soon as a new stable version was out.
+    writeFileSync(join(box.fake, "volumes", "deploy_data", "the-last-good-data.txt"), "DAMAGED");
     box.ask();
     expect(box.last()?.result).toBe("updated");
-    const made = box.copies().filter((name) => name !== EARLIER_COPY);
-    expect(made).toEqual([expect.stringMatching(/^deploy_data-before-update-\d{8}T\d{6}Z/)]);
-    expect(made[0]).not.toBe(RUNNER_COPY);
-    expect(box.copies()).toContain(EARLIER_COPY);
+    const made = box.copies().filter((name) => name !== EARLIER_COPY && name !== RUNNER_COPY);
+    expect(made).toHaveLength(1);
     expect(box.fakeState().volumeLabels[made[0]!]).toContain("com.mausbot.by=runner");
-    expect(readFileSync(join(box.fake, "volumes", EARLIER_COPY, "the-last-good-data.txt"), "utf8")).toBe("good");
+    expect(readFileSync(join(box.fake, "volumes", made[0]!, "the-last-good-data.txt"), "utf8")).toBe("DAMAGED");
+    // The good copy made before it survives this update, and the person's own copy any number of them.
+    for (const kept of [RUNNER_COPY, EARLIER_COPY]) expect(readFileSync(join(box.fake, "volumes", kept, "the-last-good-data.txt"), "utf8"), kept).toBe("good");
+    // One more: now two newer runner copies exist, so the oldest of the runner's goes. The person's stays.
+    box.setStable(NEXT);
+    box.ask({ OMB_RUNNER_GAP_S: "0" });
+    expect(box.last()?.result).toBe("updated");
+    expect(box.copies()).not.toContain(RUNNER_COPY);
+    expect(box.copies()).toContain(EARLIER_COPY);
+    expect(box.copies().filter((name) => name !== EARLIER_COPY)).toHaveLength(2);
   });
 
   it("never tries a stable image again after it rolled back from it, until a person runs update.sh or another is out", () => {
@@ -282,6 +294,64 @@ describe.skipIf(!posix)("deploy/update-runner.sh", () => {
     expect(box.last()).toMatchObject({ result: "unreleased" });
     expect(box.runnerInfo()).toMatchObject({ release: false });
     expect(box.calls().some((call) => call.startsWith("pull") || call.startsWith("compose stop"))).toBe(false);
+  });
+
+  it("lets a person's own run use links in the install's folder, as before", () => {
+    const box = install();
+    writeFileSync(join(box.root, "env-real"), "DOMAIN=maus.example.test\n");
+    rmSync(join(box.deploy, ".env"));
+    symlinkSync(join(box.root, "env-real"), join(box.deploy, ".env"));
+    const done = box.personRun();
+    expect(done.status, done.stdout + done.stderr).toBe(0);
+    expect(box.fakeState().containers.omb.image).toBe(NEW.id);
+    // The same link stops a run the server asked for.
+    const asked = install();
+    rmSync(join(asked.deploy, ".env"));
+    symlinkSync(join(box.root, "env-real"), join(asked.deploy, ".env"));
+    asked.ask();
+    expect(asked.last()?.result).toBe("refused");
+    expect(asked.fakeState().containers.omb.image).toBe(OLD.id);
+  });
+
+  it("runs nothing when the install's folder, or one above it, can be changed by others", () => {
+    const box = install({ updater: "recorder" });
+    chmodSync(box.deploy, 0o775);
+    box.ask();
+    expect(box.last()?.result).toBe("unsafe");
+    chmodSync(box.deploy, 0o755);
+    chmodSync(box.root, 0o777);
+    box.ask();
+    expect(box.last()?.result).toBe("unsafe");
+    chmodSync(box.root, 0o700);
+    // An untrusted owner is checked at every run too, not only at --install.
+    rmSync(join(box.state, "trust"));
+    box.ask();
+    expect(box.last()?.result).toBe("unsafe");
+    expect(box.argv()).toEqual([]);
+    writeFileSync(join(box.state, "trust"), `dir=${box.deploy}\n`);
+    box.ask();
+    expect(box.argv()).toHaveLength(1);
+  });
+
+  it("checks a remembered answer again when the server knows of a newer version, asking only GitHub", () => {
+    const box = install({ stable: OLD });
+    box.ask({ OMB_RUNNER_IDLE_S: "300" });
+    const pulls = () => box.calls().filter((call) => call.startsWith("pull")).length;
+    const before = pulls();
+    // Still the same stable image: the remembered answer stands, nothing is pulled.
+    writeFileSync(join(box.state, "request", "fresh"), "");
+    box.ask({ OMB_RUNNER_IDLE_S: "300" });
+    expect(box.last()).toMatchObject({ result: "updated", version: "0.1.150" });
+    expect(pulls()).toBe(before);
+    expect(existsSync(join(box.state, "request", "fresh"))).toBe(false);
+    // A newer one is out: it is taken at once.
+    box.setStable(NEW);
+    box.ask({ OMB_RUNNER_IDLE_S: "300" });
+    expect(box.last()?.result).toBe("updated");
+    expect(box.fakeState().containers.omb.image).toBe(OLD.id);
+    writeFileSync(join(box.state, "request", "fresh"), "");
+    box.ask({ OMB_RUNNER_IDLE_S: "300" });
+    expect(box.fakeState().containers.omb.image).toBe(NEW.id);
   });
 
   it("writes nothing through a .update that is a link", () => {
@@ -375,6 +445,11 @@ describe.skipIf(!posix)("deploy/update-runner.sh", () => {
     expect(refused.status).toBe(1);
     expect(refused.stderr).toContain("who cannot run Docker. Whoever owns it can change what root runs");
     expect(existsSync(box.state)).toBe(false);
+    chmodSync(box.deploy, 0o777);
+    const writable = spawnSync("sh", [RUNNER, "--install", "--dir", box.deploy, "--no-restart"], { encoding: "utf8", env: { ...env, FAKE_GROUPS: "staff docker" }, timeout: 30_000 });
+    expect(writable.status).toBe(1);
+    expect(writable.stderr).toContain("can be changed by someone other than root and its owner");
+    chmodSync(box.deploy, 0o755);
     const done = spawnSync("sh", [RUNNER, "--install", "--dir", box.deploy, "--no-restart"], { encoding: "utf8", env: { ...env, FAKE_GROUPS: "staff docker" }, timeout: 30_000 });
     expect(done.status, done.stdout + done.stderr).toBe(0);
     // The request folder's owner is the data's owner on the host, never what the container says.
@@ -410,6 +485,12 @@ describe.skipIf(!posix)("deploy/update-runner.sh", () => {
     expect(override).toContain(`- ${box.state}/status:/run/omb-update/status:ro\n`);
     expect(readFileSync(join(box.deploy, "docker-compose.yml"), "utf8")).toBe("services: {}\n");
 
+    // --remove for another folder takes nothing away.
+    const elsewhere = spawnSync("sh", [RUNNER, "--remove", "--dir", other], { encoding: "utf8", env, timeout: 30_000 });
+    expect(elsewhere.status).toBe(1);
+    expect(elsewhere.stderr).toContain(`updates ${box.deploy}, not ${other}, so nothing was removed`);
+    expect(existsSync(join(box.state, "update.sh"))).toBe(true);
+    expect(existsSync(join(systemd, "openmausbot-update.path"))).toBe(true);
     const removed = spawnSync("sh", [RUNNER, "--remove", "--dir", box.deploy], { encoding: "utf8", env, timeout: 30_000 });
     expect(removed.status, removed.stdout + removed.stderr).toBe(0);
     for (const gone of [join(systemd, "openmausbot-update.path"), join(systemd, "openmausbot-update.service"), join(sbin, "openmausbot-update-runner"),

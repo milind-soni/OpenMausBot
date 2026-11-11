@@ -98,11 +98,12 @@ const REASON_TEXT: Record<ServerUpdateReason, LocaleKey> = {
   "not-retried": "serverUpdate.reason.notRetried",
   stale: "serverUpdate.reason.stale",
   unreleased: "serverUpdate.reason.unreleased",
+  unsafe: "serverUpdate.reason.unsafe",
 };
 
 /** The command each reason names, from what the server said. */
 function reasonText(reason: ServerUpdateReason, status: ServerUpdateStatus, target?: string): string {
-  const command = reason === "stale" ? status.setup : status.command;
+  const command = reason === "stale" || reason === "unsafe" ? status.setup : status.command;
   return t(REASON_TEXT[reason], { version: target ?? status.latest ?? "", command: command ?? "" });
 }
 

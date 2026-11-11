@@ -6131,5 +6131,6 @@
   "serverUpdate.goBack": "Para volver a la versión anterior: {command}",
   "serverUpdate.reason.notRetried": "La actualización a la v{version} ya falló en este servidor, así que la app no la volverá a intentar. Para intentarlo a mano, ejecuta en el servidor: {command}",
   "serverUpdate.reason.stale": "El update.sh del servidor es más nuevo que la copia que usa el botón. En el servidor, ejecuta: {command}",
-  "serverUpdate.reason.unreleased": "Este servidor usa una compilación de main, que la app no actualiza. Para pasarlo a la versión estable, ejecuta en el servidor: {command}"
+  "serverUpdate.reason.unreleased": "Este servidor usa una compilación de main, que la app no actualiza. Pasa a la versión estable cuando esta sea más nueva que la compilación; en el servidor, ejecuta: {command}",
+  "serverUpdate.reason.unsafe": "La carpeta de la instalación, o una superior, la puede cambiar alguien que no es root, así que el botón no ejecuta nada. Corrígelo y luego, en el servidor, ejecuta: {command}"
 }

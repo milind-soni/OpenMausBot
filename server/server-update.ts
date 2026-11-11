@@ -13,7 +13,7 @@ import { join } from "node:path";
 
 import type { ServerUpdateOutcome, ServerUpdateReason, ServerUpdateRun, ServerUpdateStatus } from "../shared/server-update.ts";
 import { appendAdminAction, type AdminActor } from "./admin-activity.ts";
-import { updateCommand, type InstallKind, type UpdateCheck } from "./update-check.ts";
+import { isNewerVersion, updateCommand, type InstallKind, type UpdateCheck } from "./update-check.ts";
 
 /** Where a Docker install mounts the two folders (deploy/install.sh's compose.yaml, update-runner.sh's override):
  * `request` (writable) and `status` (read-only). OMB_SERVER_UPDATE_DIR names another place. */
@@ -29,7 +29,7 @@ const RUNNING_FOR_MS = 2 * 60 * 60_000;
 const SHOWN_FOR_MS = 60 * 60_000;
 const PENDING_FILE = "server-update.json";
 
-const REASONS: readonly ServerUpdateReason[] = ["busy", "refused", "older", "held", "too-soon", "no-updater", "failed", "not-retried", "stale", "unreleased"];
+const REASONS: readonly ServerUpdateReason[] = ["busy", "refused", "older", "held", "too-soon", "no-updater", "failed", "not-retried", "stale", "unreleased", "unsafe"];
 export type HostResult = "updated" | "rolled-back" | "rollback-failed" | ServerUpdateReason;
 const RESULTS: readonly HostResult[] = ["updated", "rolled-back", "rollback-failed", ...REASONS];
 
@@ -154,7 +154,7 @@ export function serverUpdateStatus(input: {
   const retryAt = pending && now - pending.at < REQUEST_GAP_MS ? pending.at + REQUEST_GAP_MS : undefined;
   const extra = { ...(run ? { run } : {}), ...(retryAt ? { retryAt } : {}) };
   if (runner && !runner.release) {
-    return { ...base, ...extra, mode: "command", why: "unreleased", command: `cd ${runner.dir} && sudo ./update.sh --allow-older` };
+    return { ...base, ...extra, mode: "command", why: "unreleased", command: `cd ${runner.dir} && sudo ./update.sh` };
   }
   if (runner && input.followsStable !== false) {
     const own = {
@@ -207,9 +207,14 @@ export function createServerUpdater(options: {
     }
     if (!current.available) return { status: 409, body: { error: "This server is up to date.", code: "up-to-date", status: current } };
     if (current.retryAt) return { status: 429, body: { error: "Wait a few minutes before you ask again.", code: "too-soon", status: current } };
-    const pending: PendingUpdate = { at: now(), baseline: readHostFacts(options.dir).last?.run ?? 0, from: options.version };
+    const last = readHostFacts(options.dir).last;
+    const pending: PendingUpdate = { at: now(), baseline: last?.run ?? 0, from: options.version };
     writePending(options.dataDir, pending);
     try {
+      // The host's last answer named an older stable version than this server's own check: it is checked, not reused.
+      if (last?.result === "updated" && last.version && current.latest && isNewerVersion(current.latest, last.version)) {
+        writeFileSync(join(options.dir!, "request", "fresh"), "", { mode: 0o600 });
+      }
       rmSync(requestFile, { force: true, recursive: true });
       writeFileSync(requestFile, `${randomUUID()}\n`, { mode: 0o600, flag: "wx" });
     } catch {

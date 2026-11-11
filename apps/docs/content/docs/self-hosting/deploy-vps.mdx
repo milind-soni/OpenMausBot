@@ -380,8 +380,8 @@ newer than the app, the same row offers the app's own update. With
 `OMB_UPDATE_CHANNEL=newest` the app shows the command instead, because
 `update.sh` takes the stable version. A server on a build of main (the `latest`
 image, which a checkout runs when `.env` names no `OMB_IMAGE`) gets no button:
-the app says so, with `sudo ./update.sh --allow-older`, which moves it to the
-stable version.
+the app says so, with `sudo ./update.sh`, which moves it to the stable version
+once that is newer than the build.
 
 The installer sets this up, and every run of the installer refreshes it. In a
 checkout of this repository, add it from `OpenMausBot/deploy` (it needs
@@ -398,7 +398,8 @@ That places `/usr/local/sbin/openmausbot-update-runner`, the systemd units
 `/var/lib/openmausbot-update`: root's own copy of `update.sh`, which is what
 the button runs, `request`, which the server's container writes, and `status`,
 which it reads and cannot write. One install per server: a second folder is
-refused until `--remove` on the first. A checkout gets
+refused until `--remove` on the first, and `--remove` for any other folder
+removes nothing. A checkout gets
 `docker-compose.override.yml` to mount the two (an override of your own, or a
 link, is left alone, and the script says what to add). `sudo
 ./update-runner.sh --remove` takes it all away.
@@ -408,10 +409,15 @@ root, but in your checkout: its Compose files and `.env` decide what `docker
 compose up` starts. So whoever owns that folder can change what root runs
 when the app asks for an update. `--install` accepts a folder owned by root or
 by someone in the `docker` group (who can run anything as root through Docker
-already), and anyone else only with `--trust-folder-owner`. `update.sh` writes
-nothing through a link there (`.update`, `.env`, the Compose files and its
-temporary files), nor into a `.update` that belongs to anyone but you or the
-folder's owner.
+already), and anyone else only with `--trust-folder-owner`; the folder may not
+be writable by its group or by others, nor any folder above it by anyone but
+root and that owner (a world-writable one with its sticky bit, such as `/tmp`,
+is fine). The runner checks all this again at every run, and runs nothing when
+it no longer holds (the app shows the `--install` command). On an update the
+app asked for, `update.sh` writes nothing through a link there (`.update`,
+`.env`, the Compose files and its temporary files), nor into a `.update` that
+belongs to anyone but you or the folder's owner; your own run of
+`./update.sh` uses links there as before.
 
 **Who can ask.** Only an admin's own signed-in session sees and presses the
 button; members never see it, and Clouds that MausBot runs never show it. The
@@ -425,17 +431,23 @@ requests can cause:
   data is copied, the new version starts, and if it is not healthy the old
   version and the copy come back. That stable image is then not tried again
   from the app on this server until you run `./update.sh` yourself or another
-  stable image is out. It is taken only when the running image's own label is
+  stable image is out. So a compromised server can keep one stable release from
+  being tried from the app, by making it fail on purpose; whoever presses the
+  button is told, with the command to try it by hand. It is taken only when
+  the running image's own label is
   not newer (never by the version the server says it runs; when the two
   disagree nothing changes); a stable image that names the same version as the
   running one under a new digest (a re-published image) is taken too.
-- At most two copies of the data from this: the newest one an update from the
-  app made, and the last one your own run of `./update.sh` made, which an
-  update from the app never removes.
+- At most three copies of the data: the two newest that updates from the app
+  made, and the last one your own run of `./update.sh` made, which an update
+  from the app never removes. While the next copy is made and checked, that is
+  about three times the data plus the new copy; `update.sh` refuses to start
+  when the disk has no room for it.
 - Updates that stop the server at most once every four minutes. A run with
   nothing to do stops nothing and does not count, and for five minutes the
-  same answer is given without asking GitHub or the registry again; any two
-  runs are at least 30 seconds apart. A run during which the server restarts
+  same answer is given without asking GitHub or the registry again (when the
+  server's own check knows of a newer version, only GitHub is asked whether
+  the stable image changed); any two runs are at least 30 seconds apart. A run during which the server restarts
   by itself counts as one that stopped it, so it can delay an admin's press by
   up to four minutes.
 - Nothing while `/etc/mausbot/policy.json` holds updates
@@ -449,7 +461,7 @@ version fails here) per stable release, which the admins would have pressed for
 anyway.
 
 **Copies of the data.** An update asked for from the app keeps your own last
-copy and its own newest one. A run of `./update.sh` at a terminal removes all
+copy and its own two newest ones. A run of `./update.sh` at a terminal removes all
 but its own once that one has been checked, as above. To see them:
 `docker volume ls --filter label=com.mausbot.role=update-backup`; to remove one
 yourself: `docker volume rm <name>`.

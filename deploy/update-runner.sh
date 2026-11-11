@@ -15,13 +15,13 @@
 #     back when the new one is not healthy;
 #   - after a rollback, never that same stable image again on this server until a person runs update.sh or another
 #     stable image is out (STATE/blocked), so a server that fails a version cannot be stopped and copied over and over;
-#   - the runner's own copies of the data are capped at the newest one; a person's own copy is never removed.
+#   - the runner's own copies of the data are capped at the two newest; a person's own copy is never removed.
 # Runs that stop the server are GAP_S apart; runs with nothing to do are answered from STATE/idle for IDLE_S without
 # asking GitHub or the registry, and any two runs are QUIET_S apart. It cannot choose a version, an image, a URL, a flag
 # or a path, and cannot roll back. Every file this writes is in STATE, root's folder, of which the server's container
 # sees only `request` (its own) and `status` (read-only). In a checkout, the folder's owner decides what root's
-# `docker compose up` starts (the Compose files and .env are theirs), so --install wants that owner to be root or able
-# to run Docker already.
+# `docker compose up` starts (the Compose files and .env are theirs), so --install and every run want that owner to be
+# root, able to run Docker already, or trusted at --install, and the folder and those above it closed to anyone else.
 set -u
 
 SBIN_DIR=${OMB_SBIN_DIR:-/usr/local/sbin}
@@ -42,6 +42,7 @@ STATUS="$STATE/status"
 UPDATER="$STATE/update.sh"
 BLOCKED="$STATE/blocked"
 IDLE="$STATE/idle"
+TRUST="$STATE/trust"
 VERSION_LABEL=org.opencontainers.image.version
 
 say() { printf '%s\n' "$*"; }
@@ -119,7 +120,39 @@ released() {
 }
 write_runner() { write_status runner "layout=$1" "dir=$DIR" "held=$(held_word)" "release=$(released)"; }
 # The install's update.sh, when it is a file and root's copy is the same; a checkout's after a git pull is newer.
-same_updater() { [ -f "$DIR/update.sh" ] && [ ! -L "$DIR/update.sh" ] && cmp -s "$DIR/update.sh" "$UPDATER"; }
+# A file swapped for a pipe after the check would hold cmp for ever, and with it this oneshot: it gets ten seconds.
+same_updater() {
+  [ -f "$DIR/update.sh" ] && [ ! -L "$DIR/update.sh" ] || return 1
+  if command -v timeout >/dev/null 2>&1; then timeout 10 cmp -s "$DIR/update.sh" "$UPDATER"; else cmp -s "$DIR/update.sh" "$UPDATER"; fi
+}
+owner_of() { stat -L -c %u "$1" 2>/dev/null || stat -L -f %u "$1" 2>/dev/null; }
+mode_of() { # the permission bits, sticky included, as a number
+  m=$(stat -L -c %a "$1" 2>/dev/null) || m=$(stat -L -f %p "$1" 2>/dev/null | sed 's/.*\(....\)$/\1/')
+  printf '%d' "0$m"
+}
+# SECURITY: in a checkout the folder's owner can change what root runs here (its Compose files and .env decide what
+# `docker compose up` starts), and so can whoever may rename the folder or one above it. Says `owner` when the owner is
+# neither root, nor in the docker group, nor trusted at --install; `writable` when the folder is group- or world-writable,
+# or a folder above it can be changed by anyone but root and that owner (a world-writable one with its sticky bit is fine).
+folder_problem() {
+  owner=$(owner_of "$DIR")
+  if [ "$owner" != 0 ]; then
+    name=$(stat -L -c %U "$DIR" 2>/dev/null || stat -L -f %Su "$DIR" 2>/dev/null)
+    case " $(id -nG "$name" 2>/dev/null) " in
+      *" docker "*) ;;
+      *) [ "$TRUST_OWNER" = yes ] || { [ "$MODE" = run ] && [ "$(state_value trust dir)" = "$DIR" ]; } || { echo owner; return 0; } ;;
+    esac
+  fi
+  [ $(($(mode_of "$DIR") & 18)) = 0 ] || { echo writable; return 0; }
+  parent=$(dirname "$DIR")
+  while :; do
+    mode=$(mode_of "$parent")
+    up=$(owner_of "$parent")
+    if { [ "$up" != 0 ] && [ "$up" != "$owner" ]; } || { [ $((mode & 18)) != 0 ] && [ $((mode & 512)) = 0 ]; }; then echo writable; return 0; fi
+    [ "$parent" = / ] && return 0
+    parent=$(dirname "$parent")
+  done
+}
 
 # update.sh's exit code, as the server reads it (deploy/update.sh lists them).
 result_of() {
@@ -141,8 +174,11 @@ run_requested() {
   layout=$(status_value runner layout)
   if [ -n "$layout" ]; then write_runner "$layout"; fi
   [ -e "$REQUESTS/request" ] || [ -L "$REQUESTS/request" ] || exit 0
-  # The server's file, in the server's folder: removed (a link itself, never what it names), never read.
-  rm -rf -- "$REQUESTS/request"
+  # The server's files, in the server's folder: removed (a link itself, never what it names), never read. `fresh` says the
+  # server's own check knows of a newer stable version than the last answer: then that answer is checked, not reused.
+  fresh=no
+  if [ -e "$REQUESTS/fresh" ] || [ -L "$REQUESTS/fresh" ]; then fresh=yes; fi
+  rm -rf -- "$REQUESTS/request" "$REQUESTS/fresh"
   run=$(($(number "$(status_value last run)") + 1))
   ran=$(number "$(status_value last ran)")
   since=$(($(date +%s) - $(number "$(status_value last at)")))
@@ -151,14 +187,25 @@ run_requested() {
   version=""
   done_with() { write_status last "run=$run" state=done "result=$1" "at=$(date +%s)" "ran=$ran" ${version:+"version=$version"}; }
   if held; then done_with held; return; fi
+  if [ -n "$(folder_problem)" ]; then done_with unsafe; return; fi
   image=$(server_image)
   if [ "$(released)" != yes ]; then done_with unreleased; return; fi
   if [ ! -f "$UPDATER" ] || [ ! -f "$DIR/update.sh" ] || [ -L "$DIR/update.sh" ]; then done_with no-updater; return; fi
   if ! same_updater; then done_with stale; return; fi
-  # Nothing to do a moment ago, on the same image: the same answer, without asking GitHub or the registry again.
-  if [ "$(state_value idle image)" = "$image" ] && [ $((now - $(number "$(state_value idle at)"))) -lt "$IDLE_S" ]; then done_with updated; return; fi
+  ask_target() { OMB_UPDATE_BY_RUNNER=1 bash "$UPDATER" --dir "$DIR" --print-target </dev/null 2>/dev/null; }
+  target=""
+  # Nothing to do a moment ago, on the same image: the same answer, without asking GitHub or the registry again; when the
+  # server knows of a newer version, only GitHub is asked whether the stable image is still the same.
+  if [ "$(state_value idle image)" = "$image" ] && [ $((now - $(number "$(state_value idle at)"))) -lt "$IDLE_S" ]; then
+    if [ "$fresh" = yes ]; then target=$(ask_target) || { done_with refused; return; }; fi
+    if [ "$fresh" = no ] || [ "${target% *}" = "$(state_value idle target)" ]; then
+      version=$(state_value idle version)
+      done_with updated
+      return
+    fi
+  fi
   if [ $((now - ran)) -lt "$GAP_S" ]; then done_with too-soon; return; fi
-  target=$(OMB_UPDATE_BY_RUNNER=1 bash "$UPDATER" --dir "$DIR" --print-target </dev/null 2>/dev/null) || { done_with refused; return; }
+  [ -n "$target" ] || target=$(ask_target) || { done_with refused; return; }
   version=${target##* }
   if [ "$(state_value blocked image)" = "$image" ] && [ "$(state_value blocked target)" = "${target% *}" ]; then done_with not-retried; return; fi
   write_status last "run=$run" state=running "at=$now" "ran=$ran" "version=$version"
@@ -167,7 +214,7 @@ run_requested() {
   OMB_UPDATE_BY_RUNNER=1 bash "$UPDATER" --dir "$DIR" </dev/null || code=$?
   if [ -z "$before" ] || [ "$before" != "$(server_mark)" ]; then ran=$now; fi
   rm -f "$IDLE"
-  if [ "$code" = 0 ] && [ "$ran" != "$now" ]; then printf '%s\n' "image=$image" "at=$now" | place "$IDLE" 600; fi
+  if [ "$code" = 0 ] && [ "$ran" != "$now" ]; then printf '%s\n' "image=$image" "at=$now" "target=${target% *}" "version=$version" | place "$IDLE" 600; fi
   if [ "$code" = 1 ]; then printf '%s\n' "image=$image" "target=${target% *}" | place "$BLOCKED" 600; fi
   if [ "$code" = 0 ] && [ "$ran" = "$now" ]; then rm -f "$BLOCKED"; fi
   done_with "$(result_of "$code")"
@@ -226,12 +273,10 @@ data_owner() {
 # SECURITY: in a checkout the folder's owner can change what root runs here (its Compose files and .env decide what
 # `docker compose up` starts). Fine when that owner is root or may run Docker already; anyone else, only when asked.
 check_owner() {
-  owner=$(stat -c %u "$DIR" 2>/dev/null || stat -f %u "$DIR" 2>/dev/null)
-  [ "$owner" = 0 ] && return 0
-  name=$(stat -c %U "$DIR" 2>/dev/null || stat -f %Su "$DIR" 2>/dev/null)
-  case " $(id -nG "$name" 2>/dev/null) " in *" docker "*) return 0 ;; esac
-  [ "$TRUST_OWNER" = yes ] && return 0
-  fail "$DIR belongs to ${name:-user $owner}, who cannot run Docker. Whoever owns it can change what root runs when the app asks for an update (its Compose files and .env decide what docker compose up starts). Move it to a folder root owns, or run this again with --trust-folder-owner if that is what you want."
+  case "$(folder_problem)" in
+    owner) fail "$DIR belongs to $(stat -L -c %U "$DIR" 2>/dev/null || stat -L -f %Su "$DIR" 2>/dev/null), who cannot run Docker. Whoever owns it can change what root runs when the app asks for an update (its Compose files and .env decide what docker compose up starts). Move it to a folder root owns, or run this again with --trust-folder-owner if that is what you want." ;;
+    writable) fail "$DIR, or a folder above it, can be changed by someone other than root and its owner, who could then change what root runs when the app asks for an update. Make them writable by their owner only (chmod go-w), then run this again." ;;
+  esac
 }
 
 install_button() {
@@ -285,12 +330,14 @@ Description=MausBot's update.sh for $DIR, asked for from the app
 Type=oneshot
 Environment=HOME=/root OMB_INSTALL_DIR=$DIR$extra
 ExecStart=$SBIN_DIR/$RUNNER
+TimeoutStartSec=4h
 UNIT
   systemctl daemon-reload >/dev/null 2>&1 || true
   systemctl enable --now "$UNIT.path" >/dev/null 2>&1 || fail "systemd did not switch on $UNIT.path. See: systemctl status $UNIT.path"
   [ "$layout" = installer ] || write_override
   [ -f "$STATUS/last" ] || write_status last run=0 state=done result=updated at=0 ran=0
-  rm -f "$BLOCKED" "$IDLE"
+  rm -f "$BLOCKED" "$IDLE" "$TRUST"
+  if [ "$TRUST_OWNER" = yes ]; then printf '%s\n' "dir=$DIR" | place "$TRUST" 600; fi
   write_runner "$layout"
   if [ "$RESTART" = yes ]; then
     say "Restarting the server so it sees the button's folders..."
@@ -301,6 +348,10 @@ UNIT
 
 remove_button() {
   need_root --remove
+  other=$(status_value runner dir)
+  if [ -n "$other" ] && [ "$other" != "$DIR" ]; then
+    fail "This server's button updates $other, not $DIR, so nothing was removed. To remove it: sudo $0 --remove --dir $other"
+  fi
   if command -v systemctl >/dev/null 2>&1; then systemctl disable --now "$UNIT.path" >/dev/null 2>&1 || true; fi
   rm -f "$SYSTEMD_DIR/$UNIT.path" "$SYSTEMD_DIR/$UNIT.service" "$SBIN_DIR/$RUNNER"
   if command -v systemctl >/dev/null 2>&1; then systemctl daemon-reload >/dev/null 2>&1 || true; fi
