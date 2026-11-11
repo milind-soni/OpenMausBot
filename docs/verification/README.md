@@ -71,6 +71,7 @@ Use only mapped, tested commands:
 - [Chat widgets](widgets.md)
 - [Pages and apps in a room](room-pages.md)
 - [Published apps](published-apps.md)
+- [Included app hosting](included-hosting.md)
 - [The Inbox on every plan](inbox.md)
 - [Reactions](reactions.md)
 - [Chat widgets: prompts to try with a real bot](widget-prompts.md)

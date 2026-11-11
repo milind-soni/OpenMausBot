@@ -7,6 +7,7 @@ import type { LocaleKey } from "@/locales";
 import { botAvatarUrlFromStoredPath } from "../../shared/bot-avatar";
 import { AboutMeSettings } from "./AboutMeSettings";
 import { EveryBotRules } from "./EveryBotRules";
+import { SETTINGS_INPUT, SettingsField } from "./SettingsPrimitives";
 import { profileInitials } from "./SidebarProfileMenu";
 import { User } from "lucide-react";
 
@@ -62,7 +63,7 @@ function croppedPhoto(file: File, zoom: number): Promise<File> {
 }
 
 /** The person's own picture beside their name in the sidebar. Kept in the app's attachment store; "" removes it. */
-function ProfilePhoto() {
+function ProfilePhoto({ initials }: { initials: string }) {
   const { state, dispatch } = useStore();
   const avatarUrl = state.config?.profile?.avatarUrl ?? "";
   const [busy, setBusy] = useState(false);
@@ -134,16 +135,17 @@ function ProfilePhoto() {
               <button type="button" className="rounded-md bg-control px-2 py-1 text-[12px] text-ink hover:bg-raised-hover" disabled={busy} onClick={() => save(draft)}>{t("settings.profile.avatar.save")}</button>
             </div>
           </div>
-        ) : avatarUrl ? <img src={avatarUrl} alt="" className="size-12 rounded-full object-cover" /> : <div className="size-12 rounded-full bg-raised" />}
-        <label className="cursor-pointer rounded-lg bg-control px-3 py-2 text-[12px] text-ink hover:bg-raised-hover">
-          {busy ? t("settings.profile.avatar.uploading") : t("settings.profile.avatar.choose")}
+        ) : avatarUrl ? <img src={avatarUrl} alt="" className="size-10 rounded-full object-cover" />
+          : <span aria-hidden="true" className="flex size-10 shrink-0 items-center justify-center rounded-full bg-ink/[0.08] text-[14px] font-medium leading-[18px] text-ink-secondary">{initials}</span>}
+        <label className="ui-button ui-button-md cursor-pointer rounded-full">
+          {busy ? t("settings.profile.avatar.uploading") : t(avatarUrl ? "settings.profile.avatar.change" : "settings.profile.avatar.choose")}
           <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" className="sr-only" disabled={busy} onChange={(event) => {
             const file = event.target.files?.[0];
             event.currentTarget.value = "";
             pick(file);
           }} />
         </label>
-        {avatarUrl && !draft && <button type="button" className="text-[12px] text-ink-secondary underline" onClick={remove}>{t("settings.profile.avatar.remove")}</button>}
+        {avatarUrl && !draft && <button type="button" data-danger="" className="settings-quiet cursor-pointer" onClick={remove}>{t("settings.profile.avatar.remove")}</button>}
       </div>
       {error && <div role="alert" className="text-[12px] text-danger">{error}</div>}
     </>
@@ -179,22 +181,24 @@ export function ProfileFields() {
       .catch(() => {});
   };
 
-  const inputClass =
-    "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none";
   return (
-    <div className="flex flex-col gap-3">
-      <ProfilePhoto />
-      <input aria-label={t("settings.profile.name")} value={name} onChange={(e) => setName(e.target.value)} onBlur={save} placeholder={t("settings.profile.name")} className={inputClass} />
-      <input
-        type="email"
-        aria-label={t("phone.signIn.email")}
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        onBlur={team ? undefined : save}
-        readOnly={team}
-        placeholder={t("common.emailPlaceholder")}
-        className={inputClass}
-      />
+    <div className="flex flex-col gap-4">
+      <ProfilePhoto initials={profileInitials({ name, email })} />
+      <SettingsField label={t("settings.profile.name")}>
+        <input id="profile-name" aria-label={t("settings.profile.name")} value={name} onChange={(e) => setName(e.target.value)} onBlur={save} placeholder={t("settings.profile.name")} className={SETTINGS_INPUT} />
+      </SettingsField>
+      <SettingsField label={t("phone.signIn.email")}>
+        <input
+          type="email"
+          aria-label={t("phone.signIn.email")}
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onBlur={team ? undefined : save}
+          readOnly={team}
+          placeholder={t("common.emailPlaceholder")}
+          className={SETTINGS_INPUT}
+        />
+      </SettingsField>
       <AboutMeSettings />
       <EveryBotRules />
     </div>

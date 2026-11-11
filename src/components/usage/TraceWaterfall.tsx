@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { SettingsLook } from "../SettingsPrimitives";
 import { ChevronDown, ChevronRight, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -27,6 +28,19 @@ export function LiveBadge() {
 }
 
 export function StatStrip({ items }: { items: Array<{ label: string; value: string; tone?: "danger"; hint?: string }> }) {
+  // Settings: sentence-case labels that never cut off, three to a row.
+  if (useContext(SettingsLook)) {
+    return (
+      <dl className="grid grid-cols-3">
+        {items.map((item, index) => (
+          <div key={item.label} title={item.hint} className={cn("min-w-0 px-4 py-3", index % 3 !== 0 && "border-l-[0.5px] border-(--settings-edge)", index >= 3 && "border-t-[0.5px] border-(--settings-edge)")}>
+            <dt className="text-[12px] leading-4 text-ink-secondary">{item.label}</dt>
+            <dd className={cn("mt-1 text-[18px] font-medium leading-6 tabular-nums [overflow-wrap:anywhere]", item.tone === "danger" ? "text-danger" : "text-ink")}>{item.value}</dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
   return (
     <dl className="grid grid-cols-3 sm:grid-cols-6">
       {items.map((item, index) => (

@@ -36,11 +36,12 @@ const ABORTED = -3;
  *   prefs?: () => { railHidden(): boolean, setRailHidden(hidden: boolean): void, windowFrame?(): boolean } | null,
  *   changed?: () => void,
  *   log?: (line: string) => void,
+ *   openComputer?: ((page: string) => unknown) | null,
  * }} deps `url()`: the rail's page on this app's own server; `wanted()`: whether the window has two places or more to
  * show it for (railPlaces); `args()`: the preload's arguments, as the window's own page gets them; `prefs()`: where this
  * desktop keeps the person's choice to hide it; `changed()`: the rail came or went beside the page.
  */
-export function createChromeRail({ createView, preload, args, url, wanted, prefs = () => null, changed = () => {}, log = () => {} }) {
+export function createChromeRail({ createView, preload, args, url, wanted, prefs = () => null, changed = () => {}, log = () => {}, openComputer = null }) {
   let view = null, win = null, shown = false, expanded = false, held = false;
   // The rail's page didn't load (this app's server was restarting): it loads again at the next refresh, or it stays a blank strip.
   let unloaded = false;
@@ -198,6 +199,12 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
       });
       fromPage("rail:offer", () => {});
       fromPage("rail:hide", (hide) => prefs()?.setRailHidden(hide === true));
+      // A Cloud's page beside the rail can't list or open places; it may ask for This computer, with a settings page.
+      ipcMain.handle("rail:open-computer", (event, page) => {
+        if (!pageBeside(event)) throw new Error("rail:open-computer is only available to the page beside the window's rail");
+        if (!openComputer) throw new Error("rail:open-computer is not available");
+        return openComputer(typeof page === "string" && /^[a-z-]{1,32}$/.test(page) ? page : "");
+      });
       ipcMain.handle("rail:draws-frame", (event, drawn) => {
         if (!pageBeside(event)) throw new Error("rail:draws-frame is only available to the page beside the window's rail");
         frameDrawn(drawn !== false);

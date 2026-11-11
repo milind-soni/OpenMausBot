@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Check, Loader2 } from "lucide-react";
 
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -7,7 +6,7 @@ import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { IMAGE_DEFAULT_MODELS, IMAGE_MAX_PER_TURN_DEFAULT, IMAGE_MODEL_CHOICES, IMAGE_PROVIDERS, normalizeImageGenerationUrl, type ImageProvider, type ImageProviderTest } from "../../shared/image-generation";
 import { saveCredential } from "./keys/key-save";
-import { Card, SettingRow } from "./SettingsPrimitives";
+import { LearnMore, SETTINGS_INLINE_INPUT, SETTINGS_INPUT, SettingRow, SettingsField, SettingsGroup, SettingsRows, StatusDot } from "./SettingsPrimitives";
 import { Select } from "./Select";
 import { productName } from "@/lib/brand";
 
@@ -27,8 +26,6 @@ const KEY_URL: Partial<Record<ImageProvider, string>> = {
   openai: "https://platform.openai.com/api-keys", gemini: "https://aistudio.google.com/apikey",
   xai: "https://console.x.ai", openrouter: "https://openrouter.ai/keys",
 };
-const INPUT_CLASS = "w-full min-w-0 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none disabled:opacity-50";
-const BUTTON_CLASS = "flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50";
 
 type Slot = "primary" | "fallback";
 type ModelChoice = { id: string; name: string; group: "recommended" | "more" };
@@ -66,6 +63,7 @@ export function ImageGenerationSettings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openrouterModels, setOpenrouterModels] = useState<OpenRouterImageModels | null>(null);
+  const [more, setMore] = useState(false);
   const usesOpenrouter = primary.provider === "openrouter" || fallback?.provider === "openrouter";
 
   useEffect(() => {
@@ -100,41 +98,42 @@ export function ImageGenerationSettings() {
 
   const providers = [primary.provider, ...(fallback ? [fallback.provider] : [])].filter((provider, index, all) => all.indexOf(provider) === index);
 
+  const statusText = status?.ready
+    ? primary.configured
+      ? t("imageGen.status.ready", { provider: PROVIDER_LABEL[primary.provider] })
+      : t("imageGen.status.backupOnly", { provider: PROVIDER_LABEL[fallback!.provider] })
+    : t("imageGen.status.notReady");
   return (
     <>
-      <section className="space-y-2 px-4">
-        <p className="text-[13px] leading-relaxed text-ink-secondary">{t("imageGen.intro")}</p>
-        <p role="status" data-testid="image-gen-status" className="flex items-center gap-2 text-[13px] font-medium text-ink">
-          <span className={cn("size-1.5 shrink-0 rounded-full", !status?.ready ? "bg-raised-hover" : primary.configured ? "bg-success" : "bg-warning")} />
-          {status?.ready
-            ? primary.configured
-              ? t("imageGen.status.ready", { provider: PROVIDER_LABEL[primary.provider] })
-              : t("imageGen.status.backupOnly", { provider: PROVIDER_LABEL[fallback!.provider] })
-            : t("imageGen.status.notReady")}
-        </p>
-      </section>
-
-      <SlotRow
-        slot="primary" provider={primary.provider} model={primary.model} configured={primary.configured} openrouterModels={openrouterModels}
-        disabled={saving || !state.config} onProvider={chooseProvider} onModel={(model) => void save({ imageGen: { primary: { provider: primary.provider, model } } })}
-      />
-      <SlotRow
-        slot="fallback" provider={fallback?.provider ?? null} model={fallback?.model ?? ""} configured={fallback?.configured === true} exclude={primary.provider} openrouterModels={openrouterModels}
-        disabled={saving || !state.config} onProvider={chooseProvider} onModel={(model) => fallback && void save({ imageGen: { fallback: { provider: fallback.provider, model } } })}
-      />
-      <SettingRow title={t("imageGen.maxPerTurn.label")} subtitle={t("imageGen.maxPerTurn.help")}>
-        <Select
-          className="w-20"
-          data-testid="image-gen-max"
-          value={String(status?.maxPerTurn ?? IMAGE_MAX_PER_TURN_DEFAULT)}
-          onChange={(event) => void save({ imageGen: { maxPerTurn: Number(event.target.value) } })}
-          disabled={saving || !state.config}
-          aria-label={t("imageGen.maxPerTurn.label")}
-        >
-          {Array.from({ length: 10 }, (_, index) => index + 1).map((count) => <option key={count} value={count}>{count}</option>)}
-        </Select>
-      </SettingRow>
-      {error && <p role="alert" className="px-4 text-[12px] text-danger">{error}</p>}
+      <SettingsGroup label={t("settings.ai.images")} block="images"
+        description={<>{t("imageGen.introShort")}{" "}<LearnMore onClick={() => setMore((open) => !open)} /></>}
+        footnote={<span role="status" data-testid="image-gen-status" className="inline-flex items-center">
+          {status?.ready ? <StatusDot tone={primary.configured ? "success" : "warning"} /> : <span aria-hidden="true" className="mr-1.5 inline-block size-1.5 rounded-full bg-ink/20" />}
+          {statusText}
+        </span>}>
+        {more && <p data-image-gen-more="" className="px-4 text-[12px] leading-4 text-ink-secondary">{t("imageGen.intro")}</p>}
+        <SettingsRows selectWidth={200}>
+          <SlotRow
+            slot="primary" provider={primary.provider} model={primary.model} configured={primary.configured} openrouterModels={openrouterModels}
+            disabled={saving || !state.config} onProvider={chooseProvider} onModel={(model) => void save({ imageGen: { primary: { provider: primary.provider, model } } })}
+          />
+          <SlotRow
+            slot="fallback" provider={fallback?.provider ?? null} model={fallback?.model ?? ""} configured={fallback?.configured === true} exclude={primary.provider} openrouterModels={openrouterModels}
+            disabled={saving || !state.config} onProvider={chooseProvider} onModel={(model) => fallback && void save({ imageGen: { fallback: { provider: fallback.provider, model } } })}
+          />
+          <SettingRow title={t("imageGen.maxPerTurn.label")} subtitle={t("imageGen.maxPerTurn.help")} message={error ? <span role="alert" className="text-danger">{error}</span> : undefined}>
+            <Select
+              data-testid="image-gen-max"
+              value={String(status?.maxPerTurn ?? IMAGE_MAX_PER_TURN_DEFAULT)}
+              onChange={(event) => void save({ imageGen: { maxPerTurn: Number(event.target.value) } })}
+              disabled={saving || !state.config}
+              aria-label={t("imageGen.maxPerTurn.label")}
+            >
+              {Array.from({ length: 10 }, (_, index) => index + 1).map((count) => <option key={count} value={count}>{count}</option>)}
+            </Select>
+          </SettingRow>
+        </SettingsRows>
+      </SettingsGroup>
 
       {providers.map((provider) => <ProviderKeyCard key={provider} provider={provider} status={status} />)}
     </>
@@ -160,7 +159,6 @@ function SlotRow({ slot, provider, model, configured, exclude, openrouterModels,
         subtitle={provider && !configured ? t(provider === "custom" ? "imageGen.slot.needsConnection" : "imageGen.slot.needsKey") : t(slot === "primary" ? "imageGen.primary.help" : "imageGen.fallback.help")}
       >
         <Select
-          className="w-48"
           data-testid={`image-gen-${slot}`}
           value={provider ?? ""}
           onChange={(event) => onProvider(slot, event.target.value)}
@@ -207,7 +205,6 @@ function ModelRow({ slot, slotLabel, provider, model, openrouterModels, disabled
       <div className="flex flex-wrap items-center justify-end gap-2">
         {choices.length > 0 && (
           <Select
-            className="w-64 max-w-full"
             data-testid={`image-gen-${slot}-model`}
             value={typing ? OTHER_MODEL : model}
             onChange={(event) => pick(event.target.value)}
@@ -237,7 +234,7 @@ function ModelRow({ slot, slotLabel, provider, model, openrouterModels, disabled
             aria-label={t("imageGen.model.idLabel", { slot: slotLabel })}
             autoComplete="off"
             spellCheck={false}
-            className={cn(INPUT_CLASS, "w-64 max-w-full")}
+            className={cn(SETTINGS_INLINE_INPUT, "w-[200px] text-left")}
           />
         )}
       </div>
@@ -299,87 +296,64 @@ function ProviderKeyCard({ provider, status }: { provider: ImageProvider; status
     }
   };
 
+  const keyState = t(configured ? "imageGen.key.saved" : provider === "custom" ? "imageGen.key.optional" : "imageGen.key.missing");
+  // The provider fold's key form (§6.5), in a card of its own: "Key", the field, its status under it, one line ending in
+  // Get a key, then the buttons right-aligned 8 below. No divider inside: it is one form.
   return (
-    <Card title={PROVIDER_LABEL[provider]}>
-      <KeyState configured={configured} optional={provider === "custom"} />
-      {shared && (
-        <p className="mb-2 text-[12px] leading-relaxed text-ink-secondary">
-          {t(shared.note)}{" "}
-          <button
-            type="button"
-            onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}
-            className="cursor-pointer text-accent hover:underline"
-          >
-            {t("imageGen.key.manage")}
-          </button>
-        </p>
-      )}
-      {provider === "custom" && (
-        <div className="mb-2 flex gap-2">
-          <input
-            type="url"
-            value={customUrl}
-            onChange={(event) => setUrl(event.target.value)}
-            onKeyDown={(event) => event.key === "Enter" && void saveUrl()}
-            disabled={saving}
-            placeholder="http://127.0.0.1:4000/v1"
-            aria-label={t("imageGen.custom.url")}
-            autoComplete="off"
-            className={INPUT_CLASS}
-          />
-          <button type="button" onClick={() => void saveUrl()} disabled={saving || url === null} className={BUTTON_CLASS}>
-            {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}{t("common.save")}
-          </button>
+    <SettingsGroup label={PROVIDER_LABEL[provider]} block={`images-${provider}`}>
+      <SettingsRows>
+        <div className="flex flex-col gap-2 px-4 pb-4 pt-3" data-image-key-form="">
+          {provider === "custom" && (
+            <SettingsField label={t("imageGen.custom.url")}>
+              <input
+                type="url"
+                value={customUrl}
+                onChange={(event) => setUrl(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && void saveUrl()}
+                onBlur={() => url !== null && void saveUrl()}
+                disabled={saving}
+                placeholder="http://127.0.0.1:4000/v1"
+                autoComplete="off"
+                className={SETTINGS_INPUT}
+              />
+            </SettingsField>
+          )}
+          <SettingsField label={t("imageGen.key.label")} hint={<span className="flex flex-col gap-1">
+            <span role="status" className="flex items-center">{configured ? <StatusDot tone="success" /> : <span aria-hidden="true" className="mr-1.5 inline-block size-1.5 rounded-full bg-ink/20" />}{keyState}</span>
+            {verdict && <span role="status" className={verdict.ok ? "text-ink-secondary" : "text-danger"}>{verdict.text}</span>}
+            {error && <span role="alert" className="text-danger">{error}</span>}
+          </span>}>
+            <input
+              type="password"
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && value.trim() && void saveKey(value.trim())}
+              disabled={saving}
+              placeholder={configured ? t("keys.replace") : t("keys.row.pasteKey")}
+              aria-label={t((own ?? shared!).label)}
+              autoComplete="off"
+              spellCheck={false}
+              className={SETTINGS_INPUT}
+            />
+          </SettingsField>
+          <p className="text-[13px] leading-[18px] text-ink-secondary">
+            {shared ? <>{t(shared.note)}{" "}
+              <button type="button" onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}
+                className="cursor-pointer text-accent-text hover:underline">{t("imageGen.key.manage")}</button>{" "}</>
+              : provider === "custom" ? <>{t("imageGen.custom.help", { app: productName() })}</>
+              : <>{t("imageGen.key.line", { app: productName(), provider: PROVIDER_LABEL[provider] })}{" "}</>}
+            {KEY_URL[provider] && <a href={KEY_URL[provider]} target="_blank" rel="noreferrer" className="text-accent-text hover:underline focus-visible:underline">{t("imageGen.key.get")}</a>}
+          </p>
+          <div className="flex items-center justify-end gap-2" data-settings-form-foot="">
+            {configured && <button type="button" onClick={() => void saveKey("")} disabled={saving} data-danger="" className="settings-quiet mr-auto -ms-1.5 cursor-pointer">{t("keys.removeKey")}</button>}
+            {configured && <button type="button" onClick={() => void test()} disabled={testing || saving} className="ui-button ui-button-md cursor-pointer rounded-full">{testing ? t("keys.testing") : t("keys.test")}</button>}
+            <button type="button" onClick={() => void saveKey(value.trim())} disabled={saving || !value.trim()} className="ui-button ui-button-md cursor-pointer rounded-full">
+              {saving ? t("settings.threads.saving") : t("common.save")}
+            </button>
+          </div>
         </div>
-      )}
-      <div className="flex gap-2">
-        <input
-          type="password"
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          onKeyDown={(event) => event.key === "Enter" && value.trim() && void saveKey(value.trim())}
-          disabled={saving}
-          placeholder={configured ? t("keys.replace") : t("imageGen.key.paste")}
-          aria-label={t((own ?? shared!).label)}
-          autoComplete="off"
-          spellCheck={false}
-          className={INPUT_CLASS}
-        />
-        <button type="button" onClick={() => void saveKey(value.trim())} disabled={saving || !value.trim()} className={BUTTON_CLASS}>
-          {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}{t("common.save")}
-        </button>
-        {configured && (
-          <button
-            type="button"
-            onClick={() => void test()}
-            disabled={testing || saving}
-            className="flex shrink-0 cursor-pointer items-center justify-center rounded-lg border border-hairline/40 px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {testing ? t("keys.testing") : t("keys.test")}
-          </button>
-        )}
-      </div>
-      {verdict && <p role="status" className={cn("mt-1 text-[12px]", verdict.ok ? "text-success" : "text-danger")}>{verdict.text}</p>}
-      <div className="mt-2 flex items-center justify-between gap-2 text-[12px] text-ink-secondary">
-        {KEY_URL[provider] ? <a href={KEY_URL[provider]} target="_blank" rel="noreferrer" className="text-accent hover:underline">{t("imageGen.key.get")}</a> : <span>{t("imageGen.custom.help", { app: productName() })}</span>}
-        {configured && (
-          <button type="button" onClick={() => void saveKey("")} disabled={saving} className="cursor-pointer hover:text-danger disabled:opacity-50">
-            {t("keys.removeKey")}
-          </button>
-        )}
-      </div>
-      {error && <p role="alert" className="mt-1 text-[12px] text-danger">{error}</p>}
-    </Card>
+      </SettingsRows>
+    </SettingsGroup>
   );
 }
 
-function KeyState({ configured, optional = false }: { configured: boolean; optional?: boolean }) {
-  return (
-    <div role="status" className="mb-2 flex items-center gap-2 text-[13px] text-ink-secondary">
-      <span className={cn("size-1.5 rounded-full", configured ? "bg-success" : "bg-raised-hover")} />
-      <span className={configured ? "text-success" : undefined}>
-        {t(configured ? "imageGen.key.saved" : optional ? "imageGen.key.optional" : "imageGen.key.missing")}
-      </span>
-    </div>
-  );
-}
