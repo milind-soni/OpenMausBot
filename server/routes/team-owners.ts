@@ -124,6 +124,8 @@ export function createTeamOwnerRoutes(deps: TeamOwnerRouteDeps): RouteHandler {
       if (!parsed.success) return json(res, 400, { error: "Send botIds and an email." });
       const { email } = parsed.data;
       if (unknownPerson(email)) return json(res, 400, userError("serverError.owner.choose", { team: team.name }));
+      // Security invariant: a bot the caller cannot see is unavailable exactly as an id no bot has.
+      if (parsed.data.botIds.some((id) => deps.store.bot(id) && !deps.sees(auth, id))) return json(res, 404, userError("serverError.owner.unavailable"));
       const botIds = parsed.data.botIds.filter((id) => !deps.store.bot(id)?.defaultBot?.person);
       const owners = new Map(botIds.map((id) => { const one = deps.store.bot(id); return [id, one && botOwner(one)]; }));
       const changed = setReportsTo(deps.store, botIds, email);

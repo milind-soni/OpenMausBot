@@ -6,6 +6,7 @@ import {
   ATTACHMENTS_DIR, attachmentStorageUsage, clearAttachments, deleteAttachment, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES,
   parseAudioRange, readAttachment, saveFile, saveImageUpload, validateAttachmentUploadId, type SavedAttachment,
 } from "../attachments.ts";
+import { saveXmindUpload, XMIND_MIME } from "../xmind.ts";
 import { deliveredCopy } from "../bot-attachment.ts";
 import { memberBot, memberGroup, type Viewer, type VisibleSet } from "../bot-visibility.ts";
 import type { ComputerControl } from "../computer-control.ts";
@@ -377,7 +378,9 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       try {
         // Returning must not destroy the socket: the caller still sends the 4xx when the byte count crosses the limit.
         const chunks = req.iterator({ destroyOnReturn: false }) as AsyncIterable<Buffer>;
-        const saved = await saveFile(chunks, name, rawType ?? "", { uploadId, expectedBytes: declaredLength });
+        const saved = rawType?.split(";")[0]!.trim().toLowerCase() === XMIND_MIME
+          ? await saveXmindUpload(chunks, name, { uploadId })
+          : await saveFile(chunks, name, rawType ?? "", { uploadId, expectedBytes: declaredLength });
         deps.uploads.note(auth, basename(saved.path));
         return json(res, 201, saved);
       } catch (error) {

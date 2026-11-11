@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CdpConnection } from "./connection.ts";
 import { CdpProtocolError, DriverError } from "./errors.ts";
@@ -92,6 +92,43 @@ describe("the quiet rule", () => {
 });
 
 describe("CdpConnection", () => {
+  it("cleans up a command whose transport throws and allows the next command", async () => {
+    vi.useFakeTimers();
+    const browser = fakeBrowser();
+    const send = browser.transport.send;
+    const failure = new Error("pipe write failed");
+    browser.transport.send = () => { throw failure; };
+    const connection = new CdpConnection(browser.transport);
+    try {
+      await expect(connection.root.send("Browser.getVersion")).rejects.toBe(failure);
+      expect(vi.getTimerCount()).toBe(0);
+      browser.transport.send = send;
+      const next = connection.root.send("Browser.getVersion");
+      browser.reply({ id: browser.sent[0].id, result: { product: "Chrome/1" } });
+      await expect(next).resolves.toEqual({ product: "Chrome/1" });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      connection.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("cleans up a command that cannot be serialized", async () => {
+    vi.useFakeTimers();
+    const browser = fakeBrowser();
+    const connection = new CdpConnection(browser.transport);
+    const params: Record<string, unknown> = {};
+    params.cycle = params;
+    try {
+      await expect(connection.root.send("Browser.getVersion", params)).rejects.toBeInstanceOf(TypeError);
+      expect(browser.sent).toEqual([]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      connection.close();
+      vi.useRealTimers();
+    }
+  });
+
   it("matches answers to calls and errors to their method", async () => {
     const browser = fakeBrowser();
     const connection = new CdpConnection(browser.transport);
@@ -133,6 +170,37 @@ describe("CdpConnection", () => {
     browser.reply({ method: "Target.detachedFromTarget", params: { sessionId: "S1" } });
     await expect(pending).rejects.toMatchObject({ code: "closed" });
     await expect(child.send("Page.enable")).rejects.toMatchObject({ code: "closed" });
+  });
+
+  it("rejects a new event wait on an already detached renderer without registering a timer", async () => {
+    vi.useFakeTimers();
+    const browser = fakeBrowser();
+    const connection = new CdpConnection(browser.transport);
+    try {
+      browser.reply({ method: "Target.attachedToTarget", params: { sessionId: "S1", targetInfo: { targetId: "T1", type: "iframe" } } });
+      const child = connection.session("S1")!;
+      browser.reply({ method: "Target.detachedFromTarget", params: { sessionId: "S1" } });
+      await expect(child.waitFor("Page.loadEventFired")).rejects.toMatchObject({ code: "closed" });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      connection.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects a new browser event wait after the transport has closed", async () => {
+    vi.useFakeTimers();
+    const browser = fakeBrowser();
+    const connection = new CdpConnection(browser.transport);
+    try {
+      browser.drop("browser exited");
+      await expect(connection.root.waitFor("Target.targetCreated")).rejects.toBeInstanceOf(DriverError);
+      await expect(connection.root.waitFor("Target.targetCreated")).rejects.toMatchObject({ code: "closed" });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      connection.close();
+      vi.useRealTimers();
+    }
   });
 
   it("times a call out, and fails every call when the browser goes away", async () => {

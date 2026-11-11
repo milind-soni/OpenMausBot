@@ -37,6 +37,7 @@ const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 const INITIALIZE_RELAY_TIMEOUT_MS = 1_000;
 const RELAY_TIMEOUT_MS = 10 * 60_000;
 const TOOLS_LIST_RETRY_MS = 500;
+const TOOLS_LIST_RELAY_TIMEOUT_MS = 5_000;
 
 function parsedHeaders(): Record<string, string> {
   try {
@@ -268,6 +269,19 @@ function fittedList(frame: Json): Json {
   return { ...frame, result: capToolListResult(fitToolListResult(frame.result, SCHEMA_PROFILE, log), TOOL_LIMIT, log) };
 }
 
+async function listTools(message: Json): Promise<Json> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt) await delay(TOOLS_LIST_RETRY_MS);
+    try {
+      const response = await relay(message, TOOLS_LIST_RELAY_TIMEOUT_MS);
+      if (response && !response.error && Array.isArray((response.result as Json | undefined)?.tools)) return response;
+    } catch {
+    }
+  }
+  process.stderr.write("connector-proxy: Connected apps are temporarily unavailable; start a new session to retry discovery.\n");
+  return { jsonrpc: "2.0", id: message.id, result: { tools: [] } };
+}
+
 async function handle(received: Json): Promise<void> {
   let message = received;
   const id = message.id;
@@ -333,9 +347,8 @@ async function handle(received: Json): Promise<void> {
     }
   }
   try {
-    // The engine lists tools once per session, so one failed listing would leave the whole session without them.
     const response = method === "tools/list"
-      ? await relay(message).catch(() => delay(TOOLS_LIST_RETRY_MS).then(() => relay(message)))
+      ? await listTools(message)
       : await relay(message);
     if (response && id !== undefined) {
       const name = String((message.params as Json | undefined)?.name ?? "");
