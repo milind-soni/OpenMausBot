@@ -14,6 +14,7 @@ import { issuePath } from "@/lib/issue-route";
 import { suggestLabels } from "@/lib/command-menu";
 import { hasOpenKeyboardOverlay, isEditingTarget } from "@/lib/keyboard-navigation";
 import { SubIssues } from "./sub-issues";
+import { AcceptanceCriteria } from "./acceptance-criteria";
 import { IssueLabels, IssueRelations } from "./issue-relations";
 import { ProjectIcon } from "./project-icon";
 import { useWorkspace } from "./workspace-context";
@@ -385,6 +386,7 @@ function TaskModalContent({
   const descriptionBlock = fields && <>
     <textarea ref={descriptionInput} className="issue-detail-description" aria-label="Issue description" value={fields.description} onChange={event => setField("description", event.target.value)} onBlur={() => void commit(["description"], fields)} rows={2} placeholder={canEdit ? "Add a description..." : ""} disabled={!canEdit} maxLength={60000} />
     {errors.description && <small className="issue-field-error issue-description-error" role="alert">{errors.description}</small>}
+    {details && <AcceptanceCriteria projectId={projectId} taskId={taskId} sessionToken={sessionToken} canEdit={canEdit} items={details.task.acceptanceCriteria ?? []} />}
   </>;
   const suggestions = fields ? suggestLabels(`${fields.title} ${fields.description}`) : [];
   const labelsField = <IssueLabels sessionToken={sessionToken} taskId={taskId} projectId={projectId} canEdit={canEdit} suggestions={suggestions} />;

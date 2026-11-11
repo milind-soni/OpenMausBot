@@ -70,9 +70,39 @@ claude mcp add --transport http origin https://<your-origin>/api/mcp --header "A
 ```
 
 - **Tested with:** Claude Code 2.1 (token), Codex 0.166, OpenCode 1.19 and omp 18.14 (token and OAuth). ChatGPT developer mode uses OAuth and needs a public HTTPS address.
-- **Tools:** `get_workspace`, `list_projects`, `list_issues`, `get_issue`, `get_inbox`, `list_members`, and with write access `create_issue`, `update_issue`, `move_issue`, `add_comment`.
+- **Tools:** `get_workspace`, `list_projects`, `list_issues`, `get_issue`, `get_inbox`, `list_members`, `list_assets`, `get_asset`, `vault_list`, `vault_get`, `list_repos`, `list_pull_requests`, and with write access `create_issue`, `update_issue`, `move_issue`, `add_comment`, `add_acceptance_criteria`, `update_acceptance_criteria`. Settings → Agents lists the same set (`lib/mcp-tools.ts`).
+- **Issues and specs:** issues carry `acceptanceCriteria` (`[{ text, checked }]`), shown as a checklist under the description. A bare note created in Draft gets the **Needs spec** label; it comes off once the issue has a description and at least one criterion.
+- **Vault:** `vault_list` and `vault_get` only reach items a member allowed agents to use. The Vault is end-to-end encrypted, so `vault_get` needs the Vault passphrase; it is used for that call only. Without it, or with a wrong one, the call fails and returns no value.
 
 Revoke connections and tokens in Settings → Agents.
+
+## Issue webhooks
+
+Origin can POST an event when an issue is created (`issue.created`) and when its status or completion changes (`issue.updated`; title and description edits send nothing). Set a URL and signing secret per workspace in Settings → Workspace, or a deployment-wide default in the Convex env (the workspace's own wins):
+
+```sh
+npx convex env set ORIGIN_ISSUE_WEBHOOK_URL https://hooks.example.com/origin
+npx convex env set ORIGIN_ISSUE_WEBHOOK_SECRET "$(openssl rand -hex 32)"   # at least 32 characters
+```
+
+Each request has `Content-Type: application/json`, `X-Origin-Event`, `X-Origin-Delivery` (the event id) and `X-Origin-Signature: sha256=<hex>`, the HMAC-SHA256 of the raw body under the secret. Issue URLs in the body are absolute when `ORIGIN_PUBLIC_URL` is set in the Convex env. A delivery times out after 10 seconds and is retried twice; it never blocks the issue change. Body (see `lib/issue-webhook.ts`):
+
+```json
+{
+  "id": "evt_…", "type": "issue.updated", "occurredAt": "2026-11-11T09:00:00.000Z",
+  "workspace": { "id": "…", "name": "Acme", "slug": "acme" },
+  "project": { "id": "…", "name": "Web", "repo": "acme/web" },
+  "issue": { "id": "…", "key": "ORI-AB12", "title": "…", "description": "", "labels": ["Needs spec"], "url": "https://origin.example.com/acme/issue/ORI-AB12",
+    "status": "Todo", "completed": false, "assignee": null, "acceptanceCriteria": [] },
+  "changes": { "status": { "from": "Draft", "to": "Todo" } }
+}
+```
+
+`changes` is `null` for `issue.created`; for `issue.updated` it has `status` and/or `completed`, each `{ from, to }`. To try a receiver without a workspace:
+
+```sh
+ORIGIN_ISSUE_WEBHOOK_SECRET='…' node scripts/origin-webhook-test.mjs --url http://127.0.0.1:8787/hook [--event issue.updated]
+```
 
 ## License
 

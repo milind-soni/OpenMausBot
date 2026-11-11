@@ -9,6 +9,7 @@ import { isLegacyIdeaColumn } from "../lib/origin-columns";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { repositoryUrl } from "./lib/repository";
+import { issueStatusChanged } from "./lib/issueEvents";
 
 async function inDraft(ctx: QueryCtx, task: Doc<"tasks">) {
   const column = await ctx.db.get(task.columnId);
@@ -27,6 +28,7 @@ async function completeWithMergeReceipt(ctx: MutationCtx, project: Doc<"projects
     await recordCompletion(ctx, task, true, task.completionPullRequest!.mergedAt);
     await changeOpenIssueCount(ctx, project._id, -1);
     await ctx.db.patch(task._id, { done: true, updatedAt: Date.now() });
+    await issueStatusChanged(ctx, task);
     await touchProject(ctx, project._id);
   }
   return true;
@@ -129,6 +131,7 @@ export const linkIssue = internalMutation({
     }
     const reopened = a.state === "open" && task.githubIssueState === "closed";
     await ctx.db.patch(task._id, { teamId: project.teamId, githubIssueNumber: a.number, githubIssueUrl: a.issueUrl, githubIssueState: a.state, githubIssueUpdatedAt: a.updatedAt, githubIssueSyncedAt: Date.now(), ...(a.state === "open" ? { githubIssueReopenRequested: undefined } : {}), ...(reopened ? { completionPullRequest: undefined } : {}), ...(changed ? { done: closedOnGitHub, updatedAt: Date.now() } : {}) });
+    if (changed) await issueStatusChanged(ctx, task);
     await completeWithMergeReceipt(ctx, project, (await ctx.db.get(task._id))!);
     if (changed || !task.githubIssueNumber) await touchProject(ctx, project._id); return null;
   },

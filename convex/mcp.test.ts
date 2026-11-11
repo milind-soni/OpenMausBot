@@ -148,7 +148,8 @@ describe("MCP tools", () => {
     const f = await fixture();
     const member = await f.token(f.member);
     const created = JSON.parse(await f.t.mutation(api.mcp.createIssue, { token: member, project: "Shared", title: "Labelled", labels: ["Bug", " backend ", "bug"] }));
-    expect(created.labels).toEqual(["Bug", "backend"]);
+    // A bare note in Draft also gets Needs spec; an explicit label set replaces it.
+    expect(created.labels).toEqual(["Bug", "backend", "Needs spec"]);
     const updated = JSON.parse(await f.t.mutation(api.mcp.updateIssue, { token: member, issueId: created.id, labels: ["BUG", "Frontend"] }));
     expect(updated.labels).toEqual(["Bug", "Frontend"]);
     const projects = JSON.parse(await f.t.query(api.mcp.projects, { token: member })).projects;

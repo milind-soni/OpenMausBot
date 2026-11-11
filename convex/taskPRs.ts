@@ -6,6 +6,7 @@ import { recordCompletion } from "./lib/completions";
 import { agentsTables } from "./agentsTables";
 import { internal } from "./_generated/api";
 import { reserveTaskBranch } from "./lib/taskBranches";
+import { issueStatusChanged } from "./lib/issueEvents";
 import { issueKey, pullRequestReferences, textReferences, type IssueReference } from "../lib/github-references";
 
 export const prState = v.union(v.literal("draft"), v.literal("open"), v.literal("closed"), v.literal("merged"));
@@ -38,6 +39,7 @@ async function completeFromGitHub(ctx: MutationCtx, project: Doc<"projects">, ta
   await recordCompletion(ctx, task, true, completedAt);
   await changeOpenIssueCount(ctx, project._id, -1);
   await ctx.db.patch(task._id, { done: true, columnId: doneColumn._id, githubIssueReopenRequested: undefined, updatedAt: Date.now() });
+  await issueStatusChanged(ctx, task);
   await touchProject(ctx, project._id);
 }
 
@@ -64,6 +66,55 @@ export const list = query({
     const task = await ctx.db.get(a.taskId); if (!task) throw new ConvexError("Issue not found");
     await requireMember(ctx, task.projectId, a.sessionToken);
     return ctx.db.query("taskPullRequests").withIndex("by_taskId", q => q.eq("taskId", task._id)).take(50);
+  },
+});
+
+const PR_ORDER = { open: 0, draft: 0, merged: 1, closed: 2 } as const;
+export const linkedPullRequest = v.object({
+  number: v.number(), url: v.string(), title: v.union(v.string(), v.null()), state: prState, repository: v.string(), branch: v.string(),
+  checks: v.string(), review: v.string(), mergeable: v.union(v.boolean(), v.null()), author: v.union(v.string(), v.null()), updatedAt: v.number(),
+  issues: v.array(v.object({ taskId: v.id("tasks"), key: v.string(), title: v.string(), done: v.boolean(), completesOnMerge: v.boolean() })),
+});
+
+/**
+ * Pull requests linked to the project's issues, one entry per PR with every issue it is linked to: open and draft
+ * first, then merged, then closed, each most recently updated first. Its state, title and checks come from the most
+ * recently synced link row.
+ */
+export async function linkedPullRequests(ctx: QueryCtx, projectId: Id<"projects">, limit = 500): Promise<(typeof linkedPullRequest.type)[]> {
+  const rows = await ctx.db.query("taskPullRequests").withIndex("by_projectId_and_number", q => q.eq("projectId", projectId)).order("desc").take(limit);
+  const groups = new Map<string, Doc<"taskPullRequests">[]>();
+  for (const row of rows) groups.set(row.url.toLowerCase(), [...groups.get(row.url.toLowerCase()) ?? [], row]);
+  const tasks = new Map<Id<"tasks">, Doc<"tasks"> | null>();
+  for (const row of rows) if (!tasks.has(row.taskId)) tasks.set(row.taskId, await ctx.db.get(row.taskId));
+  const result = [...groups.values()].map(group => {
+    const latest = group.reduce((a, b) => (b.githubUpdatedAt ?? b.updatedAt) > (a.githubUpdatedAt ?? a.updatedAt) ? b : a);
+    return {
+      number: latest.number, url: latest.url, title: group.find(row => row.title)?.title ?? null, state: latest.state,
+      repository: latest.repository || repoName(latest.url.split("/pull/")[0]) || "", branch: latest.branch, checks: latest.checks, review: latest.review,
+      mergeable: latest.mergeable ?? null, author: latest.authorLogin ?? null, updatedAt: latest.githubUpdatedAt ?? latest.updatedAt,
+      issues: group.flatMap(row => {
+        const task = tasks.get(row.taskId);
+        return task && task.projectId === projectId ? [{ taskId: task._id, key: issueKey(task._id), title: task.title, done: task.done, completesOnMerge: row.closes !== false }] : [];
+      }),
+    };
+  }).filter(pr => pr.issues.length);
+  return result.sort((a, b) => PR_ORDER[a.state] - PR_ORDER[b.state] || b.updatedAt - a.updatedAt);
+}
+
+/** The project's Pull requests section, with what a linked PR does to its issues. */
+export const projectPullRequests = query({
+  args: { sessionToken: v.string(), projectId: v.id("projects") },
+  returns: v.object({ pullRequests: v.array(linkedPullRequest), reviewColumn: v.union(v.string(), v.null()), doneColumn: v.string() }),
+  handler: async (ctx, a) => {
+    const { project } = await requireMember(ctx, a.projectId, a.sessionToken);
+    const review = project.githubReviewColumnId ? await ctx.db.get(project.githubReviewColumnId) : null;
+    const done = project.githubDoneColumnId ? await ctx.db.get(project.githubDoneColumnId) : null;
+    return {
+      pullRequests: await linkedPullRequests(ctx, project._id),
+      reviewColumn: review?.projectId === project._id ? review.title : null,
+      doneColumn: done?.projectId === project._id ? done.title : "Done",
+    };
   },
 });
 
@@ -118,6 +169,7 @@ export async function applySnapshot(ctx: MutationCtx, row: Doc<"taskPullRequests
     if (!reference && task.githubTaskMode !== "pull_request") await ctx.db.patch(task._id, { githubTaskMode: "pull_request" });
   } else if (columnId !== task.columnId || (!reference && task.githubTaskMode !== "pull_request")) {
     await ctx.db.patch(task._id, { ...(reference ? {} : { githubTaskMode: "pull_request" as const }), columnId, updatedAt: Date.now() });
+    await issueStatusChanged(ctx, task);
     await touchProject(ctx, project._id);
   }
   // A payload-only snapshot carries no check or review result; keep the last known ones for the same head.

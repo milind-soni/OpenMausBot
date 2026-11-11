@@ -62,7 +62,7 @@ export function WorkspaceSettings({ sessionToken, profile, security, sound, onTo
         {tab === "profile" && profile}
         {tab === "security" && <><div className="settings-group">{security}</div><SessionSettings sessionToken={sessionToken} /></>}
         {tab === "notifications" && <><div className="settings-group"><SettingSwitch label="Notification sound" checked={sound} onChange={onToggleSound} /></div><NotificationPreferences sessionToken={sessionToken} /></>}
-        {tab === "workspace" && <><WorkspaceGeneral sessionToken={sessionToken} /><LeaveWorkspace sessionToken={sessionToken} /><DeleteWorkspace sessionToken={sessionToken} /></>}
+        {tab === "workspace" && <><WorkspaceGeneral sessionToken={sessionToken} /><IssueWebhookSettings sessionToken={sessionToken} /><LeaveWorkspace sessionToken={sessionToken} /><DeleteWorkspace sessionToken={sessionToken} /></>}
         {tab === "members" && <WorkspaceMembers sessionToken={sessionToken} beforeOpenProfile={onClose} />}
         {tab === "labels" && <LabelSettings sessionToken={sessionToken} />}
         {tab === "integrations" && <IntegrationSettings sessionToken={sessionToken} />}
@@ -108,6 +108,35 @@ function WorkspaceGeneral({ sessionToken }: { sessionToken: string }) {
     <label>URL<span className="copy-field"><input value={url} readOnly onFocus={event => event.currentTarget.select()} /><button type="button" className="icon-button" aria-label="Copy workspace URL" title="Copy workspace URL" onClick={async () => { try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch { /* The field stays selectable. */ } }}>{copied ? <Check size={15} /> : <Copy size={15} />}</button></span></label>
     <FormStatus notice={notice} />
     {admin && <div className="settings-actions"><button className="primary-button compact" disabled={busy || !name.trim() || name.trim() === workspace.name}>{busy && <Loader2 size={14} className="spin" />}Save</button></div>}
+  </form>;
+}
+
+/** Where Origin POSTs issue.created and issue.updated events for this workspace (convex/issueWebhooks.ts). Admins only. */
+function IssueWebhookSettings({ sessionToken }: { sessionToken: string }) {
+  const workspace = useWorkspace();
+  const config = useQuery(api.issueWebhooks.get, { sessionToken, teamId: workspace._id });
+  const save = useMutation(api.issueWebhooks.save), remove = useMutation(api.issueWebhooks.remove);
+  const [url, setUrl] = useState<string | null>(null), [secret, setSecret] = useState("");
+  const [notice, setNotice] = useState<FormNotice>(null);
+  const [busy, setBusy] = useState(false);
+  if (!config?.canManage) return null;
+  const shownUrl = url ?? config.url ?? "";
+  const attempt = async (fn: () => Promise<unknown>, done: string) => {
+    setBusy(true); setNotice(null);
+    try { await fn(); setUrl(null); setSecret(""); setNotice({ tone: "success", text: done }); }
+    catch (error) { setNotice({ tone: "danger", text: errorText(error, "Could not save webhook") }); }
+    finally { setBusy(false); }
+  };
+  return <form className="settings-group" onSubmit={event => { event.preventDefault(); if (!busy) void attempt(() => save({ sessionToken, teamId: workspace._id, url: shownUrl, ...(secret ? { secret } : {}) }), "Webhook saved"); }}>
+    <h4>Issue webhook</h4>
+    <p className="settings-note">Origin sends <code>issue.created</code> and <code>issue.updated</code> (status or completion changes) as JSON, signed in <code>X-Origin-Signature</code> with HMAC-SHA256 of the body.{config.globalDefault && !config.url ? " Until you set one, the server’s default webhook is used." : ""}</p>
+    <label>URL<input type="url" inputMode="url" autoComplete="off" spellCheck={false} placeholder="https://" maxLength={2000} value={shownUrl} onChange={event => setUrl(event.target.value)} required /></label>
+    <label>Signing secret<input type="password" autoComplete="new-password" spellCheck={false} minLength={32} maxLength={512} placeholder={config.url ? "Saved. Enter a new one to replace it" : "At least 32 characters"} value={secret} onChange={event => setSecret(event.target.value)} required={!config.url} /></label>
+    <FormStatus notice={notice} />
+    <div className="settings-actions">
+      {config.url && <ConfirmButton className="ghost-button compact danger" label="Remove webhook" text="Remove" confirmLabel="Confirm" disabled={busy} icon={<Trash2 size={14} />} onConfirm={() => void attempt(() => remove({ sessionToken, teamId: workspace._id }), "Webhook removed")} />}
+      <button className="primary-button compact" disabled={busy || !shownUrl.trim() || (!config.url && !secret) || (shownUrl === config.url && !secret)}>{busy && <Loader2 size={14} className="spin" />}Save</button>
+    </div>
   </form>;
 }
 

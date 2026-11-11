@@ -12,6 +12,9 @@ import { updateChecklist } from "../lib/comment-checklist";
 import { compareStoredColumns, compareWorkflowColumns, DEFAULT_WORKFLOW_COLUMNS, ensureDraftColumn, isDoneColumn, isDraftColumn, normalizeColumnTitle } from "./lib/columns";
 import { DRAFT_COLUMN_TITLE, isLegacyIdeaColumn } from "../lib/origin-columns";
 import { compareTaskOrder, planTaskMove } from "../lib/task-order";
+import { addCriteria, editCriteria, needsSpecLabels, replaceCriteria, type Criterion, type CriterionEdit } from "../lib/acceptance-criteria";
+import { cleanLabels, needsSpecAvailable, projectLabels, registerLabels, workspaceLabelRows } from "./lib/labels";
+import { issueCreated, issueStatusChanged } from "./lib/issueEvents";
 import schema from "./schema";
 
 const columnDoc = v.object({ ...schema.tables.columns.validator.fields, _id: v.id("columns"), _creationTime: v.number() });
@@ -254,8 +257,11 @@ export const deleteColumn = mutation({
       const target = args.moveToColumnId ? await ctx.db.get(args.moveToColumnId) : null;
       if (!target || target._id === column._id || target.projectId !== args.projectId) throw new ConvexError("Choose a destination for the issues in this column");
       if (isDoneColumn(target) && tasks.some(task => !task.done)) throw new ConvexError("Complete the open issues before moving them to Done");
-      for (const [index, task] of tasks.entries()) await ctx.db.patch(task._id, { columnId: target._id, order: Date.now() + index, updatedAt: Date.now(),
-        ...(!task.done && task.githubIssueNumber && isDraftColumn(column) && !isDraftColumn(target) ? { githubIssueReopenRequested: true } : {}) });
+      for (const [index, task] of tasks.entries()) {
+        await ctx.db.patch(task._id, { columnId: target._id, order: Date.now() + index, updatedAt: Date.now(),
+          ...(!task.done && task.githubIssueNumber && isDraftColumn(column) && !isDraftColumn(target) ? { githubIssueReopenRequested: true } : {}) });
+        await issueStatusChanged(ctx, task);
+      }
     }
     await ctx.db.delete(args.columnId);
     await ensureDraftColumn(ctx, args.projectId);
@@ -274,6 +280,7 @@ export const createTask = mutation({
     priority: priorityValidator,
     assignedToEmail: v.optional(v.string()),
     dueDate: v.optional(v.string()),
+    labels: v.optional(v.array(v.string())),
   },
   returns: v.id("tasks"),
   handler: async (ctx, args) => {
@@ -282,7 +289,11 @@ export const createTask = mutation({
   },
 });
 
-export async function createTaskRecord(ctx: MutationCtx, args: { projectId: Id<"projects">; columnId?: Id<"columns">; title: string; description?: string; priority: "low" | "medium" | "high"; assignedToEmail?: string; dueDate?: string; }, actorId: Id<"users">) {
+/**
+ * Every new issue goes through here (board, composer, sub-issues, feedback, agents, MCP): it lands in Draft unless a
+ * column is given, gets Needs spec when it is a bare note in Draft, and sends issue.created.
+ */
+export async function createTaskRecord(ctx: MutationCtx, args: { projectId: Id<"projects">; columnId?: Id<"columns">; title: string; description?: string; priority: "low" | "medium" | "high"; assignedToEmail?: string; dueDate?: string; labels?: string[]; acceptanceCriteria?: Criterion[] }, actorId: Id<"users">) {
   const [column, assignee] = await Promise.all([
       args.columnId ? ctx.db.get(args.columnId) : ensureDraftColumn(ctx, args.projectId).then(result => result.column),
       findAssignee(ctx, args.projectId, args.assignedToEmail),
@@ -299,25 +310,42 @@ export async function createTaskRecord(ctx: MutationCtx, args: { projectId: Id<"
     const order = last ? last.order + 1 : 0;
     const project = await ctx.db.get(args.projectId);
     const done = isDoneColumn(column);
+    const description = args.description?.trim() || undefined;
+    const acceptanceCriteria = args.acceptanceCriteria?.length ? args.acceptanceCriteria : undefined;
+    // The workspace registry's spelling wins, then the project's (as when labelling an issue).
+    let labels = args.labels?.length ? cleanLabels(args.labels, [...await projectLabels(ctx, args.projectId), ...project?.teamId ? (await workspaceLabelRows(ctx, project.teamId)).map(row => row.name) : []]) : [];
+    const spec = project?.teamId ? needsSpecLabels({ description, acceptanceCriteria, labels }, { inDraft: isDraftColumn(column) }) : null;
+    if (spec && (spec.length < labels.length || await needsSpecAvailable(ctx, project!.teamId!))) labels = spec;
     const taskId = await ctx.db.insert("tasks", {
       teamId: project?.teamId,
       projectId: args.projectId,
       columnId: column._id,
       title: args.title.trim(),
-      description: args.description?.trim() || undefined,
+      description,
       priority: args.priority,
       assignedToEmail: assignee?.email,
       assignedToName: assignee?.name,
       done,
       dueDate,
+      ...(labels.length ? { labels } : {}),
+      ...(acceptanceCriteria ? { acceptanceCriteria } : {}),
       order,
       createdAt: now,
       updatedAt: now,
     });
+    if (project?.teamId && labels.length) await registerLabels(ctx, project.teamId, labels);
     await changeOpenIssueCount(ctx, args.projectId, done ? 0 : 1);
     await touchProject(ctx, args.projectId);
     if (project?.teamId && assignee) await notify(ctx, { teamId: project.teamId, email: assignee.email, actorId, kind: "assignment", eventId: `created:${taskId}`, projectId: project._id, taskId });
+    await issueCreated(ctx, taskId);
     return taskId;
+}
+
+/** Drops Needs spec once the issue has a description and acceptance criteria (lib/acceptance-criteria.ts). */
+export async function settleNeedsSpec(ctx: MutationCtx, taskId: Id<"tasks">) {
+  const task = await ctx.db.get(taskId);
+  const labels = task && needsSpecLabels(task);
+  if (task && labels) await ctx.db.patch(task._id, { labels });
 }
 
 const draftRepairPage = { cursor: v.union(v.string(), v.null()) };
@@ -445,6 +473,8 @@ export async function updateTaskRecord(ctx: MutationCtx, args: { projectId: Id<"
       if (project?.teamId) await notify(ctx, { teamId: project.teamId, email: patch.assignedToEmail, actorId, kind: "assignment", eventId: `assigned:${task._id}:${crypto.randomUUID()}`, projectId: project._id, taskId: task._id });
     }
     if (patch.done !== undefined && patch.done !== task.done) await changeOpenIssueCount(ctx, args.projectId, patch.done ? -1 : 1);
+    if (args.description !== undefined) await settleNeedsSpec(ctx, task._id);
+    await issueStatusChanged(ctx, task);
     await touchProject(ctx, args.projectId);
 }
 
@@ -478,8 +508,40 @@ export async function moveTaskRecord(ctx: MutationCtx, args: { projectId: Id<"pr
     await ctx.db.patch(args.taskId, { columnId: args.columnId, order, updatedAt: Date.now(), ...(reopen ? { githubIssueReopenRequested: true } : {}),
       ...(reopenAsDraft ? { done: false, completionPullRequest: undefined } : {}) });
     if (reopenAsDraft) await changeOpenIssueCount(ctx, args.projectId, 1);
+    await settleNeedsSpec(ctx, task._id);
+    await issueStatusChanged(ctx, task);
     await touchProject(ctx, args.projectId);
 }
+
+/** One change to an issue's acceptance criteria: append items, edit/check/remove items, or replace the list. */
+export type CriteriaChange = { add: string[] } | { edits: CriterionEdit[] } | { replace: { text: string; checked?: boolean }[] };
+
+export async function changeCriteriaRecord(ctx: MutationCtx, task: Doc<"tasks">, change: CriteriaChange) {
+  const current = task.acceptanceCriteria ?? [];
+  let next: Criterion[];
+  try { next = "add" in change ? addCriteria(current, change.add) : "edits" in change ? editCriteria(current, change.edits) : replaceCriteria(change.replace); }
+  catch (error) { throw new ConvexError(error instanceof Error ? error.message : "Invalid acceptance criteria"); }
+  await ctx.db.patch(task._id, { acceptanceCriteria: next, updatedAt: Date.now() });
+  await settleNeedsSpec(ctx, task._id);
+  await touchProject(ctx, task.projectId);
+  return next;
+}
+
+const criterionEdit = v.object({ index: v.optional(v.number()), match: v.optional(v.string()), text: v.optional(v.string()), checked: v.optional(v.boolean()), remove: v.optional(v.boolean()) });
+
+/** The issue page's acceptance criteria: the UI names items by index and current text, so a stale edit fails. */
+export const updateAcceptanceCriteria = mutation({
+  args: { projectId: v.id("projects"), sessionToken: v.string(), taskId: v.id("tasks"), add: v.optional(v.array(v.string())), edits: v.optional(v.array(criterionEdit)) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireEditor(ctx, args.projectId, args.sessionToken);
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.projectId !== args.projectId) throw new ConvexError("Issue not found");
+    if (Boolean(args.add) === Boolean(args.edits)) throw new ConvexError("Add or edit acceptance criteria");
+    await changeCriteriaRecord(ctx, task, args.add ? { add: args.add } : { edits: args.edits! });
+    return null;
+  },
+});
 
 export const addComment = mutation({
   args: { projectId: v.id("projects"), sessionToken: v.string(), taskId: v.id("tasks"), body: v.string(), mentions: v.optional(v.array(v.object({ userId: v.id("users"), token: v.string() }))),

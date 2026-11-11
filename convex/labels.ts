@@ -54,7 +54,7 @@ export const list = query({
     const rows = await workspaceLabelRows(ctx, args.teamId);
     const labels: (typeof labelRow.type)[] = rows.map(row => ({ _id: row._id, name: row.name, color: row.color, archived: row.archived, ...(row.description ? { description: row.description } : {}), ...(row.groupId ? { groupId: row.groupId } : {}) }));
     const known = new Set(rows.map(row => row.key));
-    for (const label of missingDefaultLabels(rows.map(row => row.name))) { labels.push({ _id: null, name: label.name, color: label.color, archived: false }); known.add(labelKey(label.name)); }
+    for (const label of missingDefaultLabels(rows.map(row => row.name))) { labels.push({ _id: null, name: label.name, color: label.color, archived: false, ...(label.description ? { description: label.description } : {}) }); known.add(labelKey(label.name)); }
     if (args.projectId) {
       const { project } = await requireMember(ctx, args.projectId, args.sessionToken);
       if (project.teamId !== args.teamId) throw new ConvexError("Project not found");
@@ -82,7 +82,7 @@ export const usage = query({
   },
 });
 
-/** Stores Feature, Bug and Improvement for a workspace that lacks them. Idempotent; viewers get a no-op. */
+/** Stores Feature, Bug, Improvement and Needs spec for a workspace that lacks them. Idempotent; viewers get a no-op. */
 export const ensureDefaults = mutation({
   args: { sessionToken: v.string(), teamId: v.id("teams") },
   returns: v.number(),
