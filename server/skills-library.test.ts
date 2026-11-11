@@ -217,6 +217,30 @@ describe("assignment resolution", () => {
     expect(only.editable).toBe(false);
   });
 
+  it("treats a missing opt-out file as no opt-outs and refuses a corrupt one", () => {
+    const name = `every-${Math.random().toString(36).slice(2, 10)}`;
+    expect(library.librarySkillOptOuts(bot)).toEqual(new Set());
+    expect(library.installLibrarySkill({ name, instructions: SKILL(name), source: "lib", reviewState: "approved" })).toMatchObject({ name });
+    expect(library.setLibrarySkillEveryBot(name, true)).toMatchObject({ everyBot: true });
+    const file = join(config.DATA_DIR, "skill-state", bot, "library-opt-out.json");
+    try {
+      expect(skills.resolveBotSkills(bot, []).map((skill) => skill.name)).toContain(name);
+      mkdirSync(join(config.DATA_DIR, "skill-state", bot), { recursive: true });
+      writeFileSync(file, `${JSON.stringify([name], null, 2)}\n`);
+      expect(library.librarySkillOptOuts(bot)).toEqual(new Set([name]));
+      expect(skills.resolveBotSkills(bot, []).map((skill) => skill.name)).not.toContain(name);
+
+      writeFileSync(file, "{not json");
+      expect(() => library.librarySkillOptOuts(bot)).toThrow("the skill opt-out list could not be read");
+      expect(() => skills.resolveBotSkills(bot, [])).toThrow("the skill opt-out list could not be read");
+      writeFileSync(file, JSON.stringify({ names: [name] }));
+      expect(() => library.librarySkillOptOuts(bot)).toThrow("the skill opt-out list is invalid");
+      expect(() => skills.resolveBotSkills(bot, [])).toThrow("the skill opt-out list is invalid");
+    } finally {
+      expect(library.setLibrarySkillEveryBot(name, false)).toMatchObject({ everyBot: false });
+    }
+  });
+
   it("takes a shared skill off one bot and leaves the library copy and every other bot", () => {
     const name = `shared-${Math.random().toString(36).slice(2, 10)}`;
     const other = `lib-bot-${Math.random().toString(36).slice(2, 10)}`;

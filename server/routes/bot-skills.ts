@@ -9,7 +9,7 @@ import { fetchSkillFromSource } from "../skill-fetch.ts";
 import { skillImportSummary } from "../skill-folder.ts";
 import { installLibrarySkill, librarySkillOptOuts, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, setLibrarySkillEveryBot, setLibrarySkillOptOut, setLibrarySkillReviewState, skillsLibraryEnabled, unassignLibrarySkill } from "../skill-library.ts";
 import {
-  installSkill, listBotSkillsWithOrigin, listStagedSkillWrites, parseSkillMd, removeSkill, scanSkillText, setSkillEnabled,
+  installSkill, listBotSkillsWithOrigin, listSkills, listStagedSkillWrites, parseSkillMd, removeSkill, scanSkillText, setSkillEnabled,
   type SkillListing, type StagedSkillWrite,
 } from "../skills.ts";
 import type { BotRecord, Store } from "../store.ts";
@@ -113,6 +113,7 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
       const name = m[2]!;
       const removed = removeSkill(bot.id, name);
       if (!("error" in removed)) return json(res, 200, { ok: true });
+      if (listSkills(bot.id).some((skill) => skill.name === name)) return json(res, 409, { error: removed.error });
       if (skillsLibraryEnabled(cfg)) {
         const unassigned = unassignLibrarySkill(bot.id, name, bot.assignedSkills);
         if ("unassigned" in unassigned) {

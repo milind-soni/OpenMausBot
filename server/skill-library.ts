@@ -313,14 +313,17 @@ function libraryOptOutPath(botId: string): string | null {
 /** Names this bot has taken off its own list. An explicit assignment still wins; the shared copy stays. */
 export function librarySkillOptOuts(botId: string): ReadonlySet<string> {
   const path = libraryOptOutPath(botId);
-  if (!path || !existsSync(path)) return new Set();
+  if (!path) return new Set();
+  let parsed: unknown;
   try {
-    const parsed = libraryOptOutSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
-    if (!parsed.success) return new Set();
-    return new Set(parsed.data.filter(isSkillName));
-  } catch {
-    return new Set();
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Set();
+    throw new Error("the skill opt-out list could not be read");
   }
+  const result = libraryOptOutSchema.safeParse(parsed);
+  if (!result.success) throw new Error("the skill opt-out list is invalid");
+  return new Set(result.data.filter(isSkillName));
 }
 
 export function setLibrarySkillOptOut(botId: string, name: string, optedOut: boolean): void {

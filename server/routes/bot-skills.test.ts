@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../config.ts";
 import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
-import { installLibrarySkill, readLibrarySkillFile, setLibrarySkillEveryBot } from "../skill-library.ts";
+import { installLibrarySkill, librarySkillOptOuts, readLibrarySkillFile, setLibrarySkillEveryBot } from "../skill-library.ts";
 import type { Store } from "../store.ts";
 import { installSkill, listSkills, resolveBotSkills } from "../skills.ts";
 import { fakeGitHub } from "../testing/fake-github.ts";
@@ -164,5 +164,56 @@ describe("removing a skill from one bot", () => {
     });
     expect(cleared.status).toBe(200);
     expect(resolveBotSkills(first, []).map((skill) => skill.name)).toContain(shared);
+  });
+
+  it("returns the remove error and leaves the shared assignment when a private skill cannot be removed", async () => {
+    const name = `shadow-${Math.random().toString(36).slice(2, 8)}`;
+    const botId = `bot-${Math.random().toString(36).slice(2, 8)}`;
+    const bot = { id: botId, name: "Shadow", assignedSkills: [name] as string[] };
+    const text = learned(name);
+    expect(installSkill(botId, "private:test", [{ path: "SKILL.md", content: text }])).toMatchObject({ name });
+    expect(installLibrarySkill({ name, instructions: text, source: "lib", reviewState: "approved" })).toMatchObject({ name });
+    expect(setLibrarySkillEveryBot(name, true)).toMatchObject({ everyBot: true });
+    const root = workspaceDir(botId);
+    const skillsRoot = join(root, "skills");
+    const outside = join(root, "outside-skills");
+    mkdirSync(outside, { recursive: true });
+    rmSync(skillsRoot, { recursive: true, force: true });
+    symlinkSync(outside, skillsRoot, process.platform === "win32" ? "junction" : "dir");
+    const store = {
+      bot: (id: string) => (id === botId ? bot : undefined),
+      get bots() { return [bot]; },
+      patchBot(id: string, patch: { assignedSkills?: string[] }) {
+        if (id !== botId) return null;
+        Object.assign(bot, patch);
+        return bot;
+      },
+    } as unknown as Store;
+    const routes = [createBotSkillsRoutes({
+      store,
+      cfg: { features: { skillsLibrary: true } } as AppConfig,
+      listBotSkills: () => [],
+      readBotSkillFile: () => null,
+      stagedSkillListing: (staged) => staged,
+    })];
+    const server = createServer(async (req, res) => {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const auth = { kind: "loopback", scopes: ["admin"] } as unknown as RequestAuth;
+      if (!await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth, json, readBody })) json(res, 404, {});
+    });
+    servers.push(server);
+    await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const response = await fetch(`${base}/api/bots/${botId}/skills/${name}`, { method: "DELETE" });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: "the workspace skills path is a symlink or file; refusing to remove through it" });
+      expect(bot.assignedSkills).toEqual([name]);
+      expect(librarySkillOptOuts(botId).has(name)).toBe(false);
+      expect(listSkills(botId).map((skill) => skill.name)).toContain(name);
+      expect(readLibrarySkillFile(name)).toBe(text);
+    } finally {
+      expect(setLibrarySkillEveryBot(name, false)).toMatchObject({ everyBot: false });
+    }
   });
 });
