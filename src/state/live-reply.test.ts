@@ -13,7 +13,9 @@ import {
   settleLiveReplies,
   stopLiveReply,
   streamedReply,
+  withLiveRows,
 } from "./live-reply";
+import type { Message } from "@/state/store";
 
 let seq = 0;
 const frame = (event: Partial<RuntimeEvent>, threadId = "t"): RuntimeEvent =>
@@ -250,5 +252,56 @@ describe("a reply keyed by the id the server streams it under", () => {
     finished("<SYSTEM_NOTE>internal</SYSTEM_NOTE>", "a");
     note({ type: "turn.completed", ok: true } as Partial<RuntimeEvent>);
     expect(liveReplies("t")).toEqual([]);
+  });
+});
+
+describe("a thread nobody has on screen", () => {
+  const reply = (id: string, turnId: string, text: string): Message =>
+    ({ id, role: "bot", kind: "text", at: 0, text, turnId, itemId: `${turnId}:x` }) as Message;
+
+  it("keeps nothing stale across 30 turns, and opening it with a small window draws none of them again", () => {
+    const transcript: Message[] = [];
+    for (let turn = 1; turn <= 30; turn++) {
+      const turnId = `turn-${turn}`, itemId = `${turnId}:x`, text = `Reply number ${turn}.`;
+      note({ type: "turn.started", turnId }, "bg");
+      delta("Reply number ", "bg", { turnId, itemId } as Partial<RuntimeEvent>);
+      note({ type: "item.completed", itemType: "assistant_text", text, turnId, itemId } as Partial<RuntimeEvent>, "bg");
+      const saved = reply(`m${turn}`, turnId, text);
+      noteLiveReplyMessage("bg", saved);
+      note({ type: "turn.completed", ok: true, turnId } as Partial<RuntimeEvent>, "bg");
+      transcript.push({ id: `ask${turn}`, role: "user", kind: "text", at: 0, text: "again" } as Message, saved);
+    }
+    expect(liveReplies("bg").length, "only the last turn's saved item waits for its transcript").toBeLessThanOrEqual(1);
+    const windowed = transcript.slice(-1);
+    const opened = withLiveRows(liveReplies("bg"), windowed, transcript);
+    expect(opened.rows, "nothing drawn after the newest message").toEqual(windowed);
+    settleLiveReplies("bg", opened.settled);
+    expect(liveReplies("bg")).toEqual([]);
+  });
+
+  it("matches a saved item against the whole transcript, not the rows a window shows", () => {
+    delta("Old answer ", "t", { itemId: "a" } as Partial<RuntimeEvent>);
+    note({ type: "item.completed", itemType: "assistant_text", text: "Old answer.", itemId: "a" } as Partial<RuntimeEvent>);
+    noteLiveReplyMessage("t", { id: "m1", role: "bot", kind: "text", turnId: "turn-1", itemId: "a" });
+    const transcript = [reply("m1", "turn-1", "Old answer."), { id: "later", role: "user", kind: "text", at: 0, text: "next" } as Message];
+    const { rows, settled } = withLiveRows(liveReplies("t"), transcript.slice(1), transcript);
+    expect(rows.map((row) => row.id)).toEqual(["later"]);
+    expect(settled).toHaveLength(1);
+  });
+
+  it("draws a streaming reply only under the newest message, never under a window scrolled back or opened at an old one", () => {
+    const transcript = [reply("m1", "turn-0", "Old."), { id: "ask", role: "user", kind: "text", at: 0, text: "Now?" } as Message];
+    delta("Streaming now ");
+    expect(withLiveRows(liveReplies("t"), transcript.slice(0, 1), transcript).rows.map((row) => row.id)).toEqual(["m1"]);
+    expect(withLiveRows(liveReplies("t"), transcript, transcript).rows.map((row) => row.text)).toEqual(["Old.", "Now?", "Streaming now "]);
+  });
+
+  it("holds a bounded number of items per thread whatever arrives", () => {
+    for (let n = 0; n < 100; n++) {
+      delta(`Item ${n} `, "t", { itemId: `i${n}` } as Partial<RuntimeEvent>);
+      note({ type: "item.completed", itemType: "assistant_text", text: `Item ${n}.`, itemId: `i${n}` } as Partial<RuntimeEvent>);
+    }
+    expect(liveReplies("t").length).toBeLessThanOrEqual(32);
+    expect(liveReplies("t").at(-1)!.text).toBe("Item 99.");
   });
 });

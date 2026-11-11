@@ -35,6 +35,8 @@ const LIVE_ID = "live:";
 const MAX_THREADS = 200;
 const MAX_SEEN_EVENTS = 4096;
 const MAX_STREAMED = 500;
+/** A backstop: a thread nobody has on screen settles nothing, and a turn's start already drops the turns before it. */
+const MAX_ITEMS = 32;
 const EMPTY: readonly LiveReplyItem[] = [];
 const threads = new Map<string, ThreadReplies>();
 const listeners = new Map<string, Set<() => void>>();
@@ -48,6 +50,7 @@ const boundarySinceGap = new Set<string>();
 function put(threadId: string, next: ThreadReplies): void {
   const current = threads.get(threadId);
   if (current && current.items === next.items && current.skipping === next.skipping) return;
+  if (next.items.length > MAX_ITEMS) next = { ...next, items: next.items.slice(-MAX_ITEMS) };
   threads.delete(threadId);
   if (next.items.length || next.skipping) threads.set(threadId, next);
   if (threads.size > MAX_THREADS) threads.delete(threads.keys().next().value!);
@@ -98,7 +101,11 @@ export function noteLiveReplyEvent(event: RuntimeEvent): void {
     put(threadId, { items: next, skipping: false });
   } else if (event.type === "item.started" && event.itemType === "tool") {
     if (gapped) boundarySinceGap.add(threadId);
-  } else if (event.type === "turn.started" || isTurnEnd(event)) {
+  } else if (event.type === "turn.started") {
+    if (gapped) boundarySinceGap.add(threadId);
+    // The turns before this one are over: their saved messages are in the thread's transcript by now, drawn or not.
+    put(threadId, { items: kept(items, (item) => isSaved(item) && event.turnId !== undefined && item.turnId === event.turnId), skipping: false });
+  } else if (isTurnEnd(event)) {
     if (gapped) boundarySinceGap.add(threadId);
     put(threadId, { items: kept(items, isSaved), skipping: false });
   }
@@ -208,8 +215,13 @@ const rowCache = new WeakMap<LiveReplyItem, { text: string; message: Message }>(
 export function liveReplyRows(items: readonly LiveReplyItem[], transcript: readonly (Pick<Message, "id"> & { itemId?: string })[], from?: Message["from"]): { rows: Message[]; settled: string[] } {
   const rows: Message[] = [];
   const settled: string[] = [];
+  const ids = new Set<string>(), itemIds = new Set<string>();
+  for (const message of transcript) {
+    ids.add(message.id);
+    if (message.itemId !== undefined) itemIds.add(message.itemId);
+  }
   for (const item of items) {
-    if (transcript.some((message) => (item.itemId !== undefined && message.itemId === item.itemId) || message.id === item.savedAs)) {
+    if ((item.itemId !== undefined && itemIds.has(item.itemId)) || (item.savedAs !== undefined && ids.has(item.savedAs))) {
       settled.push(item.key);
       continue;
     }
@@ -225,16 +237,22 @@ export function liveReplyRows(items: readonly LiveReplyItem[], transcript: reado
   return { rows, settled };
 }
 
-/** `transcript` with the thread's streaming reply after it. */
-export function useLiveTranscript(threadId: string, transcript: Message[], speaker?: Message["from"]): Message[] {
+/** The rows a transcript window draws: `windowed` (a slice of the whole `transcript`), then the live items. An item is
+ * matched against the whole transcript, so one saved outside the window is not drawn again; and live rows follow the
+ * newest message, so a window that stops short of it (scrolled back, or opened at a found or pinned message) draws none. */
+export function withLiveRows(items: readonly LiveReplyItem[], windowed: Message[], transcript: readonly Message[], from?: Message["from"]): { rows: Message[]; settled: string[] } {
+  if (!items.length) return { rows: windowed, settled: [] };
+  const drawn = liveReplyRows(items, transcript, from);
+  const atEnd = windowed.at(-1)?.id === transcript.at(-1)?.id;
+  return { rows: atEnd && drawn.rows.length ? [...windowed, ...drawn.rows] : windowed, settled: drawn.settled };
+}
+
+/** The `windowed` rows of `transcript` with the thread's streaming reply after them. */
+export function useLiveTranscript(threadId: string, windowed: Message[], transcript: readonly Message[], speaker?: Message["from"]): Message[] {
   const items = useLiveReplies(threadId);
   const { botId, name, color } = speaker ?? {};
   const from = useMemo(() => botId && name && color ? { botId, name, color } : undefined, [botId, name, color]);
-  const live = useMemo(() => {
-    if (!items.length) return { rows: transcript, settled: [] };
-    const drawn = liveReplyRows(items, transcript, from);
-    return { rows: drawn.rows.length ? [...transcript, ...drawn.rows] : transcript, settled: drawn.settled };
-  }, [items, transcript, from]);
+  const live = useMemo(() => withLiveRows(items, windowed, transcript, from), [items, windowed, transcript, from]);
   useEffect(() => settleLiveReplies(threadId, live.settled), [threadId, live.settled]);
   return live.rows;
 }

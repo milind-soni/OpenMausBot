@@ -188,3 +188,24 @@ describe("a turn of several messages, each streamed under its own id", () => {
   });
 });
 
+
+describe("a conversation that streamed while nobody had it open", () => {
+  it("opens with none of its old replies drawn again after the newest message", () => {
+    const rows: Message[] = [];
+    for (let turn = 1; turn <= 30; turn++) {
+      const turnId = `bg${turn}`, itemId = `${turnId}:x`, text = `Background reply ${turn}.`;
+      engine({ type: "turn.started", turnId });
+      engine({ type: "content.delta", streamKind: "assistant_text", delta: "Background reply ", turnId, itemId } as Partial<RuntimeEvent>);
+      engine({ type: "item.completed", itemType: "assistant_text", text, turnId, itemId } as Partial<RuntimeEvent>);
+      const saved = { id: `r${turn}`, role: "bot", kind: "text", at: started + turn, text, turnId, itemId } as Message;
+      act(() => noteLiveReplyMessage(THREAD, saved));
+      engine({ type: "turn.completed", ok: true, turnId } as Partial<RuntimeEvent>);
+      rows.push({ id: `q${turn}`, role: "user", kind: "text", at: started + turn, text: `Question ${turn}` }, saved);
+    }
+    for (let n = 0; n < 200; n++) rows.push({ id: `n${n}`, role: n % 2 ? "bot" : "user", kind: "text", at: started + 100 + n, text: `Later ${n}` } as Message);
+    render(bot(rows, false));
+    expect(rowOf("r30"), "the window holds only the newest rows").toBeNull();
+    expect(liveRows()).toHaveLength(0);
+    expect(occurrences("Background reply")).toBe(0);
+  });
+});
