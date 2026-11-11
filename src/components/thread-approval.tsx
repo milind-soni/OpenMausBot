@@ -1,7 +1,8 @@
 import { useState, type ComponentProps, type ReactNode } from "react";
 
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-import { useStore, type Bot } from "@/state/store";
+import type { Bot } from "@/state/store";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import type { ApprovalModeSelector } from "./ApprovalModeSelector";
 import { CommandAllowlistDialog } from "./CommandAllowlistDialog";
@@ -13,13 +14,13 @@ export type ApprovalChoice = ComponentProps<typeof ApprovalModeSelector>;
 /** One conversation's approval level as every control offers it (the composer and the bot panel), with the dialogs a
  * choice can open: the warning before Auto on this computer, and the command allowlist. A remote client gets none. */
 export function useThreadApproval(bot: Bot | undefined): { choice: ApprovalChoice | undefined; dialogs: ReactNode } {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch(), instances = useStoreSelector((state) => state.instances);
   const { capabilities } = useDesktopCapabilities();
   const ownerOrAdmin = useOwnerOrAdmin();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const [warning, setWarning] = useState<{ botId: string; threadId: string } | null>(null);
   const [allowlist, setAllowlist] = useState<{ botId: string; botName: string; threadId: string } | null>(null);
-  const engine = bot ? state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId) : undefined;
+  const engine = bot ? instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId) : undefined;
   const trusted = Boolean(!remoteClient && window.ogb?.approvals && capabilities.host.packaged);
   const onSelect = (mode: ApprovalMode) => {
     if (!bot || mode === approvalModeFor(bot)) return;

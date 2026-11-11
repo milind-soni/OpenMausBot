@@ -58,9 +58,9 @@ describe("the store side of waits", () => {
   });
 
   it("posts a wait's line once, marks the chat unread and notifies only when it fired", () => {
-    expect(host.post(wait, { status: "fired", text: "the build: done. ci passed." })).toBe(true);
-    expect(host.post(wait, { status: "fired", text: "the build: done. ci passed." })).toBe(true);
-    expect(store.lines).toEqual([{ role: "bot", kind: "text", text: "the build: done. ci passed.", wait: { id: "w1", status: "fired" } }]);
+    expect(host.post(wait, { status: "fired", text: "the build: done. /tmp/x is there now." })).toBe(true);
+    expect(host.post(wait, { status: "fired", text: "the build: done. /tmp/x is there now." })).toBe(true);
+    expect(store.lines).toEqual([{ role: "bot", kind: "text", text: "the build: done. /tmp/x is there now.", textCode: "chat.notice.waitDone.fileExists", textParams: { label: "the build", path: "/tmp/x" }, wait: { id: "w1", status: "fired" } }]);
     expect(store.patchTask).toHaveBeenCalledWith("bot-1", "t-1", { unread: true });
     expect(wrote).toHaveBeenCalledTimes(1);
     host.post({ ...wait, id: "w2" }, { status: "expired", text: "Stopped waiting for the build after 24 hours." });

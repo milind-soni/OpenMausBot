@@ -7,6 +7,7 @@ export interface SavedPlace { id: string; kind: string; name: string; origin?: s
 type Answer = { ok: boolean; status: number; body: any };
 
 export declare const OWNER_KNOWN_MS: number;
+export declare const OWNER_RETRY_MS: number;
 export function parseChoice(value: unknown): OwnHomeChoice | null;
 export function handSaved(entry: unknown): entry is SavedPlace & { kind: "remote"; origin: string };
 export function serverRequests(place: { origin: string }, fetchImpl: typeof fetch): {
@@ -15,7 +16,7 @@ export function serverRequests(place: { origin: string }, fetchImpl: typeof fetc
   /** The server's word on this window's sign-in there. */
   who(): Promise<{ signedIn: boolean; own: boolean; environmentId: string | null; takesMove: boolean; status: number }>;
 };
-export function openServerSession(chosen: OwnHomeChoice, fetchImpl: typeof fetch): Promise<{
+export function openServerSession(chosen: OwnHomeChoice, fetchImpl: typeof fetch, t?: (key: string, params?: Record<string, string | number>) => string): Promise<{
   call(method: string, route: string, body?: unknown): Promise<Answer>;
   upload(route: string, bytes: Uint8Array, type: string): Promise<Answer>;
   fetch(route: string, init?: RequestInit): Promise<Response>;
@@ -28,6 +29,7 @@ export function installOwnHome(deps: {
   /** This window's own requests, with its sign-ins. */
   fetch: typeof fetch;
   environments(): SavedPlace[];
+  t?(key: string, params?: Record<string, string | number>): string;
   /** This computer's server's private port, which hands a moving secret to main alone. */
   handoff(what: { kind: string; [key: string]: unknown }): Promise<any>;
   journal: { read(): unknown; write(value: unknown): void };

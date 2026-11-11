@@ -29,7 +29,6 @@ const controller = (over: Partial<PhoneSetupController>): PhoneSetupController =
   error: null,
   accountError: null,
   pairingLink: "openmausbot://pair?address=192.168.1.34%3A8810",
-  secondsLeft: 120,
   address: "192.168.1.34",
   pairingPort: 8810,
   addressText: "192.168.1.34:8810",
@@ -78,5 +77,31 @@ describe("the Wi-Fi pairing panel on a Windows Public network", () => {
     ]) {
       expect(render(over)).not.toContain("set to Public");
     }
+  });
+});
+
+describe("the pairing code", () => {
+  const qrCodes = (html: string) => html.match(/fill="#111111"/g)?.length ?? 0;
+  const e2e = { ...state, e2e: { enabled: true, relay: "off" as const, node: null, descriptor: null } };
+
+  it("is the only code on screen and says to scan it inside the app", () => {
+    for (const over of [{}, { state: e2e }]) {
+      const html = render(over);
+      expect(qrCodes(html)).toBe(1);
+      expect(html).toContain("Install MausBot on your phone from the App Store or Google Play, then scan this code in the app.");
+      expect(html).toContain("Scan it from inside the MausBot app, not the camera.");
+    }
+  });
+
+  it("names the stores without linking to them", () => {
+    for (const over of [{}, { state: e2e }]) {
+      const html = render(over);
+      expect(html).not.toMatch(/apps\.apple\.com|play\.google\.com|\.apk|<a /);
+      expect(html).not.toMatch(/<button[^>]*>(App Store|Google Play)</);
+    }
+  });
+
+  it("says nothing about scanning once the code expired", () => {
+    expect(render({ pairingExpired: true })).not.toContain("scan this code");
   });
 });

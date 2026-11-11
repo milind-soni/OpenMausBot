@@ -13,9 +13,10 @@ vi.mock("react", async (importOriginal) => {
   } };
 });
 const dispatch = vi.fn();
+const bots = vi.hoisted(() => ({ value: [] as Array<{ id: string; name: string; browserProfile?: string }> }));
 vi.mock("@/state/store", async (original) => ({
   ...await original<typeof import("@/state/store")>(),
-  useStore: () => ({ dispatch }),
+  useStore: () => ({ state: { bots: bots.value }, dispatch }),
 }));
 const answerSignIn = vi.fn();
 const here = { value: true };
@@ -29,6 +30,7 @@ vi.mock("@/lib/logins", () => ({
 
 import { LoginForm } from "./LoginForm";
 import { SignInBanner, SignInRequestCard } from "./SignInRequestCard";
+import { VaultChoices } from "./VaultChoices";
 
 const card = (signIn: Record<string, unknown> = {}): Message => ({
   id: "card-1",
@@ -119,6 +121,19 @@ describe("SignInRequestCard while it waits", () => {
     expect(html).toContain("Save and continue");
     expect(html).not.toMatch(/>Done<|>Open</);
     expect(saveLoginFromCard).not.toHaveBeenCalled();
+  });
+
+  it("says a login saved here is for every bot that shares this browser, by name", () => {
+    bots.value = [{ id: "pepper", name: "Pepper", browserProfile: "work" }, { id: "basil", name: "Basil", browserProfile: "work" }, { id: "sage", name: "Sage", browserProfile: "guest" }];
+    try {
+      fixture.setters = []; fixture.states = { 2: true };
+      expect(view()).toContain("Pepper and the bots that share its browser (Basil) sign in with them from now on");
+      bots.value = [{ id: "pepper", name: "Pepper", browserProfile: "guest" }, { id: "sage", name: "Sage", browserProfile: "guest" }];
+      fixture.setters = []; fixture.states = { 2: true };
+      expect(view()).toContain("From now on Pepper signs in with them without you");
+    } finally {
+      bots.value = [];
+    }
   });
 
   it("names a sign-in page on another site, open in the browser, as a choice left unticked, and saves it only when ticked", async () => {
@@ -219,5 +234,15 @@ describe("SignInBanner", () => {
     expect(html).toContain("Take control");
     nodes.find((node) => node.type === "button" && node.props.onClick === takeControl.onClick)!.props.onClick!();
     expect(takeControl.onClick).toHaveBeenCalledOnce();
+  });
+});
+
+describe("SignInRequestCard saved logins", () => {
+  it("offers the Vault's logins only where they can be filled, the bot's own browser, and not while one is being typed", () => {
+    const offered = (signIn?: Record<string, unknown>) => tree(signIn).some((node) => node.type === VaultChoices);
+    expect(offered()).toBe(true);
+    expect(offered({ place: "vm" })).toBe(false);
+    fixture.setters = []; fixture.states = { 2: true };
+    expect(offered()).toBe(false);
   });
 });

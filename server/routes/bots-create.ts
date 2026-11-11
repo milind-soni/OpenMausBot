@@ -11,15 +11,17 @@ import { MAX_MCP_SERVERS, mcpServerNameError } from "../mcp-registry.ts";
 import { journalMemoryWrite } from "../memory-journal.ts";
 import { resolveBotCreationDefaults } from "../new-bot-defaults.ts";
 import { PRESET_UNAVAILABLE_MESSAGE, applyPresetToBot, presetOffered, type OrgInstallStatus, type PresetStore } from "../presets.ts";
-import { adminOnlyBotSetting, clientBotPatchViolation, type RequestAuth } from "../request-auth.ts";
+import { adminOnlyBotSetting, memberBotCreateViolation, type RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import { installOrgSkill, installSkill, parseSkillMd, setSkillEnabled } from "../skills.ts";
 import type { BotRecord, Store } from "../store.ts";
 import type { TeamPeople } from "../team-people.ts";
 import { writeMemoryFile, writeMemoryTopic } from "../workspace.ts";
+import { refusalBody, userError } from "../user-errors.ts";
+import type { ServerErrorBody } from "../../shared/server-text.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
-export type ModelSelectionCheck = { ok: true; selection: ModelSelection } | { ok: false; status: number; error: string };
+export type ModelSelectionCheck = { ok: true; selection: ModelSelection } | ({ ok: false; status: number } & ServerErrorBody);
 
 export interface BotCreateRouteDeps {
   store: Store;
@@ -31,6 +33,8 @@ export interface BotCreateRouteDeps {
   hostedFullAccessRefusal: string;
   desktopManaged: boolean;
   maxWorkspaceBots: number;
+  /** Whether this bot is paused: a Starter Cloud keeps only so many awake, and one made past them starts paused. */
+  paused(botId: string): boolean;
   cloudOwnerKey: string | null;
   hostedModels: ReturnType<typeof hostedModelPolicy>;
   cloudRoutineAuthors: ReturnType<typeof createCloudRoutineAuthors> | null;
@@ -44,6 +48,8 @@ export interface BotCreateRouteDeps {
   team?: { name: string; people: Pick<TeamPeople, "has"> } | null;
   /** Starts writing personal answers for a new bot's setup card; never awaited. */
   personaliseSetupCard?(bot: BotRecord): void;
+  /** The Chief of Staff of a scope changed: these bots' flags did. */
+  chiefChanged?(changed: readonly BotRecord[]): void;
 }
 
 const OWN_ID = /^[\w-]{8,128}$/;
@@ -90,18 +96,19 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
           return json(res, 403, { error: `forbidden: a paired device may say who a new bot is and how it looks, not "${field}"; set that on the host computer` });
         }
       }
+      if (auth.kind === "session" && !auth.scopes.includes("admin")) {
+        if (!deps.team || auth.session.membershipAuthority !== "team" || !auth.session.email) return json(res, 403, { error: "forbidden: this session lacks the admin scope" });
+        const field = memberBotCreateViolation(body);
+        if (field) return json(res, 403, { error: `forbidden: "${field}" is an admin's to set` });
+        // The saved New bot defaults are an admin's choices, some of them an admin's alone to make.
+        body = { ...body, useDefaults: false };
+      }
       const kept = keptBotIds(body, store);
       if ("error" in kept) return json(res, kept.error.includes("already") ? 409 : 400, { error: kept.error });
       const { id: _id, threadId: _threadId, ...rest } = body;
       body = rest;
       const template = resolveBotCreationDefaults(cfg.newBotDefaults, body);
       const settings = template.profile;
-      if (auth.kind === "session" && !auth.scopes.includes("admin")) {
-        const field = clientBotPatchViolation(settings);
-        if (field || body.preset !== undefined || template.skills.length || template.routines.length || Object.keys(template.memory).length) {
-          return json(res, 403, { error: "Creating a bot with these defaults needs the admin scope" });
-        }
-      }
       if (body.preset !== undefined && (typeof body.preset !== "string" || !/^[\w-]{1,64}$/.test(body.preset))) {
         return json(res, 400, { error: "preset must be a preset id from New bot" });
       }
@@ -128,9 +135,9 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       }
       if (settings.managedSections?.length) {
         if (!settings.chiefOfStaff || settings.managedSections.some(name => name !== "" && !store.sections.includes(name))) {
-          return json(res, 400, { error: "Only a Chief may manage existing additional departments" });
+          return json(res, 400, userError("serverError.department.chiefOnlyExtra"));
         }
-        if (body.acknowledgePeerScope !== true) return json(res, 400, { error: "Confirm additional department access (acknowledgePeerScope)" });
+        if (body.acknowledgePeerScope !== true) return json(res, 400, userError("serverError.department.confirmExtra"));
         if (auth.kind === "loopback" && !DESKTOP_MANAGED && store.bots.some(bot => bot.busy)) {
           return json(res, 409, { error: "Stop running bots before granting access to another department" });
         }
@@ -161,10 +168,10 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       const creator = auth.kind === "session" && auth.session.membershipAuthority === "team" ? auth.session.email : undefined;
       let reportsTo: string | undefined;
       if (body.reportsTo !== undefined && body.reportsTo !== null) {
-        if (!deps.team) return json(res, 400, { error: "Only a team's bots report to someone." });
+        if (!deps.team) return json(res, 400, userError("serverError.owner.teamOnly"));
         if (typeof body.reportsTo !== "string" || !body.reportsTo.trim()) return json(res, 400, { error: "reportsTo must be an email" });
         const email = body.reportsTo.trim().toLowerCase();
-        if (email !== creator?.toLowerCase() && !deps.team.people.has(email)) return json(res, 400, { error: `Choose someone in ${deps.team.name}.` });
+        if (email !== creator?.toLowerCase() && !deps.team.people.has(email)) return json(res, 400, userError("serverError.owner.choose", { team: deps.team.name }));
         reportsTo = email;
       }
       let selection: ModelSelection;
@@ -172,7 +179,7 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
         selection = await defaultSelection();
       } else {
         const checked = checkedModelSelection(body.modelSelection, undefined, body.requireAvailableModel === true);
-        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        if (!checked.ok) return json(res, checked.status, refusalBody(checked));
         selection = checked.selection;
       }
       if (hostedModels && !hostedModels.allows(selection)) return json(res, 400, { error: hostedModels.error() });
@@ -200,8 +207,9 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
           mascotExpression: ordinary.mascotExpression ?? undefined,
           avatarUrl: ordinary.avatarUrl || undefined,
           computer: ordinary.computer ?? undefined, cwd: checkedCwd.cwd ?? undefined,
-          peers: ordinary.peers ?? undefined, mcpServers: ordinary.mcpServers ?? undefined,
+          mcpServers: ordinary.mcpServers ?? undefined,
           browserProfile: ordinary.browserProfile || undefined,
+          voiceNoteEveryReply: ordinary.voiceNoteEveryReply ?? undefined,
           autoApprove: ordinary.approvalMode === "auto",
         });
         const presetSkills = new Set(preset?.preset.skills ?? []);
@@ -245,7 +253,7 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       if (settings.chiefOfStaff) {
         try {
           store.patchBot(bot.id, { managedSections: settings.managedSections ?? [] });
-          store.setChiefOfStaff(bot.id);
+          deps.chiefChanged?.(store.setChiefOfStaff(bot.id) ?? []);
         } catch {
           warnings.push("Bot created; review its Chief of Staff setting before delegating work.");
         }
@@ -256,7 +264,7 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       }
       deps.personaliseSetupCard?.(bot);
       return json(res, 201, {
-        ...(warnings.length ? { warnings } : {}),
+        ...(warnings.length ? { warnings } : {}), ...(deps.paused(bot.id) ? { paused: true } : {}),
         bot: {
           ...wireBot(bot),
           messages: store.messagesFor(bot.threadId),

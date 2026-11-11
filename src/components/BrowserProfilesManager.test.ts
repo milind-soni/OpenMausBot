@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setLocale } from "@/lib/i18n";
 import type { Bot, BrowserProfile } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({ profiles: [] as BrowserProfile[], bots: [] as Bot[], myChrome: true, engine: undefined as Record<string, unknown> | undefined }));
@@ -23,6 +24,8 @@ beforeEach(() => {
   fixture.engine = undefined;
 });
 
+afterEach(() => setLocale("en"));
+
 describe("browser profile manager", () => {
   it("renders on the web without an Electron bridge and never exposes internal partition ids", () => {
     const html = renderToStaticMarkup(createElement(BrowserProfilesManager));
@@ -38,7 +41,7 @@ describe("browser profile manager", () => {
     expect(html).toContain('value="">Own browser</option>');
     expect(html).toContain('value="work" selected="">Work</option>');
     expect(html).toContain('value="guest"');
-    expect(html).toContain("Bots on a shared profile use the same logins.");
+    expect(html).toContain("Bots on a shared profile share whatever it is signed in to; a saved login kept to some bots is filled there only if every bot on the profile may use it.");
     expect(html).not.toMatch(/<details[^>]*\bopen/);
     expect(html.match(/<select[^>]*>/)?.[0]).toContain('disabled=""');
   });
@@ -98,11 +101,24 @@ describe("browser profile manager", () => {
     expect(html).not.toMatch(/<option value="chrome" disabled/);
   });
 
+  it.each(["computer", "Mac", "PC"] as const)("localizes a shared Chrome's %s device without changing its wire value", (device) => {
+    fixture.engine = { myChrome: true, myChromeOn: { name: "Studio", device, online: true } };
+    fixture.profiles = [{ id: "work", name: "Work", browser: "chrome" }];
+    const render = () => renderToStaticMarkup(createElement(BrowserProfilesManager));
+    expect(render()).toContain(`the Chrome on Studio, your ${device}. It works while that ${device} is awake`);
+    setLocale("pt-br");
+    const localized = device === "computer" ? "computador" : device;
+    expect(render()).toContain(`este é o Chrome de Studio, seu ${localized}. Ele funciona enquanto esse ${localized} estiver ativo`);
+    expect(fixture.engine.myChromeOn).toMatchObject({ device });
+    setLocale("en");
+    expect(render()).toContain(`your ${device}`);
+  });
+
   it("on My Cloud with nothing lent, it says how to lend Chrome", () => {
     fixture.engine = { myChrome: false, myChromeLendable: true };
     fixture.profiles = [{ id: "work", name: "Work", browser: "chrome" }];
     const html = renderToStaticMarkup(createElement(BrowserProfilesManager));
-    expect(html).toContain("it lends its Chrome by itself");
+    expect(html).toContain("it shares its Chrome by itself");
     expect(html).toContain("bots on a My Chrome profile can&#x27;t browse");
     expect(html).toContain("switching a profile to Built-in works too");
     expect(html).not.toContain("there is no Chrome of yours to use");
@@ -112,7 +128,7 @@ describe("browser profile manager", () => {
     fixture.engine = { myChrome: false, myChromeLendable: true };
     fixture.profiles = [{ id: "work", name: "Work" }];
     const html = renderToStaticMarkup(createElement(BrowserProfilesManager));
-    expect(html).toContain("it lends its Chrome by itself");
+    expect(html).toContain("it shares its Chrome by itself");
     expect(html).not.toContain("this profile&#x27;s bots");
   });
 
@@ -124,7 +140,7 @@ describe("browser profile manager", () => {
     expect(html).not.toContain("Signed-in sites");
     const botPanel = renderToStaticMarkup(createElement(BrowserProfilesManager, { bot })).split("<details")[0]!;
     expect(botPanel).toContain("act inside your real Chrome");
-    expect(botPanel).toContain("it lends its Chrome by itself");
+    expect(botPanel).toContain("it shares its Chrome by itself");
     expect(botPanel).not.toContain("Signed-in sites");
   });
 

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { awayNotice, deviceWord, LentComputers } from "./lent-computers.ts";
+import { awayNotice, deviceWord, lentComputersLine, LentComputers } from "./lent-computers.ts";
 import { SharedComputers, sharedComputerRegistration } from "./shared-computers.ts";
 
 const dirs: string[] = [];
@@ -40,6 +40,17 @@ describe("what a server remembers about computers lent to it", () => {
     expect(readFileSync(path, "utf8")).not.toMatch(/Plans|secret/u);
   });
 
+  it("lists every computer's status for this turn's prompt, by name, and only when it knows them", () => {
+    const at = Date.UTC(2026, 9, 7, 14, 2);
+    expect(lentComputersLine([])).toBe("");
+    expect(lentComputersLine([{ name: "ASH-PC", platform: "win32" }])).toBe("");
+    expect(lentComputersLine([
+      { name: "ASH-MBP", platform: "darwin", online: true, lent: true, lastSeenAt: at },
+      { name: "evil\u202eNAME\nnext", platform: "win32", online: false, lent: true, lastSeenAt: at },
+      { name: "OLD-BOX", platform: null, online: false, lent: false, lastSeenAt: at },
+    ])).toBe(" Their computers right now: ASH-MBP (Mac): online; evil NAME next (PC): offline since 2026-10-07 14:02 UTC; OLD-BOX (computer): no longer lent.");
+  });
+
   it("says PC on Windows, Mac only on a Mac, and computer otherwise", () => {
     expect([deviceWord("win32"), deviceWord("darwin"), deviceWord("linux"), deviceWord(null)]).toEqual(["PC", "Mac", "computer", "computer"]);
     const at = Date.UTC(2026, 9, 7, 14, 2);
@@ -52,7 +63,107 @@ describe("what a server remembers about computers lent to it", () => {
     expect(awayNotice([{ ...record, platform: "darwin", stoppedAt: at }], new Set()).say).toContain("choose Resume from OpenMausBot's icon in the menu bar on that Mac");
     expect(awayNotice([{ ...record, platform: "darwin" }], new Set()).say).toMatch(/^Their Mac ASH-PC is shared with the Cloud/u);
     expect(awayNotice([record], new Set([record.id]))).toEqual({});
+    // One of two away: the bot is told about it, without the sentence meant for a person with nothing online.
+    const other = { ...record, id: randomUUID(), name: "ASH-MBP", platform: "darwin" as const };
+    expect(awayNotice([record, other], new Set([other.id]))).toEqual({ offline: [{ name: "ASH-PC", device: "PC", lastOnline: "2026-10-07 14:02 UTC", lent: true }] });
     for (const sentence of [awayNotice([record], new Set()).say!, awayNotice([{ ...record, stoppedAt: at }], new Set()).say!]) expect(sentence).not.toMatch(/this Mac|OMB Cloud|OpenMausBot Cloud/u);
+  });
+});
+
+describe("a Cloud that just woke waits for the computers lent to it", () => {
+  const owner = { session: "s1", person: "cloud-home" };
+  const woken = (lent = new LentComputers(file())) => {
+    const broker = new SharedComputers(() => true, lent);
+    return { broker, lent };
+  };
+
+  it("a computer it hasn't heard from since it slept: the call waits for it, past the 60 s that used to fail it", async () => {
+    vi.useFakeTimers();
+    const { broker } = woken();
+    const computer = lend();
+    broker.register(computer, owner, secret);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    const woke = Date.now() - 5_000;
+    broker.wokeAt = () => woke;
+    const waiting = broker.request({ computer_id: computer.id, action: "computer_tools" }, owner.person, () => true);
+    await vi.advanceTimersByTimeAsync(40_000);
+    broker.register(computer, owner, secret);
+    await vi.advanceTimersByTimeAsync(250);
+    const job = await broker.poll(computer.id, owner.session, secret);
+    broker.complete(computer.id, owner.session, secret, job!.id, "back");
+    await expect(waiting).resolves.toBe("back");
+    broker.close();
+  });
+
+  it("a computer known only from before a real boot is waited for too, and named once the wait ends", async () => {
+    vi.useFakeTimers();
+    const lent = new LentComputers(file());
+    const computer = lend({ name: "HOME-PC", platform: "win32" });
+    lent.connected("cloud-home", { id: computer.id, name: "HOME-PC", platform: "win32", folders: 1, terminal: false, screen: true });
+    const broker = new SharedComputers(() => true, lent);
+    const woke = Date.now();
+    broker.wokeAt = () => woke;
+    let settled = false;
+    const waiting = broker.request({ computer_id: computer.id, action: "computer_tools" }, "cloud-home", () => true).catch(error => { settled = true; throw error; });
+    await vi.advanceTimersByTimeAsync(80_000);
+    expect(settled).toBe(false);
+    const named = expect(waiting).rejects.toThrow(/HOME-PC is offline/);
+    await vi.advanceTimersByTimeAsync(11_000);
+    await named;
+    broker.close();
+  });
+
+  it("not after the wait, not for one that stopped lending, and not for a stopped turn", async () => {
+    vi.useFakeTimers();
+    const lent = new LentComputers(file());
+    const computer = lend();
+    lent.connected("cloud-home", { id: computer.id, name: "ASH-PC", folders: 1, terminal: false, screen: true });
+    const broker = new SharedComputers(() => true, lent);
+    const longAgo = Date.now() - 91_000;
+    broker.wokeAt = () => longAgo;
+    await expect(broker.request({ computer_id: computer.id, action: "computer_tools" }, "cloud-home", () => true)).rejects.toThrow(/offline/);
+    const justNow = Date.now();
+    broker.wokeAt = () => justNow;
+    lent.stopped("cloud-home", computer.id);
+    await expect(broker.request({ computer_id: computer.id, action: "computer_tools" }, "cloud-home", () => true)).rejects.toThrow(/no longer lent/);
+    broker.close();
+    const other = new LentComputers(file());
+    other.connected("cloud-home", { id: computer.id, name: "ASH-PC", folders: 1, terminal: false, screen: true });
+    const away = new SharedComputers(() => true, other);
+    away.wokeAt = () => justNow;
+    let live = true;
+    const stopped = expect(away.request({ computer_id: computer.id, action: "computer_tools" }, "cloud-home", () => live)).rejects.toThrow(/offline/);
+    live = false;
+    await vi.advanceTimersByTimeAsync(500);
+    await stopped;
+    away.close();
+  });
+
+  it("a bot's look at its computers holds until one of them is back, or the wait ends; nothing lent means no wait", async () => {
+    vi.useFakeTimers();
+    const lent = new LentComputers(file());
+    const computer = lend();
+    lent.connected("cloud-home", { id: computer.id, name: "ASH-PC", folders: 1, terminal: false, screen: true });
+    const broker = new SharedComputers(() => true, lent);
+    const woke = Date.now();
+    broker.wokeAt = () => woke;
+    let done = false;
+    const settled = broker.settledAfterWake("cloud-home", () => true).then(() => { done = true; });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(done).toBe(false);
+    broker.register(computer, owner, secret);
+    await vi.advanceTimersByTimeAsync(500);
+    await settled;
+    expect(broker.list("cloud-home")).toHaveLength(1);
+    broker.close();
+
+    const none = new SharedComputers(() => true, new LentComputers(file()));
+    none.wokeAt = () => woke;
+    await none.settledAfterWake("cloud-home", () => true);
+    none.close();
+    const off = new SharedComputers(() => true, new LentComputers(file()));
+    await off.settledAfterWake("cloud-home", () => true);
+    off.close();
   });
 });
 

@@ -27,6 +27,8 @@ const EXPECTED: Record<string, EngineCapabilities> = {
   deepseekAgent: bare,
   clineAgent: { resume: true, nativeReviewer: false, full: true, edits: false, subagents: false },
   copilotAgent: bare,
+  commandCodeAgent: bare,
+  kiroAgent: bare,
   customAcp: bare,
   "openai-compat": chat,
   grok: chat,
@@ -35,6 +37,7 @@ const EXPECTED: Record<string, EngineCapabilities> = {
   cerebras: chat,
   groq: chat,
   greenference: chat,
+  modelgo: chat,
   meta: chat,
 };
 

@@ -45,7 +45,7 @@ export function settleCloudHome(deps: CloudHomeSettleDeps): { solo(): boolean; s
   const shapeOf = (id: string) => { const routine = routineById(id); return routine ? approvalShape(routine) : undefined; };
   const thread = (threadId: string) => store.botByThread(threadId) || store.groupByThread(threadId) ? store.messagesFor(threadId) : [];
   const webhookRuns = new Set((deps.routines()?.listRuns() ?? []).flatMap((run) => run.triggerSource === "webhook" && run.threadId ? [run.threadId] : []));
-  const outsideThread = (threadId: string, lines: readonly Message[] = thread(threadId)) => webhookRuns.has(threadId) || lines.some((line) => line.webhookPost);
+  const outsideThread = (threadId: string, lines: readonly Message[] = thread(threadId)) => webhookRuns.has(threadId) || lines.some((line) => line.webhookPost || line.via === "api");
   /** Every conversation once: who wrote and answered, the owner's card approvals, and the routines a webhook-driven conversation made or changed. */
   const search = () => {
     const senders = new Set<string>(), answerers = new Set<string>(), outside = new Set<string>();

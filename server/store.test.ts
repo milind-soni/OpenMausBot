@@ -18,7 +18,6 @@ import {
 } from "./memory-journal.ts";
 import type { ModelSelection } from "./contracts.ts";
 import * as mdb from "./message-db.ts";
-import { peerAllowKey } from "./peer-approval-key.ts";
 import { hasTeamAuthority } from "./peer-roster.ts";
 import { Store, toWireTask, type BotRecord } from "./store.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
@@ -56,6 +55,26 @@ describe("Store", () => {
     loaded.patchBot(bot.id, { connectorTools: { gmail: { tools: ["GMAIL_FETCH_EMAILS"] } } });
     loaded.patchBot(bot.id, { connectorScopes: { apps: { gmail: "read", github: "write" } } });
     expect(loaded.bot(bot.id)?.connectorTools, "a list already chosen for an app stays").toEqual({ gmail: { tools: ["GMAIL_FETCH_EMAILS"] }, github: { tools: "*" } });
+  });
+
+  it("loads a bot saved with the retired HighLevel app, dropping it from its scopes and tool grants", () => {
+    const store = new Store(selection);
+    const crm = store.createBot({ name: "CRM helper" });
+    const only = store.createBot({ name: "Limited bot" });
+    const file = join(DATA_DIR, "bots.json");
+    const rows = JSON.parse(readFileSync(file, "utf8")) as BotRecord[];
+    Object.assign(rows.find((row) => row.id === crm.id)!, { composio: true,
+      connectorTools: { gmail: { tools: "*" }, highlevel: { tools: ["HIGHLEVEL_GET_CONTACT"] } }, connectorScopes: { apps: { gmail: "read", highlevel: "write" } } });
+    Object.assign(rows.find((row) => row.id === only.id)!, { composio: true, connectorTools: { highlevel: { tools: "*" } }, connectorScopes: { apps: { highlevel: "read" } } });
+    writeFileSync(file, JSON.stringify(rows));
+
+    const loaded = new Store(selection);
+    expect(loaded.bot(crm.id)).toMatchObject({ name: "CRM helper", connectorTools: { gmail: { tools: "*" } }, connectorScopes: { apps: { gmail: "read" } } });
+    expect(loaded.bot(crm.id)?.connectorTools).not.toHaveProperty("highlevel");
+    expect(loaded.bot(only.id), "limited to HighLevel alone, it stays limited, to no app").toMatchObject({ name: "Limited bot", connectorTools: {}, connectorScopes: { apps: {} } });
+    const saved = readFileSync(file, "utf8");
+    expect(saved, "saved").not.toContain("highlevel");
+    expect(JSON.parse(saved).map((row: BotRecord) => row.id)).toEqual(expect.arrayContaining([crm.id, only.id]));
   });
 
   it.each([undefined, { allow: ["native:read"] }, { deny: ["native:bash"] }])("does not activate a wider tool selection when saving %j fails", (toolScope) => {
@@ -422,14 +441,14 @@ describe("Store", () => {
     store.setResumeCursor(bot.id, "claude", { sessionId: "s-1" }, bot.threadId);
     store.patchTask(bot.id, bot.threadId, { lastContextModel: "claude-sonnet-5" });
     expect(statSync(file).ino).toBe(saved);
-    expect(events).toEqual([{ type: "bot", botId: bot.id }, { type: "bot", botId: bot.id }]);
+    expect(events).toEqual([{ type: "bot", botId: bot.id }]);
 
     store.setResumeCursor(bot.id, "claude", { sessionId: "s-2" }, bot.threadId);
     expect(statSync(file).ino).not.toBe(saved);
     expect(new Store(selection).taskByThread(bot.id, bot.threadId)?.resumeCursors).toEqual({ claude: { sessionId: "s-2" } });
   });
 
-  it("still overwrites a bots.json changed on disk when the next save differs from it", () => {
+  it("overwrites a bots.json changed on disk with the next change it saves", () => {
     const file = join(DATA_DIR, "bots.json");
     const store = new Store(selection);
     const bot = store.createBot({ name: "Original" }, { seedMessages: false });
@@ -438,7 +457,7 @@ describe("Store", () => {
     edited[0].name = "Edited on disk";
     writeFileSync(file, JSON.stringify(edited, null, 2));
 
-    store.setResumeCursor(bot.id, "claude", { sessionId: "s-1" }, bot.threadId);
+    store.setResumeCursor(bot.id, "claude", { sessionId: "s-2" }, bot.threadId);
     expect(JSON.parse(readFileSync(file, "utf8"))[0].name).toBe("Original");
   });
 
@@ -1188,29 +1207,6 @@ describe("Store", () => {
     expect(reloadedAgain.bot(upper.id)?.browserProfile).toBe("work-3");
     expect(reloadedAgain.bot(canonical.id)?.browserProfile).toBe("work");
     expect(reloadedAgain.bot(suffixed.id)?.browserProfile).toBe("work-2");
-  });
-
-  it("migrates unambiguous legacy peer grants without guessing duplicate names", () => {
-    const store = new Store(selection);
-    const requester = store.createBot();
-    const helper = store.patchBot(store.createBot().id, { name: "Helper" })!;
-    store.patchBot(store.createBot().id, { name: "Twin" });
-    store.patchBot(store.createBot().id, { name: "Twin" });
-    store.patchBot(requester.id, {
-      alwaysAllow: ["ask_bot:@Helper", "delegate_bot:@Twin", "Bash:git status"],
-    });
-
-    const reloaded = new Store(selection);
-    expect(reloaded.bot(requester.id)?.alwaysAllow).toEqual([
-      peerAllowKey("ask_bot", helper.id),
-      "delegate_bot:@Twin",
-      "Bash:git status",
-    ]);
-
-    const persisted: BotRecord[] = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
-    expect(persisted.find((bot) => bot.id === requester.id)?.alwaysAllow).toEqual(
-      reloaded.bot(requester.id)?.alwaysAllow,
-    );
   });
 
   it("promotes task-only provider tool grants to the bot default", () => {
@@ -2585,7 +2581,7 @@ describe("soul", () => {
       ] };
     store.applyTeamSetup(request);
     expect(new Store(selection).bot("created-by-chief")?.visibility).toEqual({ people: ["hr@example.test"] });
-    expect(new Store(selection).bot("created-by-chief")).toMatchObject({ autoApprove: false, approvePeerComms: false });
+    expect(new Store(selection).bot("created-by-chief")).toMatchObject({ autoApprove: false });
     const open = new Store(selection);
     const everyoneChief = open.createBot({ name: "Ops", section: "Ops" });
     open.patchBot(everyoneChief.id, { chiefOfStaff: true });
@@ -2615,7 +2611,7 @@ describe("soul", () => {
       connectorTools: { gmail: { tools: ["GMAIL_FETCH_EMAILS"] }, slack: { tools: "*" } },
       connectorScopes: { apps: { gmail: "read", slack: "write" } } });
     expect(grantsOf(new Store(selection).bot("helper")!)).toEqual(grantsOf(helper));
-    expect(helper).toMatchObject({ autoApprove: false, approvePeerComms: false });
+    expect(helper).toMatchObject({ autoApprove: false });
     chief.connectorScopes!.apps.gmail = "write";
     (chief.connectorTools!.gmail.tools as string[]).push("GMAIL_SEND_EMAIL");
     expect(helper.connectorScopes?.apps.gmail, "a copy, not the Chief's own record").toBe("read");

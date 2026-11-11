@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { SettingRow, SettingsEmptyRow, SettingsGroup, SettingsLook, SettingsRows } from "./SettingsPrimitives";
 import { ArrowLeft, ChevronRight, Download, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { activeLocale, documentLanguage, t } from "@/lib/i18n";
@@ -15,8 +16,8 @@ import { UsageBudgetCards, type BudgetState } from "./UsageBudget";
 import { TraceView } from "./usage/TraceView";
 import { LiveBadge, modelName, StatStrip, totalsStats } from "./usage/TraceWaterfall";
 
-export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine";
-const OTHER_GROUPINGS: readonly UsageGroupBy[] = ["model", "user", "day", "engine", "routine"];
+export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine" | "department";
+const OTHER_GROUPINGS: readonly UsageGroupBy[] = ["model", "user", "department", "day", "engine", "routine"];
 
 export interface UsageGroup {
   key: string;
@@ -41,6 +42,7 @@ const GROUP_LABEL_KEYS: Record<UsageGroupBy, LocaleKey> = {
   day: "usage.history.byDay",
   engine: "usage.history.byEngine",
   routine: "usage.history.byRoutine",
+  department: "usage.history.byDepartment",
 };
 
 const PERIOD_LABEL_KEYS: Record<UsagePeriod, LocaleKey> = {
@@ -54,7 +56,10 @@ const PERIOD_LABEL_KEYS: Record<UsagePeriod, LocaleKey> = {
 const LIVE_REFRESH_MS = 2_000;
 
 export function usageGroupLabel(groupBy: UsageGroupBy, group: Pick<UsageGroup, "key" | "label">): string {
+  if (group.key === "routine:private") return t("usage.history.privateRoutine");
+  if (group.key === "bot:private") return t("usage.history.privateBot");
   if (groupBy === "routine") return group.key === "manual" ? t("usage.history.notRoutine") : group.label;
+  if (groupBy === "department") return group.label || t("usage.history.noDepartment");
   if (groupBy !== "user") return group.label;
   if (group.key === "owner") return t("usage.history.owner");
   if (group.key === "bot") return t("usage.history.botToBot");
@@ -76,6 +81,7 @@ function useUsageGroups(range: { from: string; to: string }, groupBy: UsageGroup
 
 export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: readonly UsageGroup[] }) {
   const { state } = useStore();
+  const settings = useContext(SettingsLook);
   const top = [...groups].sort((a, b) => headlineTokens(b) - headlineTokens(a)).slice(0, 6);
   const max = Math.max(...top.map(headlineTokens), 0);
   if (!top.length || max <= 0) return <p className="text-[13px] text-ink-secondary">{t("usage.page.whereEmpty")}</p>;
@@ -89,8 +95,8 @@ export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: 
               {bot && <BotAvatar bot={bot} state="idle" size={18} animated={false} />}
               <span className="truncate">{groupBy === "model" ? modelName(group.label, state.instances) : usageGroupLabel(groupBy, group)}</span>
             </span>
-            <span className="h-2 overflow-hidden rounded-full bg-raised">
-              <span className="block h-full rounded-full bg-accent/70" style={{ width: `${Math.max(2, (headlineTokens(group) / max) * 100)}%` }} />
+            <span className={cn("h-2 overflow-hidden rounded-full", settings ? "bg-ink/[0.08]" : "bg-raised")}>
+              <span className={cn("block h-full rounded-full", settings ? "bg-ink" : "bg-accent/70")} style={{ width: `${Math.max(2, (headlineTokens(group) / max) * 100)}%` }} />
             </span>
             <span className="min-w-[4.5rem] text-right tabular-nums text-ink-secondary">
               {formatTokens(headlineTokens(group))}
@@ -105,9 +111,11 @@ export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: 
 
 function WhereItWent({ range, version, onBudget }: { range: { from: string; to: string }; version: number; onBudget: (budget: BudgetState | null) => void }) {
   const [other, setOther] = useState<UsageGroupBy>("model");
+  const settings = useContext(SettingsLook);
   const byBot = useUsageGroups(range, "bot", version);
   const byOther = useUsageGroups(range, other, version);
   useEffect(() => { onBudget(byBot?.budget ?? null); }, [byBot, onBudget]);
+  if (settings) return null;
   return (
     <section className="rounded-2xl border border-hairline/50 bg-card p-5" aria-label={t("usage.page.where")}>
       <h3 className="text-[15px] font-medium text-ink">{t("usage.page.where")}</h3>
@@ -134,6 +142,37 @@ function WhereItWent({ range, version, onBudget }: { range: { from: string; to: 
         </div>
       </div>
     </section>
+  );
+}
+
+const SETTINGS_GROUPINGS: readonly UsageGroupBy[] = ["bot", ...OTHER_GROUPINGS];
+
+/** Settings' Where it went: a select (by bot, model, person…) as the section's action, then one row per item. */
+function SettingsWhereItWent({ range, version, onBudget }: { range: { from: string; to: string }; version: number; onBudget: (budget: BudgetState | null) => void }) {
+  const { state } = useStore();
+  const [by, setBy] = useState<UsageGroupBy>("bot");
+  const byBot = useUsageGroups(range, "bot", version);
+  const groups = useUsageGroups(range, by, version);
+  useEffect(() => { onBudget(byBot?.budget ?? null); }, [byBot, onBudget]);
+  const top = groups?.groupBy === by ? [...groups.groups].sort((a, b) => headlineTokens(b) - headlineTokens(a)).filter((group) => headlineTokens(group) > 0).slice(0, 8) : null;
+  return (
+    <SettingsGroup label={t("usage.page.where")} block="where"
+      actions={<Select value={by} onChange={(event) => setBy(event.target.value as UsageGroupBy)} aria-label={t("usage.history.groupBy")}>
+        {SETTINGS_GROUPINGS.map((option) => <option key={option} value={option}>{t(GROUP_LABEL_KEYS[option])}</option>)}
+      </Select>}>
+      <SettingsRows>
+        {!top ? <SettingsEmptyRow>{t("common.checking")}</SettingsEmptyRow>
+          : top.length === 0 ? <SettingsEmptyRow>{t("usage.page.whereEmpty")}</SettingsEmptyRow>
+          : top.map((group) => (
+            <SettingRow key={group.key} title={by === "model" ? modelName(group.label, state.instances) : usageGroupLabel(by, group)}
+              subtitle={t("usage.page.turns", { count: String(group.turns) })}>
+              <span className="text-[13px] leading-5 tabular-nums text-ink-secondary">
+                {formatTokens(headlineTokens(group))}{hasFiniteCost(group.costUsd) && group.costUsd > 0 ? ` · ${formatCost(group.costUsd)}` : ""}
+              </span>
+            </SettingRow>
+          ))}
+      </SettingsRows>
+    </SettingsGroup>
   );
 }
 
@@ -174,6 +213,7 @@ export function RunRow({ root, onOpen }: { root: TraceRootSummary; onOpen: () =>
 
 /** The Usage page: a period's totals, where the money went, and every run as a trace. */
 export function UsageSection() {
+  const settings = useContext(SettingsLook);
   const [period, setPeriod] = useState<UsagePeriod>("month");
   const range = useMemo(() => usagePeriodRange(period), [period]);
   const [list, setList] = useState<TraceList | null>(null);
@@ -207,6 +247,50 @@ export function UsageSection() {
     void fetchTraces(range, list.next).then((page) => setList((current) => current ? { ...page, roots: [...current.roots, ...page.roots] } : page));
   };
   const untimed = list?.roots.some((root) => !root.timed);
+
+  if (settings) {
+    const totals = list?.totals;
+    return (
+      <div className="flex flex-col gap-6" data-testid="usage-page">
+        {open ? (
+          <TraceView id={open.id} at={open.at} actions={(
+            <button type="button" onClick={() => setOpen(null)} className="settings-quiet flex shrink-0 cursor-pointer items-center gap-1">
+              <ArrowLeft size={13} />{t("trace.back")}
+            </button>
+          )} />
+        ) : <>
+          {/* The period select is the section's one action; the totals are rows. */}
+          <SettingsGroup label={t("usage.page.summary")} block="totals"
+            actions={<Select value={period} onChange={(event) => { setPeriod(event.target.value as UsagePeriod); setOpen(null); }} aria-label={t("usage.history.period")}>
+              {USAGE_PERIODS.map((option) => <option key={option} value={option}>{t(PERIOD_LABEL_KEYS[option])}</option>)}
+            </Select>}
+            footnote={error ? <span role="alert" className="text-danger">{error}</span> : undefined}>
+            <SettingsRows>
+              <div data-testid="usage-totals" className="contents">
+                {totals ? <>
+                  <SettingRow title={t("trace.stat.cost")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{totals.costUsd ? t("usage.page.estimated", { cost: formatCost(totals.costUsd) }) : formatCost(0)}</span></SettingRow>
+                  <SettingRow title={t("usage.page.runs")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{String(list.roots.length)}{list.next !== undefined ? "+" : ""}</span></SettingRow>
+                  <SettingRow title={t("trace.stat.errors")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{String(totals.errors)}</span></SettingRow>
+                  <SettingRow title={t("trace.stat.time")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{totals.durationMs > 0 ? formatDuration(Math.max(1_000, totals.durationMs)) : "—"}</span></SettingRow>
+                </> : <SettingsEmptyRow>{t("common.checking")}</SettingsEmptyRow>}
+              </div>
+            </SettingsRows>
+          </SettingsGroup>
+          <SettingsWhereItWent range={range} version={version} onBudget={setBudget} />
+          <SettingsGroup label={t("usage.page.runs")} block="runs" footnote={untimed ? t("usage.page.untimedNote") : undefined}
+            actions={<a href={usageExportHref(range)} download className="ui-button ui-button-md rounded-full">{t("usage.history.export")}</a>}>
+            <SettingsRows>
+              {list && !list.roots.length && <SettingsEmptyRow>{t("usage.page.runsEmpty")}</SettingsEmptyRow>}
+              {list?.roots.length ? <ul className="flex flex-col p-1">{list.roots.map((root) => <RunRow key={root.id} root={root} onOpen={() => setOpen({ id: root.id, at: root.startedAt })} />)}</ul> : null}
+              {list?.next !== undefined && <div className="px-4 py-2"><button type="button" onClick={more} className="settings-quiet cursor-pointer">{t("usage.page.more")}</button></div>}
+            </SettingsRows>
+          </SettingsGroup>
+        </>}
+        <PlanUsage />
+        <UsageBudgetCards budget={budget} />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4" data-testid="usage-page">

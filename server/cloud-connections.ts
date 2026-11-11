@@ -1,8 +1,8 @@
 // This computer's connections, as they move once to the person's own Cloud: MCP servers with their secrets and
-// sign-ins, the AI keys bots run on, the connected-apps account and HighLevel. GET /api/cloud-connections names each,
+// sign-ins, the AI keys bots run on, the connected-apps account and mailboxes. GET /api/cloud-connections names each,
 // never a secret; the secrets reach the desktop's main process only over its private port (login-handoff.ts), which
-// sends them only to the person's own Cloud. A sign-in that refreshes itself (an MCP server's own account, HighLevel's)
-// moves: once My Cloud has it, this computer forgets its copy, so the two never spend one refresh token.
+// sends them only to the person's own Cloud. A sign-in that refreshes itself (an MCP server's own account) moves: once
+// My Cloud has it, this computer forgets its copy, so the two never spend one refresh token.
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
@@ -11,16 +11,16 @@ import { canonicalJson } from "../shared/package-format.ts";
 import { fingerprint } from "./cloud-send-verify.ts";
 import type { ComposioIdentity } from "./composio-share.ts";
 import type { AppConfig } from "./config.ts";
-import type { HighLevelConnection } from "./highlevel/store.ts";
+import type { EmailAccount } from "./email/store.ts";
 import type { McpOAuthRecord } from "./mcp-oauth-store.ts";
 import type { McpAuthState } from "./mcp-oauth.ts";
 import { isRemoteMcpServer, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
 
-export type ConnectionKind = "mcp" | "key" | "composio" | "highlevel";
+export type ConnectionKind = "mcp" | "key" | "composio" | "email";
 
 /** One connection, by name only. */
 export interface ConnectionListing {
-  /** "mcp:<name>", "key:<provider>", "composio" or "highlevel". */
+  /** "mcp:<name>", "key:<provider>", "composio" or "email". */
   id: string;
   kind: ConnectionKind;
   label: string;
@@ -32,8 +32,7 @@ export interface ConnectionListing {
   launcher?: string;
   /** A key: the engines (instance ids) it runs. */
   for?: string[];
-  /** A sign-in that refreshes itself (an MCP server's own account, HighLevel's): it moves, and this computer then
-   * forgets it. */
+  /** A sign-in that refreshes itself (an MCP server's own account): it moves, and this computer then forgets it. */
   signIn?: true;
   /** Connected apps: OpenMausBot's service or the person's own Composio project, the account in a digest equal on two
    * servers exactly when they reach the same apps, and the service's installation a code is minted for. */
@@ -47,7 +46,7 @@ export interface ConnectionListing {
  * goes for "Claude (API key)" alone: there it never takes over Claude bots that sign in with a Claude account. */
 interface Provider { id: string; label: string; for: string[]; config(cfg: AppConfig): Partial<AppConfig> | null }
 
-const keyed = (name: "openai" | "openrouter" | "mistral" | "cerebras" | "greenference") => (cfg: AppConfig): Partial<AppConfig> | null => {
+const keyed = (name: "openai" | "openrouter" | "mistral" | "cerebras" | "greenference" | "modelgo") => (cfg: AppConfig): Partial<AppConfig> | null => {
   const key = cfg[name]?.key;
   return key ? { [name]: { key } } : null;
 };
@@ -66,6 +65,7 @@ export const KEY_PROVIDERS: readonly Provider[] = [
   { id: "cerebras", label: "Cerebras", for: ["cerebras"], config: keyed("cerebras") },
   { id: "groq", label: "Groq", for: ["groq"], config: keyedUrl("groq") },
   { id: "greenference", label: "Greenference", for: ["greenference"], config: keyed("greenference") },
+  { id: "modelgo", label: "ModelGo", for: ["modelgo"], config: keyed("modelgo") },
   { id: "meta", label: "Meta", for: ["meta"], config: keyedUrl("meta") },
   { id: "openaiCompat", label: "OpenAI-compatible", for: ["openaiCompat"], config: (cfg) => cfg.openaiCompat?.key
     ? { openaiCompat: Object.fromEntries(Object.entries(cfg.openaiCompat).filter(([, value]) => typeof value === "string" && value)) } : null },
@@ -103,10 +103,20 @@ export function launcherOf(command: string): string {
   return basename(command.replaceAll("\\", "/")).toLowerCase().replace(/\.(?:exe|cmd|bat|ps1)$/u, "");
 }
 
-/** A server that needs this computer: it starts a program by path, reads a file or folder here, or calls an address
- * only this computer reaches. */
+const MAIL_PROGRAM = /(?:^|[^a-z])(?:imap|smtp|e-?mail|himalaya)(?:[^a-z]|$)/iu;
+
+/** A command-line connector that talks to a mail server itself. It keeps its accounts on the computer it was set up on,
+ * outside anything its command line names, and in a bot's box a mail server is out of reach: the box's only way out is
+ * its HTTP proxy, which such a program does not use. So it starts on My Cloud, lists its tools, and reads no mail. */
+export function isMailConnector(server: StoredMcpServer): boolean {
+  return !isRemoteMcpServer(server) && [server.command, ...server.args].some((value) => MAIL_PROGRAM.test(value));
+}
+
+/** A server that needs this computer: it starts a program by path, reads a file or folder here, calls an address only
+ * this computer reaches, or is a mail connector. */
 export function runsHere(server: StoredMcpServer): boolean {
   if (isRemoteMcpServer(server)) return addressHere(server.url);
+  if (isMailConnector(server)) return true;
   const command = server.command.trim();
   if (/[\\/]/u.test(command) || command.startsWith("~") || command.startsWith(".")) return true;
   return [...server.args, ...Object.values(server.env)].some(pathHere);
@@ -131,7 +141,8 @@ export interface ConnectionSources {
   config: AppConfig;
   mcpAuth(name: string, url: string): McpAuthState;
   composio: ComposioIdentity | null;
-  highlevel(): HighLevelConnection | null;
+  /** The person's mailboxes, by address only here. */
+  email?(): ReadonlyArray<{ address: string }>;
 }
 
 export function listConnections(sources: ConnectionSources): ConnectionListing[] {
@@ -155,23 +166,26 @@ export function listConnections(sources: ConnectionSources): ConnectionListing[]
     items.push({ id: "composio", kind: "composio", label: "Connected apps", mode: account.mode, account: account.account,
       ...(account.installationId ? { installationId: account.installationId } : {}) });
   }
-  const highlevel = sources.highlevel();
-  if (highlevel) items.push({ id: "highlevel", kind: "highlevel", label: "HighLevel", ...(highlevel.kind === "oauth" ? { signIn: true as const } : {}) });
+  if (sources.email?.().length) items.push({ id: "email", kind: "email", label: "Email" });
   return items;
 }
 
 /** What one connection's handoff carries, for My Cloud's own routes. */
 export type ConnectionHandoff =
-  | { mcp: { name: string; server: StoredMcpServer; signIn?: McpOAuthRecord } }
+  /** `keys`: the Vault items this server may read its `vault:<id>` keys from, which go with it. */
+  | { mcp: { name: string; server: StoredMcpServer; signIn?: McpOAuthRecord; keys?: string[] } }
   | { config: Partial<AppConfig> }
   | { composio: { apiKey: string; userId: string } }
-  | { highlevel: HighLevelConnection };
+  | { email: readonly EmailAccount[] };
 
 export interface HandoffSources {
   config: AppConfig;
   /** The sign-in kept for a server reached by URL, with its tokens. */
   mcpSignIn(name: string, url: string): McpOAuthRecord | undefined;
-  highlevel(): HighLevelConnection | null;
+  /** The person's mailboxes with their passwords, which go only to the owner's session on their own Cloud. */
+  email?(): readonly EmailAccount[];
+  /** The Vault items an MCP server may read its keys from. */
+  mcpKeys?(name: string): string[];
 }
 
 /** A sign-in's tokens in a digest: the same tokens give the same digest, so a sign-in that refreshed meanwhile is seen. */
@@ -200,7 +214,8 @@ export function answerConnection(id: string, sources: HandoffSources):
     const server = parsed.server;
     const record = isRemoteMcpServer(server) && !runsHere(server) ? sources.mcpSignIn(name, server.url) : undefined;
     const signIn = record?.state === "signed-in" && record.tokens ? record : undefined;
-    return { ok: true, connection: { mcp: { name, server, ...(signIn ? { signIn } : {}) } }, ...(signIn ? { digest: signInDigest(signIn.tokens) } : {}) };
+    const keys = sources.mcpKeys?.(name) ?? [];
+    return { ok: true, connection: { mcp: { name, server, ...(signIn ? { signIn } : {}), ...(keys.length ? { keys } : {}) } }, ...(signIn ? { digest: signInDigest(signIn.tokens) } : {}) };
   }
   const key = /^key:(\w{1,40})$/u.exec(id);
   if (key) {
@@ -212,21 +227,16 @@ export function answerConnection(id: string, sources: HandoffSources):
     const apiKey = cfg.composio?.apiKey?.trim(), userId = cfg.composio?.userId;
     return apiKey && userId ? { ok: true, connection: { composio: { apiKey, userId } } } : { ok: false, error: "Connected apps here use OpenMausBot's service." };
   }
-  if (id === "highlevel") {
-    const connection = sources.highlevel();
-    if (!connection) return { ok: false, error: "HighLevel is not connected on this computer." };
-    return { ok: true, connection: { highlevel: connection }, ...(connection.kind === "oauth" ? { digest: highlevelDigest(connection) } : {}) };
+  if (id === "email") {
+    const accounts = sources.email?.() ?? [];
+    return accounts.length ? { ok: true, connection: { email: accounts } } : { ok: false, error: "No mailbox is connected on this computer." };
   }
   return { ok: false, error: "This connection is not on this computer." };
 }
 
-export const highlevelDigest = (connection: HighLevelConnection) =>
-  signInDigest({ accessToken: connection.accessToken, refreshToken: connection.refreshToken ?? null, expiresAt: connection.expiresAt ?? null });
-
 export interface ReleaseSources extends HandoffSources {
   /** Forgets a server's sign-in here, without signing it out: My Cloud uses it now. */
   forgetSignIn(name: string): void;
-  forgetHighLevel(): void;
 }
 
 /** This computer lets go of a sign-in that moved to My Cloud, unless it refreshed since it was read (`changed`): then
@@ -242,20 +252,13 @@ export function releaseConnection(id: string, digest: string, sources: ReleaseSo
     sources.forgetSignIn(mcp[1]!);
     return { ok: true, release: { released: true } };
   }
-  if (id === "highlevel") {
-    const connection = sources.highlevel();
-    if (connection?.kind !== "oauth") return { ok: true, release: { released: true } };
-    if (highlevelDigest(connection) !== digest) return { ok: true, release: { changed: true } };
-    sources.forgetHighLevel();
-    return { ok: true, release: { released: true } };
-  }
   return { ok: false, error: "Only a sign-in that moved is let go of." };
 }
 
 /** Each connection's own secrets in a fingerprint under `nonce` (cloud-send-verify.ts), by the id it moves under. A
  * sign-in that refreshes itself is left out: it moves once and this computer lets go of it, so the two sides never
  * hold it at once. */
-export function connectionFingerprints(nonce: string, sources: Pick<HandoffSources, "config" | "highlevel">): Record<string, string> {
+export function connectionFingerprints(nonce: string, sources: Pick<HandoffSources, "config">): Record<string, string> {
   const cfg = sources.config;
   const out: Record<string, string> = {};
   for (const [name, raw] of Object.entries(cfg.mcpServers ?? {})) {
@@ -267,8 +270,6 @@ export function connectionFingerprints(nonce: string, sources: Pick<HandoffSourc
   for (const { provider, fragment } of movingKeys(cfg)) out[`key:${provider.id}`] = fingerprint(nonce, fragment);
   const apiKey = cfg.composio?.apiKey?.trim(), userId = cfg.composio?.userId;
   if (apiKey && userId) out.composio = fingerprint(nonce, { apiKey, userId });
-  const highlevel = sources.highlevel();
-  if (highlevel?.kind === "token") out.highlevel = fingerprint(nonce, { token: highlevel.accessToken, locationId: highlevel.locationId });
   return out;
 }
 

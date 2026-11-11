@@ -1,16 +1,18 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Check, CircleAlert, ExternalLink, Eye, EyeOff, Loader2, TriangleAlert } from "lucide-react";
 import { useStore } from "@/state/store";
+import { installCommandFor } from "@/state/engine-install";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { KeyResult, KeyVia } from "@/lib/analytics-allowlist";
 import { keyRemoved, keySaved, keySaveFailure, savedKeyResult } from "@/lib/product-events";
 import { InstanceProviderMark } from "../ProviderIcons";
-import { keyEntry, keyForInstance, looksLikeOtherKey, savedState, type KeyEntry, type KeyId, type SavedState } from "./key-catalog";
+import { FIELD_EDGE, SettingsLook, SettingsMark } from "../SettingsPrimitives";
+import { keyEntry, keyForInstance, looksLikeOtherKey, savedState, shownKeyEntry, type KeyEntry, type KeyId, type SavedState } from "./key-catalog";
 import { checkKey, cleanKey, looksLikeKey, saveKey } from "./key-save";
 
-export const KEY_FIELD = "h-8 w-full min-w-0 rounded-lg border border-hairline/60 bg-inset px-3 font-mono text-[13px] leading-8 text-ink placeholder:text-ink-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus/60 disabled:opacity-60";
-export const KEY_ROW = "group flex scroll-mt-24 flex-col gap-2 rounded-[10px] px-4 py-2.5 transition-[background-color,box-shadow] duration-500 data-[key-highlight]:bg-accent/10 data-[key-highlight]:ring-1 data-[key-highlight]:ring-accent/40 motion-reduce:transition-none";
+export const KEY_FIELD = `h-8 w-full min-w-0 rounded-lg ${FIELD_EDGE} bg-app px-2 text-[13px] leading-5 text-ink placeholder:text-ink-tertiary focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-focus disabled:opacity-40`;
+export const KEY_ROW = "group flex scroll-mt-24 flex-col gap-2 px-4 py-3 transition-[background-color,box-shadow] duration-500 data-[key-highlight]:bg-accent/10 data-[key-highlight]:ring-1 data-[key-highlight]:ring-accent/40 motion-reduce:transition-none";
 const MASK = "••••••••";
 
 export function KeyMarkIcon({ entry }: { entry: KeyEntry }) {
@@ -60,10 +62,13 @@ export function SavedKeyLine({ id }: { id: KeyId }) {
   );
 }
 
+/** Where a key row's content starts: past the 32 px leading slot and its 12 px gap, so it shares the title's edge. */
+export const KEY_CONTENT = "pl-11";
+
 export function RowHeading({ entry, status, titleId }: { entry: KeyEntry; status: KeyStatus; titleId?: string }) {
   return (
-    <div className="flex items-start gap-3">
-      <span className="flex size-5 shrink-0 items-center justify-center"><KeyMarkIcon entry={entry} /></span>
+    <div className="flex items-center gap-3">
+      <span data-settings-slot="" className="flex size-8 shrink-0 items-center justify-center"><SettingsMark><KeyMarkIcon entry={entry} /></SettingsMark></span>
       <div className="min-w-0 flex-1">
         <div id={titleId} className="text-[14px] leading-5 text-ink">{t(entry.labelKey)}</div>
         <div className="text-[13px] leading-[18px] text-ink-secondary">{t(entry.purposeKey)}</div>
@@ -96,7 +101,7 @@ export function KeyRow({
   className?: string;
   children?: ReactNode;
 }) {
-  const { state, dispatch } = useStore();
+  const { state, dispatch, refreshInstances } = useStore();
   const titleId = useId();
   const [draft, setDraft] = useState("");
   const [shown, setShown] = useState(false);
@@ -107,6 +112,9 @@ export function KeyRow({
   const [notice, setNotice] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<string | null>(null);
   const [works, setWorks] = useState(false);
+  const [enginesChecking, setEnginesChecking] = useState(false);
+  const [engineCheckError, setEngineCheckError] = useState<string | null>(null);
+  const settings = useContext(SettingsLook) && !bare;
   const busyRef = useRef(false);
   const generation = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -120,8 +128,8 @@ export function KeyRow({
     (goal === "input" ? inputRef.current : replaceRef.current)?.focus();
   });
 
-  const entry = keyEntry(id);
-  const row = rowId ? keyEntry(rowId) : entry;
+  const entry = shownKeyEntry(id, state.config);
+  const row = rowId ? shownKeyEntry(rowId, state.config) : entry;
   const target = entry.target;
   if (!target) throw new Error(`${id} is not saved by a key row`);
   const pointer = row.id !== entry.id;
@@ -129,6 +137,15 @@ export function KeyRow({
   const saved = savedState(entry, state.config);
   const engineRejected = (state.instances ?? []).some((instance) => instance.access === "api" && keyForInstance(instance.instanceId) === entry.id
     && instance.snapshot.state === "available" && instance.snapshot.authenticated === false);
+  // A key engine with its own CLI (DeepSeek Harness) can't use a saved key until that CLI runs here.
+  // The Grok CLI signs in with a grok.com account and drops XAI_API_KEY, so installing it never puts the xAI key to use.
+  const keyEngines = saved.configured
+    ? (state.instances ?? []).filter((instance) => instance.driverKind !== "grokAgent" && keyForInstance(instance.instanceId) === entry.id)
+    : [];
+  const missingEngine = keyEngines.some((instance) => instance.snapshot.state === "available")
+    ? undefined
+    : keyEngines.find((instance) => instance.snapshot.state === "unavailable" && installCommandFor(instance.install) !== null);
+  const installCommand = installCommandFor(missingEngine?.install);
   const rejected = !works && (rejectedHere ?? (saved.configured && engineRejected));
   const failure = problem ?? (rejected && !busy ? t("keys.testRejected") : null);
   const editing = !saved.configured || replacing;
@@ -187,6 +204,7 @@ export function KeyRow({
       if (hadFocus) focusAfter.current = now.configured ? "replace" : "input";
       if (!now.configured) setProblem(t("keys.row.notKept"));
       onSaved?.(now.configured);
+      if (now.configured && via === "settings") target.settingsEvent?.("add_key");
       keySaved(target.analytics, via, now.configured && target.test ? await runCheck() : savedKeyResult(target.analytics));
     } catch (cause) {
       setProblem(errorText(cause));
@@ -194,6 +212,18 @@ export function KeyRow({
     } finally {
       busyRef.current = false;
       setBusy(null);
+    }
+  };
+
+  const checkEngines = async () => {
+    setEnginesChecking(true);
+    setEngineCheckError(null);
+    try {
+      await refreshInstances({ reportErrors: true });
+    } catch (cause) {
+      setEngineCheckError(errorText(cause));
+    } finally {
+      setEnginesChecking(false);
     }
   };
 
@@ -247,7 +277,60 @@ export function KeyRow({
     focusAfter.current = "replace";
   };
 
-  const field = (
+  const input = (
+    <input
+      ref={inputRef}
+      data-key-input
+      type="password"
+      value={draft}
+      onChange={(event) => { setDraft(event.target.value); setNotice(null); setProblem(null); }}
+      onPaste={(event) => {
+        const pasted = cleanKey(event.clipboardData.getData("text"));
+        if (!pasted) return;
+        event.preventDefault();
+        setDraft(pasted);
+        setNotice(null);
+        setProblem(null);
+        if (looksLikeKey(pasted) && !looksLikeOtherKey(row, pasted)) void save(pasted);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          void save(draft);
+        } else if (event.key === "Escape" && replacing) {
+          event.preventDefault();
+          event.stopPropagation();
+          cancelReplace();
+        }
+      }}
+      disabled={busy === "saving"}
+      placeholder={replacing ? t("keys.row.newKey") : t("keys.row.pasteKey")}
+      aria-label={label}
+      autoComplete="off"
+      spellCheck={false}
+      className={KEY_FIELD}
+    />
+  );
+  // In Settings: the field, one line ending in Get a key, then Save on the right (§6.5 provider fold).
+  const settingsField = (
+    <div className="flex flex-col gap-2">
+      {input}
+      {target.href && (
+        <p className="text-[13px] leading-[18px] text-ink-secondary">
+          <a href={target.href} target="_blank" rel="noopener noreferrer" onClick={() => { if (via === "settings") target.settingsEvent?.("get_key"); }} className="text-accent-text hover:underline focus-visible:underline">
+            {t("keys.row.getKey")}
+          </a>
+        </p>
+      )}
+      <span className="flex items-center justify-end gap-2">
+        {replacing && <button type="button" className="settings-quiet cursor-pointer" onClick={cancelReplace}>{t("common.cancel")}</button>}
+        <button type="button" data-key-save className="ui-button ui-button-md rounded-full" disabled={!draft.trim() || busy !== null} onClick={() => void save(draft)}>
+          {t("common.save")}
+        </button>
+      </span>
+    </div>
+  );
+  const field = settings ? settingsField : (
     <div className="flex flex-wrap items-center gap-2">
       <div className="relative min-w-[min(100%,12rem)] flex-1">
         <input
@@ -293,7 +376,7 @@ export function KeyRow({
         </button>
       </div>
       <span className="flex shrink-0 items-center gap-2">
-        <button type="button" data-key-save className="ui-button ui-button-primary" disabled={!draft.trim() || busy !== null} onClick={() => void save(draft)}>
+        <button type="button" data-key-save className="ui-button" disabled={!draft.trim() || busy !== null} onClick={() => void save(draft)}>
           {t("common.save")}
         </button>
         {replacing && <button type="button" className="ui-button" onClick={cancelReplace}>{t("common.cancel")}</button>}
@@ -306,7 +389,7 @@ export function KeyRow({
       <MaskedKey saved={saved} label={label} />
       <span className="flex shrink-0 items-center gap-2">
         <button ref={replaceRef} type="button" data-key-replace className="ui-button" disabled={busy !== null} onClick={startReplace}>{t("keys.row.replace")}</button>
-        {!pointer && <button type="button" data-key-remove className="ui-button" disabled={busy !== null} onClick={() => void remove()}>{t("keys.row.remove")}</button>}
+        {!pointer && <button type="button" data-key-remove data-danger="" className="settings-quiet cursor-pointer" disabled={busy !== null} onClick={() => void remove()}>{t("keys.row.remove")}</button>}
       </span>
     </div>
   );
@@ -324,13 +407,13 @@ export function KeyRow({
       className={cn(KEY_ROW, className)}
     >
       {bare ? status && <KeyStatusChip status={status} /> : <RowHeading entry={row} status={status} titleId={titleId} />}
-      <div className={cn("flex flex-col gap-2", !bare && "pl-8")}>
+      <div className={cn("flex flex-col gap-2", !bare && KEY_CONTENT)}>
         {fieldShown ? field : saved.configured ? masked : (
           <div>
             <button type="button" data-key-own className="ui-button" onClick={() => { setOwnKey(true); focusAfter.current = "input"; }}>{t("keys.row.useOwn")}</button>
           </div>
         )}
-        {(notice || failure || other || warning || note || verdict || (fieldShown && target.href) || (!fieldShown && saved.configured && target.test)) && (
+        {(notice || failure || other || warning || installCommand || note || verdict || (fieldShown && target.href && !settings) || (!fieldShown && saved.configured && target.test)) && (
           <div className="flex flex-col gap-1.5 text-[12px] leading-4">
             {notice && <p role="alert" className="text-danger">{notice}</p>}
             {failure && (
@@ -351,12 +434,26 @@ export function KeyRow({
                 <span>{warning}</span>
               </p>
             )}
+            {installCommand && missingEngine && (
+              <div data-key-engine-missing className="flex flex-col gap-1">
+                <p className="flex gap-1.5 text-warning">
+                  <TriangleAlert size={13} aria-hidden="true" className="mt-px shrink-0" />
+                  <span>{t("keys.row.engineMissing", { engine: missingEngine.displayName })}</span>
+                </p>
+                <code className="select-all break-all rounded-md bg-inset px-2 py-1 font-mono text-[12px] text-ink">{installCommand}</code>
+                <button type="button" data-key-engine-check className="cursor-pointer self-start text-ink-secondary hover:text-ink hover:underline disabled:opacity-50" disabled={enginesChecking}
+                  onClick={() => void checkEngines()}>
+                  {enginesChecking ? t("common.checking") : t("common.checkAgain")}
+                </button>
+                {engineCheckError && <p role="alert" className="text-danger">{t("engineSetup.checkFailed", { reason: engineCheckError })}</p>}
+              </div>
+            )}
             {note && <p className="text-ink-secondary">{note}</p>}
             {verdict && <p role="status" className="whitespace-pre-line text-ink-secondary">{verdict}</p>}
-            {(fieldShown && target.href) || (!fieldShown && saved.configured && target.test) ? (
+            {(fieldShown && target.href && !settings) || (!fieldShown && saved.configured && target.test) ? (
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                {fieldShown && target.href && (
-                  <a href={target.href} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-medium text-accent-text hover:underline">
+                {fieldShown && target.href && !settings && (
+                  <a href={target.href} target="_blank" rel="noopener noreferrer" onClick={() => { if (via === "settings") target.settingsEvent?.("get_key"); }} className="inline-flex items-center gap-1 font-medium text-accent-text hover:underline">
                     {t("keys.row.getKey")}
                     <ExternalLink size={11} aria-hidden="true" />
                   </a>

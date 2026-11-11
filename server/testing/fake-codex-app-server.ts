@@ -5,7 +5,7 @@
 //     mcp-app-approval | mcp-form | permissions-approval | question | multi-question | mixed-question |
 //     empty-question | malformed-question | config-profile | config-profile-unsupported | config-read-error |
 //     image | logged-in-stdout | logged-out | unauthorized | late-request | retry-then-complete | signin-refused |
-//     auth-recovery | mcp-401 | legacy-error | key-401 | recovered-403 | recovered-401 | recovering-403 | usage-limit
+//     auth-recovery | mcp-401 | mcp-image | legacy-error | key-401 | recovered-403 | recovered-401 | recovering-403 | usage-limit
 //     | async-question (an agentMessage with delivery async and questions, as codex 0.160 sends request_user_input_async)
 //   FAKE_CODEX_MISSING_BEARER  the first N launches fail their turn as codex-cli 0.160.1 holding no login does (count in FAKE_CODEX_STATE)
 //   FAKE_CODEX_LAUNCH_CRASHES  the first N launches die pre-ack at turn/start, transient stderr, exit 1 (count in FAKE_CODEX_STATE)
@@ -23,6 +23,7 @@
 //   FAKE_CODEX_COMMAND  the happy turn's one call, this command (default: "ls -la" and a web search);
 //     FAKE_CODEX_COMMAND_OUTPUT  JSON chunks it prints as item/commandExecution/outputDelta notifications, one every
 //     FAKE_CODEX_COMMAND_OUTPUT_MS (default all at once); FAKE_CODEX_COMMAND_GATE  the turn finishes once this file exists
+//   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (as stream-script.ts)
 //   FAKE_CODEX_PATCH_BYTES  each turn first writes web/index.html by apply_patch, streamed as two
 //     item/fileChange/patchUpdated notifications (codex-cli 0.160.1's schema) of half and all this many bytes
 //   FAKE_CODEX_IGNORE_FEATURES  "1": config/read reports no `-c features.*` override
@@ -49,15 +50,20 @@
 //   FAKE_CODEX_TEXT_LOG  `codex exec`: append {argv, cwd, prompt, env} per call
 //   FAKE_CODEX_TEXT_MODE  `codex exec`: ok (default) | fail | exit | hang | tool | noisy
 //   FAKE_CODEX_TEXT_REFUSE  `codex exec`: comma-separated models answered with the 400 a ChatGPT account gets for gpt-5.4-mini
+//   FAKE_CODEX_TEXT_BLOCK  `codex exec`: comma-separated models answered with the 403 OpenAI sends a region it does not serve
 //   FAKE_CODEX_LUNA  "1": model/list also offers gpt-6-luna
 //   FAKE_CODEX_UPDATED_FILE  while this file exists, the CLI was updated in place: --version answers codex-cli 0.162.1
 //     and model/list also offers gpt-6.1-sol
 //   FAKE_CODEX_MCP_START  "1": on thread/start, start each `-c mcp_servers.*` mount as codex-cli 0.160.1 does
 //     (its initialize, or FAKE_CODEX_MCP_HANDSHAKE) and dump mcpStartup[name]
+//   FAKE_CODEX_MCP_READY_MS  each `-c mcp_servers.*` mount is reported starting after the thread/start or
+//     thread/resume reply and ready at once, as codex-cli 0.166.0 does; with this, ready only this many ms
+//     later, and the dump records mcpReadyAtTurnStart
 //   FAKE_CODEX_ROLLOUT  rollout path thread/start and thread/resume report as `thread.path`; each happy turn appends a
 //     namespace-less function_call for retry_thread and codex's "unsupported call: retry_thread" output to it
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+
 
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
 
@@ -97,6 +103,10 @@ if (process.argv[2] === "login" && process.argv[3] === "status") {
     process.stderr.write("Not logged in\n");
     process.exit(1);
   }
+  if (mode === "api-key-configured") {
+    process.stderr.write("API key configured - sk-fake-****\nAuthentication is checked when you send a request.\n");
+    process.exit(0);
+  }
   // Codex 0.147.0 reports a successful login on stderr; older versions wrote it on stdout.
   const statusStream = mode === "logged-in-stdout" ? process.stdout : process.stderr;
   statusStream.write("Logged in using ChatGPT\n");
@@ -133,6 +143,12 @@ if (process.argv[2] === "exec") {
     event({ type: "turn.failed", error: { message } });
     process.exit(1);
   }
+  if (process.env.FAKE_CODEX_TEXT_BLOCK?.split(",").includes(model)) {
+    const message = 'unexpected status 403 Forbidden: {"error":{"code":"unsupported_country_region_territory","message":"Country, region, or territory not supported","param":null,"type":"request_forbidden"}}';
+    event({ type: "error", message });
+    event({ type: "turn.failed", error: { message } });
+    process.exit(1);
+  }
   if (textMode === "fail") {
     event({ type: "error", message: "unexpected status 401 Unauthorized" });
     event({ type: "turn.failed", error: { message: "unexpected status 401 Unauthorized" } });
@@ -161,6 +177,12 @@ if (process.argv[2] === "exec") {
 const calls: Array<{ method: string; params: unknown }> = [];
 const mcpOverrides: Record<string, Record<string, unknown>> = {};
 for (let index = 0; process.env.FAKE_CODEX_MCP_OVERRIDES === "1" && index < process.argv.length; index++) {
+  if (process.argv[index - 1] === "-c" && process.argv[index]!.startsWith("mcp_servers=")) {
+    // The real CLI replaces its accumulated override table before later dotted-path fields apply.
+    for (const name of Object.keys(mcpOverrides)) delete mcpOverrides[name];
+    for (const [, key] of process.argv[index]!.matchAll(/("(?:[^"\\]|\\.)*") = \{ enabled = false \}/g)) mcpOverrides[JSON.parse(key!) as string] = { enabled: false };
+    continue;
+  }
   const match = process.argv[index - 1] === "-c" ? /^mcp_servers\.([^.]+)\.([^.]+)=(.*)$/.exec(process.argv[index]!) : null;
   if (match) (mcpOverrides[match[1]!] ??= {})[match[2]!] = JSON.parse(match[3]!);
 }
@@ -281,7 +303,34 @@ const startMcpServers = async (): Promise<Record<string, McpStartup>> => {
   return Object.fromEntries(entries);
 };
 
+let mcpPending: string[] = [];
+let mcpReadyAtTurnStart: boolean | undefined;
+// codex-cli 0.166.0 answers the thread request first and reports each server's startup after it.
+const announceMcpStartup = () => {
+  const report = (name: string, status: string, error: string | null = null) =>
+    out({ jsonrpc: "2.0", method: "mcpServer/startupStatus/updated", params: { threadId: null, name, status, error, failureReason: null } });
+  mcpPending = Object.entries(mcpMounts())
+    .filter(([name, fields]) => "command" in fields && fields.enabled !== false && name !== process.env.FAKE_CODEX_MCP_FAILED)
+    .map(([name]) => name);
+  for (const name of mcpPending) report(name, "starting");
+  const settle = (name: string) => {
+    mcpPending = mcpPending.filter((pending) => pending !== name);
+    const started = mcpStartup?.[name];
+    if (started?.status === "failed") report(name, "failed", started.error);
+    else report(name, "ready");
+  };
+  const delayMs = Number(process.env.FAKE_CODEX_MCP_READY_MS) || 0;
+  for (const [index, name] of [...mcpPending].entries()) {
+    const delay = delayMs * (process.env.FAKE_CODEX_MCP_STAGGER === "1" ? index + 1 : 1);
+    if (delay > 0) setTimeout(() => settle(name), delay);
+    else settle(name);
+  }
+};
 const threadReply = (response: unknown) => {
+  replyToThread(response);
+  announceMcpStartup();
+};
+const replyToThread = (response: unknown) => {
   if (!process.env.FAKE_CODEX_RESTORED_USAGE) return out(response);
   const restored = {
     jsonrpc: "2.0", method: "thread/tokenUsage/updated",
@@ -318,7 +367,8 @@ const dump = () => {
   if (process.env.FAKE_CODEX_DUMP) {
     writeDumpAtomic(
       process.env.FAKE_CODEX_DUMP,
-      JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), env: process.env, calls, decision, ...(mcpStartup ? { mcpStartup } : {}) }, null, 2),
+      JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), env: process.env, calls, decision, ...(mcpStartup ? { mcpStartup } : {}),
+        ...(mcpReadyAtTurnStart !== undefined ? { mcpReadyAtTurnStart } : {}) }, null, 2),
     );
   }
 };
@@ -370,6 +420,54 @@ const finishTurn = () => {
     out({ jsonrpc: "2.0", id: 100, method: "execCommandApproval", params: { command: "echo too late" } });
     process.stdout.uncork();
   }
+};
+
+// The scripted replies every fake plays (FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE); inlined, since tests copy this fake
+// out of the repo.
+let streamTurn = 0;
+const streamScriptFor = (prompt: string): { steps: Array<Record<string, string>>; chars: number; ms: number } | null => {
+  if (!process.env.FAKE_STREAM_SCRIPT) return null;
+  let scripts: Record<string, Array<Record<string, string>>>;
+  try { scripts = JSON.parse(readFileSync(process.env.FAKE_STREAM_SCRIPT, "utf8")); } catch { return null; }
+  // A prompt can carry earlier requests as context: the newest marker in it is the request.
+  const marker = Object.keys(scripts).filter((key) => prompt.includes(key)).sort((a, b) => prompt.lastIndexOf(b) - prompt.lastIndexOf(a) || b.length - a.length)[0];
+  if (!marker) return null;
+  const [chars = 4, ms = 40] = (process.env.FAKE_STREAM_CADENCE ?? "4:40").split(":").map(Number);
+  return { steps: scripts[marker]!, chars: Math.max(1, chars), ms: Math.max(0, ms) };
+};
+const playStreamScript = (script: NonNullable<ReturnType<typeof streamScriptFor>>) => {
+  const turn = ++streamTurn;
+  const live = () => turn === streamTurn;
+  const queue = script.steps.slice();
+  let index = 0;
+  const next = () => {
+    if (!live()) return;
+    const step = queue.shift();
+    if (!step) return void notify("turn/completed", { turn: { status: "completed" } });
+    index += 1;
+    if (step.fail !== undefined) return void notify("turn/completed", { turn: { status: "failed", error: { message: step.fail } } });
+    if (step.tool !== undefined) {
+      notify("item/started", { item: { id: `c${index}`, type: "commandExecution", command: step.tool } });
+      notify("item/completed", { item: { id: `c${index}`, type: "commandExecution", status: "completed", aggregatedOutput: "ok", exitCode: 0 } });
+      return void setTimeout(next, script.ms);
+    }
+    const text = step.say ?? step.think ?? "";
+    const id = `m${index}`;
+    if (step.say !== undefined) notify("item/started", { item: { id, type: "agentMessage", text: "" } });
+    let at = 0;
+    const send = () => {
+      if (!live()) return;
+      if (at < text.length) {
+        const delta = text.slice(at, at += script.chars);
+        notify(step.say !== undefined ? "item/agentMessage/delta" : "item/reasoning/textDelta", { itemId: id, delta });
+        return void setTimeout(send, script.ms);
+      }
+      if (step.say !== undefined) notify("item/completed", { item: { id, type: "agentMessage", text } });
+      setTimeout(next, script.ms);
+    };
+    send();
+  };
+  next();
 };
 
 const playRoomPlanTurn = (msg: any, planPath: string) => {
@@ -429,7 +527,7 @@ process.stdin.on("data", (chunk) => {
       case "initialize": {
         experimentalApi = msg.params?.capabilities?.experimentalApi === true;
         logStartup("initialize");
-        const reply = () => out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
+        const reply = () => out({ jsonrpc: "2.0", id: msg.id, result: { ok: true, userAgent: process.env.FAKE_CODEX_USER_AGENT ?? "codex_cli_rs/0.166.0" } });
         if (process.env.FAKE_CODEX_STARTUP_DELAY_MS) setTimeout(reply, Number(process.env.FAKE_CODEX_STARTUP_DELAY_MS));
         else reply();
         break;
@@ -585,6 +683,7 @@ process.stdin.on("data", (chunk) => {
       }
       case "turn/interrupt":
         dump();
+        streamTurn += 1;
         if (process.env.FAKE_CODEX_INTERRUPT_SILENT) break;
         out({ jsonrpc: "2.0", id: msg.id, result: {} });
         notify("turn/completed", { turn: { status: "interrupted" } });
@@ -609,6 +708,7 @@ process.stdin.on("data", (chunk) => {
         }
         break;
       case "turn/start": {
+        if (process.env.FAKE_CODEX_MCP_READY_MS) mcpReadyAtTurnStart = mcpPending.length === 0;
         dump();
         logStartup("turn/start");
         nativeThreadId = msg.params?.threadId ?? nativeThreadId;
@@ -711,6 +811,12 @@ process.stdin.on("data", (chunk) => {
           finishTurn();
           break;
         }
+        if (mode === "mcp-image") {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          notify("item/completed", { item: { id: "t1", type: "mcpToolCall", tool: "screenshot", status: "completed", result: { content: [{ type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }] } } });
+          finishTurn();
+          break;
+        }
         if (mode === "legacy-error") {
           out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
           notify("error", { message: "stream disconnected before completion" });
@@ -735,6 +841,14 @@ process.stdin.on("data", (chunk) => {
             notify("turn/completed", { turn: { status: "failed", error } });
             break;
           }
+        }
+        if (mode === "plan-model-refused") {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          // The reporter's words (2026-11-03): ChatGPT lists gpt-6.1-sol, then refuses it for a ChatGPT account.
+          const error = { message: "unexpected status 400 Bad Request: invalid_request_error model_not_found: The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.", codexErrorInfo: null, additionalDetails: null };
+          notify("error", { willRetry: false, error });
+          notify("turn/completed", { turn: { status: "failed", error } });
+          break;
         }
         if (mode === "usage-limit") {
           out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
@@ -804,6 +918,11 @@ process.stdin.on("data", (chunk) => {
         }
         if (mode === "early-turn-events") finishTurn();
         out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+        const script = streamScriptFor((msg.params?.input ?? []).filter((item: any) => item?.type === "text").map((item: any) => item.text).join("\n"));
+        if (script) {
+          playStreamScript(script);
+          break;
+        }
         if (mode === "early-turn-events") break;
         if (process.env.FAKE_CODEX_ECHO_INPUT === "1") {
           const prompt = { type: "userMessage", id: "u1", content: msg.params?.input ?? [] };

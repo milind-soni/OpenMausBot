@@ -1,7 +1,7 @@
 // A move to the person's own Cloud carries this computer's connections, end to end: this computer's server and a Cloud
 // home (scripts/testing/cloud-send-fixture.ts), main's own functions between them (electron/cloud-connections.mjs) over
 // the private port and the owner session, OpenMausBot's connected-apps service with a fake Composio behind it, a fake
-// sign-in server for an MCP server's own account, and a fake HighLevel with its relay. Disposable homes; no network.
+// sign-in server for an MCP server's own account. Disposable homes; no network.
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -10,7 +10,6 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { collectConnections, sendConnections, type ConnectionsLocal, type ConnectionsTarget } from "../electron/cloud-connections.mjs";
 import { launchCloudSendFixture, type CloudSendFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { startBrokerFake, type BrokerFake } from "./testing/broker-fake.ts";
-import { FAKE_LOCATION_ID, startFakeHighLevel, startFakeRelay, type FakeHighLevel, type FakeRelay } from "./testing/fake-highlevel.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
 // Obvious fakes only.
@@ -44,8 +43,6 @@ process.stdin.on("data", (chunk) => {
 });`;
 
 let broker: BrokerFake;
-let hl: FakeHighLevel;
-let relay: FakeRelay;
 let fx: CloudSendFixture;
 let signIns: Server;
 let tokenEndpoint = "";
@@ -54,9 +51,7 @@ const refreshes: Array<{ refresh: string; client: string; secret: string }> = []
 
 beforeAll(async () => {
   broker = await startBrokerFake();
-  hl = await startFakeHighLevel();
-  relay = await startFakeRelay({ onAccessToken: (token) => hl.tokens.add(token) });
-  fx = await launchCloudSendFixture({ onePasswordToken: TOKEN, broker, env: { OMB_HIGHLEVEL_RELAY_URL: relay.url, OMB_HIGHLEVEL_API_URL: hl.url } });
+  fx = await launchCloudSendFixture({ onePasswordToken: TOKEN, broker });
   signIns = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => { body += chunk; });
@@ -74,8 +69,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await fx?.close();
   await broker?.close();
-  await relay?.close();
-  await hl?.close();
   await new Promise((resolve) => signIns?.close(resolve));
 });
 
@@ -100,6 +93,7 @@ it("moves the MCP servers with their secrets and sign-ins, the keys and the conn
     { name: "docs", type: "http", url: "https://mcp.docs.example.test/mcp", headers: { Authorization: `Bearer ${DOCS_TOKEN}` } },
     { name: "linear", type: "http", url: LINEAR_URL, oauth: { clientId: "omb-fixture-client", clientSecret: CLIENT_SECRET } },
     { name: "notes", type: "http", url: "http://127.0.0.1:9/mcp" },
+    { name: "easy", command: "uvx", args: ["mcp-email-server", "stdio"] },
   ]) {
     expect((await local("POST", "/api/mcp/servers", server)).status).toBe(201);
     expect((await local("PATCH", `/api/mcp/servers/${server.name}`, { enabled: true })).status).toBe(200);
@@ -109,15 +103,9 @@ it("moves the MCP servers with their secrets and sign-ins, the keys and the conn
   writeFileSync(desktopSignIns, JSON.stringify({ servers: { linear: { url: LINEAR_URL, state: "signed-in", clientId: "omb-fixture-client", tokenAuth: "client_secret_post",
     tokenEndpoint, tokens: { access: ACCESS, refresh: REFRESH, expiresAt: Date.now() - 60_000 } } } }));
   expect((await local("PATCH", "/api/config", { openrouter: { key: OPENROUTER_KEY } })).status).toBe(200);
-  // HighLevel, signed in here through its relay: its refresh token rotates, so only one side may ever spend it.
-  const started = await local("POST", "/api/highlevel/sign-in");
-  relay.complete([...relay.states.keys()].at(-1)!);
-  await expect.poll(async () => (await local("GET", `/api/highlevel/sign-in/${started.body.flowId}`)).body.phase, { timeout: 8_000, interval: 200 }).toBe("connected");
-  const refreshToken = [...relay.refreshTokens][0]!;
 
   const collected = await collectConnections(asLocal(fx));
-  expect(collected.connections.map((item) => item.id)).toEqual(["mcp:dodo", "mcp:docs", "mcp:linear", "mcp:notes", "key:openrouter", "composio", "highlevel"]);
-  expect(collected.connections.find((item) => item.id === "highlevel")).toMatchObject({ signIn: true });
+  expect(collected.connections.map((item) => item.id)).toEqual(["mcp:dodo", "mcp:docs", "mcp:linear", "mcp:notes", "mcp:easy", "key:openrouter", "composio"]);
   expect(collected.connections.find((item) => item.id === "mcp:linear")).toMatchObject({ signIn: true });
   expect(collected.connections.find((item) => item.id === "mcp:notes")).toMatchObject({ runsHere: true });
   expect(collected.computer.label).toBeTruthy();
@@ -125,15 +113,15 @@ it("moves the MCP servers with their secrets and sign-ins, the keys and the conn
   const progress: string[] = [];
   const result = await sendConnections(collected, asTarget(fx), { local: asLocal(fx), onProgress: ({ label }) => progress.push(label) });
   expect(result.failed).toEqual([]);
-  expect(result.moved.map((item) => item.id)).toEqual(["key:openrouter", "mcp:dodo", "mcp:docs", "mcp:linear", "highlevel", "composio"]);
-  expect(result.runsHere).toEqual([{ id: "mcp:notes", label: "notes" }]);
+  expect(result.moved.map((item) => item.id)).toEqual(["key:openrouter", "mcp:dodo", "mcp:docs", "mcp:linear", "composio"]);
+  expect(result.runsHere).toEqual([{ id: "mcp:notes", label: "notes" }, { id: "mcp:easy", label: "easy" }]);
   expect(result.kept).toEqual([]);
   expect(result.release).toEqual([]);
-  expect(progress).toEqual(["OpenRouter", "dodo", "docs", "linear", "notes", "HighLevel", "Connected apps"]);
+  expect(progress).toEqual(["OpenRouter", "dodo", "docs", "linear", "notes", "easy", "Connected apps"]);
 
   // The MCP servers arrived with their secrets, on, and the command-line one works there with its key.
   const servers = (await onCloud("GET", "/api/mcp/servers")).body.servers as Array<Record<string, unknown>>;
-  expect(servers.map((server) => server.name).sort()).toEqual(["docs", "dodo", "linear", "notes"]);
+  expect(servers.map((server) => server.name).sort()).toEqual(["docs", "dodo", "easy", "linear", "notes"]);
   expect(servers.find((server) => server.name === "dodo")).toMatchObject({ enabled: true, envKeys: ["DODO_PAYMENTS_API_KEY", "DODO_PAYMENTS_ENVIRONMENT"] });
   expect(servers.find((server) => server.name === "docs")).toMatchObject({ enabled: true, headerKeys: ["Authorization"] });
   expect(servers.find((server) => server.name === "linear")).toMatchObject({ auth: "signed-in", oauth: { clientId: "omb-fixture-client", clientSecretConfigured: true } });
@@ -141,8 +129,9 @@ it("moves the MCP servers with their secrets and sign-ins, the keys and the conn
 
   // The server that needs this computer is kept there, marked as running here, and never started there.
   expect(servers.find((server) => server.name === "notes")).toMatchObject({ enabled: true, runsOn: collected.computer });
+  expect(servers.find((server) => server.name === "easy"), "a mail connector stays with its accounts, whatever programs My Cloud has").toMatchObject({ enabled: true, runsOn: collected.computer });
   const notesTest = await onCloud("POST", "/api/mcp/servers/notes/test");
-  expect(notesTest).toMatchObject({ status: 409, body: { error: `This server runs on ${collected.computer.label}, so it isn't started here.` } });
+  expect(notesTest).toMatchObject({ status: 409, body: { error: `notes runs on ${collected.computer.label}, which isn't lent to My Cloud: it works once OpenMausBot is open on that computer and signed in to My Cloud.` } });
 
   // The sign-in moved: My Cloud refreshes it with the refresh token and the app's secret that came over...
   await onCloud("POST", "/api/mcp/servers/linear/test");
@@ -151,13 +140,6 @@ it("moves the MCP servers with their secrets and sign-ins, the keys and the conn
   // ...and this computer let go of its own copy, without signing it out, so it never spends that refresh token too.
   expect(JSON.parse(readFileSync(desktopSignIns, "utf8")).servers.linear).toBeUndefined();
   expect((await local("GET", "/api/mcp/servers")).body.servers.find((server: { name: string }) => server.name === "linear").auth).toBeUndefined();
-
-  // HighLevel moved with its sign-in, which only My Cloud holds now; nothing spent its refresh token on the way.
-  expect((await onCloud("GET", "/api/highlevel")).body).toMatchObject({ state: "connected", kind: "oauth", location: { id: FAKE_LOCATION_ID } });
-  expect((await local("GET", "/api/highlevel")).body).toEqual({ state: "signed-out" });
-  expect(relay.refreshes).toBe(0);
-  expect(relay.refreshTokens.has(refreshToken)).toBe(true);
-  SECRETS.push(refreshToken, ...relay.issued);
 
   // The key arrived, and so did its engine, before anything that follows it.
   expect((await onCloud("GET", "/api/config")).body.openrouter).toMatchObject({ configured: true });
@@ -172,7 +154,7 @@ it("moves the MCP servers with their secrets and sign-ins, the keys and the conn
   expect((await onCloud("PATCH", `/api/bots/${bot.id}`, { mcpServers: ["dodo", "docs", "linear", "notes"] })).status).toBe(200);
   const sections = (await onCloud("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections as Array<{ id: string; text?: string }>;
   expect(sections.find((section) => section.id === "to-connect")?.text)
-    .toBe(` Runs only on the person's computer ${collected.computer.label}, not on My Cloud: notes. If a task needs one, say so in plain words.`);
+    .toBe(` Runs only on the person's computer ${collected.computer.label}, not on My Cloud: notes (it uses files or an address only ${collected.computer.label} has). It worked there before the bots moved here. If a task needs one, tell the person in plain words that it stayed on ${collected.computer.label} and why, not that it was never set up, and do not write your own replacement.`);
 
   // Moving again changes nothing and spends nothing.
   const again = await sendConnections(await collectConnections(asLocal(fx)), asTarget(fx), { local: asLocal(fx) });

@@ -38,12 +38,11 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
-it("is never shown in Simple mode, even to someone with a Cloud, and main is not even asked", async () => {
+it("is shown in Simple mode too, to someone with a Cloud", async () => {
   f.advanced = false;
-  vi.mocked(bridge.keepHere!).mockResolvedValue(before);
-  render(); for (const effect of f.effects) effect(); await flush();
-  expect(render().html).toBe("");
-  expect(bridge.keepHere).not.toHaveBeenCalled();
+  await ready(before);
+  expect(bridge.keepHere).toHaveBeenCalledOnce();
+  expect(toggle()?.props.checked).toBe(false);
 });
 
 it("is never shown without a Cloud of one's own the move applies to, nor by a desktop that has no such switch, nor off the desktop", async () => {

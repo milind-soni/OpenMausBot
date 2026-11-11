@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -572,6 +572,31 @@ winOnly("resolveCli (Windows)", () => {
     const resolved = resolveCli("ombfake", ["--mcp-config", payload]);
     expect(resolved.command.toLowerCase()).toBe(shim.toLowerCase());
     expect(resolved.args).toEqual(["--mcp-config", payload]);
+  });
+
+  it("resolves portable Hermes to embedded Python without interpreting arguments", () => {
+    const root = join(dir, "portable Hermes & tools");
+    mkdirSync(join(root, "hermes_cli"), { recursive: true });
+    writeFileSync(join(root, "hermes_cli", "main.py"), "");
+    const shim = join(root, "hermes.bat");
+    writeFileSync(shim, '"%PYTHON_EXE%" -m hermes_cli.main %*\r\n');
+    const args = ["acp", 'a b & c | %PATH% "quoted"', "你好"];
+    const resolved = resolveCli(shim, args);
+    expect(resolved.command).toBe(join(root, "python_embedded", "python.exe"));
+    expect(resolved.args[0]).toBe("-c");
+    expect(resolved.args.slice(2)).toEqual([root, ...args]);
+    expect(resolveCli(`"${shim}"`, args)).toEqual(resolved);
+    expect(resolveCli(relative(process.cwd(), shim), args)).toEqual(resolved);
+  });
+
+  it("does not treat unrelated batch files or incomplete layouts as portable Hermes", () => {
+    const shim = join(dir, "hermes.bat");
+    writeFileSync(shim, '"%PYTHON_EXE%" -m hermes_cli.main %*\r\n');
+    expect(resolveCli(shim, ["acp"])).toEqual({ command: shim, args: ["acp"] });
+    mkdirSync(join(dir, "hermes_cli"));
+    writeFileSync(join(dir, "hermes_cli", "main.py"), "");
+    writeFileSync(shim, "custom-launcher %*\r\n");
+    expect(resolveCli(shim, ["acp"])).toEqual({ command: shim, args: ["acp"] });
   });
 
   it("hands an unknown CLI back untouched so spawn reports its own ENOENT", () => {

@@ -90,6 +90,8 @@ On a team's Cloud, everything for you arrives in one place: your chat with your 
 
 **Answering is replying.** Use **Reply** on a line, give it a 👍 or 👎, or just tell your Chief ("tell Cleo Friday works"). The answer goes back where the line came from: to the bot that asked, which carries on, or to the teammate's own inbox. Only your answer goes, nothing else from your chat.
 
+**Everyone has an Inbox.** It is the row at the top of the sidebar, with no team and no account too: questions and approvals your bots wait on, what they sent you, and routine reports, each labelled with who it is from. Answer there and the bot carries on. Each place keeps its own, so the dot on a place in the rail tells you where something waits.
+
 **Your inbox at a glance.** In your chat with your Chief, one card keeps what needs you in view: how many things need you and how many are just for your information, the newest few with their answer buttons right there, and **Open inbox**. The whole inbox opens on the right, in three tabs: **Needs you** (questions and approvals), **For your info** (reports, mentions and messages) and **Done**. Click a line to read it in full and answer or reply; mark news done when you need nothing more from it. On a phone it opens as a sheet.
 
 **What waits on you is counted.** Your own row under People shows how many questions and approvals wait on you in your inbox, and the same number is added to the count on the app's icon and in the browser tab. It drops as soon as you settle one, wherever you do it: in your inbox, in the chat it came from, or on your phone. A message you answer in the chat it came from leaves **Needs you** too.
@@ -106,6 +108,12 @@ Off a team, nothing changes: the @ list shows bots, and `@you` still means you.
 
 Bots can hand work to other bots, in any department. Delegated runs carry explicit status back into the parent conversation, including completion, failure, and cancellation: you see a "Sent to Bolt" line where the work went out, and the answer when it comes back. A bot does not need to be in a group chat to get work from one: work for a bot that isn't in the chat goes to that bot directly, in a thread of its own, and the chat shows "Sent to Bolt directly: it isn't in this room." Nobody is added to the chat, so nobody new reads it.
 
+### A second opinion from another model
+
+A bot doesn't need a teammate to get work done on another model. It can open a thread of its own on any model you have connected, from another provider too, and have the result come back to it: for example three reviews of one change, each on a different model, with no review bots to set up. The bot reads the models it can use with `list_models` and opens each thread with `start_thread`, a `model_selection` and `report_back`. `list_models` gives a short list per provider, with the model the bot is on first, and finds any other model by name, so a provider with hundreds of models doesn't flood the conversation. You see "Opened thread #Review: GPT" where it went out and "#Review: GPT replied" when the answer comes back, and the bot then carries on with every result in hand. The thread is a row under the bot like any other, so you can open it and read the whole review.
+
+A provider that is signed out or unavailable shows in `list_models` with the reason, and a thread on it is refused when it is opened, so a second opinion never quietly comes from the bot's own model. These threads can't be opened from a group chat, and a thread opened this way can't open more of its own.
+
 ### Creating a specialist with a chosen model
 
 A Chief also adds a specialist on its own when a job needs one: an ongoing area of work, a different skill set, or work to run in parallel. The bot is created at once, the Chief tells you in one line, and the change has an **Undo**. When what you want matches a ready-made team in the library, the Chief reads its roles with `list_team_library` and creates them the same way.
@@ -116,7 +124,7 @@ When no model selection is supplied, the new bot uses the workspace's default mo
 
 ## Rewind and branches
 
-Editing an earlier message creates a new conversation path. OpenMausBot avoids resuming stale provider sessions after a rewind, so the next turn follows the visible branch rather than hidden abandoned state.
+Editing an earlier message creates a new conversation path. MausBot avoids resuming stale provider sessions after a rewind, so the next turn follows the visible branch rather than hidden abandoned state.
 
 ## Memory and working folders
 

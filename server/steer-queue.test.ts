@@ -166,7 +166,7 @@ describe("steer-queue module", () => {
     expect(turn(bot.threadId, 2)[6].origin).toBeUndefined();
   });
 
-  it("answers Team incidents reports that waited as one turn, whichever bot broke, through a restart", () => {
+  it("answers Problems to look at reports that waited as one turn, whichever bot broke, through a restart", () => {
     const chief = fakeBot("bot-incidents-chief", "thread-incidents-reports", true);
     const store = fakeStore([chief]);
     const run = vi.fn();
@@ -278,6 +278,21 @@ describe("steer-queue module", () => {
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[1]![2]).toBe("second words");
     expect(store.messages.map((message) => message.text)).toEqual(["first words", "second words"]);
+  });
+
+  it("where several people write, runs each person's lines as their own turn, the asker's own addition first, and names each chip", () => {
+    const bot = fakeBot("bot-several", "thread-several", true);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    const tom = { name: "Tom", id: "p_tom" }, priya = { name: "Priya", id: "p_priya" };
+    queueSteeredMessage(bot.id, bot.threadId, "what is due", { sender: tom, first: true });
+    queueSteeredMessage(bot.id, bot.threadId, "and the PR", { sender: priya, first: true, aheadOfOthers: "p_priya" });
+    expect(queuedSteerSnapshot((id) => id === bot.id, undefined, (_threadId, sender) => sender)[bot.threadId]!.map((chip) => chip.sender?.name)).toEqual(["Priya", "Tom"]);
+    expect(queuedSteerSnapshot((id) => id === bot.id)[bot.threadId]!.some((chip) => "sender" in chip)).toBe(false);
+    bot.busy = false;
+    drainSteeredMessages(store, run);
+    drainSteeredMessages(store, run);
+    expect(run.mock.calls.map((call) => [call[2], call[6].sender?.name])).toEqual([["and the PR", "Priya"], ["what is due", "Tom"]]);
   });
 
   it("drains one call's spoken lines as one turn, and the next call's as its own", () => {
@@ -441,7 +456,7 @@ describe("steer-queue module", () => {
       expect(snapshots).toHaveLength(2);
       expect(cancelSteeredMessage(bot.id, second.id)).toBe(true);
       bot.busy = false;
-      expect(() => drainSteeredMessages(fakeStore([bot]), () => { throw new Error("failed dispatch"); })).toThrow("failed dispatch");
+      expect(() => drainSteeredMessages(fakeStore([bot]), () => { throw new Error("failed dispatch"); })).not.toThrow();
       expect(snapshots).toEqual([
         { [bot.threadId]: [{ queueId: first.id, text: "keep" }] },
         { [bot.threadId]: [{ queueId: first.id, text: "keep" }, { queueId: second.id, text: "cancel" }] },

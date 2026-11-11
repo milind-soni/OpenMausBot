@@ -90,6 +90,7 @@ describe("ThreadChip", () => {
     findElement(tree, "data-thread-chip")!.props.onClick!();
     expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([
       { type: "select", id: "scout" },
+      { type: "revealThread", threadId: "gone" },
       { type: "notice", notice: { kind: "thread-gone", botName: "Scout" } },
     ]);
   });

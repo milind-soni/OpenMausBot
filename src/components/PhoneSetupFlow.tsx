@@ -1,3 +1,4 @@
+import { companionBridge } from "@/lib/companion-bridge";
 import {
   useCallback,
   useEffect,
@@ -16,16 +17,15 @@ import {
   QrCode,
   ShieldCheck,
   Smartphone,
-  Wifi,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { phonePairingLink } from "../../shared/pairing-link";
+import { codeUntil } from "@/lib/pairing-time";
 import {
   companionPairingAddressText,
   companionPairingRoute,
   companionPairingRoutePin,
   companionPairingRoutePinAvailable,
-  type CompanionEndpoint,
   type CompanionPairingRoutePin,
   type CompanionPairingRouteMode,
 } from "../lib/companion-pairing";
@@ -64,49 +64,12 @@ import {
   phonePairingManualCodeMode,
 } from "../lib/companion-state";
 import { ConnectionDetail } from "./ConnectionDetail";
+import { PhonePairingQr } from "./PhonePairingQr";
+import { PhoneSetupSignInRoutes } from "./PhoneSetupSignInRoutes";
 import { productName } from "../lib/brand";
 
-export interface PhoneDevice {
-  id: string;
-  name: string;
-  createdAt: number;
-  lastSeenAt: number;
-  cloudDesktopAccess: boolean;
-  /** Absent (older sidecars) means no browser access. */
-  browserControlAccess?: boolean;
-}
-
-export interface CompanionState {
-  enabled: boolean;
-  keepAwake: boolean;
-  port: number;
-  devices: PhoneDevice[];
-  connectedDeviceIds?: string[];
-  pairing: { code: string; token: string; expiresAt: number } | null;
-  addresses?: string[];
-  tailscale?: string;
-  tailnetName?: string;
-  lan?: string | null;
-  hosts?: string[];
-  endpoints?: CompanionEndpoint[];
-  secretPublicKey?: string;
-  discovery?: { advertising: boolean; name: string };
-  /** Windows has that network down as Public, where its firewall drops a phone's connection. */
-  publicNetwork?: string;
-  error?: string;
-}
-
-export type CompanionBridge = {
-  state: () => Promise<CompanionState>;
-  start: () => Promise<CompanionState>;
-  stop: () => Promise<CompanionState>;
-  keepAwake: (enabled: boolean) => Promise<CompanionState>;
-  refreshTailscale: () => Promise<CompanionState>;
-  pairing: (open: boolean, expectedToken?: string) => Promise<CompanionState>;
-  cloudDesktop: (deviceId: string, allowed: boolean) => Promise<CompanionState>;
-  browserControl: (deviceId: string, allowed: boolean) => Promise<CompanionState>;
-  revoke: (deviceId: string) => Promise<CompanionState>;
-};
+import type { CompanionBridge, CompanionState } from "../lib/companion-types";
+export type { CompanionBridge, CompanionRoute, CompanionState, PhoneDevice } from "../lib/companion-types";
 
 type AccountBridge = NonNullable<NonNullable<Window["ogb"]>["companionAccount"]>;
 type StateBridge<T> = { state: () => Promise<T> };
@@ -125,9 +88,7 @@ interface PhonePairingRequest {
   generation: number;
 }
 
-export const companionBridge = (): CompanionBridge | null =>
-  // SAFETY: the preload owns this narrow bridge; browser builds are guarded by the optional lookup.
-  (globalThis as { ogb?: { companion?: CompanionBridge } }).ogb?.companion ?? null;
+export { companionBridge };
 
 export const companionAccountBridge = (): AccountBridge | null =>
   // SAFETY: Electron exposes only these account operations and never sends credentials to the renderer.
@@ -172,7 +133,6 @@ export interface PhoneSetupController {
   error: string | null;
   accountError: string | null;
   pairingLink: string | null;
-  secondsLeft: number;
   address: string | undefined;
   pairingPort: number;
   addressText: string | undefined;
@@ -212,7 +172,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
   const [setupTimedOut, setSetupTimedOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accountError, setAccountError] = useState<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
+  const [, setNow] = useState(() => Date.now());
   const [flow, dispatchFlow] = useReducer(phoneSetupReducer, initialPhoneSetupFlowState);
   const emailEdited = useRef(false);
   const pairingUiOwner = useRef<PhonePairingAttemptLock>({ generation: null });
@@ -368,7 +328,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
             read: () => companion.state(),
             start: () => mutateCompanionBridgeState(
               companionMutationEpoch,
-              () => companion.start(),
+              () => companion.start(routeMode === "automatic" ? undefined : []),
             ),
             refreshTailscale: () => mutateCompanionBridgeState(
               companionMutationEpoch,
@@ -780,13 +740,9 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
   );
   const pairingLink = useMemo(() => {
     if (!state?.pairing || !pairingRoute) return null;
-    return phonePairingLink({
-      ...pairingRoute,
-      code: state.pairing.code,
-      token: state.pairing.token,
-      name: state.discovery?.name,
-      secretPublicKey: state.secretPublicKey,
-    });
+    // An encrypted-connection QR carries no six-digit code: phones pair by the QR or a pasted link only.
+    return phonePairingLink({ ...pairingRoute, code: state.e2e?.enabled ? undefined : state.pairing.code, token: state.pairing.token,
+      name: state.discovery?.name, secretPublicKey: state.secretPublicKey, e2e: state.e2e?.descriptor });
   }, [pairingRoute, state]);
 
   const cancel = useCallback(() => {
@@ -830,9 +786,6 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
     error,
     accountError,
     pairingLink,
-    secondsLeft: state?.pairing
-      ? Math.max(0, Math.round((state.pairing.expiresAt - now) / 1000))
-      : 0,
     address: pairingRoute?.address,
     pairingPort: pairingRoute?.port ?? state?.port ?? 8810,
     addressText: pairingRoute ? companionPairingAddressText(pairingRoute) : undefined,
@@ -903,6 +856,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
   const actionError = companionAccountActionError(c.account, c.accountError);
   const canSubmitEmail = /^\S+@\S+\.\S+$/.test(c.email.trim());
   const manualCodeMode = phonePairingManualCodeMode(Boolean(c.state?.pairing), c.pairingLink);
+  if (c.phase === "qr" && c.state?.e2e?.enabled && c.pairingLink) return <PhonePairingQr c={c} signedIn={Boolean(c.account?.email)} />;
 
   if (c.phase === "intro") {
     return (
@@ -969,13 +923,13 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !c.codeSent && canSubmitEmail) c.requestCode();
                 }}
-                placeholder="you@example.com"
+                placeholder={t("common.emailPlaceholder")}
                 className="rounded-lg border border-hairline/50 bg-inset px-3 py-2.5 text-[14px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent disabled:opacity-50"
               />
             </label>
             {c.codeSent && (
               <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-medium text-ink-secondary">{t("phone.signIn.code")}</span>
+                <span className="text-[12px] font-medium text-ink-secondary">{t("phone.signIn.emailCode")}</span>
                 <input
                   autoFocus
                   autoComplete="one-time-code"
@@ -1023,19 +977,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
           </button>
         )}
         {actionError && <p role="alert" className="mt-3 text-[13px] text-danger">{actionError}</p>}
-        <div className="my-4 flex items-center gap-3 text-[11px] text-ink-secondary">
-          <span className="h-px flex-1 bg-hairline/40" /> {t("phone.signIn.or")} <span className="h-px flex-1 bg-hairline/40" />
-        </div>
-        <button
-          disabled={c.busy || c.accountBusy}
-          onClick={c.useLocal}
-          className="flex items-center justify-center gap-2 rounded-lg border border-hairline/50 py-2.5 text-[13px] text-ink hover:bg-control disabled:opacity-40"
-        >
-          <Wifi size={15} /> {t("phone.signIn.wifiInstead")}
-        </button>
-        <p className="mt-2 text-center text-[11px] leading-relaxed text-ink-secondary">
-          {t("phone.signIn.wifiNote")}
-        </p>
+        <PhoneSetupSignInRoutes c={c} />
       </div>
     );
   }
@@ -1096,24 +1038,24 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
       <h2 className="mt-3 text-[18px] font-semibold text-ink">
         {c.pairingExpired ? t("phone.code.expired") : t("phone.code.title")}
       </h2>
-      <p className="mt-1 text-[13px] text-ink-secondary">
-        {c.pairingExpired ? t("phone.code.expiredDetail") : t("phone.code.detail")}
-      </p>
+      {c.pairingExpired && <p className="mt-1 text-[13px] text-ink-secondary">{t("phone.code.expiredDetail")}</p>}
       {!c.pairingExpired && c.pairingLink && (
-        <div className="mt-4 rounded-2xl bg-white p-3.5" aria-label={t("phone.code.qrAria")}>
-          <QRCodeSVG value={c.pairingLink} size={180} level="M" bgColor="#ffffff" fgColor="#111111" />
-        </div>
+        <>
+          <div className="mt-4 rounded-2xl bg-white p-3.5" aria-label={t("phone.code.qrAria")}><QRCodeSVG value={c.pairingLink} size={180} level="M" bgColor="#ffffff" fgColor="#111111" /></div>
+          <p className="mt-3 text-[13px] text-ink-secondary">{t("phone.code.installAndScan", { app: productName() })}</p>
+          <p className="mt-1 text-[12px] text-ink-tertiary">{t("phone.code.notCamera", { app: productName() })}</p>
+        </>
       )}
       {!c.pairingExpired && manualCodeMode === "direct" && c.state?.pairing && (
         <div className="mt-4 w-full max-w-[320px] rounded-xl bg-inset px-4 py-3 text-[13px] text-ink-secondary">
-          <div>{t("phone.code.manualIntro")}</div>
+          <div>{t("phone.code.typeIntro", { app: productName() })}</div>
           <div className="mt-2 font-mono text-[22px] tracking-[0.25em] text-ink">
             {c.state.pairing.code}
           </div>
         </div>
       )}
       {!c.pairingExpired && manualCodeMode === "details" && c.state?.pairing && (
-        <p className="mt-3 text-[12px] text-ink-secondary">{t("phone.code.expiresIn", { seconds: c.secondsLeft })}</p>
+        <p className="mt-3 text-[12px] text-ink-secondary">{codeUntil(c.state.pairing.expiresAt)}</p>
       )}
       {!c.pairingExpired && c.localFallback && c.state?.publicNetwork && (
         <p role="note" className="mt-3 w-full max-w-[390px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-left text-[12px] leading-relaxed text-warning">
@@ -1129,7 +1071,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
         <details className="mt-4 w-full max-w-[390px] rounded-lg border border-hairline/40 px-3 py-2 text-left">
           <summary className="cursor-pointer text-[12px] text-ink-secondary">{t("phone.code.trouble")}</summary>
           <div className="mt-3 text-[12px] text-ink-secondary">
-            {t("phone.code.manual")}
+            {t("phone.code.pairingCode")}
             <div className="mt-1 font-mono text-[22px] tracking-[0.25em] text-ink">{c.state.pairing.code}</div>
             {c.address && (
               <div className="mt-3">

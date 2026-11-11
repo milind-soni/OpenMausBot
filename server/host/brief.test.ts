@@ -168,7 +168,7 @@ describe("the brief", () => {
     expect(shown).toContain("Aguardando sua resposta · Ada precisa dos números.");
     expect(shown).toContain("Sessão encerrada em Claude");
     expect(shown).not.toMatch(/Needs you|Waiting on your reply|Thursday/);
-    expect(widgetActions(root).map((entry) => entry.label)).toEqual(expect.arrayContaining(["Rascunhar resposta para Ada", "Abrir no Gmail", "Dispensar o e-mail de Ada"]));
+    expect(widgetActions(root).map((entry) => entry.label)).toEqual(expect.arrayContaining(["Criar rascunho de resposta para Ada", "Abrir no Gmail", "Dispensar o e-mail de Ada"]));
     expect(s.notified).toEqual(["Seu resumo: 2 precisam de você"]);
   });
 
@@ -290,6 +290,14 @@ describe("the brief", () => {
     expect(s.shown()).toContain("Reconnect Gmail in Connected apps.");
     expect(s.shown()).toContain("Claude is signed out");
     expect(s.shown()).toContain("8:09 AM · Standup");
+  });
+
+  it("points to Connected apps when one of several accounts was read and refused", async () => {
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [{ app: "gmail", signedOut: false, severalAccounts: true }] });
+    expect(s.shown()).toContain("Reconnect Gmail in Connected apps.");
+    expect(s.shown()).not.toContain("I'll try again soon.");
   });
 
   it("waits for a busy chat instead of writing into a turn", async () => {

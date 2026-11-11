@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { handSaved, installOwnHome, openServerSession, OWNER_KNOWN_MS, parseChoice } from "./own-home-main.mjs";
+import { handSaved, installOwnHome, openServerSession, OWNER_KNOWN_MS, OWNER_RETRY_MS, parseChoice } from "./own-home-main.mjs";
 
 const ID = "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
 const garage = { id: "g", kind: "remote", name: "Garage server", origin: "https://garage.example.test" };
@@ -19,6 +19,8 @@ function servers(answers) {
     const { origin, pathname } = new URL(url);
     asked.push({ origin, path: pathname, headers: init?.headers ?? {} });
     const server = answers[origin];
+    if (server?.silent) return new Promise(() => {});
+    if (server?.down) throw new TypeError("fetch failed");
     if (!server) return new Response("", { status: 502 });
     if (pathname === "/api/auth/session") return Response.json(server.signedIn === false ? { error: "unauthorized" } : { kind: "session", scopes: ["admin"], ...(server.own ? { own: true } : {}) }, { status: server.signedIn === false ? 401 : 200 });
     if (pathname === "/.well-known/openmausbot/environment") return Response.json({ environmentId: server.environmentId ?? ID, capabilities: server.move === false ? {} : { move: 1 } });
@@ -134,4 +136,24 @@ test("while the move goes, this computer's screen names the server; once home is
   assert.deepEqual(done.own.home(), { id: "g", origin: garage.origin, environmentId: ID, name: "Garage server" });
   assert.equal(done.own.offers(garage), false);
   done.own.close();
+});
+
+test("a server that does not say who owns it is asked once at a time, and again only after OWNER_RETRY_MS", async () => {
+  let at = 1_000;
+  const { own, asked } = install({ answers: { [garage.origin]: { down: true }, [family.origin]: { silent: true } }, now: () => at });
+  const to = (origin) => asked.filter((ask) => ask.origin === origin).length;
+  own.refresh(); own.refresh(); own.refresh();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(to(garage.origin), 2, "its session and its environment, once");
+  assert.equal(to(family.origin), 2, "a server still being asked is not asked again");
+  own.refresh();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(to(garage.origin), 2, "a server that did not say is left alone for a while");
+  assert.equal(own.offers(garage), false);
+  at += OWNER_RETRY_MS;
+  own.refresh();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(to(garage.origin), 4, "then asked again");
+  assert.equal(to(family.origin), 2, "while its first ask still waits");
+  own.close();
 });

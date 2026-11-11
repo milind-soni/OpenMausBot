@@ -31,7 +31,6 @@ afterEach(() => {
   vi.restoreAllMocks();
   globalThis.fetch = ORIGINAL_FETCH;
   delete process.env.OPENMAUSBOT_TOKEN;
-  delete process.env.ALLOW_INSECURE_HTTP;
 });
 
 describe("MCP JSON-RPC protocol", () => {
@@ -686,6 +685,19 @@ describe("waiting on a conversation's job", () => {
     await expect(handleToolCall("send_bot_message", { bot_id: "bot-1", text: "Go", send_id: "short" }, fetcher)).rejects.toThrow("send_id must be");
     expect(sent).toHaveLength(2);
   });
+
+  it("sends a channel message with the ids of the bots it means when two share a name", async () => {
+    const sent: unknown[] = [];
+    const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === "/api/bots?messages=0") return { bots: [], groups: [{ id: "channel-1", threadId: "room-1", tasks: [] }] };
+      sent.push(JSON.parse(String(init?.body)));
+      return { ok: true, threadId: "room-1", message: { id: "msg-1", at: 1, text: "@Quill go" } };
+    });
+    await handleToolCall("send_channel_message", { channel_id: "channel-1", text: "@Quill go", mentions: ["quill-chief"] }, fetcher);
+    expect(sent).toEqual([{ text: "@Quill go", threadId: "room-1", mentions: ["quill-chief"] }]);
+    await expect(handleToolCall("send_channel_message", { channel_id: "channel-1", text: "@Quill go", mentions: "quill-chief" }, fetcher))
+      .rejects.toThrow("arguments.mentions must be array");
+  });
 });
 
 describe("connection security and discovery", () => {
@@ -696,7 +708,11 @@ describe("connection security and discovery", () => {
     expect(() => validateBaseUrl("ftp://maus.example.com")).toThrow("http:// or https://");
     expect(() => validateBaseUrl("https://maus.example.com/api")).toThrow("origin without a path");
     expect(() => validateBaseUrl("https://user:pass@maus.example.com")).toThrow("must not contain credentials");
-    expect(() => validateBaseUrl("http://0.0.0.0:8799")).toThrow("Insecure cleartext HTTP");
+    expect(() => validateBaseUrl("http://0.0.0.0:8799")).toThrow("open internet");
+    expect(() => validateBaseUrl("http://203.0.113.9:8799")).toThrow("put HTTPS in front");
+    expect(validateBaseUrl("http://192.168.1.20:8799")).toBe("http://192.168.1.20:8799");
+    expect(validateBaseUrl("http://100.101.102.103:8799")).toBe("http://100.101.102.103:8799");
+    expect(validateBaseUrl("http://box.tail1234.ts.net:8799")).toBe("http://box.tail1234.ts.net:8799");
   });
 
   it("skips a foreign process and discovers the real fallback port", async () => {
@@ -726,6 +742,16 @@ describe("connection security and discovery", () => {
       method: "POST",
       body: JSON.stringify({ text: "hello" }),
     }, "http://127.0.0.1:8799")).rejects.toThrow("paired session token");
+  });
+
+  it("says a shared server refused, not a desktop app, when the server says so", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse(
+      { error: "forbidden: on this shared server a local request without a session may only use the service routes; sign in to change settings, people or access" },
+      { ok: false, status: 403, statusText: "Forbidden" },
+    )) as any;
+    const refused = request("/api/instances", {}, "http://127.0.0.1:8799");
+    await expect(refused).rejects.toThrow("This is a shared server, so a program on it without a paired session token may only check its health");
+    await expect(refused).rejects.not.toThrow("desktop app");
   });
 
   it("requires an explicit destination before sending a bearer token", async () => {

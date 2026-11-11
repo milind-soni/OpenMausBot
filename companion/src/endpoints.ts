@@ -1,4 +1,5 @@
-import { lanAddresses, tailnetName, tailscaleAddress } from "./listener.ts";
+import { tailnetName, tailscaleAddress } from "./listener.ts";
+import { directRoutes, routedAddresses } from "./direct-routes.ts";
 import { defaultHostName } from "./mdns.ts";
 
 export const COMPANION_ENDPOINT_KINDS = ["hosted", "tailnet", "lan", "bonjour"] as const;
@@ -51,10 +52,10 @@ const httpOrigin = (host: string, port: number): string => {
  * connection walk. */
 export function companionEndpointCandidates(
   port: number,
-  addresses: string[] = lanAddresses(),
+  addresses: string[] = routedAddresses(),
   magicDnsName: string | null = tailnetName(),
   hostedUrl: string | null = null,
-  bonjourHost: string = defaultHostName(),
+  bonjourHost: string | null = directRoutes().wifi ? defaultHostName() : null,
 ): CompanionEndpoint[] {
   const tailscale = tailscaleAddress(addresses);
   const candidates: CompanionEndpoint[] = [];
@@ -68,7 +69,7 @@ export function companionEndpointCandidates(
       candidates.push({ url: httpOrigin(address, port), kind: "lan", priority: 200 + index });
     }
   });
-  candidates.push({ url: httpOrigin(bonjourHost, port), kind: "bonjour", priority: 300 });
+  if (bonjourHost) candidates.push({ url: httpOrigin(bonjourHost, port), kind: "bonjour", priority: 300 });
 
   const seen = new Set<string>();
   const ordered = candidates

@@ -93,6 +93,11 @@ beforeAll(async () => {
       }),
       patient: fixture("patient", { FAKE_CLAUDE_MODE: "hang", FAKE_CLAUDE_FINISH_GATE: patientGate }),
       crash: fixture("crash", { FAKE_CLAUDE_MODE: "exit-early" }),
+      stray: fixture("stray", {
+        FAKE_CLAUDE_MODE: "happy",
+        FAKE_CLAUDE_REPLIES: JSON.stringify([`Coder finished it.
+${envelope({ status: "completed", detail: "Done." })}`]),
+      }),
       routine: fixture("routine", {
         FAKE_CLAUDE_MODE: "happy",
         FAKE_CLAUDE_REPLIES: JSON.stringify([`Reviewed.\n${envelope({ status: "completed", detail: "Scheduled review done." })}`]),
@@ -166,11 +171,23 @@ describe("one-on-one goal runs (a room of one)", () => {
     expect((await messagesIn(bot.threadId)).filter((message) => message.kind === "goal.run")).toHaveLength(1);
   });
 
+  it("hides an envelope written in a turn outside the goal's own, such as a teammate's result waking the lead", async () => {
+    const bot = await newBot("Stray", "stray");
+    const sent = await api("POST", `/api/bots/${bot.id}/messages`, { text: "Coder replied", threadId: bot.threadId });
+    expect(sent.status).toBe(202);
+    const replies = async () => (await messagesIn(bot.threadId))
+      .filter((message) => message.kind === "text" && message.role === "bot" && message.requestMessageId === sent.body.message.id).map((message) => message.text);
+    await expect.poll(replies, { timeout: hostTimeout(15_000) }).toEqual(["Coder finished it."]);
+    expect(JSON.stringify(await messagesIn(bot.threadId))).not.toContain("openmaus-goal");
+  });
+
   it("Stop ends the goal on its card and no turn starts after the interrupted one", async () => {
     const bot = await newBot("Stopper", "slow");
     expect((await sendGoal(bot, "Keep going")).status).toBe(202);
     await expect.poll(() => busy(bot.id)).toBe(true);
-    expect((await sendGoal(bot, "A second goal")).status).toBe(409);
+    const refused = await sendGoal(bot, "A second goal");
+    expect(refused.status).toBe(409);
+    expect(refused.body).toEqual({ error: "A goal is already running in this chat. Stop it before starting another.", errorKey: "serverError.goal.alreadyRunning" });
 
     expect((await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId })).status).toBe(200);
     await expect.poll(() => cardIn(bot.threadId)).toMatchObject({ status: "stopped", detail: "Stopped by you.", turnCount: 1 });
@@ -190,7 +207,9 @@ describe("one-on-one goal runs (a room of one)", () => {
     await expect.poll(() => cardIn(bot.threadId)).toMatchObject({
       status: "working",
       turnCount: 0,
-      detail: expect.stringMatching(/finishing what it is doing/),
+      detail: "Patient is finishing what it is doing. This goal will continue when it is free.",
+      detailCode: "chat.notice.goalWaiting",
+      detailParams: { name: "Patient" },
     });
     writeFileSync(patientGate, "observed the waiting goal");
     // The fixture's goal turn ends without a marker, so the run stops after exactly the one turn it waited for.

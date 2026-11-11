@@ -4,8 +4,22 @@ export interface RailPlace {
   id: string;
   name: string;
   color: import("./cloud-buy.mjs").CloudColor | null;
-  /** This computer, a Cloud of the person's own (My Cloud included), a team's Cloud, or a server they connected by hand. */
-  kind: "computer" | "cloud" | "team" | "server";
+  /** This computer, a Cloud of the person's own (My Cloud included), a team's Cloud, a server they connected by hand, or an
+   * account signed in here with no place of its own to show. */
+  kind: "computer" | "cloud" | "team" | "server" | "account";
+  /** A workspace of this computer's own, by its profile id: the default one is This Mac (or This PC), offered once My Cloud
+   * is home. Its circle's menu renames it, changes its colour and removes it. */
+  profile?: string;
+  /** A workspace of this computer's own with a name of its own (`name`), not This Mac's. */
+  named?: true;
+  /** It opens once this bot, in the workspace that runs now, finishes what it is doing (empty: the bot isn't named). */
+  settling?: string;
+  /** With several accounts signed in here: which group it is in (a divider stands between groups). None with one account. */
+  group?: string;
+  /** With several accounts signed in here: the address of the account it belongs to. Only the rail's own page gets this. */
+  email?: string;
+  /** Its account's sign-in has ended: a click asks for the emailed code. */
+  signIn?: true;
   /** False while there is nothing to open yet (a Cloud being made, with no address). */
   opens: boolean;
   active?: true;
@@ -13,7 +27,7 @@ export interface RailPlace {
   progress?: number;
   /** Waiting for its payment. */
   waiting?: true;
-  /** Something needs the person there (a payment problem on a Cloud they own). */
+  /** Something needs the person there: a line in that place's inbox, or a payment problem on a Cloud they own. */
   attention?: true;
   /** A server or computer of the person's own that signed in with their account. */
   server?: true;
@@ -34,15 +48,25 @@ export interface RailPlace {
   ended?: true;
   /** Its owner may take this Cloud off their list (it ended, or was never paid for): its menu offers Remove from list. */
   removable?: true;
+  /** A server connected by hand: Remove from list forgets it on this computer (this app signs out of it there). */
+  forget?: true;
   /** A server of the person's own, theirs alone by its own word, that this computer's bots may move to: its menu offers
    * Make … my home. */
   makeHome?: true;
 }
 /** ＋'s choices here: buying a Cloud, pasting a server's pairing link, typing its address on this computer's Settings, and
  * a new organization on the Team plan this account pays for (absent from an older app's main). */
-export interface RailAddChoices { cloud: boolean; link: boolean; address: boolean; organization?: boolean }
+/** `account`: Add another account (the rail's own page runs that sign-in). */
+/** `local`: a new workspace of this computer's own. */
+export interface RailAddChoices { cloud: boolean; link: boolean; address: boolean; organization?: boolean; account?: boolean; local?: boolean }
 /** `beside`: a place's page, which never reads the list, learns that the window's rail stands beside it. */
-export interface RailState { places: RailPlace[]; add: RailAddChoices; beside?: true }
+export interface RailState {
+  places: RailPlace[];
+  add: RailAddChoices;
+  beside?: true;
+  /** The place a click on this rail is opening, until its page has loaded; `waking` while My Cloud is being woken for it. */
+  switching?: { id: string; waking?: true };
+}
 /** Buying another Cloud as a page sees it: what the sheet says, never the account, an address or the checkout page. */
 export type AddCloudView =
   | { signedIn: false }
@@ -67,6 +91,7 @@ export type AddCloudView =
     };
   };
 export declare const RAIL_MIN_PLACES: number;
+export declare const PROFILE_PLACE: "profile:";
 /** main's own circles: each as the page sees it, plus the Cloud main acts on for it (never sent to a page). */
-export declare function railPlaces(input: { saved: { environments: any[]; activeId: string }; home?: string | null; mine?: string | null; state?: unknown; offers?: (entry: any) => boolean }): Array<RailPlace & { cloudId?: string }>;
+export declare function railPlaces(input: { saved: { environments: any[]; activeId: string }; home?: string | null; mine?: string | null; state?: unknown; offers?: (entry: any) => boolean; waiting?: (id: string) => boolean; accounts?: any[]; profiles?: Array<{ id: string; name?: string | null; color?: string | null; swatch?: string | null; active?: boolean; settling?: string }>; computerSettling?: string | null }): Array<RailPlace & { cloudId?: string }>;
 export declare function addCloudView(state: unknown, offer: import("./cloud-home.mjs").CloudOffer | null): AddCloudView;

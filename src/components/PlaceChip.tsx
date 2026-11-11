@@ -4,8 +4,8 @@ import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { MENU_HEADING, MENU_SHEET } from "./menu-recipe";
 import { t } from "@/lib/i18n";
-import { instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable } from "@/lib/local-computer";
-import { effectivePlace, PLACES, placeLabelKey, placeOffered, type Place } from "@/lib/place";
+import { instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable, pageOnRemoteServer } from "@/lib/local-computer";
+import { effectivePlace, personPin, PLACES, placeLabelKey, placeOffered, type Place } from "@/lib/place";
 import { placeBlocked, placeFacts, placeHasIssue, placeViewFor, usePlaceSeat } from "@/lib/place-view";
 import { useStore, type Bot, type Task } from "@/state/store";
 import type { PlaceView } from "../../shared/place-view";
@@ -15,10 +15,10 @@ import type { SidebarMenuItem } from "./SidebarPopoverMenu";
 
 export type PlaceAvailability = Record<Place, boolean>;
 
-export function usePlaceViews(bot: Bot): Record<Place, { view: PlaceView; reachable: boolean; policy: boolean }> {
+export function usePlaceViews(bot: Bot): Record<Place, { view: PlaceView; reachable: boolean; policy: boolean; listed: boolean }> {
   const { state } = useStore();
   const { capabilities } = useDesktopCapabilities();
-  const seat = usePlaceSeat(state.config, capabilities.host.platform);
+  const seat = usePlaceSeat(state.config, capabilities);
   const backend = bot.cloudBackend === "vps" ? "vps" : "box";
   const allowed = state.config?.managedPolicy?.computers ?? { thisComputer: true, localVm: true, box: true, vps: true };
   const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
@@ -30,7 +30,8 @@ export function usePlaceViews(bot: Bot): Record<Place, { view: PlaceView; reacha
     const view = placeViewFor(placeFacts({ bot, place, seat, config: state.config, instances: state.instances, local }));
     const policy = (place === "cloud" ? allowed[backend] : place === "vm" ? allowed.localVm : place === "local" ? allowed.thisComputer : true)
       && placeOffered(place, state.config);
-    return { view, policy, reachable: policy && !placeBlocked(view) };
+    const listed = placeOffered(place, state.config) && !(place === "local" && pageOnRemoteServer(capabilities));
+    return { view, policy, listed, reachable: policy && !placeBlocked(view) };
   };
   return { cloud: entry("cloud"), vm: entry("vm"), local: entry("local"), browser: entry("browser") };
 }
@@ -43,19 +44,19 @@ export function usePlaceAvailability(bot: Bot): PlaceAvailability {
 /** The place chip as one + menu entry with the same choices, for a phone composer that has no room for the chip. */
 export function usePlaceMenuItem({ bot, task, disabled = false, onPin }: {
   bot: Bot;
-  task?: Pick<Task, "surface"> | null;
+  task?: Pick<Task, "surface" | "surfaceAuto"> | null;
   disabled?: boolean;
   onPin: (surface: Place | null) => void;
 }): SidebarMenuItem {
-  const { state } = useStore();
   const places = usePlaceViews(bot);
   const effective = effectivePlace(bot, task);
-  const pinned = Boolean(task?.surface);
+  const pin = personPin(task);
+  const pinned = Boolean(pin);
   const off = effective === "off";
   const botDefault = bot.computer ?? "auto";
   const followsAuto = botDefault === "auto";
   const check = <Check size={14} className="text-accent" aria-hidden="true" />;
-  const choose = (surface: Place | null) => { if (surface !== (task?.surface ?? null)) onPin(surface); };
+  const choose = (surface: Place | null) => { if (surface !== (pin ?? null)) onPin(surface); };
   return {
     key: "place",
     label: t("computer.worksOn"),
@@ -73,15 +74,15 @@ export function usePlaceMenuItem({ bot, task, disabled = false, onPin }: {
         trailing: !pinned ? check : undefined,
         onSelect: () => choose(null),
       },
-      ...PLACES.filter((place) => placeOffered(place, state.config)).map((place): SidebarMenuItem => {
+      ...PLACES.filter((place) => places[place].listed).map((place): SidebarMenuItem => {
         const { view, reachable, policy } = places[place];
         return {
           key: `place:${place}`,
           label: t(placeLabelKey(place)),
           note: !policy ? t("place.unavailable") : placeHasIssue(view) ? view.short : t(DESCRIPTION[place]),
           icon: <PlaceIcon place={place} size={16} aria-hidden="true" />,
-          active: task?.surface === place,
-          trailing: task?.surface === place ? check : undefined,
+          active: pin === place,
+          trailing: pin === place ? check : undefined,
           disabled: !reachable,
           onSelect: () => choose(place),
         };
@@ -96,7 +97,7 @@ const DESCRIPTION: Record<Place, "computer.dest.cloudDesc" | "computer.dest.vmDe
 
 export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
   bot: Bot;
-  task?: Pick<Task, "surface"> | null;
+  task?: Pick<Task, "surface" | "surfaceAuto"> | null;
   live: boolean;
   disabled?: boolean;
   onPin: (surface: Place | null) => void;
@@ -104,10 +105,10 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
   const [open, setOpen] = useState(false);
   const motion = useMenuMotion(open);
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const { state } = useStore();
   const places = usePlaceViews(bot);
   const effective = effectivePlace(bot, task);
-  const pinned = Boolean(task?.surface);
+  const pin = personPin(task);
+  const pinned = Boolean(pin);
   const off = effective === "off";
   const label = t(placeLabelKey(effective));
   const showLive = live && effective !== "off" && effective !== "auto";
@@ -122,7 +123,7 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
     return () => { document.removeEventListener("mousedown", outside); document.removeEventListener("keydown", escape); };
   }, [open]);
 
-  const choose = (surface: Place | null) => { setOpen(false); if (surface !== (task?.surface ?? null)) onPin(surface); };
+  const choose = (surface: Place | null) => { setOpen(false); if (surface !== (pin ?? null)) onPin(surface); };
   const botDefault = bot.computer ?? "auto";
   const followsAuto = botDefault === "auto";
 
@@ -166,8 +167,8 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
               </span>
               {!pinned && <Check size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />}
             </button>
-            {PLACES.filter((place) => placeOffered(place, state.config)).map((place) => {
-              const selected = task?.surface === place;
+            {PLACES.filter((place) => places[place].listed).map((place) => {
+              const selected = pin === place;
               const { view, reachable, policy } = places[place];
               const detail = !policy ? t("place.unavailable") : placeHasIssue(view) ? view.short : t(DESCRIPTION[place]);
               return (

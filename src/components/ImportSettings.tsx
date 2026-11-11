@@ -1,7 +1,8 @@
 // Settings → Import: everything that brings work in from elsewhere, in one place. "From your AI apps" brings the skills
-// and MCP servers another AI tool keeps on this computer; the bot import below is the same one Templates has.
-import { BookOpen, Check, Info, Loader2, Plug } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+// and MCP servers another AI tool keeps on this computer.
+import { BookOpen, Check, ChevronDown, Info, Loader2, Plug } from "lucide-react";
+import { useContext, useEffect, useState, type ReactNode } from "react";
+import { SettingRow, SettingsLook, SettingsRows, Switch } from "./SettingsPrimitives";
 
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
@@ -10,7 +11,7 @@ import { importOutcome, localSetupImport, setupImportApi, skillsSummary, toolsSu
 import { useStore } from "@/state/store";
 import { detectionCount, detectionSources, type SetupDetection, type SetupImportResult, type SetupSource } from "../../shared/setup-import";
 import { GrokBotMark } from "./GrokBotMark";
-import { GrokImportFlow } from "./GrokImportFlow";
+import { GrokMoveDialog } from "./lazy-screens";
 import { ClaudeMark, CodexMark, CursorMark, PresetProviderMark } from "./ProviderIcons";
 
 function SourceMarks({ sources }: { sources: readonly SetupSource[] }) {
@@ -39,6 +40,17 @@ export function ImportRow({ icon, label, summary, hint, sources, checked, disabl
   disabled: boolean;
   onChange: (checked: boolean) => void;
 }) {
+  if (useContext(SettingsLook)) {
+    return (
+      <div className="flex items-center gap-6 py-2">
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="flex items-center gap-1.5 text-[13px] leading-5 text-ink"><SourceMarks sources={sources} />{label}</span>
+          <span className="text-[12px] leading-4 text-ink-secondary">{summary}</span>
+        </span>
+        <Switch checked={checked} disabled={disabled} aria-label={label} onClick={() => onChange(!checked)} />
+      </div>
+    );
+  }
   return (
     <label className={cn("flex items-start gap-3 px-3.5 py-3 transition-colors", disabled ? "cursor-default" : "cursor-pointer hover:bg-raised/40")}>
       <input
@@ -62,7 +74,7 @@ export function ImportRow({ icon, label, summary, hint, sources, checked, disabl
   );
 }
 
-const buttonClass = "inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-ink disabled:opacity-40";
+const BUTTON = "inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-ink disabled:opacity-40";
 
 export interface AiAppsImportViewProps {
   local: boolean;
@@ -73,10 +85,28 @@ export interface AiAppsImportViewProps {
   result: SetupImportResult | null;
   onChoose: (chosen: { skills: boolean; tools: boolean }) => void;
   onBring: () => void;
+  /** Settings' error line: Try again (look or bring again) and Skip (put the failure away) */
+  onRetry?: () => void;
+  onSkip?: () => void;
 }
 
-export function AiAppsImportView({ local, detection, chosen, status, result, onChoose, onBring }: AiAppsImportViewProps) {
+export function AiAppsImportView({ local, detection, chosen, status, result, onChoose, onBring, onRetry, onSkip }: AiAppsImportViewProps) {
   const working = status === "working";
+  const settings = useContext(SettingsLook);
+  // In Settings a failure is the row's error line (§6.5: 12/16 danger, 4 under the description, ending in Try again),
+  // with Skip as the row's quiet button, never a dead end.
+  if (settings && local && (detection === null || status === "failed")) {
+    return (
+      <div data-import-section="apps" className="contents">
+        <SettingRow title={t("settings.import.appsTitle")} subtitle={t("settings.import.appsShort")}
+          message={<span role="alert" className="text-danger">{t(detection === null ? "settings.import.lookFailed" : "settings.import.bringFailed")}
+            {onRetry && <>{" "}<button type="button" data-import-retry="" className="cursor-pointer text-accent-text hover:underline focus-visible:underline" onClick={onRetry}>{t("common.tryAgain")}</button></>}</span>}>
+          {onSkip && <button type="button" data-import-skip="" className="settings-quiet cursor-pointer" onClick={onSkip}>{t("settings.import.skip")}</button>}
+        </SettingRow>
+      </div>
+    );
+  }
+  const buttonClass = settings ? "ui-button self-end gap-1.5" : BUTTON;
   let body;
   if (!local) body = <p className="text-[13px] text-ink-secondary">{t("settings.import.appsLocalOnly")}</p>;
   else if (detection === undefined) {
@@ -99,7 +129,7 @@ export function AiAppsImportView({ local, detection, chosen, status, result, onC
   } else {
     body = (
       <>
-        <div className="divide-y divide-hairline/40 overflow-hidden rounded-xl border border-hairline/40">
+        <div className={settings ? "flex flex-col" : "divide-y divide-hairline/40 overflow-hidden rounded-xl border border-hairline/40"}>
           {detection.skills.length > 0 && (
             <ImportRow icon={<BookOpen size={15} />} label={t("onboarding.import.skills")} summary={skillsSummary(detection)}
               hint={t("onboarding.import.skillsHint")} sources={detectionSources(detection.skills)} checked={chosen.skills}
@@ -112,11 +142,32 @@ export function AiAppsImportView({ local, detection, chosen, status, result, onC
           )}
         </div>
         {status === "failed" && <p role="alert" className="mt-3 text-[13px] text-danger">{t("onboarding.import.error")}</p>}
-        <button onClick={onBring} disabled={working || !(chosen.skills || chosen.tools)} className={cn(buttonClass, "mt-3")}>
+        <button onClick={onBring} disabled={working || !(chosen.skills || chosen.tools)} className={cn(buttonClass, !settings && "mt-3")}>
           {working && <Loader2 size={14} className="animate-spin" />}
           {working ? t("onboarding.import.bringing") : t("onboarding.import.bring")}
         </button>
       </>
+    );
+  }
+  if (settings && !local) {
+    // Only the desktop app on the computer running MausBot can read that computer's AI apps: the row stays, inert.
+    return (
+      <div data-import-section="apps" className="contents">
+        <SettingRow title={t("settings.import.appsTitle")} subtitle={t("settings.import.appsShort")} inert={t("settings.import.appsLocalOnly")} inertText={t("settings.import.appsLocalOnly")}>
+          <button type="button" className="ui-button" tabIndex={-1}>{t("settings.import.choose")}</button>
+        </SettingRow>
+      </div>
+    );
+  }
+  if (settings) {
+    return (
+      <div data-import-section="apps" className="flex flex-col gap-2 px-4 py-3">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[14px] leading-5 text-ink">{t("settings.import.appsTitle")}</span>
+          <span className="text-[13px] leading-[18px] text-ink-secondary">{t("settings.import.appsShort")}</span>
+        </div>
+        {body}
+      </div>
     );
   }
   return (
@@ -134,13 +185,15 @@ function AiAppsImport({ client, local }: { client: SetupImportClient; local: boo
   const [chosen, setChosen] = useState({ skills: true, tools: true });
   const [status, setStatus] = useState<"idle" | "working" | "failed">("idle");
   const [result, setResult] = useState<SetupImportResult | null>(null);
+  const [look, setLook] = useState(0);
 
   useEffect(() => {
     if (!local) return;
     const controller = new AbortController();
+    setDetection(undefined);
     client.detect(controller.signal).then(setDetection, () => setDetection(null));
     return () => controller.abort();
-  }, [client, local]);
+  }, [client, local, look]);
 
   const bring = async () => {
     if (!detection || status === "working") return;
@@ -157,21 +210,47 @@ function AiAppsImport({ client, local }: { client: SetupImportClient; local: boo
     }
   };
 
-  return <AiAppsImportView local={local} detection={detection} chosen={chosen} status={status} result={result} onChoose={setChosen} onBring={() => void bring()} />;
+  return <AiAppsImportView local={local} detection={detection} chosen={chosen} status={status} result={result} onChoose={setChosen} onBring={() => void bring()}
+    onRetry={() => (status === "failed" ? void bring() : setLook((count) => count + 1))}
+    onSkip={() => (status === "failed" ? setStatus("idle") : setDetection({ skills: [], tools: [] }))} />;
 }
 
 export function GrokImportSection() {
+  const [started, setStarted] = useState(false);
+  const [open, setOpen] = useState(false);
+  if (useContext(SettingsLook)) {
+    return (
+      <div data-import-section="grok" className="flex flex-col">
+        <SettingRow title={t("settings.import.moveTitle")} subtitle={t("settings.import.grokLine")}>
+          <button type="button" className="ui-button" data-grok-move-open aria-expanded={open} onClick={() => { setStarted(true); setOpen(!open); }}>{t(open ? "common.close" : "settings.import.moveAction")}</button>
+        </SettingRow>
+        {started && <div className={open ? "px-4 pb-3" : "hidden"}><GrokMoveDialog inline onClose={() => { setStarted(false); setOpen(false); }} /></div>}
+      </div>
+    );
+  }
   return (
     <section data-import-section="grok" className="rounded-xl bg-card p-4">
       <div className="flex items-center gap-2 text-[15px] font-medium text-ink"><GrokBotMark size={16} />{t("settings.import.grokTitle")}</div>
       <div className="mt-0.5 text-[13px] leading-relaxed text-ink-secondary">{t("settings.import.grokSubtitle")}</div>
-      <div className="mt-4"><GrokImportFlow bare /></div>
+      <button type="button" data-grok-move-open aria-expanded={open} onClick={() => { setStarted(true); setOpen(!open); }} className={cn(BUTTON, "mt-3")}>
+        {t("settings.import.grokTitle")}
+        <ChevronDown size={14} aria-hidden="true" className={cn("transition-transform", open && "rotate-180")} />
+      </button>
+      {started && <div className={open ? undefined : "hidden"}><GrokMoveDialog inline onClose={() => { setStarted(false); setOpen(false); }} /></div>}
     </section>
   );
 }
 
 export function ImportSettings({ client = setupImportApi }: { client?: SetupImportClient }) {
   const { state } = useStore();
+  if (useContext(SettingsLook)) {
+    return (
+      <SettingsRows>
+        <AiAppsImport client={client} local={localSetupImport(state.config?.cloudHome === true)} />
+        <GrokImportSection />
+      </SettingsRows>
+    );
+  }
   return (
     <div className="flex flex-col gap-4">
       <AiAppsImport client={client} local={localSetupImport(state.config?.cloudHome === true)} />

@@ -88,6 +88,7 @@ function sides({ here = [], bots = {}, there = [], connections = [], secrets = {
     },
     store: stored(),
     engineWaitMs: 0,
+    patience: { stallMs: 0, waits: [0], blips: [] },
   };
   return { calls, cloud, deps, opened, asked };
 }
@@ -156,9 +157,9 @@ test("a bot a move made on My Cloud has all its fields sent again when the move 
 test("each item is recorded from My Cloud's own answer as soon as it went, so a send cut short later never takes it for My Cloud's own change", async () => {
   const store = stored({ v: 1, clouds: { [CLOUD]: { sent: { [itemKey.bot("juno")]: { team: ["p1", "p1"] } } } } });
   let cutAtEnd = true;
-  const move = sides({ here: [bot("juno", { team: "p2" })], bots: { juno: { peers: ["ember"] } }, there: [bot("juno", { team: "p1" })],
+  const move = sides({ here: [bot("juno", { team: "p2" })], bots: { juno: { section: "Ops" } }, there: [bot("juno", { team: "p1" })],
     onCall: (method, route, _body, cloud) => {
-      // My Cloud keeps the team without the bot it lacks: its own hash for what it took.
+      // My Cloud files the bot its own way: its own hash for what it took.
       if (method === "PATCH" && route === "/api/bots/juno") { cloud.get(itemKey.bot("juno")).parts.team = "p3"; return reply(200, {}); }
       if (cutAtEnd && method === "GET" && route === "/api/cloud-send?move=1" && cloud.get(itemKey.bot("juno")).parts.team === "p3") throw new TypeError("fetch failed");
     } });
@@ -352,6 +353,19 @@ test("a move sends what only it carries last, after the chats and their settings
   assert.deepEqual(move.deps.store.value.clouds[CLOUD].on, { "routine:r1": true, "app-event:e1": false }, "what was on here is kept for the switch, after this computer let go");
 });
 
+test("an app event My Cloud refuses for good is left behind as final, and this computer keeps collecting it", async () => {
+  const event = { key: "app-event:e1", kind: "app-event", label: "Reply to email", id: "e1", bot: "ember", parts: { def: "d2" } };
+  const error = "This app automation stays on the computer it came from: connected apps are not set up on My Cloud. Set them up here, then make it again.";
+  const refusing = (body) => sides({ here: [bot("ember", { soul: "s" }), event], there: [bot("ember", { soul: "s" })], bots: { ember: { soul: "s" } },
+    onCall: (method, route) => method === "PUT" && route === "/api/cloud-send/kind" ? reply(409, body) : null });
+  const move = refusing({ error, final: true });
+  const final = await createCloudSend(move.deps).send({ reason: "move", final: true });
+  assert.deepEqual(final.result.failed, [{ key: "app-event:e1", kind: "app-event", label: "Reply to email", error: `My Cloud said: ${error}`, final: true }]);
+  assert.ok(!move.calls.some((call) => call.startsWith("HERE DELETE")), "this computer did not let go of it");
+  const busy = refusing({ error: "busy" });
+  assert.equal((await createCloudSend(busy.deps).send({ reason: "move", final: true })).result.failed[0].final, undefined, "a refusal that may pass is tried again");
+});
+
 test("what a move carries last is never taken for removed on My Cloud, so a routine changed here before the final pass still goes", async () => {
   // Seen in the real app on Oct 22: after a plain move, cloud-send.json had every routine and webhook it had just carried
   // as "removed", because the pass's closing plan read My Cloud before the automations went.
@@ -423,4 +437,30 @@ test("while the chats go, the move's progress counts chats only: the automations
   assert.ok(counted.length > 0, "the chats are counted as they go");
   assert.ok(counted.every((progress) => progress.total === 2 && progress.done <= 2), `every count is of the 2 chats: ${JSON.stringify(counted)}`);
   assert.deepEqual(counted.at(-1), { done: 2, total: 2 });
+});
+
+test("a check that finds things missing names, for what may stay behind, each short chat's bot and every bot and room by name", async () => {
+  // Seen on a customer's PC: the check found things missing pass after pass, and only this computer's log said what.
+  const manifest = (side) => ({ v: 1, appVersion: "0.1.140", items: [bot("b1", { soul: "s" }), bot("b2", { soul: "s" })], memory: [], journal: [], learned: [], forgotten: [], teams: [],
+    rooms: [{ id: "r1", name: "Launch room", members: ["b1"], threads: ["t-r1"] }], connections: [],
+    conversations: [{ threadId: "t-b1", bot: "b1", rows: 1, newest: "t-b1-1", settings: {} }, { threadId: "t-b2", bot: "b2", rows: 1, newest: "t-b2-1", settings: {} }],
+    attachments: side === "here" ? ["0b6c9f2e-1d4a.mp3"] : [], files: [], automations: [], runs: [] });
+  const s = sides({ here: [bot("b1", { soul: "s" }), bot("b2", { soul: "s" })], there: [bot("b1", { soul: "s" }), bot("b2", { soul: "s" })], onCall: (method, route, body) => {
+    if (route.startsWith("/api/cloud-send/manifest")) return reply(200, { ...manifest("there"), rooms: [{ id: "r1", name: "Launch room", members: ["b1"], threads: ["t-r1"] }] });
+    if (route === "/api/cloud-send/chats/verify") {
+      return reply(200, { v: 1, conversations: body.conversations.map(({ threadId, ids }) => ({ threadId, missing: threadId === "t-b1" ? ids : [], unstamped: 0,
+        path: { holds: true, at: null, leaf: `${threadId}-1`, length: 1 } })) });
+    }
+    if (route === "/api/cloud-send/chats/attachments") return reply(200, { missing: body.names });
+    if (route === "/api/cloud-send/verify-secrets") return reply(200, { v: 1, secrets: {} });
+    return null;
+  } });
+  const local = s.deps.local;
+  s.deps.local = async (route, init) => (route === "/api/cloud-send/manifest" ? json(manifest("here")) : local(route, init));
+  s.deps.handoff = async (what) => (what.kind === "verify-secrets" ? { secrets: {} } : {});
+  const report = await createCloudSend(s.deps).check();
+  assert.equal(report.ok, false);
+  assert.deepEqual(report.attachments, ["0b6c9f2e-1d4a.mp3"], "one this computer no longer has is missing pass after pass");
+  assert.deepEqual(report.names, { b1: "b1", b2: "b2", "room:r1": "Launch room" });
+  assert.deepEqual(report.owners, { "t-b1": "b1" }, "only the chats found short");
 });

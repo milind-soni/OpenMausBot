@@ -2,6 +2,8 @@
 // 128 ("Invalid value for 'tools': maximum number of items is 128."). Under a limit every MCP server of a turn lists at
 // most its share; the engine's own tools are never trimmed, and a server still answers a call to a tool it left out.
 
+import { CHAT_TOOL_LIMIT } from "../shared/tool-budget.ts";
+
 /** The most tools one MCP server lists for this turn, in the environment of each server the turn hands an engine. */
 export const TOOL_LIMIT_ENV = "OMB_TOOL_LIMIT";
 /** The same on OpenMausBot's own MCP endpoints, reached over HTTP. */
@@ -115,4 +117,22 @@ export function retryUnderToolLimit(error: unknown, turn: {
 /** What a limit leaves the MCP servers once the engine's own tools are counted. */
 export function mcpToolBudget(limit: number | undefined, engineTools: number): number | undefined {
   return limit === undefined ? undefined : Math.max(0, limit - engineTools);
+}
+
+/** Providers whose API takes any number of tools. Venice serves its models through vLLM, which sets no count, and its
+ * chat completions reference names none (https://docs.venice.ai/api-reference/endpoint/chat/completions, read 2026-11-06). */
+const UNCOUNTED_HOSTS = /(?:^|\.)venice\.ai$/;
+
+/** The most tools one Chat Completions request to `apiUrl` carries for `model`: the limit a refusal taught, else the
+ * provider's own, else the common 128. Null when the provider sets none. */
+export function chatToolLimitFor(apiUrl: string, model: string): number | null {
+  const learned = learnedToolCountLimit(chatToolLimitKey(apiUrl, model));
+  if (learned !== undefined) return learned;
+  let host = "";
+  try { host = new URL(apiUrl).hostname.toLowerCase(); } catch {}
+  return UNCOUNTED_HOSTS.test(host) ? null : CHAT_TOOL_LIMIT;
+}
+
+export function chatToolLimitKey(apiUrl: string, model: string): string {
+  return `chat ${apiUrl} ${model}`;
 }

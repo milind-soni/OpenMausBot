@@ -16,6 +16,11 @@ import type { WebhookManager } from "./webhooks.ts";
 export const MOVED_REFUSAL = "This bot lives on My Cloud now.";
 /** Why a frozen copy refuses, naming the server of the person's own its bots moved to (`place`), else My Cloud. */
 export const movedRefusal = (place: string | null): string => (place ? `This bot lives on ${place} now.` : MOVED_REFUSAL);
+/** What a frozen copy answers a phone still paired with this computer: where its bots went, and, after a move to My
+ * Cloud, the workspace of this computer's own (This Mac or This PC) that the same pairing reaches once it is open. */
+export const phoneMovedRefusal = (place: string | null, platform: NodeJS.Platform = process.platform): string => place
+  ? `This computer's bots moved to ${place}. Open ${place} from your phone instead.`
+  : `This computer's bots moved to My Cloud. Open ${platform === "darwin" ? "This Mac" : "This PC"} in the app on this computer to use it from your phone, or open My Cloud.`;
 /** The one page a frozen copy serves: the desktop app's screen while My Cloud can't be opened (electron/home-window.mjs). */
 export const HOME_SCREEN = "/home";
 /** The desktop window's own rail of places (electron/chrome-rail.mjs): this app's page, beside whichever place is open. */
@@ -25,7 +30,8 @@ const FILE = /\.[A-Za-z0-9]+$/u;
 export const ENDED_REFUSAL = "My Cloud has ended. It is open only so you can take your things home.";
 
 /** What a frozen server still changes: the freeze itself, the move's reads and lets-go, signing in and out, the backup
- * that takes things home, the Admin's signed routes, Files and the computers lent to it. */
+ * that takes things home, the Admin's signed routes, Files and the computers lent to it. (The lent screen lease has its
+ * own exact exemption in refuses().) */
 const STILL_CHANGES = /^\/api\/(?:move\/|cloud-send\/|auth\/|workspace-backup\/|cloud\/|sync\/|shared-computers\/)/u;
 const READS = new Set(["GET", "HEAD", "OPTIONS"]);
 /** What a frozen copy keeps once its workspace is deleted: the marker, this server's identity, Files, downloaded tools
@@ -105,6 +111,10 @@ export function createMoveFreeze({ dataDir, exportOnly = false }: { dataDir: str
     },
     /** Why a frozen server refuses this request, or null when it takes it. */
     refuses(method: string, path: string): string | null {
+      // A lent computer keeps taking its own screen lease while frozen by a move: without it, every screen
+      // call from the home the bots moved to dies on this 409 while files and the terminal work. Only that one POST,
+      // and never on an ended Cloud's copy — that Cloud runs no bots, so nothing should be asking for a lease.
+      if (frozen && !exportOnly && method.toUpperCase() === "POST" && path === "/api/desktop/shared-computer-control") return null;
       return frozen && !READS.has(method.toUpperCase()) && !STILL_CHANGES.test(path) ? refusal() : null;
     },
     freeze(cloud: string | null, named: string | null = null): void {

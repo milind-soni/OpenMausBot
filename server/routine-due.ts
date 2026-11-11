@@ -1,6 +1,7 @@
 // When routines next need this machine: the desktop's keep-awake (`wakeHold`) and a Cloud home's sleep check
 // (server/cloud-power.ts). Pure over RoutineManager's routines and runs.
 import type { Routine, RoutineRun } from "./routines.ts";
+import { activeMs } from "./routine-waits.ts";
 
 type Due = Pick<Routine, "enabled" | "nextRunAt" | "checks" | "wakeAt" | "checkedAt">;
 type Run = Pick<RoutineRun, "status" | "retryAt">;
@@ -39,4 +40,23 @@ export const activeRunsOf = (runs: readonly Run[], now: number) => runs.some((ru
 export function nextDueOf(routines: readonly Due[], runs: readonly Run[], now: number): number | null {
   const due = dueTimes(routines, runs, now, cloudChecksDue(now));
   return due.length ? Math.min(...due) : null;
+}
+
+type Started = Run & Pick<RoutineRun, "startedAt" | "timeoutMinutes" | "waitedMs" | "asked">;
+/** When this process's scheduler next has work: a routine's next run, or its checks once `checksFrom` has passed; a queued
+ * run (now, or its retry); a started run reaching its time limit. `skip` leaves out routines whose target is gone. */
+export function schedulerDueOf<R extends Due>(routines: readonly R[], runs: readonly Started[], now: number, checksFrom: number, skip: (routine: R) => boolean = () => false): number | null {
+  let at = Infinity;
+  for (const routine of routines) {
+    if (!routine.enabled || skip(routine)) continue;
+    const next = Math.min(routine.nextRunAt ?? Infinity, routine.checks ? routine.wakeAt ?? Infinity : Infinity);
+    if (next !== Infinity) at = Math.min(at, routine.checks ? Math.max(next, checksFrom) : next);
+  }
+  for (const run of runs) {
+    if (run.status === "queued") at = Math.min(at, run.retryAt ?? now);
+    else if ((run.status === "running" || run.status === "waiting") && run.startedAt != null && run.timeoutMinutes != null) {
+      at = Math.min(at, now + Math.max(0, run.timeoutMinutes * 60_000 - activeMs(run, now)));
+    }
+  }
+  return at === Infinity ? null : at;
 }

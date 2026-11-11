@@ -1,5 +1,6 @@
 import type { RuntimeEvent } from "../../shared/runtime-events";
 import type { InspectorEntry, NativeRecord } from "../../shared/inspector";
+import { usdText } from "@/lib/usage";
 export type { InspectorEntry, InspectorPage, NativeRecord } from "../../shared/inspector";
 
 interface FoldPreview {
@@ -64,19 +65,19 @@ export function summarizeRuntime(e: RuntimeEvent): { summary: string; tone: Insp
     case "turn.completed": {
       const parts = [e.ok ? "turn ok" : "turn failed"];
       if (e.stopReason) parts.push(e.stopReason);
-      if (typeof e.cost === "number") parts.push(`$${e.cost.toFixed(4)}`);
+      if (typeof e.cost === "number") parts.push(usdText(e.cost, 4));
       if (e.denials?.length) parts.push(`${e.denials.length} denied`);
       return { summary: parts.join(" · "), tone: e.ok ? "boundary" : "error" };
     }
     case "turn.wait_started":
       return {
-        summary: `waiting for computer — ${e.holder ? `${e.holder.name}${e.holder.task ? ` (${e.holder.task})` : ""}` : "holder unknown"}`,
+        summary: `waiting for ${e.resource.startsWith("browser:") ? "browser" : "computer"} — ${e.holder ? `${e.holder.name}${e.holder.task ? ` (${e.holder.task})` : ""}` : "holder unknown"}`,
         tone: "plain",
       };
     case "turn.wait_ended": {
       const seconds = Math.round(e.waitedMs / 1000);
       const waited = e.waitedMs < 1_000 ? "under a second" : `${seconds}s`;
-      if (e.outcome === "acquired") return { summary: `computer acquired after ${waited}`, tone: "boundary" };
+      if (e.outcome === "acquired") return { summary: `${e.resource.startsWith("browser:") ? "browser" : "computer"} acquired after ${waited}`, tone: "boundary" };
       if (e.outcome === "parked") return { summary: `computer wait parked after ${waited}`, tone: "plain" };
       if (e.outcome === "gave_up") return { summary: `computer wait gave up after ${waited}`, tone: "error" };
       return { summary: `computer wait stopped after ${waited}`, tone: "plain" };

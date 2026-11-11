@@ -1,6 +1,6 @@
 // Dev-only gallery of bringing the bots together on a server of the person's own, served at /one-home-preview.html; not in
 // the packaged app. It mounts the real rail and account line over fake bridges, with no server behind them.
-// ?state=menu|moving|failing|suggest&skin=midnight|daylight&lang=de
+// ?state=menu|moving|failing|cloud-failing|suggest&skin=midnight|daylight&lang=de
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import type { CloudSendNotice } from "../electron/cloud-send.mjs";
@@ -8,7 +8,7 @@ import type { RailState } from "../electron/cloud-rail.mjs";
 import { PlacesRail } from "@/components/PlacesRail";
 import { SidebarFooter } from "@/components/SidebarFooter";
 import { TwoPlacesCard } from "@/components/TwoPlacesCard";
-import { setLocale } from "@/lib/i18n";
+import { loadLocale } from "@/lib/i18n";
 import { applySkinChoice, SKIN_IDS, type SkinId } from "@/lib/skins";
 import { initialState, StoreContext, type AppState } from "@/state/store";
 import "./styles.css";
@@ -17,13 +17,15 @@ const params = new URLSearchParams(location.search);
 const stateName = params.get("state") ?? "menu";
 const skin = params.get("skin") ?? "midnight";
 applySkinChoice(SKIN_IDS.includes(skin as SkinId) ? (skin as SkinId) : "midnight");
-setLocale(params.get("lang") ?? "en");
+await loadLocale(params.get("lang") ?? "en");
 
 const rail: RailState = { places: [
   { id: "local", name: "This computer", color: null, kind: "computer", opens: true, active: true, paint: { swatch: null } },
   { id: "garage", name: "Garage server", color: "teal", kind: "server", opens: true, makeHome: true, paint: { swatch: "green" } },
 ], add: { cloud: true, link: true, address: false } };
-const move = stateName === "failing"
+// cloud-failing: the move to My Cloud whose check keeps finding things missing, as main says it (one-home.mjs INCOMPLETE).
+const cloudFailing = { phase: "copy" as const, failing: { error: "Some things didn't reach My Cloud yet. It tries again by itself, and if they still can't go, the rest moves without them and you'll see what stayed here." } };
+const move = stateName === "cloud-failing" ? cloudFailing : stateName === "failing"
   ? { phase: "copy" as const, place: "Garage server", failing: { error: "This app isn't signed in to Garage server. Open Garage server in this app, then try again." } }
   : stateName === "moving" ? { phase: "copy" as const, place: "Garage server", chats: { done: 14, total: 31 } } : null;
 const notice = { ready: true, bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: 0, signature: "", dismissed: false, running: false, last: null, whole: null,

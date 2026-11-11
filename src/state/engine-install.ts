@@ -14,6 +14,22 @@ export interface EngineInstall {
   appCopy?: boolean;
 }
 
+type Platform = NonNullable<EngineInstall["platform"]>;
+
+function hostPlatform(): Platform {
+  const platform = window.ogb?.platform;
+  if (platform === "darwin" || platform === "win32" || platform === "linux") return platform;
+  const userAgent = navigator.userAgent;
+  if (userAgent.includes("Mac")) return "darwin";
+  if (userAgent.includes("Win")) return "win32";
+  return "linux";
+}
+
+/** The command that installs this engine where the server runs, falling back to this computer's platform. */
+export function installCommandFor(install: EngineInstall | undefined): string | null {
+  return install?.command?.[install.platform ?? hostPlatform()] ?? null;
+}
+
 // Engines an install switched to the app's own copy because the copy their CLI found doesn't start. The line saying so
 // outlives the setup panel that showed it (the engine turns Ready), until the person dismisses it or leaves Settings.
 let switched: ReadonlySet<string> = new Set();

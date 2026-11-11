@@ -23,6 +23,18 @@ describe("composerCanSteerQueuedMessages", () => {
   });
 });
 
+describe("the queued line", () => {
+  const capacity = [{ queueId: "q1", text: "later", reason: "capacity" as const }];
+  it("says a free slot elsewhere, and on Starter names the plan and the way to a bigger one", () => {
+    const line = (props: object) => renderToStaticMarkup(createElement(QueuedComposerMessages, { items: capacity, onCancel: () => {}, ...props }));
+    expect(line({})).toContain("Starts when this bot has a free thread slot.");
+    const starter = line({ oneThreadPerBot: true, onSeePlans: () => {} });
+    expect(starter).toContain("Starter runs one thread at a time per bot");
+    expect(starter).toContain("A bigger plan runs more.");
+    expect(starter).toContain("See plans");
+  });
+});
+
 describe("double-Enter steer gesture", () => {
   it("opens the window only when a chip arrives on a busy steer-capable thread", () => {
     const now = 1_000_000;

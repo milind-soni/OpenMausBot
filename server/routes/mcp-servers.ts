@@ -1,63 +1,58 @@
-import type { ChatAppsMcp } from "../chat-apps-mcp.ts";
-import type { CloudHomeConfig } from "../cloud-home.ts";
-import type { AppConfig } from "../config.ts";
+import { userError, userErrorFields } from "../user-errors.ts";
 import { hostedWorkspaceConfiguration } from "../enterprise.ts";
-import type { TeamConnectionsHost } from "../host/team-connections-host.ts";
-import { McpOAuthError, McpSignInError, mcpCallbackOrigin, withMcpSignIn, type McpOAuthManager } from "../mcp-oauth.ts";
-import { brokeredServer, type BrokerPath } from "../bot-box/broker-probe.ts";
-import { probeMcpServer, type McpProbeOptions, type McpProbeResult } from "../mcp-probe.ts";
-import { MAX_MCP_SERVERS, isRemoteMcpServer, mcpServerBody, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer, type McpRunsOn, type StoredMcpServer, type StoredRemoteMcpServer } from "../mcp-registry.ts";
+import { runsElsewhere, type McpConfig, type McpConfigDeps, type McpConfigResult } from "../host/mcp-config.ts";
+import { McpOAuthError, McpSignInError, mcpCallbackOrigin } from "../mcp-oauth.ts";
+import { isRemoteMcpServer, mcpServerBody, mcpServerNotFound, mcpServerServes, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "../mcp-registry.ts";
+import type { McpProbeResult } from "../mcp-probe.ts";
+import { isVaultItemId } from "../vault/mcp-keys.ts";
 import { personKey } from "../person-key.ts";
-import { postizKeyHeaders } from "../postiz/connection.ts";
+import type { RequestAuth } from "../request-auth.ts";
+import { toolBudgetOf } from "../tool-budgets.ts";
 import { isLoopbackHost, isProxied, provesSameOrigin, requestOrigin } from "../request-auth.ts";
-import type { SessionRegistry } from "../sessions.ts";
-import type { BusyFlag } from "./config.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+import type { json } from "../harness/http.ts";
 import { sessionMember } from "./team-phone.ts";
 
-export interface McpServerRouteDeps {
-  cfg: Pick<AppConfig, "mcpServers" | "postiz">;
-  sessions: Pick<SessionRegistry, "isLive">;
-  mcpOAuth: McpOAuthManager;
-  teamConnections: Pick<TeamConnectionsHost, "personMcp" | "people">;
-  cloudHome: Pick<CloudHomeConfig, "publicOrigin"> | null;
-  fallbackPublicUrl: string | null;
-  mcpConfigBusy: BusyFlag;
+type ListedMcpServer = { name: string; enabled: boolean; bot?: string; offFor?: readonly string[] };
+
+// Security: built field by field, never spread. The settings list carries commands, arguments and addresses that can
+// hold secrets, so it stays closed to phones and this is what they get instead.
+function botMcpServers(listed: readonly ListedMcpServer[], bot: { id: string; mcpServers?: readonly string[] | null }) {
+  return listed.filter((server) => mcpServerServes(server, bot.id)).map((server) => ({
+    name: server.name,
+    enabled: server.enabled,
+    on: server.enabled && (!bot.mcpServers || bot.mcpServers.includes(server.name)),
+    ...(server.offFor?.includes(bot.id) ? { offFor: true as const } : {}),
+  }));
+}
+
+/** The Vault items a server arriving in a move may read its `vault:<id>` keys from.
+ * Security: only where whoever may change servers owns every Vault item; on a Team Cloud or a hosted workspace an admin
+ * could otherwise point a server of theirs at a member's saved secret. */
+const vaultKeysOf = (body: unknown, ownsVault: boolean): string[] | undefined => {
+  const keys = (body as { vaultKeys?: unknown } | null)?.vaultKeys;
+  return ownsVault && Array.isArray(keys) ? keys.filter(isVaultItemId) : undefined;
+};
+
+export interface McpServerRouteDeps extends Pick<McpConfigDeps, "cfg" | "sessions" | "mcpOAuth" | "teamConnections" | "cloudHome" | "fallbackPublicUrl" | "savedCustomDomain" | "appCatalog"> {
+  config: McpConfig;
+  bot(id: string): { id: string; mcpServers?: readonly string[] | null } | null;
   /** Secrets as booleans, sign-in state attached. */
-  mcpServerResponse(): Record<string, unknown>;
-  mcpPolicyRefusal(name: string, server: object): string | undefined;
-  persistMcpServers(next: Record<string, unknown>): void;
-  savedCustomDomain(): string | null;
-  appCatalog?: Pick<ChatAppsMcp, "probeOptions" | "serverChanged" | "forgetServer"> & Partial<Pick<ChatAppsMcp, "hasApps">>;
-  /** A Team Cloud: each member's own key and sign-in for a removed server go with it. */
-  forgetPeople?(name: string): void;
-  /** Whether each command server starts for each bot: checked again when one is added, changed or turned on. */
-  health?: { changed(name: string): void };
-  /** A server was added or removed on purpose: a Cloud home's routines wait while every connection is gone. */
-  connectionsChanged?(change: "added" | "removed"): void;
-  /** How bots' turns reach a URL server here: through the credential broker where turns are boxed (null: directly). */
-  botsPath?(): BrokerPath | null;
+  mcpServerResponse(): { servers: readonly ListedMcpServer[] };
+  /** Whose lent computers this request may test a server on; null: nobody's. */
+  lender?(auth: RequestAuth): string | null;
+  /** A server the person adds that needs their own computer, marked as running on the one of theirs lent now. */
+  place?(server: StoredMcpServer, auth: RequestAuth): Promise<{ ok: true; server: StoredMcpServer } | { ok: false; error: string }>;
+  /** Whoever may change servers here owns every Vault item (not a Team Cloud or a hosted workspace), so a server arriving
+   * in a move may be given the items its `vault:<id>` keys name. */
+  ownsVault?(): boolean;
+  /** Who added a server and what Test found, for the team's connections (server/host/connection-health-host.ts). */
+  connectionHealth?: {
+    added(kind: "mcp", name: string, email: string | null): void;
+    removed(kind: "mcp", name: string): void;
+    tested(name: string, result: McpProbeResult): Promise<void>;
+  };
 }
-
-/** Where turns are boxed, a URL server is tested the way bots reach it: through the broker. If that fails but the server
- * answers directly, the fault is ours, never the person's settings, and the test says so instead of "Connected". */
-async function probeAsBots(path: BrokerPath, name: string, target: StoredRemoteMcpServer, signal: AbortSignal, options: McpProbeOptions): Promise<McpProbeResult> {
-  const brokered = brokeredServer(path, name, target);
-  let result: McpProbeResult;
-  try {
-    result = await probeMcpServer(target, undefined, signal, { ...options, via: { url: brokered.url, fetch: brokered.fetch } });
-  } finally {
-    await brokered.done();
-  }
-  if (result.ok || result.auth === "required" || signal.aborted) return result;
-  const direct = await probeMcpServer(target, undefined, signal);
-  return direct.ok
-    ? { ok: false, reason: "unreachable", error: `Your bots can't reach this server: ${result.error.replace(/ Check [^.]*\.$/, "")} It answers when tested directly, so the fault is on our side, not in your settings: tell us with @devs in any chat.` }
-    : result;
-}
-
-/** A server of another computer's: its program, files or address are there, so it is never started or signed in to here. */
-const runsElsewhere = (runsOn: McpRunsOn) => `This server runs on ${runsOn.label}, so it isn't started here.`;
 
 export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
   const withServerDetails = <T,>(body: T): T => {
@@ -75,65 +70,52 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
     };
   };
   const {
-    cfg, sessions, mcpOAuth, cloudHome: CLOUD_HOME, fallbackPublicUrl: FALLBACK_PUBLIC_URL, mcpConfigBusy,
-    mcpServerResponse, mcpPolicyRefusal, persistMcpServers, savedCustomDomain, appCatalog, forgetPeople, health,
+    cfg, sessions, mcpOAuth, cloudHome: CLOUD_HOME, fallbackPublicUrl: FALLBACK_PUBLIC_URL,
+    mcpServerResponse, savedCustomDomain, config,
   } = deps;
-  const MAX_CONCURRENT_MCP_PROBES = 2;
-  const personalHeaderRefusal = (name: string, server: StoredMcpServer) =>
-    deps.teamConnections.personMcp().includes(name) && isRemoteMcpServer(server) && Object.values(server.headers).some((value) => value !== "")
-      ? "Personal MCP header values cannot be saved in shared configuration. Save your key in your personal connection."
-      : null;
-  let mcpProbesInFlight = 0;
+  const ownsVault = () => deps.ownsVault?.() === true;
+  const answer = (res: Parameters<typeof json>[0], send: typeof json, result: McpConfigResult) => "body" in result
+    ? send(res, result.status, withServerDetails(result.body))
+    : send(res, result.status, { error: result.error, ...userErrorFields(result), ...(result.code ? { code: result.code } : {}) });
   return async ({ req, res, path, method, auth, json, readBody }) => {
     if (method === "GET" && path === "/api/mcp/servers") {
       return json(res, 200, withServerDetails(mcpServerResponse()));
     }
 
+    const budgetOf = /^\/api\/bots\/([\w-]+)\/tool-budget$/.exec(path);
+    if (method === "GET" && budgetOf) {
+      if (!deps.bot(budgetOf[1]!)) return json(res, 404, userError("serverError.bot.missing"));
+      return json(res, 200, { budget: toolBudgetOf(budgetOf[1]!) ?? null });
+    }
+
+    const ofBot = /^\/api\/bots\/([\w-]+)\/mcp-servers$/.exec(path);
+    if (method === "GET" && ofBot) {
+      const bot = deps.bot(ofBot[1]!);
+      if (!bot) return json(res, 404, userError("serverError.bot.missing"));
+      return json(res, 200, { servers: botMcpServers(mcpServerResponse().servers, bot) });
+    }
+
     const mcpTest = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})\/test$/.exec(path);
     if (method === "POST" && mcpTest) {
-      const raw = cfg.mcpServers?.[mcpTest[1]];
-      if (raw === undefined) return json(res, 404, { error: "MCP server not found." });
-      const parsed = parseStoredMcpServer(mcpTest[1], raw);
-      if (!parsed.ok) return json(res, 400, { error: parsed.error });
-      if (parsed.server.runsOn) return json(res, 409, { error: runsElsewhere(parsed.server.runsOn) });
-      if (mcpProbesInFlight >= MAX_CONCURRENT_MCP_PROBES) {
-        return json(res, 429, { error: "Two MCP connection tests are already running." });
-      }
       const controller = new AbortController();
       const disconnect = () => {
         if (!res.writableEnded) controller.abort();
       };
       res.once("close", disconnect);
-      mcpProbesInFlight += 1;
       try {
-        const name = mcpTest[1];
-        let target = parsed.server;
-        let oauth = mcpOAuth;
-        const personal = deps.teamConnections.personMcp().includes(name);
-        if (personal && isRemoteMcpServer(target) && !target.oauth && Object.keys(target.headers).length > 0) {
-          const member = auth.kind === "session" ? sessionMember(auth.session) : null;
-          if (!member) return json(res, 403, { error: "Sign in to the team to test your own connection." });
-          const person = personKey({ id: "", email: member.member.email });
-          oauth = deps.teamConnections.people.oauth(person);
-          const key = deps.teamConnections.people.key(person, name, target.url);
-          target = { ...target, headers: key ? { [key.header]: key.value } : {} };
-        } else if (!personal && isRemoteMcpServer(target)) {
-          target = { ...target, headers: { ...target.headers, ...postizKeyHeaders(cfg.postiz, name, target) } };
-        }
-        if (isRemoteMcpServer(target) && oauth.authState(name, target.url) === "signed-in") {
-          const signedIn = (await withMcpSignIn({ [name]: target }, oauth))[name];
-          if (signedIn) target = { ...signedIn, enabled: target.enabled } as typeof target;
-        }
-        const options = personal ? {} : appCatalog?.probeOptions(name, parsed.server) ?? {};
-        const viaBots = isRemoteMcpServer(target) ? deps.botsPath?.() ?? null : null;
-        const result = viaBots && isRemoteMcpServer(target)
-          ? await probeAsBots(viaBots, name, target, controller.signal, options)
-          : await probeMcpServer(target, undefined, controller.signal, options);
-        if (!result.ok && result.auth === "required" && isRemoteMcpServer(target)) oauth.markNeedsSignIn(name, target.url);
-        return json(res, 200, result);
+        const name = mcpTest[1]!;
+        const result = await config.test(name, {
+          signal: controller.signal,
+          person: (url) => {
+            const member = auth.kind === "session" ? sessionMember(auth.session) : null;
+            return member ? deps.teamConnections.people.connection(personKey({ id: "", email: member.member.email }), name, url) : null;
+          },
+          lender: deps.lender?.(auth) ?? null,
+        });
+        if ("body" in result && result.status === 200) void deps.connectionHealth?.tested(name, result.body as McpProbeResult).catch(() => {});
+        return answer(res, json, result);
       } finally {
         res.off("close", disconnect);
-        mcpProbesInFlight -= 1;
       }
     }
 
@@ -142,7 +124,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       const [, name, action, flowId] = mcpSignIn;
       const raw = cfg.mcpServers?.[name!];
       const parsed = raw === undefined ? null : parseStoredMcpServer(name!, raw);
-      if (!parsed?.ok) return json(res, 404, { error: "MCP server not found." });
+      if (!parsed?.ok) return json(res, 404, { error: mcpServerNotFound(name!) });
       if (!isRemoteMcpServer(parsed.server)) return json(res, 400, { error: "Only servers reached by URL can be signed in to." });
       if (parsed.server.runsOn) return json(res, 409, { error: runsElsewhere(parsed.server.runsOn) });
       const url = parsed.server.url;
@@ -196,30 +178,15 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
-      if (mcpConfigBusy.get()) return json(res, 409, { error: "MCP servers are already being updated." });
-      mcpConfigBusy.set(true);
-      try {
-        const body = await readBody(req);
-        const name = typeof body?.name === "string" ? body.name : "";
-        const current = cfg.mcpServers ?? {};
-        if (Object.hasOwn(current, name)) return json(res, 409, { error: "An MCP server with that name already exists." });
-        if (Object.keys(current).length >= MAX_MCP_SERVERS) {
-          return json(res, 400, { error: `You can add at most ${MAX_MCP_SERVERS} MCP servers.` });
-        }
-        const parsed = parseMcpServerMutation(name, mcpServerBody(body));
-        if (!parsed.ok) return json(res, 400, { error: parsed.error });
-        const personalRefusal = personalHeaderRefusal(name, parsed.server);
-        if (personalRefusal) return json(res, 400, { error: personalRefusal });
-        const refusal = mcpPolicyRefusal(name, parsed.server);
-        if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
-        persistMcpServers({ ...current, [name]: parsed.server });
-        appCatalog?.serverChanged(name);
-        health?.changed(name);
-        deps.connectionsChanged?.("added");
-        return json(res, 201, withServerDetails(mcpServerResponse()));
-      } finally {
-        mcpConfigBusy.set(false);
-      }
+      const body = await readBody(req);
+      const name = typeof body?.name === "string" ? body.name : "";
+      const parsed = parseMcpServerMutation(name, mcpServerBody(body));
+      if (!parsed.ok) return json(res, 400, { error: parsed.error });
+      const placed = deps.place ? await deps.place(parsed.server, auth) : { ok: true as const, server: parsed.server };
+      if (!placed.ok) return json(res, 409, { error: placed.error });
+      const added = config.add(name, placed.server, vaultKeysOf(body, ownsVault()));
+      if (added.status < 300) deps.connectionHealth?.added("mcp", name, auth.kind === "session" ? auth.session.email ?? null : null);
+      return answer(res, json, added);
     }
 
     // The {"mcpServers": {...}} block other agent tools write; imported servers stay disabled until enabled.
@@ -227,36 +194,23 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
-      if (mcpConfigBusy.get()) return json(res, 409, { error: "MCP servers are already being updated." });
-      mcpConfigBusy.set(true);
-      try {
+      return answer(res, json, await config.addMany(async () => {
         const body = await readBody(req);
         const text = typeof body?.json === "string" ? body.json : "";
         if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
-          return json(res, 401, { error: "unauthorized: this session has expired or was revoked" });
+          return { status: 401, error: "unauthorized: this session has expired or was revoked" };
         }
-        if (!text.trim()) return json(res, 400, { error: "Paste the JSON block first." });
+        if (!text.trim()) return { status: 400, error: "Paste the JSON block first." };
         const parsed = parseMcpServersImport(text);
-        if (!parsed.ok) return json(res, 400, { error: parsed.error });
-        const current = cfg.mcpServers ?? {};
-        const names = Object.keys(parsed.servers);
-        const taken = names.filter((name) => Object.hasOwn(current, name));
-        if (taken.length) {
-          return json(res, 409, { error: `Already added: ${taken.join(", ")}. Remove or rename ${taken.length === 1 ? "it" : "them"} first.` });
+        if (!parsed.ok) return { status: 400, error: parsed.error };
+        const servers: Record<string, StoredMcpServer> = {};
+        for (const [name, server] of Object.entries(parsed.servers)) {
+          const placed = deps.place ? await deps.place(server, auth) : { ok: true as const, server };
+          if (!placed.ok) return { status: 409, error: placed.error };
+          servers[name] = placed.server;
         }
-        if (Object.keys(current).length + names.length > MAX_MCP_SERVERS) {
-          return json(res, 400, { error: `You can add at most ${MAX_MCP_SERVERS} MCP servers.` });
-        }
-        const personalRefusal = names.map((name) => personalHeaderRefusal(name, parsed.servers[name]!)).find(Boolean);
-        if (personalRefusal) return json(res, 400, { error: personalRefusal });
-        const refused = names.filter(name => mcpPolicyRefusal(name, parsed.servers[name] as object));
-        if (refused.length) return json(res, 403, { error: `${mcpPolicyRefusal(refused[0]!, parsed.servers[refused[0]!] as object)} Not approved: ${refused.join(", ")}.`, code: "managed_policy" });
-        persistMcpServers({ ...current, ...parsed.servers });
-        deps.connectionsChanged?.("added");
-        return json(res, 201, { ...withServerDetails(mcpServerResponse()), added: names });
-      } finally {
-        mcpConfigBusy.set(false);
-      }
+        return { servers };
+      }));
     }
 
     const mcpServerRoute = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})$/.exec(path);
@@ -264,60 +218,28 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       if (method !== "DELETE" && !String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
-      if (mcpConfigBusy.get()) return json(res, 409, { error: "MCP servers are already being updated." });
-      mcpConfigBusy.set(true);
-      try {
-        const name = mcpServerRoute[1];
-        const current = cfg.mcpServers ?? {};
-        if (!Object.hasOwn(current, name)) return json(res, 404, { error: "MCP server not found." });
-        if (method === "DELETE") {
-          const next = { ...current };
-          delete next[name];
-          persistMcpServers(next);
-          mcpOAuth.forget(name);
-          forgetPeople?.(name);
-          appCatalog?.forgetServer(name);
-          deps.connectionsChanged?.("removed");
-          return json(res, 200, withServerDetails(mcpServerResponse()));
-        }
-
-        const existing = parseStoredMcpServer(name, current[name]);
-        if (!existing.ok) return json(res, 400, { error: existing.error });
-        const body = await readBody(req);
-        if (method === "PATCH") {
-          const key = body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === 1 ? Object.keys(body)[0] : undefined;
-          if ((key !== "enabled" && key !== "apps") || typeof body[key] !== "boolean") {
-            return json(res, 400, { error: "Only an enabled or apps boolean can be changed here." });
-          }
-          const { apps: _apps, ...rest } = existing.server;
-          persistMcpServers({ ...current, [name]: key === "enabled" ? { ...existing.server, enabled: body.enabled } : { ...rest, ...(body.apps ? {} : { apps: false }) } });
-          if (body[key] === true) appCatalog?.serverChanged(name);
-          if (key === "enabled") health?.changed(name);
-          return json(res, 200, withServerDetails(mcpServerResponse()));
-        }
-
-        const parsed = parseMcpServerMutation(name, body, existing.server);
-        if (!parsed.ok) return json(res, 400, { error: parsed.error });
-        const personalRefusal = personalHeaderRefusal(name, parsed.server);
-        if (personalRefusal) return json(res, 400, { error: personalRefusal });
-        const refusal = mcpPolicyRefusal(name, parsed.server);
-        if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
-        persistMcpServers({ ...current, [name]: parsed.server });
-        appCatalog?.forgetServer(name);
-        appCatalog?.serverChanged(name);
-        health?.changed(name);
-        // A sign-in belongs to one address: a token never follows the entry elsewhere.
-        const before = isRemoteMcpServer(existing.server) ? existing.server.url : null;
-        const after = isRemoteMcpServer(parsed.server) ? parsed.server.url : null;
-        // ...and to one sign-in app with its scopes; a new secret for the same app keeps it.
-        const app = (server: typeof existing.server) => isRemoteMcpServer(server) && server.oauth
-          ? JSON.stringify([server.oauth.clientId, server.oauth.scopes ?? []]) : null;
-        if (before !== after || app(existing.server) !== app(parsed.server)
-          || (after && mcpOAuth.authState(name, after) === "needs-sign-in")) mcpOAuth.forget(name);
-        return json(res, 200, withServerDetails(mcpServerResponse()));
-      } finally {
-        mcpConfigBusy.set(false);
+      const name = mcpServerRoute[1]!;
+      if (method === "DELETE") {
+        const removed = config.remove(name);
+        if (removed.status < 300) deps.connectionHealth?.removed("mcp", name);
+        return answer(res, json, removed);
       }
+      const body = await readBody(req);
+      const current = cfg.mcpServers ?? {};
+      if (!Object.hasOwn(current, name)) return json(res, 404, { error: mcpServerNotFound(name) });
+      const existing = parseStoredMcpServer(name, current[name]);
+      if (!existing.ok) return json(res, 400, { error: existing.error });
+      if (method === "PATCH") {
+        const key = body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === 1 ? Object.keys(body)[0] : undefined;
+        if ((key !== "enabled" && key !== "apps") || typeof body[key] !== "boolean") {
+          return json(res, 400, { error: "Only an enabled or apps boolean can be changed here." });
+        }
+        return answer(res, json, key === "enabled" ? config.setEnabled(name, body.enabled) : config.setApps(name, body.apps));
+      }
+      const { vaultKeys: _keys, ...fields } = (body ?? {}) as Record<string, unknown>;
+      const parsed = parseMcpServerMutation(name, fields, existing.server);
+      if (!parsed.ok) return json(res, 400, { error: parsed.error });
+      return answer(res, json, config.replace(name, parsed.server, vaultKeysOf(body, ownsVault())));
     }
     return PASS;
   };

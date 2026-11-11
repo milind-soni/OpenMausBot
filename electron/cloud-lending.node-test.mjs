@@ -6,11 +6,21 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { cloudLendingVerdict, createComputerSharing } from "./computer-sharing.mjs";
+import nativeText from "./native-text.cjs";
 import { PERSON_AWAY_SECONDS, personActiveText } from "./lent-screen-presence.mjs";
 
 const ORIGIN = "https://omb-u-fixture.fly.dev";
 const binding = { accountId: "acct_1", origin: ORIGIN };
 const env = { id: "my-cloud", name: "My Cloud", origin: ORIGIN };
+
+test("an empty Cloud grant follows the current native language without changing its English", async t => {
+  const text = nativeText.createNativeText({ saved: "en" });
+  const { sharing } = await lendingFixture(t, { t: text.t });
+  for (const language of ["en", "pt-br"]) {
+    text.set(language);
+    await assert.rejects(sharing.saveCloud(env, { folders: [], screen: false }), { message: text.t("native.lend.chooseCapability") });
+  }
+});
 
 test("the Cloud verdict: same account and machine run, anything else ends or pauses", () => {
   const connected = { status: "connected", accountId: "acct_1", origin: ORIGIN };
@@ -90,6 +100,7 @@ async function lendingFixture(t, options = {}) {
   const sharing = createComputerSharing({
     file: path.join(dir, "profile", "computer-sharing.json"), fetch: home.fetch, environments: () => [options.env ?? env],
     ...(options.reconnect ? { reconnect: options.reconnect } : {}), ...(options.now ? { now: options.now } : {}), ...(options.ownClouds ? { ownClouds: options.ownClouds } : {}),
+    ...(options.t ? { t: options.t } : {}),
     // The maintainer flag is off, as for every Cloud Pro user.
     enabled: async () => { maintainerChecks++; return false; },
     cloud: asked => (typeof cloud === "function" ? cloud(asked) : cloud), home: path.join(dir, "home"),
@@ -140,8 +151,8 @@ test("the terminal is lent only when asked for with exactly true: the bots can t
   await connected(sharing, 2, home);
   assert.equal(home.connects.at(-1).terminal, true);
   home.push({ action: "run_command", command: "echo fixture-terminal" });
-  // On Windows a command starts two PowerShells, which on a fresh CI runner can take longer than the default wait.
-  await until(() => home.results.length === 1, "the command result", 30_000);
+  // On Windows a command starts two PowerShells, whose first start on a fresh CI runner has taken over 30 seconds.
+  await until(() => home.results.length === 1, "the command result", 120_000);
   assert.notEqual(home.results[0].isError, true);
   assert.match(home.results[0].content[0].text, /fixture-terminal/);
   assert.deepEqual(sharing.activity(env.id).map(entry => [entry.action, entry.ok]), [["run_command", true]]);
@@ -289,7 +300,7 @@ test("while the person uses this computer, background screen calls run and one t
   // Listing the tools never touches the screen, so it takes no screen lock.
   assert.notEqual((await run({ action: "computer_tools" })).isError, true);
   assert.deepEqual(leases, []);
-  assert.notEqual((await run({ action: "computer_call", tool_name: "click", arguments: { pid: 42, window_id: 7, element_index: 3 } })).isError, true);
+  assert.notEqual((await run({ action: "computer_call", tool_name: "click", arguments: { pid: 42, window_id: 7, element_token: "s1-e3" } })).isError, true);
   for (const args of [{ x: 5, y: 5 }, { pid: 42, window_id: 7, x: 5, y: 5, delivery_mode: "foreground" }]) {
     const refused = await run({ action: "computer_call", tool_name: "click", arguments: args });
     assert.equal(refused.isError, true);
@@ -349,7 +360,7 @@ test("Pause is instant: the Cloud is told, running work is cancelled, nothing mo
   home.push({ action: "computer_call", tool_name: "click", arguments: {} });
   await delay(300);
   assert.equal((await readFile(driver.calls, "utf8")).trim(), "drag");
-  assert.deepEqual(summaries.at(-1), { lending: [], clouds: ["My Cloud"], using: [], paused: true, terminal: false, busy: null, screen: null });
+  assert.deepEqual(summaries.at(-1), { lending: [], clouds: ["My Cloud"], waiting: [], using: [], paused: true, terminal: false, terminalSwitch: true, busy: null, screen: null });
   assert.equal(sharing.cloudState(env).problem, "paused");
 });
 

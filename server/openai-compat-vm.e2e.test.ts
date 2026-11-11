@@ -100,6 +100,8 @@ beforeAll(async () => {
   upstream = createServer(async (req, res) => {
     res.setHeader("content-type", "application/json");
     if (req.url === "/v1/models") return res.end(JSON.stringify({ data: [{ id: "fixture-model" }] }));
+    // The chat engine asks a local server whether it is Ollama (/api/version); this one is not.
+    if (req.method === "GET") { res.statusCode = 404; return res.end(); }
     let raw = "";
     for await (const chunk of req) raw += chunk;
     const request = JSON.parse(raw || "{}") as ChatRequest;
@@ -147,6 +149,7 @@ beforeAll(async () => {
     env: {
       PATH: [fakebin, dirname(process.execPath), "/usr/bin", "/bin"].join(delimiter),
       HOME: fixtureHome, USERPROFILE: fixtureHome, OMB_DATA_DIR: data,
+      OMB_AGENTS_TOOL_BRIDGE: "0",
       APPDATA: join(fixtureHome, "appdata"), LOCALAPPDATA: join(fixtureHome, "localappdata"),
       TEMP: fixtureHome, TMP: fixtureHome, TMPDIR: fixtureHome,
       OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui,
@@ -163,7 +166,7 @@ beforeAll(async () => {
     try { return (await fetch(base + "/api/health")).ok; } catch { return false; }
   }, Boolean);
   await api("PATCH", "/api/config", { openaiCompat: { key: "fixture-key", url: `http://127.0.0.1:${upstreamPort}/v1`, model: "fixture-model" } });
-  // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Team incidents turn
+  // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Problems to look at turn
   // of its own on Claude: its dump would stand in for the turn under test. Stepped down, each dump is the test's own.
   const seeded = (await api("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff);
   await api("PATCH", `/api/bots/${seeded.id}`, { chiefOfStaff: false });

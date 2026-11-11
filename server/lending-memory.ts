@@ -7,7 +7,7 @@ import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
 
 export const WORKING_FOLDER_FILES = [".mcp.json", ".claude/settings.json", ".claude/settings.local.json", ".claude/CLAUDE.md"] as const;
-export const WORKING_FOLDER_DIRS = [".claude/skills", ".claude/agents", ".claude/commands", ".agents/skills"] as const;
+export const WORKING_FOLDER_DIRS = [".claude/skills", ".claude/agents", ".claude/commands", ".agents/skills", ".grok/skills"] as const;
 const WORKING_FOLDER_TOP = new Map<string, string[]>();
 for (const path of [...WORKING_FOLDER_FILES, ...WORKING_FOLDER_DIRS]) {
   const [top, inner] = path.split("/") as [string, string?];
@@ -17,6 +17,14 @@ for (const path of [...WORKING_FOLDER_FILES, ...WORKING_FOLDER_DIRS]) {
 export const ANCESTOR_FILES = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "AGENTS.override.md"] as const;
 export const FOLDER_ENTRY_CAP = 200;
 const ROOT_ENTRY_CAP = 5_000;
+
+/** A filesystem's clock moves in ticks (about 16 ms on NTFS, a kernel tick on ext4, 2 s on FAT), so two changes inside
+ * one tick leave the same mtime and ctime, and what was read at a stamp this recent may be the first of them. Such a
+ * read is used but never remembered: the next look reads again, until the clock has moved well past the stamp. A stamp
+ * ahead of this clock is never remembered either. */
+const RACY_STAMP_MS = 2_000;
+const settled = (stat: { mtimeNs: bigint; ctimeNs: bigint }, now: number) =>
+  (stat.mtimeNs > stat.ctimeNs ? stat.mtimeNs : stat.ctimeNs) / 1_000_000n < BigInt(Math.floor(now) - RACY_STAMP_MS);
 
 /** Cached by identity, size and ctime, which no process can set back. */
 const contentCache = new Map<string, { key: string; hash: string }>();
@@ -31,8 +39,10 @@ function describe(file: string): string | undefined {
   const key = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
   const cached = contentCache.get(file);
   if (cached?.key === key) return cached.hash;
+  const keep = settled(stat, Date.now());
   let hash: string;
   try { hash = `file:${createHash("sha256").update(readFileSync(file)).digest("hex")}`; } catch { hash = "file:unreadable"; }
+  if (!keep) { contentCache.delete(file); return hash; }
   if (contentCache.size > 50_000) contentCache.clear();
   contentCache.set(file, { key, hash });
   return hash;
@@ -55,6 +65,7 @@ function listing(dir: string, cap: number, through = false): Listing | undefined
   const cacheKey = `${cap}\u0000${dir}`;
   const cached = listingCache.get(cacheKey);
   if (cached?.key === key) return cached;
+  const keep = settled(stat, Date.now());
   const names = new Set<string>();
   let overflow = false;
   try {
@@ -71,6 +82,7 @@ function listing(dir: string, cap: number, through = false): Listing | undefined
     return { key: `${key}:unreadable`, names: new Set(), overflow: true };
   }
   const listed = { key, names, overflow };
+  if (!keep) { listingCache.delete(cacheKey); return listed; }
   if (listingCache.size > 50_000) listingCache.clear();
   listingCache.set(cacheKey, listed);
   return listed;
@@ -93,7 +105,16 @@ function fullFolder(dir: string): string {
   return hash.digest("hex");
 }
 
-export function memoryFiles(workspace: string, workingFolders: readonly string[] = [], alsoAbove: readonly string[] = []): Record<string, string> {
+/** The skills the harness itself links into a bot's folders, each with where its link points. A bot's turn can't write this
+ * record, so a link matching it exactly is the harness's: it says nothing a bot chose, wherever and whenever it appears. */
+export interface HarnessSkillLinks {
+  /** The bot's own enabled skills. Their folders are the bot's to write, so each one's SKILL.md counts, once. */
+  own: ReadonlyMap<string, string>;
+  /** Skills brought from the person's computer, kept where no bot's turn can write. */
+  imported: ReadonlyMap<string, string>;
+}
+
+export function memoryFiles(workspace: string, workingFolders: readonly string[] = [], alsoAbove: readonly string[] = [], skillLinks?: HarnessSkillLinks): Record<string, string> {
   const files: Record<string, string> = {};
   const add = (name: string, file: string) => {
     const described = describe(file);
@@ -106,12 +127,16 @@ export function memoryFiles(workspace: string, workingFolders: readonly string[]
   for (const name of [...listing(join(workspace, "memory", "log"), Infinity)?.names ?? []].sort()) add(`memory/log/${name}`, join(workspace, "memory", "log", name));
   const present = (dir: string, wanted: readonly string[], listed = listing(dir, ROOT_ENTRY_CAP)) =>
     listed ? wanted.filter((name) => listed.overflow || listed.names.has(name)) : [];
+  const harnessLink = (entry: string, path: string) =>
+    [skillLinks?.own.get(entry), skillLinks?.imported.get(entry)].some((target) => target !== undefined && describe(path) === `link:${target}`);
   const capped = (dir: string) => {
-    const listed = listing(dir, FOLDER_ENTRY_CAP, true);
+    const listed = listing(dir, FOLDER_ENTRY_CAP + (skillLinks ? skillLinks.own.size + skillLinks.imported.size : 0), true);
     if (!listed || listed.link) add(dir, dir);
     if (!listed) return;
     if (listed.overflow) { files[dir] = `overflow:${fullFolder(dir)}`; return; }
     for (const entry of [...listed.names].sort()) {
+      // The harness never links through a skills folder that is itself a link.
+      if (!listed.link && harnessLink(entry, join(dir, entry))) continue;
       add(join(dir, entry), join(dir, entry));
       add(join(dir, entry, "SKILL.md"), join(dir, entry, "SKILL.md"));
     }
@@ -151,6 +176,12 @@ export function memoryFiles(workspace: string, workingFolders: readonly string[]
     for (const name of top ? present(dir, ANCESTOR_FILES, top) : ANCESTOR_FILES) add(join(dir, name), join(dir, name));
   }
   for (const folder of ["memory", "memory/log"]) if (files[folder]?.startsWith("other:")) delete files[folder];
+  // Named as the link in the bot's own folder would name it, so a record from before these links stopped counting still
+  // matches; under a name of its own if something else stands there, so neither hides the other.
+  for (const [name, target] of skillLinks?.own ?? []) {
+    const named = join(resolve(workspace), ".claude", "skills", name, "SKILL.md");
+    add(files[named] === undefined ? named : `${named}, the skill`, join(target, "SKILL.md"));
+  }
   return files;
 }
 
@@ -160,10 +191,10 @@ export interface LendingBot {
   tasks: readonly { threadId: string; cwd?: string | null }[];
 }
 
-export function botMemoryFiles(bot: LendingBot | undefined, dirs: { workspace: (botId: string) => string; taskWorkspaces: string }): Record<string, string> {
+export function botMemoryFiles(bot: LendingBot | undefined, dirs: { workspace: (botId: string) => string; taskWorkspaces: string; skillLinks?: (botId: string) => HarnessSkillLinks }): Record<string, string> {
   if (!bot) return {};
   const folders = bot.tasks.flatMap((task) => typeof task.cwd === "string" ? [task.cwd] : []);
-  return memoryFiles(dirs.workspace(bot.id), [...new Set([...(bot.cwd ? [bot.cwd] : []), ...folders])], [join(dirs.taskWorkspaces, bot.id)]);
+  return memoryFiles(dirs.workspace(bot.id), [...new Set([...(bot.cwd ? [bot.cwd] : []), ...folders])], [join(dirs.taskWorkspaces, bot.id)], dirs.skillLinks?.(bot.id));
 }
 
 export function fingerprintOf(files: Record<string, string>): string {
@@ -176,9 +207,14 @@ function digests(files: Record<string, string>): Record<string, string> {
   return Object.fromEntries(Object.entries(files).map(([name, described]) => [name, createHash("sha256").update(described).digest("hex").slice(0, 24)]));
 }
 
+/** A skill in a bot's own or a conversation's folder. Its going away plants nothing: the harness takes back a link it no
+ * longer wants this way, a thread's folder goes with the thread, and older records list the harness's own links. */
+const FOLDER_SKILL = /[\\/](?:workspaces[\\/][^\\/]+|task-workspaces[\\/][^\\/]+[\\/][^\\/]+)[\\/]\.(?:claude|agents|grok)[\\/]skills[\\/][^\\/]+(?:[\\/]SKILL\.md)?$/;
+
 export function changedFiles(before: Record<string, string> | undefined, after: Record<string, string>): string[] {
   if (!before) return Object.keys(after).sort();
-  return [...new Set([...Object.keys(before), ...Object.keys(after)])].filter((name) => before[name] !== after[name]).sort();
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter((name) => before[name] !== after[name] && !(after[name] === undefined && FOLDER_SKILL.test(name))).sort();
 }
 
 const record = z.object({
@@ -199,9 +235,11 @@ export interface LendingMemoryDeps {
   files: (botId: string) => Record<string, string>;
   knownBots: () => readonly string[];
   log?: (line: string) => void;
+  /** A bot just became locked: the owner hears about it, with a way to allow it, instead of finding out when something fails. */
+  onLocked?: (botId: string) => void;
 }
 
-export function createLendingMemory({ file, files: snapshot, knownBots, log = () => {} }: LendingMemoryDeps) {
+export function createLendingMemory({ file, files: snapshot, knownBots, log = () => {}, onLocked }: LendingMemoryDeps) {
   let bots: { [botId: string]: Record_ } = {};
   // Fail closed: a damaged, linked or oversized record flags every bot that existed when it was found.
   let unknownFlagged = new Set<string>();
@@ -248,6 +286,9 @@ export function createLendingMemory({ file, files: snapshot, knownBots, log = ()
   const first = (botId: string, current: { files: Record<string, string>; hash: string }, pending: boolean): Record_ =>
     ({ trusted: current.hash, files: current.files, ...(unknownFlagged.has(botId) ? { flagged: true as const } : {}), ...(pending ? { pending: true as const } : {}) });
   const needs = (botId: string) => bots[botId]?.flagged === true || (!bots[botId] && unknownFlagged.has(botId));
+  /** What was trusted is still what's there, whichever way either side was fingerprinted. */
+  const unchanged = (current: Record_, snap: { files: Record<string, string>; hash: string }) =>
+    snap.hash === current.trusted || (current.files !== undefined && changedFiles(current.files, snap.files).length === 0);
   return {
     noteForeignTurn(botId: string) {
       load();
@@ -264,16 +305,15 @@ export function createLendingMemory({ file, files: snapshot, knownBots, log = ()
       const snap = now(botId, opts.cached === true && !(current?.pending && !foreignRunning));
       if (!current) { const created = first(botId, snap, foreignRunning); set(botId, created); return { changedBySomeoneElse: created.flagged === true }; }
       if (current.flagged) return { changedBySomeoneElse: true };
-      if (snap.hash !== current.trusted) {
-        if (current.pending) {
-          log(`lending: memory of bot ${botId} changed while a conversation the owner did not write was running; its turns cannot use the lent Mac until the owner reviews it`);
-          set(botId, { ...current, flagged: true });
-          return { changedBySomeoneElse: true };
-        }
-        set(botId, { trusted: snap.hash, files: snap.files });
-        return { changedBySomeoneElse: false };
+      if (current.pending && !unchanged(current, snap)) {
+        log(`lending: memory of bot ${botId} changed while a conversation the owner did not write was running; its turns cannot use the lent Mac until the owner reviews it`);
+        set(botId, { ...current, flagged: true });
+        if (onLocked) queueMicrotask(() => onLocked(botId));
+        return { changedBySomeoneElse: true };
       }
-      if (current.pending && !foreignRunning) set(botId, { trusted: current.trusted, ...(current.files ? { files: current.files } : {}) });
+      if (snap.hash !== current.trusted || (current.pending && !foreignRunning)) {
+        set(botId, { trusted: snap.hash, files: snap.files, ...(current.pending && foreignRunning ? { pending: true as const } : {}) });
+      }
       return { changedBySomeoneElse: false };
     },
     reviewInfo(botId: string): { needed: boolean; token: string; changed: string[] } {
@@ -292,11 +332,11 @@ export function createLendingMemory({ file, files: snapshot, knownBots, log = ()
     trustedWrite<T>(botId: string, write: () => T): T {
       load();
       const current = bots[botId];
-      const before = now(botId).hash;
+      const before = now(botId);
       const result = write();
       const after = now(botId);
       if (!current) set(botId, first(botId, after, false));
-      else if (!current.flagged && before === current.trusted) set(botId, { ...current, trusted: after.hash, files: after.files });
+      else if (!current.flagged && unchanged(current, before)) set(botId, { ...current, trusted: after.hash, files: after.files });
       return result;
     },
     forget(botId: string) {

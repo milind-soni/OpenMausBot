@@ -7,6 +7,7 @@ import { t } from "@/lib/i18n";
 
 export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void; compact?: boolean }) {
   const { state, dispatch } = useStore();
+  const azure = state.config?.live?.provider === "azure";
   const [key, setKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,17 +47,17 @@ export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void
         void save();
       }}
     >
-      <div className="text-[14px] font-medium text-ink">{t("call.live.keyTitle")}</div>
-      <div className="text-[13px] leading-[1.45] text-ink-secondary">{t("call.live.keyExplain")}</div>
-      <div className="text-[13px] leading-[1.45] text-ink-secondary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true })}</div>
+      <div className="text-[14px] font-medium text-ink">{t(azure ? "call.live.azureKeyTitle" : "call.live.keyTitle")}</div>
+      <div className="text-[13px] leading-[1.45] text-ink-secondary">{t(azure ? "call.live.azureKeyExplain" : "call.live.keyExplain")}</div>
+      <div className="text-[13px] leading-[1.45] text-ink-secondary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure })}</div>
       <input
         type="password"
         autoComplete="off"
         spellCheck={false}
         value={key}
         onChange={(event) => setKey(event.target.value)}
-        placeholder="sk-…"
-        aria-label={t("call.live.keyField")}
+        placeholder={azure ? "…" : "sk-…"}
+        aria-label={t(azure ? "call.live.azureKeyField" : "call.live.keyField")}
         className="rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent/60"
       />
       {error && <div className="text-[12px] text-danger">{error}</div>}

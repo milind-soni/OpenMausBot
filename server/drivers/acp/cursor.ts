@@ -5,7 +5,12 @@ import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
 import { titleCaseModelId } from "../../contracts.ts";
 import { execCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { CURSOR_STANDALONE } from "./cursor-release.ts";
+import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
 import { discoverAcpModels } from "./custom-model-catalog.ts";
+import { bundledEngineCatalog } from "../../model-manifest/bundled.ts";
+import { currentEngineCatalog } from "../../model-manifest/manifest.ts";
+import { ENGINE_MODEL_ID } from "../../model-manifest/schema.ts";
 import type { AcpQuestionRequest } from "./question-requests.ts";
 import {
   capAnswerEcho, formatQuestionAnswers, MAX_QUESTIONS, parseChoices, parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById,
@@ -89,22 +94,14 @@ export function matchCursorAcpModel(
   return null;
 }
 
-export const STATIC_CURSOR_MODELS: ModelCatalog = {
-  default: "auto",
-  options: [
-    { id: "auto", label: "Auto" },
-    { id: "composer-2.5", label: "Composer 2.5" },
-    { id: "composer-2.5-fast", label: "Composer 2.5 Fast" },
-    { id: "gpt-5.3-codex", label: "Codex 5.3" },
-    { id: "claude-sonnet-5-thinking-high", label: "Claude Sonnet 5 1M Thinking" },
-  ],
-};
+export const STATIC_CURSOR_MODELS: ModelCatalog = bundledEngineCatalog("cursor");
+const currentCursorModels = () => currentEngineCatalog("cursor");
 
 /** Without parameterizedModelPicker Cursor (CLI 2026.10.19) offers only `composer-2.5[fast=true]`, so a
  * `composer-2.5` bot bills as Fast; with it, Fast is a separate `fast` config option. */
 const CURSOR_CLIENT_META = { parameterizedModelPicker: true };
 
-const SLUG = /^[a-z0-9][a-z0-9._:+-]*$/i;
+const SLUG = ENGINE_MODEL_ID.cursor;
 const EXEC_TIMEOUT_MS = 8_000;
 
 const nonBlank = (value: string | undefined): boolean => Boolean(value?.trim());
@@ -196,9 +193,9 @@ export function decodeCursorModelCatalog(payload: unknown): ModelCatalog | null 
     (typeof asRecord(payload)?.default === "string" && seen.has(asRecord(payload)!.default as string)
       ? (asRecord(payload)!.default as string)
       : undefined) ??
-    (seen.has(STATIC_CURSOR_MODELS.default) ? STATIC_CURSOR_MODELS.default : options[0]!.id);
+    (seen.has(currentCursorModels().default) ? currentCursorModels().default : options[0]!.id);
 
-  return { default: defaultId, options: withUnseen(STATIC_CURSOR_MODELS.options, options) };
+  return { default: defaultId, options: withUnseen(currentCursorModels().options, options) };
 }
 
 function stripModelMarkers(label: string): { label: string; isDefault: boolean; isCurrent: boolean } {
@@ -240,8 +237,8 @@ export function decodeCursorModelText(text: string): ModelCatalog | null {
   const defaultId =
     (markedDefault && seen.has(markedDefault) ? markedDefault : undefined) ??
     (markedCurrent && seen.has(markedCurrent) ? markedCurrent : undefined) ??
-    (seen.has(STATIC_CURSOR_MODELS.default) ? STATIC_CURSOR_MODELS.default : options[0]!.id);
-  return { default: defaultId, options: withUnseen(STATIC_CURSOR_MODELS.options, options) };
+    (seen.has(currentCursorModels().default) ? currentCursorModels().default : options[0]!.id);
+  return { default: defaultId, options: withUnseen(currentCursorModels().options, options) };
 }
 
 function truthyAuthFlag(value: unknown): boolean | null {
@@ -313,18 +310,50 @@ export async function probeCursorAuth(
   return false;
 }
 
+/** `cursor-agent --version` prints its build alone (`2026.10.22-27dcf5f`); curl, run by an install command pasted as
+ * the CLI path, answers `curl 7.88.1 (x86_64-pc-linux-gnu) …`. */
+export const CURSOR_CLI_VERSION = /^\d{4}\.\d{1,2}\.\d{1,2}(?:-[0-9a-z]+)?\s*$/i;
+
+/** `cursor-agent status --format json` (2026.10.22): `{"status":"unauthenticated","isAuthenticated":false,…}`. */
+export function readCursorStatus(code: number | null, output: string): DeviceSignInState {
+  const signedIn = code === 0 ? decodeCursorAuthStatus(firstJsonValue(output)) : null;
+  return signedIn === true ? "signed-in" : signedIn === false ? "signed-out" : "unknown";
+}
+
+/** Never the CLI's own words: its output carries the sign-in request. */
+function cursorLoginFailure(output: string): string {
+  if (/expired|timed? ?out/i.test(output)) return "The Cursor sign-in link expired. Start sign-in again for a new link.";
+  return "Cursor sign-in did not finish. Check the server's connection, then try again.";
+}
+
+/** `cursor-agent login` where the bots run: on a server it cannot open a browser, so it prints the link that finishes
+ * the sign-in (NO_OPEN_BROWSER keeps it from trying) and waits; the person opens that link on any device. The login lands
+ * in the server account's own Cursor home, which turns read. */
+export const CURSOR_SIGN_IN: DeviceSignIn = {
+  provider: "cursor",
+  product: "Cursor",
+  account: "Cursor",
+  homeEnv: "CURSOR_CONFIG_DIR",
+  homeDir: ".cursor",
+  loginArgs: ["login"],
+  env: { NO_OPEN_BROWSER: "1" },
+  install: "Install Cursor's CLI (https://cursor.com/docs/cli/installation) for the user running OpenMausBot, then try again.",
+  failure: cursorLoginFailure,
+  status: { args: ["status", "--format", "json"], read: readCursorStatus },
+};
+
 export function cursorCatalogFromSession(advertised: ModelCatalog["options"]): ModelCatalog | null {
   const discovered: ModelCatalog["options"] = [];
   const bases = new Set<string>();
   for (const model of advertised) {
     const raw = model.id.split("[")[0]!.trim();
-    const id = raw.toLowerCase() === "default" ? STATIC_CURSOR_MODELS.default : raw;
+    const id = raw.toLowerCase() === "default" ? currentCursorModels().default : raw;
     pushModel(discovered, bases, id, model.label.trim().toLowerCase() === id.toLowerCase() ? titleCaseModelId(id, /[-_]+/) : model.label);
   }
   if (!discovered.length) return null;
-  const offered = STATIC_CURSOR_MODELS.options
-    .filter((option) => option.id === STATIC_CURSOR_MODELS.default || bases.has(option.id.replace(/-fast$/, "")));
-  return { default: STATIC_CURSOR_MODELS.default, options: withUnseen(offered, discovered) };
+  const offered = currentCursorModels().options
+    .filter((option) => option.id === currentCursorModels().default || bases.has(option.id.replace(/-fast$/, "")));
+  return { default: currentCursorModels().default, options: withUnseen(offered, discovered) };
 }
 
 /** `cursor-agent models` (2026.10.22) lists only `auto` while session/new lists every model the account can use, so the
@@ -346,7 +375,7 @@ export async function fetchCursorModels(
     const fromJson = decodeCursorModelCatalog(firstJsonValue(stdout));
     if (fromJson) return fromJson;
   }
-  return STATIC_CURSOR_MODELS;
+  return currentCursorModels();
 }
 
 export function classifyCursorError(error: unknown): ProviderErrorCode | undefined {
@@ -440,11 +469,14 @@ const support = (run: typeof execCli): AcpSupport => ({
   driverKind: "cursorAgent",
   questionRequests: { "cursor/ask_question": CURSOR_ASK_QUESTION }, askTool: "AskQuestion",
   displayName: "Cursor",
-  models: STATIC_CURSOR_MODELS,
+  cliVersion: CURSOR_CLI_VERSION,
+  get models() { return currentCursorModels(); },
   // Other coding agents can install a generic `agent` shim; `cursor-agent` is unambiguous.
   defaultCli: "cursor-agent",
   nativeSource: "cursor.acp",
-  loginNote: "Cursor CLI is not signed in — run `cursor-agent login` in a terminal, or set CURSOR_API_KEY",
+  // Turns read this too: the sign-in runs where the bots run, from the app, never on the person's own computer.
+  loginNote: "Cursor is not signed in where your bots run. Choose Cursor in the model picker and sign in from its card, or set CURSOR_API_KEY.",
+  deviceSignIn: CURSOR_SIGN_IN,
 
   install: {
     command: {
@@ -454,6 +486,8 @@ const support = (run: typeof execCli): AcpSupport => ({
     },
     docsUrl: "https://cursor.com/docs/cli/installation",
     signInCommand: "cursor-agent login",
+    // On Linux, Settings installs Cursor's own pinned build: a Cloud has no terminal for its installer.
+    standalone: CURSOR_STANDALONE,
   },
 
   // Global flags precede `acp`; `--force` is the documented auto-approve switch.

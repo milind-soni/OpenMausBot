@@ -34,7 +34,7 @@ const ROSTER = [
   { person: ADA, email: "ada@acme.test", role: "member" as const }, { person: CLEO, email: "cleo@acme.test", role: "member" as const },
 ];
 
-function setup(options: { team?: boolean; requester?: Record<string, string>; servers?: Record<string, unknown>; roster?: typeof ROSTER } = {}) {
+function setup(options: { team?: boolean; requester?: Record<string, string>; servers?: Record<string, unknown>; roster?: typeof ROSTER; fullAccess?: (botId: string, threadId: string) => boolean } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-team-connections-"));
   const requester = { "ada-chat": ADA, "cleo-chat": CLEO, "room-chat": ADA, "main-chat": ADA, "work-chat": ADA, "ada-work": ADA, "cleo-work": CLEO, ...options.requester };
   const cfg = { mcpServers: options.servers ?? {
@@ -47,7 +47,7 @@ function setup(options: { team?: boolean; requester?: Record<string, string>; se
     mcpIntegration: vi.fn(async (_cfg: AppConfig, context: { commsToken: string; as?: unknown }) => ({ command: "node", args: ["bridge"], env: { TOKEN: context.commsToken, AS: context.as ? "own" : "team" } })),
     connectedServices: vi.fn(async (_cfg: AppConfig, as?: { token: string }) => (as?.token === ADA_ACCESS.token || as?.token === CLEO_ACCESS.token
       ? { gmail: { connected: true, pending: false, status: "ACTIVE", accounts: [{ id: "ca_1", status: "ACTIVE", alias: "own@gmail.example" }] } } : {})),
-    connectedServiceSlugs: vi.fn(async () => ["google_search_console"] as readonly string[]),
+    verifiedConnectedServiceSlugs: vi.fn(async () => ["google_search_console"] as readonly string[]),
     authorizeService: vi.fn(),
     removeService: vi.fn(),
   };
@@ -62,8 +62,9 @@ function setup(options: { team?: boolean; requester?: Record<string, string>; se
       const server = raw as { url: string; headers: Record<string, string> };
       return [name, { type: "http", url: server.url, headers: server.headers } as McpServerSpec];
     })),
-    isSessionLive: () => true,
+    isOwnerLive: () => true,
     ...(options.roster ? { roster: () => options.roster! } : {}),
+    ...(options.fullAccess ? { fullAccess: options.fullAccess } : {}),
     brokerUrl: () => ADA_ACCESS.url,
     composio: composio as never,
   });
@@ -107,6 +108,25 @@ describe("whose connection a turn may use", () => {
     const routine = setup({ requester: { "ada-chat": "", "ada-work": "" } }).host;
     for (const thread of ["ada-chat", "ada-work"]) expect(routine.turnPerson(thread), `a routine or a webhook acts for nobody (${thread})`).toBeNull();
     expect(setup({ team: false }).host.turnPerson("ada-chat"), "off a team nothing is anyone's").toBeNull();
+  });
+
+  it("tests a personal server with the member's own sign-in, and their key only at the address it was saved for", () => {
+    const { host } = setup();
+    host.people.putKey(ADA, "ada@acme.test", "mail", { url: "https://mail.example/mcp", header: "Authorization", value: "Bearer ada-own-mail-key" });
+    const own = host.people.connection(ADA, "mail", "https://mail.example/mcp");
+    expect(own.oauth).toBe(host.people.oauth(ADA));
+    expect(own.key).toMatchObject({ header: "Authorization", value: "Bearer ada-own-mail-key" });
+    expect(host.people.connection(ADA, "mail", "https://elsewhere.example/mcp").key).toBeUndefined();
+    expect(host.people.connection(CLEO, "mail", "https://mail.example/mcp")).toEqual({ oauth: host.people.oauth(CLEO) });
+  });
+
+  it("lets a turn change the team's MCP servers only when the person it acts for is an owner or admin", () => {
+    const team = setup({ roster: ROSTER, requester: { "main-chat": OLIVE, "work-chat": BEN, "ada-chat": ADA, "room-chat": "" } }).host;
+    expect(team.actsForAdmin("main-chat"), "the owner").toBe(true);
+    expect(team.actsForAdmin("work-chat"), "an admin").toBe(true);
+    expect(team.actsForAdmin("ada-chat"), "a User").toBe(false);
+    expect(team.actsForAdmin("room-chat"), "a turn that acts for nobody").toBe(false);
+    expect(setup({ team: false }).host.actsForAdmin("ada-chat"), "off a Team Cloud").toBe(true);
   });
 
   it("opens work a person's request hands on in the receiving bot's chat with them, when they connected anything of their own", () => {
@@ -200,6 +220,23 @@ describe("apps each person connects", () => {
     expect(await host.callRefusal({ threadId: "cleo-chat", generation: "gen-1" }, [{ slug: "GMAIL_FETCH_EMAILS" }]), "Cleo's chat never reaches Ada's Gmail").toMatch(/Connect your Gmail/);
   });
 
+  it("offers a bot with app grants the apps' sandbox only in a turn at Full access, never while its scopes limit its apps", async () => {
+    const { host, composio } = setup({ fullAccess: (_botId, threadId) => threadId === "work-chat" });
+    const scout = { id: "scout", name: "Scout", connectorTools: { gmail: { tools: "*" as const } } };
+    await host.appsIntegrations(scout, "main-chat", "g1");
+    await host.appsIntegrations(scout, "work-chat", "g2");
+    await host.appsIntegrations({ id: "mausbot", name: "MausBot" }, "work-chat", "g3");
+    await host.appsIntegrations({ ...scout, connectorScopes: { apps: { gmail: "read" } } }, "work-chat", "g4");
+    const offered = composio.mcpIntegration.mock.calls.map(([, context]) => context as typeof context & { connectorTools?: unknown })
+      .filter((context) => !context.as).map((context) => context.connectorTools);
+    expect(offered).toEqual([
+      { gmail: { tools: "*" } },
+      { gmail: { tools: "*" }, composio: { tools: ["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMOTE_BASH_TOOL"] } },
+      undefined,
+      { gmail: { tools: "*" } },
+    ]);
+  });
+
   it("refuses a person's app through the team's bridge, and a team app through her own", async () => {
     const { host, dataDir } = setup({ requester: { "main-chat": "" } });
     adaConnected(host, dataDir);
@@ -225,8 +262,22 @@ describe("apps each person connects", () => {
     const { host, composio } = setup();
     host.scopes.set("app", "google_search_console", "person");
     expect(await host.callRefusal({ threadId: "room-chat", generation: "g" }, [{ slug: "COMPOSIO_PROXY_EXECUTE" }])).toMatch(/Google Search Console is connected by each person/);
-    composio.connectedServiceSlugs.mockResolvedValue([]);
+    composio.verifiedConnectedServiceSlugs.mockResolvedValue([]);
     expect(await host.callRefusal({ threadId: "room-chat", generation: "g" }, [{ slug: "COMPOSIO_PROXY_EXECUTE" }])).toBeNull();
+  });
+
+  it("refuses opaque team calls when inventory discovery fails, then checks the recovered inventory", async () => {
+    const { host, composio } = setup();
+    host.scopes.set("app", "gmail", "person");
+    const cap = { threadId: "room-chat", generation: "g" };
+    const calls = [{ slug: "COMPOSIO_PROXY_EXECUTE" }];
+    composio.verifiedConnectedServiceSlugs.mockResolvedValue(["gmail"]);
+    expect(await host.callRefusal(cap, calls)).toMatch(/can't run here.*Gmail/);
+    composio.verifiedConnectedServiceSlugs.mockRejectedValueOnce(new Error("synthetic inventory timeout"));
+    expect(await host.callRefusal(cap, calls)).toMatch(/can't run here.*inventory could not be verified/);
+    expect(await host.callRefusal(cap, calls)).toMatch(/can't run here.*Gmail/);
+    composio.verifiedConnectedServiceSlugs.mockResolvedValue([]);
+    expect(await host.callRefusal(cap, calls)).toBeNull();
   });
 
   it("answers a connection card for a person's app with the one plain line, never a card", () => {
@@ -238,6 +289,55 @@ describe("apps each person connects", () => {
     expect(host.connectRefusal({ threadId: "room-chat", generation: "g" }, ["slack"]), "a team app keeps its card").toBeNull();
     expect(host.connectRefusal({ threadId: "ada-chat", generation: "g", connectorsFor: ADA }, ["slack"])).toMatch(/Slack is Acme's, connected once for everyone by its owner or an admin/);
     expect(setup({ team: false }).host.connectRefusal({ threadId: "ada-chat", generation: "g" }, ["gmail"])).toBeNull();
+  });
+
+  describe("the connected app an MCP server that wants a sign-in can be swapped for", () => {
+    const SERVERS = { gmail: { type: "http", url: "https://mail.example/mcp", headers: {} }, calendar: { type: "http", url: "https://calendarmcp.googleapis.com/mcp/v1", headers: {} } } as Record<string, McpServerSpec>;
+    const SCOUT = { id: "scout", name: "Scout" };
+    const open = { servers: SERVERS, bridged: true, blocked: () => undefined };
+    /** Calendar connected on the team's installation, read the way a turn reads it: with its connected-apps bridge. */
+    async function calendarConnected(options: { team?: boolean } = {}) {
+      const made = setup(options);
+      made.composio.connectedServices.mockImplementation(async () => ({ googlecalendar: { connected: true, pending: false, status: "ACTIVE", accounts: [] } }) as never);
+      await made.host.appsIntegrations(SCOUT, "main-chat", "gen-1");
+      return made.host;
+    }
+
+    it("offers the card for an app not connected yet, and points to one already connected", async () => {
+      const lookup = (await calendarConnected({ team: false })).mcpServerApps(SCOUT, open)!;
+      expect(lookup("gmail", "https://mail.example/mcp")).toEqual({ slug: "gmail", label: "Gmail", connected: false });
+      expect(lookup("calendar", "https://calendarmcp.googleapis.com/mcp/v1")).toEqual({ slug: "googlecalendar", label: "Google Calendar", connected: true });
+      expect(lookup("mail", "https://mail.example/mcp"), "an unknown server").toBeNull();
+    });
+
+    it("does so on a Team Cloud for a team app on the team's bridge, never for a person's app", async () => {
+      const host = await calendarConnected();
+      expect(host.mcpServerApps(SCOUT, open)!("gmail", "")).toEqual({ slug: "gmail", label: "Gmail", connected: false });
+      host.scopes.set("app", "gmail", "person");
+      expect(host.mcpServerApps(SCOUT, open)!("gmail", "")).toBeNull();
+      expect(host.mcpServerApps(SCOUT, open)!("calendar", "https://calendarmcp.googleapis.com/mcp/v1")?.connected).toBe(true);
+    });
+
+    it("gives no app without the turn's bridge, or where the bot's tool selection, scopes, grants or policy leave it out", async () => {
+      const host = await calendarConnected({ team: false });
+      expect(host.mcpServerApps(SCOUT, { ...open, bridged: false }), "no connected-apps bridge").toBeUndefined();
+      expect(host.mcpServerApps({ ...SCOUT, composio: false }, open), "connected apps off for this bot").toBeUndefined();
+      expect(host.mcpServerApps({ ...SCOUT, toolScope: { deny: ["mcp:composio:*"] } }, open), "its tool selection drops connected apps").toBeUndefined();
+      expect(host.mcpServerApps({ ...SCOUT, toolScope: { allow: ["native:*"] } }, open), "its tool selection names no connected-apps tool").toBeUndefined();
+      expect(host.mcpServerApps(SCOUT, { ...open, servers: { mail: { type: "http", url: "https://mail.example/mcp", headers: {} } } }), "no server stands for an app").toBeUndefined();
+      const noCard = host.mcpServerApps({ ...SCOUT, toolScope: { deny: ["mcp:composio:COMPOSIO_MANAGE_CONNECTIONS"] } }, open)!;
+      expect(noCard("gmail", ""), "no card it may show").toBeNull();
+      expect(noCard("calendar", "https://calendarmcp.googleapis.com/mcp/v1")?.connected, "an app it already has").toBe(true);
+      expect(host.mcpServerApps(SCOUT, { ...open, blocked: (slug) => (slug === "gmail" ? "Gmail is off here." : undefined) })!("gmail", ""), "refused by policy").toBeNull();
+      expect(host.mcpServerApps({ ...SCOUT, connectorScopes: { apps: { slack: "write" } } }, open)!("gmail", ""), "outside its scopes").toBeNull();
+      expect(host.mcpServerApps({ ...SCOUT, connectorTools: { slack: { tools: "*" } } }, open)!("gmail", ""), "outside its grants").toBeNull();
+    });
+
+    it("never waits for the apps connected: before the first read it knows none", () => {
+      const { host, composio } = setup({ team: false });
+      expect(host.mcpServerApps(SCOUT, open)!("calendar", "https://calendarmcp.googleapis.com/mcp/v1")).toEqual({ slug: "googlecalendar", label: "Google Calendar", connected: false });
+      expect(composio.connectedServices).not.toHaveBeenCalled();
+    });
   });
 });
 

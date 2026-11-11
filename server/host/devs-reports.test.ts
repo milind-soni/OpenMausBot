@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { citationAttachment, createCitationTextSelector } from "../../src/lib/citations.ts";
+import { composeMessage, pasteAttachment } from "../../src/lib/composer-attachments.ts";
 import "../server-line-packs.ts";
 import type { DevsReportPayload } from "../devs-report.ts";
 import type { ReportStatusAnswer, ReportStatusQuestion, SendOutcome } from "../devs-report-send.ts";
@@ -18,7 +20,7 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 const SCOUT = { id: "scout", name: "Scout", threadId: "scout-main", modelSelection: { instanceId: "claude", model: "claude-opus-5-5" }, composio: true };
 const ROVER = { id: "rover", name: "Rover", threadId: "rover-main", modelSelection: { instanceId: "codex", model: "gpt-5.5", effort: "high" } };
 
-function fixture(options: { dataDir?: string; outcomes?: SendOutcome[]; sessions?: PublicSession[]; ownerKey?: string | null; team?: boolean;
+function fixture(options: { dataDir?: string; sections?: string[]; outcomes?: SendOutcome[]; sessions?: PublicSession[]; ownerKey?: string | null; team?: boolean;
   profileEmail?: string; automated?: boolean; lineLanguage?: DevsReportsDeps["lineLanguage"]; appVersion?: string; clock?: number;
   /** The conversations, kept across a restart (another fixture on the same data). */
   threads?: Map<string, Message[]>;
@@ -34,6 +36,7 @@ function fixture(options: { dataDir?: string; outcomes?: SendOutcome[]; sessions
   const groups = [{ id: "launch", name: "Launch", threadId: "room", memberIds: ["scout", "rover"] }];
   const store = {
     bots,
+    sections: options.sections ?? [],
     bot: (id: string) => bots.find((bot) => bot.id === id) ?? null,
     botByThread: (threadId: string) => bots.find((bot) => bot.threadId === threadId) ?? null,
     groupByThread: (threadId: string) => groups.find((group) => group.threadId === threadId),
@@ -142,6 +145,7 @@ describe("a message that tags @devs", () => {
     expect(fx.sent).toHaveLength(1);
     expect(fx.sent[0]!.description).toContain("No summary from a bot: the bot did not call report_bug.");
     expect(fx.notices("scout-main")).toEqual([`notice: ${sentLine("report-1", "ada@example.com")}`]);
+    expect(fx.store.activePath("scout-main").at(-1)?.tool).toEqual({ name: `notice: ${sentLine("report-1", "ada@example.com")}`, ok: true });
     fx.stop();
   });
 
@@ -199,9 +203,142 @@ describe("a message that tags @devs", () => {
     expect(fx.sent).toHaveLength(1);
     fx.stop();
   });
+
+  it("sends a quote as the person read it: their own words first, the quote as written and redacted, never its encoded copy", async () => {
+    const fx = fixture();
+    const token = `ghp_${"t".repeat(36)}`;
+    const said = fx.bot("scout-main", "The relay failed.\nI only send a report when your message tags @devs.");
+    const quote = citationAttachment({ ownerType: "bot", ownerId: "scout", threadId: "scout-main", messageId: said.id },
+      createCitationTextSelector(said.text!, 0, said.text!.length)!, `@devs help me send on it, my token is ${token}`);
+    fx.person("scout-main", composeMessage("", [quote]));
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(1);
+    const { description } = fx.sent[0]!;
+    const [words, rest] = description.split("\n\nWhat they wrote: ");
+    expect(words).toBe(`help me send on it, my token is «redacted ${token.length} chars»`);
+    expect(rest).toMatch(/^> Quoted message:\n> The relay failed\.\n> I only send a report when your message tags @devs\.\n/);
+    expect(JSON.stringify(fx.sent[0])).not.toContain("omb-citation");
+    expect(JSON.stringify(fx.sent[0])).not.toContain(token);
+    expect(readFileSync(join(fx.dataDir, DEVS_REPORTS_FILE), "utf8")).not.toContain("omb-citation");
+    fx.stop();
+  });
+
+  it("does not send for a @devs that is only inside a quote; the person's own @devs beside the same quote sends one", async () => {
+    const fx = fixture();
+    const said = fx.bot("scout-main", "I only send a report when your message tags @devs.");
+    const quote = (comment: string) => citationAttachment({ ownerType: "bot", ownerId: "scout", threadId: "scout-main", messageId: said.id },
+      createCitationTextSelector(said.text!, 0, said.text!.length)!, comment);
+    fx.person("scout-main", composeMessage("what does this mean?", [quote("really?")]));
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(0);
+    fx.person("scout-main", composeMessage("@devs this is wrong", [quote("")]));
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(1);
+    expect(fx.sent[0]!.description.split("\n")[0]).toBe("this is wrong");
+    fx.stop();
+  });
+
+  it("does not send for a @devs that is only inside pasted text; the person's own @devs beside the paste sends one", async () => {
+    const fx = fixture();
+    const notes = pasteAttachment("What's new\n- Quoted @devs reports send correctly.\n* fix(devs-reports): a quoted @devs alone sends nothing");
+    fx.person("scout-main", composeMessage("does this update change how we work?", [notes]));
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(0);
+    fx.person("scout-main", composeMessage("@devs it crashes with this log", [notes]));
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(1);
+    const [words, written] = fx.sent[0]!.description.split("\n\nWhat they wrote: ");
+    expect(words).toContain("<pasted-text index=\"1\">\nWhat's new");
+    expect(written).toContain("Quoted @devs reports send correctly.");
+    fx.stop();
+  });
+
+  it("does not send for a @devs in a quote comment that is itself inside pasted text", async () => {
+    const fx = fixture();
+    const said = fx.bot("scout-main", "I only send a report when your message tags @devs.");
+    const quoted = composeMessage("", [citationAttachment({ ownerType: "bot", ownerId: "scout", threadId: "scout-main", messageId: said.id },
+      createCitationTextSelector(said.text!, 0, said.text!.length)!, "@devs this is wrong")]);
+    fx.person("scout-main", composeMessage("what did I send yesterday?", [pasteAttachment(quoted)]));
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(0);
+    fx.stop();
+  });
+
+  it("keeps an opening paste line with no closing line as the person's text, and reads many of them quickly", async () => {
+    const fx = fixture();
+    const started = performance.now();
+    fx.person("scout-main", `<pasted-text>\n@devs it broke\n${"<pasted-text>\n".repeat(50_000)}`);
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(fx.sent).toHaveLength(1);
+    fx.stop();
+  });
+
+  it("still reads a typed @devs before an opening paste line followed by a very long unclosed tail", async () => {
+    const fx = fixture();
+    fx.person("scout-main", `@devs it broke\n<pasted-text>\n${"\n".repeat(150_000)}x`);
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(1);
+    fx.stop();
+  });
+
+  it("reads each part on its own: a code span the quote cuts in half does not hide the person's own @devs", async () => {
+    const fx = fixture();
+    const said = fx.bot("scout-main", "Try: run `npm i` first.");
+    const quote = citationAttachment({ ownerType: "bot", ownerId: "scout", threadId: "scout-main", messageId: said.id },
+      createCitationTextSelector(said.text!, 0, 12)!, "@devs it fails at `install`");
+    fx.person("scout-main", composeMessage("", [quote]));
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(1);
+    fx.stop();
+  });
+
+  it("drops a marker it cannot read too, so nothing encoded slips past redaction", async () => {
+    const fx = fixture();
+    const token = `ghp_${"t".repeat(36)}`;
+    fx.person("scout-main", `<!--omb-citation-v1:${Buffer.from(JSON.stringify({ comment: token })).toString("base64url")}-->\n@devs it broke`);
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(1);
+    expect(fx.sent[0]!.description.split("\n")[0]).toBe("it broke");
+    expect(JSON.stringify(fx.sent[0])).not.toContain("omb-citation");
+    expect(readFileSync(join(fx.dataDir, DEVS_REPORTS_FILE), "utf8")).not.toContain("omb-citation");
+    fx.stop();
+  });
+
+  it("is never a message that tags a department named devs", async () => {
+    const fx = fixture({ sections: ["Devs"] });
+    fx.person("scout-main", "I added Rover to the @devs department, notify Scout");
+    fx.busy.add("scout-main");
+    expect(fx.reports.note("scout-main", true)).toBe("");
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toEqual([]);
+    expect((await fx.call("scout", "scout-main", { went_wrong: "x" })).status).toBe(409);
+    fx.stop();
+  });
 });
 
 describe("what the person is told, in their language", () => {
+  it("writes the reporter's receipt in Portuguese without client translation metadata", async () => {
+    const fx = fixture({ profileEmail: "ada@example.com", lineLanguage: () => "pt-br" });
+    fx.person("scout-main", "@devs o botão travou");
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.notices("scout-main")).toEqual(["notice: Enviado à equipe do MausBot (relatório report-1). Milind e Omkar recebem por e-mail e vão responder para ada@example.com."]);
+    expect(fx.store.activePath("scout-main").at(-1)?.tool?.nameCode).toBeUndefined();
+    fx.stop();
+  });
+
   const german = (person?: string) => (person === "p-ada" ? "de" : undefined);
   const ada = { sender: { name: "Ada", id: "p-ada" } };
 

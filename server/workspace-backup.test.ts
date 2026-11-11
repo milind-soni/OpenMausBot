@@ -66,6 +66,7 @@ function fixture(root: string): DatabaseSync {
   json(join(root, "sessions.json"), { identity: "source-session" });
   json(join(root, "cloud-owner.json"), { identity: "source-owner-record" });
   writeFileSync(join(root, "environment-id"), "source-environment");
+  json(join(root, "data-format.json"), { format: 2, writtenBy: "99.0.0", writtenAt: "2027-01-01T00:00:00.000Z" });
   mkdirSync(join(root, "tools"));
   writeFileSync(join(root, "tools", "downloaded"), "reinstallable");
   mkdirSync(join(root, "decider-log"));
@@ -181,6 +182,7 @@ describe("encrypted full workspace backups", () => {
       const targetComputers = { version: 1, environmentId: "target-environment", computers: [{ id: "target-computer", name: "Destination desktop", section: null }] };
       json(join(target, "team-computers.json"), targetComputers);
       writeFileSync(join(target, "environment-id"), "target-environment");
+      json(join(target, "data-format.json"), { format: 1, writtenBy: "0.1.151", writtenAt: "2026-11-01T00:00:00.000Z" });
       writeFileSync(join(target, "openmausbot-server.lease"), "live-lease");
       writeFileSync(join(target, "messages.db-wal"), "old database WAL must not enter the new DB");
       writeFileSync(join(target, "messages.db-shm"), "old database shared memory");
@@ -193,6 +195,7 @@ describe("encrypted full workspace backups", () => {
       expect(existsSync(join(data, "bots.json"))).toBe(true);
       expect(existsSync(join(data, "runtime.db"))).toBe(true);
       expect(existsSync(join(data, "cloud-owner.json"))).toBe(false);
+      expect(existsSync(join(data, "data-format.json"))).toBe(false);
       expect(readJson(join(data, "config.json"))).toEqual({ language: "ja" });
       expect(readJson(join(data, "webhooks.json")).webhooks[0]).not.toHaveProperty("secretHash");
       expect(readFileSync(join(data, "webhooks.json"), "utf8")).not.toContain("sealed-");
@@ -211,6 +214,7 @@ describe("encrypted full workspace backups", () => {
       expect(readJson(join(target, "cloud-owner.json"))).toEqual({ identity: "target-owner-record" });
       expect(readJson(join(target, "team-computers.json"))).toEqual(targetComputers);
       expect(readFileSync(join(target, "environment-id"), "utf8")).toBe("target-environment");
+      expect(readJson(join(target, "data-format.json"))).toMatchObject({ format: 1, writtenBy: "0.1.151" });
       expect(readFileSync(join(target, "openmausbot-server.lease"), "utf8")).toBe("live-lease");
       expect(existsSync(join(target, "messages.db-wal"))).toBe(false);
       expect(readFileSync(join(result.safetyCopyPath!, "data", "messages.db-wal"), "utf8")).toBe("old database WAL must not enter the new DB");
@@ -370,7 +374,7 @@ describe("encrypted full workspace backups", () => {
       "vm-home/.browser-profiles/chrome/Cookies", "vm-homes/abc/.browser-profiles/chromium/Cookies",
       "tmp/omb-mcp-123/mcp.json", ".tmp/secret",
       "logins.json.enc", "logins-key", "logins.json.enc.123.05a7b3e0-1234.tmp",
-      "highlevel.json.enc", "highlevel-key", "connected-apps-installation.json", "webhook-key",
+      "connected-apps-installation.json", "webhook-key",
     ];
     for (const root of [source, target]) {
       for (const path of authPaths) {
@@ -682,7 +686,11 @@ describe("encrypted full workspace backups", () => {
     expect(readFileSync(join(data, "CLAUDE.md"), "utf8")).toBe("Be brief.");
 
     symlinkSync(".", join(project, "loop"), process.platform === "win32" ? "junction" : "dir");
-    await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toThrow(/folder that contains it: workspaces\/ws\/project\/loop/);
+    await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toMatchObject({
+      message: "Cannot back up a symbolic link to the folder that contains it: workspaces/ws/project/loop",
+      errorKey: "serverError.backup.recursiveLink",
+      errorParams: { path: "workspaces/ws/project/loop" },
+    });
     rmSync(join(project, "loop"));
     mkdirSync(join(root, "workspaces", "other"), { recursive: true });
     writeFileSync(join(root, "workspaces", "other", "notes.md"), "theirs");
@@ -774,7 +782,87 @@ describe("encrypted full workspace backups", () => {
     expect(readFileSync(join(data, "imported-skills", "pdf", "scripts", "run.sh"), "utf8")).toBe("echo run\n");
   });
 
-  it("recovers an interrupted top-level swap before any application state is loaded", async () => {
+  it.each([
+    "safety directory", "data directory", "partial manifest", "manifest",
+    "partial previous receipt", "previous receipt", "partial journal", "journal",
+  ])("cancels an interrupted restore preparation after %s without changing original data", async (step) => {
+    const source = directory();
+    writeFileSync(join(source, "note.txt"), "new workspace");
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const target = directory();
+    const original = join(target, "note.txt");
+    writeFileSync(original, "original workspace");
+    const before = statSync(original);
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    commitPendingWorkspaceRestore(target, staged.id);
+    const root = join(target, ".backups");
+    const safety = join(root, `safety-${staged.id}`);
+    const receipt = { restored: true, id: "00000000-0000-4000-8000-000000000000", clientState: {} };
+    json(join(root, "last-restore.json"), receipt);
+    const journal = { id: staged.id, phase: "applying", existing: ["note.txt"], incoming: ["note.txt"] };
+    const steps = ["safety directory", "data directory", "partial manifest", "manifest", "partial previous receipt", "previous receipt", "partial journal", "journal"];
+    const reached = (name: string) => steps.indexOf(step) >= steps.indexOf(name);
+    mkdirSync(safety);
+    if (reached("data directory")) mkdirSync(join(safety, "data"));
+    if (step === "partial manifest") writeFileSync(join(safety, "manifest.json.123.crash.tmp"), '{"id":');
+    if (reached("manifest")) json(join(safety, "manifest.json"), { id: staged.id, originalEntries: ["note.txt"] });
+    if (step === "partial previous receipt") writeFileSync(join(safety, "previous-restore.json.123.crash.tmp"), '{"restored":');
+    if (reached("previous receipt")) json(join(safety, "previous-restore.json"), receipt);
+    if (step === "partial journal") writeFileSync(join(root, "restore-journal.json.123.crash.tmp"), '{"id":');
+    if (step === "journal") json(join(root, "restore-journal.json"), journal);
+
+    expect(applyPendingWorkspaceRestore(target)).toMatchObject({ restored: false, rolledBack: true, id: staged.id });
+    expect(readFileSync(original, "utf8")).toBe("original workspace");
+    expect(statSync(original).ino).toBe(before.ino);
+    expect(statSync(original).mtimeMs).toBe(before.mtimeMs);
+    expect(readFileSync(join(root, staged.id, "apply", "data", "note.txt"), "utf8")).toBe("new workspace");
+    expect(readJson(join(root, "last-restore.json"))).toEqual(receipt);
+    expect(readPendingWorkspaceRestoreMetadata(target)).toBeNull();
+    expect(applyPendingWorkspaceRestore(target)).toEqual({ restored: false });
+  });
+
+  it("preserves moved originals and prepared files when the recovery journal is missing", async () => {
+    const source = directory();
+    writeFileSync(join(source, "note.txt"), "new workspace");
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const target = directory();
+    writeFileSync(join(target, "note.txt"), "original workspace");
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    commitPendingWorkspaceRestore(target, staged.id);
+    const root = join(target, ".backups");
+    const saved = join(root, `safety-${staged.id}`, "data");
+    mkdirSync(saved, { recursive: true });
+    renameSync(join(target, "note.txt"), join(saved, "note.txt"));
+    const prepared = join(root, staged.id, "apply", "data", "note.txt");
+    writeFileSync(prepared, "prepared recovery copy");
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(() => applyPendingWorkspaceRestore(target)).toThrow(/safety copy already exists/i);
+      expect(readFileSync(join(saved, "note.txt"), "utf8")).toBe("original workspace");
+      expect(readFileSync(prepared, "utf8")).toBe("prepared recovery copy");
+      expect(existsSync(join(target, "note.txt"))).toBe(false);
+      expect(readPendingWorkspaceRestoreMetadata(target)?.id).toBe(staged.id);
+    }
+  });
+
+  it.each(["safety", "data"])("refuses an unjournaled restore with a linked %s directory", async (linked) => {
+    const source = directory();
+    writeFileSync(join(source, "note.txt"), "new workspace");
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const target = directory();
+    writeFileSync(join(target, "note.txt"), "original workspace");
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    commitPendingWorkspaceRestore(target, staged.id);
+    const safety = join(target, ".backups", `safety-${staged.id}`);
+    const outside = directory();
+    if (linked === "data") mkdirSync(safety);
+    symlinkSync(outside, linked === "safety" ? safety : join(safety, "data"), process.platform === "win32" ? "junction" : "dir");
+    expect(() => applyPendingWorkspaceRestore(target)).toThrow(/safety copy already exists/i);
+    expect(readFileSync(join(target, "note.txt"), "utf8")).toBe("original workspace");
+    expect(readPendingWorkspaceRestoreMetadata(target)?.id).toBe(staged.id);
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it.each([false, true])("recovers an interrupted top-level swap with incoming moved=%s before any application state is loaded", async (incomingMoved) => {
     const source = directory();
     json(join(source, "bots.json"), []);
     const exported = await createWorkspaceBackup(source, { password: PASSWORD });
@@ -789,7 +877,7 @@ describe("encrypted full workspace backups", () => {
     mkdirSync(saved, { recursive: true });
     json(join(root, "restore-journal.json"), { id: staged.id, phase: "applying", existing: ["bots.json"], incoming: ["bots.json"] });
     renameSync(join(target, "bots.json"), join(saved, "bots.json"));
-    renameSync(join(apply, "bots.json"), join(target, "bots.json"));
+    if (incomingMoved) renameSync(join(apply, "bots.json"), join(target, "bots.json"));
     expect(applyPendingWorkspaceRestore(target)).toMatchObject({ restored: false, rolledBack: true, id: staged.id });
     expect(readJson(join(target, "bots.json"))).toEqual([{ id: "original" }]);
     expect(applyPendingWorkspaceRestore(target)).toEqual({ restored: false });

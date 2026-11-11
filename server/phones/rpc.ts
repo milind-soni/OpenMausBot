@@ -1,9 +1,10 @@
+import type { ServerTextParams } from "../../shared/server-text.ts";
+import { phoneWriteSummary } from "./summary.ts";
 // The JSON-RPC entry the harness proxy reaches for the device kind: tools/list (filtered to what this bot may run on the
 // owner's phones) and tools/call (validate → verdict → pick the phone → run as a phone job). OpenMausBot adds no card of
 // its own: a send opens a sheet on the phone and goes only when the person taps Send there. The turn's capability must
 // still be live before and after the call.
 import { isPhoneToolName, isPhoneWrite, type PhonePlatform, type PhoneToolName } from "../../shared/phone-apps.ts";
-import { describeAction } from "./access.ts";
 import { PHONE_INSTRUCTIONS, PHONE_NO_PHONE_TEXT } from "./instructions.ts";
 import type { PhoneJobOutcome } from "./jobs.ts";
 import { PHONE_TOOLS, phoneErrorResult, phoneOkResult, phoneToolCallProblem, type PhoneToolResult } from "./tools.ts";
@@ -22,7 +23,7 @@ export interface PhoneRpcDeps {
   phone(preferred: string | undefined, name: PhoneToolName): PhoneTarget | PhoneRefusal | null;
   run(phone: PhoneTarget, name: PhoneToolName, args: Record<string, unknown>): Promise<PhoneJobOutcome>;
   /** A successful write (sends included): the handler records it in the bot's activity. */
-  onWrite?(record: { tool: PhoneToolName; phone: string; summary: string }): void;
+  onWrite?(record: { tool: PhoneToolName; phone: string; summary: string; summaryCode?: string; summaryParams?: ServerTextParams }): void;
 }
 
 export type PhoneToolsList = { tools: (typeof PHONE_TOOLS)[number][]; instructions: string };
@@ -51,6 +52,6 @@ export async function phoneRpc(
   const outcome = await deps.run(target, name, jobArgs);
   deps.assertActive();
   if (!outcome.ok) return phoneErrorResult(outcome.error, outcome.code ? { code: outcome.code } : {});
-  if (isPhoneWrite(name)) deps.onWrite?.({ tool: name, phone: target.name, summary: `${describeAction(name)} on ${target.name}`.slice(0, 240) });
+  if (isPhoneWrite(name)) deps.onWrite?.({ tool: name, phone: target.name, ...phoneWriteSummary(name, target.name) });
   return phoneOkResult(outcome.result, { name: target.name, platform: target.platform });
 }

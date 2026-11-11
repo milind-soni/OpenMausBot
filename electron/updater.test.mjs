@@ -16,10 +16,10 @@ const CLOUD = "https://home-7f3k2.fly.dev";
 const OTHER = "https://bots.example.test";
 const OWN = "https://omb-c-a.fly.dev";
 
-const fixture = vi.hoisted(() => ({ autoUpdater: null, handlers: new Map() }));
+const fixture = vi.hoisted(() => ({ autoUpdater: null, handlers: new Map(), home: "" }));
 
 vi.mock("electron", () => ({
-  app: { isPackaged: true, getPath: () => "/unused-updater-test-log", getVersion: () => "1.0.0", hide: vi.fn() },
+  app: { isPackaged: true, getPath: () => fixture.home, getVersion: () => "1.0.0", hide: vi.fn() },
   clipboard: { writeText: vi.fn() },
   ipcMain: { handle: (name, handler) => fixture.handlers.set(name, handler) },
 }));
@@ -38,7 +38,7 @@ function mainRule() {
   const start = source.indexOf("function myCloud() {"), end = source.indexOf("const savedWorkspace = id =>", start);
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
-  expect(source.includes("registerUpdaterIpc({ pageAllowed: updaterPageAllowed });"), "main.mjs wires the updater to updaterPageAllowed").toBe(true);
+  expect(source.includes("registerUpdaterIpc({ pageAllowed: updaterPageAllowed, serverPage: event => activePageOrigin(event), confirmRestart: "), "main.mjs wires the updater to updaterPageAllowed").toBe(true);
   const signInStart = source.indexOf("function ensureCloudAccount() {"), signInEnd = source.indexOf("\n}\n", signInStart) + 3;
   expect(signInStart).toBeGreaterThanOrEqual(0);
   const window = { isDestroyed: () => false, webContents: null };
@@ -55,7 +55,7 @@ function mainRule() {
     // ensureCloudAccount's world: a packaged app, and a sign-in client whose state the test sets.
     app: { isPackaged: true, getPath: () => "/unused", getVersion: () => "1.0.0" }, process: { platform: "darwin", env: {} }, cloudTarget,
     path: { join: (...parts) => parts.join("/") }, os: { hostname: () => "mac" }, shell: {}, safeStorage: {},
-    createCloudAccountStore: () => ({}), rememberCloudHome: () => {}, rememberedCloudHome, computerSharing: null, updatesConsent: null,
+    createCloudAccountStore: () => ({}), cloudEncryption: {}, cloudAccountStore: () => ({}), cloudSync: { accountChanged: () => {} }, accounts: { tell: () => {} }, rememberCloudHome: () => {}, rememberedCloudHome, computerSharing: null, updatesConsent: null,
     sendUpdaterState: () => {}, refreshCloudMenus: () => {}, announceCloudReady: () => {}, installCloudPlanIpc: () => {},
     includedX: { onState: async () => {} }, includedPages: { onState: async () => {} }, cloudPower: { changed: () => {}, awaiting: () => false }, cloudLogins: { kick: () => {} },
     createCloudAccountClient: (options) => {
@@ -91,10 +91,10 @@ function mainRule() {
     context.cloudSignInRestored = true;
     signIn.options.onState(state);
   };
-  return { context, window, show, offered, launching, signedIn, pageAllowed: vm.runInContext("updaterPageAllowed", context) };
+  return { context, window, show, offered, launching, signedIn, pageAllowed: vm.runInContext("updaterPageAllowed", context), serverPage: (event) => vm.runInContext("activePageOrigin", context)(event) ?? null };
 }
 
-async function load(pageAllowed) {
+async function load(pageAllowed, serverPage = undefined, confirmRestart = undefined) {
   vi.resetModules();
   fixture.handlers.clear();
   const autoUpdater = new EventEmitter();
@@ -111,7 +111,7 @@ async function load(pageAllowed) {
   autoUpdater.quitAndInstall = vi.fn();
   fixture.autoUpdater = autoUpdater;
   const updater = await import("./updater.mjs");
-  updater.registerUpdaterIpc({ pageAllowed });
+  updater.registerUpdaterIpc({ pageAllowed, ...(serverPage ? { serverPage, confirmRestart } : {}) });
   return { updater, autoUpdater, handlers: fixture.handlers };
 }
 
@@ -120,12 +120,14 @@ const settle = async () => {
 };
 
 beforeEach(() => {
+  fixture.home = mkdtempSync(join(tmpdir(), "omb-updater-home-"));
   localOriginModule.setLocalOrigin(LOCAL);
   vi.useFakeTimers();
 });
 afterEach(() => {
   vi.clearAllTimers();
   vi.useRealTimers();
+  rmSync(fixture.home, { recursive: true, force: true });
 });
 
 function bridgeFor(origin, { clicked = false, rule = null } = {}) {
@@ -339,11 +341,12 @@ it("downloads an update by itself: the first check after launch starts it, and n
 it("My Cloud's page reads and drives the update channels, and another server's page is refused", async () => {
   const rule = mainRule();
   const { handlers } = await load(rule.pageAllowed);
-  expect([...handlers.keys()].sort()).toEqual(["update:check", "update:get-state", "update:install", "update:seen"]);
+  expect([...handlers.keys()].sort()).toEqual(["update:check", "update:for-server-page", "update:get-state", "update:install", "update:seen"]);
 
   const cloud = page(CLOUD);
   rule.show(cloud, "cloud");
-  for (const channel of handlers.keys()) expect(() => handlers.get(channel)(cloud.event), channel).not.toThrow();
+  const channels = [...handlers.keys()].filter((channel) => channel !== "update:for-server-page");
+  for (const channel of channels) expect(() => handlers.get(channel)(cloud.event), channel).not.toThrow();
   rule.context.cloudAccount = { homeTarget: () => null, state: () => ({ status: "unavailable", account: { id: "a1" } }), isOwnCloud: () => false };
   rule.context.rememberedHome = { accountId: "a1", origin: CLOUD };
   expect(() => handlers.get("update:get-state")(cloud.event)).not.toThrow();
@@ -352,19 +355,19 @@ it("My Cloud's page reads and drives the update channels, and another server's p
   rule.context.cloudAccount = { homeTarget: () => ({ origin: CLOUD }), state: () => ({ status: "connected", account: { id: "a1" } }), isOwnCloud: () => false };
 
   rule.context.desktopRemoteAccess = { endpoint: "https://companion.example.test" };
-  for (const channel of handlers.keys()) expect(() => handlers.get(channel)(cloud.event), channel).toThrow(/only available/);
+  for (const channel of channels) expect(() => handlers.get(channel)(cloud.event), channel).toThrow(/only available/);
   rule.context.desktopRemoteAccess = false;
 
   const other = page(OTHER);
   rule.show(other, "vps");
-  for (const channel of handlers.keys()) expect(() => handlers.get(channel)(other.event), channel).toThrow(/only available/);
+  for (const channel of channels) expect(() => handlers.get(channel)(other.event), channel).toThrow(/only available/);
   expect(() => handlers.get("update:get-state")({ sender: other.webContents, senderFrame: { url: `${CLOUD}/` } })).toThrow(/only available/);
   rule.show(cloud, "cloud");
   expect(() => handlers.get("update:get-state")({ sender: cloud.webContents, senderFrame: { url: `${CLOUD}/` } })).toThrow(/only available/);
 
   const local = page(LOCAL);
   rule.show(local);
-  for (const channel of handlers.keys()) expect(() => handlers.get(channel)(local.event), channel).not.toThrow();
+  for (const channel of channels) expect(() => handlers.get(channel)(local.event), channel).not.toThrow();
 });
 
 it("sends update news only to a page allowed to read it", async () => {
@@ -420,4 +423,37 @@ it("sends updater progress to a reopened window without restarting the updater",
     .toEqual(["checking", "downloading", "downloading", ...(process.platform === "darwin" ? ["preparing"] : []), "downloaded"]);
   expect(autoUpdater.eventNames().reduce((count, name) => count + autoUpdater.listenerCount(name), 0)).toBe(listenerCount);
   expect(vi.getTimerCount()).toBe(timerCount);
+});
+
+it("a server's page the window shows may ask for the app's own update: it learns only what was done, and nothing restarts unless the person says so", async () => {
+  const rule = mainRule();
+  const other = page(OTHER);
+  rule.show(other, "vps");
+  expect(rule.serverPage(other.event)).toBe(OTHER);
+  expect(rule.serverPage({ sender: other.webContents, senderFrame: { url: `${CLOUD}/` } })).toBeNull();
+  expect(rule.serverPage({ sender: page(OTHER).webContents, senderFrame: { url: `${OTHER}/` } })).toBeNull();
+  const answers = [];
+  const confirmRestart = vi.fn(async (version) => { answers.push(version); return answers.length > 1; });
+  const { updater, autoUpdater, handlers } = await load(rule.pageAllowed, rule.serverPage, confirmRestart);
+  const ask = handlers.get("update:for-server-page");
+  await expect(Promise.resolve().then(() => ask({ sender: page(OTHER).webContents, senderFrame: { url: `${OTHER}/` } }))).rejects.toThrow(/only available/);
+  expect(await ask(other.event)).toBe("unavailable");
+  updater.attachUpdaterWindow(rule.window);
+  updater.startUpdater();
+  // Checked and downloaded at the page's request; the person said Not now. Five asks at once open one dialog, which
+  // names the asking server.
+  vi.advanceTimersByTime(updater.SERVER_PAGE_ASK_COOLDOWN_MS);
+  expect(await Promise.all([1, 2, 3, 4, 5].map(() => ask(other.event)))).toEqual(["later", "later", "later", "later", "later"]);
+  expect(confirmRestart).toHaveBeenCalledTimes(1);
+  expect(confirmRestart).toHaveBeenCalledWith("2.0.0", OTHER);
+  expect(await ask(other.event)).toBe("later");
+  expect(confirmRestart).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(updater.SERVER_PAGE_ASK_COOLDOWN_MS);
+  expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+  await settle();
+  // Not the updater's state: the page never hears it, only what its own request did.
+  expect(other.webContents.send).not.toHaveBeenCalled();
+  expect(await ask(other.event)).toBe("installing");
+  expect(confirmRestart).toHaveBeenLastCalledWith("2.0.0", OTHER);
+  expect(autoUpdater.quitAndInstall).toHaveBeenCalledTimes(1);
 });

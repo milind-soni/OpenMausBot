@@ -1,13 +1,13 @@
 // The window's own frame in the real app, as the desktop window draws it on macOS and Windows: the top bar (the
 // traffic lights or the caption buttons, the rail's button, the place on screen in its middle, an update, Settings),
-// the rail of places beside it, the sidebar on the frame's colour beside the app's card, the sidebar's edge dragged to
+// the rail of places beside it in the bar's colour, the sidebar and the chat in the app's card, the sidebar's edge dragged to
 // its avatars and back, the same window with the frame turned off, and the rail's tiles up close. Against a disposable fake-engine server, with the desktop bridge
 // of scripts/testing/rail-preview.tsx (the window's own rail drawn by its own page, in a frame).
 // Run: node --experimental-strip-types scripts/verify-window-frame.ts --shots <dir> [--only <view,view>] [--skins all]
 // Each view is photographed in Daylight and Midnight (every skin with --skins all) at 1280x800, at twice that size,
 // and the views of the bar also as a strip of the bar alone. `tiles` draws each state of a rail tile with every pixel
 // as a square, at 1x and 2x; `colours` puts the frame's colour today, the colour derived from the app's and the app's
-// own side by side; `skins` shows the window's corner in every skin, and `corners` the card's three round corners in
+// own side by side; `skins` shows the window's corner in every skin, and `corners` the card's three corners in
 // every skin, three times their size.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,7 +23,7 @@ const argument = (name: string) => { const at = process.argv.indexOf(name); retu
 const shots = argument("--shots") === null ? null : resolve(argument("--shots")!);
 const only = argument("--only") === null ? null : new Set(argument("--only")!.split(",").filter(Boolean));
 const WIDTH = 1280, HEIGHT = 800;
-const ALL_SKINS = ["daylight", "midnight", "atelier", "foundry", "lagoon", "graphite", "linen", "dusk", "meadow", "pop", "halloween"];
+const ALL_SKINS = ["daylight", "midnight", "atelier", "foundry", "lagoon", "graphite", "linen", "dusk", "meadow", "pop", "halloween", "diwali", "aurora"];
 const SKINS = argument("--skins") === "all" ? ALL_SKINS : ["daylight", "midnight"];
 const LOOK: Record<string, string> = { daylight: "light", midnight: "dark" };
 const BAR = "[data-window-frame-bar]";
@@ -141,7 +141,7 @@ async function tiles(page: HeadlessPage, base: string, skin: string, file: strin
 
 const CORNER = { x: 0, y: 0, width: 560, height: 300 };
 type Box = { x: number; y: number; width: number; height: number };
-/** The card's round corners, each with the frame round it. */
+/** The card's corners, each with the frame round it. */
 const cardCorners = (card: Box): Array<[string, Box]> => [
   ["top left", { x: card.x - 24, y: card.y - 16, width: 96, height: 64 }],
   ["top right", { x: card.x + card.width - 72, y: card.y - 16, width: 72, height: 64 }],
@@ -214,7 +214,7 @@ try {
           rows.push({ label: "", pictures });
         }
         const file = join(shots, "corners.png");
-        await sheet(page, "The card's round corners in every skin, three times their size", rows, file);
+        await sheet(page, "The card's corners in every skin, three times their size", rows, file);
         console.log(file);
       }
     } finally {

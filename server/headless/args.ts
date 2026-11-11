@@ -9,6 +9,8 @@ export const EXIT = {
   timeout: 4,
   unreachable: 5,
   changes: 6,
+  /** `doctor --host`: this machine is missing something the server needs. */
+  hostMissing: 7,
   interrupted: 130,
 } as const;
 
@@ -54,13 +56,13 @@ const WAITING = {
 } satisfies ParseArgsOptionsConfig;
 
 const VERBS: Record<string, { options: ParseArgsOptionsConfig; positionals: number }> = {
-  doctor: { options: { wait: { type: "string" } }, positionals: 0 },
+  doctor: { options: { wait: { type: "string" }, host: { type: "boolean" }, "data-dir": { type: "string" }, domain: { type: "string" } }, positionals: 0 },
   bots: { options: {}, positionals: 0 },
   channels: { options: {}, positionals: 0 },
   models: { options: {}, positionals: 0 },
   messages: { options: { ...TARGET, limit: { type: "string" } }, positionals: 1 },
-  send: { options: { ...TARGET, ...TEXT, "send-id": { type: "string" }, "dry-run": { type: "boolean" } }, positionals: 2 },
-  "send-channel": { options: { ...TARGET, ...TEXT, "send-id": { type: "string" }, "dry-run": { type: "boolean" } }, positionals: 2 },
+  send: { options: { ...TARGET, ...TEXT, title: { type: "string" }, "send-id": { type: "string" }, "dry-run": { type: "boolean" } }, positionals: 2 },
+  "send-channel": { options: { ...TARGET, ...TEXT, title: { type: "string" }, "send-id": { type: "string" }, "dry-run": { type: "boolean" } }, positionals: 2 },
   run: {
     options: { ...TARGET, ...TEXT, ...WAITING, title: { type: "string" }, wait: { type: "string" }, export: { type: "string" }, force: { type: "boolean" },
       "send-id": { type: "string" } },
@@ -105,13 +107,16 @@ const VERBS: Record<string, { options: ParseArgsOptionsConfig; positionals: numb
     positionals: 1,
   },
   mcp: { options: {}, positionals: 0 },
+  "token create": { options: { out: { type: "string" }, scope: { type: "string" }, expires: { type: "string" }, force: { type: "boolean" } }, positionals: 1 },
+  "token list": { options: {}, positionals: 0 },
+  "token revoke": { options: {}, positionals: 1 },
 };
 
 export const HEADLESS_VERBS: ReadonlySet<string> = new Set(Object.keys(VERBS).map((verb) => verb.split(" ")[0]!));
 
 /** Verbs that change something; control-omb refuses them on a discovered server. */
 export const MUTATING_VERBS: ReadonlySet<string> = new Set([
-  "send", "send-channel", "run", "interrupt", "new-bot", "new-channel", "set-model", "edit", "team apply", "engine set",
+  "send", "send-channel", "run", "interrupt", "new-bot", "new-channel", "set-model", "edit", "team apply", "engine set", "token create", "token revoke",
 ]);
 
 export type Flags = Record<string, string | boolean | string[] | undefined>;
@@ -122,15 +127,17 @@ export interface ParsedCommand {
   positionals: string[];
 }
 
+const SUBCOMMANDS = new Map([["team", ["apply", "export"]], ["engine", ["set", "list"]], ["token", ["create", "list", "revoke"]]]);
+
 /** Strict: an unknown flag or a missing value is a usage error (exit 2). */
 export function parseCommand(argv: readonly string[]): ParsedCommand {
   const [head, ...rest] = argv;
   if (!head) throw usageError("name a verb", "run openmausbot help");
   let verb = head;
   let args = rest;
-  if (head === "team" || head === "engine") {
+  const actions = SUBCOMMANDS.get(head);
+  if (actions) {
     const action = rest[0];
-    const actions = head === "team" ? ["apply", "export"] : ["set", "list"];
     if (!action || !actions.includes(action)) {
       if (action === "--help" || action === "-h") return { verb: head, flags: { help: true }, positionals: [] };
       throw usageError(`${head} needs one of: ${actions.join(", ")}`, `run openmausbot help ${head}`);
@@ -164,23 +171,25 @@ export function requiredFlag(flags: Flags, name: string): string {
   return value;
 }
 
-const DURATION = /^(\d+(?:\.\d+)?)(ms|s|m|h)?$/;
-const UNIT: Record<string, number> = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 };
+const DURATION = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/;
+const DAY = 24 * 3_600_000;
+const UNIT: Record<string, number> = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000, d: DAY };
 
-/** `90`, `90s`, `5m`, `2h` (a bare number is seconds) to milliseconds. */
+/** `90`, `90s`, `5m`, `2h`, `30d` (a bare number is seconds) to milliseconds. */
 export function parseDuration(raw: string, name: string, bounds: { min?: number; max?: number } = {}): number {
   const match = DURATION.exec(raw.trim());
   const min = bounds.min ?? 1_000;
-  const max = bounds.max ?? 24 * 3_600_000;
+  const max = bounds.max ?? DAY;
   const ms = match ? Math.round(Number(match[1]) * UNIT[match[2] ?? "s"]!) : NaN;
   if (!Number.isFinite(ms) || ms < min || ms > max) {
-    throw usageError(`${name} must be a duration from ${describeMs(min)} to ${describeMs(max)}, such as 90, 90s, 5m or 2h`);
+    throw usageError(`${name} must be a duration from ${describeMs(min)} to ${describeMs(max)}, such as ${max > DAY ? "12h, 30d or 90d" : "90, 90s, 5m or 2h"}`);
   }
   return ms;
 }
 
 export const describeMs = (ms: number): string =>
-  ms === 0 ? "0s" : ms % 3_600_000 === 0 ? `${ms / 3_600_000}h` : ms % 60_000 === 0 ? `${ms / 60_000}m` : ms % 1_000 === 0 ? `${ms / 1_000}s` : `${ms}ms`;
+  ms === 0 ? "0s" : ms > DAY && ms % DAY === 0 ? `${ms / DAY}d` : ms % 3_600_000 === 0 ? `${ms / 3_600_000}h`
+    : ms % 60_000 === 0 ? `${ms / 60_000}m` : ms % 1_000 === 0 ? `${ms / 1_000}s` : `${ms}ms`;
 
 const SIZE = /^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb)?$/i;
 const SIZE_UNIT: Record<string, number> = { b: 1, kb: 1_000, mb: 1_000_000, gb: 1_000_000_000 };

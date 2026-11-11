@@ -12,6 +12,7 @@ import type { RoomReport } from "./engine-memory.ts";
 import type { FirstHourReport } from "./host/first-hour.ts";
 import type { ValueReport } from "./host/value-ledger.ts";
 import type { ProviderSnapshot, RuntimeEvent } from "./contracts.ts";
+import { createCloudSpeed, type CloudSpeed } from "./cloud-speed.ts";
 import { classifyError } from "./drivers/retry.ts";
 import type { Message, StoreChange } from "./store.ts";
 
@@ -47,7 +48,7 @@ const FIXED_CAUSES: ReadonlyArray<[RegExp, string]> = [
   [/^no activity for \d+ minutes — the turn was stopped$/, "stalled"],
   [/^turn interrupted — OpenMausBot restarted$/, "restart"],
   [/could not start — /, "could_not_start"],
-  [/^the incident could not reach /, "incident_undelivered"],
+  [/^the problem report could not reach /, "incident_undelivered"],
   [/^could not deliver approval to the provider/, "approval_undelivered"],
   [/^Canonical event history is incomplete/, "event_log"],
 ];
@@ -253,6 +254,8 @@ export interface CloudHealthDeps {
   firstHour?: () => { firstHour?: FirstHourReport; value?: ValueReport };
   /** The last day's memory pressure (engine-memory.ts), where this home watches it. */
   room?: () => RoomReport;
+  /** CPU steal and pressure, boot and wake times, and how long messages wait for their engine. */
+  speed?: CloudSpeed;
   now?: () => number;
 }
 
@@ -268,8 +271,9 @@ export function boxSummary(report: BoxReport | undefined): { box: BoxReport["box
 export function createCloudHealth(deps: CloudHealthDeps) {
   const now = deps.now ?? Date.now;
   const ledger = createCloudHealthLedger({ botOf: (threadId) => deps.store.botByThread(threadId)?.id ?? null, now });
-  deps.store.onChange((change) => { if (change.type === "message") ledger.noteMessage(change.threadId, change.message); });
-  deps.bus.subscribe((event) => ledger.noteEvent(event));
+  const speed = deps.speed ?? createCloudSpeed({ now });
+  deps.store.onChange((change) => { if (change.type === "message") { ledger.noteMessage(change.threadId, change.message); speed.noteMessage(change.threadId, change.message); } });
+  deps.bus.subscribe((event) => { ledger.noteEvent(event); speed.noteEvent(event); });
   const connectors = backgroundLookup(deps.connectors, CONNECTORS_TTL_MS, now);
   const version = match(VERSION, deps.version) ?? "unknown", image = match(IMAGE, deps.image);
 
@@ -290,6 +294,7 @@ export function createCloudHealth(deps: CloudHealthDeps) {
 
   return {
     ledger,
+    speed,
     noteRoutineRun: ledger.noteRoutineRun,
     report(after: string | null | undefined) {
       const read = ledger.read(after);
@@ -299,7 +304,7 @@ export function createCloudHealth(deps: CloudHealthDeps) {
         turns: read.turns, routines: read.routines, engines: engines(), connectors: connectorState(),
         browser: { available: browser.available, installing: browser.installing, interrupted: browser.interrupted },
         box: boxSummary(deps.box?.()),
-        firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null,
+        firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null, speed: speed.report(),
         system: { ...memory, rssBytes: process.memoryUsage.rss(), load1: loadavg()[0] ?? 0, cpus: availableParallelism(), disk: diskBytes(deps.dataDir), eventLogWritable: writable(deps.eventsDir) },
       };
       let budget = CLOUD_HEALTH_MAX_BYTES - JSON.stringify({ ...base, cursor: ledger.cursor(read.seq), truncated: true, incidents: [] }).length;

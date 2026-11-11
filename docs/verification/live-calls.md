@@ -53,6 +53,72 @@ start answer 409 `needsKey`; after the OpenAI key is saved through
 `PUT /api/config`, a phone's call starts with that key; a separate Live key
 then wins; neither key appears in the config or the log.
 
+## Azure OpenAI as the Live provider
+
+With `live.provider: "azure"` (`OMB_LIVE_PROVIDER=azure`) a call creates its
+GPT-Live session on the person's Azure OpenAI / Foundry resource:
+`POST {endpoint}/openai/v1/live/sessions` with the deployment name
+(`live.azureDeployment`, `OMB_AZURE_OPENAI_LIVE_DEPLOYMENT`, default
+`gpt-live-1`) as `session.model`, and the sideband attaches to
+`wss://{endpoint}/openai/v1/live/sessions/{id}/attach`. Both send the resource
+key as `api-key`, never as a bearer token, and the session request refuses a
+redirect, since `fetch` would carry `api-key` to another host. The key is only
+`live.key`; the OpenAI API key is never used for Azure. `live.azureEndpoint`
+(`OMB_AZURE_OPENAI_LIVE_ENDPOINT`) must be `https` on an Azure OpenAI host
+(`azureOpenAiRoot` in `server/live-call.ts`), and `PATCH /api/live/settings`
+refuses any other.
+
+`live.key` goes only where it was saved for. Saving a key records `live.keyFor`:
+`openai` or `azure:<host>` (`liveKeyTarget` in `server/live-config.ts`), and
+`usableLiveKey` hands the key out only while calls go there. Switching the
+Service or changing the endpoint's host, through `PATCH /api/live/settings` or
+`PUT /api/config`, forgets the key and asks for it again, even after changing
+back (`liveSavePatch`). A new path or deployment on the same host keeps it.
+`keyFor` is never taken from a request. A key saved with Azure chosen and no
+endpoint answers `400`. A key with no `keyFor` is from before Azure was offered,
+so OpenAI's. In the environment, `OMB_OPENAI_LIVE_KEY` with `OMB_LIVE_PROVIDER=azure`
+and `OMB_AZURE_OPENAI_LIVE_ENDPOINT` is the operator's own pairing, unless the
+file already says where the key may go. So a key the app forgot stays forgotten
+until one is saved again, including the desktop's copy in the OS store, and a
+different key in the environment takes no pairing from the file.
+
+Without the key, or with a missing or invalid endpoint,
+`POST /api/live/session` answers `409` with `needsKey` and the Azure setup
+sentence before anything leaves the harness. A call keeps the endpoint it
+started with even if the settings change mid-call.
+
+Azure refuses `session.client` (`400 Unknown parameter`), so an Azure call goes
+without `LIVE_DATA_CHANNEL`: the caller's data channel keeps Azure's default
+events instead of "may only hang up". This is read from the code and was not
+checked against Azure: assume the caller could send session or item events and
+receive events holding the bot's instructions. So an Azure call is limited to
+an admin, or the owner of a single-owner server (`azureLiveCallRefusal` in
+`server/live-access.ts`, asked by `LiveCallController.start`, the only place a
+session is created):
+
+| Caller | Azure call |
+| --- | --- |
+| Desktop app's window; the owner's phone through the companion | yes |
+| Single-owner server: local request, or a paired admin device | yes |
+| My Cloud: the owner's session | yes |
+| Team Cloud: Super admin, Admin | yes |
+| Shared company workspace: admin | yes |
+| Self-hosted with a sign-in list: admin session | yes |
+| Team Cloud User, on the app or their phone; a workspace non-admin; a chat-only device | no, plain sentence |
+| A local request where others use the server (a bot's shell): Team Cloud, shared workspace, sign-in list, a chat-only device or code | no |
+| A sign-in that only moves a bot in | no |
+| A published or inline page, with or without an admin's cookie | no |
+
+The refused answer is `403 { "error": "Live calls here go through Azure OpenAI, so only an admin or the owner of this server can start one. Ask an admin if you need a call." }`,
+with no `needsKey`. Nothing reaches Azure or OpenAI: a refused call never falls
+back to another provider. `GET /api/config` and the stream tell a session
+without the admin scope `live.provider`, never `azureEndpoint` or
+`azureDeployment`. `server/live-access.test.ts` runs each caller above through
+the sign-in gate and the limit. `server/live-azure-access.e2e.test.ts` does it on
+the full server with a made-up key and its `fetch` stubbed.
+`server/hosted-access.test.ts` does it for a shared workspace, with no key saved,
+so a caller who gets through stops at the setup prompt.
+
 ## User path
 
 Start a Live call from the call button's menu, say something the bot must act

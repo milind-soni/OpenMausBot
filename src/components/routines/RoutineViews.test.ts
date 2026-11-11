@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Routine, RoutineRun } from "@/lib/routines";
 import { RoutineList } from "./RoutineList";
 import { latestRoutineRun, routineNextLabel } from "@/lib/routine-display";
+import { setLocale } from "@/lib/i18n";
 
 const routine: Routine = {
   id: "brief", name: "Morning brief", prompt: "Report progress", target: "bot", botId: "scout", runOn: "maus", enabled: true,
@@ -18,6 +19,15 @@ function list(props: Partial<Parameters<typeof RoutineList>[0]> = {}) {
 afterEach(() => vi.useRealTimers());
 
 describe("routine list", () => {
+  it("warns on an enabled routine whose bot is paused, with a way to swap it in", () => {
+    const paused = list({ pausedBots: ["scout"] });
+    expect(paused).toContain("bot is paused on this plan, so it won&#x27;t run.");
+    expect(paused).toContain("Swap awake bots");
+    expect(list({ pausedBots: ["scout"], routines: [{ ...routine, enabled: false }] })).not.toContain("Swap awake bots");
+    expect(list({ pausedBots: ["other"] })).not.toContain("Swap awake bots");
+    expect(list()).not.toContain("Swap awake bots");
+  });
+
   it("shows saved skips and recent failure streaks without claiming all offline occurrences were counted", () => {
     const markup = list({ routines: [{ ...routine, skippedRuns: 3, lastSkippedAt: 100, failureStreak: 2 }] });
     expect(markup).toContain("Scheduled occurrences skipped while busy: 3");
@@ -31,6 +41,19 @@ describe("routine list", () => {
     expect(markup).toContain("6 of 7 runs OK this week");
     expect(markup).toContain("Latest: Retried after the AI stalled · Completed");
     expect(list()).not.toContain("runs OK this week");
+    expect(list({ routines: [{ ...routine, weekRuns: { ok: 1, total: 1 } }] })).toContain("1 of 1 runs OK this week");
+    setLocale("pt-br");
+    expect(list({ routines: [{ ...routine, weekRuns: { ok: 1, total: 1 } }] })).toContain("1 de 1 execução bem-sucedida nesta semana");
+    expect(list({ routines: [{ ...routine, weekRuns: { ok: 2, total: 3 } }] })).toContain("2 de 3 execuções bem-sucedidas nesta semana");
+    setLocale("en");
+  });
+  it("says a coded run result in the app language, and the run's own words otherwise", () => {
+    const waiting = { ...run, output: undefined, attention: "Starting again shortly after OpenMausBot restarted while it ran", attentionCode: "routines.server.retryAfterRestart" } as RoutineRun;
+    expect(list({ runs: [waiting] })).toContain("Starting again shortly after OpenMausBot restarted while it ran");
+    setLocale("pt-br");
+    expect(list({ runs: [waiting] })).toContain("Vai começar novamente em instantes: o OpenMausBot reiniciou durante a execução");
+    expect(list()).toContain("Brief prepared.");
+    setLocale("en");
   });
   it("retains visible records and latest results during a failed refresh", () => {
     const markup = list({ error: true });
@@ -88,9 +111,9 @@ describe("routine list", () => {
   });
 
   it("chooses a new pending run ahead of an older run that finished later", () => {
-    const pending = { ...run, id: "new", createdAt: 200, scheduledFor: 200, status: "waiting" as const, attention: "Waiting for delegated work to finish" };
+    const pending = { ...run, id: "new", createdAt: 200, scheduledFor: 200, status: "waiting" as const, attention: "Waiting for work it handed on to finish" };
     expect(latestRoutineRun(routine.id, [{ ...run, finishedAt: 300 }, pending])).toBe(pending);
     expect(list({ runs: [run, pending] })).toContain("Latest: Waiting");
-    expect(list({ runs: [run, pending] })).toContain("Waiting for delegated work to finish");
+    expect(list({ runs: [run, pending] })).toContain("Waiting for work it handed on to finish");
   });
 });

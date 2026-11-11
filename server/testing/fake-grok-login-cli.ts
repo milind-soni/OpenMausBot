@@ -3,7 +3,7 @@
 // device instructions): no network, no real credential; needs explicit opt-in and a disposable HOME.
 //   FAKE_GROK_MODE  success | approve (once HOME/.omb-fake-grok-approved exists) | waiting | complete |
 //     evil (a page on another host) | expired | denied | crash | no-credential | old (no --device-auth) | ignore-term
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 
 const home = process.env.HOME;
@@ -49,6 +49,10 @@ if (args.join(" ") === "--version") {
     if (mode === "ignore-term") process.on("SIGTERM", () => {});
     setInterval(() => {}, 1000);
   }
+} else if (args.join(" ") === "logout") {
+  rmSync(join(grokHome, "auth.json"), { force: true });
+  process.stderr.write("Signed out of Grok.\n");
+  process.exit(0);
 } else {
   process.stderr.write("Unsupported offline fixture command.\n");
   process.exitCode = 2;

@@ -152,33 +152,58 @@ describe("lazyScreen", () => {
 });
 
 describe("preloadScreens", () => {
-  it("fetches every deferred screen once the launch is idle, and can be cancelled", () => {
-    let idle: (() => void) | undefined;
+  it("a page on this machine fetches nothing ahead: each screen loads when it opens", () => {
+    vi.useFakeTimers();
+    const preloads = stubPreloads();
+    expect(preloads.length).toBe(21);
+    for (const host of ["127.0.0.1", "localhost", "[::1]"]) preloadScreens(host);
+    vi.runAllTimers();
+    for (const preload of preloads) expect(preload).not.toHaveBeenCalled();
+  });
+
+  it("a Cloud page fetches the screens after launch, one per idle moment, and can be cancelled", async () => {
+    vi.useFakeTimers();
+    const idle: Array<() => void> = [];
     const cancel = vi.fn();
     vi.stubGlobal("requestIdleCallback", (run: () => void, options: { timeout: number }) => {
       expect(options.timeout).toBeGreaterThan(0);
-      idle = run;
-      return 7;
+      idle.push(run);
+      return idle.length;
     });
     vi.stubGlobal("cancelIdleCallback", cancel);
     const preloads = stubPreloads();
-    expect(preloads.length).toBe(14);
-    const stop = preloadScreens();
-    for (const preload of preloads) expect(preload).not.toHaveBeenCalled();
-    idle!();
-    for (const preload of preloads) expect(preload).toHaveBeenCalledTimes(1);
+    const called = () => preloads.filter((preload) => preload.mock.calls.length > 0).length;
+    const stop = preloadScreens("cloud.example");
+    vi.advanceTimersByTime(4_999);
+    expect(idle.length, "nothing during launch").toBe(0);
+    vi.advanceTimersByTime(1);
+    expect(idle.length).toBe(1);
+    expect(called()).toBe(0);
+    idle.shift()!();
+    expect(called(), "one at a time").toBe(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(idle.length, "the next waits for the last to arrive").toBe(1);
+    idle.shift()!();
+    expect(called()).toBe(2);
+    await vi.advanceTimersByTimeAsync(0);
     stop();
-    expect(cancel).toHaveBeenCalledWith(7);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    while (idle.length) idle.shift()!();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(idle.length, "nothing after cancel").toBe(0);
   });
 
-  it("falls back to a timer where requestIdleCallback is missing", () => {
+  it("reaches every screen on a Cloud page, by timer where requestIdleCallback is missing", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("requestIdleCallback", undefined);
     const preloads = stubPreloads();
-    preloadScreens();
+    preloadScreens("cloud.example");
     for (const preload of preloads) expect(preload).not.toHaveBeenCalled();
-    vi.runAllTimers();
-    for (const preload of preloads) expect(preload).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    const rarelyOpened = [screens.CloudAddDialog, screens.GrokMoveDialog, screens.PhoneAppDialog, screens.ShareTeamDialog, screens.TeamLibraryPanel];
+    const stubbed = Object.values(screens).filter((value): value is ReturnType<typeof lazyScreen> => typeof value === "function" && "preload" in value);
+    for (const screen of stubbed) expect(screen.preload).toHaveBeenCalledTimes(rarelyOpened.includes(screen as never) ? 0 : 1);
+    expect(preloads.length).toBe(stubbed.length);
   });
 
   it("a window opened onto Settings fetches Settings at once, not when idle", async () => {
@@ -208,18 +233,20 @@ describe("launch bundle", () => {
       : specifier.startsWith(".") ? join(dirname(from), specifier) : null;
     if (!base) return null;
     for (const candidate of [base, `${base}.tsx`, `${base}.ts`, join(base, "index.tsx"), join(base, "index.ts")]) {
-      if (/\.tsx?$/.test(candidate) && existsSync(candidate)) return candidate;
+      if (/\.(tsx?|json)$/.test(candidate) && existsSync(candidate)) return candidate;
     }
     return null;
   };
-  const staticImports = /(?:^|\n)\s*(?:import|export)\s+(?!type\s)(?:[^"'`;]*?\sfrom\s+)?["']([^"']+)["']/g;
-  const launchModules = () => {
+  const staticImports = /(?:^|[\n;])\s*(?:import|export)\s+(?!type\s)(?:[^"'`;]*?\sfrom\s+)?["']([^"']+)["']/g;
+  // The app's launch is main.tsx and App.tsx, whose fetch main.tsx starts at once on every path but /pair and /home.
+  const launchModules = (...entries: string[]) => {
     const seen = new Set<string>();
-    const queue = [join(srcRoot, "main.tsx")];
+    const queue = (entries.length ? entries : ["main.tsx", "App.tsx"]).map((entry) => join(srcRoot, entry));
     while (queue.length) {
       const file = queue.pop()!;
       if (seen.has(file)) continue;
       seen.add(file);
+      if (file.endsWith(".json")) continue;
       for (const [, specifier] of readFileSync(file, "utf8").matchAll(staticImports)) {
         const target = resolve(file, specifier!);
         if (target) queue.push(target);
@@ -234,10 +261,30 @@ describe("launch bundle", () => {
     expect(reached.has("App.tsx")).toBe(true);
     expect(reached.has("components/Sidebar.tsx")).toBe(true);
     const deferred = [
-      "ActivityPanel", "BotSettingsDialog", "ComputerPanel", "InspectorPanel", "KeyboardShortcutsModal",
-      "LocalVmWorkspace", "NewBotDialog", "RemoteAgentSettingsPanel", "remote-desktop-panel", "RoutineCalendarPage",
-      "RoutinesPage", "SettingsModal", "TeamMapPage", "TriggersPage", "WebhookTrigger", "room-panel/RoomPanel",
+      "ActivityPanel", "BotSettingsDialog", "CloudAddDialog", "ComputerPanel", "InspectorPanel", "KeyboardShortcutsModal",
+      "LocalVmWorkspace", "NewBotDialog", "PhoneAppDialog", "PhoneSetupFlow", "PluginsPanel", "published-apps/PublishedAppsPage", "RemoteAgentSettingsPanel", "remote-desktop-panel", "RoutineCalendarPage",
+      "RoutinesPage", "SettingsModal", "ShareTeamDialog", "TeamLibraryPanel", "TeamMapPage", "TriggersPage", "WebhookTrigger", "room-panel/RoomPanel",
     ].map((name) => `components/${name}.tsx`);
     expect(deferred.filter((file) => reached.has(file))).toEqual([]);
+    expect(reached.has("lib/team-import.ts"), "the team library brings the YAML parser in").toBe(false);
+  });
+
+  it("the sign-in and home pages leave the app out", () => {
+    const page = launchModules("main.tsx");
+    expect(page.has("pair/PairPage.tsx")).toBe(true);
+    expect(page.has("components/HomeScreen.tsx")).toBe(true);
+    expect(["App.tsx", "state/store.tsx", "components/Sidebar.tsx", "components/ChatView.tsx"].filter((file) => page.has(file))).toEqual([]);
+  });
+
+  it("carries English and no other language: the one a person chose loads before the first render", () => {
+    expect([...launchModules()].filter((file) => file.startsWith("locales/")).sort()).toEqual(["locales/en.json", "locales/index.ts"]);
+  });
+
+  it("gives the window's rail a page of its own that leaves the app out", () => {
+    const rail = launchModules("rail.tsx");
+    expect(rail.has("components/PlacesRail.tsx")).toBe(true);
+    expect(rail.has("components/PlaceAddSheet.tsx")).toBe(true);
+    expect(["App.tsx", "state/store.tsx", "components/Sidebar.tsx", "components/ChatView.tsx"].filter((file) => rail.has(file))).toEqual([]);
+    expect([...rail].filter((file) => file.startsWith("locales/")).sort()).toEqual(["locales/en.json", "locales/index.ts"]);
   });
 });

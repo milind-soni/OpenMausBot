@@ -19,7 +19,7 @@ vi.mock("mdast-util-from-markdown", async (importOriginal) => {
 });
 
 import { fromMarkdown } from "mdast-util-from-markdown";
-import { ChatMarkdown } from "./ChatMarkdown";
+import { ChatMarkdown, clearChatMarkdownCache } from "./ChatMarkdown";
 import { ThreadRefsContext, type ThreadRefsValue } from "./ThreadRefs";
 
 const qa = { botId: "scout", botName: "Scout", threadId: "qa-245", title: "QA PR 245", activeAt: 1 };
@@ -30,6 +30,7 @@ const after: ThreadRefsValue = {
 };
 
 function markdownProps(refs: ThreadRefsValue, text: string): Record<string, unknown> {
+  clearChatMarkdownCache();
   captured.length = 0;
   renderToStaticMarkup(createElement(ThreadRefsContext.Provider, { value: refs },
     createElement(ChatMarkdown, { text, message: { threadId: "t", messageId: "m" } })));
@@ -58,6 +59,9 @@ describe("ChatMarkdown element renderers", () => {
 
   it("follows the thread list only for a message that can hold a thread link", () => {
     markdownProps(before, "No thread links here: `code`, **bold** and a [site](https://example.test).");
+    expect(threadListReads()).toBe(0);
+
+    markdownProps(before, "## A heading\n\nStill # no thread link.");
     expect(threadListReads()).toBe(0);
 
     markdownProps(before, "Tracked in #QA PR 245.");
@@ -94,5 +98,44 @@ describe("ChatMarkdown normalization", () => {
     expect(fromMarkdown).not.toHaveBeenCalled();
     markdownProps(before, oldest);
     expect(fromMarkdown).toHaveBeenCalledOnce();
+  });
+});
+
+describe("ChatMarkdown rendered once per message", () => {
+  const draw = (text: string, extra: Record<string, unknown> = {}, refs: ThreadRefsValue = before) => {
+    renderToStaticMarkup(createElement(ThreadRefsContext.Provider, { value: refs },
+      createElement(ChatMarkdown, { text, message: { threadId: "t", messageId: "m" }, ...extra })));
+  };
+  const parses = (run: () => void) => {
+    captured.length = 0;
+    run();
+    return captured.length;
+  };
+  beforeEach(() => clearChatMarkdownCache());
+
+  it("draws a message again from its first rendering", () => {
+    const text = "## Plan\n\n- one\n- two with `code`";
+    expect(parses(() => draw(text))).toBe(1);
+    expect(parses(() => { draw(text); draw(text); })).toBe(0);
+    expect(parses(() => draw(`${text}\n- three`))).toBe(1);
+  });
+
+  it("renders a message again only when what its plugins read changes", () => {
+    const plain = "No names in this one.";
+    const named = "Ask @Atlas about it.";
+    expect(parses(() => { draw(plain, { mentionPeers: [{ name: "Atlas" }] }); draw(named, { mentionPeers: [{ name: "Atlas" }] }); })).toBe(2);
+    // A new peer list with the same names is the same rendering; a renamed or recoloured peer is not.
+    expect(parses(() => { draw(plain, { mentionPeers: [{ name: "Juno" }] }); draw(named, { mentionPeers: [{ name: "Atlas" }] }); })).toBe(0);
+    expect(parses(() => draw(named, { mentionPeers: [{ name: "Atlas", color: "red" }] }))).toBe(1);
+    expect(parses(() => draw(named, { mentionPeers: [{ name: "Atlas", color: "red" }], everyone: true }))).toBe(1);
+  });
+
+  it("renders a message that may link a thread again when the thread list changes", () => {
+    const text = "Tracked in #QA PR 245.";
+    expect(parses(() => draw(text, {}, before))).toBe(1);
+    expect(parses(() => draw(text, {}, before))).toBe(0);
+    expect(parses(() => draw(text, {}, after))).toBe(1);
+    expect(parses(() => draw("Nothing to link.", {}, before))).toBe(1);
+    expect(parses(() => draw("Nothing to link.", {}, after))).toBe(0);
   });
 });

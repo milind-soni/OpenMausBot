@@ -1,6 +1,6 @@
 # Usage analytics
 
-OpenMausBot can send anonymous product analytics to PostHog (US cloud, `us.i.posthog.com`), so its maintainers can see
+MausBot can send anonymous product analytics to PostHog (US cloud, `us.i.posthog.com`), so its maintainers can see
 which features people set up and use. This page lists every event and every property the app can send. Nothing else is
 sent.
 
@@ -39,7 +39,8 @@ on there lasts until that page reloads. In a browser, switch it off on each serv
 - URLs, hosts and addresses. PostHog's own `$current_url`, `$host`, `$pathname`, `$referrer`, `$referring_domain`,
   campaign parameters (`utm_*`, `gclid` and the like) and their `$initial_*` and `$session_entry_*` copies are removed
   before an event leaves the app.
-- File paths, and ids of any kind: bot, room, conversation, instance, account or computer.
+- File paths, and ids of any kind: bot, room, conversation, instance, account or computer. (An `announcement` event
+  names the card, by the id the public announcements file gives it, never anything of yours.)
 - Instructions, prompts, message content, model output and error messages.
 
 ## Allowed values
@@ -49,8 +50,8 @@ Properties are counts, `true` or `false`, or words from fixed lists in the app's
 
 | List | Values |
 | --- | --- |
-| Key provider | `anthropic`, `openai`, `openrouter`, `openai_compat`, `xai`, `mistral`, `cerebras`, `groq`, `greenference`, `meta`, `boat`, `composio`, `opencode_go`, `custom_endpoint`, `elevenlabs`, `fish_audio`, `jev`, `openrouter_decider`, `openai_image`, `custom_image`, `openai_live`, `onepassword`, `treg`, `postiz` |
-| Engine | `claude`, `codex`, `gemini`, `cursor`, `opencode`, `qwen`, `hermes`, `cline`, `custom_acp`, `pi`, `openai_compat`, `grok`, `grok_api`, `kimi`, `droid`, `antigravity`, `minimax`, `mistral`, `cerebras`, `groq`, `greenference`, `meta`, `muse_code`, `deepseek`, `copilot` |
+| Key provider | `anthropic`, `openai`, `openrouter`, `openai_compat`, `xai`, `mistral`, `cerebras`, `groq`, `greenference`, `modelgo`, `meta`, `boat`, `composio`, `opencode_go`, `custom_endpoint`, `elevenlabs`, `fish_audio`, `jev`, `openrouter_decider`, `openai_image`, `custom_image`, `openai_live`, `onepassword`, `treg`, `postiz` |
+| Engine | `claude`, `codex`, `gemini`, `cursor`, `opencode`, `qwen`, `hermes`, `cline`, `custom_acp`, `pi`, `openai_compat`, `grok`, `grok_api`, `kimi`, `droid`, `antigravity`, `minimax`, `mistral`, `cerebras`, `groq`, `greenference`, `modelgo`, `meta`, `muse_code`, `deepseek`, `copilot`, `command_code`, `kiro` |
 | App | The 24 apps Connected apps lists by default: `slack`, `github`, `gmail`, `googlecalendar`, `googlesheets`, `googledocs`, `googledrive`, `notion`, `linear`, `sentry`, `posthog`, `discord`, `twitter`, `reddit`, `zapier`, `hubspot`, `salesforce`, `jira`, `asana`, `trello`, `dropbox`, `airtable`, `figma`, `stripe`. Every other app is `other`. |
 | Starting role | `assistant`, `inbox`, `research`, `coder`, `community`, `ops` |
 | Cloud plan | `starter`, `personal`, `pro`, `max` |
@@ -153,7 +154,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `cloud_checkout_opened` | A Cloud checkout opens in the browser | `plan`: Cloud plan; `trial`: true/false; `source`: as for `cloud_dialog_shown` |
 | `cloud_add_another` | Buying another Cloud, for someone who has one, takes a step | `step`: `plan` (a plan chosen), `checkout_opened`, `ready`; `plan`: Cloud plan, for `plan` and `checkout_opened` |
 | `rail_place_opened` | You open a place from the rail of Clouds at the window's left edge | `kind`: `computer`, `cloud`, `team`, `server` |
-| `rail_add` | You use the rail's ＋ | `step`: `opened` (its sheet opened), `cloud` (Buy a Cloud, on this computer's own sheet), `link` (Paste pairing link), `address` (Enter its address instead), `organization` (a new organization added on the Team plan) |
+| `rail_add` | You use the rail's ＋ | `step`: `opened` (its sheet opened), `cloud` (Buy a Cloud, on this computer's own sheet), `link` (Connect to a server), `address` (Enter its address instead), `organization` (a new organization added on the Team plan) |
 | `cloud_setup_started` | A new Cloud starts its first job | none |
 | `cloud_intent_submitted` | You tell a new Cloud what to do first | `idea`: `digest`, `watch`, `research`, `plan`, or none for your own words; `edited`: true/false |
 | `cloud_intent_skipped` | You skip that question | none |
@@ -161,7 +162,12 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `cloud_welcome_ended` | A new Cloud's welcome ends | `reason`: `done`, `skipped`; `at`: the step it ended on |
 | `product_hunt_card` | You act on the Product Hunt card | `action`: `upvote`, `not_now`, `close` |
 | `boat_offer` | Boat's credit offer: its one-time card is shown or you act on it, or you act on it on the Boat card in Settings → API keys | `action`: `shown` (the card only), `get_boat`, `claim` (the drafted email to Boat opened), `not_now`, `close`; `place`: `card`, `settings` |
+| `modelgo_offer` | ModelGo, a sponsor: its one-time popup or its first-run option is shown, or you act on the popup, the first-run option or the ModelGo row in Settings → API keys | `action`: `shown` (the popup and the first-run option), `get_key` (ModelGo's site opened), `add_key` (Settings: a key was saved there; first run: you opened the ModelGo row to add one; never the popup), `not_now`, `close` (the popup only); `place`: `popup`, `onboarding`, `settings` |
+| `announcement` | A card from the project's public announcements file (sponsor offers, product news, tips; [Announcements](https://github.com/milind-soni/OpenMausBot/blob/main/docs/announcements.md)) is shown, or you act on it | `id`: the card's own id from that file, the same for everyone who sees the card; `kind`: `sponsor`, `product`, `tip`; `action`: `shown`, `primary` (its main button), `secondary` (its second button), `close` (Not now, the X or Escape) |
 | `simple_mode_prompt` | The Simple mode popup, shown once in each browser after an update when nothing else is on screen, is shown, its Simple mode switch is flipped, or it is closed (Done, the X, Escape or a click outside) | `action`: `shown`, `toggled`, `closed`; `mode`: `simple`, `advanced`, the mode it was shown or closed in, or the one a flip turned on |
+| `new_look_notice` | The notice that Simple is now the only look, shown once in each browser that was on Advanced mode, when nothing else is on screen, is shown or closed (Done, the X, Escape or a click outside) | `action`: `shown`, `closed` |
+| `advanced_back_notice` | The notice that Advanced mode is back, shown once in each browser that was on Advanced mode before Simple became the only look and is put back on it, when nothing else is on screen, is shown or closed (Done, the X, Escape or a click outside) | `action`: `shown`, `closed` |
+| `grok_move_popup` | The one-time Move from Grok Bot popup is shown or you act on it | `action`: `shown`, `start`, `not_now`, `close` |
 | `two_places_card` | You act on the card that says your bots live in two places (this computer and a server of your own, or My Cloud) | `action`: `bring`, `not_now`; `kind`: `server`, `cloud`, the place it offered |
 
 `api_key_saved` reports `ok` for a key the server checks with its provider before saving it (Boat, Composio,

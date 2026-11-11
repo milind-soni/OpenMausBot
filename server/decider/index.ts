@@ -1,3 +1,4 @@
+import { userError, type UserError } from "../user-errors.ts";
 // Never throws into a turn: every failure comes back as { ok: false, reason }. The included relay
 // token goes only to the relay's URL, and only with requests the relay accepts.
 import type { AppConfig } from "../config.ts";
@@ -76,11 +77,12 @@ export function deciderSharedKeyUsable(cfg: AppConfig): boolean {
   return Boolean(sharedOpenRouterKey(cfg));
 }
 
-/** Never a key, nor a base URL (operator settings with no UI). `provider` is the one in use; `keySource` and
- * `sharedKey` are OpenRouter's, while it is in use. Which own keys are on file is `describeHelpers`'s. */
+/** Never a key, nor a base URL (operator settings with no UI). `provider` is the one in use, else the one chosen
+ * (so Settings shows its key field); `keySource` and `sharedKey` are OpenRouter's, while it is in use. Which own
+ * keys are on file is `describeHelpers`'s. */
 export function describeDecider(cfg: AppConfig) {
   const account = deciderAccount(cfg);
-  const provider = account?.provider ?? "jev";
+  const provider = account?.provider ?? draftProvider(cfg);
   return {
     provider,
     ...(provider === "openrouter" ? { model: deciderModel(cfg), api: deciderApi(cfg) } : {}),
@@ -109,7 +111,7 @@ export function deciderSavePatch(
   patch: Partial<DeciderConfig>,
   current: DeciderConfig | undefined,
   fallback: DeciderKeyFallback = {},
-): { ok: true; patch: Partial<DeciderConfig> } | { ok: false; error: string } {
+): { ok: true; patch: Partial<DeciderConfig> } | ({ ok: false } & UserError) {
   const next: Partial<DeciderConfig> = { ...patch };
   for (const field of [...KEY_FIELDS, "workersAiAccountId"] as const) if (typeof patch[field] === "string") next[field] = patch[field].trim();
   const saving = KEY_FIELDS.some((field) => Boolean(next[field]));
@@ -118,7 +120,7 @@ export function deciderSavePatch(
   const ownAfter = Boolean(after("key") || after("openrouterKey") || (after("workersAiToken") && after("workersAiAccountId")));
   const fallbackHere = fallback.included === true || fallback.shared === true;
   if (patch.openrouterModel !== undefined && patch.openrouterApi === undefined) next.openrouterApi = "chat";
-  if (next.workersAiToken && !after("workersAiAccountId")) return { ok: false, error: "Add your Cloudflare account ID with the token." };
+  if (next.workersAiToken && !after("workersAiAccountId")) return { ok: false, ...userError("serverError.decider.accountRequired") };
   if (saving) {
     next.enabled = patch.enabled ?? true;
     next.jobs = { ...current?.jobs, roomRouting: true, ...patch.jobs };
@@ -128,7 +130,7 @@ export function deciderSavePatch(
     next.jobs = { ...current?.jobs, ...patch.jobs };
   }
   if (next.enabled === true && !saving && !ownAfter && !fallbackHere) {
-    return { ok: false, error: "Save a Cloudflare Workers AI, Jev or OpenRouter key before turning on fast decisions." };
+    return { ok: false, ...userError("serverError.decider.keyRequired") };
   }
   return { ok: true, patch: next };
 }
@@ -136,6 +138,8 @@ export function deciderSavePatch(
 export interface DeciderKeyCheck { key: string; provider: DeciderProvider; model?: string; api?: OpenRouterApi; accountId?: string }
 
 /** What Settings says when a save's key check is refused: a fixed sentence, never the vendor's body. */
+export const DECIDER_KEY_ERROR = { jev: "serverError.decider.jevRejected", workersai: "serverError.decider.workersRejected", openrouter: "serverError.decider.routerRejected" } as const;
+
 export const DECIDER_KEY_REJECTED: Record<DeciderProvider, string> = {
   jev: "Jev rejected this key. Check it at typesafe.ai and paste it again.",
   workersai: "Cloudflare rejected this token. Check that it has Workers AI permission and belongs to this account ID.",

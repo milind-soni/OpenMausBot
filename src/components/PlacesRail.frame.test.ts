@@ -53,7 +53,7 @@ it("with the frame turned off, stands beside the sidebar as it did before the fr
   await mount();
   expect(above()).toContain("h-[52px]");
   const nav = host.querySelector("[data-places-rail]")!.className.split(" ");
-  expect(nav).toEqual(expect.arrayContaining(["bg-panel", "border-r"]));
+  expect(nav).toEqual(expect.arrayContaining(["bg-panel", "border-r-[0.5px]", "border-edge"]));
   expect(nav).not.toContain("bg-frame");
 });
 

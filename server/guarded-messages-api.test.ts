@@ -271,8 +271,10 @@ it("refuses a parked conversation after its own provider settles while its teamm
     await expect.poll(async () => (await api("PATCH", `/api/bots/${chief.id}/tasks/${chief.activeTaskId}`, { approvalMode: "ask" })).status,
       { timeout: 15_000 }).toBe(200);
     const pagePath = `/api/threads/${chief.activeTaskId}/messages?limit=100`;
+    await expect.poll(async () => ((await api("GET", pagePath)).body as Page).messages.some(message =>
+      message.text === "The teammate owns the outstanding check." && message.turnTerminal,
+    ), { timeout: 15_000 }).toBe(true);
     const baseline = (await api("GET", pagePath)).body as Page;
-    expect(baseline.messages.some(message => message.text === "The teammate owns the outstanding check." && message.turnTerminal)).toBe(true);
     expect(nodes().find(node => node.botId === teammate.id)?.status).toBe("running");
     const refusal = await api("POST", `/api/bots/${chief.id}/messages/guarded`, {
       threadId: chief.activeTaskId, sendId: randomUUID(), text: "THIS_GUARDED_FOLLOWUP_MUST_NOT_RUN", expectedActiveLeafId: baseline.activeLeafId,

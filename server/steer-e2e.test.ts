@@ -7,12 +7,13 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { splitLaunchNote } from "./testing/launch-note.ts";
 import { withoutTurnClock } from "./testing/turn-clock-text.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
 const FAKE_ACP = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
 const FAKE_CODEX = join(SERVER_DIR, "testing", "fake-codex-app-server.ts");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
+const PORT = workerPort(18800, 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const posixOnly = describe.skipIf(process.platform === "win32");
 
@@ -26,6 +27,7 @@ posixOnly("mid-turn steering e2e", () => {
   let lateSteerContinuationGate: string;
   let lateSteerDump: string;
   let codexSteerGate: string;
+  let hermesGate: string;
 
   const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
     const res = await fetch(`${BASE}${path}`, {
@@ -79,6 +81,7 @@ posixOnly("mid-turn steering e2e", () => {
     lateSteerContinuationGate = join(home, "finish-late-steer-continuation.gate");
     lateSteerDump = join(home, "late-steer-dump.json");
     codexSteerGate = join(home, "codex-steer-refused.gate");
+    hermesGate = join(home, "finish-hermes-turn.gate");
     writeFileSync(codexSteerGate, "refuse live steers until the queue test clears this gate");
     writeFileSync(
       join(home, ".openmausbot", "config.json"),
@@ -108,6 +111,11 @@ posixOnly("mid-turn steering e2e", () => {
             config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" },
           },
           acp: { driver: "grokAgent", environment: { FAKE_ACP_MODE: "hang" }, config: { cli: FAKE_ACP, fullAuto: true } },
+          hermes: {
+            driver: "hermesAgent",
+            environment: { FAKE_ACP_MODE: "hermes-steer", FAKE_ACP_GATE_FILE: hermesGate, OPENMAUSBOT_PROBE_LOCAL_INJECT: "0" },
+            config: { cli: FAKE_ACP, fullAuto: true },
+          },
           // codex parks its turn on an unanswered question; turn/steer folds new input into that live turn without ending it.
           codex: { driver: "codex", environment: { FAKE_CODEX_MODE: "question", FAKE_CODEX_ASK_HOLD: "1" }, config: { cli: FAKE_CODEX } },
           codexRace: {
@@ -190,6 +198,87 @@ posixOnly("mid-turn steering e2e", () => {
     },
     40_000,
   );
+
+  it("a message sent with followUp: queue during a Claude turn waits for it instead of steering, then runs as its own turn", async () => {
+    rmSync(steerFinishGate, { force: true });
+    let queued: Awaited<ReturnType<typeof api>>;
+    const created = (await api("POST", "/api/bots")).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "claudeSteer", model: "claude-fake" } });
+      expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
+      await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.kind === "activity"), "the tool chip");
+      queued = await api("POST", `/api/bots/${created.id}/messages`, { text: "a new task for later", followUp: "queue" });
+      expect((await getBot(created.id)).busy).toBe(true);
+    } finally {
+      writeFileSync(steerFinishGate, "finish");
+    }
+    expect(queued.status).toBe(202);
+    expect(queued.body).toMatchObject({ ok: true, queued: true, queueId: expect.any(String) });
+    expect(queued.body.steered).toBeUndefined();
+
+    await waitFor(async () => {
+      const bot = await getBot(created.id);
+      return !bot.busy && bot.messages.some((m: any) => m.role === "bot" && m.kind === "text" && withoutTurnClock(m.text).startsWith("reply to: a new task for later"));
+    }, "the queued message to run after the first turn");
+    const bot = await getBot(created.id);
+    expect(bot.messages.find((m: any) => m.role === "user" && m.text === "a new task for later").steered).toBeUndefined();
+    expect(bot.messages.some((m: any) => m.role === "bot" && m.kind === "text" && m.text.includes("steered: a new task for later"))).toBe(false);
+    expect(bot.messages.some((m: any) => m.role === "bot" && m.kind === "text" && withoutTurnClock(m.text).startsWith("reply to: first"))).toBe(true);
+    expect(bot.messages.filter((m: any) => m.role === "user" && m.kind === "text").map((m: any) => m.text)).toEqual(["first", "a new task for later"]);
+    // The first turn's end was not the end: the queued message ran next. One "done", for the turn that finished last.
+    await waitFor(async () => ((await api("GET", "/api/notifications")).body.notifications ?? []).some((n: any) => n.botId === created.id && n.kind === "done"), "the done notification");
+    const dones = ((await api("GET", "/api/notifications")).body.notifications as any[]).filter((n) => n.botId === created.id && n.kind === "done");
+    expect(dones).toHaveLength(1);
+    expect(dones[0].body).toContain("a new task for l");
+  }, 40_000);
+
+  it("a message sent with followUp: restart during a Claude turn stops that turn and runs as the next one, never steered", async () => {
+    rmSync(steerFinishGate, { force: true });
+    const created = (await api("POST", "/api/bots")).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "claudeSteer", model: "claude-fake" } });
+      expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
+      await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.kind === "activity"), "the tool chip");
+      const restarted = await api("POST", `/api/bots/${created.id}/messages`, { text: "start over with this", followUp: "restart" });
+      expect(restarted.status).toBe(202);
+      expect(restarted.body).toMatchObject({ ok: true, queued: true, queueId: expect.any(String) });
+      await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.role === "user" && m.text === "start over with this"),
+        "the restarted turn to begin with the message");
+    } finally {
+      writeFileSync(steerFinishGate, "finish");
+    }
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.role === "bot" && m.kind === "text" && withoutTurnClock(m.text).startsWith("reply to: start over with this")),
+      "the restarted turn's reply");
+    await waitFor(async () => (await getBot(created.id)).busy === false, "the restarted turn to settle");
+    const bot = await getBot(created.id);
+    expect(bot.messages.find((m: any) => m.role === "user" && m.text === "start over with this").steered).toBeUndefined();
+    expect(bot.messages.some((m: any) => m.role === "bot" && m.kind === "text" && withoutTurnClock(m.text).startsWith("reply to: first"))).toBe(false);
+    expect(bot.messages.filter((m: any) => m.role === "user" && m.kind === "text").map((m: any) => m.text)).toEqual(["first", "start over with this"]);
+  }, 40_000);
+
+  it("a message sent with followUp: restart to an engine that cannot steer stops the turn and runs next", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "acp", model: "fake-model" } });
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).busy === true, "the hung turn to start");
+    const restarted = await api("POST", `/api/bots/${created.id}/messages`, { text: "second", followUp: "restart" });
+    expect(restarted.body).toMatchObject({ ok: true, queued: true });
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.text === "second"), "the message to begin its own turn");
+    await api("POST", `/api/bots/${created.id}/interrupt`);
+    await waitFor(async () => (await getBot(created.id)).busy === false, "the restarted turn to settle");
+  }, 30_000);
+
+  it("refuses a followUp that is not steer, queue or restart, and one on a message that is not typed", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    for (const followUp of ["later", true]) {
+      const refused = await api("POST", `/api/bots/${created.id}/messages`, { text: "hi", followUp });
+      expect(refused.status).toBe(400);
+      expect(refused.body.error).toBe("followUp must be steer, queue or restart");
+    }
+    const pressed = await api("POST", `/api/bots/${created.id}/messages`, { text: "hi", followUp: "queue", widgetAction: { messageId: "m", action: "a" } });
+    expect(pressed.status).toBe(400);
+    expect(pressed.body.error).toBe("only a typed message can choose how it meets the running turn");
+  });
 
   it("a typed stop during a Claude turn ends it like Stop, and a longer message that starts with stop is still steered", async () => {
     rmSync(steerFinishGate, { force: true });
@@ -568,6 +657,44 @@ posixOnly("mid-turn steering e2e", () => {
       for (const threadId of threads) await api("POST", `/api/bots/${created.id}/interrupt`, { threadId });
       await waitFor(async () => (await busy()).length === 0, "every slot to settle");
     }
+  }, 40_000);
+
+  it("a message during a Hermes turn is steered into it through Hermes's /steer, and Hermes's answer never shows", async () => {
+    rmSync(hermesGate, { force: true });
+    const created = (await api("POST", "/api/bots")).body.bot;
+    const hermes = (await api("GET", "/api/instances")).body.instances.find((i: any) => i.instanceId === "hermes");
+    expect(hermes.capabilities.queueing).toBe(true);
+    await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "hermes", model: hermes.models.default } });
+
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
+    const nativeRows = () => {
+      try {
+        return readFileSync(join(home, ".openmausbot", "native", `${created.threadId}.ndjson`), "utf8")
+          .trim().split("\n").map((line) => JSON.parse(line));
+      } catch {
+        return [];
+      }
+    };
+    await waitFor(async () => nativeRows().some((row) => row.dir === "in" && row.msg?.params?.update?.content?.text === "working. "), "Hermes to work on the turn");
+    let second: Awaited<ReturnType<typeof api>>;
+    try {
+      second = await api("POST", `/api/bots/${created.id}/messages`, { text: "and also this" });
+    } finally {
+      writeFileSync(hermesGate, "finish");
+    }
+    expect(second.status).toBe(202);
+    expect(second.body.steered).toBe(true);
+    const steerRow = nativeRows().find((row) => row.dir === "out" && row.msg?.method === "session/prompt" && row.msg.params.prompt[0].text.startsWith("/steer "));
+    expect(steerRow?.msg.params.prompt[0].text).toContain("and also this");
+
+    await waitFor(async () => (await getBot(created.id)).busy === false, "the steered Hermes turn to settle");
+    const bot = await getBot(created.id);
+    const texts = bot.messages.filter((m: any) => m.kind === "text").map((m: any) => `${m.role}:${m.role === "bot" ? withoutTurnClock(m.text) : m.text}`);
+    expect(texts.slice(1, 3)).toEqual(["user:first", "user:and also this"]);
+    expect(texts[3]).toMatch(/^bot:working\. done; steered: [\s\S]*and also this/);
+    expect(texts).toHaveLength(4);
+    expect(JSON.stringify(bot.messages)).not.toContain("Steer queued");
+    expect(bot.messages.find((m: any) => m.text === "and also this").steered).toBe(true);
   }, 40_000);
 
   it("a codex message during a live turn is steered into it via turn/steer, and Stop never reports SIGTERM", async () => {

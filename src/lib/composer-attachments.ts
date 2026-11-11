@@ -1,4 +1,6 @@
 import { isCitationAttachment, serializeCitation, type CitationAttachment } from "./citations.ts";
+import { randomUuid } from "./random-uuid.ts";
+import { FILE_MAX_BYTES } from "../../shared/upload-limits.ts";
 export { dataContextFor, type DataContext, type DataViewContext } from "../../shared/data-context.ts";
 
 export type PasteAttachment = {
@@ -82,21 +84,7 @@ function newId(): string {
 }
 
 /** Stable across the one retry, so a lost success response cannot create a second file. */
-function newUploadId(): string {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  const bytes = new Uint8Array(16);
-  if (globalThis.crypto?.getRandomValues) {
-    globalThis.crypto.getRandomValues(bytes);
-  } else {
-    for (let index = 0; index < bytes.length; index += 1) {
-      bytes[index] = Math.floor(Math.random() * 256);
-    }
-  }
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
-  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
-}
+const newUploadId = randomUuid;
 
 export function fileAttachment(name: string, path: string, size: number): FileAttachment {
   return { kind: "file", id: newId(), path, name, size };
@@ -104,7 +92,73 @@ export function fileAttachment(name: string, path: string, size: number): FileAt
 
 /** Must match the server's IMAGE_MAX_BYTES. */
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
-export const FILE_MAX_BYTES = 25 * 1024 * 1024;
+/** One limit for a sent file on every surface; previews read whole stay at PREVIEW_MAX_BYTES. */
+export { FILE_MAX_BYTES, PREVIEW_MAX_BYTES } from "../../shared/upload-limits.ts";
+/** Must match the server's TURN_IMAGE_MAX_COUNT: a message carrying more images is refused at send. */
+export const TURN_IMAGE_MAX_COUNT = 10;
+
+/** Must match the server's TURN_IMAGE_MAX_BYTES: a message whose images total more is refused at send. */
+export const TURN_IMAGE_MAX_BYTES = 4 * IMAGE_MAX_BYTES;
+
+export function imageLimitNotice(leftOut: readonly string[]): string {
+  return `A message takes up to ${TURN_IMAGE_MAX_COUNT} images, ${TURN_IMAGE_MAX_BYTES / (1024 * 1024)} MB in all. ${leftOut.join(", ")} ${leftOut.length === 1 ? "wasn't" : "weren't"} attached.`;
+}
+
+/** Splits images by the slots and bytes left: an image over IMAGE_MAX_BYTES is kept to fail with its own size error but takes no room. */
+export function fitImagesToSlots<T extends { size: number }>(images: readonly T[], slots: number, bytes = Infinity): { kept: T[]; leftOut: T[] } {
+  const kept: T[] = [];
+  const leftOut: T[] = [];
+  let room = slots;
+  let bytesRoom = bytes;
+  for (const image of images) {
+    if (image.size > IMAGE_MAX_BYTES) kept.push(image);
+    else if (room > 0 && image.size <= bytesRoom) {
+      room -= 1;
+      bytesRoom -= image.size;
+      kept.push(image);
+    } else leftOut.push(image);
+  }
+  return { kept, leftOut };
+}
+
+/** Images a draft holding these attachments can still take. */
+export function imageSlotsLeft(attachments: readonly Attachment[]): number {
+  return Math.max(0, TURN_IMAGE_MAX_COUNT - attachments.filter((attachment) => attachment.kind === "image").length);
+}
+
+/** Image bytes a draft holding these attachments can still take. */
+export function imageBytesLeft(attachments: readonly Attachment[]): number {
+  return Math.max(0, TURN_IMAGE_MAX_BYTES - attachments.reduce((total, attachment) => total + (attachment.kind === "image" ? attachment.size : 0), 0));
+}
+
+/** The images that fit the slots and bytes left; the rest are named in one notice. */
+export function imagesThatFit<T extends { name: string; size: number }>(images: readonly T[], slots: number, onNotice: (notice: string) => void, bytes = Infinity): T[] {
+  const { kept, leftOut } = fitImagesToSlots(images, slots, bytes);
+  if (leftOut.length) onNotice(imageLimitNotice(leftOut.map((image) => image.name)));
+  return kept;
+}
+
+const ARCHIVE_NAME = /\.(?:zip|rar|7z|tar|gz|tgz|bz2|xz)$/i;
+
+export type AttachProblem =
+  | { kind: "too-large"; name: string; limitMb: number }
+  | { kind: "unsupported"; names: string[] }
+  | { kind: "archives"; names: string[] }
+  | { kind: "image-limit"; names: string[] }
+  | { kind: "upload-failed"; name: string; reason: string };
+
+type TooLarge = Extract<AttachProblem, { kind: "too-large" }>;
+
+export class AttachError extends Error {
+  readonly problem: TooLarge;
+  readonly status = 413;
+  constructor(name: string, limitBytes: number) {
+    const limitMb = limitBytes / (1024 * 1024);
+    super(`${name} exceeds ${limitMb} MB`);
+    this.name = "AttachError";
+    this.problem = { kind: "too-large", name, limitMb };
+  }
+}
 
 const DOCUMENT_MIMES: Readonly<Record<string, string>> = {
   txt: "text/plain",
@@ -124,6 +178,7 @@ const DOCUMENT_MIMES: Readonly<Record<string, string>> = {
   odt: "application/vnd.oasis.opendocument.text",
   ods: "application/vnd.oasis.opendocument.spreadsheet",
   odp: "application/vnd.oasis.opendocument.presentation",
+  xmind: "application/vnd.xmind.workbook",
 };
 
 const ACCEPTED_DOCUMENT_MIMES = new Set(Object.values(DOCUMENT_MIMES));
@@ -262,7 +317,7 @@ function canonicalImageName(originalName: string, path: string, mime: string): s
 
 export function optimisticImageAttachment(file: File): ImageAttachment | null {
   if (!isImageFile(file)) return null;
-  if (file.size > IMAGE_MAX_BYTES) throw Object.assign(new Error(`${file.name} exceeds 10 MB`), { status: 413 });
+  if (file.size > IMAGE_MAX_BYTES) throw new AttachError(file.name, IMAGE_MAX_BYTES);
   const mime = file.type.split(";", 1)[0]!.trim().toLowerCase();
   const previewUrl = typeof URL.createObjectURL === "function" ? URL.createObjectURL(file) : undefined;
   return {
@@ -282,7 +337,7 @@ export async function imageAttachmentFromFile(
   optimistic?: Pick<ImageAttachment, "id" | "previewUrl">,
 ): Promise<ImageAttachment | null> {
   if (!isImageFile(file)) return null;
-  if (file.size > IMAGE_MAX_BYTES) throw Object.assign(new Error(`${file.name} exceeds 10 MB`), { status: 413 });
+  if (file.size > IMAGE_MAX_BYTES) throw new AttachError(file.name, IMAGE_MAX_BYTES);
   const bytes = new Uint8Array(await file.arrayBuffer());
   const uploadId = newUploadId();
   const saved = await uploadWithRetry<{ path: string; mime: string; bytes: number }>(
@@ -311,9 +366,7 @@ export async function fileAttachmentFromFile(file: File): Promise<FileAttachment
   const mime = documentMime(file) ??
     (ACCEPTED_AUDIO_MIMES.has(declared) ? declared : AUDIO_MIMES_BY_EXTENSION[extension]);
   if (!mime) return null;
-  if (file.size > FILE_MAX_BYTES) {
-    throw Object.assign(new Error(`${file.name} exceeds 25 MB`), { status: 413 });
-  }
+  if (file.size > FILE_MAX_BYTES) throw new AttachError(file.name, FILE_MAX_BYTES);
   const uploadId = newUploadId();
   const saved = await uploadWithRetry<{ path: string; name: string; bytes: number }>(
     `/api/files?name=${encodeURIComponent(file.name)}&uploadId=${encodeURIComponent(uploadId)}`,
@@ -381,16 +434,6 @@ export function byteLength(text: string): number {
   return new TextEncoder().encode(text).length;
 }
 
-export function pasteSummary(a: { lines: number; size: number }): string {
-  return `${a.lines} lines, ${formatSize(a.size)}`;
-}
-
-export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 export function composeMessage(text: string, attachments: Attachment[]): string {
   const parts = [text.trim()];
   attachments.forEach((a, i) => {
@@ -438,7 +481,7 @@ export type TranscriptAttachments = {
 };
 
 /** A second encoded pass stays encoded rather than turning attacker-controlled text into markup. */
-function decodeAttachmentAttribute(value: string): string {
+export function decodeAttachmentAttribute(value: string): string {
   return value.replace(/&(quot|lt|gt|amp);|&#(9|10|13);/g, (entity, named: string | undefined, numeric: string | undefined) => {
     if (numeric === "9") return "\t";
     if (numeric === "10") return "\n";
@@ -479,8 +522,8 @@ type TranscriptBlock =
   | { kind: "untilBlank" }
   | { kind: "untilToken"; closingToken: string; hiddenWrapper?: boolean };
 
-const PASTED_TEXT_OPEN = /^ {0,3}<pasted-text(?:[\t ]+index="\d+")?[\t ]*>[\t ]*$/i;
-const PASTED_TEXT_CLOSE = /^[\t ]*<\/pasted-text>[\t ]*$/i;
+export const PASTED_TEXT_OPEN = /^ {0,3}<pasted-text(?:[\t ]+index="\d+")?[\t ]*>[\t ]*$/i;
+export const PASTED_TEXT_CLOSE = /^[\t ]*<\/pasted-text>[\t ]*$/i;
 
 /** An unterminated fence protects the rest of the message: examples must never become actionable attachments. */
 function transcriptFenceMarker(line: string): (TranscriptFence & { remainder: string }) | null {
@@ -715,29 +758,38 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
     getPath: (file: T) => string;
     uploadImage: (file: T) => Promise<Attachment | null>;
     uploadFile?: (file: T) => Promise<FileAttachment | null>;
+    /** Images the message can still take; the rest are left out and named in the notice. */
+    imageSlots?: number;
+    /** Image bytes the message can still take; images past it are left out the same way. */
+    imageBytes?: number;
   },
-): Promise<{ attachments: Attachment[]; notice: string | null }> {
-  const files = [..._files];
+): Promise<{ attachments: Attachment[]; problems: AttachProblem[]; notice: string | null }> {
   const { allowImages, getPath, uploadImage } = _opts;
+  const images = allowImages ? _files.filter((file) => isImageFile(file)) : [];
+  const overflow = new Set(fitImagesToSlots(images, _opts.imageSlots ?? Infinity, _opts.imageBytes).leftOut);
+  const leftOut = [...overflow].map((file) => file.name);
+  const files = _files.filter((file) => !overflow.has(file));
   const uploadFile = _opts.uploadFile ?? (async (file: T) => {
     if (!file.arrayBuffer) return null;
     return fileAttachmentFromFile(file as unknown as File);
   });
+  const failed = (file: T, err: unknown): { uploadError: AttachProblem; uploadErrorText: string } => ({
+    uploadError: err instanceof AttachError ? err.problem
+      : { kind: "upload-failed", name: file.name, reason: err instanceof Error ? err.message : "upload failed" },
+    uploadErrorText: `${file.name}: ${err instanceof Error ? err.message : "upload failed"}`,
+  });
   const results = await Promise.all(files.map(async (file): Promise<{
     attachments: Attachment[];
     rejectedNames: string[];
-    uploadError?: string;
+    uploadError?: AttachProblem;
+    uploadErrorText?: string;
   }> => {
     if (allowImages && isImageFile(file)) {
       try {
         const attachment = await uploadImage(file);
         return { attachments: attachment ? [attachment] : [], rejectedNames: [] };
       } catch (err) {
-        return {
-          attachments: [],
-          rejectedNames: [],
-          uploadError: `${file.name}: ${err instanceof Error ? err.message : "upload failed"}`,
-        };
+        return { attachments: [], rejectedNames: [], ...failed(file, err) };
       }
     }
     try {
@@ -746,25 +798,32 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
         return { attachments: [attachment], rejectedNames: [] };
       }
     } catch (err) {
-      return {
-        attachments: [],
-        rejectedNames: [],
-        uploadError: `${file.name}: ${err instanceof Error ? err.message : "upload failed"}`,
-      };
+      return { attachments: [], rejectedNames: [], ...failed(file, err) };
     }
     const result = await attachmentsFromDroppedFiles([file], getPath);
     return result;
   }));
   const attachments = results.flatMap((result) => result.attachments);
   const rejectedNames = results.flatMap((result) => result.rejectedNames);
+  const archives = rejectedNames.filter((name) => ARCHIVE_NAME.test(name));
+  const unsupported = rejectedNames.filter((name) => !ARCHIVE_NAME.test(name));
   const uploadErrors = results.flatMap((result) => result.uploadError ? [result.uploadError] : []);
-  const pathless = rejectedNames.length
-    ? `Unable to attach ${rejectedNames.join(", ")}. Choose a supported image, document, or audio file.`
-    : null;
-  const failed = uploadErrors.length ? uploadErrors.join("; ") : null;
+  const pathless = [
+    unsupported.length ? `Unable to attach ${unsupported.join(", ")}. Choose a supported image, document, or audio file.` : "",
+    archives.length ? `Archives can't be attached: unzip ${archives.join(", ")} and attach the files inside.` : "",
+  ].filter(Boolean).join(" ") || null;
+  const uploadErrorText = results.flatMap((result) => result.uploadErrorText ? [result.uploadErrorText] : []).join("; ") || null;
+  const notice = pathless && uploadErrorText ? `${pathless} (${uploadErrorText})` : (pathless ?? uploadErrorText);
+  const limited = leftOut.length ? imageLimitNotice(leftOut) : null;
   return {
     attachments,
-    notice: pathless && failed ? `${pathless} (${failed})` : (pathless ?? failed),
+    problems: [
+      ...(leftOut.length ? [{ kind: "image-limit" as const, names: leftOut }] : []),
+      ...(unsupported.length ? [{ kind: "unsupported" as const, names: unsupported }] : []),
+      ...(archives.length ? [{ kind: "archives" as const, names: archives }] : []),
+      ...uploadErrors,
+    ],
+    notice: limited && notice ? `${limited} ${notice}` : (limited ?? notice),
   };
 }
 

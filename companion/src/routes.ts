@@ -94,6 +94,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/api\/bots$/ },
   { method: "POST", path: /^\/api\/bots$/ },
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+$/ },
+  // The desktop's own delete. A paired phone can remove one bot it can see,
+  // including through a public tunnel. The harness still refuses the default bot.
+  { method: "DELETE", path: /^\/api\/bots\/[\w-]+$/ },
   // Display order only; the harness accepts just the bots the device can see.
   { method: "PUT", path: /^\/api\/bots\/order$/ },
   // Can only file visible bots; cannot alter execution policy.
@@ -110,6 +113,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // A credential value crosses only as an HPKE envelope, bound to the
   // authenticated device and the exact pending card.
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/provide$/ },
+  // A typed custom secret: the harness checks thread visibility and that only
+  // the conversation's own person may answer it.
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/save$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/compact$/ },
   // Set me up under a new bot's greeting and the x on its chip: no more than a typed /setup.
@@ -123,6 +129,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/api\/bots\/[\w-]+\/overview$/ },
   // Read-only: no settings reachable through it.
   { method: "GET", path: /^\/api\/bots\/[\w-]+\/activity$/ },
+  // Names and on/off only. The MCP settings list, which carries commands and
+  // addresses, stays closed.
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/mcp-servers$/ },
   // Team memory edits are content, not execution policy. The section rides as
   // a query string.
   { method: "GET", path: /^\/api\/team-memory$/ },
@@ -159,9 +168,10 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
 
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages$/ },
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/image$/ },
+  { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/tool$/ },
   // An app row's document is transcript data, scoped to its thread. `rpc` reaches only the app's own MCP
   // server, under the bot's tool selection and approval rules; `context` is bounded text.
-  { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/app$/ },
+  { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/app(?:\/download)?$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/apps\/[\w-]+\/rpc$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/apps\/[\w-]+\/context$/ },
   MESSAGE_FILE_ROUTE,
@@ -208,6 +218,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "DELETE", path: /^\/api\/routines\/[\w-]+$/ },
   { method: "POST", path: /^\/api\/routines\/[\w-]+\/run$/ },
   { method: "POST", path: /^\/api\/routine-runs\/[\w-]+\/(?:cancel|seen)$/ },
+  // The stopped turn's "Continue when your limit resets": a one-time automation in an existing
+  // conversation, less than POST /api/routines already allows.
+  { method: "POST", path: /^\/api\/limit-resets\/continue$/ },
 
   // Opaque ids and aliases only. Account removal is allowed (the handler proves
   // ownership first); the whole-service DELETE stays with the host.

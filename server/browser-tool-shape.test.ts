@@ -74,6 +74,41 @@ describe("browser tool shaping", () => {
     expect(shapeBrowserToolResult({ error: "x" })).toEqual({ error: "x" });
   });
 
+  it("tells the bot the install command when Chrome cannot load a system library", () => {
+    const launch = "Chrome exited early (exit code: 127) without writing DevToolsActivePort\nChrome stderr:\n  /home/maus/.agent-browser/browsers/chrome-157.0.8103.38/chrome: error while loading shared libraries: libatk-1.0.so.0: cannot open shared object file: No such file or directory";
+    const platform = process.platform;
+    const shape = (result: unknown) => shapeBrowserToolResult(result) as { content: Array<{ text: string }>; isError?: boolean };
+    try {
+      Object.defineProperty(process, "platform", { value: "linux" });
+      const shaped = shape({ content: [{ type: "text", text: launch }], isError: true });
+      expect(shaped.isError).toBe(true);
+      expect(shaped.content).toHaveLength(1);
+      // the advice comes first, so a client that cuts a long stderr short still shows it
+      expect(shaped.content[0].text.startsWith("This host is missing libraries the browser needs (libatk-1.0.so.0)")).toBe(true);
+      expect(shaped.content[0].text.endsWith(launch)).toBe(true);
+      expect(shaped.content[0].text).toContain("missing libraries the browser needs (libatk-1.0.so.0)");
+      // agent-browser's longer-stderr form of the marker counts too
+      expect(shape({ content: [{ type: "text", text: launch.replace("Chrome stderr:", "Chrome stderr (last 20 lines):") }], isError: true }).content[0].text).toContain("--with-deps");
+      expect(shaped.content[0].text).toContain("`sudo openmausbot browser install --with-deps`");
+      // a page that merely mentions the loader's words, or another failure, gets no install advice
+      const echoed = "Error: page script failed: /usr/bin/app: error while loading shared libraries: libfoo.so.1: cannot open shared object file";
+      // a page error that quotes a whole launch error, marker included, did not come from our launch
+      const quotedLaunch = `Error: page script failed: ${launch}`;
+      for (const result of [{ content: [{ type: "text", text: launch }] }, { content: [{ type: "text", text: "Chrome exited early (exit code: 1)" }], isError: true }, { content: [{ type: "text", text: echoed }], isError: true }, { content: [{ type: "text", text: quotedLaunch }], isError: true }]) {
+        expect(shape(result).content).toEqual(result.content);
+      }
+      // an absurdly long library name is cut short
+      const long = shape({ content: [{ type: "text", text: launch.replace("libatk-1.0.so.0", "x".repeat(5000)) }], isError: true }).content[0].text;
+      expect(long).toContain(`(${"x".repeat(120)}…)`);
+      expect(long).not.toContain(`${"x".repeat(121)})`);
+      // the install command is for Linux hosts only
+      Object.defineProperty(process, "platform", { value: "darwin" });
+      expect(shape({ content: [{ type: "text", text: launch }], isError: true }).content[0].text).toBe(launch);
+    } finally {
+      Object.defineProperty(process, "platform", { value: platform });
+    }
+  });
+
   it("cuts oversized text to the budget and says how to narrow the next call", () => {
     const text = "line of accessibility tree\n".repeat(4_000);
     const shaped = shapeBrowserToolResult({ content: [{ type: "text", text }], structuredContent: {} }, { toolName: "agent_browser_snapshot" }) as { content: Array<{ text: string }> };

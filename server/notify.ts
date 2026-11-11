@@ -1,11 +1,13 @@
 import type { Notification, NotifyKind } from "../shared/notification.ts";
 import { personMentionExcerpt } from "../shared/person-mention.ts";
+import { plainPreviewText } from "../shared/plain-preview.ts";
 import { conversationLanguage, serverLine, type ServerLineKey } from "./server-lines.ts";
 
 export type { Notification, NotifyKind } from "../shared/notification.ts";
 
+/** Fenced code stays out of a banner, as before; the rest of the Markdown becomes the readable line a lock screen shows. */
 export function summarize(text: string, max = 140): string {
-  const line = text.replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim();
+  const line = plainPreviewText(text.replace(/```[\s\S]*?```/g, " "));
   return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
 }
 
@@ -47,16 +49,18 @@ export function buildNotification(
   bot: Omit<NotifyBot, "threadId"> & { threadId?: string },
   threadId: string,
   detail: string,
-  extra?: { avatarUrl?: string; group?: { id: string; name: string }; site?: string },
+  extra?: { avatarUrl?: string; group?: { id: string; name: string }; site?: string; label?: string; app?: string },
 ): Notification | null {
   if (bot.notifications === false) return null;
 
   const body = summarize(detail);
   const language = conversationLanguage(threadId);
   const who = extra?.group ? serverLine(language, "server.notify.inRoom", { bot: bot.name, room: extra.group.name }) : bot.name;
-  const title = kind === "sign-in"
-    ? extra?.site ? serverLine(language, "server.notify.signIn", { who, site: extra.site }) : serverLine(language, "server.notify.signInWebsite", { who })
-    : serverLine(language, TITLE[kind] ?? "server.notify.done", { who });
+  const title = kind === "secret" ? serverLine(language, "server.notify.secret", { who, label: extra?.label ?? "" })
+    : kind === "sign-in"
+      ? extra?.app ? serverLine(language, "server.notify.connect", { who, app: extra.app })
+        : extra?.site ? serverLine(language, "server.notify.signIn", { who, site: extra.site }) : serverLine(language, "server.notify.signInWebsite", { who })
+      : serverLine(language, TITLE[kind] ?? "server.notify.done", { who });
 
   if ((kind === "done" || kind === "mention") && !body) return null;
 
@@ -64,6 +68,17 @@ export function buildNotification(
   if (extra?.avatarUrl) notification.avatarUrl = extra.avatarUrl;
   if (extra?.group) notification.groupId = extra.group.id;
   return notification;
+}
+
+export function unaskedBotThread(
+  task: { openedBy?: unknown } | undefined,
+  path: readonly { role: string; kind: string; at: number; peerAsk?: { incident?: unknown } }[],
+  assignedAt?: number,
+): boolean {
+  if (!task?.openedBy) return false;
+  const asked = path.findLast((message) => message.role === "user" && message.kind === "text");
+  if (!asked || (assignedAt !== undefined && asked.at < assignedAt)) return true;
+  return Boolean(asked.peerAsk && !asked.peerAsk.incident);
 }
 
 type MentionSource = {

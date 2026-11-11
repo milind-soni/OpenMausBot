@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveCallState } from "../shared/wire.ts";
 import {
-  ATTACH_TIMEOUT_MS, CLOSE_TIMEOUT_MS, CONSENT_SETTLE_MS, DELEGATION_SETTLE_MS, IDLE_CHECK_MS, PROGRESS_INTERVAL_MS,
+  ATTACH_TIMEOUT_MS, CLOSE_TIMEOUT_MS, CONSENT_SETTLE_MS, DELEGATION_SETTLE_MS, GOODBYE_MS, IDLE_CHECK_MS, PROGRESS_INTERVAL_MS,
   LiveCallBusyError, LiveCallController, LiveCallSignedOutError, type LiveActivity, type LiveCallDeps, type LiveSocket,
 } from "./live-call-controller.ts";
 import { LIVE_COPY } from "../shared/live-approval.ts";
-import { LIVE_NEEDS_KEY, LiveSessionError } from "./live-call.ts";
+import { LIVE_NEEDS_AZURE, LIVE_NEEDS_KEY, LiveSessionError, type LiveEndpoint } from "./live-call.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
 
@@ -30,6 +30,7 @@ class FakeSocket implements LiveSocket {
 
 const owner: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
 const BOT = { botId: "bot1", botName: "Ada", threadId: "t1" };
+const ENDPOINT: LiveEndpoint = { provider: "openai", apiBase: "https://api.openai.com/v1", model: "gpt-live-1" };
 
 function setup(overrides: Partial<LiveCallDeps> = {}) {
   const listeners = new Set<(change: StoreChange) => void>();
@@ -37,7 +38,7 @@ function setup(overrides: Partial<LiveCallDeps> = {}) {
   const frames: Array<LiveCallState | null> = [];
   const logs: string[] = [];
   let activity: LiveActivity = "idle";
-  const settings = { key: "sk-test", voice: "sol", readTypedReplies: true, idleMinutes: 5 };
+  const settings: ReturnType<LiveCallDeps["settings"]> = { key: "sk-test", endpoint: ENDPOINT, voice: "sol", readTypedReplies: true, idleMinutes: 5 };
   const queue = new Set<string>();
   let messageCounter = 0;
   const deps: LiveCallDeps = {
@@ -48,6 +49,7 @@ function setup(overrides: Partial<LiveCallDeps> = {}) {
     activity: () => activity,
     broadcast: (frame) => frames.push(frame.call),
     settings: () => settings,
+    azureRefusal: vi.fn(() => null),
     createSession: vi.fn(async () => ({ sessionId: "sess_1", sdp: "answer-sdp" })),
     openSocket: (url, key) => { const socket = new FakeSocket(url, key); sockets.push(socket); return socket; },
     attachUrl: (id) => `ws://fake/${id}/attach`,
@@ -76,7 +78,7 @@ describe("LiveCallController lifecycle", () => {
   it("creates the session with the key and voice, attaches the sideband and goes live", async () => {
     const t = setup();
     const result = await t.controller.start({ auth: owner, ...BOT, client: "ios", sdp: "offer-sdp" });
-    expect(t.deps.createSession).toHaveBeenCalledWith({ key: "sk-test", sdp: "offer-sdp", botId: "bot1", threadId: "t1", voice: "sol" });
+    expect(t.deps.createSession).toHaveBeenCalledWith({ key: "sk-test", endpoint: ENDPOINT, sdp: "offer-sdp", botId: "bot1", threadId: "t1", voice: "sol" });
     expect(result.sdp).toBe("answer-sdp");
     expect(result.call).toMatchObject({ botId: "bot1", threadId: "t1", client: "ios", voice: "sol", status: "connecting" });
     expect(t.socket().url).toBe("ws://fake/sess_1/attach");
@@ -104,6 +106,92 @@ describe("LiveCallController lifecycle", () => {
       expect(t.controller.current()).toBeNull();
     }
     expect(LIVE_NEEDS_KEY).toBe("Live calls use your own OpenAI key. Add it in Settings → API keys.");
+  });
+
+  it("refuses an Azure call whose setup is incomplete with the setup message, before reaching Azure", async () => {
+    const t = setup();
+    t.settings.endpoint = null;
+    t.settings.provider = "azure";
+    t.settings.setupProblem = LIVE_NEEDS_AZURE;
+    await expect(t.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "a" })).rejects.toMatchObject({ status: 409, message: LIVE_NEEDS_AZURE });
+    expect(t.deps.createSession).not.toHaveBeenCalled();
+    expect(t.controller.current()).toBeNull();
+  });
+
+  it("creates and attaches an Azure call on the Azure endpoint it started with, even if settings change mid-call", async () => {
+    const azure: LiveEndpoint = { provider: "azure", apiBase: "https://res.openai.azure.com/openai/v1", model: "live-dep" };
+    const attachUrl = vi.fn((id: string, endpoint: LiveEndpoint) => `${endpoint.apiBase}/live/sessions/${id}/attach`);
+    const t = setup({ attachUrl });
+    t.settings.endpoint = azure;
+    const pending = t.controller.start({ auth: owner, ...BOT, client: "web", sdp: "offer-sdp" });
+    t.settings.endpoint = ENDPOINT;
+    await pending;
+    expect(t.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ endpoint: azure }));
+    expect(attachUrl).toHaveBeenCalledWith("sess_1", azure);
+    expect(t.socket().url).toBe("https://res.openai.azure.com/openai/v1/live/sessions/sess_1/attach");
+    t.socket().open();
+    expect(t.controller.current()).toMatchObject({ status: "live" });
+  });
+
+  describe("with Azure chosen", () => {
+    const AZURE: LiveEndpoint = { provider: "azure", apiBase: "https://res.openai.azure.com/openai/v1", model: "live-dep" };
+    const REFUSED = "only an admin, in these words";
+    const member: RequestAuth = { kind: "loopback", scopes: ["client"], trust: "service" };
+    const azure = (overrides: Partial<LiveCallDeps> = {}) => {
+      const t = setup(overrides);
+      t.settings.endpoint = AZURE;
+      t.settings.provider = "azure";
+      return t;
+    };
+
+    it("asks who is calling, with their own sign-in, and goes ahead when they may", async () => {
+      const t = azure();
+      await t.controller.start({ auth: owner, ...BOT, client: "web", sdp: "a" });
+      expect(t.deps.azureRefusal).toHaveBeenCalledWith(owner);
+      expect(t.deps.createSession).toHaveBeenCalledOnce();
+    });
+
+    it("refuses with the reason as a 403, never a setup prompt, before any session, socket or line is taken", async () => {
+      const t = azure({ azureRefusal: () => REFUSED });
+      await expect(t.controller.start({ auth: member, ...BOT, client: "ios", sdp: "a" })).rejects.toMatchObject({ status: 403, message: REFUSED });
+      expect(t.deps.createSession).not.toHaveBeenCalled();
+      expect(t.sockets).toHaveLength(0);
+      expect(t.frames).toEqual([]);
+      expect(t.controller.current()).toBeNull();
+      expect(t.logs.join("\n")).toContain("[live] call refused bot=bot1 client=ios provider=azure");
+    });
+
+    it("refuses a person who may not call even while Azure is not set up yet, rather than sending them to set it up", async () => {
+      const t = azure({ azureRefusal: () => REFUSED });
+      t.settings.endpoint = null;
+      t.settings.key = "";
+      t.settings.setupProblem = LIVE_NEEDS_AZURE;
+      await expect(t.controller.start({ auth: member, ...BOT, client: "web", sdp: "a" })).rejects.toMatchObject({ status: 403, message: REFUSED });
+    });
+
+    it("asks too when only the endpoint says Azure, so no reading of the settings slips past it", async () => {
+      const t = azure({ azureRefusal: () => REFUSED });
+      delete t.settings.provider;
+      await expect(t.controller.start({ auth: member, ...BOT, client: "web", sdp: "a" })).rejects.toMatchObject({ status: 403 });
+      expect(t.deps.createSession).not.toHaveBeenCalled();
+    });
+
+    it("tells a refused caller nothing about a call already running", async () => {
+      let asked = 0;
+      const t = azure({ azureRefusal: () => (asked++ === 0 ? null : REFUSED) });
+      await t.start();
+      const second = t.controller.start({ auth: member, ...BOT, client: "web", sdp: "a" });
+      await expect(second).rejects.toMatchObject({ status: 403, message: REFUSED });
+      await expect(second).rejects.not.toBeInstanceOf(LiveCallBusyError);
+    });
+
+  });
+
+  it("asks nothing of the Azure limit for a call through OpenAI", async () => {
+    const t = setup({ azureRefusal: vi.fn(() => "never asked") });
+    await t.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "a" });
+    expect(t.deps.azureRefusal).not.toHaveBeenCalled();
+    expect(t.deps.createSession).toHaveBeenCalledOnce();
   });
 
   it("starts a phone's call with no plan at all once a key exists, through the companion or by the phone's own client", async () => {
@@ -471,6 +559,107 @@ describe("LiveCallController relay", () => {
       await vi.advanceTimersByTimeAsync(IDLE_CHECK_MS);
       expect(signedOut(t)).toEqual([expect.objectContaining({ delegation_id: null })]);
       expect(t.socket().sent.at(-1)).toMatchObject({ type: "session.close" });
+    });
+  });
+
+  describe("a spoken request to hang up", () => {
+    const closes = (t: ReturnType<typeof setup>) => t.socket().sent.filter((e) => e.type === "session.close");
+
+    it("says goodbye, then ends the call the way the End button does", async () => {
+      const t = await live();
+      hear(t, "okay, thanks, you can hang up now.", 100);
+      await delegate(t, "del_1", 400);
+      expect(t.deps.send).not.toHaveBeenCalled();
+      expect(t.socket().appends("instructions").at(-1)).toMatchObject({ delegation_id: "del_1", content: LIVE_COPY.goodbye });
+      expect(closes(t)).toHaveLength(0);
+      hear(t, "wait", 1_000);
+      await delegate(t, "del_2", 1_200);
+      expect(t.deps.send).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(GOODBYE_MS);
+      expect(closes(t)).toHaveLength(1);
+      t.socket().receive({ type: "session.closed", reason: "close_requested" });
+      expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "hung-up" });
+      expect(t.controller.current()).toBeNull();
+    });
+
+    it("says nothing about a request that fails to send after the goodbye", async () => {
+      let fail: (error: Error) => void = () => {};
+      const t = await live({ send: vi.fn(() => new Promise<never>((_resolve, reject) => { fail = reject; })) });
+      hear(t, "check my mail", 100);
+      await delegate(t, "del_1", 400);
+      hear(t, "hang up", 1_000);
+      await delegate(t, "del_2", 1_200);
+      fail(new Error("offline"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.socket().appends("commentary")).toHaveLength(0);
+    });
+
+    it("never says an answer is missing when the bot stops during the goodbye", async () => {
+      const t = await live();
+      hear(t, "check my mail", 100);
+      await delegate(t, "del_1", 400);
+      t.setActivity("working");
+      await vi.advanceTimersByTimeAsync(0);
+      hear(t, "hang up", 2_000);
+      await delegate(t, "del_2", 2_200);
+      t.setActivity("idle");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.socket().appends("commentary").map((e) => e.content)).not.toContain(LIVE_COPY.noAnswer);
+    });
+
+    it("keeps the call for anything that is not a clear request to hang up", async () => {
+      for (const text of ["don't hang up", "how do I end the call?", "hang up the poster in my room", "end the call with Sam on my calendar", "bye"]) {
+        const t = await live();
+        hear(t, text, 100);
+        await delegate(t, "del_1", 400);
+        expect(vi.mocked(t.deps.send).mock.calls.map(([input]) => input.text), text).toEqual([text]);
+        await vi.advanceTimersByTimeAsync(GOODBYE_MS + CLOSE_TIMEOUT_MS);
+        expect(closes(t), text).toHaveLength(0);
+        expect(t.controller.current()?.status, text).toBe("live");
+      }
+    });
+
+    it("never hangs up on the voice's own words heard back through a speaker", async () => {
+      const t = await live();
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "Should I hang up?", start_ms: 1_000, end_ms: 2_000 });
+      hear(t, "hang up", 1_200, 1_400);
+      await delegate(t, "del_1", 1_500);
+      await vi.advanceTimersByTimeAsync(GOODBYE_MS + CLOSE_TIMEOUT_MS);
+      expect(closes(t)).toHaveLength(0);
+      expect(t.socket().appends("instructions").some((e) => e.content === LIVE_COPY.goodbye)).toBe(false);
+    });
+
+    it("keeps the call when the words before \"hang up\" were heard over the voice", async () => {
+      const t = await live();
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "Here is what I found.", start_ms: 1_000, end_ms: 2_000 });
+      hear(t, "don't", 1_200, 1_400);
+      hear(t, "hang up", 2_100, 2_300);
+      await delegate(t, "del_1", 2_500);
+      await vi.advanceTimersByTimeAsync(GOODBYE_MS + CLOSE_TIMEOUT_MS);
+      expect(closes(t)).toHaveLength(0);
+      expect(t.socket().appends("instructions").some((e) => e.content === LIVE_COPY.goodbye)).toBe(false);
+    });
+
+    it("speaks no more of the bot's answers once the goodbye starts", async () => {
+      const t = await live();
+      hear(t, "check my mail", 100);
+      await delegate(t, "del_1", 300);
+      hear(t, "okay, thanks, you can hang up now.", 1_000);
+      await delegate(t, "del_2", 1_200);
+      t.patch({ id: "b1", text: "You have two new emails.", requestMessageId: "m1", turnTerminal: true });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.socket().appends("instructions").at(-1)).toMatchObject({ content: LIVE_COPY.goodbye });
+      expect(t.socket().appends("commentary")).toHaveLength(0);
+    });
+
+    it("keeps the real end reason when the call drops during the goodbye", async () => {
+      const t = await live();
+      hear(t, "hang up", 100);
+      await delegate(t, "del_1", 400);
+      t.socket().drop();
+      expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "sideband-lost" });
+      await vi.advanceTimersByTimeAsync(GOODBYE_MS);
+      expect(closes(t)).toHaveLength(0);
     });
   });
 
@@ -892,6 +1081,32 @@ describe("LiveCallController relay", () => {
       await delegate(t, "del_ambiguous", 5_200);
       expect(t.deps.respond).not.toHaveBeenCalled();
       expect(t.socket().appends("instructions").at(-1)).toMatchObject({ content: LIVE_COPY.notClear });
+    });
+
+    it("says nothing about a failed save once the person asked to hang up", async () => {
+      let finish: (result: { ok: false; error: string }) => void = () => {};
+      const t = await live({ respond: vi.fn(() => new Promise<{ ok: false; error: string }>((resolve) => { finish = resolve; })) });
+      t.message(approval());
+      await vi.advanceTimersByTimeAsync(0);
+      hear(t, "yes go ahead", 5_000);
+      await delegate(t, "del_2", 5_200);
+      expect(t.deps.respond).toHaveBeenCalled();
+      hear(t, "hang up", 6_000);
+      await delegate(t, "del_3", 6_200);
+      finish({ ok: false, error: "disk full" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.socket().appends("commentary").map((e) => e.content)).not.toContain(LIVE_COPY.saveFailed("disk full"));
+    });
+
+    it("grants nothing heard after the person asked to hang up", async () => {
+      const t = await live();
+      t.message(approval());
+      await vi.advanceTimersByTimeAsync(0);
+      hear(t, "hang up", 5_000);
+      await delegate(t, "del_2", 5_200);
+      hear(t, "yes", 5_400);
+      await vi.advanceTimersByTimeAsync(CONSENT_SETTLE_MS + 1);
+      expect(t.deps.respond).not.toHaveBeenCalled();
     });
 
     it("accepts a yes heard in a quiet moment, without a delegation", async () => {

@@ -178,7 +178,7 @@ type Instance = { instanceId: string; readOnly?: boolean; trialCredit?: string; 
 type Message = { role: string; kind: string; tool?: { name: string; setup?: boolean; ok?: boolean } };
 type Bot = { id: string; name: string; busy?: boolean; modelSelection: { instanceId: string; model: string }; messages: Message[] };
 const SONNET = { instanceId: CLOUD_CREDIT_INSTANCE, model: "claude-sonnet-5" };
-const instances = async () => (await api("GET", "/api/instances")).body.instances as Instance[];
+const instances = async () => (await api("GET", "/api/instances?fresh=1")).body.instances as Instance[];
 const credit = async () => (await instances()).find((instance) => instance.instanceId === CLOUD_CREDIT_INSTANCE);
 const bots = async () => (await api("GET", "/api/bots?messages=20")).body.bots as Bot[];
 const named = async (name: string) => (await bots()).find((bot) => bot.name === name)!;
@@ -215,7 +215,7 @@ describe("the free trial's Claude credit on a Cloud home", { timeout: 90_000 }, 
     const settled = await turn("hello");
     expect(answered(settled)).toBe(true);
     expect(completions().at(-1)).toMatchObject({ method: "POST", path: `${RELAY_PATH}/v1/chat/completions`, bearer: `Bearer ${TOKEN}`, model: "claude-sonnet-5" });
-    expect(relayed.filter((request) => ![`${RELAY_PATH}/v1/models`, `${RELAY_PATH}/v1/chat/completions`].includes(request.path))).toEqual([]);
+    expect(relayed.filter((request) => ![`${RELAY_PATH}/v1/models`, `${RELAY_PATH}/v1/chat/completions`, `${RELAY_PATH}/api/version`].includes(request.path))).toEqual([]);
     expect(relayed.every((request) => request.apiKey === "")).toBe(true);
     expect(() => readFileSync(join(home, "own-turn.json"), "utf8")).toThrow();
   });

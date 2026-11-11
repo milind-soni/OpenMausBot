@@ -97,7 +97,7 @@ async function withRecoveryFixture(
       const { instances } = await api("GET", "/api/instances") as { instances: any[] };
       return instances.find((instance) => instance.instanceId === "codex")?.models.options.some((option: any) => option.id === "gpt-fake-default");
     }, { timeout: 20_000 }).toBe(true);
-    // Chief first makes the starter its team's Chief, which answers a teammate's failed run with a Team incidents turn
+    // Chief first makes the starter its team's Chief, which answers a teammate's failed run with a Problems to look at turn
     // of its own on Claude: the backup engine, whose prompts these tests count. Stepped down, only the runs under test run.
     const { bots } = await api("GET", "/api/bots") as { bots: Array<{ id: string; chiefOfStaff?: boolean }> };
     const starter = bots.find((bot) => bot.chiefOfStaff)!;

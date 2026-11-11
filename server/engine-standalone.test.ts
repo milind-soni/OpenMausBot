@@ -1,6 +1,7 @@
 // A local HTTP server stands in for the vendor's download host: the test fetch maps https://<host>/<path> onto it, so the
 // installer's own HTTPS, host and redirect checks run unchanged. Nothing here reaches the internet.
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import {
   chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync,
@@ -268,6 +269,51 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
     expect(leftovers()).toEqual([VERSION, "bin", "current.json"]);
   });
 
+  // Cursor's build: a launcher that runs the node and scripts beside it, found from where the launcher really is.
+  describe("a launcher release", () => {
+    const launcher = () => `#!/bin/sh\nhere="$(dirname "$(realpath "$0")")"\n[ -f "$here/runtime.js" ] || { echo 'no runtime beside me' >&2; exit 3; }\necho "$* launched" >> '${log}'\necho 'fake-engine ${VERSION}'\n`;
+    async function launcherRelease(): Promise<StandaloneRelease> {
+      const program = launcher();
+      const data = await tarGz({ "pkg/fake-engine": { data: program, mode: 0o755 }, "pkg/runtime.js": { data: "// the rest of the build\n", mode: 0o644 } });
+      return fixtureRelease({ [standalonePlatformKey()]: serve(data, "tar.gz", "pkg/fake-engine", program) }, { launcher: true });
+    }
+
+    it("puts a link to the launcher in bin/, which runs from inside its own folder", async () => {
+      const installed = await install(await launcherRelease());
+      expect(installed).toEqual({ version: VERSION, executablePath: binPath(), binDir: binDir() });
+      expect(lstatSync(binPath()).isSymbolicLink()).toBe(true);
+      expect(realpathSync(binPath())).toBe(realpathSync(join(engineDir(), VERSION, "pkg", "fake-engine")));
+      expect(readdirSync(binDir())).toEqual(["fake-engine"]);
+      expect(findCliCandidates("fake-engine")).toEqual([binPath()]);
+      expect(spawnSync(binPath(), ["--version"], { encoding: "utf8" }).stdout.trim()).toBe(`fake-engine ${VERSION}`);
+    });
+
+    it("goes back on PATH at start-up only while bin/ links to exactly this version's launcher, unchanged", async () => {
+      const release = await launcherRelease();
+      await install(release);
+      resetPathCacheForTests();
+      registerStandaloneBinDirs(base, [release]);
+      expect(findCliCandidates("fake-engine")).toEqual([binPath()]);
+
+      // A link to anything else is not the app's.
+      const elsewhere = join(scratch, "elsewhere");
+      writeFileSync(elsewhere, launcher(), { mode: 0o755 });
+      rmSync(binPath());
+      symlinkSync(elsewhere, binPath());
+      resetPathCacheForTests();
+      registerStandaloneBinDirs(base, [release]);
+      expect(findCliCandidates("fake-engine")).toEqual([]);
+
+      // Nor is the right link to a launcher that changed.
+      rmSync(binPath());
+      symlinkSync(join("..", VERSION, "pkg", "fake-engine"), binPath());
+      writeFileSync(join(engineDir(), VERSION, "pkg", "fake-engine"), "#!/bin/sh\necho changed\n");
+      resetPathCacheForTests();
+      registerStandaloneBinDirs(base, [release]);
+      expect(findCliCandidates("fake-engine")).toEqual([]);
+    });
+  });
+
   it("clears anything else out of bin/ when it installs, so only the program is on PATH", async () => {
     mkdirSync(binDir(), { recursive: true });
     writeFileSync(join(binDir(), "codex"), "#!/bin/sh\necho planted\n", { mode: 0o755 });
@@ -311,8 +357,12 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
 
   it("lets a slow download finish while bytes keep arriving", async () => {
     const release = await served("raw");
-    server.routes.set("assets.example.test/blob/fake", { body: Buffer.from(script()), trickle: { bytes: 16, everyMs: 120 } });
-    await expect(install(release, { stallMs: 400 })).resolves.toMatchObject({ version: VERSION });
+    // Pieces 60 ms apart against a 1 s stall limit: a busy runner once held one 120 ms piece past a 400 ms limit.
+    server.routes.set("assets.example.test/blob/fake", { body: Buffer.from(script()), trickle: { bytes: 8, everyMs: 60 } });
+    const started = performance.now();
+    await expect(install(release, { stallMs: 1_000 })).resolves.toMatchObject({ version: VERSION });
+    // The whole download outlasted the limit, so it is the arriving bytes that kept it alive.
+    expect(performance.now() - started).toBeGreaterThan(1_000);
   });
 
   it("refuses a redirect to a host it does not trust, without contacting that host", async () => {

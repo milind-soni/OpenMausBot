@@ -28,11 +28,11 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
 });
 
-async function fixture(person?: string) {
+async function fixture(person?: string, teamAiOwnerName?: () => string) {
   const store = new Store(() => sonnet);
   const maus = createDefaultBot(store, person ? { person } : {});
   const routines = [{ botId: maus.id, enabled: true }, { botId: maus.id, enabled: false }, { botId: "elsewhere", enabled: true }];
-  const deps = { store, routines: () => ({ listRoutines: () => routines }) } as unknown as BotMessageRouteDeps;
+  const deps = { store, routines: () => ({ listRoutines: () => routines }), ...(teamAiOwnerName ? { teamAiOwnerName } : {}) } as unknown as BotMessageRouteDeps;
   const routes = [createBotMessageRoutes(deps)];
   let auth = OWNER;
   const server = createServer(async (req, res) => {
@@ -85,6 +85,27 @@ describe("MausBot's follow-up", () => {
     const team = await fixture("ada@example.com");
     expect((await team.post({ ai: "own" }, session("bob@example.com", true))).status, "not even an admin").toBe(403);
     expect((await team.post({ ai: "own" }, session("Ada@Example.com"))).status).toBe(201);
+  });
+
+  it("tells a User on a team that the owner connects the AI, in what it stores and what the model reads", async () => {
+    const { post } = await fixture("ada@example.com", () => "Olive");
+    const written = (await post({ ai: "none" }, session("ada@example.com"))).body.message;
+    expect(written?.helperFollowup).toMatchObject({ ai: "none", connects: "Olive" });
+    expect(written?.text).toBe("I looked around. Before I can do real work, I need an AI to think with. Olive connects that for the team, and I'll take it from there.");
+    expect(written?.text).not.toMatch(/sign in/i);
+    const unknown = await fixture("ada@example.com", () => "");
+    expect((await unknown.post({ ai: "none" }, session("ada@example.com"))).body.message?.text).toContain("The team's owner connects that");
+    const helped = await fixture("ada@example.com", () => "Olive");
+    expect((await helped.post({ ai: "backup" }, session("ada@example.com"))).body.message?.text).toBe("I looked around. For now I'm thinking with a free backup model. Olive can connect a better one for the team.");
+  });
+
+  it("still asks someone who can connect an AI to sign in: an admin of the team, and everyone off a team", async () => {
+    const admin = await fixture("ben@example.com", () => "Olive");
+    const theirs = (await admin.post({ ai: "none" }, session("ben@example.com", true))).body.message;
+    expect(theirs?.text).toBe(FOLLOWUP_ENGLISH["helperIntro.followup.noAi"]);
+    expect(theirs?.helperFollowup).not.toHaveProperty("connects");
+    const solo = await fixture();
+    expect((await solo.post({ ai: "none" })).body.message?.text).toBe(FOLLOWUP_ENGLISH["helperIntro.followup.noAi"]);
   });
 
   it("refuses another bot, a conversation without the intro, and a body it cannot read", async () => {

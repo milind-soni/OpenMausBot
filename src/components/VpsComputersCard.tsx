@@ -1,4 +1,4 @@
-import { AlertTriangle, Loader2, RefreshCw, Server, Trash2 } from "lucide-react";
+import { AlertTriangle, Loader2, Server, Trash2 } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { Card } from "./SettingsPrimitives";
@@ -50,13 +50,13 @@ export function VpsComputersCard({
           onClick={onRefresh}
           disabled={loading || removingName !== null}
           aria-label={t("vm.vps.refreshAria")}
-          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40"
+          className="settings-quiet flex shrink-0 cursor-pointer items-center disabled:opacity-40"
         >
-          <RefreshCw size={12} className={cn(loading && "animate-spin")} /> {t("vm.refresh")}
+          {t("vm.refresh")}
         </button>
       </div>
 
-      {error && <div role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
+      {error && <div role="alert" className="mt-2 text-[12px] leading-4 text-danger">{error}</div>}
 
       <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
         {loading
@@ -70,7 +70,7 @@ export function VpsComputersCard({
                 : t("vm.vps.foundMany", { count: instances.length })}
       </p>
 
-      <div
+      {!(configured === false && !loading && !unavailableReason) && <div
         aria-busy={loading || removingName !== null}
         className="mt-3 overflow-hidden rounded-xl border border-hairline/40"
       >
@@ -150,7 +150,7 @@ export function VpsComputersCard({
             </div>
           );
         })}
-      </div>
+      </div>}
     </Card>
   );
 }

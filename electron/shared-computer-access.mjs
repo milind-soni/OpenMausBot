@@ -9,6 +9,7 @@ import { lentScreenArguments, lentScreenToolListing } from "./lent-screen-tools.
 import { typeOneCharacterAtATime, typesInOneBurst } from "./paced-typing.mjs";
 import { helperMissing } from "./lent-screen-failures.mjs";
 import { commandPath } from "./shell-path.mjs";
+import { LENT_MCP_ACTIONS, lentMcpRefusal } from "./lent-mcp.mjs";
 
 /** Reads stay under the 4 MB body that carries a result to the server (base64 of 2 MiB is 2.8 MB); writes stay small. */
 const READ_LIMIT = 2 * 1024 * 1024;
@@ -229,7 +230,7 @@ export async function sharedCommand(command, cwd, signal, seconds = COMMAND_SECO
 }
 
 /** Persistent transport: Cua observation references survive to the next call. Ending sharing closes this, not the app's daemon. */
-export function createSharedCua(connection, { platform = process.platform } = {}) {
+export function createSharedCua(connection, { platform = process.platform, t } = {}) {
   const child = spawn(connection.mcpCommand, connection.mcpArgs, {
     stdio: ["pipe", "pipe", "ignore"], windowsHide: true,
     env: { ...driverEnvironment(), ...connection.mcpEnv },
@@ -238,7 +239,7 @@ export function createSharedCua(connection, { platform = process.platform } = {}
   const pending = new Map();
   const fail = error => {
     closed = true;
-    const reason = child.pid === undefined ? new Error(helperMissing()) : error;
+    const reason = child.pid === undefined ? new Error(helperMissing(platform, t)) : error;
     for (const item of pending.values()) item.reject(reason);
     pending.clear(); child.kill();
   };
@@ -290,9 +291,14 @@ export function createSharedCua(connection, { platform = process.platform } = {}
   };
 }
 
-export async function executeSharedOperation(grant, operation, signal, cua) {
+export async function executeSharedOperation(grant, operation, signal, cua, lentMcp) {
   signal.throwIfAborted();
   if (grant.enabled !== true) throw new Error("Computer sharing is off");
+  if (LENT_MCP_ACTIONS.has(operation.action)) {
+    const refused = lentMcpRefusal(grant, operation.server);
+    if (refused) throw new Error(refused);
+    return (await lentMcp()).call(operation, signal);
+  }
   if (operation.action === "run_command") {
     if (grant.terminal !== true) throw new Error("Terminal access is not enabled for this server");
     return sharedCommand(operation.command, grant.folders[0]?.path ?? process.env.HOME ?? process.env.USERPROFILE, signal, operation.timeout_seconds);

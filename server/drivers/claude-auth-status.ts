@@ -3,8 +3,9 @@ import type { ProviderSnapshot } from "../contracts.ts";
 import { execCli } from "../procs.ts";
 
 /** Whether `claude` is signed in, per the CLI's own `auth status`: credential storage varies by
- * platform (Keychain, a JSON file) and presence checks accept stale credentials. A check that
- * timed out (a Keychain prompt left open) says nothing, so `authenticated` is left out. */
+ * platform (Keychain, a JSON file) and presence checks accept stale credentials. Only `loggedIn: false`
+ * means signed out. A check that timed out (a Keychain prompt left open) or gave no readable status
+ * says nothing, so `authenticated` is left out. */
 export function claudeAuthStatus(
   cli: string,
   env: NodeJS.ProcessEnv,
@@ -15,9 +16,8 @@ export function claudeAuthStatus(
       if ((error as { killed?: boolean } | null)?.killed) return resolve({});
       try {
         const status: unknown = JSON.parse(stdout);
-        if (!status || typeof status !== "object" || !("loggedIn" in status) || status.loggedIn !== true) {
-          return resolve({ authenticated: false });
-        }
+        const loggedIn = status && typeof status === "object" && "loggedIn" in status ? status.loggedIn : undefined;
+        if (loggedIn !== true) return resolve(loggedIn === false ? { authenticated: false } : {});
         const identity = status as { email?: unknown; orgName?: unknown; authMethod?: unknown };
         const boundedText = (value: unknown, max: number): string | undefined =>
           typeof value === "string" && value.trim().length > 0 && value.length <= max && !/[\p{Cc}\p{Cf}]/u.test(value)
@@ -32,7 +32,7 @@ export function claudeAuthStatus(
         };
         resolve({ authenticated: true, ...(Object.keys(account).length ? { account } : {}) });
       } catch {
-        resolve({ authenticated: false });
+        resolve({});
       }
     });
   });

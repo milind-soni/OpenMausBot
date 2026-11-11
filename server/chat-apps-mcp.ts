@@ -1,9 +1,9 @@
 import { approvalModeFor } from "../shared/approval-mode.ts";
-import { APP_LIMITS, APP_MIME, appBlockedText, mcpAppFallbackText, oneLine, type AppBlockedReason, type AppCan, type AppDocument, type AppPayload, type AppToolResult } from "../shared/app.ts";
+import { APP_LIMITS, APP_MIME, appBlockedText, appDoneOf, mcpAppFallbackText, oneLine, type AppBlockedReason, type AppCan, type AppDocument, type AppDoneState, type AppPayload, type AppToolResult } from "../shared/app.ts";
 import { mcpAppNetwork } from "../shared/app-frame/csp.ts";
 import { allowsTool, canUseMcpServer } from "../shared/tool-scope.ts";
-import { rowRate, type ChatApps } from "./chat-apps.ts";
-import type { AgentCardResult } from "./chat-widgets.ts";
+import { appRow, rowRate, type ChatApps } from "./chat-apps.ts";
+import { speakerIn, type AgentCardResult } from "./chat-widgets.ts";
 import type { McpServerSpec } from "./contracts.ts";
 import { McpAppCatalog, mcpServerConfigHash } from "./mcp-app-catalog.ts";
 import { AppConnections } from "./mcp-app-connections.ts";
@@ -11,7 +11,8 @@ import { toolUiResource, toolVisibility, uiMeta } from "./mcp-app-observer.ts";
 import { McpHttpError, McpRpcError } from "./mcp-http.ts";
 import type { McpOAuthManager } from "./mcp-oauth.ts";
 import { withMcpSignIn } from "./mcp-oauth.ts";
-import { probeMcpServer, type McpProbeOptions } from "./mcp-probe.ts";
+import { probeMcpServer, sendsCredentials, type McpProbeOptions } from "./mcp-probe.ts";
+import type { McpKeys } from "./vault/mcp-keys.ts";
 import { isRemoteMcpServer, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
 import { lenientToolValidator, schemaProblems } from "./mcp-schema-validator.ts";
 import { redactSecretsInText } from "./redact.ts";
@@ -36,14 +37,18 @@ function isRecord(value: unknown): value is Json {
 
 export type ChatAppsMcpStore = Pick<Store, "bot" | "botByThread" | "groupByThread" | "messagesFor" | "appendMessage" | "patchMessage" | "projectBotForTask">;
 
-export type ChatAppsMcpOAuth = Pick<McpOAuthManager, "authState" | "accessToken">;
+export type ChatAppsMcpOAuth = Pick<McpOAuthManager, "authState" | "accessToken" | "requireSignIn">;
 
 export interface ChatAppsMcpDeps {
   store: ChatAppsMcpStore;
   apps: ChatApps;
   storedServers(): Record<string, unknown>;
+  /** A server's `vault:<id>` keys, read when it is probed. */
+  keys?: McpKeys;
   mountedServers(bot: BotRecord): Record<string, McpServerSpec>;
   personMcp?(): readonly string[];
+  /** How a command server is started outside a turn: as the turns of its bot, or of any bot (server/mcp-probe.ts `asBot`). */
+  probeAs?(server: { bot?: string }): NonNullable<McpProbeOptions["asBot"]>;
   oauth: ChatAppsMcpOAuth;
   dataDir?: string;
   catalog?: McpAppCatalog;
@@ -97,6 +102,19 @@ type ResourceRead =
   | { ok: true; html: string; ui: Json | undefined }
   | { ok: false; reason: AppBlockedReason };
 
+function mcpToolTitle(definition: Json): string {
+  const name = String(definition.name);
+  const annotations = isRecord(definition.annotations) ? definition.annotations : {};
+  return oneLine(String((typeof definition.title === "string" && definition.title) || (typeof annotations.title === "string" && annotations.title) || name)).slice(0, APP_LIMITS.title) || name.slice(0, APP_LIMITS.title);
+}
+
+/** The note is stored and shown, so a secret in the result never is; a link a secret was found in is dropped. */
+function redactedDone(done: AppDoneState): AppDoneState {
+  const { text, url, ...rest } = done;
+  const clean = text && redactSecretsInText(text);
+  return { ...rest, ...(clean ? { text: clean } : {}), ...(url && redactSecretsInText(url) === url ? { url } : {}) };
+}
+
 const rpcError = (status: number, code: number, message: string, extra: Json = {}): McpRpcAnswer => ({ status, body: { error: { code, message }, ...extra } });
 
 export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
@@ -104,7 +122,14 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => console.info(`chat apps: ${line}`));
   const catalog = deps.catalog ?? new McpAppCatalog(deps.dataDir ? `${deps.dataDir}/mcp-app-catalog.json` : null);
+  // A command server OpenMausBot starts by itself (the background probe, an app's own connection) runs where the bots'
+  // turns run it: in the bot box where that is on, never beside the server.
+  const asBot = (name: string) => {
+    const stored = storedServer(name, deps.storedServers()[name]);
+    return deps.probeAs?.(stored && !isRemoteMcpServer(stored) ? stored : {}) ?? {};
+  };
   const connections = deps.connections ?? new AppConnections({
+    asBot,
     onTools: (name, server, tools, extensions) => {
       if (storedServer(name, deps.storedServers()[name])?.apps === false) return;
       catalog.recordList(name, server, tools, extensions);
@@ -157,9 +182,8 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
 
   async function recordMcpAppCall(args: McpAppCallArgs): Promise<AgentCardResult> {
     const { threadId, input } = args;
-    // No row for a room, an unmounted server, one outside the bot's scope or one whose apps are off; the
-    // observer reads nothing back.
-    if (store.groupByThread(threadId)) return { ok: false, status: 409, error: "Apps are not shown in rooms yet." };
+    // No row for an unmounted server, one outside the bot's scope or one whose apps are off; the observer reads nothing
+    // back.
     const bot = store.bot(args.bot.id);
     if (!bot) return { ok: false, status: 404, error: "No such bot." };
     const name = input.server;
@@ -182,8 +206,7 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
     const read: ResourceRead = spec ? await readResource(name, spec, resourceUri) : { ok: false, reason: "signed-out" };
     const info = isRecord(input.serverInfo) ? input.serverInfo : (spec ? await connections.serverInfo(name, spec) : undefined);
     const serverTitle = oneLine(String((typeof info?.title === "string" && info.title) || (typeof info?.name === "string" && info.name) || name)).slice(0, 80);
-    const annotations = isRecord(definition.annotations) ? definition.annotations : {};
-    const toolTitle = oneLine(String((typeof definition.title === "string" && definition.title) || (typeof annotations.title === "string" && annotations.title) || definition.name)).slice(0, APP_LIMITS.title) || definition.name.slice(0, APP_LIMITS.title);
+    const toolTitle = mcpToolTitle(definition);
     const toolResult: AppToolResult = {
       content: result.content,
       ...(result.structuredContent !== undefined ? { structuredContent: result.structuredContent } : {}),
@@ -218,7 +241,7 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
       payload = { v: 1, source: "mcp", title: toolTitle, doc: "", rev: 0, bytes: 0, border: true, network: { connect: [], resources: [] }, mcp: ref, blocked: read.reason };
     }
     const message = store.appendMessage(threadId, {
-      role: "bot", kind: "app", text: redactSecretsInText(mcpAppFallbackText(serverTitle, toolTitle, toolResult)), app: payload,
+      role: "bot", kind: "app", text: redactSecretsInText(mcpAppFallbackText(serverTitle, toolTitle, toolResult)), app: payload, ...speakerIn(store, threadId, bot),
     });
     args.authored?.(message.id);
     catalog.recordTool(name, server, definition);
@@ -306,7 +329,13 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
       || approvalOf(bot.id, request.threadId) === "full";
     if (!runs) return rpcError(403, -32000, APP_WRITE_DECLINED);
     const result = await connections.request(name, server, "tools/call", { name: tool.name, arguments: callArgs }, AbortSignal.timeout(RPC_CALL_MS), extension);
-    return { status: 200, body: isRecord(result) ? result : { content: [] } };
+    const body = isRecord(result) ? result : { content: [] };
+    // A change the card made itself stays on its row, so the reopened conversation says it is done.
+    if (visibility.includes("model") && annotations.readOnlyHint !== true && body.isError !== true) {
+      const row = appRow(store, request.threadId, request.row.id);
+      if (row) store.patchMessage(request.threadId, row.id, { app: { ...row.app, done: redactedDone(appDoneOf(mcpToolTitle(tool), body, now())) } });
+    }
+    return { status: 200, body };
   }
 
   async function rpc(request: McpRpcRequest): Promise<McpRpcAnswer> {
@@ -374,12 +403,17 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
       queued.delete(name);
       if (closed || deps.personMcp?.().includes(name)) return;
       const stored = storedServer(name, deps.storedServers()[name]);
-      if (!stored?.enabled || stored.apps === false) return;
+      if (!stored?.enabled || stored.apps === false || stored.runsOn) return;
       if (isRemoteMcpServer(stored) && deps.oauth.authState(name, stored.url) === "needs-sign-in") return;
-      const target = isRemoteMcpServer(stored) ? await signedIn(name, stored) : stored;
+      await deps.keys?.warm(name, stored);
+      const keyed = deps.keys ? deps.keys.resolve(name, stored) : { ok: true as const, server: stored };
+      if (!keyed.ok) return;
+      const target = isRemoteMcpServer(keyed.server) ? await signedIn(name, keyed.server) : keyed.server;
       if (!target) return;
-      const result = await probe({ ...target, enabled: true } as StoredMcpServer, BACKGROUND_PROBE_MS, undefined, probeOptions(name, stored));
-      log(`probed ${name}: ${result.ok ? `apps=${catalog.get(name, stored)?.apps === true}` : "failed"}`);
+      const probed = { ...target, enabled: true } as StoredMcpServer;
+      const result = await probe(probed, BACKGROUND_PROBE_MS, undefined, { ...probeOptions(name, keyed.server), ...(isRemoteMcpServer(probed) ? {} : { asBot: asBot(name) }) });
+      if (!result.ok && result.auth === "required" && isRemoteMcpServer(probed) && !sendsCredentials(probed)) deps.oauth.requireSignIn(name, probed.url);
+      log(`probed ${name}: ${result.ok ? `apps=${catalog.get(name, stored)?.apps === true}` : result.auth === "required" ? "needs sign-in" : "failed"}`);
     }).catch((error: unknown) => log(`probe of ${name} failed: ${String(error)}`));
   }
 
@@ -400,7 +434,7 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
   const startup = deps.startupProbes === false ? undefined : setTimeout(() => {
     for (const [name, raw] of Object.entries(deps.storedServers())) {
       const stored = storedServer(name, raw);
-      if (stored?.enabled && stored.apps !== false && isRemoteMcpServer(stored) && catalog.stale(name, stored)) probeStale(name);
+      if (stored?.enabled && stored.apps !== false && !stored.runsOn && isRemoteMcpServer(stored) && catalog.stale(name, stored)) probeStale(name);
     }
   }, STARTUP_PROBE_DELAY_MS);
   startup?.unref?.();

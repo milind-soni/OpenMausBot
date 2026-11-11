@@ -5,16 +5,18 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { link, open, unlink } from "node:fs/promises";
-import { join, extname } from "node:path";
-import { FILE_MAX_BYTES } from "../shared/upload-limits.ts";
+import { basename, dirname, extname, join, resolve } from "node:path";
+import { FILE_MAX_BYTES, PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
 import { DATA_DIR } from "./config.ts";
+import { boxUploadsDir } from "./bot-box/plan.ts";
 
-export { FILE_MAX_BYTES } from "../shared/upload-limits.ts";
+export { FILE_MAX_BYTES, PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
 export const ATTACHMENTS_DIR = join(DATA_DIR, "attachments");
 
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
@@ -169,6 +171,21 @@ export function cleanupStaleAttachmentPartials(now = Date.now()): number {
   return removed;
 }
 
+/** A removed upload also goes from every conversation's box uploads folder, where box-attachments.ts linked it, so no box
+ * can still read it and its space comes back. */
+function dropBoxUploadCopies(names: readonly string[], dataDir = DATA_DIR): void {
+  if (!names.length) return;
+  const root = join(dataDir, "box-uploads");
+  const dirs = (path: string) => { try { return readdirSync(path); } catch { return []; } };
+  for (const bot of dirs(root)) {
+    for (const thread of dirs(join(root, bot))) {
+      for (const name of names) {
+        try { rmSync(join(boxUploadsDir(dataDir, bot, thread), name), { force: true }); } catch { /* best effort: a file still in use stays */ }
+      }
+    }
+  }
+}
+
 /** Every removal of a file saveImage/saveFile created must come through here, or the cache overcounts and rejects uploads. */
 export function deleteAttachment(path: string): void {
   try {
@@ -177,8 +194,66 @@ export function deleteAttachment(path: string): void {
     if (committedAttachmentBytes !== null) {
       committedAttachmentBytes = Math.max(0, committedAttachmentBytes - size);
     }
-  } catch {
+  } catch (error) {
+    // An upload still on disk (a busy file on Windows) keeps its box copies; one already gone loses them.
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
   }
+  if (resolve(dirname(path)) === resolve(ATTACHMENTS_DIR)) dropBoxUploadCopies([basename(path)]);
+}
+
+/** Settings → General: what the store holds against its ceiling, rescanned so files removed outside the app count. */
+export function attachmentStorageUsage(): { usedBytes: number; maxBytes: number } {
+  invalidateAttachmentAccounting();
+  return { usedBytes: committedBytes(), maxBytes: ATTACHMENTS_MAX_BYTES };
+}
+
+/** What a Settings clear leaves, as stored names: pictures given by their /api/attachments/ url (bot and profile
+ * pictures), and files given by their path or bare name (the banner, routines' files). */
+export function keptAttachmentNames(urls: ReadonlyArray<string | null | undefined>, paths: ReadonlyArray<string | undefined>): Set<string> {
+  const kept = new Set<string>();
+  for (const url of urls) if (url?.startsWith("/api/attachments/")) kept.add(url.slice("/api/attachments/".length));
+  for (const path of paths) {
+    const name = path?.replaceAll("\\", "/").split("/").pop();
+    if (name) kept.add(name);
+  }
+  return kept;
+}
+
+let clearOffered = true;
+/** A Team Cloud has no Settings clear, so its full-store error must not point there. */
+export function offerAttachmentClear(offered: boolean): void {
+  clearOffered = offered;
+}
+
+/** A file this new may still be on its way into a message or a turn, so a clear leaves it. */
+export const ATTACHMENT_CLEAR_MIN_AGE_MS = 10 * 60 * 1000;
+
+/** The person's Clear in Settings: every stored file older than a few minutes goes, except the ones `kept` holds
+ * (pictures, routine files). A message that showed a removed file shows it missing. */
+export function clearAttachments(kept: ReadonlySet<string>, now = Date.now()): { removed: number; freedBytes: number; failed: number } {
+  ensureAttachmentsDir();
+  let removed = 0;
+  let freedBytes = 0;
+  let failed = 0;
+  const gone: string[] = [];
+  for (const entry of readdirSync(ATTACHMENTS_DIR, { withFileTypes: true })) {
+    if (!entry.isFile() || PARTIAL_NAME.test(entry.name) || kept.has(entry.name)) continue;
+    const path = join(ATTACHMENTS_DIR, entry.name);
+    try {
+      const { mtimeMs, size } = statSync(path);
+      if (now - mtimeMs < ATTACHMENT_CLEAR_MIN_AGE_MS) continue;
+      unlinkSync(path);
+      gone.push(entry.name);
+      removed += 1;
+      freedBytes += size;
+    } catch (error) {
+      // Gone already is fine; anything else (permissions, a busy file on Windows) the person is told about.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") failed += 1;
+    }
+  }
+  dropBoxUploadCopies(gone);
+  invalidateAttachmentAccounting();
+  return { removed, freedBytes, failed };
 }
 
 export function __resetAttachmentAccountingForTests(): void {
@@ -223,7 +298,7 @@ class AttachmentReservation {
     if (available < required) {
       throw statusError(
         507,
-        `attachments storage is full (${formatStoreLimit(ATTACHMENTS_MAX_BYTES)} limit)`,
+        `attachments storage is full (${formatStoreLimit(ATTACHMENTS_MAX_BYTES)} limit)${clearOffered ? ". Clear old attachments in Settings → General." : ""}`,
       );
     }
     const granted = Math.min(preferred, available);
@@ -569,8 +644,9 @@ export function saveAudio(bytes: Buffer, mime: string): SavedAttachment {
     throw Object.assign(new Error("unsupported audio type"), { status: 400 });
   }
   if (bytes.byteLength === 0) throw Object.assign(new Error("empty audio"), { status: 400 });
-  if (bytes.byteLength > FILE_MAX_BYTES) {
-    throw Object.assign(new Error(`audio exceeds ${FILE_MAX_BYTES} bytes`), { status: 413 });
+  // Saved from memory and served whole by readAttachment, so held to the preview size, not the streamed store limit.
+  if (bytes.byteLength > PREVIEW_MAX_BYTES) {
+    throw Object.assign(new Error(`audio exceeds ${PREVIEW_MAX_BYTES} bytes`), { status: 413 });
   }
   ensureAttachmentsDir();
   const reservation = new AttachmentReservation();

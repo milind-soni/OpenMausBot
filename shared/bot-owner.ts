@@ -43,6 +43,12 @@ export function withOneChief<T extends OwnedBot & { id: string }>(bots: readonly
   return bots.map((bot) => (bot.id === chief.id || !bot.chiefOfStaff || chiefScope(bot) !== scope ? bot : { ...bot, chiefOfStaff: false }));
 }
 
+/** A person as the People list names them: their name, or for an address, the part before the @ as below. */
+export function shownPersonName(name: string): string {
+  const trimmed = name.trim();
+  return trimmed.includes("@") ? nameFromEmail(trimmed) : trimmed;
+}
+
 /** A member's name until their profile has one: the address before the @, capitalised. */
 export function nameFromEmail(email: string): string {
   const local = email.split("@")[0]?.replace(/[._-]+/g, " ").trim() || email;

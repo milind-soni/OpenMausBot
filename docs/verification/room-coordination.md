@@ -38,9 +38,8 @@ At the next start (the runtime's restart policy, `server/runtime/runtime.ts` `op
   Every time budget of a tree that outlived a restart starts again at boot
   (downtime is nobody's budget); request and execution counts carry on, and a
   rerun costs one execution. Stop on the requester cancels a rerun not yet
-  started, "Stopped before it resumed", since nothing of it is running; a
-  rerun already running is left alone like any teammate mid-turn, and so is
-  one the person left working by a Stop before the restart.
+  started, "Stopped before it resumed", and a rerun already running, like any
+  teammate mid-turn.
 - A routine run still going at a restart fails, as before, and its
   teammates' work ends with it, "OpenMausBot restarted while this routine was
   running": none of it runs again, so no result lands after the person was
@@ -161,8 +160,8 @@ receiving conversation. Same-room receipts have no unnecessary navigation.
 Receipts remain visible when tool calls are hidden. Files are not copied between
 computers: briefs must include accessible absolute paths or the required content.
 Returned reports stay available to subsequent model turns behind the compact
-receipt, subject to the bounded retention and a fresh reach check (peers list,
-archived bots, audiences).
+receipt, subject to the bounded retention and a fresh reach check (archived
+bots, audiences).
 Direct-chat receipts use the existing avatar/thread pill, opening the exact
 recipient task without changing other tasks.
 
@@ -180,16 +179,14 @@ every outstanding assignment has settled and the resumed coordination has
 finished. Steering stays the default; Stop keeps its conversation-scoped
 behavior either way.
 
-Stop is scoped to the conversation it was pressed in. It ends that bot's turn
-and stops the conversation awaiting its teammates, so nothing resumes into a
-stopped chat. An assignment that had not started yet is cancelled, since
-nothing is lost. A teammate already mid-turn keeps its own provider process:
-it finishes, and its result is still recorded and reported back here as the
-usual receipt. Each teammate Stop leaves running gets its own pill in the
-transcript — "Stopped here — Eli is still working; open to stop it too" —
-which survives Tool calls being hidden and opens that teammate's conversation,
-where Stop reaches its turn for real. Deleting a waiting source still cancels
-its whole tree, and never recreates the conversation.
+Stop is scoped to the request in the conversation it was pressed in, and stop
+means stop. It ends that bot's turn and everything the request handed out: an
+assignment that had not started yet ("Stopped before it started") and a
+teammate already mid-turn ("Stopped with the request it was for"), with what
+they handed on in turn. Nothing resumes into a stopped chat, and no result
+arrives after it. Each stopped assignment is still recorded and reported back
+here as the usual receipt. Deleting a waiting source still cancels its whole
+tree, and never recreates the conversation.
 
 Provider work and waiting-on-teammate status stay separate internally, so
 waiting does not hold a provider session or block another independent
@@ -266,13 +263,11 @@ first member's two turns in one thread, and one resume of the Lead.
 
 A room's members can come from any department, a Chief that manages none of
 them included: they list each other with `list_room_targets` and hand each
-other work with `coordinate_bots` like any room. A bot's own peers list still
-narrows what it can address, and a revoked peer is refused before queued work
-starts. On a Team Cloud, nothing from a member's private chat is handed into a
-room or posted in one.
+other work with `coordinate_bots` like any room. On a Team Cloud, nothing from
+a member's private chat is handed into a room or posted in one.
 
 ```sh
-pnpm exec vitest run server/peer-roster.test.ts server/post-to-room.test.ts server/room-coordination.e2e.test.ts server/direct-coordination.e2e.test.ts server/runtime-coordinator.test.ts server/peer-allowlist.e2e.test.ts server/cloud-team-open-reach.e2e.test.ts
+pnpm exec vitest run server/peer-roster.test.ts server/post-to-room.test.ts server/room-coordination.e2e.test.ts server/direct-coordination.e2e.test.ts server/runtime-coordinator.test.ts server/cloud-team-open-reach.e2e.test.ts
 ```
 
 The coordination suites use `launchVerificationServer`, `control-omb`, and the
@@ -332,7 +327,7 @@ pnpm exec vitest run server/group-goal-run.e2e.test.ts server/group-goal-wait-ca
 pnpm exec vitest run server/room-recovery.e2e.test.ts server/testing/room-handoff-agent.test.ts
 pnpm exec vitest run server/direct-coordination.e2e.test.ts --maxWorkers=1
 pnpm exec vitest run server/turn-dispatch-guard.test.ts
-pnpm exec vitest run server/comms.test.ts server/thread-aware-bots.e2e.test.ts server/routine-delegation.e2e.test.ts server/independent-threads-api.test.ts server/peer-allowlist.e2e.test.ts server/steer-queue.test.ts
+pnpm exec vitest run server/comms.test.ts server/thread-aware-bots.e2e.test.ts server/routine-delegation.e2e.test.ts server/independent-threads-api.test.ts server/steer-queue.test.ts
 pnpm exec vitest run server/runtime-paths.e2e.test.ts server/notification-routing.e2e.test.ts server/post-to-room.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/direct-coordination-ui.e2e.test.ts
 ```
@@ -417,7 +412,7 @@ preview/server processes afterward; retain evidence without credentials.
 
 ## Limits and safety
 
-Peer lists and peer approvals still apply; departments never limit who works with whom.
+Departments never limit who works with whom.
 Every turn — a chat, a room, a routine run, a webhook run, a goal run, a Cloud
 guest's turn, a standing external runtime — hands teammate work on with the
 one `coordinate_bots` tool (work, a question with `consult`, a one-way notice

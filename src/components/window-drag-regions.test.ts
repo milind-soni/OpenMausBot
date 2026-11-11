@@ -84,9 +84,9 @@ describe("caption chrome", () => {
 
   it("opts controls, menus and dialogs out of a drag region in styles.css", () => {
     const document = new Window().document;
-    document.body.innerHTML = `<div data-window-drag><button></button><input><a href="#"></a><span role="button"></span><span></span><div class="field"><select></select><svg></svg></div></div><div role="menu"></div><div class="fixed backdrop"><div role="dialog"></div></div><div class="fixed overlay"><p></p></div>`;
-    const matches = [...document.querySelectorAll("button, input, a, span, .field, [role], .backdrop, .overlay")].map((element) => element.matches(noDragSelector));
-    expect(matches).toEqual([true, true, true, true, false, true, true, true, true, false]);
+    document.body.innerHTML = `<div data-window-drag><button></button><input><a href="#"></a><span role="button"></span><span></span><div class="field"><select></select><svg></svg></div></div><div role="menu"></div><div class="fixed backdrop"><div role="dialog"></div></div><div class="fixed overlay"><p></p></div><div data-browser-transport="stream"></div>`;
+    const matches = [...document.querySelectorAll("button, input, a, span, .field, [role], .backdrop, .overlay, [data-browser-transport]")].map((element) => element.matches(noDragSelector));
+    expect(matches).toEqual([true, true, true, true, false, true, true, true, true, false, true]);
   });
 });
 

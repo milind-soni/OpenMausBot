@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { Plus, TabletSmartphone } from "lucide-react";
+import { Plus, Smartphone } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { phonePairingSettingsAction } from "@/lib/phone-pairing";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
-import { companionBridge, type CompanionState } from "./PhoneSetupFlow";
+import { companionBridge } from "@/lib/companion-bridge";
+import type { CompanionState } from "./PhoneSetupFlow";
 
 export const SIDEBAR_PHONE_RECENT_MS = 2 * 60_000;
 const SIDEBAR_PHONE_POLL_MS = 15_000;
@@ -170,7 +171,7 @@ export function SidebarPhoneStatusButton({
         connected ? "text-success" : "text-ink-secondary hover:text-ink",
       )}
     >
-      <TabletSmartphone size={18} strokeWidth={1.8} />
+      <Smartphone size={18} strokeWidth={1.75} />
       {status.kind === "unpaired" && (
         <span
           aria-hidden="true"

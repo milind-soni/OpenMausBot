@@ -1,6 +1,7 @@
 /** The client-visible wire model for tasks, bots, messages and rooms. A field
  * here is one the server emits in every response and SSE frame that carries
  * the shape. */
+import type { PresenceFrame } from "./team-presence.ts";
 import type { DataBroadcast } from "./data-surface.ts";
 import type { ApprovalMode } from "./approval-mode.ts";
 import type { ToolScope } from "./tool-scope.ts";
@@ -9,21 +10,23 @@ import type { TurnDigest } from "./digest.ts";
 import type { BotAvatarCrop, MascotFaceColor } from "./bot-avatar.ts";
 import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
-import type { CredentialTargetId, CUSTOM_SECRET_TARGET, SecretDelivery } from "./credential-request.ts";
+import type { CredentialTargetId, CUSTOM_SECRET_TARGET, SecretDelivery } from "./credential-request.ts"; import type { EmailOutgoingFields } from "./email.ts";
 import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
-import type { SetupCardFields } from "./setup-card.ts"; import type { BugReportField } from "./devs-report-status.ts"; import type { BotAccessFields } from "./bot-access.ts";
+import type { SetupCardFields } from "./setup-card.ts"; import type { BugReportField } from "./devs-report-status.ts"; import type { AccessRequestCardField, BotAccessFields } from "./bot-access.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts"; import type { SavedStepsMark } from "./saved-steps.ts";
 import type { WebhookRequestCardData } from "./webhook-request.ts"; import type { WaitCardField, WaitLineField } from "./wait-request.ts"; import type { ComputerAskField } from "./computer-ask.ts";
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
-import type { PlaceRow } from "./place-view.ts";
+import type { ServerTextLine, ServerTextParams } from "./server-text.ts";
+import type { WireTool } from "./wire-tool.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
-import type { SkillRequestCardData } from "./skill-request.ts";
+import type { ConnectorCardData } from "./connector-card.ts"; import type { McpChangeRequest } from "./mcp-request.ts";
+import type { SkillRequestCardData } from "./skill-request.ts"; import type { OutsideWriteCardField } from "./outside-write.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
 import type { AutomationLine, RoutineRunCardData } from "./routine-run.ts";
 import type { WidgetPayload } from "./widget.ts";
 import type { AppFromRef, AppPayload, AppPointedRef } from "./app.ts";
-import type { GroupGoalRunCardData } from "./group-goal-run.ts";
+import type { GroupGoalRunCardData } from "./group-goal-run.ts"; import type { BurstCardData } from "./burst.ts";
 import type { RuntimeEvent } from "./runtime-events.ts";
 import type { NotificationLogEntry } from "./notification.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
@@ -31,7 +34,10 @@ import type { WebhookAttempt, WebhookTrigger } from "./webhooks.ts";
 import type { PublishedPageCard } from "./published-page.ts";
 import type { InboxItem, InboxTask } from "./inbox.ts";
 import type { LiveCallRecord, LiveCallState } from "./live-call-wire.ts";
-export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveEndReason, LiveKeySource, LiveSettings } from "./live-call-wire.ts";
+/** What a team bot's main chat is called, beside each person's own chats. */
+export const SHARED_CHAT_TITLE = "Shared chat";
+
+export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveEndReason, LiveKeySource, LiveProvider, LiveSettings } from "./live-call-wire.ts";
 
 /** Reasoning-effort levels, ascending: a union of what any engine accepts;
  * each driver declares the subset its CLI will take. */
@@ -85,13 +91,13 @@ export interface TaskOpenedBy {
   /** What kind of conversation the opener made this: "pair" is the one
    * durable conversation between two bots; "work" closes itself once its
    * result has been reported. */
-  kind?: "pair" | "work";
+  kind?: "pair" | "work"; /** The burst this thread is one part of: it is listed under that burst's card, not on its own. */ burstId?: string;
   /** The opener's own conversation this "work" thread was opened from.
    * Everything that conversation later sends this bot continues here. */
   threadId?: string;
   /** A parallel room job's thread: `threadId` is the room thread it came from, and the member must stay in that room. */
   roomLane?: true;
-  at: number;
+  /** Security invariant: harness-set only, when a turn that could itself use the owner's lent computer opened this thread (server/cloud-lending.ts); any other hand-in clears it for good. */ forOwner?: true; at: number;
 }
 
 /** The bot that closed a thread it opened (or one of its own). */
@@ -138,14 +144,21 @@ export interface WireTask extends InboxTask {
   /** The first message already drove a title attempt for this thread, so a
    * later one does not rename a thread the person may have retitled. */
   titleFromFirstMessage?: true;
+  /** Team Cloud only: this is the bot's main chat, everyone's who sees the bot. Its title is SHARED_CHAT_TITLE on every
+   * person's copy, whatever is stored, and it can't be renamed. */
+  sharedChat?: true;
   /** Organizational grouping only; never a directory or provider context. */
   projectId?: string;
-  /** Detached routine execution, reachable through its visible results card. */
-  routineRunId?: string;
-  /** Set when a bot, not a person, opened this thread. */
-  openedBy?: TaskOpenedBy;
+  /** Detached routine execution, reachable through its visible results card. */ routineRunId?: string;
+  /** Work from outside (a webhook, an app's event) reached this conversation: what it starts or runs stays confined, for good. */ outside?: true;
+  /** An outside caller opened this thread through the bot's API, so only it may continue it; such a thread is outside too. */ botApi?: true;
+  /** Set when a bot, not a person, opened this thread. */ openedBy?: TaskOpenedBy;
   /** On a team's server: one person's conversation, seen by them alone (never by another member or an admin). */
   private?: true;
+  /** On a team's server: a private conversation its person shared, never private again. `sharedWith`: shared with one person,
+   * the other reader as this viewer sees them (`byYou` to the one who shared it); nobody else, an admin included, is sent it. */
+  shared?: true; sharedWith?: { name: string; byYou?: true };
+  /** Team Cloud, where several people write, while it works: whose request runs (they or an Owner or Admin stop it). */ askedBy?: ResolvedSender;
   /** Set by close_thread; absent while the thread is open. */
   closedBy?: TaskClosedBy;
   archivedAt?: number;
@@ -333,7 +346,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   voice?: string;
   /** Whether this bot may send voice notes. Absent/true = allowed; false
    * hides the tool and refuses the route even with a voice configured. */
-  voiceNotes?: boolean;
+  voiceNotes?: boolean; /** The harness speaks each reply as a voice note; absent follows the installation's `tts.everyReply`. */ voiceNoteEveryReply?: boolean;
   /** Whether this bot may use the X research tools (x_search and its
    * actions), which spend the workspace's treg balance.
    * Absent/false = off: the person turns it on per bot. */
@@ -362,10 +375,6 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   /** Team Cloud only: the lowercased email of the member the bot reports to, whose inbox its questions, approvals,
    * failures and routine results reach. Absent: it reports to `createdBy`. */
   reportsTo?: string;
-  /** Pause for human approval before this bot talks to a peer. */
-  approvePeerComms?: boolean;
-  /** Bot ids this bot is allowed to contact. */
-  peers?: string[];
   /** Whether this bot may use the workspace's connected apps. */
   composio?: boolean;
   /** Which connected-app tools this bot may call, by service slug. Absent
@@ -373,7 +382,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
    * none. Grants never travel in shareable exports. */
   connectorTools?: Record<string, ConnectorToolGrant>;
   connectorScopes?: { apps: Record<string, "read" | "write"> };
-  outbound?: { policy: "ask" | "allow"; dailyCap: number };
+  outbound?: { policy: "ask" | "allow" };
   /** Which of a paired phone's apps this bot may use; absent: every bot may use what the phone allows (shared/phone-apps.ts). */
   phoneApps?: import("./phone-apps.ts").PhoneApps;
   /** Ordered backups used only by opt-in, pre-prompt startup recovery. */
@@ -443,25 +452,23 @@ export type CardAnswerer = (
 export const EXCERPT_SUMMARY_HEADER = "Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.";
 
 /** One transcript line, serialized as stored. */
-export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLineField, BugReportField {
+export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCardFields, WaitLineField, BugReportField {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget" | "app";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "burst" | "digest" | "compaction" | "call" | "widget" | "app";
   text?: string;
   digest?: TurnDigest;
-  compaction?: {
-    summary: string;
-    firstKeptId: string;
-    foldedThroughId: string;
-    tokensBefore: number;
-    by: "person" | "harness";
-  };
-  /** Renderers receive only the allowlisted /api/attachments URL. `file`
-   * entries are opened through the message-scoped file route, never by path. */
+  /** kind "compaction" with no `compaction` record: the engine condensed its own session. A marker for people, never context. */
+  engineCompaction?: true;
+  compaction?: { summary: string; firstKeptId: string; foldedThroughId: string; tokensBefore: number; by: "person" | "harness";
+    /** The divider "Start fresh" leaves: no summary, and a provider reads nothing before it. */ fresh?: true };
+  /** Renderers receive only the allowlisted /api/attachments URL. `file` entries are opened through the message-scoped
+   * file route, never by path. `source`: a bot attach-file copy's original path on the server, for Show in folder.
+   * `fromTool`: an image a tool's result returned while the bot worked, which it did not make or send. */
   attachments?: Array<
-    | { kind: "image"; path: string; mime: string; name?: string }
-    | { kind: "file"; path: string; mime: string; name: string }
+    | { kind: "image"; path: string; mime: string; name?: string; source?: string; fromTool?: true }
+    | { kind: "file"; path: string; mime: string; name: string; source?: string }
     /** `text` is the words the note speaks (secret-redacted when stored): clients show it behind a
      * collapsed transcript, never as message body, and the model's replay folds it back after `text`. */
     | { kind: "audio"; path: string; mime: string; durationMs?: number; text?: string }
@@ -489,29 +496,19 @@ export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLine
   /** signin rows: the bot asked the person to sign in to a site themselves. */
   signIn?: SignInRequestCardData;
   /** One idempotently updated status card for a routine run. */
-  routineRun?: RoutineRunCardData;
+  routineRun?: RoutineRunCardData; /** The card a burst shows in its parent chat: first a preview, then its progress. */ burst?: BurstCardData;
   automation?: AutomationLine;
   /** Terminal receipt for a bounded multi-bot channel goal. */
   goalRun?: GroupGoalRunCardData;
   /** call rows (kind "call"): the finished Live call this row records. */
   call?: LiveCallRecord;
   /** activity messages: tool name + outcome. */
-  tool?: {
-    name: string; ok?: boolean; spoken?: string; setup?: boolean; terminal?: boolean; summary?: string; input?: string; output?: string;
-    /** What the call works on, as its live status said it: the chip's and the "Now" card's specific words. `whose`: the person whose own app or MCP server the call used. */
-    step?: import("./turn-progress.ts").LiveStep; whose?: { person: string; app: string };
-    /** error rows: the installed Claude Code is too old for the model, and
-     * the UI can offer to update it in place. notice rows: `rescue`, a turn that heard nothing from its AI for a while. */
-    claudeUpdate?: boolean; rescue?: import("./first-reply-rescue.ts").FirstReplyRescue;
-  /** error rows: the place this turn could not use. */
-    place?: PlaceRow;
-    /** error rows: epoch ms when the usage limit that stopped the turn resets. */
-    limitResetsAt?: number;
-    /** Provider item identity, scoped to the owning turn. */
-    itemId?: string;
-    /** Whether the harness captured the full redacted result. Private
-     * server-local spill paths are not exposed to clients. */
-    fullResult?: boolean;
+  tool?: WireTool & {
+    clipped?: boolean;
+    /** Words the harness wrote for what the call did, shown in place of `name`; `name` stays the tool's own. */
+    label?: string;
+    /** error rows: the reply came back; only a step the turn ran failed or wasn't allowed. */
+    partial?: boolean;
   };
   /** A bot line a "post" webhook wrote: whoever called the webhook chose
    * its words. On a room line this also carries `from`, so the room renders
@@ -538,7 +535,7 @@ export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLine
    * one. Absent reads as the profile name. */
   sender?: ResolvedSender;
   /** Provider turn that produced this message. */
-  turnId?: string;
+  turnId?: string; /** A stopped row where several people use the server: who pressed Stop. */ stoppedBy?: ResolvedSender; /** A bot reply: the `itemId` its words streamed under, so a client swaps the streamed text for this message. */ itemId?: string;
   /** Server-proven originating user message, including supported harness
    * continuations. Absent means external clients must not infer ownership. */
   requestMessageId?: string;
@@ -578,7 +575,7 @@ export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLine
   doneWhen?: string;
   /** Set on the user-role line another bot delivered into this bot's own
    * conversation (coordinate_bots, start_thread). `incident`: the line is a
-   * Team incidents report or Team escalations notice about that bot's thread
+   * Team incidents report about that bot's thread
    * in `threadId`, not its words; `notified`: the person was already buzzed. */
   peerAsk?: { botId: string; name: string; unattended?: boolean; incident?: { threadId: string; notified?: boolean } };
   /** One reaction per person (shared/reactions.ts REACTIONS). `by` is "user"
@@ -645,13 +642,17 @@ export function nextOpenThread<T extends OpenThreadCandidate>(tasks: readonly T[
   return [listed, open, own].map((candidates) => orderedThreadList(candidates)[0]).find((task) => task !== undefined);
 }
 
-export interface OptionCardData extends WaitCardField, ComputerAskField {
+export interface OptionCardData extends WaitCardField, ComputerAskField, AccessRequestCardField, OutsideWriteCardField {
+  /** The harness asks the owner to let this line of theirs use the lent computer (server/host/lending-lifts.ts). */ lendingLift?: { requestMessageId: string; memoryToken?: string; outside?: true; botOpened?: true; allowedAt?: number };
   /** calls: one per outbound call the card covers, in subtitle order. */
   outboundRequest?: { tool: string; app: string | null; calls?: Array<{ app: string | null; label: string }> };
   /** `revision`: the entry as it applied without a person, so Undo can tell it changed since. */
   teamMemoryRequest?: { section: string; entryId: string; kind: string; revision?: string };
   title: string;
   subtitle: string;
+  /** Fixed `chat.notice.*` words for `subtitle`; the English fallback stays stored in `subtitle`. */
+  summaryCode?: string;
+  summaryParams?: ServerTextParams;
   options: string[];
   /** Distinguishes a provider question from an approval after its live run ends. */
   requestType?: "permission" | "question";
@@ -700,6 +701,8 @@ export interface OptionCardData extends WaitCardField, ComputerAskField {
   /** A durable default-model proposal (propose_model). */
   modelRequest?: ModelRequestCardData;
   teamSetupRequest?: TeamSetupRequest;
+  /** A bot's MCP server change waiting on the person (Ask, Edits or Auto). */
+  mcpRequest?: McpChangeRequest;
   /** A durable learned-skill proposal. */
   skillRequest?: SkillRequestCardData;
   /** A provider's structured question set. */
@@ -719,33 +722,24 @@ export interface QuotaSwitchCardData {
   rootId?: string;
 }
 
-export interface ConnectorCardData {
-  /** Composio toolkit slug. It is validated server-side before every action. */
-  slug: string;
-  label: string;
-  description: string;
-  status: "required" | "authorizing" | "connected" | "failed";
-  /** Cards created by one agent request resume together after all connect. */
-  resumeKey: string;
-  /** Account alias supplied by the agent when adding a second account. */
-  alias?: string;
-  error?: string;
-  dismissed?: boolean;
-  resumed?: boolean;
-  /** Stop ended the turn this card paused: it offers no action, and a
-   * connection made afterwards is kept but continues nothing. */
-  stopped?: boolean;
-}
-
 export interface SecretRequestCardData {
   /** Fixed allowlisted credential id, never a config path; CUSTOM_SECRET_TARGET: a secret the bot names, kept off Settings. */
   target: CredentialTargetId | typeof CUSTOM_SECRET_TARGET;
   label: string;
   description: string;
+  /** Optional named-key copy for client localization; `description` remains the complete fallback for English and older cards. */
+  descriptionParts?: {
+    baseCode: "secretCard.greenference.description" | "secretCard.modelgo.description" | "secretCard.geminiTts.description";
+    reason: string;
+    bot: string;
+  };
   placeholder: string;
   helpUrl: string;
-  /** A custom secret's use the person agrees to: "ref", OpenMausBot's own tools only; "file", the bot's commands. */
-  delivery?: SecretDelivery;
+  /** A custom secret's use: "ref", OpenMausBot's own tools only; "file", the bot's commands; "email", the Email connector, never a bot. */ delivery?: SecretDelivery | "email";
+  /** An email card: the mailbox it is for, when known; off a phone the person can change it on the card. */ address?: string;
+  /** An email card: the incoming server that took the password, once it did, while sending is still being checked. */
+  emailReading?: string;
+  /** An email card for a connected mailbox that can't send: only its outgoing server, from what is known, never a password. */ emailOutgoing?: EmailOutgoingFields;
   /** A custom secret: the bot's own words on why; `description` adds what the bot may do with it, and helpUrl is empty. */
   reason?: string;
   /** A file secret's Local VM target key, when the asking turn ran in one. */
@@ -830,6 +824,8 @@ export interface GroupTask {
   /** This conversation's own turn limit: whole minutes a turn may go without progress. Absent uses
    * the global group turn limit. Direct chats do not use this limit. */
   turnTimeoutMinutes?: number;
+  /** Epoch ms when the person archived this thread; absent while it is in the list. */ archivedAt?: number;
+  /** A card in this thread waits on the person, with no turn running. */ activity?: "waiting-on-you";
   /** Epoch ms of the newest message, or createdAt when the thread has none. */
   updatedAt?: number;
   lastThreadOrderAt?: number;
@@ -845,7 +841,7 @@ export interface GroupTask {
 /** A room as a client may see it: the record plus the computed working flag. */
 export interface WireGroup {
   /** Computed from the usage ledger, not stored in groups.json. */
-  usage?: GroupThreadUsage | null;
+  usage?: GroupThreadUsage | null; /** Transient: the department's Chief of Staff, when this room is without it. Null clears an earlier value. */ chiefAbsent?: { botId: string; name: string } | null;
   /** transient: each member's context in the active thread, from its last
    * turn there, and whether its next turn there was asked to start
    * compacted. */
@@ -932,9 +928,9 @@ export interface RoomHeldMessage {
  * turn (which runs one at a time per bot). */
 export type SteerQueueReason = "capacity" | "group-turn";
 
-/** Pending steer-queue chips, as `queuedSteerSnapshot` emits them and the
- * `bot.queued` frame carries them: threadId → queued items. */
-export type BotQueuedMessages = Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason }>>;
+/** Pending steer-queue chips, as `queuedSteerSnapshot` emits them and the `bot.queued` frame carries them: threadId → queued items. */
+export type BotQueuedMessages = Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason; /** The reason in plain words, shown as it is. */ why?: string;
+  /** Team Cloud, where several people write: whose line waits; only they remove it, and it runs after as their own turn. */ sender?: ResolvedSender }>>;
 
 /** Skills library browse surface: one row per library entry, with the bots
  * currently assigned to it. Version is null for locally imported skills. */
@@ -981,6 +977,8 @@ export type ServerFrame =
   | { kind: "app-trigger.deleted"; triggerId: string }
   | { kind: "app-trigger.service"; service: AppTriggerService }
   | { kind: "runtime"; event: RuntimeEvent }
+  /** An MCP server was added, changed or removed: a list of them is stale. */
+  | { kind: "mcp.changed" }
   /** `surface` names what the frame shows: the bot's desktop (`computer`) or its built-in browser. */
   | { kind: "screen"; botId: string; threadId: string; png: string; mime?: string; surface?: "browser" | "computer" }
   /** A bot's computer is being set up or woken for a turn; the chat shows
@@ -996,5 +994,7 @@ export type ServerFrame =
   | { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }
   /** A job is waiting for the phone whose registry key this is; it polls now. */
   | { kind: "device.job"; phone: string; id: string }
+  /** Who is here on a Team Cloud (shared/team-presence.ts). */
+  | PresenceFrame
   /** The config status object spread flat into the frame. */
   | ({ kind: "config" } & Record<string, unknown>);

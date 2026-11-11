@@ -4,9 +4,9 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
 import { agentsMcp } from "./drivers/agents-mcp.ts";
-import { agentsServerEnv, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, roomSkillsRefusal, type AgentsConversation, type AgentsTurn } from "./agents-turn.ts";
+import { agentsServerEnv, botDrivenConversation, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, roomSkillsRefusal, type AgentsConversation, type AgentsTurn } from "./agents-turn.ts";
 
-const HOST: AgentsConversation["host"] = { skillAuthoring: true, sharedComputers: true, cloudHome: false, team: false, escalations: true, voiceNotes: true, x: true, research: true };
+const HOST: AgentsConversation["host"] = { skillAuthoring: true, sharedComputers: true, cloudHome: false, team: false, voiceNotes: true, x: true, research: true, imageGeneration: false };
 const CHAT: AgentsConversation = { threadId: "thread-1", bot: { id: "bot-1", chiefOfStaff: true }, room: false, teamComputer: false, host: HOST };
 const ROOM: AgentsConversation = { ...CHAT, threadId: "room-1", room: true };
 
@@ -54,13 +54,25 @@ describe("one conversation's agents tools", () => {
     }
   }
 
+  it("never lists select_computer in a conversation only bots or automation drive, where every pick would be refused", async () => {
+    const names = async (conversation: AgentsConversation) =>
+      (JSON.parse((await everyTurn(conversation))[0]!.wire) as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name);
+    expect(await names(CHAT)).toContain("select_computer");
+    expect(await names({ ...CHAT, botDriven: true })).not.toContain("select_computer");
+    expect(botDrivenConversation({ openedBy: { botId: "b" } })).toBe(true);
+    expect(botDrivenConversation({ botApi: true })).toBe(true);
+    expect(botDrivenConversation({ routineRunId: "r1" })).toBe(true);
+    expect(botDrivenConversation({})).toBe(false);
+    expect(botDrivenConversation(undefined)).toBe(false);
+  });
+
   it("lists a direct chat select_computer and the wait tools and a room none, and both the skill tools while authoring is on", async () => {
     const names = async (conversation: AgentsConversation) =>
       (JSON.parse((await everyTurn(conversation))[0]!.wire) as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name);
     const chat = await names(CHAT), room = await names(ROOM);
     expect(chat).toEqual(expect.arrayContaining(["select_computer", "wait_until", "list_waits", "cancel_wait"]));
     for (const tool of ["select_computer", "wait_until", "list_waits", "cancel_wait"]) expect(room).not.toContain(tool);
-    for (const tools of [chat, room]) expect(tools).toEqual(expect.arrayContaining(["skills_list", "skill_manage"]));
+    for (const tools of [chat, room]) expect(tools).toEqual(expect.arrayContaining(["skills_list", "skill_manage", "usage_limits"]));
     expect(await names({ ...CHAT, host: { ...HOST, skillAuthoring: false } })).not.toContain("skill_manage");
   });
 

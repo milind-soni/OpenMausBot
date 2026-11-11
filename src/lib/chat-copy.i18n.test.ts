@@ -50,13 +50,14 @@ describe("usage chip", () => {
   const usage = { input: 2000, output: 500, costUsd: 0.02, turns: 2 };
 
   it("translates the units and the cost caption", () => {
+    expect(usageChip(usage)).toBe("$0.02");
     setLocale("pt-br");
     expect(usageDetail(usage)).toContain("entrada");
     expect(usageDetail(usage)).toContain("saída");
-    expect(usageChip(usage)).toBe("$0.02");
+    expect(usageChip(usage)).toBe("US$\u00a00,02");
     expect(usageChip({ ...usage, costUsd: null })).toContain("entrada");
-    expect(costCaption("subscription")).toBe("equivalente — está na sua assinatura, não é cobrado");
-    expect(costCaption(undefined)).toBe("conforme informado pelo provedor");
+    expect(costCaption("subscription")).toBe("equivalente (incluído na assinatura, sem cobrança)");
+    expect(costCaption(undefined)).toBe("segundo o provedor");
   });
 });
 

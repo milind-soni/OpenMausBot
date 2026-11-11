@@ -4,9 +4,10 @@ import { botButton, type BotButton } from "@/lib/bot-button";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { MausColor } from "@/lib/mascot";
+import { imeComposing } from "@/lib/send-key";
 import type { Bot } from "@/state/store";
 import { BotAvatar } from "./Avatar";
-import { ELEVATED_CARD } from "./elevated";
+import { ELEVATED_CARD, ELEVATED_FLOAT } from "./elevated";
 
 /** The bot a card asks for: its face and name lead the card. */
 export type Asker = Pick<Bot, "name" | "color"> & Partial<Pick<Bot, "avatarUrl" | "avatarCrop" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "mascotBody" | "mascotFaceColor">>;
@@ -39,6 +40,7 @@ export function AskCard({
   children,
   footer,
   onKeyDown,
+  stays = false,
 }: {
   /** An AskHeader: who asks, above the question. */
   header?: ReactNode;
@@ -53,6 +55,8 @@ export function AskCard({
   children?: ReactNode;
   footer?: ReactNode;
   onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void;
+  /** Work rests on this card and the person's answer alone moves it: it stays in view however far the chat scrolls. */
+  stays?: boolean;
 }) {
   return (
     <div
@@ -61,7 +65,7 @@ export function AskCard({
       data-tour={tour}
       data-ask-card="pending"
       onKeyDown={onKeyDown}
-      className={cn("w-full max-w-[560px] rounded-[20px] px-4 pb-3.5 pt-3 text-start", ELEVATED_CARD)}
+      className={cn("w-full max-w-[560px] rounded-[18px] px-4 pb-3.5 pt-3 text-start", stays ? `sticky top-[60px] bottom-[72px] z-10 ${ELEVATED_FLOAT}` : ELEVATED_CARD)}
     >
       {header && <div className="mb-1.5 pe-6">{header}</div>}
       <div className="flex min-w-0 items-start gap-2">
@@ -195,7 +199,7 @@ export function AskReply({ label, placeholder, color, onSend, sending = false, v
         disabled={sending}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+          if (event.key !== "Enter" || event.shiftKey || imeComposing(event.nativeEvent)) return;
           event.preventDefault();
           send();
         }}
@@ -273,7 +277,7 @@ const ASK_SHAPE =
 /** A card's answers: at least 36px tall, 44 on a touch screen, and a label that wraps rather than being cut. */
 export const ASK_BUTTON_SHAPE =
   "inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-center text-[14px] font-medium leading-5 transition-colors [&>svg]:shrink-0 disabled:cursor-not-allowed pointer-coarse:min-h-11";
-const ASK_ICON_SHAPE = "inline-flex size-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed pointer-coarse:size-9";
+export const ASK_ICON_SHAPE = "inline-flex size-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed pointer-coarse:size-9";
 const ASK_LOOK = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-40";
 const ASK_CONTROL = `${ASK_SHAPE} ${ASK_LOOK}`;
 const ASK_PRIMARY_LOOK = `${ASK_LOOK} ui-button-primary bg-accent text-accent-ink hover:brightness-110`;
@@ -290,7 +294,7 @@ export const ASK_SECONDARY_BUTTON = `${ASK_BUTTON_SHAPE} ${ASK_LOOK} bg-ink/[0.0
 /** An extra option that should not compete with the answer: Always allow, Details. */
 export const ASK_QUIET_ANSWER = `${ASK_BUTTON_SHAPE} ${ASK_LOOK} text-ink-secondary enabled:hover:bg-ink/[0.06] enabled:hover:text-ink enabled:active:bg-ink/[0.1]`;
 
-const ASK_CHOICE = `flex min-h-10 w-full items-center gap-2.5 rounded-[14px] px-3.5 py-2 text-start text-[14px] leading-5 text-ink ring-[0.5px] ring-ink/[0.14] transition-colors ${ASK_LOOK} disabled:cursor-default pointer-coarse:min-h-11`;
+const ASK_CHOICE = `flex min-h-10 w-full items-center gap-2.5 rounded-[12px] px-3.5 py-2 text-start text-[14px] leading-5 text-ink ring-[0.5px] ring-ink/[0.14] transition-colors ${ASK_LOOK} disabled:cursor-default pointer-coarse:min-h-11`;
 
 export const ASK_CHIP = `${ASK_CONTROL} max-w-full border`;
 export const ASK_CHIP_IDLE = "border-transparent bg-ink/[0.07] text-ink hover:bg-ink/[0.12]";

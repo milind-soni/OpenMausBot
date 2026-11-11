@@ -2,14 +2,14 @@
 // side, names this server's connections (never a secret) with the engines it runs and the programs it has. On a Cloud
 // home: POST /api/cloud-connections/connected-apps makes this Cloud act as the computer's connected-apps account (a
 // one-time code from OpenMausBot's service, or the person's own Composio project); PUT
-// /api/cloud-connections/mcp/<name>/sign-in and PUT /api/cloud-connections/highlevel take a sign-in that moved; PUT
-// /api/cloud-connections/held-keys keeps a trial's moved keys unused while its Claude credit lasts. Admin scope
+// /api/cloud-connections/mcp/<name>/sign-in takes a sign-in that moved; PUT
+// /api/cloud-connections/held-keys keeps a trial's moved keys unused while its Claude credit lasts; PUT
+// /api/cloud-connections/email takes the person's mailboxes. Admin scope
 // (request-auth's default): only the owner's app reaches them.
 import { z } from "zod";
 
 import type { ConnectionListing } from "../cloud-connections.ts";
 import type { ShareOutcome } from "../composio-share.ts";
-import { parseHighLevelConnection, type HighLevelConnection } from "../highlevel/store.ts";
 import { parseMcpOAuthRecord, type McpOAuthRecord } from "../mcp-oauth-store.ts";
 import type { McpRunsOn } from "../mcp-registry.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -41,7 +41,7 @@ export interface CloudConnectionRouteDeps {
   /** Only a Cloud home takes connections, and a server of one person's own from that person's session (`ownHome`). */
   cloudHome: boolean;
   ownHome?(auth: RequestAuth): boolean;
-  /** A Team Cloud: a person's own connections (a share, a sign-in, HighLevel) are refused with one plain line. */
+  /** A Team Cloud: a person's own connections (a share, a sign-in, a mailbox) are refused with one plain line. */
   personalRefusal?: (what: string) => string | null;
   list(): Promise<ConnectionsAnswer>;
   adoptShare(code: string): Promise<ShareOutcome>;
@@ -50,7 +50,8 @@ export interface CloudConnectionRouteDeps {
   composioConnected(slugs: string[]): Promise<Record<string, boolean>>;
   /** `replaces`: the digest of the sign-in this computer moved here before, which a newer one may replace. */
   adoptSignIn(name: string, record: McpOAuthRecord, replaces: string | null): Adopted;
-  adoptHighLevel(connection: HighLevelConnection, replaces: string | null): Adopted;
+  /** The person's mailboxes with their passwords; one already here at that address stays. */
+  adoptEmail?(accounts: unknown[]): { adopted: number; kept: number };
   /** Keeps the keys of these engines unused while a trial's Claude credit lasts; false when they run now. */
   holdKeys?(engines: string[]): boolean;
 }
@@ -71,10 +72,10 @@ export function createCloudConnectionRoutes(deps: CloudConnectionRouteDeps): Rou
       return json(res, 200, { held: deps.holdKeys?.(asked.data.for) ?? false });
     }
     const signIn = SIGN_IN.exec(path);
-    if (path !== "/api/cloud-connections/connected-apps" && path !== "/api/cloud-connections/highlevel" && !signIn) return json(res, 404, { error: "not found" });
+    if (path !== "/api/cloud-connections/connected-apps" && path !== "/api/cloud-connections/email" && !signIn) return json(res, 404, { error: "not found" });
     if (method !== (path === "/api/cloud-connections/connected-apps" ? "POST" : "PUT")) return json(res, 405, { error: "method not allowed" });
     if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) return json(res, 415, { error: "content-type must be application/json" });
-    const refused = deps.personalRefusal?.(signIn ? signIn[1]! : path === "/api/cloud-connections/highlevel" ? "HighLevel" : "these apps");
+    const refused = deps.personalRefusal?.(signIn ? signIn[1]! : path === "/api/cloud-connections/email" ? "Email" : "these apps");
     if (refused) { req.resume(); return json(res, 403, { error: refused }); }
     const body = await readBody(req, 64 * 1024);
     const replaces = url.searchParams.get("replaces");
@@ -86,11 +87,10 @@ export function createCloudConnectionRoutes(deps: CloudConnectionRouteDeps): Rou
       const adopted = deps.adoptSignIn(signIn[1]!, record, replaces);
       return adopted.ok ? json(res, 200, { [adopted.outcome]: true }) : json(res, adopted.status, { error: adopted.error });
     }
-    if (path === "/api/cloud-connections/highlevel") {
-      const connection = parseHighLevelConnection(body);
-      if (!connection) return json(res, 400, { error: "send the HighLevel connection as this computer keeps it" });
-      const adopted = deps.adoptHighLevel(connection, replaces);
-      return adopted.ok ? json(res, 200, { [adopted.outcome]: true }) : json(res, adopted.status, { error: adopted.error });
+    if (path === "/api/cloud-connections/email") {
+      const accounts = (body as { accounts?: unknown } | null)?.accounts;
+      if (!Array.isArray(accounts) || !deps.adoptEmail) return json(res, 400, { error: "send { accounts } as this computer keeps them" });
+      return json(res, 200, deps.adoptEmail(accounts));
     }
 
     const parsed = connectSchema.safeParse(body);

@@ -1,6 +1,6 @@
 import { Children, createElement, isValidElement, type ReactElement, type ReactNode, type RefObject } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 import type { Routine, RoutineRun } from "../../shared/routines";
 
@@ -22,7 +22,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
-const { t } = await import("@/lib/i18n");
+const { setLocale, t } = await import("@/lib/i18n");
 const { EventDetails, EventEditor, PausedList } = await import("./RoutineCalendarPage");
 
 const bot = {
@@ -49,6 +49,7 @@ function render(element: () => ReactNode) {
 
 beforeEach(() => { fixture.calls = []; });
 afterAll(() => vi.unstubAllGlobals());
+afterEach(() => setLocale("en"));
 
 describe.each([
   {
@@ -124,13 +125,27 @@ describe("calendar event details drawer", () => {
 });
 
 describe("calendar event editor", () => {
-  it("cannot save a room goal whose room is gone until another room is chosen", () => {
+  it("dims the page behind the editor without blurring it", () => {
+    const tree = render(() => EventEditor({
+      seed: { kind: "routine", at: 1, durationMinutes: 30, botIds: [bot.id], routine },
+      bots: [bot], plain: true, onClose: vi.fn(), onSavedCall: vi.fn(),
+    }));
+    const overlay = tree.find((node) => String(node.props.className ?? "").includes("fixed inset-0"))!;
+    expect(overlay.props.className).toContain("bg-black/65");
+    expect(overlay.props.className).not.toMatch(/backdrop-blur|backdrop-filter/);
+  });
+
+  it.each([
+    ["en", "Room no longer exists. Choose another.", "Save"],
+    ["pt-br", "O grupo não existe mais. Escolha outro.", "Salvar"],
+  ])("cannot save a room goal whose room is gone until another room is chosen in %s", (locale, notice, save) => {
+    setLocale(locale);
     const orphaned: Routine = { ...routine, target: "room-goal", groupId: "gone" };
     const html = renderToStaticMarkup(createElement(() => EventEditor({
       seed: { kind: "routine", at: 1, durationMinutes: 30, botIds: [bot.id], routine: orphaned },
       bots: [bot], onClose: vi.fn(), onSavedCall: vi.fn(),
     })));
-    expect(html).toContain("Room no longer exists");
-    expect(html).toMatch(/<button[^>]*\bdisabled=""[^>]*>(?:(?!<\/button>).)*Save<\/button>/s);
+    expect(html).toContain(notice);
+    expect(html).toMatch(new RegExp(`<button[^>]*\\bdisabled=""[^>]*>(?:(?!<\\/button>).)*${save}<\\/button>`, "s"));
   });
 });

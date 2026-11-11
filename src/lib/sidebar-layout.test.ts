@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  activeBotsFirst,
   BOT_CHATS_SECTION_ID,
   BOTS_SECTION_ID,
   CHANNELS_SECTION_ID,
@@ -114,6 +115,20 @@ describe("sidebar virtual sections", () => {
     expect(parts.sectionedBots).toEqual([stay]);
     expect(workChief.section).toBe("Work");
     expect(home.section).toBe("Home");
+  });
+
+  it("finds the viewer's own hidden MausBot in a search, never someone else's", () => {
+    const mine = { id: "nova", defaultBot: {}, sidebarHidden: true, section: "C Suite" };
+    const theirs = { id: "theirs", defaultBot: { person: "sam@example.com" }, section: "C Suite" };
+    expect(partitionSidebarBots([mine, theirs], { viewerEmail: null }).sectionedBots).toEqual([]);
+    expect(partitionSidebarBots([mine, theirs], { viewerEmail: null, searching: true }).sectionedBots).toEqual([mine]);
+    const plain = { id: "plain", sidebarHidden: true, section: "C Suite" };
+    expect(partitionSidebarBots([plain], { viewerEmail: null, searching: true }).sectionedBots).toEqual([]);
+    const hiddenMaus = { id: "maus", chiefOfStaff: true, sidebarHidden: true, defaultBot: {} };
+    const sharedChief = { id: "shared", chiefOfStaff: true };
+    const found = partitionSidebarBots([hiddenMaus, sharedChief], { viewerEmail: null, searching: true });
+    expect([found.unsectionedChief, ...found.unsectionedBots]).toEqual([hiddenMaus, sharedChief]);
+    expect(partitionSidebarBots([hiddenMaus, sharedChief], { viewerEmail: null }).unsectionedBots).toEqual([]);
   });
 
   it("lists a group's pinned Chief with the pinned bots on every client; the main Chief keeps its own top slot", () => {
@@ -302,5 +317,20 @@ describe("the primary tile", () => {
     expect(tiled.unsectionedBots.map((candidate) => candidate.id)).toEqual(["bea"]);
     expect(tiled.sectionChiefs.map((candidate) => candidate.id)).toEqual(["lead"]);
     expect(withPrimaryTile(parts, undefined).primary).toBeNull();
+  });
+});
+
+describe("active bots first", () => {
+  it("moves active bots up inside each list, keeps everyone's order, and touches nothing else", () => {
+    const parts = { pinnedBots: ["p1", "p2", "p3"], sectionedBots: ["w1", "h1", "w2"], unsectionedBots: ["a", "b", "c"], other: "kept" };
+    const active = new Set(["p3", "w2", "h1", "c", "b"]);
+    expect(activeBotsFirst(parts, (id) => active.has(id))).toEqual({
+      pinnedBots: ["p3", "p1", "p2"],
+      sectionedBots: ["h1", "w2", "w1"],
+      unsectionedBots: ["b", "c", "a"],
+    });
+    expect(parts.unsectionedBots).toEqual(["a", "b", "c"]);
+    expect(parts.pinnedBots).toEqual(["p1", "p2", "p3"]);
+    expect(parts.sectionedBots).toEqual(["w1", "h1", "w2"]);
   });
 });

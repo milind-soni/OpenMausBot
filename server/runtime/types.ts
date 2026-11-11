@@ -123,7 +123,11 @@ export interface Assignment {
    * a repeat lands on it unless rework is set. */
   rework: boolean;
   /** While parked: the exact question for the person. */
+  /** Its reply only acknowledged: its requester takes no turn for it (status-reply.ts). */
+  statusOnly?: boolean;
   question?: string;
+  /** While parked: when the person was reminded of it, so a restart never reminds them twice. */
+  remindedAt?: number;
   /** While parked under Full access ("Just do it"): the question is its requester's to answer, never the person's.
    * Still unanswered when the requester's turn that carries it ends, the assignee goes on with `default`, or with its
    * own pick when it named none. */
@@ -150,6 +154,8 @@ export interface Assignment {
   approved?: boolean;
   /** A room brief shown once per call: every recipient of that call shares it. */
   batchKey?: string;
+  /** The call that handed this out, when one call reached several teammates. */
+  fanOut?: string;
   version: 1;
 }
 
@@ -172,7 +178,7 @@ export interface TurnEvidence {
 export type EventKind =
   | "enqueued" | "refused" | "admitted" | "started" | "progress" | "parked" | "answered"
   | "waiting" | "resume_due" | "settled" | "reported" | "woken" | "cancelled"
-  | "restart_reconciled" | "budget" | "stalled" | "continued";
+  | "restart_reconciled" | "budget" | "stalled" | "continued" | "held" | "reminded";
 
 export interface AssignmentEvent {
   id: number;
@@ -215,6 +221,10 @@ export interface EnqueueRequest {
   driverKind?: string;
   approved?: boolean;
   batchKey?: string;
+  /** One call that hands the same work to several teammates: it counts once against the request budget. */
+  fanOut?: string;
+  /** A new thread of the requester's own bot (tree.ts ownThread): the requesting turn is not an ancestor it refuses. */
+  ownThread?: boolean;
 }
 
 export type EnqueueResult =
@@ -245,7 +255,8 @@ export interface RunInput {
 }
 
 export type RunResult =
-  | { kind: "completed"; text: string; evidence?: TurnEvidence }
+  /** statusOnly: nothing in `text` for the requester to do (status-reply.ts). */
+  | { kind: "completed"; text: string; evidence?: TurnEvidence; statusOnly?: boolean }
   | { kind: "failed"; outcome: Exclude<Outcome, "done" | "needs_input">; text: string; evidence?: TurnEvidence }
   | { kind: "needs_input"; question: string; cards?: string[]; decide?: { default?: string }; evidence?: TurnEvidence }
   /** The turn stopped short (a step cap, a seat it could not get) and the
@@ -301,6 +312,8 @@ export interface TurnRunner {
   /** The assignment is parked on the person; show what it needs. `restored`
    * is the restart's re-park: show it again only if it never got shown. */
   park(a: Assignment, question: string, restored?: boolean): void;
+  /** Work parked on the person has waited inputRemindMs: remind them, once. `closesAt`: when it expires. */
+  remind?(a: Assignment, closesAt: number): void;
   /** A settled child, into its requester's conversation (a chip, a line), or
    * a root that ended alone, into its own. Called once per settlement. */
   report(a: Assignment, parent?: Assignment): void;
@@ -335,9 +348,12 @@ export interface Limits {
   /** A turn with no activity for this long is stalled (the host says what
    * counts as activity by touching progress()). */
   turnStallMs: number;
-  /** How long a parked assignment waits on the person's words before it expires: not run, not refused. Infinite
-   * unless a host sets it: a question waits for the person. */
+  /** How long handed-off work parked on the person waits before it expires: not run, not refused. On the wall clock,
+   * restarts included. Infinite unless a host sets it. A root waits on no one above it and has no such limit. */
   inputWaitMs: number;
+  /** How long that work waits before the person is reminded of it, once. The rest of inputWaitMs always follows the
+   * reminder, however late a restart let it go out. Infinite: no reminder. */
+  inputRemindMs: number;
 }
 
 export const DEFAULT_LIMITS: Limits = {
@@ -349,6 +365,7 @@ export const DEFAULT_LIMITS: Limits = {
   stallMs: 4 * 60 * 60_000,
   turnStallMs: 20 * 60_000,
   inputWaitMs: Number.POSITIVE_INFINITY,
+  inputRemindMs: Number.POSITIVE_INFINITY,
 };
 
 export interface LiveEdge {

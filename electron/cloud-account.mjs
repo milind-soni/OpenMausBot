@@ -1,8 +1,11 @@
 import { createManagedDesktopStore, retryDelay, unreadableRecord } from "./managed-desktop.mjs";
-import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTeams, parseCloudRoom, parseCloudTrial, parseCloudUsage, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
+import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudLanding, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTeams, parseCloudRoom, parseCloudTrial, parseCloudUsage, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
 import { CLOUD_ID, CLOUD_SWATCHES, cleanCloudListName, ORGANIZATION_BLOCKS, otherOwnClouds, ownCloud, parseCloudList, parseCloudRenewal, parseOrganizations, releaseVersion } from "./cloud-list.mjs";
 import { planTeam, teamPlan } from "./cloud-team-plan.mjs";
 import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
+import nativeText from "./native-text.cjs";
+
+const { englishText } = nativeText;
 
 export const CLOUD_ORIGIN = "https://cloud.openmausbot.com";
 /** The staging Admin (Dodo test mode, real test Clouds): a fixed address, on only with OMB_CLOUD_STAGING=1. */
@@ -11,12 +14,14 @@ export const STAGING_CLOUD_ORIGIN = "https://omb-cloud-staging.fly.dev";
  * entry, Files' state, the Cloud's chosen name): staging never reads or writes production's. */
 export function cloudTarget(env = process.env) {
   return env?.OMB_CLOUD_STAGING === "1"
-    ? { origin: STAGING_CLOUD_ORIGIN, staging: true, file: "cloud-account-staging.bin", environments: "environments-staging.json", sync: "cloud-sync-staging", look: "cloud-home-look-staging.json" }
-    : { origin: CLOUD_ORIGIN, staging: false, file: "cloud-account.bin", environments: "environments.json", sync: "cloud-sync", look: "cloud-home-look.json" };
+    ? { origin: STAGING_CLOUD_ORIGIN, staging: true, file: "cloud-account-staging.bin", saved: "cloud-accounts-staging.bin", places: "account-places-staging.json", environments: "environments-staging.json", sync: "cloud-sync-staging", look: "cloud-home-look-staging.json" }
+    : { origin: CLOUD_ORIGIN, staging: false, file: "cloud-account.bin", saved: "cloud-accounts.bin", places: "account-places.json", environments: "environments.json", sync: "cloud-sync", look: "cloud-home-look.json" };
 }
 const TOKEN = /^omc_[A-Za-z0-9_-]{43}$/;
 const CODE = /^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/;
 const PRIVATE_CODE = /^[A-Za-z0-9_-]{43}$/;
+/** What the Admin says of a Cloud of this account's a computer moved to (POST moved-to). */
+const MOVED_TO = Object.freeze(["deleted", "ended", "live", "unknown"]);
 const TIER = /^[a-z][a-z0-9-]{0,23}$/;
 const REFRESH_MS = 60_000;
 const STEADY_MS = 15 * 60_000;
@@ -93,7 +98,7 @@ function addOffer(result) {
 
 export function createCloudAccountClient({ store, openBrowser, platform, deviceName, appVersion,
   origin = CLOUD_ORIGIN, fixture = false, fetch: fetcher = globalThis.fetch, now = Date.now, onState = () => {},
-  setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message), awaitingWake = () => false }) {
+  setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message), awaitingWake = () => false, t = englishText.t }) {
   origin = cloudOrigin(origin, fixture);
   const staging = origin === STAGING_CLOUD_ORIGIN;
   let grant = null, issued = null, cleanup = null, pending = null, cleanupNeeded = false;
@@ -142,7 +147,10 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     if (!closed) { timer = setTimer(() => { timer = null; void work().catch(() => {}); }, Math.max(1, delay)); timer?.unref?.(); }
   };
   const reset = () => { generation++; stopTimer(); controller.abort(); controller = new AbortController(); pending = null; emailed = null; verifiedUntil = 0; failures = 0; return generation; };
-  const current = stamp => !closed && generation === stamp;
+  // `quiet`: another account is taking over (quiesce to reload): this sign-in's grant is still in memory, and nothing may ask for
+  // it or write it over the one taking its place, whoever asks (a window coming to the front, Settings' Refresh).
+  let quiet = false;
+  const current = stamp => !closed && !quiet && generation === stamp;
   const versionHeader = text(appVersion, 40) && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/.test(appVersion) ? { "x-openmausbot-version": appVersion } : {};
   async function request(route, { method = "GET", body, token, signal = controller.signal, path = `/api/cloud/desktop/${route}`, timeoutMs = 20_000 } = {}) {
     const response = await fetcher(`${origin}${path}`, {
@@ -253,7 +261,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
         throw Object.assign(new Error("Cloud identity changed."), { status: 401, code: "invalid_token" });
       }
       const access = entitlement(result.entitlement);
-      const machine = parseCloudSummary(result.cloud), teams = parseCloudTeams(result.teams);
+      const machine = parseCloudSummary(result.cloud), teams = parseCloudTeams(result.teams), landing = parseCloudLanding(result.landing, teams);
       const purchase = parseCloudPurchase(result.cloud?.purchase);
       const trial = parseCloudTrial(result.cloud?.trial), credit = parseCloudCredit(result.cloud?.credit), offer = parseCloudOffer(result.offer);
       const usage = access.status === "active" ? parseCloudUsage(result.cloud?.usage) : null, room = usage ? parseCloudRoom(result.cloud?.room) : null;
@@ -286,7 +294,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       else if (adding && adding.cloudId === null && waitingCloud) adding = { ...adding, cloudId: waitingCloud.id, name: waitingCloud.name, color: waitingCloud.color, tier: waitingCloud.tier ?? adding.tier };
       verifiedUntil = Math.min(grant.expiresAt, now() + STEADY_MS,
         access.status === "active" && access.expiresAt !== null ? access.expiresAt : Infinity);
-      publish({ ...view("connected"), entitlement: access, ...(machine ? { machine } : {}), ...(teams.length ? { teams } : {}), ...(purchase ? { purchase } : {}),
+      publish({ ...view("connected"), entitlement: access, ...(machine ? { machine } : {}), ...(teams.length ? { teams } : {}), ...(landing ? { landing } : {}), ...(purchase ? { purchase } : {}),
         ...(trial ? { trial } : {}), ...(credit ? { credit } : {}), ...(offer ? { offer } : {}), ...(usage ? { usage } : {}), ...(room ? { room } : {}), ...(renewingCloud ? { renewal } : {}),
         ...(clouds ? { clouds, addCloud: more } : {}), ...(organizations ? { organizations } : {}), ...(latest ? { latestVersion: latest } : {}), verifiedAt: now(), verifiedUntil });
       const planCloud = teamPlan(value) ? planTeam(value)?.machine ?? null : machine;
@@ -650,12 +658,12 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const current = grant;
       if (cloudId !== null) {
         const cloud = otherOwnCloud(cloudId);
-        if (!current || !cloud) throw Object.assign(new Error("That Cloud is no longer one of yours."), { gone: true });
-        if (!cloud.origin || !["ready", "offline"].includes(cloud.status)) throw new Error(`${cloud.name} isn't ready to open yet.`);
+        if (!current || !cloud) throw Object.assign(new Error(t("native.cloud.otherGone")), { gone: true });
+        if (!cloud.origin || !["ready", "offline"].includes(cloud.status)) throw new Error(t("native.cloud.otherNotReady", { name: cloud.name }));
         let result;
         try { result = await request("pairing", { method: "POST", body: { cloudId }, token: current.token }); } catch (error) {
-          if (error?.status === 404 && !error.opaque) { void refresh().catch(() => {}); throw Object.assign(new Error(`${cloud.name} is no longer one of your Clouds.`), { gone: true }); }
-          if (error?.status === 409) throw new Error(`${cloud.name} isn't running right now.`);
+          if (error?.status === 404 && !error.opaque) { void refresh().catch(() => {}); throw Object.assign(new Error(t("native.cloud.otherNoLongerYours", { name: cloud.name })), { gone: true }); }
+          if (error?.status === 409) throw new Error(t("native.cloud.otherNotRunning", { name: cloud.name }));
           throw error;
         }
         const pairing = parsePairingGrant(result, cloud.origin, now());
@@ -663,7 +671,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
         return pairing;
       }
       const target = homeTarget();
-      if (!target || !current) throw new Error("My Cloud is not ready to connect yet.");
+      if (!target || !current) throw new Error(t("native.cloud.notReady"));
       let result;
       try { result = await request("pairing", { method: "POST", body: {}, token: current.token }); } catch (error) {
         const why = cloudUnreachableText(await refresh().catch(() => state()), target.origin);
@@ -687,7 +695,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const cleanName = cleanCloudListName(name);
       if (typeof tier !== "string" || !TIER.test(tier) || !ADD_INTERVALS.includes(interval) || !cleanName || !(color === null || CLOUD_SWATCHES.includes(color))
         || !(source === null || CHECKOUT_SOURCES.includes(source))) {
-        throw new Error("Invalid Cloud to add.");
+        throw new Error(t("native.cloud.invalidAdd"));
       }
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
@@ -728,7 +736,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * with the Admin's reason; `taken` when another of the plan's has that name; `unsupported` from an Admin without it. */
     async addOrganization({ name, color = null } = {}) {
       const cleanName = cleanCloudListName(name);
-      if (!cleanName || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error("Invalid organization to add.");
+      if (!cleanName || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error(t("native.cloud.invalidOrganization"));
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
       if (!value.organizations) return { outcome: "unsupported" };
@@ -748,7 +756,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * change: `saved` once the Admin keeps it (the session is read again, so every place follows); `refused` when the
      * Admin says it is someone else's to change; `unsupported` from an Admin without the route or the list. */
     async setCloudColor(cloudId, color) {
-      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId) || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error("Invalid Cloud color.");
+      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId) || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error(t("native.cloud.invalidColor"));
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
       if (!value.clouds?.some(cloud => cloud.id === cloudId && cloud.managed !== false)) return { outcome: "unsupported" };
@@ -767,7 +775,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * when it says that Cloud can't be removed now; `gone` when it is not theirs any more; `unsupported` from an Admin without
      * Remove from list (whose session never says `removable`). */
     async hideCloud(cloudId) {
-      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId)) throw new Error("Invalid Cloud to remove.");
+      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId)) throw new Error(t("native.cloud.invalidRemove"));
       const signedIn = grant;
       if (!signedIn || state().status !== "connected") return { outcome: "failed" };
       if (!value.clouds?.some(cloud => cloud.id === cloudId && cloud.removable === true)) return { outcome: "unsupported" };
@@ -847,6 +855,17 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       try { await request("kept", { method: "POST", body: { installation }, token: current.token }); return true; }
       catch (error) { if (error?.status === 404 && !error.opaque) return false; throw error; }
     },
+    /** The Admin's word on this account's own Cloud at `origin` (POST /api/cloud/desktop/moved-to), for a computer frozen
+     * for a Cloud that is not My Cloud now: "deleted", "ended" (stopped and kept only until it is deleted), "live", or
+     * "unknown" (none of this account's ever was). Null without a verified sign-in, or from an Admin that doesn't say (404). */
+    async movedTo(cloudOrigin) {
+      const current = grant;
+      if (!current || value.status !== "connected" || typeof cloudOrigin !== "string") return null;
+      let result;
+      try { result = await request("moved-to", { method: "POST", body: { origin: cloudOrigin }, token: current.token }); }
+      catch (error) { if (error?.status === 404 && !error.opaque) return null; throw error; }
+      return grant === current && result?.cloudContractVersion === 1 && MOVED_TO.includes(result.state) ? result.state : null;
+    },
     /** Tells the Admin where this computer's move to My Cloud stands (POST /api/cloud/desktop/move-status; move-status.mjs
      * builds `report`). False when there is no sign-in or the Admin doesn't take it yet (404). */
     async reportMoveStatus(report) {
@@ -911,18 +930,31 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const result = await request(null, { method: "POST", path: "/api/updates-consent", body: { status, receipt }, signal: AbortSignal.timeout(10_000) });
       if (result?.ok !== true) throw new Error("Invalid Cloud consent response.");
     },
+    /** Another account takes over: nothing more is asked or written for this sign-in. */
+    quiesce() { quiet = true; reset(); },
+    /** Reads the sign-in saved in `store` afresh: nothing of the one before stays. Told once, when the Admin has answered. */
+    reload() {
+      quiet = false;
+      reset();
+      grant = null; issued = null; cleanup = null; cleanupNeeded = false; plan = null; savedHint = null; opened = null; adding = null; renewalCloud = null; offerCache = null; waking = false;
+      confirmations.clear();
+      value = { status: "signed-out", message: "restoring" };
+      return start();
+    },
+    /** Ends a sign-in that waits on this device, at the Admin. */
+    revokeSaved: revoke,
     close() { closed = true; reset(); },
   };
 }
 
-export function cloudMenuSublabel(state, date) {
+export function cloudMenuSublabel(state, date, t = englishText.t) {
   if (state?.status !== "connected") return null;
   const trial = state.trial;
   if (state.entitlement?.plan === "pro" && state.entitlement.status === "active") {
-    if (trial?.state === "active" || trial?.state === "ending") return `Free trial until ${date(trial.endsAt)}`;
-    return state.machine?.power?.sleeps ? "Sleeps when idle" : "Always on";
+    if (trial?.state === "active" || trial?.state === "ending") return t("native.cloud.sub.trialUntil", { date: date(trial.endsAt) });
+    return t(state.machine?.power?.sleeps ? "native.cloud.sub.sleeps" : "native.cloud.sub.alwaysOn");
   }
-  return state.machine || trial ? "Stopped" : null;
+  return state.machine || trial ? t("native.cloud.sub.stopped") : null;
 }
 
 /** What the person's own Cloud page may show of the plan: never the account, a credential or an address. */

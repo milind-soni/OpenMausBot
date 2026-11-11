@@ -5,7 +5,7 @@ export function byLanguage<T>(table: { en: T } & Partial<Record<string, T>>, lan
   let candidate = language?.trim().toLowerCase() || "en";
   while (candidate) {
     const entry = table[ALIASES[candidate] ?? candidate];
-    if (entry) return entry;
+    if (entry !== undefined) return entry;
     const separator = candidate.lastIndexOf("-");
     if (separator < 0) break;
     candidate = candidate.slice(0, separator);

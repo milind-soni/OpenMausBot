@@ -12,6 +12,8 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
   useState: (initial: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = typeof initial === "function" ? (initial as () => unknown)() : initial;
     return [f.values[index], (next: unknown) => { f.values[index] = typeof next === "function" ? (next as (value: unknown) => unknown)(f.values[index]) : next; }]; },
   useRef: (current: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = { current }; return f.values[index]; },
+  // Walked by hand outside a render, so the Settings look (a context) reads as unset.
+  useContext: () => false,
 }));
 import { CloudUsageCardView, CloudUsageSettingsView, confirmUpgrade, previewUpgrade, useUpgrade } from "./CloudUsageMeter";
 
@@ -109,6 +111,19 @@ describe("Upgrade", () => {
     expect([after.confirming, after.note]).toEqual([false, { tone: "good", text: "You're on Max now. Your new allowances are ready." }]);
     // Every meter on the page reads the plan again at once.
     expect(dispatchEvent.mock.calls.map(([event]) => (event as Event).type)).toEqual(["omb:cloud-plan-changed"]);
+  });
+  it("reads the trial's end from the plan when the preview has no date, so a longer trial still hears nothing is charged today", async () => {
+    const DAY = 86_400_000;
+    const asked = async (trialEndsAt: number) => {
+      const b = bridge(), current = usage({ trialEndsAt });
+      b.upgradePreview.mockResolvedValue({ outcome: "preview" as const, preview: { ...PREVIEW, trial: true, nextBillingAt: undefined } });
+      const render = () => { f.index = 0; return useUpgrade(b, current, "app_usage"); };
+      render().start();
+      await flush();
+      return String(render().dialog.props.body);
+    };
+    expect(await asked(Date.now() + 3 * DAY)).toBe("Your free trial moves to Max now, and nothing is charged today. When it ends, Max is $99 a month, plus any tax.");
+    expect(await asked(Date.now() + DAY / 2)).toBe("Your free trial moves to Max now. When it ends, Max is $99 a month, plus any tax.");
   });
   it("opens the Cloud page when the app can't change plans, and never previews or changes then", async () => {
     const b = bridge();

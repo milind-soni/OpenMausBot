@@ -57,10 +57,13 @@ const ENTRY_POINTS = [
   "drivers/agents-proxy.ts",
   "drivers/dweb-proxy.ts",
   "drivers/phone-proxy.ts",
+  "drivers/chatgpt-plan-token-command.ts",
   // the bot box (server/bot-box): the in-box bridge, the probe the self-check runs inside a box, and the check by hand
   "bot-box/box-bridge.ts",
   "bot-box/box-probe.ts",
   "bot-box/box-check.ts",
+  // the meeting bot, copied to a cloud computer and run there with its own Node
+  "meetings/meetbot.ts",
 ];
 
 await build({
@@ -71,6 +74,10 @@ await build({
   format: "esm",
   outbase: server,
   outdir: join(root, "dist-server"),
+  // Function names stay in stack traces. Node prints a whole source line with an uncaught error, so no line may be long.
+  minifyWhitespace: true,
+  minifySyntax: true,
+  lineLimit: 500,
   // Written after tsc, replacing its output for these entry points.
   allowOverwrite: true,
   logLevel: "info",
@@ -136,7 +143,7 @@ if (existsSync(join(root, "enterprise", "server", "index.ts"))) {
   copyFileSync(join(root, "enterprise", "LICENSE"), join(root, "dist-server", "enterprise", "LICENSE"));
 }
 
-// The packaged desktop forks this bootstrap to turn on Node's compile cache.
+// The packaged desktop and the container launcher run this bootstrap to turn on Node's compile cache.
 // Copied, not bundled: esbuild would inline index.js into it.
 copyFileSync(join(root, "scripts", "desktop-server-entry.mjs"), join(root, "dist-server", "desktop-entry.mjs"));
 

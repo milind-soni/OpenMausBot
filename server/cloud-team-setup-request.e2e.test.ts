@@ -49,7 +49,7 @@ async function turn(token: string, botId: string, threadId: string, text: string
 }
 
 it("in the team's shared main chat, only the person who pressed Set me up sets the bot up, and only they can stop it", async () => {
-  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout" });
+  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   const bot = created.body.bot as { id: string; mainThreadId: string; messages: any[] };
   const main = bot.mainThreadId;
@@ -83,11 +83,11 @@ it("in the team's shared main chat, only the person who pressed Set me up sets t
 }, hostTimeout(180_000));
 
 it("refuses another person's press while a member's request waits, and the owner can clear it", async () => {
-  const bot = (await team.as(owner, "POST", "/api/bots", { name: "Scribe" })).body.bot as { id: string; mainThreadId: string };
+  const bot = (await team.as(owner, "POST", "/api/bots", { name: "Scribe", visibility: "everyone" })).body.bot as { id: string; mainThreadId: string };
   const main = bot.mainThreadId;
   expect((await team.as(ada, "POST", `/api/bots/${bot.id}/setup-request`, { threadId: main })).status).toBe(200);
   expect(await team.as(owner, "POST", `/api/bots/${bot.id}/setup-request`, { threadId: main })).toEqual({
-    status: 409, body: { error: "Someone else is setting this bot up." },
+    status: 409, body: { error: "Someone else is setting this bot up.", errorKey: "serverError.setup.someoneElse" },
   });
   expect((await team.as(owner, "DELETE", `/api/bots/${bot.id}/setup-request`, { threadId: main })).status).toBe(200);
   expect(await waiting(owner, bot.id, main)).toBeUndefined();
@@ -95,7 +95,7 @@ it("refuses another person's press while a member's request waits, and the owner
 
 // Last: Ada's sessions end with her leaving.
 it("drops a member's request when she leaves the team", async () => {
-  const bot = (await team.as(owner, "POST", "/api/bots", { name: "Herald" })).body.bot as { id: string; mainThreadId: string };
+  const bot = (await team.as(owner, "POST", "/api/bots", { name: "Herald", visibility: "everyone" })).body.bot as { id: string; mainThreadId: string };
   const main = bot.mainThreadId;
   expect((await team.as(ada, "POST", `/api/bots/${bot.id}/setup-request`, { threadId: main })).status).toBe(200);
   expect(await waiting(owner, bot.id, main)).toMatchObject({ by: expect.any(String) });

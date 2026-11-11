@@ -1,10 +1,11 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, use, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Check, Copy, Ellipsis, Reply, X } from "lucide-react";
 import { popoverClosesOnKey, usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { MENU_ITEM, MENU_SHEET } from "./menu-recipe";
+import { StreamingReplyContext } from "@/state/live-reply";
 
 export const ACTION_ICON = { size: 17, strokeWidth: 1.5 } as const;
 
@@ -18,7 +19,13 @@ export type MessageMenuItem = {
   onSelect: () => void;
   title?: string;
   disabled?: boolean;
+  /** Offered only while the chat's turn is not running. */
+  idleOnly?: boolean;
 };
+
+/** Whether the chat's turn is running, apart from the row values every message reads: a turn starting or ending
+ * re-renders only the few rows that show it, not every message. */
+export const ChatBusyContext = createContext(false);
 
 export const MESSAGE_ROW = "data-message-row";
 
@@ -37,7 +44,7 @@ export function MessageActions({
   side,
   forceOpen = false,
   className,
-  menu = [],
+  menu: items = [],
   children,
 }: {
   side: "user" | "bot";
@@ -51,14 +58,18 @@ export function MessageActions({
   const moreRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
+  const [menuOpen, setMenuOpen] = useState(false);
+  // use() may run conditionally: a closed menu has no reason to follow the turn.
+  const busy = menuOpen && items.some((item) => item.idleOnly) ? use(ChatBusyContext) : false;
+  const menu = busy ? items.filter((item) => !item.idleOnly) : items;
   const [hovered, setHovered] = useState(false);
   const [keyboardFocus, setKeyboardFocus] = useState(false);
   const [tapped, setTapped] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [menuAbove, setMenuAbove] = useState(false);
   const [menuFlipped, setMenuFlipped] = useState(false);
   const mirrored = side === "user";
-  const shown = forceOpen || menuOpen || hovered || keyboardFocus || tapped;
+  const streaming = use(StreamingReplyContext);
+  const shown = !streaming && (forceOpen || menuOpen || hovered || keyboardFocus || tapped);
 
   useEffect(() => {
     const row = rootRef.current?.closest<HTMLElement>(`[${MESSAGE_ROW}]`) ?? rootRef.current;
@@ -164,6 +175,7 @@ export function MessageActions({
         className,
       )}
       data-testid="message-actions"
+      inert={streaming || undefined}
       data-shown={shown ? "true" : undefined}
       onKeyDown={(event) => {
         if (menuOpen || forceOpen || !popoverClosesOnKey(event.nativeEvent) || !keyboardFocus) return;

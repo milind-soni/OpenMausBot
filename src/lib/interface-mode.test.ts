@@ -15,8 +15,10 @@ function memoryStorage() {
 let local: ReturnType<typeof memoryStorage>;
 
 // The module keeps a per-session choice, so each case loads a fresh copy over the same storage, as a relaunch would.
-async function fresh() {
+// simpleOnly false is the switch put back (simple-only.ts), which keeps the old rules.
+async function fresh(simpleOnly = false) {
   vi.resetModules();
+  vi.doMock("./simple-only", () => ({ SIMPLE_ONLY: simpleOnly }));
   return import("./interface-mode");
 }
 
@@ -27,10 +29,35 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.doUnmock("./simple-only");
   vi.unstubAllGlobals();
 });
 
-describe("interface mode", () => {
+describe("with Simple the only mode", () => {
+  it("reads Advanced as off whatever this browser stored, and never turns it on", async () => {
+    local.setItem("omb-skin", "lagoon");
+    local.setItem("omb-advanced-mode", "1");
+    const { readAdvancedMode, setAdvancedMode } = await fresh(true);
+    expect(readAdvancedMode()).toBe(false);
+    setAdvancedMode(true);
+    expect(readAdvancedMode()).toBe(false);
+    expect(local.getItem("omb-advanced-mode")).toBe("1");
+  });
+
+  it("ships with the switch off: Advanced mode can be turned on, and stays on", async () => {
+    vi.resetModules();
+    expect((await vi.importActual<typeof import("./simple-only")>("./simple-only")).SIMPLE_ONLY).toBe(false);
+    const { readAdvancedMode, setAdvancedMode } = await import("./interface-mode");
+    expect(readAdvancedMode()).toBe(false);
+    setAdvancedMode(true);
+    expect(readAdvancedMode()).toBe(true);
+    expect(local.getItem("omb-advanced-mode")).toBe("1");
+    vi.resetModules();
+    expect((await import("./interface-mode")).readAdvancedMode(), "after a relaunch").toBe(true);
+  });
+});
+
+describe("with the switch back", () => {
   it("defaults a fresh install to Simple and stores that once", async () => {
     const { readAdvancedMode, settleAdvancedModeDefault, ADVANCED_MODE_KEY } = await fresh();
     expect(readAdvancedMode()).toBe(false);

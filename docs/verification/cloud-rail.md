@@ -9,12 +9,13 @@ rail, and the window looks as before.
 The rail is the window's own chrome, not a page's: this app's page `/rail` in a
 view of its own at the left edge (electron/chrome-rail.mjs), beside whichever
 place's page the window shows, at every width and on every place, whatever that
-server runs. The page beside it moves over by the rail's width (the app's
-preload, at any zoom). The rail's sheets cover the window while open. Its
-circles are small and named on hover; the place on screen wears a ring. Beside
-the rail the sidebar's switcher and the profile menu's Switch to… step aside.
-The person can hide the rail; the page then has the whole window, and those two
-come back.
+server runs. `/rail` is a small page of its own (`rail.html`, `src/rail.tsx`):
+the rail, its sheets, the skin and the person's language, not the app. The
+page beside it moves over by the rail's width (the app's preload, at any zoom).
+The rail's sheets cover the window while open. Its circles are small and named
+on hover; the place on screen wears a ring. Beside the rail the sidebar's
+switcher and the profile menu's Switch to… step aside. The person can hide the
+rail; the page then has the whole window, and those two come back.
 Nothing here needs a real MausBot Cloud account, a payment or the Electron app.
 
 ## Contract
@@ -30,7 +31,7 @@ Nothing here needs a real MausBot Cloud account, a payment or the Electron app.
   sidebar's top row, right after the macOS traffic lights (on the same spot
   either way: the app's preload tells the page how far it moved, in
   `--rail-beside`), or with the "Show your computers" switch in Settings
-  (Simple: General → Appearance; Advanced: Appearance). Both are there only
+  (Simple and Advanced: This app → Appearance → Layout). Both are there only
   while the window has a rail. The choice is this desktop's (`railHidden` in
   desktop-prefs.json), never a server's or a place's.
 - The page beside the rail offers that button through `window.ogb.rail`
@@ -46,6 +47,12 @@ Nothing here needs a real MausBot Cloud account, a payment or the Electron app.
   computer's or a Cloud's; a page learns only that the rail stands beside it. A
   circle opens only a place main listed, by its id, through main's own switch,
   and only from the person's click.
+- A click on a circle is taken at once: the place clicked is marked from that
+  click, pending, with its name on a shell over the page while main opens it
+  (Waking My Cloud… while it wakes), and any other click replaces it on the
+  spot, even one back to the place on screen. Main ends what the earlier click
+  had under way; a server restart that can't stop leaves the window on the place
+  the person chose last, and the rail stays up through it.
 - Buying another Cloud sends the plan, a name and a swatch to the Admin, which
   answers with a checkout this app opens in the browser; the sheet then follows
   the payment and the setup. An Admin that sells one Cloud per account (no
@@ -84,6 +91,79 @@ Nothing here needs a real MausBot Cloud account, a payment or the Electron app.
   connected here as that saved place, one reachable but not connected with its
   pairing steps, and one only reachable on its own network with nothing to
   open.
+
+## This Mac, once My Cloud is home
+
+Once a person's bots moved to My Cloud, this computer's own copy is frozen and
+is never a place again. The rail then shows This Mac (This PC on Windows and
+Linux) first, beside My Cloud: a separate place on this computer, with its own
+bots. A click starts it fresh in a folder of its own beside the data folder
+(`~/.openmausbot-profiles/default`, a profile by its stable id; more profiles
+would be more folders there), on the same address, one server at a time, as a
+local environment switch does. Nothing moves either way, the frozen copy keeps
+its marker and its bots, and the move's code never reaches the profile. A line
+on its page says the bots from before are on My Cloud and that an older copy
+comes in from Settings → Backups, until its ✕ closes it for good in that
+workspace, or by itself once it was shown on three days or a week went by. My
+Cloud on the rail goes back; the profile keeps running, so This Mac is one
+click again. A launch opens the place open when the app last closed (My Cloud,
+another Cloud, This Mac or another workspace, a server saved by hand); one that
+can't open now (removed, ended, not answering in a few seconds) is My Cloud
+instead, with no dialog, and This Mac when My Cloud doesn't run either.
+This computer stays lent to My Cloud throughout: lending follows the sign-in,
+and only the clean workspace for nobody who can reach the bots stops it. People
+with no Cloud see no change.
+
+```sh
+node --test electron/clean-workspace.node-test.mjs electron/home-window-profile.node-test.mjs electron/home-window-clean.node-test.mjs electron/cloud-rail.node-test.mjs electron/lending-target.node-test.mjs electron/start-place.node-test.mjs electron/home-places.node-test.mjs
+pnpm exec vitest run src/components/PlacesRail.test.ts src/components/HomeLine.test.ts
+OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/rail-profile-ui.e2e.test.ts
+```
+
+`scripts/testing/rail-profile-ui.e2e.test.ts` runs main's own handlers in a
+headless Chrome (`launchHomeWorld` with `profiles`): My Cloud a real Cloud-mode
+server with the bots, this computer its real frozen server until This Mac
+restarts it on the profile's folder, the rail's own page in a tab of its own,
+and this computer really lent to My Cloud on the window's session. It clicks
+This Mac on the rail (an empty place, the line, the marker untouched), then My
+Cloud (the Cloud's bots), then This Mac again (what was made there is still
+there, with no restart), watching the lent link every 50 ms all the while: it
+never drops. Each picture is the rail beside the page, as the window shows them.
+
+## More workspaces on this computer, and the cloud badge
+
+＋ offers New workspace on this computer first, to everyone with the rail (and
+in the Server menu where there is no rail yet). It asks a name (Work, then
+Personal, then Workspace 2 and on) and a colour, then opens it fresh: another
+profile under `~/.openmausbot-profiles/<id>`, listed with its name, colour and
+creation time in `~/.openmausbot-profiles/profiles.json` (This Mac, `default`,
+is its first entry, kept as it was). One runs at a time: opening another waits
+for the work under way in the one that runs (as the move waits for it, at most
+a minute, the circle saying so), then stops it as a quit does and starts the
+next. Once My Cloud is home every workspace is on the rail; with no home the
+named ones sit after This computer, which stays the data folder. A workspace's
+menu renames it, changes its colour and removes it, asked first; removing the
+open one moves the window to My Cloud (or This computer) and stops its server
+before its folder goes to the Trash. Every Cloud's tile has a small cloud at its
+corner, and a screen reader hears "…, Cloud"; a named workspace's has a laptop
+and a server of the person's own its server mark.
+
+```sh
+node --test electron/local-profiles.node-test.mjs electron/cloud-rail.node-test.mjs electron/environments.node-test.mjs
+pnpm exec vitest run src/components/PlacesRail.test.ts src/components/PlaceAddSheet.test.ts src/components/HomeLine.test.ts src/components/WindowPlaceTitle.test.ts
+OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/rail-profile-ui.e2e.test.ts
+```
+
+The UI test walks every path through the real pages: ＋ with Escape, Close and
+Back at each step, an empty and a taken name, a new workspace opening fresh,
+This Mac, Work and My Cloud in every order, a switch while a turn runs (the
+circle waits, the turn finishes there and its reply is there on return), two
+quick clicks, Rename, Colour, Remove with Cancel, removing the open one and the
+last one, an app restart while a workspace is open, the rail past eight, the
+badge in the light and dark looks, and, in a second world with no Cloud, the
+Server menu's New workspace and the rail appearing with a second place. It
+watches the lent link every 50 ms throughout and checks that the frozen copy's
+server never starts.
 
 ## Automated fixtures
 

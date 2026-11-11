@@ -62,6 +62,8 @@ export interface BrowserHostDeps {
   }): string;
   DESKTOP_MANAGED: boolean;
   CLOUD_HOME: unknown;
+  /** A shared company workspace: the server's network is the operator's, so the stored local-sites switch and allow-list are ignored. */
+  HOSTED_WORKSPACE?: boolean;
   PORT: number;
   /** A Cloud home's way out through the person's own lent computer. */
   device?: EgressSetup["device"];
@@ -91,7 +93,7 @@ function lentDevice(device: NonNullable<EgressSetup["device"]>, holder: (session
 }
 
 type Spec = { command: string; args?: readonly string[]; env: Record<string, string> };
-type LendRefusal = CloudLendingRefusal | "memory-changed";
+type LendRefusal = CloudLendingRefusal | "memory-changed" | "memory-changed-here";
 const BOT_SESSION = /^bot-[A-Za-z0-9_.-]+$/;
 
 export function createBrowserHost(deps: BrowserHostDeps) {
@@ -123,6 +125,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     egressPort: (key) => browserEgress.open(key),
     egressNotice: (key) => browserEgress.takeNotice(key),
     idleMs,
+    held: (session) => !turnResources.free(`browser:${session}`),
     log: (line) => console.warn(line),
   });
   const lendRefusal = deps.lendRefusal ?? ((): LendRefusal => "unproven");
@@ -136,8 +139,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return chromeRefusals.get(session) ?? null;
   }
   const lentChromeAllowed = (session: string) => chromeRefusal(session) === null;
-  /** A new conversation can't undo a memory change, so that refusal points to Memory instead. */
-  const refusedAs = (session: string) => (chromeRefusals.get(session) === "memory-changed" ? "memory-changed" : "not-allowed");
+  /** Each refusal has its own way out: a new conversation can't undo a memory change, for one. */
+  const refusedAs = (session: string) => chromeRefusals.get(session) ?? "not-allowed";
   // The desktop's idle time, not a Cloud home's shorter one: each reconnect may make Chrome ask the person to Allow again.
   const doors = lentChrome ? new LentChromeDoors({ route: () => lentChrome.route(), allowed: lentChromeAllowed, idleMs: () => browserIdleMs(cfg, { cloudHome: false }) }) : undefined;
   const doorUrls = new Map<string, string>();
@@ -203,7 +206,12 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const audiences = new AudienceBrowsers(join(DATA_DIR, "browser", "audiences.json"));
   const browserAudience = (threadId: string | undefined): Audience => (threadId && deps.audienceOf ? deps.audienceOf(threadId) : "team");
   const device = deps.device && lentDevice(deps.device, (session) => turnResources.holder(`browser:${session}`), mayLend);
-  browserEgress.configure({ host: DESKTOP_MANAGED ? "desktop" : CLOUD_HOME ? "cloud" : "server", config: () => cfg.browserEngine?.egress, ...(device ? { device } : {}) });
+  const egressHost = DESKTOP_MANAGED ? "desktop" : CLOUD_HOME ? "cloud" : "server";
+  // Self-hosted servers only: the owner's switch for this server's own sites and its local network. A shared company
+  // workspace's network is the operator's, so its stored switch and allow-list are ignored, like MausBot Cloud's.
+  const hostedServer = egressHost === "server" && Boolean(deps.HOSTED_WORKSPACE);
+  const sitesSwitch = egressHost === "server" && !hostedServer;
+  browserEgress.configure({ host: egressHost, config: () => (hostedServer ? undefined : cfg.browserEngine?.egress), ...(device ? { device } : {}) });
   /** A live bot's, profile's or temporary browser of this data dir, for any audience. */
   const belongs = (session: string) => isTemporaryBrowserSession(session) || audiences.variants().some((suffix) =>
     store.bots.some((bot) => browserSessionId(bot.id + suffix, "") === session)
@@ -438,6 +446,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       const browser = threadBrowser(threadId);
       return browser !== null && (browser.session === undefined || !browserRunning(browser.session, browser.spec));
     },
+    which: (threadId) => threadBrowser(threadId)?.session,
     running: (threadId) => {
       const browser = threadBrowser(threadId);
       return browser?.session !== undefined && browserRunning(browser.session, browser.spec);
@@ -531,9 +540,10 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return { binaryPath: engine.binaryPath, session, env: browserSessionSpec(engine.binaryPath, session, profile, await browserEgress.open(session)).env, encryptionKey: browserEngineEncryptionKey() };
   }
   /** What Settings shows of the engine that runs bots' browsers here; My Chrome stays on agent-browser. */
-  function engineSummary<T extends { myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind } {
-    if (browserEngineKind(cfg) !== "chrome") return { ...agentBrowser, engine: "agent-browser" };
-    return { ...chromeEngine.summary(), myChrome: agentBrowser.myChrome, ...lentChromeSummary(), engine: "chrome" };
+  function engineSummary<T extends { myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind; serverSites?: boolean } {
+    const serverSites = sitesSwitch ? { serverSites: cfg.browserEngine?.egress?.localNetwork === true } : {};
+    if (browserEngineKind(cfg) !== "chrome") return { ...agentBrowser, ...serverSites, engine: "agent-browser" };
+    return { ...chromeEngine.summary(), myChrome: agentBrowser.myChrome, ...lentChromeSummary(), ...serverSites, engine: "chrome" };
   }
 
   return {

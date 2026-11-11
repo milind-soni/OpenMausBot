@@ -4,12 +4,15 @@ import { rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { cpus, tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { DATA_LIMITS, DATA_RESULTS_SCHEMA } from "../../shared/data-surface.ts";
-import { CLOSE_DRAIN_MS, EXTENSION_INSTALL_TIMEOUT_MS, Lane, closeNames, createDataEngine, dataEngine, drainLanes, duckdbDirectory, instanceSettings, levenshtein, likePattern, loadExtensions, type DataEngineOptions } from "./engine.ts";
+import { CLOSE_DRAIN_MS, EXTENSION_INSTALL_TIMEOUT_MS, Lane, closeNames, createDataEngine, dataEngine, drainLanes, duckdbDirectory, instanceSettings, levenshtein, likePattern, loadExtensions, quoteIdentifier, type DataEngineOptions } from "./engine.ts";
 import { DataFailure, type BotDatabase, type DataEngine } from "./types.ts";
+import { DataSheetStore } from "./sheet.ts";
+import { planLoad } from "./tools.ts";
 
 const root = mkdtempSync(join(tmpdir(), "omb-data-engine-"));
 const outOfTree = join(root, "duckdb-resources");
@@ -252,6 +255,24 @@ describe("a bot's database", () => {
     expect(some.truncated).toBe(true);
   });
 
+  it.each([
+    { label: "compressed files", names: ["one.csv.gz", "nested/two.csv.gz"] },
+    { label: "uppercase extensions", names: ["one.CSV", "nested/two.CSV"] },
+    { label: "mixed names", names: ["one.csv", "two.CSV", "nested/three.csv.gz"] },
+  ])("loads every discovered CSV in a folder with $label", async ({ names }) => {
+    await ready;
+    const source = mkdtempSync(join(root, "load-folder-"));
+    mkdirSync(join(source, "nested"));
+    for (const [index, name] of names.entries()) {
+      const csv = `amount\n${index + 1}\n`;
+      writeFileSync(join(source, name), name.endsWith(".gz") ? gzipSync(csv) : csv);
+    }
+    const plans = planLoad({ source, kind: "folder" });
+    expect(plans).toHaveLength(1);
+    const result = await db.run(`SELECT count(*)::INTEGER, sum(amount)::INTEGER FROM ${plans[0]!.reader}`, bot);
+    expect(result.rows).toEqual([[names.length, names.length * (names.length + 1) / 2]]);
+  });
+
   it("returns JSON cells: big numbers and decimals as text, dates as DuckDB prints them, blobs by size, nested values as JSON text", async () => {
     await ready;
     const result = await db.run(`SELECT 1::BIGINT AS big, 1.25::DECIMAL(10,2) AS dec, DATE '2024-01-02' AS d, TIMESTAMP '2024-01-02 03:04:05' AS ts, 'ab'::BLOB AS bl, [1,2] AS l, {'x':1} AS st, INTERVAL 1 DAY AS iv, 1::HUGEINT AS hu, 1.5::DOUBLE AS dbl, true AS bo, NULL::INTEGER AS nul, MAP {'k':1} AS mp, 'x' AS v`, bot);
@@ -277,6 +298,17 @@ describe("a bot's database", () => {
     await db.dropResult("gone");
     await db.dropResult("gone");
     expect((await failure(db.run(`SELECT * FROM ${DATA_RESULTS_SCHEMA}.gone`, bot))).error.code).toBe("table_not_found");
+  });
+
+  it("keeps an earlier query result when the sheet reopens before the next query", async () => {
+    const database = await engine().forBot("result-names");
+    const options = { botId: "result-names", dir: join(root, "bots", "result-names") };
+    const first = new DataSheetStore(options).nextResultName();
+    await database.materialise("SELECT 11 AS value", first, bot);
+    const second = new DataSheetStore(options).nextResultName();
+    await database.materialise("SELECT 22 AS value", second, bot);
+    expect((await database.run(`SELECT * FROM ${DATA_RESULTS_SCHEMA}.${first}`, panel)).rows).toEqual([[11]]);
+    expect((await database.run(`SELECT * FROM ${DATA_RESULTS_SCHEMA}.${second}`, panel)).rows).toEqual([[22]]);
   });
 
   it("drops a result on the panel's connection without waiting behind the bot's statement", async () => {
@@ -365,6 +397,19 @@ describe("a bot's database", () => {
     const query = await db.describe("SELECT id FROM sales WHERE id < 10", bot);
     expect(query.rowCount).toBe(10);
     expect(query.columns[0]).toMatchObject({ name: "id", max: "9" });
+  });
+
+  it.each(["分析", "report/2026", 'Revenue "USD"', "select from report", " padded "])("describes a quoted table named %j without treating its name as SQL", async (name) => {
+    await ready;
+    await db.run(`CREATE TABLE ${quoteIdentifier(name)} AS SELECT 17 AS amount`, bot);
+    const described = await db.describe(`main . ${quoteIdentifier(name)}`, bot);
+    expect(described).toMatchObject({ rowCount: 1, columns: [{ name: "amount", min: "17", max: "17" }] });
+  });
+
+  it("still describes an existing unquoted display name with spaces", async () => {
+    await ready;
+    await db.run('CREATE TABLE "Old display name" AS SELECT 19 AS amount', bot);
+    expect(await db.describe("Old display name", bot)).toMatchObject({ rowCount: 1, columns: [{ name: "amount", min: "19" }] });
   });
 
   it("profiles at most describeColumnsMax columns and lists the rest by type only", async () => {
@@ -515,41 +560,57 @@ describe("cancellation", () => {
     expect((await failure(db.run("SELECT 1", { ...bot, signal: early.signal }))).error.code).toBe("cancelled");
   });
 
-  it("cancels a statement whose abort landed before it dispatched", async () => {
-    let dispatched = false;
-    let delivered = 0;
+  /** A lane whose statement reaches the connection only on `dispatch()`; an interrupt before that is lost, as DuckDB's is,
+   * and one that is never delivered after it lets the statement finish half a second later. */
+  function undispatched(signal?: AbortSignal) {
+    const seen = { dispatched: false, delivered: 0 };
     let abandon: (() => void) | undefined;
-    const connection = {
+    const lane = new Lane({
       run: () => {
-        dispatched = true;
+        seen.dispatched = true;
         return new Promise<unknown>((resolve, reject) => {
           const finish = setTimeout(() => resolve("finished without an interrupt"), 500);
           abandon = () => { clearTimeout(finish); reject(new Error("INTERRUPT Error: Interrupted!")); };
         });
       },
       interrupt: () => {
-        delivered++;
+        seen.delivered++;
         abandon?.();
       },
-    };
-    const lane = new Lane(connection as never);
+    } as never);
     let parked!: () => void;
     const atWork = new Promise<void>((done) => { parked = done; });
-    let open!: () => void;
-    const gate = new Promise<void>((done) => { open = done; });
-    const controller = new AbortController();
-    const running = lane.run("SELECT 1", { signal: controller.signal, timeoutMs: 30_000 }, async (conn) => {
+    let dispatch!: () => void;
+    const gate = new Promise<void>((done) => { dispatch = done; });
+    const running = lane.run("SELECT 1", { signal, timeoutMs: 30_000 }, async (conn) => {
       parked();
       await gate;
       return conn.run("SELECT 1");
     });
-    await atWork;
+    return { seen, lane, atWork, dispatch, running };
+  }
+
+  it("cancels a statement whose abort landed before it dispatched", async () => {
+    const controller = new AbortController();
+    const statement = undispatched(controller.signal);
+    await statement.atWork;
     controller.abort();
-    open();
-    const error = await failure(running);
-    expect(dispatched).toBe(true);
+    statement.dispatch();
+    const error = await failure(statement.running);
+    expect(statement.seen.dispatched).toBe(true);
     expect(error.error.code).toBe("cancelled");
-    expect(delivered).toBeGreaterThan(1);
+    expect(statement.seen.delivered).toBeGreaterThan(1);
+  });
+
+  it("cancels a statement whose interrupt landed before it dispatched", async () => {
+    const statement = undispatched();
+    await statement.atWork;
+    statement.lane.interrupt();
+    statement.dispatch();
+    const error = await failure(statement.running);
+    expect(statement.seen.dispatched).toBe(true);
+    expect(error.error.code).toBe("cancelled");
+    expect(statement.seen.delivered).toBeGreaterThan(1);
   });
 
   it("interrupts one connection while the other keeps working, and queued statements still run", async () => {

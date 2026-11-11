@@ -10,7 +10,7 @@ Now the team's coordinator hears first. When a run breaks on a bot whose
 section has a **Chief of Staff** (or that a Chief was put in charge of),
 OpenMausBot:
 
-1. opens — once — a **Team incidents** thread on the Chief and leaves a chip
+1. opens — once — a **Problems to look at** thread (older ones are still called Team incidents) on the Chief and leaves a chip
    there naming what broke, linked to the broken thread;
 2. gives the Chief a turn carrying the report: who, which thread, what the
    run said when it stopped, the last request and the last reply there, and
@@ -50,6 +50,7 @@ announced twice. A thread running an assignment another bot is waiting on
 failure is reported to it and resumes it — so it raises no incident. A run
 the person stopped is not an incident.
 
+A confined conversation's problem (work from outside, docs/team-cloud.md) reaches a person, never a Chief's turn.
 `retry_thread` is Chief-only, for a teammate the Chief can reach, never a
 room thread (coordinate in the room instead), never a thread that is still
 running, and never one that has finished a run since it was last reported
@@ -57,6 +58,6 @@ running, and never one that has finished a run since it was last reported
 not woken for its result — it stays in that thread, findable with
 `list_threads` or `session_search`.
 
-What the person sees: the Chief's *Team incidents* thread in the sidebar (and
+What the person sees: the Chief's *Problems to look at* thread in the sidebar (and
 on the phone), with one entry per incident and the Chief's one-line report of
 what it did — instead of a silent stall somewhere in the team.

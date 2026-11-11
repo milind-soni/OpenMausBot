@@ -1,7 +1,7 @@
 import { z, type ZodString } from "zod";
 import * as boat from "../boat.ts";
 import type { ComputerControl } from "../computer-control.ts";
-import { isValidSshAlias, localVmMaxInstances, localVmMode, localVmPersistentAddons, type AppConfig } from "../config.ts";
+import { isValidSshAlias, localVmMaxInstances, localVmMode, localVmResources, localVmPersistentAddons, type AppConfig } from "../config.ts";
 import {
   containerComputerAction,
   containerComputerExists,
@@ -37,7 +37,7 @@ async function keepSignInsBeforeRemove(
   persistentAddons: ReadonlyArray<PersistentLocalVmAddon>,
 ): Promise<void> {
   const before = await containerComputerStatus(undefined, undefined, target, { persistentAddons });
-  await keepFirefoxProfileBeforeRemove(target, before, () => containerComputerAction("stop", undefined, undefined, target, persistentAddons));
+  await keepFirefoxProfileBeforeRemove(target, before, () => containerComputerAction("stop", undefined, undefined, target, undefined, persistentAddons));
 }
 
 export interface ComputerRouteDeps {
@@ -316,7 +316,7 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
       else localVmLifecycleBusy.add(SHARED_LOCAL_VM_TARGET.key);
       try {
         if (action === "remove") await keepSignInsBeforeRemove(SHARED_LOCAL_VM_TARGET, localVmPersistentAddons(cfg));
-        const status = await containerComputerAction(action, undefined, undefined, SHARED_LOCAL_VM_TARGET, localVmPersistentAddons(cfg));
+        const status = await containerComputerAction(action, undefined, undefined, SHARED_LOCAL_VM_TARGET, localVmResources(cfg), localVmPersistentAddons(cfg));
         if (action === "run" || action === "start") {
           localVmSeen.add(SHARED_LOCAL_VM_TARGET.key);
           localVmIdleFor(SHARED_LOCAL_VM_TARGET).touch();
@@ -391,7 +391,7 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
           }
         }
         if (action === "remove") await keepSignInsBeforeRemove(target, localVmPersistentAddons(cfg));
-        const status = await containerComputerAction(action, undefined, undefined, target, localVmPersistentAddons(cfg));
+        const status = await containerComputerAction(action, undefined, undefined, target, localVmResources(cfg), localVmPersistentAddons(cfg));
         if (action === "run" || action === "start") {
           localVmSeen.add(target.key);
           localVmIdleFor(target).touch();

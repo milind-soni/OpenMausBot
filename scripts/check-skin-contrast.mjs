@@ -161,6 +161,9 @@ const PAIRS = [
   ["--color-danger", "--color-card", 4.5],
   ["--color-success", "--color-card", 4.5],
   ["--color-warning", "--color-card", 4.5],
+  // The usage card's and model menu's "At its limit", and the usage bars in the model button.
+  ["--color-warning", "--color-menu", 4.5],
+  ["--color-warning", "--color-composer", 3],
   // borders and dots are UI components, not text — AA asks 3:1 of them
   ["--color-hairline", "--color-app", 1.5],
   ["--color-accent", "--color-app", 3],
@@ -273,7 +276,7 @@ for (const skinId of ["daylight", "pop"]) {
     ["--color-danger-ink", "--color-danger"],
     ["--color-success-ink", "--color-success"],
   ]) {
-    const ratio = contrast(bubble[fg] ?? "", bubble[bg] ?? "");
+    const ratio = contrast(resolve(bubble[fg] ?? "", bubble), resolve(bubble[bg] ?? "", bubble));
     if (ratio === null || ratio < 4.5) {
       failed = true;
       bubbleFailed = true;
@@ -309,6 +312,24 @@ if (!night) {
     }
     if (!schemeFailed) console.log(`✓ night card (${scheme}) — its text and close button clear the sky behind them`);
   }
+}
+
+// Settings' off switch: a light fill and a 1 px ink outline that must read as a control (3:1 against the card). Two
+// fixed cases pin the Daylight and Midnight values, so a token change can't quietly undo them; every skin is measured too.
+for (const [label, outline, card] of [["Daylight off-switch outline (ink 50% on #ffffff)", "#1c1c1c80", "#ffffff"], ["Midnight off-switch outline (ink 40% on #1f1f1f)", "#f5f5f566", "#1f1f1f"]]) {
+  const ratio = contrast(outline, card);
+  if (ratio === null || ratio < 3) { failed = true; console.log(`✗ ${label}: ${ratio?.toFixed(2) ?? "unmeasurable"}:1 (needs 3:1)`); }
+  else console.log(`✓ ${label}: ${ratio.toFixed(2)}:1`);
+}
+for (const [id, tokens] of skins) {
+  if (id.endsWith("(phone)")) continue;
+  const ink = resolve(tokens["--color-ink"] ?? "", tokens).trim();
+  const card = resolve(tokens["--color-menu"] ?? "", tokens);
+  const alpha = id === "midnight" ? "66" : "80";
+  const ratio = /^#[0-9a-f]{6}$/i.test(ink) ? contrast(`${ink}${alpha}`, card) : null;
+  if (ratio === null) { console.log(`~ ${id} off-switch outline — not measurable here (${ink} on ${card})`); continue; }
+  if (ratio < 3) { failed = true; console.log(`✗ ${id} off-switch outline: ${ratio.toFixed(2)}:1 (needs 3:1)`); }
+  else console.log(`✓ ${id} off-switch outline: ${ratio.toFixed(2)}:1`);
 }
 
 process.exit(failed ? 1 : 0);

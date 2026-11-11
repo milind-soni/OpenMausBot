@@ -52,7 +52,7 @@ describe.skipIf(process.platform === "win32")("a member's own MCP server and the
         const server = raw as { url: string; headers: Record<string, string> };
         return [name, { type: "http", url: server.url, headers: server.headers } as McpServerSpec];
       })),
-      isSessionLive: () => true,
+      isOwnerLive: () => true,
       brokerUrl: () => null,
       composio: { configured: () => false, mcpIntegration: async () => null, connectedServices: async () => ({}), connectedServiceSlugs: async () => [], authorizeService: async () => { throw new Error("unused"); }, removeService: async () => {} } as never,
     });

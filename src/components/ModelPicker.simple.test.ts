@@ -51,7 +51,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
   }),
 }));
 
-const { ModelPicker, ModelVariantRow, SIMPLE_POPOVER_WIDTH } = await import("./ModelPicker");
+const { EffortRow, ModelPicker, ModelVariantRow, SIMPLE_POPOVER_WIDTH } = await import("./ModelPicker");
 const { FollowBotModelRow, ModelEngineRail, ModelRow } = await import("./ModelPickerFull");
 const { SimpleModelMenu } = await import("./SimpleModelMenu");
 const { EngineSetup } = await import("./EngineSetup");
@@ -186,15 +186,15 @@ describe("the model picker in Simple mode", () => {
     expect(html).not.toContain("new chats too");
   });
 
-  it("is a 300px menu on the shared menu surface, and the full picker keeps its own 420px", () => {
-    expect(SIMPLE_POPOVER_WIDTH).toBe(300);
+  it("is a 324px menu on the shared menu surface, and the full picker keeps its own 420px", () => {
+    expect(SIMPLE_POPOVER_WIDTH).toBe(324);
     fixture.instances = [claude(false)];
     const forBot = bot();
     const opened = open(forBot);
     const content = opened.nodes.find((node) => node.props["data-model-picker-content"] !== undefined)!;
     expect(String(content.props.className)).toContain("menu-surface");
     expect(String(content.props.className)).not.toMatch(/\bborder\b|shadow-2xl|rounded-2xl/);
-    expect(menu(opened.html)).toContain("width:300px");
+    expect(menu(opened.html)).toContain("width:324px");
     pane(opened)!.props.onSetUp(instance("claude"), false);
     expect(menu(render(forBot).html)).toContain("width:420px");
   });
@@ -237,11 +237,10 @@ describe("the model picker in Simple mode", () => {
     expect(renderToStaticMarkup(chip)).toContain(">Claude Sonnet 5</span>");
   });
 
-  it("names models without a second line; a blurb is only the row's tooltip", () => {
+  it("names models without a second line or a ranking claim, in the row and its tooltip", () => {
     const html = menu(open(bot()).html);
-    const blurb = "Fast and smart. Good for most work.";
-    expect(html).not.toContain(`>${blurb}<`);
-    expect(html).toContain(`title="Sonnet 5.5 · ${blurb}"`);
+    expect(html).not.toContain("Fast and smart. Good for most work.");
+    expect(html).toMatch(/title="Sonnet 5\.5( · [^"]+)?"/);
   });
 
   it("opens a provider's long list in place with Show all, and offers a search once the menu holds more than twelve models", () => {
@@ -350,7 +349,7 @@ describe("the model picker in Simple mode", () => {
     expect(bottom).toContain('role="group" aria-labelledby=');
     expect(bottom).toMatch(/data-simple-effort="true"[^>]*class="[^"]*rounded-full bg-ink\/\[0.05\] p-\[3px\]/);
     expect(bottom).toContain('title="High thinking. Higher is slower but more careful."');
-    expect(bottom).toMatch(/title="The model decides how hard to think."[^>]*>Use default<\/button>/);
+    expect(bottom).toMatch(/data-effort-auto="true" aria-pressed="false"[^>]*title="The model decides how hard to think."[^>]*>Auto<\/button>/);
     thinking(opened).onReset();
     expect(fixture.dispatch).toHaveBeenLastCalledWith({
       type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true,
@@ -358,9 +357,9 @@ describe("the model picker in Simple mode", () => {
     });
     fixture.values = [];
     const atDefault = region(menu(open(bot()).html), "data-simple-effort-band");
-    expect(atDefault).not.toContain('aria-pressed="true"');
-    expect(atDefault).not.toContain("Use default");
-    expect(atDefault).toContain('title="The model decides how hard to think." class="text-[12px] leading-4 text-ink-tertiary">Default</span>');
+    expect(atDefault.match(/aria-pressed="true"/g)).toHaveLength(1);
+    expect(atDefault).toMatch(/data-effort-auto="true" aria-pressed="true"[^>]*>Auto<\/button>/);
+    expect(atDefault).toContain('data-simple-effort-auto="true" class="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">Recommended. Effort is picked per message.</p>');
   });
 
   it("names the model on the Simple chip, quiet until hovered; thinking and route stay in its tooltip and the menu", () => {
@@ -374,7 +373,7 @@ describe("the model picker in Simple mode", () => {
     expect(String(chip.props.className)).toContain("rounded-full");
     expect(String(chip.props.className)).not.toMatch(/\bborder\b|bg-control/);
     expect(markup).not.toContain("@max-4xl/chathead");
-    expect(markup).toContain('<span class="min-w-0 max-w-[160px] truncate">Opus 5.5</span>');
+    expect(markup).toContain('<span class="min-w-0 truncate max-w-[160px]">Opus 5.5</span>');
     expect(markup).toContain("opacity-60");
     fixture.advanced = true;
     const advanced = render(bot("high")).nodes.find((node) => node.props["data-tour"] === "model")!;
@@ -403,11 +402,11 @@ describe("the model picker in Simple mode", () => {
 
   it("lets the contained trigger shrink inside the bot panel's Model row, and the loose one keep its size", () => {
     const contained = render(bot(), { contained: true }).nodes.find((node) => node.props["data-tour"] === "model")!;
-    expect(String(contained.props.className)).toContain("min-w-0 max-w-[58%]");
+    expect(String(contained.props.className)).toContain("min-w-0 max-w-[72%]");
     expect(String(contained.props.className)).not.toMatch(/\bshrink-0\b/);
     const loose = render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!;
     expect(String(loose.props.className)).toContain("shrink-0");
-    expect(String(loose.props.className)).not.toContain("max-w-[58%]");
+    expect(String(loose.props.className)).not.toContain("max-w-[72%]");
   });
 
   it("puts the provider before a model the catalog names in one bare word, on the chip and the current row", () => {
@@ -468,11 +467,11 @@ describe("the model picker in Simple mode", () => {
 
   it("does not reuse the full picker's bot scope for a Cloud guest's Simple choice", () => {
     fixture.cloudHome = true;
-    fixture.ownerOrAdmin = false;
     fixture.advanced = true;
     const forBot = bot();
     const full = open(forBot);
     click(full.nodes.find((node) => node.type === "button" && node.props.children === "Thread + bot default"));
+    fixture.ownerOrAdmin = false;
     fixture.advanced = false;
     pane(render(forBot))!.props.onPick(instance("claude"), "claude-sonnet-5-5");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ updateBotDefault: false }));
@@ -498,6 +497,20 @@ describe("the model picker in Simple mode", () => {
     const opened = open(bot());
     expect(pane(opened)).toBeUndefined();
     expect(opened.html).toContain("Only this thread");
+  });
+
+  it.each([false, null])("offers a guest no bot scope in the full picker and keeps its picks thread-only (owner status: %s)", (ownerOrAdmin) => {
+    fixture.advanced = true;
+    const forBot = bot();
+    const asOwner = open(forBot);
+    click(asOwner.nodes.find((node) => node.type === "button" && node.props.children === "Thread + bot default"));
+    fixture.ownerOrAdmin = ownerOrAdmin;
+    const asGuest = render(forBot);
+    expect(asGuest.html).not.toContain("Thread + bot default");
+    const effort = asGuest.nodes.find((node) => node.type === EffortRow)!;
+    expect(effort.props.updateBotDefault).toBe(false);
+    (asGuest.nodes.find((node) => (node.props.option as Option | undefined)?.id === "claude-sonnet-5-5")!.props.onPick as () => void)();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ type: "setModel", updateBotDefault: false }));
   });
 
   it("opens the same floating menu from bot settings' Default model, without a second Thinking control, and edits the bot's default", () => {
@@ -531,6 +544,28 @@ describe("the model picker in Simple mode", () => {
     (simple.props as { onResetVariant: () => void }).onResetVariant();
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       type: "setModel", selection: { instanceId: "antigravity", model: "gemini-3.8-flash" },
+    }));
+  });
+
+  it("shows the picked Antigravity thinking level on the closed picker, so the pick visibly lands (#4160)", () => {
+    const variants = [{ id: "low", label: "Low" }, { id: "medium", label: "Medium" }];
+    fixture.instances = [{ ...engine("antigravity", "antigravityAgent", "Google Gemini", "subscription", [
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", variants },
+    ]), capabilities: { modelVariants: true } }];
+    const forBot = { ...bot(undefined, "antigravity", "gemini-3.8-flash"), modelSelection: {
+      instanceId: "antigravity", model: "gemini-3.8-flash", variant: "medium",
+    } };
+    expect(render(forBot, { contained: true }).html).toContain(">Gemini 3.8 Flash</span><span class=\"shrink-0 whitespace-pre\"> · Medium</span>");
+  });
+
+  it("dispatches a picked Antigravity thinking level from its menu row (#4160)", () => {
+    const variants = [{ id: "low", label: "Low" }, { id: "medium", label: "Medium" }];
+    fixture.instances = [{ ...engine("antigravity", "antigravityAgent", "Google Gemini", "subscription", [
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", variants },
+    ]), capabilities: { modelVariants: true } }];
+    pane(open(bot(undefined, "antigravity", "gemini-3.8-flash"), { contained: true }))!.props.onPick(instance("antigravity"), "gemini-3.8-flash", "medium");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "setModel", selection: expect.objectContaining({ instanceId: "antigravity", model: "gemini-3.8-flash", variant: "medium" }),
     }));
   });
 
@@ -619,7 +654,8 @@ describe("the model picker in Simple mode", () => {
       pane(open(forBot))!.props.onSetUp(missing, false);
       fixture.instances = [claude(), cursor];
       const full = render(forBot);
-      expect(menu(full.html)).toContain(updatesDefault ? "every thread that uses the bot&#x27;s model" : "This thread only.");
+      expect(menu(full.html).includes("every thread that uses the bot&#x27;s model")).toBe(updatesDefault);
+      expect(menu(full.html).includes("Thread + bot default")).toBe(updatesDefault);
       (full.nodes.find((node) => node.type === ModelRow)!.props.onPick as () => void)();
       expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
         type: "setModel", threadId: "thread-scout", updateBotDefault: updatesDefault,
@@ -864,7 +900,7 @@ describe("a thread's picker and its bot's model", () => {
   it("says on the current model that a thread follows its bot, with no follow row to click", () => {
     const opened = open(scout(null));
     expect(list(opened).follow).toBe(false);
-    expect(list(opened).current!.meta).toBe("Scout's model");
+    expect(list(opened).current!.meta).toBe("Scout's model, used in all its chats");
     expect(menu(opened.html)).not.toContain("data-follow-bot-model");
     expect(render(scout(null)).nodes.find((node) => node.props["data-tour"] === "model")!.props.title).toContain("Uses Scout's model");
   });
@@ -898,12 +934,14 @@ describe("a thread's picker and its bot's model", () => {
     expect(closed).not.toContain("data-thread-models-notice");
   });
 
-  it("right after a pick changes the bot's model, says how many threads keep their own, until it opens again", () => {
+  it("once the menu closes after a pick changes the bot's model, says how many threads keep their own, until it opens again", () => {
     const forBot = scout(null, [{ threadId: "kept", model: haiku }, { threadId: "follows", model: null }]);
     const opened = open(forBot);
     pane(opened)!.props.onPick(instance("claude"), "claude-sonnet-5-5");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ type: "setModel", updateBotDefault: true }));
-    const closed = render(forBot);
+    // Sonnet 5.5 has effort levels, so the menu stays open for them; the chip closes it.
+    expect(render(forBot).html).not.toContain("data-thread-models-notice");
+    const closed = open(forBot);
     expect(closed.html).toContain("data-thread-models-notice");
     expect(closed.html).toContain("menu-surface");
     expect(closed.html).toContain("1 thread uses its own model.");
@@ -956,7 +994,7 @@ describe("every capability of the picker stays reachable", () => {
       "a signed-out account signs in": body("claude-work") === "signIn",
       "a managed provider says who manages it": body("openai") === "policy" && html.includes("Managed by Acme"),
       "a provider with nothing listed checks again": body("chatgpt") === "empty" && html.includes("data-simple-refresh"),
-      "thinking levels in the provider's own names, and back to Default": html.includes(">X-High</button>") && html.includes(">Use default</button>"),
+      "thinking levels in the provider's own names, and back to Default": html.includes(">X-High</button>") && html.includes(">Auto</button>"),
       "AI accounts in Settings": html.includes("data-simple-manage"),
     };
     expect(missingFrom(before)).toEqual([]);
@@ -981,6 +1019,28 @@ describe("every capability of the picker stays reachable", () => {
     const onMissing = open({ ...forBot, modelSelection: { instanceId: "cursor", model: "auto" } });
     expect(group(onMissing, "cursor")?.body.kind).toBe("setUp");
     expect(list(onMissing).current).toMatchObject({ meta: "Setup required", warning: true });
+  });
+
+  it.each([false, true])("on a paired desktop (Advanced: %s), still picks models but leaves provider settings to the host", (advanced) => {
+    fixture.advanced = advanced;
+    fixture.instances = rich();
+    const forBot = followed();
+    window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
+    try {
+      const html = menu(open(forBot).html);
+      expect(html).toContain("Sonnet 5.5");
+      for (const hostOnly of ["data-simple-manage", "Model providers and accounts", "data-model-add-api-keys"]) {
+        expect(html, hostOnly).not.toContain(hostOnly);
+      }
+      // Nothing follows the thinking levels, so no divider hangs under them.
+      if (!advanced) {
+        const band = region(html, "data-simple-effort-band");
+        expect(band).toContain(">X-High</button>");
+        expect(band.lastIndexOf('role="separator"')).toBeLessThan(band.indexOf(">X-High</button>"));
+      }
+    } finally {
+      delete window.ogb;
+    }
   });
 
   it("in Advanced mode, from the chip and the full picker", () => {

@@ -81,7 +81,7 @@ beforeAll(async () => {
   await until(idle);
   const lines = (await as("ada", "GET", `/api/threads/${payroll.threadId}/messages`)).body.messages as Array<{ id: string }>;
   lastLine = lines.at(-1)!.id;
-  const routine = (botId: string) => ({ name: "Weekly pay check", prompt: "Check this week's pay runs.", botId, schedule: { type: "interval", everyMinutes: 1440, anchorAt: Date.now() + 86_400_000 } });
+  const routine = (botId: string) => ({ name: "Weekly pay check", prompt: "Check this week's pay runs.", botId, resultsThreadId: null, schedule: { type: "interval", everyMinutes: 1440, anchorAt: Date.now() + 86_400_000 } });
   const adas = await as("ada", "POST", "/api/routines", routine(payroll.id));
   expect(adas.status, JSON.stringify(adas.body)).toBe(201);
   adaRoutine = adas.body.routine.id;
@@ -117,6 +117,7 @@ describe("a team bot shared with a level per person", () => {
     ["POST", `/api/bots/${payroll.id}/tasks`, { title: "Mine" }],
     ["POST", `/api/bots/${payroll.id}/interrupt`, { threadId: payroll.threadId }],
     ["POST", `/api/bots/${payroll.id}/compact`, { threadId: payroll.threadId }],
+    ["POST", `/api/bots/${payroll.id}/start-fresh`, { threadId: payroll.threadId }],
     ["POST", `/api/bots/${payroll.id}/respond`, { requestId: "x", behavior: "deny", threadId: payroll.threadId }],
     ["POST", `/api/bots/${payroll.id}/messages/${lastLine}/edit`, { text: "Edited", threadId: payroll.threadId }],
     ["POST", `/api/bots/${payroll.id}/always-allow`, { threadId: payroll.threadId, requestId: "x" }],
@@ -198,13 +199,131 @@ describe("a team bot shared with a level per person", () => {
     expect(changed.body.bot).toMatchObject({ soul: "Answer pay questions briefly.", yourAccess: "edit" });
     const profile = await as("dan", "PATCH", `/api/bots/${payroll.id}/profile`, { description: "Pay questions" });
     expect(profile.status, JSON.stringify(profile.body)).toBe(200);
-    for (const field of [{ approvalMode: "full" }, { cwd: "/tmp" }, { computer: "off" }, { section: "Finance" }, { chiefOfStaff: true }, { peers: [] }, { visibility: "everyone" }, { access: { everyone: "edit", people: {} } }]) {
+    for (const field of [{ approvalMode: "full" }, { cwd: "/tmp" }, { computer: "off" }, { section: "Finance" }, { chiefOfStaff: true }, { visibility: "everyone" }, { access: { everyone: "edit", people: {} } }]) {
       const res = await as("dan", "PATCH", `/api/bots/${payroll.id}`, field);
       expect(res.status, `${JSON.stringify(field)}: ${JSON.stringify(res.body)}`).toBe(403);
     }
     expect((await as("dan", "PATCH", `/api/routines/${adaRoutine}`, { enabled: false })).status).toBe(200);
     expect((await as("dan", "PUT", `/api/bots/${payroll.id}/access`, { everyone: "none", people: { [BOB.email]: "view", [CARA.email]: "chat", [DAN.email]: "edit", "stranger@elsewhere.test": "chat" } })).status).toBe(400);
     expect((await botOf("dan", payroll.id))?.soul).toBe("Answer pay questions briefly.");
+  });
+
+  it("lets Admins and the bot's editors manage its Bot API, and its calls run as outside work the team can read", async () => {
+    const path = `/api/bots/${mirror.id}/bot-api`;
+    expect((await as("eve", "GET", path)).status).toBe(404);
+    for (const who of ["bob", "cara"]) {
+      expect((await as(who, "POST", path, { enabled: true })).status, who).toBe(403);
+      expect((await as(who, "POST", `${path}/new-key`)).status, who).toBe(403);
+    }
+    expect((await as("cara", "GET", path)).body).toMatchObject({ enabled: false, canManage: false });
+    const on = await as("dan", "POST", path, { enabled: true });
+    expect(on.status, JSON.stringify(on.body)).toBe(200);
+    expect((await as("ada", "POST", `${path}/new-key`)).status).toBe(200);
+    const rekeyed = await as("dan", "POST", `${path}/new-key`);
+    const key = rekeyed.body.key as string;
+
+    const hooks = `${team.base.replace(/:(\d+)$/, (_, port) => `:${Number(port) + 1}`)}/hooks/api/bots/${mirror.id}/messages`;
+    const answered = await fetch(hooks, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ message: "What is the pay date?" }) });
+    const body = await answered.json() as { reply?: string; thread: string };
+    expect(answered.status, JSON.stringify(body)).toBe(200);
+    expect(body.reply).toBeTruthy();
+    const task = (await botOf("cara", mirror.id) as unknown as { tasks: Array<{ threadId: string; botApi?: boolean; approvalMode?: string }> }).tasks.find((one) => one.threadId === body.thread);
+    expect(task).toMatchObject({ botApi: true, approvalMode: "ask" });
+    expect((await as("cara", "GET", `/api/threads/${body.thread}/messages`)).body.messages.find((line: { role: string }) => line.role === "user")).toMatchObject({ text: "What is the pay date?", via: "api" });
+    expect((await as("cara", "GET", path)).body.calls).toEqual([]);
+    expect((await as("dan", "GET", path)).body.calls[0]).toMatchObject({ statusCode: 200, preview: "What is the pay date?" });
+    const activity = JSON.stringify((await as("ada", "GET", "/api/admin-activity?what=bot-api")).body);
+    expect(activity).toContain("bot-api.on");
+    expect(activity).toContain("bot-api.new-key");
+    expect(activity).not.toContain(key);
+    expect((await as("dan", "POST", path, { enabled: false })).body).toMatchObject({ enabled: false });
+    await until(idle);
+  });
+
+  it("follows the Admin's signed plan on Bot API without a restart, and an Admin that sends none means not Starter", async () => {
+    const path = `/api/bots/${mirror.id}/bot-api`;
+    expect((await team.signed("POST", "/api/cloud/plan", { v: 1, cancelled: false })).status).toBe(200);
+    expect((await as("ada", "GET", path)).body).toMatchObject({ included: true });
+    const key = (await as("ada", "POST", path, { enabled: true })).body.key as string;
+    const hooks = `${team.base.replace(/:(\d+)$/, (_, port) => `:${Number(port) + 1}`)}/hooks/api/bots/${mirror.id}/messages`;
+    const send = () => fetch(hooks, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ message: "Plan check", wait: 0 }) });
+
+    expect((await team.signed("POST", "/api/cloud/plan", { v: 1, tier: "starter" })).status).toBe(200);
+    expect((await as("ada", "GET", "/api/config")).body).toMatchObject({ cloudStarter: true });
+    const refused = await send();
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "Bot API comes with a higher plan. Upgrade this Cloud to use it." });
+    expect((await as("ada", "POST", `${path}/new-key`)).status).toBe(403);
+
+    expect((await team.signed("POST", "/api/cloud/plan", { v: 1, tier: "pro" })).status).toBe(200);
+    expect((await as("ada", "GET", "/api/config")).body).toMatchObject({ cloudStarter: false });
+    expect((await send()).status).toBeLessThan(300);
+    await until(idle);
+    expect((await as("ada", "POST", path, { enabled: false })).status).toBe(200);
+  });
+
+  it("refuses a Bot API turn every way out, and a teammate who leaves takes the key they made", async () => {
+    const fenced = (await as("ada", "POST", "/api/bots", { name: "Fenced" })).body.bot as Bot;
+    const path = `/api/bots/${fenced.id}/bot-api`;
+    const FINN = { email: "finn@acme.test", role: "member" as const };
+    token.finn = (await team.pair(FINN)).token!;
+    expect((await share("ada", fenced.id, { everyone: "none", people: { [FINN.email]: "edit" } })).status).toBe(200);
+    expect((await as("ada", "PATCH", `/api/bots/${fenced.id}`, { approvalMode: "full", applyToAllThreads: true })).status).toBe(200);
+    const key = (await as("finn", "POST", path, { enabled: true })).body.key as string;
+    const hooks = `${team.base.replace(/:(\d+)$/, (_, port) => `:${Number(port) + 1}`)}/hooks/api/bots/${fenced.id}/messages`;
+    const send = () => fetch(hooks, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ message: "Fence check" }) });
+    const answered = await send();
+    expect(answered.status).toBe(200);
+    const thread = (await answered.json() as { thread: string }).thread;
+    const turnToken = await team.capability(fenced.id, thread);
+    const internal = (method: string, route: string, body?: unknown) => fetch(`${team.base}${route}${route.includes("?") ? "&" : "?"}fromBotId=${fenced.id}`, {
+      method, headers: { authorization: `Bearer ${turnToken}`, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const ways: Array<[string, string, unknown?]> = [
+      ["POST", "/api/internal/threads", { fromBotId: fenced.id, fromThreadId: thread, title: "Own", message: "Run a shell" }],
+      ["GET", "/api/internal/threads"],
+      ["POST", "/api/internal/trigger-requests", { action: "create", when: "schedule", name: "Later", prompt: "x" }],
+      ["POST", "/api/internal/routine-requests", { name: "Later", prompt: "x" }],
+      ["POST", "/api/internal/webhook-requests", { name: "In", prompt: "x" }],
+      ["POST", "/api/internal/profile-requests", { soul: "new" }],
+      ["POST", "/api/internal/model-requests", { model: "x" }],
+      ["POST", "/api/internal/skills", { action: "create" }],
+      ["POST", "/api/internal/memory", { text: "x" }],
+      ["POST", "/api/internal/team-memory", { text: "x" }],
+      ["GET", "/api/internal/session-search?q=pay"],
+      ["GET", "/api/internal/session-read?threadId=x"],
+      ["POST", "/api/internal/coordinate-bots", { to: "x" }],
+      ["POST", "/api/internal/create-bot", { name: "x" }],
+      ["POST", "/api/internal/post-to-room", { text: "x" }],
+      ["POST", "/api/internal/manage-room", {}],
+      ["POST", "/api/internal/fill-login", {}],
+      ["POST", "/api/internal/retry-thread", {}],
+      ["POST", "/api/internal/computer/select", {}],
+      ["POST", "/api/internal/computer/mcp", {}],
+      ["POST", "/api/internal/browser/mcp", {}],
+      ["POST", "/api/internal/connectors/mcp", {}],
+      ["POST", "/api/internal/phone/claim", {}],
+      ["GET", "/api/internal/shared-computers"],
+      ["POST", "/api/internal/vm-exec", { command: "id" }],
+      ["POST", "/api/internal/team-setup-requests", {}],
+    ];
+    for (const [method, route, body] of ways) {
+      const refused = await internal(method, route, body);
+      expect(refused.status, `${method} ${route}`).toBe(403);
+      expect((await refused.json() as { error: string }).error, `${method} ${route}`).toMatch(/came in through the Bot API/);
+    }
+    const before = (await botOf("ada", fenced.id) as unknown as { tasks: unknown[] }).tasks.length;
+    expect((await botOf("ada", fenced.id) as unknown as { tasks: unknown[] }).tasks).toHaveLength(before);
+
+    // The same token on the person's own conversation is not fenced: the gate is the thread, not the bot.
+    const own = await team.capability(fenced.id, fenced.threadId);
+    const search = await fetch(`${team.base}/api/internal/session-search?fromBotId=${fenced.id}&q=Fence`, { headers: { authorization: `Bearer ${own}`, "content-type": "application/json" } });
+    expect(search.status).toBe(200);
+    expect((await search.json() as { hits: Array<{ threadId: string }> }).hits.map((hit) => hit.threadId)).not.toContain(thread);
+
+    expect((await team.signed("POST", "/api/cloud/team/member-left", { v: 1, email: FINN.email })).status).toBeLessThan(300);
+    expect((await send()).status).toBe(403);
+    await until(idle);
   });
 
   it("relays another app's message only for a person who can chat with the bot", async () => {
@@ -310,5 +429,83 @@ describe("bots set up before levels", () => {
     expect((await as("ada", "PATCH", `/api/bots/${board.id}`, { visibility: { people: [DAN.email] } })).status).toBe(200);
     expect((await botOf("ada", board.id))?.access).toEqual({ everyone: "none", people: { [DAN.email]: "chat" } });
     expect((await botOf("dan", board.id))).toMatchObject({ yourAccess: "chat" });
+  });
+});
+
+describe("asking to chat", () => {
+  type Row = { id: string; kind: string; tab: string; text: string; card?: { requestId?: string; accessRequest?: { botId: string; email: string }; answered?: string; answeredText?: string } };
+  const inbox = async (who: string) => (await as(who, "GET", "/api/inbox")).body as { threadId: string; rows: Row[] };
+  const asks = async (who: string, botId: string) => (await inbox(who)).rows.filter((row) => row.card?.accessRequest?.botId === botId);
+  const answer = async (who: string, row: Row, message: string) => {
+    const { threadId } = await inbox(who);
+    return as(who, "POST", `/api/threads/${threadId}/respond`, { requestId: row.card!.requestId, behavior: "answer", message });
+  };
+
+  it("puts one Allow / Not now card in the owner's inbox; Not now changes nothing, Allow lets them chat at once and tells them", async () => {
+    const made = await as("ada", "POST", "/api/bots", { name: "Ledger", reportsTo: DAN.email });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    const ledger = made.body.bot as Bot;
+    expect((await share("ada", ledger.id, { everyone: "none", people: { [BOB.email]: "view" } })).status).toBe(200);
+    expect((await as("cara", "POST", `/api/bots/${ledger.id}/access-request`)).status, "someone who can't see it").toBe(404);
+    expect((await as("dan", "POST", `/api/bots/${ledger.id}/access-request`)).status, "its owner edits it already").toBe(409);
+
+    const asked = await as("bob", "POST", `/api/bots/${ledger.id}/access-request`);
+    expect(asked.status, JSON.stringify(asked.body)).toBe(201);
+    expect(asked.body.asked).toEqual([{ email: DAN.email, name: "Dan" }]);
+    expect((await as("bob", "POST", `/api/bots/${ledger.id}/access-request`)).body.asked, "asking again sends nothing new").toEqual([{ email: DAN.email, name: "Dan" }]);
+    const [card] = await asks("dan", ledger.id);
+    expect(await asks("dan", ledger.id)).toHaveLength(1);
+    expect(card).toMatchObject({ kind: "ask", tab: "needs-you", card: { accessRequest: { botId: ledger.id, email: BOB.email } } });
+    expect(await asks("ada", ledger.id), "the owner decides, not every admin").toEqual([]);
+    const danInbox = (await inbox("dan")).threadId;
+    expect((await as("bob", "POST", `/api/threads/${danInbox}/respond`, { requestId: card!.card!.requestId, behavior: "answer", message: "Allow" })).status, "the asker can't answer it").toBe(404);
+
+    expect((await answer("dan", card!, "Not now")).status).toBe(200);
+    expect((await botOf("bob", ledger.id))).toMatchObject({ yourAccess: "view" });
+    expect((await asks("dan", ledger.id))[0]).toMatchObject({ tab: "done", card: { answeredText: "Not now" } });
+
+    expect((await as("bob", "POST", `/api/bots/${ledger.id}/access-request`)).status, "a new ask after Not now").toBe(201);
+    const again = (await asks("dan", ledger.id)).find((row) => !row.card?.answered)!;
+    const allowed = await answer("dan", again, "Allow");
+    expect(allowed.status, JSON.stringify(allowed.body)).toBe(200);
+    expect(allowed.body).toMatchObject({ outcome: "allowed" });
+    expect((await botOf("bob", ledger.id))).toMatchObject({ yourAccess: "chat" });
+    expect((await botOf("dan", ledger.id))?.access?.people).toEqual({ [BOB.email]: "chat" });
+    expect((await as("bob", "POST", `/api/bots/${ledger.id}/tasks`, { title: "Now mine" })).status).toBe(201);
+    expect((await inbox("bob")).rows.some((row) => row.kind === "notice" && row.text === "Dan let you chat with Ledger.")).toBe(true);
+    expect((await as("bob", "POST", `/api/bots/${ledger.id}/access-request`)).status).toBe(409);
+  });
+
+  it("lets only someone who can edit the bot allow it", async () => {
+    const made = await as("ada", "POST", "/api/bots", { name: "Atlas", reportsTo: CARA.email });
+    const atlas = made.body.bot as Bot;
+    expect((await share("ada", atlas.id, { everyone: "none", people: { [EVE.email]: "view" } })).status).toBe(200);
+    expect((await as("eve", "POST", `/api/bots/${atlas.id}/access-request`)).status).toBe(201);
+    const [card] = await asks("cara", atlas.id);
+    // Cara stops owning it before she answers: her Allow no longer lets anyone in.
+    expect((await as("ada", "PUT", `/api/bots/${atlas.id}/reports-to`, { email: null })).status).toBe(200);
+    expect((await as("ada", "PUT", `/api/bots/${atlas.id}/access`, { everyone: "none", people: { [EVE.email]: "view" } })).status).toBe(200);
+    const refused = await answer("cara", card!, "Allow");
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect((await botOf("eve", atlas.id))).toMatchObject({ yourAccess: "view" });
+  });
+
+  it("shows each sharing change, answered ask and owner hand-over in the admins' Activity", async () => {
+    type Entry = { who: string; action: string; target?: { id: string; name?: string }; after?: Record<string, unknown> };
+    const activity = async (who = "ada") => ((await as(who, "GET", "/api/admin-activity?what=visibility")).body.entries ?? []) as Entry[];
+    const made = await as("ada", "POST", "/api/bots", { name: "Archive", reportsTo: CARA.email });
+    const archive = made.body.bot as Bot;
+    expect((await share("ada", archive.id, { everyone: "none", people: { [EVE.email]: "view" } })).status).toBe(200);
+    expect((await as("eve", "POST", `/api/bots/${archive.id}/access-request`)).status).toBe(201);
+    expect((await answer("cara", (await asks("cara", archive.id))[0]!, "Allow")).status).toBe(200);
+    expect((await as("ada", "PUT", `/api/bots/${archive.id}/reports-to`, { email: DAN.email })).status).toBe(200);
+    await until(async () => (await activity()).filter((entry) => entry.target?.id === archive.id).length >= 2);
+    const rows = (await activity()).filter((entry) => entry.target?.id === archive.id);
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "access.update", target: expect.objectContaining({ name: "Archive" }), after: { access: { everyone: "none", people: { [EVE.email]: "view" } } } }),
+      expect.objectContaining({ action: "access.allow", who: expect.stringContaining(CARA.email) }),
+    ]));
+    await until(async () => ((await as("ada", "GET", "/api/admin-activity?what=bot")).body.entries as Entry[]).some((entry) => entry.action === "owner.update" && entry.target?.id === archive.id));
+    expect((await as("bob", "GET", "/api/admin-activity?what=visibility")).status, "a member never reads it").toBe(403);
   });
 });

@@ -1,12 +1,14 @@
 // OpenRouter's catalog is public, so /key proves the key there; elsewhere /models proves only catalog access. Keys go only over TLS (or loopback).
-export type ProviderKeyKind = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "meta";
+import { isIP } from "node:net";
+
+export type ProviderKeyKind = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta";
 
 export type ProviderKeyVerdict =
   /** `freeTier`: OpenRouter's /key says the account never bought credit, so paid models refuse it. */
   | { ok: true; check: "authentication" | "models"; models: string[]; freeTier?: boolean }
   | { ok: false; reason: "rejected" | "unreachable" | "unexpected"; status?: number };
 
-export const PROVIDER_KEY_KINDS: readonly ProviderKeyKind[] = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "meta"];
+export const PROVIDER_KEY_KINDS: readonly ProviderKeyKind[] = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta"];
 
 const DEFAULT_URLS: Record<ProviderKeyKind, string> = {
   anthropic: "https://api.anthropic.com",
@@ -18,6 +20,7 @@ const DEFAULT_URLS: Record<ProviderKeyKind, string> = {
   cerebras: "https://api.cerebras.ai/v1",
   groq: "https://api.groq.com/openai/v1",
   greenference: "https://llm.eu.greenference.com/v1",
+  modelgo: "https://api.modelgo.ai/v1",
   meta: "https://api.meta.ai/v1",
 };
 
@@ -26,7 +29,7 @@ const MAX_MODELS = 5;
 /** A URL hostname on this machine: the only place a key may go over plain http. */
 export function isLoopback(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, "");
-  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host.startsWith("127.");
+  return host === "localhost" || host === "::1" || (isIP(host) === 4 && host.startsWith("127."));
 }
 
 export function providerBaseUrl(provider: ProviderKeyKind, base?: string | null): string {
@@ -39,9 +42,10 @@ export function providerModelsUrl(provider: ProviderKeyKind, base?: string | nul
   return `${root}/models`;
 }
 
-function modelIds(body: unknown): string[] {
+function modelIds(body: unknown): string[] | null {
   const record = body && typeof body === "object" ? (body as { data?: unknown; models?: unknown }) : null;
-  const list = Array.isArray(body) ? body : Array.isArray(record?.data) ? record.data : Array.isArray(record?.models) ? record.models : [];
+  const list = Array.isArray(body) ? body : Array.isArray(record?.data) ? record.data : Array.isArray(record?.models) ? record.models : null;
+  if (!list) return null;
   const ids: string[] = [];
   for (const entry of list) {
     const item = entry && typeof entry === "object" ? (entry as { id?: unknown; name?: unknown }) : null;
@@ -89,7 +93,10 @@ export async function checkProviderKey(
       if (typeof freeTier !== "boolean") return { ok: false, reason: "unexpected", status: response.status };
       return { ok: true, check: "authentication", models: [], freeTier };
     }
-    return { ok: true, check: "models", models: modelIds(body) };
+    const models = modelIds(body);
+    return models === null
+      ? { ok: false, reason: "unexpected", status: response.status }
+      : { ok: true, check: "models", models };
   } catch {
     return { ok: false, reason: "unreachable" };
   } finally {
