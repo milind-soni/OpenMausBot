@@ -195,7 +195,7 @@ channel and its bots under a named context, then rename it or change its members
 
 ### ⚡ Fast decisions with Jev
 
-Add a Cloudflare Workers AI token with its account ID, a TypeSafe Jev key, or an OpenRouter key and model, in **Settings → Decision and extraction** and rooms set to **Auto** pick the bot
+Add a Cloudflare Workers AI token with its account ID, a TypeSafe Jev key, or an OpenRouter key and model, in **Settings › AI › Routing and extraction** and rooms set to **Auto** pick the bot
 that fits each un-mentioned message in a few hundred milliseconds, falling back to the room's lead whenever the decision model is off or unsure.
 See [docs/decision-model.md](docs/decision-model.md).
 

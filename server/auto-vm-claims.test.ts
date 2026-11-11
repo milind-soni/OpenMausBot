@@ -209,8 +209,8 @@ describe("lazyClaimFailedText", () => {
 
   it("names the plan's limit in its own sentence when the Admin turned the computer away", () => {
     expect(lazyClaimFailedText({ ...boat, cause: "Your Pro free trial's 20 cloud computer hours are used up.",
-      limit: "This Cloud's free trial cloud computer hours are used up; its full allowance starts with its first payment on 14 Nov.", backOnAuto: true })).toBe(
-      "The cloud computer could not be started. This Cloud's free trial cloud computer hours are used up; its full allowance starts with its first payment on 14 Nov. " +
+      limit: "This Cloud's free trial cloud computer hours are used up; they come back on 14 Nov.", backOnAuto: true })).toBe(
+      "The cloud computer could not be started. This Cloud's free trial cloud computer hours are used up; they come back on 14 Nov. " +
       "This call was not performed. This conversation is back on Auto. Do not retry computer work in this turn; tell the person what you could not do.");
   });
 

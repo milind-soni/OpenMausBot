@@ -4,7 +4,7 @@ import type { ComponentProps } from "react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { useStore, type Bot } from "@/state/store";
+import type { Bot } from "@/state/store"; import { useStoreSelector } from "@/state/store-select";
 import { awayFromMainThread } from "@/state/thread-navigation";
 import { BotAvatar } from "./Avatar";
 import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
@@ -16,7 +16,7 @@ import { sharedChatAudience } from "./TeamPrivateChatsLine";
 const UNTITLED = "New thread";
 const CHEVRON_MOTION = "duration-[140ms] ease-[cubic-bezier(.22,1,.36,1)]";
 
-export type ChatHeadPrivacy = { kind: "private" } | { kind: "ownHelper" } | { kind: "shared"; team: string; onlyPeopleAdded?: boolean } | null;
+export type ChatHeadPrivacy = { kind: "private" } | { kind: "ownHelper" } | { kind: "shared"; team: string; onlyPeopleAdded?: boolean; sharedWith?: string } | null;
 
 const PRIVACY_ICONS = { private: Lock, ownHelper: UserRound, shared: Users } as const;
 
@@ -24,7 +24,7 @@ function privacyLabelOf(privacy: ChatHeadPrivacy): string | null {
   switch (privacy?.kind) {
     case "private": return t("team.privateHeader");
     case "ownHelper": return t("team.ownHelperHeader");
-    case "shared": return sharedChatAudience(privacy.team, privacy.onlyPeopleAdded);
+    case "shared": return sharedChatAudience(privacy.team, privacy.onlyPeopleAdded, privacy.sharedWith);
     default: return null;
   }
 }
@@ -38,9 +38,8 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
   privacy: ChatHeadPrivacy;
   onToggle: () => void;
 }) {
-  const { state } = useStore();
-  const open = state.settingsOpen;
-  const elsewhere = sidebarBotActivityTasks(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId).length;
+  const open = useStoreSelector((state) => state.settingsOpen), pendingQueued = useStoreSelector((state) => state.pendingQueued);
+  const elsewhere = sidebarBotActivityTasks(bot, pendingQueued).filter((task) => task.threadId !== bot.threadId).length;
   const privacyLabel = privacyLabelOf(privacy);
   const PrivacyIcon = privacy ? PRIVACY_ICONS[privacy.kind] : Users;
   const title = bot.tasks?.find((task) => task.threadId === bot.threadId)?.title;

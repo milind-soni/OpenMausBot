@@ -1,9 +1,10 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useContext, useEffect, useState, useSyncExternalStore } from "react";
 import { AlertTriangle, Loader2, Shield } from "lucide-react";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { macCuaPermissionMessage, missingMacCuaPermissions } from "@/lib/mac-cua-permissions";
 import { MacCuaRecoveryActions } from "./MacCuaRecoveryActions";
 import { NotNowButton } from "./NoticeCard";
+import { SettingsLook } from "./SettingsPrimitives";
 import { t } from "@/lib/i18n";
 
 let hiddenUntilRelaunch = false;
@@ -32,6 +33,7 @@ export function MacLocalControl() {
   const [pending, setPending] = useState(false);
   const [awaitingGrant, setAwaitingGrant] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const settings = useContext(SettingsLook);
 
   const retry = async () => {
     setPending(true);
@@ -76,6 +78,30 @@ export function MacLocalControl() {
 
   if (capabilities.host.platform !== "darwin" || capabilities.localComputer.reasonCode === "remote-server") return null;
   if (capabilities.localComputer.available || hidden) return null;
+
+  if (settings) {
+    // In Settings: an ordinary row. A 16 px warning mark, the title, its reason, and one primary; Retry and Not now quiet.
+    return (
+      <section data-mac-control="" className="flex items-start gap-3">
+        <AlertTriangle size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-warning" />
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="text-[14px] leading-5 text-ink">{t("computer.mac.allowTitle")}</div>
+          <p className="text-[12px] leading-4 text-ink-secondary">{permissionMessage ?? t("computer.mac.permission.generic")}</p>
+          {error && <p role="alert" className="text-[12px] leading-4 text-danger">{error}</p>}
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            {permissionMessage && reason && <MacCuaRecoveryActions reason={reason} />}
+            {!permissionMessage && (
+              <button type="button" onClick={() => void openSettings()} disabled={pending} className="ui-button ui-button-md ui-button-primary rounded-full">
+                {t("computer.mac.openSystemSettings")}
+              </button>
+            )}
+            <button type="button" onClick={() => void retry()} disabled={pending} className="settings-quiet cursor-pointer">{t("commandAllowlist.retry")}</button>
+            {!pending && <button type="button" onClick={hideMacLocalControlUntilRelaunch} className="settings-quiet cursor-pointer">{t("phone.intro.notNow")}</button>}
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="mt-4 rounded-xl border border-warning/25 bg-warning/10 p-4">

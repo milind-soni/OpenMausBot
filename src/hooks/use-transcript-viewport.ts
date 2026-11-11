@@ -35,7 +35,7 @@ import {
   type TranscriptFollowEvent,
 } from "@/lib/transcript-follow";
 import { hasLiveReply } from "@/state/live-reply";
-import { useStore } from "@/state/store";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export const AUTO_EXPAND_TOP_THRESHOLD = 250;
 
@@ -73,7 +73,9 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   transcriptShown?: boolean;
   hasMore?: boolean;
 }) {
-  const { state, dispatch } = useStore();
+  const focusMessage = useStoreSelector((state) => state.focusMessage);
+  const olderPending = useStoreSelector((state) => Boolean(state.loadingOlder[threadId]));
+  const dispatch = useStoreDispatch();
   const scrollRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
@@ -191,7 +193,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   const appliedFocus = useRef<number | null>(null);
   // Before the follow scroll below: a search jump into the conversation just opened wins over its end.
   useLayoutEffect(() => {
-    const focus = state.focusMessage;
+    const focus = focusMessage;
     if (!focus || focus.consumed || focus.threadId !== threadId || appliedFocus.current === focus.nonce) return;
     const targetIndex = messages.findIndex((message) => message.id === focus.messageId);
     if (targetIndex < 0) return;
@@ -200,7 +202,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     followEvent({ type: "navigated" });
     followEvent({ type: "leftEnd" });
     setTranscriptWindow({ key: transcriptKey, start: range.start, end: range.end });
-  }, [threadId, messages, followEvent, state.focusMessage, transcriptKey]);
+  }, [threadId, messages, followEvent, focusMessage, transcriptKey]);
   useFocusMessage(threadId, messages.length > 0);
 
   // Before paint, so a conversation opens at its end with no frame elsewhere. `follow` is omitted on purpose: re-arming
@@ -248,7 +250,6 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     const nextEnd = Math.min(messages.length, endIndex + TRANSCRIPT_WINDOW_SIZE);
     setTranscriptWindow((w) => ({ ...w, end: nextEnd >= messages.length ? null : nextEnd }));
   };
-  const olderPending = Boolean(state.loadingOlder[threadId]);
   const loadOlder = () => {
     holdRowForPrepend();
     dispatch({ type: "loadOlderMessages", threadId });

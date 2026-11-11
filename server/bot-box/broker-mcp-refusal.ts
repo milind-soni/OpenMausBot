@@ -11,8 +11,8 @@ export const MAX_REFUSABLE_CALL_BYTES = 1_048_576;
  * use that app instead. */
 function signInWantedText(server: string, app?: McpServerApp): string {
   const refused = `The MCP server "${server}" needs a sign-in before its tools work, and nobody has signed in (HTTP 401), so nothing ran. Don't retry.`;
-  if (app?.connected) return `${refused} ${app.label} is already connected as a connected app here, so use the connected app's ${app.label} tools instead of this MCP server. Don't show a connect card for it.`;
   const signIn = `mcp_server with action sign_in and name ${server}, then end your turn; if you can't, tell the person to sign in to ${server} in Apps, MCP servers.`;
+  if (app?.connected) return `${refused} ${app.label} is already connected as a connected app here, so use the connected app's ${app.label} tools instead of this MCP server. Don't show a connect card for it. If you don't have those tools, call ${signIn}`;
   if (!app) return `${refused} Call ${signIn}`;
   return `${refused} ${app.label} can be connected in one step with its connect card. Call COMPOSIO_MANAGE_CONNECTIONS with toolkits ${JSON.stringify([app.slug])} to show the card in this chat, then end your turn. Once it is connected, use the connected app's ${app.label} tools instead of this MCP server. If the card can't be shown, call ${signIn}`;
 }
