@@ -301,8 +301,8 @@ describe("a bot's database", () => {
   });
 
   it("keeps an earlier query result when the sheet reopens before the next query", async () => {
-    const database = await engine().forBot("query-names");
-    const options = { botId: "query-names", dir: join(root, "bots", "query-names") };
+    const database = await engine().forBot("result-names");
+    const options = { botId: "result-names", dir: join(root, "bots", "result-names") };
     const first = new DataSheetStore(options).nextResultName();
     await database.materialise("SELECT 11 AS value", first, bot);
     const second = new DataSheetStore(options).nextResultName();
