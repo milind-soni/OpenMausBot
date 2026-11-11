@@ -1,7 +1,7 @@
 import { cloudAsleep, onCloudPower } from "../lib/cloud-power";
 import { api, ApiError, retryRequest, snapshotArrays } from "./api";
 import { use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { createAppStore } from "./app-store"; import { StoreContext, StoreSourceContext } from "./store-context";
+import { createAppStore } from "./app-store"; import { readOneBot } from "./bot-read"; import { StoreContext, StoreSourceContext } from "./store-context";
 import { flushSync } from "react-dom";
 import type { BotMovedTo, BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, ResolvedSender, SteerQueueReason, WireBot, WireGroup, WireTask, OptionCardData as WireOptionCard } from "../../shared/wire"; import type { InstanceEndpointInfo } from "../../shared/claude-endpoint";
 import { movesThreadToTop } from "../../shared/wire"; import type { DefaultBotFields } from "../../shared/default-bot";
@@ -2114,10 +2114,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       createBotPatchQueue({
         send: (botId, patch, signal, currentBot, leaving) =>
           persistBotUpdate(botId, patch, signal, api, desktopApprovalBridge(), currentBot, leaving),
-        reconcile: async (botId, signal) => {
-          const result: { bots: BotAnnouncement[] } = await api(`/api/bots?messages=${MESSAGE_PAGE_SIZE}`, { signal });
-          return result.bots.find((candidate) => candidate.id === botId) ?? null;
-        },
+        reconcile: (botId, signal) => readOneBot(botId, MESSAGE_PAGE_SIZE, signal),
         onAuthoritative: (bot, optimisticOverlay) => {
           rawDispatch({ type: "botPatched", bot: withTaskWrites({ ...bot, ...optimisticOverlay }) });
         },
@@ -2211,8 +2208,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // Keep blocking sends while reconciliation fails (it is asked again) or a newer write owns this lane.
         if (taskWrites.get(threadId) === pending) {
           pending.patch = {};
-          retryRequest(() => taskWrites.get(threadId) === pending, () => api(`/api/bots?messages=${MESSAGE_PAGE_SIZE}`).then(({ bots }) => {
-            const bot = taskWrites.get(threadId) === pending ? bots.find((candidate: Bot) => candidate.id === botId) : undefined;
+          retryRequest(() => taskWrites.get(threadId) === pending, () => readOneBot(botId, MESSAGE_PAGE_SIZE).then((read) => {
+            const bot = taskWrites.get(threadId) === pending ? read : null;
             if (bot) {
               rawDispatch({ type: "botPatched", bot: withTaskWrites(bot) });
               taskWrites.delete(threadId);
