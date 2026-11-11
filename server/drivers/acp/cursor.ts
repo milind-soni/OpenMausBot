@@ -495,9 +495,8 @@ const support = (run: typeof execCli): AcpSupport => ({
     standalone: CURSOR_STANDALONE,
   },
 
-  // Global flags precede `acp`. `--approve-mcps` covers OpenMausBot's own servers from session/new
-  // (Cursor's ACP path historically gated them behind an approval middleware that never surfaces to the
-  // client). `--force` / `--auto-review` are the documented tool-permission switches only.
+  // Global flags precede `acp`. `--approve-mcps` covers OpenMausBot's own servers from session/new.
+  // `--force` / `--auto-review` are the documented tool-permission switches only.
   spawnArgs: (config, turn) => [
     ...(config.fullAuto ? ["--force"] : turn.approvalMode === "auto" ? ["--auto-review"] : []),
     "--approve-mcps",
