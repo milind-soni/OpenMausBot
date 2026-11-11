@@ -33,6 +33,8 @@ import type * as http from "../http.js";
 import type * as inbox from "../inbox.js";
 import type * as integrationTables from "../integrationTables.js";
 import type * as integrations from "../integrations.js";
+import type * as issueActivity from "../issueActivity.js";
+import type * as issueActivityTables from "../issueActivityTables.js";
 import type * as issueRelations from "../issueRelations.js";
 import type * as issueRoutes from "../issueRoutes.js";
 import type * as issueWebhooks from "../issueWebhooks.js";
@@ -128,6 +130,8 @@ declare const fullApi: ApiFromModules<{
   inbox: typeof inbox;
   integrationTables: typeof integrationTables;
   integrations: typeof integrations;
+  issueActivity: typeof issueActivity;
+  issueActivityTables: typeof issueActivityTables;
   issueRelations: typeof issueRelations;
   issueRoutes: typeof issueRoutes;
   issueWebhooks: typeof issueWebhooks;

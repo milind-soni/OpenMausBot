@@ -20,6 +20,7 @@ import { storageScope, uploadTarget } from "./lib/storageValidators";
 import { githubLifecycleTables, githubSyncState } from "./githubLifecycleTables";
 import { serverStoreTables } from "./serverStoreTables";
 import { labelTables } from "./labelTables";
+import { issueActivityTables } from "./issueActivityTables";
 import {
   assetTypeValidator,
   callSignalKindValidator,
@@ -56,6 +57,7 @@ export default defineSchema({
   ...pulseTables,
   ...integrationTables,
   ...githubLifecycleTables,
+  ...issueActivityTables,
   storageAdmissions: defineTable({ storageId: v.id("_storage"), scopeKey: v.string(), scope: storageScope, contentType: v.optional(v.string()), createdAt: v.number() }).index("by_storageId_and_scopeKey", ["storageId", "scopeKey"]),
   storageUploadIntents: defineTable({ tokenHash: v.string(), sessionId: v.id("sessions"), userId: v.id("users"), target: uploadTarget, state: v.union(v.literal("issued"), v.literal("uploading"), v.literal("complete")), expiresAt: v.number(), storageId: v.optional(v.id("_storage")) }).index("by_tokenHash", ["tokenHash"]).index("by_expiresAt", ["expiresAt"]).index("by_userId_and_expiresAt", ["userId", "expiresAt"]),
   notifications: defineTable({ teamId: v.id("teams"), userId: v.id("users"), actorId: v.id("users"), kind: v.union(v.literal("assignment"), v.literal("comment"), v.literal("mention"), v.literal("digest"), v.literal("lead")), eventId: v.string(), digestId: v.optional(v.id("standupDigests")), leadId: v.optional(v.id("pipelineLeads")), projectId: v.optional(v.id("projects")), taskId: v.optional(v.id("tasks")), messageId: v.optional(v.string()), conversation: v.optional(v.string()), agentThreadId: v.optional(v.id("agentThreads")), preview: v.optional(v.string()), read: v.boolean(), snoozedUntil: v.optional(v.number()), createdAt: v.number() })
@@ -260,6 +262,9 @@ export default defineSchema({
     dueDate: v.optional(v.string()),
     /** Points on lib/estimates.ts's scale (1, 2, 3, 5, 8); absent means no estimate. */
     estimate: v.optional(v.number()),
+    /** The agent (a connector grant marked as taking delegated issues) working this issue for its assignee. */
+    delegateGrantId: v.optional(v.id("connectorGrants")),
+    delegateName: v.optional(v.string()),
     githubIssueNumber: v.optional(v.number()),
     githubIssueUrl: v.optional(v.string()),
     githubIssueState: v.optional(v.union(v.literal("open"), v.literal("closed"))),
@@ -300,6 +305,8 @@ export default defineSchema({
   connectorGrants: defineTable({
     teamId: v.id("teams"), userId: v.id("users"), tokenHash: v.string(), name: v.string(),
     agentAccess: v.optional(v.boolean()),
+    /** The owner listed this connection as an agent: issues can be delegated to it (convex/issueActivity.ts). */
+    delegatable: v.optional(v.boolean()),
     hostId: v.optional(v.id("agentHosts")),
     runId: v.optional(v.id("workspaceAgentRuns")),
     write: v.boolean(), expiresAt: v.number(), createdAt: v.number(), revoked: v.boolean(),

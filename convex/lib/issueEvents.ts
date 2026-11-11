@@ -29,6 +29,7 @@ async function schedule(ctx: MutationCtx, type: IssueWebhookEvent, task: Doc<"ta
     issue: {
       id: task._id, key: issueKey(task._id), title: task.title, description: task.description, labels: task.labels, status: await columnTitle(ctx, task.columnId),
       completed: task.done, assignee: task.assignedToEmail ? { email: task.assignedToEmail, name: task.assignedToName } : null, acceptanceCriteria: task.acceptanceCriteria,
+      ...(task.delegateGrantId ? { delegate: { id: task.delegateGrantId, name: task.delegateName ?? "Agent" } } : {}),
     },
     changes,
     origin: process.env.ORIGIN_PUBLIC_URL,
@@ -39,6 +40,14 @@ async function schedule(ctx: MutationCtx, type: IssueWebhookEvent, task: Doc<"ta
 export async function issueCreated(ctx: MutationCtx, taskId: Id<"tasks">) {
   const task = await ctx.db.get(taskId);
   if (task) await schedule(ctx, "issue.created", task, null);
+}
+
+/** Sends issue.delegated when the agent on the issue differs from `before` (convex/issueActivity.ts setDelegate). */
+export async function issueDelegated(ctx: MutationCtx, before: Doc<"tasks">) {
+  const after = await ctx.db.get(before._id);
+  if (!after || after.delegateGrantId === before.delegateGrantId) return;
+  const agent = (task: Doc<"tasks">) => task.delegateGrantId ? { id: task.delegateGrantId as string, name: task.delegateName ?? "Agent" } : null;
+  await schedule(ctx, "issue.delegated", after, { delegate: { from: agent(before), to: agent(after) } });
 }
 
 /** Sends issue.updated when the column title (status) or completion differs from `before`; other edits send nothing. */

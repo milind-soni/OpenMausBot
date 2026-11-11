@@ -97,6 +97,7 @@ function taskSteps(ctx: MutationCtx, { drain }: Purger, task: Doc<"tasks">) {
     () => drain(n => ctx.db.query("taskPullRequests").withIndex("by_taskId", q => q.eq("taskId", task._id)).take(n)),
     () => drain(n => ctx.db.query("taskCompletions").withIndex("by_taskId", q => q.eq("taskId", task._id)).take(n)),
     () => drain(n => ctx.db.query("designLinks").withIndex("by_task", q => q.eq("taskId", task._id)).take(n)),
+    () => drain(n => ctx.db.query("issueActivity").withIndex("by_taskId_and_createdAt", q => q.eq("taskId", task._id)).take(n)),
   ]);
 }
 
