@@ -10,6 +10,7 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { repositoryUrl } from "./lib/repository";
 import { issueStatusChanged } from "./lib/issueEvents";
+import { retryPendingMirrorsForTeam } from "./lib/githubIssueSync";
 
 async function inDraft(ctx: QueryCtx, task: Doc<"tasks">) {
   const column = await ctx.db.get(task.columnId);
@@ -60,7 +61,11 @@ export const configure = mutation({
   handler: async (ctx, a) => {
     const { user } = await requireTeamAdmin(ctx, a.teamId, a.sessionToken);
     if (a.disconnect) await ctx.db.patch(a.teamId, { githubLogin: undefined, githubConnectedBy: undefined, githubAutoCreate: false });
-    else await ctx.db.patch(a.teamId, { ...(a.login ? { githubLogin: a.login.slice(0, 100), githubConnectedBy: user._id } : {}), ...(a.autoCreate === undefined ? {} : { githubAutoCreate: a.autoCreate }) });
+    else {
+      await ctx.db.patch(a.teamId, { ...(a.login ? { githubLogin: a.login.slice(0, 100), githubConnectedBy: user._id } : {}), ...(a.autoCreate === undefined ? {} : { githubAutoCreate: a.autoCreate }) });
+      // A reconnect should drain backed-off issue mirrors immediately, not after the next backoff window.
+      if (a.login) await retryPendingMirrorsForTeam(ctx, a.teamId);
+    }
     return null;
   },
 });

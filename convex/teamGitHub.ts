@@ -14,6 +14,7 @@ import { inviteCreator } from "./githubLinks";
 import { protectCreated } from "./githubProtection";
 import { githubPR, checksSummary, toSnapshot, type PRSnapshot } from "../lib/github-pr-snapshot";
 import { isRepositoryName, repositoryNameFor } from "../lib/github-repo-name";
+import { retryPendingMirrorsForTeam } from "./lib/githubIssueSync";
 
 export const NOT_SHARED = "GitHub isn't set up for this workspace yet. A workspace owner or admin connects it once in Settings > Integrations; then every member can use it.";
 const ADMIN_ROLES = new Set(["owner", "admin"]);
@@ -119,6 +120,7 @@ export const store = internalMutation({
     for (const project of waiting) {
       if (!project.repoUrl && project.status === "active" && project.githubRepoState === "awaiting_connection") await ctx.scheduler.runAfter(0, internal.teamGitHub.autoCreate, { projectId: project._id });
     }
+    await retryPendingMirrorsForTeam(ctx, a.teamId);
     return null;
   },
 });
