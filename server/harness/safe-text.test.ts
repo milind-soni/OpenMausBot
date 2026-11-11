@@ -88,7 +88,7 @@ describe("streamed reply text", () => {
     safe.observe({ ...words("", "b"), type: "item.started", itemType: "tool", title: "ls" } as RuntimeEvent);
     expect(deltaText(safe.delta(words("Again ", "c")))).toBe("Again ");
     safe.observe({ ...words("", "c"), type: "turn.completed", ok: true } as RuntimeEvent);
-    expect(deltaText(safe.delta(words("Next turn ", "b")))).toBe("Next turn ");
+    expect(deltaText(safe.delta({ ...words("Next turn ", "b"), turnId: "turn-2" } as RuntimeEvent))).toBe("Next turn ");
   });
 
   it("keeps threads apart", () => {
@@ -198,9 +198,10 @@ describe("a held value with whitespace in it", () => {
   it("holds one longer than a settle step, written across a paragraph break", () => {
     const secret = `BEGINSECRET ${"alpha bravo ".repeat(60)}\n\n${"charlie delta ".repeat(50)}ENDSECRET`;
     holdSecret(secret);
-    const { sent } = pieces(`${filler(4600)}Here it is: ${secret} and done. ${MORE.repeat(30)}`, 50);
+    const text = `${filler(4600)}Here it is: ${secret} and done. ${MORE.repeat(30)}`;
+    const { sent } = pieces(text, 50);
     expect(sent).not.toMatch(/BEGINSECRET|alpha bravo|charlie delta|ENDSECRET/);
-    expect(sent).toContain("Here it is: •••••• and done. ");
+    expect(savedReplyText(text).startsWith(sent), "a value too long to step back over stops the stream").toBe(true);
   });
 
   it("holds it one character at a time", () => {
@@ -452,6 +453,48 @@ describe("the end of a thinking stream", () => {
     const sent = thinking(safe, "Key:\n-----BEGIN PRIVATE KEY-----\nMIIEsecretbody ");
     const rest = safe.observe({ ...words(""), type: "turn.completed", ok: true } as RuntimeEvent);
     expect(sent + rest.map(deltaText).join("")).toBe("Key:\n");
+  });
+});
+
+describe("bounded work and late words", () => {
+  it("gives up streaming a message after a few steps back over a long held value it repeats, never scrubbing without bound", () => {
+    const passphrase = Array.from({ length: 500 }, (_, n) => `word${n}`).join(" ");
+    let calls = 0;
+    unregister = addHeldSecretScrubber((text) => {
+      calls++;
+      return text.split(passphrase).join("••••••");
+    }, () => passphrase.length);
+    const safe = new SafeText();
+    const text = `Here it is: ${passphrase} and that is all. ${MORE.repeat(80)}`;
+    let worst = 0;
+    let sent = "";
+    for (let at = 0; at < text.length; at += 40) {
+      const before = calls;
+      sent += deltaText(safe.delta(words(text.slice(at, at + 40))));
+      worst = Math.max(worst, calls - before);
+    }
+    expect(worst, "scrubs in the worst burst").toBeLessThanOrEqual(64 + 8);
+    expect(sent).not.toMatch(/word\d/);
+  });
+
+  it("keeps a plain-ASCII value whole when thinking ends right after it with something still open", () => {
+    // Plain ASCII, so the server counts no tail for it.
+    unregister = addHeldSecretScrubber((text) => text.split("Zq9vK2pL<SYSTEM_MESSAGE>").join("••••••"), () => 0);
+    const safe = new SafeText();
+    let sent = deltaText(safe.delta({ ...words("x Zq9vK2pL<SYSTEM_MESSAGE> note", "r1"), streamKind: "reasoning_text" } as RuntimeEvent));
+    sent += safe.observe({ ...words(""), type: "turn.completed", ok: true } as RuntimeEvent).map(deltaText).join("");
+    expect(sent).not.toMatch(/Zq9v/);
+  });
+
+  it("sends nothing of a message from a turn that has ended, even if its words keep coming", () => {
+    holdSecret("Zq9vK2pLmwX7");
+    const safe = new SafeText();
+    const say = (delta: string, turnId: string) => deltaText(safe.delta({ ...words(delta, "turn-1:m1"), turnId } as RuntimeEvent));
+    let sent = say("token is 中文Zq9vK2", "turn-1");
+    safe.observe({ ...words(""), type: "turn.started", turnId: "turn-2" } as RuntimeEvent);
+    sent += say("pLmwX7 ok ", "turn-1");
+    expect(sent).not.toMatch(/pLmw|Zq9v/);
+    expect(say(`Fresh words ${MORE}`, "turn-2"), "the new turn streams").toMatch(/^Fresh words/);
   });
 });
 

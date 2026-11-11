@@ -24,6 +24,9 @@ const MAX_WINDOW = 64 * 1024;
 const MAX_OPEN = 8;
 /** Messages remembered per thread as closed this turn, so a late word for one sends nothing. */
 const MAX_CLOSED = 256;
+/** Ended turns remembered per thread, and threads remembered, so a late word for an ended turn sends nothing. */
+const MAX_ENDED_TURNS = 16;
+const MAX_THREADS = 1024;
 /** The held-back length is the longest held value's, rounded up to this, so the lag tells little about it. */
 const HELD_BUCKET = 32;
 /** Text after a break must hold this much besides whitespace before the break settles: a secret's name, a long run of
@@ -83,33 +86,42 @@ function heldBack(longest: number): number {
   return longest > 0 ? Math.ceil(longest / HELD_BUCKET) * HELD_BUCKET - 1 : 0;
 }
 
-/** `end`, moved back until the text before it scrubs to the start of what the text scrubs to: never partway into a
- * whole held value that crosses it, or into one of a chain of overlapping values. The mask there shows that position
- * anyway. */
+/** Word-safe places `beforeWholeHeld` tries before it gives up on streaming the message. */
+const CUT_BACK_STEPS = 64;
+
+/** `end`, moved back over word-safe places until the text before it scrubs to the start of what the text scrubs to:
+ * never partway into a whole held value that crosses it, or into one of a chain of overlapping values (the mask there
+ * shows that position anyway). -1 when no such place turns up within a few steps: the message then stops streaming. */
 function beforeWholeHeld(text: string, end: number, longest: number): number {
   if (longest < 2 || !Number.isFinite(longest) || end <= 0 || end >= text.length) return end;
   const upTo = text.slice(0, Math.min(text.length, end + longest - 1));
   const masked = scrubHeldSecrets(upTo);
   if (masked === upTo) return end;
-  for (let cut = end; cut > 0; cut--) if (masked.startsWith(scrubHeldSecrets(text.slice(0, cut)))) return cut;
-  return 0;
+  let cut = end;
+  for (let step = 0; step < CUT_BACK_STEPS && cut > 0; step++) {
+    if (masked.startsWith(scrubHeldSecrets(text.slice(0, cut)))) return cut;
+    cut = wordSafeCut(text, cut - 1);
+  }
+  return cut > 0 ? -1 : 0;
 }
 
+/** `at`, or the start of the run of printable ASCII it falls inside: a held value made only of such characters is
+ * never sent in part. */
+const snapped = (text: string, at: number, from: number) => (at < from ? wordSafeCut(text, at) : at);
+
 /** How much of `text` may be cleaned and sent while more is on the way: short of the word still being written, of
- * anything still open, and of the held-back tail. */
+ * anything still open, and of the held-back tail; -1 when that cannot be settled in a few steps (the message then stops
+ * streaming and its completion carries it). */
 export function safeEnd(text: string): number {
   const longest = heldSecretLongest();
   const held = Math.max(0, text.length - heldBack(longest));
   const end = Math.min(heldTailStart(text), held < text.length ? wordSafeCut(text, held) : held);
-  // A cut before something still open may fall inside a run of printable ASCII: back to the run's start, so a held
-  // value made only of such characters is never sent in part.
-  const open = shortOfOpen(text, end);
-  return beforeWholeHeld(text, open < end ? wordSafeCut(text, open) : end, longest);
+  return beforeWholeHeld(text, snapped(text, shortOfOpen(text, end), end), longest);
 }
 
-/** How much of `text`, now complete, may be sent: all of it but anything still open. */
+/** How much of `text`, now complete, may be sent: all of it but anything still open; -1 as for `safeEnd`. */
 function finalEnd(text: string): number {
-  return beforeWholeHeld(text, shortOfOpen(text, text.length), heldSecretLongest());
+  return beforeWholeHeld(text, snapped(text, shortOfOpen(text, text.length), text.length), heldSecretLongest());
 }
 
 interface Stream {
@@ -129,6 +141,8 @@ interface ThreadStreams {
   open: Map<string, Stream>;
   /** Messages closed or let go this turn: what comes later for one is not sent, its completion carries it. */
   closed: Set<string>;
+  /** Turns of this thread that have ended: a late word for one of their messages is not sent. */
+  ended: Set<string>;
 }
 
 const isThinking = (stream: Stream) => stream.key.startsWith("reasoning_text:");
@@ -146,9 +160,13 @@ export class SafeText {
   delta(event: RuntimeEvent): RuntimeEvent | null {
     if (event.type !== "content.delta") return event;
     let thread = this.threads.get(event.threadId);
-    if (!thread) this.threads.set(event.threadId, (thread = { open: new Map(), closed: new Set() }));
+    if (!thread) {
+      this.threads.set(event.threadId, (thread = { open: new Map(), closed: new Set(), ended: new Set() }));
+      // Only a thread with nothing open is forgotten: one with an open message would start it again mid-word.
+      if (this.threads.size > MAX_THREADS) for (const [id, old] of this.threads) if (!old.open.size) { this.threads.delete(id); break; }
+    }
     const key = `${event.streamKind}:${event.itemId ?? ""}`;
-    if (thread.closed.has(key)) return null;
+    if (thread.closed.has(key) || (event.turnId !== undefined && thread.ended.has(event.turnId))) return null;
     let stream = thread.open.get(key);
     if (!stream) {
       stream = { key, raw: "", base: 0, settled: "", sent: "", stopped: false, last: event };
@@ -181,8 +199,18 @@ export class SafeText {
       return [];
     }
     if (!isTurnBoundary(event)) return [];
-    const rest = Array.from(thread.open.values()).filter(isThinking).flatMap((stream) => this.finish(stream) ?? []);
-    this.threads.delete(event.threadId);
+    const streams = Array.from(thread.open.values());
+    const rest = streams.filter(isThinking).flatMap((stream) => this.finish(stream) ?? []);
+    // Every turn with a message open here is over (and the one that just ended, unless this one is starting).
+    const ended = streams.flatMap((stream) => stream.last.turnId ?? []);
+    if (event.type !== "turn.started" && event.turnId) ended.push(event.turnId);
+    for (const turnId of ended) {
+      thread.ended.delete(turnId);
+      thread.ended.add(turnId);
+    }
+    while (thread.ended.size > MAX_ENDED_TURNS) thread.ended.delete(thread.ended.values().next().value!);
+    thread.open.clear();
+    thread.closed.clear();
     return rest;
   }
 
@@ -196,7 +224,9 @@ export class SafeText {
   private finish(stream: Stream): RuntimeEvent | null {
     if (stream.stopped || stream.last.type !== "content.delta") return null;
     const window = stream.raw.slice(stream.base);
-    const out = stream.settled + spaced(window.slice(0, finalEnd(window)));
+    const end = finalEnd(window);
+    if (end < 0) return null;
+    const out = stream.settled + spaced(window.slice(0, end));
     if (!out.startsWith(stream.sent) || out.length === stream.sent.length) return null;
     const delta = out.slice(stream.sent.length);
     stream.sent = out;
@@ -208,8 +238,8 @@ export class SafeText {
     if (stream.stopped) return "";
     const window = stream.raw.slice(stream.base);
     const end = safeEnd(window);
-    const out = stream.settled + spaced(window.slice(0, end));
-    if (!out.startsWith(stream.sent)) {
+    const out = end < 0 ? "" : stream.settled + spaced(window.slice(0, end));
+    if (end < 0 || !out.startsWith(stream.sent)) {
       stream.stopped = true;
       return "";
     }
