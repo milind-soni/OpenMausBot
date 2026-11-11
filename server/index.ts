@@ -2231,7 +2231,7 @@ function canAdmitDirectTurn(botId: string, threadId: string): boolean {
   return admit("peer", {}, {
     threadBusy: threadBusy(botId, threadId),
     atCapacity: botAtThreadCapacity(botId, undefined, true),
-    groupTurn: Boolean(activeGroupTurnForBot(botId)),
+    groupTurn: Boolean(activeGroupTurnForBot(botId, false)),
   }).action === "start";
 }
 
@@ -3535,7 +3535,7 @@ const roomMemberContexts = new RoomContextTracker({
   heldUntil: (threadId) => cacheKeepWarmStatus(threadId)?.until,
   expired: (threadId) => { const room = store.groupByThread(threadId); if (room) broadcast({ kind: "group", group: publicGroupState(room) }); },
 });
-/** Holds a member for the thread it was handed to until that turn marks the bot busy. */
+/** Holds a member for the thread it was handed to until that member turn ends. */
 const roomMemberLock = new RoomMemberLock();
 
 function groupThreadIsWorking(groupId: string, threadId: string): boolean {
@@ -3764,7 +3764,7 @@ function coordinationSystemInstructions(): string {
 }
 
 const threadReadableFrom = (threadId: string) => (other: string): boolean => !proactive.fence.confines(other) && !botApiThread(other) && (CLOUD_TEAM ? teamHost.readableFrom(threadId)(other) : !CLOUD_HOME || cloudOwnerOnlyThread(other));
-const queuedDeps = { botName: (id: string) => store.bot(id)?.name, threadBusy, groupTurn: (id: string) => Boolean(activeGroupTurnForBot(id)), behindPerson: queuedBehindPerson,
+const queuedDeps = { botName: (id: string) => store.bot(id)?.name, threadBusy, groupTurn: (id: string) => Boolean(activeGroupTurnForBot(id, false)), behindPerson: queuedBehindPerson,
   waitsForComputer: (node: HandoffView) => { const seat = parkedSeats.get(node.id); return Boolean(seat && !turnResources.free(seat)); },
   slots: (id: string) => ({ busy: store.tasks(id).filter((task) => threadBusy(id, task.threadId)).map(({ threadId, title }) => ({ threadId, title })), limit: maxConcurrentChildThreads(cfg, botThreadsHost(cloudPlanTier.starter())) }) }; const queuedStatus = createQueuedReason(queuedDeps), queuedNotes = createQueuedNotes({ ...queuedDeps, now: Date.now, language: (threadId) => threadLanguage(threadId), parent: (node) => node.parentId ? coordinator.node(node.parentId) : undefined, node: (id) => coordinator.node(id), post: (parent, node, line) => { const bot = store.bot(node.botId), title = store.taskByThread(node.botId, node.threadId)?.title; store.appendMessage(parent.threadId, { role: "bot", kind: "activity", ...(bot ? { from: { botId: bot.id, name: bot.name, color: bot.color } } : {}), tool: { name: line, ok: true }, ...(title ? { threadRef: { botId: node.botId, threadId: node.threadId, title } } : {}) }); } });
 const asksActingPerson = createAsksActingPerson({ team: Boolean(CLOUD_TEAM), requester: (threadId, generation) => actingPeople.requester(threadId, generation), askedPerson: (botId, threadId) => teamOwners.routing.askedPerson(botId, threadId) });
@@ -4468,9 +4468,13 @@ function groupProviderHandshakeSettled(operation: GroupTurnOperation): void {
   clearCancelledProviderHandshake(operation.threadId, `group:${operation.id}`);
 }
 
-function activeGroupTurnForBot(botId: string): { group: GroupRecord; threadId: string } | null {
+/** The room turn that has this bot: claimed for its member turn, or speaking. With `queued` (the default, for Stop, delete,
+ * model switches and busy checks) also a round it still waits its turn in; direct work may start on such a member. */
+function activeGroupTurnForBot(botId: string, queued = true): { group: GroupRecord; threadId: string } | null {
+  const claimed = roomMemberLock.holder(botId), claimedGroup = claimed ? store.groupByThread(claimed) : undefined;
+  if (claimed && claimedGroup) return { group: claimedGroup, threadId: claimed };
   for (const group of store.groups) {
-    for (const operation of groupTurnOperations.get(group.id) ?? []) {
+    for (const operation of queued ? groupTurnOperations.get(group.id) ?? [] : []) {
       if (!operation.cancelled && operation.botIds.has(botId)) {
         return { group, threadId: operation.threadId };
       }
@@ -7153,7 +7157,7 @@ function drainQueuedSendsNow() {
       }).catch(reject);
     }),
     // Provider completion can precede its dispatch promise: keep the queue until that exact handshake releases its claim.
-    (botId, threadId, head) => threadBusy(botId, threadId) || botAtThreadCapacity(botId, head.peerAsk ? undefined : threadId, Boolean(head.peerAsk)) || roomTurnHolds(activeGroupTurnForBot(botId), threadId, !head.peerAsk)
+    (botId, threadId, head) => threadBusy(botId, threadId) || botAtThreadCapacity(botId, head.peerAsk ? undefined : threadId, Boolean(head.peerAsk)) || roomTurnHolds(activeGroupTurnForBot(botId, false), threadId, !head.peerAsk)
       || directRootQueued(threadId) || (!head.peerAsk?.incident && parksBehindCoordination(botId, threadId)),
   );
 }
@@ -7362,7 +7366,7 @@ async function startOrQueueOpenedThread(
   const peerAsk = { botId, name: store.bot(botId)!.name, unattended: unattended || undefined };
   const decision = admit("opened-thread", {}, {
     atCapacity: botAtThreadCapacity(botId, undefined, true),
-    groupTurn: Boolean(activeGroupTurnForBot(botId)),
+    groupTurn: Boolean(activeGroupTurnForBot(botId, false)),
   });
   if (decision.action === "queue") {
     queueSteeredMessage(botId, threadId, text, {
@@ -7588,7 +7592,7 @@ async function beginTurn(
     computerSkipped ??= changing;
   }
   if (threadBusy(botId, threadId)) throw Object.assign(new Error("this thread is already working — interrupt it first"), { status: 409, code: "thread_busy" });
-  if (roomTurnHolds(activeGroupTurnForBot(botId), threadId, opts?.allowRoomTurnElsewhere === true)) {
+  if (roomTurnHolds(activeGroupTurnForBot(botId, false), threadId, opts?.allowRoomTurnElsewhere === true)) {
     throw Object.assign(new Error("the bot is already working in a channel — wait for it to finish"), { status: 409, code: "thread_busy" });
   }
   if (botAtThreadCapacity(botId, threadId, Boolean(opts?.coordination || opts?.peerAsk || opts?.commsDepth || opts?.cardContinuation || opts?.computerSelectionContinuation))) {
@@ -9624,7 +9628,7 @@ async function runGroupMemberTurn(...args: Parameters<typeof runClaimedGroupMemb
   try {
     return await runClaimedGroupMemberTurn(...args);
   } finally {
-    roomMemberLock.release(args[2], args[1]);
+    if (roomMemberLock.release(args[2], args[1])) drainQueuedSends();
   }
 }
 
@@ -9930,7 +9934,6 @@ async function runClaimedGroupMemberTurn(
     return true;
   }
   store.setActivity(bot.id, "working");
-  roomMemberLock.release(bot.id, threadId);
   // Claim cleanup ownership before browser preparation can yield; the finally releases exactly this setup, never a newer turn.
   roomSpeaker = { botId: bot.id, name: bot.name, color: bot.color, since: Date.now() };
   groupSpeakers.set(threadId, roomSpeaker);
@@ -10515,6 +10518,7 @@ async function runClaimedGroupMemberTurn(
     hop < MAX_GROUP_HOPS &&
     replyText.trim()
   ) {
+    if (roomMemberLock.release(bot.id, threadId)) drainQueuedSends();
     const members = group.memberIds
       .map((id) => store.bot(id))
       .filter((b): b is NonNullable<typeof b> => Boolean(b) && b!.id !== bot.id);
@@ -10887,11 +10891,7 @@ function startGroupTurn(
   };
   if (!autoRoute) startTitle(goalCoordinator ?? responders[0]!);
 
-  const operation = beginGroupTurnOperation(
-    groupId,
-    threadId,
-    goalCoordinator || autoRoute ? [] : responders.map((responder) => responder.id),
-  );
+  const operation = beginGroupTurnOperation(groupId, threadId, goalCoordinator || autoRoute ? [] : responders.map((responder) => responder.id));
   // Only a person's own chat line; cloudHomeLendingRefusal still proves it is the owner's.
   if (!goalCoordinator && message.role === "user" && !message.via && (!options.trigger || options.trigger.kind === "user" || options.trigger.kind === "owner")) {
     operation.requestMessageId = message.id;
