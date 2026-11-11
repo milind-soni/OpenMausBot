@@ -87,6 +87,17 @@ function space(dataDir: string): { freeBytes: number; volumeBytes: number } | nu
 
 const staging = (dataDir: string) => join(dataDir, "tmp", "move-files");
 const partialPath = (dataDir: string, sha256: string, size: number) => join(staging(dataDir), `${sha256}-${size}.partial`);
+const publications = new Map<string, Promise<void>>();
+
+/** Keeps this receiver's target check and publication together, releasing waiters on failure too. */
+async function publishInOrder<T>(target: string, publish: () => Promise<T>): Promise<T> {
+  const previous = publications.get(target) ?? Promise.resolve();
+  const result = previous.then(publish);
+  const settled = result.then(() => {}, () => {});
+  publications.set(target, settled);
+  try { return await result; }
+  finally { if (publications.get(target) === settled) publications.delete(target); }
+}
 
 /** Partial files a move left more than a day ago. */
 async function tidyPartials(dataDir: string, now = Date.now()): Promise<void> {
@@ -167,7 +178,7 @@ async function takePart(deps: MoveFilesDeps, req: IncomingMessage, query: z.infe
 }
 
 async function takePartAt(deps: MoveFilesDeps, req: IncomingMessage, query: z.infer<typeof putSchema>, partial: string): Promise<{ status: number; body: Record<string, unknown> }> {
-  const { path, size, sha256, offset, mode, expect } = query;
+  const { path, size, sha256, offset } = query;
   await mkdir(staging(deps.dataDir), { recursive: true, mode: 0o700 });
   const held = (await stat(partial).catch(() => null))?.size ?? 0;
   if (offset !== held) { await rawBody(req, 0); return { status: 409, body: { received: held } }; }
@@ -181,12 +192,17 @@ async function takePartAt(deps: MoveFilesDeps, req: IncomingMessage, query: z.in
   if (received < size) return { status: 200, body: { received } };
   if (await sha256Of(partial) !== sha256) { await unlink(partial).catch(() => {}); return { status: 422, body: { error: "the file arrived different from what was sent" } }; }
   const target = join(deps.dataDir, path);
-  if (!(await realFolders(deps.dataDir, path))) return { status: 409, body: { conflict: true } };
+  return publishInOrder(target, () => publishPart(deps.dataDir, target, partial, query));
+}
+
+/** Publishes a verified part after all earlier publications to this target have finished. */
+async function publishPart(dataDir: string, target: string, partial: string, { path, mode, expect, sha256 }: z.infer<typeof putSchema>): Promise<{ status: number; body: Record<string, unknown> }> {
+  if (!(await realFolders(dataDir, path))) return { status: 409, body: { conflict: true } };
   const there = await lstat(target).catch(() => null);
   if (there && !there.isFile()) return { status: 409, body: { conflict: true } };
   if (there && await sha256Of(target) === sha256) { await unlink(partial).catch(() => {}); return { status: 201, body: { stored: false } }; }
   if (mode === "replace" && there && expect && await sha256Of(target) === expect) {
-    const placed = join(staging(deps.dataDir), `${randomUUID()}.placing`);
+    const placed = join(staging(dataDir), `${randomUUID()}.placing`);
     await link(partial, placed);
     await rename(placed, target);
     await unlink(partial).catch(() => {});
@@ -195,7 +211,14 @@ async function takePartAt(deps: MoveFilesDeps, req: IncomingMessage, query: z.in
   if (there) return { status: 409, body: { conflict: true } };
   try { await link(partial, target); }
   catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return { status: 409, body: { conflict: true } };
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      const current = await lstat(target).catch(() => null);
+      if (current?.isFile() && await sha256Of(target) === sha256) {
+        await unlink(partial).catch(() => {});
+        return { status: 201, body: { stored: false } };
+      }
+      return { status: 409, body: { conflict: true } };
+    }
     throw error;
   }
   await unlink(partial).catch(() => {});
