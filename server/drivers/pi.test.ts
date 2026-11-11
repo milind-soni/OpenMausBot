@@ -1145,7 +1145,7 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(dumps.some((row) => row.setModel?.provider === "omlx" && row.setModel?.modelId === "MiniMax-M3-4bit")).toBe(
       true,
     );
-    const written = JSON.parse(readFileSync(join(home, ".pi", "agent", "models.json"), "utf8")) as {
+    const written = JSON.parse(readFileSync(join(home, ".openmausbot", "pi", "pi-test", "models.json"), "utf8")) as {
       providers: { omlx: { baseUrl: string; models: Array<{ id: string }> } };
     };
     expect(written.providers.omlx.baseUrl).toBe("http://127.0.0.1:8080/v1");
@@ -1277,7 +1277,8 @@ describe("ensurePiInstanceAgentDir", () => {
   afterEach(async () => { await removeTempDir(home); });
 
   it("creates the instance dir and symlinks auth.json + models.json from the operator dir", () => {
-    const operatorDir = mkdtempSync(join(tmpdir(), "omb-pi-op-"));
+    const operatorDir = join(home, ".pi", "agent");
+    mkdirSync(operatorDir, { recursive: true });
     writeFileSync(join(operatorDir, "auth.json"), '{"token":"test"}');
     writeFileSync(join(operatorDir, "models.json"), '{"providers":{}}');
     const instanceDir = ensurePiInstanceAgentDir("inst-" + randomUUID(), operatorDir, { HOME: home });
@@ -1289,7 +1290,8 @@ describe("ensurePiInstanceAgentDir", () => {
   });
 
   it("is idempotent: calling twice does not throw", () => {
-    const operatorDir = mkdtempSync(join(tmpdir(), "omb-pi-op2-"));
+    const operatorDir = join(home, ".pi", "agent");
+    mkdirSync(operatorDir, { recursive: true });
     writeFileSync(join(operatorDir, "auth.json"), '{"token":"x"}');
     const id = "inst-idem-" + randomUUID();
     ensurePiInstanceAgentDir(id, operatorDir, { HOME: home });
@@ -1297,7 +1299,8 @@ describe("ensurePiInstanceAgentDir", () => {
   });
 
   it("skips symlinks for operator files that do not exist", () => {
-    const operatorDir = mkdtempSync(join(tmpdir(), "omb-pi-op3-"));
+    const operatorDir = join(home, ".pi", "agent-empty");
+    mkdirSync(operatorDir, { recursive: true });
     const instanceDir = ensurePiInstanceAgentDir("inst-nofiles-" + randomUUID(), operatorDir, { HOME: home });
     expect(existsSync(join(instanceDir, "auth.json"))).toBe(false);
     expect(existsSync(join(instanceDir, "models.json"))).toBe(false);

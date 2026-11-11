@@ -179,7 +179,7 @@ export function ensurePiInstanceAgentDir(
   env: Record<string, string | undefined> = process.env,
 ): string {
   const dir = join(env.HOME || env.USERPROFILE || homedir(), ".openmausbot", "pi", instanceId);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   for (const file of ["auth.json", "models.json"] as const) {
     const link = join(dir, file);
     const target = join(operatorAgentDir, file);
@@ -397,8 +397,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
 
   async create(input: DriverCreateInput<PiConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
-    const instancePiDir = ensurePiInstanceAgentDir(instanceId, join(homedir(), ".pi", "agent"));
-    const catalogEnv = piEnvironment({ ...process.env, ...input.environment, PI_CODING_AGENT_DIR: instancePiDir });
+    const baseEnv = piEnvironment({ ...process.env, ...input.environment });
+    const operatorAgentDir = join(baseEnv.HOME || baseEnv.USERPROFILE || homedir(), ".pi", "agent");
+    const instancePiDir = ensurePiInstanceAgentDir(instanceId, operatorAgentDir, baseEnv);
+    const catalogEnv = { ...baseEnv, PI_CODING_AGENT_DIR: instancePiDir };
     let models = EMPTY;
     const readModels = async () => {
       let base = models, listed = false;
