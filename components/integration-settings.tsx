@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { ExternalLink, GitBranch, Loader2, Unplug } from "lucide-react";
+import { ExternalLink, GitBranch, Loader2, Plug, Unplug } from "lucide-react";
+import { ClientSetup, CopyButton } from "./agent-clients";
 import { api } from "@/convex/_generated/api";
 import { useWorkspace } from "./workspace-context";
 import { localApi, localAppOrigin, navigateLocalApp } from "@/lib/client-api";
@@ -66,12 +67,25 @@ export function IntegrationSettings({ sessionToken }: { sessionToken: string }) 
         </div>
       </div>
       {login && <SettingSwitch label="Create a private repository for new projects" disabled={!admin || busy} checked={Boolean(github?.autoCreate)} onChange={checked => void attempt(async () => { await configure({ sessionToken, teamId: workspace._id, autoCreate: checked }); })} />}
+      {login && <p className="settings-note">Every issue outside Backlog is also a GitHub issue in the project&apos;s repository. Title, description, labels and open/closed move both ways. Completing closes it, reopening reopens it, deleting closes it as not planned. Backlog stays in Origin.</p>}
       {login && <p className="settings-note">A pull request links to an issue when its branch or title contains the issue key (ORI-AB12) or its description says “Closes ORI-AB12”. Merging it completes the issue.</p>}
       {admin && config?.configured && <div className="integration-links">
         {config.installationUrl && <a href={config.installationUrl} target="_blank" rel="noreferrer">Repository access<ExternalLink size={12} /></a>}
         {config.permissionApprovalUrl && <a href={config.permissionApprovalUrl} target="_blank" rel="noreferrer">App permissions<ExternalLink size={12} /></a>}
       </div>}
     </section>
+    <AgentConnections />
     {notice && <p className="notice danger" role="alert">{notice}</p>}
   </div>;
+}
+
+/** Agents and MCP clients: Origin is one Streamable HTTP MCP server any agent can add by URL. */
+function AgentConnections() {
+  const url = typeof window === "undefined" ? "" : `${localAppOrigin()}/api/mcp`;
+  return <section className="settings-group agent-connections">
+    <h4>Agents and MCP clients</h4>
+    <p className="settings-note">One URL. Clients that support OAuth sign in as you and register themselves. The rest take a personal access token from Settings → Agents. Each acts with your access, nothing more.</p>
+    <div className="agent-url"><Plug size={15} /><input aria-label="MCP server URL" value={url} readOnly onFocus={e => e.currentTarget.select()} /><CopyButton value={url} label="Copy MCP URL" /></div>
+    <ClientSetup url={url} />
+  </section>;
 }

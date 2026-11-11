@@ -226,3 +226,7 @@ label.file-button:has(input:focus-visible) { outline: 2px solid var(--focus); ou
 @media (pointer: coarse) {
   .agent-clients button { height: 36px; }
 }
+.agent-steps { margin: 0 0 var(--space-2); padding-left: 18px; color: var(--text-2); font-size: var(--text-base); line-height: var(--leading); }
+.agent-steps li + li { margin-top: 2px; }
+.agent-connections { display: grid; gap: var(--space-3); }
+.connector-grant .ghost-button.is-on { border-color: color-mix(in srgb, var(--violet) 40%, transparent); color: var(--violet); }

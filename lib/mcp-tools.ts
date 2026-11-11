@@ -15,12 +15,16 @@ export const MCP_TOOLS = [
   { name: "vault_get", title: "Get vault item", write: false, description: "One allowed Vault item's value. Pass the Vault passphrase; without it, or with a wrong one, the Vault stays locked." },
   { name: "list_repos", title: "List repositories", write: false, description: "Projects with a linked GitHub repository." },
   { name: "list_pull_requests", title: "List pull requests", write: false, description: "Pull requests linked to issues, with their issue keys, state, checks and review. Filter by project and state." },
+  { name: "list_agents", title: "List agents", write: false, description: "Agents that can be delegated issues in a project (connections their owner listed under Settings > Agents), and whether this connection takes issues." },
+  { name: "list_issue_activity", title: "Issue activity", write: false, description: "An issue's Activity: delegation, and what agents reported (acknowledged, progress, question, blocked, done), oldest first." },
   { name: "create_issue", title: "Create issue", write: true, description: "Create an issue. It lands in Draft unless a column is given; a bare note in Draft gets the Needs spec label. Assignee, due date, labels and acceptance criteria are optional." },
   { name: "update_issue", title: "Update issue", write: true, description: "Change the given fields of an issue. \"none\" clears the assignee or due date; labels replace the issue's labels ([] clears them)." },
   { name: "move_issue", title: "Move issue", write: true, description: "Move an issue to a column or position, or complete/reopen it. Moving a completed issue to a column reopens it." },
   { name: "add_comment", title: "Add comment", write: true, description: "Comment on an issue. @username mentions (from list_members) notify people." },
   { name: "add_acceptance_criteria", title: "Add acceptance criteria", write: true, description: "Append unchecked acceptance criteria to an issue. With a description, this removes Needs spec." },
   { name: "update_acceptance_criteria", title: "Update acceptance criteria", write: true, description: "Check, uncheck, edit or remove acceptance criteria by index or text, or replace the whole list." },
+  { name: "delegate_issue", title: "Delegate issue", write: true, description: "Delegate an issue to an agent (\"me\", an agent id or name from list_agents), or \"none\" to take it back. The human assignee stays. Delegating starts nothing: the agent refines with the owner first." },
+  { name: "add_agent_activity", title: "Report on issue", write: true, description: "Record what you, the agent, are doing on an issue in its Activity: acknowledged, progress, question, blocked or done. done reports your part finished; it does not complete the issue." },
 ] as const;
 
 export type McpToolName = typeof MCP_TOOLS[number]["name"];

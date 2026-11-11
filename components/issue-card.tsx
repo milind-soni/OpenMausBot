@@ -10,6 +10,7 @@ import { GitHubIssueIndicator, type LinkedPullRequest } from "./github-issue-ind
 import { EstimateIcon, PriorityIcon, StatusIcon } from "./issue-icons";
 import { estimateLabel, isEstimate } from "@/lib/estimates";
 import { UserAvatar } from "./user-avatar";
+import { AgentMark } from "./issue-agent";
 import type { TaskMenuAnchor, TaskMenuView } from "./task-actions-menu";
 import { LabelChips } from "./issue-labels";
 import type { DisplayProperty } from "@/lib/issue-view";
@@ -133,7 +134,9 @@ export function DueChip({ task, canEdit, onDueDate, empty = false }: { task: Tas
 /** Assignee avatar (with the name in list rows) that opens the assignee menu. */
 export function AssigneeChip({ task, assignee, canEdit, onMenu, withName = false }: { task: Task; assignee: CardPerson | null; canEdit: boolean; onMenu: OnMenu; withName?: boolean }) {
   const name = assignee ? displayName(assignee) : "";
-  const face = assignee ? <UserAvatar user={assignee} /> : <span className="task-assignee-empty"><UserRound size={12} /></span>;
+  const person = assignee ? <UserAvatar user={assignee} /> : <span className="task-assignee-empty"><UserRound size={12} /></span>;
+  // Delegated to an agent: the agent's square badge sits beside the human assignee (Linear's assign + delegate).
+  const face = task.delegateName ? <span className="task-assignee-pair" title={`${name || "Unassigned"} · delegated to ${task.delegateName}`}>{person}<span className="task-delegate" aria-label={`Delegated to ${task.delegateName}`}><AgentMark size={12} /></span></span> : person;
   const label = withName && assignee ? <span className="task-assignee-name">{name}</span> : null;
   if (canEdit) return <button type="button" tabIndex={-1} className={clsx("task-assignee", !assignee && "is-empty", withName && "with-name")} aria-label={`Assignee: ${assignee ? name : "Unassigned"}`} title={!withName && name ? name : undefined} aria-haspopup="menu" onClick={openChip(task, "assignee", onMenu)}>{face}{label}</button>;
   return assignee ? <span className={clsx("task-assignee", withName && "with-name")} title={!withName ? name : undefined}>{face}{label}</span> : null;

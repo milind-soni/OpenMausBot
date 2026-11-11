@@ -24,6 +24,7 @@ import { TaskPullRequests, createTaskPullRequest } from "./task-pull-request";
 import { taskBranch } from "@/lib/task-branch";
 import { Dialog } from "./dialog";
 import { IssueFields, type IssueFieldKey } from "./issue-fields";
+import { IssueDelegate, useIssueActivity } from "./issue-agent";
 import { IssueCommentBody, IssueCommentComposer } from "./issue-comments";
 import { IssueFileUpload } from "./issue-file-upload";
 import { UserAvatar } from "./user-avatar";
@@ -181,6 +182,7 @@ function TaskModalContent({
   const details = useQuery(api.tasks.details, { projectId, sessionToken, taskId });
   const me = useQuery(api.auth.me, { sessionToken });
   const prs = useQuery(api.taskPRs.list, { taskId, sessionToken });
+  const agentActivity = useIssueActivity(sessionToken, projectId, taskId);
   const workspace = useWorkspace();
   const updateTask = useMutation(api.tasks.updateTask);
   const moveTask = useMutation(api.tasks.moveTask);
@@ -413,6 +415,7 @@ function TaskModalContent({
     estimate={(estimate === undefined ? details.task.estimate : estimate) ?? undefined} onEstimateChange={value => void changeEstimate(value)}
     errors={{ status: errors.status, estimate: errors.estimate, ...Object.fromEntries(Object.entries(FIELD_ERROR_KEY).map(([field, key]) => [key, errors[field as keyof Fields]])) }}
     disabled={!canEdit}>
+    <div className="issue-property" data-field="agent"><span>Agent</span><div><IssueDelegate sessionToken={sessionToken} projectId={projectId} taskId={taskId} delegateId={details.task.delegateGrantId} delegateName={details.task.delegateName} disabled={!canEdit} onError={reportError} /></div></div>
     {!page && <div className="issue-property" data-field="labels"><span>Labels</span>{labelsField}</div>}
     {!page && githubLinks && <div className="issue-property" data-field="github"><span>GitHub</span>{githubLinks}</div>}
   </IssueFields>;
@@ -423,16 +426,16 @@ function TaskModalContent({
   const attachmentList = !!attachments.length && <div className="issue-attachments" aria-label="Attachments">{attachments.map(asset => asset.localFileId
     ? <LocalAttachment key={asset._id} file={{ id: asset.localFileId, name: asset.name, size: asset.size || 0, contentType: asset.contentType || "application/octet-stream" }} sessionToken={sessionToken} scope={`teamId=${workspace._id}`} />
     : <a key={asset._id} className="activity-attachment" href={asset.url} target="_blank" rel="noreferrer"><LinkIcon size={13} /><span>{asset.name}</span><ExternalLink size={12} /></a>)}</div>;
-  const timeline = details && comments.map(comment => {
+  const timeline = details && [...comments.map(comment => {
     const author = memberById.get(comment.authorUserId);
-    return <article className="issue-timeline-entry" key={comment._id}>
+    return { at: comment.createdAt, node: <article className="issue-timeline-entry" key={comment._id}>
       <UserAvatar user={author || { name: comment.authorName, email: comment.authorEmail }} size="small" />
       <div className="activity-entry-content"><header><strong>{author ? displayName(author) : comment.authorName}</strong><time dateTime={new Date(comment.createdAt).toISOString()} title={formatDateTime(comment.createdAt)}>{formatRelative(comment.createdAt)}</time></header>
         <IssueCommentBody comment={comment} sessionToken={sessionToken} canEdit={canEdit} members={details.members} onOpenReference={openReference} />
         <div className="comment-media">{details.assets.filter(asset => asset.commentId === comment._id && asset.localFileId).map(asset => <LocalAttachment key={asset._id} file={{ id: asset.localFileId!, name: asset.name, size: asset.size || 0, contentType: asset.contentType || "application/octet-stream" }} sessionToken={sessionToken} scope={`teamId=${workspace._id}`} />)}</div>
       </div>
-    </article>;
-  });
+    </article> };
+  }), ...agentActivity].sort((a, b) => a.at - b.at).map(entry => entry.node);
   const composer = canEdit && details && <IssueCommentComposer key={taskId} projectId={projectId} taskId={taskId} sessionToken={sessionToken} members={details.members} />;
   const deleteDialog = deleting && details && <IssueDeleteDialog taskId={taskId} title={details.task.title} disabled={!online} onCancel={() => {
     setDeleting(false);
@@ -523,7 +526,7 @@ function TaskModalContent({
         </aside>
         <IssueRelations sessionToken={sessionToken} projectId={projectId} taskId={taskId} canEdit={canEdit} onOpen={openReference} />
         {attachmentList}
-        {!!comments.length && <section className="issue-activity" aria-label="Activity">
+        {!!(comments.length || agentActivity.length) && <section className="issue-activity" aria-label="Activity">
           <h3>Activity</h3>
           <div className="issue-timeline">{timeline}</div>
         </section>}

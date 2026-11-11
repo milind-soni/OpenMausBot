@@ -58,11 +58,11 @@ export const verify = query({
 
 export const listGrants = query({
   args: { sessionToken: v.string(), teamId: v.id("teams") },
-  returns: v.array(v.object({ _id: v.id("connectorGrants"), name: v.string(), write: v.boolean(), createdAt: v.number(), expiresAt: v.number(), revoked: v.boolean() })),
+  returns: v.array(v.object({ _id: v.id("connectorGrants"), name: v.string(), write: v.boolean(), createdAt: v.number(), expiresAt: v.number(), revoked: v.boolean(), delegatable: v.boolean() })),
   handler: async (ctx, a) => {
     const { user } = await requireTeamMember(ctx, a.teamId, a.sessionToken);
     return (await ctx.db.query("connectorGrants").withIndex("by_userId_and_teamId_and_runId_and_hostId", q => q.eq("userId", user._id).eq("teamId", a.teamId).eq("runId", undefined).eq("hostId", undefined)).order("desc").take(100))
-      .map(({ _id, name, write, createdAt, expiresAt, revoked }) => ({ _id, name, write, createdAt, expiresAt, revoked }));
+      .map(({ _id, name, write, createdAt, expiresAt, revoked, delegatable }) => ({ _id, name, write, createdAt, expiresAt, revoked, delegatable: Boolean(delegatable) }));
   },
 });
 

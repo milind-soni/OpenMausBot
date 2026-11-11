@@ -76,6 +76,10 @@ export function originMcpServer(token: string, write: boolean) {
     ...meta("list_pull_requests"),
     inputSchema: z.object({ project: ref("Project id or name").optional(), state: z.enum(["open", "merged", "closed", "all"]).optional().describe("Default: open (includes drafts)"), limit: z.number().int().min(1).max(100).optional().describe("Default: 25") }), annotations: read,
   }, a => run(() => convex.query(api.mcp.pullRequests, { token, ...a })));
+  server.registerTool("list_agents", { ...meta("list_agents"), inputSchema: z.object({ project: ref("Project id or name") }), annotations: read },
+    a => run(() => convex.query(api.mcp.agents, { token, ...a })));
+  server.registerTool("list_issue_activity", { ...meta("list_issue_activity"), inputSchema: z.object({ issueId: ref("Issue id or key") }), annotations: read },
+    a => run(() => convex.query(api.mcp.issueActivity, { token, ...a })));
   if (!write) return server;
   server.registerTool("create_issue", {
     ...meta("create_issue"),
@@ -121,6 +125,14 @@ export function originMcpServer(token: string, write: boolean) {
       replace: z.array(z.object({ text: criterion, checked: z.boolean().optional() })).max(50).optional().describe("The full new list; [] clears it"),
     }), annotations: { ...change, destructiveHint: true },
   }, a => run(() => convex.mutation(api.mcp.updateAcceptanceCriteria, { token, ...a })));
+  server.registerTool("delegate_issue", {
+      ...meta("delegate_issue"),
+      inputSchema: z.object({ issueId: ref("Issue id or key"), agent: ref("\"me\", an agent id or name from list_agents, or \"none\"") }), annotations: { ...change, idempotentHint: true },
+    }, a => run(() => convex.mutation(api.mcp.delegateIssue, { token, ...a })));
+    server.registerTool("add_agent_activity", {
+      ...meta("add_agent_activity"),
+      inputSchema: z.object({ issueId: ref("Issue id or key"), kind: z.enum(["acknowledged", "progress", "question", "blocked", "done"]), body: z.string().max(2000).optional().describe("One or two plain sentences") }), annotations: change,
+    }, a => run(() => convex.mutation(api.mcp.addAgentActivity, { token, ...a })));
   return server;
 }
 

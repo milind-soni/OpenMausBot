@@ -296,3 +296,16 @@ span.criterion-text { cursor: default; }
 .composer-label-suggestions > span { margin-right: var(--space-1); }
 .composer-label-suggestions .ghost-button { height: 26px; padding: 0 var(--space-1); }
 .composer-label-suggestions .label-chip { border-style: dashed; }
+
+/* Agents: a squared violet badge, never a round person avatar, so delegated work reads as an agent's at a glance. */
+.agent-mark { display: inline-grid; flex: none; place-items: center; border-radius: 4px; background: color-mix(in srgb, var(--violet) 22%, transparent); color: var(--violet); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--violet) 40%, transparent); }
+.agent-name { color: var(--violet); font-weight: var(--weight-medium); }
+.agent-on-behalf { color: var(--text-3); }
+.issue-timeline-event.agent-activity { align-items: start; }
+.issue-timeline-event.agent-activity > .agent-mark { justify-self: center; margin-top: 1px; }
+.issue-timeline-event.agent-activity > span:first-child:not(.agent-mark) { margin-top: 6px; }
+.issue-timeline-event.agent-activity strong { color: var(--text-2); font-weight: var(--weight-medium); }
+.issue-timeline-event.agent-activity strong.agent-name { color: var(--violet); }
+.agent-activity-body { margin: var(--space-1) 0 0; padding: var(--space-2) var(--space-3); border-left: 2px solid color-mix(in srgb, var(--violet) 45%, transparent); background: var(--surface-2); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; color: var(--text-2); font-size: var(--text-base); white-space: pre-wrap; }
+.task-assignee-pair { display: inline-flex; align-items: center; gap: 2px; }
+.task-delegate { display: inline-grid; }
