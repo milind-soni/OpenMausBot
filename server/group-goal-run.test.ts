@@ -243,3 +243,101 @@ describe("one goal-run loop for a room and a one-on-one chat", () => {
     expect(goal.finished).toEqual([{ status: "completed", detail: "Draft verified." }]);
   });
 });
+
+describe("parseGroupGoalDecision tolerant recovery (issue #5209)", () => {
+  const O = GROUP_GOAL_CONTROL_OPEN;
+  const C = GROUP_GOAL_CONTROL_CLOSE;
+
+  it("recovers a complete continue decision whose close tag never arrived (EOF truncation)", () => {
+    const parsed = parseGroupGoalDecision(
+      `Scout is on it.\n${O}{"status":"continue","next":"Scout","instruction":"Verify the release","detail":"Draft ready"}`,
+    );
+    expect(parsed.decision).toEqual({
+      status: "continue",
+      next: "Scout",
+      instruction: "Verify the release",
+      detail: "Draft ready",
+    });
+    expect(parsed.visibleText).toBe("Scout is on it.");
+  });
+
+  it("recovers a terminal decision whose close tag is missing", () => {
+    expect(parseGroupGoalDecision(`${O}{"status":"completed","detail":"All green"}`).decision)
+      .toEqual({ status: "completed", detail: "All green" });
+    expect(parseGroupGoalDecision(`${O}{"status":"needs-input","detail":"Which warehouse?"}`).decision)
+      .toEqual({ status: "needs-input", detail: "Which warehouse?" });
+    expect(parseGroupGoalDecision(`${O}{"status":"blocked","detail":"Awaiting the key"}`).decision)
+      .toEqual({ status: "blocked", detail: "Awaiting the key" });
+  });
+
+  it("recovers a decision closed by an escaped close tag", () => {
+    const parsed = parseGroupGoalDecision(
+      `Done.\n${O}{"status":"completed","detail":"Shipped"}<\\/openmaus-goal>`,
+    );
+    expect(parsed.decision).toEqual({ status: "completed", detail: "Shipped" });
+  });
+
+  it("recovers a decision when trailing prose follows the JSON before a present close tag", () => {
+    const parsed = parseGroupGoalDecision(
+      `${O}{"status":"continue","next":"Scout","instruction":"Verify","detail":"ok"} please proceed ${C}`,
+    );
+    expect(parsed.decision).toEqual({ status: "continue", next: "Scout", instruction: "Verify", detail: "ok" });
+  });
+
+  it("recovers a decision whose close tag is escaped and also carries trailing prose", () => {
+    const parsed = parseGroupGoalDecision(
+      `${O}{"status":"blocked","detail":"No network"} trailing ${""}<\\/openmaus-goal>`,
+    );
+    expect(parsed.decision).toEqual({ status: "blocked", detail: "No network" });
+  });
+
+  it("still fails closed on a genuinely truncated (unbalanced) JSON object", () => {
+    expect(parseGroupGoalDecision(`${O}{"status":"continue","next":"Sc`)).toEqual({
+      visibleText: "",
+      decision: null,
+    });
+    expect(parseGroupGoalDecision(`Prefix\n${O}{"status":"continue","instruction":"Verify"`).decision).toBeNull();
+  });
+
+  it("still fails closed when a continue decision is missing its required fields", () => {
+    expect(parseGroupGoalDecision(`${O}{"status":"continue"}`).decision).toBeNull();
+    expect(parseGroupGoalDecision(`${O}{"status":"continue","next":"Scout"}`).decision).toBeNull();
+    expect(parseGroupGoalDecision(`${O}{"status":"continue","instruction":"Verify"}`).decision).toBeNull();
+    expect(parseGroupGoalDecision(`${O}{"status":"completed"}`).decision).toBeNull();
+  });
+
+  it("does not recover when two open tags are present and no close tag arrived", () => {
+    // Both envelopes are truncated (no close tag anywhere). Tolerant recovery requires a
+    // single unambiguous open tag, so a quoted example cannot steer the run.
+    const text =
+      `Example: ${O}{"status":"continue","next":"X","instruction":"Y","detail":"Z"}\n`
+      + `Real: ${O}{"status":"completed","detail":"Done here"`;
+    expect(parseGroupGoalDecision(text).decision).toBeNull();
+  });
+
+  it("still lets the last complete envelope win when several are present", () => {
+    const text =
+      `${O}{"status":"continue","next":"Scout","instruction":"A","detail":"1"}${C}\n`
+      + `${O}{"status":"completed","detail":"final"}${C}`;
+    expect(parseGroupGoalDecision(text).decision).toEqual({ status: "completed", detail: "final" });
+  });
+
+  it("keeps the bounded lengths when recovering", () => {
+    const longInstruction = "x".repeat(2_400); // no trailing whitespace; must be cut to 2000
+    const parsed = parseGroupGoalDecision(
+      `${O}{"status":"continue","next":"Scout","instruction":"${longInstruction}","detail":"d"}`,
+    );
+    expect(parsed.decision?.status).toBe("continue");
+    expect((parsed.decision as { instruction: string }).instruction.length).toBe(2_000);
+  });
+
+  it("recovers a decision after leading whitespace following the open tag", () => {
+    const parsed = parseGroupGoalDecision(`${O}\n  {"status":"completed","detail":"ok"}`);
+    expect(parsed.decision).toEqual({ status: "completed", detail: "ok" });
+  });
+
+  it("fails closed on an open tag with no JSON at all, and on ordinary text", () => {
+    expect(parseGroupGoalDecision(`just prose ${O}`).decision).toBeNull();
+    expect(parseGroupGoalDecision(`no envelope here`).decision).toBeNull();
+  });
+});

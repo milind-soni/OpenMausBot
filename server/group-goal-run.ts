@@ -55,35 +55,87 @@ export function visibleCoordinatorText(text: string): string {
   return visible.replaceAll(GROUP_GOAL_CONTROL_CLOSE, "").trim();
 }
 
+/** A close tag the model sometimes escapes; it ends an envelope exactly like the plain one. */
+const ESCAPED_GOAL_CONTROL_CLOSE = "<\\/openmaus-goal>";
+
+/** The first balanced {...} object at the start of s (after whitespace), or null if none is complete. */
+function leadingJsonObject(s: string): string | null {
+  let i = 0;
+  while (i < s.length && /\s/.test(s[i] as string)) i++;
+  if (s[i] !== "{") return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let k = i; k < s.length; k++) {
+    const c = s[k] as string;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === "\"") inString = false;
+    } else if (c === "\"") inString = true;
+    else if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) return s.slice(i, k + 1);
+    }
+  }
+  return null;
+}
+
+/** Validate one decision object against the goal protocol; null when it is not a usable decision. */
+function parseDecisionPayload(payload: string): GroupGoalDecision | null {
+  const object = leadingJsonObject(payload);
+  if (!object) return null;
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(object) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const status = raw.status;
+  const detail = bounded(raw.detail, 500);
+  if (status === "continue") {
+    const next = bounded(raw.next, 100);
+    const instruction = bounded(raw.instruction, 2_000);
+    if (!next || !instruction) return null;
+    return { status, next, instruction, ...(detail ? { detail } : {}) };
+  }
+  if (status === "completed" || status === "needs-input" || status === "blocked") {
+    if (!detail) return null;
+    return { status, detail };
+  }
+  return null;
+}
+
 /** The last complete envelope wins, so a quoted example earlier in the reply cannot steer the run. */
 export function parseGroupGoalDecision(text: string): ParsedGroupGoalDecision {
-  const closeAt = text.lastIndexOf(GROUP_GOAL_CONTROL_CLOSE);
-  const openAt = closeAt < 0 ? -1 : text.lastIndexOf(GROUP_GOAL_CONTROL_OPEN, closeAt);
-  if (openAt < 0 || closeAt < 0) return { visibleText: visibleCoordinatorText(text), decision: null };
-
   const visibleText = visibleCoordinatorText(text);
-  const payload = text.slice(openAt + GROUP_GOAL_CONTROL_OPEN.length, closeAt).trim();
-  try {
-    const raw = JSON.parse(payload) as Record<string, unknown>;
-    const status = raw.status;
-    const detail = bounded(raw.detail, 500);
-    if (status === "continue") {
-      const next = bounded(raw.next, 100);
-      const instruction = bounded(raw.instruction, 2_000);
-      if (!next || !instruction) return { visibleText, decision: null };
-      return {
-        visibleText,
-        decision: { status, next, instruction, ...(detail ? { detail } : {}) },
-      };
-    }
-    if (status === "completed" || status === "needs-input" || status === "blocked") {
-      if (!detail) return { visibleText, decision: null };
-      return { visibleText, decision: { status, detail } };
-    }
-  } catch {
+  const fail = (): ParsedGroupGoalDecision => ({ visibleText, decision: null });
+
+  // An envelope ends at the later of the plain or escaped close tag.
+  const closeAt = Math.max(
+    text.lastIndexOf(GROUP_GOAL_CONTROL_CLOSE),
+    text.lastIndexOf(ESCAPED_GOAL_CONTROL_CLOSE),
+  );
+  const openAt = closeAt < 0 ? -1 : text.lastIndexOf(GROUP_GOAL_CONTROL_OPEN, closeAt);
+  if (openAt >= 0 && closeAt > openAt) {
+    const payload = text.slice(openAt + GROUP_GOAL_CONTROL_OPEN.length, closeAt);
+    const decision = parseDecisionPayload(payload);
+    if (decision) return { visibleText, decision };
   }
-  return { visibleText, decision: null };
+
+  // Truncation recovery: the close tag never arrived (EOF), or the chosen envelope carried
+  // trailing prose. Recover only from a single unambiguous open tag whose following text is
+  // exactly one complete, valid decision object, so a quoted example or a second envelope
+  // cannot steer the run.
+  const open = text.lastIndexOf(GROUP_GOAL_CONTROL_OPEN);
+  if (open >= 0 && open === text.indexOf(GROUP_GOAL_CONTROL_OPEN)) {
+    const decision = parseDecisionPayload(text.slice(open + GROUP_GOAL_CONTROL_OPEN.length));
+    if (decision) return { visibleText, decision };
+  }
+  return fail();
 }
+
 
 /** A goal run never recruits somebody outside the room. */
 export function selectGroupGoalCoordinator<Member extends GoalRunMember>(
