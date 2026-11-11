@@ -478,6 +478,12 @@ function getStore(): Store {
   }
 }
 
+/** True when the composer for `id` holds text, attachments, or an upload still in flight. */
+export function hasComposerDraft(id: string): boolean {
+  const store = getStore();
+  return getDraft(store, id) !== "" || getDraftAttachments(store, id).length > 0 || (attachmentPendingCounts.get(id) ?? 0) > 0;
+}
+
 /** A draft's channel mode, the same in every place that shows it: the composer's chip and the bot panel's switch. */
 export function useComposerChannelMode(id: string): [ChannelMode, (next: SetStateAction<ChannelMode>) => void] {
   const store = getStore();
