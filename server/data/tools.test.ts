@@ -231,8 +231,8 @@ describe("sources", () => {
     expect(folder.map((plan) => plan.stem).sort()).toEqual(["stuff_csv", "stuff_json", "stuff_parquet", "stuff_tsv"]);
     const csvFamily = folder.find((plan) => plan.stem === "stuff_csv")!.reader;
     const forward = dir.replace(/\\/g, "/");
-    expect(csvFamily).toBe(`read_csv(['${forward}/**/*.csv', '${forward}/**/*.txt'], union_by_name=true, filename=true)`);
-    expect(folder.find((plan) => plan.stem === "stuff_parquet")!.reader).toBe(`read_parquet('${forward}/**/*.parquet', union_by_name=true, filename=true)`);
+    expect(csvFamily).toBe(`read_csv(['${forward}/**/*.[cC][sS][vV]', '${forward}/**/*.[tT][xX][tT]'], union_by_name=true, filename=true)`);
+    expect(folder.find((plan) => plan.stem === "stuff_parquet")!.reader).toBe(`read_parquet('${forward}/**/*.[pP][aA][rR][qQ][uU][eE][tT]', union_by_name=true, filename=true)`);
     expect(folder.find((plan) => plan.stem === "stuff_tsv")!.reader).toContain("delim='\t'");
   });
 
