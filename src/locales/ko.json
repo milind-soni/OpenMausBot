@@ -2090,7 +2090,7 @@
   "sidebar.menu.connectPhone.server": "여기 있는 봇에",
   "sidebar.menu.getPhoneApp": "휴대폰 앱 받기",
   "phoneApp.title": "휴대폰 앱 받기",
-  "phoneApp.install": "휴대폰에서 App Store로 {app}을 설치하거나 Android용으로 다운로드하세요.",
+  "phoneApp.installStores": "휴대폰에서 App Store 또는 Google Play로 {app}을 설치하세요.",
   "phoneApp.next": "설치했나요? 이제 휴대폰을 연결하고 앱으로 페어링 코드를 스캔하세요.",
   "sidebar.menu.settings": "설정",
   "sidebar.menu.about": "정보",

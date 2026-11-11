@@ -769,7 +769,7 @@
   "sidebar.menu.connectPhone.server": "aux bots d'ici",
   "sidebar.menu.getPhoneApp": "Obtenir l’app mobile",
   "phoneApp.title": "Obtenir l’app mobile",
-  "phoneApp.install": "Sur votre téléphone, installez {app} depuis l'App Store ou téléchargez-le pour Android.",
+  "phoneApp.installStores": "Sur votre téléphone, installez {app} depuis l'App Store ou Google Play.",
   "phoneApp.next": "Installée ? Connectez ensuite votre téléphone et scannez le code d’association avec l’app.",
   "sidebar.menu.settings": "Paramètres",
   "sidebar.menu.about": "À propos",

@@ -12,8 +12,7 @@ With MausBot Cloud, pair the phone with your Cloud instead of your computer, and
 it keeps working while the computer is off.
 
 1. In the desktop app, open the menu under your name and choose **Get the
-   phone app**: the App Store for iPhone, or the APK for Android. Scan its code
-   with the phone's camera.
+   phone app**: the App Store for iPhone, or Google Play for Android.
 2. In the same menu, choose **Connect your phone · to your Cloud (always on)**.
    (**Settings → MausBot Cloud → Use My Cloud on your phone** does the same.) The
    app opens your Cloud in its window, at the Cloud's phone pairing.

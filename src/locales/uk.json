@@ -888,7 +888,7 @@
   "sidebar.menu.connectPhone.server": "до ботів тут",
   "sidebar.menu.getPhoneApp": "Отримати застосунок для телефона",
   "phoneApp.title": "Отримати застосунок для телефона",
-  "phoneApp.install": "Установіть {app} на телефон з App Store або завантажте версію для Android.",
+  "phoneApp.installStores": "Установіть {app} на телефон з App Store або Google Play.",
   "phoneApp.next": "Встановили? Тепер підключіть телефон і відскануйте код прив'язки в застосунку.",
   "sidebar.menu.settings": "Налаштування",
   "sidebar.menu.about": "Про застосунок",

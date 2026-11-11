@@ -2288,7 +2288,7 @@
   "sidebar.menu.connectPhone.server": "aos bots daqui",
   "sidebar.menu.getPhoneApp": "Baixar o app para celular",
   "phoneApp.title": "Baixar o app para celular",
-  "phoneApp.install": "No celular, instale o {app} pela App Store ou baixe para Android.",
+  "phoneApp.installStores": "No celular, instale o {app} pela App Store ou pelo Google Play.",
   "phoneApp.next": "Instalou? Agora conecte seu celular e escaneie o código de pareamento com o app.",
   "accounts.heading": "Login feito como",
   "accounts.add": "Adicionar outra conta",

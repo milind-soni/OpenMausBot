@@ -920,7 +920,7 @@
   "sidebar.menu.connectPhone.server": "mit den Bots hier",
   "sidebar.menu.getPhoneApp": "Telefon-App holen",
   "phoneApp.title": "Telefon-App holen",
-  "phoneApp.install": "Installiere {app} auf deinem Handy aus dem App Store oder lade es für Android herunter.",
+  "phoneApp.installStores": "Installiere {app} auf deinem Handy aus dem App Store oder von Google Play.",
   "phoneApp.next": "Installiert? Verbinde als Nächstes dein Telefon und scanne den Kopplungscode mit der App.",
   "sidebar.menu.settings": "Einstellungen",
   "sidebar.menu.about": "Über",

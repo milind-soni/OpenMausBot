@@ -140,7 +140,7 @@ sign-in instead of the welcome flow, which describes the person's own computer
 ### Use My Cloud on your phone
 
 1. Get the phone app: the menu under your name → **Get the phone app** (App
-   Store for iPhone, APK for Android).
+   Store for iPhone, Google Play for Android).
 2. The same menu → **Connect your phone · to your Cloud (always on)**, or
    **Settings → MausBot Cloud → Use My Cloud on your phone**. The Cloud opens in
    the app window at its phone pairing.

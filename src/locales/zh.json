@@ -2227,7 +2227,7 @@
   "sidebar.menu.connectPhone.server": "到这里的机器人",
   "sidebar.menu.getPhoneApp": "获取手机应用",
   "phoneApp.title": "获取手机应用",
-  "phoneApp.install": "在手机上从 App Store 安装 {app}，或下载 Android 版。",
+  "phoneApp.installStores": "在手机上从 App Store 或 Google Play 安装 {app}。",
   "phoneApp.next": "装好了？接下来连接你的手机，用应用扫描配对代码。",
   "sidebar.menu.settings": "设置",
   "sidebar.menu.about": "关于",

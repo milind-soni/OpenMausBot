@@ -2355,7 +2355,7 @@
   "sidebar.menu.connectPhone.server": "到這裡的機器人",
   "sidebar.menu.getPhoneApp": "取得手機 App",
   "phoneApp.title": "取得手機 App",
-  "phoneApp.install": "在手機上從 App Store 安裝 {app}，或下載 Android 版。",
+  "phoneApp.installStores": "在手機上從 App Store 或 Google Play 安裝 {app}。",
   "phoneApp.next": "裝好了嗎？接著連接你的手機，用 App 掃描配對碼。",
   "accounts.heading": "登入身分",
   "accounts.add": "新增其他帳號",

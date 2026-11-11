@@ -1523,7 +1523,7 @@
   "sidebar.menu.connectPhone.server": "buradaki botlara",
   "sidebar.menu.getPhoneApp": "Telefon uygulamasını edinin",
   "phoneApp.title": "Telefon uygulamasını edinin",
-  "phoneApp.install": "Telefonunuza {app} uygulamasını App Store'dan yükleyin veya Android için indirin.",
+  "phoneApp.installStores": "Telefonunuza {app} uygulamasını App Store'dan veya Google Play'den yükleyin.",
   "phoneApp.next": "Yüklediniz mi? Şimdi telefonunuzu bağlayın ve eşleştirme kodunu uygulamayla tarayın.",
   "sidebar.menu.settings": "Ayarlar",
   "sidebar.menu.about": "Hakkında",

@@ -23,7 +23,7 @@ import {
   updateLabel,
   updatePhase,
 } from "./SidebarProfileMenu";
-import { ANDROID_APK_URL, DOCS_URL, FEEDBACK_URL, HELP_CENTER_URL, IOS_APP_STORE_URL, platformLabel } from "@/lib/app-links";
+import { DOCS_URL, FEEDBACK_URL, GOOGLE_PLAY_URL, HELP_CENTER_URL, IOS_APP_STORE_URL, platformLabel } from "@/lib/app-links";
 import { profileForSession } from "@/lib/session";
 import {
   cloudPhoneDestination,
@@ -330,9 +330,9 @@ describe("choosing where the phone connects", () => {
 
 describe("Get the phone app", () => {
   it("offers iPhone and Android with the links the website and Cloud page use", () => {
-    expect(PHONE_APPS.map((app) => [app.id, app.url])).toEqual([["ios", IOS_APP_STORE_URL], ["android", ANDROID_APK_URL]]);
-    expect(IOS_APP_STORE_URL).toBe("https://apps.apple.com/in/app/mausbot/id6803387923");
-    expect(ANDROID_APK_URL).toBe("https://github.com/milind-soni/OpenMausBot/releases/download/android-v1.5.0/OpenMausBot.apk");
+    expect(PHONE_APPS.map((app) => [app.id, app.url])).toEqual([["ios", IOS_APP_STORE_URL], ["android", GOOGLE_PLAY_URL]]);
+    expect(IOS_APP_STORE_URL).toBe("https://apps.apple.com/app/mausbot/id6803387923");
+    expect(GOOGLE_PLAY_URL).toBe("https://play.google.com/store/apps/details?id=com.openmausbot.companion");
   });
 
   const render = (connect?: PhoneAppConnect[]) => {
@@ -347,9 +347,9 @@ describe("Get the phone app", () => {
 
   it("links the App Store and Android with no code to scan, and points on to Connect your phone where this window can pair", () => {
     const html = render([to("here", "to this computer")]);
-    expect(html).toContain("On your phone, install MausBot from the App Store, or download it for Android.");
+    expect(html).toContain("On your phone, install MausBot from the App Store or Google Play.");
     expect(html).toMatch(/<button[^>]*data-phone-app="ios"[^>]*>App Store<\/button>/);
-    expect(html).toMatch(/<button[^>]*data-phone-app="android"[^>]*>Android<\/button>/);
+    expect(html).toMatch(/<button[^>]*data-phone-app="android"[^>]*>Google Play<\/button>/);
     expect(html).not.toContain("<svg");
     expect(html.indexOf('data-phone-app="android"')).toBeLessThan(html.indexOf("Connect your phone"));
     expect(html).toContain("Connect your phone");

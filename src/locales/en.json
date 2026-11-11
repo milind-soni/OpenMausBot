@@ -2454,7 +2454,7 @@
   "sidebar.menu.connectPhone.server": "to the bots here",
   "sidebar.menu.getPhoneApp": "Get the phone app",
   "phoneApp.title": "Get the phone app",
-  "phoneApp.install": "On your phone, install {app} from the App Store, or download it for Android.",
+  "phoneApp.installStores": "On your phone, install {app} from the App Store or Google Play.",
   "phoneApp.next": "Installed? Connect your phone next, and scan the pairing code with the app.",
   "accounts.heading": "Signed in as",
   "accounts.add": "Add another account",

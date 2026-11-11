@@ -2195,7 +2195,7 @@
   "sidebar.menu.connectPhone.server": "ここのボットへ",
   "sidebar.menu.getPhoneApp": "スマートフォンアプリを入手",
   "phoneApp.title": "スマートフォンアプリを入手",
-  "phoneApp.install": "スマートフォンに App Store から {app} をインストールするか、Android 版をダウンロードしてください。",
+  "phoneApp.installStores": "スマートフォンに App Store または Google Play から {app} をインストールしてください。",
   "phoneApp.next": "インストールしたら、次にスマートフォンを接続し、アプリでペアリングコードを読み取ってください。",
   "accounts.heading": "サインイン中のアカウント",
   "sidebar.menu.settings": "設定",

@@ -95,9 +95,9 @@ describe("the pairing code", () => {
 
   it("links the phone app without a code of its own", () => {
     const html = render({ state: e2e });
-    expect(html).toContain("install MausBot from the App Store, or download it for Android.");
+    expect(html).toContain("install MausBot from the App Store or Google Play.");
     expect(html).toMatch(/data-phone-app="ios"[^>]*>App Store</);
-    expect(html).toMatch(/data-phone-app="android"[^>]*>Android</);
+    expect(html).toMatch(/data-phone-app="android"[^>]*>Google Play</);
   });
 
   it("says nothing about scanning once the code expired", () => {

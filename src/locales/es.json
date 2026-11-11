@@ -1819,7 +1819,7 @@
   "sidebar.menu.connectPhone.server": "a los bots de aquí",
   "sidebar.menu.getPhoneApp": "Obtener la app para el teléfono",
   "phoneApp.title": "Obtener la app para el teléfono",
-  "phoneApp.install": "En tu teléfono, instala {app} desde la App Store o descárgalo para Android.",
+  "phoneApp.installStores": "En tu teléfono, instala {app} desde la App Store o Google Play.",
   "phoneApp.next": "¿Ya la instalaste? Ahora conecta tu teléfono y escanea el código de vinculación con la app.",
   "sidebar.menu.settings": "Ajustes",
   "sidebar.menu.about": "Acerca de",
