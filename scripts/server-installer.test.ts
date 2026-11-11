@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -442,6 +442,20 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(mode(first.install)).toBe(0o755);
     expect(mode(join(first.install, "data"))).toBe(0o755);
     expect(again.stdout).toContain(`  note  ${first.install} could be changed by others on this server; now only its owner can change it.`);
+    // A folder its owner made tighter keeps its mode; a link to the folder is judged by the folder, not the link.
+    chmodSync(first.install, 0o700);
+    const tight = run([], { umask: "000" }, { dir: first.dir });
+    expect(tight.status, tight.all).toBe(0);
+    expect(mode(first.install)).toBe(0o700);
+    expect(tight.stdout).not.toContain("could be changed by others");
+    chmodSync(first.install, 0o755);
+    const real = join(first.dir, "elsewhere");
+    renameSync(first.install, real);
+    symlinkSync(real, first.install);
+    const linked = run([], { umask: "000" }, { dir: first.dir });
+    expect(linked.status, linked.all).toBe(0);
+    expect(linked.stdout).not.toContain("could be changed by others");
+    expect(mode(real)).toBe(0o755);
   });
 
   it("--uninstall stops the server and keeps the data, saying where it is", () => {

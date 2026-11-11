@@ -841,7 +841,7 @@ place_button() {
 # The sandbox's host preparation and Compose settings are this repository's own (deploy/box, connector/profiles),
 # fetched and used as they are, all four from the same place.
 fetch_sandbox() {
-  install -d -m 755 "$INSTALL_DIR/box" "$INSTALL_DIR/box/profiles"
+  make_folders "$INSTALL_DIR/box" "$INSTALL_DIR/box/profiles"
   fetch deploy/box/prepare-host.sh "$INSTALL_DIR/box/prepare-host.sh" 755 &&
     fetch deploy/box/compose.box.yaml "$INSTALL_DIR/compose.box.yaml" &&
     fetch "connector/profiles/$SECCOMP" "$INSTALL_DIR/box/profiles/$SECCOMP" &&
@@ -970,19 +970,26 @@ wait_https() {
 
 # An install's folder, or its data, that others may write to (made by hand, or by an installer before this one) is closed
 # to them: root runs what is in it.
-close_to_others() { # folder
-  if [ -n "$(find "$1" -prune \( -perm -020 -o -perm -002 \) 2>/dev/null)" ]; then
+close_to_others() { # folder, judged where a link to it leads
+  if [ -n "$(find -H "$1" -prune \( -perm -020 -o -perm -002 \) 2>/dev/null)" ]; then
     chmod go-w "$1"
     note "$1 could be changed by others on this server; now only its owner can change it."
   fi
 }
 
+# A new folder is made 755; one that is there keeps its own mode, only closed to others when it was open (a folder its
+# owner made 700 stays 700).
+make_folders() { # folder...
+  for folder in "$@"; do
+    if [ -d "$folder" ]; then close_to_others "$folder"; else install -d -m 755 "$folder"; fi
+  done
+}
+
 install_server() {
   say ""
   say "Installing MausBot in $INSTALL_DIR..."
-  if [ -d "$INSTALL_DIR" ]; then close_to_others "$INSTALL_DIR"; fi
   if [ -d "$INSTALL_DIR/data" ]; then close_to_others "$INSTALL_DIR/data"; fi
-  install -d -m 755 "$INSTALL_DIR" "$INSTALL_DIR/caddy" "$INSTALL_DIR/caddy/data" "$INSTALL_DIR/caddy/config"
+  make_folders "$INSTALL_DIR" "$INSTALL_DIR/caddy" "$INSTALL_DIR/caddy/data" "$INSTALL_DIR/caddy/config"
   write_compose
   write_caddyfile
   write_settings

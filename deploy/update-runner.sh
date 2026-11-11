@@ -139,9 +139,14 @@ folder_line() { printf '%s %o' "$(stat_of '%U:%G' '%Su:%Sg' "$1")" "$(mode_of "$
 # user, which their umask 002 makes every new folder writable by.
 private_group() {
   user=$(stat_of %U %Su "$1")
-  [ -n "$user" ] && [ "$user" = "$(stat_of %G %Sg "$1")" ] || return 1
-  members=$(getent group "$user" 2>/dev/null | cut -d: -f4)
-  [ -z "$members" ] || [ "$members" = "$user" ]
+  # GNU stat says UNKNOWN for an id with no name: two of those are not one user's group.
+  [ -n "$user" ] && [ "$user" != UNKNOWN ] && [ "$user" = "$(stat_of %G %Sg "$1")" ] || return 1
+  entry=$(getent group "$user" 2>/dev/null) && [ -n "$entry" ] || return 1
+  members=$(printf '%s' "$entry" | cut -d: -f4)
+  [ -z "$members" ] || [ "$members" = "$user" ] || return 1
+  # Nor when anyone else has it as their own group, or the users cannot be listed to tell.
+  users=$(getent passwd 2>/dev/null) && [ -n "$users" ] || return 1
+  [ -z "$(printf '%s\n' "$users" | awk -F: -v gid="$(printf '%s' "$entry" | cut -d: -f3)" -v user="$user" '$4 == gid && $1 != user')" ]
 }
 # True when someone besides root and the folder's owner may change it: writable by all without the sticky bit, or by a
 # group other than root's or the owner's private one.

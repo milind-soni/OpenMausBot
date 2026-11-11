@@ -57,7 +57,7 @@ function install(options: { stable?: Image; running?: Image; updater?: "real" | 
   // The user's groups, a folder's group and the group list, as the test says: never the machine's own (a CI user may be in
   // the docker group, a Mac's temporary folders belong to group wheel).
   writeFileSync(join(bin, "id"), '#!/bin/sh\ncase "$1" in -nG) echo "${FAKE_GROUPS:-staff}" ;; *) exec /usr/bin/id "$@" ;; esac\n');
-  writeFileSync(join(bin, "getent"), '#!/bin/sh\n[ -n "${FAKE_GETENT:-}" ] || exit 2\necho "$FAKE_GETENT"\n');
+  writeFileSync(join(bin, "getent"), '#!/bin/sh\ncase "$1" in\n  group) [ -n "${FAKE_GETENT:-}" ] || exit 2; echo "$FAKE_GETENT" ;;\n  passwd) [ -n "${FAKE_PASSWD:-}" ] || exit 2; printf "%s\\n" "$FAKE_PASSWD" ;;\n  *) exit 2 ;;\nesac\n');
   writeFileSync(join(bin, "stat"), `#!/bin/sh
 case "$*" in
   *" %g "*) echo "\${FAKE_GID:-1000}"; exit 0 ;;
@@ -338,13 +338,18 @@ describe.skipIf(!posix)("deploy/update-runner.sh", () => {
     // Group-writable by a shared group: refused, and the folder named with its owner, group and mode.
     expect(unsafe()).toBe(`${box.deploy} ${me}:staff 775`);
     // By the owner's own private group (umask 002 on Ubuntu and Fedora), or by root's group: fine.
-    expect(unsafe({ FAKE_GROUP: me, FAKE_GETENT: `${me}:x:1000:` })).toBeNull();
+    const passwd = `root:x:0:0::/root:/bin/sh\n${me}:x:1000:1000::/home/${me}:/bin/sh\nbob:x:1001:1001::/home/bob:/bin/sh`;
+    expect(unsafe({ FAKE_GROUP: me, FAKE_GETENT: `${me}:x:1000:`, FAKE_PASSWD: passwd })).toBeNull();
+    // Not when someone else has that group as their own, when the users can't be listed, or when it has no entry at all.
+    expect(unsafe({ FAKE_GROUP: me, FAKE_GETENT: `${me}:x:1000:`, FAKE_PASSWD: `${passwd}\neve:x:1002:1000::/home/eve:/bin/sh` })).toBe(`${box.deploy} ${me}:${me} 775`);
+    expect(unsafe({ FAKE_GROUP: me, FAKE_GETENT: `${me}:x:1000:` })).toBe(`${box.deploy} ${me}:${me} 775`);
+    expect(unsafe({ FAKE_GROUP: me, FAKE_PASSWD: passwd })).toBe(`${box.deploy} ${me}:${me} 775`);
     expect(unsafe({ FAKE_GID: "0" })).toBeNull();
     // A group of the owner's name with someone else in it is not private.
-    expect(unsafe({ FAKE_GROUP: me, FAKE_GETENT: `${me}:x:1000:${me},bob` })).toBe(`${box.deploy} ${me}:${me} 775`);
+    expect(unsafe({ FAKE_GROUP: me, FAKE_GETENT: `${me}:x:1000:${me},bob`, FAKE_PASSWD: passwd })).toBe(`${box.deploy} ${me}:${me} 775`);
     // World-writable never, whatever the group.
     chmodSync(box.deploy, 0o777);
-    expect(unsafe({ FAKE_GROUP: me, FAKE_GETENT: `${me}:x:1000:` })).toBe(`${box.deploy} ${me}:${me} 777`);
+    expect(unsafe({ FAKE_GROUP: me, FAKE_GETENT: `${me}:x:1000:`, FAKE_PASSWD: passwd })).toBe(`${box.deploy} ${me}:${me} 777`);
     chmodSync(box.deploy, 0o755);
     // A folder above it, open to all without the sticky bit: that folder is the one named.
     chmodSync(box.root, 0o777);
