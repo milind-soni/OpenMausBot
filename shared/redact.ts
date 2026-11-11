@@ -88,16 +88,17 @@ export const HELD_SECRET_MASK = "••••••";
 
 interface HeldSecretScrubber {
   scrub: (text: string) => string;
-  /** Where text still being written may have begun one of the held values; -1 when it has not. */
-  pendingAt?: (text: string) => number;
+  /** The length of the longest value it holds, in any form; 0 when it holds none. */
+  longest: () => number;
 }
 
 const heldSecretScrubbers = new Set<HeldSecretScrubber>();
 
-/** Register a scrubber for held secret values, and optionally where text still being written may have begun one of
- * them (`partialFormAt` over the same values); returns its removal. */
-export function addHeldSecretScrubber(scrub: (text: string) => string, pendingAt?: (text: string) => number): () => void {
-  const entry: HeldSecretScrubber = { scrub, ...(pendingAt ? { pendingAt } : {}) };
+/** Register a scrubber for held secret values, with the length of the longest one it holds; returns its removal. A
+ * stream holds back that many characters whatever they are, so a value is masked whole and nothing about it shows
+ * before. */
+export function addHeldSecretScrubber(scrub: (text: string) => string, longest: () => number): () => void {
+  const entry: HeldSecretScrubber = { scrub, longest };
   heldSecretScrubbers.add(entry);
   return () => { heldSecretScrubbers.delete(entry); };
 }
@@ -109,34 +110,21 @@ export function scrubHeldSecrets(text: string): string {
   return out;
 }
 
-/** The earliest index from which the rest of `text` begins a held value without finishing it, or -1: a stream sends
- * nothing from there until the value is whole (and masked) or the text has gone another way. Only an index leaves
- * the scrubbers, never a value. */
-export function heldSecretPendingAt(text: string): number {
-  let at = -1;
-  for (const { pendingAt } of heldSecretScrubbers) {
-    const found = pendingAt?.(text) ?? -1;
-    if (found >= 0 && (at < 0 || found < at)) at = found;
+/** The length of the longest held value; Infinity when a scrubber cannot say (a stream then holds everything back). */
+export function heldSecretLongest(): number {
+  let longest = 0;
+  for (const scrubber of heldSecretScrubbers) {
+    const length = typeof scrubber.longest === "function" ? scrubber.longest() : Infinity;
+    longest = Math.max(longest, Number.isNaN(length) ? Infinity : length);
   }
-  return at;
+  return longest;
 }
 
-/** The earliest index from which the rest of `text` is a proper prefix of one of `forms`, or -1. */
-export function partialFormAt(text: string, forms: Iterable<string>): number {
-  if (!text) return -1;
-  const last = text[text.length - 1]!;
-  let at = -1;
-  for (const form of forms) {
-    if (form.length < 2) continue;
-    // The longest prefix of `form` that `text` ends with, short of the whole form (a whole one is masked already).
-    for (let j = form.lastIndexOf(last, form.length - 2); j >= 0; j = j > 0 ? form.lastIndexOf(last, j - 1) : -1) {
-      if (j + 1 > text.length || !text.endsWith(form.slice(0, j + 1))) continue;
-      const start = text.length - (j + 1);
-      if (at < 0 || start < at) at = start;
-      break;
-    }
-  }
-  return at;
+/** The longest of `forms`, for a scrubber's `longest`. */
+export function longestForm(forms: Iterable<string>): number {
+  let longest = 0;
+  for (const form of forms) if (form.length > longest) longest = form.length;
+  return longest;
 }
 
 export function redactSecretsInText(text: string): string {

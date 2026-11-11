@@ -441,7 +441,7 @@ describe("around every bot's browser call", () => {
   });
 
   it("keeps held secrets out of every text a step keeps, the page's console lines included", async () => {
-    cleanup.push(addHeldSecretScrubber((text) => text.replaceAll("fake-held-pw-1234", "[hidden]")));
+    cleanup.push(addHeldSecretScrubber((text) => text.replaceAll("fake-held-pw-1234", "[hidden]"), () => "fake-held-pw-1234".length));
     const { daemon, evidence, run } = await setup({ record: true });
     await run("snapshot");
     daemon.geometry = { ...daemon.geometry, title: "Hello fake-held-pw-1234" };

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EVENTS_DIR, ensureDirs } from "../config.ts";
-import { addHeldSecretScrubber, partialFormAt } from "../redact.ts";
+import { addHeldSecretScrubber } from "../redact.ts";
 import type { RuntimeEvent } from "../contracts.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
 import { EventBus } from "./bus.ts";
@@ -96,7 +96,7 @@ describe("EventBus", () => {
     const remove = addHeldSecretScrubber((text) => {
       scrubbed.push(text);
       return text.replaceAll("hunter2-held-value", "••••••");
-    });
+    }, () => "hunter2-held-value".length);
     try {
       bus.publish(testEvent({ type: "runtime.error", message: "login failed with hunter2-held-value" } as Partial<RuntimeEvent>));
       await bus.flush();
@@ -506,18 +506,18 @@ describe("EventBus streamed text", () => {
 
   it("sends none of a held passphrase's words before it is whole, to any listener or the event log", async () => {
     const passphrase = "correct horse battery staple";
-    const remove = addHeldSecretScrubber((text) => text.replaceAll(passphrase, "••••••"), (text) => partialFormAt(text, [passphrase]));
+    const remove = addHeldSecretScrubber((text) => text.replaceAll(passphrase, "••••••"), () => passphrase.length);
     try {
       const bus = new EventBus();
       const seen: RuntimeEvent[] = [];
       bus.subscribe((event) => seen.push(event));
-      for (const piece of ["Your passphrase is correct ", "horse battery ", "staple. Done "]) {
+      for (const piece of ["Your passphrase is correct ", "horse battery ", "staple. Done ", "and a few more words to move past it all. "]) {
         bus.publish(delta(piece, { eventId: `h${piece.length}` }));
         vi.advanceTimersByTime(50);
       }
       await bus.flush();
       const streamed = seen.filter((event) => event.type === "content.delta").map((event) => event.type === "content.delta" ? event.delta : "");
-      expect(streamed.join("")).toBe("Your passphrase is ••••••. Done ");
+      expect(streamed.join("")).toMatch(/^Your passphrase is ••••••\. Done and a few /);
       for (const piece of streamed) expect(piece).not.toMatch(/correct|horse|battery/);
       expect(readFileSync(join(EVENTS_DIR, "thread-1.ndjson"), "utf8")).not.toMatch(/correct|horse|battery/);
     } finally {
@@ -525,8 +525,42 @@ describe("EventBus streamed text", () => {
     }
   });
 
+  it("streams and logs a right guess at a held value exactly as a wrong one, thinking and its end included", async () => {
+    const remove = addHeldSecretScrubber((text) => text.replaceAll("Tr0ub4dor&3", "••••••"), () => "Tr0ub4dor&3".length);
+    const run = async (guess: string, threadId: string) => {
+      const bus = new EventBus();
+      const seen: RuntimeEvent[] = [];
+      bus.subscribe((event) => seen.push(event));
+      for (const streamKind of ["reasoning_text", "assistant_text"] as const) {
+        for (const char of `Repeat: —${guess}${"—".repeat(40)}`) {
+          bus.publish(delta(char, { threadId, streamKind, eventId: `${threadId}-${streamKind}-${seq++}` }));
+          vi.advanceTimersByTime(50);
+        }
+      }
+      bus.publish(testEvent({ threadId, eventId: `${threadId}-end`, type: "turn.completed", ok: true, turnId: "turn-1" }));
+      await bus.flush();
+      // What an observer can compare: each frame's kind and size, and the text with the guess blanked.
+      const shape = (events: RuntimeEvent[]) => {
+        const deltas = events.flatMap((event) => event.type === "content.delta" ? [event] : []);
+        return { sizes: deltas.map((event) => `${event.streamKind}:${event.delta.length}`), text: deltas.map((event) => event.delta).join("").replaceAll(guess, "<guess>") };
+      };
+      const logged = readFileSync(join(EVENTS_DIR, `${threadId}.ndjson`), "utf8").trim().split("\n").map((line) => JSON.parse(line) as RuntimeEvent);
+      return { frames: shape(seen), logged: shape(logged) };
+    };
+    let seq = 0;
+    try {
+      const right = await run("Tr0u", "right");
+      const wrong = await run("Tr0v", "wrong");
+      expect(right).toEqual(wrong);
+      expect(right.frames.text).toContain("<guess>");
+      expect(right.logged).toEqual(right.frames);
+    } finally {
+      remove();
+    }
+  });
+
   it("sends streamed words only as masked as the saved message, to every listener and the event log", async () => {
-    const remove = addHeldSecretScrubber((text) => text.replaceAll("Zq9vK2pLmw", "••••••"));
+    const remove = addHeldSecretScrubber((text) => text.replaceAll("Zq9vK2pLmw", "••••••"), () => "Zq9vK2pLmw".length);
     try {
       const bus = new EventBus();
       const seen: RuntimeEvent[] = [];
@@ -534,7 +568,7 @@ describe("EventBus streamed text", () => {
       const pieces = [
         "Your password is Zq9v", "K2pLmw and the key:\n-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0B ",
         "secretbody\n-----END PRIVATE KEY-----\nSure. <SYSTEM_MESSAGE>Background task ", "finished</SYSTEM_MESSAGE> Then ",
-        "<openmaus-goal>{\"status\": ", "\"done\"}</openmaus-goal> that is all.",
+        "<openmaus-goal>{\"status\": ", "\"done\"}</openmaus-goal> that is all. ", "And some more words that move the held tail past it. ",
       ];
       const raw = pieces.join("");
       for (const piece of pieces) {
@@ -545,7 +579,7 @@ describe("EventBus streamed text", () => {
       await bus.flush();
       const streamed = seen.filter((event) => event.type === "content.delta").map((event) => event.type === "content.delta" ? event.delta : "");
       for (const piece of streamed) expect(piece).not.toMatch(/Zq9v|K2pL|MIIE|secretbody|SYSTEM_MESSAGE|Background|openmaus-goal|status/);
-      expect(streamed.join("")).toMatch(/^Your password is •••••• and the key:\n-----BEGIN PRIVATE KEY-----\n«redacted \d+ chars»\n-----END PRIVATE KEY-----\nSure\.\s+Then\s+that is $/);
+      expect(streamed.join("")).toMatch(/^Your password is •••••• and the key:\n-----BEGIN PRIVATE KEY-----\n«redacted \d+ chars»\n-----END PRIVATE KEY-----\nSure\.\s+Then\s+that is all\. And /);
       const log = readFileSync(join(EVENTS_DIR, "thread-1.ndjson"), "utf8");
       expect(log).not.toMatch(/Zq9v|K2pL|MIIE|secretbody/);
       const completed = seen.find((event) => event.type === "item.completed");

@@ -276,7 +276,7 @@ describe("server-owned browser MCP runtime", () => {
   it("hands no held secret back to the bot: snapshot, eval, page text, console and network results are all scrubbed", async () => {
     const leaked = "fake-filled-Passw0rd";
     // The default scrubber is the server's registry (shared/redact.ts), as in production.
-    const remove = addHeldSecretScrubber((text) => text.split(leaked).join(HELD_SECRET_MASK));
+    const remove = addHeldSecretScrubber((text) => text.split(leaked).join(HELD_SECRET_MASK), () => leaked.length);
     try {
       const value = runtime();
       const leaking = spec();

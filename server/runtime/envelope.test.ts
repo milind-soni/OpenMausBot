@@ -501,7 +501,7 @@ describe("composeEnvelope at Full access: nothing a bot can settle waits on the 
   });
 
   it("keeps the end of an answer just under the 12 000-character storage limit that redaction made longer", () => {
-    const removeScrubber = addHeldSecretScrubber((text) => text.replaceAll("code 42", `code ${HELD_SECRET_MASK}`));
+    const removeScrubber = addHeldSecretScrubber((text) => text.replaceAll("code 42", `code ${HELD_SECRET_MASK}`), () => "code 42".length);
     try {
       const body = "Sent code 42. ".repeat(100);
       const answer = `${body}${"x".repeat(11_999 - body.length - 5)} End.`;

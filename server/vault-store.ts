@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
-import { HELD_SECRET_MASK, partialFormAt } from "../shared/redact.ts";
+import { HELD_SECRET_MASK, longestForm } from "../shared/redact.ts";
 import { LOGIN_FIELD_MAX, LOGIN_HOSTS_MAX, loginMatchesHost, loginSite, loginUsableBy, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
 import { SECRET_VALUE_MAX_BYTES, VAULT_SECRET_NAME_MAX, vaultNameKey, type VaultSecret } from "../shared/vault.ts";
 import { writeFileAtomic } from "./atomic.ts";
@@ -585,10 +585,9 @@ export class HeldSecrets {
     return out;
   }
 
-  /** Where text still being written may have begun a held value or code (see `partialFormAt`). */
-  pendingAt(text: string): number {
-    if (!text) return -1;
+  /** The length of the longest value or live code held, in any form. */
+  longest(): number {
     const now = this.now();
-    return partialFormAt(text, [...this.currentForms(), ...[...this.codes].filter(([, until]) => until > now).map(([code]) => code)]);
+    return Math.max(longestForm(this.currentForms()), longestForm([...this.codes].filter(([, until]) => until > now).map(([code]) => code)));
   }
 }

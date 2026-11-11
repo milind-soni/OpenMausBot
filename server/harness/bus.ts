@@ -127,7 +127,7 @@ export class EventBus {
       return;
     }
     if (pending) this.flushThread(event.threadId);
-    this.safeText.observe(event);
+    for (const rest of this.safeText.observe(event)) this.write(rest);
     this.write(event);
     this.steps.announce(event);
   }

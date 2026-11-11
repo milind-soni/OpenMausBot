@@ -92,13 +92,13 @@ describe("secretRef", () => {
     expect(vault.scrub("ntn_canary_value")).toBe("ntn_canary_value");
   });
 
-  it("says where text still being written has begun a live value", () => {
+  it("says how long its longest live value is", () => {
     const vault = new SecretVault(clock);
+    expect(vault.longest()).toBe(0);
     vault.saveRef(ATLAS, "card-1", "Phrase", "open sesame now");
-    expect(vault.pendingAt("It is open sesame ")).toBe(6);
-    expect(vault.pendingAt("It is open door ")).toBe(-1);
+    expect(vault.longest()).toBeGreaterThanOrEqual("open sesame now".length);
     now += SECRET_FILE_TTL_MS;
-    expect(vault.pendingAt("It is open sesame ")).toBe(-1);
+    expect(vault.longest()).toBe(0);
   });
 });
 

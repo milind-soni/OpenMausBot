@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { EmailError, openGuard, sendingError } from "./client.ts";
 import type { DiscoverDeps } from "./discover.ts";
 import { createEmailService } from "./service.ts";
+import { secretForms } from "../vault-store.ts";
 import { MAX_EMAIL_ACCOUNTS } from "./store.ts";
 
 const PASSWORD = "fake-mailbox-password-1";
@@ -254,8 +255,7 @@ describe("connecting a mailbox", () => {
     expect(email.scrub("before p&ss w<rd after")).not.toContain("p&ss w<rd");
     expect(email.scrub(encodeURIComponent("p&ss w<rd"))).not.toContain("w%3Crd");
     expect(email.scrub("nothing here")).toBe("nothing here");
-    expect(email.pendingAt("the password is p&ss ")).toBe(16);
-    expect(email.pendingAt("the password is plain ")).toBe(-1);
+    expect(email.longest()).toBe(Math.max(...secretForms("p&ss w<rd").map((form) => form.length)));
   });
 
   it("takes mailboxes moved from a computer, keeping one already here", async () => {

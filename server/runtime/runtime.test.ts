@@ -289,7 +289,7 @@ describe("Runtime: one tree, one lane", () => {
 
   it("masks a held secret, even one with spaces, before an over-long answer is clipped", async () => {
     const secret = "alpha bravo charlie";
-    const removeScrubber = addHeldSecretScrubber((text) => text.replaceAll(secret, HELD_SECRET_MASK));
+    const removeScrubber = addHeldSecretScrubber((text) => text.replaceAll(secret, HELD_SECRET_MASK), () => secret.length);
     try {
       const w = world();
       w.runner.script = a => a.assignee.botId === "lead" && a.executions === 1 ? { kind: "needs_input", question: "Done?" } : undefined;

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { RuntimeEvent } from "../contracts.ts";
-import { addHeldSecretScrubber, partialFormAt, redactSecretsInText } from "../redact.ts";
+import { addHeldSecretScrubber, redactSecretsInText } from "../redact.ts";
 import { heldTailStart } from "../../shared/stream-hold.ts";
 import { publicReplyEvent, SafeText, safeEnd, savedReplyText } from "./safe-text.ts";
 
@@ -36,13 +36,13 @@ describe("streamed reply text", () => {
   });
 
   it("never sends a held secret split across two deltas, and masks it whole once it is in", () => {
-    unregister = addHeldSecretScrubber((text) => text.split(HELD).join("••••••"));
-    const out = stream(["Your password is Zq9v", "K2pLmw and nothing ", "else."]);
+    holdSecret(HELD);
+    const out = stream(["Your password is Zq9v", "K2pLmw and nothing ", "else, and a few more words to carry it out. "]);
     for (const piece of out) {
       expect(piece).not.toContain("Zq9v");
       expect(piece).not.toContain("K2pL");
     }
-    expect(out.join("")).toBe("Your password is •••••• and nothing ");
+    expect(out.join("")).toMatch(/^Your password is •••••• and nothing else/);
   });
 
   it("holds a private key from its header until its END line, then sends it masked", () => {
@@ -85,7 +85,9 @@ describe("streamed reply text", () => {
     expect(deltaText(safe.delta(words("First message ", "a")))).toBe("First message ");
     expect(deltaText(safe.delta(words("Second ", "b")))).toBe("Second ");
     safe.observe({ ...words("", "b"), type: "item.started", itemType: "tool", title: "ls" } as RuntimeEvent);
-    expect(deltaText(safe.delta(words("Again ", "b")))).toBe("Again ");
+    expect(deltaText(safe.delta(words("Again ", "c")))).toBe("Again ");
+    safe.observe({ ...words("", "c"), type: "turn.completed", ok: true } as RuntimeEvent);
+    expect(deltaText(safe.delta(words("Next turn ", "b")))).toBe("Next turn ");
   });
 
   it("keeps threads apart", () => {
@@ -159,61 +161,108 @@ describe("a finished reply as it goes out", () => {
   });
 });
 
-/** A held value registered the way the server registers its own: masked whole, and pending while begun. */
+/** A held value registered the way the server registers its own: masked whole, with its length. */
 function holdSecret(value: string): void {
-  unregister = addHeldSecretScrubber((text) => text.split(value).join("••••••"), (text) => partialFormAt(text, [value]));
+  unregister = addHeldSecretScrubber((text) => text.split(value).join("••••••"), () => value.length);
 }
 const filler = (chars: number) => {
   const paragraph = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor. ".repeat(4).trim() + "\n\n";
   return paragraph.repeat(Math.ceil(chars / paragraph.length)).slice(0, chars).replace(/\S*$/, "");
 };
+const MORE = "and a few more words to carry the held tail past it all. ";
+/** Each piece in, what goes out, and everything sent. */
+function pieces(text: string, size: number, safe = new SafeText(), itemId?: string): { frames: string[]; sent: string } {
+  const frames: string[] = [];
+  for (let at = 0; at < text.length; at += size) frames.push(deltaText(safe.delta(words(text.slice(at, at + size), itemId))));
+  return { frames, sent: frames.join("") };
+}
 
 describe("a held value with whitespace in it", () => {
   const PASS = "correct horse battery staple";
 
   it("sends none of its words before it is whole, then masks it", () => {
     holdSecret(PASS);
-    const out = stream(["Your passphrase is correct ", "horse battery ", "staple. Done "]);
-    expect(out[0]).toBe("Your passphrase is ");
-    expect(out[1]).toBe("");
-    expect(out.join("")).toBe("Your passphrase is ••••••. Done ");
+    const out = stream(["Your passphrase is correct ", "horse battery ", "staple. Done ", MORE]);
+    for (const piece of out) expect(piece).not.toMatch(/correct|horse|battery/);
+    expect(out.join("")).toMatch(/^Your passphrase is ••••••\. Done and a few /);
   });
 
   it("holds one written across a line break", () => {
     holdSecret("first line\nsecond line");
-    const out = stream(["It is first ", "line\nsecond ", "line and that is all "]);
-    expect(out.join("")).toBe("It is •••••• and that is all ");
+    const out = stream(["It is first ", "line\nsecond ", "line and that is all ", MORE]);
+    expect(out.join("")).toMatch(/^It is •••••• and that is all and/);
     for (const piece of out) expect(piece).not.toMatch(/first|second/);
   });
 
   it("holds one longer than a settle step, written across a paragraph break", () => {
     const secret = `BEGINSECRET ${"alpha bravo ".repeat(60)}\n\n${"charlie delta ".repeat(50)}ENDSECRET`;
     holdSecret(secret);
-    const safe = new SafeText();
-    const text = `${filler(4600)}Here it is: ${secret} and done. `;
-    let sent = "";
-    for (let at = 0; at < text.length; at += 50) sent += deltaText(safe.delta(words(text.slice(at, at + 50))));
+    const { sent } = pieces(`${filler(4600)}Here it is: ${secret} and done. ${MORE.repeat(30)}`, 50);
     expect(sent).not.toMatch(/BEGINSECRET|alpha bravo|charlie delta|ENDSECRET/);
-    expect(sent.endsWith("Here it is: •••••• and done. ")).toBe(true);
+    expect(sent).toContain("Here it is: •••••• and done. ");
   });
 
   it("holds it one character at a time", () => {
     holdSecret(PASS);
-    const text = `Use ${PASS} to sign in. `;
-    const out = stream([...text]);
-    let sent = "";
-    for (const piece of out) {
-      sent += piece;
-      expect(sent).not.toMatch(/correct|horse|battery/);
+    const { frames, sent } = pieces(`Use ${PASS} to sign in. ${MORE}`, 1);
+    let so = "";
+    for (const piece of frames) {
+      so += piece;
+      expect(so).not.toMatch(/correct|horse|battery/);
     }
-    expect(sent).toBe("Use •••••• to sign in. ");
+    expect(sent).toMatch(/^Use •••••• to sign in\. and/);
   });
 
-  it("streams text that only starts like one, once it goes another way", () => {
+  it("streams text that only starts like one in full once it is far enough back", () => {
     holdSecret(PASS);
-    const out = stream(["The correct ", "horse ", "racing tip is here "]);
-    expect(out.slice(0, 2).join("")).toBe("The ");
-    expect(out.join("")).toBe("The correct horse racing tip is here ");
+    expect(stream(["The correct ", "horse ", "racing tip is here ", MORE]).join("")).toMatch(/^The correct horse racing tip is here and/);
+  });
+});
+
+describe("what a stream shows about a held value", () => {
+  const HELD_VALUE = "Tr0ub4dor&3";
+  /** What goes out for a bot repeating `guess`, with the guess blanked: reply frames, thinking frames, and the bus's
+   * log and flush at the end. */
+  const watch = (guess: string, streamKind: "assistant_text" | "reasoning_text", tail = 24) => {
+    holdSecret(HELD_VALUE);
+    try {
+      const safe = new SafeText();
+      const text = `Repeat: —${guess}${"—".repeat(tail)}`;
+      const frames: string[] = [];
+      for (const char of text) {
+        const out = safe.delta({ ...words(char), streamKind } as RuntimeEvent);
+        frames.push(deltaText(out));
+      }
+      const end = safe.observe({ ...words(""), type: "turn.completed", ok: true } as RuntimeEvent);
+      frames.push(...end.map(deltaText));
+      return { sizes: frames.map((frame) => frame.length), text: frames.join("").replaceAll(guess, "<guess>") };
+    } finally {
+      unregister?.();
+      unregister = null;
+    }
+  };
+
+  it.each(["assistant_text", "reasoning_text"] as const)("is the same for a right first guess and a wrong one (%s)", (kind) => {
+    for (const tail of [24, 48]) {
+      const right = watch("Tr0u", kind, tail);
+      expect(right).toEqual(watch("Tr0v", kind, tail));
+      if (tail === 48 || kind === "reasoning_text") expect(right.text, "the guess streams like any other text").toContain("<guess>");
+    }
+  });
+
+  it("holds the same number of characters back whatever they are, blurred to a bucket", () => {
+    for (const length of [1, 11, 32]) {
+      unregister = addHeldSecretScrubber((text) => text, () => length);
+      expect(safeEnd(`${"日".repeat(100)}`)).toBe(100 - 31);
+      unregister();
+    }
+    unregister = addHeldSecretScrubber((text) => text, () => 33);
+    expect(safeEnd(`${"日".repeat(100)}`)).toBe(100 - 63);
+  });
+
+  it("holds everything back for a scrubber that cannot say how long its values are", () => {
+    unregister = addHeldSecretScrubber((text) => text, undefined as unknown as () => number);
+    expect(safeEnd("plenty of words here to send ")).toBe(0);
   });
 });
 
@@ -234,11 +283,76 @@ describe("settling a long message", () => {
     expect(all).toBe("Plan\n\nVisible words ");
   });
 
+  it("never settles where blank space separates a secret's name from a value still to come", () => {
+    for (const gap of [`password:${"\n".repeat(700)}`, `password${"\n".repeat(700)}:${"\n".repeat(300)}`, `password${" ".repeat(400)}:${" ".repeat(400)}`, `Authorization${"\n".repeat(300)}:${"\n".repeat(300)}Basic${"\n".repeat(300)}`]) {
+      const safe = new SafeText();
+      const sent = [`${filler(4600)}${gap}`, "aHVudGVyMmh1bnRlcjI= ", "and on. "].map((piece) => deltaText(safe.delta(words(piece)))).join("");
+      expect(sent, JSON.stringify(gap.slice(0, 20))).not.toContain("aHVudGVy");
+    }
+  });
+
+  it("settles at sentence ends in a long paragraph with no line breaks", () => {
+    const { sent } = pieces("This is a sentence that goes on for a while. ".repeat(1400), 40);
+    expect("This is a sentence that goes on for a while. ".repeat(1400).startsWith(sent)).toBe(true);
+    expect(sent.length).toBeGreaterThan(1400 * 45 - 40);
+  });
+
   it("never settles between a secret's name and a value that follows a long run of blank lines", () => {
     const safe = new SafeText();
     const sent = [`${filler(4600)}password:${"\n".repeat(700)}`, "hunter2hunter2 ", "and on. "].map((piece) => deltaText(safe.delta(words(piece)))).join("");
     expect(sent).not.toContain("hunter2");
     expect(sent.endsWith("«redacted 14 chars» and on. ")).toBe(true);
+  });
+});
+
+describe("a message closed and then continued", () => {
+  const event = (fields: Partial<RuntimeEvent>) => ({ ...words(""), ...fields }) as RuntimeEvent;
+
+  it("sends nothing more of a message whose open key a thinking item interrupted", () => {
+    const safe = new SafeText();
+    const sent = [deltaText(safe.delta(words("Key:\n-----BEGIN PRIVATE KEY-----\nMIIEsecretbody ", "m1")))];
+    safe.observe(event({ type: "item.started", itemType: "reasoning", itemId: "r1" }));
+    sent.push(deltaText(safe.delta(words("morebody\nlines\n-----END PRIVATE KEY-----\nok ", "m1"))));
+    expect(sent.join("")).not.toMatch(/MIIE|secretbody|morebody/);
+  });
+
+  it("sends nothing more of a message a tool split in the middle of a held passphrase", () => {
+    holdSecret("correct horse battery staple");
+    const safe = new SafeText();
+    const sent = [deltaText(safe.delta(words(`Phrase: ${"word ".repeat(10)}correct horse `, "m1")))];
+    safe.observe(event({ type: "item.started", itemType: "tool", itemId: "c1", title: "ls" } as Partial<RuntimeEvent>));
+    sent.push(deltaText(safe.delta(words(`battery staple then ${MORE}`, "m1"))));
+    expect(sent.join("")).not.toMatch(/correct|horse|battery/);
+  });
+
+  it("sends nothing more of a message let go for others streaming meanwhile", () => {
+    const safe = new SafeText();
+    const sent = [deltaText(safe.delta(words("Key:\n-----BEGIN PRIVATE KEY-----\nMIIEsecretbody ", "a")))];
+    for (let n = 0; n < 8; n++) sent.push(deltaText(safe.delta(words("Other words ", `b${n}`))));
+    sent.push(deltaText(safe.delta(words("morebody\n-----END PRIVATE KEY-----\nok ", "a"))));
+    expect(sent.join("")).not.toMatch(/MIIE|secretbody|morebody/);
+  });
+});
+
+describe("the end of a thinking stream", () => {
+  const thinking = (safe: SafeText, delta: string) => deltaText(safe.delta({ ...words(delta, "r1"), streamKind: "reasoning_text" } as RuntimeEvent));
+
+  it("sends its held-back tail, cleaned, when a tool starts or the turn ends", () => {
+    for (const end of [{ type: "item.started", itemType: "tool", itemId: "c1", title: "ls" }, { type: "turn.completed", ok: true }]) {
+      const safe = new SafeText();
+      const sent = thinking(safe, "Let me look at sk-ant-api03-abcdefghijklmnopqrstuvwxyz then decide");
+      const rest = safe.observe({ ...words(""), ...end } as RuntimeEvent);
+      expect(rest).toHaveLength(1);
+      expect(rest[0]).toMatchObject({ streamKind: "reasoning_text", itemId: "r1" });
+      expect(sent + deltaText(rest[0]!)).toMatch(/^Let me look at «redacted \d+ chars» then decide$/);
+    }
+  });
+
+  it("drops a tail it cannot show safely", () => {
+    const safe = new SafeText();
+    const sent = thinking(safe, "Key:\n-----BEGIN PRIVATE KEY-----\nMIIEsecretbody ");
+    const rest = safe.observe({ ...words(""), type: "turn.completed", ok: true } as RuntimeEvent);
+    expect(sent + rest.map(deltaText).join("")).toBe("Key:\n");
   });
 });
 
@@ -283,6 +397,7 @@ describe("text written without spaces", () => {
       "ログインはhttps://user:pässwörd@example.comから。", "トークンghp_abcdefghijklmnopqrstuvwxyz0123です。", "plain words ", "\n\n",
       "Bearer abcdefghijklmnopqrstuvwxyz ", "ภาษาไทยไม่มีช่องว่างระหว่างคำ",
     ];
+    holdSecret("Tr0ub4dor&3");
     for (let round = 0; round < 40; round++) {
       const text = Array.from({ length: 12 }, () => parts[Math.floor(random() * parts.length)]).join("");
       const saved = savedReplyText(text);

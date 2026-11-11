@@ -365,17 +365,16 @@ describe("the held-secret scrubber", () => {
     expect(held.scrub("Code 492039 accepted")).toBe("Code 492039 accepted");
   });
 
-  it("says where text still being written has begun a held password or code, and nothing once it goes another way", () => {
+  it("says how long its longest held value or live code is, in any form", () => {
     let now = 0;
     const held = new HeldSecrets(new VaultStore({ dataDir: dir }), () => now);
-    held.remember("correct horse battery", "password");
-    held.remember("492039", "code");
-    expect(held.pendingAt("Use correct horse ")).toBe(4);
-    expect(held.pendingAt("Use correct horse racing ")).toBe(-1);
-    expect(held.pendingAt("Use correct horse battery ")).toBe(-1);
-    expect(held.pendingAt("Code 4920")).toBe(5);
+    expect(held.longest()).toBe(0);
+    held.remember("4920391234567", "code");
+    expect(held.longest()).toBe(13);
+    held.remember("p&ss", "password");
+    expect(held.longest(), "its HTML form, p&amp;ss, is longer still").toBe(13);
     now = 6 * 60_000;
-    expect(held.pendingAt("Code 4920")).toBe(-1);
+    expect(held.longest()).toBe("p&amp;ss".length);
   });
 
   it("masks a password filled from elsewhere for the rest of the run, and ignores values too short to be one", () => {
@@ -389,7 +388,7 @@ describe("the held-secret scrubber", () => {
     const store = new VaultStore({ dataDir: dir });
     store.create({ ...at("example.com"), username: "alice", password: "fake-hunter2", source: "settings", bots: "all" });
     const held = new HeldSecrets(store);
-    const remove = addHeldSecretScrubber((text) => held.scrub(text));
+    const remove = addHeldSecretScrubber((text) => held.scrub(text), () => held.longest());
     held.remember("555123", "code");
     try {
       expect(redactSecretsInText("My password is fake-hunter2, enjoy.")).toBe("My password is ••••••, enjoy.");
