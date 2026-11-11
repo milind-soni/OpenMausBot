@@ -171,6 +171,8 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
                 }}
                 placeholder={t("apiInstances.modelId")}
                 aria-label={t("apiInstances.modelFor", { name: server.displayName })}
+                aria-invalid={error?.at === server.instanceId || undefined}
+                aria-describedby={error?.at === server.instanceId ? `model-error-${server.instanceId}` : undefined}
                 title={t("apiInstances.modelHint")}
                 spellCheck={false}
                 disabled={busy !== null}
@@ -233,7 +235,7 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
               <Trash2 size={13} aria-hidden="true" />
             </button>
           </div>
-          {error?.at === server.instanceId && editing !== server.instanceId && <div role="alert" className="mt-1 text-[12px] leading-4 text-danger">{error.text}</div>}
+          {error?.at === server.instanceId && editing !== server.instanceId && <div id={`model-error-${server.instanceId}`} role="alert" className="mt-1 text-[12px] leading-4 text-danger">{error.text}</div>}
           {editing === server.instanceId && (
             <div className="mt-1.5 flex flex-col gap-1.5">
               <input value={editText} onChange={(e) => setEditText(e.target.value)} placeholder={t("apiInstances.models")}
