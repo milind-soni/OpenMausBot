@@ -4,7 +4,7 @@ import { ErrorBoundary } from "./error-boundary";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { useMutation, useQuery } from "convex/react";
 import clsx from "clsx";
-import { CheckCircle2, ChevronRight, CircleAlert, CircleDot, ExternalLink, GitPullRequest, LinkIcon, Loader2, MoreHorizontal, RotateCcw, Trash2, X } from "lucide-react";
+import { CheckCircle2, ChevronRight, CircleAlert, CircleDot, ExternalLink, GitBranch, GitPullRequest, LinkIcon, Loader2, MoreHorizontal, RotateCcw, Trash2, X } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { localApi } from "@/lib/client-api";
@@ -15,6 +15,7 @@ import { ProjectIcon } from "./project-icon";
 import { useWorkspace } from "./workspace-context";
 import { LocalAttachment } from "./local-attachment";
 import { TaskPullRequests, createTaskPullRequest } from "./task-pull-request";
+import { taskBranch } from "@/lib/task-branch";
 import { Dialog } from "./dialog";
 import { IssueFields, type IssueFieldKey } from "./issue-fields";
 import { IssueCommentBody, IssueCommentComposer } from "./issue-comments";
@@ -270,6 +271,13 @@ function TaskModalContent({
     catch { setNotice({ text: "Clipboard unavailable. Copy the link from the address bar.", tone: "danger" }); }
   };
 
+  /** Linear's habit: a branch named after the issue links its pull request and completes the issue on merge. */
+  const copyBranch = async () => {
+    if (!details) return;
+    try { await navigator.clipboard.writeText(taskBranch(details.task)); showIssueToast("Branch name copied"); }
+    catch { setNotice({ text: `Clipboard unavailable. Branch: ${taskBranch(details.task)}`, tone: "danger" }); }
+  };
+
   const linkedGitHubAsset = details?.assets.find((asset) => asset.url.includes("github.com") && /\/issues\/\d+/.test(asset.url));
   const linkedGitHubUrl = details?.task.githubIssueUrl || linkedGitHubAsset?.url;
   const githubIssueNumber = details?.task.githubIssueNumber ?? linkedGitHubUrl?.match(/\/issues\/(\d+)/)?.[1];
@@ -292,7 +300,9 @@ function TaskModalContent({
       const result = await localApi<{ message: string }>("/api/github/issues", sessionToken, { method: "POST", json: { projectId, taskId } });
       setNotice({ text: result.message });
     } }] : []),
-    ...(repo && prs?.length === 0 ? [{ key: "pull-request", label: taskMode === "pull_request" ? "Create draft PR" : "Create pull request", icon: <GitPullRequest size={14} />, run: async () => {
+    ...(repo ? [{ key: "branch", label: "Copy branch name", icon: <GitBranch size={14} />, run: copyBranch }] : []),
+    // Projects set to mirror issues as draft PRs keep that path; elsewhere a PR links itself from its branch or "Closes" line.
+    ...(repo && taskMode === "pull_request" && prs?.length === 0 ? [{ key: "pull-request", label: "Create draft PR", icon: <GitPullRequest size={14} />, run: async () => {
       flush(); await queue.current;
       setNotice({ text: await createTaskPullRequest(projectId, taskId, sessionToken) });
     } }] : []),
@@ -302,6 +312,10 @@ function TaskModalContent({
   // Escape in a text field leaves the field first; the next Escape closes the issue.
   const onKeyDown = (event: ReactKeyboardEvent) => {
     const target = event.target as HTMLElement;
+    // Ctrl/Cmd+Shift+. copies the branch name, as in Linear.
+    if (event.key === ">" || (event.code === "Period" && event.shiftKey)) {
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && repo) { event.preventDefault(); void copyBranch(); return; }
+    }
     if (event.key !== "Escape" || event.defaultPrevented || !target.matches("textarea, input")) return;
     event.preventDefault();
     target.blur();

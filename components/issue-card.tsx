@@ -6,7 +6,7 @@ import { CalendarDays, Check, MoreHorizontal, UserRound } from "lucide-react";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { displayName, formatDue } from "@/lib/format";
 import { taskKey } from "@/lib/project-issues";
-import { GitHubIssueIndicator } from "./github-issue-indicator";
+import { GitHubIssueIndicator, type LinkedPullRequest } from "./github-issue-indicator";
 import { PriorityIcon, StatusIcon } from "./issue-icons";
 import { UserAvatar } from "./user-avatar";
 import type { TaskMenuAnchor, TaskMenuView } from "./task-actions-menu";
@@ -37,6 +37,8 @@ type IssueItemProps = {
 };
 
 export type IssueCardProps = IssueItemProps & {
+  /** The pull request linked to the issue, if any (from the board query). */
+  pullRequest?: LinkedPullRequest;
   dragState?: "placeholder" | "moving";
   keyboardMoving: boolean;
   onHandleKeyDown: (event: ReactKeyboardEvent<HTMLElement>, taskId: string) => void;
@@ -109,7 +111,7 @@ export function AssigneeChip({ task, assignee, canEdit, onMenu, withName = false
  * place. Inner controls are pointer targets only (tabIndex -1): keyboard users get the same actions from the menu
  * (Shift+F10 / context-menu key) and the issue view.
  */
-export const IssueCard = memo(function IssueCard({ task, assignee, canEdit, tabStop, selected, completing, dragState, keyboardMoving, menuOpen, onOpen, onComplete, onMenu, onDueDate, onKeyDown, onFocus, onPointerDown, onHandleKeyDown, onHandleClick, onHandleBlur }: IssueCardProps) {
+export const IssueCard = memo(function IssueCard({ task, pullRequest, assignee, canEdit, tabStop, selected, completing, dragState, keyboardMoving, menuOpen, onOpen, onComplete, onMenu, onDueDate, onKeyDown, onFocus, onPointerDown, onHandleKeyDown, onHandleClick, onHandleBlur }: IssueCardProps) {
   const key = taskKey(task._id);
   const done = task.done || Boolean(completing);
   return (
@@ -134,7 +136,7 @@ export const IssueCard = memo(function IssueCard({ task, assignee, canEdit, tabS
       }}
     >
       <div className="task-card-head">
-        <span className="task-code issue-key" ref={tapTarget}>{key}<GitHubIssueIndicator number={task.githubIssueNumber} /></span>
+        <span className="task-code issue-key" ref={tapTarget}>{key}<GitHubIssueIndicator number={task.githubIssueNumber} pullRequest={pullRequest} /></span>
         {canEdit && <button className="drag-handle" type="button" tabIndex={-1} aria-label={`Move ${task.title}`} aria-pressed={keyboardMoving} onKeyDown={event => onHandleKeyDown(event, task._id)} onClick={event => onHandleClick(event, task._id)} onBlur={() => onHandleBlur(task._id)} />}
         <AssigneeChip task={task} assignee={assignee} canEdit={canEdit} onMenu={onMenu} />
       </div>

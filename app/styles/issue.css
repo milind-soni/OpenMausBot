@@ -63,6 +63,8 @@
 .issue-github-link { display: flex; align-items: center; gap: 6px; min-height: 28px; min-width: 0; padding: 0 var(--space-2); margin-left: calc(var(--space-2) * -1); border-radius: var(--radius-sm); color: var(--text-1); text-decoration: none; transition: background var(--duration-fast); }
 .issue-github-link:hover { background: var(--hover); }
 .issue-github-link > svg { flex: none; color: var(--text-3); }
+.issue-github-link[data-state="open"] > svg { color: var(--green); }
+.issue-github-link[data-state="merged"] > svg { color: var(--violet); }
 .issue-github-link > span { flex: none; font-variant-numeric: tabular-nums; }
 .issue-github-link > small { flex: 1; min-width: 0; overflow: hidden; color: var(--text-3); font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
 .issue-date-summary { display: grid; gap: 2px; margin: var(--space-3) 0 0; padding-top: var(--space-3); border-top: 1px solid var(--border-1); }

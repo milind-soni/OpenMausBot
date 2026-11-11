@@ -337,6 +337,8 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
   for (const person of [...(board.assignees || []), ...(projectMembers || [])]) people.set(person.email, { email: person.email, name: person.name, username: person.username, avatarUrl: person.avatarUrl });
   const assigneeOf = (task: Task): CardPerson | null => task.assignedToEmail ? people.get(task.assignedToEmail) ?? { email: task.assignedToEmail, name: task.assignedToName } : null;
   const visualColumns = board.columns.filter(column => !isDone(column));
+  // Rows keep their identity while the board result is unchanged, so memoized cards do not re-render.
+  const pullRequests = new Map((board.pullRequests ?? []).map(pr => [pr.taskId as string, pr]));
   const matches = (task: Task) => matchesIssue(task, filter, assigneeFilter);
   const visibleColumnIds = new Set<string>(visualColumns.map(column => column._id));
   const fallbackColumn = visualColumns.find(column => column.title.toLowerCase() === "todo") || visualColumns[0];
@@ -665,6 +667,7 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
                   {tasks.map(task => <IssueCard
                     key={task._id}
                     task={task}
+                    pullRequest={pullRequests.get(task._id)}
                     assignee={assigneeOf(task)}
                     canEdit={canEdit}
                     tabStop={tabStopId === task._id}
