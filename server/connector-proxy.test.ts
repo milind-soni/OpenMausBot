@@ -47,6 +47,47 @@ afterEach(async () => {
 });
 
 describe("connector MCP bridge", () => {
+  it("rejects unsafe numeric literals before forwarding calls and accepts the next safe request", async () => {
+    const calls: unknown[] = [];
+    const upstream = await listen((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        const rpc = JSON.parse(body);
+        calls.push(rpc.params.arguments);
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { content: [{ type: "text", text: "accepted" }] } }));
+      });
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    const unsafe = [
+      '{"id":9007199254740993}',
+      '{"id":-9007199254740993}',
+      '{"tools":[{"arguments":{"amount":1e400}}]}',
+      '{"tools":[{"arguments":{"amount":1e-400}}]}',
+      '{"amount":1.0000000000000001}',
+      '9007199254740993',
+    ];
+    for (const [index, args] of unsafe.entries()) {
+      const reply = nextJson(lines);
+      child!.stdin.write(`{"jsonrpc":"2.0","id":${index},"method":"tools/call","params":{"name":"FIXTURE_NUMBER","arguments":${args}}}\n`);
+      const refused = await reply;
+      expect(refused.id).toBe(index);
+      expect(refused.result.isError).toBe(true);
+      expect(refused.result.content[0].text).toMatch(/not sent.*numeric literal/);
+      expect(calls).toEqual([]);
+    }
+    const safe = { id: "9007199254740993", values: [Number.MAX_SAFE_INTEGER, -0.125, 1e-7, 42], code: "1e400" };
+    const reply = nextJson(lines);
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 10, method: "tools/call", params: { name: "FIXTURE_NUMBER", arguments: safe } })}\n`);
+    expect((await reply).result.isError).toBeUndefined();
+    expect(calls).toEqual([safe]);
+    const metadataReply = nextJson(lines);
+    child!.stdin.write('{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"FIXTURE_NUMBER","arguments":{"value":42},"_meta":{"arguments":{"limit":1e400}}}}\n');
+    expect((await metadataReply).result.isError).toBeUndefined();
+    expect(calls).toEqual([safe, { value: 42 }]);
+  });
+
   it("turns agent connection requests into authenticated chat-card requests", async () => {
     let received: any = null;
     const harness = await listen((request, response) => {

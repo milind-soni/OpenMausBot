@@ -49,7 +49,7 @@ function decimalValue(text: string): string | null {
   return `${match[1]}${digits}e${exponent}`;
 }
 
-function preservesNumericText(text: string, value: number): boolean {
+export function preservesNumericText(text: string, value: number): boolean {
   if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) return false;
   const original = decimalValue(text);
   return original !== null && original === decimalValue(String(value));
