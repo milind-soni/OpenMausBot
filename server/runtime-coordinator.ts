@@ -82,7 +82,9 @@ export function needsInputQuestion(text: string): string | undefined {
   const at = /^default:/i.test(lines[last]!.trim()) ? filled(last - 1) : last;
   const line = at < 0 ? "" : lines[at]!.trim();
   if (!NEEDS_INPUT.test(line)) return undefined;
-  const question = [line.slice("NEEDS INPUT:".length), ...lines.slice(at + 1)].join("\n").trim();
+  const value = line.slice("NEEDS INPUT:".length).trim();
+  if (/^none(?:[.!])?$/i.test(value)) return undefined;
+  const question = [value, ...lines.slice(at + 1)].join("\n").trim();
   return question || undefined;
 }
 

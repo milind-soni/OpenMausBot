@@ -182,6 +182,16 @@ describe("needsInputQuestion", () => {
     expect(needsInputQuestion("NEEDS INPUT:")).toBeUndefined();
     expect(needsInputQuestion("")).toBeUndefined();
     expect(needsInputQuestion("Done.")).toBeUndefined();
+    expect(needsInputQuestion("NEEDS INPUT: none")).toBeUndefined();
+    expect(needsInputQuestion("NEEDS INPUT: none.")).toBeUndefined();
+    expect(needsInputQuestion("NEEDS INPUT:  NONE! \n\n")).toBeUndefined();
+    expect(needsInputQuestion("NEEDS INPUT: none.\nDefault: proceed")).toBeUndefined();
+  });
+
+  it("preserves actual questions and defaults", () => {
+    expect(needsInputQuestion("NEEDS INPUT: none?")).toBe("none?");
+    expect(needsInputQuestion("NEEDS INPUT: none of the accounts work; which one?")).toBe("none of the accounts work; which one?");
+    expect(needsInputQuestion("NEEDS INPUT: Which account?\nDefault: staging")).toBe("Which account?\nDefault: staging");
   });
 });
 
