@@ -41,9 +41,10 @@ const STANDALONE_SOCKET = path.join(
   "Library/Caches/cua-driver/cua-driver.sock",
 );
 const HOST_BUNDLE_ID = "com.openmausbot.app";
-const CUA_ENV = { CUA_DRIVER_RS_TELEMETRY_ENABLED: "0" };
+const CUA_ENV = { CUA_DRIVER_RS_TELEMETRY_ENABLED: "0", CUA_DRIVER_RS_UPDATE_CHECK: "false" };
 const execFileAsync = promisify(execFile);
 process.env.CUA_DRIVER_RS_TELEMETRY_ENABLED ??= "0";
+process.env.CUA_DRIVER_RS_UPDATE_CHECK ??= "false";
 
 // Where cua-driver installs itself on Windows; the installer's own directory is the fallback.
 const WIN_INSTALLED_DRIVERS = [

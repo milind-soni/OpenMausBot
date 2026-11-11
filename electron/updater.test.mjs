@@ -123,8 +123,10 @@ beforeEach(() => {
   fixture.home = mkdtempSync(join(tmpdir(), "omb-updater-home-"));
   localOriginModule.setLocalOrigin(LOCAL);
   vi.useFakeTimers();
+  vi.stubEnv("OMB_AUTO_UPDATE", "1");
 });
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.clearAllTimers();
   vi.useRealTimers();
   rmSync(fixture.home, { recursive: true, force: true });
@@ -336,6 +338,24 @@ it("downloads an update by itself: the first check after launch starts it, and n
   const statuses = local.webContents.send.mock.calls.map(([, state]) => state.status);
   expect(statuses).not.toContain("available");
   expect(statuses.at(-1)).toBe("downloaded");
+});
+
+it("asks GitHub nothing on its own without OMB_AUTO_UPDATE=1, and still checks when asked", async () => {
+  vi.stubEnv("OMB_AUTO_UPDATE", "");
+  const rule = mainRule();
+  const local = page(LOCAL);
+  rule.show(local);
+  const { updater, autoUpdater, handlers } = await load(rule.pageAllowed);
+  updater.attachUpdaterWindow(rule.window);
+  updater.startUpdater();
+
+  await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000);
+  await settle();
+  expect(autoUpdater.checkForUpdates).not.toHaveBeenCalled();
+
+  await handlers.get("update:check")(local.event);
+  await settle();
+  expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1);
 });
 
 it("My Cloud's page reads and drives the update channels, and another server's page is refused", async () => {

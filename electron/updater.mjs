@@ -186,6 +186,8 @@ export function startUpdater(signals = null) {
     setState({});
   }
 
+  // Security: GitHub hears from this app on its own only with OMB_AUTO_UPDATE=1; otherwise only "Check for updates" asks.
+  if (process.env.OMB_AUTO_UPDATE !== "1") return;
   setTimeout(() => void updaterCoordinator?.check(), 15_000).unref?.();
   setInterval(() => void updaterCoordinator?.check(), 60 * 60 * 1000).unref?.();
 }

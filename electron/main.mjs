@@ -438,9 +438,9 @@ async function secureWorkspaceConfig() {
   });
 }
 
-function composioBrokerUrl() {
-  return managedComposioBrokerUrl(process.env.OMB_COMPOSIO_BROKER_URL, app.isPackaged);
-}
+// Security: the desktop says nothing to the managed connected-apps service until OMB_COMPOSIO_BROKER=on.
+if (!/^(on|1|true|yes)$/i.test(process.env.OMB_COMPOSIO_BROKER?.trim() ?? "")) process.env.OMB_COMPOSIO_BROKER = "off";
+const composioBrokerUrl = () => managedComposioBrokerUrl(process.env.OMB_COMPOSIO_BROKER_URL, app.isPackaged);
 
 // Finder/Explorer launches have no usable stdio, so the server child's output goes to server.log here.
 const LOG_DIR = app.getPath("logs");

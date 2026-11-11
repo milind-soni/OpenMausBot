@@ -12,7 +12,8 @@ import { BUNDLED_MODEL_MANIFEST, bundledEngineCatalog, engineCatalogFrom } from 
 import { parseModelManifest, type ManifestEngine, type ManifestPrice, type ModelManifestData } from "./schema.ts";
 
 export const MODEL_MANIFEST_URL = "https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/server/model-manifest/model-manifest.json";
-export const MANIFEST_DISABLE_ENV = "OMB_DISABLE_MODEL_MANIFEST_FETCH";
+/** Security: GitHub hears from this server only once someone sets this to 1; until then the bundled manifest is used. */
+export const MANIFEST_FETCH_ENV = "OMB_MODEL_MANIFEST_FETCH";
 export const MANIFEST_TTL_MS = 60 * 60 * 1000;
 /** GitHub's raw CDN caches about this long, so a shorter window buys nothing. */
 export const MANIFEST_ON_DEMAND_TTL_MS = 5 * 60 * 1000;
@@ -68,7 +69,7 @@ export class ModelManifestStore {
   }
 
   get fetchDisabled(): boolean {
-    return (this.options.env ?? process.env)[MANIFEST_DISABLE_ENV] === "1";
+    return (this.options.env ?? process.env)[MANIFEST_FETCH_ENV] !== "1";
   }
 
   /** The newest usable manifest. Reads the disk cache once and never waits on the network. */

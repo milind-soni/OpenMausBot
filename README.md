@@ -484,6 +484,9 @@ Usage analytics are optional and anonymous: product events and a once-a-day coun
 names, addresses or conversations. Turn them off in Settings → General → Usage analytics;
 [`docs/analytics.md`](docs/analytics.md) lists every event and property.
 
+Update checks, model list refreshes and the managed connected-apps service stay off until you turn them on;
+[`docs/background-network.md`](docs/background-network.md) lists each one and its switch.
+
 ## Support the project
 
 OpenMausBot is free and open source. If it does real work for you, you can

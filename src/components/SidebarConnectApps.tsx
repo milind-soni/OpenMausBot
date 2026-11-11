@@ -50,7 +50,7 @@ function useSidebarApps(): SidebarApps {
 }
 
 function AppFaceIcon({ face, className }: { face: AppFace; className?: string }) {
-  const sources = [face.logo, face.domain ? `https://www.google.com/s2/favicons?domain=${face.domain}&sz=64` : null].filter((src): src is string => Boolean(src));
+  const sources = [face.logo].filter((src): src is string => Boolean(src));
   const [failed, setFailed] = useState(0);
   const src = sources[failed];
   return (

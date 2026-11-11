@@ -60,7 +60,9 @@ schedule that checks the app, or a webhook, does the job instead.
 
 **With your own project key saved**, the desktop app and a Cloud home do not register or check in with OpenMausBot's managed service, and connected apps go to Composio directly. An app-event automation made before the key was saved can still be paused, deleted or restored, but only here: its copy on the service is left alone and removed if you later go back to the service.
 
-**`OMB_COMPOSIO_BROKER=off`** in the environment of the desktop app, a server or a Cloud home turns the service off whether or not a key is saved: no registration, check-in, tool calls or app events. Connected apps then need your own key, and show the setup message until there is one. A saved installation is kept for if the switch is removed. `OMB_COMPOSIO_BROKER_URL` is not a switch: left blank it means the default service.
+**The desktop app leaves the service off** unless `OMB_COMPOSIO_BROKER=on` is in its environment.
+
+**`OMB_COMPOSIO_BROKER=off`** in the environment of a server or a Cloud home turns the service off whether or not a key is saved: no registration, check-in, tool calls or app events. Connected apps then need your own key, and show the setup message until there is one. A saved installation is kept for if the switch is removed. `OMB_COMPOSIO_BROKER_URL` is not a switch: left blank it means the default service.
 
 A Team Cloud's per-person apps (**each person connects their own**) follow the same rule. With the team's key saved, each member is their own Composio user in the team's project (`omb_member_…`, made from the team's id and a hash of the person, never their address), and their connect links, connections, tool calls and disconnects go to Composio with the team's key. A member who leaves has that user's connections removed from the project; if Composio can't be reached then, it is tried again at the next start. App events are not available for them, as for the team's own apps with a key.
 

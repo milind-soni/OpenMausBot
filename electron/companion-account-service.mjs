@@ -956,8 +956,8 @@ export function createCompanionAccountService({
   });
 
   const restore = () => serialize(async () => {
-    if (!configured) return settledState();
     startWatchdog();
+    if (!configured || (!storedAccount(credentials()) && !companionAccountCleanupPending(credentials()))) return settledState();
     if (!(await probeControlPlane({ force: true }))) return settledState();
     if (companionAccountCleanupPending(credentials())) return retryWork();
     await ensureClientIdentity();

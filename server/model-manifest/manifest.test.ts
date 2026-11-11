@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BUNDLED_MODEL_MANIFEST, engineCatalogFrom } from "./bundled.ts";
 import {
-  MANIFEST_DISABLE_ENV,
+  MANIFEST_FETCH_ENV,
   MANIFEST_ON_DEMAND_TTL_MS,
   MANIFEST_RETRY_MS,
   MANIFEST_TTL_MS,
@@ -54,7 +54,7 @@ function store(options: Partial<ConstructorParameters<typeof ModelManifestStore>
     dir,
     log,
     advance: (ms: number) => { time += ms; },
-    manifest: new ModelManifestStore({ dataDir: dir, bundled, now: () => time, log, env: {}, ...rest }),
+    manifest: new ModelManifestStore({ dataDir: dir, bundled, now: () => time, log, env: { [MANIFEST_FETCH_ENV]: "1" }, ...rest }),
   };
 }
 
@@ -165,9 +165,9 @@ describe("downloads", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("does nothing when fetching is switched off", async () => {
+  it("does nothing until fetching is switched on", async () => {
     const fetchMock = vi.fn();
-    const subject = store({ fetch: fetchMock as unknown as typeof fetch, env: { [MANIFEST_DISABLE_ENV]: "1" } });
+    const subject = store({ fetch: fetchMock as unknown as typeof fetch, env: {} });
     await subject.manifest.refresh({ force: true });
     await subject.manifest.refreshOnDemand();
     subject.manifest.refreshInBackground();

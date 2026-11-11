@@ -113,6 +113,12 @@ function signedCredentials(overrides = {}) {
 }
 
 describe("Companion account service", () => {
+  it("asks the control plane nothing at launch on a desktop that never signed in", async () => {
+    const { client, service } = serviceFixture();
+    await expect(service.restore()).resolves.toMatchObject({ status: "signed-out" });
+    expect(client.health).not.toHaveBeenCalled();
+  });
+
   it("uses the packaged hosted default and only explicit safe development origins", () => {
     expect(resolveCompanionControlPlaneURL({ isPackaged: true, environment: {} })).toBe(
       "https://accounts.openmausbot.com",

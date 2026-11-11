@@ -115,7 +115,7 @@ function claudeEnvironment(
   instanceEnvironment: NodeJS.ProcessEnv = {},
   endpoint = false, bedrock = false,
 ): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { BASH_MAX_TIMEOUT_MS: "600000", ...source, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error" };
+  const env: NodeJS.ProcessEnv = { BASH_MAX_TIMEOUT_MS: "600000", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", ...source, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error" };
   if (configDir?.trim()) env.CLAUDE_CONFIG_DIR = resolveClaudeConfigDir(configDir, env);
   else if (env.CLAUDE_CONFIG_DIR) env.CLAUDE_CONFIG_DIR = resolveClaudeConfigDir(undefined, env);
   if (configDir?.trim() || endpoint || bedrock) {
