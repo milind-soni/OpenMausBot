@@ -102,7 +102,7 @@ export function answerLoginHandoff(store: HandoffStore, what: Exclude<LoginHando
   }
   if (what.kind === "secret") {
     const secret = store.secret(what.id);
-    if (!secret) return { ok: false, error: "This secret is no longer saved on this computer." };
+    if (!secret || secret.person) return { ok: false, error: "This secret is no longer saved on this computer." };
     return { ok: true, secret: { id: secret.id, name: secret.name, value: secret.value, bots: secret.bots, source: secret.source, ...(secret.refOnly ? { refOnly: true } : {}) } };
   }
   const login = store.get(what.id);

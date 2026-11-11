@@ -438,6 +438,9 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/team\/my-connections\/(?:apps\/[\w-]{1,64}\/connect|mcp\/[a-z][a-z0-9_-]{0,31}\/sign-in)$/ },
   { methods: ["PUT"], path: /^\/api\/team\/my-connections\/mcp\/[a-z][a-z0-9_-]{0,31}\/key$/ },
   { methods: ["DELETE"], path: /^\/api\/team\/my-connections\/(?:apps\/[\w-]{1,64}|mcp\/[a-z][a-z0-9_-]{0,31})$/ },
+  // a Team Cloud member's own saved secrets, by name only: the handler lists and deletes the session's own alone (routes/vault.ts)
+  { methods: ["GET"], path: /^\/api\/vault$/ },
+  { methods: ["DELETE"], path: /^\/api\/vault\/secrets\/[\w-]{1,128}$/ },
   // the person opened the app: their own brief on a Team Cloud, nothing recorded for anyone else
   { methods: ["POST"], path: /^\/api\/presence\/active$/ },
   // which shared conversation a team member's window shows: the handler keeps only one they and others may read

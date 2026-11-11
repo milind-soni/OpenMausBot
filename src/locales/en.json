@@ -3890,6 +3890,8 @@
   "settings.vault.title": "Vault",
   "settings.vault.subtitle": "Passwords and keys your bots can use. Bots never see them: {app} types a password into the login page for a bot, and gives a key to its tools without showing it.",
   "settings.vault.adminOnly": "Only an admin of this installation can see and change the Vault.",
+  "settings.vault.memberSubtitle": "Keys you gave a bot in your own chats. Only you can use them, in your own chats with that bot: no teammate and no admin sees them.",
+  "settings.vault.memberEmpty": "Nothing saved yet. A key you type into a bot's card in your own chat shows here.",
   "settings.vault.loading": "Loading the Vault…",
   "settings.vault.loadError": "Could not load the Vault.",
   "settings.vault.empty": "Nothing saved yet. Add a login or a secret here, or save one when a bot asks for it.",
