@@ -552,6 +552,7 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
     <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} more={more} />
     {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /><ClaudeBedrockEndpoints /></div>}
     {orphanCodexEndpoints && <div className="px-4"><CodexEndpoints /></div>}
+    <HiddenEngines />
   </>;
 
   return (

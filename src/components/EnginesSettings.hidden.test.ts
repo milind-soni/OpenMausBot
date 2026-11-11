@@ -16,7 +16,7 @@ vi.mock("@/state/store", async (original) => ({
   },
 }));
 
-const { HiddenEngines } = await import("./EnginesSettings");
+const { EnginesSettings, HiddenEngines } = await import("./EnginesSettings");
 
 let root: Root;
 let host: HTMLElement;
@@ -38,11 +38,13 @@ describe("hidden providers in Settings", () => {
     expect(host.querySelector("[data-hidden-engines]")).toBeNull();
   });
 
-  it("lists hidden providers, folded, and unhides one with a click", async () => {
+  it.each([false, true])("lists hidden providers, folded, and unhides one with a click (simple: %s)", async (simple) => {
     fixture.hidden = [{ instanceId: "hermes", displayName: "Hermes" }, { instanceId: "pi", displayName: "pi" }];
-    flushSync(() => root.render(createElement(HiddenEngines)));
+    flushSync(() => root.render(createElement(EnginesSettings, { simple, more: { id: "ai-more", open: false, onToggle: () => {} } })));
     await settle();
-    const list = host.querySelector("[data-hidden-engines]")!;
+    const list = host.querySelector<HTMLDetailsElement>("[data-hidden-engines]")!;
+    expect(list).not.toBeNull();
+    expect(list.open).toBe(false);
     expect(list.querySelector("summary")!.textContent).toBe("Hidden (2)");
     expect(list.textContent).toContain("Hermes");
     flushSync(() => host.querySelector<HTMLButtonElement>('[data-unhide-engine="hermes"]')!.click());
