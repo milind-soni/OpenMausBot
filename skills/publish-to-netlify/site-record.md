@@ -47,6 +47,7 @@ dotfile: it is never uploaded with the site, and it never holds the token.
 | `publishedAt` | no | When the latest production deploy was first seen ready, ISO 8601 in UTC. While a newer deploy is still being processed it is the time of the one before. Absent until a deploy has been ready. |
 | `access` | no | `public`: the link answered without a login. `private`: it asked for a Netlify login (a new account's default). As last checked. |
 
-Draft deploys (`--draft`) change nothing in the record. A record written before version 1 has only `siteId`, `name`,
+`deploy.mjs --delete` deletes the site from Netlify and then removes the record; the record stays when Netlify
+refuses. Draft deploys (`--draft`) change nothing in the record. A record written before version 1 has only `siteId`, `name`,
 `url` and `adminUrl`; a reader should treat every key but `siteId` and `url` as optional, and ignore keys it does not
 know.

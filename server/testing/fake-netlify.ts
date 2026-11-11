@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // A stand-in for Netlify's deploy API on loopback: create a site, a file-digest deploy, file uploads, deploy state,
-// making a site public, and the published site itself under /live/<site id>/.
+// making a site public, deleting a site, and the published site itself under /live/<site id>/.
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -102,6 +102,11 @@ export async function startFakeNetlify(token: string, { teamLogin = false }: { t
       }
       const change = /^\/api\/v1\/sites\/([\w-]+)$/.exec(path);
       const changed = change && fake.sites.get(change[1]!);
+      if (req.method === "DELETE" && changed) {
+        fake.sites.delete(change[1]!);
+        res.writeHead(204);
+        return res.end();
+      }
       if (req.method === "PATCH" && changed) {
         if ((JSON.parse(body.toString()) as { sso_login?: boolean }).sso_login === false) changed.teamLogin = false;
         return send(200, { id: change[1], name: changed.name, sso_login: changed.teamLogin });

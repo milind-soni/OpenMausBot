@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { lstatSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import { join, relative, resolve, sep } from "node:path";
@@ -155,17 +155,19 @@ class NetlifyError extends Error {
 }
 
 function parseArgs(argv) {
-  const args = { draft: false, public: false, check: false };
+  const args = { draft: false, public: false, check: false, delete: false };
   for (let at = 0; at < argv.length; at += 1) {
     const flag = argv[at];
     if (flag === "--draft") args.draft = true;
     else if (flag === "--make-public") args.public = true;
     else if (flag === "--check") args.check = true;
+    else if (flag === "--delete") args.delete = true;
     else if (["--dir", "--token-file", "--project", "--name", "--title", "--bot-name"].includes(flag) && argv[at + 1]) args[flag.slice(2)] = argv[(at += 1)];
     else throw new Error(`unknown or incomplete option ${flag}`);
   }
-  if (!args["token-file"] || !(args.dir || args.public || args.check)) {
-    throw new Error("usage: node deploy.mjs --dir <folder to publish> --token-file <secret file> [--project <folder>] [--name <site name>] [--title <title>] [--bot-name <your name>] [--draft] [--make-public] | --check --token-file <secret file> | --make-public --token-file <secret file>");
+  if (args.delete && (args.dir || args.public || args.check || args.draft)) throw new Error("--delete takes only --token-file and --project");
+  if (!args["token-file"] || !(args.dir || args.public || args.check || args.delete)) {
+    throw new Error("usage: node deploy.mjs --dir <folder to publish> --token-file <secret file> [--project <folder>] [--name <site name>] [--title <title>] [--bot-name <your name>] [--draft] [--make-public] | --check --token-file <secret file> | --make-public --token-file <secret file> | --delete --token-file <secret file>");
   }
   return args;
 }
@@ -263,6 +265,18 @@ export async function publish(argv, env = process.env, { pollMs = 2000, waitMs =
       if (!draft) save({ url, deployState: state, ...(link.access ? { access: link.access } : {}), ...(firstLook ? { publishedAt: now().toISOString() } : {}) });
       return { ...common, ...link };
     };
+
+    if (args.delete) {
+      if (!site) throw new Error(`${siteFile} is missing; there is no published site recorded in this folder`);
+      const response = await request(`${base}/sites/${site.siteId}`, { method: "DELETE", headers: auth }, env);
+      const gone = response.status === 404;
+      if (!gone && (response.status < 200 || response.status >= 300)) throw new NetlifyError("Deleting the site", response);
+      rmSync(siteFile);
+      return {
+        ok: true, deleted: true, alreadyGone: gone, siteId: site.siteId, name: site.name, url: site.url,
+        message: gone ? "Netlify no longer had this site; its record here was removed." : "The site was deleted from Netlify and its link no longer works; its record here was removed.",
+      };
+    }
 
     if (!dir) {
       if (!site) throw new Error(`${siteFile} is missing; publish the site first`);

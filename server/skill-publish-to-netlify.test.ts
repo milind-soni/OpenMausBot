@@ -58,7 +58,7 @@ describe("publish-to-netlify skill guide", () => {
   });
 
   it("states the rules a bot must keep, with the real tool names and limits", () => {
-    expect(guide.split("\n").length).toBeLessThanOrEqual(150);
+    expect(guide.split("\n").length).toBeLessThanOrEqual(165);
     for (const tool of ["request_credential", "publish_page", "show_html", "select_computer", "copy_to_computer", "copy_from_computer", "exec_status"]) expect(guide, tool).toContain(tool);
     expect(guide).toContain(`up to ${PAGE_MAX_BYTES / 1024 / 1024} MB and ${PAGE_MAX_FILES} files`);
     expect(guide).toContain("https://app.netlify.com/user/applications#personal-access-tokens");
@@ -72,6 +72,9 @@ describe("publish-to-netlify skill guide", () => {
     expect(guide).toContain('"pending": true');
     expect(guide).toMatch(/--check --token-file/);
     expect(guide).toMatch(/don't report a dead link or a failure/);
+    expect(guide).toMatch(/--delete --token-file/);
+    expect(guide).toMatch(/only after they confirm/);
+    expect(guide).toMatch(/link will stop working for everyone/);
     expect(guide).toMatch(/--make-public[^.]*only after they say/);
     expect(guide).toMatch(/Early Access/);
     expect(guide).toMatch(/Never promise that it is always on/);
@@ -406,6 +409,62 @@ describe("publish-to-netlify helper, end to end against a stand-in on loopback",
       fake.rootContentType = "text/html; charset=UTF-8";
       expect(plain).toMatchObject({ state: "ready", live: false, access: "public", uploaded: 0, alreadyOnNetlify: 3 });
       expect(readRecord(folder)).toMatchObject({ siteId: before.siteId, url: before.url, title: before.title, createdAt: before.createdAt });
+    });
+  });
+
+  describe("deleting a published site", () => {
+    const publishIn = async (name: string) => {
+      const folder = join(home, "workspace", name);
+      mkdirSync(join(folder, "out"), { recursive: true });
+      writeFileSync(join(folder, "out", "index.html"), `<h1>${name}</h1>`);
+      const published = await run(["--dir", "out", "--token-file", tokenFile], {}, folder);
+      expect(published.json).toMatchObject({ ok: true, live: true });
+      return { folder, siteId: String(published.json.siteId), url: String(published.json.url) };
+    };
+
+    it("deletes the site from Netlify, then its record, and leaves the files", async () => {
+      const { folder, siteId, url } = await publishIn("to-delete");
+      const deleted = await run(["--delete", "--token-file", tokenFile], {}, folder);
+      expect(deleted).toMatchObject({ code: 0, json: { ok: true, deleted: true, alreadyGone: false, siteId, url } });
+      expect(String(deleted.json.message)).toMatch(/deleted from Netlify and its link no longer works/);
+      expect(fake.requests.at(-1)).toBe(`DELETE /api/v1/sites/${siteId}`);
+      expect(fake.sites.has(siteId)).toBe(false);
+      expect((await fetch(url)).status).toBe(404);
+      expect(readdirSync(folder)).toEqual(["out"]);
+
+      const none = await run(["--delete", "--token-file", tokenFile], {}, folder);
+      expect(none.code).toBe(1);
+      expect(String(none.json.error)).toMatch(/no published site recorded in this folder/);
+      expect(fake.requests.filter((request) => request.startsWith("DELETE "))).toEqual([`DELETE /api/v1/sites/${siteId}`]);
+    });
+
+    it("treats a site Netlify no longer has as already deleted", async () => {
+      const { folder, siteId } = await publishIn("already-gone");
+      fake.sites.delete(siteId);
+      const deleted = await run(["--delete", "--token-file", tokenFile], {}, folder);
+      expect(deleted).toMatchObject({ code: 0, json: { ok: true, deleted: true, alreadyGone: true, siteId } });
+      expect(readdirSync(folder)).toEqual(["out"]);
+    });
+
+    it("keeps the site and its record when Netlify refuses the token, and deletes nothing else", async () => {
+      const { folder, siteId } = await publishIn("kept");
+      const wrong = join(project, ".openmausbot-secrets", "thread1", "card3");
+      writeFileSync(wrong, "nfp_RevokedTokenNeverReal", { mode: 0o600 });
+      const refused = await run(["--delete", "--token-file", wrong], {}, folder);
+      rmSync(wrong);
+      expect(refused).toMatchObject({ code: 1, json: { ok: false, error: "Deleting the site: Netlify answered 401: Access Denied" } });
+      expect(refused.stdout).not.toContain("nfp_Revoked");
+      expect(fake.sites.has(siteId)).toBe(true);
+      expect(readdirSync(folder).sort()).toEqual([helper.SITE_FILE, "out"]);
+
+      fake.failNext(500, { message: "Internal error" });
+      const failed = await run(["--delete", "--token-file", tokenFile], {}, folder);
+      expect(failed.json).toMatchObject({ ok: false, error: "Deleting the site: Netlify answered 500: Internal error" });
+      expect(readdirSync(folder).sort()).toEqual([helper.SITE_FILE, "out"]);
+
+      const mixed = await run(["--delete", "--dir", "out", "--token-file", tokenFile], {}, folder);
+      expect(String(mixed.json.error)).toMatch(/--delete takes only --token-file and --project/);
+      expect(fake.sites.has(siteId)).toBe(true);
     });
   });
 
