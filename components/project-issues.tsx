@@ -620,8 +620,8 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
         <thead><tr><th scope="col">Issue</th>{properties.has("status") && <th scope="col" className="col-status">Status</th>}{properties.has("priority") && <th scope="col" className="col-priority">Priority</th>}{properties.has("assignee") && <th scope="col" className="col-assignee">Assignee</th>}{properties.has("dueDate") && <th scope="col" className="col-due">Due</th>}{properties.has("created") && <th scope="col" className="col-created">Created</th>}</tr></thead>
         {listGroups.map(group => <Fragment key={group.key || "none"}>
           {view.grouping !== "none" && <tbody className="issue-group"><tr className="issue-group-row"><th scope="rowgroup" colSpan={columnCount}>
-            <span>{view.grouping === "status" && <StatusIcon title={isDraftColumn(visualColumns.find(column => column._id === group.key) ?? { title: group.title }) ? "Draft" : group.title} />}<strong>{group.title}</strong><small>{group.tasks.length}</small></span>
-            {canEdit && online && view.grouping === "status" && <button type="button" className="icon-button" aria-label={`Add issue to ${group.title}`} onClick={() => setLaneCreate(group.key as Id<"columns">)}><Plus size={14} /></button>}
+            <div className="issue-group-head"><span>{view.grouping === "status" && <StatusIcon title={isDraftColumn(visualColumns.find(column => column._id === group.key) ?? { title: group.title }) ? "Draft" : group.title} />}<strong>{group.title}</strong><small>{group.tasks.length}</small></span>
+            {canEdit && online && view.grouping === "status" && <button type="button" className="icon-button" aria-label={`Add issue to ${group.title}`} onClick={() => setLaneCreate(group.key as Id<"columns">)}><Plus size={14} /></button>}</div>
           </th></tr></tbody>}
           <tbody>{group.tasks.map(task => {
             const status = statusOf(task);
@@ -797,7 +797,7 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
       }} />}
       {columnDelete && <ColumnDeleteDialog column={columnDelete} columns={visualColumns} activeCount={board.tasks.filter(task => task.columnId === columnDelete._id && !task.done).length} completedCount={board.tasks.filter(task => task.columnId === columnDelete._id && task.done).length} projectId={projectId} sessionToken={sessionToken} onClose={() => setColumnDelete(null)} />}
       {laneCreate && <IssueComposer sessionToken={sessionToken} activeProjectId={projectId} projects={[project]} initialColumnId={laneCreate} onClose={() => setLaneCreate(null)} onCreated={() => undefined} />}
-      {selectedTaskId ? <TaskModal key={selectedTaskId} onOpenPage={navigation ? () => { const taskId = selectedTaskId; closeTask(false); navigation.openIssue(projectId, taskId); } : undefined} onOpenReference={(target, task) => { if (target === projectId && task) setSelectedTaskId(task); else { closeTask(); onOpenReference?.(target, task); } }} project={project} projectId={projectId} sessionToken={sessionToken} taskId={selectedTaskId} canEdit={canEdit} onClose={closeTask} onDelete={() => deleteFromIssue(selectedTaskId)} /> : null}
+      {selectedTaskId ? <TaskModal key={selectedTaskId} onOpenPage={navigation ? () => { const taskId = selectedTaskId; pushedIssue.current = null; setSelectedTaskId(null); navigation.openIssue(projectId, taskId, { replace: true }); } : undefined} onOpenReference={(target, task) => { if (target === projectId && task) setSelectedTaskId(task); else { closeTask(); onOpenReference?.(target, task); } }} project={project} projectId={projectId} sessionToken={sessionToken} taskId={selectedTaskId} canEdit={canEdit} onClose={closeTask} onDelete={() => deleteFromIssue(selectedTaskId)} /> : null}
       <IssueToastHost />
     </section>
   );

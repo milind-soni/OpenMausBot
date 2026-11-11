@@ -270,13 +270,14 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
     if (!already) window.history.pushState(null, "", `/${workspace.slug}?project=${projectId}`);
   };
   /** An issue's full page: its own history entry and URL; Back (or Escape) returns to where it was opened from. */
-  const openIssue = (projectId: Id<"projects">, taskId: Id<"tasks">) => {
+  const openIssue = (projectId: Id<"projects">, taskId: Id<"tasks">, options?: { replace?: boolean }) => {
     setLinkedTask(null); setMobileOpen(false);
     if (mainView === "project") returnFocus.current = { projectId, taskId };
     setActiveProjectId(projectId);
     setIssueRoute({ slug: workspace.slug, key: taskKey(taskId), taskId });
     setMainView("issue");
-    if (window.location.pathname !== issuePath(workspace.slug, taskId)) window.history.pushState({ originIssuePage: taskId }, "", issuePath(workspace.slug, taskId));
+    if (options?.replace) window.history.replaceState({ originIssuePage: taskId }, "", issuePath(workspace.slug, taskId));
+    else if (window.location.pathname !== issuePath(workspace.slug, taskId)) window.history.pushState({ originIssuePage: taskId }, "", issuePath(workspace.slug, taskId));
   };
   const closeIssue = (projectId?: Id<"projects">) => {
     if (window.history.state?.originIssuePage) { window.history.back(); return; }
@@ -285,7 +286,7 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
     window.history.pushState(null, "", `/${workspace.slug}`);
   };
   const navigation = useMemo<IssueNavigation>(() => ({
-    openIssue: (projectId, taskId) => openIssueRef.current(projectId, taskId),
+    openIssue: (projectId, taskId, options) => openIssueRef.current(projectId, taskId, options),
     takeReturnFocus: projectId => {
       const target = returnFocus.current;
       if (target?.projectId !== projectId) return null;
@@ -413,7 +414,7 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
       {issueOpen && <IssueComposer sessionToken={sessionToken} activeProjectId={mainView === "project" ? activeProjectId : null} projects={sidebarProjects || []} onClose={() => setIssueOpen(false)} onCreated={openProject} />}
       {createWorkspaceOpen && <CreateWorkspaceDialog sessionToken={sessionToken} onClose={() => setCreateWorkspaceOpen(false)} />}
       {memberEmail && <MemberProfile key={memberEmail} email={memberEmail} sessionToken={sessionToken} onClose={() => setMemberEmail(null)} onOpenIssue={openIssue} />}
-      {linkedTask && projects?.find(p => p._id === linkedTask.projectId) && <TaskModal project={projects.find(p => p._id === linkedTask.projectId)!} projectId={linkedTask.projectId} taskId={linkedTask.taskId} sessionToken={sessionToken} canEdit={projects.find(p => p._id === linkedTask.projectId)!.memberRole !== "viewer"} onClose={() => setLinkedTask(null)} onOpenReference={openReference} onOpenPage={() => openIssue(linkedTask.projectId, linkedTask.taskId)} />}
+      {linkedTask && projects?.find(p => p._id === linkedTask.projectId) && <TaskModal project={projects.find(p => p._id === linkedTask.projectId)!} projectId={linkedTask.projectId} taskId={linkedTask.taskId} sessionToken={sessionToken} canEdit={projects.find(p => p._id === linkedTask.projectId)!.memberRole !== "viewer"} onClose={() => setLinkedTask(null)} onOpenReference={openReference} onOpenPage={() => openIssue(linkedTask.projectId, linkedTask.taskId, { replace: true })} />}
       {command && <CommandMenu key={`${command.page}:${command.issue?.taskId ?? ""}`} sessionToken={sessionToken} issue={command.issue} initialPage={command.page} canEdit={canEditIssue(command.issue)} onClose={() => setCommand(null)}
         onCreateIssue={canCreateIssue ? () => setIssueOpen(true) : undefined} onSearch={() => setSearchOpen(true)} onShortcuts={() => setShortcutsOpen(true)} onOpenInbox={() => openView("inbox")} onOpenChat={() => openView("chat")} onOpenIssue={openIssue} />}
       {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}

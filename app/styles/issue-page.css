@@ -72,8 +72,9 @@
 .sub-issue-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; height: 36px; padding: 0 var(--space-2); border: 0; background: transparent; color: var(--text-1); text-align: left; }
 .sub-issue-row:hover { background: var(--hover); }
 .sub-issue-row > small { flex: none; width: 64px; color: var(--text-3); font-size: var(--text-xs); }
-.sub-issue-row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub-issue-row > span:not(.origin-user-avatar) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sub-issue-row > span.is-done { color: var(--text-3); }
+.sub-issue-row > .origin-user-avatar { flex: none; }
 .sub-issue-row .sub-issue-done { flex: none; color: var(--accent-text); }
 .sub-issue-row .origin-user-avatar { --avatar-size: 18px; }
 .sub-issue-add { display: flex; align-items: center; gap: var(--space-2); height: 36px; padding: 0 var(--space-2); border-bottom: 1px solid var(--border-1); color: var(--text-3); }
@@ -87,6 +88,9 @@
 .label-chip > span:not(.label-dot) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .label-chip-more { color: var(--text-3); }
 .task-labels .label-chip { height: 20px; font-size: var(--text-xs); }
+/* On a card, labels take what room is left and clip rather than widen the card. */
+.task-meta > .label-chips { flex: 0 1 auto; min-width: 0; }
+.task-meta > .label-chips .label-chip { flex-shrink: 1; min-width: 0; }
 .issue-labels > .label-chip { gap: 6px; padding-right: 2px; color: var(--text-1); }
 .issue-labels > .label-chip > button { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--text-3); }
 .issue-labels > .label-chip > button:hover { background: var(--surface-5); color: var(--text-1); }
@@ -100,6 +104,7 @@
 .label-list-options:focus { outline: none; }
 .label-list-options > button { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 30px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-1); font-size: var(--text-base); text-align: left; }
 .label-list-options > button[data-highlighted="true"] { background: var(--surface-5); }
+.label-list-options > button > :is(.label-dot, .label-check) { flex: none; }
 .label-list-options > button > span:not(.label-dot):not(.label-check) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .label-list-options > button > small { color: var(--text-3); font-size: var(--text-xs); }
 .label-list-options > p { margin: 0; padding: var(--space-2); color: var(--text-3); font-size: var(--text-sm); }
@@ -159,10 +164,11 @@
 .issue-row-labels { flex: 0 1 auto; justify-content: flex-end; margin-left: auto; }
 .issue-row-labels .label-chip { height: 20px; font-size: var(--text-xs); }
 .issue-group-row th { position: sticky; top: 32px; z-index: 1; height: 36px; padding: 0 var(--space-2) 0 var(--space-3); border-bottom: 1px solid var(--border-1); background: var(--surface-2); text-align: left; }
-.issue-group-row th > span { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text-1); font-size: var(--text-base); }
+.issue-group-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.issue-group-head > span { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text-1); font-size: var(--text-base); }
 .issue-group-row strong { font-weight: var(--weight-medium); }
 .issue-group-row small { color: var(--text-3); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
-.issue-group-row .icon-button { float: right; width: 26px; height: 26px; margin-top: 5px; }
+.issue-group-row .icon-button { width: 26px; height: 26px; }
 .task-created { color: var(--text-3); font-size: var(--text-xs); }
 
 /* Command menu. */

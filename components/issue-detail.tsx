@@ -495,7 +495,7 @@ function TaskModalContent({
   return <Dialog title={details ? `${key} ${details.task.title}` : "Issue"} className="issue-detail-dialog" onClose={closeIssue} heading={<div className="issue-detail-heading">
       <h2 tabIndex={-1} data-initial-focus><ProjectIcon project={project} /><span>{project.name}</span>{details && <><ChevronRight size={13} aria-hidden="true" /><span className="issue-detail-key issue-key">{key}</span></>}</h2>
       {saveState}
-      {details && onOpenPage && <button type="button" className="icon-button" aria-label="Open issue page" title="Open full page" onClick={() => { flush(); releaseHistory(); onOpenPage(); }}><Maximize2 size={14} /></button>}
+      {details && onOpenPage && <button type="button" className="icon-button" aria-label="Open issue page" title="Open full page" onClick={() => { flush(); ownedEntry = null; onOpenPage(); }}><Maximize2 size={14} /></button>}
       {details && <button type="button" className="icon-button" aria-label="Copy link" title="Copy link" onClick={() => void copyLink()}><LinkIcon size={15} /></button>}
       {actionsMenu}
     </div>}>

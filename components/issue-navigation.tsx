@@ -3,8 +3,8 @@ import { createContext, useContext } from "react";
 import type { Id } from "@/convex/_generated/dataModel";
 
 export type IssueNavigation = {
-  /** Opens the issue's full page (its own URL; Back returns). */
-  openIssue: (projectId: Id<"projects">, taskId: Id<"tasks">) => void;
+  /** Opens the issue's full page (its own URL; Back returns). `replace` swaps out the current entry (a peek's). */
+  openIssue: (projectId: Id<"projects">, taskId: Id<"tasks">, options?: { replace?: boolean }) => void;
   /** The issue last opened from this project's list, to focus again when coming back to it (read once). */
   takeReturnFocus: (projectId: Id<"projects">) => Id<"tasks"> | null;
 };

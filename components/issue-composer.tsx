@@ -205,7 +205,7 @@ export function IssueComposer({
             </IssueFields>
             {suggestLabels(`${draft.title} ${draft.description}`, draft.labels).length > 0 && <div className="composer-label-suggestions" aria-label="Suggested labels">
               <span>Suggested</span>
-              {suggestLabels(`${draft.title} ${draft.description}`, draft.labels).map(label => <button key={label} type="button" className="ghost-button compact" onClick={() => update({ labels: [...draft.labels, label] })}><LabelChips labels={[label]} /></button>)}
+              {suggestLabels(`${draft.title} ${draft.description}`, draft.labels).map(label => <button key={label} type="button" className="ghost-button compact" onClick={() => { update({ labels: [...draft.labels, label] }); titleInput.current?.focus({ preventScroll: true }); }}><LabelChips labels={[label]} /></button>)}
             </div>}
             <footer className="issue-composer-footer">
               {error ? <div role="alert" className="issue-field-error">{error}</div> : <span />}

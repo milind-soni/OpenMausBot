@@ -64,9 +64,11 @@ export function colorForLabel(name: string) {
   const key = labelKey(name);
   const preset = DEFAULT_LABELS.find(label => label.name.toLowerCase() === key);
   if (preset) return preset.color;
+  // New labels take the colors the defaults don't use, so "Design" never looks like "Bug".
+  const palette = LABEL_COLORS.filter(color => !DEFAULT_LABELS.some(label => label.color === color) && color !== LABEL_COLORS[0]);
   let hash = 0;
   for (const char of key) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return LABEL_COLORS[1 + (hash % (LABEL_COLORS.length - 1))]!;
+  return palette[hash % palette.length]!;
 }
 
 /** Default labels a registry does not have yet (matched case-insensitively, archived ones count as present). */
