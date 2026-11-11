@@ -10,7 +10,6 @@ services:
       - "127.0.0.1:3000:3000"
     environment:
       ORIGIN_PUBLIC_URL: ${ORIGIN_PUBLIC_URL:?Set your public origin}
-      ORIGIN_LOCAL_DATA_DIR: /data/origin
       ORIGIN_INTEGRATION_SECRET: ${ORIGIN_INTEGRATION_SECRET:?Set your integration secret}
       ORIGIN_SMTP_HOST: ${ORIGIN_SMTP_HOST:-}
       ORIGIN_SMTP_PORT: ${ORIGIN_SMTP_PORT:-465}
@@ -29,13 +28,8 @@ services:
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       ORIGIN_LEGACY_OWNER_EMAIL: ${ORIGIN_LEGACY_OWNER_EMAIL:-}
-    volumes:
-      - origin-data:/data/origin
     logging:
       driver: json-file
       options:
         max-size: 10m
         max-file: "3"
-
-volumes:
-  origin-data:
