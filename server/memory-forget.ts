@@ -116,6 +116,6 @@ export function botMemoryUpdate(
     rememberForgotten(passage, mentions);
     return { ok: true, forgotten, aboutMe };
   }
-  if (body.action === "append" && typeof body.text === "string") clearForgotten(body.text);
+  if ((body.action === "append" || body.action === "supersede") && typeof body.text === "string") clearForgotten(body.text);
   return updateMemory(layer, { action: body.action, text: body.text, oldText: body.oldText, ...(body.until !== undefined ? { until: body.until } : {}) } as MemoryUpdate, { source: opts.source });
 }

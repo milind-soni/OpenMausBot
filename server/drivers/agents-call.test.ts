@@ -360,6 +360,18 @@ describe("memory_update", () => {
     expect(isForgotten("The person likes short answers")).toBe(false);
   });
 
+  it("lets a forgotten fact count again when the person restores it as a change to an existing entry", async () => {
+    const bot = "bot-memory-supersede-forgotten";
+    const ctx = context({ botId: bot, client: harness(bot) });
+    expect((await callTool("memory_update", { action: "append", text: "The person wants replies in English" }, ctx)).isError).toBeFalsy();
+    expect((await callTool("memory_update", { action: "forget", old_text: "long replies" }, ctx)).isError).toBeFalsy();
+    expect(isForgotten("The person likes long replies")).toBe(true);
+
+    const changed = await callTool("memory_update", { action: "supersede", old_text: "The person wants replies in English", text: "The person wants long replies in English" }, ctx);
+    expect(changed.isError, changed.text).toBeFalsy();
+    expect(isForgotten("The person likes long replies")).toBe(false);
+  });
+
   it("removes a whole dated entry when only its fact is named, never leaving a note with a date and no text", async () => {
     const bot = "bot-memory-remove";
     writeMemoryFile(bot, '- 2026-10-27 · from chat "Remember" (noticed) · The person prefers short answers\n- Keep this unique fact.\n');
