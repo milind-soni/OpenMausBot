@@ -94,7 +94,9 @@ async function publishInOrder<T>(target: string, publish: () => Promise<T>): Pro
   // Directory identity covers case and Unicode aliases without guessing a volume's path rules.
   // Filesystems without a usable identity share a conservative fallback queue.
   const key = directory && directory.ino !== 0n ? `${directory.dev}:${directory.ino}` : "unidentified-directory";
-  const previous = publications.get(key) ?? Promise.resolve();
+  const previous = key === "unidentified-directory"
+    ? Promise.all(publications.values())
+    : Promise.all([publications.get(key), publications.get("unidentified-directory")]);
   const result = previous.then(publish);
   const settled = result.then(() => {}, () => {});
   publications.set(key, settled);

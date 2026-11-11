@@ -4,6 +4,7 @@ import { link, lstat, rename, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { setImmediate } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { removeTempDir } from "./testing/cleanup.ts";
 
@@ -72,15 +73,33 @@ describe("publishing bot files during a move", () => {
     expect(await send(path, "")).toEqual({ status: 409, body: { conflict: true } });
   });
 
-  it.each([["current.txt", false], ["CURRENT.txt", false], ["CURRENT.txt", true]] as const)("checks a queued replacement through %s with unavailable identity %s", async (secondName, unavailableIdentity) => {
+  it.each([
+    ["current.txt", false, false],
+    ["CURRENT.txt", false, false],
+    ["CURRENT.txt", true, true],
+    ["CURRENT.txt", true, false],
+    ["CURRENT.txt", false, true],
+  ] as const)("checks a queued replacement through %s when directory identity is unavailable: %s then %s", async (secondName, firstUnavailable, secondUnavailable) => {
     const path = "workspaces/b1/current.txt";
     writeFileSync(join(data, path), "original");
     const alias = join(data, "workspaces/b1/CURRENT.txt");
     const actual = join(data, path);
-    vi.mocked(lstat).mockImplementation((file, ...options) => realFs.lstat(file === alias ? actual : file, ...options));
-    vi.mocked(createReadStream).mockImplementation((file, options) => realSyncFs.createReadStream(file === alias ? actual : file, options));
-    vi.mocked(stat).mockImplementation((file, options) => unavailableIdentity && options?.bigint
-      ? Promise.reject(new Error("directory identity unavailable")) : realFs.stat(file, options));
+    let paused = false;
+    let readsWhilePaused = 0;
+    vi.mocked(lstat).mockImplementation(async (file, options) => realSyncFs.lstatSync(file === alias ? actual : file, { ...options, throwIfNoEntry: true }));
+    vi.mocked(createReadStream).mockImplementation((file) => {
+      if (paused && (file === alias || file === actual)) readsWhilePaused++;
+      return Readable.from([realSyncFs.readFileSync(file === alias ? actual : file)]) as ReturnType<typeof createReadStream>;
+    });
+    let identityReads = 0;
+    let secondIdentity!: () => void;
+    const secondIdentified = new Promise<void>((resolve) => { secondIdentity = resolve; });
+    vi.mocked(stat).mockImplementation((file, options) => {
+      if (!options?.bigint) return realFs.stat(file, options);
+      const unavailable = identityReads++ === 0 ? firstUnavailable : secondUnavailable;
+      if (identityReads === 2) secondIdentity();
+      return unavailable ? Promise.reject(new Error("directory identity unavailable")) : Promise.resolve(realSyncFs.statSync(file, options));
+    });
     let reached!: () => void;
     let release!: () => void;
     const waiting = new Promise<void>((resolve) => { reached = resolve; });
@@ -89,6 +108,7 @@ describe("publishing bot files during a move", () => {
     vi.mocked(rename).mockImplementation(async (source, target) => {
       if (target === join(data, path) && firstRename) {
         firstRename = false;
+        paused = true;
         reached();
         await allowed;
       }
@@ -97,15 +117,17 @@ describe("publishing bot files during a move", () => {
     const first = send(path, "updated", "original");
     await waiting;
     const second = send(`workspaces/b1/${secondName}`, "", "original");
-    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await Promise.race([second, new Promise<void>((resolve) => { timer = setTimeout(resolve, 1000); })]);
+      await secondIdentified;
+      await setImmediate();
     } finally {
-      clearTimeout(timer);
+      paused = false;
       release();
     }
-    expect(await first).toEqual({ status: 201, body: { stored: true } });
-    expect(await second).toEqual({ status: 409, body: { conflict: true } });
+    const [firstAnswer, secondAnswer] = await Promise.all([first, second]);
+    expect(readsWhilePaused).toBe(0);
+    expect(firstAnswer).toEqual({ status: 201, body: { stored: true } });
+    expect(secondAnswer).toEqual({ status: 409, body: { conflict: true } });
     expect(readFileSync(join(data, path), "utf8")).toBe("updated");
   });
 
