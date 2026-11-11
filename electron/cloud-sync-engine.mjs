@@ -113,21 +113,8 @@ export async function fetchOutputs({ client, state, folder, local, platform = pr
   const base = state.base(folder.id);
   const { entries: pc, temps } = await scanPc(local, base, { now });
   for (const temp of temps) if (now() - temp.mtimeMs > TEMP_STALE_MS) fs.rmSync(temp.file, { force: true });
-  const listed = (await client.files(folder.id)).filter((file) => validWirePath(file.path) && !neverFromCloud(file.path) && !(platform === "win32" && windowsProblem(file.path)));
-  if (caseInsensitive(local, platform)) {
-    const names = new Map();
-    for (const file of listed) {
-      const parts = file.path.split("/");
-      for (let length = 1; length <= parts.length; length++) {
-        const name = parts.slice(0, length).join("/"), key = foldKey(name);
-        const previous = names.get(key);
-        if (previous !== undefined && previous !== name) {
-          throw new Error(`${JSON.stringify(previous)} and ${JSON.stringify(name)} have the same name on this computer. Rename one on My Cloud before syncing.`);
-        }
-        names.set(key, name);
-      }
-    }
-  }
+  let listed = (await client.files(folder.id)).filter((file) => validWirePath(file.path) && !neverFromCloud(file.path) && !(platform === "win32" && windowsProblem(file.path)));
+  if (caseInsensitive(local, platform)) listed = withoutNameClashes(listed, result);
   const cloud = new Map(listed.map((file) => [file.path, file]));
   const { downloads, records } = planOutputs({ base, pc, cloud });
   const ctx = { client, state, folder, local, pc, cloud, now, trashItem, markDownloaded, freeBytes, result };
@@ -140,6 +127,21 @@ export async function fetchOutputs({ client, state, folder, local, platform = pr
   });
   result.status = result.waitingBytes ? "waiting" : result.done < result.files ? "copying" : result.problem ? "problem" : "synced";
   return result;
+}
+
+/** On a disk where two Cloud paths name the same file, keep the first by path, leave the other on My Cloud and say so. */
+function withoutNameClashes(listed, result) {
+  const kept = new Map();
+  const dropped = new Set();
+  for (const file of [...listed].sort((a, b) => (a.path < b.path ? -1 : 1))) {
+    const parts = file.path.split("/");
+    const names = parts.map((_, index) => parts.slice(0, index + 1).join("/"));
+    const clash = names.find((name) => kept.has(foldKey(name)) && kept.get(foldKey(name)) !== name);
+    if (clash === undefined) { for (const name of names) kept.set(foldKey(name), name); continue; }
+    dropped.add(file);
+    result.problem ??= `${JSON.stringify(kept.get(foldKey(clash)))} and ${JSON.stringify(clash)} have the same name on this computer. Rename one on My Cloud.`;
+  }
+  return listed.filter((file) => !dropped.has(file));
 }
 
 /** Where a wire path lives in this folder: never outside it, and never through a link or a file in the way. */

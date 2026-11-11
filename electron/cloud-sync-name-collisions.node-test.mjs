@@ -42,17 +42,27 @@ test("a single decomposed filename still uploads using its normalized wire name"
   assert.equal(ctx.cloud.get(ctx.folder.id, "café.txt"), "coffee");
 });
 
-for (const names of [["Report.txt", "report.txt"], ["Data", "data/result.txt"], ["Docs/a.txt", "docs/b.txt"]]) test(`refuses case-aliasing Cloud paths ${names.join(" and ")} on Windows`, async (t) => {
+/** Every file under `root`, by the exact names on disk, so a case-folding disk can't answer for the alias. */
+function filesIn(root, prefix = "") {
+  return readdirSync(join(root, ...prefix.split("/").filter(Boolean)), { withFileTypes: true }).flatMap((entry) => {
+    const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+    return entry.isDirectory() ? filesIn(root, path) : [path];
+  }).sort();
+}
+
+for (const names of [["Report.txt", "report.txt"], ["Data", "data/result.txt"], ["Docs/a.txt", "docs/b.txt"]]) test(`keeps only the first of case-aliasing Cloud paths ${names.join(" and ")} on Windows`, async (t) => {
   const ctx = setup(t);
-  ctx.cloud.put(ctx.folder.id, names[0], "first");
   ctx.cloud.put(ctx.folder.id, names[1], "second");
-  const downloaded = [];
-  await assert.rejects(fetchOutputs({ ...ctx, platform: "win32", freeBytes: () => 100 * 1024 ** 3,
-    markDownloaded: async file => { downloaded.push(file); }, trashItem: async () => { throw new Error("must not trash"); },
-  }), /same.*name|name.*conflict/i);
-  assert.deepEqual(downloaded, []);
-  assert.deepEqual(readdirSync(ctx.local), []);
-  assert.equal(ctx.state.base(ctx.folder.id).size, 0);
+  ctx.cloud.put(ctx.folder.id, names[0], "first");
+  ctx.cloud.put(ctx.folder.id, "other.txt", "unrelated");
+  const result = await fetchOutputs({ ...ctx, platform: "win32", freeBytes: () => 100 * 1024 ** 3,
+    markDownloaded: async () => {}, trashItem: async () => { throw new Error("must not trash"); },
+  });
+  assert.match(result.problem, /same name/);
+  assert.equal(result.status, "problem");
+  assert.deepEqual(filesIn(ctx.local), [names[0], "other.txt"].sort());
+  assert.equal(readFileSync(join(ctx.local, ...names[0].split("/")), "utf8"), "first");
+  assert.equal(readFileSync(join(ctx.local, "other.txt"), "utf8"), "unrelated");
 });
 
 test("keeps distinct case-sensitive Cloud filenames on a filesystem that supports them", async (t) => {
