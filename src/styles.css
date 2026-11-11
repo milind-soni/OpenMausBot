@@ -1639,12 +1639,12 @@ body {
 @media (max-width: 767.98px) {
   .glass-popup-frame[data-settings-sheet] {
     align-items: flex-end;
-    padding: 44px 0 0;
+    padding: 12px 0 0;
   }
   .glass-popup-frame[data-settings-sheet] > .glass-popup {
     width: 100%;
     height: 100%;
-    border-radius: 24px 24px 0 0;
+    border-radius: 16px 16px 0 0;
   }
 }
 /* Cards and rails sitting on the glass: a second, thinner pane. */
@@ -1696,10 +1696,92 @@ body {
 /* Settings: cards and fields edge in one faint ink line. In Midnight and Daylight the sheet is opaque, in the page
    colour, with no shadow; every other skin keeps its glass. */
 [data-settings-look] {
-  --settings-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  --settings-edge: color-mix(in srgb, var(--color-ink) 10%, transparent);
+  --switch-on: var(--color-accent);
+  --switch-knob-on: #fff;
+  --switch-outline: color-mix(in srgb, var(--color-ink) 50%, transparent);
 }
 :root[data-skin="midnight"] [data-settings-look] {
-  --settings-edge: color-mix(in srgb, var(--color-ink) 6%, transparent);
+  --settings-edge: color-mix(in srgb, var(--color-ink) 9%, transparent);
+  --switch-outline: color-mix(in srgb, var(--color-ink) 40%, transparent);
+}
+:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] {
+  --switch-on: var(--color-ink);
+  --switch-knob-on: var(--color-app);
+}
+/* One switch in Settings: 32 by 20. Off is a light fill with an outline that keeps 3:1 against the card. */
+[data-settings-look] [data-switch] {
+  width: 32px;
+  height: 20px;
+  background: color-mix(in srgb, var(--color-ink) 22%, transparent);
+  box-shadow: inset 0 0 0 1px var(--switch-outline);
+  filter: none;
+}
+[data-settings-look] [data-switch][aria-checked="true"] {
+  background: var(--switch-on);
+  box-shadow: none;
+}
+[data-settings-look] [data-switch] > span {
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  transition-duration: 150ms;
+}
+[data-settings-look] [data-switch][aria-checked="true"] > span {
+  left: 14px;
+  background: var(--switch-knob-on);
+}
+/* One button family in Settings: 28 tall pills, 13/20 500; secondary on a 5% ink fill. */
+[data-settings-look] .ui-button {
+  height: 28px;
+  min-height: 28px;
+  border-radius: 9999px;
+  border-color: transparent;
+  padding: 0 12px;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+}
+[data-settings-look] .ui-button:not(.ui-button-primary) {
+  background: color-mix(in srgb, var(--color-ink) 5%, transparent);
+  color: var(--color-ink);
+}
+[data-settings-look] .ui-button:not(.ui-button-primary):enabled:is(:hover, :active) {
+  background: color-mix(in srgb, var(--color-ink) 10%, transparent);
+}
+[data-settings-look] .settings-quiet {
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--color-ink-secondary);
+}
+[data-settings-look] .settings-quiet:enabled:hover { color: var(--color-ink); background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
+[data-settings-look] .settings-quiet[data-danger]:enabled:hover { color: var(--color-danger); }
+/* Rows in a card part with a hairline that starts where their text starts: 16 in, 60 in a card whose rows lead with an icon. */
+[data-settings-rows] > :not([hidden]) ~ :not([hidden]) {
+  background-image: linear-gradient(var(--settings-edge), var(--settings-edge));
+  background-repeat: no-repeat;
+  background-size: calc(100% - 32px) 0.5px;
+  background-position: 16px 0;
+}
+[data-settings-rows][data-settings-icons] > :not([hidden]) ~ :not([hidden]) {
+  background-size: calc(100% - 76px) 0.5px;
+  background-position: 60px 0;
+}
+[data-settings-highlight] {
+  animation: settings-highlight 1.2s ease-out;
+}
+@keyframes settings-highlight {
+  from { background-color: var(--color-menu-active); }
+  to { background-color: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-settings-highlight] { animation: none; }
 }
 :root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .glass-surface {
   background: var(--color-app);
@@ -1741,8 +1823,22 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--color-scrollbar) transparent;
 }
+@property --settings-fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes settings-fade-top {
+  0% { --settings-fade-top: 0px; }
+  6%, 100% { --settings-fade-top: 12px; }
+}
 @supports (animation-timeline: scroll()) {
   .settings-scroll {
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--settings-fade-top), #000 calc(100% - var(--settings-fade)), transparent);
+    animation: settings-fade linear both, settings-fade-top linear both;
+    animation-timeline: scroll(self), scroll(self);
+  }
+  .settings-scroll[data-settings-content] {
     mask-image: linear-gradient(to bottom, #000 calc(100% - var(--settings-fade)), transparent);
     animation: settings-fade linear both;
     animation-timeline: scroll(self);
@@ -1754,12 +1850,12 @@ body {
 }
 @media (min-width: 768px) {
   .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] {
-    padding: 48px 16px;
+    padding: 24px;
   }
   .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] > .glass-popup {
-    width: min(860px, 100%);
-    height: min(700px, 100%);
-    border-radius: 12px;
+    width: min(920px, 100%);
+    height: min(720px, 100%);
+    border-radius: 16px;
   }
 }
 

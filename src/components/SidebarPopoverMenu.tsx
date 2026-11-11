@@ -26,6 +26,8 @@ export interface SidebarMenuItem {
   keepOpen?: boolean;
   submenu?: SidebarMenuItem[];
   chevron?: boolean;
+  /** a 32 px leading picture and a 48 px row: the account at the top of the menu */
+  large?: boolean;
   /** a sentence that wraps instead of being cut short */
   wrap?: boolean;
   /** the row's tooltip, for what its one line leaves out */
@@ -123,20 +125,21 @@ function MenuRows({
             onPointerEnter={(event) => onRowEnter?.(item, event.currentTarget, { x: event.clientX, y: event.clientY })}
             onPointerLeave={() => onRowLeave?.(item)}
             className={cn(
-              "flex min-h-[30px] w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-[14px] leading-[18px] disabled:opacity-60 focus-visible:bg-menu-hover focus-visible:outline-none",
+              "flex min-h-8 w-full items-center gap-2 rounded-lg px-2 py-1.5 text-start text-[14px] leading-5 disabled:opacity-60 focus-visible:bg-menu-hover focus-visible:outline-none",
+              item.large && "min-h-12 py-1.5",
               item.active || (item.submenu && openSubmenu === item.key && engaged) ? "bg-menu-active text-ink" : "text-ink hover:bg-menu-hover",
             )}
           >
             {item.icon && (
               <span
-                className={cn("flex size-4 shrink-0 items-center justify-center [&>svg]:size-4", item.wrap && "h-[18px] self-start", item.active ? "text-accent" : "text-ink-secondary")}
+                className={cn("flex shrink-0 items-center justify-center", item.large ? "size-8" : "size-4 [&>svg]:size-4", item.wrap && "h-[18px] self-start", item.active ? "text-accent" : "text-ink-secondary")}
               >
                 {item.icon}
               </span>
             )}
             {item.subtitle || item.note ? (
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className={item.wrap ? "break-words" : "truncate"}>{item.label}</span>
+                <span className={cn(item.wrap ? "break-words" : "truncate", item.large && "font-medium leading-[18px]")}>{item.label}</span>
                 {item.subtitle && <span className="truncate text-[12px] font-normal leading-4 text-ink-secondary">{item.subtitle}</span>}
                 {item.note && <span className="text-[12px] font-normal leading-snug text-ink-tertiary">{item.note}</span>}
               </span>

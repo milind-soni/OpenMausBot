@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
-import { Loader2, ShieldCheck } from "lucide-react";
+import { ChevronRight, Loader2 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import { cn } from "@/lib/cn";
+import { openExternalLink } from "@/lib/app-links";
+import { PHONE_APPS } from "./PhoneAppDialog";
 import type { CompanionAccountState } from "../types/ogb";
 import {
   PhoneSetupFlowView,
@@ -16,12 +20,12 @@ import {
   usePhoneSetupController,
 } from "./PhoneSetupFlow";
 import { companionPairingMode } from "../lib/phone-setup";
-import { revealPhonePairing } from "../lib/phone-pairing";
+import { revealPhonePairing, takePairOnOpen } from "../lib/phone-pairing";
 import { showTunnelRetiredNotice } from "../lib/phone-link";
 import { PhonesList } from "./PhonesList";
 import { PairedPhones } from "./PairedPhones";
 import { TailnetComputers } from "./TailnetComputers";
-import { Card, Switch } from "./SettingsPrimitives";
+import { SettingRow, SettingsGroup, SettingsLinkRow, SettingsRows, Switch } from "./SettingsPrimitives";
 import { Layer } from "./Layer";
 import { productName } from "../lib/brand";
 import { useStore } from "@/state/store";
@@ -169,7 +173,6 @@ const ROUTE_TEXT = {
   relay: { name: "devices.route.relay", detail: "devices.route.relayDetail" },
 } as const;
 
-const button = "rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-40";
 
 /** "On · since Nov 7", "On · waiting for a paired device", or "Off". */
 export function routeStateText(route: { on: boolean; since: number | null } | undefined, paired: number): string {
@@ -183,21 +186,19 @@ function setRoute(companion: CompanionBridge, route: CompanionRoute, on: boolean
   return companion.setRoute?.(route, on) ?? (on ? companion.start([route]) : companion.state());
 }
 
+const ROUTE_LINE = { wifi: "phone.reach.wifiLine", relay: "phone.reach.anywhereLine" } as const;
+
 function RouteRow({ c, state, route, blocked }: { c: PhoneSetupController; state: CompanionState; route: "wifi" | "relay"; blocked: string | null }) {
   const current = state.routes?.[route];
+  const inert = Boolean(blocked) && !current?.on;
   return (
-    <div className="flex items-center justify-between gap-4 py-3" data-route-row={route}>
-      <div className="min-w-0">
-        <div className="text-[13px] text-ink">{t(ROUTE_TEXT[route].name, { app: productName() })}</div>
-        <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-          {routeStateText(current, state.devices.length)} · {t(ROUTE_TEXT[route].detail, { app: productName() })}
-        </div>
-      </div>
-      <button type="button" className={button} disabled={c.busy || (Boolean(blocked) && !current?.on)} title={blocked ?? undefined}
-        onClick={() => void c.act((companion) => setRoute(companion, route, !current?.on))}>
-        {current?.on ? t("devices.route.turnOff") : t("devices.route.turnOn")}
-      </button>
-    </div>
+    <SettingRow title={t(ROUTE_TEXT[route].name, { app: productName() })} subtitle={t(ROUTE_LINE[route])}
+      message={current?.on ? routeStateText(current, state.devices.length) : inert ? blocked : undefined}>
+      <span data-route-row={route} className="contents">
+        <Switch checked={current?.on === true} aria-label={t(ROUTE_TEXT[route].name, { app: productName() })} disabled={c.busy || inert} title={blocked ?? undefined}
+          onClick={() => void c.act((companion) => setRoute(companion, route, !current?.on))} />
+      </span>
+    </SettingRow>
   );
 }
 
@@ -206,10 +207,11 @@ type PairStep = "consent" | "pairing";
 const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 
 /** Pair a device: says what it will turn on before anything listens, then shows the code. */
-export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
+export function PairDeviceDialog({ c, state, onClose, secureAddress = false, placeName = t("rail.thisComputer") }: {
   c: PhoneSetupController;
   state: CompanionState;
   onClose: () => void;
+  placeName?: string;
   /** HTTPS address → Set up: the free web address, with its sign-in, before the code. */
   secureAddress?: boolean;
 }) {
@@ -252,42 +254,43 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [close]);
   // An ancestor with backdrop-filter becomes the containing block for `fixed`, so it renders through Layer, on the body.
+  const title = t("phone.pair.dialogTitle", { place: placeName });
   const dialog = (
-    <div ref={root} role="dialog" aria-modal="true" aria-label={step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" data-pair-dialog={step}>
-      <div className="flex max-h-full w-full max-w-[460px] flex-col gap-4 overflow-y-auto rounded-2xl bg-card p-5 shadow-xl">
-        <div className="text-[15px] font-semibold text-ink">{step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}</div>
+    <div ref={root} role="dialog" aria-modal="true" aria-label={title}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" data-pair-dialog={step} data-settings-look="simple">
+      <div className="flex max-h-full w-full max-w-[440px] flex-col gap-4 overflow-y-auto rounded-2xl border-[0.5px] border-(--settings-edge) bg-app p-6 shadow-xl">
+        <div className="text-[16px] font-semibold leading-[22px] text-ink">{title}</div>
         {step === "consent" ? (
           <>
-            <div className="flex flex-col gap-2 text-[13px] text-ink">
-              <div>{t("devices.pair.willTurnOn", { app: productName() })}</div>
+            <p className="text-[13px] leading-[18px] text-ink-secondary">{t("phone.pair.howReach")}</p>
+            <div className="flex flex-col rounded-[12px] border-[0.5px] border-(--settings-edge) bg-menu" data-settings-rows="">
               {needed.map((route) => (
-                <label key={route} className="flex items-start gap-2">
-                  <input type="checkbox" className="mt-0.5" checked={picked[route]} onChange={(event) => setPicked((current) => ({ ...current, [route]: event.target.checked }))} />
-                  <span>
-                    {t(ROUTE_TEXT[route].name, { app: productName() })}
-                    {route === "relay" && <span className="block text-[12px] text-ink-secondary">{t(ROUTE_TEXT.relay.detail, { app: productName() })}</span>}
+                <label key={route} className="flex min-h-11 cursor-pointer items-center gap-6 px-4 py-3">
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="text-[14px] leading-5 text-ink">{t(ROUTE_TEXT[route].name, { app: productName() })}</span>
+                    <span className="text-[13px] leading-[18px] text-ink-secondary">{t(ROUTE_LINE[route])}</span>
                   </span>
+                  <Switch checked={picked[route]} aria-label={t(ROUTE_TEXT[route].name, { app: productName() })}
+                    onClick={() => setPicked((current) => ({ ...current, [route]: !current[route] }))} />
                 </label>
               ))}
-              <div className="text-[12px] text-ink-secondary">{t("devices.pair.changeLater")}</div>
-              {chosen.length === 0 && <div role="alert" className="text-[12px] text-danger">{t("devices.pair.pickOne")}</div>}
             </div>
+            {chosen.length === 0 && <div role="alert" className="text-[12px] leading-4 text-danger">{t("devices.pair.pickOne")}</div>}
             <div className="flex justify-end gap-2">
-              <button type="button" className={button} onClick={close}>{t("common.cancel")}</button>
-              <button type="button" disabled={chosen.length === 0 || c.busy} onClick={() => void begin()}
-                className="rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-40">{t("devices.route.turnOn")}</button>
+              <button type="button" className="ui-button" onClick={close}>{t("common.cancel")}</button>
+              <button type="button" disabled={chosen.length === 0 || c.busy} onClick={() => void begin()} className="ui-button ui-button-primary" data-pair-turn-on="">{t("phone.pair.turnOnShow")}</button>
             </div>
           </>
         ) : (
           <>
             <PhoneSetupFlowView controller={c} />
-            <div className="text-[12px] leading-relaxed text-ink-secondary">{reachLine(state)}</div>
+            <div className="text-[12px] leading-4 text-ink-secondary">{reachLine(state)}</div>
             <div className="flex justify-end">
-              <button type="button" className={button} onClick={close}>{t("devices.pair.done")}</button>
+              <button type="button" className="ui-button ui-button-primary" onClick={close}>{t("devices.pair.done")}</button>
             </div>
           </>
         )}
+        <p className="text-[12px] leading-4 text-ink-secondary">{t("phone.pair.foot")}</p>
       </div>
     </div>
   );
@@ -300,11 +303,11 @@ export function OpenCodeRow({ c, state }: { c: PhoneSetupController; state: Comp
   if (!pairing) return null;
   const until = new Date(pairing.expiresAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-hairline/40 bg-card px-3 py-2.5" data-open-code="">
-      <div className="min-w-0 text-[13px] text-ink">
+    <div className="flex min-h-11 items-center justify-between gap-6 px-4 py-3" data-open-code="">
+      <div className="min-w-0 text-[14px] leading-5 text-ink">
         {t("devices.openCode", { until })}
       </div>
-      <button type="button" className={button} disabled={c.busy}
+      <button type="button" className="settings-quiet cursor-pointer" data-danger="" disabled={c.busy}
         onClick={() => void c.act((companion) => companion.pairing(false, pairing.token))}>{t("devices.revoke")}</button>
     </div>
   );
@@ -323,7 +326,11 @@ export function reachLine(state: Pick<CompanionState, "routes">): string {
   return t("devices.reach.line", { ways: new Intl.ListFormat(undefined, { type: "conjunction" }).format(ways) });
 }
 
-export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simple = false }: { profileEmail?: string; focusRequest?: number; simple?: boolean }) {
+export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simple = false, placeName = t("rail.thisComputer"), top = null }: {
+  profileEmail?: string; focusRequest?: number; simple?: boolean; placeName?: string;
+  /** what leads the page: the door to pairing with My Cloud, when there is one */
+  top?: React.ReactNode;
+}) {
   const c = usePhoneSetupController(profileEmail);
   const state = c.state;
   const pairingFlow = useRef<HTMLDivElement>(null);
@@ -333,7 +340,10 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
   const [showRoutes, setShowRoutes] = useState(!simple);
   useEffect(() => {
     if (!focusRequest) revealed.current = 0;
-    else if (revealed.current !== focusRequest && revealPhonePairing(pairingFlow.current)) revealed.current = focusRequest;
+    else if (revealed.current !== focusRequest && revealPhonePairing(pairingFlow.current)) {
+      revealed.current = focusRequest;
+      if (takePairOnOpen()) setPairing("device");
+    }
   }, [focusRequest, loaded]);
   const resumeAsked = useRef(false);
   const resumePaused = shouldResumePausedAddress(c.account, state);
@@ -351,9 +361,12 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
 
   if (!state) {
     return (
-      <Card title={t("devices.title")} subtitle={t("remote.checking")}>
-        <Loader2 size={15} className="animate-spin text-ink-secondary" />
-      </Card>
+      <div className="flex flex-col gap-6" ref={pairingFlow} tabIndex={-1} data-phone-pairing="computer">
+        {top}
+        <SettingsGroup label={t("phone.pair.section")} block="pair">
+          <SettingsRows><SettingRow title={t("remote.checking")}><Loader2 size={14} className="animate-spin text-ink-secondary" /></SettingRow></SettingsRows>
+        </SettingsGroup>
+      </div>
     );
   }
 
@@ -363,136 +376,151 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
   const tailscaleOn = state.routes?.tailscale?.on === true;
   const httpsOn = state.routes?.https?.on === true;
   const hosted = state.endpoints?.find((endpoint) => endpoint.kind === "hosted");
+  const anyRoute = companionRoutesOn(state);
+  const reachOpen = showRoutes || pairedCount > 0 || anyRoute;
+  const moreWays = !simple || tailscaleOn || httpsOn;
+  const moreOpen = !simple || tailscaleOn || httpsOn;
   const pairAgain = c.busy || remoteBlocked ? undefined : () => setPairing("device");
-  const pairButton = (label: string) => (
-    <button type="button" disabled={c.busy || Boolean(remoteBlocked)} title={managedBy ?? undefined} onClick={() => setPairing("device")}
-      className="w-fit rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white disabled:opacity-40" data-pair-device="">
-      {label}
+  const pairButton = (
+    <button type="button" aria-disabled={c.busy || Boolean(remoteBlocked) || undefined} disabled={c.busy} title={managedBy ?? undefined}
+      onClick={() => { if (!remoteBlocked) setPairing("device"); }}
+      className={cn("ui-button ui-button-primary", remoteBlocked && "opacity-40")} data-pair-device="" data-phone-pairing-action="">
+      {t("phone.pair.button")}
     </button>
   );
 
-  if (simple && !showRoutes) {
-    return (
-      <div className="flex flex-col gap-3" ref={pairingFlow} tabIndex={-1} data-phone-pairing="computer">
-        <RouteNotices c={c} notices={state.notices ?? []} />
-        {pairedCount === 0 ? (
-          <div className="flex items-center justify-between gap-4 rounded-xl border border-hairline/40 bg-card px-4 py-3">
-            <div className="text-[13px] text-ink">{t("devices.simple.setUpTitle", { app: productName() })}</div>
-            <button type="button" className={button} disabled={c.busy || Boolean(remoteBlocked)} onClick={() => setPairing("device")}>{t("devices.simple.setUp")}</button>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3 rounded-xl border border-hairline/40 bg-card px-4 py-3">
-            <div className="text-[13px] font-medium text-ink">{t("devices.simple.yourPhone")}</div>
-            <PairedPhones c={c} state={state} onPairAgain={pairAgain} />
-            <div className="text-[12px] text-ink-secondary">
-              {reachLine(state)}{" "}
-              <button type="button" className="text-accent hover:underline" onClick={() => setShowRoutes(true)}>{t("devices.change")}</button>
-            </div>
-            {pairButton(t("devices.pairAnother"))}
-          </div>
-        )}
-        {pairing && <PairDeviceDialog c={c} state={state} onClose={() => setPairing(false)} />}
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-4" ref={pairingFlow} tabIndex={-1} data-phone-pairing="computer">
-      {remoteBlocked && <p role="status" className="text-[13px] leading-relaxed text-ink-secondary">{remoteBlocked}</p>}
-      <p className="text-[13px] leading-relaxed text-ink-secondary">{t("devices.intro")}</p>
-      {pairButton(t("devices.pair"))}
+    <div className="flex flex-col gap-6 focus:outline-none" ref={pairingFlow} tabIndex={-1} data-phone-pairing="computer">
+      {top}
       <RouteNotices c={c} notices={state.notices ?? []} />
-      {pairing && <PairDeviceDialog c={c} state={state} onClose={() => setPairing(false)} secureAddress={pairing === "https"} />}
+      {pairing && <PairDeviceDialog c={c} state={state} placeName={placeName} onClose={() => setPairing(false)} secureAddress={pairing === "https"} />}
 
-      <section className="flex flex-col gap-2" data-devices-block="paired">
-        <div className="text-[13px] font-medium text-ink">{t("devices.paired")}</div>
-        {showTunnelRetiredNotice(c.account, state) && (
-          <p role="status" data-devices-notice="tunnel-retired" className="rounded-xl bg-inset px-3 py-2.5 text-[13px] leading-relaxed text-ink">
-            {t("remote.devices.retiredNotice")}
-          </p>
-        )}
-        <OpenCodeRow c={c} state={state} />
-        {pairedCount ? <PairedPhones c={c} state={state} onPairAgain={pairAgain} /> : !state.pairing && <div className="text-[12px] text-ink-secondary">{t("devices.pairedNone")}</div>}
-        <PhonesList />
-      </section>
-
-      <section className="flex flex-col rounded-xl border border-hairline/40 bg-card px-4" data-devices-block="routes">
-        <div className="pt-3 text-[13px] font-medium text-ink">{t("devices.howTheyReach")}</div>
-        <RouteRow c={c} state={state} route="wifi" blocked={managedBy} />
-        <div className="border-t border-hairline/30"><RouteRow c={c} state={state} route="relay" blocked={managedBy} /></div>
-        <details className="border-t border-hairline/30 py-3" open={tailscaleOn || httpsOn || undefined}>
-          <summary className="cursor-pointer text-[13px] text-ink">{t("devices.moreWays")}</summary>
-          <div className="mt-3 flex flex-col gap-4" data-route-row="tailscale">
-            <div className="flex items-center justify-between gap-4">
-              <div className="min-w-0">
-                <div className="text-[13px] text-ink">Tailscale</div>
-                <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t("remote.tailscaleSwitch.detail", { app: productName() })}</div>
-              </div>
-              <button type="button" className={button} disabled={c.busy || c.accountBusy || (Boolean(managedBy) && !tailscaleOn)}
-                onClick={() => void c.act((companion) => setCompanionTailscale(companion, !tailscaleOn))}>
-                {tailscaleOn ? t("devices.route.turnOff") : t("devices.route.turnOn")}
-              </button>
-            </div>
-            {tailscaleStatus.kind !== "off" && (
-              <div data-tailscale-status={tailscaleStatus.kind} className="rounded-xl bg-inset px-3 py-3" aria-live="polite">
-                <div className="flex items-start gap-2.5">
-                  <ShieldCheck size={16} className={`mt-0.5 shrink-0 ${tailscaleStatus.kind === "ready" ? "text-success" : "text-ink-secondary"}`} />
-                  <div className="min-w-0">
-                    <div className="text-[13px] font-medium text-ink">{tailscaleStatus.title}</div>
-                    {tailscaleStatus.detail && <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{tailscaleStatus.detail}</div>}
-                  </div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {tailscaleOn && tailscaleStatus.kind !== "error" && (
-                    <button type="button" className={button} disabled={c.busy || c.accountBusy} onClick={c.refreshTailscale}>
-                      {c.busy ? t("common.checking") : t("remote.checkAgain")}
-                    </button>
-                  )}
-                  {tailscaleStatus.kind === "not-installed" && (
-                    <a href="https://tailscale.com/download" target="_blank" rel="noreferrer" className={button}>{t("remote.tailscale.getIt")}</a>
-                  )}
-                  {tailscaleStatus.kind === "signed-out" && (
-                    <button type="button" className={button} disabled={c.busy || c.accountBusy} onClick={() => void c.act((companion) => setCompanionTailscale(companion, true))}>
-                      {t("common.tryAgain")}
-                    </button>
-                  )}
-                </div>
-              </div>
+      {pairedCount === 0 && !state.pairing ? (
+        <SettingsGroup label={t("phone.pair.section")} block="pair">
+          <SettingsRows icons>
+            <StepRow step={1} title={t("phone.pair.getApp")} subtitle={t("phone.pair.getAppLine")}><StoreButtons /></StepRow>
+            <StepRow step={2} title={t("phone.pair.step")} subtitle={t("phone.pair.stepLine", { app: productName() })} reason={remoteBlocked}>{pairButton}</StepRow>
+          </SettingsRows>
+        </SettingsGroup>
+      ) : (
+        <>
+          <SettingsGroup label={t("devices.paired")} block="paired" actions={pairButton}>
+            {showTunnelRetiredNotice(c.account, state) && (
+              <p role="status" data-devices-notice="tunnel-retired" className="px-4 text-[12px] leading-4 text-warning">{t("remote.devices.retiredShort")}</p>
             )}
-            {tailscaleOn && state.routes?.tailscale?.name && <TailnetComputers c={c} state={state} blocked={managedBy} simple={simple} />}
-            <div className="flex items-start justify-between gap-4 border-t border-hairline/30 pt-4" data-route-row="https">
-              <div className="min-w-0">
-                <div className="text-[13px] text-ink">{t("devices.route.https")}</div>
-                <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-                  {httpsOn && hosted ? t("devices.route.httpsOn", { address: endpointHost(hosted.url) }) : routeStateText(state.routes?.https, pairedCount)}
-                  {" · "}{t("devices.route.httpsDetail", { app: productName() })}
-                </div>
-                {c.account?.status === "ready" && (
-                  <div className="mt-1 text-[12px] text-ink-secondary">{t("remote.account.signedIn", { email: c.account.email ?? t("remote.account.yourAccount") })}</div>
-                )}
-                {accountActionError && <div className="mt-1 text-[12px] text-danger">{accountActionError}</div>}
-              </div>
-              {httpsOn ? (
-                <button type="button" className={button} disabled={c.busy} onClick={() => void c.act((companion) => setRoute(companion, "https", false))}>{t("devices.route.turnOff")}</button>
-              ) : (
-                <button type="button" className={button} disabled={c.busy || c.accountBusy || Boolean(managedBy)}
-                  onClick={() => setPairing("https")}>{t("devices.route.setUp")}</button>
-              )}
-            </div>
-          </div>
-        </details>
-      </section>
+            {remoteBlocked && <p role="status" className="px-4 text-[12px] leading-4 text-ink-secondary">{remoteBlocked}</p>}
+            {state.pairing && <SettingsRows><OpenCodeRow c={c} state={state} /></SettingsRows>}
+            <PairedPhones c={c} state={state} onPairAgain={pairAgain} />
+          </SettingsGroup>
+          <SettingsGroup label={t("phone.pair.getApp")} block="get-app">
+            <SettingsRows><SettingRow title={t("phone.pair.forPhones", { app: productName() })}><StoreButtons /></SettingRow></SettingsRows>
+          </SettingsGroup>
+        </>
+      )}
 
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-[13px] text-ink">{t("remote.keepAwake")}</div>
-          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t("remote.keepAwakeDetail")}</div>
-        </div>
-        <Switch checked={state.keepAwake} aria-label={t("remote.keepAwakeAria")} disabled={c.busy || !companionRoutesOn(state)}
-          onClick={() => void c.act((companion) => companion.keepAwake(!state.keepAwake))} />
-      </div>
-      {simple && <button type="button" className="w-fit text-[12px] text-accent hover:underline" onClick={() => setShowRoutes(false)}>{t("devices.done")}</button>}
-      {(c.error || state.error) && <div className="text-[12px] text-danger">{c.error ?? state.error}</div>}
+      {!reachOpen ? (
+        <SettingsGroup block="reach" footnote={t("phone.reach.foot")}>
+          <SettingsRows>
+            <SettingsLinkRow title={t("phone.reach.title")} value={t("devices.route.off")} onClick={() => setShowRoutes(true)} data={{ "data-reach-fold": "" }} />
+          </SettingsRows>
+        </SettingsGroup>
+      ) : (
+        <SettingsGroup label={t("phone.reach.title")} block="reach">
+          <SettingsRows>
+            <RouteRow c={c} state={state} route="wifi" blocked={managedBy} />
+            <RouteRow c={c} state={state} route="relay" blocked={managedBy} />
+            <SettingRow title={t("remote.keepAwake")} subtitle={t("phone.reach.awakeLine")}
+              message={!anyRoute ? t("remote.keepAwakeNeedsRoute") : undefined}>
+              <Switch checked={state.keepAwake} aria-label={t("remote.keepAwakeAria")} disabled={c.busy || !anyRoute}
+                onClick={() => void c.act((companion) => companion.keepAwake(!state.keepAwake))} />
+            </SettingRow>
+          </SettingsRows>
+          {moreWays && (
+            <details className="group mt-4 flex flex-col" open={moreOpen || undefined} data-more-ways="">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-6 rounded-[12px] border-[0.5px] border-(--settings-edge) bg-menu px-4 py-3 text-[14px] leading-5 text-ink hover:bg-menu-hover [&::-webkit-details-marker]:hidden">
+                {t("devices.moreWays")}
+                <ChevronRight size={14} aria-hidden="true" className="text-ink-tertiary transition-transform group-open:rotate-90" />
+              </summary>
+              <div className="mt-2 flex flex-col">
+                <SettingsRows>
+                  <SettingRow title="Tailscale" subtitle={t("remote.tailscaleSwitch.detail", { app: productName() })}
+                    message={tailscaleStatus.kind !== "off" ? <span data-tailscale-status={tailscaleStatus.kind} aria-live="polite">{tailscaleStatus.title}{tailscaleStatus.detail ? ` ${tailscaleStatus.detail}` : ""}</span> : undefined}>
+                    <span data-route-row="tailscale" className="contents">
+                      {tailscaleStatus.kind === "not-installed" && <a href="https://tailscale.com/download" target="_blank" rel="noreferrer" className="ui-button">{t("remote.tailscale.getIt")}</a>}
+                      {tailscaleOn && tailscaleStatus.kind !== "error" && tailscaleStatus.kind !== "not-installed" && (
+                        <button type="button" className="settings-quiet cursor-pointer" disabled={c.busy || c.accountBusy} onClick={c.refreshTailscale}>{c.busy ? t("common.checking") : t("remote.checkAgain")}</button>
+                      )}
+                      <Switch checked={tailscaleOn} aria-label="Tailscale" disabled={c.busy || c.accountBusy || (Boolean(managedBy) && !tailscaleOn)}
+                        onClick={() => void c.act((companion) => setCompanionTailscale(companion, !tailscaleOn))} />
+                    </span>
+                  </SettingRow>
+                  <SettingRow title={t("devices.route.https")} subtitle={t("devices.route.httpsDetail", { app: productName() })}
+                    message={<>
+                      {httpsOn && hosted ? t("devices.route.httpsOn", { address: endpointHost(hosted.url) }) : null}
+                      {c.account?.status === "ready" && <span className="block">{t("remote.account.signedIn", { email: c.account.email ?? t("remote.account.yourAccount") })}</span>}
+                      {accountActionError && <span className="block text-danger">{accountActionError}</span>}
+                    </>}>
+                    <span data-route-row="https" className="contents">
+                      {httpsOn ? (
+                        <button type="button" className="ui-button" disabled={c.busy} onClick={() => void c.act((companion) => setRoute(companion, "https", false))}>{t("devices.route.turnOff")}</button>
+                      ) : (
+                        <button type="button" className="ui-button" disabled={c.busy || c.accountBusy || Boolean(managedBy)} onClick={() => setPairing("https")}>{t("devices.route.setUp")}</button>
+                      )}
+                    </span>
+                  </SettingRow>
+                </SettingsRows>
+                {tailscaleOn && state.routes?.tailscale?.name && <div className="mt-4"><TailnetComputers c={c} state={state} blocked={managedBy} simple={simple} /></div>}
+              </div>
+            </details>
+          )}
+        </SettingsGroup>
+      )}
+      <PhonesList />
+      {(c.error || state.error) && <div className="px-4 text-[12px] leading-4 text-danger">{c.error ?? state.error}</div>}
     </div>
+  );
+}
+
+/** A numbered step: the 20 px circle sits in the row's leading slot, so step titles line up with every icon card. */
+export function StepRow({ step, title, subtitle, reason, children }: { step: number; title: string; subtitle: string; reason?: string | null; children: React.ReactNode }) {
+  return (
+    <div role="group" aria-label={title} data-step-row={step} className="flex min-h-16 items-center gap-3 px-4 py-3">
+      <span className="flex size-8 shrink-0 items-center justify-center">
+        <span aria-hidden="true" className="flex size-5 items-center justify-center rounded-full bg-ink/[0.06] text-[12px] font-medium leading-4 text-ink-secondary">{step}</span>
+      </span>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-6 gap-y-2">
+        <div className="flex min-w-[min(100%,12rem)] flex-1 flex-col gap-0.5">
+          <span className="text-[14px] leading-5 text-ink">{title}</span>
+          <span className="text-[13px] leading-[18px] text-ink-secondary">{subtitle}</span>
+          {reason && <span className="text-[12px] leading-4 text-ink-secondary">{reason}</span>}
+        </div>
+        <div className="ml-auto flex shrink-0 items-center gap-2">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/** Get for iPhone / Get for Android: a code to scan with the phone's camera, to download the app. */
+export function StoreButtons() {
+  const [open, setOpen] = useState<"ios" | "android" | null>(null);
+  const app = PHONE_APPS.find((entry) => entry.id === open);
+  return (
+    <span className="relative flex items-center gap-2" data-store-buttons="">
+      {PHONE_APPS.map((entry) => (
+        <button key={entry.id} type="button" className="ui-button" aria-expanded={open === entry.id} data-phone-app={entry.id}
+          onClick={() => setOpen((current) => (current === entry.id ? null : entry.id))}>
+          {t(entry.id === "ios" ? "phone.pair.getIphone" : "phone.pair.getAndroid")}
+        </button>
+      ))}
+      {app && (
+        <span role="dialog" aria-label={t("phone.pair.scanToDownload")} className="popover-surface absolute right-0 top-9 z-30 flex w-[192px] flex-col items-center gap-2 rounded-[12px] p-4 text-center">
+          <span className="text-[13px] font-medium leading-[18px] text-ink">{t("phone.pair.scanToDownload")}</span>
+          <span className="rounded-md bg-white p-2"><QRCodeSVG value={app.url} size={144} level="M" bgColor="#ffffff" fgColor="#111111" /></span>
+          <button type="button" className="cursor-pointer text-[13px] leading-[18px] text-accent-text hover:underline" onClick={() => void openExternalLink(app.url)}>
+            {t(app.id === "ios" ? "phone.pair.downloadIphone" : "phone.pair.downloadAndroid")}
+          </button>
+        </span>
+      )}
+    </span>
   );
 }

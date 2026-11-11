@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, Smartphone } from "lucide-react";
 
 import { t } from "@/lib/i18n";
 import type { CompanionState, PhoneDevice, PhoneSetupController } from "./PhoneSetupFlow";
@@ -36,33 +36,37 @@ export function PhoneRow({ device, connected, state, c, onRemoved, onPairAgain, 
   const e2eEnabled = state.e2e?.enabled === true;
   const live = connected || Boolean(device.route);
   return (
-    <li className="border-t border-hairline/30 first:border-t-0">
-      <div className="flex items-center gap-2.5 px-3 py-3">
-        <span className="flex size-3 shrink-0 items-center justify-center" title={phoneSubtitle(device, connected, e2eEnabled)}>
-          <span className={`size-2 rounded-full ${live ? "bg-success" : "bg-ink-tertiary/40"}`} />
+    <li>
+      <div className="flex min-h-16 items-center gap-3 px-4 py-3">
+        <span className="relative flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary" title={phoneSubtitle(device, connected, e2eEnabled)}>
+          <Smartphone size={18} strokeWidth={1.75} aria-hidden="true" />
+          {live && <span aria-hidden="true" className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-success ring-2 ring-menu" />}
         </span>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[14px] font-medium text-ink">{device.name}</div>
-          <div className="truncate text-[12px] text-ink-secondary">{phoneSubtitle(device, connected, e2eEnabled)}</div>
-          {c.account?.paused && <div className="truncate text-[12px] text-ink-secondary">{t("remote.devices.paused")}</div>}
+          <div className="truncate text-[14px] leading-5 text-ink">{device.name}</div>
+          <div className="truncate text-[13px] leading-[18px] text-ink-secondary">{phoneSubtitle(device, connected, e2eEnabled)}</div>
+          {c.account?.paused && <div className="truncate text-[12px] leading-4 text-ink-secondary">{t("remote.devices.paused")}</div>}
           {c.account?.tunnelRetired && !device.e2eAt && (
-            <div className="text-[12px] leading-relaxed text-warning" data-phone-retired="">
-              {t("remote.devices.retired")}
-              {onPairAgain && <>{" "}<button type="button" className="text-accent hover:underline" onClick={onPairAgain}>{t("remote.devices.pairAgain")}</button></>}
+            <div className="flex items-start gap-1.5 text-[12px] leading-4 text-warning" data-phone-retired="" title={t("remote.devices.retired")}>
+              <span aria-hidden="true" className="mt-[5px] size-1.5 shrink-0 rounded-full bg-warning" />
+              <span>{t("remote.devices.retiredShort")}</span>
             </div>
           )}
         </div>
+        {c.account?.tunnelRetired && !device.e2eAt && onPairAgain && (
+          <button type="button" className="ui-button shrink-0" data-pair-again="" onClick={onPairAgain}>{t("remote.devices.pairAgain")}</button>
+        )}
         <button
           onClick={() => setOpen((value) => !value)}
           aria-expanded={open}
           aria-label={t("remote.devices.more", { name: device.name })}
-          className="shrink-0 rounded p-1.5 text-ink-secondary hover:bg-control"
+          className="ui-icon-button size-7 shrink-0 rounded-full text-ink-secondary hover:text-ink"
         >
-          <MoreHorizontal size={15} />
+          <MoreHorizontal size={16} />
         </button>
       </div>
       {open && (
-        <div className="flex flex-col gap-3 border-t border-hairline/30 px-3 py-3">
+        <div className="flex flex-col gap-3 px-4 pb-3 pl-[60px]">
           {e2eEnabled && (
             <div className="flex items-center justify-between gap-3">
               <div className="text-[12px] text-ink">{t("remote.devices.connectFrom")}</div>
@@ -110,7 +114,8 @@ export function PhoneRow({ device, connected, state, c, onRemoved, onPairAgain, 
             disabled={c.busy}
             onClick={() => void c.act((companion) => companion.revoke(device.id)).then(() => onRemoved(device.name))}
             aria-label={t("remote.devices.remove", { name: device.name })}
-            className="self-start text-[12px] text-danger hover:underline disabled:opacity-40"
+            data-danger=""
+            className="settings-quiet self-start cursor-pointer disabled:opacity-40"
           >
             {t("remote.devices.removePhone")}
           </button>
@@ -128,14 +133,14 @@ export function PairedPhones({ c, state, onPairAgain }: { c: PhoneSetupControlle
   return (
     <>
       {state.devices.length > 0 && (
-        <ul className="rounded-xl border border-hairline/40 bg-card">
+        <ul data-settings-rows="" data-settings-icons="" className="settings-card flex flex-col overflow-hidden rounded-[12px] border-[0.5px] border-(--settings-edge) bg-menu">
           {sortPhones(state.devices, connected).map((device) => (
             <PhoneRow key={device.id} device={device} connected={connected.has(device.id)} state={state} c={c} onRemoved={setRemoved} onPairAgain={onPairAgain} />
           ))}
         </ul>
       )}
       {removed && (
-        <div role="status" className="mt-2 text-[12px] text-ink-secondary">{t("remote.devices.removed", { name: removed })}</div>
+        <div role="status" className="px-4 text-[12px] leading-4 text-ink-secondary">{t("remote.devices.removed", { name: removed })}</div>
       )}
     </>
   );

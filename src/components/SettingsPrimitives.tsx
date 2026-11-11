@@ -1,15 +1,13 @@
-import { useId, type ComponentProps, type ReactNode } from "react";
-import { Check, ChevronRight, Copy, X } from "lucide-react";
+import { createContext, useContext, useId, type ComponentProps, type ReactNode } from "react";
+import { ArrowUpRight, Check, ChevronRight, Copy, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 
-export const SIMPLE_CARD = "rounded-[12px] border-[0.5px] border-(--settings-edge) bg-menu py-2";
-export const SIMPLE_BUTTONS = cn(
-  "[&_.ui-button]:h-8 [&_.ui-button]:rounded-full [&_.ui-button]:border-0 [&_.ui-button]:px-3 [&_.ui-button]:text-[14px] [&_.ui-button]:font-normal",
-  "[&_.ui-button:not(.ui-button-primary)]:bg-ink/5 [&_.ui-button:not(.ui-button-primary)]:text-ink [&_.ui-button:not(.ui-button-primary):enabled:hover]:bg-ink/10",
-  "[&_.ui-button-primary]:bg-ink [&_.ui-button-primary]:text-app [&_.ui-button-primary:enabled:hover]:bg-ink/85",
-);
+/** True inside the Settings window: every primitive draws the one Settings look (cards with edges, 44/64 px rows). */
+export const SettingsLook = createContext(false);
+
+export const SIMPLE_CARD = "settings-card rounded-[12px] border-[0.5px] border-(--settings-edge) bg-menu";
 
 export function Switch({
   checked,
@@ -22,19 +20,17 @@ export function Switch({
       type="button"
       role="switch"
       aria-checked={checked}
+      data-switch=""
       className={cn(
         "relative cursor-pointer h-6 w-11 shrink-0 rounded-full transition-colors enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none",
-        "in-data-[settings-look=simple]:h-5 in-data-[settings-look=simple]:w-8",
-        checked ? "bg-accent in-data-[settings-look=simple]:bg-ink" : "bg-control in-data-[settings-look=simple]:bg-ink/[0.12] in-data-[settings-look=simple]:ring-1 in-data-[settings-look=simple]:ring-inset in-data-[settings-look=simple]:ring-ink/45",
+        checked ? "bg-accent" : "bg-control",
         className,
       )}
     >
       <span
         className={cn(
           "absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white transition-[left] motion-reduce:transition-none",
-          checked && "in-data-[settings-look=simple]:bg-app",
-          "in-data-[settings-look=simple]:top-0.5 in-data-[settings-look=simple]:size-4",
-          checked ? "left-[21px] in-data-[settings-look=simple]:left-[14px]" : "left-[3px] in-data-[settings-look=simple]:left-0.5",
+          checked ? "left-[21px]" : "left-[3px]",
         )}
       />
     </button>
@@ -50,10 +46,23 @@ export function Card({
   subtitle?: string;
   children?: React.ReactNode;
 }) {
+  if (useContext(SettingsLook)) {
+    return (
+      <section className="flex flex-col gap-2">
+        {(title || subtitle) && (
+          <div className="flex flex-col gap-0.5 px-4">
+            {title && <h3 className="text-[13px] font-medium leading-[18px] text-ink">{title}</h3>}
+            {subtitle && <p className="text-[13px] leading-[18px] text-ink-secondary">{subtitle}</p>}
+          </div>
+        )}
+        {children && <div className={cn(SIMPLE_CARD, "p-4")}>{children}</div>}
+      </section>
+    );
+  }
   return (
-    <div className="rounded-xl bg-card p-4 max-md:rounded-2xl in-data-[settings-look=simple]:rounded-[12px] in-data-[settings-look=simple]:border-[0.5px] in-data-[settings-look=simple]:border-(--settings-edge) in-data-[settings-look=simple]:bg-menu">
-      {title && <div className="text-[16px] font-semibold text-ink in-data-[settings-look=simple]:text-[14px] in-data-[settings-look=simple]:leading-5 in-data-[settings-look=simple]:font-medium">{title}</div>}
-      {subtitle && <div className={cn(title && "mt-0.5", "text-[13px] leading-relaxed text-ink-secondary in-data-[settings-look=simple]:leading-[18px]")}>{subtitle}</div>}
+    <div className="rounded-xl bg-card p-4 max-md:rounded-2xl">
+      {title && <div className="text-[16px] font-semibold text-ink">{title}</div>}
+      {subtitle && <div className={cn(title && "mt-0.5", "text-[13px] leading-relaxed text-ink-secondary")}>{subtitle}</div>}
       {children && <div className={title || subtitle ? "mt-4" : undefined}>{children}</div>}
     </div>
   );
@@ -65,33 +74,55 @@ export function SettingRow({
   children,
   message,
   className,
+  tag,
 }: {
   title: string;
   subtitle?: React.ReactNode;
   children: React.ReactNode;
   message?: React.ReactNode;
   className?: string;
+  /** a short word after the title, such as Advanced or Early */
+  tag?: string;
 }) {
   const titleId = useId();
-  return (
-    <div role="group" aria-labelledby={titleId} className={cn("px-4 in-data-[settings-look=simple]:py-2.5", className)}>
-      <div className="grid min-w-0 grid-cols-1 items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-6 in-data-[settings-look=simple]:flex in-data-[settings-look=simple]:min-h-6 in-data-[settings-look=simple]:flex-wrap in-data-[settings-look=simple]:gap-x-5 in-data-[settings-look=simple]:gap-y-2">
-        <div className="min-w-0 in-data-[settings-look=simple]:flex in-data-[settings-look=simple]:min-w-[min(100%,15rem)] in-data-[settings-look=simple]:flex-1 in-data-[settings-look=simple]:flex-col in-data-[settings-look=simple]:gap-0.5">
-          <div id={titleId} className="text-[14px] font-medium text-ink in-data-[settings-look=simple]:font-normal in-data-[settings-look=simple]:leading-5">{title}</div>
-          {subtitle && <div className="mt-1 text-[12px] leading-relaxed text-pretty text-ink-secondary in-data-[settings-look=simple]:mt-0 in-data-[settings-look=simple]:text-[13px] in-data-[settings-look=simple]:leading-[18px]">{subtitle}</div>}
+  if (useContext(SettingsLook)) {
+    return (
+      <div role="group" aria-labelledby={titleId} data-setting-row="" className={cn("flex min-h-11 flex-col justify-center px-4 py-3", className)}>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <div className="flex min-w-[min(100%,15rem)] flex-1 flex-col gap-0.5">
+            <div id={titleId} className="flex items-center gap-1.5 text-[14px] leading-5 text-ink">{title}{tag && <SettingsTag>{tag}</SettingsTag>}</div>
+            {subtitle && <div className="text-[13px] leading-[18px] text-pretty text-ink-secondary">{subtitle}</div>}
+          </div>
+          {children != null && children !== false && <div className="ml-auto flex shrink-0 items-center gap-2">{children}</div>}
         </div>
-        <div className="min-w-0 sm:max-w-[240px] in-data-[settings-look=simple]:ml-auto in-data-[settings-look=simple]:flex in-data-[settings-look=simple]:shrink-0 in-data-[settings-look=simple]:items-center in-data-[settings-look=simple]:sm:max-w-none">{children}</div>
+        {message && <div className="mt-1 text-[12px] leading-4 text-ink-secondary">{message}</div>}
+      </div>
+    );
+  }
+  return (
+    <div role="group" aria-labelledby={titleId} className={cn("px-4", className)}>
+      <div className="grid min-w-0 grid-cols-1 items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-6">
+        <div className="min-w-0">
+          <div id={titleId} className="text-[14px] font-medium text-ink">{title}</div>
+          {subtitle && <div className="mt-1 text-[12px] leading-relaxed text-pretty text-ink-secondary">{subtitle}</div>}
+        </div>
+        <div className="min-w-0 sm:max-w-[240px]">{children}</div>
       </div>
       {message && <div className="mt-2 text-[12px]">{message}</div>}
     </div>
   );
 }
 
-export function SettingsGroup({ label, block, actions, footnote, children }: {
+export function SettingsTag({ children }: { children: ReactNode }) {
+  return <span data-settings-tag="" className="inline-flex h-4 shrink-0 items-center rounded-full bg-ink/[0.06] px-1.5 text-[11px] font-medium leading-4 text-ink-secondary">{children}</span>;
+}
+
+export function SettingsGroup({ label, block, actions, footnote, description, children }: {
   label?: string;
   block?: string;
   actions?: ReactNode;
   footnote?: ReactNode;
+  description?: ReactNode;
   children: ReactNode;
 }) {
   const labelId = useId();
@@ -102,19 +133,49 @@ export function SettingsGroup({ label, block, actions, footnote, children }: {
       className="flex scroll-mt-4 flex-col gap-2 has-[>[data-settings-rows]:empty]:hidden"
     >
       {(label || actions) && (
-        <div className="flex min-h-4 items-center justify-between gap-3 pl-4 pr-1">
-          {label && <h3 id={labelId} className="text-[13px] leading-4 font-semibold text-ink-secondary">{label}</h3>}
+        <div className="flex min-h-7 items-center justify-between gap-3 px-4">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            {label && <h3 id={labelId} className="text-[13px] font-medium leading-[18px] text-ink">{label}</h3>}
+            {description && <p className="text-[13px] leading-[18px] text-ink-secondary">{description}</p>}
+          </div>
           {actions}
         </div>
       )}
       {children}
-      {footnote && <p className="-mt-0.5 pl-4 text-[12px] leading-4 text-ink-tertiary empty:hidden">{footnote}</p>}
+      {footnote && <p className="px-4 text-[12px] leading-4 text-ink-secondary empty:hidden">{footnote}</p>}
     </section>
   );
 }
 
-export function SettingsRows({ children }: { children: ReactNode }) {
-  return <div data-settings-rows="" className={cn(SIMPLE_CARD, "flex flex-col empty:hidden")}>{children}</div>;
+export function SettingsRows({ children, icons = false }: { children: ReactNode; icons?: boolean }) {
+  return <div data-settings-rows="" data-settings-icons={icons ? "" : undefined} className={cn(SIMPLE_CARD, "flex flex-col overflow-hidden empty:hidden")}>{children}</div>;
+}
+
+/** A row that goes somewhere: the whole row is the button, with a value and a chevron (an arrow when it leaves Settings). */
+export function SettingsLinkRow({ title, subtitle, value, badge, external = false, onClick, data }: {
+  title: string;
+  subtitle?: ReactNode;
+  value?: ReactNode;
+  badge?: ReactNode;
+  external?: boolean;
+  onClick: () => void;
+  data?: Record<string, string>;
+}) {
+  return (
+    <button type="button" onClick={onClick} {...data}
+      className="group flex min-h-11 w-full cursor-pointer items-center gap-6 px-4 py-3 text-left transition-colors hover:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none">
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="text-[14px] leading-5 text-ink">{title}</span>
+        {subtitle && <span className="text-[13px] leading-[18px] text-ink-secondary">{subtitle}</span>}
+      </span>
+      <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[13px] leading-5 text-ink-secondary">
+        {badge}
+        {value}
+        {external ? <ArrowUpRight size={12} aria-hidden="true" className="text-ink-tertiary" />
+          : <ChevronRight size={14} aria-hidden="true" className="text-ink-tertiary rtl:-scale-x-100" />}
+      </span>
+    </button>
+  );
 }
 
 export function SettingsDisclosureRow({ id, title, subtitle, trailing, block, open, onToggle, children }: {
@@ -136,19 +197,19 @@ export function SettingsDisclosureRow({ id, title, subtitle, trailing, block, op
           aria-expanded={open}
           aria-controls={regionId}
           onClick={onToggle}
-          className="group flex w-full cursor-pointer flex-wrap items-center gap-x-5 gap-y-2 px-4 py-2.5 text-left"
+          className="group flex min-h-11 w-full cursor-pointer items-center gap-6 rounded-[12px] px-4 py-3 text-left transition-colors hover:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none"
         >
-          <span className="flex min-w-[min(100%,15rem)] flex-1 flex-col gap-0.5">
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="text-[14px] leading-5 text-ink">{title}</span>
             {subtitle && <span className="text-[13px] leading-[18px] text-ink-secondary">{subtitle}</span>}
           </span>
-          <span className="ml-auto flex shrink-0 items-center gap-3">
+          <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[13px] leading-5 text-ink-secondary">
             {trailing}
-            <ChevronRight size={14} aria-hidden="true" className={cn("text-ink-secondary transition-transform motion-reduce:transition-none", open && "rotate-90")} />
+            <ChevronRight size={14} aria-hidden="true" className={cn("text-ink-tertiary transition-transform duration-150 motion-reduce:transition-none", open && "rotate-90")} />
           </span>
         </button>
       </div>
-      <div id={regionId} hidden={!open} className="flex flex-col gap-4">{children}</div>
+      <div id={regionId} hidden={!open} className="flex flex-col gap-6">{children}</div>
     </section>
   );
 }
