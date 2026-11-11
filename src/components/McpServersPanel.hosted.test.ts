@@ -3,7 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { HOSTED_MCP_APPS, type HostedApp } from "@/lib/hosted-mcp-apps";
+import { HOSTED_MCP_APPS, hostedKeyOptional, type HostedApp } from "@/lib/hosted-mcp-apps";
 import { setLocale } from "@/lib/i18n";
 
 const fixture = vi.hoisted(() => ({
@@ -28,8 +28,10 @@ vi.mock("./bot-panel/panel-link", () => ({ openBotSettings: fixture.openBotSetti
 import { openExternalLink } from "@/lib/app-links";
 import { McpServersPanel } from "./McpServersPanel";
 
-interface Listing { name: string; type: "http"; url: string; headerKeys: string[]; enabled: boolean; auth: "signed-in" | "needs-sign-in"; managedBy?: string }
+interface Listing { name: string; type: "http"; url: string; headerKeys: string[]; enabled: boolean; auth?: "signed-in" | "needs-sign-in"; managedBy?: string }
 const listing = (app: HostedApp, extra: Partial<Listing> = {}): Listing => ({ name: app.id, type: "http", url: app.url, headerKeys: [], enabled: false, auth: "needs-sign-in", ...extra });
+
+const keyApp = (app: HostedApp): app is Extract<HostedApp, { key: unknown }> => "key" in app;
 
 let host: HTMLDivElement;
 let root: Root;
@@ -70,7 +72,9 @@ beforeEach(() => {
     // Like the real server, every answer is a fresh copy, and a listing names its headers without their values.
     const saved = ({ headers, ...entry }: { headers?: Record<string, string> } & Record<string, unknown>) => ({ ...entry, headerKeys: Object.keys(headers ?? {}).sort() });
     if (path === "/api/mcp/servers" && init?.method === "POST") {
-      servers.push({ auth: "needs-sign-in", ...saved(body) } as Listing);
+      // A server with no OAuth record lists no sign-in state, like a key app's.
+      const keyed = HOSTED_MCP_APPS.some((app) => "key" in app && app.url === body.url);
+      servers.push({ ...(keyed ? {} : { auth: "needs-sign-in" }), ...saved(body) } as Listing);
       return Promise.resolve({ servers: structuredClone(servers) });
     }
     const named = /^\/api\/mcp\/servers\/([^/]+)(\/sign-out|\/test)?$/.exec(path);
@@ -229,19 +233,23 @@ describe.each(HOSTED_MCP_APPS.filter((app) => !("key" in app)))("The $label card
   });
 });
 
-describe.each(HOSTED_MCP_APPS.filter((app) => "key" in app))("The $label key card", (app) => {
-  const keyField = () => card(app).querySelector<HTMLInputElement>('input[type="password"]')!;
-  async function typeKey(value: string) {
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(keyField(), value);
-      keyField().dispatchEvent(new Event("input", { bubbles: true }));
-    });
-  }
-  async function connectWith(value: string) {
-    await typeKey(value);
-    await act(async () => button(app, "Connect").click());
-    await settle();
-  }
+const keyFieldOf = (app: HostedApp) => card(app).querySelector<HTMLInputElement>('input[type="password"]')!;
+async function typeKeyInto(app: HostedApp, value: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(keyFieldOf(app), value);
+    keyFieldOf(app).dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+async function connectInto(app: HostedApp, value: string) {
+  if (value) await typeKeyInto(app, value);
+  await act(async () => button(app, "Connect").click());
+  await settle();
+}
+
+describe.each(HOSTED_MCP_APPS.filter(keyApp).filter((app) => !hostedKeyOptional(app.key)))("The $label key card", (app) => {
+  const keyField = () => keyFieldOf(app);
+  const typeKey = (value: string) => typeKeyInto(app, value);
+  const connectWith = (value: string) => connectInto(app, value);
 
   it("keeps Connect off until a key is typed", async () => {
     await mount();
@@ -302,6 +310,89 @@ describe.each(HOSTED_MCP_APPS.filter((app) => "key" in app))("The $label key car
     expect(calls("DELETE")).toEqual([[`/api/mcp/servers/${app.id}`, undefined]]);
     expect(fixture.api.mock.calls.some(([path]) => String(path).endsWith("/sign-out"))).toBe(false);
     expect(keyField()).not.toBeNull();
+  });
+
+  it("opens the service's own page for making a key", async () => {
+    await mount();
+    await act(async () => button(app, `Get a ${app.label} key`).click());
+    expect(openExternalLink).toHaveBeenCalledWith(app.key.url);
+  });
+});
+
+describe.each(HOSTED_MCP_APPS.filter(keyApp).filter((app) => hostedKeyOptional(app.key)))("The $label optional-key card", (app) => {
+  it("connects with the key field left empty: no headers, no browser sign-in, on once its tools load", async () => {
+    await mount();
+    expect(keyFieldOf(app).getAttribute("aria-label")).toBe(`${app.label} API key`);
+    expect(keyFieldOf(app).placeholder).toBe(`Optional: paste your ${app.label} key`);
+    expect((button(app, "Connect") as HTMLButtonElement).disabled).toBe(false);
+    await connectInto(app, "");
+    expect(added()).toEqual([{ name: app.id, type: "http", url: app.url, enabled: false }]);
+    expect(fixture.runMcpSignIn).not.toHaveBeenCalled();
+    expect(calls("PATCH")).toEqual([]);
+    await act(async () => testRequest!.resolve({ ok: true, tools: [{ name: "search_web_pages" }, { name: "fetch_page_content" }] }));
+    await settle();
+    expect(calls("PATCH")).toEqual([[`/api/mcp/servers/${app.id}`, { enabled: true }]]);
+    expect(card(app).querySelector('[aria-label="Connected"]')).not.toBeNull();
+  });
+
+  it("sends a pasted key as it is in the service's own header, never as a Bearer token", async () => {
+    await mount();
+    await connectInto(app, " kn-live ");
+    expect(added()).toEqual([{ name: app.id, type: "http", url: app.url, headers: { "X-API-Key": "kn-live" }, enabled: false }]);
+    await act(async () => testRequest!.resolve({ ok: true, tools: [{ name: "search_web_pages" }] }));
+    await settle();
+    expect(card(app).querySelector('[aria-label="Connected"]')).not.toBeNull();
+    expect(card(app).querySelector('input[type="password"]')).toBeNull();
+  });
+
+  it("says a refused key was refused, leaves the server off and offers no sign-in", async () => {
+    await mount();
+    await connectInto(app, "kn-wrong");
+    await act(async () => testRequest!.resolve({ ok: false, reason: "keys", status: 403, error: "The server didn't accept the keys (HTTP 403). Check the header values." }));
+    await settle();
+    expect(card(app).querySelector('[role="alert"]')?.textContent).toBe(`${app.label} didn’t accept that key. Check it and connect again.`);
+    expect(calls("PATCH")).toEqual([]);
+    expect(fixture.runMcpSignIn).not.toHaveBeenCalled();
+    expect(card(app).textContent).not.toContain("Sign in");
+    expect(card(app).querySelector('[aria-label="Connected"]')).toBeNull();
+  });
+
+  it("gives the reason without blaming a key when a keyless connect fails", async () => {
+    await mount();
+    await connectInto(app, "");
+    await act(async () => testRequest!.resolve({ ok: false, reason: "timeout", error: "The server did not answer in time." }));
+    await settle();
+    expect(card(app).querySelector('[role="alert"]')?.textContent).toBe(`${app.label}’s tools could not be loaded: The server did not answer in time. Connect again to retry.`);
+    expect(calls("PATCH")).toEqual([]);
+  });
+
+  it("keeps the key a server already holds when Connect is pressed with the field empty", async () => {
+    servers = [listing(app, { name: "search", headerKeys: ["X-API-Key"], auth: undefined })];
+    await mount();
+    await connectInto(app, "");
+    expect(added()).toEqual([]);
+    expect(calls("PUT")).toEqual([]);
+    await act(async () => testRequest!.resolve({ ok: true, tools: [{ name: "search_web_pages" }] }));
+    await settle();
+    expect(calls("PATCH")).toEqual([["/api/mcp/servers/search", { enabled: true }]]);
+  });
+
+  it("replaces the key on the server it already has when a new one is pasted", async () => {
+    servers = [listing(app, { name: "search", headerKeys: ["X-API-Key"], auth: undefined })];
+    await mount();
+    await connectInto(app, "kn-new");
+    expect(added()).toEqual([]);
+    expect(calls("PUT")).toEqual([["/api/mcp/servers/search", { type: "http", url: app.url, headers: { "X-API-Key": "kn-new" }, enabled: false }]]);
+  });
+
+  it("deletes the server, and with it any key, on Disconnect", async () => {
+    servers = [listing(app, { enabled: true, headerKeys: ["X-API-Key"], auth: undefined })];
+    await mount();
+    expect(card(app).querySelector('[aria-label="Connected"]')).not.toBeNull();
+    await act(async () => button(app, "Disconnect").click());
+    await settle();
+    expect(calls("DELETE")).toEqual([[`/api/mcp/servers/${app.id}`, undefined]]);
+    expect(fixture.api.mock.calls.some(([path]) => String(path).endsWith("/sign-out"))).toBe(false);
   });
 
   it("opens the service's own page for making a key", async () => {

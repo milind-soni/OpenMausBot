@@ -107,6 +107,23 @@ sending a message. Choose which bots get each card under **Bot access**. To
 have a bot answer new mail, texts or calls, add a webhook for that bot in
 **Automations** and paste its address into the service.
 
+### Keenable
+
+In Plugins, find **Keenable** and click **Connect**. The card uses Keenable's
+official catalog endpoint, `https://api.keenable.ai/mcp-public`, which needs
+no sign-in and no API key: Connect saves the server, loads its tools and
+switches it on. Its two tools, `search_web_pages` and `fetch_page_content`,
+only read the web.
+
+The public tier allows 1,000 requests an hour. A key from the
+[Keenable console](https://app.keenable.ai/console) lifts that limit; paste it
+in the card's optional key field before **Connect**. It is sent as the
+`X-API-Key` header, never as `Authorization: Bearer` and never in the address,
+and like every header value it is never shown again. A refused key leaves the
+server off and says why. **Disconnect** deletes the server and any key, and
+**Bot access** works as it does for Whop. The card adds a server; it does not
+change any engine's built-in web search.
+
 ### Servers that ask you to sign in
 
 Some URL servers take no token; they want you to sign in with your browser

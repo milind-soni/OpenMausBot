@@ -32,7 +32,7 @@ import { HostedMcpIcon } from "./HostedMcpIcon";
 import type { McpMessage } from "./McpResultBudgetField";
 import { McpServerEditor, type McpServerSubmission } from "./McpServerEditor";
 import { isRemoteMcpListing, type McpServerListing } from "./mcp-draft";
-import { HOSTED_KEY_HEADER, HOSTED_MCP_APPS, hostedConnections, hostedMcpApp, hostedServerName, mcpServerConnected, ownMcpServer, type HostedApp, type HostedConnections, type HostedMcpAppId } from "@/lib/hosted-mcp-apps";
+import { HOSTED_MCP_APPS, hostedConnections, hostedKeyHeaders, hostedKeyOptional, hostedMcpApp, hostedServerName, mcpServerConnected, ownMcpServer, type HostedApp, type HostedConnections, type HostedMcpAppId } from "@/lib/hosted-mcp-apps";
 import { CHAT_TOOL_LIMIT, chatToolBudgetFit } from "../../shared/tool-budget";
 import { openBotSettings } from "./bot-panel/panel-link";
 
@@ -413,7 +413,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
 
   const connectWithKey = async (app: Extract<HostedApp, { key: unknown }>, existing: McpServerListing | undefined) => {
     const key = keys[app.id]?.trim();
-    if (!servers || !key) return;
+    if (!servers || !(key || hostedKeyOptional(app.key))) return;
     setBusy(`hosted:${app.id}`);
     loadGeneration.current += 1;
     setError(null);
@@ -422,12 +422,15 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
     const name = existing?.name ?? hostedServerName(app, servers);
     forgetProbe(name);
     try {
-      const entry = { type: "http", url: app.url, headers: { [HOSTED_KEY_HEADER]: `Bearer ${key}` }, enabled: false };
-      listed((await api(existing ? `/api/mcp/servers/${name}` : "/api/mcp/servers", {
-        method: existing ? "PUT" : "POST",
-        body: JSON.stringify(existing ? entry : { name, ...entry }),
-      })).servers);
-      const tested = await signedInToolsCheck(name, api, undefined, app.label, "hostedMcp.keyTestFailed");
+      const keepsSavedKey = !key && existing !== undefined;
+      if (!keepsSavedKey) {
+        const entry = { type: "http", url: app.url, ...(key ? { headers: hostedKeyHeaders(app.key, key) } : {}), enabled: false };
+        listed((await api(existing ? `/api/mcp/servers/${name}` : "/api/mcp/servers", {
+          method: existing ? "PUT" : "POST",
+          body: JSON.stringify(existing ? entry : { name, ...entry }),
+        })).servers);
+      }
+      const tested = await signedInToolsCheck(name, api, undefined, app.label, key ? "hostedMcp.keyTestFailed" : "hostedMcp.keylessTestFailed");
       if (!mounted.current) return;
       setProbe((current) => ({ ...current, [name]: tested.reason === "keys" ? { ...tested, error: t("hostedMcp.keyRefused", { service: app.label }) } : tested }));
       if (!tested.ok) return;
@@ -561,7 +564,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
         </div>
         {server && signingIn === server.name ? <button type="button" onClick={() => signInAbort.current?.abort()} className="inline-flex h-7 shrink-0 items-center rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink">{t("mcp.auth.cancel")}</button> :
           <button type="button" aria-label={t(connected ? "hostedMcp.disconnect" : "hostedMcp.connect", { service: app.label })}
-            disabled={pending || (servers !== null && !connected && (Boolean(server?.managedBy) || (restricted && !policy?.mcp.allowlist.length) || ("key" in app && !keys[app.id]?.trim())))}
+            disabled={pending || (servers !== null && !connected && (Boolean(server?.managedBy) || (restricted && !policy?.mcp.allowlist.length) || ("key" in app && !hostedKeyOptional(app.key) && !keys[app.id]?.trim())))}
             onClick={() => void (servers === null ? load() : connected && server ? signOut(server, app) : connectHosted(app))}
             className="inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink hover:bg-raised-hover disabled:opacity-40">
             {pending && (mine || busy === "load") ? <Loader2 size={14} className="animate-spin" /> : servers === null ? t("connectors.action.retry") : t(connected ? "connectors.disconnect" : "connectors.action.connect")}
@@ -570,7 +573,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
       <div className="ps-[52px]">
       {"key" in app && !connected && servers !== null && <div className="mt-2 flex flex-col items-start gap-2">
         <input type="password" value={keys[app.id] ?? ""} disabled={pending} autoComplete="off" spellCheck={false}
-          aria-label={t("hostedMcp.keyLabel", { service: app.label })} placeholder={t("hostedMcp.keyPlaceholder", { service: app.label })}
+          aria-label={t("hostedMcp.keyLabel", { service: app.label })} placeholder={t(hostedKeyOptional(app.key) ? "hostedMcp.optionalKeyPlaceholder" : "hostedMcp.keyPlaceholder", { service: app.label })}
           onChange={(event) => { const value = event.target.value; setKeys((current) => ({ ...current, [app.id]: value })); }}
           onKeyDown={(event) => { if (event.key === "Enter") void connectHosted(app); }}
           className="h-8 w-full min-w-0 rounded-lg bg-inset px-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-1 focus:ring-accent/50" />
@@ -697,7 +700,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
               const result = probe[server.name];
               const auth = isRemoteMcpListing(server) ? server.auth : undefined;
               const canSignIn = isRemoteMcpListing(server) && !server.runsOn
-                && (auth === "needs-sign-in" || result?.auth === "required" || ((Boolean(hosted) || Boolean(server.oauth)) && auth !== "signed-in"));
+                && (auth === "needs-sign-in" || result?.auth === "required" || ((Boolean(hosted && !("key" in hosted && hostedKeyOptional(hosted.key))) || Boolean(server.oauth)) && auth !== "signed-in"));
               return (
                 <div key={server.name} data-hosted-server={hosted?.id} className="rounded-2xl border border-hairline/50 bg-card px-4 py-4 sm:px-5">
                   <div data-mcp-row className="flex flex-wrap items-center gap-3">

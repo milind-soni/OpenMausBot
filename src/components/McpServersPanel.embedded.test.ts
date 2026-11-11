@@ -117,6 +117,15 @@ describe("Your MCP servers inside the Apps pop-up", () => {
     expect(html).toContain("Bot access");
   });
 
+  it("offers no browser sign-in on the row of a hosted app whose key is optional", () => {
+    const keenable = HOSTED_MCP_APPS.find((app) => app.id === "keenable")!;
+    fixture.servers = [{ name: "search", type: "http", url: keenable.url, headerKeys: [], enabled: true }];
+    const html = render(true);
+    expect(html).toContain('data-hosted-server="keenable"');
+    expect(html).not.toContain("Connect Keenable");
+    expect(html).not.toContain("Sign in");
+  });
+
   it.each(HOSTED_MCP_APPS)("does not brand an unrelated endpoint just because its name is $id", (app) => {
     fixture.servers = [{ name: app.id, type: "http", url: "https://unrelated.example/mcp", headerKeys: [], enabled: false }];
     const html = render(true);

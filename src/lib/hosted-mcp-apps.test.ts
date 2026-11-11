@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { HOSTED_MCP_APPS, hostedConnections, hostedMcpApp, hostedServerName, type HostedApp } from "./hosted-mcp-apps";
+import { HOSTED_MCP_APPS, hostedConnections, hostedKeyHeader, hostedKeyHeaders, hostedKeyOptional, hostedMcpApp, hostedServerName, type HostedApp } from "./hosted-mcp-apps";
+
+const keyApp = (app: HostedApp): app is Extract<HostedApp, { key: unknown }> => "key" in app;
 
 describe("hosted MCP apps", () => {
   it("has unique ids that are valid server names and unique https endpoints", () => {
@@ -44,7 +46,10 @@ describe("hosted MCP apps", () => {
     expect(connectedWith(app, { enabled: true, headerKeys: ["Authorization"] })).toBe(false);
   });
 
-  it.each(HOSTED_MCP_APPS.filter((app) => "key" in app))("$label is connected only while its server is on and holds its key", (app) => {
+  const requiredKey = HOSTED_MCP_APPS.filter(keyApp).filter((app) => !hostedKeyOptional(app.key));
+  const optionalKey = HOSTED_MCP_APPS.filter(keyApp).filter((app) => hostedKeyOptional(app.key));
+
+  it.each(requiredKey)("$label is connected only while its server is on and holds its key", (app) => {
     expect(connectedWith(app, { enabled: true, headerKeys: ["Authorization"] })).toBe(true);
     expect(connectedWith(app, { enabled: true, headerKeys: ["authorization"] })).toBe(true);
     expect(connectedWith(app, { enabled: true, headerKeys: [] })).toBe(false);
@@ -53,9 +58,29 @@ describe("hosted MCP apps", () => {
     expect(connectedWith(app, { enabled: true, auth: "signed-in" })).toBe(false);
   });
 
+  it.each(optionalKey)("$label is connected while its server is on with no key or with its own key header", (app) => {
+    const header = hostedKeyHeader(app.key);
+    expect(connectedWith(app, { enabled: true })).toBe(true);
+    expect(connectedWith(app, { enabled: true, headerKeys: [] })).toBe(true);
+    expect(connectedWith(app, { enabled: true, headerKeys: [header] })).toBe(true);
+    expect(connectedWith(app, { enabled: true, headerKeys: [header.toLowerCase()] })).toBe(true);
+    expect(connectedWith(app, { enabled: true, headerKeys: ["Authorization"] })).toBe(false);
+    expect(connectedWith(app, { enabled: true, auth: "needs-sign-in" })).toBe(false);
+    expect(connectedWith(app, { enabled: false })).toBe(false);
+    expect(connectedWith(app, { enabled: false, headerKeys: [header] })).toBe(false);
+  });
+
   it("takes a pasted key exactly for the services with no browser sign-in, each with an https page to make one", () => {
-    expect(HOSTED_MCP_APPS.filter((app) => "key" in app).map((app) => app.id)).toEqual(["vapi", "telnyx"]);
+    expect(requiredKey.map((app) => app.id)).toEqual(["vapi", "telnyx"]);
+    expect(optionalKey.map((app) => app.id)).toEqual(["keenable"]);
     for (const app of HOSTED_MCP_APPS) if ("key" in app) expect(app.key.url).toMatch(/^https:\/\//);
+  });
+
+  it("sends a required key as a Bearer token, and Keenable's optional key as it is in X-API-Key", () => {
+    for (const app of requiredKey) expect(hostedKeyHeaders(app.key, "sk-live")).toEqual({ Authorization: "Bearer sk-live" });
+    const keenable = HOSTED_MCP_APPS.find((app) => app.id === "keenable")!;
+    expect(keenable.url).toBe("https://api.keenable.ai/mcp-public");
+    expect(hostedKeyHeaders(keenable.key, "kn-live")).toEqual({ "X-API-Key": "kn-live" });
   });
 
   it("counts each app on its own server", () => {

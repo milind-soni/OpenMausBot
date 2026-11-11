@@ -1,8 +1,10 @@
-import { CreditCard, Mail, PhoneCall, RadioTower, Smartphone, type LucideIcon } from "lucide-react";
+import { CreditCard, Mail, PhoneCall, RadioTower, Search, Smartphone, type LucideIcon } from "lucide-react";
 
 import whopLogo from "@/assets/whop/logo.png";
 import type { LocaleKey } from "@/locales";
 import { POSTIZ_SERVER } from "../../shared/postiz";
+
+export interface HostedKey { readonly url: string; readonly header?: string; readonly optional?: boolean }
 
 export interface HostedMcpApp {
   /** The card's id (`data-app-tile`) and the name the server is added under (then `-2`, `-3`…): a valid server name. */
@@ -11,9 +13,10 @@ export interface HostedMcpApp {
   readonly label: string;
   /** Its official hosted MCP endpoint. A server is this app only at exactly this address, over streamable HTTP. */
   readonly url: string;
-  /** A service with no browser sign-in takes a key the person pastes, sent as `Authorization: Bearer`; `url` is where
-   * they make one. Without it the card signs in with browser OAuth. */
-  readonly key?: { readonly url: string };
+  /** A service with no browser sign-in takes a key the person pastes; `url` is where they make one. The key is sent as
+   * `Authorization: Bearer`, or as it is in `header` when the service names its own. `optional`: the service also answers
+   * with no key, so Connect works with the field left empty. Without `key` the card signs in with browser OAuth. */
+  readonly key?: HostedKey;
   /** Its licensed logo, or a neutral lucide glyph when the service publishes none we may ship. */
   readonly icon: { readonly image: string } | { readonly glyph: LucideIcon };
   readonly description: LocaleKey;
@@ -84,6 +87,18 @@ export const HOSTED_MCP_APPS = [
     notice: "agentphone.notice",
     keywords: "agentphone phone number sms text call calls",
   },
+  {
+    id: "keenable",
+    label: "Keenable",
+    // Keenable's documented address for catalog entries: it publishes no OAuth metadata, and X-API-Key lifts its hourly limit.
+    url: "https://api.keenable.ai/mcp-public",
+    key: { url: "https://app.keenable.ai/console", header: "X-API-Key", optional: true },
+    // Keenable publishes no logo licence we have checked, so a neutral glyph stands in.
+    icon: { glyph: Search },
+    description: "keenable.description",
+    notice: "keenable.notice",
+    keywords: "keenable search web fetch crawler pages mcp retrieval",
+  },
 ] as const satisfies readonly HostedMcpApp[];
 
 /** A row of the table, with its own literal id. */
@@ -117,15 +132,35 @@ export function hostedServerName(app: HostedMcpApp, servers: ReadonlyArray<{ nam
 
 export const HOSTED_KEY_HEADER = "Authorization";
 
+/** The header a pasted key is saved in. */
+export function hostedKeyHeader(key: HostedKey): string {
+  return key.header ?? HOSTED_KEY_HEADER;
+}
+
+/** The headers that carry a pasted key: `Authorization: Bearer <key>`, or the key as it is in the service's own header. */
+export function hostedKeyHeaders(key: HostedKey, value: string): Record<string, string> {
+  return key.header ? { [key.header]: value } : { [HOSTED_KEY_HEADER]: `Bearer ${value}` };
+}
+
+export function hostedKeyOptional(key: HostedKey): boolean {
+  return key.optional === true;
+}
+
+type ListedServer = ServerAddress & { enabled: boolean; auth?: "signed-in" | "needs-sign-in"; headerKeys?: readonly string[] };
+
+function holdsKey(server: ListedServer, key: HostedKey): boolean {
+  const header = hostedKeyHeader(key).toLowerCase();
+  const names = (server.headerKeys ?? []).map((name) => name.toLowerCase());
+  if (!hostedKeyOptional(key)) return names.includes(header);
+  return server.auth !== "needs-sign-in" && names.every((name) => name === header);
+}
+
 /** The one rule for "connected", shared by the cards, the Connected filter and the count: the server is on and signed
- * in, or for a key app, on and holding its key. */
-export function hostedConnections(
-  servers: ReadonlyArray<ServerAddress & { enabled: boolean; auth?: "signed-in" | "needs-sign-in"; headerKeys?: readonly string[] }>,
-): HostedConnections {
-  const holdsKey = (server: (typeof servers)[number]) => server.headerKeys?.some((name) => name.toLowerCase() === HOSTED_KEY_HEADER.toLowerCase()) === true;
+ * in; for a key app, on and holding its key; for an app whose key is optional, on and holding no header but its key's. */
+export function hostedConnections(servers: ReadonlyArray<ListedServer>): HostedConnections {
   return Object.fromEntries(HOSTED_MCP_APPS.map((app) => [
     app.id,
-    servers.some((server) => hostedMcpApp(server) === app && server.enabled && ("key" in app ? holdsKey(server) : server.auth === "signed-in")),
+    servers.some((server) => hostedMcpApp(server) === app && server.enabled && ("key" in app ? holdsKey(server, app.key) : server.auth === "signed-in")),
   ])) as HostedConnections;
 }
 
