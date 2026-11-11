@@ -3263,6 +3263,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       onOpen: () => rawDispatch({ type: "connected", value: true }),
       onError: () => rawDispatch({ type: "connected", value: false }),
       onSnapshotRequired: () => {
+        store.flushFrames(); // the old stream's waiting frames go first, so forgetLiveTurns() below has the last word
         clearTimeout(hydrationFallback);
         publishMissedFrames();
         // Frames buffered before a non-resumable stream belong to an abandoned generation, and so do the turns they named.
