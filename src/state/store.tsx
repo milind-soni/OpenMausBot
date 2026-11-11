@@ -3273,8 +3273,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       onFrame: (frame) => {
         publishLiveFrame(frame as ServerFrame);
-        if (hydrated) store.enqueueFrame(frame as ServerFrame, frame.kind === "live.call");
-        else pendingFrames.push(withoutScreenPixels(frame as ServerFrame));
+        const queued = withoutScreenPixels(frame as ServerFrame); // the store reads only a screen frame's botId
+        if (hydrated) store.enqueueFrame(queued, frame.kind === "live.call"); else pendingFrames.push(queued);
       },
     });
     return () => {
