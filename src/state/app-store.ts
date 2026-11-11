@@ -53,7 +53,7 @@ export function createAppStore<State, Action, Frame>(
       changedWhileHeld = true;
       return;
     }
-    for (const listener of [...listeners]) listener();
+    for (const listener of listeners) listener();
   };
   const flushFrames = () => {
     cancelScheduled?.();

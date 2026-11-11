@@ -1,6 +1,6 @@
-import { use, useContext, useRef, useSyncExternalStore } from "react";
-import type { AppState } from "./store";
-import { StoreContext, StoreSourceContext, type StoreActions, type StoreSource, type StoreValue } from "./store-context";
+import { useContext, useState, useSyncExternalStore } from "react";
+import { useStore, type AppState } from "./store";
+import { StoreSourceContext, type StoreActions, type StoreSource, type StoreValue } from "./store-context";
 
 const scopedSources = new WeakMap<StoreValue, StoreSource>();
 const noSubscription = () => () => {};
@@ -16,12 +16,9 @@ function scopedSource(value: StoreValue): StoreSource {
   return source;
 }
 
+/** useStore only reads a context, and a component stays on one side of this branch, so calling it here is safe. */
 function useStoreSource(): StoreSource {
-  const source = useContext(StoreSourceContext);
-  if (source) return source;
-  const scoped = use(StoreContext);
-  if (!scoped) throw new Error("useStoreSelector outside provider");
-  return scopedSource(scoped);
+  return useContext(StoreSourceContext) ?? scopedSource(useStore());
 }
 
 interface Selection<T> {
@@ -33,7 +30,7 @@ interface Selection<T> {
 /** Renders again only when the selected value changes under `equal`. A selector may be a new closure each render. */
 export function useStoreSelector<T>(selector: (state: AppState) => T, equal: (a: T, b: T) => boolean = Object.is): T {
   const source = useStoreSource();
-  const last = useRef<Selection<T> | null>(null);
+  const [last] = useState<{ current?: Selection<T> }>(() => ({}));
   const read = () => {
     const state = source.getState();
     const previous = last.current;
