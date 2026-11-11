@@ -372,6 +372,17 @@ describe("memory_update", () => {
     expect(isForgotten("The person likes long replies")).toBe(false);
   });
 
+  it("keeps a forgotten fact blocked when a supersede names an entry that is not there", async () => {
+    const bot = "bot-memory-supersede-stale";
+    const ctx = context({ botId: bot, client: harness(bot) });
+    expect((await callTool("memory_update", { action: "append", text: "The person wants replies in English" }, ctx)).isError).toBeFalsy();
+    expect((await callTool("memory_update", { action: "forget", old_text: "long replies" }, ctx)).isError).toBeFalsy();
+
+    const stale = await callTool("memory_update", { action: "supersede", old_text: "The person wants replies in French", text: "The person wants long replies in English" }, ctx);
+    expect(stale.isError).toBe(true);
+    expect(isForgotten("The person likes long replies")).toBe(true);
+  });
+
   it("removes a whole dated entry when only its fact is named, never leaving a note with a date and no text", async () => {
     const bot = "bot-memory-remove";
     writeMemoryFile(bot, '- 2026-10-27 · from chat "Remember" (noticed) · The person prefers short answers\n- Keep this unique fact.\n');
