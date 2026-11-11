@@ -113,7 +113,13 @@ export function createSyncClient({ origin, fetch: fetchImpl, power = null, chunk
     async download(folderId, path, temporary, size = 0) {
       const have = statSync(temporary, { throwIfNoEntry: false })?.size ?? 0;
       try {
-        const response = await call("GET", `/api/sync/folders/${id(folderId)}/file?path=${encodeURIComponent(path)}`, { headers: have ? { range: `bytes=${have}-` } : {}, timeoutMs: 60_000 + Math.ceil(Math.max(0, size - have) / SLOWEST) });
+        const endpoint = `/api/sync/folders/${id(folderId)}/file?path=${encodeURIComponent(path)}`;
+        let response = await call("GET", endpoint, { headers: have ? { range: `bytes=${have}-` } : {}, timeoutMs: 60_000 + Math.ceil(Math.max(0, size - have) / SLOWEST) });
+        // The partial can already be complete, or the remote file can have shrunk. Retrying that range forever cannot help.
+        if (have && response.status === 416) {
+          await response.body?.cancel().catch(() => {});
+          response = await call("GET", endpoint, { timeoutMs: 60_000 + Math.ceil(size / SLOWEST) });
+        }
         if (!response.ok) throw new SyncHttpError(response.status, await response.json().catch(() => null));
         await pipeline(Readable.fromWeb(response.body), createWriteStream(temporary, { flags: response.status === 206 ? "a" : "w", mode: 0o600 }));
         return { sha256: response.headers.get("x-omb-sha256") };
