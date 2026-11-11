@@ -9,11 +9,14 @@ body {
   font-size: var(--text-base);
   line-height: var(--leading);
   font-feature-settings: "cv11", "ss01";
+  font-optical-sizing: auto;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
 h1, h2, h3, h4 { line-height: var(--leading-tight); letter-spacing: -0.01em; }
+/* Inter Display: headings pin the optical size so large titles get the tighter display cut. */
+h1, h2, .display-type { font-family: var(--font-display); font-variation-settings: var(--display-opsz); }
 button, input, textarea, select { font: inherit; color: inherit; letter-spacing: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: 0.45; }

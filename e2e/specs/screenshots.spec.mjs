@@ -10,14 +10,31 @@ const shots = process.env.ORIGIN_SHOTS_DIR;
 if (shots) mkdirSync(shots, { recursive: true });
 const shot = (target, name, options = {}) => target.screenshot({ path: resolve(shots, name), animations: 'disabled', ...options });
 const refs = process.env.ORIGIN_LINEAR_REFS;
-/** Origin's shot on the left, the official Linear reference on the right, at the same height. */
+/** Origin's shot on the left, the official Linear reference on the right, at the same height (compare/<name>). */
 async function compare(page, name, origin, linear, caption) {
   if (!refs || !existsSync(resolve(refs, linear))) return;
+  mkdirSync(resolve(shots, 'compare'), { recursive: true });
   const data = file => `data:image/png;base64,${readFileSync(file).toString('base64')}`;
   await page.setViewportSize({ width: 1600, height: 640 });
   await page.setContent(`<style>body{margin:0;background:#08090a;color:#9a9ba2;font:13px Inter,system-ui,sans-serif}main{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px}figure{margin:0;display:grid;gap:8px}img{width:100%;height:560px;object-fit:contain;object-position:left top;border:1px solid #26272b;border-radius:8px;background:#0e0f11}</style>
     <main><figure><img src="${data(resolve(shots, origin))}"><figcaption>Origin · ${caption}</figcaption></figure><figure><img src="${data(resolve(refs, linear))}"><figcaption>Linear (official docs) · ${linear}</figcaption></figure></main>`);
-  await page.screenshot({ path: resolve(shots, name) });
+  await page.screenshot({ path: resolve(shots, 'compare', name) });
+}
+/**
+ * Linear at 50% over Origin, both scaled to the same CSS pixel density (Linear's docs art is ~2x), aligned at a
+ * chosen anchor so row pitch, icon size and text baselines can be read off directly.
+ * crop = the region of the Linear image (in its own pixels) that corresponds to the Origin shot.
+ */
+async function overlay(page, name, origin, linear, crop, caption) {
+  if (!refs || !existsSync(resolve(refs, linear))) return;
+  mkdirSync(resolve(shots, 'compare'), { recursive: true });
+  const data = file => `data:image/png;base64,${readFileSync(file).toString('base64')}`;
+  const { x, y, scale = 0.5 } = crop;
+  await page.setViewportSize({ width: 900, height: 560 });
+  await page.setContent(`<style>body{margin:0;background:#08090a;color:#9a9ba2;font:12px Inter,system-ui,sans-serif}.stage{position:relative;width:860px;height:500px;margin:12px 20px 0;overflow:hidden;border:1px solid #26272b}.stage img{position:absolute;left:0;top:0;transform-origin:0 0}.linear{opacity:.5;mix-blend-mode:screen}p{margin:8px 20px}</style>
+    <div class="stage"><img src="${data(resolve(shots, origin))}"><img class="linear" style="transform:translate(${-x * scale}px,${-y * scale}px) scale(${scale})" src="${data(resolve(refs, linear))}"></div><p>Overlay · Origin (solid) + Linear 50% (${linear}, scaled ${scale}) · ${caption}</p>`);
+  await page.waitForTimeout(100);
+  await page.screenshot({ path: resolve(shots, 'compare', name) });
 }
 const day = offset => { const d = new Date(Date.now() + offset * 86400000); return d.toISOString().slice(0, 10); };
 
@@ -165,6 +182,7 @@ test('polish screenshots', async ({ clients, f }) => {
   const now = Date.now();
   const rows = [
     { projectId: gamma, taskId: fix, requesterUserId: f.owner.user.id || f.owner.user._id, number: 42, url: `${repoUrl}/pull/42`, branch: `${fixKey.toLowerCase()}-fix-login-redirect`, state: 'open', checks: 'success', review: 'approved', mergeable: true, repository: 'acme/origin-demo', title: 'Fix login redirect loop', authorLogin: 'sam', linkSource: 'reference', updatedAt: now - 3600000 },
+    { projectId: gamma, taskId: fix, requesterUserId: f.owner.user.id || f.owner.user._id, number: 44, url: `${repoUrl}/pull/44`, branch: 'paste-images', state: 'open', checks: 'failure', review: 'review_required', mergeable: true, repository: 'acme/origin-demo', title: 'Paste images into comments without a crash', authorLogin: 'kim', linkSource: 'reference', updatedAt: now - 1800000 },
   ];
   const file = resolve(shots, '.seed-prs.jsonl');
   writeFileSync(file, rows.map(row => JSON.stringify(row)).join('\n'));
@@ -182,6 +200,8 @@ test('polish screenshots', async ({ clients, f }) => {
     pullRequests: [
       { number: 42, title: 'Fix login redirect loop', state: 'open', url: `${repoUrl}/pull/42`, author: 'sam', branch: `${fixKey.toLowerCase()}-fix-login-redirect`, updatedAt: now - 3600000 },
       { number: 41, title: 'Bump convex to 1.37', state: 'open', url: `${repoUrl}/pull/41`, author: 'renovate', branch: 'renovate/convex-1.x', updatedAt: now - 5 * 3600000 },
+      { number: 44, title: 'Paste images into comments without a crash', state: 'open', url: `${repoUrl}/pull/44`, author: 'kim', branch: 'paste-images', updatedAt: now - 1800000 },
+      { number: 43, title: 'WIP: calendar view', state: 'draft', url: `${repoUrl}/pull/43`, author: 'alex', branch: 'calendar-view', updatedAt: now - 9000000 },
       { number: 39, title: 'Add estimates to issues', state: 'merged', url: `${repoUrl}/pull/39`, author: 'alex', branch: 'estimates', updatedAt: now - 2 * 86400000 },
     ],
   };
@@ -189,9 +209,10 @@ test('polish screenshots', async ({ clients, f }) => {
   await owner.route('**/api/github/repo?**', route => route.fulfill({ json: snapshot }));
   await owner.getByRole('tab', { name: 'Code' }).click();
   await expect(owner.locator('.code-row').first()).toBeVisible();
-  if (seeded) await expect(owner.locator('.pull-request-issue')).toBeVisible();
+  if (seeded) await expect(owner.locator('.pull-request-issue').first()).toBeVisible();
   await owner.mouse.move(1, 1);
   await shot(owner, 'code.png');
+  await shot(owner, 'code-pr-rows.png', { clip: { x: 240, y: 0, width: 900, height: 420 } });
   await shot(owner.locator('.project-navigation'), 'nav-code.png');
   await owner.getByRole('tab', { name: /Commits/ }).click();
   await shot(owner, 'code-commits.png');
@@ -209,13 +230,17 @@ test('polish screenshots', async ({ clients, f }) => {
   await phone.waitForTimeout(400);
   await shot(phone, 'phone-nav.png');
 
-  // Origin | Linear side-by-sides from the official docs images.
+  // Origin | Linear side-by-sides and 50% overlays from the official docs images (compare/).
   const sheet = await clients.login(f.admin, f.url());
   await compare(sheet, 'compare-sidebar.png', 'nav-sidebar.png', 'docs-team-pages.png', 'sidebar');
-  await compare(sheet, 'compare-view-tabs.png', 'view-tabs.png', 'docs-filters.png', 'view tabs + header');
+  await compare(sheet, 'compare-header-tabs.png', 'view-tabs.png', 'docs-custom-views-board.png', 'header + view tabs');
   await compare(sheet, 'compare-display.png', 'display-popover.png', 'docs-display-options.png', 'Display popover');
   await compare(sheet, 'compare-filter-bar.png', 'filter-bar.png', 'docs-filters.png', 'filter bar');
-  await compare(sheet, 'compare-header.png', 'view-tabs.png', 'docs-custom-views-board.png', 'header cluster');
   await compare(sheet, 'compare-board.png', 'board.png', 'docs-board-layout.png', 'board');
   await compare(sheet, 'compare-list.png', 'list-active.png', 'docs-filters.png', 'list');
+  await compare(sheet, 'compare-issue-page.png', 'issue-page.png', 'docs-reviews.png', 'issue page (Linear: review page chrome + metadata sidebar)');
+  await compare(sheet, 'compare-pr-rows.png', 'code-pr-rows.png', 'docs-reviews-d.png', 'Code / pull request rows');
+  // Linear's docs art is rendered at 2x; the crops line up the sidebar's first row and the Reviews list's first row.
+  await overlay(sheet, 'overlay-sidebar.png', 'nav-sidebar.png', 'docs-team-pages.png', { x: 4, y: 257 }, 'sidebar rows (Inbox aligned)');
+  await overlay(sheet, 'overlay-pr-rows.png', 'code-pr-rows.png', 'docs-reviews-d.png', { x: 88, y: -84 }, 'Reviews rows');
 });

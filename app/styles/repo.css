@@ -1,9 +1,9 @@
 /* Code tab (components/project-code.tsx): the repository on top, then its pull requests, commits or GitHub issues. */
 .code-tab { display: flex; flex: 1; flex-direction: column; gap: var(--space-3); min-width: 0; padding-top: var(--space-3); }
 .code-tab > .notice { margin: 0; }
-.code-repo { display: flex; flex: none; align-items: center; gap: var(--space-3); min-width: 0; min-height: 52px; padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3); border: 1px solid var(--border-1); border-radius: var(--radius-md); background: var(--surface-2); }
-.code-repo-icon { display: grid; flex: none; place-items: center; width: 32px; height: 32px; border: 1px solid var(--border-2); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--text-2); }
-.code-repo-name { display: grid; flex: 1; gap: 1px; min-width: 0; }
+.code-repo { display: flex; flex: none; align-items: center; gap: var(--space-3); min-width: 0; min-height: 40px; padding: 0 var(--space-1) 0 var(--space-3); border: 0; border-radius: 0; background: transparent; }
+.code-repo-icon { display: grid; flex: none; place-items: center; width: 16px; height: 16px; color: var(--text-3); }
+.code-repo-name { display: flex; flex: 1; align-items: baseline; gap: var(--space-2); min-width: 0; }
 .code-repo-name > a { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-1); font-size: var(--text-base); font-weight: var(--weight-semibold); text-decoration: none; }
 .code-repo-name > a > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .code-repo-name > a > svg { flex: none; color: var(--text-3); }
@@ -25,10 +25,12 @@
 
 /* Rows: 44px, state icon, title + meta, linked issue keys, time at the end. */
 .code-list { display: grid; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--border-1); }
-.code-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; column-gap: var(--space-3); min-height: 52px; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border-1); transition: background var(--duration-fast) var(--ease-standard); }
+/* Rows follow Linear Reviews: one 36px line, 16px state icon, 13px title, quiet trailing meta, hairline dividers. */
+.code-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; column-gap: 10px; min-height: 36px; padding: 0 var(--space-3); border-bottom: 1px solid var(--border-1); transition: background var(--duration-instant) var(--ease-standard); }
 @media (hover: hover) { .code-row:hover { background: var(--hover); } }
-.code-row-main { display: grid; gap: 2px; min-width: 0; }
-.code-row-title { overflow: hidden; color: var(--text-1); font-size: var(--text-base); font-weight: var(--weight-medium); line-height: 1.4; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+.code-row-main { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.code-row-main > .repository-meta { flex: 0 1 auto; }
+.code-row-title { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--text-1); font-size: var(--text-base); font-weight: var(--weight-medium); line-height: 1.4; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
 .code-row-title::after { content: ""; position: absolute; inset: 0; }
 .code-row { position: relative; }
 .code-row :is(.pull-request-issues, .repository-meta a) { position: relative; z-index: 1; }
@@ -48,7 +50,7 @@
 .repository-meta > * + *::before { content: "·"; margin-right: 6px; color: var(--text-3); }
 .repository-meta a { color: inherit; text-decoration: none; }
 .repository-meta code { overflow: hidden; max-width: 220px; font-family: var(--font-mono); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
-.repository-state { display: grid; place-items: center; height: 19px; color: var(--text-3); }
+.repository-state { display: grid; place-items: center; height: 16px; color: var(--text-3); }
 .repository-state.open { color: var(--green); }
 .repository-state.draft { color: var(--text-3); }
 .repository-state.merged { color: var(--violet); }
@@ -96,3 +98,34 @@
 .repo-workspace-setup { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: var(--space-4) 0; border-top: 1px solid var(--border-2); font-size: var(--text-sm); }
 .repo-workspace-setup > div:first-child { display: flex; flex: 1; align-items: center; gap: var(--space-2); }
 .repo-workspace-setup > p { width: 100%; margin: 0; }
+
+/* Pull requests: Linear Reviews rows. */
+.pull-state-tabs .view-tab { gap: 6px; height: 26px; }
+.pull-state-tabs .view-tab[data-active] { border-color: var(--border-2); background: var(--selected); color: var(--text-1); }
+.pull-state-tabs .view-tab > small { color: var(--text-3); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.pull-groups { display: grid; gap: var(--space-2); }
+.pull-group { display: grid; }
+.pull-group-head { display: flex; align-items: center; gap: 6px; height: 28px; margin: 0; padding: 0 var(--space-3); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); font-family: var(--font-sans); font-size: var(--text-base); font-weight: var(--weight-medium); font-variation-settings: normal; letter-spacing: 0; }
+.pull-group-head > small { color: var(--text-3); font-size: var(--text-base); font-weight: var(--weight-regular); font-variant-numeric: tabular-nums; }
+.pull-group .code-list { border-top: 0; }
+.pull-list .code-row { min-height: 32px; }
+.pull-list .code-row-title { color: var(--text-1); }
+.pull-number { flex: none; color: var(--text-3); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.pull-branch { flex: 0 1 auto; min-width: 0; max-width: 220px; overflow: hidden; color: var(--text-3); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.pull-trailing { display: flex; align-items: center; gap: 10px; grid-column: 3 / -1; min-width: 0; color: var(--text-3); font-size: var(--text-sm); }
+.pull-trailing .pull-request-issues { flex-wrap: nowrap; max-width: 200px; }
+.pull-fact { display: grid; place-items: center; width: 16px; height: 16px; color: var(--text-3); }
+.pull-fact.is-good { color: var(--green); }
+.pull-fact.is-bad { color: var(--red); }
+.pull-fact.is-pending { color: var(--amber); }
+.pull-repo { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pull-author { display: inline-flex; align-items: center; gap: 6px; max-width: 120px; color: var(--text-2); }
+.pull-author > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pull-author-initial { display: grid; flex: none; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--surface-5); color: var(--text-1); font-size: 9px; font-weight: var(--weight-semibold); }
+.pull-trailing .code-row-time { min-width: 22px; text-align: right; }
+.pull-request-row .pull-request-issues, .pull-request-row .pull-trailing { position: relative; z-index: 1; }
+@media (max-width: 760px) {
+  .pull-repo, .pull-branch, .pull-author > span:last-child { display: none; }
+  .code-row.pull-request-row { grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; padding: 0 var(--space-2); }
+  .pull-request-row .pull-request-issues { grid-column: auto; grid-row: auto; padding-top: 0; }
+}

@@ -46,8 +46,11 @@
   --green-soft: rgba(92, 197, 143, 0.12);
   --blue-soft: rgba(90, 174, 252, 0.12);
 
-  /* Type: one family (Inter); code uses the platform monospace. */
-  --font-sans: var(--font-inter), "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Type: Inter Variable for UI, Inter Display (the same file at opsz 32) for
+     headings; code uses the platform monospace. */
+  --font-sans: var(--font-inter), "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-inter), "Inter Display", "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --display-opsz: "opsz" 32;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
   --text-xs: 11px;
   --text-sm: 12px;
@@ -59,8 +62,9 @@
   --leading-tight: 1.25;
   --leading: 1.5;
   --weight-regular: 400;
-  --weight-medium: 500;
-  --weight-semibold: 600;
+  --weight-medium: 510;
+  --weight-semibold: 590;
+  --weight-bold: 600;
 
   /* Spacing: 4px scale. */
   --space-1: 4px;

@@ -203,3 +203,9 @@
   .account-dropdown button { min-height: 44px; }
   .mobile-topbar { flex-basis: 52px; height: 52px; padding: 0 var(--space-1); }
 }
+
+/* One icon set (Lucide), one weight: every sidebar and chrome icon draws at 16px
+   with the same 1.75 stroke so rows line up on a single optical baseline.
+   Disclosure chevrons stay 12px, as Linear's section carets do. */
+.sidebar .lucide, .view-header .lucide, .project-navigation .lucide, .settings-nav .lucide { stroke-width: 1.75; }
+.sidebar :is(.nav-item, .project-button, .sidebar-topbar .icon-button, .icon-create) > .lucide { width: 16px; height: 16px; }
