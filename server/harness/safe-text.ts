@@ -5,7 +5,7 @@
 // characters always wait too, as many as the longest of them (rounded up), whatever they are: what a stream sends
 // never depends on how much of a held value the text has begun. Thinking text gets the same. Every bus listener, the
 // event log included, sees only what is safe; a reply's finished text arrives with its completion, and the rest of
-// a thinking stream when it ends.
+// a thinking stream when the turn ends.
 import type { RuntimeEvent } from "../contracts.ts";
 import { heldSecretLongest, redactSecretsInText, scrubHeldSecrets } from "../redact.ts";
 import { openPrivateKeyAt } from "../../shared/redact.ts";
@@ -19,7 +19,8 @@ const SETTLE_AFTER = 2048;
 const SETTLE_LOOKAHEAD = 512;
 /** A message with no break to settle at stops streaming here; its finished text still arrives whole. */
 const MAX_WINDOW = 64 * 1024;
-/** Open messages kept per thread: a message is let go when it completes, a tool starts or the turn ends. */
+/** Open reply messages kept per thread (thinking stays open until the turn ends): a message is let go when it
+ * completes, a tool starts or the turn ends. */
 const MAX_OPEN = 8;
 /** Messages remembered per thread as closed this turn, so a late word for one sends nothing. */
 const MAX_CLOSED = 256;
@@ -82,14 +83,14 @@ function heldBack(longest: number): number {
   return longest > 0 ? Math.ceil(longest / HELD_BUCKET) * HELD_BUCKET - 1 : 0;
 }
 
-/** `end`, moved back to the start of a whole held value that crosses it: the mask there shows that position anyway. */
+/** `end`, moved back until the text before it scrubs to the start of what the text scrubs to: never partway into a
+ * whole held value that crosses it, or into one of a chain of overlapping values. The mask there shows that position
+ * anyway. */
 function beforeWholeHeld(text: string, end: number, longest: number): number {
   if (longest < 2 || !Number.isFinite(longest) || end <= 0 || end >= text.length) return end;
-  const from = Math.max(0, end - longest + 1);
-  const near = text.slice(from, Math.min(text.length, end + longest - 1));
-  const masked = scrubHeldSecrets(near);
-  for (let cut = end; cut > from; cut--) if (masked.startsWith(scrubHeldSecrets(near.slice(0, cut - from)))) return cut;
-  return from;
+  const masked = scrubHeldSecrets(text.slice(0, Math.min(text.length, end + longest - 1)));
+  for (let cut = end; cut > 0; cut--) if (masked.startsWith(scrubHeldSecrets(text.slice(0, cut)))) return cut;
+  return 0;
 }
 
 /** How much of `text` may be cleaned and sent while more is on the way: short of the word still being written, of
@@ -125,6 +126,8 @@ interface ThreadStreams {
   closed: Set<string>;
 }
 
+const isThinking = (stream: Stream) => stream.key.startsWith("reasoning_text:");
+
 const isTurnBoundary = (event: RuntimeEvent) =>
   event.type === "turn.started" || event.type === "turn.completed" || event.type === "cap.exhausted" ||
   event.type === "session.exited" || (event.type === "runtime.error" && event.terminal === true);
@@ -145,15 +148,21 @@ export class SafeText {
     if (!stream) {
       stream = { key, raw: "", base: 0, settled: "", sent: "", stopped: false, last: event };
       thread.open.set(key, stream);
-      if (thread.open.size > MAX_OPEN) this.close(thread, thread.open.values().next().value!);
+      if (thread.open.size > MAX_OPEN) {
+        // Thinking stays open for the whole turn; the oldest reply message is let go.
+        const oldest = Array.from(thread.open.values()).find((open) => !isThinking(open));
+        if (oldest) this.close(thread, oldest);
+      }
     }
     stream.last = event;
     const fresh = this.extend(stream, event.delta);
     return fresh ? { ...event, delta: fresh } : null;
   }
 
-  /** Any other event, before it is published: a message's completion closes that message; a tool's start, a thinking
-   * item's start or a turn's end closes them all. Returns the rest of any thinking stream that ends here. */
+  /** Any other event, before it is published: a message's completion closes that message, and a tool's start or a
+   * thinking item's start closes every reply message. Thinking has no completion and may go on after a tool (an engine
+   * that names no thinking item cannot be told from one that does), so it stays open, sending only what is safe, until
+   * the turn ends; then the rest of it goes out. Returns that rest. */
   observe(event: RuntimeEvent): RuntimeEvent[] {
     const thread = this.threads.get(event.threadId);
     if (!thread) return [];
@@ -162,21 +171,18 @@ export class SafeText {
       if (stream) this.close(thread, stream);
       return [];
     }
-    if (!(event.type === "item.started" && (event.itemType === "tool" || event.itemType === "reasoning")) && !isTurnBoundary(event)) return [];
-    const rest: RuntimeEvent[] = [];
-    for (const stream of Array.from(thread.open.values())) {
-      const flushed = stream.key.startsWith("reasoning_text:") ? this.finish(stream) : null;
-      if (flushed) rest.push(flushed);
-      this.close(thread, stream);
+    if (event.type === "item.started" && (event.itemType === "tool" || event.itemType === "reasoning")) {
+      for (const stream of Array.from(thread.open.values())) if (!isThinking(stream)) this.close(thread, stream);
+      return [];
     }
-    if (isTurnBoundary(event)) this.threads.delete(event.threadId);
+    if (!isTurnBoundary(event)) return [];
+    const rest = Array.from(thread.open.values()).filter(isThinking).flatMap((stream) => this.finish(stream) ?? []);
+    this.threads.delete(event.threadId);
     return rest;
   }
 
   private close(thread: ThreadStreams, stream: Stream): void {
     thread.open.delete(stream.key);
-    // Thinking that names no item cannot be told apart from the next thinking: only its finished part was sent.
-    if (stream.key.endsWith(":")) return;
     thread.closed.add(stream.key);
     if (thread.closed.size > MAX_CLOSED) thread.closed.delete(thread.closed.values().next().value!);
   }

@@ -219,6 +219,34 @@ describe("a held value with whitespace in it", () => {
   });
 });
 
+describe("overlapping held values", () => {
+  const hold = (...values: string[]) => {
+    const removes = values.map((value) => addHeldSecretScrubber((text) => text.split(value).join("••••••"), () => value.length));
+    unregister = () => removes.forEach((remove) => remove());
+  };
+  const check = (values: string[], text: string) => {
+    for (const order of [values, [...values].reverse()]) {
+      hold(...order);
+      const saved = savedReplyText(text);
+      for (let length = 40; length <= 60; length++) {
+        const sent = deltaText(new SafeText().delta(words(text.slice(0, length))));
+        expect(saved.startsWith(sent), `${order.join(" | ")} at ${length}: ${JSON.stringify(sent)}`).toBe(true);
+        if (order === values) expect(sent, `at ${length}`).not.toMatch(/Aa/);
+      }
+      unregister!();
+      unregister = null;
+    }
+  };
+
+  it("never sends the start of one whose end another overlaps", () => {
+    check(["Aaaaaaaaabbbbbbb", "bbbbbbb c"], `x Aaaaaaaaabbbbbbb c ${"zz ".repeat(30)}`);
+  });
+
+  it("never sends the start of a chain of three", () => {
+    check(["Aaaaaaaaabbbbbbb", "bbbbbbb cccc", "cccc dddd"], `x Aaaaaaaaabbbbbbb cccc dddd ${"zz ".repeat(30)}`);
+  });
+});
+
 describe("what a stream shows about a held value", () => {
   const HELD_VALUE = "Tr0ub4dor&3";
   /** What goes out for a bot repeating `guess`, with the guess blanked: reply frames, thinking frames, and the bus's
@@ -337,14 +365,31 @@ describe("a message closed and then continued", () => {
 describe("the end of a thinking stream", () => {
   const thinking = (safe: SafeText, delta: string) => deltaText(safe.delta({ ...words(delta, "r1"), streamKind: "reasoning_text" } as RuntimeEvent));
 
-  it("sends its held-back tail, cleaned, when a tool starts or the turn ends", () => {
-    for (const end of [{ type: "item.started", itemType: "tool", itemId: "c1", title: "ls" }, { type: "turn.completed", ok: true }]) {
+  it("sends its held-back tail, cleaned, when the turn ends, and goes on through a tool", () => {
+    const safe = new SafeText();
+    let sent = thinking(safe, "Let me look at sk-ant-api03-abcdefghijklmnopqrstuvwxyz then ");
+    expect(safe.observe({ ...words(""), type: "item.started", itemType: "tool", itemId: "c1", title: "ls" } as RuntimeEvent)).toEqual([]);
+    sent += thinking(safe, "decide");
+    const rest = safe.observe({ ...words(""), type: "turn.completed", ok: true } as RuntimeEvent);
+    expect(rest).toHaveLength(1);
+    expect(rest[0]).toMatchObject({ streamKind: "reasoning_text", itemId: "r1" });
+    expect(sent + deltaText(rest[0]!)).toMatch(/^Let me look at «redacted \d+ chars» then decide$/);
+  });
+
+  it.each([undefined, "r1"])("never sends a held passphrase or a key's body split across a tool start (item %s)", (itemId) => {
+    holdSecret("correct horse battery staple");
+    for (const [first, second, hidden] of [
+      [`Thinking about ${"it ".repeat(12)}correct horse `, `battery staple and then ${MORE}`, /correct|horse|battery/],
+      ["Key:\n-----BEGIN PRIVATE KEY-----\nMIIEsecretbody ", `morebody\n-----END PRIVATE KEY-----\nok ${MORE}`, /MIIE|secretbody|morebody/],
+    ] as const) {
       const safe = new SafeText();
-      const sent = thinking(safe, "Let me look at sk-ant-api03-abcdefghijklmnopqrstuvwxyz then decide");
-      const rest = safe.observe({ ...words(""), ...end } as RuntimeEvent);
-      expect(rest).toHaveLength(1);
-      expect(rest[0]).toMatchObject({ streamKind: "reasoning_text", itemId: "r1" });
-      expect(sent + deltaText(rest[0]!)).toMatch(/^Let me look at «redacted \d+ chars» then decide$/);
+      const think = (delta: string) => deltaText(safe.delta({ ...words(delta, itemId), streamKind: "reasoning_text" } as RuntimeEvent));
+      const frames = [think(first)];
+      frames.push(...safe.observe({ ...words(""), type: "item.started", itemType: "tool", itemId: "c1", title: "ls" } as RuntimeEvent).map(deltaText));
+      frames.push(think(second));
+      frames.push(...safe.observe({ ...words(""), type: "turn.completed", ok: true } as RuntimeEvent).map(deltaText));
+      for (const frame of frames) expect(frame).not.toMatch(hidden);
+      expect(frames.join("")).toMatch(/••••••|«redacted/);
     }
   });
 
