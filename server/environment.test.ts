@@ -206,7 +206,12 @@ describe("environment identity", () => {
   it("reports only a release version to the control plane", () => {
     expect(reportableServerVersion("0.1.153")).toBe("0.1.153");
     expect(reportableServerVersion("0.2.0-beta.1")).toBe("0.2.0-beta.1");
+    expect(reportableServerVersion("0.2.0+build.7")).toBe("0.2.0+build.7");
     expect(reportableServerVersion("unknown")).toBeUndefined();
+    expect(reportableServerVersion("0.1.153-rc 1")).toBeUndefined();
+    expect(reportableServerVersion("0.1.153-")).toBeUndefined();
+    expect(reportableServerVersion("v0.1.153")).toBeUndefined();
+    expect(reportableServerVersion("1234567890.0.0")).toBeUndefined();
     expect(reportableServerVersion("")).toBeUndefined();
   });
 });

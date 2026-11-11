@@ -146,7 +146,7 @@ export function serverVersion(root = SERVER_ROOT): string {
   return "unknown";
 }
 
-const RELEASE_VERSION = /^\d+\.\d+\.\d+(?:[-+].*)?$/;
+const RELEASE_VERSION = /^[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
 /** The version to tell the control plane, or none: it records what it is told, and stops serving a public address to a
  * version below its minimum, so a version this server could not read must not stand in for the release it runs. */
