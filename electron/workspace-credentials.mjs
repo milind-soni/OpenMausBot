@@ -17,6 +17,7 @@ export const WORKSPACE_CREDENTIALS = [
   { section: "tts", field: "key", name: "ttsKey", env: "OMB_TTS_KEY" },
   { section: "tts", field: "fishKey", name: "fishAudioKey", env: "OMB_FISH_AUDIO_API_KEY" },
   { section: "tts", field: "geminiKey", name: "geminiTtsKey", env: "OMB_GEMINI_API_KEY" },
+  { section: "stt", field: "key", name: "sttKey", env: "OMB_STT_API_KEY" },
   { section: "decider", field: "key", name: "jevApiKey", env: "OMB_JEV_API_KEY" },
   { section: "decider", field: "openrouterKey", name: "openrouterDeciderKey", env: "OMB_OPENROUTER_DECIDER_KEY" },
   { section: "decider", field: "workersAiToken", name: "workersAiToken", env: "OMB_WORKERS_AI_TOKEN" },

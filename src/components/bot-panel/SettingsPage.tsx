@@ -6,8 +6,8 @@ import { t } from "@/lib/i18n";
 import { mcpServersForBot, useMcpServers } from "@/lib/mcp-servers";
 import { CALL_MODES, callModeHint, effectiveCallMode, setCallMode, useCallMode, type CallMode } from "@/lib/call-mode";
 import { callCapabilityHelp } from "@/lib/call-capability";
-import { fishListeningReady, listensHere, speechBridge } from "@/lib/speech";
 import { requestNotificationPermission } from "@/lib/notify";
+import { listensHere, speechRecognizer } from "@/lib/speech";
 import { firstSentence } from "@/lib/soul";
 import { currentTaskBot, useStore, type Bot } from "@/state/store";
 import type { ApprovalMode } from "../../../shared/approval-mode";
@@ -81,12 +81,12 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
   // As the call button: where this device cannot listen in turns, a call is always Live.
   const turnsHere = !ready || listensHere(capabilities, state.config);
   const callMode = effectiveCallMode(storedCallMode, { turnsHere, canLive: true });
-  const turnsHelp = turnsHere ? null : callCapabilityHelp(capabilities, Boolean(speechBridge()?.speechStart), fishListeningReady(state.config));
+  const turnsHelp = turnsHere ? null : callCapabilityHelp(capabilities, state.config);
   const callOptions: SegmentOption<CallMode>[] = CALL_MODES.map((entry) => ({
     value: entry.id,
     label: t(entry.label),
     disabled: entry.id === "turns" && turnsHelp !== null,
-    tooltip: entry.id === "turns" && turnsHelp ? `${turnsHelp.label}. ${turnsHelp.reason}` : entry.id === "live" ? t("call.mode.liveHint") : callModeHint("turns"),
+    tooltip: entry.id === "turns" && turnsHelp ? `${turnsHelp.label}. ${turnsHelp.reason}` : entry.id === "live" ? t("call.mode.liveHint") : callModeHint("turns", {}, speechRecognizer(state.config, capabilities)),
   }));
 
   const replyOptions: SegmentOption<ReplyStyle>[] = REPLY_STYLES.map((style) => ({

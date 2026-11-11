@@ -19,6 +19,12 @@ export const CREDENTIAL_PATCH = {
   ttsKey: (value) => ({ tts: { key: value } }),
   fishAudioKey: (value) => ({ tts: { fishKey: value } }),
   geminiTtsKey: (value) => ({ tts: { geminiKey: value } }),
+  sttKey: (value, options) => ({ stt: {
+    ...(typeof options?.provider === "string" ? { provider: options.provider } : {}),
+    ...(typeof options?.baseUrl === "string" ? { baseUrl: options.baseUrl } : {}),
+    ...(typeof options?.model === "string" ? { model: options.model } : {}),
+    key: value,
+  } }),
   jevApiKey: (value) => ({ decider: { key: value } }),
   openrouterDeciderKey: (value) => ({ decider: { openrouterKey: value } }),
   workersAiToken: (value) => ({ decider: { workersAiToken: value } }),

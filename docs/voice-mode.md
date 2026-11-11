@@ -94,11 +94,22 @@ hand real work to specialists with `coordinate_bots` — no new machinery requir
 
 ## Known gaps
 
-- **Take-turns calls listen differently off the Mac.** On macOS the dictation
-  helper listens on-device. On Windows and Linux the page records the mic
-  (`src/lib/fish-speech.ts`) and `POST /api/tts/transcribe` sends each turn's
-  clip, silence trimmed, to Fish Audio speech-to-text with the saved Fish key.
-  Without that key Take turns is off. The voice half works everywhere. Live
+- **Take-turns speech input is configurable.** Automatic uses the on-device
+  macOS helper in the Mac app and Fish Audio everywhere else, browsers included.
+  Settings → General → Speech input can select Fish Audio or an OpenAI-compatible
+  transcription server. The page recorder (`src/lib/recorded-speech.ts`) trims
+  silence and uploads WAV clips through `POST /api/tts/transcribe`. For offline,
+  private transcription, run any Whisper server that speaks OpenAI's
+  `/audio/transcriptions` on the server's own computer and choose Custom or local
+  server with its localhost address; audio then never leaves that computer.
+  A browser page records only when it is secure (https or localhost).
+  OpenAI and Groq presets fill the API root and need a key; Load models fetches each
+  server's current catalog, and the model field also accepts custom IDs. Any other
+  server works without a key, and an address with no path gets `/v1`. See
+  [speech input setup and verification](verification/speech-input.md).
+  Google (Gemini) is another provider option, using Google's OpenAI-compatible audio chat input
+  with a separate Google AI Studio key.
+  The voice half works everywhere. Live
   calls (GPT-Live, `server/live-call.ts`) need no dictation, so they work in
   the desktop app on any computer and on the phones, with the person's own
   OpenAI key. Fish Audio has no talking model, so Live stays OpenAI or Azure. A Cloud's page, in a web browser
