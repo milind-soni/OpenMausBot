@@ -21,7 +21,7 @@ export function serverArgs(scid: number): string[] {
     "log_level=error",
     "tunnel_forward=true",
     "audio=false",
-    "control=false",
+    "control=true",
     "send_device_meta=false",
     "clipboard_autosync=false",
     "power_on=false",
@@ -29,6 +29,91 @@ export function serverArgs(scid: number): string[] {
     "max_fps=30",
     "video_bit_rate=4000000",
   ];
+}
+
+/** Android key codes, under the names the Android panel and the phone tool give the keys. */
+export const KEYCODES = {
+  back: 4,
+  home: 3,
+  recent: 187,
+  enter: 66,
+  delete: 67,
+  tab: 61,
+  up: 19,
+  down: 20,
+  left: 21,
+  right: 22,
+  wakeup: 224,
+} as const;
+
+const INJECT_KEYCODE = 0;
+const INJECT_TEXT = 1;
+const INJECT_TOUCH_EVENT = 2;
+const SET_CLIPBOARD = 9;
+const KEY_DOWN = 0;
+const KEY_UP = 1;
+const PASTE = 1;
+const TOUCH_ACTIONS = { down: 0, up: 1, move: 2 };
+// scrcpy's SC_POINTER_ID_GENERIC_FINGER, -2.
+const GENERIC_FINGER = 0xffff_ffff_ffff_fffen;
+const FULL_PRESSURE = 0xffff;
+// scrcpy's SC_CONTROL_MSG_INJECT_TEXT_MAX_LENGTH.
+const INJECT_TEXT_MAX_BYTES = 300;
+const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
+
+function keyEvent(action: number, keycode: number): Buffer {
+  const message = Buffer.alloc(14);
+  message[0] = INJECT_KEYCODE;
+  message[1] = action;
+  message.writeUInt32BE(keycode, 2);
+  return message;
+}
+
+function withText(head: Buffer, text: string): Buffer {
+  const bytes = Buffer.from(text, "utf8");
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(bytes.length);
+  return Buffer.concat([head, length, bytes]);
+}
+
+/** Messages for the control socket. Coordinates are video pixels; `width` and `height` are the video's size. */
+export const control = {
+  touch(action: "down" | "up" | "move", x: number, y: number, width: number, height: number): Buffer {
+    const message = Buffer.alloc(32);
+    message[0] = INJECT_TOUCH_EVENT;
+    message[1] = TOUCH_ACTIONS[action];
+    message.writeBigUInt64BE(GENERIC_FINGER, 2);
+    message.writeUInt32BE(x, 10);
+    message.writeUInt32BE(y, 14);
+    message.writeUInt16BE(width, 18);
+    message.writeUInt16BE(height, 20);
+    message.writeUInt16BE(action === "up" ? 0 : FULL_PRESSURE, 22);
+    return message;
+  },
+
+  /** The key pressed, then released. */
+  key(keycode: number): Buffer {
+    return Buffer.concat([keyEvent(KEY_DOWN, keycode), keyEvent(KEY_UP, keycode)]);
+  },
+
+  /** scrcpy types this as key events, which it can only for printable ASCII of at most 300 bytes. */
+  text(ascii: string): Buffer {
+    return withText(Buffer.from([INJECT_TEXT]), ascii);
+  },
+
+  /** Replaces the phone's clipboard with `text` and pastes it. */
+  paste(text: string): Buffer {
+    // Bytes 1 to 8 are a sequence number: scrcpy acknowledges only one other than 0.
+    const head = Buffer.alloc(10);
+    head[0] = SET_CLIPBOARD;
+    head[9] = PASTE;
+    return withText(head, text);
+  },
+};
+
+/** The message that enters `text` on the phone. */
+export function textMessage(text: string): Buffer {
+  return PRINTABLE_ASCII.test(text) && text.length <= INJECT_TEXT_MAX_BYTES ? control.text(text) : control.paste(text);
 }
 
 export type VideoPacket =

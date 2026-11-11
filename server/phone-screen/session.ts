@@ -1,4 +1,5 @@
 import { randomInt } from "node:crypto";
+import { once } from "node:events";
 import { connect, type Socket } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -18,6 +19,8 @@ export type PhoneSessionEnd = "device-gone" | "server-exit" | "protocol" | "clos
 export type PhoneSession = {
   /** Video waits until the first listener is added, so that listener sees the stream from its first packet. */
   onPacket(listener: (packet: VideoPacket) => void): () => void;
+  /** Writes a scrcpy control message to the phone. Does nothing once the session has started to end. */
+  send(message: Buffer): void;
   /** Settles once the cleanup has run: the adb child stopped, then the forward and the session's files removed if adb still reaches the phone. */
   closed: Promise<PhoneSessionEnd>;
   close(): Promise<void>;
@@ -30,7 +33,7 @@ const SERVER_STDERR_KEPT = 2_048;
 // adb's words for a serial that is unplugged or has dropped off the bus.
 const DEVICE_GONE = /device '.*' not found|device offline|no devices\/emulators found/;
 
-function runAdb(adbPath: string, args: string[]): Promise<string> {
+export function runAdb(adbPath: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     execCli(adbPath, args, { timeout: ADB_TIMEOUT_MS }, (error, stdout, stderr) => {
       if (error) reject(new Error(stderr?.trim() || error.message));
@@ -93,6 +96,7 @@ export async function openPhoneSession(deps: PhoneSessionDeps, serial: string): 
   let forwardedPort: number | undefined;
   let server: ReturnType<typeof spawnCli> | undefined;
   let socket: Socket | undefined;
+  let controlSocket: Socket | undefined;
   let serverStderr = "";
   let ending: Promise<void> | undefined;
   let settleClosed!: (end: PhoneSessionEnd) => void;
@@ -102,6 +106,7 @@ export async function openPhoneSession(deps: PhoneSessionDeps, serial: string): 
 
   const end = (reason: PhoneSessionEnd): Promise<void> => (ending ??= (async () => {
     socket?.destroy();
+    controlSocket?.destroy();
     if (server) await killCliTree(server);
     if (forwardedPort !== undefined) await adb("forward", "--remove", `tcp:${forwardedPort}`).catch(() => {});
     const cleanupError = await adb("shell", "rm", "-rf", dir).then(() => "", (error: Error) => error.message);
@@ -151,6 +156,15 @@ export async function openPhoneSession(deps: PhoneSessionDeps, serial: string): 
     }
     socket.on("data", deliver);
     socket.once("close", () => void end("server-exit"));
+    // scrcpy 5.0.1 accepts its control connection next, on the same port, without a byte to say so. Nothing it sends
+    // there later is used.
+    controlSocket = connect({ host: "127.0.0.1", port: forwardedPort });
+    controlSocket.on("error", () => {});
+    await once(controlSocket, "connect", { signal: starting.signal }).catch(() => {
+      throw new Error("The control connection to the phone could not be opened.");
+    });
+    controlSocket.once("close", () => void end("server-exit"));
+    controlSocket.resume();
     await adb("forward", "--remove", `tcp:${forwardedPort}`);
     forwardedPort = undefined;
   } catch (error) {
@@ -160,6 +174,7 @@ export async function openPhoneSession(deps: PhoneSessionDeps, serial: string): 
   }
 
   const video = socket;
+  const control = controlSocket;
   return {
     onPacket(listener) {
       listeners.add(listener);
@@ -167,6 +182,9 @@ export async function openPhoneSession(deps: PhoneSessionDeps, serial: string): 
       return () => {
         listeners.delete(listener);
       };
+    },
+    send(message) {
+      if (!ending) control.write(message);
     },
     closed,
     close: () => end("closed"),

@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { describe, expect, it } from "vitest";
 
 import { SCRCPY_VIDEO, SCRCPY_VIDEO_PACKETS } from "../testing/scrcpy-video.ts";
-import { deviceSocket, SCRCPY_SERVER, ScrcpyProtocolError, serverArgs, VideoReader, type VideoPacket } from "./scrcpy-wire.ts";
+import { control, deviceSocket, KEYCODES, SCRCPY_SERVER, ScrcpyProtocolError, serverArgs, textMessage, VideoReader, type VideoPacket } from "./scrcpy-wire.ts";
 
 const PREAMBLE = Buffer.from("0068323634", "hex");
 const hex = (packet: VideoPacket | undefined, bytes: number) =>
@@ -20,14 +20,14 @@ describe("the scrcpy server this client is written for", () => {
     });
   });
 
-  it("starts view-only, without waking the phone, syncing its clipboard or logging below errors", () => {
+  it("starts with a control socket, without waking the phone, syncing its clipboard or logging below errors", () => {
     expect(serverArgs(0x1a2b3c)).toEqual([
       "5.0.1",
       "scid=001a2b3c",
       "log_level=error",
       "tunnel_forward=true",
       "audio=false",
-      "control=false",
+      "control=true",
       "send_device_meta=false",
       "clipboard_autosync=false",
       "power_on=false",
@@ -40,6 +40,75 @@ describe("the scrcpy server this client is written for", () => {
 
   it("listens on the phone under the same scid", () => {
     expect(deviceSocket(0x1a2b3c)).toBe("localabstract:scrcpy_001a2b3c");
+  });
+});
+
+// The expected bytes are the arrays in scrcpy v5.0.1's app/tests/test_control_msg_serialize.c, field by field. Where
+// a field holds another value than in scrcpy's test, the comment beside it gives scrcpy's.
+describe("control messages", () => {
+  const sent = (message: Buffer) => message.toString("hex");
+  const fields = (...parts: string[]) => parts.join("");
+  const ascii = (text: string) => Buffer.from(text, "latin1").toString("hex");
+  const NO_SEQUENCE = "0000000000000000";
+
+  it.each([
+    ["down", "00", "ffff"],
+    ["up", "01", "0000"],
+    ["move", "02", "ffff"],
+  ] as const)("builds a touch %s of scrcpy's generic finger with no button", (action, actionByte, pressure) => {
+    // test_serialize_inject_touch_event, which is the "down" row.
+    expect(sent(control.touch(action, 100, 200, 1080, 1920))).toBe(
+      fields(
+        "02",
+        actionByte,
+        "fffffffffffffffe", // scrcpy's test: pointer id 1234567887654321
+        "00000064",
+        "000000c8",
+        "0438",
+        "0780",
+        pressure,
+        "00000000", // scrcpy's test: action button 00000001
+        "00000000", // scrcpy's test: buttons 00000001
+      ),
+    );
+  });
+
+  it("builds a key as its press, then its release", () => {
+    // test_serialize_inject_keycode, which is the release, with repeat 00000005 and metastate 00000041.
+    expect(sent(control.key(66))).toBe(
+      fields("00", "00", "00000042", "00000000", "00000000") + fields("00", "01", "00000042", "00000000", "00000000"),
+    );
+  });
+
+  it.each([
+    // test_serialize_inject_text
+    ["hello, world!", "0000000d"],
+    // test_serialize_inject_text_long
+    ["a".repeat(300), "0000012c"],
+  ])("builds injected text with its length before it", (text, length) => {
+    expect(sent(control.text(text))).toBe(fields("01", length, ascii(text)));
+  });
+
+  it("builds a clipboard to set and paste", () => {
+    // test_serialize_set_clipboard, with sequence 0102030405060708.
+    expect(sent(control.paste("hello, world!"))).toBe(fields("09", NO_SEQUENCE, "01", "0000000d", ascii("hello, world!")));
+  });
+
+  it.each([
+    ["injects", "letters", "abc", fields("01", "00000003", "616263")],
+    ["injects", "the first and the last printable character", " ~", fields("01", "00000002", "207e")],
+    ["injects", "300 bytes", "a".repeat(300), fields("01", "0000012c", "61".repeat(300))],
+    ["pastes", "301 bytes", "a".repeat(301), fields("09", NO_SEQUENCE, "01", "0000012d", "61".repeat(301))],
+    ["pastes", "Chinese", "你好", fields("09", NO_SEQUENCE, "01", "00000006", "e4bda0e5a5bd")],
+    ["pastes", "a tab", "a\tb", fields("09", NO_SEQUENCE, "01", "00000003", "610962")],
+    ["pastes", "the character after the last printable one", "\x7f", fields("09", NO_SEQUENCE, "01", "00000001", "7f")],
+    ["pastes", "the character before the first printable one", "\x1f", fields("09", NO_SEQUENCE, "01", "00000001", "1f")],
+  ])("%s %s", (_how, _what, text, message) => {
+    expect(sent(textMessage(text))).toBe(message);
+  });
+
+  it("knows the Android key codes of the phone panel's keys, and no others", () => {
+    expect(KEYCODES).toEqual({ back: 4, home: 3, recent: 187, enter: 66, delete: 67, tab: 61, up: 19, down: 20, left: 21, right: 22, wakeup: 224 });
   });
 });
 

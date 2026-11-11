@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -62,6 +62,20 @@ describe("openPhoneSession", () => {
       /** The scid of each session started on this phone, read from where it pushed its file. */
       scids: () => phone.calls().filter((call) => call[2] === "push").map((push) => /-([0-9a-f]{8})\/[^/]*$/.exec(push[4] ?? "")?.[1]),
       port: () => Number(read("port")),
+      /** What the phone's control socket has received, in hex. */
+      controlBytes: () => (existsSync(join(dir, "control.hex")) ? read("control.hex") : ""),
+      /** The same, once it is at least `bytes` long. */
+      controlBytesOnce: (bytes: number) =>
+        new Promise<string>((resolve) => {
+          const look = () => {
+            const received = phone.controlBytes();
+            if (received.length < bytes * 2) return;
+            changes.close();
+            resolve(received);
+          };
+          const changes = watch(dir, look);
+          look();
+        }),
       serverPid: () => Number(read("server.pid")),
     };
     phone.become(mode);
@@ -104,6 +118,64 @@ describe("openPhoneSession", () => {
     expect(phone.calls().slice(started.length)).toEqual([removal(scid)]);
     expect(isRunning(phone.serverPid())).toBe(false);
     await expect(session.closed).resolves.toBe("closed");
+  });
+
+  it("delivers exactly what is sent to the phone's control socket, in order", async () => {
+    const phone = fakePhone();
+    session = await openPhoneSession(phone.deps, SERIAL);
+    const messages = ["0200fffe", "00", "09000000e4bda0"];
+
+    for (const message of messages) session.send(Buffer.from(message, "hex"));
+
+    await expect(phone.controlBytesOnce(12)).resolves.toBe(messages.join(""));
+  });
+
+  it("writes nothing that is sent after close(), though the phone's scrcpy still reads", async () => {
+    const phone = fakePhone("outlives-adb");
+    session = await openPhoneSession(phone.deps, SERIAL);
+    session.send(Buffer.from("0201", "hex"));
+    await phone.controlBytesOnce(2);
+
+    const closing = session.close();
+    session.send(Buffer.from("0304", "hex"));
+    await closing;
+    session.send(Buffer.from("0506", "hex"));
+
+    expect(phone.controlBytes()).toBe("0201");
+  });
+
+  it("closes the control connection on close(), which stops a scrcpy that stopping adb leaves running", async () => {
+    const phone = fakePhone("outlives-adb");
+    session = await openPhoneSession(phone.deps, SERIAL);
+
+    await session.close();
+
+    expect(existsSync(join(dir, "control.closed"))).toBe(true);
+  });
+
+  it("says the server stopped, and raises no uncaught error, when the phone resets the control connection", async () => {
+    const uncaught: unknown[] = [];
+    const note = (error: unknown) => uncaught.push(error);
+    process.on("uncaughtException", note);
+    try {
+      const phone = fakePhone("resets-control");
+      session = await openPhoneSession(phone.deps, SERIAL);
+
+      await expect(session.closed).resolves.toBe("server-exit");
+      expect(uncaught).toEqual([]);
+      expect(phone.calls().at(-1)).toEqual(removal(phone.scids()[0]));
+    } finally {
+      process.off("uncaughtException", note);
+    }
+  });
+
+  it("says the server stopped when the phone closes the control connection, whatever it sent there, and ends the adb child", async () => {
+    const phone = fakePhone("drops-control");
+    session = await openPhoneSession(phone.deps, SERIAL);
+
+    await expect(session.closed).resolves.toBe("server-exit");
+    expect(isRunning(phone.serverPid())).toBe(false);
+    expect(phone.calls().at(-1)).toEqual(removal(phone.scids()[0]));
   });
 
   it("keeps two sessions on one phone apart: closing one removes only its own directory", async () => {
@@ -248,6 +320,17 @@ describe("openPhoneSession", () => {
       expect(calls.at(-2)).toEqual(["-s", SERIAL, "forward", "--remove", `tcp:${phone.port()}`]);
       await expect(refusesConnections(phone.port())).resolves.toBe(true);
     }
+  });
+
+  it("fails to open when the control connection is refused, and leaves nothing behind", async () => {
+    const phone = fakePhone("no-control");
+
+    await expect(openPhoneSession(phone.deps, SERIAL)).rejects.toThrow("Could not open the phone's screen. The control connection to the phone could not be opened.");
+
+    expect(phone.calls().map(step)).toEqual(["push", "forward", "start server", "remove forward", "remove files"]);
+    expect(phone.calls().at(-1)).toEqual(removal(phone.scids()[0]));
+    expect(isRunning(phone.serverPid())).toBe(false);
+    await expect(refusesConnections(phone.port())).resolves.toBe(true);
   });
 
   it("fails to open when adb cannot be started for the server", async () => {
