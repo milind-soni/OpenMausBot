@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -37,6 +37,7 @@ describe("composer dictation through Fish Audio", () => {
   let container: HTMLDivElement;
   let dictation: Dictation;
   let typed: string[];
+  let probe: () => null;
 
   beforeEach(() => {
     cacheDesktopCapabilities({ ...initialDesktopCapabilities(), dictation: { available: true, engine: "fish-audio", onDevice: false } });
@@ -45,10 +46,10 @@ describe("composer dictation through Fish Audio", () => {
     typed = [];
     vi.clearAllMocks();
     const onText = (text: string) => typed.push(text);
-    const Probe = () => { dictation = useComposerDictation({ draftId: "d", text: "", onText }); return null; };
+    probe = () => { dictation = useComposerDictation({ draftId: "d", text: "", onText }); return null; };
     container = document.createElement("div");
     root = createRoot(container);
-    flushSync(() => root.render(createElement(Probe)));
+    flushSync(() => root.render(createElement(probe)));
   });
 
   afterEach(() => {
@@ -85,6 +86,19 @@ describe("composer dictation through Fish Audio", () => {
     toggle();
     flushSync(() => fish.listeners.end!({ code: 1, reason: "microphone-blocked", message: t("call.live.micBlocked") }));
     expect(dictation.speechError).toBe(t("call.live.micBlocked"));
+  });
+
+  it("ends the session when the speech bridge changes, without starting the new one", async () => {
+    toggle();
+    expect(dictation.recording).toBe(true);
+    const native = { speechStart: vi.fn(async () => {}), speechStop: vi.fn(async () => {}), onSpeechTranscript: () => () => {}, onSpeechEnd: () => () => {} };
+    vi.stubGlobal("window", Object.assign(window, { ogb: native }));
+    cacheDesktopCapabilities({ ...initialDesktopCapabilities(), dictation: { available: true, engine: "apple-speech", onDevice: true } });
+    await act(async () => root.render(createElement(probe)));
+    expect(fish.speechStop).toHaveBeenCalledOnce();
+    expect(native.speechStart).not.toHaveBeenCalled();
+    expect(dictation.recording).toBe(false);
+    delete (window as { ogb?: unknown }).ogb;
   });
 
   it("is not ready without a saved Fish Audio key", () => {
