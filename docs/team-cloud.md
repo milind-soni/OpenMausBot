@@ -557,6 +557,43 @@ none, and the person can hide it.
 - With one side empty (nobody shared a bot with them yet, say) there is no switch and the sidebar lists everything.
   The first time the switch shows on a device, one line under it says what the two sides are.
 
+## Sharing a conversation
+
+A private conversation is shared only by the person it is private to, from its menu (the bot panel's This conversation
+rows in Simple, the header's ⋯ in Advanced, and its row in a conversation list): **Share with the team** or **Share
+with…** one teammate who can chat with that bot. A confirm step says who will read the whole conversation, everything
+already in it and its files included, and that it can't be made private again (`POST
+/api/bots/<bot>/tasks/<thread>/share { with: "team" | { email } }`, `GET` the same path for whom it can go to;
+`server/routes/conversation-share.ts`). Nobody else, an admin included, can share it: to them it is no such conversation.
+
+- **With the team** it becomes the team's (audience `team`): on the Team side for everyone who sees the bot, with the
+  shared chat's label, its turns reading and writing the team's notes. Nobody gets an inbox line or a notification for it.
+- **With one person** it gets an audience of its own, `member:<share key>`, the key made from the conversation and held by
+  no session (`server/host/conversation-shares.ts`): its own memory layer, engine home and browser, so neither person's
+  notes, About you or other chats reach it. Exactly its owner and that person read it, never an admin; both see it on
+  the Team side, *"Shared · only you and Marta can see"* (`WireTask.shared`, `sharedWith`). Either of them writes in it and
+  the bot keeps its context: the next turn opens a new engine session given the whole conversation so far. The person
+  gets one inbox line and one notification linking it. From then on, what one of them writes, or the bot answers them,
+  waits in the other's inbox while they don't have it open: one line per conversation, updated in place until they answer
+  there. Its owner may still widen it to the team; nothing narrows it.
+- **What stays.** Notifications from before the share stay with whoever they were for. A conversation a routine lives in
+  is refused until the routine goes, and so is one the bot is working in. When one of the two people leaves the team the
+  conversation becomes the other's private chat; one shared with the team stays the team's.
+- **No way back.** It can't be made private again: nobody can un-read what was shared, and what others wrote in it, the
+  notes its turns saved and the files they made would have no clear owner. Its owner can still delete it.
+
+## Saving to team memory
+
+**Save to team memory** on a message of a conversation with a team bot (not a group chat, not one's own MausBot) puts
+that message into the bot's team notes (MEMORY.md in its own folder, which every conversation with it reads) in one
+click, as one line saying who saved it and the day: *"We ship on 3 March (saved by Rui, 2026-11-11)"*. A message longer
+than one note keeps its start and says *"shortened"*. Undo on the toast takes it out again (`POST`/`GET
+/api/bots/<bot>/memory/team`, `DELETE /api/bots/<bot>/memory/team/<id>`; `server/host/team-memory-saves.ts`). It needs
+Can chat on the bot and a conversation the person reads, so from a private chat only its own person saves. The line
+names no conversation. Its author sees and removes it in the bot's What it remembers; an admin removes any line there
+or in the notes; nobody else can remove or change it. Nothing is ever saved there on its own, and nothing from a
+conversation that came in from outside.
+
 ## Who looks after a bot
 
 Every team bot is **looked after by** one member, its owner in the data: `reportsTo` (an email) names them; without it

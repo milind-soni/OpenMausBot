@@ -6,7 +6,7 @@ import { onTeamChats, ownChatOf, ownChatStarted, teamChats, type TeamChats } fro
 
 export type TeamSide = "me" | "team";
 
-type SideTask = { threadId: string; private?: unknown; sharedChat?: unknown; unread?: boolean; routineRunId?: unknown; archivedAt?: unknown };
+type SideTask = { threadId: string; private?: unknown; shared?: unknown; sharedChat?: unknown; unread?: boolean; routineRunId?: unknown; archivedAt?: unknown };
 type SideBot = { id: string; threadId: string; tasks?: SideTask[]; yourAccess?: string; defaultBot?: { person?: unknown }; hidden?: boolean; messages?: unknown[] };
 type SideGroup = { id: string; unread?: boolean };
 
@@ -19,7 +19,7 @@ type SideGroup = { id: string; unread?: boolean };
 export function sideOfThread(bot: Pick<SideBot, "tasks" | "defaultBot">, threadId: string): TeamSide {
   if (bot.defaultBot?.person) return "me";
   const task = bot.tasks?.find((candidate) => candidate.threadId === threadId);
-  return task?.sharedChat !== true && (task?.private === true || ownChatStarted(threadId)) ? "me" : "team";
+  return task?.sharedChat !== true && (task?.private === true || (ownChatStarted(threadId) && task?.shared !== true)) ? "me" : "team";
 }
 
 /** The bot's shared chat, as the server names it; null for a bot that has none (a person's own MausBot). */

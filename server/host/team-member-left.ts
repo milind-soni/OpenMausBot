@@ -47,6 +47,8 @@ export interface TeamMemberLeftDeps {
   openedBy(person: string): string[];
   /** The person a conversation is private to (audience.ts), else null. */
   privateTo(threadId: string): string | null;
+  /** Their conversations shared with one person become that person's own, before their private chats go. */
+  sharesLeft?(person: string): void;
   /** Ends every session and open pairing code of this address; how many sessions ended. */
   revokeSessions(email: string): number;
   busy(botId: string, threadId: string): boolean;
@@ -101,6 +103,7 @@ export function createTeamMemberLeft(deps: TeamMemberLeftDeps): (email: string) 
       deps.record({ category: "bot", action: "routine.handover", target: { kind: "routine", id: routine.id, name: routine.name }, after: { owner: to } });
     }
     for (const routine of ownRoutines) deps.deleteRoutine(routine.id);
+    deps.sharesLeft?.(person);
     const mine = new Set(deps.openedBy(person).filter((threadId) => deps.privateTo(threadId) === person));
     let chats = 0;
     const files = new Set<string>([...memberUploads(deps.dataDir, person), ...ownRoutines.flatMap((routine) => routine.files)]);
