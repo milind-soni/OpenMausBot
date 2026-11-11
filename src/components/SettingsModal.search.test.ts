@@ -63,6 +63,25 @@ const type = (value: string) => {
 };
 
 describe("Settings search in Simple mode", () => {
+  it("finds exact feature keys, plain-language labels, and loop protection docs", async () => {
+    const { featureSearchResults } = await import("./SettingsModal");
+    expect(featureSearchResults("skillsLibrary").map(([key]) => key)).toContain("skillsLibrary");
+    expect(featureSearchResults("memory recall").map(([key]) => key)).toContain("autoRecall");
+    expect(featureSearchResults("features.autoRecall").map(([key]) => key)).toEqual(["autoRecall"]);
+    expect(featureSearchResults("tool bridge").map(([key]) => key)).toContain("agentsToolBridge");
+    type("loopGuard");
+    expect(document.querySelector('[data-settings-feature-result="loopGuard"]')?.textContent).toContain("Loop protection");
+  });
+
+  it("takes tool-call search straight to its switch in Simple mode", () => {
+    type("tool calls");
+    const result = document.querySelector<HTMLButtonElement>('[data-settings-feature-result="showToolCalls"]')!;
+    flushSync(() => result.click());
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "general" });
+    expect(scrolled.map((element) => element.getAttribute("data-settings-block"))).toContain("control-showToolCalls");
+    expect(document.querySelector('[data-settings-advanced-only="settings.toolCalls.title"]')).toBeNull();
+  });
+
   it("opens on the dialog itself, and a typed letter moves into search", () => {
     expect(document.activeElement).toBe(dialog());
     flushSync(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true, cancelable: true })));
@@ -102,7 +121,7 @@ describe("Settings search in Simple mode", () => {
     flushSync(() => document.querySelector<HTMLButtonElement>("[data-settings-more]")!.click());
     expect(heading()).toBe("More settings");
     expect([...document.querySelectorAll("[data-settings-more-section]")].map((row) => row.getAttribute("data-settings-more-section")))
-      .toEqual(["decisionModel", "imageGeneration", "backups", "experimental"]);
+      .toEqual(["decisionModel", "imageGeneration", "skills", "features", "backups", "experimental"]);
     const limits = document.querySelector('[data-settings-block="limits"]')!;
     expect(limits.querySelector("h3")!.textContent).toBe("Limits");
     for (const title of ["Group turns", "Tool time limit", "Parallel threads", "Automatic recovery", "Event log cleanup"]) expect(limits.textContent, title).toContain(title);

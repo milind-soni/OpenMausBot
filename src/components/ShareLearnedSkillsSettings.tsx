@@ -16,7 +16,7 @@ export function ShareLearnedSkillsSettings() {
   const { state, dispatch } = useStore();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  if (!skillsLibraryEnabled(state.config)) return null;
+  const library = skillsLibraryEnabled(state.config);
   const authoring = skillAuthoringEnabled(state.config);
   const mode = shareLearnedSkillsMode(state.config);
 
@@ -38,12 +38,12 @@ export function ShareLearnedSkillsSettings() {
   };
 
   return (
-    <div className="mt-4 border-t border-hairline/30 pt-4" data-testid="share-learned-skills-settings">
+    <div className="mt-4 scroll-mt-4 border-t border-hairline/30 pt-4" data-testid="share-learned-skills-settings" data-settings-block="control-shareLearnedSkills" tabIndex={-1}>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="text-[14px] font-medium text-ink">{t("settings.experimental.shareSkills")}</div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            {t(authoring ? "settings.experimental.shareSkillsDetail" : "settings.experimental.shareSkillsNeedsAuthoring")}
+            {t(!library ? "settings.features.shareNeedsLibrary" : authoring ? "settings.experimental.shareSkillsDetail" : "settings.experimental.shareSkillsNeedsAuthoring")}
           </div>
         </div>
         <div className="inline-flex shrink-0 rounded-xl bg-inset p-1" role="radiogroup" aria-label={t("settings.experimental.shareSkillsAria")}>
@@ -53,7 +53,7 @@ export function ShareLearnedSkillsSettings() {
               type="button"
               role="radio"
               aria-checked={mode === option.value}
-              disabled={saving || !authoring}
+              disabled={saving || !authoring || !library}
               onClick={() => void choose(option.value)}
               className={cn(
                 "rounded-lg px-3 py-1.5 text-[13px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",

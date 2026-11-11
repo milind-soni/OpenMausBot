@@ -30,7 +30,7 @@ function ClaudeConfigSwitch({ feature, enabled, prefix }: { feature: Feature; en
   };
 
   return (
-    <div className="mt-4 flex items-start justify-between gap-4 rounded-2xl border border-hairline/50 bg-card px-4 py-4 sm:px-5">
+    <div className="mt-4 flex scroll-mt-4 items-start justify-between gap-4 rounded-2xl border border-hairline/50 bg-card px-4 py-4 sm:px-5" data-settings-block={`control-${feature}`} tabIndex={-1}>
       <div className="min-w-0">
         <div className="text-[14px] font-medium text-ink">{t(`${prefix}.title` as LocaleKey)}</div>
         <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">{t(`${prefix}.desc` as LocaleKey)}</p>

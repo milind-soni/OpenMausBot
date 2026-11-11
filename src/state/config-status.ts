@@ -1,3 +1,4 @@
+import type { FeatureConfig } from "../../shared/features";
 // What GET /api/config tells the app about the server and its settings (re-exported by store.tsx).
 import type { EffortLevel, LiveSettings } from "../../shared/wire";
 import type { ImageProvider } from "../../shared/image-generation";
@@ -146,8 +147,8 @@ export interface ConfigStatus {
   language?: string;
   /** What a paired phone calls this computer; "" uses the default. */
   computerName?: string;
-  /** Opt-in flags. Absent means off. */
-  features?: { skillAuthoring: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean };
+  /** Feature values reported by the server; older servers may omit fields. */
+  features?: FeatureConfig & { readonly savedStepsHere?: boolean };
   /** First-run progress: whether the welcome tour was finished and which
    * one-time hints were dismissed. Server-owned so it follows the workspace. */
   onboarding?: OnboardingStatus;

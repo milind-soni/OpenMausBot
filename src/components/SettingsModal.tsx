@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Archive, Cloud, Gauge, CloudDownload, Coins, Download, FlaskConical, KeyRound, LockKeyhole, Monitor, Palette, ScrollText, Search, Settings, Sparkles, TabletSmartphone, Terminal, User, Users, X, Building2, Zap, BookOpen, ImagePlus } from "lucide-react";
 import { useStore, type AppSettingsSection } from "@/state/store";
-import { skillsLibraryEnabled } from "@/lib/feature-flags";
+import { FEATURE_CATALOG, type FeatureCatalogEntry } from "@/lib/feature-catalog";
+import { featureControlDestination, FeaturesSettings, SkillsSettings } from "./FeatureSettings";
+import type { FeatureConfig } from "../../shared/features";
 import { type LocaleKey } from "@/locales";
 import { t } from "@/lib/i18n";
 import { AdminOnly } from "./AdminOnly";
@@ -43,7 +45,6 @@ import { Card, SettingsGroup, SIMPLE_BUTTONS } from "./SettingsPrimitives";
 import { Layer, useIsTopLayer } from "./Layer";
 import { shortcutLabel } from "./ShortcutHint";
 import { UsageSection } from "./UsageSection";
-import { SkillsSection } from "./SkillsSection";
 import { LicenseExpiryBanner } from "./LicenseExpiryBanner";
 import { WorkspacesSection, workspacesAvailable } from "./WorkspacesSection";
 import { SkinPicker } from "./SkinPicker";
@@ -100,6 +101,7 @@ export const SECTIONS: Array<{
   { id: "decisionModel", group: "ai", labelKey: "settings.section.decisionModel", icon: Zap, keywords: ["decision", "extraction", "jev", "typesafe", "cloudflare", "workers ai", "clef", "clairic", "email", "routing", "auto", "rooms", "who answers"] },
   { id: "imageGeneration", group: "ai", labelKey: "settings.section.imageGeneration", icon: ImagePlus, keywords: ["image", "images", "picture", "generate", "avatar", "gpt image", "grok imagine", "gemini", "nano banana", "openrouter", "flux", "backup"] },
   { id: "skills", group: "ai", labelKey: "settings.section.skills", icon: BookOpen, keywords: ["skills", "library", "assign", "agent skills", "skill md"] },
+  { id: "features", group: "ai", labelKey: "settings.section.features", icon: Sparkles, keywords: ["features", "flags", "settings", "loopGuard", "loop guard", "loop protection"] },
   { id: "desktopWorkspaces", group: "computers", labelKey: "settings.section.desktopWorkspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "servers", "connect", "pair", "switch", "local"] },
   { id: "computer", group: "computers", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop", "browser", "built-in browser", "profiles", "browser profiles"] },
   { id: "logins", group: "computers", labelKey: "settings.section.vault", icon: LockKeyhole, keywords: ["vault", "logins", "login", "passwords", "password", "sign in", "2fa", "one-time code", "totp", "fill_login", "1password", "password manager", "secrets", "secret", "token", ".env", "env"] },
@@ -137,7 +139,7 @@ export const SIMPLE_PAGES: SimpleSettingsPage[] = [
 /** What only an admin can use: a team's member isn't offered these at all. */
 export const TEAM_ADMIN_SECTIONS: readonly AppSettingsSection[] = ["engines", "connections", "decisionModel", "imageGeneration", "computer", "usage", "backups", "import"];
 
-export const SIMPLE_HIDDEN_SECTIONS: readonly AppSettingsSection[] = ["backups", "experimental", "workspaces", "skills", "decisionModel", "imageGeneration"];
+export const SIMPLE_HIDDEN_SECTIONS: readonly AppSettingsSection[] = ["backups", "experimental", "workspaces", "skills", "features", "decisionModel", "imageGeneration"];
 
 
 export const SIMPLE_FOLDED: Partial<Record<AppSettingsSection, SimpleDisclosureId>> = {
@@ -184,6 +186,14 @@ export function keySearchResults(query: string): KeyEntry[] {
   return query ? KEY_CATALOG.filter((entry) => keyMatches(entry, query)).slice(0, 8) : [];
 }
 
+export function featureSearchResults(query: string): Array<[keyof FeatureConfig, FeatureCatalogEntry]> {
+  if (!query) return [];
+  const normalized = query.toLowerCase().replace(/^features\./, "");
+  return (Object.entries(FEATURE_CATALOG) as Array<[keyof FeatureConfig, FeatureCatalogEntry]>).filter(([key, entry]) =>
+    [key, t(entry.labelKey), t(entry.descriptionKey), ...entry.keywords].some((part) => part.toLowerCase().includes(normalized)),
+  );
+}
+
 export const openKeyResult = (entry: KeyEntry) => entry.uses ? openKeySettings(entry.uses, entry.id) : openKeySettings(entry.id);
 
 export function SettingsModal() {
@@ -223,7 +233,7 @@ function SettingsDialog() {
     .filter((entry) => entry.id !== "activity" || (!window.ogb && ownerOrAdmin === true))
     .filter((entry) => entry.id !== "botAccess" || (Boolean(state.config?.team) && ownerOrAdmin === true))
     .filter((entry) => !(state.config?.team && ownerOrAdmin === false && TEAM_ADMIN_SECTIONS.includes(entry.id)));
-  const availableSections = baseSections.filter((entry) => entry.id !== "skills" || skillsLibraryEnabled(state.config));
+  const availableSections = baseSections.filter((entry) => entry.id !== "features" || ownerOrAdmin !== false);
   const visibleSections = availableSections.filter((entry) => sectionMatches(entry, q));
 
   const simpleAvailable = new Set<AppSettingsSection>([...availableSections.map((entry) => entry.id), ...(remoteActive ? [] : ["updates" as const])]);
@@ -259,6 +269,18 @@ function SettingsDialog() {
   const advancedMatches = advanced || SIMPLE_ONLY || !q ? [] : SIMPLE_ADVANCED_ONLY.filter((key) => t(key).toLowerCase().includes(q));
   const moreSections = availableSections.filter((entry) => SIMPLE_HIDDEN_SECTIONS.includes(entry.id));
   const keyResults = remoteActive || !availableSections.some((entry) => entry.id === "connections") ? [] : keySearchResults(q);
+  const featureResults = remoteActive || ownerOrAdmin === false ? [] : featureSearchResults(q);
+  const loopGuardResult = !remoteActive && ownerOrAdmin !== false && q !== "" && ["loopguard", "loop guard", "loop protection"].some((term) => term.includes(q));
+  const featureResultButtons = (className: string) => <>
+    {featureResults.map(([key, entry]) => <button key={key} type="button" data-settings-feature-result={key} className={className}
+      onClick={() => { const target = featureControlDestination(key, state.config); setQuery(""); openControl(target.section, target.anchor); }}>
+      {t(entry.labelKey)}
+    </button>)}
+    {loopGuardResult && <button type="button" data-settings-feature-result="loopGuard" className={className}
+      onClick={() => { setQuery(""); openControl("features", "feature-loopGuard"); }}>
+      {t("settings.features.loopGuard.label")}
+    </button>}
+  </>;
   const keyResultButtons = (className: string) => keyResults.map((entry) => (
     <button key={entry.id} type="button" data-settings-key-result={entry.id} className={className}
       onClick={() => { setQuery(""); setSubPage(null); dispatch(openKeyResult(entry)); }}>
@@ -274,9 +296,12 @@ function SettingsDialog() {
   useEffect(() => {
     if (!reveal) return;
     const block = scrollRef.current?.querySelector(`[data-settings-block="${reveal}"]`);
-    if (scrollRef.current && block) scrollWithin(scrollRef.current, block);
-    setReveal(null);
-  }, [reveal]);
+    if (scrollRef.current && block) {
+      scrollWithin(scrollRef.current, block);
+      if (block instanceof HTMLElement) block.focus({ preventScroll: true });
+      setReveal(null);
+    }
+  }, [reveal, section]);
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -375,7 +400,7 @@ function SettingsDialog() {
             <LanguageRow />
             <OpenAtLoginRow />
             <NewBotEffortRow />
-            <SavedStepsRow />
+            <div data-settings-block="control-savedSteps" tabIndex={-1}><SavedStepsRow /></div>
             <AnalyticsRow />
             <UpdatesConsentRow />
             <DefaultBotSettings />
@@ -421,12 +446,14 @@ function SettingsDialog() {
             <PinnedCirclesRow />
             <UniversalPinsRow />
             <NotificationRows />
-            {!remoteActive && <ToolCallsRow />}
+            {!remoteActive && <AdminOnly><div data-settings-block="control-showToolCalls" tabIndex={-1}><ToolCallsRow /></div></AdminOnly>}
             <RunCardRow />
           </>
         );
       case "experimental":
-        return <ExperimentalFeaturesRow />;
+        return <AdminOnly><ExperimentalFeaturesRow /></AdminOnly>;
+      case "features":
+        return <FeaturesSettings onOpen={openControl} />;
       case "connections":
         return <AdminOnly><KeysPage /></AdminOnly>;
       case "decisionModel": return <AdminOnly><DecisionModelSettings /></AdminOnly>;
@@ -437,13 +464,13 @@ function SettingsDialog() {
       case "companion":
         return <>{remoteAccess.companion}{remoteAccess.pairing}{remoteAccess.domain}{window.ogb?.environments ? null : remoteAccess.client}</>;
       case "computer":
-        return <><BuiltInBrowserRow /><ServerSitesRow /><BrowserProfilesRow /><AdminOnly><LocalComputerSection /></AdminOnly></>;
+        return <><div data-settings-block="control-browser" tabIndex={-1}><BuiltInBrowserRow /></div><ServerSitesRow /><BrowserProfilesRow /><AdminOnly><LocalComputerSection /></AdminOnly></>;
       case "logins":
         return <VaultSettings />;
       case "usage":
         return <AdminOnly note="settings.adminOnly.usage"><UsageSection /></AdminOnly>;
       case "skills":
-        return skillsLibraryEnabled(state.config) ? <SkillsSection /> : null;
+        return <SkillsSettings />;
       case "people":
         return <PeopleSection />;
       case "activity":
@@ -458,6 +485,12 @@ function SettingsDialog() {
   };
 
   const openMore = () => { openSection("general"); setSubPage("more", "general"); };
+  const openControl = (target: AppSettingsSection, anchor: string) => {
+    if (!advanced && anchor === "control-showToolCalls") { openSection("general"); setSubPage("looks", "general"); }
+    else if (!advanced && anchor === "control-savedSteps") openMore();
+    else { setSubPage(null); openSection(target); }
+    setReveal(anchor);
+  };
   const renderSimplePage = (page: SimpleSettingsPage) => {
     const has = (id: AppSettingsSection) => page.sections.includes(id);
     switch (page.id) {
@@ -534,7 +567,7 @@ function SettingsDialog() {
               "mb-2 flex h-8 shrink-0 items-center gap-2 rounded-lg bg-ink/[0.05] px-[9px] text-[13px] focus-within:ring-2 focus-within:ring-focus/60",
               "w-full min-w-0 bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none",
             )}
-            {visiblePages.length === 0 && advancedMatches.length === 0 && moreMatches.length === 0 && keyResults.length === 0 && (
+            {visiblePages.length === 0 && advancedMatches.length === 0 && moreMatches.length === 0 && keyResults.length === 0 && featureResults.length === 0 && !loopGuardResult && (
               <div className="px-[9px] py-3 text-[13px] leading-[18px] text-ink-secondary">{t("settings.noMatch", { query: query.trim() })}</div>
             )}
             {visiblePages.map((page) => {
@@ -580,6 +613,7 @@ function SettingsDialog() {
               </button>
             ))}
             {keyResultButtons(resultClass)}
+            {featureResultButtons(resultClass)}
           </nav>
 
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -621,6 +655,10 @@ function SettingsDialog() {
               )}
             >
               <LicenseExpiryBanner config={state.config} />
+              <div className="sm:hidden">
+                {searchField("flex items-center gap-2 rounded-lg bg-ink/5 px-3 py-2", "min-w-0 flex-1 bg-transparent text-ink outline-none")}
+                {q && <div className="mt-2 flex flex-col gap-1">{keyResultButtons("ui-button text-left")}{featureResultButtons("ui-button text-left")}</div>}
+              </div>
               {currentPage ? renderSimplePage(currentPage) : null}
             </div>
           </div>
@@ -656,7 +694,7 @@ function SettingsDialog() {
             "mb-2 mt-1 flex h-8 shrink-0 items-center gap-2 rounded-lg bg-ink/[0.05] px-[9px] text-[13px] focus-within:ring-2 focus-within:ring-focus/60",
             "w-full min-w-0 bg-transparent text-[13px] text-ink placeholder:text-ink-tertiary focus:outline-none",
           )}
-          {visibleSections.length === 0 && (
+          {visibleSections.length === 0 && featureResults.length === 0 && !loopGuardResult && keyResults.length === 0 && (
             <div className="px-2.5 py-4 text-[13px] leading-relaxed text-ink-secondary">
               {t("settings.noMatch", { query: query.trim() })}
             </div>
@@ -688,6 +726,7 @@ function SettingsDialog() {
             );
           })}
           {keyResultButtons("cursor-pointer flex min-h-9 items-center rounded-lg px-2.5 py-2 text-left text-[13px] text-ink transition-colors hover:bg-control/50 motion-reduce:transition-none")}
+          {featureResultButtons("flex min-h-9 items-center rounded-lg px-2.5 py-2 text-left text-[13px] text-ink hover:bg-control/50")}
         </nav>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -726,6 +765,10 @@ function SettingsDialog() {
 
           <div ref={scrollRef} className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 py-4 sm:px-5 sm:pb-5">
             <LicenseExpiryBanner config={state.config} />
+            <div className="sm:hidden">
+              {searchField("flex items-center gap-2 rounded-lg bg-ink/5 px-3 py-2", "min-w-0 flex-1 bg-transparent text-ink outline-none")}
+              {q && <div className="mt-2 flex flex-col gap-1">{keyResultButtons("ui-button text-left")}{featureResultButtons("ui-button text-left")}</div>}
+            </div>
             {renderSection(section)}
           </div>
         </div>

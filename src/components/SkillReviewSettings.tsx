@@ -61,7 +61,7 @@ export function SkillReviewSettings() {
   };
 
   return (
-    <div className="mt-4 border-t border-hairline/30 pt-4" data-testid="skill-review-settings">
+    <div className="mt-4 scroll-mt-4 border-t border-hairline/30 pt-4" data-testid="skill-review-settings" data-settings-block="control-skillReview" tabIndex={-1}>
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <div className="text-[14px] font-medium text-ink">{t("settings.experimental.skillReview")}</div>
@@ -78,8 +78,7 @@ export function SkillReviewSettings() {
         />
       </div>
       <SkillReviewEngineNote engines={unavailable} />
-      {enabled ? (
-        <div className="mt-3 flex items-center gap-3">
+      <div className="mt-3 flex items-center gap-3" data-settings-block="control-skillReviewSteps" tabIndex={-1}>
           <label htmlFor="skill-review-steps" className="text-[13px] text-ink">
             {t("settings.experimental.skillReviewSteps")}
           </label>
@@ -96,7 +95,7 @@ export function SkillReviewSettings() {
               step={1}
               inputMode="numeric"
               value={value}
-              disabled={saving}
+              disabled={saving || !authoring || !enabled}
               aria-invalid={Boolean(error)}
               onChange={(event) => {
                 setValue(event.target.value);
@@ -110,8 +109,7 @@ export function SkillReviewSettings() {
               className="min-w-0 flex-1 bg-transparent px-3 py-1.5 text-[14px] tabular-nums text-ink focus:outline-none"
             />
           </div>
-        </div>
-      ) : null}
+      </div>
       {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
     </div>
   );

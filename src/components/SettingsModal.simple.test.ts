@@ -154,7 +154,7 @@ describe("Settings in Simple mode", () => {
     const placed = SIMPLE_PAGES.flatMap((page) => page.sections);
     expect(new Set(placed).size).toBe(placed.length);
     const hidden = SECTIONS.map((entry) => entry.id).filter((id) => !placed.includes(id));
-    expect(hidden).toEqual(["decisionModel", "imageGeneration", "skills", "backups", "workspaces", "experimental"]);
+    expect(hidden).toEqual(["decisionModel", "imageGeneration", "skills", "features", "backups", "workspaces", "experimental"]);
     for (const id of hidden) expect(SIMPLE_HIDDEN_SECTIONS).toContain(id);
   });
 
@@ -268,7 +268,7 @@ describe("Settings in Simple mode", () => {
     fixture.section = "companion";
     const html = render();
     expect(currentPage(html)).toBe("computer");
-    expect(blocks(html)).toEqual(["computer", "companion", "browser", "logins", "elsewhere", "desktopWorkspaces", "remote"]);
+    expect(blocks(html)).toEqual(["computer", "companion", "browser", "control-browser", "logins", "elsewhere", "desktopWorkspaces", "remote"]);
     expect(groupLabels(html)).toEqual(["Your bots’ computers", "Phone &amp; devices", "Built-in browser"].map((label) => label.replace("’", "&#x27;")));
     expect(html).toContain('aria-label="Enable the built-in browser"');
   });

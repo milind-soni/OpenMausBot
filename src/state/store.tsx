@@ -511,7 +511,7 @@ export type AppSettingsSection =
   | "organization"
   | "cloudAccount"
   | "appearance"
-  | "experimental"
+  | "experimental" | "features"
   | "connections"
   | "decisionModel" | "imageGeneration"
   | "engines"

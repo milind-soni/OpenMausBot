@@ -149,7 +149,7 @@ export function SimpleLooksPage({ onBack, toolCalls = true }: { onBack: () => vo
     <>
       <div><button type="button" className="ui-button" onClick={onBack}>{t("settings.simple.looks.back")}</button></div>
       <div data-settings-block="looks"><SkinPicker /></div>
-      {toolCalls && <SettingsRows><ToolCallsRow /></SettingsRows>}
+      {toolCalls && <AdminOnly><SettingsRows><div data-settings-block="control-showToolCalls" tabIndex={-1}><ToolCallsRow /></div></SettingsRows></AdminOnly>}
     </>
   );
 }
@@ -179,7 +179,7 @@ export function SimpleMorePage({ sections, onOpen, onBack }: { sections: readonl
           <AutomaticRecoverySettings />
           <ThreadCleanupSettings />
           <CacheKeepWarmSettings />
-          <SettingsRows><SavedStepsRow /></SettingsRows>
+          <SettingsRows><div data-settings-block="control-savedSteps" tabIndex={-1}><SavedStepsRow /></div></SettingsRows>
         </div>
       </SettingsGroup>
     </>
@@ -223,7 +223,7 @@ export function SimpleComputerPage({ has, remoteAccess, servers, disclose }: { h
       )}
       {has("computer") && (
         <SettingsGroup label={t("settings.experimental.browser")} block="browser">
-          <SettingsRows><BuiltInBrowserRow /><ServerSitesRow /></SettingsRows>
+          <SettingsRows><div data-settings-block="control-browser" tabIndex={-1}><BuiltInBrowserRow /></div><ServerSitesRow /></SettingsRows>
           <BrowserProfilesRow />
         </SettingsGroup>
       )}
