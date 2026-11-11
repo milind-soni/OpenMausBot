@@ -91,6 +91,15 @@ describe("secretRef", () => {
     now += SECRET_FILE_TTL_MS;
     expect(vault.scrub("ntn_canary_value")).toBe("ntn_canary_value");
   });
+
+  it("says where text still being written has begun a live value", () => {
+    const vault = new SecretVault(clock);
+    vault.saveRef(ATLAS, "card-1", "Phrase", "open sesame now");
+    expect(vault.pendingAt("It is open sesame ")).toBe(6);
+    expect(vault.pendingAt("It is open door ")).toBe(-1);
+    now += SECRET_FILE_TTL_MS;
+    expect(vault.pendingAt("It is open sesame ")).toBe(-1);
+  });
 });
 
 posix("secret files", () => {

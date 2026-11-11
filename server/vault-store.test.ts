@@ -365,6 +365,19 @@ describe("the held-secret scrubber", () => {
     expect(held.scrub("Code 492039 accepted")).toBe("Code 492039 accepted");
   });
 
+  it("says where text still being written has begun a held password or code, and nothing once it goes another way", () => {
+    let now = 0;
+    const held = new HeldSecrets(new VaultStore({ dataDir: dir }), () => now);
+    held.remember("correct horse battery", "password");
+    held.remember("492039", "code");
+    expect(held.pendingAt("Use correct horse ")).toBe(4);
+    expect(held.pendingAt("Use correct horse racing ")).toBe(-1);
+    expect(held.pendingAt("Use correct horse battery ")).toBe(-1);
+    expect(held.pendingAt("Code 4920")).toBe(5);
+    now = 6 * 60_000;
+    expect(held.pendingAt("Code 4920")).toBe(-1);
+  });
+
   it("masks a password filled from elsewhere for the rest of the run, and ignores values too short to be one", () => {
     const held = new HeldSecrets(new VaultStore({ dataDir: dir }));
     held.remember("fake-vault-pass", "password");

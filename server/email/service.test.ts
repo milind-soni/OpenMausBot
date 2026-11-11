@@ -254,6 +254,8 @@ describe("connecting a mailbox", () => {
     expect(email.scrub("before p&ss w<rd after")).not.toContain("p&ss w<rd");
     expect(email.scrub(encodeURIComponent("p&ss w<rd"))).not.toContain("w%3Crd");
     expect(email.scrub("nothing here")).toBe("nothing here");
+    expect(email.pendingAt("the password is p&ss ")).toBe(16);
+    expect(email.pendingAt("the password is plain ")).toBe(-1);
   });
 
   it("takes mailboxes moved from a computer, keeping one already here", async () => {

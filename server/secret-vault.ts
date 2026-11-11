@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { SECRET_VALUE_MAX_BYTES } from "../shared/vault.ts";
 import { vaultPointer } from "./vault/mcp-keys.ts";
 import { secretForms } from "./vault-store.ts";
-import { HELD_SECRET_MASK } from "./redact.ts";
+import { HELD_SECRET_MASK, partialFormAt } from "./redact.ts";
 import { inSecretFolder, SECRET_FOLDER } from "./secret-folder.ts";
 
 export { inSecretFolder, SECRET_FOLDER, SECRET_VALUE_MAX_BYTES };
@@ -276,6 +276,13 @@ export class SecretVault {
       for (const form of entry.forms) if (out.includes(form)) out = out.split(form).join(HELD_SECRET_MASK);
     }
     return out;
+  }
+
+  /** Where text still being written may have begun a held value (see `partialFormAt`). */
+  pendingAt(text: string): number {
+    if (!text || this.held.length === 0) return -1;
+    const now = this.now();
+    return partialFormAt(text, this.held.filter((entry) => entry.until > now).flatMap((entry) => entry.forms));
   }
 
   private hold(value: string, until: number): void {

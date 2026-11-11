@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EVENTS_DIR, ensureDirs } from "../config.ts";
-import { addHeldSecretScrubber } from "../redact.ts";
+import { addHeldSecretScrubber, partialFormAt } from "../redact.ts";
 import type { RuntimeEvent } from "../contracts.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
 import { EventBus } from "./bus.ts";
@@ -470,12 +470,12 @@ describe("EventBus streamed text", () => {
 
     bus.publish(delta("a1 "));
     bus.publish(delta("b1 ", { threadId: "thread-2" }));
-    bus.publish(delta("thinking", { streamKind: "reasoning_text" }));
+    bus.publish(delta("thinking ", { streamKind: "reasoning_text" }));
     bus.publish(delta("a2 "));
     bus.publish(delta("next turn ", { turnId: "turn-2" }));
     bus.publish(delta("api error ", { turnId: "turn-2", synthetic: true }));
     bus.publish(delta("b2 ", { threadId: "thread-2" }));
-    expect(summary(seen)).toEqual(["thread-1:assistant_text:a1 ", "thread-1:reasoning_text:thinking", "thread-1:assistant_text:a2 ", "thread-1:assistant_text:next turn "]);
+    expect(summary(seen)).toEqual(["thread-1:assistant_text:a1 ", "thread-1:reasoning_text:thinking ", "thread-1:assistant_text:a2 ", "thread-1:assistant_text:next turn "]);
 
     vi.advanceTimersByTime(50);
     expect(summary(seen).slice(4).sort()).toEqual(["thread-1:assistant_text:api error ", "thread-2:assistant_text:b1 b2 "]);
@@ -502,6 +502,27 @@ describe("EventBus streamed text", () => {
     vi.advanceTimersByTime(100);
     expect(seen).toHaveLength(3);
     await bus.flush();
+  });
+
+  it("sends none of a held passphrase's words before it is whole, to any listener or the event log", async () => {
+    const passphrase = "correct horse battery staple";
+    const remove = addHeldSecretScrubber((text) => text.replaceAll(passphrase, "••••••"), (text) => partialFormAt(text, [passphrase]));
+    try {
+      const bus = new EventBus();
+      const seen: RuntimeEvent[] = [];
+      bus.subscribe((event) => seen.push(event));
+      for (const piece of ["Your passphrase is correct ", "horse battery ", "staple. Done "]) {
+        bus.publish(delta(piece, { eventId: `h${piece.length}` }));
+        vi.advanceTimersByTime(50);
+      }
+      await bus.flush();
+      const streamed = seen.filter((event) => event.type === "content.delta").map((event) => event.type === "content.delta" ? event.delta : "");
+      expect(streamed.join("")).toBe("Your passphrase is ••••••. Done ");
+      for (const piece of streamed) expect(piece).not.toMatch(/correct|horse|battery/);
+      expect(readFileSync(join(EVENTS_DIR, "thread-1.ndjson"), "utf8")).not.toMatch(/correct|horse|battery/);
+    } finally {
+      remove();
+    }
   });
 
   it("sends streamed words only as masked as the saved message, to every listener and the event log", async () => {

@@ -5,7 +5,7 @@ import { EMAIL_SLUG, type EmailAccountView, type EmailConnectAnswer, type EmailC
 import { boxRefusal } from "../bot-box/egress-gate.ts";
 import { resolveTarget } from "../browser/egress/gate.ts";
 import { secretForms } from "../vault-store.ts";
-import { HELD_SECRET_MASK } from "../redact.ts";
+import { HELD_SECRET_MASK, partialFormAt } from "../redact.ts";
 import { EmailError, LASTING_SENDING_FAULTS, openGuard, pinned, sendingError, sendMessage, SendingError, testMailbox, testSending, type EmailGuard, type SendingFault } from "./client.ts";
 import { discoverMailServers, liveDiscoverDeps, smtpBeside, type DiscoverDeps, type MailCandidates } from "./discover.ts";
 import { EmailStore, MAX_EMAIL_ACCOUNTS, parseEmailAccount, type EmailAccount, type EmailServer } from "./store.ts";
@@ -197,6 +197,8 @@ export function createEmailService(deps: EmailServiceDeps) {
     guard,
     status,
     scrub,
+    /** Where text still being written may have begun a saved password (see `partialFormAt`). */
+    pendingAt: (text: string) => partialFormAt(text, store.secretValues().flatMap(secretForms)),
     mounted: () => !deps.refusal && store.list().length > 0,
     slug: EMAIL_SLUG,
     /** Why this mailbox can't send, or nothing while it can. */

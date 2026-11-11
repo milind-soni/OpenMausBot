@@ -156,6 +156,14 @@ describe("a reply as it streams from an older server", () => {
     expect(liveReplyText({ text: "plain words", done: false })).toBe("plain ");
   });
 
+  it("shows text written without spaces as it streams, all but its last few characters", () => {
+    const text = "これは日本語の文章です。".repeat(20);
+    const shownNow = liveReplyText({ text, done: false });
+    expect(text.startsWith(shownNow)).toBe(true);
+    expect(shownNow.length).toBe(text.length - 24);
+    expect(liveReplyText({ text: `日本語sk-ant-api03-${"a".repeat(30)}`, done: false }), "a key in it is held whole").toBe("日本語");
+  });
+
   it("shows nothing of a private key until its END line is in", () => {
     const open = "Key:\n-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA secretbody\nmore ";
     expect(liveReplyText({ text: open, done: false })).toBe("Key:\n");
