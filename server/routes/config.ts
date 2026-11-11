@@ -1,5 +1,6 @@
 import { liveSavePatch } from "../live-config.ts";
 import { signInEnvRefusal } from "../sign-in-env.ts";
+import { STT_INSECURE_KEY_ERROR, sttKeySendable, sttSavePatch } from "../stt-config.ts";
 import * as boat from "../boat.ts";
 import { boatCreateRecoverySnapshot, retireDeletedBoatCreate } from "../boat-create-idempotency.ts";
 import { boatDeletionSnapshot } from "../boat-delete-journal.ts";
@@ -508,6 +509,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         if (!merged.ok) return json(res, 400, { error: merged.error });
         patch.opencodeGo = { ...patch.opencodeGo, providerKeys: merged.keys };
       }
+      if (patch.stt?.key?.trim() && !sttKeySendable({ ...cfg.stt, ...patch.stt })) return json(res, 400, { error: STT_INSECURE_KEY_ERROR });
       const browserCleanupRequests: BrowserCleanupRequest[] = [];
       if (profileControlConflict()) return json(res, 409, { error: "Release browser control before deleting its profile." });
       try {
@@ -539,6 +541,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
       try {
         if (patch.live) patch.live = liveSavePatch(cfg.live, patch.live);
+        if (patch.stt) patch.stt = sttSavePatch(cfg.stt, patch.stt);
         // Before the provider commit, so a failed write never leaves a foreign voice id to speak.
         if (changingVoiceProvider) store.clearVoiceSelections();
         if (externalSecretStorage) {
@@ -562,6 +565,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.tts?.key !== undefined) persisted.tts.key = "";
           if (persisted.tts?.fishKey !== undefined) persisted.tts.fishKey = "";
           if (persisted.tts?.geminiKey !== undefined) persisted.tts.geminiKey = "";
+          if (persisted.stt?.key !== undefined) persisted.stt.key = "";
           if (persisted.decider?.key !== undefined) persisted.decider.key = "";
           if (persisted.decider?.openrouterKey !== undefined) persisted.decider.openrouterKey = "";
           if (persisted.decider?.workersAiToken !== undefined) persisted.decider.workersAiToken = "";

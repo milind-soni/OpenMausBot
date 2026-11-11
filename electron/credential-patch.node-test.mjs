@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { credentialSaveError } from "./credential-patch.mjs";
+import { CREDENTIAL_PATCH, credentialSaveError } from "./credential-patch.mjs";
 import nativeText from "./native-text.cjs";
+
+test("a speech input key is saved together with the endpoint it was entered for", () => {
+  assert.deepEqual(CREDENTIAL_PATCH.sttKey("secret", { provider: "openai", baseUrl: "https://api.groq.com/openai/v1", model: "whisper" }),
+    { stt: { provider: "openai", baseUrl: "https://api.groq.com/openai/v1", model: "whisper", key: "secret" } });
+  assert.deepEqual(CREDENTIAL_PATCH.sttKey(""), { stt: { key: "" } });
+});
 
 test("a key the provider refused crosses IPC named KeyRejected, with the server's words", () => {
   const error = credentialSaveError(400, { error: "boat.dev rejected that key", code: "key_rejected" });

@@ -16,7 +16,8 @@ import { cn } from "@/lib/cn";
 import { BotAvatar } from "./Avatar";
 import { CallTargetButton, type CallButtonPlacement } from "./CallView";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { speechBridge } from "@/lib/speech";
+import { canListenHere, speechBridge } from "@/lib/speech";
+import { sttDestination } from "../../shared/stt";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 import { titledCard } from "./ApprovalCard";
@@ -30,8 +31,9 @@ type Phase = "listening" | "sending" | "working" | "speaking";
 /** `fill` (Simple composer): a round button in that colour, with its glyph in `ink`. */
 export function GroupCallButton({ group, members, placement, fill, ink }: { group: Group; members: Bot[]; placement?: CallButtonPlacement; fill?: string; ink?: string }) {
   const { capabilities, ready } = useDesktopCapabilities();
+  const config = useStore().state.config;
   if (group.dm) return null;
-  if (ready && !capabilities.dictation.available) return null;
+  if (ready && !canListenHere(capabilities, config)) return null;
   return (
     <CallTargetButton
       placement={placement}
@@ -71,7 +73,9 @@ function questionIn(messages: Message[]): Message | undefined {
 }
 
 function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
+  const { capabilities } = useDesktopCapabilities();
+  const [{ bridge, destination }] = useState(() => ({ bridge: speechBridge(state.config, capabilities), destination: sttDestination(state.config?.stt) }));
   const speech = useSpeech();
   const initialPhase: Phase = group.working || group.busyBotId ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);
@@ -80,7 +84,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const [speakingMemberId, setSpeakingMemberId] = useState<string | null>(null);
   const pushToTalk = usePushToTalk(group.id, phase === "listening", () => {
     setNote(t("call.turns.pushToTalkFailed"));
-  });
+  }, { bridge, destination });
 
   const messages = group.messages;
   const approval = pendingApprovals(messages)[0];
@@ -124,8 +128,8 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   }, []);
 
   const hush = useCallback(() => {
-    void speechBridge()?.speechStop();
-  }, []);
+    void bridge?.speechStop();
+  }, [bridge]);
 
   const listen = useCallback(() => {
     if (!alive.current || currentCall() !== group.id) return;
@@ -133,12 +137,12 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     setSpeakingMemberId(null);
     setHeard("");
     setNote(null);
-    void speechBridge()?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
+    void bridge?.speechStart({ endpointMs: CALL_ENDPOINT_MS, destination }).catch(() => {
       if (alive.current && currentCall() === group.id) {
         setNote(t("call.turns.micFailed"));
       }
     });
-  }, [group.id, move]);
+  }, [group.id, move, bridge, destination]);
 
   const scheduleListen = useCallback(
     (force = false, delay = 140) => {
@@ -216,7 +220,6 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   }, [group.id]);
 
   useEffect(() => {
-    const bridge = speechBridge();
     if (!bridge) return;
     const offTranscript = bridge.onSpeechTranscript((line) => {
       if (!alive.current || currentCall() !== group.id || phaseRef.current !== "listening") return;
@@ -338,10 +341,10 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     return () => {
       offTranscript();
       offEnd();
-      void speechBridge()?.speechStop();
+      void bridge.speechStop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dispatch, enqueueSpeech, group.id, group.threadId, hush, listen, move, scheduleListen]);
+  }, [dispatch, enqueueSpeech, group.id, group.threadId, hush, listen, move, scheduleListen, bridge]);
 
   useEffect(() => {
     let resumeAfterRoutine = false;

@@ -5,7 +5,7 @@ vi.mock("@/state/api", async (importOriginal) => ({ ...(await importOriginal<typ
 
 import { ApiError } from "@/state/api";
 import { t } from "./i18n";
-import { createClip, createEndpointer, encodeWav, fishSpeech, rms } from "./fish-speech";
+import { createClip, createEndpointer, encodeWav, recordedSpeech, rms } from "./recorded-speech";
 
 const FRAME_MS = 64;
 const loud = () => new Float32Array(1024).fill(0.2);
@@ -124,11 +124,11 @@ describe("Fish Audio listener", () => {
     getUserMedia = vi.fn(async () => stream());
     vi.stubGlobal("navigator", { mediaDevices: { getUserMedia } });
     vi.stubGlobal("AudioContext", FakeContext);
-    offs.push(fishSpeech.onSpeechTranscript((line) => lines.push(line)), fishSpeech.onSpeechEnd((info) => ends.push(info)));
+    offs.push(recordedSpeech.onSpeechTranscript((line) => lines.push(line)), recordedSpeech.onSpeechEnd((info) => ends.push(info)));
   });
 
   afterEach(async () => {
-    await fishSpeech.speechStop();
+    await recordedSpeech.speechStop();
     offs.splice(0).forEach((off) => off());
     vi.unstubAllGlobals();
   });
@@ -137,7 +137,7 @@ describe("Fish Audio listener", () => {
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   it("hears a call turn: one 'hearing you' line, the clip uploaded as WAV, then the text and a completed end", async () => {
-    await fishSpeech.speechStart({ endpointMs: 850 });
+    await recordedSpeech.speechStart({ endpointMs: 850 });
     expect(getUserMedia).toHaveBeenCalledWith({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     feed(quiet, 5);
     feed(loud, 10);
@@ -155,10 +155,20 @@ describe("Fish Audio listener", () => {
     expect(contextsClosed).toBe(1);
   });
 
+  it("uploads the clip naming the destination it was recorded for", async () => {
+    await recordedSpeech.speechStart({ endpointMs: 850, destination: "openai http://localhost:8000/v1" });
+    feed(loud, 10);
+    feed(quiet, 14);
+    await settle();
+    expect(sent.api.mock.calls[0]![1].headers).toEqual({
+      "content-type": "audio/wav", "x-omb-stt-destination": encodeURIComponent("openai http://localhost:8000/v1"),
+    });
+  });
+
   it("ends a turn that heard no speech without sending anything", async () => {
-    await fishSpeech.speechStart({ endpointMs: 850 });
+    await recordedSpeech.speechStart({ endpointMs: 850 });
     feed(quiet, 20);
-    await fishSpeech.speechFinish();
+    await recordedSpeech.speechFinish();
     expect(sent.api).not.toHaveBeenCalled();
     expect(ends).toEqual([{ code: 0, reason: "completed" }]);
     expect(tracksStopped).toBe(1);
@@ -166,20 +176,20 @@ describe("Fish Audio listener", () => {
 
   it("ends a turn with no text without a final line, so a call listens once", async () => {
     sent.api.mockResolvedValue({ text: "  " });
-    await fishSpeech.speechStart({ endpointMs: 850 });
+    await recordedSpeech.speechStart({ endpointMs: 850 });
     feed(loud, 5);
-    await fishSpeech.speechFinish();
+    await recordedSpeech.speechFinish();
     await settle();
     expect(lines.filter((line) => (line as { partial: boolean }).partial === false)).toEqual([]);
     expect(ends).toEqual([{ code: 0, reason: "completed" }]);
   });
 
   it("captures a manual clip until it is finished, with no partial line", async () => {
-    await fishSpeech.speechStart();
+    await recordedSpeech.speechStart();
     feed(loud, 5);
     feed(quiet, 40);
     expect(sent.api).not.toHaveBeenCalled();
-    await fishSpeech.speechFinish();
+    await recordedSpeech.speechFinish();
     await settle();
     expect(sent.api).toHaveBeenCalledOnce();
     expect(lines).toEqual([{ partial: false, text: "hello bot" }]);
@@ -187,10 +197,10 @@ describe("Fish Audio listener", () => {
   });
 
   it("emits nothing when stopped while listening", async () => {
-    await fishSpeech.speechStart({ endpointMs: 850 });
+    await recordedSpeech.speechStart({ endpointMs: 850 });
     feed(loud, 5);
     lines.length = 0;
-    await fishSpeech.speechStop();
+    await recordedSpeech.speechStop();
     await settle();
     expect(sent.api).not.toHaveBeenCalled();
     expect({ lines, ends }).toEqual({ lines: [], ends: [] });
@@ -203,10 +213,10 @@ describe("Fish Audio listener", () => {
       signal = init.signal;
       signal!.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
     }));
-    await fishSpeech.speechStart();
+    await recordedSpeech.speechStart();
     feed(loud, 5);
-    await fishSpeech.speechFinish();
-    await fishSpeech.speechStop();
+    await recordedSpeech.speechFinish();
+    await recordedSpeech.speechStop();
     await settle();
     expect(signal!.aborted).toBe(true);
     expect({ lines, ends }).toEqual({ lines: [], ends: [] });
@@ -215,10 +225,10 @@ describe("Fish Audio listener", () => {
   it("never speaks for a session that was replaced during the upload", async () => {
     let release!: (value: { text: string }) => void;
     sent.api.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
-    await fishSpeech.speechStart();
+    await recordedSpeech.speechStart();
     feed(loud, 5);
-    await fishSpeech.speechFinish();
-    await fishSpeech.speechStart({ endpointMs: 850 });
+    await recordedSpeech.speechFinish();
+    await recordedSpeech.speechStart({ endpointMs: 850 });
     release({ text: "stale" });
     await settle();
     expect({ lines, ends }).toEqual({ lines: [], ends: [] });
@@ -227,8 +237,8 @@ describe("Fish Audio listener", () => {
   it("releases a microphone that was granted after the session was stopped", async () => {
     let grant!: (value: ReturnType<typeof stream>) => void;
     getUserMedia.mockImplementationOnce(() => new Promise((resolve) => { grant = resolve; }));
-    const started = fishSpeech.speechStart({ endpointMs: 850 });
-    await fishSpeech.speechStop();
+    const started = recordedSpeech.speechStart({ endpointMs: 850 });
+    await recordedSpeech.speechStop();
     grant(stream());
     await started;
     expect(tracksStopped).toBe(1);
@@ -238,8 +248,8 @@ describe("Fish Audio listener", () => {
 
   it("ends a finish that arrives before the microphone opened", async () => {
     getUserMedia.mockImplementationOnce(() => new Promise(() => {}));
-    void fishSpeech.speechStart();
-    await fishSpeech.speechFinish();
+    void recordedSpeech.speechStart();
+    await recordedSpeech.speechFinish();
     expect(ends).toEqual([{ code: 0, reason: "completed" }]);
   });
 
@@ -249,15 +259,15 @@ describe("Fish Audio listener", () => {
     ["AbortError", { code: 1, reason: "microphone-failed" }],
   ])("ends a %s microphone failure with a reason", async (name, end) => {
     getUserMedia.mockRejectedValueOnce(Object.assign(new Error(name), { name }));
-    await fishSpeech.speechStart({ endpointMs: 850 });
+    await recordedSpeech.speechStart({ endpointMs: 850 });
     expect(ends).toEqual([end]);
   });
 
   it("reports the server's message when the upload fails", async () => {
     sent.api.mockRejectedValue(new ApiError("Fish Audio rejected that API key.", 502));
-    await fishSpeech.speechStart();
+    await recordedSpeech.speechStart();
     feed(loud, 5);
-    await fishSpeech.speechFinish();
+    await recordedSpeech.speechFinish();
     await settle();
     expect(ends).toEqual([{ code: 1, reason: "transcribe-failed", message: "Fish Audio rejected that API key." }]);
   });

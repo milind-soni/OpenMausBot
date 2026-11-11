@@ -324,7 +324,7 @@ import { LiveCallController, LiveCallSignedOutError, openLiveSocket } from "./li
 import { liveCallSettings, liveSettingsFor, liveSettingsForClient, saveLiveSettings } from "./live-settings.ts"; import { azureLiveCallRefusal, liveScopeRefusal } from "./live-access.ts";
 import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-record.ts"; import { noteGroupTurn, turnsSince } from "./room-round-turns.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
-import { createTtsRoutes } from "./routes/tts.ts";
+import { createTtsRoutes } from "./routes/tts.ts"; import { sttStatus } from "./stt-config.ts";
 import { turnStartLogLine } from "./turn-log.ts";
 import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } from "./turn-context.ts";
@@ -11755,7 +11755,7 @@ function configStatus() {
     box: { ...boat.describeBoatAccount(cfg), ...(boat.boatAccount(cfg)?.included ? {} : keyHint(cfg.box?.token)) },
     vps: { configured: Boolean(vpsSshAlias(cfg)), sshAlias: vpsSshAlias(cfg) ?? "" },
     opencodeGo: { ...keyStatus(cfg.opencodeGo?.apiKey), providerKeys: Object.keys(openCodeProviderKeys(cfg)) },
-    tts: tts.describeVoice(cfg),
+    tts: tts.describeVoice(cfg), stt: sttStatus(cfg),
     decider: describeDecider(cfg), helpers: describeHelpers(cfg),
     imageGen: avatarImageStatus(cfg), savedKeys: nestedKeyStatus(cfg),
     live: liveSettingsFor(cfg),
@@ -11820,7 +11820,7 @@ function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean
     ...withoutKeyHints(status),
     edition: { edition: status.edition.edition, features: status.edition.features },
     signIn: { admins: [], members: [] }, live: liveSettingsForClient(status.live), everyBotRules: undefined,
-    vps: { configured: status.vps.configured, sshAlias: "" },
+    vps: { configured: status.vps.configured, sshAlias: "" }, stt: { ...status.stt, baseUrl: "", configured: false },
     opencodeGo: { configured: status.opencodeGo.configured, providerKeys: [] },
     ...(CLOUD_TEAM ? { onboarding } : {}), profile: CLOUD_TEAM ? profile : { name: profile.name, email: "", ...(profile.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}) },
     browserProfiles: status.browserProfiles.map((profile) => Object.fromEntries(Object.entries(profile).filter(([key]) => key !== "partitionId"))),

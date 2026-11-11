@@ -1,4 +1,6 @@
 import { t } from "@/lib/i18n";
+import type { ConfigStatus } from "@/state/store";
+import { canListenHere, serverListeningReady, speechBridge, speechRecognizer } from "./speech";
 
 export type CallCapabilityHelp = {
   label: string;
@@ -15,6 +17,11 @@ const turnsNeedFishKey = (): CallCapabilityHelp => ({
   reason: t("call.capability.turnsNeedFishKeyReason"),
 });
 
+const turnsNeedSpeechInput = (): CallCapabilityHelp => ({
+  label: t("stt.needSetup"),
+  reason: t("stt.needSetupReason"),
+});
+
 const turnsOnThisComputerAnyOs = (): CallCapabilityHelp => ({
   label: t("call.capability.turnsOnThisComputerAnyOs"),
   reason: t("call.capability.turnsOnThisComputerAnyOsReason"),
@@ -25,12 +32,9 @@ const turnsOnThisComputer = (): CallCapabilityHelp => ({
   reason: t("call.capability.turnsOnThisComputerReason"),
 });
 
-export function callCapabilityHelp(
-  capabilities: DesktopCapabilities,
-  speechServiceAvailable: boolean,
-  fishKeySaved: boolean,
-): CallCapabilityHelp | null {
-  if (!capabilities.dictation.available) {
+export function callCapabilityHelp(capabilities: DesktopCapabilities, config: ConfigStatus | null | undefined): CallCapabilityHelp | null {
+  const recognizer = speechRecognizer(config, capabilities);
+  if (!canListenHere(capabilities, config)) {
     switch (capabilities.dictation.reasonCode) {
       case "remote-server":
         return capabilities.host.platform === "darwin" ? turnsOnThisComputer() : turnsOnThisComputerAnyOs();
@@ -44,8 +48,8 @@ export function callCapabilityHelp(
         };
     }
   }
-  if (capabilities.dictation.engine === "fish-audio" && !fishKeySaved) return turnsNeedFishKey();
-  if (!speechServiceAvailable) {
+  if (recognizer !== "native" && !serverListeningReady(config)) return recognizer === "endpoint" ? turnsNeedSpeechInput() : turnsNeedFishKey();
+  if (!speechBridge(config, capabilities)?.speechStart) {
     return {
       label: t("call.capability.serviceUnavailable"),
       reason: t("call.capability.serviceUnavailableReason"),
