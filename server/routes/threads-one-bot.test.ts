@@ -13,6 +13,7 @@ import { Store, type BotRecord } from "../store.ts";
 import { dispatchRoutes } from "./table.ts";
 import { createThreadRoutes, type ThreadRouteDeps } from "./threads.ts";
 
+type Body = { bot: { messages: Array<{ text: string }>; tasks: unknown[] }; bots: Array<{ id: string }>; error?: string };
 const sonnet: ModelSelection = { instanceId: "claude", model: "claude-sonnet-5" };
 const servers: Server[] = [];
 
@@ -55,13 +56,13 @@ describe("GET /api/bots/:id", () => {
     for (const text of ["one", "two", "three"]) store.appendMessage(scout.threadId, { role: "user", kind: "text", text });
     store.appendMessage(other.threadId, { role: "user", kind: "text", text: "elsewhere" });
     const base = await serve(store, hidden.id);
-    const get = async (path: string) => { const res = await fetch(`${base}${path}`); return { status: res.status, body: await res.json() }; };
+    const get = async (path: string) => { const res = await fetch(`${base}${path}`); return { status: res.status, body: await res.json() as Body }; };
 
     const one = await get(`/api/bots/${scout.id}?messages=2`);
     const list = await get(`/api/bots?messages=2`);
     expect(one.status).toBe(200);
-    expect(one.body).toEqual({ bot: list.body.bots.find((bot: { id: string }) => bot.id === scout.id) });
-    expect(one.body.bot.messages.map((message: { text: string }) => message.text)).toEqual(["two", "three"]);
+    expect(one.body).toEqual({ bot: list.body.bots.find((bot) => bot.id === scout.id) });
+    expect(one.body.bot.messages.map((message) => message.text)).toEqual(["two", "three"]);
     expect(one.body.bot.tasks).toEqual([]);
 
     expect(await get(`/api/bots/${hidden.id}`)).toEqual({ status: 404, body: { error: NO_SUCH_BOT } });

@@ -8,7 +8,7 @@ const bot = (id: string) => ({ id, threadId: `${id}-thread`, name: id }) as BotA
 
 describe("reading one bot to reconcile it", () => {
   it("asks for that bot alone", async () => {
-    const read = vi.fn(async () => ({ bot: bot("scout") }) as never);
+    const read = vi.fn(async (_path: string) => ({ bot: bot("scout") }) as never);
     expect(await readOneBot("scout", 200, undefined, read)).toEqual(bot("scout"));
     expect(read.mock.calls.map(([path]) => path)).toEqual(["/api/bots/scout?messages=200"]);
   });
