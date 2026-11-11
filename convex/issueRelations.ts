@@ -3,6 +3,7 @@ import { mutation, query } from "./_generated/server";
 import { canEdit, projectMember, requireMember } from "./lib/permissions";
 import type { Id } from "./_generated/dataModel";
 import { cleanLabels, projectLabels, registerLabels, workspaceLabelRows } from "./lib/labels";
+import { queueGitHubSync } from "./lib/githubIssueSync";
 
 const kind = v.union(v.literal("blocks"), v.literal("parent"));
 export const list = query({
@@ -37,6 +38,7 @@ export const labels = mutation({
     const labels = cleanLabels(args.labels, [...await projectLabels(ctx, task.projectId), ...registry]);
     await ctx.db.patch(task._id, { labels, updatedAt: Date.now() });
     if (teamId) await registerLabels(ctx, teamId, labels);
+    await queueGitHubSync(ctx, task._id);
     return null;
   },
 });

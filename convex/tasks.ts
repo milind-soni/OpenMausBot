@@ -16,6 +16,7 @@ import { compareTaskOrder, planTaskMove } from "../lib/task-order";
 import { addCriteria, editCriteria, needsSpecLabels, replaceCriteria, type Criterion, type CriterionEdit } from "../lib/acceptance-criteria";
 import { cleanLabels, needsSpecAvailable, projectLabels, registerLabels, workspaceLabelRows } from "./lib/labels";
 import { issueCreated, issueStatusChanged } from "./lib/issueEvents";
+import { queueGitHubDelete } from "./lib/githubIssueSync";
 import schema from "./schema";
 
 const columnDoc = v.object({ ...schema.tables.columns.validator.fields, _id: v.id("columns"), _creationTime: v.number() });
@@ -707,6 +708,7 @@ export async function deleteTaskRecord(ctx: MutationCtx, args: { projectId: Id<"
     const incoming = await ctx.db.query("taskRelations").withIndex("by_toTaskId", q => q.eq("toTaskId", args.taskId)).take(31);
     for (const relation of [...outgoing, ...incoming]) await ctx.db.delete(relation._id);
     for (const entry of await ctx.db.query("issueActivity").withIndex("by_taskId_and_createdAt", q => q.eq("taskId", args.taskId)).take(1000)) await ctx.db.delete(entry._id);
+    await queueGitHubDelete(ctx, task);
     await ctx.db.delete(args.taskId);
     await changeOpenIssueCount(ctx, args.projectId, task.done ? 0 : -1);
     await touchProject(ctx, args.projectId);

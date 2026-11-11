@@ -4,6 +4,7 @@ import { internal } from "../_generated/api";
 import { globalIssueWebhook } from "../issueWebhooks";
 import { issueKey } from "../../lib/github-references";
 import { issueWebhookChanges, issueWebhookPayload, type IssueWebhookChanges, type IssueWebhookEvent } from "../../lib/issue-webhook";
+import { queueGitHubSync } from "./githubIssueSync";
 
 // Issue webhooks from issue writes: call issueCreated after inserting an issue, and issueStatusChanged with the
 // issue as it was before a write that may move or complete it. Each schedules convex/issueWebhooks.ts `deliver`
@@ -40,6 +41,7 @@ async function schedule(ctx: MutationCtx, type: IssueWebhookEvent, task: Doc<"ta
 export async function issueCreated(ctx: MutationCtx, taskId: Id<"tasks">) {
   const task = await ctx.db.get(taskId);
   if (task) await schedule(ctx, "issue.created", task, null);
+  await queueGitHubSync(ctx, taskId);
 }
 
 /** Sends issue.delegated when the agent on the issue differs from `before` (convex/issueActivity.ts setDelegate). */
@@ -50,8 +52,12 @@ export async function issueDelegated(ctx: MutationCtx, before: Doc<"tasks">) {
   await schedule(ctx, "issue.delegated", after, { delegate: { from: agent(before), to: agent(after) } });
 }
 
-/** Sends issue.updated when the column title (status) or completion differs from `before`; other edits send nothing. */
+/**
+ * Sends issue.updated when the column title (status) or completion differs from `before`; other edits send nothing.
+ * Every call also queues the issue for GitHub issue sync, which compares content itself.
+ */
 export async function issueStatusChanged(ctx: MutationCtx, before: Doc<"tasks">) {
+  await queueGitHubSync(ctx, before._id);
   const after = await ctx.db.get(before._id);
   if (!after || (after.columnId === before.columnId && after.done === before.done)) return;
   const changes = issueWebhookChanges(

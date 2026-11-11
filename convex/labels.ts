@@ -8,6 +8,7 @@ import {
   MAX_LABEL_DESCRIPTION, MAX_WORKSPACE_LABELS, cleanLabelColor, cleanLabelName, colorForLabel, ensureDefaultLabels, labelKey,
   missingDefaultLabels, projectLabels, workspaceLabelRows,
 } from "./lib/labels";
+import { queueGitHubSync } from "./lib/githubIssueSync";
 
 const labelRow = v.object({
   _id: v.union(v.id("issueLabels"), v.null()),
@@ -130,6 +131,7 @@ async function renameOnIssues(ctx: MutationCtx, teamId: Id<"teams">, from: strin
     if (!task.labels?.some(label => labelKey(label) === key)) continue;
     const labels = task.labels.map(label => labelKey(label) === key ? to : label);
     await ctx.db.patch(task._id, { labels: labels.filter((label, index) => labels.findIndex(other => labelKey(other) === labelKey(label)) === index) });
+    if (task.githubIssueNumber) await queueGitHubSync(ctx, task._id);
   }
 }
 

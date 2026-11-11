@@ -16,4 +16,17 @@ export const githubLifecycleTables = {
   }).index("by_taskId", ["taskId"]).index("by_nextAt", ["nextAt"])
     .index("by_projectId_and_updatedAt", ["projectId", "updatedAt"])
     .index("by_repoUrl_and_number", ["repoUrl", "number"]),
+  /**
+   * Two-way issue sync (convex/githubIssueSync.ts): per Origin issue, fingerprints of the title, body and labels that
+   * Origin and GitHub last agreed on, plus an outbox entry while Origin has changes GitHub has not seen yet. A deleted
+   * issue keeps its row (with `deleted`) until the worker closed its GitHub issue.
+   */
+  githubIssueMirrors: defineTable({
+    projectId: v.id("projects"), taskId: v.id("tasks"),
+    titleHash: v.optional(v.string()), bodyHash: v.optional(v.string()), labelsHash: v.optional(v.string()),
+    pending: v.boolean(), revision: v.number(), attempts: v.number(), nextAt: v.number(),
+    leaseUntil: v.optional(v.number()), error: v.optional(v.string()),
+    deleted: v.optional(v.object({ repoUrl: v.string(), number: v.number() })),
+    updatedAt: v.number(),
+  }).index("by_taskId", ["taskId"]).index("by_pending_and_nextAt", ["pending", "nextAt"]),
 };

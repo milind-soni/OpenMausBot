@@ -16,7 +16,7 @@ vi.mock("./integration-bridge", async importOriginal => ({
   ...await importOriginal<typeof import("./integration-bridge")>(),
   integrationBridge: (operation: string, args: unknown) => operation === "pending" ? Promise.resolve([]) : signedBridge(backend.current!, operation, args),
 }));
-vi.mock("./github-sync", () => ({ createProjectRepository: sync, syncGitHubPage: sync }));
+vi.mock("./github-sync", () => ({ createProjectRepository: sync, syncGitHubPage: sync, syncGitHubOutbox: sync }));
 vi.mock("./github-prs", () => ({ syncPRPage: sync }));
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); pending.length = 0; sync.mockClear(); });
 
