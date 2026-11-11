@@ -40,21 +40,6 @@ const KEY_PREFIXES: RegExp[] = [
 const KEY_PREFIX_TESTS = KEY_PREFIXES.map((re) => new RegExp(re.source));
 const PRIVATE_KEY_BLOCK = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
 
-const PRIVATE_KEY_HEADER = /-----BEGIN [A-Z ]*PRIVATE KEY-----/g;
-const PRIVATE_KEY_END = /-----END [A-Z ]*PRIVATE KEY-----/;
-/** `-----BEGIN RSA PRIVA`: a header still being written, which may yet open a private key. */
-const PARTIAL_KEY_HEADER = /-----BEGIN[A-Z ]*-{0,4}$/;
-
-/** Where text still being written opens a private key it has not closed, or may be about to; -1 when it does neither.
- * A key's body is masked only once its END line is in, so streamed text waits from here. */
-export function openPrivateKeyAt(text: string): number {
-  PRIVATE_KEY_HEADER.lastIndex = 0;
-  for (let header = PRIVATE_KEY_HEADER.exec(text); header; header = PRIVATE_KEY_HEADER.exec(text)) {
-    if (!PRIVATE_KEY_END.test(text.slice(PRIVATE_KEY_HEADER.lastIndex))) return header.index;
-  }
-  return PARTIAL_KEY_HEADER.exec(text)?.index ?? -1;
-}
-
 /** Only shapes that are unmistakably a credential (a provider's key prefix, a private key block), never a name or a
  * placeholder: text holding one is a credential store, not instructions. */
 export function holdsCredential(text: string): boolean {
@@ -87,52 +72,19 @@ const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"]+:)([^\s/@'"«»]+)(@)/
 /** What a held secret becomes wherever it would have appeared. */
 export const HELD_SECRET_MASK = "••••••";
 
-interface HeldSecretScrubber {
-  scrub: (text: string) => string;
-  /** The length of the longest value it holds, in any form, that a stream could cut partway (see
-   * `longestSplittableForm`); 0 when it holds none. */
-  longest: () => number;
-}
+const heldSecretScrubbers = new Set<(text: string) => string>();
 
-const heldSecretScrubbers = new Set<HeldSecretScrubber>();
-
-/** Register a scrubber for held secret values, with the length of the longest one a stream could cut partway; returns
- * its removal. A stream holds back that many characters whatever they are, so such a value is masked whole and nothing
- * about it shows before. */
-export function addHeldSecretScrubber(scrub: (text: string) => string, longest: () => number): () => void {
-  const entry: HeldSecretScrubber = { scrub, longest };
-  heldSecretScrubbers.add(entry);
-  return () => { heldSecretScrubbers.delete(entry); };
+/** Register a scrubber for held secret values; returns its removal. */
+export function addHeldSecretScrubber(scrub: (text: string) => string): () => void {
+  heldSecretScrubbers.add(scrub);
+  return () => { heldSecretScrubbers.delete(scrub); };
 }
 
 export function scrubHeldSecrets(text: string): string {
   if (!text || heldSecretScrubbers.size === 0) return text;
   let out = text;
-  for (const { scrub } of heldSecretScrubbers) out = scrub(out);
+  for (const scrub of heldSecretScrubbers) out = scrub(out);
   return out;
-}
-
-/** The length of the longest held value a stream could cut partway; Infinity when a scrubber cannot say (a stream then
- * holds everything back). */
-export function heldSecretLongest(): number {
-  let longest = 0;
-  for (const scrubber of heldSecretScrubbers) {
-    const length = typeof scrubber.longest === "function" ? scrubber.longest() : Infinity;
-    longest = Math.max(longest, Number.isNaN(length) ? Infinity : length);
-  }
-  return longest;
-}
-
-/** Printable ASCII with no whitespace: a stream never cuts inside a run of it (shared/stream-hold.ts), so a value made
- * only of it is whole whenever any of it is sent, and is masked whole. */
-const UNSPLITTABLE = /^[\x21-\x7e]*$/;
-
-/** The longest of `forms` that a stream could cut partway (one with whitespace or a character outside printable
- * ASCII), for a scrubber's `longest`; forms of printable ASCII alone need no held-back tail. */
-export function longestSplittableForm(forms: Iterable<string>): number {
-  let longest = 0;
-  for (const form of forms) if (form.length > longest && !UNSPLITTABLE.test(form)) longest = form.length;
-  return longest;
 }
 
 export function redactSecretsInText(text: string): string {

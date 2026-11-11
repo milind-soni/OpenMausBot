@@ -10,7 +10,6 @@ import { capThreadLog, currentThreadLogCap } from "../thread-log-rotation.ts";
 import { newId, type ProviderAdapter, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener } from "../contracts.ts";
 import { LiveSteps } from "./live-steps.ts";
 import { ProgressGate } from "./progress-gate.ts";
-import { SafeText } from "./safe-text.ts";
 import { TextItems } from "./text-items.ts";
 
 const INCOMPLETE_LOG_MESSAGE =
@@ -75,7 +74,6 @@ export class EventBus {
 
   private readonly gate?: (event: RuntimeEvent) => boolean;
   private readonly textItems = new TextItems();
-  private readonly safeText = new SafeText();
 
   /** `gate` sees each adapter event first; true means it took the event and publishes what it chooses. */
   constructor(appendLog: EventLogAppend = defaultAppend, gate?: (event: RuntimeEvent) => boolean) {
@@ -127,7 +125,6 @@ export class EventBus {
       return;
     }
     if (pending) this.flushThread(event.threadId);
-    for (const rest of this.safeText.observe(event)) this.write(rest);
     this.write(event);
     this.steps.announce(event);
   }
@@ -156,9 +153,7 @@ export class EventBus {
     // Gone from the map before delivery: a listener may publish on this thread.
     this.pendingText.delete(threadId);
     clearTimeout(pending.timer);
-    // Streamed words go out cleaned as their saved message will be, and only once they can no longer change.
-    const safe = this.safeText.delta(pending.event);
-    if (safe) this.write(safe);
+    this.write(pending.event);
   }
 
   private write(event: RuntimeEvent) {

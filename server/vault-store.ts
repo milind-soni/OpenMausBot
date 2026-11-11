@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
-import { HELD_SECRET_MASK, longestSplittableForm } from "../shared/redact.ts";
+import { HELD_SECRET_MASK } from "../shared/redact.ts";
 import { LOGIN_FIELD_MAX, LOGIN_HOSTS_MAX, loginMatchesHost, loginSite, loginUsableBy, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
 import { SECRET_VALUE_MAX_BYTES, VAULT_SECRET_NAME_MAX, vaultNameKey, type VaultSecret } from "../shared/vault.ts";
 import { writeFileAtomic } from "./atomic.ts";
@@ -583,11 +583,5 @@ export class HeldSecrets {
       }
     }
     return out;
-  }
-
-  /** The length of the longest value or live code held, in any form a stream could cut partway. */
-  longest(): number {
-    const now = this.now();
-    return Math.max(longestSplittableForm(this.currentForms()), longestSplittableForm([...this.codes].filter(([, until]) => until > now).map(([code]) => code)));
   }
 }

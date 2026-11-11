@@ -91,17 +91,6 @@ describe("secretRef", () => {
     now += SECRET_FILE_TTL_MS;
     expect(vault.scrub("ntn_canary_value")).toBe("ntn_canary_value");
   });
-
-  it("says how long its longest live value is", () => {
-    const vault = new SecretVault(clock);
-    expect(vault.longest()).toBe(0);
-    vault.saveRef(ATLAS, "card-1", "Token", "ntn_canary_value_without_spaces");
-    expect(vault.longest(), "printable ASCII alone is never cut partway").toBe(0);
-    vault.saveRef(ATLAS, "card-2", "Phrase", "open sesame now");
-    expect(vault.longest()).toBe("open sesame now".length);
-    now += SECRET_FILE_TTL_MS;
-    expect(vault.longest()).toBe(0);
-  });
 });
 
 posix("secret files", () => {

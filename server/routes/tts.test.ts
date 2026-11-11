@@ -36,7 +36,7 @@ describe("voice routes", () => {
   });
 
   it("prepare a reply with a short first block, and never a held secret", async () => {
-    const remove = addHeldSecretScrubber((text) => text.replaceAll("correct-horse-battery", "••••••"), () => "correct-horse-battery".length);
+    const remove = addHeldSecretScrubber((text) => text.replaceAll("correct-horse-battery", "••••••"));
     try {
       const text = `I logged in with correct-horse-battery and then ${Array.from({ length: 30 }, (_, i) => `checked item ${i}`).join(", ")}. Done.`;
       const { answers } = await call("POST", "/api/tts/prepare", { text });

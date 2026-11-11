@@ -108,7 +108,7 @@ describe("the line a bot reads", () => {
   });
 
   it("masks a held secret before the line is cut or its spaces collapse, so no part of it is left", () => {
-    const remove = addHeldSecretScrubber((text) => text.replaceAll("fake-held-tail-9876", HELD_SECRET_MASK).replaceAll("fake  held  pw", HELD_SECRET_MASK), () => "fake-held-tail-9876".length);
+    const remove = addHeldSecretScrubber((text) => text.replaceAll("fake-held-tail-9876", HELD_SECRET_MASK).replaceAll("fake  held  pw", HELD_SECRET_MASK));
     try {
       // The secret straddles the 120-character cut: masked first, nothing of it stays.
       const cut = sanitizePageText(`${"x".repeat(100)} password fake-held-tail-9876 rejected`, 120);

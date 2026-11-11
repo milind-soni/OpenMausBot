@@ -6,8 +6,7 @@ import { createContext, useEffect, useMemo, useSyncExternalStore } from "react";
 
 import type { RuntimeEvent } from "../../shared/runtime-events";
 import { isClientCancellation } from "../../shared/client-cancel";
-import { openPrivateKeyAt, redactSecretsInText } from "../../shared/redact";
-import { heldTailStart } from "../../shared/stream-hold";
+import { redactSecretsInText } from "../../shared/redact";
 import type { Message } from "@/state/store";
 
 export interface LiveReplyItem {
@@ -177,13 +176,10 @@ export function isLiveReply(message: Pick<Message, "id">): boolean {
   return message.id.startsWith(LIVE_ID);
 }
 
-/** What a streaming item shows. The server already sends only masked text; as a second layer, the last word waits for
- * the space after it (in text without spaces, the last few characters wait), so a secret is masked whole or not shown,
- * and a private key's body waits for its END line. */
+/** What a streaming item shows. The last word waits for the space after it, so a secret is masked whole or not shown. */
 export function liveReplyText(item: Pick<LiveReplyItem, "text" | "done">): string {
-  const words = item.done ? item.text : item.text.slice(0, heldTailStart(item.text));
-  const key = item.done ? -1 : openPrivateKeyAt(words);
-  const text = key < 0 ? words : words.slice(0, key);
+  const end = item.done ? item.text.length : Math.max(item.text.lastIndexOf(" "), item.text.lastIndexOf("\n")) + 1;
+  const text = item.text.slice(0, end);
   return isClientCancellation(text) ? "" : redactSecretsInText(text);
 }
 

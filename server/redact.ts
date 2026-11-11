@@ -11,7 +11,7 @@ export function isSecretName(name: string): boolean {
 
 import { mask, redactSecretsInText } from "../shared/redact.ts";
 
-export { addHeldSecretScrubber, HELD_SECRET_MASK, heldSecretLongest, longestSplittableForm, mask, redactParams, redactSecretsInText, scrubHeldSecrets } from "../shared/redact.ts";
+export { addHeldSecretScrubber, HELD_SECRET_MASK, mask, redactParams, redactSecretsInText, scrubHeldSecrets } from "../shared/redact.ts";
 
 export function redactSecrets(input: unknown, depth = 0): unknown {
   if (typeof input === "string") return redactSecretsInText(input);

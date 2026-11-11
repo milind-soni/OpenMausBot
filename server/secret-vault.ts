@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { SECRET_VALUE_MAX_BYTES } from "../shared/vault.ts";
 import { vaultPointer } from "./vault/mcp-keys.ts";
 import { secretForms } from "./vault-store.ts";
-import { HELD_SECRET_MASK, longestSplittableForm } from "./redact.ts";
+import { HELD_SECRET_MASK } from "./redact.ts";
 import { inSecretFolder, SECRET_FOLDER } from "./secret-folder.ts";
 
 export { inSecretFolder, SECRET_FOLDER, SECRET_VALUE_MAX_BYTES };
@@ -276,12 +276,6 @@ export class SecretVault {
       for (const form of entry.forms) if (out.includes(form)) out = out.split(form).join(HELD_SECRET_MASK);
     }
     return out;
-  }
-
-  /** The length of the longest live value held, in any form a stream could cut partway. */
-  longest(): number {
-    const now = this.now();
-    return longestSplittableForm(this.held.filter((entry) => entry.until > now).flatMap((entry) => entry.forms));
   }
 
   private hold(value: string, until: number): void {

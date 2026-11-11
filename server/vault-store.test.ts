@@ -365,21 +365,6 @@ describe("the held-secret scrubber", () => {
     expect(held.scrub("Code 492039 accepted")).toBe("Code 492039 accepted");
   });
 
-  it("says how long its longest held value a stream could cut partway is: one with a space or beyond plain ASCII", () => {
-    let now = 0;
-    const held = new HeldSecrets(new VaultStore({ dataDir: dir }), () => now);
-    expect(held.longest()).toBe(0);
-    held.remember("4920391234567", "code");
-    held.remember("p&ss-Tr0ub4dor&3", "password");
-    expect(held.longest(), "printable ASCII alone is never cut partway").toBe(0);
-    held.remember("pass wörd", "password");
-    expect(held.longest(), "its HTML form, the longest with a space").toBe("pass wörd".length);
-    held.remember("abcd efgh ijkl mnop", "password");
-    expect(held.longest()).toBe(19);
-    now = 6 * 60_000;
-    expect(held.longest()).toBe(19);
-  });
-
   it("masks a password filled from elsewhere for the rest of the run, and ignores values too short to be one", () => {
     const held = new HeldSecrets(new VaultStore({ dataDir: dir }));
     held.remember("fake-vault-pass", "password");
@@ -391,7 +376,7 @@ describe("the held-secret scrubber", () => {
     const store = new VaultStore({ dataDir: dir });
     store.create({ ...at("example.com"), username: "alice", password: "fake-hunter2", source: "settings", bots: "all" });
     const held = new HeldSecrets(store);
-    const remove = addHeldSecretScrubber((text) => held.scrub(text), () => held.longest());
+    const remove = addHeldSecretScrubber((text) => held.scrub(text));
     held.remember("555123", "code");
     try {
       expect(redactSecretsInText("My password is fake-hunter2, enjoy.")).toBe("My password is ••••••, enjoy.");
