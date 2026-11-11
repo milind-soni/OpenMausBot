@@ -22,6 +22,7 @@ import { REMOTE_MCP_STARTUP_MS, remoteMcpSpec } from "../mcp-http.ts";
 import { compileToolSchema, schemaProblems, serverToolValidator, type ServerToolCheck } from "../mcp-schema-validator.ts";
 import { fitToolList, withoutDanglingReferences } from "../mcp-tool-schema.ts";
 import { listsComputerTool } from "../computer-tool-list.ts";
+import { READ_OPEN_PAGE_ONLY, readsAroundBrowser } from "../browser-tool-shape.ts";
 import { capToolList, learnToolCountLimit, shareToolBudget, toolCountLimitFromError } from "../tool-count-limit.ts";
 import type { ToolSchemaProfile } from "../tool-schema-profile.ts";
 import { allowsTool, canUseMcpServer, parseToolScope, type ToolScope } from "../../shared/tool-scope.ts";
@@ -708,7 +709,10 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     if (!tool) throw new Error("The requested tool was not advertised for this turn");
     if (selectionExcludes(tool, args)) throw new Error("Tool selection excludes this tool");
     omitBlankDefaults(tool.builtInBrowser, tool.name, args);
-    if (!object(args) || (!(tool.searched && isDirectoryTool(tool.name)) && !tool.schema(args))) throw new Error(ARGUMENTS_MISFIT);
+    if (!object(args) || (!(tool.searched && isDirectoryTool(tool.name)) && !tool.schema(args))) {
+      // agent-browser's read hides `url`; name the way to read an address instead of the bare schema misfit.
+      throw new Error(tool.builtInBrowser && readsAroundBrowser({ name: tool.name, arguments: args }) ? READ_OPEN_PAGE_ONLY : ARGUMENTS_MISFIT);
+    }
   };
   const viewOf = (tool: RegisteredTool, args: Record<string, unknown>, title: string): ChatToolCallView => {
     const runs = target(tool, args);

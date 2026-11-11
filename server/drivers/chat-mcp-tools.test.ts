@@ -204,6 +204,21 @@ describe("Chat MCP session", () => {
     expect(calls).toEqual([dropped ? {} : { url: " " }, { url: "https://example.com" }]);
   });
 
+  it.each([
+    ["browser", "Open the address with agent_browser_open first"],
+    ["custom", "input schema"],
+  ] as const)("names the way to read an address when agent_browser_read's url is hidden (%s)", async (mountAs, error) => {
+    // agent-browser's read with its url hidden by slimBrowserToolList (email bug 1a1cb892)
+    const readSchema = { type: "object", properties: { filter: { type: "string" } }, additionalProperties: false };
+    const f = fixture(`if (message.method === "tools/list") { reply(message, {tools:[{name:"agent_browser_read",description:"Read the open page.",inputSchema:schema}]}); continue; }`, readSchema);
+    const session = await mountChatTools(mountAs === "browser" ? { browser: f.server } : { custom: { browser: f.server } }, f.controller.signal, true);
+    sessions.push(session);
+    const name = session.definitions[0]!.function.name;
+    expect(() => session.validate(name, { url: "https://example.com/swagger.json" })).toThrow(error);
+    expect(() => session.validate(name, { filter: 7 })).toThrow("input schema");
+    expect(() => session.validate(name, {})).not.toThrow();
+  });
+
   it("shows a model behind Moonshot each schema fitted to its limit, and still checks calls against the full one", async () => {
     const full = wideSchema(110);
     const f = fixture("", full);
