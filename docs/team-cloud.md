@@ -444,6 +444,17 @@ engine writes its copy, and the next spawn in any audience takes the newest sett
 or out from the app still happens in the server's HOME and reaches every audience's next turn. Session resume works
 within an audience: its home is the same at each turn. A member who leaves takes their engine home with them.
 
+**Deleting.** A deleted conversation takes its Claude Code and Codex session files with it, from every audience's home
+(`server/host/delete-leftovers.ts`): the session it resumes and every session its event log says it started, unless a
+conversation that stays still resumes the same one. The files uploaded to it go too when no other conversation, picture
+or routine names them, and so does its box uploads folder. A deleted bot also takes its checkpoints
+(`checkpoints/<bot>`), its memory journal and the room and member memory layers kept beside its own folder. Nothing is reached through a link, and a cleanup that fails is logged
+(`delete leftovers: … stayed behind`) and never fails the delete. Still left: sessions kept by the other engines
+(OpenCode, Gemini and the rest of the ACP family, Muse), which only the engine itself can remove; the bot's
+per-folder checkpoints, which its conversations share, until the bot is deleted; and anything on a computer other than
+this server. Kept on purpose: a conversation's own folder (`task-workspaces/<bot>/<thread>`) holds the files the bot
+made for the person, and stays when the conversation or the bot is deleted.
+
 **The move.** The first turn after a Team Cloud starts with engine homes moves what the engines kept in the server's
 HOME. A Claude Code project's session (`projects/<folder>/<session>.jsonl` and its session folder, `file-history`,
 `session-env`, `todos`, `debug`) or a Codex rollout (`sessions/…/rollout-…-<id>.jsonl`, `archived_sessions`) goes to
@@ -694,7 +705,11 @@ run belongs to the person whose own request it answers (`server/host/run-owner.t
   `/api/groups/<id>/interrupt`, a typed "stop", a guarded request's `/interrupt`) from anyone else answers 403 with
   `code: "stop_not_yours"` and *"Only Priya or an admin can stop this."*; their "@Scout stop" in a group chat is an
   ordinary line there. Stop stays the only interrupt. The app shows Stop, and Retry on a stopped request, only to the
-  asker and to Owners and Admins (and to everyone for a run no person asked for). The stopped row records who pressed
+  asker and to Owners and Admins (and to everyone for a run no person asked for). The server holds Retry to the same
+  rule: running someone else's request again (`POST /api/bots/<bot>/messages/<id>/edit`, with the same words or new
+  ones) answers 403 with `code: "retry_not_yours"` and *"Only Priya or an admin can run this request again."* In a
+  shared conversation this rule alone decides it, whoever opened the conversation; renaming, deleting or otherwise
+  changing the conversation itself stays with whoever opened it and the Owner's side. The stopped row records who pressed
   Stop (`WireMessage.stoppedBy`): it reads "Maya stopped this." to everyone else and "You stopped this." to Maya.
 - **Who asked, for what is not a person's line** (read from the records the provenance labels come from, never from
   model text). A routine, a webhook and an app's event never run in a person's conversation: each runs in its own and

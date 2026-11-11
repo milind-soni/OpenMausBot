@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { routeRunOwners, type Actor, type RunOwners } from "../host/run-owner.ts";
+import { routeRunOwners, type Actor, type RouteRunOwners } from "../host/run-owner.ts";
 import type { ResolvedSender, WireGroup } from "../../shared/wire.ts";
 import { admit } from "../admission.ts";
 import {
@@ -42,7 +42,7 @@ export type MessagePage = { messages: Array<Message | Record<string, unknown>>; 
 
 export interface ChannelRouteDeps {
   /** Whoever asked owns the run, where several people write. */
-  runOwners?: Pick<RunOwners, "stopRefusal" | "removeRefusal" | "joinRefusal">;
+  runOwners?: RouteRunOwners;
   runActor?(auth: RequestAuth): Actor;
   store: Pick<Store,
     | "group" | "groupTaskByThread" | "bot" | "switchGroupTask" | "patchGroupTask" | "patchGroup" | "messagesFor" | "groupTasks" | "deleteGroupTasks" | "deleteGroup"
