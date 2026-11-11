@@ -9,11 +9,12 @@ import {
   type ExecFileOptions,
   type SpawnOptions,
 } from "node:child_process";
-import { closeSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import type { Readable, Writable } from "node:stream";
 import { basename, dirname, join, resolve } from "node:path";
 import { botBox, type WrappedSpawn } from "./bot-box/box.ts";
 import type { BoxRequest } from "./bot-box/plan.ts";
+import { homeProgramsDistrusted, serverMayRunFrom, serverPath } from "./bot-box/program-trust.ts";
 import { engineMemory } from "./engine-memory.ts";
 import { engineHomes } from "./engine-homes/engine-homes.ts";
 import type { HomedSpawn } from "./engine-homes/layout.ts";
@@ -198,6 +199,22 @@ export function sharedBoxScope(cwd: string): string | null {
   return basename(dirname(parent)) === "task-workspaces" ? parent : resolve(cwd);
 }
 
+/** Security (bot-box/program-trust.ts): a spawn outside the box neither starts a program from a folder a boxed bot can
+ * write nor looks one up there. */
+export function outsideBoxOptions<T extends { env?: NodeJS.ProcessEnv; cwd?: string | URL }>(command: string, opts: T): T {
+  if (!homeProgramsDistrusted()) return opts;
+  if (/[/\\]/.test(command)) {
+    const path = resolve(typeof opts.cwd === "string" ? opts.cwd : process.cwd(), command);
+    let real = path;
+    try { real = realpathSync(path); } catch {}
+    if (!serverMayRunFrom(path) || !serverMayRunFrom(real)) {
+      throw Object.assign(new Error(`${command} is in a folder the bots can write, so the server does not run it outside the bot box.`), { code: "EACCES" });
+    }
+  }
+  const env = opts.env ?? process.env;
+  return { ...opts, env: { ...env, PATH: serverPath(env.PATH) } };
+}
+
 export function spawnCli(
   cli: string,
   args: string[],
@@ -209,7 +226,7 @@ export function spawnCli(
   const homed = owner === "bot" || opts.engineHome ? engineHomes.forSpawn(opts.env ?? process.env) : null;
   const options: CliSpawnOptions = homed ? { ...opts, env: homed.env } : opts;
   const boxed = boxedSpawn(resolved, options, owner, homed);
-  const { box: _box, engineHome: _engineHome, botWork, ...spawnOpts } = options;
+  const { box: _box, engineHome: _engineHome, botWork, ...spawnOpts } = boxed ? options : outsideBoxOptions(resolved.command, options);
   // The box's extra descriptors (its seccomp filter) follow stdio; only a plain three-entry stdio can take them.
   const stdio = boxed?.extraFds.length && Array.isArray(spawnOpts.stdio) && spawnOpts.stdio.length === 3 ? [...spawnOpts.stdio, ...boxed.extraFds] : spawnOpts.stdio;
   const start = () => spawn(boxed?.command ?? resolved.command, boxed?.args ?? resolved.args, {
@@ -246,6 +263,44 @@ export function spawnCli(
   return child;
 }
 
+/** execCli's answer for a spawn that runs in the bot box where it is on (`box`), as a bot's own would: an engine's
+ * status or catalog read that loads the engine's settings, extensions or MCP servers from a HOME a bot can write. */
+export function execCliBoxed(
+  cli: string,
+  args: string[],
+  opts: { env: NodeJS.ProcessEnv | Record<string, string | undefined>; cwd?: string; timeout: number; maxBuffer?: number; box: NonNullable<BoxSpawnOptions["box"]> },
+  cb: (err: (Error & { code?: number | string | null; killed?: boolean }) | null, stdout: string, stderr: string) => void,
+): void {
+  const limit = opts.maxBuffer ?? 1024 * 1024;
+  let child: ChildProcessByStdio<Writable, Readable, Readable>;
+  try {
+    child = spawnCli(cli, args, { env: opts.env as NodeJS.ProcessEnv, cwd: opts.cwd, stdio: ["pipe", "pipe", "pipe"], box: opts.box });
+  } catch (error) {
+    queueMicrotask(() => cb(error instanceof Error ? error : new Error(String(error)), "", ""));
+    return;
+  }
+  child.stdin.end();
+  let stdout = "", stderr = "", done = false, timedOut = false;
+  const finish = (err: (Error & { code?: number | string | null; killed?: boolean }) | null) => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    cb(err, stdout, stderr);
+  };
+  child.stdout.on("data", (chunk: Buffer) => { if (stdout.length < limit) stdout += chunk.toString("utf8").slice(0, limit - stdout.length); });
+  child.stderr.on("data", (chunk: Buffer) => { if (stderr.length < limit) stderr += chunk.toString("utf8").slice(0, limit - stderr.length); });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void killCliTree(child, 0);
+  }, opts.timeout);
+  timer.unref?.();
+  child.once("error", (error) => finish(error));
+  child.once("close", (code) => {
+    if (timedOut) finish(cutOffError(cli, opts.timeout));
+    else finish(code === 0 ? null : Object.assign(new Error(`${cli} exited with code ${code}`), { code }));
+  });
+}
+
 const EXEC_KILL_GRACE_MS = 2_000;
 
 export function execCli(
@@ -257,6 +312,7 @@ export function execCli(
   const resolved = resolveCli(cli, args);
   try {
     assertSafeCliArgv(resolved);
+    opts = outsideBoxOptions(resolved.command, opts);
   } catch (error) {
     queueMicrotask(() => cb(error instanceof Error ? error : new Error(String(error)), "", ""));
     return;

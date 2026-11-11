@@ -112,6 +112,23 @@ would answer the whole internet over plain http. More options are in
 
 ### Docker with your own domain
 
+On a fresh Ubuntu 22.04 or 24.04 server (x86-64), one command checks the
+server, installs MausBot under `/opt/openmausbot` and ends with HTTPS on your
+domain:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --domain maus.example.com
+cd /opt/openmausbot && sudo docker compose exec omb openmausbot pair   # Link https://<DOMAIN>/pair#code=…
+```
+
+Add `--check` to only check the server. Running it again repairs;
+`sudo /opt/openmausbot/update.sh` updates, with a copy of the data first;
+`--uninstall` stops the server and keeps your data. The checks, the files it
+writes and what it contacts are in
+[Deploy on a VPS](deploy-vps.md#quick-start-one-command-on-your-own-domain).
+
+By hand, on any system with Docker:
+
 ```sh
 git clone https://github.com/milind-soni/OpenMausBot && cd OpenMausBot/deploy
 cp .env.example .env                          # set DOMAIN (and ENGINES)
@@ -330,6 +347,10 @@ For local Docker Desktop or private Tailscale access without a public domain,
 use the [local Compose setup](../deploy/local/README.md). It defaults to
 `http://localhost:8080` and supports optional `.env` overrides.
 
+On Ubuntu, the [installer](deploy-vps.md#quick-start-one-command-on-your-own-domain)
+sets this up with one command, keeping the data in `/opt/openmausbot/data`.
+The rest of this section is the same setup by hand.
+
 One tenant = one container for the server plus Caddy for HTTPS.
 Requirements: Docker with Compose, a DNS name pointing at the machine, and
 ports 80/443 open.
@@ -340,9 +361,13 @@ cp .env.example .env            # set DOMAIN
 docker compose pull omb && docker compose up -d
 ```
 
-That uses the image CI publishes on every `main` push
-(`ghcr.io/milind-soni/openmausbot`, tagged `latest`, `sha-…` and `v…`).
-To build from your checkout instead: `docker compose up -d --build`.
+That starts the image CI publishes on every `main` push
+(`ghcr.io/milind-soni/openmausbot:latest`; each release is also tagged `v…`,
+and the one our own Clouds have run for 48 hours is `stable`). Move to the
+stable version right away with `./update.sh`, which pins it by digest in
+`.env`. To build from your checkout instead: `docker compose up -d --build`. The
+build needs about 6 GB of memory: on a smaller server, add swap first or use
+the published image.
 
 Then sign the engine CLIs in **inside the container** (their logins live on
 the `data` volume, so they survive restarts and image upgrades) and mint a
@@ -366,16 +391,24 @@ What the stack does, so you can adapt it:
   `--build-arg ENGINES="…"` (or `ENGINES=` in `.env`) bakes engine CLIs
   into the image.
 - [`deploy/docker-compose.yml`](../deploy/docker-compose.yml) runs Caddy
-  **in the server's network namespace**, so Caddy reaches the server on
-  `127.0.0.1` and the server never binds anything public.
+  in its own container. It reaches the server over two Unix sockets in a
+  shared in-memory volume (`OMB_TUNNEL_SOCKET`, `OMB_WEBHOOK_SOCKET`), so the
+  server never binds anything but loopback, and a request that comes through
+  Caddy is a remote one, as one through any proxy is. Caddy used to share the
+  server's network instead; then a server container restarted on its own (a
+  crash, `docker compose restart`, `stop omb`) came back in a new network and
+  left Caddy refusing HTTPS in the old one while both showed healthy.
 - [`deploy/Caddyfile`](../deploy/Caddyfile) terminates TLS and forwards
   the real `Host` plus `X-Forwarded-For`/`X-Forwarded-Proto`; the server's
   own pairing is the login. A shared-password `basic_auth` block is there,
   commented out, if you want a second wall in front of pairing.
 
-Upgrade with `docker compose pull omb && docker compose up -d` (or
-`git pull && docker compose up -d --build`). State (chats, routines,
-engine logins, paired sessions) is on the `data` volume; back that up.
+Update with `git pull && ./update.sh`: it copies the data aside, starts the
+stable version, and puts the old version and the data back if the new one
+does not come up healthy ([what it does, step by step](deploy-vps.md#update)).
+A build from source updates with `git pull && docker compose up -d --build`.
+State (chats, routines, engine logins, paired sessions) is on the `data`
+volume; back that up.
 
 The published image installs the current Chrome for Testing whenever a new
 Stable ships. A build from source keeps the Chrome (and any `ENGINES`) it
@@ -795,8 +828,11 @@ An entry is an address or `@domain` (everyone at that domain). Admins get
 the same access as a pairing code from `openmausbot serve`; users get the
 chat-only scope, the same as `openmausbot pair --phone`. The same lists live
 in `config.json` under `signIn.admins` and `signIn.members` and can be changed
-through the settings API without a restart; the environment variables win
-when set, which is how a container or a service unit is bootstrapped.
+through the settings API without a restart. An environment variable that
+names someone wins over its list, which is how a container or a service unit
+is bootstrapped; while it does, Settings refuses to change that list and says
+which variable to change instead. One that is empty, as `.env.example` and the
+Compose files leave them, leaves the list to Settings.
 
 The code itself comes from `accounts.openmausbot.com`, the OpenMausBot
 account service, so your server needs no email credentials. Your server asks
@@ -1404,7 +1440,7 @@ The note needs an engine that accepts a message in the middle of a turn
 only the stop, and only if you set it. The note and the stop do not cover bots
 on API models or turns in a room yet.
 
-Bots on API models (xAI, Mistral, Groq, Greenference, Cerebras, Meta, MiniMax or an
+Bots on API models (xAI, Mistral, Groq, Greenference, ModelGo, Cerebras, Meta, MiniMax or an
 OpenAI-compatible endpoint) end a turn as failed when a tool call failed and
 the bot then answered. With the loop guard on, set `loopGuard.correctiveRounds`
 (0-5, default 0) and such a bot is sent back to re-run the failed call up to
@@ -1436,15 +1472,41 @@ settings do not change it.
 
 ## Updating
 
-For the npm service, [install the chosen new version](deploy-vps.md#update)
-as the service user while the server is stopped, then start it again.
-For a foreground invocation, `npx --yes openmausbot@X.Y.Z serve --tunnel`
-selects a particular published release; replace `X.Y.Z` with that version.
+Self-hosted servers follow the **stable** channel: a released version that our
+own Clouds have run for 48 hours, named by the image tag `stable` and by
+[`stable.json`](https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json).
+`latest` follows `main` and is not for a server you rely on. The update check
+(`GET /api/updates/check`, **Check for updates** in the app) compares the
+server with the stable version; `OMB_UPDATE_CHANNEL=newest` makes it follow
+every release instead.
+
+A server installed with the [installer](deploy-vps.md#quick-start-one-command-on-your-own-domain)
+updates with `sudo /opt/openmausbot/update.sh`, which the installer puts there.
 
 ```sh
-docker compose -f deploy/docker-compose.yml pull omb && docker compose -f deploy/docker-compose.yml up -d   # Docker
+cd deploy && git pull && ./update.sh                                    # Docker: copy the data, update, roll back on failure
 git pull && pnpm install && sudo systemctl restart openmausbot          # from source
 ```
+
+`deploy/update.sh` is the whole routine for a Docker Compose install: the
+stable image by digest, a copy of `/data` first, a health check that includes
+"an engine can still start a bot", and the old image and the copy put back
+when the check fails. It is safe to interrupt and to run twice, carries on
+when the terminal closes, never goes to an older version unless told to
+(`--allow-older`; a server on `latest` moves to stable once the stable version
+is newer than the one it reports), and asks before it puts back data from an
+update an earlier run left unfinished.
+[Every step, the rollback and the exit codes](deploy-vps.md#update).
+
+For the npm service there is no one-command updater yet:
+[do the same steps by hand](deploy-vps.md#paths-a-and-c-npm-with-the-service-above-the-same-steps-by-hand),
+as the service user while the server is stopped. For a foreground invocation,
+`npx --yes openmausbot@X.Y.Z serve --tunnel` selects a particular published
+release; replace `X.Y.Z` with that version.
+
+The desktop and phone apps work with any server version that was the stable
+one within the last 90 days. An older server keeps running, but the app says
+it is behind, and newer features may not work until it is updated.
 
 Routines and queued work survive restarts. A teammate turn in flight runs
 again once at the next start, told to check what it already did, and the bot

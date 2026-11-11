@@ -7,6 +7,7 @@ import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, writeFile
 import { dirname, join, resolve } from "node:path";
 
 import { engineInstallRoots } from "../engine-roots.ts";
+import { homeProgramDirs, resetPathCache } from "../env-path.ts";
 import { SERVER_ROOT, resolveProxy } from "../proxy-paths.ts";
 import { bridgedCommand, type BridgeTools } from "./bridge.ts";
 import { brokerRewrite } from "./broker-env.ts";
@@ -15,6 +16,7 @@ import { detectBox, type BoxDetection, type BoxKind } from "./detect.ts";
 import { openBoxEgressGate, type BoxEgressGate } from "./egress-gate.ts";
 import { boxEnvironment } from "./env.ts";
 import { openHarnessGate, type HarnessGate } from "./harness-gate.ts";
+import { distrustHomePrograms } from "./program-trust.ts";
 import { procHidepid } from "./hidepid.ts";
 import { DENIED_SYSCALLS, seccompBytes, seccompSupported } from "./seccomp.ts";
 import { RELAY_SOCKET_NAME, boxUploadsDir, bwrapArgs, inBoxSocket, planBox, taskWorkspaceIds, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
@@ -102,6 +104,9 @@ export class BoxRunner {
     const env = mutate?.has("env-all")
       ? Object.fromEntries(Object.entries(request.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
       : boxEnvironment(request.env, this.options.denyEnv, new Set(request.allowEnv ?? []));
+    // The server's own PATH leaves out the programs in HOME (program-trust.ts); inside the box they are the bot's own.
+    const homePrograms = homeProgramDirs(resolve(request.home ?? this.options.setup.home)).filter((dir) => !(env.PATH ?? "").split(":").includes(dir));
+    if (homePrograms.length) env.PATH = [...(env.PATH ? [env.PATH] : []), ...homePrograms].join(":");
     if (plan.net === "isolated") {
       const proxy = `http://127.0.0.1:${this.options.egressPort ?? BOX_EGRESS_PORT}`;
       for (const name of BOX_PROXY_ENV) env[name] = proxy;
@@ -235,6 +240,8 @@ export class BotBox {
       denyEnv: options.denyEnv, seccompFile: this.seccompFile,
       broker: { port: BOX_BROKER_PORT, mintForProcess: this.credentials.mintForProcess, revoke: this.credentials.revoke },
     });
+    distrustHomePrograms(options.home, [options.dataDir], ["workspaces", "task-workspaces", "engine-homes"].map((name) => join(options.dataDir, name)));
+    resetPathCache();
     log(`bot box: on (bubblewrap, ${this.detection.tools.socat ? "socat" : "node"} bridges, credential broker, seccomp ${this.seccompFile ? "on" : "unsupported here"})`);
     return this.detection;
   }
@@ -313,6 +320,8 @@ export class BotBox {
     this.credentials = null;
     this.seccompFile = null;
     this.runner = null;
+    distrustHomePrograms(null);
+    resetPathCache();
   }
 }
 

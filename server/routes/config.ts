@@ -1,4 +1,5 @@
 import { liveSavePatch } from "../live-config.ts";
+import { signInEnvRefusal } from "../sign-in-env.ts";
 import * as boat from "../boat.ts";
 import { boatCreateRecoverySnapshot, retireDeletedBoatCreate } from "../boat-create-idempotency.ts";
 import { boatDeletionSnapshot } from "../boat-delete-journal.ts";
@@ -126,7 +127,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
-      if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
+      if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
       const patch = parseConfigPatchForPerson(body);
       if (patch.profile && ownProfile) {
         // The address is the verified claim's; a profile names no other.
@@ -149,6 +150,9 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       if (CLOUD_HOME && (patch.signIn?.admins?.length || patch.signIn?.members?.length)) {
         return json(res, 403, { ...userError("serverError.cloud.personal"), code: "cloud_personal" });
       }
+      // Saved, it would be overruled by the environment at once: say so instead of answering 200 with nothing changed.
+      const signInPinned = signInEnvRefusal(patch.signIn);
+      if (signInPinned) return json(res, 409, { error: signInPinned, code: "signin_env" });
       if (patch.newBotDefaults) {
         if (patch.newBotDefaults.profile.modelSelection) {
           const checked = checkedModelSelection(patch.newBotDefaults.profile.modelSelection);
@@ -540,6 +544,17 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         if (externalSecretStorage) {
           // Supplied credentials are already in the OS-encrypted store: tombstone them so no older plaintext survives the merge.
           const persisted = structuredClone(patch);
+          if (persisted.openai?.key !== undefined) persisted.openai.key = "";
+          if (persisted.anthropic?.key !== undefined) persisted.anthropic.key = "";
+          if (persisted.openrouter?.key !== undefined) persisted.openrouter.key = "";
+          if (persisted.mistral?.key !== undefined) persisted.mistral.key = "";
+          if (persisted.cerebras?.key !== undefined) persisted.cerebras.key = "";
+          if (persisted.groq?.key !== undefined) persisted.groq.key = "";
+          if (persisted.greenference?.key !== undefined) persisted.greenference.key = "";
+          if (persisted.modelgo?.key !== undefined) persisted.modelgo.key = "";
+          if (persisted.meta?.key !== undefined) persisted.meta.key = "";
+          if (persisted.deepseek?.key !== undefined) persisted.deepseek.key = "";
+          if (persisted.openaiCompat?.key !== undefined) persisted.openaiCompat.key = "";
           if (persisted.xai?.key !== undefined) persisted.xai.key = "";
           if (persisted.composio?.apiKey !== undefined) persisted.composio.apiKey = "";
           if (persisted.box?.token !== undefined) persisted.box.token = "";

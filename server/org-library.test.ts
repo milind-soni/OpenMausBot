@@ -227,13 +227,12 @@ describe("release files", () => {
   });
 });
 
-describe("adding from the shelf on a Starter Cloud", () => {
-  it("answers 409 at the limit, adds nothing, reports no broken package, and adds it once there is room", async () => {
+describe("adding from the shelf past five bots", () => {
+  it("adds a team to a Cloud that has five already, and refuses one past the workspace's ceiling as no broken package", async () => {
     const app = await installation();
     for (let i = 0; i < 5; i++) app.store.createBot({ name: `Bot ${i}` });
-    const { createBotLimit } = await import("./host/starter-bot-limit.ts");
-    let starter = true;
-    const deps = { ...app.importDeps, botLimit: createBotLimit({ starter: () => starter, bots: () => app.store.bots }) };
+    let maxBots = 7;
+    const deps = () => ({ ...app.importDeps, maxBots });
     const library = app.open();
     const team = release("full-team.v2.json");
     app.writeBlob(team.bytes);
@@ -242,14 +241,14 @@ describe("adding from the shelf on a Starter Cloud", () => {
     const before = app.store.bots.length;
     app.posted.length = 0;
 
-    expect(library.add(TEAM_ID, deps)).toMatchObject({ ok: false, status: 409, code: "bot_limit", error: expect.stringContaining("upgrade this Cloud") });
+    expect(library.add(TEAM_ID, deps())).toMatchObject({ ok: false, status: 409, code: "too_many_bots" });
     await library.settled();
     expect(app.store.bots).toHaveLength(before);
     expect(app.posted.flatMap((report: { packages: Array<{ state: string }> }) => report.packages).filter((row) => row.state === "failed")).toEqual([]);
     expect(app.readState().adding ?? {}).toEqual({});
 
-    starter = false;
-    const added = library.add(TEAM_ID, deps);
+    maxBots = 100;
+    const added = library.add(TEAM_ID, deps());
     expect(added).toMatchObject({ ok: true, status: 201 });
     expect(app.store.bots.length).toBe(before + 3);
   });

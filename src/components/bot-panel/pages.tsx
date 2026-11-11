@@ -14,6 +14,7 @@ import { shortPath } from "@/lib/short-path";
 import { skillImportLines } from "@/lib/skill-import";
 import { useStore, type Bot } from "@/state/store";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
+import { connectAppFromBot } from "../AppGrantPrompt";
 import { ServiceIcon } from "../ServiceIcon";
 import { RoutineEditor } from "../RoutinesPage";
 import { useWorkingFolder } from "../bot-settings/AccessSection";
@@ -121,10 +122,7 @@ export function AppsPage({ bot, derived }: PageContext) {
         <LinkRow
           data-panel-link="add-app"
           icon={Plus}
-          onClick={() => {
-            dispatch({ type: "toggleSettings", open: false });
-            dispatch({ type: "togglePlugins", open: true, surface: "apps" });
-          }}
+          onClick={() => connectAppFromBot(dispatch, bot.id)}
         >
           {t("botPanel.apps.connectAnother")}
         </LinkRow>
@@ -312,7 +310,8 @@ function MemoryTextEditor({ bot, doc, mine, onDone }: {
   };
   const reload = () => {
     if (!conflict) return;
-    setSavedDraft(text);
+    // A second Reload keeps the first kept draft too.
+    setSavedDraft((kept) => (kept === null || kept === text ? text : `${kept}\n\n${text}`));
     setBase({ text: conflict.current, hash: conflict.currentHash });
     setText(conflict.current);
     setConflict(null);
@@ -328,6 +327,7 @@ function MemoryTextEditor({ bot, doc, mine, onDone }: {
           value={text}
           placeholder={t("memory.indexPlaceholder")}
           aria-label={t("memory.botMemory")}
+          readOnly={saving}
           onChange={(event) => setText(event.target.value)}
         />
         {error && <div className="text-[13px] text-warning">{error}</div>}

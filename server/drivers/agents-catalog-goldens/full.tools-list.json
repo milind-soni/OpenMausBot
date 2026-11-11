@@ -853,6 +853,7 @@
               "cerebrasApiKey",
               "groqApiKey",
               "greenferenceApiKey",
+              "modelgoApiKey",
               "metaApiKey",
               "deepseekApiKey",
               "email"
@@ -911,7 +912,7 @@
     },
     {
       "name": "fill_login",
-      "description": "Sign in with a login the person saved in OpenMausBot or in their connected 1Password. Call it on the login page open in your browser: OpenMausBot types the username, password and any one-time code itself, submits each step, and says where the page went; you never see the password. A login fills on its own site, such as any page of example.com. With no saved login for the site, sign in another way the person allowed (a code sent to their own email, which you read and type in, is one), or call request_sign_in.",
+      "description": "Sign in with a login the person saved in OpenMausBot or in their connected 1Password. Call it on the login page open in your browser: OpenMausBot types the username, password and any one-time code itself (also one emailed to a connected mailbox), submits each step, and says where the page went; you never see them. A login fills on its own site, such as any page of example.com. With no saved login for the site, sign in another way the person allowed, or call request_sign_in.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -919,6 +920,9 @@
           "username": {
             "type": "string",
             "description": "Which saved login to use when the site has more than one."
+          },
+          "email": {
+            "type": "string"
           },
           "submit": {
             "type": "boolean",

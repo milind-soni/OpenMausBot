@@ -168,6 +168,15 @@ describe("provider key check", () => {
   });
 
   // Its /models answers without a key, but a wrong key gets 401 (checked 2026-10-30), so a key's own list proves it.
+  it("checks ModelGo at its preset endpoint and only there", async () => {
+    const modelgo: typeof fetch = async (input, init) => {
+      expect(String(input)).toBe("https://api.modelgo.ai/v1/models");
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer fixture-modelgo");
+      return Response.json({ object: "list", data: [{ id: "fixture-model" }] });
+    };
+    expect(await checkProviderKey({ provider: "modelgo", key: "fixture-modelgo" }, modelgo)).toEqual({ ok: true, check: "models", models: ["fixture-model"] });
+  });
+
   it("checks Greenference at its preset endpoint", async () => {
     const greenference: typeof fetch = async (input, init) => {
       expect(String(input)).toBe("https://llm.eu.greenference.com/v1/models");

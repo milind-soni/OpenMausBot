@@ -39,9 +39,11 @@ const SERVICE_SCOPES: readonly Scope[] = ["client"];
  * the Slack worker holds, so these routes stop answering session-less loopback. */
 export const SERVICE_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: RegExp }> = [
   { methods: ["GET"], path: /^\/api\/health$/ },
+  { methods: ["GET"], path: /^\/api\/health\/engines$/ }, // a count: deploy/update.sh checks the server can still start a bot
   { methods: ["GET"], path: /^\/api\/auth\/session$/ },
   { methods: ["GET"], path: /^\/api\/edition$/ },
   { methods: ["GET"], path: /^\/api\/brand$/ },
+  { methods: ["GET"], path: /^\/api\/seats$/ }, // a number: the MausBot connector on the same server reads it
   { methods: ["GET"], path: /^\/api\/bots$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages$/ },
   { methods: ["GET"], path: /^\/api\/attachments\/[\w.-]+$/ },
@@ -349,6 +351,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST", "DELETE"], path: /^\/api\/bots\/[\w-]+\/setup-request$/ }, // Set me up: what a typed /setup could do
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/compact$/ },
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/start-fresh$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/helper-followup$/ }, // MausBot's own person only: see mayFollowUp
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/interrupt$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/read$/ },

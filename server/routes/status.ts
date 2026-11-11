@@ -31,6 +31,8 @@ export interface StatusRouteDeps {
   browserEngineInstallError: { set(error: string | null): void };
   /** On a Team Cloud: false for someone else's private chat, whose words never reach this session's lists. */
   threadShown?(auth: RequestAuth): (threadId: string) => boolean;
+  /** Whether bots run in the bot box: the MausBot connector reads it on a server its owner runs, on or off and nothing more. */
+  boxOn?(): boolean;
 }
 
 /** A decision in a conversation the reader may not see keeps its when, which bot, which tool and what was decided (the
@@ -52,7 +54,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
       return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR), capabilities: {
         guardedMessages: 1, guardedRequests: 1, guardedFullAccess: 1, guardedOnBehalfOf: 1,
         ...(sharedWorkspaceFullAccessEnabled() ? { sharedWorkspaceFullAccess: 1 } : {}),
-      } });
+      }, ...(deps.boxOn ? { box: deps.boxOn() ? "on" : "off" } : {}) });
     }
     // JSON-only, so a form posted from another local page cannot start the install. One install at a time.
     if (method === "POST" && path === "/api/browser-engine/install") {
@@ -153,7 +155,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
         return json(res, 400, { error: `provider must be one of ${PROVIDER_KEY_KINDS.join(", ")}` });
       }
       const kind = provider as ProviderKeyKind;
-      const saved = { anthropic: cfg.anthropic, openai: cfg.openai, openrouter: cfg.openrouter, openaiCompat: cfg.openaiCompat, mistral: cfg.mistral, cerebras: cfg.cerebras, groq: cfg.groq, greenference: cfg.greenference, meta: cfg.meta, xai: cfg.xai }[kind];
+      const saved = { anthropic: cfg.anthropic, openai: cfg.openai, openrouter: cfg.openrouter, openaiCompat: cfg.openaiCompat, mistral: cfg.mistral, cerebras: cfg.cerebras, groq: cfg.groq, greenference: cfg.greenference, modelgo: cfg.modelgo, meta: cfg.meta, xai: cfg.xai }[kind];
       if (body?.key !== undefined && typeof body.key !== "string") {
         return json(res, 400, { error: "key must be a string" });
       }

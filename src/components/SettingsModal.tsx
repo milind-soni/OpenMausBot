@@ -40,6 +40,7 @@ import { CloudAccountSettings } from "./CloudAccountSettings";
 import { ProSettingsCard } from "./ProIntroduction";
 import { CloudUsageSettings } from "./CloudUsageMeter";
 import { Card, SettingsGroup, SIMPLE_BUTTONS } from "./SettingsPrimitives";
+import { Layer, useIsTopLayer } from "./Layer";
 import { shortcutLabel } from "./ShortcutHint";
 import { UsageSection } from "./UsageSection";
 import { SkillsSection } from "./SkillsSection";
@@ -94,7 +95,7 @@ export const SECTIONS: Array<{
   { id: "appearance", group: "you", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "font", "typeface", "chat width", "width", "wide", "full width", "bubble", "bubbles", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime", "pinned", "circles", "universal", "groups", "top", "send", "enter", "return", "shift+enter", "ctrl+enter", "cmd+enter", "⌘+enter", "new line", "keyboard", "ime", "japanese", "message color", "my messages", "toolbar", "tools layout", "footer", "routines", "triggers", "team map", "color", "colour", "cloud color", "server color", "tint", "sidebar color", "sidebar picture", "picture", "image", "banner", "background", "computers", "your computers", "rail", "strip", "frame", "window frame", "title bar"] },
   { id: "companion", group: "you", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
   { id: "engines", group: "ai", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "model providers", "engines", "claude", "codex", "grok", "providers", "cli", "sign in", "subscription"] },
-  { id: "connections", group: "ai", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "api key", "api keys", "connections", "composio", "box", "xai", "mistral", "cerebras", "meta", "muse", "vps", "router", "openrouter", "base url", "openai", "anthropic", "groq", "greenference", "opencode", "deepseek", "provider", "lm studio", "lmstudio", "llm studio", "llmstudio", "bionic"] },
+  { id: "connections", group: "ai", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "api key", "api keys", "connections", "composio", "box", "xai", "mistral", "cerebras", "meta", "muse", "vps", "router", "openrouter", "base url", "openai", "anthropic", "groq", "greenference", "modelgo", "opencode", "deepseek", "provider", "lm studio", "lmstudio", "llm studio", "llmstudio", "bionic"] },
   { id: "decisionModel", group: "ai", labelKey: "settings.section.decisionModel", icon: Zap, keywords: ["decision", "extraction", "jev", "typesafe", "cloudflare", "workers ai", "clef", "clairic", "email", "routing", "auto", "rooms", "who answers"] },
   { id: "imageGeneration", group: "ai", labelKey: "settings.section.imageGeneration", icon: ImagePlus, keywords: ["image", "images", "picture", "generate", "avatar", "gpt image", "grok imagine", "gemini", "nano banana", "openrouter", "flux", "backup"] },
   { id: "skills", group: "ai", labelKey: "settings.section.skills", icon: BookOpen, keywords: ["skills", "library", "assign", "agent skills", "skill md"] },
@@ -182,6 +183,11 @@ export function keySearchResults(query: string): KeyEntry[] {
 export const openKeyResult = (entry: KeyEntry) => entry.uses ? openKeySettings(entry.uses, entry.id) : openKeySettings(entry.id);
 
 export function SettingsModal() {
+  return <Layer modal><SettingsDialog /></Layer>;
+}
+
+function SettingsDialog() {
+  const isTop = useIsTopLayer();
   const { state, dispatch } = useStore();
   const advanced = useAdvancedMode();
   const remoteActive = window.ogb?.remoteClient?.active === true;
@@ -275,6 +281,7 @@ export function SettingsModal() {
     else dialog?.focus();
 
     const onKey = (event: KeyboardEvent) => {
+      if (!isTop()) return;
       if (!searchFirst.current && dialog && document.activeElement === dialog && event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey
         && search?.checkVisibility()) {
         event.preventDefault();
@@ -320,7 +327,7 @@ export function SettingsModal() {
       window.removeEventListener("keydown", onKey);
       previousFocus?.focus();
     };
-  }, [dispatch]);
+  }, [dispatch, isTop]);
 
   const openSection = (id: AppSettingsSection) => dispatch({ type: "toggleAppSettings", open: true, section: id });
 

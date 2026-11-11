@@ -1,5 +1,5 @@
 export type MoveKind = "routine" | "call" | "webhook" | "app-event" | "imported-skill" | "library-skill";
-export type SendKind = "bot" | "skill" | "login" | "1password" | "setting" | MoveKind;
+export type SendKind = "bot" | "skill" | "login" | "1password" | "secret" | "setting" | MoveKind;
 
 export interface SendItem {
   key: string;
@@ -10,8 +10,8 @@ export interface SendItem {
   bot?: string;
   parts: Record<string, string>;
 }
-/** `chats`: the server takes chats by row (server/cloud-send-chats.ts). */
-export interface SendSummary { v: 1; appVersion: string | null; items: SendItem[]; chats?: true }
+/** `chats`: the server takes chats by row (server/cloud-send-chats.ts). `vault`: it takes saved Vault secrets by id. */
+export interface SendSummary { v: 1; appVersion: string | null; items: SendItem[]; chats?: true; vault?: true }
 
 export type RowState = "only-here" | "on-both" | "to-update" | "differs" | "removed" | "off";
 export interface PlanRow {
@@ -48,6 +48,7 @@ export declare const itemKey: Readonly<{
   bot(id: string): string;
   skill(botId: string, name: string): string;
   login(site: string, username: string, exactHost?: string): string;
+  secret(id: string): string;
   onePassword(): string;
   setting(name: string): string;
   moved(kind: MoveKind, id: string): string;

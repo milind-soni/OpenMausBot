@@ -48,6 +48,8 @@ export interface EngineLimit {
   resetsAt: number | null;
   /** The engine refuses work until resetsAt. */
   blocked: boolean;
+  /** Blocked only by a refusal's hold, which "Try again now" can end; absent when a window at its limit blocks it. */
+  held?: boolean;
   /** Every window the engine reported, in the engine's order. A server that predates it sends only the deciding window above. */
   windows?: LimitWindowUsage[];
 }

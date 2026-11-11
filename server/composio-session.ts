@@ -214,6 +214,15 @@ export async function prepareProjectSession(
   return { apiKey: trimmed, userId, sessionId };
 }
 
+type SessionIds = { userId: string; sessionId: string };
+const sessionKeepers = new WeakMap<object, (ids: SessionIds) => void>();
+
+/** Keeps the Session of a `composio` that is not the saved config's (a Team Cloud member's own Composio user in the
+ * team's project) with `keep`, never in config.json. */
+export function keepSessionWith(composio: NonNullable<AppConfig["composio"]>, keep: (ids: SessionIds) => void): void {
+  sessionKeepers.set(composio, keep);
+}
+
 async function adoptProjectSession(
   composio: NonNullable<AppConfig["composio"]>,
   apiKey: string,
@@ -223,7 +232,8 @@ async function adoptProjectSession(
   multiAccountUpgradeAttempted.add(sessionId);
   composio.userId = userId;
   composio.sessionId = sessionId;
-  saveConfig({ composio: { userId, sessionId } });
+  const keep = sessionKeepers.get(composio);
+  if (keep) keep({ userId, sessionId }); else saveConfig({ composio: { userId, sessionId } });
   const created = await getProjectSession(apiKey, sessionId);
   if (!created) throw new Error("Composio Session disappeared after creation");
   return created;
@@ -250,15 +260,19 @@ export async function ensureProjectSession(cfg: AppConfig, wanted?: AuthConfigMa
   const apiKey = projectApiKey(cfg);
   if (!composio || !apiKey) throw new Error("No Composio project key configured");
   const configs = wanted ?? (await projectAuthConfigs(apiKey)).configs;
+  const member = sessionKeepers.has(composio);
   if (composio.sessionId) {
     const existing = await getProjectSession(apiKey, composio.sessionId);
-    if (existing && (supportsMultiAccount(existing) || multiAccountUpgradeAttempted.has(existing.session_id))) {
+    // Security: a member's Session is used only while it is their own Composio user's, never the team's or another member's.
+    if (member && existing?.config?.user_id && existing.config.user_id !== composio.userId) delete composio.sessionId;
+    else if (existing && (supportsMultiAccount(existing) || multiAccountUpgradeAttempted.has(existing.session_id))) {
       if (authConfigsReady(existing, configs)) return existing;
       const named = await nameAuthConfigsInPlace(apiKey, existing, configs);
       if (named) return named;
     }
   }
   const prepared = await prepareProjectSession(apiKey, composio, configs);
+  if (member && prepared.userId !== composio.userId) throw new Error("Composio returned a Session for another user");
   return adoptProjectSession(composio, apiKey, prepared.userId, prepared.sessionId);
 }
 

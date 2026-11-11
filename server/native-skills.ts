@@ -71,12 +71,12 @@ export function nativeSkills(
   });
 }
 
-/** Bot Settings → Skills and the `/` menu: always on, and changed only where it lives. */
-export function nativeSkillListing(skill: NativeSkill): SkillListing & { origin: "native" } {
+/** Bot Settings → Skills and the `/` menu. `enabled` is this bot's switch (default on); the files stay where the engine loads them. */
+export function nativeSkillListing(skill: NativeSkill, enabled = true): SkillListing & { origin: "native" } {
   return {
     name: skill.name,
     description: skill.description,
-    enabled: true,
+    enabled,
     editable: false,
     source: skill.source,
     sha256: skill.sha256,

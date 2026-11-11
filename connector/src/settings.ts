@@ -37,6 +37,8 @@ export const PATHS = {
   audit: process.env.MAUSBOT_AUDIT_DIR || "/var/log/mausbot",
   /** In the container's own /tmp: `mausbot-connector job` reaches the running connector here. */
   jobs: process.env.MAUSBOT_JOBS_SOCKET || "/tmp/mausbot-jobs.sock",
+  /** /var/lib/mausbot/update on the host, on a customer-run server only: where an update is handed to the server's own updater. */
+  update: process.env.MAUSBOT_UPDATE_DIR || "/var/lib/mausbot/update",
 } as const;
 
 export const AUDIT_FILE = "audit.jsonl";

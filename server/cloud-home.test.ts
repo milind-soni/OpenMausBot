@@ -505,14 +505,14 @@ it("gives the server only an allow-listed environment: a secret added later, a t
   const config = cloudHomeConfiguration(contract())!;
   const env = { ...contract(), PATH: "/usr/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", NODE_ENV: "production", OMB_STATIC_DIR: "/app/dist",
     OMB_CLOUD_BOAT_URL: "https://cloud.example.test/boat", OMB_TTS_DEFAULT_VOICE: "alloy", OMB_CLOUD_AI_URL: "https://cloud.example.test/api/cloud/services/ai",
-    OMB_COMPOSIO_BROKER_URL: "https://broker.example.test", OMB_COMPOSIO_BROKER_TOKEN: "b".repeat(64),
+    OMB_COMPOSIO_BROKER_URL: "https://broker.example.test", OMB_COMPOSIO_BROKER_TOKEN: "b".repeat(64), OMB_COMPOSIO_BROKER: "off",
     OMB_CLOUD_FUTURE_SECRET: "later", OMB_TEST_CLOUD_LEFT_BEHIND_KEY: "k".repeat(43), FLY_API_TOKEN: "fly", SOME_TOKEN: "t", HOME: "/root" };
   const { server, dropped } = cloudHomeChildEnvironments(config, env, "/data");
   expect(server).toMatchObject({ PATH: "/usr/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", NODE_ENV: "production", OMB_STATIC_DIR: "/app/dist",
     OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: machineId, OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
     OMB_CLOUD_BOAT_URL: "https://cloud.example.test/boat", OMB_TTS_DEFAULT_VOICE: "alloy", OMB_CLOUD_AI_URL: "https://cloud.example.test/api/cloud/services/ai", HOME: "/data",
     // A staging Cloud may name its connected-apps service; the Cloud registers its own token, never one from outside.
-    OMB_COMPOSIO_BROKER_URL: "https://broker.example.test" });
+    OMB_COMPOSIO_BROKER_URL: "https://broker.example.test", OMB_COMPOSIO_BROKER: "off" });
   for (const name of ["OMB_CLOUD_FUTURE_SECRET", "OMB_TEST_CLOUD_LEFT_BEHIND_KEY", "FLY_API_TOKEN", "SOME_TOKEN", "OMB_COMPOSIO_BROKER_TOKEN"]) {
     expect(server).not.toHaveProperty(name);
     expect(dropped).toContain(name);

@@ -18,6 +18,8 @@ export interface StarterCaps {
   status(): { running: number; waiting: number; refusedAt?: number; refused?: PlanLimitReason } | undefined;
   /** The words a paused bot's turn is refused with, in the person's language; null when the bot is awake. */
   pausedText(botId: string, language: string | undefined): string | null;
+  /** What a bot that just made this one is told when it starts paused; null when it is awake. */
+  createdPaused(botId: string): string | null;
 }
 
 export function createStarterCaps(deps: {
@@ -55,6 +57,11 @@ export function createStarterCaps(deps: {
       },
     },
     status: () => (deps.starter() ? { running: STARTER_RUNNING_TURNS, waiting: STARTER_WAITING_HANDOFFS, ...(last ? { refusedAt: last.at, refused: last.reason } : {}) } : undefined),
+    createdPaused(botId) {
+      if (!deps.starter() || !deps.awake.isPaused(botId)) return null;
+      return `@${deps.botName(botId) ?? "The new bot"} was created, and is paused: this Cloud's Starter plan keeps ${deps.awake.limit()} bots awake, so it takes no work yet. `
+        + "Tell the person in one line: they can choose which bots stay awake, or upgrade this Cloud to wake them all. Do not hand it work until then.";
+    },
     pausedText(botId, language) {
       return deps.starter() && deps.awake.isPaused(botId) ? deps.pausedLine(language, deps.awake.limit() ?? 0) : null;
     },
