@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { LoginBots } from "../shared/logins.ts";
 import { fillLogin, type FillCandidate } from "./login-fill.ts";
-import { loginFields, ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED, OnePasswordLogins, onePasswordProblem, onePasswordUnavailable, OnePasswordUnavailableError, sdkOnePasswordClient, secretFields } from "./onepassword.ts";
+import { loginExtraFields, loginFields, ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED, OnePasswordLogins, onePasswordProblem, onePasswordUnavailable, OnePasswordUnavailableError, sdkOnePasswordClient, secretFields } from "./onepassword.ts";
 import { FakeLoginPage, LOGIN_FORM } from "./testing/fake-login-page.ts";
 import { fakeOnePasswordSdk } from "./testing/fake-onepassword.ts";
 import { parseTotpKey, totpCode } from "./totp.ts";
@@ -272,6 +272,14 @@ describe("1Password secrets", () => {
     expect(await read("Plain token")).toBe(PLAIN_TOKEN);
     for (const name of ["Partner API username", "Partner API password", "No website", "Example"]) expect(findLinkedSecret([source], name, "pepper")).toBeNull();
     expect(source.list().map((row) => row.site)).not.toContain("");
+  });
+
+  it("leaves out a Login's fallback username and password (found by type and title) from its extra fields", () => {
+    const field = (id: string, title: string, fieldType: string, value: string) => ({ id, title, fieldType, value });
+    const fields = [field("f1", "E-mail", "Email", "alice@example.com"), field("f2", "Site password", "Concealed", "fake-fallback-pass"),
+      field("f3", "API key", "Concealed", "fake-api-key"), field("f4", "Region", "Text", "eu")];
+    expect(loginFields(fields)).toMatchObject({ username: "alice@example.com", password: "fake-fallback-pass" });
+    expect([...loginExtraFields({ fields })]).toEqual([["", "fake-api-key"], ["API key", "fake-api-key"], ["Region", "eu"]]);
   });
 
   it("never lets Logins without a website push a website login out of the item limit", async () => {
