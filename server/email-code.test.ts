@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { extractCode, senderDomain, sentBySite, waitForEmailCode, type CodeMailbox, type MailSummary } from "./email-code.ts";
 
@@ -127,6 +127,42 @@ describe("waitForEmailCode", () => {
     const time = clocked();
     await waitForEmailCode([mailbox([])], { ...options(time), active: () => false });
     expect(time.now()).toBe(ASKED);
+  });
+
+  it("does not read a mailbox when the turn has already ended", async () => {
+    const box = { list: vi.fn(async () => [mail()]), body: vi.fn(async () => mail().text) };
+    expect(await waitForEmailCode([box], { ...options(clocked()), active: () => false })).toEqual({ kind: "miss", why: "not-found" });
+    expect(box.list).not.toHaveBeenCalled();
+    expect(box.body).not.toHaveBeenCalled();
+  });
+
+  it("does not read message bodies when the turn ends during the mailbox listing", async () => {
+    let active = true;
+    const box = {
+      list: async () => { active = false; return [mail()]; },
+      body: vi.fn(async () => mail().text),
+    };
+    expect(await waitForEmailCode([box], { ...options(clocked()), active: () => active })).toEqual({ kind: "miss", why: "not-found" });
+    expect(box.body).not.toHaveBeenCalled();
+  });
+
+  it("discards a late code and reads no further messages after the turn ends", async () => {
+    let active = true;
+    const box = {
+      list: async () => [mail(), mail({ id: "m2" })],
+      body: vi.fn(async () => { active = false; return mail().text; }),
+    };
+    expect(await waitForEmailCode([box], { ...options(clocked()), active: () => active })).toEqual({ kind: "miss", why: "not-found" });
+    expect(box.body).toHaveBeenCalledExactlyOnceWith("m1");
+  });
+
+  it("does not start another poll after the turn ends while waiting", async () => {
+    let active = true;
+    const box = { list: vi.fn(async () => []), body: vi.fn(async () => null) };
+    expect(await waitForEmailCode([box], {
+      ...options(clocked()), active: () => active, sleep: async () => { active = false; },
+    })).toEqual({ kind: "miss", why: "not-found" });
+    expect(box.list).toHaveBeenCalledTimes(1);
   });
 
   it("says the mailbox couldn't be read when every look fails", async () => {
