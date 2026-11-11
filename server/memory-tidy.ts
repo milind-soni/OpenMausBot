@@ -125,7 +125,7 @@ export function parseContradictions(text: string, count: number): Contradiction[
     if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
     const ia = a as number;
     const ib = b as number;
-    if (ia < 0 || ib < 0 || ia >= count || ib >= count) continue;
+    if (ia < 0 || ib < 0 || ia >= Math.min(count, PROMPT_ENTRIES) || ib >= Math.min(count, PROMPT_ENTRIES)) continue;
     if (keep !== "a" && keep !== "b") continue;
     const key = `${Math.min(ia, ib)}:${Math.max(ia, ib)}`;
     if (seen.has(key)) continue;

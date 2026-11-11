@@ -287,8 +287,10 @@ export function execCliBoxed(
     clearTimeout(timer);
     cb(err, stdout, stderr);
   };
-  child.stdout.on("data", (chunk: Buffer) => { if (stdout.length < limit) stdout += chunk.toString("utf8").slice(0, limit - stdout.length); });
-  child.stderr.on("data", (chunk: Buffer) => { if (stderr.length < limit) stderr += chunk.toString("utf8").slice(0, limit - stderr.length); });
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => { if (stdout.length < limit) stdout += chunk.slice(0, limit - stdout.length); });
+  child.stderr.on("data", (chunk: string) => { if (stderr.length < limit) stderr += chunk.slice(0, limit - stderr.length); });
   const timer = setTimeout(() => {
     timedOut = true;
     void killCliTree(child, 0);
