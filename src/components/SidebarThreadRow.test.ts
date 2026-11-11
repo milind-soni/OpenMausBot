@@ -66,12 +66,19 @@ describe("sidebar thread visibility", () => {
       { threadId: "weekly-10", title: "Weekly", createdAt: 10 },
       { threadId: "daily-5", title: "Daily brief", createdAt: 5, unread: true },
     ];
-    const runs = [...["daily-40", "daily-30", "daily-20", "daily-5"].map((threadId) => ({ routineId: "daily", threadId })), { routineId: "weekly", threadId: "weekly-10" }, { routineId: "room" }];
+    const runs = [...[40, 30, 20, 5].map((at) => ({ routineId: "daily", threadId: `daily-${at}`, createdAt: at })), { routineId: "weekly", threadId: "weekly-10", createdAt: 10 }, { routineId: "room", createdAt: 60 }];
     expect(visibleSidebarThreads(rows, "chat", "", [], false, runs).map((task) => task.threadId)).toEqual(["chat", "daily-40", "weekly-10", "daily-5"]);
     expect(visibleSidebarThreads(rows, "daily-20", "", [], false, runs).map((task) => task.threadId)).toEqual(["chat", "daily-40", "daily-20", "weekly-10", "daily-5"]);
     expect(visibleSidebarThreads(rows, "chat", "", [], true, runs)).toEqual(rows);
     expect(visibleSidebarThreads(rows, "chat", "daily", [], false, runs)).toHaveLength(4);
     expect(visibleSidebarThreads(rows, "chat").map((task) => task.threadId)).toEqual(rows.map((task) => task.threadId));
+  });
+  it("picks a routine's newest run by when it started, not by when it last replied", () => {
+    // Run A started at 10 and finished at 50; run B started at 30 and finished at 35. A sorts first in the list.
+    const rows = [{ threadId: "run-a", title: "Daily brief", createdAt: 10, lastThreadOrderAt: 50 }, { threadId: "run-b", title: "Daily brief", createdAt: 30, lastThreadOrderAt: 35 }];
+    const runs = [{ routineId: "daily", threadId: "run-a", createdAt: 10 }, { routineId: "daily", threadId: "run-b", createdAt: 30 }];
+    expect(visibleSidebarThreads(rows, "", "", [], false, runs).map((task) => task.threadId)).toEqual(["run-b"]);
+    expect(visibleSidebarThreads([{ ...rows[0] }, { ...rows[1], archivedAt: 40 }], "", "", [], false, runs).map((task) => task.threadId)).toEqual(["run-a"]);
   });
   it("keeps queued older threads visible", () => {
     const rows = tasks.map((task) => ({ ...task, queued: task.threadId === "9" }));

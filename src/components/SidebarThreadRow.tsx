@@ -124,24 +124,28 @@ export function HelperThreadGroup<T>({ tasks, renderThread }: { tasks: T[]; rend
 }
 
 /** Default list shows each routine's newest run only; older runs stay under "Show all". */
-export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], showAll = false, routineRuns: readonly Pick<RoutineRun, "routineId" | "threadId">[] = []): T[] {
+export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], showAll = false, routineRuns: readonly Pick<RoutineRun, "routineId" | "threadId" | "createdAt">[] = []): T[] {
   const needle = query.trim().toLowerCase();
   if (needle) {
     return tasks.filter((task) => task.title.toLowerCase().includes(needle) || folders.some((folder) => folder.id === task.projectId && folder.name.toLowerCase().includes(needle)));
   }
   if (showAll) return tasks;
   let open = 0;
-  const routineOf = new Map(routineRuns.flatMap((run) => run.threadId ? [[run.threadId, run.routineId] as const] : []));
-  const shownRoutines = new Set<string>();
+  const runOf = new Map(routineRuns.flatMap((run) => run.threadId ? [[run.threadId, run] as const] : []));
+  // Newest by the run's start, not sidebar order: an older run that finished later sorts first.
+  const newestRun = new Map<string, Pick<RoutineRun, "routineId" | "createdAt">>();
+  for (const task of tasks) {
+    const run = runOf.get(task.threadId);
+    if (!run || task.pinned === true || task.openedBy?.burstId || isArchived(task)) continue;
+    const seen = newestRun.get(run.routineId);
+    if (!seen || run.createdAt > seen.createdAt) newestRun.set(run.routineId, run);
+  }
   return orderedThreadList(tasks).filter((task) => {
     if (task.pinned === true) return true;
     if (task.openedBy?.burstId) return task.threadId === activeId || demandsAttention(task, activeId);
     if (isArchived(task)) return task.threadId === activeId;
-    const routineId = routineOf.get(task.threadId);
-    if (routineId !== undefined) {
-      if (shownRoutines.has(routineId)) return demandsAttention(task, activeId);
-      shownRoutines.add(routineId);
-    }
+    const run = runOf.get(task.threadId);
+    if (run && newestRun.get(run.routineId) !== run) return demandsAttention(task, activeId);
     return task.closedBy || isSnoozed(task)
       ? demandsAttention(task, activeId)
       : open++ < 6 || demandsAttention(task, activeId);
