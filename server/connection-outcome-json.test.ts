@@ -33,4 +33,22 @@ describe("JSON text in a failed MCP tool result", () => {
     expect(appCallOutcome(200, answer([JSON.stringify({ error: "Message not found" })], true), "application/json"))
       .toEqual({ ok: true });
   });
+
+  it.each([
+    { error: "Message not found", resource: "/messages/401" },
+    { message: "Message not found", resource: "/messages/403" },
+    { error: { message: "Message not found", resource: "/messages/401" } },
+    { data: { message: "Token expired; reconnect" }, requestId: "401" },
+  ])("ignores unrelated JSON fields in a failed result: %j", (value) => {
+    expect(appCallOutcome(200, answer([JSON.stringify(value)], true), "application/json"))
+      .toEqual({ ok: true });
+  });
+
+  it.each([
+    [{ error: { message: "invalid_token" } }, "sign-in"],
+    [{ error: { message: "403 Forbidden" }, resource: "/messages/401" }, "refused"],
+  ])("reads nested error messages without classifying metadata: %j", (value, error) => {
+    expect(appCallOutcome(200, answer([JSON.stringify(value)], true), "application/json"))
+      .toEqual({ ok: false, error });
+  });
 });
