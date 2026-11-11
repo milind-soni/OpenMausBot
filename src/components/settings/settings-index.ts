@@ -178,7 +178,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "keep-awake", page: "phone", anchor: "reach", labelKey: "remote.keepAwake", sectionKey: "phone.reach.title", when: hereOnly, synonyms: ["sleep", "awake", "overnight", "scheduled"] },
   { id: "wake-automations", page: "phone", labelKey: "settings.search.wakeAutomations", jump: "automations", when: hereOnly, topFor: ["sleep", "overnight", "scheduled"], synonyms: ["awake"] },
   { id: "tailscale", page: "phone", anchor: "reach", labelKey: "devices.moreWays", sectionKey: "phone.reach.title", when: hereOnly, advanced: true, synonyms: ["tailscale", "https", "tailnet"] },
-  { id: "domain", page: "overview", anchor: "address", labelKey: "settings.overview.address", when: (ctx) => !ctx.here && !ctx.client, synonyms: ["domain", "dns", "https", "custom domain"] },
+  { id: "domain", page: "overview", anchor: "address", labelKey: "settings.overview.address", advanced: true, when: (ctx) => !ctx.here && !ctx.client, synonyms: ["domain", "dns", "https", "custom domain"] },
   { id: "sidebar-color", page: "overview", anchor: "sidebar", labelKey: "placeLook.sidebarColor", sectionKey: "settings.overview.sidebar", synonyms: ["color", "colour", "tint", "cloud color"] },
   { id: "sidebar-picture", page: "overview", anchor: "sidebar", labelKey: "placeLook.sidebarPicture", sectionKey: "settings.overview.sidebar", topFor: ["wallpaper", "background", "sidebar image"], synonyms: ["picture", "banner", "image"] },
   { id: "show-helper", page: "overview", anchor: "sidebar", labelKey: "settings.search.showHelper", sectionKey: "settings.overview.sidebar", synonyms: ["helper", "starter", "default bot"] },

@@ -3560,7 +3560,6 @@
   "settings.glance.appsConnected": "{count} connectées",
   "settings.glance.appsNone": "Aucune pour l'instant",
   "settings.overview.yourData": "Vos données",
-  "settings.domain.notConnected": "Non connecté",
   "settings.recovery.short": "Si un fournisseur échoue avant de démarrer, un remplaçant est essayé une fois.",
   "decider.introShort": "De petits modèles rapides qui trient et lisent pour vos bots.",
   "decider.provider.title": "Fournisseur",

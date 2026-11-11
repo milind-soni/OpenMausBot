@@ -7981,7 +7981,6 @@
   "settings.glance.appsConnected": "{count} 件接続済み",
   "settings.glance.appsNone": "まだありません",
   "settings.overview.yourData": "あなたのデータ",
-  "settings.domain.notConnected": "未接続",
   "settings.recovery.short": "プロバイダーが開始前に失敗した場合、予備を一度試します。",
   "decider.introShort": "ボットのために物事を仕分けて読む、小さく速いモデル。",
   "decider.provider.title": "プロバイダー",

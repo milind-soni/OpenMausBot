@@ -7653,7 +7653,6 @@
   "settings.glance.appsConnected": "{count}개 연결됨",
   "settings.glance.appsNone": "아직 없음",
   "settings.overview.yourData": "내 데이터",
-  "settings.domain.notConnected": "연결 안 됨",
   "settings.recovery.short": "제공자가 시작 전에 실패하면 백업을 한 번 시도합니다.",
   "decider.introShort": "봇을 위해 정리하고 읽어 주는 작고 빠른 모델입니다.",
   "decider.provider.title": "제공자",

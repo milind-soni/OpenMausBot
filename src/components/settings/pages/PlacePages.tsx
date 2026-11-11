@@ -12,10 +12,9 @@ import { BuiltInBrowserRow, ServerSitesRow } from "../../BrowserSettingsRows";
 import { CacheKeepWarmSettings } from "../../CacheKeepWarmSettings";
 import { TeamPeopleCard } from "../../CloudAccountSettings";
 import { CloudKeepHere } from "../../CloudKeepHere";
-import { CustomDomainSettings, useCustomDomain } from "../../CustomDomainSettings";
+import { CustomDomainSettings } from "../../CustomDomainSettings";
 import { WorkspaceBackupSettings } from "../../WorkspaceBackupSettings";
 import { preloadConnectedApps } from "@/lib/connected-apps";
-import { setAdvancedMode } from "@/lib/interface-mode";
 import { DecisionModelSettings } from "../../DecisionModelSettings";
 import { DefaultBotSidebarRow } from "../../DefaultBotControls";
 import { EnginesSettings } from "../../EnginesSettings";
@@ -103,23 +102,9 @@ export function OverviewPage() {
       </SettingsGroup>
     )}
     {ctx.desktop && ctx.cloud && team && team.cloudPage && <div data-settings-block="people-and-plan"><TeamPeopleCard team={team} /></div>}
-    {!ctx.here && !ctx.client && !ctx.team && (ctx.advanced ? <CustomDomainSettings /> : <DomainLinkRow />)}
+    {/* A place's own address is builder detail: Advanced only, so Simple's Overview stays one window tall. */}
+    {!ctx.here && !ctx.client && !ctx.team && ctx.advanced && <CustomDomainSettings />}
   </>;
-}
-
-/** Simple's one row for a place's own address: what it is, and the form in Advanced. */
-function DomainLinkRow() {
-  const { go } = useSettingsShell();
-  const status = useCustomDomain();
-  if (status && !status.supported) return null;
-  return (
-    <SettingsGroup block="address-link">
-      <SettingsRows>
-        <SettingsLinkRow title={t("settings.domain.label")} value={status?.customDomain ?? t("settings.domain.notConnected")} data={{ "data-domain-link": "" }}
-          onClick={() => { setAdvancedMode(true); go("overview", "address"); }} />
-      </SettingsRows>
-    </SettingsGroup>
-  );
 }
 
 /** How many apps this place has connected, for At a glance; null until it is known. */

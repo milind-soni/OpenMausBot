@@ -115,17 +115,6 @@ export function CustomDomainGuide({ status, open = false, onToggle }: { status: 
   </>;
 }
 
-/** Whether this place has a domain of its own yet, for Simple's one link row. */
-export function useCustomDomain(): CustomDomainStatus | null {
-  const [status, setStatus] = useState<CustomDomainStatus | null>(null);
-  useEffect(() => {
-    const controller = new AbortController();
-    void api("/api/settings/custom-domain", { signal: controller.signal }).then((next: CustomDomainStatus) => { if (!controller.signal.aborted) setStatus(next); }).catch(() => {});
-    return () => controller.abort();
-  }, []);
-  return status;
-}
-
 export function CustomDomainSettings() {
   const [status, setStatus] = useState<CustomDomainStatus | null>(null);
   const [domain, setDomain] = useState("");

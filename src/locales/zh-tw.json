@@ -10183,7 +10183,6 @@
   "settings.glance.appsConnected": "已連接 {count} 個",
   "settings.glance.appsNone": "尚無",
   "settings.overview.yourData": "你的資料",
-  "settings.domain.notConnected": "未連接",
   "settings.recovery.short": "如果供應商在開始前失敗，會嘗試一次備用。",
   "decider.introShort": "為你的機器人整理和讀取資訊的小而快的模型。",
   "decider.provider.title": "供應商",

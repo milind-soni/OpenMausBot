@@ -5825,7 +5825,6 @@
   "settings.glance.appsConnected": "{count} đã kết nối",
   "settings.glance.appsNone": "Chưa có",
   "settings.overview.yourData": "Dữ liệu của bạn",
-  "settings.domain.notConnected": "Chưa kết nối",
   "settings.recovery.short": "Nếu nhà cung cấp lỗi trước khi bắt đầu, thử một lần với phương án dự phòng.",
   "decider.introShort": "Các mô hình nhỏ, nhanh giúp bot của bạn sắp xếp và đọc thông tin.",
   "decider.provider.title": "Nhà cung cấp",

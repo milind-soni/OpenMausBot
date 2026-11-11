@@ -3413,7 +3413,6 @@
   "settings.glance.appsConnected": "{count} जुड़े हैं",
   "settings.glance.appsNone": "अभी कोई नहीं",
   "settings.overview.yourData": "आपका डेटा",
-  "settings.domain.notConnected": "जुड़ा नहीं",
   "settings.recovery.short": "अगर कोई प्रदाता शुरू होने से पहले विफल हो, तो एक बार बैकअप आज़माया जाता है।",
   "decider.introShort": "छोटे, तेज़ मॉडल जो आपके बॉट्स के लिए चीज़ें छाँटते और पढ़ते हैं।",
   "decider.provider.title": "प्रदाता",

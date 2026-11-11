@@ -3851,7 +3851,6 @@
   "settings.glance.appsConnected": "Підключено: {count}",
   "settings.glance.appsNone": "Поки немає",
   "settings.overview.yourData": "Ваші дані",
-  "settings.domain.notConnected": "Не підключено",
   "settings.recovery.short": "Якщо провайдер не запуститься, один раз пробується запасний.",
   "decider.introShort": "Невеликі швидкі моделі, що сортують і читають для ваших ботів.",
   "decider.provider.title": "Провайдер",

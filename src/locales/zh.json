@@ -7872,7 +7872,6 @@
   "settings.glance.appsConnected": "已连接 {count} 个",
   "settings.glance.appsNone": "暂无",
   "settings.overview.yourData": "你的数据",
-  "settings.domain.notConnected": "未连接",
   "settings.recovery.short": "如果提供方在开始前失败，会尝试一次备用。",
   "decider.introShort": "为你的机器人整理和读取信息的小而快的模型。",
   "decider.provider.title": "提供方",

@@ -10457,7 +10457,6 @@
   "settings.glance.appsConnected": "{count} conectados",
   "settings.glance.appsNone": "Nenhum ainda",
   "settings.overview.yourData": "Seus dados",
-  "settings.domain.notConnected": "Não conectado",
   "settings.recovery.short": "Se um provedor falhar antes de começar, tenta um reserva uma vez.",
   "decider.introShort": "Modelos pequenos e rápidos que organizam e leem coisas para seus bots.",
   "decider.provider.title": "Provedor",

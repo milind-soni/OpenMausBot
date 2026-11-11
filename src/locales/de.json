@@ -3719,7 +3719,6 @@
   "settings.glance.appsConnected": "{count} verbunden",
   "settings.glance.appsNone": "Noch keine",
   "settings.overview.yourData": "Deine Daten",
-  "settings.domain.notConnected": "Nicht verbunden",
   "settings.recovery.short": "Wenn ein Anbieter vor dem Start ausfällt, wird einmal ein Ersatz versucht.",
   "decider.introShort": "Kleine, schnelle Modelle, die für deine Bots sortieren und lesen.",
   "decider.provider.title": "Anbieter",

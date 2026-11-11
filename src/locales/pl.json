@@ -7085,7 +7085,6 @@
   "settings.glance.appsConnected": "Połączone: {count}",
   "settings.glance.appsNone": "Jeszcze brak",
   "settings.overview.yourData": "Twoje dane",
-  "settings.domain.notConnected": "Nie połączono",
   "settings.recovery.short": "Jeśli dostawca zawiedzie przed startem, raz próbuje zapasowego.",
   "decider.introShort": "Małe, szybkie modele, które sortują i czytają rzeczy dla Twoich botów.",
   "decider.provider.title": "Dostawca",

@@ -5825,7 +5825,6 @@
   "settings.glance.appsConnected": "{count} bağlı",
   "settings.glance.appsNone": "Henüz yok",
   "settings.overview.yourData": "Verilerin",
-  "settings.domain.notConnected": "Bağlı değil",
   "settings.recovery.short": "Bir sağlayıcı başlamadan hata verirse bir kez yedeği dener.",
   "decider.introShort": "Botların için bir şeyleri sıralayan ve okuyan küçük, hızlı modeller.",
   "decider.provider.title": "Sağlayıcı",
