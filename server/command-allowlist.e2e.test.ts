@@ -2,20 +2,22 @@
 // user profiles, shell commands or live application data are used.
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { closeSync, existsSync, openSync, readFileSync, rmSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { launchVerificationServer, verificationServerEnvironment } from "../scripts/control-omb.ts";
-import { waitForExit } from "./testing/cleanup.ts";
+import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
-it("remembers real permission requests, scopes and revokes grants, and preserves them across restart", async () => {
+it("scopes native approvals to workspace reads and remembered commands, and restores saved grants after restart", async () => {
   const fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "hang" });
   const { url, dataDir, logPath } = fixture.info;
   const sockets: Socket[] = [];
   let restarted: ChildProcess | undefined;
+  let project: string | undefined;
   const api = async (method: string, path: string, body?: unknown, status = 200, token?: string) => {
     const response = await fetch(url + path, { method, headers: {
       origin: url, "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}),
@@ -33,7 +35,7 @@ it("remembers real permission requests, scopes and revokes grants, and preserves
     await expect.poll(() => existsSync(dump), { timeout: 15_000 }).toBe(true);
     return JSON.parse(readFileSync(dump, "utf8")).mcpConfig.mcpServers.ogb.args.at(-1) as string;
   };
-  const ask = async (socketPath: string, command: string, input = {}, tool = "Bash") => {
+  const ask = async (socketPath: string, command: string | undefined, input = {}, tool = "Bash") => {
     const socket = connect(socketPath);
     sockets.push(socket);
     await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
@@ -57,7 +59,7 @@ it("remembers real permission requests, scopes and revokes grants, and preserves
     // Assertions may inspect the card before awaiting this reply; keep an
     // early transport rejection handled while preserving it for the await.
     void reply.catch(() => {});
-    socket.write(JSON.stringify({ t: "ask", id, tool, input: { command, ...input } }) + "\n");
+    socket.write(JSON.stringify({ t: "ask", id, tool, input: command === undefined ? input : { command, ...input } }) + "\n");
     return { id, answer: () => answer, reply, socket };
   };
   const stop = (bot: any, thread = bot.threadId) => api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: thread });
@@ -151,10 +153,49 @@ it("remembers real permission requests, scopes and revokes grants, and preserves
     expect(await restored.reply).toMatchObject({ id: restored.id, behavior: "allow" });
     expect(await card(bot.threadId, restored.id)).toBeUndefined();
     await stop(bot);
+
+    project = mkdtempSync(join(tmpdir(), "omb-project-read-"));
+    const src = join(project, "src");
+    mkdirSync(src);
+    const file = join(src, "notes.md"), secret = join(project, ".env");
+    writeFileSync(file, "public fixture");
+    writeFileSync(secret, "FIXTURE_TOKEN=fake");
+    await api("PATCH", `/api/bots/${bot.id}`, { cwd: project });
+    const projectTask = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Project reads" }, 201)).task;
+    const projectSocket = await start(bot, projectTask.threadId);
+    for (const [tool, input] of [
+      ["Read", { file_path: file }],
+      ["LS", { path: src }],
+      ["Grep", { path: src, pattern: "fixture" }],
+      ["Glob", { path: src, pattern: "**/*.md" }],
+    ] as const) {
+      const read = await ask(projectSocket, undefined, input, tool);
+      expect(await read.reply).toMatchObject({ id: read.id, behavior: "allow" });
+      expect(await card(projectTask.threadId, read.id)).toBeUndefined();
+      await expect.poll(async () => (await api("GET", "/api/decisions")).decisions.some((row: any) => row.requestId === read.id && row.source === "workspace-read")).toBe(true);
+    }
+    for (const [tool, input, command] of [
+      ["Read", { file_path: secret }, undefined],
+      ["Read", { file_path: join(dataDir, "config.json") }, undefined],
+      ["Grep", { path: project, pattern: "token" }, undefined],
+      ["Glob", { path: src, pattern: "../*.env" }, undefined],
+      ["Write", { file_path: file, content: "change" }, undefined],
+      ["mcp__example__Read", { file_path: file }, undefined],
+      ["Bash", { dangerouslyDisableSandbox: true }, "cat src/notes.md"],
+      ["Bash", {}, "npm test"],
+    ] as const) {
+      const held = await ask(projectSocket, command, input, tool);
+      await expect.poll(async () => Boolean(await card(projectTask.threadId, held.id))).toBe(true);
+      expect(held.answer()).toBeUndefined();
+      await api("POST", `/api/threads/${projectTask.threadId}/respond`, { requestId: held.id, behavior: "deny" });
+      expect(await held.reply).toMatchObject({ id: held.id, behavior: "deny" });
+    }
+    await stop(bot, projectTask.threadId);
     console.info(`Command allowlist real-server verification passed; isolated log: ${logPath}`);
   } finally {
     for (const socket of sockets) socket.destroy();
     await waitForExit(restarted, { signal: "SIGTERM" });
     await fixture.close();
+    if (project) await removeTempDir(project);
   }
 }, 90_000);

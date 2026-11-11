@@ -1,8 +1,3 @@
-// Nothing here decides whether an action is safe: each level is the provider's own permission mode passed through, and a
-// request reaching this process is one the provider left for a person. The app's own grants are Full access, the person's
-// exact saved commands and remembered MCP read tools, Approve for me's web search, and a bot's plain reads of its own files
-// at every level (own-file-reads.ts). A bot's question always reaches a human.
-
 import { supportsApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
 import { failedTurnTool, type FailedTurnTool } from "../shared/failed-turn.ts";
 import { isOutboundTool } from "../shared/outbound.ts";
@@ -78,6 +73,7 @@ export type AutoVerdictSource =
   | "tool-allowlist"
   | "web-search"
   | "own-files"
+  | "workspace-read"
   | "native-approval"
   | "explicit-approval-block"
   | "outbound-guard"
@@ -102,6 +98,7 @@ export function autoVerdict(
     toolAllowed?: boolean;
     /** The request only reads the bot's own files: its SOUL.md, skills, memory and conversation folders. */
     ownFilesRead?: boolean;
+    workspaceRead?: boolean;
   },
 ): AutoVerdict {
   if (ASKS_A_PERSON.has(bareToolName(tool))) {
@@ -114,6 +111,7 @@ export function autoVerdict(
   if (context?.commandAllowed) return { approve: `approved ${tool} (saved command)`, source: "command-allowlist" };
   if (context?.toolAllowed) return { approve: `approved ${tool} (always allowed)`, source: "tool-allowlist" };
   if (context?.ownFilesRead) return { approve: `approved ${tool} (its own files)`, source: "own-files" };
+  if (context?.workspaceRead) return { approve: `approved ${tool} (workspace read)`, source: "workspace-read" };
   if (mode === "auto" && WEB_SEARCH.has(bareToolName(tool))) {
     return { approve: `approved ${tool} (web search)`, source: "web-search" };
   }
@@ -128,7 +126,8 @@ export function undeliveredApprovalTool(
 ): FailedTurnTool | { name: string; ok: false } {
   if (outcome !== "rejected") return failedTurnTool("could not deliver approval to the provider; retry the task after reconnecting.");
   const grant = source === "command-allowlist" ? "the saved command permission"
-    : source === "tool-allowlist" ? "the saved tool permission" : "Full access";
+    : source === "tool-allowlist" ? "the saved tool permission"
+    : source === "workspace-read" ? "the workspace read permission" : "Full access";
   return { name: `The provider rejected this action despite ${grant}.`, ok: false };
 }
 

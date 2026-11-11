@@ -14,6 +14,8 @@ export interface ModelVariantOption {
   label: string;
 }
 
+export type WorkspaceReadKind = "file" | "list" | "search";
+
 export interface ModelVariantState {
   options: ModelVariantOption[];
   currentValue?: string;
@@ -144,6 +146,8 @@ export type RuntimeEvent = RuntimeEventBase &
         /** The files a read tool's ask reads (absolute): a request that reads only the bot's own files is answered
          * without the person. Like `command`, never broadcast. */
         reads?: string[];
+         /** A native file tool's read scope and the canonical workspace pinned at launch. Never broadcast. */
+         workspaceRead?: { root: string; kind: WorkspaceReadKind };
         choices?: string[];
         /** A provider's structured ask (Claude's AskUserQuestion): the whole
          * set of questions, each with its own options, so the card can offer

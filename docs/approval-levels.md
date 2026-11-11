@@ -4,10 +4,10 @@ Approval levels belong to a bot and apply to its next provider turn, including
 when that provider resumes an existing native thread. You can also change one
 while the bot is working (see below). Each level is one of the
 provider's own permission modes, passed through. A native tool request that
-reaches you is one the provider left for you. OpenMausBot only answers from an
-explicit grant: Full Access, a saved exact command or MCP read-shaped tool,
-the narrow built-in web-search allowance under Approve for me, or a bot reading
-its own files. In Full Access, OMB also applies its own configuration tools
+reaches you is one the provider left for you. OpenMausBot can answer from
+Full Access, a saved exact command or MCP read-shaped tool, the built-in
+web-search allowance under Approve for me, or a verified file read. In Full
+Access, OMB also applies its own configuration tools
 without another approval.
 
 **A bot reading its own files never asks**, at any level: its standing
@@ -20,6 +20,13 @@ command (a pipe, a redirect, a second command, a variable, a glob) asks as
 before, and so does every read in a guest's turn, since a bot's folder holds its
 owner's memory. On a Cloud the bot's box also shows it its own `SOUL.md`,
 read-only.
+
+For Claude's native Read, LS, Grep and Glob requests, OpenMausBot also checks
+the path against the project's working folder pinned at the start of the turn.
+It can approve a regular file read, a directory listing, or a search of a
+bounded directory tree. Hidden files, common credential and private-key names,
+links that escape the folder, and searches whose scope cannot be checked still
+require approval. Guest and bot API turns follow their own restricted policy.
 
 Every bot and conversation starts at **Full access**, the default T3 Code uses
 too: each engine runs in its own most permissive mode, and a real question or
