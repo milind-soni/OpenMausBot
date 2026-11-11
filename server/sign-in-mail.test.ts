@@ -75,15 +75,18 @@ describe("sign-in codes through the server's own mail server", () => {
 
   it.each(["success", "failure"])("keeps a resent code after an older delivery ends in %s", async (outcome) => {
     let clock = 1_000_000;
-    const started = Promise.withResolvers<void>();
-    const delivery = Promise.withResolvers<void>();
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    let delivered!: () => void;
+    let refused!: (error: Error) => void;
+    const delivery = new Promise<void>((resolve, reject) => { delivered = resolve; refused = reject; });
     const box = mailbox();
     const mail = createSignInMail({ url: URL_, now: () => clock, transport: {
       sendMail: async (message) => {
         box.sent.push(message);
         if (box.sent.length === 1) {
-          started.resolve();
-          await delivery.promise;
+          started();
+          await delivery;
         }
       },
     } });
@@ -91,12 +94,12 @@ describe("sign-in codes through the server's own mail server", () => {
     const finished = outcome === "failure"
       ? expect(first).rejects.toThrow("550 relay denied")
       : expect(first).resolves.toBe("sent");
-    await started.promise;
+    await ready;
     clock += SIGNIN_CODE_RESEND_MS;
     expect(await mail.send("her@example.test")).toBe("sent");
     const code = box.code();
-    if (outcome === "failure") delivery.reject(new Error("550 relay denied"));
-    else delivery.resolve();
+    if (outcome === "failure") refused(new Error("550 relay denied"));
+    else delivered();
     await finished;
 
     expect(mail.check("her@example.test", code)).toBe("ok");
