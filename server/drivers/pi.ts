@@ -293,6 +293,7 @@ export function ensurePiInjectModel(
   return split;
 }
 
+/** Read `provider/model` from the pi agent dir's settings.json; "" when unset or unreadable. */
 function readPiDefaultModel(env: Record<string, string | undefined>): string {
   try {
     const s = JSON.parse(readFileSync(join(piAgentDir(env), "settings.json"), "utf8")) as {
@@ -422,6 +423,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
   decodeConfig,
   defaultConfig: () => decodeConfig({}),
 
+  /** Build a pi instance: resolve its agent dir (explicit `PI_CODING_AGENT_DIR` or a seeded per-instance dir),
+   *  then expose the model catalog and turn runner against that dir. */
   async create(input: DriverCreateInput<PiConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
     const baseEnv = piEnvironment({ ...process.env, ...input.environment });
