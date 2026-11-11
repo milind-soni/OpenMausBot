@@ -324,7 +324,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
         ]);
         add(nativesFor(bot, threadId, instance, cwd).filter((skill) => !switched.has(skill.name)));
       }
-      if (files.size < mentioned.length) add(projectInUse(bot, threadId, cwd, instance, assigned));
+      if (files.size < mentioned.length) add(projectInUse(bot, threadId, cwd, instance, assigned).filter((skill) => !skill.modelOnly));
       return skillCommandTurnText(text, files, typed, ownStart);
     },
 

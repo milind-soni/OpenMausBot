@@ -449,7 +449,7 @@ export function SkillsPage({ bot }: PageContext) {
         ))}
         {skills.error && !skills.reviewing && <NoteRow tone="warn">{skills.error}</NoteRow>}
       </Card>
-      {project.length > 0 && (
+      {(project.length > 0 || projectOn) && (
         <Card label={t("botPanel.skills.project")} anchor="project-skills">
           <SwitchRow
             data-panel-row="project-skills"

@@ -498,7 +498,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                       </span>
                     )}
                     <div className="mt-0.5 line-clamp-2 text-[12px] text-ink-secondary">{skill.description}</div>
-                    <div className="mt-0.5 text-[11px] text-ink-secondary">{t(skill.enabled && !skillSwitchOn(skill) ? "skills.foundWhenNeeded" : "skills.usedWhenRelevant")}</div>
+                    <div className="mt-0.5 text-[11px] text-ink-secondary">{t(skill.origin === "project" && !skill.enabled ? "skills.projectOff" : skill.enabled && !skillSwitchOn(skill) ? "skills.foundWhenNeeded" : "skills.usedWhenRelevant")}</div>
                   </button>
                   {skill.origin !== "project" && (
                     <Switch

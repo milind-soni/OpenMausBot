@@ -189,14 +189,14 @@ describe("skills a project ships for any agent", () => {
 
   it("show on the bot's Skills page, off until the owner trusts project skills, and never reach a turn until then", () => {
     const paths = plantRepo();
-    const off = hostFor("codex", { cwd: join(repo, "app") });
+    const off = hostFor("geminiAgent", { cwd: join(repo, "app") });
     expect(listed(off.host.listBotSkills(off.bot))).toEqual(["agents-skill:project", "dot-agents-skill:project", "claude-skill:project"]);
     expect(off.host.listBotSkills(off.bot).every((skill) => !skill.enabled && !skill.editable)).toBe(true);
     expect(off.host.readBotSkillFile(off.bot, "claude-skill")).toBe(skillMd("claude-skill"));
     expect(off.host.skillsIndex(off.bot, "main")).toBe("");
     expect(off.host.expandSkillCommand(off.bot, "main", "/claude-skill go", undefined, [], true)).toBe("/claude-skill go");
 
-    const on = hostFor("codex", { cwd: join(repo, "app"), cfg: trusted });
+    const on = hostFor("geminiAgent", { cwd: join(repo, "app"), cfg: trusted });
     const index = on.host.skillsIndex(on.bot, "main");
     expect(index).toContain("Skills in this project:");
     expect(index).toContain(`- agents-skill: Works with agents-skill. Read ${JSON.stringify(paths.nearer)}.`);
@@ -212,14 +212,14 @@ describe("skills a project ships for any agent", () => {
     const loose = join(PROJECTS, "loose", "app");
     plant(join(PROJECTS, "loose", "agents", "skills"), "above");
     const here = plant(join(loose, ".agents", "skills"), "here");
-    const { host, bot } = hostFor("codex", { cwd: loose, cfg: trusted });
+    const { host, bot } = hostFor("geminiAgent", { cwd: loose, cfg: trusted });
     expect(listed(host.listBotSkills(bot))).toEqual(["here:project"]);
     expect(host.skillsIndex(bot, "main")).toContain(JSON.stringify(here));
   });
 
   it("follow the folder a turn really works in", () => {
     const paths = plantRepo();
-    const { host, bot } = hostFor("codex", { cfg: trusted });
+    const { host, bot } = hostFor("geminiAgent", { cfg: trusted });
     expect(host.skillsIndex(bot, "main")).toBe("");
     expect(host.skillsIndex(bot, "main", undefined, repo)).toContain(JSON.stringify(paths.agents));
     expect(host.skillsIndex(bot, "main", undefined, null)).toBe("");
@@ -227,10 +227,45 @@ describe("skills a project ships for any agent", () => {
 
   it("never run from the bot's folder for a resumed thread that will stay where its session is", () => {
     plantRepo();
-    const { host, bot } = hostFor("codex", { cwd: repo, cfg: trusted, resumed: true });
+    const { host, bot } = hostFor("geminiAgent", { cwd: repo, cfg: trusted, resumed: true });
     expect(listed(host.listBotSkills(bot, "pinned"))).toEqual([]);
     expect(host.expandSkillCommand(bot, "pinned", "/claude-skill go", undefined, [], true)).toBe("/claude-skill go");
     expect(host.expandSkillCommand(bot, "main", "/claude-skill go", undefined, [], true)).toContain("claude-skill");
+  });
+
+  it("leave .agents/skills to Codex, which loads it by itself", () => {
+    const paths = plantRepo();
+    const { host, bot } = hostFor("codex", { cwd: join(repo, "app"), cfg: trusted });
+    expect(listed(host.listBotSkills(bot))).toEqual(["agents-skill:native", "dot-agents-skill:native", "claude-skill:project"]);
+    const index = host.skillsIndex(bot, "main");
+    expect(index).toContain(JSON.stringify(paths.claude));
+    expect(index).not.toContain("dot-agents-skill");
+    expect(index).not.toContain("- agents-skill:");
+  });
+
+  it("list a model-only skill for the model, but never run it with /name", () => {
+    mkdirSync(join(repo, ".git"), { recursive: true });
+    const folder = join(repo, "agents", "skills", "background");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "SKILL.md"), "---\ndescription: House style.\nuser-invocable: false\n---\n\nUse it.\n");
+    const { host, bot } = hostFor("geminiAgent", { cwd: repo, cfg: trusted });
+    expect(host.skillsIndex(bot, "main")).toContain("- background: House style.");
+    expect(host.expandSkillCommand(bot, "main", "/background go", undefined, [], true)).toBe("/background go");
+  });
+
+  it.skipIf(process.platform === "win32")("never come from the app's own folders through a link", () => {
+    mkdirSync(join(repo, ".git"), { recursive: true });
+    plant(join(DATA_DIR, "app-skills"), "app-owned");
+    mkdirSync(join(repo, "agents", "skills"), { recursive: true });
+    symlinkSync(join(DATA_DIR, "app-skills", "app-owned"), join(repo, "agents", "skills", "app-owned"), "dir");
+    const linkedRepo = join(PROJECTS, "linked");
+    symlinkSync(join(DATA_DIR, "workspaces"), linkedRepo, "dir");
+    plant(join(DATA_DIR, "workspaces", ".agents", "skills"), "inside");
+    const { host, bot } = hostFor("geminiAgent", { cwd: repo, cfg: trusted });
+    expect(listed(host.listBotSkills(bot))).toEqual([]);
+    expect(host.skillsIndex(bot, "main", undefined, linkedRepo)).toBe("");
+    rmSync(join(DATA_DIR, "app-skills"), { recursive: true, force: true });
+    rmSync(join(DATA_DIR, "workspaces", ".agents"), { recursive: true, force: true });
   });
 
   it("leave .claude/skills to Claude Code, which loads it by itself", () => {
@@ -244,7 +279,7 @@ describe("skills a project ships for any agent", () => {
 
   it("never run in a conversation that keeps a private folder", () => {
     plantRepo();
-    const { host, bot } = hostFor("codex", { cwd: repo, cfg: trusted });
+    const { host, bot } = hostFor("geminiAgent", { cwd: repo, cfg: trusted });
     expect(host.expandSkillCommand(bot, "guest", "/claude-skill go", undefined, [], true, true)).toBe("/claude-skill go");
     expect(host.expandSkillCommand(bot, "guest", "/claude-skill go", undefined, [], true)).toContain("claude-skill");
   });
@@ -262,7 +297,7 @@ describe("skills a project ships for any agent", () => {
 
   it("yield a name to the bot's own skill, even one switched off", () => {
     plantRepo();
-    const { host, bot } = hostFor("codex", { cwd: repo, cfg: trusted });
+    const { host, bot } = hostFor("geminiAgent", { cwd: repo, cfg: trusted });
     installSkill(bot.id, "local", [{ path: "SKILL.md", content: skillMd("agents-skill") }]);
     expect(listed(host.listBotSkills(bot))).toEqual(["agents-skill:own", "dot-agents-skill:project", "claude-skill:project"]);
     expect(host.skillsIndex(bot, "main")).not.toContain("- agents-skill:");
@@ -271,7 +306,7 @@ describe("skills a project ships for any agent", () => {
 
   it("never come from the app's own folders, nor reach an engine that cannot read files, nor a package", () => {
     plant(join(TASK_WORKSPACES_DIR, ".agents", "skills"), "app-link");
-    const task = hostFor("codex", { cfg: trusted });
+    const task = hostFor("geminiAgent", { cfg: trusted });
     expect(listed(task.host.listBotSkills(task.bot))).toEqual([]);
     expect(task.host.skillsIndex(task.bot, "main", undefined, join(DATA_DIR, "workspaces", task.bot.id))).toBe("");
 
@@ -279,7 +314,7 @@ describe("skills a project ships for any agent", () => {
     const api = hostFor("openai-compat", { cwd: repo, cfg: trusted });
     expect(listed(api.host.listBotSkills(api.bot))).toEqual([]);
 
-    const exported = hostFor("codex", { cwd: repo, cfg: trusted });
+    const exported = hostFor("geminiAgent", { cwd: repo, cfg: trusted });
     const team = skillExport(exported.host).collectTeamSkills([exported.bot], "all");
     expect(team.ok && [...team.skillsByBot.values()].flat()).toEqual([]);
     expect(skillExport(exported.host).checkedExportSkillNames(["agents-skill"], [exported.bot])).toMatchObject({ ok: false });
