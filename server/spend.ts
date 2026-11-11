@@ -135,7 +135,7 @@ function readMarks(dataDir: string): AlertMarks | null {
 
 export function takeSpendAlert(dataDir: string, state: SpendState | null): SpendAlert | null {
   if (!state || (!state.warn && !state.exceeded)) return null;
-  const saved = readMarks(dataDir) ?? memoryMarks.get(dataDir) ?? null;
+  const saved = memoryMarks.get(dataDir) ?? readMarks(dataDir);
   const marks: AlertMarks = saved && saved.month === state.month && saved.monthlyUsd === state.monthlyUsd
     ? saved
     : { month: state.month, monthlyUsd: state.monthlyUsd };
