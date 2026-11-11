@@ -125,7 +125,7 @@ export type RuntimeEvent = RuntimeEventBase &
      * store and never forwarded to renderer SSE. `fromTool`: a tool's result
      * returned the image to the engine; the bot did not make or send it. */
     | { type: "item.completed"; itemType: "assistant_image"; data: string; alt?: string; fromTool?: true }
-    | { type: "content.delta"; streamKind: "assistant_text" | "reasoning_text"; delta: string }
+    | { type: "content.delta"; streamKind: "assistant_text" | "reasoning_text"; delta: string; /** A room reply as it goes out: the member speaking. */ botId?: string }
     | {
         type: "request.opened";
         requestType: "permission" | "question";
