@@ -52,6 +52,13 @@ describe("the side of a conversation is the server's answer", () => {
     expect(teamThreadOf(mausbot()), "a person's own MausBot has none").toBeNull();
   });
 
+  it("moves a conversation its person shared to Team at once, even on a page whose session still lists it as theirs", () => {
+    setTeamChats({ ...ADA, opened: ["handed", "widened"] });
+    const bot = scout([{ threadId: "handed", shared: true, sharedWith: { name: "Marta", byYou: true }, createdAt: 2 }, { threadId: "widened", shared: true, createdAt: 3 }]);
+    expect(sideOfThread(bot, "handed"), "shared with one person").toBe("team");
+    expect(sideOfThread(bot, "widened"), "shared with the team").toBe("team");
+  });
+
   it("does not move with the switch: the same conversation is the same side whichever side the sidebar shows", () => {
     setTeamChats(ADA);
     const bot = scout([{ threadId: "ada-own", private: true, createdAt: 2 }]);
