@@ -4,7 +4,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { formatTokens, hasFiniteCost } from "@/lib/usage";
 import {
-  formatCost, formatDuration, formatTick, groupLabel, timeAxis, toolLabel, traceBadges, traceRows, type TraceRow,
+  formatCost, formatDuration, formatTick, groupLabel, runTitle, timeAxis, toolLabel, traceBadges, traceRows, type TraceRow,
 } from "@/lib/usage-trace";
 import { useStore, type InstanceInfo } from "@/state/store";
 import type { TraceDetail, TraceNode, TraceRootSummary, TraceTotals } from "../../../shared/usage-trace";
@@ -87,11 +87,13 @@ function RowName({ row, models }: { row: TraceRow; models: readonly InstanceInfo
   let name: string;
   let detail: string | undefined;
   switch (node.kind) {
-    case "turn":
-      icon = <TurnAvatar bot={state.bots.find((bot) => bot.id === node.botId)} name={node.botName} />;
-      name = node.botName || t("trace.unknownBot");
+    case "turn": {
+      const bot = state.bots.find((entry) => entry.id === node.botId);
+      icon = <TurnAvatar bot={bot} name={node.botName} />;
+      name = (bot?.name ?? node.botName) || t("trace.unknownBot");
       detail = modelName(node.model, models);
       break;
+    }
     case "step":
       icon = <StepIcon />;
       name = t("trace.step");
@@ -206,7 +208,7 @@ export function TraceWaterfall({ detail, now, actions }: { detail: TraceDetail; 
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-  const title = root.title || t(`trace.source.${root.source}`, { bot: root.bots[0]?.name ?? "" });
+  const title = runTitle(root, state.bots);
 
   return (
     <section className="overflow-hidden rounded-2xl border border-hairline/50 bg-card" data-testid="trace-waterfall" aria-label={t("trace.title")}>
