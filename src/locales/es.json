@@ -1717,7 +1717,6 @@
   "relay.reply": "{name} respondió",
   "relay.assistant": "El asistente de {name} respondió",
   "sidebar.people.title": "Personas",
-  "sidebar.people.you": "{name} (tú)",
   "sidebar.people.yourInbox": "Tu bandeja de entrada: todo lo que te envían",
   "sidebar.people.yourInboxWaiting": "Tu bandeja de entrada: te esperan, {count}",
   "sidebar.people.invite": "Invitar a alguien",

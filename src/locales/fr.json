@@ -694,7 +694,6 @@
   "relay.reply": "{name} a répondu",
   "relay.assistant": "L'assistant de {name} a répondu",
   "sidebar.people.title": "Personnes",
-  "sidebar.people.you": "{name} (vous)",
   "sidebar.people.yourInbox": "Votre boîte de réception : tout ce qu'on vous envoie",
   "sidebar.people.yourInboxWaiting": "Votre boîte de réception : en attente de vous, {count}",
   "sidebar.people.invite": "Inviter quelqu'un",

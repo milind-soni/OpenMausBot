@@ -1895,7 +1895,6 @@
   "relay.reply": "{name} ответил(а)",
   "relay.assistant": "Ассистент {name} ответил",
   "sidebar.people.title": "Люди",
-  "sidebar.people.you": "{name} (вы)",
   "sidebar.people.yourInbox": "Ваши входящие: всё, что вам отправили",
   "sidebar.people.yourInboxWaiting": "Ваши входящие: ждут вас, {count}",
   "sidebar.people.invite": "Пригласить кого-нибудь",

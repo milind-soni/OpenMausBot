@@ -1421,7 +1421,6 @@
   "relay.reply": "{name} yanıtladı",
   "relay.assistant": "{name} asistanı yanıtladı",
   "sidebar.people.title": "Kişiler",
-  "sidebar.people.you": "{name} (sen)",
   "sidebar.people.yourInbox": "Gelen kutun: sana gönderilen her şey",
   "sidebar.people.yourInboxWaiting": "Gelen kutun: seni bekliyor, {count}",
   "sidebar.people.invite": "Birini davet et",

@@ -444,6 +444,17 @@ engine writes its copy, and the next spawn in any audience takes the newest sett
 or out from the app still happens in the server's HOME and reaches every audience's next turn. Session resume works
 within an audience: its home is the same at each turn. A member who leaves takes their engine home with them.
 
+**Deleting.** A deleted conversation takes its Claude Code and Codex session files with it, from every audience's home
+(`server/host/delete-leftovers.ts`): the session it resumes and every session its event log says it started, unless a
+conversation that stays still resumes the same one. The files uploaded to it go too when no other conversation, picture
+or routine names them, and so does its box uploads folder. A deleted bot also takes its checkpoints
+(`checkpoints/<bot>`), its memory journal and the room and member memory layers kept beside its own folder. Nothing is reached through a link, and a cleanup that fails is logged
+(`delete leftovers: … stayed behind`) and never fails the delete. Still left: sessions kept by the other engines
+(OpenCode, Gemini and the rest of the ACP family, Muse), which only the engine itself can remove; the bot's
+per-folder checkpoints, which its conversations share, until the bot is deleted; and anything on a computer other than
+this server. Kept on purpose: a conversation's own folder (`task-workspaces/<bot>/<thread>`) holds the files the bot
+made for the person, and stays when the conversation or the bot is deleted.
+
 **The move.** The first turn after a Team Cloud starts with engine homes moves what the engines kept in the server's
 HOME. A Claude Code project's session (`projects/<folder>/<session>.jsonl` and its session folder, `file-history`,
 `session-env`, `todos`, `debug`) or a Codex rollout (`sessions/…/rollout-…-<id>.jsonl`, `archived_sessions`) goes to
@@ -498,8 +509,44 @@ routine from anyone else (404 *no such bot*).
 ## The shared chat's name
 
 A team bot's main chat is called *"Shared chat"* on every person's copy (`WireTask.sharedChat`), whatever its stored title,
-so nobody takes it for one of their own, and it can't be renamed. A member's own MausBot has none. Clicking a bot still
-opens the person's own private chat.
+so nobody takes it for one of their own, and it can't be renamed. A member's own MausBot has none.
+
+## Just me and Team
+
+At the top of a team's sidebar sits one switch, **Just me / Team** (`src/state/team-side.ts`, `TeamSideSwitch`). It is in
+the sidebar in each of its shapes: full width, the rail of icons (two icon buttons) and the phone's bot list. It is not
+in the window's rail of Clouds, which is the desktop window's own chrome: a browser and a phone have none, one place has
+none, and the person can hide it.
+
+- **Just me** lists the bots the person can chat with privately (their own MausBot among them), each with their own
+  conversations with it, and no group chat. A bot opens the person's own chat with it, made through `POST
+  /api/bots/<id>/tasks` the first time.
+- **Team** lists the bots that have a shared chat, each with its shared conversations only, and the group chats. A bot
+  opens its shared chat. A bot with no shared chat (a person's own MausBot) is not listed there. No new conversation is
+  offered beside a shared chat: a conversation a person opens is always private, so New conversation is under Just me.
+- **Which side a conversation is on is the server's answer**, never the switch: `private: true` on the task (or a
+  conversation this page just made through that route, or the person's own MausBot) is Just me; everything else, a
+  conversation the page knows nothing of included, is Team. Neither side's list shows a conversation, an unread mark or a
+  preview line of the other's.
+- **By the message box**, every conversation on a team says who can read it, from that same answer: *"Private · only
+  you"*, *"Shared · everyone in Acme can see"*, *"Shared · only people added and admins can see"* or, in a group chat,
+  *"Shared · everyone in this group chat can see"* (`TeamAudienceLabel`).
+- **The switch follows a conversation the person asked for**: another bot or group chat, a conversation opened by
+  name (a notification, a link, search, a list), one they just made. That, and pressing the switch, are the only things
+  that keep a side as their choice (`localStorage`, `omb.team-side.<team>.<address>`, per person and team on the
+  device; Just me until they choose Team).
+- **A conversation that came on screen unasked is never kept.** The first conversation a page shows, one the app opened
+  as it started (before it knew this is a team's Cloud), or the bot's own pick changing because a teammate opened
+  another: when it is of the other side, the page goes back to the side the person chose, to their own conversation
+  with that bot when it is listed there. So a reload with Just me chosen opens their private chat, never the shared one.
+  With nowhere to go on that side the switch shows the side on screen for that page only.
+- **A draft stays with its conversation.** What is typed and not sent is kept per conversation, so it is never in the
+  message box of the other side; on a team the older per-bot draft is not read.
+- **Unread.** The side not shown carries a dot when the person has something unread there (their own marks: a private
+  chat's, or their own read line of a shared chat or a group chat). A bot's row carries only its side's marks: no
+  unread mark, working line or preview from the other side's conversations.
+- With one side empty (nobody shared a bot with them yet, say) there is no switch and the sidebar lists everything.
+  The first time the switch shows on a device, one line under it says what the two sides are.
 
 ## Who looks after a bot
 
@@ -658,7 +705,11 @@ run belongs to the person whose own request it answers (`server/host/run-owner.t
   `/api/groups/<id>/interrupt`, a typed "stop", a guarded request's `/interrupt`) from anyone else answers 403 with
   `code: "stop_not_yours"` and *"Only Priya or an admin can stop this."*; their "@Scout stop" in a group chat is an
   ordinary line there. Stop stays the only interrupt. The app shows Stop, and Retry on a stopped request, only to the
-  asker and to Owners and Admins (and to everyone for a run no person asked for). The stopped row records who pressed
+  asker and to Owners and Admins (and to everyone for a run no person asked for). The server holds Retry to the same
+  rule: running someone else's request again (`POST /api/bots/<bot>/messages/<id>/edit`, with the same words or new
+  ones) answers 403 with `code: "retry_not_yours"` and *"Only Priya or an admin can run this request again."* In a
+  shared conversation this rule alone decides it, whoever opened the conversation; renaming, deleting or otherwise
+  changing the conversation itself stays with whoever opened it and the Owner's side. The stopped row records who pressed
   Stop (`WireMessage.stoppedBy`): it reads "Maya stopped this." to everyone else and "You stopped this." to Maya.
 - **Who asked, for what is not a person's line** (read from the records the provenance labels come from, never from
   model text). A routine, a webhook and an app's event never run in a person's conversation: each runs in its own and
@@ -776,8 +827,8 @@ listed), two of that name, the person the bot is already talking with, a person 
 inbox here, and more than 10 passes an hour from one conversation (answers from an inbox included).
 
 **People.** The composer's @ list offers the teammates after the bots, with their picture and a "Person" tag; the
-sidebar lists the team's people with their pictures: your own row opens your inbox, a teammate's puts their @name in
-the composer on screen. Each person is tagged by their whole name, and by their first name when no other teammate shares
+sidebar shows the team's people as a row of faces above the bots, never as rows of their own: your own face opens your
+inbox, a teammate's puts their @name in the composer on screen. Each person is tagged by their whole name, and by their first name when no other teammate shares
 it (`shared/person-mention.ts`). A tag a bot shares is the person's: "@Ben" reaches Ben even with a bot called Ben, and
 that bot is not told it was named; only a longer bot name ("@Ben Bot") reaches a bot. A bot made or renamed with a
 person's name says so once in its own chat, and the Chief's `create_bot` result warns (`server/host/bot-name-clash.ts`).
