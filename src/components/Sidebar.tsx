@@ -666,7 +666,7 @@ export interface BotRowProps {
   botDragging?: boolean;
 }
 
-export function botRowProps<State extends Pick<AppState, "activeView" | "selectedId" | "revealThread" | "deletingBots" | "mascotMotion" | "pendingQueued" | "instances" | "liveCall" | "config">>(
+export function botRowProps<State extends Pick<AppState, "activeView" | "selectedId" | "revealThread" | "deletingBots" | "mascotMotion" | "pendingQueued" | "routineRuns" | "instances" | "liveCall" | "config">>(
   state: State,
   dispatch: Dispatch<Action>,
   bot: Bot,
