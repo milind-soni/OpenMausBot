@@ -132,15 +132,17 @@ const WORKSPACE_READ_FIELDS: Record<string, readonly string[]> = {
 export function workspaceReadKind(tool: string, input: Record<string, unknown>): WorkspaceReadKind | undefined {
   const fields = WORKSPACE_READ_FIELDS[tool];
   if (!Array.isArray(fields) || !Object.keys(input).every(key => fields.includes(key))) return undefined;
-  const glob = tool === "Glob" ? input.pattern : input.glob;
-  if (glob !== undefined && (typeof glob !== "string" || !/^[\w./*? -]+$/.test(glob) || glob.startsWith("/") || glob.split("/").includes(".."))) return undefined;
+  const rawGlob = tool === "Glob" ? input.pattern : input.glob;
+  const glob = typeof rawGlob === "string" ? rawGlob.replaceAll("\\", "/") : undefined;
+  if (glob !== undefined && (!/^[\w./*? -]+$/.test(glob) || glob.startsWith("/") || glob.split("/").includes(".."))) return undefined;
   if ((tool === "Glob" || tool === "Grep") && typeof input.pattern !== "string") return undefined;
   return tool === "Read" ? "file" : tool === "LS" ? "list" : "search";
 }
 
+const WINDOWS_DEVICE = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i;
 const PRIVATE_NAME = /^(?:\.|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.|$))|(?:^|[._ -])(?:credentials?|secrets?|passwords?|tokens?|private[-_ ]?keys?)(?:[._ -]|$)|\.(?:pem|key|pfx|p12|kdbx|jks|keystore)$/i;
 const pathParts = (path: string) => path.slice(parse(path).root.length).split(/[\\/]/).filter(Boolean);
-const plainName = (name: string) => !PRIVATE_NAME.test(name) && !/[:\0*?]/.test(name) && !/[. ]$/.test(name);
+const plainName = (name: string) => !PRIVATE_NAME.test(name) && !WINDOWS_DEVICE.test(name) && !/[:\0*?]/.test(name) && !/[. ]$/.test(name);
 
 function plainLocalPath(path: string): boolean {
   return isAbsolute(path) && !/^[\\/]{2}/.test(path) && pathParts(path).every(plainName);

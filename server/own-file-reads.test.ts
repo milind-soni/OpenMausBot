@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { acpReadPaths, ownReadRoots, readOnlyPaths, readToolPaths, readsOwnFiles, readsWorkspaceFiles } from "./own-file-reads.ts";
+import { acpReadPaths, ownReadRoots, readOnlyPaths, readToolPaths, readsOwnFiles, readsWorkspaceFiles, workspaceReadKind } from "./own-file-reads.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -131,4 +131,10 @@ it("keeps project reads inside the pinned folder and searches out of linked or p
   writeFileSync(env, "FIXTURE_TOKEN=fake");
   expect(readsWorkspaceFiles(data, project, env, "file")).toBe(false);
   expect(readsWorkspaceFiles(data, project, source, "list")).toBe(false);
+
+  expect(workspaceReadKind("Glob", { path: source, pattern: "src\\*.ts" })).toBe("search");
+  expect(workspaceReadKind("Glob", { path: source, pattern: "..\\secrets\\*.ts" })).toBeUndefined();
+  expect(workspaceReadKind("Glob", { path: source, pattern: "\\root\\*.ts" })).toBeUndefined();
+  expect(workspaceReadKind("Grep", { path: source, pattern: "token", glob: "src\\*.ts" })).toBe("search");
+  expect(readsWorkspaceFiles(data, project, join(source, "CON"), "file")).toBe(false);
 });
