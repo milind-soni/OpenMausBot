@@ -7241,5 +7241,6 @@
   "sidebar.update.readyInstall": "Установить {app} {version}",
   "sidebar.update.readyShort": "Обновление готово",
   "sidebar.update.restartAction": "Перезапустить",
-  "sidebar.update.retryAction": "Повторить"
+  "sidebar.update.retryAction": "Повторить",
+  "sidebar.nav.publishedApps": "Опубликованные приложения"
 }

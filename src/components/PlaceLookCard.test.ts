@@ -53,11 +53,12 @@ it("the tint: a place's colour in the skin's own tone; no colour, or one this ap
 
 it("this computer, by default: plain, nothing chosen, in plain words with no picture yet", async () => {
   await page(COMPUTER, { own: true });
-  expect([checked(), tint(), host.querySelector("[data-place-banner]")], "no colour, no tint, no picture: the sidebar as it always was").toEqual([[], null, null]);
+  // With no colour, None is the choice: the first swatch, ringed.
+  expect([checked(), tint(), host.querySelector("[data-place-banner]")], "no colour, no tint, no picture: the sidebar as it always was").toEqual([["slate"], null, null]);
   expect(host.querySelector("[data-place-picture]")?.getAttribute("data-place-picture")).toBe("none");
   const words = host.querySelector("[data-sidebar-look]")!.textContent!;
-  for (const said of ["Sidebar color", "Tints the top of the sidebar.", "Sidebar picture", "Your own image, faded into the top of the sidebar."]) expect(words).toContain(said);
-  expect(words, "no Cloud's words on this computer").not.toMatch(/This computer|place|workspace|Everyone here|admins/i);
+  for (const said of ["Sidebar color", "Tints the top of the sidebar and", "Sidebar picture", "An image faded into the top of the sidebar."]) expect(words).toContain(said);
+  expect(words, "no Cloud's words on this computer").not.toMatch(/workspace|Everyone here|admins/i);
   expect(host.querySelector("[role='radiogroup']")?.getAttribute("aria-label")).toBe("Sidebar color");
   expect([swatch("slate").getAttribute("aria-label"), swatch("slate").disabled, button("Use an image")?.disabled], "None, and both changeable here").toEqual(["None", false, false]);
   expect(host.querySelector("[data-sidebar-look]")?.getAttribute("data-settings-look"), "in the Simple look in Advanced too").toBe("simple");
@@ -71,7 +72,7 @@ it("this computer takes a colour and a picture, both shown at once; None and Rem
   expect(tint(), "the sidebar takes it at once").toContain("var(--identity-teal)");
   await click(swatch("slate"));
   expect(workspaces.color).toHaveBeenLastCalledWith("slate");
-  expect([checked(), tint()], "None: no tint, and nothing chosen, as at first").toEqual([[], null]);
+  expect([checked(), tint()], "None: no tint, and None chosen, as at first").toEqual([["slate"], null]);
 
   const input = host.querySelector("[data-place-picture-input]") as HTMLInputElement;
   const file = new File(["png"], "beach.png", { type: "image/png" });
@@ -91,8 +92,9 @@ it("this computer takes a colour and a picture, both shown at once; None and Rem
 
 it("a solo Cloud's owner changes both its colour (on the Admin) and its picture", async () => {
   const { workspaces } = await page(look({ name: "My Cloud", color: null, swatch: null }));
-  expect(host.textContent).toContain("My Cloud shows in this color at the top of the sidebar and on its icon on the left of the app.");
-  expect(host.textContent).toContain("Everyone who uses these bots sees it.");
+  // One line per row on every place (the same words as This computer's).
+  expect(host.textContent).toContain("Tints the top of the sidebar and My Cloud's circle.");
+  expect(host.textContent).toContain("An image faded into the top of the sidebar.");
   expect([swatch("rose").disabled, button("Use an image")?.disabled]).toEqual([false, false]);
   await click(swatch("rose"));
   expect(workspaces.color).toHaveBeenCalledWith("rose");
@@ -104,7 +106,7 @@ it("choosing a swatch saves it through main, and the tint follows at once", asyn
   const { workspaces } = await page(look());
   expect(tint()).toContain("var(--identity-teal)");
   expect(swatch("green").getAttribute("aria-checked")).toBe("true");
-  expect(host.textContent).toContain("Client A shows in this color at the top of the sidebar and on its icon on the left of the app.");
+  expect(host.textContent).toContain("Tints the top of the sidebar and Client A's circle.");
   await click(swatch("rose"));
   expect(workspaces.color).toHaveBeenCalledWith("rose");
   expect(swatch("rose").getAttribute("aria-checked")).toBe("true");
@@ -148,7 +150,7 @@ it("a browser or an older app: no colour and no tint, only the place's picture",
   expect(host.querySelector("[data-swatch]")).toBeNull();
   expect(host.querySelector("[data-place-tint]")).toBeNull();
   expect(host.querySelector("[data-place-picture]")).toBeTruthy();
-  expect(host.textContent).toContain("An image faded into the top of the sidebar. Everyone who uses these bots sees it.");
+  expect(host.textContent).toContain("An image faded into the top of the sidebar.");
   await act(async () => root?.unmount());
   vi.resetModules();
   vi.doMock("@/state/store", () => ({ useStore: () => ({ state: { config: {} } }) }));

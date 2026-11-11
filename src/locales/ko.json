@@ -7722,5 +7722,6 @@
   "settings.simple.themes.followHint": "컴퓨터를 따름: 밝을 때는 Daylight, 어두울 때는 Midnight.",
   "settings.theme.lightOrDark": "라이트 또는 다크",
   "settings.userBubbles.simpleTitle": "내 메시지에 봇 색상 사용",
-  "sidebar.account.moving": "내 클라우드로 이동 중…"
+  "sidebar.account.moving": "내 클라우드로 이동 중…",
+  "sidebar.nav.publishedApps": "게시한 앱"
 }

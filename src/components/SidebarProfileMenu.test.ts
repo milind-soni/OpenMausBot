@@ -304,10 +304,10 @@ describe("profileMenuItems", () => {
     ...patch,
   });
 
-  it("starts with your account, then Phone & devices and Settings, then Plan & billing and Help after a divider", () => {
+  it("starts with your account, then Phone & devices, Settings and Plan & billing, then Help after a divider", () => {
     const items = build();
     expect(items.map((item) => item.key)).toEqual(["account", "phone-devices", "settings", "plan", "support"]);
-    expect(items.filter((item) => item.separatorBefore).map((item) => item.key)).toEqual(["phone-devices", "plan"]);
+    expect(items.filter((item) => item.separatorBefore).map((item) => item.key)).toEqual(["phone-devices", "support"]);
     expect(items.find((item) => item.key === "support")!.submenu!.map((item) => item.key)).toEqual(["help", "shortcuts", "feedback", "about"]);
     expect(items[0]).toMatchObject({ label: "Ada Lovelace", subtitle: "Pro · ada@example.com", large: true, chevron: true });
   });
@@ -473,8 +473,8 @@ describe("Simple mode's account menu", () => {
 
   it("puts the move's row first in Advanced's account menu too, under its own divider", () => {
     const move = [{ key: "cloud-move", label: "Moving to My Cloud…", title: "Moving your bots to My Cloud… 34 of 120 chats", onSelect: noop }];
-    expect(groups(build({ simple: undefined, move }))).toEqual([["cloud-move"], ["account"], ["phone-devices", "settings"], ["plan", "support"]]);
-    expect(groups(build({ simple: undefined }))).toEqual([["account"], ["phone-devices", "settings"], ["plan", "support"]]);
+    expect(groups(build({ simple: undefined, move }))).toEqual([["cloud-move"], ["account"], ["phone-devices", "settings", "plan"], ["support"]]);
+    expect(groups(build({ simple: undefined }))).toEqual([["account"], ["phone-devices", "settings", "plan"], ["support"]]);
   });
 
   it("draws a person instead of a question mark for someone with no name, at the trigger's own size", () => {

@@ -10234,5 +10234,6 @@
   "settings.runCard.line": "顯示你目前請求的 shell 指令。",
   "settings.chatWidth.line": "訊息泡泡在這台裝置上最多能有多寬。",
   "settings.font.line": "在這台裝置上取代主題字型。",
-  "settings.profile.awayEmails": "我不在時寄電子郵件給我"
+  "settings.profile.awayEmails": "我不在時寄電子郵件給我",
+  "sidebar.nav.publishedApps": "已發佈的 App"
 }

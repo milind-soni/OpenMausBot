@@ -7047,5 +7047,6 @@
   "sidebar.update.readyInstall": "Installa {app} {version}",
   "sidebar.update.readyShort": "Aggiornamento pronto",
   "sidebar.update.restartAction": "Riavvia",
-  "sidebar.update.retryAction": "Riprova"
+  "sidebar.update.retryAction": "Riprova",
+  "sidebar.nav.publishedApps": "App pubblicate"
 }

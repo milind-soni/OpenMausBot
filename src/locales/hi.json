@@ -3560,5 +3560,6 @@
   "sidebar.update.readyInstall": "{app} {version} इंस्टॉल करें",
   "sidebar.update.readyShort": "अपडेट तैयार",
   "sidebar.update.restartAction": "रीस्टार्ट करें",
-  "sidebar.update.retryAction": "फिर से कोशिश करें"
+  "sidebar.update.retryAction": "फिर से कोशिश करें",
+  "sidebar.nav.publishedApps": "प्रकाशित ऐप्स"
 }

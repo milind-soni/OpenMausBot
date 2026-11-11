@@ -3706,5 +3706,6 @@
   "sidebar.update.readyInstall": "Installer {app} {version}",
   "sidebar.update.readyShort": "Mise à jour prête",
   "sidebar.update.restartAction": "Redémarrer",
-  "sidebar.update.retryAction": "Réessayer"
+  "sidebar.update.retryAction": "Réessayer",
+  "sidebar.nav.publishedApps": "Apps publiées"
 }

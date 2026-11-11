@@ -3,7 +3,8 @@ import { Smartphone } from "lucide-react";
 
 import { t } from "@/lib/i18n";
 import type { CompanionState, PhoneDevice, PhoneSetupController } from "./PhoneSetupFlow";
-import { Switch } from "./SettingsPrimitives";
+import { SIMPLE_CARD, Switch } from "./SettingsPrimitives";
+import { cn } from "@/lib/cn";
 import { relative } from "./PhoneDevicesSection";
 
 const ROUTE_LABEL = { wifi: "remote.devices.route.wifi", tailscale: "remote.devices.route.tailscale", relay: "remote.devices.route.relay" } as const;
@@ -138,7 +139,7 @@ export function PairedPhones({ c, state, onPairAgain }: { c: PhoneSetupControlle
   return (
     <>
       {state.devices.length > 0 && (
-        <ul data-settings-rows="" data-settings-icons="" className="settings-card flex flex-col overflow-hidden rounded-[12px] border-[0.5px] border-(--settings-edge) bg-menu">
+        <ul data-settings-rows="" data-settings-icons="" className={cn(SIMPLE_CARD, "flex flex-col overflow-hidden")}>
           {sortPhones(state.devices, connected).map((device) => (
             <PhoneRow key={device.id} device={device} connected={connected.has(device.id)} state={state} c={c} onRemoved={setRemoved} onPairAgain={onPairAgain} />
           ))}

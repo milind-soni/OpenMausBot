@@ -7185,5 +7185,6 @@
   "sidebar.update.readyInstall": "Zainstaluj {app} {version}",
   "sidebar.update.readyShort": "Aktualizacja gotowa",
   "sidebar.update.restartAction": "Uruchom ponownie",
-  "sidebar.update.retryAction": "Ponów"
+  "sidebar.update.retryAction": "Ponów",
+  "sidebar.nav.publishedApps": "Opublikowane aplikacje"
 }

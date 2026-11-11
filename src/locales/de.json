@@ -3863,5 +3863,6 @@
   "sidebar.update.readyInstall": "{app} {version} installieren",
   "sidebar.update.readyShort": "Update bereit",
   "sidebar.update.restartAction": "Neu starten",
-  "sidebar.update.retryAction": "Erneut versuchen"
+  "sidebar.update.retryAction": "Erneut versuchen",
+  "sidebar.nav.publishedApps": "Veröffentlichte Apps"
 }

@@ -36,9 +36,11 @@ beforeEach(() => {
 });
 
 describe("Phone & devices", () => {
-  it("with nothing paired and no way in on, shows one task: get the app, then pair, with the ways in folded into one row", () => {
+  it("with nothing paired and no way in on, shows one task: pair, with where to get the app in plain words and the ways in folded into one row", () => {
     const html = page(true);
-    expect(html).toMatch(/Pair a phone[\s\S]*?data-step-row="1"[\s\S]*?Get the app[\s\S]*?App Store[\s\S]*?Android[\s\S]*?data-step-row="2"[\s\S]*?Pair[\s\S]*?Then scan the pairing code with the MausBot app\./);
+    expect(html).toMatch(/Pair a phone[\s\S]*?Pair[\s\S]*?Install MausBot on your phone from the App Store or Google Play, then scan this code in the app\./);
+    expect(html, "no store or download link in the desktop app").not.toMatch(/data-phone-app|apps\.apple\.com|\.apk|<a [^>]*App Store/);
+    expect(html).not.toContain("data-step-row");
     expect(html.match(/data-phone-pairing-action/g), "exactly one button is the pairing door").toHaveLength(1);
     expect(html).toMatch(/data-phone-pairing-action=""[^>]*>Pair a phone</);
     expect(html).toContain("How your phone reaches this computer");

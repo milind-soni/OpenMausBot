@@ -194,7 +194,7 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, 
     : page === "phone" && phone.kind === "attention" ? "warning" as const : null;
   const searching = query.trim() !== "";
   return (
-    <nav aria-label={t("settings.title")} className={cn("flex min-h-0 flex-col", narrow ? "flex-1" : "w-[220px] shrink-0 border-r-[0.5px] border-(--settings-edge)")}>
+    <nav aria-label={t("settings.title")} className={cn("flex min-h-0 flex-col", narrow ? "flex-1" : "w-[220px] shrink-0 shadow-[inset_-0.5px_0_0_var(--settings-edge)]")}>
       <div className={cn("shrink-0", narrow ? "px-4 pb-2" : "p-3 pb-0")}>
         <SettingsSearchField query={query} onQuery={onQuery} onClose={onClose}
           onFirst={() => listRef.current?.querySelector<HTMLElement>("button[data-settings-hit], button[data-settings-page]")?.focus()} />
@@ -232,7 +232,7 @@ function AdvancedModeFooter({ narrow, onChange }: { narrow: boolean; onChange: (
   const advanced = useAdvancedMode();
   return (
     <div data-settings-block="advanced-mode" title={t("settings.advancedMode.tooltip")}
-      className={cn("flex h-12 shrink-0 items-center justify-between gap-3 border-t-[0.5px] border-(--settings-edge)", narrow ? "px-4" : "px-5")}>
+      className={cn("flex h-12 shrink-0 items-center justify-between gap-3 shadow-[inset_0_0.5px_0_var(--settings-edge)]", narrow ? "px-4" : "px-5")}>
       <span id="settings-advanced-mode" className="text-[13px] leading-5 text-ink">{t("settings.advancedMode.title")}</span>
       <Switch checked={advanced} aria-labelledby="settings-advanced-mode" data-settings-advanced-switch="" onClick={() => onChange(!advanced)} />
     </div>

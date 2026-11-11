@@ -12,12 +12,13 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: { host: { platform: f.platform } }, ready: true }) }));
 vi.mock("@/state/store", async original => ({ ...await original<typeof import("@/state/store")>(), useStore: () => ({ state: { bots: [{ name: "Ember" }] }, dispatch: vi.fn() }) }));
 import { CloudAccountSettings, CloudPlanOnCloud, TeamPeopleCard, cloudLinkAction, cloudPlanLabel } from "./CloudAccountSettings";
+import { SignOutConfirm } from "./settings/SignOutConfirm";
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => void }>;
 function nodes(value: ReactNode): Node[] { if (!isValidElement(value)) return []; const node = value as Node; return [node, ...Children.toArray(node.props.children).flatMap(nodes)]; }
 // Settings shows the account and the plan on two pages, from one component; both are rendered here, from the same state.
 function render(props?: { linkRequest?: number; cloudHome?: boolean; teamHome?: { name: string; cloudPage?: string }; onConnectPhone?: () => void; onAddCloud?: () => void; onSignIn?: () => void }) {
   f.effects = []; let html = ""; const trees: ReactNode[] = [];
-  for (const part of ["account", "plan"] as const) {
+  for (const part of ["account", "plan", "sign-out"] as const) {
     f.index = 0; let tree: ReactNode; function Capture() { tree = CloudAccountSettings({ ...props, part }); return tree; }
     html += renderToStaticMarkup(createElement(Capture)); trees.push(tree);
   }
@@ -62,10 +63,13 @@ it("names the verified tier; no tier is today's Pro, and a tier newer than the a
   expect(render().html).not.toContain("No plan yet"); expect(render().html).not.toContain("Add a Cloud");
   expect(cloudPlanLabel()).toBe("Pro"); expect(cloudPlanLabel("toString")).toBe("Cloud");
 });
-it("sign-out requires confirmation and preserves local and organization wording", async () => {
+const confirmDialog = () => render().nodes.find(node => node.type === SignOutConfirm) as ReactElement<{ onConfirm: () => Promise<unknown>; onClose: () => void }> | undefined;
+it("sign-out asks first, says what keeps running, and Cancel keeps you signed in", async () => {
   await ready(free); click("Sign out"); expect(bridge.signOut).not.toHaveBeenCalled();
-  expect(render().html).toContain("Your plan, your bots and this computer&#x27;s chats stay as they are."); click("Keep signed in"); expect(bridge.signOut).not.toHaveBeenCalled();
-  click("Sign out"); click("Sign out"); await flush(); expect(bridge.signOut).toHaveBeenCalledExactlyOnceWith();
+  expect(render().html).toContain("Sign out of MausBot?");
+  expect(render().html).toContain("Your bots keep running on this computer.");
+  confirmDialog()!.props.onClose(); expect(confirmDialog()).toBeUndefined(); expect(bridge.signOut).not.toHaveBeenCalled();
+  click("Sign out"); void confirmDialog()!.props.onConfirm(); await flush(); expect(bridge.signOut).toHaveBeenCalledExactlyOnceWith();
   expect(render().html).toContain("Sign in to MausBot"); expect(fetch).not.toHaveBeenCalled();
 });
 it("never accesses account bridge from remote companion pages", async () => {
@@ -163,7 +167,7 @@ it("a free account may add a Cloud, and is told what to do if it bought with ano
   all(render({ onAddCloud: vi.fn() }).html, ["No plan yet", ">Add a Cloud<", "Bought a plan with a different email?"]);
   none(render({ onAddCloud: vi.fn() }).html, ["Choose a Cloud plan", "Free account", "a checkout return alone"]);
   button("Sign out and use that email")!.props.onClick!();
-  expect(render().html).toContain("stay as they are"); expect(bridge.signOut).not.toHaveBeenCalled();
+  expect(render().html).toContain("Sign out of MausBot?"); expect(bridge.signOut).not.toHaveBeenCalled();
 });
 it("shows the sign-in code plainly, with how long it works", async () => {
   await ready({ status: "connecting", enrollment: { userCode: "ABCDE-FGHJK", expiresAt: Date.UTC(2026, 9, 2, 12, 15) } });
@@ -262,7 +266,7 @@ it("stays exactly as before when the account has no Cloud machine", async () => 
 });
 it.each([
   ["provisioning", "Setting up the Cloud", false],
-  ["ready", "Sign in there with your own Claude or ChatGPT account", true],
+  ["ready", "Sign in there with your AI account", true],
   ["stopped", "The Cloud is stopped", false],
   ["payment-problem", "problem with your payment", false],
   ["failed", "could not be set up yet", false],
@@ -280,13 +284,13 @@ it("while the bots move to My Cloud, says how the move goes, with nothing to ope
   const moving = async () => { await ready({ ...pro, machine: { status: "ready", origin } }); f.effects[2](); await flush(); return render(); };
   let view = await moving();
   all(view.html, ["Moving your bots to My Cloud… 3 of 12 chats", "data-cloud-moving"]);
-  none(view.html, ["data-plan-open-cloud", "Switch back to This computer", "Sign in there with your own"]);
+  none(view.html, ["data-plan-open-cloud", "Switch back to This computer", "Sign in there with your AI account"]);
   move = { phase: "finishing" };
   f.values = []; view = await moving();
   all(view.html, ["Moving to My Cloud… almost done"]); none(view.html, ["data-plan-open-cloud", "Switch back to This computer"]);
   move = undefined;
   f.values = []; view = await moving();
-  all(view.html, ["data-plan-open-cloud", "Sign in there with your own"]); none(view.html, ["data-cloud-moving", "Moving", "Switch back to This computer"]);
+  all(view.html, ["data-plan-open-cloud", "Sign in there with your AI account"]); none(view.html, ["data-cloud-moving", "Moving", "Switch back to This computer"]);
 });
 it("this computer's Settings has no lending card: no switch, no Which Cloud, nothing to choose, whatever the Cloud's state", async () => {
   for (const machine of [{ status: "ready", origin }, { status: "provisioning" }, { status: "stopped", origin }] as const) {
@@ -303,7 +307,7 @@ it("says why a ready Cloud can't be reached when the Admin knows, with no button
   expect(html).toContain('data-cloud-unreachable="host"');
   expect(html).toContain("Our hosting provider is restarting the machine the Cloud runs on. The Cloud and its files are safe, and it comes back on its own, usually within about 20 minutes.");
   expect(html).not.toContain("data-plan-open-cloud");
-  expect(html).not.toContain("Sign in there with your own");
+  expect(html).not.toContain("Sign in there with your AI account");
   push({ ...pro, machine: { status: "ready", origin, unreachable: { cause: "no_answer", since } } });
   html = render().html;
   expect(html).toContain("The Cloud hasn&#x27;t answered for a few minutes. Nothing was lost, and we&#x27;ve been told.");
@@ -319,7 +323,7 @@ it("says why a ready Cloud can't be reached when the Admin knows, with no button
 it("promises no included AI: the person signs in with their own account there", async () => {
   await ready({ ...pro, machine: { status: "ready", origin } });
   const html = render().html;
-  expect(html).toContain("Sign in there with your own Claude or ChatGPT account, or an API key");
+  expect(html).toContain("Sign in there with your AI account or a key");
   expect(html).not.toMatch(/included/i);
 });
 it("connects with one click, sending nothing from the page", async () => {

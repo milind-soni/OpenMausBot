@@ -138,7 +138,8 @@ export function AiPage() {
   const [more, setMore] = useState(false);
   // Simple ends after Providers: Other services is one closed fold row, so the page fits one window.
   const [services, setServices] = useState(ctx.advanced || anchor === "ai-keys");
-  const shown = ctx.advanced || services;
+  // A key asked for by search or a link opens Other services whatever the fold says.
+  const shown = ctx.advanced || services || anchor === "ai-keys";
   const count = KEY_SECTIONS.filter((section) => section.id !== "ai").length;
   return <>
     <AdminOnly>
@@ -148,7 +149,7 @@ export function AiPage() {
       {!ctx.advanced && (
         <SettingsGroup block="ai-keys-fold">
           <SettingsRows>
-            <SettingsFoldRow id="ai-other-services" title={t("settings.ai.otherServices")} value={String(count)} open={services} onToggle={() => setServices((open) => !open)} />
+            <SettingsFoldRow id="ai-other-services" title={t("settings.ai.otherServices")} value={String(count)} open={shown} onToggle={() => setServices(!shown)} />
           </SettingsRows>
         </SettingsGroup>
       )}

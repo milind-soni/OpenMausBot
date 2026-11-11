@@ -57,6 +57,7 @@ export function BoatOfferPanel() {
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <h3 id={titleId} className="text-[14px] leading-5 text-ink">{t("boatOffer.title")}</h3>
         <p className="text-[13px] leading-[18px] text-ink-secondary">{t("boatOffer.body")}</p>
+        <p data-boat-offer-yourself className="mt-1 text-[12px] leading-4 text-ink-secondary">{t("boatOffer.yourself")}</p>
       </div>
       <LinkButton url={BOAT_OFFER.url} label={t("boatOffer.get")} className="ui-button ui-button-md shrink-0 rounded-full" onOpened={() => reportBoatOffer("get_boat", "settings")} />
     </div>

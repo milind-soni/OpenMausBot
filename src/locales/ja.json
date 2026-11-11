@@ -8043,5 +8043,6 @@
   "settings.simple.group.typing": "言語と入力",
   "settings.simple.themes.followHint": "コンピュータに合わせる：明るいときは Daylight、暗いときは Midnight。",
   "settings.theme.lightOrDark": "ライトまたはダーク",
-  "settings.userBubbles.simpleTitle": "自分のメッセージにボットの色を使う"
+  "settings.userBubbles.simpleTitle": "自分のメッセージにボットの色を使う",
+  "sidebar.nav.publishedApps": "公開したアプリ"
 }

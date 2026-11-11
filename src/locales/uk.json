@@ -3986,5 +3986,6 @@
   "sidebar.update.readyInstall": "Встановити {app} {version}",
   "sidebar.update.readyShort": "Оновлення готове",
   "sidebar.update.restartAction": "Перезапустити",
-  "sidebar.update.retryAction": "Повторити"
+  "sidebar.update.retryAction": "Повторити",
+  "sidebar.nav.publishedApps": "Опубліковані застосунки"
 }

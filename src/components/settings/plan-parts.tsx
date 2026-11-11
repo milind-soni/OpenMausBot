@@ -46,7 +46,8 @@ export function CancelPlanRow({ renewal, actions, onChanged }: { renewal: CloudR
   return <>
     <div data-settings-block="cancel" className="contents">
       <SettingRow title={t(renewal.trial ? "cloudCancel.cancelTrial" : "cloudCancel.cancelPlan")}>
-        <button type="button" data-cloud-cancel="renewing" data-danger="" className="settings-quiet cursor-pointer" onClick={() => setOpen(true)}>
+        <button type="button" data-cloud-cancel="renewing" data-danger="" className="settings-quiet cursor-pointer" onClick={() => setOpen(true)}
+          aria-label={t(renewal.trial ? "cloudCancel.cancelTrial" : "cloudCancel.cancelPlan")}>
           {t("settings.plan.cancelAction")}
         </button>
       </SettingRow>

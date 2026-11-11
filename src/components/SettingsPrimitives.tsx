@@ -9,7 +9,9 @@ export const SettingsLook = createContext(false);
 
 const InCard = createContext(false);
 
-export const SIMPLE_CARD = "settings-card rounded-[12px] border-[0.5px] border-(--settings-edge) bg-menu";
+/** A card: radius 12 on the card fill, with its 0.5 px edge drawn as an inset hairline above the rows (a border this thin
+ * is rounded up to a whole pixel on some screens, which made cards read heavier than their 0.5 px dividers). */
+export const SIMPLE_CARD = "settings-card relative rounded-[12px] bg-menu after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:shadow-[inset_0_0_0_0.5px_var(--settings-edge)] after:content-['']";
 
 export function Switch({
   checked,

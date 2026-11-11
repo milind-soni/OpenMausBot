@@ -5923,5 +5923,6 @@
   "sidebar.update.readyInstall": "Cài {app} {version}",
   "sidebar.update.readyShort": "Bản cập nhật đã sẵn sàng",
   "sidebar.update.restartAction": "Khởi động lại",
-  "sidebar.update.retryAction": "Thử lại"
+  "sidebar.update.retryAction": "Thử lại",
+  "sidebar.nav.publishedApps": "Ứng dụng đã xuất bản"
 }

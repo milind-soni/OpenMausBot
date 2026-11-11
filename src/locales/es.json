@@ -6422,5 +6422,6 @@
   "sidebar.update.readyInstall": "Instalar {app} {version}",
   "sidebar.update.readyShort": "Actualización lista",
   "sidebar.update.restartAction": "Reiniciar",
-  "sidebar.update.retryAction": "Reintentar"
+  "sidebar.update.retryAction": "Reintentar",
+  "sidebar.nav.publishedApps": "Apps publicadas"
 }

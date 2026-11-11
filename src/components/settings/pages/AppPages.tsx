@@ -61,23 +61,22 @@ export function AppPage() {
         </SettingsRows>
       </SettingsGroup>
     )}
-    {ctx.desktop && (window.ogb?.environments
+    {/* Your computers is Advanced: in Simple the rail switches places, and the page stays one window tall. */}
+    {ctx.desktop && ctx.advanced && (window.ogb?.environments
       ? <ConnectedWorkspacesSettings label={t("settings.app.computers")} description={t("settings.app.computersLine")} />
       : !ctx.client && <PlacesFromHere />)}
-    {ctx.desktop && <RemoteComputerSection hideWhenUnavailable legacyOnly />}
+    {ctx.desktop && ctx.advanced && <RemoteComputerSection hideWhenUnavailable legacyOnly />}
     <SettingsGroup label={t("sidebar.menu.helpShort")} block="help">
       <SettingsRows>
         <SettingsLinkRow title={t("sidebar.menu.help")} external onClick={() => void openExternalLink(HELP_CENTER_URL)} />
         <SettingsLinkRow title={t("sidebar.menu.feedback")} external onClick={() => void openExternalLink(FEEDBACK_URL)} />
         <SettingsLinkRow title={t("sidebar.menu.shortcuts")} onClick={() => { dispatch({ type: "toggleAppSettings", open: false }); dispatch({ type: "toggleShortcuts", open: true }); }} />
         {!ctx.client && <ReplayTourRow />}
-        {desk && (window.ogb?.exportDiagnostics ? <DiagnosticsRow simple /> : <InertRow title={t("settings.app.diagnostics")}
+        {desk && ctx.advanced && (window.ogb?.exportDiagnostics ? <DiagnosticsRow simple /> : <InertRow title={t("settings.app.diagnostics")}
           control={<button type="button" className="ui-button" tabIndex={-1}>{t("settings.diagnostics.export")}</button>} />)}
-      </SettingsRows>
-    </SettingsGroup>
-    <SettingsGroup label={t("sidebar.menu.about")} block="about">
-      <SettingsRows>
-        <SettingsLinkRow title={t("settings.app.about", { app: productName() })} value={appVersion()} onClick={() => setAbout(true)} />
+        <div data-settings-block="about" className="contents">
+          <SettingsLinkRow title={t("settings.app.about", { app: productName() })} value={appVersion()} onClick={() => setAbout(true)} />
+        </div>
       </SettingsRows>
     </SettingsGroup>
     <AboutDialog open={about} onClose={() => setAbout(false)} />
@@ -108,7 +107,7 @@ function PlacesFromHere() {
       </SettingsRows>
     </SettingsGroup>
     <SettingsGroup label={t("connectedWorkspaces.localTitle")} block="environments">
-      <SettingsRows><InertRow title={t("connectedWorkspaces.localTitle")} control={<button type="button" className="ui-button" tabIndex={-1}>{t("connectedWorkspaces.newEnvironment")}</button>} /></SettingsRows>
+      <SettingsRows><InertRow title={t("connectedWorkspaces.newEnvironment")} /></SettingsRows>
     </SettingsGroup>
   </>;
 }

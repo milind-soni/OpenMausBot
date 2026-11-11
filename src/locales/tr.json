@@ -5923,5 +5923,6 @@
   "sidebar.update.readyInstall": "{app} {version} yükle",
   "sidebar.update.readyShort": "Güncelleme hazır",
   "sidebar.update.restartAction": "Yeniden başlat",
-  "sidebar.update.retryAction": "Tekrar dene"
+  "sidebar.update.retryAction": "Tekrar dene",
+  "sidebar.nav.publishedApps": "Yayınlanan uygulamalar"
 }
