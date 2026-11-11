@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -29,6 +29,30 @@ describe("which bot files a move carries", () => {
     symlinkSync(join(data, "secret.txt"), join(data, "workspaces", "b1", "link.txt"));
     expect(await listBotFiles(data, ["b1", "../x"])).toEqual([{ path: "workspaces/b1/notes.md", size: 5, sha256: sha("hello") },
       { path: "task-workspaces/b1/t1/r.csv", size: 3, sha256: sha("a,b") }]);
+  });
+});
+
+describe("bot-file digests after a timestamp-preserving edit", () => {
+  it.each(["overwrite", "replace"])("rechecks a same-size file after %s with its old mtime", async (operation) => {
+    const data = mkdtempSync(join(tmpdir(), "omb-files-digest-"));
+    const path = "workspaces/b1/notes.md";
+    const full = join(data, path);
+    const old = new Date("2020-01-01T00:00:00Z");
+    mkdirSync(join(data, "workspaces", "b1"), { recursive: true });
+    writeFileSync(full, "first");
+    utimesSync(full, old, old);
+    expect(await listBotFiles(data, ["b1"])).toEqual([{ path, size: 5, sha256: sha("first") }]);
+    if (operation === "replace") {
+      const replacement = join(data, "replacement.md");
+      writeFileSync(replacement, "later");
+      utimesSync(replacement, old, old);
+      renameSync(replacement, full);
+    } else {
+      writeFileSync(full, "later");
+      utimesSync(full, old, old);
+    }
+    expect(await listBotFiles(data, ["b1"])).toEqual([{ path, size: 5, sha256: sha("later") }]);
+    expect(await listBotFiles(data, ["b1"])).toEqual([{ path, size: 5, sha256: sha("later") }]);
   });
 });
 
