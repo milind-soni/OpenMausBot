@@ -32,6 +32,33 @@ export function pageMessage(message: Message): Message | Record<string, unknown>
   return { ...slim, tool: { ...tool, output: toolResultPrefix(output, TOOL_OUTPUT_PREVIEW), clipped: true } };
 }
 
+/** What one snapshot of every conversation may carry in messages. The companion proxy buffers a JSON answer up to
+ * 32 MiB and refuses a larger one, so a host with many long conversations must stay under that with room for the rest
+ * of the snapshot, or a paired client can't load its bot list at all. */
+export const SNAPSHOT_MESSAGE_BYTES = 24 * 1024 * 1024;
+
+/** Fits a snapshot's conversation pages into `budget` bytes of messages. Each conversation gets an even share, what a
+ * short one leaves goes to the longer ones, and a cut drops the oldest messages and sets hasMore, so scrolling up
+ * still reads them. The newest message always stays: the next page is asked for from the oldest one held. */
+export function fitSnapshotPages<T extends { messages: unknown[]; hasMore?: boolean }>(owners: T[], budget = SNAPSHOT_MESSAGE_BYTES): T[] {
+  const sized = owners.map((owner, index) => {
+    const sizes = owner.messages.map((message) => Buffer.byteLength(JSON.stringify(message)));
+    return { index, sizes, bytes: sizes.reduce((sum, size) => sum + size, 0) };
+  });
+  if (sized.reduce((sum, owner) => sum + owner.bytes, 0) <= budget) return owners;
+  const fitted = [...owners];
+  let left = budget;
+  sized.sort((a, b) => a.bytes - b.bytes).forEach(({ index, sizes, bytes }, order) => {
+    const share = left / (sized.length - order);
+    let kept = sizes.length;
+    let used = bytes;
+    while (kept > 1 && used > share) used -= sizes[sizes.length - kept--]!;
+    left = Math.max(0, left - used);
+    if (kept < sizes.length) fitted[index] = { ...owners[index]!, messages: owners[index]!.messages.slice(-kept), hasMore: true };
+  });
+  return fitted;
+}
+
 /** A conversation's messages one page at a time (newest first when `before` is absent), and the page around one message. */
 export function messagePages(store: Pick<Store, "messagesFor" | "messagesTail" | "activeLeaf">) {
   function messagePage(threadId: string, limit: number | undefined, before?: string | null) {

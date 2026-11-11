@@ -10,6 +10,7 @@ import { saveXmindUpload, XMIND_MIME } from "../xmind.ts";
 import { deliveredCopy } from "../bot-attachment.ts";
 import { memberBot, memberGroup, type Viewer, type VisibleSet } from "../bot-visibility.ts";
 import type { ComputerControl } from "../computer-control.ts";
+import { fitSnapshotPages } from "../host/message-pages.ts";
 import { speakerOf, type PersonName } from "../replies.ts";
 import type { Coordinator } from "../coordinator.ts";
 import type { WorkspaceAccess } from "../enterprise.ts";
@@ -95,20 +96,24 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       // tasks stays explicit: clients expect [] where wireBot() would omit the key.
       const shownBots = (deps.botOrderFor?.(auth, store.bots) ?? store.bots).filter((bot) => visible.bot(bot.id));
       const queued = publicBotQueuedMessages();
+      const bots = shownBots.map((bot) => {
+        const wired = wireBot(bot);
+        // Narrowed first: on a Team Cloud the selected conversation may be someone else's, and its words never go out.
+        const shown = memberBot({ ...wired, tasks: wired.tasks ?? [] }, visible);
+        return { ...shown, ...(typeof shown.threadId === "string" ? messagePage(shown.threadId, limit) : { messages: [], hasMore: false, activeLeafId: null }) };
+      });
+      const groups = store.groups.filter((g) => visible.group(g.id)).map((g) => {
+        const group = publicGroupState(g);
+        const room = { ...(deps.groupFor?.(auth, group) ?? group), ...messagePage(g.threadId, limit) };
+        return visible.everything || !visible.member ? room : memberGroup(room);
+      });
+      // Asked for whole transcripts, the caller gets them; only a page can be read back later.
+      const pages: Array<{ messages: unknown[]; hasMore?: boolean }> = limit === undefined ? [...bots, ...groups] : fitSnapshotPages([...bots, ...groups]);
       return json(res, 200, {
-        bots: shownBots.map((bot) => {
-          const wired = wireBot(bot);
-          // Narrowed first: on a Team Cloud the selected conversation may be someone else's, and its words never go out.
-          const shown = memberBot({ ...wired, tasks: wired.tasks ?? [] }, visible);
-          return { ...shown, ...(typeof shown.threadId === "string" ? messagePage(shown.threadId, limit) : { messages: [], hasMore: false, activeLeafId: null }) };
-        }),
+        bots: pages.slice(0, bots.length),
         botQueuedMessages: visible.everything ? queued : Object.fromEntries(Object.entries(queued).filter(([threadId]) => visible.thread(threadId))),
         sections: visible.sections(store.sections),
-        groups: store.groups.filter((g) => visible.group(g.id)).map((g) => {
-          const group = publicGroupState(g);
-          const room = { ...(deps.groupFor?.(auth, group) ?? group), ...messagePage(g.threadId, limit) };
-          return visible.everything || !visible.member ? room : memberGroup(room);
-        }),
+        groups: pages.slice(bots.length),
         computerControl: Object.fromEntries(
           shownBots.map((bot) => {
             const snapshot = botComputerControlSnapshot(bot.id);
