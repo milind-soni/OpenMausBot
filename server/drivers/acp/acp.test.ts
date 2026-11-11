@@ -10,6 +10,7 @@ import { BUILT_IN_DATA_SYSTEM_PROMPT } from "../../data/instructions.ts";
 import type { ProviderInstance } from "../../contracts.ts";
 import { TurnNotStartedError } from "../../contracts.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
+import { publishedMessages } from "../../harness/text-items.testkit.ts";
 import { promptSplitFingerprints, writePromptSplitReceipt } from "../prompt-split.ts";
 import { classifyError } from "../retry.ts";
 import { createAcpDriver, skipSubscriptionAuthForLocalInject, type AcpSupport } from "./core.ts";
@@ -1001,6 +1002,11 @@ describe("ACP turns (fake CLI)", () => {
       .filter((e) => e.type === "item.completed" && (e as { itemType?: string }).itemType === "assistant_text")
       .map((e) => (e as { text: string }).text);
     expect(texts).toEqual(["before one", "before two", "after"]);
+    expect(publishedMessages(recorder.events), "each message's words and its completion share one id of their own").toEqual([
+      { itemId: expect.any(String), streamed: "before one", completed: "before one" },
+      { itemId: expect.any(String), streamed: "before two", completed: "before two" },
+      { itemId: expect.any(String), streamed: "after", completed: "after" },
+    ]);
   });
 
   it("normalizes a structured ACP image block without treating it as text", async () => {

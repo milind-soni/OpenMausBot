@@ -14,6 +14,7 @@ import { DATA_DIR, NATIVE_DIR } from "../config.ts";
 import { flushNativeLog } from "./native.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
+import { publishedMessages } from "../harness/text-items.testkit.ts";
 import { CodexDriver, codexNativeIncomingLogMessage, codexUpdateCommand } from "./codex.ts";
 import { codexCliOverrides } from "./codex-process.ts";
 import { parseToml } from "../toml-lite.ts";
@@ -2030,6 +2031,29 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     );
     expect(settled).toHaveLength(1);
     expect((settled[0] as any).text).toBe("done from fake codex");
+  });
+
+  it("keeps each streamed message under Codex's own item id, scoped to its turn", async () => {
+    process.env.FAKE_CODEX_STREAM = "4:1";
+    process.env.FAKE_CODEX_STREAM_REPLIES = JSON.stringify(["First message.", "Second, after the command.", "Third."]);
+    try {
+      await create();
+      await instance.adapter.sendTurn({ threadId: "t-items", text: "hi" });
+      await recorder.until((e) => e.type === "turn.completed");
+    } finally {
+      delete process.env.FAKE_CODEX_STREAM;
+      delete process.env.FAKE_CODEX_STREAM_REPLIES;
+    }
+    const deltas = recorder.events.filter((e: any) => e.type === "content.delta" && e.streamKind === "assistant_text");
+    expect(new Set(deltas.map((e) => e.itemId))).toEqual(new Set(["m1", "m2", "m3"]));
+    const messages = publishedMessages(recorder.events);
+    expect(messages.map(({ streamed, completed }) => ({ streamed, completed }))).toEqual([
+      { streamed: "First message.", completed: "First message." },
+      { streamed: "Second, after the command.", completed: "Second, after the command." },
+      { streamed: "Third.", completed: "Third." },
+    ]);
+    const turnId = recorder.events.find((e) => e.type === "turn.started")?.turnId;
+    expect(messages.map((message) => message.itemId)).toEqual([`${turnId}:m1`, `${turnId}:m2`, `${turnId}:m3`]);
   });
 
   it("reports an apply_patch as it streams, for the chat's status line", async () => {

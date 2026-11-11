@@ -1,6 +1,7 @@
-// A bot's reply as it streams: each thread's assistant text deltas, held outside the app reducer so a delta re-renders
-// only the transcript that shows that thread. A streamed item stays drawn until the transcript holds the message it was
-// saved as, so the saved bubble replaces it in the same commit.
+// A bot's reply as it streams: each thread's assistant text deltas, keyed by the message id the server streams them
+// under and held outside the app reducer, so a delta re-renders only the transcript that shows that thread. A streamed
+// item stays drawn until the transcript holds the message saved under the same id, so the saved bubble replaces it in
+// the same commit.
 import { createContext, useEffect, useMemo, useSyncExternalStore } from "react";
 
 import type { RuntimeEvent } from "../../shared/runtime-events";
@@ -10,6 +11,8 @@ import type { Message } from "@/state/store";
 
 export interface LiveReplyItem {
   key: string;
+  /** The message id the server streamed it under; absent from a server older than item ids. */
+  itemId?: string;
   turnId?: string;
   text: string;
   at: number;
@@ -77,37 +80,46 @@ export function noteLiveReplyEvent(event: RuntimeEvent): void {
   if (event.type === "content.delta") {
     if (event.streamKind !== "assistant_text" || !event.delta || !firstSeen(event.eventId) || current.skipping) return;
     if (gapped && !boundarySinceGap.has(threadId)) return;
-    const open = items.at(-1);
-    if (open && !open.done && sameTurn(open, event.turnId)) {
-      put(threadId, { ...current, items: [...items.slice(0, -1), { ...open, text: open.text + event.delta }] });
+    const at = event.itemId ? items.findIndex((item) => item.itemId === event.itemId) : legacyOpen(items, event.turnId);
+    const growing = items[at];
+    if (growing) {
+      if (!growing.done) put(threadId, { ...current, items: items.map((item, index) => index === at ? { ...item, text: item.text + event.delta } : item) });
       return;
     }
-    // The server saves a finished item before it sends anything later, so one still unsaved by now never will be.
-    const settled = kept(items, isSaved);
-    const fresh: LiveReplyItem = { key: event.eventId, ...(event.turnId ? { turnId: event.turnId } : {}), text: event.delta, at: Date.now(), done: false };
-    put(threadId, { ...current, items: [...settled, fresh] });
+    // The server opens a message only once the one before it is over: an earlier one still open never completes.
+    const fresh: LiveReplyItem = { key: event.itemId ?? event.eventId, ...(event.itemId ? { itemId: event.itemId } : {}),
+      ...(event.turnId ? { turnId: event.turnId } : {}), text: event.delta, at: Date.now(), done: false };
+    put(threadId, { ...current, items: [...kept(items, (item) => item.done), fresh] });
   } else if (event.type === "item.completed" && event.itemType === "assistant_text") {
     if (!firstSeen(event.eventId)) return;
     if (gapped) boundarySinceGap.add(threadId);
-    const open = items.at(-1);
-    const next = open && !open.done && sameTurn(open, event.turnId) ? [...items.slice(0, -1), { ...open, text: event.text, done: true }] : items;
+    const at = event.itemId ? items.findIndex((item) => item.itemId === event.itemId) : legacyOpen(items, event.turnId);
+    const next = at >= 0 && !items[at]!.done ? items.map((item, index) => index === at ? { ...item, text: event.text, done: true } : item) : items;
     put(threadId, { items: next, skipping: false });
   } else if (event.type === "item.started" && event.itemType === "tool") {
-    // Engines finish their words before a tool starts: an item still open here was only whitespace, and the words
-    // after the tool are a new message.
-    put(threadId, { ...current, items: kept(items, isSaved) });
+    if (gapped) boundarySinceGap.add(threadId);
   } else if (event.type === "turn.started" || isTurnEnd(event)) {
     if (gapped) boundarySinceGap.add(threadId);
     put(threadId, { items: kept(items, isSaved), skipping: false });
   }
 }
 
-/** A message frame: the first finished item of its turn not yet saved is now that message. */
-export function noteLiveReplyMessage(threadId: string, message: Pick<Message, "id" | "role" | "kind" | "turnId"> | undefined): void {
+/** A server older than item ids sends none: its words build the last open item of the turn until one completes. */
+function legacyOpen(items: readonly LiveReplyItem[], turnId: string | undefined): number {
+  const last = items.length - 1;
+  const open = items[last];
+  return open && !open.itemId && !open.done && sameTurn(open, turnId) ? last : -1;
+}
+
+/** A message frame: the reply saved from the item that streamed under its `itemId` (or, from an older server, the
+ * first finished item of its turn) is now that message. */
+export function noteLiveReplyMessage(threadId: string, message: (Pick<Message, "id" | "role" | "kind" | "turnId"> & { itemId?: string }) | undefined): void {
   if (!message || message.role !== "bot" || message.kind !== "text") return;
   const current = threads.get(threadId);
   if (!current || current.items.some((item) => item.savedAs === message.id)) return;
-  const index = current.items.findIndex((item) => item.done && item.savedAs === undefined && sameTurn(item, message.turnId));
+  const index = message.itemId
+    ? current.items.findIndex((item) => item.itemId === message.itemId)
+    : current.items.findIndex((item) => !item.itemId && item.done && item.savedAs === undefined && sameTurn(item, message.turnId));
   if (index < 0) return;
   streamed.add(message.id);
   if (streamed.size > MAX_STREAMED) streamed.delete(streamed.values().next().value!);
@@ -197,11 +209,11 @@ const rowCache = new WeakMap<LiveReplyItem, { text: string; message: Message }>(
 
 /** The transcript rows the live items draw, after `transcript`'s own: an item whose saved message `transcript` holds
  * draws nothing, so the two never show together. */
-export function liveReplyRows(items: readonly LiveReplyItem[], transcript: readonly Pick<Message, "id">[], from?: Message["from"]): { rows: Message[]; settled: string[] } {
+export function liveReplyRows(items: readonly LiveReplyItem[], transcript: readonly (Pick<Message, "id"> & { itemId?: string })[], from?: Message["from"]): { rows: Message[]; settled: string[] } {
   const rows: Message[] = [];
   const settled: string[] = [];
   for (const item of items) {
-    if (item.savedAs !== undefined && transcript.some((message) => message.id === item.savedAs)) {
+    if (transcript.some((message) => (item.itemId !== undefined && message.itemId === item.itemId) || message.id === item.savedAs)) {
       settled.push(item.key);
       continue;
     }
