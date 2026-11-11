@@ -1,5 +1,3 @@
-// Take turns and dictation where the Mac's speech helper does not exist: the page records the mic, trims silence, and
-// the harness sends each clip to Fish Audio. It speaks the same five-method contract as window.ogb's speech bridge.
 import { api, ApiError } from "@/state/api";
 import { t } from "./i18n";
 
@@ -171,7 +169,7 @@ function finishCapture(gen: number) {
   void upload(gen, clip.frames(), abort);
 }
 
-export const fishSpeech: SpeechBridge = {
+export const recordedSpeech: SpeechBridge = {
   async speechStart(options) {
     teardown();
     const gen = generation;

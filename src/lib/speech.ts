@@ -1,18 +1,32 @@
 import { keyEntry, savedState } from "@/components/keys/key-catalog";
 import type { ConfigStatus } from "@/state/store";
 import { desktopCapabilitiesNow } from "./desktop";
-import { fishSpeech, type SpeechBridge } from "./fish-speech";
+import { recordedSpeech, type SpeechBridge } from "./recorded-speech";
 
-/** The speech bridge this computer listens through: the page's own Fish Audio listener, or the desktop app's helper. */
-export function speechBridge(): SpeechBridge | Window["ogb"] {
-  return desktopCapabilitiesNow().dictation.engine === "fish-audio" ? fishSpeech : globalThis.window?.ogb;
+/** The page records the microphone itself unless Automatic can hand listening to Apple Speech in the Mac app. */
+export function usesRecordedSpeech(config?: ConfigStatus | null, capabilities = desktopCapabilitiesNow()): boolean {
+  return (config?.stt?.provider ?? "auto") !== "auto" || capabilities.dictation.engine !== "apple-speech";
 }
 
-export function fishListeningReady(config: ConfigStatus | null | undefined): boolean {
+export function speechBridge(config?: ConfigStatus | null, capabilities = desktopCapabilitiesNow()): SpeechBridge | Window["ogb"] {
+  return usesRecordedSpeech(config, capabilities) ? recordedSpeech : globalThis.window?.ogb;
+}
+
+export function serverListeningReady(config: ConfigStatus | null | undefined): boolean {
+  if (config?.stt) return config.stt.configured;
   return savedState(keyEntry("fishAudio"), config).configured;
 }
 
-/** Whether speech can be heard here: the engine is there and, through Fish Audio, so is a saved key. */
+/** Browsers expose the microphone only to secure pages: https, localhost or the desktop app. */
+export function pageCanRecord(): boolean {
+  return Boolean(globalThis.navigator?.mediaDevices?.getUserMedia);
+}
+
 export function listensHere(capabilities: DesktopCapabilities, config: ConfigStatus | null | undefined): boolean {
-  return capabilities.dictation.available && (capabilities.dictation.engine !== "fish-audio" || fishListeningReady(config));
+  return usesRecordedSpeech(config, capabilities) ? pageCanRecord() && serverListeningReady(config) : capabilities.dictation.available;
+}
+
+export function stopSpeech() {
+  void recordedSpeech.speechStop();
+  void globalThis.window?.ogb?.speechStop?.();
 }

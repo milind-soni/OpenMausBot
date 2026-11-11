@@ -1,4 +1,6 @@
 import { t } from "@/lib/i18n";
+import type { ConfigStatus } from "@/state/store";
+import { pageCanRecord, serverListeningReady, speechBridge, usesRecordedSpeech } from "./speech";
 
 export type CallCapabilityHelp = {
   label: string;
@@ -10,9 +12,9 @@ const turnsNeedDesktop = (): CallCapabilityHelp => ({
   reason: t("call.capability.turnsNeedDesktopReason"),
 });
 
-const turnsNeedFishKey = (): CallCapabilityHelp => ({
-  label: t("call.capability.turnsNeedFishKey"),
-  reason: t("call.capability.turnsNeedFishKeyReason"),
+const turnsNeedSpeechInput = (): CallCapabilityHelp => ({
+  label: t("stt.needSetup"),
+  reason: t("stt.needSetupReason"),
 });
 
 const turnsOnThisComputerAnyOs = (): CallCapabilityHelp => ({
@@ -25,12 +27,10 @@ const turnsOnThisComputer = (): CallCapabilityHelp => ({
   reason: t("call.capability.turnsOnThisComputerReason"),
 });
 
-export function callCapabilityHelp(
-  capabilities: DesktopCapabilities,
-  speechServiceAvailable: boolean,
-  fishKeySaved: boolean,
-): CallCapabilityHelp | null {
-  if (!capabilities.dictation.available) {
+export function callCapabilityHelp(capabilities: DesktopCapabilities, config: ConfigStatus | null | undefined): CallCapabilityHelp | null {
+  const recorded = usesRecordedSpeech(config, capabilities);
+  if (recorded && pageCanRecord()) return serverListeningReady(config) ? null : turnsNeedSpeechInput();
+  if (recorded || !capabilities.dictation.available) {
     switch (capabilities.dictation.reasonCode) {
       case "remote-server":
         return capabilities.host.platform === "darwin" ? turnsOnThisComputer() : turnsOnThisComputerAnyOs();
@@ -44,8 +44,7 @@ export function callCapabilityHelp(
         };
     }
   }
-  if (capabilities.dictation.engine === "fish-audio" && !fishKeySaved) return turnsNeedFishKey();
-  if (!speechServiceAvailable) {
+  if (!speechBridge(config, capabilities)?.speechStart) {
     return {
       label: t("call.capability.serviceUnavailable"),
       reason: t("call.capability.serviceUnavailableReason"),

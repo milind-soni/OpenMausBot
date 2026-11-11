@@ -19,7 +19,7 @@ const fish = vi.hoisted(() => {
     onSpeechEnd: (cb: (info: unknown) => void) => { listeners.end = cb; return () => {}; },
   };
 });
-vi.mock("./fish-speech", () => ({ fishSpeech: fish }));
+vi.mock("./recorded-speech", () => ({ recordedSpeech: fish }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: fixture.config } }) }));
 vi.mock("@/components/DesktopCapabilities", async () => {
   const { initialDesktopCapabilities } = await import("./desktop");
@@ -40,6 +40,7 @@ describe("composer dictation through Fish Audio", () => {
 
   beforeEach(() => {
     cacheDesktopCapabilities({ ...initialDesktopCapabilities(), dictation: { available: true, engine: "fish-audio", onDevice: false } });
+    vi.stubGlobal("navigator", { mediaDevices: { getUserMedia: vi.fn() } });
     fixture.config = { savedKeys: { fishAudioKey: { configured: true } } };
     typed = [];
     vi.clearAllMocks();
@@ -53,6 +54,7 @@ describe("composer dictation through Fish Audio", () => {
   afterEach(() => {
     flushSync(() => root.unmount());
     cacheDesktopCapabilities(initialDesktopCapabilities());
+    vi.unstubAllGlobals();
   });
 
   const toggle = () => flushSync(() => dictation.toggle());

@@ -1,7 +1,7 @@
 // Read by the SSE fold too: auto-speak stands down for the bot on a call, or the two deadlock over the speaker.
 import { useSyncExternalStore } from "react";
 
-import { speechBridge } from "./speech";
+import { stopSpeech } from "./speech";
 import { speaker } from "./tts";
 
 let current: string | null = null;
@@ -19,7 +19,7 @@ export function startCall(targetId: string) {
   if (current === targetId) return;
   // Silence both halves before ownership changes: the old overlay may not unmount until React's next render.
   speaker.stop();
-  void speechBridge()?.speechStop?.();
+  stopSpeech();
   current = targetId;
   notify();
 }
@@ -30,7 +30,7 @@ export function endCall(targetId?: string): boolean {
   if (current === null) return false;
   current = null;
   speaker.stop();
-  void speechBridge()?.speechStop?.();
+  stopSpeech();
   notify();
   return true;
 }

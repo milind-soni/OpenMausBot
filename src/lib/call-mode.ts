@@ -16,9 +16,9 @@ export function liveDisclosure({ cloudHome = false, azure = false }: { cloudHome
   return t(cloudHome ? "call.live.disclosureCloud" : "call.live.disclosure");
 }
 
-export function callModeHint(mode: CallMode, where: { cloudHome?: boolean } = {}): string {
+export function callModeHint(mode: CallMode, where: { cloudHome?: boolean; serverSpeech?: boolean } = {}): string {
   if (mode === "live") return `${t("call.mode.liveHint")} ${liveDisclosure(where)}`;
-  return t(desktopCapabilitiesNow().dictation.engine === "fish-audio" ? "call.mode.turnsHintFish" : "call.mode.turnsHint");
+  return t((where.serverSpeech ?? desktopCapabilitiesNow().dictation.engine === "fish-audio") ? "stt.turnsHint" : "call.mode.turnsHint");
 }
 
 export function effectiveCallMode(stored: CallMode, { turnsHere, canLive }: { turnsHere: boolean; canLive: boolean }): CallMode {

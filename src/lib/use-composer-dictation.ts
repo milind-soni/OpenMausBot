@@ -3,7 +3,7 @@ import { useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { withOpenSettings } from "@/components/OpenSystemSettings";
 import { useStore } from "@/state/store";
 import { t } from "./i18n";
-import { fishSpeech } from "./fish-speech";
+import { recordedSpeech } from "./recorded-speech";
 import { listensHere, speechBridge } from "./speech";
 
 export function useComposerDictation({ draftId, text, onText }: {
@@ -12,14 +12,15 @@ export function useComposerDictation({ draftId, text, onText }: {
   onText: (text: string) => void;
 }) {
   const { capabilities } = useDesktopCapabilities();
-  const ready = listensHere(capabilities, useStore().state.config);
+  const config = useStore().state.config;
+  const bridge = speechBridge(config);
+  const ready = listensHere(capabilities, config);
   const [recording, setRecording] = useState(false);
   const [speechError, setSpeechError] = useState<ReactNode>(null);
   const draft = useRef({ id: draftId, text });
   draft.current = { id: draftId, text };
   const session = useRef({ draftId: "", base: "" });
   const cancel = useRef<(() => void) | null>(null);
-  // Fish Audio hears the clip only at its end, so stopping the mic must finish it.
   const finish = useRef<(() => void) | null>(null);
   const stop = useCallback(() => {
     cancel.current?.();
@@ -28,7 +29,6 @@ export function useComposerDictation({ draftId, text, onText }: {
 
   useEffect(() => {
     if (!recording) return;
-    const bridge = speechBridge();
     if (!bridge || session.current.draftId !== draftId) {
       setRecording(false);
       return;
@@ -44,7 +44,7 @@ export function useComposerDictation({ draftId, text, onText }: {
       setRecording(false);
     };
     cancel.current = cancelSession;
-    finish.current = bridge === fishSpeech ? () => void fishSpeech.speechFinish() : null;
+    finish.current = bridge === recordedSpeech ? () => void recordedSpeech.speechFinish() : null;
     const offTranscript = bridge.onSpeechTranscript((line) => {
       if (!active || draft.current.id !== draftId) return;
       if (draft.current.text !== lastText) {
@@ -83,10 +83,10 @@ export function useComposerDictation({ draftId, text, onText }: {
         void bridge.speechStop();
       }
     };
-  }, [recording, draftId, onText]);
+  }, [recording, draftId, onText, bridge]);
 
   const toggle = () => {
-    if (!ready || !speechBridge()) {
+    if (!ready || !speechBridge(config)) {
       setSpeechError(t("composer.dictation.unavailable"));
     } else if (recording) {
       if (finish.current) finish.current();
