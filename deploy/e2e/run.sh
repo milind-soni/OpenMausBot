@@ -18,9 +18,11 @@ DOMAIN=installer-e2e.internal
 DIR=/opt/openmausbot
 SETTINGS=(OMB_INSTALL_SKIP_DNS=1 OMB_INSTALL_HTTPS_WAIT_S=20 "OMB_INSTALL_SOURCE=file://$ROOT")
 # Without a version asked for: what a person's later run is, which must keep the version update.sh pinned.
-PLAIN_INSTALL=(sudo env "${SETTINGS[@]}" sh "$ROOT/deploy/install.sh")
+# Under umask 000, as a root shell may have it: what the installer makes must not take its modes from there.
+UMASK_000=(sh -c "umask 000; exec sh \"\$0\" \"\$@\"")
+PLAIN_INSTALL=(sudo env "${SETTINGS[@]}" "${UMASK_000[@]}" "$ROOT/deploy/install.sh")
 if [ -n "${OMB_INSTALL_IMAGE:-}" ]; then SETTINGS+=("OMB_INSTALL_IMAGE=$OMB_INSTALL_IMAGE"); fi
-INSTALL=(sudo env "${SETTINGS[@]}" sh "$ROOT/deploy/install.sh")
+INSTALL=(sudo env "${SETTINGS[@]}" "${UMASK_000[@]}" "$ROOT/deploy/install.sh")
 box_check() { (cd "$DIR" && sudo docker compose exec -T omb node dist-server/bot-box/box-check.js --public=none "$@"); }
 
 as_root() { sudo "$@"; }
@@ -130,6 +132,14 @@ else
   contains "$OUT/install.txt" "has no bots' sandbox yet." "the install neither turned the sandbox on nor said why not"
   echo "this image has no sandbox; the install said so"
 fi
+
+step "what the installer made has fixed modes, though it ran under umask 000"
+getfacl -p /opt 2>/dev/null || true
+for want in "755 $DIR" "644 $DIR/compose.yaml" "644 $DIR/Caddyfile" "600 $DIR/.env" "700 $DIR/data" "755 $DIR/caddy/data" "755 $DIR/caddy/config"; do
+  [ "$(sudo stat -c '%a %n' "${want#* }")" = "$want" ] || fail "$(sudo stat -c '%a %n' "${want#* }"), not $want"
+done
+if [ -f "$DIR/update.sh" ]; then [ "$(sudo stat -c %a "$DIR/update.sh")" = 755 ] || fail "update.sh is $(sudo stat -c %a "$DIR/update.sh"), not 755"; fi
+echo "the install's folder 755, its files 644 and 755, .env 600, data 700"
 
 step "update.sh is placed as the repository has it"
 if [ -f "$ROOT/deploy/update.sh" ]; then

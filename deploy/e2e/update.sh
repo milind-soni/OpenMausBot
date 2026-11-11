@@ -20,7 +20,8 @@ TO=${TO_VERSION:-0.1.151}
 mkdir -p "$OUT"
 if [ "$LAYOUT" = installer ]; then DIR=/opt/openmausbot DATA=/opt/openmausbot/data
 else DIR=/srv/openmausbot-e2e/deploy DATA=deploy_data; fi
-UPDATE=(bash "$ROOT/deploy/update.sh" --dir "$DIR")
+# Under umask 000, as a root shell may have it: what update.sh writes must not take its modes from there.
+UPDATE=(bash -c "umask 000; exec bash \"\$0\" \"\$@\"" "$ROOT/deploy/update.sh" --dir "$DIR")
 
 step() { printf '\n== %s\n' "$*"; }
 fail() {
@@ -48,7 +49,7 @@ for old in /opt/openmausbot /srv/openmausbot-e2e/deploy; do
   if [ -d "$old" ]; then (cd "$old" && docker compose down -v) >/dev/null 2>&1; fi
 done
 for volume in $(copies); do docker volume rm -f "$volume" >/dev/null 2>&1; done
-rm -rf "$DIR" && mkdir -p "$DIR"
+rm -rf "$DIR" && install -d -m 755 "$(dirname "$DIR")" "$DIR"
 docker pull -q "$REPO:v$FROM" >/dev/null && docker pull -q "$REPO:v$TO" >/dev/null || fail "could not pull the two releases"
 if [ "$LAYOUT" = installer ]; then
   mkdir -p "$DIR/caddy/data" "$DIR/caddy/config"
@@ -116,6 +117,7 @@ step "2. update to the stable version"
 [ "$(version)" = "$TO" ] || fail "the server says $(version)"
 grep -qx "OMB_IMAGE=$STABLE" "$DIR/.env" || fail ".env is not pinned by digest"
 [ "$(stat -c %a "$DIR/.env")" = 600 ] || fail ".env changed its mode"
+[ "$(stat -c %a "$DIR/.update")" = 700 ] || fail ".update is $(stat -c %a "$DIR/.update"), not 700, though update.sh ran under umask 000"
 in_data 'cat /d/.openmausbot/e2e-sentinel.txt' | grep -q "written under $FROM" || fail "the data did not carry over"
 [ "$(cd "$DIR" && docker compose ps --status running --services | sort | tr '\n' ' ')" = "caddy omb " ] || fail "caddy or omb is not running"
 copy >/dev/null || fail "expected one copy of the data"
