@@ -127,14 +127,10 @@ export function noteLiveReplyMessage(threadId: string, message: (Pick<Message, "
   put(threadId, { ...current, items });
 }
 
-/** The person pressed Stop: what streamed so far goes, and the rest of that item is not drawn. */
+/** The person pressed Stop: what streamed so far stays as it is and grows no more. An engine that keeps the words a
+ * Stop cut short completes the item and its saved message takes its place; otherwise the turn's end removes it. */
 export function stopLiveReply(threadId: string): void {
-  const current = threads.get(threadId);
-  if (!current) {
-    put(threadId, { items: EMPTY, skipping: true });
-    return;
-  }
-  put(threadId, { items: kept(current.items, isSaved), skipping: true });
+  put(threadId, { items: threads.get(threadId)?.items ?? EMPTY, skipping: true });
 }
 
 /** The live stream restarted without the frames it missed: no thread's open item can be completed from here. */

@@ -107,9 +107,11 @@ describe("a reply as it streams from an older server", () => {
     expect(shown(), "a passing warning is no end").toEqual(["A third "]);
 
     stopLiveReply("t");
-    expect(liveReplies("t")).toEqual([]);
+    expect(shown(), "what streamed before Stop stays, as an engine may keep it").toEqual(["A third "]);
     delta("late words ");
-    expect(shown(), "the rest of a stopped item is not drawn").toEqual([]);
+    expect(shown(), "the rest of a stopped item is not drawn").toEqual(["A third "]);
+    note({ type: "turn.completed", ok: false } as Partial<RuntimeEvent>);
+    expect(liveReplies("t"), "not kept: the turn's end removes it").toEqual([]);
     note({ type: "turn.started" });
     delta("Fresh ");
     expect(shown()).toEqual(["Fresh "]);

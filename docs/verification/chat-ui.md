@@ -261,28 +261,40 @@ output just now` and the command's last two lines in the card.
 
 ## A reply as it streams
 
-The bot's words appear as they arrive, and the saved message takes the
-streamed bubble's place in the same frame. To watch it slowly with each engine
-shape, script a slow stream:
+The bot's words appear as they arrive, keyed by the id the server streams each
+message under, and the saved message takes the streamed bubble's place in the
+same frame. One command streams every scripted case through the real renderer,
+once per engine, and checks each frame:
 
 ```sh
-FAKE_CLAUDE_STREAM_CADENCE=3:110 FAKE_CLAUDE_REPLIES='["# Plan\n\nFirst part..."]' \
-  node --experimental-strip-types scripts/control-omb.ts ui launch
-FAKE_CODEX_STREAM=3:90 FAKE_CODEX_STREAM_REPLIES='["First message.", "Second message."]' \
-  node --experimental-strip-types scripts/control-omb.ts ui launch --engine codex
-FAKE_ACP_STREAM=3:90 FAKE_ACP_STREAM_REPLIES='["First message.", "Second message."]' \
-  node --experimental-strip-types scripts/control-omb.ts ui launch --engine acp
+node --experimental-strip-types scripts/verify-live-reply.ts \
+  --engines claude,codex,acp,cline,copilot --out .omb-scratch/verify-evidence/live-reply
 ```
 
-The Codex and ACP fakes run one command between messages, as a real turn of
-text, a tool and more text does; move Pepper to them with
-`PATCH /api/bots/<id>` and `{"modelSelection":{"instanceId":"codex","model":"gpt-fake-default"}}`
-or `{"instanceId":"myAgent","model":"fixture-fast"}`. Expected: each message
-grows in its own bubble, a code block's actions appear once its fence closes,
-and after the turn the transcript holds each message once and no
-`[data-mid^="live:"]` row. The permanent checks are
-`src/state/live-reply.test.ts`, `src/components/ChatView.live-reply.test.ts`
-and `src/components/ChatMarkdown.streaming.test.ts`.
+Each engine gets its own fixture (`ui launch --engine codex|acp|cline|copilot`);
+its fake plays the case named by a marker in the prompt from
+`FAKE_STREAM_SCRIPT` at `FAKE_STREAM_CADENCE` (the cases are
+`server/testing/live-reply-cases.ts`: short and long replies, Markdown, code
+fences, math, emoji and right-to-left text, links and images, text and tools
+interleaved, two messages in a row, a blank message, thinking, Stop, a steer,
+an error, a reconnect, a chat switch, and a room with two bots). Expected: a
+`pass` for every case in the printed table, which is also written to
+`results.md` with each case's screenshot and evidence. Steering is checked
+where the fake steers (Claude).
+
+`--engines opencode` with `OMB_VERIFY_OPENCODE_CLI` set to an OpenCode the
+recipe downloaded and checked against `server/drivers/acp/opencode-release.ts`
+runs real prompts on a free model OpenCode offers with no sign-in, in the
+fixture's temporary home.
+
+The engine-level checks, which need no browser, are
+`server/drivers/acp/live-reply-matrix.test.ts` (every ACP engine),
+`server/drivers/claude-live-reply.test.ts`, and the case runs in
+`server/drivers/codex.test.ts`, `server/drivers/pi.test.ts` and
+`server/drivers/openai-chat-tools.test.ts` (each OpenAI-compatible provider).
+The client's checks are `src/state/live-reply.test.ts`,
+`src/components/ChatView.live-reply.test.ts` and
+`src/components/ChatMarkdown.streaming.test.ts`.
 
 The before-and-after screenshots were removed because they showed real example
 data; run the `scripts/control-omb.ts ui launch` command above to see the
