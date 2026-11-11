@@ -7,7 +7,6 @@ import type { BotRecord, TaskRecord } from "./store.ts";
 export const UNTITLED_THREAD = "New thread";
 const TASK_TITLE_MAX = 80;
 
-/** Every title (a bot's or a person's) passes through here, so equality tells a machine-made title from a rename. */
 export function threadTitleFrom(title?: string): string {
   return title?.trim().slice(0, TASK_TITLE_MAX) || UNTITLED_THREAD;
 }

@@ -6,14 +6,17 @@ const sendRead: SendRead = (path, threadId) => {
   void fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) }).catch(() => {});
 };
 
-/** The main conversation and its side fork are both visible while the panel is open. */
+function visibleThreadIds(state: AppState, kind: "bot" | "group", ownerId: string, shown?: string): string[] {
+  const panel = state.forkPanel;
+  return [...new Set([shown, panel?.kind === kind && panel.ownerId === ownerId ? panel.threadId : undefined])]
+    .filter((threadId): threadId is string => Boolean(threadId));
+}
+
 export function markVisibleBotThreadsRead(state: AppState, bot: BotAnnouncement, focused: boolean, post: SendRead = sendRead): void {
   if (bot.id !== state.selectedId || state.activeView !== "chat" || !focused) return;
   const selected = state.bots.find((candidate) => candidate.id === bot.id);
   const shown = selected?.switchingTo ?? selected?.threadId;
-  const panel = state.forkPanel;
-  const visibleThreads = [...new Set([shown, panel?.kind === "bot" && panel.ownerId === bot.id ? panel.threadId : undefined])]
-    .filter((threadId): threadId is string => Boolean(threadId));
+  const visibleThreads = visibleThreadIds(state, "bot", bot.id, shown);
   for (const threadId of visibleThreads) {
     const task = bot.tasks?.find((candidate) => candidate.threadId === threadId);
     if (!task?.unread && (bot.tasks || !bot.unread)) continue;
@@ -27,9 +30,7 @@ export function markVisibleGroupThreadsRead(state: AppState, group: Partial<Grou
   post: SendRead = sendRead): void {
   if (group.id !== state.selectedId || state.activeView !== "chat" || !focused) return;
   const shown = state.groups.find((candidate) => candidate.id === group.id)?.threadId;
-  const panel = state.forkPanel;
-  const visibleThreads = [...new Set([shown, panel?.kind === "group" && panel.ownerId === group.id ? panel.threadId : undefined])]
-    .filter((threadId): threadId is string => Boolean(threadId));
+  const visibleThreads = visibleThreadIds(state, "group", group.id, shown);
   for (const threadId of visibleThreads) {
     const task = group.tasks?.find((candidate) => candidate.threadId === threadId);
     if (!task?.unread && (group.tasks || !group.unread)) continue;

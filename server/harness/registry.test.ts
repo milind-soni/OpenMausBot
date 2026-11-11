@@ -1,6 +1,6 @@
 // A config written by a newer or differently built app must load as an unavailable shadow, never crash the fleet.
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -548,8 +548,6 @@ process.exit(0);
     originalPath = process.env.PATH;
     const binDir = join(scratch, "fake-path");
     mkdirSync(binDir);
-    // The fake npm uses /usr/bin/env node, so keep Node available on the isolated PATH.
-    symlinkSync(process.execPath, join(binDir, "node"));
     if (present) addFakeNpm(binDir);
     process.env.PATH = binDir;
     process.env.FAKE_NPM_LOG = join(scratch, "npm-calls.jsonl");

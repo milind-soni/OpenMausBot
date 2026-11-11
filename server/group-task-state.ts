@@ -18,7 +18,6 @@ export function mirrorActiveGroupTask(group: GroupRecord, task: GroupTask): void
     lastReadMessageId: task.lastReadMessageId });
 }
 
-/** The old registry kept one read cursor and unread mark on the room itself. */
 export function migrateGroupTaskRead(group: GroupRecord, active: GroupTask): boolean {
   let changed = false;
   if (group.lastReadMessageId && !active.lastReadMessageId) {
@@ -55,7 +54,6 @@ export function refreshGroupUnread(group: GroupRecord): void {
   group.unread = Boolean(group.tasks?.some((task) => task.unread));
 }
 
-/** A finished room turn clears its speaker and marks exactly that conversation unread. */
 export function markGroupThreadUnreadAfterTurn(store: Pick<Store, "patchGroup" | "markGroupThreadUnread">,
   groupId: string, threadId: string, busyBotId: string | null): void {
   store.patchGroup(groupId, { busyBotId });

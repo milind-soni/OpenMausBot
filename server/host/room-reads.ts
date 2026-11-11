@@ -1,5 +1,3 @@
-// A Team Cloud's group chats are read per person and conversation: each person's own "read up to"
-// line in `room-reads.json` means opening one room task clears no other task or person's unread mark.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";

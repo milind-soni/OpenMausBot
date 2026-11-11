@@ -34,8 +34,8 @@ export function ForkPanel() {
               {t("chat.retry")}
             </button>
           </div>
-          : openedBot ? <ChatView key={panel.threadId} bot={openedBot} />
-            : openedGroup ? <GroupView key={panel.threadId} group={openedGroup} />
+          : openedBot ? <ChatView key={panel.threadId} bot={openedBot} inForkPanel />
+            : openedGroup ? <GroupView key={panel.threadId} group={openedGroup} inForkPanel />
               : <p className="p-4 text-sm text-ink-secondary">{t("chat.forkUnavailable")}</p>}
       </div>
     </aside>

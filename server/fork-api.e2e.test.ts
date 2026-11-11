@@ -78,7 +78,6 @@ it("forks bot and room conversations through the public API and keeps a fork aft
       { unread: boolean; tasks: Array<{ threadId: string; unread?: boolean }> };
     await expect.poll(async () => (await roomState()).tasks.find((task) => task.threadId === roomFork.body.task.threadId)?.unread, { timeout: 20_000 }).toBe(true);
     expect((await api("POST", `/api/groups/${room.id}/read`, { threadId: roomThreadId })).status).toBe(404);
-    // The deleted source cannot clear the background fork's unread reply.
     expect((await roomState()).unread).toBe(true);
     expect((await api("POST", `/api/groups/${room.id}/tasks/${roomFork.body.task.threadId}?messages=0`)).status).toBe(200);
     expect((await roomState()).unread).toBe(false);

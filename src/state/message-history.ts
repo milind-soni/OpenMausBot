@@ -14,7 +14,6 @@ export function reduceOlderMessages(state: AppState, action: OlderMessages): App
     const held = new Set(owner.messages.map((message) => message.id));
     return {
       ...owner,
-      // A page that raced an edit can overlap held rows; the held copy is newer.
       messages: [...action.messages.filter((message) => !held.has(message.id)), ...owner.messages],
       hasMore: action.hasMore,
     };
@@ -28,7 +27,6 @@ export function reduceOlderMessages(state: AppState, action: OlderMessages): App
 
 export function loadOlderPage(action: LoadOlderMessages, current: AppState, inFlight: Set<string>,
   dispatch: (action: Action) => void, showError: (error: unknown) => void): void {
-  // current is the pre-dispatch state; the reducer's loading flag has not reached the ref yet.
   if (inFlight.has(action.threadId)) return;
   inFlight.add(action.threadId);
   const owner = [...current.bots, ...current.groups].find((candidate) => candidate.threadId === action.threadId);

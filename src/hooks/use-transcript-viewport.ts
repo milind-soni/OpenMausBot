@@ -103,7 +103,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     setBottomFollow(false);
     setTranscriptWindow({ key: transcriptKey, start: range.start, end: range.end });
   }, [threadId, messages, setBottomFollow, state.focusMessage, transcriptKey]);
-  useFocusMessage(threadId, messages.length > 0);
+  useFocusMessage(threadId, messages.length > 0, scrollRef);
 
   // `follow` is omitted on purpose: re-arming only arms future content and never scrolls.
   useEffect(() => {

@@ -12,14 +12,12 @@ function forkHistory(path: Message[], messageId: string): Message[] | null {
   return structuredClone(path.slice(0, anchor + 1));
 }
 
-/** Commit copied history first; a failed database commit must never leave a visible task without its history. */
 function registerImportedFork<T extends { threadId: string }>(task: T, history: Message[], messageId: string,
   register: (task: T) => void): void {
   mdb.importThread(task.threadId, history, messageId);
   try {
     register(task);
   } catch (error) {
-    // The registry writer rolls back its in-memory mutation on failure.
     try { mdb.deleteThread(task.threadId); } catch (cleanupError) {
       throw new AggregateError([error, cleanupError], "could not roll back the imported fork");
     }

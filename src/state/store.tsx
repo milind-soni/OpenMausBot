@@ -741,7 +741,7 @@ export type Action =
   | { type: "loadOlderMessages"; threadId: string }
   | { type: "olderMessages"; threadId: string; generation: number; messages: Message[]; hasMore: boolean }
   | { type: "answerCard"; botId: string; messageId: string; answer: string; threadId?: string; groupId?: string }
-  | { type: "answerCardFailed"; botId: string; messageId: string; answer: string; groupId?: string }
+  | { type: "answerCardFailed"; botId: string; messageId: string; answer: string; threadId?: string; groupId?: string }
   | { type: "dismissCard"; botId: string; messageId: string; threadId?: string; groupId?: string }
   | {
       type: "decideRequest";
@@ -881,6 +881,28 @@ function patchGroupCard(state: AppState, groupId: string, messageId: string, pat
       g.id === groupId ? { ...g, messages: withPatchedCard(g.messages, messageId, patch) } : g,
     ),
   };
+}
+
+function cardMessages(state: AppState, botId: string, groupId?: string, threadId?: string): Message[] | undefined {
+  const panel = state.forkPanel;
+  if (threadId && panel?.threadId === threadId && panel.kind === (groupId ? "group" : "bot") && panel.ownerId === (groupId ?? botId)) {
+    return panel.messages;
+  }
+  const host = groupId ? state.groups.find((group) => group.id === groupId) : state.bots.find((bot) => bot.id === botId);
+  return !threadId || host?.threadId === threadId ? host?.messages : undefined;
+}
+
+function patchThreadCard(state: AppState, action: { botId: string; messageId: string; threadId?: string; groupId?: string }, patch: Partial<OptionCardData>): AppState {
+  const panel = state.forkPanel;
+  if (action.threadId && panel?.threadId === action.threadId && panel.kind === (action.groupId ? "group" : "bot") && panel.ownerId === (action.groupId ?? action.botId)) {
+    return { ...state, forkPanel: { ...panel, messages: withPatchedCard(panel.messages, action.messageId, patch) } };
+  }
+  if (action.groupId) {
+    const group = state.groups.find((candidate) => candidate.id === action.groupId);
+    return !action.threadId || group?.threadId === action.threadId ? patchGroupCard(state, action.groupId, action.messageId, patch) : state;
+  }
+  const bot = state.bots.find((candidate) => candidate.id === action.botId);
+  return !action.threadId || bot?.threadId === action.threadId ? patchCard(state, action.botId, action.messageId, patch) : state;
 }
 
 function openOnboardingCard(bot: Bot): Message | undefined {
@@ -1111,38 +1133,21 @@ export function reducer(state: AppState, action: Action): AppState {
       );
     }
     case "answerCard": {
-      if (action.groupId) {
-        const card = state.groups.find((group) => group.id === action.groupId)?.messages.find((message) => message.id === action.messageId)?.card;
-        return patchGroupCard(state, action.groupId, action.messageId, {
-          answered: action.answer,
-          ...(card?.requestId ? { pendingAnswer: action.answer } : {}),
-        });
-      }
-      const bot = state.bots.find((candidate) => candidate.id === action.botId);
-      const card = bot?.messages.find((message) => message.id === action.messageId)?.card;
-      return withMascotMotion(
-        patchCard(state, action.botId, action.messageId, {
-          answered: action.answer,
-          ...(card?.requestId ? { pendingAnswer: action.answer } : { dismissed: true }),
-        }),
-        action.botId,
-        "working",
-      );
+      const card = cardMessages(state, action.botId, action.groupId, action.threadId)?.find((message) => message.id === action.messageId)?.card;
+      const patched = patchThreadCard(state, action, {
+        answered: action.answer,
+        ...(card?.requestId ? { pendingAnswer: action.answer } : action.groupId ? {} : { dismissed: true }),
+      });
+      return action.groupId ? patched : withMascotMotion(patched, action.botId, "working");
     }
     case "answerCardFailed": {
-      const host = action.groupId
-        ? state.groups.find((group) => group.id === action.groupId)
-        : state.bots.find((bot) => bot.id === action.botId);
-      const card = host?.messages.find((message) => message.id === action.messageId)?.card;
+      const card = cardMessages(state, action.botId, action.groupId, action.threadId)?.find((message) => message.id === action.messageId)?.card;
       if (card?.pendingAnswer !== action.answer) return state;
       const reopened = { answered: undefined, pendingAnswer: undefined };
-      return action.groupId
-        ? patchGroupCard(state, action.groupId, action.messageId, reopened)
-        : patchCard(state, action.botId, action.messageId, reopened);
+      return patchThreadCard(state, action, reopened);
     }
     case "dismissCard":
-      if (action.groupId) return patchGroupCard(state, action.groupId, action.messageId, { dismissed: true });
-      return patchCard(state, action.botId, action.messageId, { dismissed: true });
+      return patchThreadCard(state, action, { dismissed: true });
     case "decideRequest":
       return state;
     case "botAdded":
@@ -2169,17 +2174,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         else if (saved) rawDispatch(saved);
       }).catch(() => {});
     };
-    const cardTarget = (action: { botId: string; messageId: string; groupId?: string }) => {
+    const cardTarget = (action: { botId: string; messageId: string; threadId?: string; groupId?: string }) => {
       const host = action.groupId
         ? stateRef.current.groups.find((g) => g.id === action.groupId)
         : stateRef.current.bots.find((b) => b.id === action.botId);
-      return { host, card: host?.messages.find((m) => m.id === action.messageId)?.card, inRoom: !!action.groupId };
+      return { host, card: cardMessages(stateRef.current, action.botId, action.groupId, action.threadId)?.find((m) => m.id === action.messageId)?.card, inRoom: !!action.groupId };
     };
-    const persistCard = (botId: string, messageId: string, patch: Partial<OptionCardData>) => {
+    const persistCard = (botId: string, messageId: string, patch: Partial<OptionCardData>, threadId?: string) => {
       fetch(`/api/bots/${botId}/cards/${messageId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(patch),
+        body: JSON.stringify({ ...patch, threadId }),
       }).catch(() => {});
     };
 
@@ -2556,7 +2561,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 });
               }
               if (inRoom) return;
-              persistCard(action.botId, action.messageId, { answered: action.answer, dismissed: true });
+              persistCard(action.botId, action.messageId, { answered: action.answer, dismissed: true }, action.threadId);
               return api(`/api/bots/${action.botId}/messages`, {
                 method: "POST",
                 body: JSON.stringify({ text: action.answer, threadId: action.threadId }),
@@ -2564,7 +2569,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             })
             .catch((error) => {
               if (card?.requestId && host) {
-                rawDispatch({ type: "answerCardFailed", botId: action.botId, messageId: action.messageId, answer: action.answer, groupId: action.groupId });
+                rawDispatch({ type: "answerCardFailed", botId: action.botId, messageId: action.messageId, answer: action.answer, threadId: action.threadId, groupId: action.groupId });
               }
               showError(error);
             });
@@ -2578,7 +2583,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               body: JSON.stringify({ requestId: card.requestId, ...dismissResponse(card) }),
             }).catch(() => {});
           } else if (!inRoom) {
-            persistCard(action.botId, action.messageId, { dismissed: true });
+            persistCard(action.botId, action.messageId, { dismissed: true }, action.threadId);
           }
           break;
         }

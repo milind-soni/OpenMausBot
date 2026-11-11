@@ -8,7 +8,6 @@ import { afterEach, expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
 import { AUTOMATION_REPLY_PROMPT } from "./system-prompt.ts";
-import { hostTimeout } from "./testing/host-timeout.ts";
 import { launchRestartableServer } from "./testing/restartable-server.ts";
 import { openSse, type SseRecorder } from "./testing/sse.ts";
 
@@ -59,8 +58,8 @@ async function server(env: NodeJS.ProcessEnv = {}) {
     schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },
   }, 201)).routine.id as string;
   const runNow = async (routineId: string) => (await api("POST", `/api/routines/${routineId}/run`, undefined, 201)).run.id as string;
-  const settled = (id: string, status = "completed") => expect.poll(async () => (await run(id))?.status, { timeout: hostTimeout(30_000) }).toBe(status);
-  const reported = (id: string, state: string) => expect.poll(async () => (await run(id))?.report?.state, { timeout: hostTimeout(30_000) }).toBe(state);
+  const settled = (id: string, status = "completed") => expect.poll(async () => (await run(id))?.status, { timeout: 30_000 }).toBe(status);
+  const reported = (id: string, state: string) => expect.poll(async () => (await run(id))?.report?.state, { timeout: 30_000 }).toBe(state);
   const savedBot = async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id);
   const notified = () => events!.frames.filter((frame) => frame.kind === "notify").map((frame) => frame.notification as { kind: string; threadId: string; body: string });
   const header = (name: string) => `Routine ${JSON.stringify(name)} — do this now:`;

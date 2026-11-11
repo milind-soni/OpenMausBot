@@ -12,12 +12,9 @@ import { OutboundRequestService } from "./outbound-requests.ts";
 type HoldBot = Parameters<OutboundHold["hold"]>[0]["bot"];
 
 const dirs: string[] = [];
-afterEach(async () => {
+afterEach(() => {
   vi.useRealTimers();
-  for (const dir of dirs.splice(0)) {
-    await flushDecisionLog(dir);
-    rmSync(dir, { recursive: true, force: true });
-  }
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 const calls = [{ slug: "GMAIL_SEND_EMAIL", arguments: { to: "ana@example.com", subject: "Hello" } }];

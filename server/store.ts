@@ -984,7 +984,6 @@ export class Store {
     return groupTaskByThread(this.group(groupId), threadId);
   }
 
-  /** A room's unread mark summarizes its conversations, while each task retains its own mark. */
   markGroupThreadUnread(groupId: string, threadId: string, unread: boolean, lastReadMessageId?: string): GroupRecord | null {
     const group = this.group(groupId);
     if (group?.dm && group.threadId === threadId) return this.patchGroup(groupId, { unread, ...(!unread && lastReadMessageId ? { lastReadMessageId } : {}) });

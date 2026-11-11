@@ -7,7 +7,6 @@ import { useSpeakAction } from "@/components/SpeakButton";
 
 export type PinAction = { pinned: boolean; onToggle: () => void; hint?: string };
 
-/** Simple mode keeps Reply and Copy in the message's actions menu. */
 export function replyAndCopy(onReply: () => void, text: string): MessageMenuItem[] {
   return [
     { key: "reply", icon: <Reply {...ACTION_ICON} />, label: t("chat.reply"), onSelect: onReply },

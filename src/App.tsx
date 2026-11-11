@@ -95,6 +95,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const sidebarAndPanelFit = useMediaQuery(SIDEBAR_AND_PANEL_FIT, true);
   const sidebarInline = useMediaQuery(SIDEBAR_INLINE, false);
   useEffect(() => {
+    if (!sidebarInline && state.forkPanel) dispatch({ type: "closeForkPanel" });
+  }, [sidebarInline, state.forkPanel, dispatch]);
+  useEffect(() => {
     if (!window.ogb?.environments) return;
     const open = (computerId?: string | null) => {
       if (computerId) {
@@ -420,7 +423,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           />
         )
       )}
-      {state.forkPanel && <ForkPanel />}
+      {state.forkPanel && sidebarInline && <ForkPanel />}
       {!state.forkPanel && roomPanelOpen && group && (
         <RoomPanel key={`room:${group.id}`} group={group} overlay={notificationFeed && state.notificationsOpen && !twoSidePanelsFit} />
       )}
