@@ -308,13 +308,14 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       const typed = typedWords(threadId, lines);
       const mentioned = skillCalls(text, typed, ownStart);
       if (!mentioned.length) return text;
-      const cwd = threadFolder(bot, threadId, privateOnly);
       const assigned = skillsLibraryEnabled(cfg) ? liveAssigned(bot) : undefined;
       const files = enabledSkillFiles(bot.id, mentioned, assigned);
       const add = (skills: readonly ImportedSkillView[]) => {
         for (const skill of skills) if (mentioned.includes(skill.name) && !files.has(skill.name)) files.set(skill.name, skill.file);
       };
       if (files.size < mentioned.length) add(importsFor(bot, assigned, instance));
+      const engine = files.size < mentioned.length ? engineOf(instance ?? deps.instanceOf?.(bot.modelSelection.instanceId)) : undefined;
+      const cwd = engine ? threadFolder(bot, threadId, privateOnly) : null;
       if (files.size < mentioned.length) {
         // A skill switched off on the Skills page stays off, even when the engine holds one of the same name.
         const switched = new Set([
