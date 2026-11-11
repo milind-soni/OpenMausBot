@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { HELD_SECRET_MASK, longestSplittableForm } from "../shared/redact.ts";
+import { heldPiecesIn, heldShape, heldTail, maskHeldPieces, type HeldShape } from "./held-pieces.ts";
 import { LOGIN_FIELD_MAX, LOGIN_HOSTS_MAX, loginMatchesHost, loginSite, loginUsableBy, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
 import { SECRET_VALUE_MAX_BYTES, VAULT_SECRET_NAME_MAX, vaultNameKey, type VaultSecret } from "../shared/vault.ts";
 import { writeFileAtomic } from "./atomic.ts";
@@ -535,6 +536,7 @@ export class HeldSecrets {
   private readonly filled = new Set<string>();
   private readonly codes = new Map<string, number>();
   private forms: string[] = [];
+  private shapes: HeldShape[] = [];
   private builtFor = -1;
   private filledVersion = 0;
   private builtFilled = -1;
@@ -565,6 +567,7 @@ export class HeldSecrets {
       const all = new Set([...values, ...this.filled].flatMap(secretForms));
       // Longest first, so a password that contains another is masked whole.
       this.forms = [...all].sort((a, b) => b.length - a.length);
+      this.shapes = [...new Set([...values, ...this.filled])].map((value) => heldShape(value, secretForms(value)));
       this.builtFor = this.stored.version;
       this.builtFilled = this.filledVersion;
     }
@@ -582,12 +585,19 @@ export class HeldSecrets {
         if (out.includes(code)) out = out.replace(new RegExp(`(?<!\\d)${escapeRegExp(code)}(?!\\d)`, "gu"), HELD_SECRET_MASK);
       }
     }
-    return out;
+    return maskHeldPieces(out, this.shapes);
   }
 
-  /** The length of the longest value or live code held, in any form a stream could cut partway. */
+  /** What a stream holds back for the values and live codes held (held-pieces.ts `HeldShape.tail`). */
   longest(): number {
+    this.currentForms();
     const now = this.now();
-    return Math.max(longestSplittableForm(this.currentForms()), longestSplittableForm([...this.codes].filter(([, until]) => until > now).map(([code]) => code)));
+    return Math.max(heldTail(this.shapes), longestSplittableForm([...this.codes].filter(([, until]) => until > now).map(([code]) => code)));
+  }
+
+  /** Whether text holds a piece of a held value (held-pieces.ts). */
+  begun(text: string): boolean {
+    this.currentForms();
+    return heldPiecesIn(text, this.shapes);
   }
 }
