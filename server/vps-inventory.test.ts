@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR, type AppConfig } from "./config.ts";
 import { loadEnvironmentId } from "./environment.ts";
@@ -12,6 +12,18 @@ import {
   type ManagedVpsOwner,
   type VpsCommandRunner,
 } from "./vps-computer.ts";
+
+// These tests model the SSH transport; an OMB_VPS_DOCKER_HOST inherited from the outer
+// environment would reroute them to a socket and fail before exercising the fixtures.
+let savedDockerHost: string | undefined;
+beforeEach(() => {
+  savedDockerHost = process.env.OMB_VPS_DOCKER_HOST;
+  delete process.env.OMB_VPS_DOCKER_HOST;
+});
+afterEach(() => {
+  if (savedDockerHost !== undefined) process.env.OMB_VPS_DOCKER_HOST = savedDockerHost;
+  else delete process.env.OMB_VPS_DOCKER_HOST;
+});
 
 const CONFIG: AppConfig = { vps: { sshAlias: "production-vps" } };
 const OWNER: ManagedVpsOwner = { botId: "bot-current", name: "Research", inUse: false };
@@ -44,20 +56,20 @@ function inventoryRunner(initial: ContainerFixture[]) {
       return { stdout: containers.map((container) => container.id.slice(0, 12)).join("\n"), stderr: "" };
     }
     if (command[0] === "container" && command[1] === "inspect") {
-      const requested = command.slice(2);
+      // The scan projects one small JSON object per container (--format), so a full inventory
+      // never approaches the runner's output cap.
+      const requested = command.slice(2).filter((arg) => !arg.startsWith("--") && !arg.startsWith("{"));
       return {
-        stdout: JSON.stringify(containers
+        stdout: containers
           .filter((container) => requested.some((id) => container.id.startsWith(id)))
-          .map((container) => ({
+          .map((container) => JSON.stringify({
             Id: container.id,
             Name: `/${container.name}`,
-            Config: {
-              Env: ["VNC_PW=must-not-leak"],
-              Labels: container.labels ?? labels(container.name),
-            },
-            State: { Status: container.state ?? "running", Running: container.running ?? true },
-            NetworkSettings: { Networks: { bridge: { IPAddress: "172.17.0.9" } } },
-          }))),
+            Labels: container.labels ?? labels(container.name),
+            Status: container.state ?? "running",
+            Running: container.running ?? true,
+          }))
+          .join("\n") + "\n",
         stderr: "",
       };
     }
@@ -90,6 +102,22 @@ describe("managed VPS inventory", () => {
       instances: [],
     });
     expect(fake.calls).toEqual([]);
+  });
+
+  it("scans only the configured target in socket mode, never mislabeling local containers under remote aliases", async () => {
+    const ownedName = vpsContainerName(OWNER.botId);
+    const fake = inventoryRunner([{ id: "a".repeat(64), name: ownedName }]);
+    process.env.OMB_VPS_DOCKER_HOST = "unix:///var/run/docker.sock";
+    try {
+      // Even with several remote aliases requested, the socket reaches one daemon only.
+      const inventory = await listManagedVpsComputers(CONFIG, [OWNER], fake.runner, ["alpha-vps", "beta-vps"]);
+      expect(inventory.vpsAliases).toEqual(["production-vps"]);
+      expect(inventory.instances.map((instance) => instance.vpsAlias)).toEqual(["production-vps"]);
+      // The fixture records args.slice(2); socket routing itself is pinned in vps-computer.test.ts.
+      expect(fake.calls.length).toBeGreaterThan(0);
+    } finally {
+      delete process.env.OMB_VPS_DOCKER_HOST;
+    }
   });
 
   it("lists current and orphaned stopped computers without waking or leaking them", async () => {
@@ -188,16 +216,18 @@ describe("managed VPS inventory", () => {
         return { stdout: containers.map((container) => container.id.slice(0, 12)).join("\n"), stderr: "" };
       }
       if (command[0] === "container" && command[1] === "inspect") {
-        const requested = command.slice(2);
+        const requested = command.slice(2).filter((arg) => !arg.startsWith("--") && !arg.startsWith("{"));
         return {
-          stdout: JSON.stringify(containers
+          stdout: containers
             .filter((container) => requested.some((id) => container.id.startsWith(id)))
-            .map((container) => ({
+            .map((container) => JSON.stringify({
               Id: container.id,
               Name: `/${container.name}`,
-              Config: { Labels: container.labels ?? labels(container.name) },
-              State: { Status: container.state ?? "running", Running: container.running ?? true },
-            }))),
+              Labels: container.labels ?? labels(container.name),
+              Status: container.state ?? "running",
+              Running: container.running ?? true,
+            }))
+            .join("\n") + "\n",
           stderr: "",
         };
       }
