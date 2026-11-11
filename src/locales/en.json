@@ -4745,8 +4745,8 @@
   "remote.checkAgain": "Check again",
   "remote.devices.lastSeen": "Last seen {when}",
   "remote.devices.paused": "Paused after 30 days unused. It reconnects when you open this page.",
-  "remote.devices.retired": "This phone has an older MausBot app. Update the app, then pair it again here.",
-  "remote.devices.retiredNotice": "Phones now reach this computer through MausBot Relay, and the older secure link has been switched off. A phone with an older MausBot app can no longer connect away from your Wi-Fi. Update the MausBot app on that phone, then pair it again here in Settings → Phone & devices.",
+  "remote.devices.retired": "This phone has an older MausBot app. Update the app, then open it once on the same Wi-Fi as this computer. If that doesn't reconnect it, pair it again here.",
+  "remote.devices.retiredNotice": "Phones now reach this computer through MausBot Relay, and the older secure link has been switched off. A phone with an older MausBot app can no longer connect away from your Wi-Fi. Update the MausBot app on that phone, then open it once on the same Wi-Fi as this computer. If that doesn't reconnect it, pair it again here.",
   "remote.devices.remove": "Remove {name}",
   "remote.devices.allowView": "Allow computer view",
   "remote.devices.allowViewDetail": "Full interactive access from this device.",
@@ -10203,5 +10203,10 @@
   "phone.code.typeIntro": "Open the {app} app and type this pairing code.",
   "phone.signIn.emailCode": "Sign-in code from your email",
   "settings.simple.account.noNameHint": "Not set yet",
-  "settings.simple.account.yourName": "Your name"
+  "settings.simple.account.yourName": "Your name",
+  "phoneUpdate.title": "Update MausBot on your phone",
+  "phoneUpdate.body": "{phone} has an older version of the MausBot app, which can no longer connect to this computer away from your Wi-Fi. Update the app on that phone, then open it once on the same Wi-Fi as this computer. If that doesn't reconnect it, pair it again.",
+  "phoneUpdate.bodyMany": "{count} of your phones have an older version of the MausBot app, which can no longer connect to this computer away from your Wi-Fi. Update the app on each phone, then open it once on the same Wi-Fi as this computer. If that doesn't reconnect it, pair it again.",
+  "phoneUpdate.open": "Open Phone & devices",
+  "remote.devices.pairAgain": "Pair again"
 }

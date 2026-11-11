@@ -6841,5 +6841,12 @@
   "settings.simple.more.title": "Więcej ustawień",
   "settings.simple.more.subtitle": "Kopie zapasowe, limity i ustawienia, które rzadko zmieniasz.",
   "settings.simple.more.limits": "Limity",
-  "settings.simple.more.open": "Otwórz"
+  "settings.simple.more.open": "Otwórz",
+  "phoneUpdate.title": "Zaktualizuj MausBot na telefonie",
+  "phoneUpdate.body": "{phone} ma starszą wersję aplikacji MausBot, która nie może już łączyć się z tym komputerem poza Twoją siecią Wi-Fi. Zaktualizuj aplikację na tym telefonie, a potem otwórz ją raz w tej samej sieci Wi-Fi co ten komputer. Jeśli to nie przywróci połączenia, sparuj go ponownie.",
+  "phoneUpdate.bodyMany": "Twoje telefony ({count}) mają starszą wersję aplikacji MausBot, która nie może już łączyć się z tym komputerem poza Twoją siecią Wi-Fi. Zaktualizuj aplikację na każdym telefonie, a potem otwórz ją raz w tej samej sieci Wi-Fi co ten komputer. Jeśli to nie przywróci połączenia, sparuj go ponownie.",
+  "phoneUpdate.open": "Otwórz Telefon i urządzenia",
+  "remote.devices.pairAgain": "Sparuj ponownie",
+  "remote.devices.retired": "Ten telefon ma starszą wersję aplikacji MausBot. Zaktualizuj aplikację, a potem otwórz ją raz w tej samej sieci Wi-Fi co ten komputer. Jeśli to nie przywróci połączenia, sparuj go tutaj ponownie.",
+  "remote.devices.retiredNotice": "Telefony łączą się teraz z tym komputerem przez MausBot Relay, a starsze bezpieczne połączenie zostało wyłączone. Telefon ze starszą wersją aplikacji MausBot nie może już łączyć się poza Twoją siecią Wi-Fi. Zaktualizuj aplikację MausBot na tym telefonie, a potem otwórz ją raz w tej samej sieci Wi-Fi co ten komputer. Jeśli to nie przywróci połączenia, sparuj go tutaj ponownie."
 }

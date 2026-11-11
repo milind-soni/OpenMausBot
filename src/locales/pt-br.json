@@ -4446,8 +4446,8 @@
   "remote.checkAgain": "Verificar novamente",
   "remote.devices.lastSeen": "Visto por último {when}",
   "remote.devices.paused": "Pausado após 30 dias sem uso. Ele se reconecta quando você abre esta página.",
-  "remote.devices.retired": "Este celular tem um app MausBot mais antigo. Atualize o app e depois pareie o celular de novo aqui.",
-  "remote.devices.retiredNotice": "Agora os celulares chegam a este computador pelo MausBot Relay, e o link seguro antigo foi desativado. Um celular com um app MausBot mais antigo não consegue mais se conectar fora do seu Wi-Fi. Atualize o app MausBot nesse celular e depois pareie de novo aqui, em Configurações → Celular e dispositivos.",
+  "remote.devices.retired": "Este celular tem um app MausBot mais antigo. Atualize o app e depois abra-o uma vez no mesmo Wi-Fi deste computador. Se ele não reconectar, pareie o celular de novo aqui.",
+  "remote.devices.retiredNotice": "Agora os celulares chegam a este computador pelo MausBot Relay, e o link seguro antigo foi desativado. Um celular com um app MausBot mais antigo não consegue mais se conectar fora do seu Wi-Fi. Atualize o app MausBot nesse celular e depois abra-o uma vez no mesmo Wi-Fi deste computador. Se ele não reconectar, pareie de novo aqui.",
   "remote.devices.remove": "Remover {name}",
   "remote.devices.allowView": "Permitir ver o computador",
   "remote.devices.allowViewDetail": "Acesso interativo completo a partir deste dispositivo.",
@@ -10203,5 +10203,10 @@
   "pair.team.openHint": "Você entra lá com seu e-mail e volta direto para cá.",
   "native.teamLink.otherTitle": "Esta equipe não está na conta conectada aqui",
   "native.teamLink.otherDetail": "O MausBot está conectado como {email}. Se você entrou na equipe com outro endereço, entre com ele. {email} continua conectado também.",
-  "native.teamLink.signIn": "Entrar com outro endereço"
+  "native.teamLink.signIn": "Entrar com outro endereço",
+  "phoneUpdate.title": "Atualize o MausBot no seu celular",
+  "phoneUpdate.body": "{phone} tem uma versão mais antiga do app MausBot, que não consegue mais se conectar a este computador fora do seu Wi-Fi. Atualize o app nesse celular e depois abra-o uma vez no mesmo Wi-Fi deste computador. Se ele não reconectar, pareie de novo.",
+  "phoneUpdate.bodyMany": "{count} dos seus celulares têm uma versão mais antiga do app MausBot, que não consegue mais se conectar a este computador fora do seu Wi-Fi. Atualize o app em cada celular e depois abra-o uma vez no mesmo Wi-Fi deste computador. Se ele não reconectar, pareie de novo.",
+  "phoneUpdate.open": "Abrir Celular e dispositivos",
+  "remote.devices.pairAgain": "Parear de novo"
 }
