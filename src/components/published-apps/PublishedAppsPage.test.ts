@@ -43,12 +43,14 @@ const ORPHAN: PublishedApp = { ...PAGE, id: "page-orphan00000000000000000", titl
 let root: Root;
 let host: HTMLElement;
 let apps: PublishedApp[];
+let included: { used: number; max: number } | undefined;
 let deleteAnswer: () => Promise<unknown>;
 const deletes: string[] = [];
 
 beforeEach(() => {
   vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
   apps = [SITE, PAGE, TEAM_ONLY, ORPHAN];
+  included = undefined;
   deleteAnswer = async () => ({ ok: true });
   deletes.length = 0;
   fixture.opened.length = 0;
@@ -56,7 +58,7 @@ beforeEach(() => {
   fixture.dispatch.mockReset();
   fixture.api.mockReset();
   fixture.api.mockImplementation(async (path: string, init?: { method?: string; body?: string }) => {
-    if (path === "/api/published-apps") return { apps };
+    if (path === "/api/published-apps") return { apps, ...(included ? { included } : {}) };
     if (path === "/api/published-apps/delete" && init?.method === "POST") {
       const { id } = JSON.parse(init.body!) as { id: string };
       deletes.push(id);
@@ -209,3 +211,73 @@ describe("the Published apps page", () => {
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "showChat" });
   });
 });
+
+describe("apps on the hosting the Cloud plan includes", () => {
+  const INCLUDED: PublishedApp = {
+    id: "included-app-5d0c1b7e9a3f4c62b8e1d2a4f6c80913", source: "included", title: "Bakery order page", url: "https://mb-3f9c2a17d04e8b65.netlify.app/", bot: { id: "mira", name: "Mira" },
+    threadId: "ada-chat", publishedAt: NOW - 3_600_000, access: "public", canDelete: true,
+  };
+  const TAKEN_DOWN: PublishedApp = { ...INCLUDED, id: "included-app-taken", title: "Flash sale", access: "unknown", status: "taken_down" };
+  const NOT_LIVE: PublishedApp = { ...INCLUDED, id: "included-app-new", title: "Staff rota", url: "", access: "unknown", status: "not_live" };
+  const FOLDERLESS: PublishedApp = { ...INCLUDED, id: "included-app-orphan", title: "Old shop", bot: { id: "", name: "" }, threadId: undefined };
+  const labels = (id: string) => [...card(id).querySelectorAll("button")].map((one) => one.getAttribute("aria-label") ?? one.textContent);
+
+  it("says plainly where each app is hosted", async () => {
+    apps = [INCLUDED, SITE, PAGE];
+    await show();
+    expect([INCLUDED, SITE, PAGE].map((app) => card(app.id).querySelector("[data-app-source]")?.textContent)).toEqual(["Included hosting", "Your Netlify", "MausBot page"]);
+    expect(card(INCLUDED.id).getAttribute("data-source")).toBe("included");
+    expect(card(INCLUDED.id).querySelector("[data-app-access]")?.textContent).toBe("Public");
+  });
+
+  it("gives an included app Preview, Open, Copy link, Ask the bot and Delete, and no Netlify page to manage", async () => {
+    apps = [INCLUDED];
+    await show();
+    expect(labels(INCLUDED.id)).toEqual(["Preview Bakery order page", "Preview", "Open", "Copy link", "Ask Mira to change it", "Delete Bakery order page"]);
+    act(() => button(card(INCLUDED.id), "Open").click());
+    expect(fixture.opened).toEqual([INCLUDED.url]);
+    act(() => button(card(INCLUDED.id), "Preview").click());
+    expect(fixture.previews).toEqual([{ url: INCLUDED.url, title: "Bakery order page" }]);
+    act(() => button(card(INCLUDED.id), "Delete Bakery order page").click());
+    await act(async () => button(dialog()!, "Delete").click());
+    expect(deletes).toEqual([INCLUDED.id]);
+    expect(host.querySelector(`[data-published-app="${INCLUDED.id}"]`)).toBeNull();
+  });
+
+  it("shows an app MausBot took down as taken down, with nothing to open, preview or copy", async () => {
+    apps = [TAKEN_DOWN, NOT_LIVE, FOLDERLESS];
+    await show();
+    expect(card(TAKEN_DOWN.id).querySelector("[data-app-status]")?.textContent).toBe("Taken down");
+    expect(card(TAKEN_DOWN.id).querySelector("[data-app-access]")).toBeNull();
+    expect(labels(TAKEN_DOWN.id)).toEqual(["Ask Mira to change it", "Delete Flash sale"]);
+    expect(card(TAKEN_DOWN.id).querySelector("iframe")).toBeNull();
+    expect(card(TAKEN_DOWN.id).querySelector("[data-app-thumb]")?.getAttribute("data-app-thumb")).toBe("tile");
+    expect(card(NOT_LIVE.id).querySelector("[data-app-status]")?.textContent).toBe("Not online yet");
+    expect(labels(NOT_LIVE.id)).toEqual(["Ask Mira to change it", "Delete Staff rota"]);
+    expect(labels(FOLDERLESS.id)).toEqual(["Preview Old shop", "Preview", "Open", "Copy link", "Delete Old shop"]);
+  });
+
+  it("shows how many of the plan's apps are in use in one quiet line, and no line where the plan has no hosting", async () => {
+    apps = [INCLUDED];
+    included = { used: 3, max: 10 };
+    await show();
+    const line = host.querySelector("[data-included-apps]");
+    expect(line?.textContent).toBe("3 of 10 apps included in your plan");
+    expect(line?.getAttribute("data-included-apps")).toBe("3/10");
+    act(() => root.unmount());
+    root = createRoot(host);
+    included = undefined;
+    await show();
+    expect(host.querySelector("[data-included-apps]")).toBeNull();
+    expect(host.textContent).not.toContain("included in your plan");
+  });
+
+  it("keeps the count beside the empty page, so a new plan says what it includes", async () => {
+    apps = [];
+    included = { used: 0, max: 5 };
+    await show();
+    expect(host.querySelector("[data-included-apps]")?.textContent).toBe("0 of 5 apps included in your plan");
+    expect(host.textContent).toContain("Nothing published yet");
+  });
+});
+
