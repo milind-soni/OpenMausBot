@@ -1276,7 +1276,7 @@ describe("ensurePiInstanceAgentDir", () => {
   beforeEach(() => { home = mkdtempSync(join(tmpdir(), "omb-pi-home-")); });
   afterEach(async () => { await removeTempDir(home); });
 
-  it("creates the instance dir and symlinks auth.json + models.json from the operator dir", () => {
+  it.skipIf(process.platform === "win32")("creates the instance dir and symlinks auth.json + models.json from the operator dir", () => {
     const operatorDir = join(home, ".pi", "agent");
     mkdirSync(operatorDir, { recursive: true });
     writeFileSync(join(operatorDir, "auth.json"), '{"token":"test"}');
@@ -1331,7 +1331,7 @@ describe("ensurePiInjectModel symlink detachment", () => {
   afterEach(async () => { await removeTempDir(home); });
   const canDenyWrites = process.platform !== "win32" && process.getuid?.() !== 0;
 
-  it("replaces a dangling models.json symlink with an instance-owned file", () => {
+  it.skipIf(process.platform === "win32")("replaces a dangling models.json symlink with an instance-owned file", () => {
     const agentDir = join(home, "agent");
     mkdirSync(agentDir, { recursive: true });
     symlinkSync(join(home, "deleted-operator-models.json"), join(agentDir, "models.json"));
