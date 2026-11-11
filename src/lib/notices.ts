@@ -17,12 +17,13 @@ export const PRODUCT_HUNT_UNTIL = Date.UTC(2026, 10, 1);
 export const BOAT_OFFER_NOTICE = "boat-credit-2026-11";
 /** The Move from Grok Bot popup: each person sees it once, first of all, after their welcome. */
 export const GROK_MOVE_NOTICE = "grok-move-2026-11";
-/** The sponsor's card for ModelGo: each person sees it once, on every page but a branded build or a desktop whose organization refuses it. */
+/** The sponsor's card for ModelGo: each person sees it once, on every page but a branded build or a desktop whose organization
+ * refuses it, and on the first launch it may show in: first when nothing else is due, else right after the launch's notice. */
 export const MODELGO_OFFER_NOTICE = "modelgo-offer-2026-11";
 
 /**
- * Every notice, in the order a launch asks them: one launch shows one notice, the first one due, and only the product-updates
- * question may follow it there. The rest wait for later launches, in this order.
+ * Every notice, in the order a launch asks them: one launch shows one notice first, the first one due, and only FOLLOWERS may
+ * come after it there. The rest wait for later launches, in this order.
  */
 export const NOTICES = [
   GROK_MOVE_NOTICE,
@@ -43,11 +44,26 @@ export type NoticeId = (typeof NOTICES)[number];
 
 export type NoticeFacts = Record<NoticeId, boolean | null>;
 
-/** `launch`: the notice this launch already showed (launchNotice), the only one besides the product-updates question that
- * may show again in it. */
-export function nextNotice(facts: NoticeFacts, seen: (id: NoticeId) => boolean, launch: NoticeId | null = null): NoticeId | null {
+/** What may still come in a launch another notice took: the product-updates question, and the sponsor's card, which everyone
+ * is to see on the first launch it may show in. Each in its place in NOTICES. */
+export const FOLLOWERS: readonly NoticeId[] = [UPDATES_CONSENT_NOTICE, MODELGO_OFFER_NOTICE];
+/** Notices the person has to act on. The sponsor's card never goes ahead of one, even one left for a later launch: it waits
+ * for that launch and follows it there. */
+export const MUST_ACT: readonly NoticeId[] = [GROK_MOVE_NOTICE, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE];
+
+/** `launch`: the notice this launch already showed (launchNotice), the only one besides FOLLOWERS that may show again in it.
+ * `closed`: that notice was closed in this page, so it doesn't come back however its facts read. The sponsor's card follows
+ * only once the launch's notice is gone, so two cards never share the corner. */
+export function nextNotice(facts: NoticeFacts, seen: (id: NoticeId) => boolean, launch: NoticeId | null = null, closed = false): NoticeId | null {
+  const launchUp = launch !== null && !closed && !seen(launch) && facts[launch] !== false;
+  let held = false;
   for (const id of NOTICES) {
-    if (seen(id) || (launch !== null && id !== launch && id !== UPDATES_CONSENT_NOTICE)) continue;
+    if (seen(id)) continue;
+    if ((closed || (launch !== null && id !== launch)) && !FOLLOWERS.includes(id)) {
+      if (id !== launch && MUST_ACT.includes(id) && facts[id] !== false) held = true;
+      continue;
+    }
+    if (id === MODELGO_OFFER_NOTICE && id !== launch && (held || launchUp)) continue;
     if (facts[id] === null) return null;
     if (facts[id]) return id;
   }

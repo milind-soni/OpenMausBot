@@ -34,3 +34,38 @@ export function sanitizeAcpToolMessage(message: any): unknown {
   if (!isToolUpdate && !isPermission) return message;
   return sanitizeToolLogValue(message, { nodes: 512, text: TOOL_LOG_TEXT_LIMIT });
 }
+
+/** What the native log keeps of any ACP message: inline images stay on the wire but never go in as base64. */
+export function acpNativeLogMessage(msg: any, sanitizeToolPayload: boolean): unknown {
+  let redacted = msg;
+  const prompt = msg?.method === "session/prompt" ? msg?.params?.prompt : null;
+  if (Array.isArray(prompt)) {
+    redacted = {
+      ...msg,
+      params: {
+        ...msg.params,
+        prompt: prompt.map((content: any) =>
+          content?.type === "image" && typeof content.data === "string"
+            ? { ...content, data: `[image data: ${content.data.length} base64 chars]` }
+            : content
+        ),
+      },
+    };
+  }
+  const content = redacted?.params?.update?.content;
+  if (
+    redacted?.method === "session/update" &&
+    redacted?.params?.update?.sessionUpdate === "agent_message_chunk" &&
+    content?.type === "image" &&
+    typeof content.data === "string"
+  ) {
+    redacted = {
+      ...redacted,
+      params: {
+        ...redacted.params,
+        update: { ...redacted.params.update, content: { ...content, data: `[image data: ${content.data.length} base64 chars]` } },
+      },
+    };
+  }
+  return sanitizeToolPayload ? sanitizeAcpToolMessage(redacted) : redacted;
+}

@@ -39,7 +39,7 @@ export function createLoginHandoffClient({ timeoutMs = 10_000, randomId = random
       const waiting = typeof message.requestId === "string" ? pending.get(message.requestId) : undefined;
       if (!waiting || waiting.proc !== proc) return true;
       settle(message.requestId, ({ resolve, reject }) => {
-        if (message.ok === true && [message.onePassword, message.login, message.connection, message.share, message.release, message.secrets].some(record)) resolve(message);
+        if (message.ok === true && [message.onePassword, message.login, message.secret, message.connection, message.share, message.release, message.secrets].some(record)) resolve(message);
         else reject(new Error(sentence(message.error) ?? "OpenMausBot on this computer could not read that login."));
       });
       return true;

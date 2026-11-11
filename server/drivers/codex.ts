@@ -2,10 +2,10 @@ import { decodeRoutedCodexConfig, managedCodexArgs, endpointCodexArgs, type Code
 export { managedCodexArgs, endpointCodexArgs } from "./codex-endpoint-config.ts";
 import { codexActionFailure } from "./codex-action-notice.ts";
 import { codexToolSurfaceArgs } from "./codex-tool-surface.ts";
-import { codexShellDisabled, GUEST_CONFINED_CODEX_ARGS } from "./codex-guest.ts";
+import { codexShellDisabled, codexTurnConfigArgs } from "./codex-guest.ts";
 import { TEAM_TOOLS_FAILED, teamToolsFailed } from "./team-tools.ts";
 import { enabledMcpMounts, mcpStartupTracker, supportsMcpStartup } from "./codex-mcp-startup.ts";
-import { boxProxyEnvNames, type McpApprovalMode, mountMcpServer } from "./codex-mcp-mount.ts";
+import { boxAdmittedEnv, boxProxyEnvNames, customServerEnvBox, type McpApprovalMode, mountMcpServer } from "./codex-mcp-mount.ts";
 import { reportUnsupportedCalls, rolloutMark, type RolloutMark } from "./codex-unsupported-calls.ts";
 // The `codex` CLI headless over its app-server JSON-RPC (NDJSON on stdio): completion is
 // `turn/completed`, approvals arrive as server→client requests, resumeCursor is the codex thread id.
@@ -550,7 +550,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           // Native shell snapshots can restore variables the shell policy removed.
           ...(turn.toolScope === undefined && !authBridge ? [] : ["-c", "features.shell_snapshot=false"]),
           // A guest-driven turn: no shell, no file reads (-c wins over config files).
-          ...(turn.guestConfined ? GUEST_CONFINED_CODEX_ARGS : [])];
+          ...codexTurnConfigArgs(turn)];
         const codexConfig = codexConfigMcp(env), declaredInCodexConfig = codexConfig.names;
         if (turn.toolScope !== undefined) appServerArgs.push(...codexMcpDisableArgs(declaredInCodexConfig));
         const baseEnv = new Map(Object.entries(env).filter(([, value]) => value !== undefined));
@@ -633,10 +633,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
         }
 
-        // Codex gives MCP children their variables from the environment it runs shell commands in, so
-        // every variable a mount writes is excluded from that shell (snapshots are off).
+        // Codex hands MCP children its shell environment, so mounted variables (and box-admitted custom env) leave that shell.
+        const customBox = customServerEnvBox(turn.integrations?.custom, selectedMcp), boxAdmitted = boxAdmittedEnv(customBox);
         const mountedEnv = [...mountedNames].filter((name) => env[name] !== undefined && !SHELL_ESSENTIALS.has(name) && !name.startsWith("LC_")
-          && (name === "ELECTRON_RUN_AS_NODE" || baseEnv.get(name) !== env[name]));
+          && (name === "ELECTRON_RUN_AS_NODE" || boxAdmitted.has(name) || baseEnv.get(name) !== env[name]));
         const privateEnv = [...new Set([
           ...(config.endpoint ? ["OPENMAUSBOT_CODEX_API_KEY"] : []),
           ...(turn.toolScope !== undefined ? ["OMB_GATE_CONFIG_*"] : []),
@@ -659,7 +659,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const child = spawnHoldingSlot(releaseSlot, () => spawnCli(...codexLaunch(config.cli, appServerArgs), {
           cwd: turn.cwd ?? homedir(),
           env,
-          stdio: ["pipe", "pipe", "pipe"],
+          stdio: ["pipe", "pipe", "pipe"], ...customBox,
         }, "bot"));
 
       let abandoned = false;

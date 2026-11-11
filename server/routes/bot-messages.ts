@@ -30,12 +30,13 @@ import type { RoutineManager } from "../routines.ts";
 import { acceptedSendMatch, parseSendId } from "../send-idempotency.ts";
 import type { DirectSendInput, DirectSendReceipt } from "../direct-send.ts";
 import { cancelSteeredMessage, holdSteeredQueue, queuedSteerSender, queuedSteeredMessage, restoreHeldSteeredQueue, settleHeldSteeredQueue } from "../steer-queue.ts";
-import { routeRunOwners, type Actor, type RunOwners } from "../host/run-owner.ts";
+import { routeRunOwners, type Actor, type RouteRunOwners } from "../host/run-owner.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { extractSteerImages } from "../turn-images.ts";
 import { followupFacts, helperFollowup, helperFollowupBody, mayFollowUp } from "../helper-followup.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { noteTypedSend } from "../typed-sends.ts";
+import { startFresh } from "../fresh-start.ts";
 import { parseMentionPicks } from "../../shared/room-mentions.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import { refusalBody, userError } from "../user-errors.ts";
@@ -54,7 +55,7 @@ type Behavior = "allow" | "deny" | "answer";
 
 export interface BotMessageRouteDeps {
   store: Pick<Store,
-    | "activeLeaf" | "appendMessage" | "bot" | "botByThread" | "bots" | "groupByThread" | "messagesFor"
+    | "activeLeaf" | "activePath" | "appendMessage" | "bot" | "botByThread" | "bots" | "groupByThread" | "messagesFor"
     | "patchMessage" | "patchTask" | "projectBotForTask" | "setActiveLeaf" | "setTaskAskedAt" | "taskByThread" | "tasks">;
   registry: Pick<ProviderRegistry, "get">;
   /** On a team: the words for a turn with no AI to answer with, having told who can connect one. */
@@ -111,7 +112,7 @@ export interface BotMessageRouteDeps {
   deliverLateQuestionAnswer(auth: RequestAuth, threadId: string, requestId: string, answer: string, cardMessage: Message, owner: BotRecord): Promise<{ queued: boolean }>;
   stopThreadForPerson(botId: string, threadId: string, by?: ResolvedSender): Promise<void>;
   /** Whoever asked owns the run, where several people write. */
-  runOwners?: Pick<RunOwners, "stopRefusal" | "removeRefusal" | "joinRefusal">;
+  runOwners?: RouteRunOwners;
   runActor?(auth: RequestAuth): Actor;
   cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): unknown;
   revokeInternalCapabilitiesForThread(threadId: string): void;
@@ -480,13 +481,26 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       return json(res, 202, { ok: true, threadId: bot.threadId });
     }
 
+    m = path.match(/^\/api\/bots\/([\w-]+)\/start-fresh$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      requirePinnedClientThread(m[1], body?.threadId);
+      const bot = requestedTaskBot(m[1], body?.threadId);
+      const notYours = cloudThreadRefusal(auth, bot.threadId);
+      if (notYours) return json(res, 403, { error: notYours });
+      // Synchronous from here: startTurn flips busy before the next request, so a turn cannot slip past this check.
+      if (threadBusy(bot.id, bot.threadId)) return json(res, 409, userError("serverError.chat.busyFresh"));
+      if (phoneSecretSubmissions.hasThread(bot.threadId)) return json(res, 409, userError("serverError.chat.savingCredential"));
+      return json(res, 200, { ok: true, message: startFresh(store, bot.id, bot.threadId), threadId: bot.threadId });
+    }
+
     m = path.match(/^\/api\/bots\/([\w-]+)\/messages\/([\w-]+)\/edit$/);
     if (m && method === "POST") {
       const messageId = m[2];
       const body = await readBody(req);
       requirePinnedClientThread(m[1], body?.threadId);
       const bot = requestedTaskBot(m[1], body.threadId);
-      const notYours = cloudThreadRefusal(auth, bot.threadId);
+      const notYours = owners.decidesRetry(bot.threadId) ? null : cloudThreadRefusal(auth, bot.threadId);
       if (notYours) return json(res, 403, { error: notYours });
       const textRefused = messageTextRefusal(body.text);
       if (textRefused) return json(res, 400, { error: textRefused });
@@ -497,6 +511,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (!source || source.role !== "user" || source.kind !== "text") {
         return json(res, 404, { error: "only user messages can be edited" });
       }
+      const notYoursToRetry = owners.retryRefusal(auth, bot.threadId, source.sender);
+      if (notYoursToRetry) return json(res, 403, { error: notYoursToRetry, code: "retry_not_yours" });
       // Before the busy guard: a retried edit's own fork is what is busy.
       const sendId = parseSendId(body.sendId);
       if (sendId) {

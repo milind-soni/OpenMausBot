@@ -14,13 +14,17 @@ export const VERIFY_NONCE = /^[A-Za-z0-9_-]{43,128}$/u;
 
 export const fingerprint = (nonce: string, value: unknown): string => createHmac("sha256", nonce).update(canonicalJson(value)).digest("hex");
 
-/** Each saved login, by the key Send to My Cloud compares it under, and 1Password's token. */
-export function loginFingerprints(nonce: string, store: Pick<VaultStore, "changes" | "get" | "onePasswordToken">): Record<string, string> {
+/** Each saved login and saved secret, by the key Send to My Cloud compares it under, and 1Password's token. */
+export function loginFingerprints(nonce: string, store: Pick<VaultStore, "changes" | "get" | "listSecrets" | "secret" | "onePasswordToken">): Record<string, string> {
   const out: Record<string, string> = {};
   for (const { id } of store.changes()) {
     const login = store.get(id);
     if (!login) continue;
     out[itemKey.login(login.site, login.username, login.exactHost ? login.hosts[0] : undefined)] = fingerprint(nonce, { password: login.password, totp: login.totp ?? null });
+  }
+  for (const { id } of store.listSecrets()) {
+    const secret = store.secret(id);
+    if (secret) out[itemKey.secret(id)] = fingerprint(nonce, { value: secret.value });
   }
   const token = store.onePasswordToken();
   if (token) out[itemKey.onePassword()] = fingerprint(nonce, { token });

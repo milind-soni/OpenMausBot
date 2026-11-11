@@ -22,11 +22,20 @@ import { audienceHome } from "../engine-homes/layout.ts";
 import { forgetBotMemoryJournal, journalFile } from "../memory-journal.ts";
 import { deleteBotMemoryFiles } from "../message-db.ts";
 import { personKey } from "../person-key.ts";
+import { removeMemoryLayer, type MemoryLayerRecords } from "./delete-leftovers.ts";
 import { memberUploads } from "./member-uploads.ts";
 
 /** A file in attachments/, by its URL or by its path (as JSON escapes it) a sent document's tag carries. */
 const ATTACHMENT = /attachments(?:\/|\\)+([A-Za-z0-9][\w.-]{0,200})/g;
 const PERSON = /^p_[\w-]{22}$/;
+
+export const memoryLayerRecords: MemoryLayerRecords = {
+  journalFile,
+  forget(layer) {
+    deleteBotMemoryFiles(layer);
+    forgetBotMemoryJournal(layer);
+  },
+};
 
 export interface TeamMemberLeftDeps {
   dataDir: string;
@@ -53,7 +62,7 @@ export interface TeamMemberLeftDeps {
   deleteAttachment(name: string): void;
   eraseBrowsers(audience: Audience): Promise<boolean>;
   /** Their own connections, keys and MCP sign-ins (team-connections.ts). */
-  forgetConnections(person: string): void;
+  forgetConnections(person: string): void | Promise<void>;
   /** Every routine: `home` is the person whose private chat it lives in (routine-home.ts), `writer` who last wrote it,
    * `files` the attachments/ names it carries. */
   routines(): ReadonlyArray<{ id: string; name: string; botId: string; home: string | null; writer: string | undefined; files: readonly string[] }>;
@@ -135,15 +144,12 @@ export function createTeamMemberLeft(deps: TeamMemberLeftDeps): (email: string) 
     let entries: string[] = [];
     try { entries = readdirSync(workspaces); } catch {}
     for (const layer of entries.filter((entry) => entry.endsWith(`--member-${person}`))) {
-      rmSync(join(workspaces, layer), { recursive: true, force: true });
-      rmSync(journalFile(layer), { force: true });
-      deleteBotMemoryFiles(layer);
-      forgetBotMemoryJournal(layer);
+      removeMemoryLayer(deps.dataDir, layer, memoryLayerRecords);
       layers++;
     }
     rmSync(join(deps.dataDir, "people", person), { recursive: true, force: true });
     rmSync(audienceHome(deps.dataDir, memberAudience(person)), { recursive: true, force: true });
-    deps.forgetConnections(person);
+    await Promise.resolve(deps.forgetConnections(person)).catch((error: unknown) => { console.warn(`[team] a leaving member's connections were not all removed: ${error instanceof Error ? error.message : String(error)}`); });
     const browsers = await deps.eraseBrowsers(memberAudience(person)).catch(() => false);
     // Counts of shared things only: nothing here says what was theirs alone.
     deps.record({ category: "people", action: "member.left", target: { kind: "person", name: address }, after: { botsHandedBack, routinesHandedOver: written.length } });

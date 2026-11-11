@@ -88,7 +88,9 @@ it("restart keeps the key and replaces the warm process, and so does turning the
     await cycled.done();
     expect(cycled.started.pid, "off and on in one turn starts a new process too").not.toBe(fresh.started.pid);
     expect(mailKey(cycled.started)).toBe("kept-key-value");
-    expect(JSON.parse(readFileSync(join(fixture.info.dataDir, "config.json"), "utf8")).mcpServers.mail.env).toEqual({ MAIL_KEY: "kept-key-value" });
+    const onDisk = readFileSync(join(fixture.info.dataDir, "config.json"), "utf8");
+    expect(JSON.parse(onDisk).mcpServers.mail.env).toEqual({ MAIL_KEY: expect.stringMatching(/^vault:[0-9a-f-]{36}$/u) });
+    expect(onDisk).not.toContain("kept-key-value");
   } finally {
     writeFileSync(gate, "");
     await fixture.close();

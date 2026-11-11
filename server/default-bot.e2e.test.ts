@@ -53,6 +53,18 @@ it("makes MausBot a new install's first bot, never deleted, hidden by its switch
     expect((await bots()).find((bot) => bot.id === maus.id)?.sidebarHidden).toBe(true);
     expect((await api("PATCH", `/api/bots/${maus.id}`, { sidebarHidden: false })).status).toBe(200);
     expect((await bots()).find((bot) => bot.id === maus.id)?.sidebarHidden).toBe(false);
+    // A hidden MausBot comes back when it is renamed or moved to a department, unless the change itself says hidden.
+    const hiddenAfter = async (patch: Record<string, unknown>) => {
+      expect((await api("PATCH", `/api/bots/${maus.id}`, { sidebarHidden: true })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${maus.id}`, patch)).status).toBe(200);
+      return (await bots()).find((bot) => bot.id === maus.id)?.sidebarHidden;
+    };
+    expect(await hiddenAfter({ color: "blue" })).toBe(true);
+    expect(await hiddenAfter({ name: "Nova" })).toBe(false);
+    expect(await hiddenAfter({ section: "C Suite" })).toBe(false);
+    expect(await hiddenAfter({ section: "C Suite" })).toBe(true);
+    expect(await hiddenAfter({ name: "Nova Two", sidebarHidden: true })).toBe(true);
+    expect((await api("PATCH", `/api/bots/${maus.id}`, { name: maus.name, section: null, sidebarHidden: false })).status).toBe(200);
 
     const { bot: clive } = await control(["new-bot", "--name", "Clive"]);
     expect((await api("PATCH", `/api/bots/${clive.id}`, { sidebarHidden: true })).status).toBe(400);

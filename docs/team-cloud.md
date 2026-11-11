@@ -277,7 +277,9 @@ their team page in MausBot Cloud (the Admin's Cloud page calls the routes below 
   asked in is only where the result is ("Done. The result is in Clerk's chat with Ada."), never the result: a private chat
   never reaches a room or the team (server/host/room-access.ts).
 - **Apps.** A member's own apps are their own installation on the connected-apps service (their own Composio user),
-  registered the first time they press Connect. Their turn gets a second bridge, `own_apps`, beside the team's
+  registered the first time they press Connect. While the team has its own Composio project key they are instead the
+  member's own Composio user in the team's project, and nothing of theirs goes to the service
+  ([composio.md](composio.md), "Keeping traffic off the managed service"); who gets them is the same. Their turn gets a second bridge, `own_apps`, beside the team's
   `composio`; the relay checks every frame again: the team's bridge refuses a `person` app (and code that calls apps
   while the team's own installation still holds one), a member's bridge refuses a team app and anything outside their
   own turn. A connection card for a `person` app is never shown: the bot gets one plain line to say, *"Connect your
@@ -292,14 +294,15 @@ their team page in MausBot Cloud (the Admin's Cloud page calls the routes below 
   used, else `Authorization: Bearer`) or their own sign-in; one not mounted is named to the bot with why and the fix. Both are pinned to the server's address: re-pointed, they aren't sent.
   Removing the server forgets every member's key and sign-in for it.
 - **Storage.** `team-connection-scopes.json` (no secret, carried by backups) and `people-connections/` (0700; each
-  member's installation token, keys and sign-ins, 0600), which no backup carries and no bot box binds. Nothing a route
+  member's installation token, keys and sign-ins, 0600; with the team's own key, `project-apps.json`: each member's
+  Composio user and Session ids and a short hash of the key, never the key), which no backup carries and no bot box binds. Nothing a route
   answers carries a key, a token or more of an address than its host.
 
 | Route | Who | |
 |---|---|---|
 | `PUT /api/team/connection-scopes { kind: "app" \| "mcp", id, scope: "team" \| "person" }` | admin | `{ scopes: { apps, mcp } }`; recorded in admin activity |
-| `GET /api/team/my-connections` | the member | `{ team, link, email, apps: [{ slug, name, connected, accounts }], mcp: [{ name, host, connected, how, offers }] }` |
-| `POST /api/team/my-connections/apps/:slug/connect` | the member | `{ url }`, the app's own sign-in (a new tab) |
+| `GET /api/team/my-connections` | the member | `{ team, link, email, apps: [{ slug, name, connected, accounts, reconnect? }], mcp: [{ name, host, connected, how, offers }], ownApps? }`; `reconnect: true` on an app they connected before the team changed its Composio key, to connect again; `ownApps: "needs-key"` when the connected-apps service is off and the team has no key |
+| `POST /api/team/my-connections/apps/:slug/connect` | the member | `{ url }`, the app's own sign-in (a new tab); 409 `own_apps_need_key` when an admin must add the team's key first |
 | `DELETE /api/team/my-connections/apps/:slug` | the member | |
 | `POST /api/team/my-connections/mcp/:name/sign-in` | the member | `{ auth }`; it comes back to this server's `/mcp-oauth/callback` |
 | `PUT /api/team/my-connections/mcp/:name/key { value, url? }` | the member | write-only; with `url`, returns 409 if the server URL changed |
@@ -441,6 +444,17 @@ engine writes its copy, and the next spawn in any audience takes the newest sett
 or out from the app still happens in the server's HOME and reaches every audience's next turn. Session resume works
 within an audience: its home is the same at each turn. A member who leaves takes their engine home with them.
 
+**Deleting.** A deleted conversation takes its Claude Code and Codex session files with it, from every audience's home
+(`server/host/delete-leftovers.ts`): the session it resumes and every session its event log says it started, unless a
+conversation that stays still resumes the same one. The files uploaded to it go too when no other conversation, picture
+or routine names them, and so does its box uploads folder. A deleted bot also takes its checkpoints
+(`checkpoints/<bot>`), its memory journal and the room and member memory layers kept beside its own folder. Nothing is reached through a link, and a cleanup that fails is logged
+(`delete leftovers: … stayed behind`) and never fails the delete. Still left: sessions kept by the other engines
+(OpenCode, Gemini and the rest of the ACP family, Muse), which only the engine itself can remove; the bot's
+per-folder checkpoints, which its conversations share, until the bot is deleted; and anything on a computer other than
+this server. Kept on purpose: a conversation's own folder (`task-workspaces/<bot>/<thread>`) holds the files the bot
+made for the person, and stays when the conversation or the bot is deleted.
+
 **The move.** The first turn after a Team Cloud starts with engine homes moves what the engines kept in the server's
 HOME. A Claude Code project's session (`projects/<folder>/<session>.jsonl` and its session folder, `file-history`,
 `session-env`, `todos`, `debug`) or a Codex rollout (`sessions/…/rollout-…-<id>.jsonl`, `archived_sessions`) goes to
@@ -495,8 +509,44 @@ routine from anyone else (404 *no such bot*).
 ## The shared chat's name
 
 A team bot's main chat is called *"Shared chat"* on every person's copy (`WireTask.sharedChat`), whatever its stored title,
-so nobody takes it for one of their own, and it can't be renamed. A member's own MausBot has none. Clicking a bot still
-opens the person's own private chat.
+so nobody takes it for one of their own, and it can't be renamed. A member's own MausBot has none.
+
+## Just me and Team
+
+At the top of a team's sidebar sits one switch, **Just me / Team** (`src/state/team-side.ts`, `TeamSideSwitch`). It is in
+the sidebar in each of its shapes: full width, the rail of icons (two icon buttons) and the phone's bot list. It is not
+in the window's rail of Clouds, which is the desktop window's own chrome: a browser and a phone have none, one place has
+none, and the person can hide it.
+
+- **Just me** lists the bots the person can chat with privately (their own MausBot among them), each with their own
+  conversations with it, and no group chat. A bot opens the person's own chat with it, made through `POST
+  /api/bots/<id>/tasks` the first time.
+- **Team** lists the bots that have a shared chat, each with its shared conversations only, and the group chats. A bot
+  opens its shared chat. A bot with no shared chat (a person's own MausBot) is not listed there. No new conversation is
+  offered beside a shared chat: a conversation a person opens is always private, so New conversation is under Just me.
+- **Which side a conversation is on is the server's answer**, never the switch: `private: true` on the task (or a
+  conversation this page just made through that route, or the person's own MausBot) is Just me; everything else, a
+  conversation the page knows nothing of included, is Team. Neither side's list shows a conversation, an unread mark or a
+  preview line of the other's.
+- **By the message box**, every conversation on a team says who can read it, from that same answer: *"Private · only
+  you"*, *"Shared · everyone in Acme can see"*, *"Shared · only people added and admins can see"* or, in a group chat,
+  *"Shared · everyone in this group chat can see"* (`TeamAudienceLabel`).
+- **The switch follows a conversation the person asked for**: another bot or group chat, a conversation opened by
+  name (a notification, a link, search, a list), one they just made. That, and pressing the switch, are the only things
+  that keep a side as their choice (`localStorage`, `omb.team-side.<team>.<address>`, per person and team on the
+  device; Just me until they choose Team).
+- **A conversation that came on screen unasked is never kept.** The first conversation a page shows, one the app opened
+  as it started (before it knew this is a team's Cloud), or the bot's own pick changing because a teammate opened
+  another: when it is of the other side, the page goes back to the side the person chose, to their own conversation
+  with that bot when it is listed there. So a reload with Just me chosen opens their private chat, never the shared one.
+  With nowhere to go on that side the switch shows the side on screen for that page only.
+- **A draft stays with its conversation.** What is typed and not sent is kept per conversation, so it is never in the
+  message box of the other side; on a team the older per-bot draft is not read.
+- **Unread.** The side not shown carries a dot when the person has something unread there (their own marks: a private
+  chat's, or their own read line of a shared chat or a group chat). A bot's row carries only its side's marks: no
+  unread mark, working line or preview from the other side's conversations.
+- With one side empty (nobody shared a bot with them yet, say) there is no switch and the sidebar lists everything.
+  The first time the switch shows on a device, one line under it says what the two sides are.
 
 ## Who looks after a bot
 
@@ -655,7 +705,11 @@ run belongs to the person whose own request it answers (`server/host/run-owner.t
   `/api/groups/<id>/interrupt`, a typed "stop", a guarded request's `/interrupt`) from anyone else answers 403 with
   `code: "stop_not_yours"` and *"Only Priya or an admin can stop this."*; their "@Scout stop" in a group chat is an
   ordinary line there. Stop stays the only interrupt. The app shows Stop, and Retry on a stopped request, only to the
-  asker and to Owners and Admins (and to everyone for a run no person asked for). The stopped row records who pressed
+  asker and to Owners and Admins (and to everyone for a run no person asked for). The server holds Retry to the same
+  rule: running someone else's request again (`POST /api/bots/<bot>/messages/<id>/edit`, with the same words or new
+  ones) answers 403 with `code: "retry_not_yours"` and *"Only Priya or an admin can run this request again."* In a
+  shared conversation this rule alone decides it, whoever opened the conversation; renaming, deleting or otherwise
+  changing the conversation itself stays with whoever opened it and the Owner's side. The stopped row records who pressed
   Stop (`WireMessage.stoppedBy`): it reads "Maya stopped this." to everyone else and "You stopped this." to Maya.
 - **Who asked, for what is not a person's line** (read from the records the provenance labels come from, never from
   model text). A routine, a webhook and an app's event never run in a person's conversation: each runs in its own and
@@ -773,8 +827,8 @@ listed), two of that name, the person the bot is already talking with, a person 
 inbox here, and more than 10 passes an hour from one conversation (answers from an inbox included).
 
 **People.** The composer's @ list offers the teammates after the bots, with their picture and a "Person" tag; the
-sidebar lists the team's people with their pictures: your own row opens your inbox, a teammate's puts their @name in
-the composer on screen. Each person is tagged by their whole name, and by their first name when no other teammate shares
+sidebar shows the team's people as a row of faces above the bots, never as rows of their own: your own face opens your
+inbox, a teammate's puts their @name in the composer on screen. Each person is tagged by their whole name, and by their first name when no other teammate shares
 it (`shared/person-mention.ts`). A tag a bot shares is the person's: "@Ben" reaches Ben even with a bot called Ben, and
 that bot is not told it was named; only a longer bot name ("@Ben Bot") reaches a bot. A bot made or renamed with a
 person's name says so once in its own chat, and the Chief's `create_bot` result warns (`server/host/bot-name-clash.ts`).
@@ -869,9 +923,12 @@ opens the team's page on the Cloud site (`/cloud/team/<id>`), not a chat. Nothin
   (the team's), whichever chat wrote them; a routine is its place's (above, "Routines"). The Owner's whole-machine
   export leaves every member's private chats out (above), the Owner's own too: an export is the team's, never anyone's
   alone.
-- **Own apps with the team's own Composio project.** A member's own apps always use OpenMausBot's connected-apps
-  service, even when the team connected a Composio project key of its own; an app that needs the project's own auth
-  config can't be connected by each person.
+- **Own apps after the team changes its Composio key.** Saving, removing or replacing the team's key leaves every
+  member's own apps to be connected again. What they connected before stays where it was made (the connected-apps
+  service, or the earlier project) and is not erased from here.
+- **A member who leaves a team on the connected-apps service.** Their installation's token is forgotten here, but the
+  installation and its connections are not erased at the service. With the team's own key their connections are
+  removed from the project.
 
 ## The desktop app and a team it was invited to
 

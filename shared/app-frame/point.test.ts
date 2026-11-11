@@ -85,6 +85,51 @@ describe("the page's point script", () => {
     expect(posted).toHaveLength(1);
   });
 
+  it("keeps a space between a badge and the words after it, so the chip label reads as the page does", () => {
+    const { say } = boot();
+    document.body.innerHTML = `<div class="card"><span style="display:inline-block">Cloud</span>Restore <b>fin</b>ishes<script>ignored()</script>
+      <i style="visibility:hidden">tooltip</i><details><summary>More</summary>folded</details></div>`;
+    say(pointMessage(true));
+    click(document.querySelector(".card")!);
+    expect(posted.at(-1)).toMatchObject({ params: { tag: "div", text: "Cloud Restore finishes More" } });
+  });
+
+  it("keeps the page's capitals, a visible child of a hidden wrapper, and leaves out text the page does not render", () => {
+    const { say } = boot();
+    document.body.innerHTML = `<div class="card"><span style="text-transform:uppercase">save</span>
+      <span style="visibility:hidden">tip <em style="visibility:visible">shown</em></span><details><summary>One</summary><summary>Two</summary>x</details>
+      <section style="content-visibility:hidden">skipped</section></div>`;
+    say(pointMessage(true));
+    click(document.querySelector(".card")!);
+    expect(posted.at(-1)).toMatchObject({ params: { tag: "div", text: "SAVE shown One" } });
+  });
+
+  it("capitalizes a word once when it spans inline tags, and never picks a hovered part the page removed", () => {
+    const { say } = boot();
+    document.body.innerHTML = `<p class="cap" style="text-transform:capitalize"><b>w</b>ord <i>two</i>words</p><div id="gone">Gone</div>`;
+    say(pointMessage(true));
+    click(document.querySelector(".cap")!);
+    expect(posted.at(-1)).toMatchObject({ params: { tag: "p", text: "Word Twowords" } });
+    say(pointMessage(true));
+    const gone = document.querySelector("#gone")!;
+    gone.dispatchEvent(new PointerEvent("pointermove", { bubbles: true }));
+    gone.remove();
+    window.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(posted).toHaveLength(1);
+  });
+
+  it("keeps a capital after leading punctuation and a hyphen, and names a closed select by its chosen option", () => {
+    const { say } = boot();
+    document.body.innerHTML = `<p class="cap" style="text-transform:capitalize">(note) <b>"</b>two foo-bar</p>
+      <select id="plan"><option>Free</option><option selected>Pro</option></select>`;
+    say(pointMessage(true));
+    click(document.querySelector(".cap")!);
+    expect(posted.at(-1)).toMatchObject({ params: { tag: "p", text: '(Note) "Two Foo-Bar' } });
+    say(pointMessage(true));
+    click(document.querySelector("#plan")!);
+    expect(posted.at(-1)).toMatchObject({ params: { tag: "select", text: "Pro" } });
+  });
+
   it("names a keyed part by its key, and Escape ends point mode with word to the parent", () => {
     const { say } = boot();
     say(pointMessage(true));

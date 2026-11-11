@@ -1,4 +1,5 @@
 import { liveSavePatch } from "../live-config.ts";
+import { signInEnvRefusal } from "../sign-in-env.ts";
 import * as boat from "../boat.ts";
 import { boatCreateRecoverySnapshot, retireDeletedBoatCreate } from "../boat-create-idempotency.ts";
 import { boatDeletionSnapshot } from "../boat-delete-journal.ts";
@@ -149,6 +150,9 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       if (CLOUD_HOME && (patch.signIn?.admins?.length || patch.signIn?.members?.length)) {
         return json(res, 403, { ...userError("serverError.cloud.personal"), code: "cloud_personal" });
       }
+      // Saved, it would be overruled by the environment at once: say so instead of answering 200 with nothing changed.
+      const signInPinned = signInEnvRefusal(patch.signIn);
+      if (signInPinned) return json(res, 409, { error: signInPinned, code: "signin_env" });
       if (patch.newBotDefaults) {
         if (patch.newBotDefaults.profile.modelSelection) {
           const checked = checkedModelSelection(patch.newBotDefaults.profile.modelSelection);

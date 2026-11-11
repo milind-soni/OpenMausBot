@@ -27,6 +27,7 @@ import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import * as procs from "../procs.ts";
 import { botBox } from "../bot-box/box.ts";
+import { boxEnvironment } from "../bot-box/env.ts";
 import { autoVerdict } from "../auto-approve.ts";
 import { formatQuestionAnswers } from "../../shared/ask-question.ts";
 
@@ -1313,6 +1314,49 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     vi.spyOn(botBox, "enabled").mockReturnValue(true);
     expect(await envVars("t-boxed-proxy")).toEqual(["LIST", "HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "NO_PROXY", "no_proxy"]);
   }, 20_000);
+
+  it("lets a person's own stdio server's env through the bot box to Codex, which hands it on by name", async () => {
+    await create();
+    const realSpawnCli = procs.spawnCli;
+    const spawns: Parameters<typeof procs.spawnCli>[] = [];
+    const spawnSpy = vi.spyOn(procs, "spawnCli").mockImplementation((...args: Parameters<typeof procs.spawnCli>) => {
+      spawns.push(args);
+      return realSpawnCli(...args);
+    });
+    const appServer = () => spawns.find(([, args]) => args.some((arg) => arg.startsWith("mcp_servers.")))?.[2];
+    try {
+      const woo = { command: "python3", args: ["woo.py"], env: { WOO_KEY: "ck_fixture", TRC_ONLY: "1" } };
+      await instance.adapter.sendTurn({ threadId: "t-box-env", text: "go", integrations: { custom: { woo } } });
+      await recorder.until((event) => event.type === "turn.completed" && event.threadId === "t-box-env");
+      const options = appServer()!;
+      const allow = new Set(typeof options.box === "object" ? options.box.allowEnv : []);
+      expect([...allow].sort()).toEqual(["TRC_ONLY", "WOO_KEY"]);
+      // The box keeps only its allow-list: without these names the server would start with neither.
+      expect(boxEnvironment(options.env!, new Set(), new Set())).not.toHaveProperty("WOO_KEY");
+      expect(boxEnvironment(options.env!, new Set(), allow)).toMatchObject({ WOO_KEY: "ck_fixture", TRC_ONLY: "1" });
+
+      spawns.length = 0;
+      const plain = { command: "python3", args: ["todo.py"], env: {} };
+      await instance.adapter.sendTurn({ threadId: "t-box-no-env", text: "go", integrations: { custom: { plain } } });
+      await recorder.until((event) => event.type === "turn.completed" && event.threadId === "t-box-no-env");
+      expect(appServer()).not.toHaveProperty("box");
+    } finally {
+      spawnSpy.mockRestore();
+    }
+  }, 20_000);
+
+  it("with the box on, keeps a box-admitted custom env name out of Codex's shell even when the inherited value is the same", async () => {
+    const dump = join(scratch, "box-env-shell.json"); process.env.FAKE_CODEX_DUMP = dump;
+    vi.spyOn(botBox, "enabled").mockReturnValue(true);
+    await create({ mode: "resume", environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_MCP_OVERRIDES: "1", MY_MCP_AUTH: "same-fixture" } });
+    const woo = { command: "python3", args: ["woo.py"], env: { MY_MCP_AUTH: "same-fixture" } };
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-box-env-shell", text: "go", integrations: { custom: { woo } } });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).toContain("features.shell_snapshot=false");
+    const thread = seen.calls.find((call: { method: string }) => call.method === "thread/start");
+    expect(thread.params.config["shell_environment_policy.exclude"]).toContain("MY_MCP_AUTH");
+  });
 
   it("reaches a url server through OpenMausBot's connector on Codex's own login, header values off argv", async () => {
     await create();
