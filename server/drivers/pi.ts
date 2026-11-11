@@ -3,7 +3,7 @@ import { RuntimeNoticeError, runtimeErrorText } from "./runtime-notice-error.ts"
 // The pi coding agent (@earendil-works/pi-coding-agent) over its own stdio JSON-RPC mode
 // (`pi --mode rpc --no-session`), not ACP. pi is BYOK and reads ~/.pi/agent/auth.json itself, so
 // this driver holds no key; resumeCursor is pi's `sessionFile` (switch_session).
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -184,7 +184,12 @@ export function ensurePiInstanceAgentDir(
     const link = join(dir, file);
     const target = join(operatorAgentDir, file);
     if (!existsSync(link) && existsSync(target)) {
-      try { symlinkSync(target, link); } catch {}
+      try {
+        symlinkSync(target, link);
+      } catch {
+        // Symlinks require elevated privileges on Windows; fall back to a copy so auth works.
+        try { copyFileSync(target, link); } catch {}
+      }
     }
   }
   return dir;
@@ -205,6 +210,15 @@ export function ensurePiInjectModel(
   const dir = piAgentDir(env);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "models.json");
+  // If models.json is a symlink to the operator's file (from ensurePiInstanceAgentDir seeding),
+  // replace it with an owned copy so inject writes don't modify the operator's shared config.
+  try {
+    if (lstatSync(path).isSymbolicLink()) {
+      const content = readFileSync(path, "utf8");
+      unlinkSync(path);
+      writeFileSync(path, content, { mode: 0o600 });
+    }
+  } catch {}
   let root: Record<string, unknown> = { providers: {} };
   if (existsSync(path)) {
     try {
@@ -398,8 +412,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
   async create(input: DriverCreateInput<PiConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
     const baseEnv = piEnvironment({ ...process.env, ...input.environment });
-    const operatorAgentDir = join(baseEnv.HOME || baseEnv.USERPROFILE || homedir(), ".pi", "agent");
-    const instancePiDir = ensurePiInstanceAgentDir(instanceId, operatorAgentDir, baseEnv);
+    // If the operator already set PI_CODING_AGENT_DIR explicitly, honour it; otherwise
+    // create a MausBot-owned instance dir seeded from the operator's default ~/.pi/agent.
+    const instancePiDir = baseEnv.PI_CODING_AGENT_DIR
+      ?? ensurePiInstanceAgentDir(instanceId, join(baseEnv.HOME || baseEnv.USERPROFILE || homedir(), ".pi", "agent"), baseEnv);
     const catalogEnv = { ...baseEnv, PI_CODING_AGENT_DIR: instancePiDir };
     let models = EMPTY;
     const readModels = async () => {
