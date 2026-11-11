@@ -44,6 +44,7 @@ import { lacksAdminScope } from "@/lib/admin-scope";
 import { SavedKeysReset } from "./SavedKeysReset";
 import { botAppScope } from "@/lib/bot-app-access";
 import { AppGrantPrompt, botsForApps, useAppGrants } from "./AppGrantPrompt";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { ServiceIcon, type ToolkitCard } from "./ServiceIcon"; import { AppsSection } from "./AppsSection";
 export { ServiceIcon, type ToolkitCard } from "./ServiceIcon";
 
@@ -147,6 +148,7 @@ export function PluginsPanel() {
   const [emailConnected, setEmailConnected] = useState<boolean | null>(null);
   const [mcpServers, setMcpServers] = useState<McpServerListing[]>([]);
 
+  const disconnectingRef = useRef<{ slug: string; label: string; account: ConnectorAccount } | null>(null);
   const polls = useRef(new Map<string, () => void>());
   const statusGenerations = useRef(new Map<string, number>());
   const latestStatusRequests = useRef(new Map<string, number>());
@@ -273,6 +275,9 @@ export function PluginsPanel() {
     const controls = focusable();
     (controls.find((element) => element.matches("input")) ?? controls[0] ?? dialog)?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
+      // The disconnect dialog handles its own keys. Trapping them here would close the apps panel,
+      // or pull focus off its buttons, before the account is removed.
+      if (disconnectingRef.current) return;
       if (event.key === "Escape") {
         event.preventDefault();
         dispatch({ type: "togglePlugins", open: false });
@@ -307,6 +312,10 @@ export function PluginsPanel() {
   }, [dispatch]);
 
   const { suggestions, picking, pick } = useSuggestedApps(cards !== null && configured && inventoryPhase === "ready", `${cardsRefresh}:${Object.keys(status).filter((slug) => status[slug]?.connected).sort().join()}`);
+  // The browser confirm's OK button does nothing on the phone web while this glass panel is open, so the
+  // account stays connected. Ask in the page, above the panel.
+  const [disconnecting, setDisconnecting] = useState<{ slug: string; label: string; account: ConnectorAccount } | null>(null);
+  disconnectingRef.current = disconnecting;
 
   const openConnectUrl = async (url: string) => {
     if (opening.current) return;
@@ -728,6 +737,21 @@ export function PluginsPanel() {
             </div>
           )}
         </div>
+        <ConfirmDialog
+          open={disconnecting !== null}
+          layer="z-[60]"
+          tone="danger"
+          title={t("connectors.disconnect")}
+          body={disconnecting ? disconnectAccountConfirmation(disconnecting.label, disconnecting.account) : ""}
+          confirmLabel={t("connectors.disconnect")}
+          onCancel={() => setDisconnecting(null)}
+          onConfirm={() => {
+            const pending = disconnecting;
+            if (!pending) return;
+            setDisconnecting(null);
+            disconnectAccount(pending.slug, pending.account.id);
+          }}
+        />
         {appGrants.changing && (
           <AppGrantPrompt
             key={appGrants.changing}
@@ -915,10 +939,7 @@ export function PluginsPanel() {
                     <button
                       type="button"
                       disabled={busy}
-                      onClick={() => {
-                        if (!window.confirm(disconnectAccountConfirmation(card.label, account))) return;
-                        disconnectAccount(card.slug, account.id);
-                      }}
+                      onClick={() => setDisconnecting({ slug: card.slug, label: card.label, account })}
                       className={cn("shrink-0 rounded-full px-2 text-[12px] font-medium leading-5 text-ink-secondary transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-40", !reconnectable && "ms-auto")}
                       aria-label={t("connectors.disconnectAria", {
                         account: account.alias || account.id,
