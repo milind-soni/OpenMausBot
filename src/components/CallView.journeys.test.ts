@@ -150,7 +150,7 @@ async function firstLiveCall() {
   expect(requests.map(({ path, method }) => `${method} ${path}`)).toEqual(["POST /api/live/session"]);
   expect(text()).not.toContain("Call unavailable");
   expect(container.querySelector("input")).toBeNull();
-  const openApiKeys = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Open API keys");
+  const openApiKeys = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Open AI › Other services");
   press(openApiKeys ?? null);
   expect(text()).not.toContain(KEY_NEEDED);
 

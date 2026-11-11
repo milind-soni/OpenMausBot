@@ -1493,10 +1493,10 @@ computers belong to this machine on every request.
   Workers AI or OpenRouter) until the relay accepts it too. For decisions the
   relay speaks Jev's API only: included decisions are Jev's. An own Jev or
   Workers AI key comes before them; an OpenRouter key comes after them,
-  whichever provider is selected in **Settings → Decision and extraction**.
+  whichever provider is selected in **Settings › AI › Routing and extraction**.
 - **Included decisions are on until switched off.** While the decision model
   runs on the included token, its master switch counts as on unless the person
-  switched it off in **Settings → Decision and extraction**; an explicit off
+  switched it off in **Settings › AI › Routing and extraction**; an explicit off
   always wins, and switching it back on needs no key. The per-job switches keep
   their defaults, so rooms set to Auto ask who answers, and new rooms start on
   Auto, as with a saved key. An own Jev key is on once saved, as anywhere else,
