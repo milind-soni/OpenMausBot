@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { hostTimeout } from "../../server/testing/host-timeout.ts";
-import { freePortBlock } from "../../server/testing/ports.ts";
 import { launchCloudSendFixture, type CloudSendFixture } from "./cloud-send-fixture.ts";
 import { ensureUiBrowser, UI_TOOLS_DIR } from "./control-omb-ui.ts";
 import { launchHomeWorld, shotsDir, welcomed, type HomeWorld } from "./one-workspace-fixture.ts";
@@ -37,7 +36,10 @@ const PAIR_FORM = "Boolean(document.querySelector('form input') && /pairing code
   const onCloudPage = () => until(() => page<boolean>("Boolean(document.querySelector('textarea[aria-label^=\"Message\"]'))"), Boolean, 60_000, "My Cloud's page")
     .then(() => expect(new URL(world.window.url).origin).toBe(world.cloudOrigin));
   const screen = () => page<string | null>("document.querySelector('[data-home-screen]')?.dataset.homeScreen ?? null");
-  const blank = async () => { await world.window.loadURL("about:blank"); await new Promise((resolve) => setTimeout(resolve, 200)); };
+  const blank = async () => {
+    await world.window.loadURL("about:blank");
+    await until(async () => world.window.url === "about:blank" && await page("location.href") === "about:blank", Boolean, 10_000, "the blank page");
+  };
 
   beforeAll(async () => {
     fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-window-${randomBytes(12).toString("hex")}` });
@@ -45,8 +47,7 @@ const PAIR_FORM = "Boolean(document.querySelector('form input') && /pairing code
     nova = (await fx.onCloud("POST", "/api/bots", { name: "Nova", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot.id;
     const tools = await ensureUiBrowser(process.env);
     if (!tools.chrome) throw new Error("This harness needs the pinned Chrome for Testing");
-    const ports = await Promise.all([freePortBlock([0, 1]), freePortBlock([0, 1]), freePortBlock([0]), freePortBlock([0, 1])]) as [number, number, number, number];
-    world = await launchHomeWorld(fx, { chrome: tools.chrome, ports });
+    world = await launchHomeWorld(fx, { chrome: tools.chrome });
     shots = shotsDir(fx.root);
     // Each page's dev server bundles what it imports on the first visit, then reloads it once: done before anything counts.
     for (const url of [`${world.localOrigin}/`, `${world.cloudOrigin}/`, `${world.teamOrigin}/`]) {

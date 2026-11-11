@@ -15,7 +15,6 @@ import { cleanWorkspaceConfig, profileDir, profilesDir } from "../../electron/cl
 import { parseCloudList } from "../../electron/cloud-list.mjs";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { hostTimeout } from "../../server/testing/host-timeout.ts";
-import { freePortBlock } from "../../server/testing/ports.ts";
 import { launchCloudSendFixture, type CloudSendFixture } from "./cloud-send-fixture.ts";
 import { ensureUiBrowser, UI_TOOLS_DIR } from "./control-omb-ui.ts";
 import { launchHomeWorld, shotsDir, welcomed, type HomeWorld } from "./one-workspace-fixture.ts";
@@ -98,8 +97,11 @@ function harness(get: () => { world: HomeWorld; shots: string }) {
   const onCloud = () => until(() => page<string>("document.body.innerText"), (text) => new URL(world.window.url).origin === world.cloudOrigin && text.includes("Atlas"), 60_000, "My Cloud's page with its bots");
   const lentCount = async () => ((await fx.onCloud("GET", "/api/shared-computers")).body?.computers ?? []).filter((computer: { online?: boolean }) => computer.online !== false).length;
   const current = async () => (await tiles()).find((tile) => tile.current)?.id ?? null;
-  const shown = (id: string, text?: string) => until(async () => ({ current: await current(), local: onLocal(), body: await page<string>("document.body.innerText") }),
-    (seen) => seen.current === id && (id === cloudEntry ? !seen.local : seen.local) && (!text || seen.body.includes(text)), 90_000, `${id} on screen${text ? ` with ${text}` : ""}`);
+  const shown = (id: string, text?: string) => until(async () => ({
+    current: await current(), local: onLocal(), running: world.running(), body: await page<string>("document.body.innerText"),
+  }), (seen) => seen.current === id
+    && (id === cloudEntry ? !seen.local : seen.local && seen.running === profileDir(fx.desktopDataDir, id.slice("profile:".length)))
+    && (!text || seen.body.includes(text)), 90_000, `${id} on screen${text ? ` with ${text}` : ""}`);
   const lineOf = () => page<string | null>("document.querySelector('[data-home-line]')?.textContent ?? null");
   const workId = () => world.registry!.list().find((entry) => entry.name === "Work")?.id ?? "work";
 
@@ -114,8 +116,7 @@ function harness(get: () => { world: HomeWorld; shots: string }) {
     }
     const tools = await ensureUiBrowser(process.env);
     if (!tools.chrome) throw new Error("This harness needs the pinned Chrome for Testing");
-    const ports = await Promise.all([freePortBlock([0, 1]), freePortBlock([0, 1]), freePortBlock([0]), freePortBlock([0, 1])]) as [number, number, number, number];
-    world = await launchHomeWorld(fx, { chrome: tools.chrome, ports, profiles: true });
+    world = await launchHomeWorld(fx, { chrome: tools.chrome, profiles: true });
     shots = shotsDir(fx.root);
     await world.setSize(WIDTH, HEIGHT);
     // The session lists My Cloud as the person's own, as the Admin does: so its circle is a rail even alone, for ＋.
@@ -427,8 +428,7 @@ function harness(get: () => { world: HomeWorld; shots: string }) {
     await fx.local("POST", "/api/bots", { name: "Atlas", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
     const tools = await ensureUiBrowser(process.env);
     if (!tools.chrome) throw new Error("This harness needs the pinned Chrome for Testing");
-    const ports = await Promise.all([freePortBlock([0, 1]), freePortBlock([0, 1]), freePortBlock([0]), freePortBlock([0, 1])]) as [number, number, number, number];
-    world = await launchHomeWorld(fx, { chrome: tools.chrome, ports, profiles: true });
+    world = await launchHomeWorld(fx, { chrome: tools.chrome, profiles: true });
     shots = shotsDir(fx.root);
     await world.setSize(WIDTH, HEIGHT);
     world.moved = false;
