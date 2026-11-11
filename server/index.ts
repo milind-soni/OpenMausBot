@@ -268,7 +268,7 @@ import {
   sendFingerprint,
   SendSequencer,
 } from "./send-idempotency.ts";
-import { EventBus } from "./harness/bus.ts";
+import { EventBus } from "./harness/bus.ts"; import { publicReplyEvent } from "./harness/public-reply.ts";
 import { ENGINE_LIST_REUSE_MS, engineMemory, enginesByUse, ProviderRegistry } from "./harness/registry.ts"; import { afterFirstEngineRead, holdUntilFirstEngineRead } from "./first-engine-read.ts"; import { HANDOFF_BROWSER_NOTE, HANDOFF_BROWSER_ONLY, handoffSurface, StoppedHandoffs, stoppedHandoffResult } from "./host/handoff-browser.ts";
 import { ManagedDesktopProviders } from "./managed-desktop.ts";
 import { mainThread, wasOldestThread } from "./main-thread.ts";
@@ -6344,14 +6344,14 @@ bus.subscribe((event: RuntimeEvent) => {
       eventId: `${event.eventId}-goal-text`,
       type: "item.completed",
       itemType: "assistant_text",
-      text: coordinatorVisibleText,
+      text: redactSecretsInText(coordinatorVisibleText),
     };
     broadcast({ kind: "runtime", event: publicAssistantEvent });
   }
   const privateImageEvent = event.type === "item.completed" && event.itemType === "assistant_image";
   if (!privateImageEvent) {
     // Exact executable input is internal; the bus's persistence redactor does not scrub the live event.
-    const publicEvent = event.type === "request.opened" ? { ...event, command: undefined, commandLine: undefined, reads: undefined } : event;
+    const publicEvent = event.type === "request.opened" ? { ...event, command: undefined, commandLine: undefined, reads: undefined } : publicReplyEvent(event, groupSpeakers.get(event.threadId)?.botId);
     broadcast({ kind: "runtime", event: publicEvent });
   }
   const routineRun = privateImageEvent ? null : (routines?.handleRuntimeEvent(event) ?? null);
@@ -6387,7 +6387,7 @@ bus.subscribe((event: RuntimeEvent) => {
       pushStoppedTurn(turnId);
       return;
     }
-    pushMessage({ role: "bot", kind: "text", text: spoken.text, turnId });
+    pushMessage({ role: "bot", kind: "text", text: spoken.text, turnId, ...(event.type === "item.completed" && event.itemId ? { itemId: event.itemId } : {}) });
     lastReply.set(event.threadId, spoken.text);
   };
   const landParkedFiles = () => {

@@ -25,6 +25,12 @@ describe("the fixture's fake engine knobs", () => {
     expect(env).toMatchObject({ FAKE_CLAUDE_TEXT_ROUTES: "/tmp/routes.json", FAKE_CODEX_TEXT_ROUTES: "/tmp/codex-routes.json", FAKE_CODEX_TEXT_LOG: "/tmp/codex.jsonl" });
     for (const key of ["FAKE_CODEX_MODE", "FAKE_CODEX_DUMP", "SOME_SECRET"]) expect(env, key).not.toHaveProperty(key);
   });
+
+  it("lets every fake's scripted stream cross, for a reply that arrives in pieces", () => {
+    const env = childEnv({ FAKE_STREAM_SCRIPT: "/tmp/script.json", FAKE_STREAM_CADENCE: "3:90", FAKE_ACP_DUMP: "/tmp/acp.json" });
+    expect(env).toMatchObject({ FAKE_STREAM_SCRIPT: "/tmp/script.json", FAKE_STREAM_CADENCE: "3:90" });
+    expect(env).not.toHaveProperty("FAKE_ACP_DUMP");
+  });
 });
 
 describe("the fixture's Netlify stand-in", () => {
