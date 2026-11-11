@@ -258,6 +258,8 @@ export default defineSchema({
     assignedToName: v.optional(v.string()),
     done: v.boolean(),
     dueDate: v.optional(v.string()),
+    /** Points on lib/estimates.ts's scale (1, 2, 3, 5, 8); absent means no estimate. */
+    estimate: v.optional(v.number()),
     githubIssueNumber: v.optional(v.number()),
     githubIssueUrl: v.optional(v.string()),
     githubIssueState: v.optional(v.union(v.literal("open"), v.literal("closed"))),

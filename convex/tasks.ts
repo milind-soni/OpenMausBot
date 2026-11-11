@@ -11,6 +11,7 @@ import { containsMention, mentionToken } from "../lib/issue-mentions";
 import { updateChecklist } from "../lib/comment-checklist";
 import { compareStoredColumns, compareWorkflowColumns, DEFAULT_WORKFLOW_COLUMNS, ensureDraftColumn, isDoneColumn, isDraftColumn, normalizeColumnTitle } from "./lib/columns";
 import { DRAFT_COLUMN_TITLE, isLegacyIdeaColumn } from "../lib/origin-columns";
+import { ESTIMATES, isEstimate } from "../lib/estimates";
 import { compareTaskOrder, planTaskMove } from "../lib/task-order";
 import { addCriteria, editCriteria, needsSpecLabels, replaceCriteria, type Criterion, type CriterionEdit } from "../lib/acceptance-criteria";
 import { cleanLabels, needsSpecAvailable, projectLabels, registerLabels, workspaceLabelRows } from "./lib/labels";
@@ -193,7 +194,7 @@ export const createColumn = mutation({
     const columns = await ctx.db.query("columns").withIndex("by_project", (q) => q.eq("projectId", args.projectId)).take(20);
     const order = columns.length ? Math.max(...columns.map((column) => column.order)) + 1 : 0;
     if (columns.length >= 20) throw new ConvexError("A workflow can have up to 20 columns");
-    const id = await ctx.db.insert("columns", { projectId: args.projectId, title: args.title.trim(), isDone: false, ...(normalizeColumnTitle(args.title) === "draft" ? { isDraft: true } : {}), order, createdAt: now, updatedAt: now });
+    const id = await ctx.db.insert("columns", { projectId: args.projectId, title: args.title.trim(), isDone: false, isDraft: normalizeColumnTitle(args.title) === "draft", order, createdAt: now, updatedAt: now });
     await ensureDraftColumn(ctx, args.projectId);
     await touchProject(ctx, args.projectId);
     return id;
@@ -420,6 +421,8 @@ export const updateTask = mutation({
     priority: v.optional(priorityValidator),
     assignedToEmail: v.optional(v.string()),
     dueDate: v.optional(v.string()),
+    /** Points (1, 2, 3, 5 or 8); null removes the estimate. */
+    estimate: v.optional(v.union(v.number(), v.null())),
     done: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -428,7 +431,7 @@ export const updateTask = mutation({
   },
 });
 
-export async function updateTaskRecord(ctx: MutationCtx, args: { projectId: Id<"projects">; taskId: Id<"tasks">; title?: string; description?: string; priority?: "low" | "medium" | "high"; assignedToEmail?: string; dueDate?: string; done?: boolean; }, actorId: Id<"users">) {
+export async function updateTaskRecord(ctx: MutationCtx, args: { projectId: Id<"projects">; taskId: Id<"tasks">; title?: string; description?: string; priority?: "low" | "medium" | "high"; assignedToEmail?: string; dueDate?: string; estimate?: number | null; done?: boolean; }, actorId: Id<"users">) {
   const task = await ctx.db.get(args.taskId);
     if (!task || task.projectId !== args.projectId) throw new ConvexError("Issue not found");
     const patch: Partial<{
@@ -438,6 +441,7 @@ export async function updateTaskRecord(ctx: MutationCtx, args: { projectId: Id<"
       assignedToEmail: string | undefined;
       assignedToName: string | undefined;
       dueDate: string | undefined;
+      estimate: number | undefined;
       done: boolean;
       completionPullRequest: Doc<"tasks">["completionPullRequest"];
       githubIssueReopenRequested: boolean | undefined;
@@ -460,6 +464,10 @@ export async function updateTaskRecord(ctx: MutationCtx, args: { projectId: Id<"
       patch.assignedToName = assignee?.name;
     }
     if (args.dueDate !== undefined) patch.dueDate = optionalDueDate(args.dueDate);
+    if (args.estimate !== undefined) {
+      if (args.estimate !== null && !isEstimate(args.estimate)) throw new ConvexError(`Choose an estimate of ${ESTIMATES.join(", ")} points`);
+      patch.estimate = args.estimate ?? undefined;
+    }
     if (args.done !== undefined) patch.done = args.done;
     if (patch.done === false && task.done) {
       patch.completionPullRequest = undefined;

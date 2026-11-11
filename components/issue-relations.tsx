@@ -6,7 +6,7 @@ import { CheckCircle2, Circle, Link2, Plus, Tag, X } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { LinkIssuePicker, type RelationKind } from "./feature-issue-picker";
-import { LabelDot, LabelPicker, useLabelColors } from "./issue-labels";
+import { LabelDot, LabelPicker, labelStyle, useLabelColors } from "./issue-labels";
 
 /** Related issues, listed only when there are some, plus one quiet "Link issue" entry that opens the picker. */
 export function IssueRelations({ sessionToken, projectId, taskId, canEdit, onOpen, hideSubIssues = false }: { sessionToken: string; projectId: Id<"projects">; taskId: Id<"tasks">; canEdit: boolean; onOpen: (projectId: Id<"projects">, taskId: Id<"tasks">) => void; /** The issue page lists sub-issues in their own section. */ hideSubIssues?: boolean }) {
@@ -56,7 +56,7 @@ export function IssueLabels({ sessionToken, taskId, canEdit, suggestions }: { se
   };
   return <div className="issue-labels-field">
     <div className="issue-labels">
-      {labels.map(value => <span key={value} className="label-chip"><LabelDot color={color(value)} /><span>{value}</span>{canEdit && <button type="button" aria-label={`Remove label ${value}`} onClick={() => change(labels.filter(item => item !== value))}><X size={11} /></button>}</span>)}
+      {labels.map(value => <span key={value} className="label-chip" style={labelStyle(color(value))}><LabelDot color={color(value)} /><span>{value}</span>{canEdit && <button type="button" aria-label={`Remove label ${value}`} onClick={() => change(labels.filter(item => item !== value))}><X size={11} /></button>}</span>)}
       {canEdit && <LabelPicker value={labels} onChange={change} suggestions={suggestions} trigger={() => labels.length ? <Plus size={13} /> : <><Tag size={13} /><span>Add label</span></>} className={labels.length ? "is-compact" : undefined} />}
       {!canEdit && !labels.length && <span className="issue-empty-value">None</span>}
     </div>

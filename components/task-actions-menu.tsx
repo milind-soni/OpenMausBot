@@ -2,20 +2,22 @@
 
 import { useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Link2, RotateCcw, Search, Trash2, UserRound } from "lucide-react";
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Link2, RotateCcw, Search, Tag, Trash2, UserRound } from "lucide-react";
+import { ESTIMATES, estimateLabel } from "@/lib/estimates";
+import { EstimateIcon } from "./issue-icons";
 import { displayName, formatDue } from "@/lib/format";
 import { PriorityIcon, StatusIcon } from "./issue-icons";
 import { UserAvatar } from "./user-avatar";
 import { SHEET_CLASS, isSheetLayout } from "./use-anchored-popover";
 
-export type TaskMenuView = "root" | "status" | "priority" | "assignee";
+export type TaskMenuView = "root" | "status" | "priority" | "assignee" | "estimate";
 /** Viewport box the menu opens from: a card, a chip, or the pointer (a zero-size box). */
 export type TaskMenuAnchor = { left: number; top: number; right: number; bottom: number };
 export type TaskMenuPerson = { email: string; name?: string; username?: string; avatarUrl?: string | null };
 type Priority = "low" | "medium" | "high";
 
 const PRIORITIES: { value: Priority; label: string }[] = [{ value: "high", label: "High" }, { value: "medium", label: "Medium" }, { value: "low", label: "Low" }];
-const SUBMENUS: { view: Exclude<TaskMenuView, "root">; label: string }[] = [{ view: "status", label: "Status" }, { view: "priority", label: "Priority" }, { view: "assignee", label: "Assignee" }];
+const SUBMENUS: { view: Exclude<TaskMenuView, "root">; label: string }[] = [{ view: "status", label: "Status" }, { view: "priority", label: "Priority" }, { view: "assignee", label: "Assignee" }, { view: "estimate", label: "Estimate" }];
 const noAssignee = <span className="task-menu-no-assignee" aria-hidden="true"><UserRound size={12} /></span>;
 const items = (menu: HTMLElement | null) => Array.from(menu?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not(:disabled)') ?? []);
 const sheetLayout = isSheetLayout;
@@ -38,12 +40,16 @@ export function MenuScrim({ onClose }: { onClose: () => void }) {
  * The issue card menu: right-click / long-press / ⋯ open it at the root; the card's priority and assignee chips open a
  * submenu directly. On phones it is a bottom sheet. A completed issue (`onReopen`) gets Reopen, Copy link and Delete.
  */
-export function TaskMenu({ title, view: initialView, anchor, status, statuses, priority, assignee, members, currentEmail, dueDate, onStatus, onPriority, onAssignee, onDueDate, onCopyLink, onDelete, onReopen, onClose }: {
+export function TaskMenu({ title, view: initialView, anchor, status, statuses, priority, assignee, members, currentEmail, dueDate, estimate, labelCount = 0, onStatus, onPriority, onAssignee, onDueDate, onEstimate, onLabels, onCopyLink, onDelete, onReopen, onClose }: {
   title: string; view: TaskMenuView; anchor: TaskMenuAnchor;
   status: string; statuses: { id: string; title: string }[];
   priority: string; assignee?: string; members: TaskMenuPerson[]; currentEmail?: string; dueDate?: string;
   onStatus: (columnId: string) => void; onPriority: (priority: Priority) => void; onAssignee: (email: string) => void;
   onDueDate: () => void; onCopyLink: () => void; onDelete: () => void;
+  /** Points, or undefined for no estimate; `onEstimate(null)` removes it. */
+  estimate?: number; onEstimate?: (value: number | null) => void;
+  /** Opens the label picker on the issue (after the menu closes). */
+  labelCount?: number; onLabels?: () => void;
   /** The issue is completed: the menu offers Reopen in place of the property submenus. */
   onReopen?: () => void;
   /** `restoreFocus` is false when the menu closes because the pointer went elsewhere. */
@@ -113,11 +119,13 @@ export function TaskMenu({ title, view: initialView, anchor, status, statuses, p
       status: { icon: <StatusIcon title={statusTitle} />, value: statusTitle },
       priority: { icon: <PriorityIcon priority={priority} />, value: PRIORITIES.find(item => item.value === priority)?.label ?? "" },
       assignee: { icon: person ? <UserAvatar user={person} /> : noAssignee, value: person ? displayName(person) : "Unassigned" },
+      estimate: { icon: <EstimateIcon />, value: estimate ? estimateLabel(estimate) : "None" },
     };
     body = <>
-      {SUBMENUS.map(item => <button key={item.view} type="button" role="menuitem" aria-haspopup="menu" data-view={item.view} onClick={() => open(item.view)}>
+      {SUBMENUS.filter(item => item.view !== "estimate" || onEstimate).map(item => <button key={item.view} type="button" role="menuitem" aria-haspopup="menu" data-view={item.view} onClick={() => open(item.view)}>
         {values[item.view].icon}<span>{item.label}</span><small>{values[item.view].value}</small><ChevronRight size={14} className="task-menu-chevron" />
       </button>)}
+      {onLabels && <button type="button" role="menuitem" aria-haspopup="listbox" onClick={() => pick(onLabels)}><Tag size={14} /><span>Labels</span><small>{labelCount ? labelCount : ""}</small></button>}
       <button type="button" role="menuitem" onClick={() => pick(onDueDate)}><CalendarDays size={14} /><span>Due date</span><small className={due?.tone === "overdue" ? "overdue" : undefined}>{due?.label ?? ""}</small></button>
       <hr />
       <button type="button" role="menuitem" onClick={() => pick(onCopyLink)}><Link2 size={14} /><span>Copy link</span></button>
@@ -138,6 +146,8 @@ export function TaskMenu({ title, view: initialView, anchor, status, statuses, p
       {view === "assignee" && !query.trim() && option("unassigned", !assignee, noAssignee, "Unassigned", () => onAssignee(""))}
       {view === "assignee" && people.map(member => option(member.email, member.email === assignee, <UserAvatar user={member} />, displayName(member), () => onAssignee(member.email), member.email === currentEmail ? <small>You</small> : null))}
       {view === "assignee" && !people.length && <p className="task-menu-empty">No members found</p>}
+      {view === "estimate" && onEstimate && option("none", !estimate, <EstimateIcon empty />, "No estimate", () => onEstimate(null))}
+      {view === "estimate" && onEstimate && ESTIMATES.map(value => option(String(value), value === estimate, <EstimateIcon />, estimateLabel(value), () => onEstimate(value)))}
     </>;
   }
 

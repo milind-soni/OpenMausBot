@@ -57,6 +57,6 @@ describe("stored view state", () => {
     expect(readIssueView(null)).toEqual(DEFAULT_VIEW);
     expect(readIssueView(null, "list").layout).toBe("list");
     const view = readIssueView({ layout: "list", grouping: "nope", ordering: "priority", properties: ["id", "bogus"], filters: { labels: ["Bug", 3], priorities: ["urgent", "high"] } });
-    expect(view).toMatchObject({ layout: "list", grouping: "status", ordering: "priority", properties: ["id"], filters: { labels: ["bug"], priorities: ["high"] } });
+    expect(view).toMatchObject({ layout: "list", grouping: "status", ordering: "priority", properties: ["id", "estimate"], filters: { labels: ["bug"], priorities: ["high"] } });
   });
 });

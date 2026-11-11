@@ -15,17 +15,17 @@ export function workspaceShortcut(event: KeyEvent, context: Context & { canCreat
   return null;
 }
 
-export type IssueAction = "status" | "priority" | "labels" | "assignee" | "due-date" | "assign-me";
+export type IssueAction = "status" | "priority" | "labels" | "assignee" | "due-date" | "estimate" | "assign-me";
 
 /**
  * Single keys that act on the issue in focus (a list row, a board card, or the open issue page), as in Linear:
- * S status, P priority, L labels, A assignee, I assign to me, Shift+D due date.
+ * S status, P priority, L labels, A assignee, I assign to me, Shift+D due date, Shift+E estimate.
  */
 export function issueActionShortcut(event: KeyEvent & Pick<KeyboardEvent, "shiftKey">, context: Context & { hasIssue: boolean; canEdit: boolean }): IssueAction | null {
   if (!context.hasIssue || !context.canEdit || context.editing || context.overlayOpen) return null;
   if (event.defaultPrevented || event.isComposing || event.repeat || event.metaKey || event.ctrlKey || event.altKey) return null;
   const key = event.key.toLowerCase();
-  if (event.shiftKey) return key === "d" ? "due-date" : null;
+  if (event.shiftKey) return key === "d" ? "due-date" : key === "e" ? "estimate" : null;
   return ({ s: "status", p: "priority", l: "labels", a: "assignee", i: "assign-me" } as const)[key as "s"] ?? null;
 }
 

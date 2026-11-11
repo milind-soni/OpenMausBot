@@ -1,6 +1,6 @@
 "use client";
 import { errorText } from "@/lib/error-text";
-import { isDraftColumn } from "@/lib/origin-columns";
+import { isDraftColumn, presentColumns } from "@/lib/origin-columns";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery } from "convex/react";
@@ -16,7 +16,7 @@ import { MenuScrim, TaskMenu, type TaskMenuAnchor, type TaskMenuView } from "./t
 import { IssueCard, IssueRow, type CardPerson } from "./issue-card";
 import { DatePopover } from "./date-picker";
 import { Dialog } from "./dialog";
-import { StatusIcon, laneTone } from "./issue-icons";
+import { EstimateIcon, StatusIcon, laneTone } from "./issue-icons";
 import { useBoardScroll } from "./use-board-scroll";
 import { swallowNextClick, useCardFlip, useIssueDrag } from "./use-issue-drag";
 import { isSheetLayout } from "./use-anchored-popover";
@@ -29,13 +29,15 @@ import { DelayedSkeleton } from "./delayed-skeleton";
 import { DEFAULT_VIEW, activeFilterCount, groupIssues, matchesFilters, readIssueView, sortIssues, type DisplayProperty, type IssueViewState } from "@/lib/issue-view";
 import { DisplayOptions, FilterChips, FilterMenu, filterSources } from "./issue-filters";
 import { useIssueNavigation } from "./issue-navigation";
-import { useWorkspaceLabels } from "./issue-labels";
+import { LabelPopover, useWorkspaceLabels } from "./issue-labels";
+import { suggestLabels } from "@/lib/command-menu";
+import { totalEstimate } from "@/lib/estimates";
 
 type Task = Doc<"tasks">;
 type Column = Doc<"columns">;
 type Priority = "low" | "medium" | "high";
 type MoveTaskArgs = { projectId: Id<"projects">; sessionToken: string; taskId: Id<"tasks">; columnId: Id<"columns">; beforeTaskId?: Id<"tasks"> };
-type UpdateTaskArgs = { projectId: Id<"projects">; sessionToken: string; taskId: Id<"tasks">; priority?: Priority; assignedToEmail?: string; dueDate?: string; done?: boolean };
+type UpdateTaskArgs = { projectId: Id<"projects">; sessionToken: string; taskId: Id<"tasks">; priority?: Priority; assignedToEmail?: string; dueDate?: string; estimate?: number | null; done?: boolean };
 type MenuState = { taskId: Id<"tasks">; view: TaskMenuView; anchor: TaskMenuAnchor; from: HTMLElement };
 
 /** How long a completed card stays (checked) before it collapses, and how long the collapse takes. */
@@ -66,6 +68,7 @@ function updateTaskOnBoard(store: OptimisticLocalStore, args: UpdateTaskArgs) {
     ...task,
     ...(args.priority !== undefined ? { priority: args.priority } : {}),
     ...(args.dueDate !== undefined ? { dueDate: args.dueDate } : {}),
+    ...(args.estimate !== undefined ? { estimate: args.estimate ?? undefined } : {}),
     ...(args.done !== undefined ? { done: args.done } : {}),
     ...(args.assignedToEmail !== undefined ? { assignedToEmail: args.assignedToEmail, assignedToName: board.assignees.find(person => person.email === args.assignedToEmail)?.name } : {}),
     updatedAt: Date.now(),
@@ -145,6 +148,12 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
   const updateTask = useMutation(api.tasks.updateTask).withOptimisticUpdate(updateTaskOnBoard);
   const moveTask = useMutation(api.tasks.moveTask).withOptimisticUpdate(moveTaskOnBoard);
   const deleteTask = useMutation(api.tasks.deleteTask);
+  // Labels set from a card show on it at once.
+  const saveLabels = useMutation(api.issueRelations.labels).withOptimisticUpdate((store, args) => {
+    const query = { projectId, sessionToken };
+    const current = store.getQuery(api.tasks.board, query);
+    if (current) store.setQuery(api.tasks.board, query, { ...current, tasks: current.tasks.map(task => task._id === args.taskId ? { ...task, labels: args.labels, updatedAt: Date.now() } : task) });
+  });
   const createColumn = useMutation(api.tasks.createColumn);
   const updateColumn = useMutation(api.tasks.updateColumn);
 
@@ -216,6 +225,8 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
   const [menu, setMenu] = useState<MenuState | null>(null);
   /** The card whose due date popover is open, anchored to its due chip (or the card). */
   const [datePick, setDatePick] = useState<{ taskId: Id<"tasks">; anchor: { current: HTMLElement } } | null>(null);
+  /** The card whose label picker is open, anchored to its labels (or the card). */
+  const [labelPick, setLabelPick] = useState<{ taskId: Id<"tasks">; anchor: { current: HTMLElement } } | null>(null);
   const [completing, setCompleting] = useState<Record<string, "checked">>({});
   const [deleting, setDeleting] = useState<Task | null>(null);
   const [columnDelete, setColumnDelete] = useState<Column | null>(null);
@@ -240,15 +251,17 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
 
   // A tap outside the card's date popover only closes it (mouse presses behave as before).
   useEffect(() => {
-    if (!datePick) return;
+    const open = datePick ?? labelPick;
+    if (!open) return;
+    const selector = datePick ? ".date-picker-popover" : ".label-picker-popover";
     const guard = (event: PointerEvent) => {
       const target = event.target as Element | null;
-      if (event.pointerType === "mouse" || target?.closest?.(".date-picker-popover") || datePick.anchor.current.contains(target)) return;
-      swallowTapThrough(".date-picker-popover");
+      if (event.pointerType === "mouse" || target?.closest?.(selector) || open.anchor.current.contains(target)) return;
+      swallowTapThrough(selector);
     };
     document.addEventListener("pointerdown", guard, true);
     return () => document.removeEventListener("pointerdown", guard, true);
-  }, [datePick]);
+  }, [datePick, labelPick]);
 
   const showToast = showIssueToast;
   /** Search, filters and sub-issue visibility: what the list and board both show. */
@@ -361,7 +374,7 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
   const people = new Map<string, CardPerson>();
   for (const person of [...(board.assignees || []), ...(projectMembers || [])]) people.set(person.email, { email: person.email, name: person.name, username: person.username, avatarUrl: person.avatarUrl });
   const assigneeOf = (task: Task): CardPerson | null => task.assignedToEmail ? people.get(task.assignedToEmail) ?? { email: task.assignedToEmail, name: task.assignedToName } : null;
-  const visualColumns = board.columns.filter(column => !isDone(column));
+  const visualColumns = presentColumns(board.columns.filter(column => !isDone(column)));
   // Rows keep their identity while the board result is unchanged, so memoized cards do not re-render.
   const pullRequests = new Map((board.pullRequests ?? []).map(pr => [pr.taskId as string, pr]));
   const matches = matchesView;
@@ -483,6 +496,8 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
   };
   const menuTask = menu ? board.tasks.find(task => task._id === menu.taskId) : undefined;
   const datePickTask = datePick ? board.tasks.find(task => task._id === datePick.taskId) : undefined;
+  const labelPickTask = labelPick ? board.tasks.find(task => task._id === labelPick.taskId) : undefined;
+  const openLabels = (task: Task, from: HTMLElement) => { if (canEdit) { setFocusId(task._id); setLabelPick({ taskId: task._id, anchor: { current: from } }); } };
 
   const onCardKeyDown = (event: ReactKeyboardEvent<HTMLElement>, task: Task) => {
     if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -612,15 +627,15 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
     </div>
   );
 
-  const columnCount = 1 + (["status", "priority", "assignee", "dueDate", "created"] as const).filter(property => properties.has(property)).length;
+  const columnCount = 1 + (["status", "priority", "estimate", "assignee", "dueDate", "created"] as const).filter(property => properties.has(property)).length;
   const listView = (
     <div className="issue-table-scroll">
       <table className="issue-table">
         <caption className="sr-only">Active project issues</caption>
-        <thead><tr><th scope="col">Issue</th>{properties.has("status") && <th scope="col" className="col-status">Status</th>}{properties.has("priority") && <th scope="col" className="col-priority">Priority</th>}{properties.has("assignee") && <th scope="col" className="col-assignee">Assignee</th>}{properties.has("dueDate") && <th scope="col" className="col-due">Due</th>}{properties.has("created") && <th scope="col" className="col-created">Created</th>}</tr></thead>
+        <thead><tr><th scope="col">Issue</th>{properties.has("status") && <th scope="col" className="col-status">Status</th>}{properties.has("priority") && <th scope="col" className="col-priority">Priority</th>}{properties.has("estimate") && <th scope="col" className="col-estimate">Estimate</th>}{properties.has("assignee") && <th scope="col" className="col-assignee">Assignee</th>}{properties.has("dueDate") && <th scope="col" className="col-due">Due</th>}{properties.has("created") && <th scope="col" className="col-created">Created</th>}</tr></thead>
         {listGroups.map(group => <Fragment key={group.key || "none"}>
           {view.grouping !== "none" && <tbody className="issue-group"><tr className="issue-group-row"><th scope="rowgroup" colSpan={columnCount}>
-            <div className="issue-group-head"><span>{view.grouping === "status" && <StatusIcon title={isDraftColumn(visualColumns.find(column => column._id === group.key) ?? { title: group.title }) ? "Draft" : group.title} />}<strong>{group.title}</strong><small>{group.tasks.length}</small></span>
+            <div className="issue-group-head"><span>{view.grouping === "status" && <StatusIcon title={isDraftColumn(visualColumns.find(column => column._id === group.key) ?? { title: group.title }) ? "Draft" : group.title} />}<strong>{group.title}</strong><small>{group.tasks.length}</small>{properties.has("estimate") && totalEstimate(group.tasks) > 0 && <small className="lane-estimate" title={`${totalEstimate(group.tasks)} points`}><EstimateIcon />{totalEstimate(group.tasks)}</small>}</span>
             {canEdit && online && view.grouping === "status" && <button type="button" className="icon-button" aria-label={`Add issue to ${group.title}`} onClick={() => setLaneCreate(group.key as Id<"columns">)}><Plus size={14} /></button>}</div>
           </th></tr></tbody>}
           <tbody>{group.tasks.map(task => {
@@ -641,6 +656,7 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
               onComplete={complete}
               onMenu={(item, menuView, anchor, from) => openMenu(item._id, menuView, anchor, from)}
               onDueDate={(item, from) => setDatePick({ taskId: item._id, anchor: { current: from } })}
+              onLabels={openLabels}
               onKeyDown={onCardKeyDown}
               onFocus={setFocusId}
               onPointerDown={onRowPointerDown}
@@ -696,6 +712,7 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
                       ? <input className="lane-rename" autoFocus defaultValue={column.title} maxLength={60} aria-label="Column name" onFocus={event => event.currentTarget.select()} onBlur={event => void renameColumn(column, event.currentTarget.value)} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setRenaming(null); } }} />
                       : <strong>{column.title}</strong>}
                     <span className="lane-count">{tasks.filter(task => !completing[task._id]).length}</span>
+                    {properties.has("estimate") && totalEstimate(tasks) > 0 && <span className="lane-estimate" title={`${totalEstimate(tasks)} points`}><EstimateIcon />{totalEstimate(tasks)}</span>}
                   </div>
                   {canEdit && <div className="kanban-tools">
                     <button className="icon-button" aria-label={`Add issue to ${column.title}`} title={!online ? RECONNECT_TO_CREATE : undefined} disabled={!online} onClick={() => setLaneCreate(column._id)}><Plus size={15} /></button>
@@ -723,6 +740,7 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
                     onComplete={complete}
                     onMenu={(item, menuView, anchor, from) => openMenu(item._id, menuView, anchor, from)}
                     onDueDate={(item, from) => setDatePick({ taskId: item._id, anchor: { current: from } })}
+                    onLabels={openLabels}
                     onKeyDown={onCardKeyDown}
                     onFocus={setFocusId}
                     onPointerDown={dnd.onPointerDown}
@@ -765,6 +783,16 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
         members={projectMembers ?? [...people.values()]}
         currentEmail={userEmail}
         dueDate={menuTask.dueDate}
+        estimate={menuTask.estimate}
+        labelCount={menuTask.labels?.length ?? 0}
+        onEstimate={estimate => { if (estimate !== (menuTask.estimate ?? null)) void update(menuTask._id, { estimate }); }}
+        onLabels={() => {
+          const taskId = menuTask._id;
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            const card = cardElement(boardScroll.current, taskId);
+            if (card) setLabelPick({ taskId, anchor: { current: card.querySelector<HTMLElement>(".label-chips-button") ?? card } });
+          }));
+        }}
         onStatus={columnId => moveToLane(menuTask, columnId)}
         onPriority={priority => { if (priority !== menuTask.priority) void update(menuTask._id, { priority }); }}
         onAssignee={email => { if (email !== (menuTask.assignedToEmail ?? "")) void update(menuTask._id, { assignedToEmail: email }); }}
@@ -788,6 +816,14 @@ export function BoardTab({ project, projectId, sessionToken, canEdit, userEmail,
         title={datePickTask.title}
         onChange={dueDate => void update(datePickTask._id, { dueDate })}
         onClose={restore => { const id = datePick.taskId; setDatePick(null); if (restore) focusCard(id); }}
+      />}
+      {labelPick && labelPickTask && <LabelPopover
+        key={labelPick.taskId}
+        anchor={labelPick.anchor}
+        value={labelPickTask.labels ?? []}
+        suggestions={suggestLabels(`${labelPickTask.title} ${labelPickTask.description ?? ""}`, labelPickTask.labels ?? [])}
+        onChange={labels => void saveLabels({ sessionToken, taskId: labelPickTask._id, labels }).catch(report("Could not update labels"))}
+        onClose={restore => { const id = labelPick.taskId; setLabelPick(null); if (restore) focusCard(id); }}
       />}
       {deleting && <IssueDeleteDialog taskId={deleting._id} title={deleting.title} disabled={!online} onCancel={() => { const id = deleting._id; setDeleting(null); focusCard(id); }} onConfirm={() => {
         const task = deleting;

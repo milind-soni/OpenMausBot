@@ -5,10 +5,11 @@
 export type Priority = "low" | "medium" | "high";
 export type IssueLayout = "board" | "list";
 export type IssueGrouping = "status" | "priority" | "assignee" | "label" | "none";
-export type IssueOrdering = "manual" | "priority" | "dueDate" | "created" | "updated" | "title";
-export type DisplayProperty = "id" | "status" | "priority" | "assignee" | "labels" | "dueDate" | "pullRequest" | "created";
+export type IssueOrdering = "manual" | "priority" | "estimate" | "dueDate" | "created" | "updated" | "title";
+export type DisplayProperty = "id" | "status" | "priority" | "assignee" | "labels" | "estimate" | "dueDate" | "pullRequest" | "created";
 export type IssueFilters = { statuses: string[]; priorities: Priority[]; assignees: string[]; labels: string[] };
 export type IssueViewState = {
+  version?: number;
   layout: IssueLayout;
   grouping: IssueGrouping;
   ordering: IssueOrdering;
@@ -18,25 +19,29 @@ export type IssueViewState = {
   filters: IssueFilters;
 };
 export type FilterKey = keyof IssueFilters;
-export type ViewTask = { _id: string; title: string; priority: Priority; assignedToEmail?: string; labels?: string[]; dueDate?: string; createdAt: number; updatedAt: number; order: number };
+export type ViewTask = { _id: string; title: string; priority: Priority; assignedToEmail?: string; labels?: string[]; dueDate?: string; estimate?: number; createdAt: number; updatedAt: number; order: number };
 
 export const GROUPINGS: { value: IssueGrouping; label: string }[] = [
   { value: "status", label: "Status" }, { value: "priority", label: "Priority" }, { value: "assignee", label: "Assignee" }, { value: "label", label: "Label" }, { value: "none", label: "No grouping" },
 ];
 export const ORDERINGS: { value: IssueOrdering; label: string }[] = [
-  { value: "manual", label: "Manual" }, { value: "priority", label: "Priority" }, { value: "dueDate", label: "Due date" }, { value: "created", label: "Created" }, { value: "updated", label: "Updated" }, { value: "title", label: "Title" },
+  { value: "manual", label: "Manual" }, { value: "priority", label: "Priority" }, { value: "estimate", label: "Estimate" }, { value: "dueDate", label: "Due date" }, { value: "created", label: "Created" }, { value: "updated", label: "Updated" }, { value: "title", label: "Title" },
 ];
 export const DISPLAY_PROPERTIES: { value: DisplayProperty; label: string }[] = [
   { value: "id", label: "ID" }, { value: "status", label: "Status" }, { value: "assignee", label: "Assignee" }, { value: "priority", label: "Priority" },
-  { value: "dueDate", label: "Due date" }, { value: "labels", label: "Labels" }, { value: "pullRequest", label: "Pull requests" }, { value: "created", label: "Created" },
+  { value: "estimate", label: "Estimate" }, { value: "dueDate", label: "Due date" }, { value: "labels", label: "Labels" }, { value: "pullRequest", label: "Pull requests" }, { value: "created", label: "Created" },
 ];
+/** Version of the stored view; properties added since a stored version are switched on when it is read. */
+export const VIEW_VERSION = 2;
+const ADDED_PROPERTIES: Record<number, DisplayProperty[]> = { 2: ["estimate"] };
 export const PRIORITY_ORDER: Priority[] = ["high", "medium", "low"];
 export const UNASSIGNED = "";
 export const NO_LABEL = "";
 
 export const DEFAULT_VIEW: IssueViewState = {
+  version: 2,
   layout: "board", grouping: "status", ordering: "manual", showEmptyGroups: false, showSubIssues: true,
-  properties: ["id", "status", "priority", "assignee", "dueDate", "labels", "pullRequest"],
+  properties: ["id", "status", "priority", "assignee", "estimate", "dueDate", "labels", "pullRequest"],
   filters: { statuses: [], priorities: [], assignees: [], labels: [] },
 };
 
@@ -48,7 +53,11 @@ export function readIssueView(raw: unknown, legacyLayout?: string | null): Issue
   const value = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
   const filters = value.filters && typeof value.filters === "object" ? value.filters as Record<string, unknown> : {};
   const properties = strings(value.properties).filter(property => DISPLAY_PROPERTIES.some(option => option.value === property)) as DisplayProperty[];
+  // A view saved before a property existed shows it, as a new default would.
+  const version = typeof value.version === "number" ? value.version : 1;
+  for (let next = version + 1; next <= VIEW_VERSION; next++) for (const added of ADDED_PROPERTIES[next] ?? []) if (!properties.includes(added)) properties.push(added);
   return {
+    version: VIEW_VERSION,
     layout: value.layout === "list" || value.layout === "board" ? value.layout : legacyLayout === "list" ? "list" : "board",
     grouping: pick(value.grouping, GROUPINGS, DEFAULT_VIEW.grouping),
     ordering: pick(value.ordering, ORDERINGS, DEFAULT_VIEW.ordering),
@@ -96,6 +105,8 @@ export function sortIssues<T extends ViewTask>(tasks: readonly T[], ordering: Is
   const compare: Record<IssueOrdering, (a: T, b: T) => number> = {
     manual,
     priority: (a, b) => rank(a.priority) - rank(b.priority) || manual(a, b),
+    // Largest first; issues without an estimate go last.
+    estimate: (a, b) => (b.estimate ?? -1) - (a.estimate ?? -1) || manual(a, b),
     // Issues without a due date go last.
     dueDate: (a, b) => (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999") || manual(a, b),
     created: (a, b) => b.createdAt - a.createdAt,

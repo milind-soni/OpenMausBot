@@ -41,3 +41,10 @@ function arc(fraction: number) {
   const y = 7 - radius * Math.cos(angle);
   return `M7 7 L7 ${7 - radius} A${radius} ${radius} 0 ${fraction > 0.5 ? 1 : 0} 1 ${x.toFixed(3)} ${y.toFixed(3)} Z`;
 }
+
+/** Estimate: a small triangle, as in Linear; dashed when the issue has none. */
+export function EstimateIcon({ empty = false }: { empty?: boolean }) {
+  return <svg className="estimate-icon" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+    <path d="M6 1.75 10.6 10H1.4Z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeDasharray={empty ? "1.6 1.4" : undefined} />
+  </svg>;
+}

@@ -88,9 +88,11 @@ export function FilterChips({ filters, sources, onChange }: { filters: IssueFilt
   return <div className="filter-chips" aria-label="Active filters">
     {CATEGORIES.filter(item => (filters[item.key] as string[]).length).map(item => {
       const values = filters[item.key] as string[];
-      const names = values.map(value => optionsFor(item.key, sources).find(option => option.value === value)?.label ?? value);
-      return <span key={item.key} className="filter-chip">
-        {item.icon}<span><strong>{item.label}</strong> {values.length > 1 ? "is any of" : "is"} {names.join(", ")}</span>
+      const options = values.map(value => optionsFor(item.key, sources).find(option => option.value === value) ?? { value, label: value, icon: null });
+      return <span key={item.key} className="filter-chip" data-filter={item.key}>
+        {item.icon}<span><strong>{item.label}</strong> {values.length > 1 ? "is any of" : "is"} {item.key === "labels"
+          ? options.map((option, index) => <span key={option.value} className="filter-chip-value">{index > 0 && ", "}{option.icon}{option.label}</span>)
+          : options.map(option => option.label).join(", ")}</span>
         <button type="button" aria-label={`Remove ${item.label.toLowerCase()} filter`} onClick={() => onChange({ ...filters, [item.key]: [] })}><X size={12} /></button>
       </span>;
     })}

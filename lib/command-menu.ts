@@ -18,6 +18,7 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
   { group: "Issues", label: "Assign to", keys: ["A"] },
   { group: "Issues", label: "Assign to me", keys: ["I"] },
   { group: "Issues", label: "Change due date", keys: ["Shift", "D"] },
+  { group: "Issues", label: "Set estimate", keys: ["Shift", "E"] },
   { group: "Issues", label: "Copy issue ID", keys: ["Mod", "."] },
   { group: "Issues", label: "Copy issue URL", keys: ["Mod", "Shift", ","] },
   { group: "Issues", label: "Copy git branch name", keys: ["Mod", "Shift", "."] },

@@ -50,6 +50,7 @@
 .kanban-scroll.is-dragging { -webkit-mask-image: none; mask-image: none; }
 .kanban-column {
   --lane: var(--text-3);
+  /* Lanes are a quiet tray, a shade off the page. */
   display: flex;
   flex: 0 1 var(--lane-width);
   flex-direction: column;
@@ -57,8 +58,8 @@
   min-height: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
-  transition: background var(--duration) var(--ease-out), border-color var(--duration) var(--ease-out), min-width var(--duration-slow) var(--ease-move), flex-basis var(--duration-slow) var(--ease-move);
+  background: color-mix(in srgb, var(--surface-2) 45%, transparent);
+  transition: background var(--duration-fast) var(--ease-standard), border-color var(--duration) var(--ease-out), min-width var(--duration-slow) var(--ease-move), flex-basis var(--duration-slow) var(--ease-move);
 }
 /* Lane colors carry meaning: grey drafts, cyan to do, amber in progress, violet in review, green done. */
 .kanban-column.draft { --lane: var(--text-3); }
@@ -72,14 +73,14 @@
 .kanban-title { display: flex; flex: none; align-items: center; justify-content: space-between; gap: var(--space-2); height: 40px; padding: 0 var(--space-1) 0 var(--space-3); }
 .kanban-name { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .kanban-name .status-icon { color: var(--lane); }
-.kanban-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-base); font-weight: var(--weight-semibold); }
+.kanban-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); font-size: var(--text-base); font-weight: var(--weight-medium); }
 .lane-count { flex: none; color: var(--text-3); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 .lane-rename { width: 100%; min-width: 0; min-height: 26px; padding: 0 6px; font-size: var(--text-base); font-weight: var(--weight-semibold); }
 .kanban-tools { display: flex; flex: none; align-items: center; gap: 0; }
 .kanban-tools .icon-button { width: 28px; min-width: 28px; height: 28px; color: var(--text-3); opacity: 0; transition: opacity var(--duration-fast), background var(--duration-fast), color var(--duration-fast); }
 .kanban-tools .icon-button:hover:not(:disabled) { color: var(--text-1); }
 .kanban-column:hover .kanban-tools .icon-button, .kanban-tools .icon-button:focus-visible, .kanban-tools .icon-button[aria-expanded="true"] { opacity: 1; }
-.task-list { position: relative; display: flex; flex: 1; flex-direction: column; gap: 6px; min-height: 0; padding: 0 6px 6px; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; }
+.task-list { position: relative; display: flex; flex: 1; flex-direction: column; gap: 6px; min-height: 0; padding: 2px 6px 6px; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; }
 .empty-lane { display: grid; place-items: center; min-height: 72px; border: 1px dashed var(--border-2); border-radius: var(--radius-md); color: var(--text-3); font-size: var(--text-sm); transition: border-color var(--duration), color var(--duration); }
 .kanban-column[data-drop] .empty-lane { border-color: color-mix(in srgb, var(--lane) 45%, transparent); color: var(--text-2); }
 .archive-lane-link { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font-size: var(--text-sm); }
@@ -106,64 +107,69 @@
 .kanban-add-column input { min-height: 32px; }
 .kanban-add-actions { display: flex; gap: var(--space-1); }
 
-/* Cards. */
+/* Cards: a calm surface. Hover and press change background and border only (no lift, no scale); 100ms, no spring. */
 .task-card {
   position: relative;
   display: grid;
   flex: none;
   gap: 6px;
-  padding: 10px var(--space-3) 10px;
+  padding: 10px var(--space-3) var(--space-2);
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
   background: var(--surface-2);
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.24);
   cursor: pointer;
   outline: none;
-  transition: transform 0.35s var(--ease-spring), background var(--duration-fast), border-color var(--duration-fast), box-shadow var(--duration);
+  transition: background var(--duration-instant) var(--ease-standard), border-color var(--duration-instant) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
 }
 .task-card.can-drag { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 @media (hover: hover) {
-  .task-card:hover { transform: translateY(-1px); border-color: var(--border-2); background: var(--surface-3); }
-  /* A card just dropped under the pointer stays where the ghost set it down. */
-  .task-card[data-landed]:hover { transform: none; }
+  .task-card:hover { border-color: var(--border-2); background: var(--surface-3); }
 }
-.task-card:active:not(:has(button:active, input:active)) { transform: scale(0.99); background: var(--surface-3); transition-duration: 0.12s; }
-.task-card:focus-visible { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus), var(--shadow-sm); }
-.task-card.is-selected, .task-card.has-menu { border-color: color-mix(in srgb, var(--accent) 60%, var(--border-2)); background: var(--surface-3); }
+.task-card:active:not(:has(button:active, input:active)) { background: var(--surface-3); }
+.task-card:focus-visible { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+.task-card.is-selected, .task-card.has-menu { border-color: color-mix(in srgb, var(--accent) 55%, var(--border-2)); background: color-mix(in srgb, var(--accent) 6%, var(--surface-3)); }
 .task-card.done .task-top strong { color: var(--text-3); }
 .task-card.is-completing .task-top strong { text-decoration: line-through; text-decoration-color: var(--text-3); }
 .task-card.is-collapsing { overflow: hidden; pointer-events: none; }
-.task-card-head { display: flex; align-items: center; gap: var(--space-2); min-height: 18px; }
-.task-code { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; color: var(--text-3); font-size: var(--text-xs); font-weight: var(--weight-medium); letter-spacing: 0.01em; }
+.task-card-head { display: flex; align-items: center; gap: var(--space-2); min-height: 20px; }
+.task-code { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; color: var(--text-3); font-size: var(--text-sm); font-weight: var(--weight-regular); font-variant-numeric: tabular-nums; letter-spacing: 0; }
 .github-issue-indicator { display: inline-grid; color: var(--text-3); }
 .github-issue-indicator svg { width: 12px; height: 12px; }
 .github-issue-indicator[data-state="open"] { color: var(--green); }
 .github-issue-indicator[data-state="merged"] { color: var(--violet); }
 .task-top { display: flex; align-items: flex-start; gap: var(--space-2); }
-.task-top strong { flex: 1; min-width: 0; font-size: var(--text-base); font-weight: var(--weight-medium); line-height: 1.4; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; transition: color var(--duration); }
-.task-meta { position: relative; display: flex; align-items: center; gap: var(--space-1); min-height: 22px; }
-.task-labels { display: inline-flex; min-width: 0; gap: var(--space-1); overflow: hidden; }
-.task-label { flex: none; max-width: 88px; height: 20px; padding: 0 7px; overflow: hidden; border: 1px solid var(--border-2); border-radius: var(--radius-full); color: var(--text-3); font-size: var(--text-xs); line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.task-top strong { flex: 1; min-width: 0; color: var(--text-1); font-size: var(--text-base); font-weight: var(--weight-medium); line-height: 20px; letter-spacing: -0.003em; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; transition: color var(--duration); }
+.task-meta { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 22px; margin-top: 2px; }
+.task-meta:empty { display: none; }
+.task-labels { display: inline-flex; min-width: 0; gap: 4px; overflow: hidden; }
 
 /* Keyboard move target: focusable while a card is moved with the keyboard, never shown. */
 .drag-handle { position: absolute; top: 0; left: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
 
 /* Complete: a rounded square (status icons are rings) that fills with a green tick when the issue is completed. */
-.check-button { position: relative; display: grid; place-items: center; flex: none; width: 18px; height: 18px; margin-top: 1px; padding: 0; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-3); transition: color var(--duration-fast), transform var(--duration) var(--ease-spring); }
-.check-box { width: 14px; height: 14px; border: 1.5px solid currentColor; border-radius: 4px; transition: background var(--duration-fast); }
-.check-button:hover:not(:disabled) { color: var(--green); transform: scale(1.1); }
-.check-button:hover:not(:disabled) .check-box { background: color-mix(in srgb, var(--green) 14%, transparent); }
-.check-button:active:not(:disabled) { transform: scale(0.9); }
+.check-button { position: relative; display: grid; place-items: center; flex: none; width: 18px; height: 20px; padding: 0; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-3); transition: color var(--duration-instant) var(--ease-standard); }
+.check-box { width: 14px; height: 14px; border: 1.5px solid currentColor; border-radius: 4px; transition: background var(--duration-instant) var(--ease-standard), border-color var(--duration-instant) var(--ease-standard); }
+.check-button:hover:not(:disabled) { color: var(--green); }
+.check-button:hover:not(:disabled) .check-box { background: color-mix(in srgb, var(--green) 16%, transparent); }
+.check-button:active:not(:disabled) .check-box { background: color-mix(in srgb, var(--green) 28%, transparent); }
 .check-button:disabled { opacity: 1; cursor: inherit; }
 .check-done { display: grid; place-items: center; width: 14px; height: 14px; border-radius: 4px; background: var(--green); color: var(--text-inverse); }
-.is-completing .check-done { animation: check-pop 0.42s var(--ease-spring); }
+.is-completing .check-done { animation: check-pop 0.24s var(--ease-out); }
 .is-completing .check-done svg { stroke-dasharray: 20; animation: check-draw 0.32s 0.08s var(--ease-out) backwards; }
-@keyframes check-pop { 0% { transform: scale(0.4); opacity: 0.4; } 60% { transform: scale(1.18); } 100% { transform: scale(1); } }
+@keyframes check-pop { from { transform: scale(0.6); opacity: 0.5; } }
 @keyframes check-draw { from { stroke-dashoffset: 20; } }
 
 /* Chips: light, and buttons where the card can be edited in place. */
-.task-chip, .priority { position: relative; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border: 1px solid var(--border-2); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--text-xs); font-weight: var(--weight-medium); text-transform: capitalize; white-space: nowrap; }
-button.task-chip { cursor: pointer; transition: background var(--duration-fast), border-color var(--duration-fast), color var(--duration-fast); }
+.task-chip, .priority { position: relative; display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 6px; border: 1px solid var(--border-2); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--text-sm); font-weight: var(--weight-medium); font-variant-numeric: tabular-nums; text-transform: capitalize; white-space: nowrap; }
+.task-chip.icon-only { justify-content: center; width: 22px; padding: 0; }
+button.task-chip { cursor: pointer; transition: background var(--duration-instant) var(--ease-standard), border-color var(--duration-instant) var(--ease-standard), color var(--duration-instant) var(--ease-standard); }
+.estimate-chip { color: var(--text-2); }
+.estimate-chip > .estimate-icon, .lane-estimate > .estimate-icon { flex: none; color: var(--text-3); }
+.lane-estimate { display: inline-flex; align-items: center; gap: 3px; color: var(--text-3); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+/* Label chips on a card are one button that opens the label picker. */
+.label-chips-button { display: inline-flex; min-width: 0; max-width: 100%; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; cursor: pointer; }
+.label-chips-button:hover .label-chip { border-color: color-mix(in srgb, var(--label, var(--text-3)) 50%, transparent); background: color-mix(in srgb, var(--label, var(--text-3)) 22%, transparent); }
 button.task-chip:hover { border-color: var(--border-3); background: var(--hover); color: var(--text-1); }
 button.task-chip:active { background: var(--active); }
 .priority-icon { flex: none; }
@@ -184,8 +190,11 @@ button.task-assignee:hover { box-shadow: 0 0 0 2px var(--border-3); color: var(-
 .task-assignee.is-empty, .task-assignee-empty { border: 1px dashed var(--border-3); }
 .task-assignee-empty { display: grid; flex: none; place-items: center; width: 20px; height: 20px; border-radius: 50%; }
 .task-assignee.is-empty:not(.with-name) > .task-assignee-empty { border: 0; }
-.task-menu-button.icon-button { width: 24px; min-width: 24px; height: 22px; margin-left: auto; opacity: 0; transition: opacity var(--duration-fast), background var(--duration-fast); }
-.task-card:hover .task-menu-button, .task-card.has-menu .task-menu-button { opacity: 1; }
+.task-menu-button.icon-button { width: 22px; min-width: 22px; height: 22px; margin-left: auto; color: var(--text-3); opacity: 0; transition: opacity var(--duration-instant) var(--ease-standard), background var(--duration-instant) var(--ease-standard); }
+.task-card:hover .task-menu-button, .task-card.has-menu .task-menu-button, .task-card:focus-visible .task-menu-button { opacity: 1; }
+/* With nothing else in the row, the ⋯ floats on the title row instead of adding an empty line. */
+.task-meta:has(> .task-menu-button:only-child) { position: absolute; right: 8px; bottom: 8px; margin: 0; min-height: 0; }
+@media (hover: hover) { .task-card:has(.task-meta > .task-menu-button:only-child) .task-top strong { padding-right: 18px; } }
 .task-card.is-moving .task-menu-button { opacity: 0; }
 
 /* Touch: every control on a card is visible and at least 44px tall to the finger; the menu is a long-press. */
@@ -210,12 +219,12 @@ button.task-assignee:hover { box-shadow: 0 0 0 2px var(--border-3); color: var(-
 
 /* Drag and drop (components/use-issue-drag.ts). */
 html.issue-dragging, html.issue-dragging * { cursor: grabbing !important; -webkit-user-select: none !important; user-select: none !important; }
-.kanban-scroll .task-card.is-placeholder, .kanban-scroll.is-dragging .task-card.is-placeholder:hover { border-style: dashed; border-color: var(--border-3); background: transparent; box-shadow: none; transform: none; }
+.kanban-scroll .task-card.is-placeholder, .kanban-scroll.is-dragging .task-card.is-placeholder:hover { border-style: dashed; border-color: color-mix(in srgb, var(--lane, var(--border-3)) 45%, var(--border-3)); background: color-mix(in srgb, var(--lane, transparent) 4%, transparent); box-shadow: none; transform: none; }
 .kanban-scroll .task-card.is-placeholder > * { visibility: hidden; }
-.kanban-scroll .task-card.is-moving { border-color: var(--focus); background: var(--surface-3); box-shadow: 0 18px 36px -16px rgba(0, 0, 0, 0.8); transform: translateY(-2px); }
+.kanban-scroll .task-card.is-moving { border-color: var(--focus); background: var(--surface-3); box-shadow: 0 0 0 1px var(--focus), 0 12px 28px -14px rgba(0, 0, 0, 0.8); }
 .kanban-scroll.is-dragging .task-card:hover { transform: none; }
 .task-drag-layer { position: fixed; left: 0; top: 0; z-index: 90; pointer-events: none; will-change: transform; }
-.task-drag-layer .task-card.task-ghost { box-sizing: border-box; margin: 0; border-color: var(--border-3); background: var(--surface-3); box-shadow: var(--shadow-drag); transform: rotate(2deg) scale(1.03); transition: transform 0.24s var(--ease-move), box-shadow 0.24s, border-color 0.24s, background 0.24s; animation: task-lift 0.2s var(--ease-move); }
+.task-drag-layer .task-card.task-ghost { box-sizing: border-box; margin: 0; border-color: var(--border-3); background: var(--surface-3); box-shadow: var(--shadow-drag); transform: rotate(1deg); transition: transform 0.16s var(--ease-move), box-shadow 0.16s, border-color 0.16s, background 0.16s; animation: task-lift 0.14s var(--ease-move); }
 .task-drag-layer .task-card.task-ghost.is-settling { transform: none; border-color: var(--border-1); background: var(--surface-2); box-shadow: var(--shadow-sm); }
 .task-drag-layer .task-ghost .task-menu-button { opacity: 0; }
 @keyframes task-lift { from { transform: none; box-shadow: var(--shadow-sm); border-color: var(--border-1); } }
@@ -277,9 +286,12 @@ html.issue-dragging, html.issue-dragging * { cursor: grabbing !important; -webki
 .issue-table th.col-priority { width: 112px; }
 .issue-table th.col-assignee { width: 180px; }
 .issue-table th.col-due { width: 120px; }
-.issue-table td { height: 42px; padding: 6px var(--space-3); border-bottom: 1px solid var(--border-1); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.issue-table th.col-estimate { width: 96px; }
+.issue-table :is(.estimate-chip).is-empty { opacity: 0; transition: opacity var(--duration-instant); }
+.issue-table tbody tr:is(:hover, .has-menu) .estimate-chip.is-empty { opacity: 1; }
+.issue-table td { height: 40px; padding: 6px var(--space-3); border-bottom: 1px solid var(--border-1); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .issue-table td:not(.col-issue) { padding-left: calc(var(--space-3) - 7px); }
-.issue-table tbody tr { cursor: pointer; outline: none; transition: background var(--duration-fast); }
+.issue-table tbody tr { cursor: pointer; outline: none; transition: background var(--duration-instant) var(--ease-standard); }
 .issue-table tbody tr.can-press { -webkit-touch-callout: none; }
 @media (hover: hover) { .issue-table tbody tr:hover { background: var(--hover); } }
 .issue-table tbody tr:active:not(:has(button:active)) { background: var(--active); }
@@ -287,7 +299,7 @@ html.issue-dragging, html.issue-dragging * { cursor: grabbing !important; -webki
 .issue-table tbody tr.is-selected, .issue-table tbody tr.has-menu { background: var(--accent-soft); }
 .issue-table td.col-issue { display: flex; align-items: center; gap: var(--space-3); }
 .issue-table-title { display: flex; flex: 1; align-items: center; gap: var(--space-3); min-width: 0; color: var(--text-1); font-weight: var(--weight-medium); }
-.issue-table-title small { flex: none; width: 64px; color: var(--text-3); font-size: var(--text-xs); font-weight: var(--weight-medium); }
+.issue-table-title small { flex: none; width: 64px; color: var(--text-3); font-size: var(--text-sm); font-weight: var(--weight-regular); font-variant-numeric: tabular-nums; }
 .issue-table-title > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .issue-table tr.is-completing .issue-table-title > span { color: var(--text-3); text-decoration: line-through; }
 .issue-table .check-button { margin: 0; }
@@ -349,7 +361,7 @@ button.task-assignee.with-name:hover { box-shadow: none; border-color: var(--bor
   .kanban-add-column { scroll-snap-align: end; }
   .kanban-add-column.is-editing { flex-basis: calc(100vw - 56px); min-width: 0; }
   .kanban-scroll.is-dragging { scroll-snap-type: none; }
-  .task-card { padding: var(--space-3); gap: var(--space-2); }
+  .task-card { padding: var(--space-3) var(--space-3) 10px; gap: var(--space-2); }
   .task-top strong { font-size: var(--text-md); }
   .task-chip { height: 24px; font-size: var(--text-sm); }
   .issue-table thead { display: none; }
