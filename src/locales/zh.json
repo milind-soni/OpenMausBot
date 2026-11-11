@@ -3528,7 +3528,7 @@
   "settings.logins.onePassword.refresh": "刷新",
   "settings.logins.onePassword.disconnect": "断开连接",
   "settings.logins.onePassword.vaults": "1Password 密码库",
-  "settings.logins.onePassword.vaultUse": "{count} 条登录信息 · {who}",
+  "settings.logins.onePassword.vaultUse": "{count} 条网站登录信息 · {who}",
   "settings.logins.onePassword.changeVault": "更改谁能使用 {vault}",
   "settings.logins.onePassword.error": "无法连接 1Password。请检查网络连接和令牌后重试。",
   "settings.logins.onePassword.note": "令牌会加密保存在运行 {app} 的电脑上，之后不会再显示。1Password 中的登录信息会出现在上面的列表中，以同样的方式填入，并在 1Password 中修改。除非你为密码库指定了机器人，否则所有机器人都能使用。",

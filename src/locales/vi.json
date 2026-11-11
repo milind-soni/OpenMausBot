@@ -2566,7 +2566,7 @@
   "settings.logins.onePassword.refresh": "Làm mới",
   "settings.logins.onePassword.disconnect": "Ngắt kết nối",
   "settings.logins.onePassword.vaults": "Kho lưu trữ 1Password",
-  "settings.logins.onePassword.vaultUse": "{count} thông tin đăng nhập · {who}",
+  "settings.logins.onePassword.vaultUse": "{count} thông tin đăng nhập trang web · {who}",
   "settings.logins.onePassword.changeVault": "Thay đổi ai có thể sử dụng {vault}",
   "settings.logins.onePassword.note": "Mã token được mã hóa trên máy tính mà {app} đang chạy và không bao giờ hiển thị lại. Thông tin đăng nhập 1Password sẽ xuất hiện trong danh sách phía trên, được điền theo cách tương tự, và được thay đổi trong 1Password. Một kho lưu trữ dành cho mọi bot trừ khi bạn chọn bot cho kho đó.",
   "settings.logins.cloudOwn": "Đây là thông tin đăng nhập riêng của Cloud. Thông tin đăng nhập trên máy tính của bạn sẽ tự đến đây khi {app} trên máy tính đó chuyển các bot của bạn sang đây.",

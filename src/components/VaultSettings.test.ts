@@ -171,14 +171,14 @@ describe("Settings → Vault: logins", () => {
       .mockResolvedValueOnce({ logins: [{ ...VAULT_LOGIN, bots: ["quill"] }], onePassword: narrowed });
     await render();
     const row = () => host.querySelector('[data-vault="Shared with OMB"]')!;
-    expect(row().textContent).toContain("2 logins · All bots");
+    expect(row().textContent).toContain("2 website logins · All bots");
     await click("Change who can use Shared with OMB");
     await act(async () => { [...row().querySelectorAll<HTMLInputElement>('input[type="radio"]')][1]!.click(); });
     await act(async () => { [...row().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')][1]!.click(); });
     await click("Save changes");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/1password/vaults/v1", { method: "PATCH", body: JSON.stringify({ bots: ["quill"] }) });
-    expect(row().textContent).toContain("2 logins · Quill");
+    expect(row().textContent).toContain("2 website logins · Quill");
     expect(host.querySelector('[data-login-row="example.com"]')!.textContent).toContain("From 1Password · Quill");
   });
 

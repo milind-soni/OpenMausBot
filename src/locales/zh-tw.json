@@ -3700,7 +3700,7 @@
   "settings.logins.onePassword.refresh": "重新整理",
   "settings.logins.onePassword.disconnect": "中斷連接",
   "settings.logins.onePassword.vaults": "1Password 保險庫",
-  "settings.logins.onePassword.vaultUse": "{count} 個登入資訊 · {who}",
+  "settings.logins.onePassword.vaultUse": "{count} 個網站登入資訊 · {who}",
   "settings.logins.onePassword.changeVault": "變更誰可以使用 {vault}",
   "settings.logins.onePassword.error": "無法連上 1Password。請檢查網路連線和權杖，然後再試一次。",
   "settings.logins.onePassword.note": "權杖會在執行 {app} 的電腦上加密，且不會再次顯示。1Password 的登入資訊會出現在上方清單中，以相同方式填入，並在 1Password 中變更。除非你為保險庫選擇特定機器人，否則每個機器人都能使用。",

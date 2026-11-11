@@ -2566,7 +2566,7 @@
   "settings.logins.onePassword.refresh": "Yenile",
   "settings.logins.onePassword.disconnect": "Bağlantıyı kes",
   "settings.logins.onePassword.vaults": "1Password kasaları",
-  "settings.logins.onePassword.vaultUse": "{count} giriş bilgisi · {who}",
+  "settings.logins.onePassword.vaultUse": "{count} web sitesi giriş bilgisi · {who}",
   "settings.logins.onePassword.changeVault": "{vault} kasasını kimlerin kullanabileceğini değiştir",
   "settings.logins.onePassword.note": "Belirteç, {app}'un çalıştığı bilgisayarda şifrelenir ve bir daha gösterilmez. 1Password giriş bilgileri yukarıdaki listede görünür, aynı şekilde doldurulur ve 1Password'de değiştirilir. Bir kasa, siz onun için bot seçmedikçe tüm botlar içindir.",
   "settings.logins.cloudOwn": "Bunlar Cloud'un kendi girişleridir. O bilgisayardaki {app} botlarınızı buraya taşıdığında bilgisayarınızın girişleri de buraya kendiliğinden gelir.",
