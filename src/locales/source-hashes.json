@@ -33972,7 +33972,9 @@
       "phoneUpdate.body": "98842214e78636950a18a5f2c845a7165f1f44799cce314f78c2f83e8ae36241",
       "phoneUpdate.bodyMany": "9eaa5a5fee2496ba55ce8bc2032ca7a32b6fb7c9740909fb2ee98579c83e935d",
       "phoneUpdate.open": "4997e0ba6a79fe84efb5c17a9025aa917c736232b40d1f765e43443d1a99b51e",
-      "remote.devices.pairAgain": "b0545ee3486b14f40b7b0a853bb1626a6f62ef7df6d6099faa39ff305d6d8f98"
+      "remote.devices.pairAgain": "b0545ee3486b14f40b7b0a853bb1626a6f62ef7df6d6099faa39ff305d6d8f98",
+      "botPanel.memory.fullWindow": "7a571395deca2a2f3c3ff72b70276133db911a58347111a54dde8e5b9092a929",
+      "botPanel.memory.exitFullWindow": "cb69ca910bb229e8df7db54afe8113c5ca5627f0e46bcde3b5e85a6d6a5019f4"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -51569,7 +51571,9 @@
       "phoneUpdate.body": "98842214e78636950a18a5f2c845a7165f1f44799cce314f78c2f83e8ae36241",
       "phoneUpdate.bodyMany": "9eaa5a5fee2496ba55ce8bc2032ca7a32b6fb7c9740909fb2ee98579c83e935d",
       "phoneUpdate.open": "4997e0ba6a79fe84efb5c17a9025aa917c736232b40d1f765e43443d1a99b51e",
-      "remote.devices.pairAgain": "b0545ee3486b14f40b7b0a853bb1626a6f62ef7df6d6099faa39ff305d6d8f98"
+      "remote.devices.pairAgain": "b0545ee3486b14f40b7b0a853bb1626a6f62ef7df6d6099faa39ff305d6d8f98",
+      "botPanel.memory.fullWindow": "7a571395deca2a2f3c3ff72b70276133db911a58347111a54dde8e5b9092a929",
+      "botPanel.memory.exitFullWindow": "cb69ca910bb229e8df7db54afe8113c5ca5627f0e46bcde3b5e85a6d6a5019f4"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

@@ -9872,6 +9872,8 @@
   "botPanel.routines.emptyHint": "這個機器人依排程執行的工作，例如每天早上的新聞摘要。",
   "botPanel.routines.seeAll": "在「自動化」中檢視所有例行工作",
   "botPanel.memory.editText": "以純文字編輯",
+  "botPanel.memory.fullWindow": "全視窗",
+  "botPanel.memory.exitFullWindow": "結束全視窗",
   "claudeEndpoints.modelHint": "選填。留空時，OpenMausBot 會讀取主機的模型清單；OpenAI 與 Anthropic 會使用標準清單。若主機未列出模型，請手動輸入模型。之後每個機器人都可以選擇自己的模型。",
   "phone.signIn.tailscaleInstead": "使用 Tailscale 配對",
   "automations.allDepartments": "所有部門",
