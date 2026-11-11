@@ -4094,6 +4094,8 @@
   "usage.history.owner": "This computer",
   "usage.history.botToBot": "Bot to bot",
   "usage.history.routine": "Routine: {name}",
+  "usage.history.privateRoutine": "Private routine",
+  "usage.history.privateBot": "Private bot",
   "usage.budget.title": "Monthly spend limit",
   "usage.budget.subtitle": "Once the month's cost reaches the limit, no bot in this installation starts a turn until an admin raises it. Admins are notified once a month at the warning level and once at the limit.",
   "usage.budget.none": "No limit is set. Bots spend freely.",

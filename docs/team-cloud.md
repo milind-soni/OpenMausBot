@@ -253,7 +253,11 @@ this server shares with every bot. It exists only on a Team Cloud.
   changes are recorded too. The Admin's Team admin → Activity reads it with the same session, beside the team's own record there; Usage
   reads `/api/usage` (by person, bot and model) and `/api/usage/traces` (the runs) the same way. A member's private chat
   shows there as metadata only: its usage counts and cost by person and bot, an activity row's when, bot, tool and
-  outcome; never its runs' titles or a decision's words.
+  outcome; never its runs' titles or a decision's words. To anyone but its person a usage row from a private chat names
+  no conversation (the export's `thread` is empty), a routine that lives in one is the one line *Private routine* (key
+  `routine:private`, no name, no id) and a person's own MausBot is *Private bot* (`bot:private`); the amounts still count
+  toward the person's and the team's totals (`server/host/private-records.ts`). What a person changes on their own
+  MausBot is never recorded in admin activity.
 - For a business sign-in (Claude or ChatGPT on this server), the Admin opens this server's own pages signed in as that
   admin (a browser sign-in with the member's claim) at `/?connect=ai` (or `apps`, `mcp`, `keys`).
 
@@ -499,7 +503,12 @@ whoever made it or runs it (the schedule, its writer or an Admin), and reports i
 chat of its own that everyone who reads the place reads; its asks go to whoever looks after the bot, or the Admins. The
 routine form on a team offers two places: **Just me** (`resultsThreadId: "just-me"`, the person's own private chat with
 the bot, or a new one named for the routine) and **Shared chat** (the bot's main chat); anyone who can chat with the bot
-may choose either, and an older app's "The bot's main thread" (`null`) is the shared place's own results chat. A routine
+may choose either, and an older app's "The bot's main thread" (`null`) is the shared place's own results chat. A new
+routine is never shared unless its writer chose that: the form presets the audience of the place it was opened from
+(Shared chat only while that bot's shared chat is on screen; Just me in a private chat and anywhere else), always shows
+who will see the routine and what it reports in the words of the label by the message box (*"Private · only you"*,
+*"Shared · everyone in Acme can see"*), and a request that names no place (`resultsThreadId` left out) makes the
+routine its writer's alone, as Just me does; when no private chat can be opened for it the request is refused. A routine
 that reports into a chat whose audience is not its own, such as one made before this for the shared chat whose results
 chat was opened privately for its writer, gets a results chat of its own place at its next run; the old chat stays
 where it is, unchanged. The chat a routine opened for its own results does not make it anyone's until they write in it.
@@ -644,6 +653,12 @@ allow, folders), where it runs, its department, whom it answers to or directs, c
   `visibility` follows in the same write (everyone when everyone may at least view it, else the owner and the people
   added), so every rule of the audience rule above that reads who sees a bot holds unchanged. A new team bot is
   Everyone · Can chat. A member's own MausBot stays theirs alone, as before.
+- **A person's own MausBot exists for nobody else.** To every other member and every Admin, the Owner included, it is
+  in no list, stream, search, export, routine picker or group chat, whatever its stored sharing says
+  (`VisibleSet.bot`), and every route naming it, by path (its memory layers too) or in a body, answers exactly as an id
+  no bot has: on a Team Cloud both are refused at the one gate, 404 *no such bot*, before any route can answer them
+  differently (`server/host/visibility-host.ts`). Only the Cloud itself reaches it: the leave clean-up and the Owner's
+  whole-machine export, which leaves it out.
 - **Before levels.** A bot whose sharing was never set is read from its visibility, exactly as it was: everyone →
   Everyone · Can chat; admins only → Only people added (admins still edit); a list of addresses → those people · Can
   chat. Nothing is rewritten on disk; the first change in the Share dialog stores the sharing. An older app's
