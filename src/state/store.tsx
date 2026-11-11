@@ -3075,13 +3075,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     const hydrationFallback = setTimeout(hydrate, 1_000);
 
-    // One read per conversation at a time; an unread frame meanwhile asks for exactly one more once it finishes.
-    const readsInFlight = new Map<string, boolean>();
-    const sendRead = (botId: string, threadId: string | undefined, key: string): void => {
-      readsInFlight.set(key, false);
+    // One read per conversation at a time, covering its newest message (the task's updatedAt). An unread frame meanwhile
+    // with a newer message asks for exactly one more once it finishes; one re-announcing what the read covers does not.
+    const readsInFlight = new Map<string, { covers: number; again: boolean }>();
+    const sendRead = (botId: string, threadId: string | undefined, key: string, covers: number): void => {
+      readsInFlight.set(key, { covers, again: false });
       void fetch(`/api/bots/${botId}/read`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) }).catch(() => {}).finally(() => {
-        const again = readsInFlight.get(key); readsInFlight.delete(key);
-        if (again && alive) sendRead(botId, threadId, key);
+        const open = readsInFlight.get(key); readsInFlight.delete(key);
+        if (open?.again && alive) sendRead(botId, threadId, key, open.covers);
       });
     };
     const stopFrames = store.handleFrames((frame) => { handleFrame(frame); stateRef.current = store.getState(); });
@@ -3136,9 +3137,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               (selectedTask?.unread || (!bot.tasks && bot.unread))) {
             if (selectedTask) selectedTask.unread = false;
             bot.unread = botShowsUnread(bot);
-            const read = `${bot.id}:${shown}`;
-            if (readsInFlight.has(read)) readsInFlight.set(read, true);
-            else sendRead(bot.id, shown, read);
+            const read = `${bot.id}:${shown}`, newest = selectedTask?.updatedAt ?? 0, open = readsInFlight.get(read);
+            if (!open) sendRead(bot.id, shown, read, newest);
+            else if (newest > open.covers) readsInFlight.set(read, { covers: newest, again: true });
           }
           rawDispatch({
             type: "botPatched",
