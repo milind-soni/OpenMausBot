@@ -81,6 +81,23 @@ it("sends the chosen effort as reasoning_effort, and nothing the model does not 
   await instance.dispose();
 });
 
+it("keeps the published efforts when a later /models answers with no models", async () => {
+  const { instance, turn } = await fixture();
+  vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => String(input).endsWith("/models")
+    ? Response.json({ data: [] })
+    : new Response(reply, { headers: { "content-type": "text/event-stream" } })));
+  await instance.refreshModels?.();
+  expect(instance.models.options.find((option) => option.id === "deepseek-v4.1-flash")?.variants).toBeDefined();
+  const sent: Record<string, unknown>[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (_input: string | URL, init?: RequestInit) => {
+    sent.push(JSON.parse(String(init?.body)));
+    return new Response(reply, { headers: { "content-type": "text/event-stream" } });
+  }));
+  await turn("deepseek-v4.1-flash", "high").catch(() => undefined);
+  expect(sent.at(-1)?.reasoning_effort).toBe("high");
+  await instance.dispose();
+});
+
 it("asks OpenRouter for a provider that applies the chosen effort, and leaves routing alone otherwise", async () => {
   const { instance, turn } = await fixture("https://openrouter.ai/api/v1");
   expect(await turn("openrouter-model", "max")).toMatchObject({ reasoning: { effort: "max" }, provider: { require_parameters: true } });

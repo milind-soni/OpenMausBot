@@ -222,6 +222,8 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       ? "No API key — open Settings → API keys."
       : `no API key — set ${config.apiKeyEnv} or add it to the instance config`;
     const seeded = config.catalog === "openai" ? OPENAI_MODELS : isOllamaServer(config) ? NO_MODELS : DEFAULT_MODELS;
+    /** Models of a server that is neither OpenAI's nor OpenRouter that publish their own efforts; it changes with `catalog`. */
+    let advertised = new Set<string>();
     let catalog: ModelCatalog = config.managedModels
       ? { default: config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) }
       : config.model
@@ -257,15 +259,14 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       }));
       if (config.model && !options.some((model) => model.id === config.model)) options.unshift({ id: config.model, label: config.model, custom: true });
       catalog = { default: config.model ?? options[0]?.id ?? "", options };
+      advertised = new Set();
       return true;
     };
 
-    /** Models of a server that is neither OpenAI's nor OpenRouter that publish their own efforts. */
-    const advertised = new Set<string>();
-    const effortsFor = (id: string, row: OpenRouterModelRow & Record<string, unknown>) => {
+    const effortsFor = (id: string, row: OpenRouterModelRow & Record<string, unknown>, into: Set<string>) => {
       if (config.catalog === "openai") return OPENAI_REASONING.test(id) ? EFFORT_CHOICES : undefined;
       const efforts = publishedEfforts(row, openRouter);
-      if (efforts && !openRouter) advertised.add(id);
+      if (efforts && !openRouter) into.add(id);
       return efforts;
     };
     const apiEffort = (model: string, variant: string | undefined) => {
@@ -302,6 +303,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
                   default: config.model ?? options[0]!.id,
                   options,
                 };
+                advertised = new Set();
                 return;
               }
             }
@@ -324,7 +326,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
             .sort((a, b) => (typeof b.created === "number" ? b.created : 0) - (typeof a.created === "number" ? a.created : 0));
         }
         const seen = new Set<string>();
-        advertised.clear();
+        const nextAdvertised = new Set<string>();
         const options: ModelCatalog["options"] = [];
         for (const row of rows) {
           const rawId = typeof row.id === "string" ? row.id : "";
@@ -333,7 +335,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           seen.add(id);
           const label = typeof row.name === "string" && row.name.trim() ? row.name : id;
           const contextWindow = advertisedContextWindow(row);
-          const efforts = effortsFor(id, row);
+          const efforts = effortsFor(id, row, nextAdvertised);
           options.push({
             id,
             label: openRouter ? freeLabel(label, row) : label,
@@ -364,6 +366,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           ordered.unshift({ id: config.model, label: config.model, custom: true });
         }
         catalog = { default: config.model ?? freeDefault(freeTools) ?? ordered[0].id, options: ordered };
+        advertised = nextAdvertised;
       } catch {}
     };
     const loading = apiKey ? Promise.all([
