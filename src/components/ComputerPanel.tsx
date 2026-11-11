@@ -52,8 +52,8 @@ import {
   type ComputerPanelView,
 } from "@/lib/computer-panel-view";
 import { approvalModeFor } from "../../shared/approval-mode";
-import { openPlaceAction, placeBlocked, placeFacts, placeHasIssue, placeViewFor, usePlaceSeat, worksOnSimpleLabel } from "@/lib/place-view";
-import { cloudRefusal, type PlaceActionId, type PlaceFacts, type PlaceView } from "../../shared/place-view";
+import { openPlaceAction, panelCloudRefusal, placeBlocked, placeFacts, placeHasIssue, placeViewFor, usePlaceSeat, worksOnSimpleLabel } from "@/lib/place-view";
+import type { PlaceActionId, PlaceFacts, PlaceView } from "../../shared/place-view";
 import { t } from "@/lib/i18n";
 import { LocalizedPanelError, panelErrorText } from "@/lib/computer-messages";
 
@@ -1107,7 +1107,7 @@ export function ComputerPanel({
     ...(refusal ? { refusal } : {}),
   });
   const cloudRefused = bot.computer === "cloud" && cloudBackend === "box" && phase === "error" && error && !(error instanceof LocalizedPanelError)
-    ? cloudRefusal({ message: errorText ?? "", status: Number((error as { status?: unknown }).status ?? 0) || undefined }, state.config?.box?.included === true)
+    ? panelCloudRefusal(error, errorText ?? "", state.config?.box?.included === true)
     : undefined;
   const cloudView = viewOf("cloud", cloudRefused);
   const autoView = viewOf("auto");

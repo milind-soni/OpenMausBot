@@ -33,6 +33,12 @@ const usage = (thread: string, turn: string, ms: number, fields: Record<string, 
 const completed = (thread: string, turn: string, ms: number, ok = true, extra: Record<string, unknown> = {}) =>
   event(thread, turn, ms, { type: "turn.completed", ok, usage: { input: 900, output: 60, cachedInput: 400 }, ...extra });
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 describe("trace recorder", () => {
   it("times each AI step and tool from the engine's own events and hands the turn to its usage row", async () => {
     const dir = dataDir();
@@ -172,6 +178,51 @@ describe("trace recorder", () => {
     await flushSpans(dir);
     const t1 = (await readSpans(dir, daysBetween(T0, T0), new Set(["bot:t1"]))).get("bot:t1")!;
     expect(t1.find((span) => span.kind === "tool")).toMatchObject({ status: "ended", endedAt: T0 + 500 });
+  });
+
+  it.each(["settled", "replaced", "no owner"] as const)("does not charge a late HTTP tool response to the next turn (%s)", async (previous) => {
+    const dir = dataDir();
+    let clock = T0 + 100;
+    const recorder = createTraceRecorder({ dataDir: dir, now: () => clock });
+    if (previous !== "no owner") recorder.observe(started("bot", "t1", 0));
+    const received = deferred();
+    const answer = deferred();
+    const server = createServer(async (req, res) => {
+      await readBody(req);
+      recorder.timeServed(req, res, "bot");
+      received.resolve();
+      await answer.promise;
+      json(res, 200, { result: { isError: true, content: [{ type: "text", text: "Tool failed" }] } });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as { port: number };
+    const response = fetch(`http://127.0.0.1:${port}`, {
+      method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list_bots" } }),
+    });
+    try {
+      await received.promise;
+      if (previous === "settled") {
+        recorder.observe(completed("bot", "t1", 200));
+        recorder.settle("bot");
+      }
+      recorder.observe(started("bot", "t2", 300));
+      clock = T0 + 400;
+      answer.resolve();
+      await (await response).json();
+      const current = recorder.liveTurns().find((turn) => turn.turnId === "t2")!;
+      expect(current.spans.filter((span) => span.kind === "tool")).toEqual([]);
+      await flushSpans(dir);
+      const old = (await readSpans(dir, daysBetween(T0, T0), new Set(["bot:t1"]))).get("bot:t1");
+      if (previous === "no owner") expect(old).toBeUndefined();
+      else expect(old?.find((span) => span.kind === "tool")).toMatchObject({
+        turnId: "t1", name: "list_bots", timedBy: "omb", status: "error", startedAt: T0 + 100, endedAt: T0 + 400,
+      });
+    } finally {
+      answer.resolve();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await response.catch(() => undefined);
+    }
   });
 
   it("takes each Codex turn's share of the thread's running total", () => {

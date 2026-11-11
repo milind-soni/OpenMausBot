@@ -181,6 +181,17 @@ describe("redactSecretsInText", () => {
     }
   });
 
+  it("masks Notion integration tokens", () => {
+    // ntn_ plus 46 letters and digits, assembled at runtime like the cases above.
+    const token = `${"nt" + "n_"}${"0123456789A"}${"bcdefghijklmnopqrstuvwxyzABCDEFGHIJ"}`;
+    expect(redactSecretsInText(`notion ${token} connected`)).toBe(`notion «redacted ${token.length} chars» connected`);
+    expect(holdsCredential(`header Notion ${token}`)).toBe(true);
+    for (const ordinary of ["ntn_example", `${"nt" + "n_"}${"a".repeat(39)}`, `example_${"nt" + "n_"}${"a".repeat(46)}`]) {
+      expect(redactSecretsInText(ordinary)).toBe(ordinary);
+      expect(holdsCredential(ordinary)).toBe(false);
+    }
+  });
+
   it.each([
     ["xai-", 20],
     ["gsk_", 40],

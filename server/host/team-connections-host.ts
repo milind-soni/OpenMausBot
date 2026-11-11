@@ -18,6 +18,7 @@ import { advertisedGrants } from "../connector-advertisement.ts";
 import { appSandboxAllowed, serviceSlugFor } from "../connector-verdict.ts";
 import { type McpOAuthManager, type McpRefreshOutcome, type McpSignInPhase, withMcpSignIn, withoutPendingSignIn } from "../mcp-oauth.ts";
 import { isRemoteMcpServer, parseStoredMcpServer, type McpOAuthClientConfig } from "../mcp-registry.ts";
+import { knownMcpServerApp, type McpServerApp } from "../mcp-server-app.ts";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { managedComposioBrokerOff } from "../composio-broker-access.ts";
 import { projectApiKey } from "../composio-session.ts";
@@ -271,6 +272,19 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
         if (own) out.composioOwn = await withAppTools(own, bot, names, access);
       }
       return out;
+    },
+
+    /** For a turn with the team's connected-apps bridge: the connected app an MCP server that wants a sign-in can be swapped
+     * for, or null where this bot could not use that app: a `person` app, one its scopes or grants leave out, or one
+     * `blocked` refuses. */
+    async mcpServerApps(bot: Bot, blocked: (slug: string) => string | undefined): Promise<(name: string, url: string) => McpServerApp | null> {
+      const connected = await appsConnected(), apps = personApps();
+      return (name, url) => {
+        const known = knownMcpServerApp(name, url);
+        if (!known || apps.includes(known.slug) || blocked(known.slug)) return null;
+        if ((bot.connectorScopes && !bot.connectorScopes.apps[known.slug]) || (bot.connectorTools && !bot.connectorTools[known.slug])) return null;
+        return { ...known, connected: connected.includes(known.slug) };
+      };
     },
 
     /** Whose installation a relayed frame goes to: the team's (none named), or the member's own after checking the turn

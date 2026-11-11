@@ -517,7 +517,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const hideRefusedModel = (raw: string) => hidePlanRefusedModel(turn.model, raw, route);
       const signedOut = chatgptTurn && await loginCheck.check(childEnv()) === "missing";
       const authBridge = planAuth && await planRenewal.supported() ? await startPlanTokenBridge(() => planAuth.accessToken(), () => { assertPlanCurrent(); if (stopRequested) throw new Error("This task has ended."); }) : null;
-      try { assertPlanCurrent(); if (active.has(threadId)) throw new Error("a turn is already running on this thread"); } catch (error) { authBridge?.close(); throw error; }
+      let turnConfigArgs: string[]; try { assertPlanCurrent(); if (active.has(threadId)) throw new Error("a turn is already running on this thread"); turnConfigArgs = codexTurnConfigArgs(turn, childEnv()); } catch (error) { authBridge?.close(); throw error; }
       const turnId = newId();
       if (signedOut) {
         emit({ ...base(threadId, turnId), type: "turn.started" });
@@ -550,7 +550,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           // Native shell snapshots can restore variables the shell policy removed.
           ...(turn.toolScope === undefined && !authBridge ? [] : ["-c", "features.shell_snapshot=false"]),
           // A guest-driven turn: no shell, no file reads (-c wins over config files).
-          ...codexTurnConfigArgs(turn)];
+          ...turnConfigArgs];
         const codexConfig = codexConfigMcp(env), declaredInCodexConfig = codexConfig.names;
         if (turn.toolScope !== undefined) appServerArgs.push(...codexMcpDisableArgs(declaredInCodexConfig));
         const baseEnv = new Map(Object.entries(env).filter(([, value]) => value !== undefined));
@@ -806,7 +806,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           return settle(false, failedStop);
         }
         await interruptibleDelay(Math.max(1, Math.round(delayMs * retryScale)), stopSignal.signal).promise;
-        if (!stopRequested) void launchAttempt(attempt).catch(() => authBridge?.close());
+        if (!stopRequested) { try { turnConfigArgs = codexTurnConfigArgs(turn, childEnv()); } catch (error) { emit({ ...base(threadId, turnId), type: "runtime.error", message: error instanceof Error ? error.message : String(error) }); return settle(false, "rpc_error"); } void launchAttempt(attempt).catch(() => authBridge?.close()); }
         else await settle(false, "interrupted");
       };
 
