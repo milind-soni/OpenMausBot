@@ -18,6 +18,24 @@ it("shares overlapping slow probes and accepts a version after the old eight-sec
   expect(run).toHaveBeenCalledTimes(1);
 });
 
+it("never hands a caller the version of a probe started with a different PATH", async () => {
+  vi.useFakeTimers();
+  const run = vi.fn<typeof execCli>((_cli, _args, options, callback) => {
+    const version = options.env?.PATH === "nvm" ? "2.1.197" : "2.1.321";
+    setTimeout(() => callback(null, version), options.env?.PATH === "nvm" ? 1_000 : 2_000);
+  });
+  const probe = cliVersionProbe("claude", run);
+  const homebrew = probe({ PATH: "homebrew" });
+  const nvm = probe({ PATH: "nvm" });
+  expect(nvm).not.toBe(homebrew);
+  expect(probe({ PATH: "nvm" })).toBe(nvm);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(await nvm).toEqual({ version: "2.1.197" });
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(await homebrew).toEqual({ version: "2.1.321" });
+  expect(run).toHaveBeenCalledTimes(2);
+});
+
 it("retries an empty success once within the original thirty-second budget", async () => {
   vi.useFakeTimers();
   const run = vi.fn<typeof execCli>()
