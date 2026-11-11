@@ -164,6 +164,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
               <div className="min-w-[200px] flex-1">
                 <div className="font-mono text-[18px] tracking-[0.14em] text-ink">{offer.code}</div>
                 <div className="mt-1 text-[13px] text-ink-secondary">{codeUntil(offer.expiresAt)}</div>
+                {offer.url ? <p className="mt-2 text-[12px] text-ink-tertiary">{t("remote.serverPairing.camera")}</p> : null}
                 {offer.url ? (
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <code className="break-all text-[12px] text-ink-secondary">{offer.url}</code>
