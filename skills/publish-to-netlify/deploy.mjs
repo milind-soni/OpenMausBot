@@ -155,15 +155,18 @@ class NetlifyError extends Error {
 }
 
 function parseArgs(argv) {
-  const args = { draft: false, public: false };
+  const args = { draft: false, public: false, check: false };
   for (let at = 0; at < argv.length; at += 1) {
     const flag = argv[at];
     if (flag === "--draft") args.draft = true;
     else if (flag === "--make-public") args.public = true;
-    else if (["--dir", "--token-file", "--project", "--name"].includes(flag) && argv[at + 1]) args[flag.slice(2)] = argv[(at += 1)];
+    else if (flag === "--check") args.check = true;
+    else if (["--dir", "--token-file", "--project", "--name", "--title", "--bot-name"].includes(flag) && argv[at + 1]) args[flag.slice(2)] = argv[(at += 1)];
     else throw new Error(`unknown or incomplete option ${flag}`);
   }
-  if (!args["token-file"] || !(args.dir || args.public)) throw new Error("usage: node deploy.mjs --dir <folder to publish> --token-file <secret file> [--project <folder>] [--name <site name>] [--draft] [--make-public]");
+  if (!args["token-file"] || !(args.dir || args.public || args.check)) {
+    throw new Error("usage: node deploy.mjs --dir <folder to publish> --token-file <secret file> [--project <folder>] [--name <site name>] [--title <title>] [--bot-name <your name>] [--draft] [--make-public] | --check --token-file <secret file> | --make-public --token-file <secret file>");
+  }
   return args;
 }
 
@@ -180,20 +183,38 @@ function readSiteRecord(file) {
   return record;
 }
 
+const RECORD_KEYS = ["version", "siteId", "name", "url", "adminUrl", "title", "botId", "botName", "createdAt", "publishedAt", "deployId", "deployState", "access"];
+const oneLine = (value, max) => String(value).replace(/[\p{Cc}\s]+/gu, " ").trim().slice(0, max);
+
+/** `.netlify-site.json`, a contract other code reads: known keys only, in a fixed order, and never the token. */
+export function siteRecord(fields) {
+  const record = { version: 1 };
+  for (const key of RECORD_KEYS) if (fields[key] !== undefined && fields[key] !== null && fields[key] !== "") record[key] = fields[key];
+  return record;
+}
+
 const wait = (ms) => new Promise((done) => setTimeout(done, ms));
 
 /** Netlify (2026-11): a new account's sites answer 401 with a redirect to its team login until `sso_login` is turned
- * off on the site, so a 401 is a deployed site that only the account's team can open. */
-async function checkLink(url, env, deadline, pollMs) {
+ * off on the site, so a 401 is a deployed site that only the account's team can open. Turning it off takes a few
+ * seconds to show, so `expectPublic` waits through 401s. */
+async function checkLink(url, env, { pollMs, waitMs, privateAfterMs, expectPublic }) {
+  const started = Date.now();
   for (;;) {
     const { status, type } = await request(url, {}, env).then((response) => ({ status: response.status, type: String(response.headers["content-type"] ?? "") }), () => ({ status: 0, type: "" }));
+    const waited = Date.now() - started;
     if (status === 200) return { live: /^text\/html\b/i.test(type), access: "public", liveStatus: status, contentType: type };
-    if (Date.now() >= deadline) return { live: false, access: status === 401 ? "private" : "unknown", liveStatus: status };
+    if (status === 401 && (waited >= waitMs || (!expectPublic && waited >= privateAfterMs))) return { live: false, access: "private", liveStatus: status };
+    if (waited >= waitMs) {
+      return status === 0
+        ? { live: false, liveStatus: 0, message: "Netlify finished the deploy, but the link could not be reached from here. Run again with --check." }
+        : { live: false, access: "public", liveStatus: status, contentType: type };
+    }
     await wait(pollMs);
   }
 }
 
-export async function publish(argv, env = process.env, { pollMs = 2000, waitMs = 120_000, privateWaitMs = 6000 } = {}) {
+export async function publish(argv, env = process.env, { pollMs = 2000, waitMs = 240_000, linkWaitMs = 60_000, privateAfterMs = 6000, now = () => new Date() } = {}) {
   const args = parseArgs(argv);
   const dir = args.dir ? realpathSync(resolve(args.dir)) : null;
   const project = resolve(args.project ?? ".");
@@ -213,12 +234,42 @@ export async function publish(argv, env = process.env, { pollMs = 2000, waitMs =
     };
     const siteFile = join(project, SITE_FILE);
     let site = readSiteRecord(siteFile);
+    const save = (changes) => {
+      site = siteRecord({ ...site, ...changes });
+      writeFileSync(siteFile, `${JSON.stringify(site, null, 2)}\n`);
+    };
     const makePublic = () => api("Making the site public", "PATCH", `/sites/${site.siteId}`, { sso_login: false });
+
+    /** Waits for Netlify to finish a deploy, then for its link. A deploy still being processed at the deadline is
+     * neither a success nor a failure: the answer says so and `--check` picks it up. */
+    const finish = async (deploy, { draft, expectPublic, firstLook }) => {
+      const deadline = Date.now() + waitMs;
+      while (deploy.state !== "ready" && deploy.state !== "error" && Date.now() < deadline) {
+        await wait(pollMs);
+        deploy = await api("Checking the deploy", "GET", `/sites/${site.siteId}/deploys/${deploy.id}`);
+      }
+      const state = deploy.state;
+      if (state === "error") {
+        if (!draft) save({ deployState: state });
+        throw new Error(`Netlify could not process the deploy${deploy.error_message ? `: ${deploy.error_message}` : ""}`);
+      }
+      const url = draft ? deploy.deploy_ssl_url || deploy.deploy_url : deploy.ssl_url || deploy.url || site.url;
+      const common = { ok: true, draft, siteId: site.siteId, name: site.name, url, adminUrl: site.adminUrl, deployId: deploy.id, state };
+      if (state !== "ready") {
+        if (!draft) save({ deployState: state });
+        return { ...common, pending: true, live: false, message: `Netlify is still processing this deploy (${state}). It is not live yet and has not failed. Run again with --check in a minute.` };
+      }
+      const link = await checkLink(url, env, { pollMs, waitMs: linkWaitMs, privateAfterMs, expectPublic });
+      if (!draft) save({ url, deployState: state, ...(link.access ? { access: link.access } : {}), ...(firstLook ? { publishedAt: now().toISOString() } : {}) });
+      return { ...common, ...link };
+    };
 
     if (!dir) {
       if (!site) throw new Error(`${siteFile} is missing; publish the site first`);
-      await makePublic();
-      return { ok: true, created: false, draft: false, siteId: site.siteId, name: site.name, url: site.url, adminUrl: site.adminUrl, ...(await checkLink(site.url, env, Date.now() + waitMs, pollMs)) };
+      if (args.public) await makePublic();
+      if (!site.deployId) return { ok: true, draft: false, siteId: site.siteId, name: site.name, url: site.url, adminUrl: site.adminUrl, ...(await checkLink(site.url, env, { pollMs, waitMs: linkWaitMs, privateAfterMs, expectPublic: args.public })) };
+      const deploy = await api("Checking the deploy", "GET", `/sites/${site.siteId}/deploys/${site.deployId}`);
+      return await finish(deploy, { draft: false, expectPublic: args.public, firstLook: site.deployState !== "ready" || !site.publishedAt });
     }
 
     const { files, skipped } = collectFiles(dir);
@@ -228,10 +279,16 @@ export async function publish(argv, env = process.env, { pollMs = 2000, waitMs =
     if (leaking) throw new Error(`${leaking.path} contains the Netlify token; remove it before publishing`);
 
     const created = !site;
+    const labels = {
+      ...(args.title ? { title: oneLine(args.title, 120) } : {}),
+      ...(args["bot-name"] ? { botName: oneLine(args["bot-name"], 80) } : {}),
+      ...(/^[\w-]{1,80}$/.test(env.OMB_BOT_ID ?? "") ? { botId: env.OMB_BOT_ID } : {}),
+    };
     if (!site) {
       const made = await api("Creating the site", "POST", "/sites", args.name ? { name: args.name } : {});
-      site = { siteId: made.id, name: made.name, url: made.ssl_url || made.url, adminUrl: made.admin_url };
-      writeFileSync(siteFile, `${JSON.stringify(site, null, 2)}\n`);
+      save({ siteId: made.id, name: made.name, url: made.ssl_url || made.url, adminUrl: made.admin_url, title: made.name, createdAt: now().toISOString(), ...labels });
+    } else if (Object.keys(labels).length && !args.draft) {
+      save(labels);
     }
     if (args.public) await makePublic();
 
@@ -240,13 +297,16 @@ export async function publish(argv, env = process.env, { pollMs = 2000, waitMs =
       ...(args.draft ? { draft: true } : {}),
       ...(files.length >= ASYNC_FROM_FILES ? { async: true } : {}),
     });
-    const deadline = Date.now() + waitMs;
-    while (!Array.isArray(deploy.required) && deploy.state === "preparing" && Date.now() < deadline) {
+    if (!args.draft) save({ deployId: deploy.id, deployState: deploy.state });
+    const prepared = Date.now() + waitMs;
+    while (!Array.isArray(deploy.required) && deploy.state === "preparing" && Date.now() < prepared) {
       await wait(pollMs);
       deploy = await api("Preparing the deploy", "GET", `/sites/${site.siteId}/deploys/${deploy.id}`);
     }
     const required = [...new Set(deploy.required ?? [])];
-    const queue = required.map((sha) => bySha.get(sha)).filter(Boolean);
+    const unknown = required.find((sha) => !bySha.has(sha));
+    if (unknown) throw new Error(`Netlify asked for a file this folder does not have (${unknown})`);
+    const queue = required.map((sha) => bySha.get(sha));
     const upload = async (file) => {
       for (let attempt = 1; ; attempt += 1) {
         try {
@@ -263,27 +323,10 @@ export async function publish(argv, env = process.env, { pollMs = 2000, waitMs =
       for (let file = queue.shift(); file; file = queue.shift()) await upload(file);
     }));
 
-    let state = deploy.state;
-    while (state !== "ready" && state !== "error" && Date.now() < deadline) {
-      await wait(pollMs);
-      deploy = await api("Checking the deploy", "GET", `/sites/${site.siteId}/deploys/${deploy.id}`);
-      state = deploy.state;
-    }
-    if (state === "error") throw new Error(`Netlify could not process the deploy${deploy.error_message ? `: ${deploy.error_message}` : ""}`);
-
-    const url = args.draft ? deploy.deploy_ssl_url || deploy.deploy_url : deploy.ssl_url || deploy.url || site.url;
-    let link = { live: false, access: "unknown", liveStatus: 0 };
-    if (state === "ready" && url) {
-      link = await checkLink(url, env, args.public ? deadline : Math.min(deadline, Date.now() + privateWaitMs), pollMs);
-      if (link.access !== "private" && !link.live) link = await checkLink(url, env, deadline, pollMs);
-    }
-    if (!args.draft && url && url !== site.url) {
-      site = { ...site, url };
-      writeFileSync(siteFile, `${JSON.stringify(site, null, 2)}\n`);
-    }
     return {
-      ok: true, created, draft: args.draft, siteId: site.siteId, name: site.name, url, adminUrl: site.adminUrl, deployId: deploy.id, state, ...link,
-      files: files.length, uploaded: required.length, bytes: files.reduce((sum, file) => sum + file.size, 0), skipped,
+      ...(await finish(deploy, { draft: args.draft, expectPublic: args.public, firstLook: true })), created,
+      files: files.length, uploaded: required.length, alreadyOnNetlify: new Set(Object.values(digest)).size - required.length,
+      bytes: files.reduce((sum, file) => sum + file.size, 0), skipped,
     };
   } catch (error) {
     throw new Error(scrub(error.message));

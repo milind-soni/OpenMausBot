@@ -12,7 +12,8 @@ interface FakeDeploy {
   draft: boolean;
   files: Record<string, string>;
   required: Set<string>;
-  state: "uploading" | "ready";
+  state: "uploading" | "processing" | "ready";
+  pollsLeft: number;
 }
 
 export interface FakeNetlify {
@@ -28,6 +29,8 @@ export interface FakeNetlify {
   failNext(status: number, body: unknown): void;
   /** What a site's root is served as; Netlify serves a lone file stored at "/" as text/plain. */
   rootContentType: string;
+  /** How many status reads a new deploy answers "processing" before it is ready; a new site's first deploy is slow. */
+  processingPolls: number;
   stop(): Promise<void>;
 }
 
@@ -39,6 +42,7 @@ export async function startFakeNetlify(token: string, { teamLogin = false }: { t
     requests: [], refused: [], sites: new Map(), deploys: new Map(), uploads: [],
     failNext: (status, body) => { failure = { status, body }; },
     rootContentType: "text/html; charset=UTF-8",
+    processingPolls: 0,
   };
   const origin = () => `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const deployView = (deploy: FakeDeploy) => ({
@@ -47,6 +51,10 @@ export async function startFakeNetlify(token: string, { teamLogin = false }: { t
   });
   const settle = (deploy: FakeDeploy) => {
     if (deploy.required.size) return;
+    if (deploy.pollsLeft > 0) {
+      deploy.state = "processing";
+      return;
+    }
     deploy.state = "ready";
     const live = new Map(Object.entries(deploy.files).map(([path, sha]) => [path, blobs.get(sha)!]));
     if (deploy.draft) fake.sites.set(`${deploy.siteId}--${deploy.id}`, { name: "draft", live, teamLogin: false });
@@ -104,14 +112,21 @@ export async function startFakeNetlify(token: string, { teamLogin = false }: { t
         const input = JSON.parse(body.toString()) as { files: Record<string, string>; draft?: boolean };
         const deploy: FakeDeploy = {
           id: randomBytes(8).toString("hex"), siteId: create[1]!, draft: input.draft === true, files: input.files,
-          required: new Set(Object.values(input.files).filter((sha) => !blobs.has(sha))), state: "uploading",
+          required: new Set(Object.values(input.files).filter((sha) => !blobs.has(sha))), state: "uploading", pollsLeft: fake.processingPolls,
         };
         fake.deploys.set(deploy.id, deploy);
         settle(deploy);
         return send(200, deployView(deploy));
       }
       const status = /^\/api\/v1\/sites\/[\w-]+\/deploys\/([\w-]+)$/.exec(path);
-      if (req.method === "GET" && status && fake.deploys.has(status[1]!)) return send(200, deployView(fake.deploys.get(status[1]!)!));
+      const read = status && fake.deploys.get(status[1]!);
+      if (req.method === "GET" && read) {
+        if (read.state === "processing") {
+          read.pollsLeft -= 1;
+          settle(read);
+        }
+        return send(200, deployView(read));
+      }
       const upload = /^\/api\/v1\/deploys\/([\w-]+)\/files(\/.+)$/.exec(path);
       const deploy = upload && fake.deploys.get(upload[1]!);
       if (req.method === "PUT" && upload && deploy) {

@@ -25,7 +25,8 @@ MausBot keeps the token in its [Vault](/docs/security/permissions-and-secrets#th
 - On a new Netlify account, Netlify keeps every site visible to your Netlify team only: the link asks for a Netlify login. The bot tells you when that is the case and opens the site to everyone only after you say so. You can change it yourself in Netlify, in the site's access settings.
 - The bot publishes the built site only. Hidden files and folders, env files, keys, certificates and installed packages are never uploaded, and publishing stops if a file contains the token.
 - The bot asks first when the content looks personal or internal.
-- The project folder keeps a small `.netlify-site.json` with the site's id and address, so the next publish goes to the same link. Delete it and the next publish makes a new site.
+- The project folder keeps a small `.netlify-site.json` with the site's id, address, title and when it was published, so the next publish goes to the same link. Delete it and the next publish makes a new site.
+- A new site's first publish can take Netlify a few minutes. The bot waits for it, and if Netlify is still working it says so and checks again rather than calling the link broken.
 
 The sites live in your Netlify account: rename, remove or give them a domain there. Netlify's own limits apply (through its API, 3 deploys a minute and 100 a day).
 

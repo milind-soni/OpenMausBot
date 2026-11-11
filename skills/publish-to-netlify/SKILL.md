@@ -76,12 +76,16 @@ The deploy always runs where the token file was delivered.
 nothing installed, and works through the proxy your commands already use. Run it from the project folder:
 
 ```sh
-node "<root>/deploy.mjs" --dir <output folder> --token-file <the secret file's path>
+node "<root>/deploy.mjs" --dir <output folder> --token-file <the secret file's path> \
+  --title "<what the site is, in a few words>" --bot-name "<your name>"
 ```
 
+Give the call an 8-minute `timeout`: a new site's first deploy can take Netlify a few minutes to process.
+
 - The first run creates a site on the person's account and writes `.netlify-site.json` in the project folder (the
-  site's id, name and addresses; never the token). Keep that file: with it, every later run updates the same link.
-  If it is gone, a new run makes a second site with a new link.
+  site's id, name, addresses, title, your name and when it was published; never the token). Keep that file and
+  don't edit it by hand: with it, every later run updates the same link, and MausBot lists what you published from
+  it. If it is gone, a new run makes a second site with a new link.
 - `--name my-site` asks for that address (`my-site.netlify.app`) on the first run; names are shared by all of
   Netlify, so it may be taken. Without it Netlify picks a name.
 - `--project <folder>` when the project folder is not the current one. `--draft` publishes a preview at its own
@@ -89,7 +93,7 @@ node "<root>/deploy.mjs" --dir <output folder> --token-file <the secret file's p
 - It never uploads dotfiles and dot folders (`.env`, `.git`, `.openmausbot-secrets`, the site record),
   `node_modules`, env files, keys or certificates, or links to files elsewhere, and it stops if any file contains the
   token. The answer lists what it left out under `skipped`.
-- Only changed files are uploaded. Netlify allows 3 deploys a minute and 100 a day through its API: batch your
+- Only files Netlify does not already hold are uploaded (`uploaded`; `alreadyOnNetlify` counts the rest). Netlify allows 3 deploys a minute and 100 a day through its API: batch your
   changes rather than deploying after each one.
 
 It prints one line of JSON:
@@ -103,8 +107,12 @@ It prints one line of JSON:
   that one site and checks the link again.
 - `live` false with `"liveStatus": 200`: the link answers, but not as a web page (`contentType` is not `text/html`),
   so a browser would show the page's source. Say so; don't call it published.
-- `live` false otherwise: say the deploy was sent but the link did not answer yet, and give the link; don't wait in a
-  loop.
+- `"pending": true` (`state` is `processing` or similar): Netlify is still working on it. It is not live yet and it
+  has not failed, so don't report a dead link or a failure, and don't deploy again. Run
+  `node "<root>/deploy.mjs" --check --token-file <the secret file's path>` once, a minute later; it answers the same
+  way. If it is still pending, say the site was sent and Netlify is still processing it, and give the link.
+- `live` false with a `message`: the deploy is ready but the link could not be reached from where you run. Say that,
+  give the link, and check once more with `--check`.
 - `"ok": false`: tell the person plainly what Netlify answered (`error`) and what you will try; don't retry the same
   thing more than once.
 
