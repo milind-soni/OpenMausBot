@@ -1,7 +1,8 @@
 import type { Bot } from "@/state/store";
 
 const drawn = (bot: Bot) => [
-  bot.id, bot.name, bot.hidden, bot.sidebarHidden, JSON.stringify(bot.defaultBot ?? null), bot.color, bot.mascotBody, bot.mascotExpression,
+  // title and chiefOfStaff: the @-mention menu describes each bot by them.
+  bot.id, bot.name, bot.title, bot.chiefOfStaff, bot.hidden, bot.sidebarHidden, JSON.stringify(bot.defaultBot ?? null), bot.color, bot.mascotBody, bot.mascotExpression,
   bot.mascotFaceColor, bot.avatarUrl, bot.avatarCrop, bot.avatarZoom, bot.avatarFocusX, bot.avatarFocusY,
 ].join("\u0001");
 
