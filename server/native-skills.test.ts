@@ -242,6 +242,24 @@ describe("skills a project ships for any agent", () => {
     expect(index).not.toContain("claude-skill");
   });
 
+  it("never run in a conversation that keeps a private folder", () => {
+    plantRepo();
+    const { host, bot } = hostFor("codex", { cwd: repo, cfg: trusted });
+    expect(host.expandSkillCommand(bot, "guest", "/claude-skill go", undefined, [], true, true)).toBe("/claude-skill go");
+    expect(host.expandSkillCommand(bot, "guest", "/claude-skill go", undefined, [], true)).toContain("claude-skill");
+  });
+
+  it("in a turn's own folder, yield a name only to what the engine loads from that folder", () => {
+    const room = join(PROJECTS, "room");
+    mkdirSync(join(room, ".git"), { recursive: true });
+    const roomSkill = plant(join(room, "agents", "skills"), "shared-name");
+    mkdirSync(join(repo, ".git"), { recursive: true });
+    plant(join(repo, ".claude", "skills"), "shared-name");
+    const { host, bot } = hostFor("claudeAgent", { cwd: repo, cfg: trusted });
+    expect(host.skillsIndex(bot, "main", undefined, room)).toContain(JSON.stringify(roomSkill));
+    expect(host.skillsIndex(bot, "main", undefined, repo)).not.toContain("shared-name");
+  });
+
   it("yield a name to the bot's own skill, even one switched off", () => {
     plantRepo();
     const { host, bot } = hostFor("codex", { cwd: repo, cfg: trusted });

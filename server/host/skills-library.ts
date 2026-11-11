@@ -152,18 +152,21 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   /** The ones of those the turn's prompt lists and links into its task folder; it searches for the rest. */
   const listedImports = (bot: BotRecord, available: readonly ImportedSkillView[]) => listedImportedSkills(bot.id, available, aboutBot(bot));
 
-  /** The folder a thread's turns run in, as `store.pinTaskCwd` pins it on its first turn: none for a task that already
-   * resumes a session, since moving it breaks the resume. */
-  const threadFolder = (bot: BotRecord, threadId: string): string | null => {
+  /** The folder a thread's turns run in, as `store.pinTaskCwd` pins it on its first turn: its own task folder for a
+   * conversation that keeps a private one, none for a task that already resumes a session, since moving it breaks the
+   * resume. */
+  const threadFolder = (bot: BotRecord, threadId: string, privateOnly = false): string | null => {
     const task = store.taskByThread(bot.id, threadId);
     if (task?.cwd !== undefined) return task.cwd;
+    const own = join(TASK_WORKSPACES_DIR, bot.id, threadId);
+    if (privateOnly) return own;
     if (task && Object.keys(task.resumeCursors ?? {}).length > 0) return null;
-    return bot.cwd ?? join(TASK_WORKSPACES_DIR, bot.id, threadId);
+    return bot.cwd ?? own;
   };
   /** Outside a turn, what the bot's main conversation would load. */
-  const nativesFor = (bot: BotRecord, threadId = bot.threadId, instance = deps.instanceOf?.(bot.modelSelection.instanceId)) => {
+  const nativesFor = (bot: BotRecord, threadId = bot.threadId, instance = deps.instanceOf?.(bot.modelSelection.instanceId), cwd?: string | null) => {
     const engine = engineOf(instance);
-    return engine ? nativeSkills(engine, { claudeUserSkills: claudeUserSkillsEnabled(cfg), cwd: threadFolder(bot, threadId) }) : [];
+    return engine ? nativeSkills(engine, { claudeUserSkills: claudeUserSkillsEnabled(cfg), cwd: cwd === undefined ? threadFolder(bot, threadId) : cwd }) : [];
   };
 
   /** What the project a turn works in ships for any agent; none for an engine that cannot read files. `cwd` undefined:
@@ -178,11 +181,12 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
    * bot already has or its engine loads by itself. */
   const projectInUse = (bot: BotRecord, threadId: string, cwd: string | null | undefined, instance: TurnInstance | undefined, assigned: readonly string[] | undefined): NativeSkill[] => {
     if (!projectSkillsEnabled(cfg)) return [];
+    const folder = cwd === undefined ? threadFolder(bot, threadId) : cwd;
     const names = new Set([
       ...resolveBotSkills(bot.id, assigned).map((skill) => skill.name), ...Object.keys(readImportedSkills()),
-      ...nativesFor(bot, threadId, instance).map((skill) => skill.name),
+      ...nativesFor(bot, threadId, instance, folder).map((skill) => skill.name),
     ]);
-    return projectFor(bot, threadId, cwd, instance).filter((skill) => !names.has(skill.name));
+    return projectFor(bot, threadId, folder, instance).filter((skill) => !names.has(skill.name));
   };
 
   const editable = (botId: string, name: string): boolean =>
@@ -297,12 +301,14 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       return listedImports(bot, importsFor(bot, conversationSkills(bot, threadId), instance));
     },
 
-    /** Each `/name` called for one of the bot's own, library or imported skills, or one its engine loads by itself. `lines`
-     * are the turn's own lines when it is a person's turn: only words they typed can call a skill past the start of the text. */
-    expandSkillCommand(bot: BotRecord, threadId: string, text: string, instance?: TurnInstance, lines: ReadonlyArray<{ sendId?: string; text?: string }> = [], ownStart = false): string {
+    /** Each `/name` called for one of the bot's own, library or imported skills, one its engine loads by itself, or one its
+     * project ships. `lines` are the turn's own lines when it is a person's turn: only words they typed can call a skill
+     * past the start of the text. `privateOnly`: the conversation keeps a private folder, as `store.pinTaskCwd` is told. */
+    expandSkillCommand(bot: BotRecord, threadId: string, text: string, instance?: TurnInstance, lines: ReadonlyArray<{ sendId?: string; text?: string }> = [], ownStart = false, privateOnly = false): string {
       const typed = typedWords(threadId, lines);
       const mentioned = skillCalls(text, typed, ownStart);
       if (!mentioned.length) return text;
+      const cwd = threadFolder(bot, threadId, privateOnly);
       const assigned = skillsLibraryEnabled(cfg) ? liveAssigned(bot) : undefined;
       const files = enabledSkillFiles(bot.id, mentioned, assigned);
       const add = (skills: readonly ImportedSkillView[]) => {
@@ -316,9 +322,9 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
             .filter((skill) => !skill.enabled).map((skill) => skill.name),
           ...disabledNativeSkillNames(bot.id),
         ]);
-        add(nativesFor(bot, threadId, instance).filter((skill) => !switched.has(skill.name)));
+        add(nativesFor(bot, threadId, instance, cwd).filter((skill) => !switched.has(skill.name)));
       }
-      if (files.size < mentioned.length) add(projectInUse(bot, threadId, undefined, instance, assigned));
+      if (files.size < mentioned.length) add(projectInUse(bot, threadId, cwd, instance, assigned));
       return skillCommandTurnText(text, files, typed, ownStart);
     },
 
