@@ -5906,7 +5906,7 @@
   "skills.learned.hintOff": "技能撰寫已關閉，但你已啟用的技能仍在此由你掌控。",
   "skills.origin.imported": "這台電腦",
   "skills.origin.native": "AI",
-  "skills.origin.nativeHint": "機器人的 AI 會從「來源」下的資料夾載入此技能。在這裡關閉，只會對這個機器人停用；檔案會留在原處。在 Codex 中，只要這裡關閉了任何一項，這個機器人的回覆就不會使用 ~/.codex/config.toml 中的 skills.config 清單。",
+  "skills.origin.nativeHint": "機器人的 AI 會從「來源」下的資料夾載入此技能。在這裡關閉，只會對這個機器人停用；檔案會留在原處。",
   "skills.write.title": "撰寫指令",
   "skills.write.hint": "為你常要求的事情給機器人一個簡短指令。在聊天中輸入 /名稱 即可執行。名稱後面的任何內容會填入 {input}。",
   "skills.write.name": "指令名稱",

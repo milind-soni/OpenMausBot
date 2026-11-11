@@ -130,6 +130,23 @@ describe.skipIf(process.platform === "win32")("Muse Code's process", () => {
     return { cli, log };
   };
 
+  it("keeps discovery failures from an unavailable temp directory inside the instance and can retry", async () => {
+    const { cli } = fakeMuse();
+    const previousTmp = process.env.TMPDIR;
+    vi.stubEnv("TMPDIR", join(root, "missing-temp-directory"));
+    const instance = await MuseCodeDriver.create({ instanceId: "museCode", displayName: "Muse Code", enabled: true,
+      environment: {}, config: MuseCodeDriver.decodeConfig({ cli }) });
+    try {
+      await expect(instance.refreshModels!()).resolves.toBeUndefined();
+      expect(instance.models.default).toBe(MuseCodeDriver.models.default);
+      vi.stubEnv("TMPDIR", previousTmp);
+      await instance.refreshModels!();
+      expect(instance.models.default).toBe("muse-fake-1.0");
+    } finally {
+      await instance.dispose();
+    }
+  });
+
   it("starts through the shared launcher, in the conversation's engine home, and stops with the instance", async () => {
     const { cli, log } = fakeMuse();
     const home = join(root, "home");

@@ -704,6 +704,14 @@ describe("RuntimeCoordinator: one answer to the same request from two teammates"
       send(w, chief, "gen-1", undefined, builder, ASK);
       send(w, lead, "gen-2", undefined, builderForLead, "How many days would the database migration to the new hosting provider cost, roughly?");
     }],
+    ["a request in another currency", (w) => {
+      send(w, chief, "gen-1", undefined, builder, "Please calculate the forecast for the next financial year using a budget of $100.");
+      send(w, lead, "gen-2", undefined, builderForLead, "Please calculate the forecast for the next financial year using a budget of €100.");
+    }],
+    ["a request with the opposite comparison", (w) => {
+      send(w, chief, "gen-1", undefined, builder, "Please find all the invoices from the previous financial year with an amount >= 100.");
+      send(w, lead, "gen-2", undefined, builderForLead, "Please find all the invoices from the previous financial year with an amount <= 100.");
+    }],
     ["a requester who may not read the first answer", (w) => {
       w.host.shareAnswer = () => false;
       send(w, chief, "gen-1", undefined, builder, ASK);
