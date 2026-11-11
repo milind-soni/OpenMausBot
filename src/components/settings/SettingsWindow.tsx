@@ -33,7 +33,8 @@ export function revealAnchor(scroller: HTMLElement | null, anchor: string | null
   if (!scroller || !anchor) return;
   const block = scroller.querySelector<HTMLElement>(`[data-settings-block="${CSS.escape(anchor)}"]`);
   if (!block) return;
-  scrollWithin(scroller, block, "start", 96);
+  const header = scroller.querySelector<HTMLElement>("[data-settings-header]");
+  scrollWithin(scroller, block, "start", (header?.offsetHeight ?? 96) + 8);
   block.setAttribute("data-settings-highlight", "");
   window.setTimeout(() => block.removeAttribute("data-settings-highlight"), 1200);
 }

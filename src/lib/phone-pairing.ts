@@ -105,7 +105,7 @@ export function revealPhonePairing(
   if (!root) return false;
   schedule(() => {
     const pane = root.closest?.("[data-settings-scroll]") as HTMLElement | null | undefined;
-    if (pane) scrollWithin(pane, root as unknown as HTMLElement, "start", 96);
+    if (pane) scrollWithin(pane, root as unknown as HTMLElement, "start", (pane.querySelector<HTMLElement>("[data-settings-header]")?.offsetHeight ?? 96) + 8);
     (root.querySelector(`[${PHONE_PAIRING_ACTION}]:not([disabled])`) ?? root).focus({ preventScroll: true });
   });
   return true;

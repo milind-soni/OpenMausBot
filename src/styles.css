@@ -1696,6 +1696,7 @@ body {
 /* Settings: cards and fields edge in one faint ink line. In Midnight and Daylight the sheet is opaque, in the page
    colour, with no shadow; every other skin keeps its glass. */
 [data-settings-look] {
+  --settings-sheet: var(--color-menu);
   --settings-edge: color-mix(in srgb, var(--color-ink) 10%, transparent);
   --switch-on: var(--color-accent);
   --switch-knob-on: #fff;
@@ -1706,6 +1707,7 @@ body {
   --switch-outline: color-mix(in srgb, var(--color-ink) 40%, transparent);
 }
 :root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] {
+  --settings-sheet: var(--color-app);
   --switch-on: var(--color-ink);
   --switch-knob-on: var(--color-app);
 }

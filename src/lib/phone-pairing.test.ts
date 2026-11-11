@@ -125,7 +125,7 @@ describe("opening Settings on the phone pairing", () => {
 
   type Focusable = { focus: (options?: FocusOptions) => void };
   const focusable = () => ({ focus: vi.fn<(options?: FocusOptions) => void>() });
-  const pane = { scrollTop: 0, clientHeight: 600, getBoundingClientRect: () => ({ top: 100 }) };
+  const pane = { scrollTop: 0, clientHeight: 600, getBoundingClientRect: () => ({ top: 100 }), querySelector: () => ({ offsetHeight: 88 }) };
   const element = (action: Focusable | null) => ({
     closest: vi.fn((_selector: string) => pane as unknown as Element),
     getBoundingClientRect: () => ({ top: 500 }),
