@@ -87,6 +87,10 @@ function planHint(value) {
   return { ...(typeof value.tier === "string" && TIER.test(value.tier) ? { tier: value.tier } : {}), active: value.active };
 }
 /** Only the Admin's own JSON "invalid_token" ends a sign-in; a 401/403 page from Cloudflare or a proxy does not. */
+/** The session's `support`, while the account may contact support: the address to write to, and whether the form is on. */
+function parseSupport(input) {
+  return typeof input?.email === "string" && /^[^\s@]{1,64}@[^\s@]{1,190}$/.test(input.email) && typeof input.form === "boolean" ? { email: input.email, form: input.form } : null;
+}
 const signInEnded = error => [401, 403].includes(error?.status) && error.code === "invalid_token";
 const sameHint = (left, right) => (left?.tier ?? null) === (right?.tier ?? null) && (left?.active ?? null) === (right?.active ?? null);
 /** Whether the Admin opens another Cloud's checkout for this account now, as its session says (`canAdd` and
@@ -266,7 +270,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const trial = parseCloudTrial(result.cloud?.trial), credit = parseCloudCredit(result.cloud?.credit), offer = parseCloudOffer(result.offer);
       const usage = access.status === "active" ? parseCloudUsage(result.cloud?.usage) : null, room = usage ? parseCloudRoom(result.cloud?.room) : null;
       const clouds = parseCloudList(result.clouds), more = clouds ? addOffer(result) : null, latest = clouds ? releaseVersion(result.latestVersion) : null;
-      const organizations = clouds ? parseOrganizations(result.organizations) : null;
+      const organizations = clouds ? parseOrganizations(result.organizations) : null, support = parseSupport(result.support);
       const { cloudId: renewingCloud = null, ...renewal } = parseCloudRenewal(result.clouds) ?? {};
       const hint = access.plan === "pro" ? { ...(access.tier ? { tier: access.tier } : {}), active: access.status === "active" } : null;
       if (next.expiresAt !== previous.expiresAt) {
@@ -296,7 +300,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
         access.status === "active" && access.expiresAt !== null ? access.expiresAt : Infinity);
       publish({ ...view("connected"), entitlement: access, ...(machine ? { machine } : {}), ...(teams.length ? { teams } : {}), ...(landing ? { landing } : {}), ...(purchase ? { purchase } : {}),
         ...(trial ? { trial } : {}), ...(credit ? { credit } : {}), ...(offer ? { offer } : {}), ...(usage ? { usage } : {}), ...(room ? { room } : {}), ...(renewingCloud ? { renewal } : {}),
-        ...(clouds ? { clouds, addCloud: more } : {}), ...(organizations ? { organizations } : {}), ...(latest ? { latestVersion: latest } : {}), verifiedAt: now(), verifiedUntil });
+        ...(clouds ? { clouds, addCloud: more } : {}), ...(organizations ? { organizations } : {}), ...(latest ? { latestVersion: latest } : {}), ...(support ? { support } : {}), verifiedAt: now(), verifiedUntil });
       const planCloud = teamPlan(value) ? planTeam(value)?.machine ?? null : machine;
       const settingUp = planCloud?.status === "provisioning" || (access.status === "active" && !planCloud) || Boolean(purchase) || otherOwnClouds(clouds).some(cloud => cloud.status === "setting_up");
       const added = adding ? clouds?.find(cloud => cloud.id === adding.cloudId) ?? null : null;
@@ -908,6 +912,13 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       }
       return { url: result.url, token: result.token };
     },
+    /** One Contact support request on this sign-in: the intake's status and answer, null when it wasn't reached. */
+    async supportRequest(body) {
+      const current = grant;
+      if (!current) return { status: 401, body: {} };
+      try { return { status: 201, body: await request("", { method: "POST", body, token: current.token, path: "/api/bug-reports" }) }; }
+      catch (error) { return error?.status && !error.opaque ? { status: error.status, body: { error: error.code } } : error?.status ? { status: error.status, body: {} } : null; }
+    },
     /** The account's answer to the product-updates question (GET /api/cloud/desktop/updates-consent), as the Admin sends it. */
     async updatesConsent() {
       const current = grant;
@@ -964,7 +975,7 @@ export function cloudPlanSnapshot(state, { notice = null } = {}) {
   const trial = state?.status === "connected"
     ? { ...(state.trial ? { trial: state.trial } : {}), ...(state.credit ? { credit: state.credit } : {}), ...(notice && state.trial ? { notice } : {}),
       ...(state.machine?.power?.sleeps ? { sleeps: true } : {}), ...(state.usage ? { usage: state.usage } : {}), ...(state.room ? { room: state.room } : {}),
-      ...(state.renewal ? { renewal: state.renewal } : {}) } : {};
+      ...(state.renewal ? { renewal: state.renewal } : {}), ...(state.support ? { support: { ...state.support, account: state.account?.email ?? null } } : {}) } : {};
   if (state?.status === "connected" && state.entitlement?.plan === "pro") return { status: state.entitlement.status === "active" ? "paid" : "attention", ...named, ...trial };
   if (state?.status === "reauth-required") return { status: "signin", ...(state.lastPlan ? { tier: state.lastPlan.tier ?? "pro" } : {}) };
   if (state?.status !== "connected" && state?.lastPlan) return { status: "checking", ...named };

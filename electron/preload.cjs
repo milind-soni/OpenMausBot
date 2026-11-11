@@ -624,6 +624,9 @@ const bridge = {
       ? ipcRenderer.invoke("cloud-plan:room-not-now", String(id)) : Promise.reject(new Error("Choose Not now.")),
     restartNow: () => navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-plan:restart-now") : Promise.reject(new Error("Choose Restart now to restart the Cloud.")),
+    // Contact support: only from the person's click on Send; main names the place and sends it on this device's sign-in.
+    support: input => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-plan:support", input) : Promise.reject(new Error("Choose Send to contact support.")),
   } : undefined,
   organization: process.argv.includes("--omb-company-desktop=1") ? {
     settingsOpened: () => ipcRenderer.invoke("organization:settings-opened"),

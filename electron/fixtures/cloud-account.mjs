@@ -13,7 +13,9 @@ export async function fixture(t, options = {}) {
     offer: undefined, checkout: { status: 404, body: "<!doctype html>not here" }, interest: { status: 200, body: { ok: true } },
     upgradePreview: { status: 404, body: { error: "not_found" } }, upgrade: { status: 404, body: { error: "not_found" } }, teams: undefined, teamPairing: { status: 404, body: { error: "not_found" } }, moved: { status: 404, body: { error: "not_found" } }, moveStatus: { status: 404, body: { error: "not_found" } },
     // An Admin before the app's Cancel and Keep: neither route, and the session's `clouds` absent.
-    clouds: undefined, feedback: { status: 404, body: { error: "Not found." } }, renewal: () => ({ status: 404, body: { error: "Not found." } }) };
+    clouds: undefined, feedback: { status: 404, body: { error: "Not found." } }, renewal: () => ({ status: 404, body: { error: "Not found." } }),
+    // Contact support: the session's `support`, and the report intake's answer.
+    support: undefined, supportAnswer: { status: 201, body: { id: "report-1", priority: true } } };
   const identity = () => ({ cloudContractVersion: 1, expiresAt: f.now + 86400_000, device: { id: "fixture-device" }, account: { id: "fixture-account", email: "person@example.test" } });
   const server = createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
@@ -35,6 +37,7 @@ export async function fixture(t, options = {}) {
     if (req.url === "/api/cloud/desktop/services/pages" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.pages.status, f.pages.body);
     if (req.url === "/api/cloud/desktop/moved" && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.moved.status, f.moved.body);
     if (req.url === "/api/cloud/desktop/move-status" && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.moveStatus.status, f.moveStatus.body);
+    if (req.url === "/api/bug-reports" && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.supportAnswer.status, f.supportAnswer.body);
     if (req.url === "/api/cloud/desktop/feedback" && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.feedback.status, f.feedback.body);
     const renewal = /^\/api\/cloud\/desktop\/clouds\/([^/]+)\/(cancel|keep)$/.exec(req.url);
     if (renewal && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) { const answer = f.renewal(renewal[2], renewal[1]); return send(answer.status, answer.body); }
@@ -57,7 +60,8 @@ export async function fixture(t, options = {}) {
       if (f.sessionStatus !== 200) return send(f.sessionStatus, { error: "unavailable" });
       return send(200, { ...identity(), ...(f.invalidIdentity ? { account: { id: "someone-else", email: "other@example.test" } } : {}),
         entitlement: f.invalidEntitlement ? { plan: "pro", status: "active" } : f.entitlement, ...(f.cloud === undefined ? {} : { cloud: f.cloud }),
-        ...(f.offer === undefined ? {} : { offer: f.offer }), ...(f.teams === undefined ? {} : { teams: f.teams }), ...(f.clouds === undefined ? {} : { clouds: f.clouds }) });
+        ...(f.offer === undefined ? {} : { offer: f.offer }), ...(f.teams === undefined ? {} : { teams: f.teams }), ...(f.clouds === undefined ? {} : { clouds: f.clouds }),
+        ...(f.support === undefined ? {} : { support: f.support }) });
     }
     send(404, { error: "not_found" });
   });

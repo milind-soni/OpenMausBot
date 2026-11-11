@@ -666,6 +666,31 @@ test("pages access: this sign-in's own pages token on any plan, null without the
   f.pages = { status: 500, body: { error: "down" } }; await assert.rejects(f.client.pagesAccess());
 });
 
+test("Contact support: the session says whether this account may write, and a request goes to the report intake on this sign-in", async t => {
+  const f = await fixture(t);
+  const body = { kind: "support", topic: "billing", message: "Charged twice.", replyTo: "me@example.test", appVersion: "0.1.153", platform: "darwin arm64, desktop app", place: "desktop" };
+  assert.deepEqual(await f.client.supportRequest(body), { status: 401, body: {} }, "signed out: nothing is sent");
+  assert.equal(f.requests.some(r => r.route === "/api/bug-reports"), false);
+  await f.connect();
+  assert.equal(f.client.state().support, undefined);
+  assert.equal(cloudPlanSnapshot(f.client.state()).support, undefined, "a free account: nothing to offer");
+  f.support = { email: "help@example.test", form: true };
+  await f.client.refresh();
+  assert.deepEqual(f.client.state().support, { email: "help@example.test", form: true });
+  assert.deepEqual(cloudPlanSnapshot(f.client.state()).support, { email: "help@example.test", form: true, account: "person@example.test" });
+  for (const bad of [{ email: "nobody", form: true }, { email: "help@example.test" }, "help@example.test"]) {
+    f.support = bad; await f.client.refresh();
+    assert.equal(f.client.state().support, undefined, JSON.stringify(bad));
+  }
+  assert.deepEqual(await f.client.supportRequest(body), { status: 201, body: { id: "report-1", priority: true } });
+  const sent = f.requests.findLast(r => r.route === "/api/bug-reports");
+  assert.deepEqual([sent.method, sent.token, JSON.parse(sent.body)], ["POST", `Bearer ${accessToken}`, body]);
+  f.supportAnswer = { status: 403, body: { error: "Contact support is for accounts with a paid Cloud or Team plan.", code: "support_unavailable" } };
+  assert.deepEqual(await f.client.supportRequest(body), { status: 403, body: { error: "Contact support is for accounts with a paid Cloud or Team plan." } });
+  f.supportAnswer = { status: 200, body: { accepted: false, code: "support_off", supportEmail: "help@example.test" } };
+  assert.deepEqual((await f.client.supportRequest(body)).body, { accepted: false, code: "support_off", supportEmail: "help@example.test" });
+});
+
 test("My Cloud's line in the server menus says what is true now: the trial's end while it is ahead, always on while paid for, stopped when not, nothing when unknown", () => {
   const date = value => new Date(value).toISOString().slice(0, 10);
   const connected = (extra = {}) => ({ status: "connected", account: { id: "a", email: "a@example.test" }, entitlement: { plan: "pro", tier: "pro", status: "active", expiresAt: 2e12, version: 1 }, ...extra });

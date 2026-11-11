@@ -14,6 +14,7 @@ import {
   Laptop,
   LifeBuoy,
   Loader2,
+  Mail,
   RefreshCw,
   Rocket,
   Settings as SettingsIcon,
@@ -28,6 +29,7 @@ import { AccountMoveStatus, useAccountMove, type AccountMoveKind } from "./Accou
 import { InitialsAvatar } from "./Avatar";
 import { DiscordIcon } from "./DiscordIcon";
 import { AboutDialog } from "./AboutDialog";
+import { useContactSupport } from "./ContactSupportDialog";
 import { PhoneAppDialog } from "./lazy-screens";
 import { CloudTile } from "./cloud-buy/parts";
 import { usageBridge } from "./CloudUsageMeter";
@@ -466,6 +468,7 @@ export function profileMenuItems({
   onHelp,
   onFeedback,
   onAccount,
+  onContactSupport,
 }: {
   phone: SidebarMenuItem[];
   usage: boolean;
@@ -485,8 +488,11 @@ export function profileMenuItems({
   onHelp: () => void;
   onFeedback: () => void;
   onAccount: () => void;
+  /** Contact support, first in Help: only for an account with a paid Cloud or Team plan. */
+  onContactSupport?: () => void;
 }): SidebarMenuItem[] {
   const help: SidebarMenuItem[] = [
+    ...(onContactSupport ? [{ key: "contact-support", label: t("support.menu"), icon: <Mail size={18} />, onSelect: onContactSupport }] : []),
     { key: "help", label: t("sidebar.menu.help"), icon: <HelpCircle size={18} />, onSelect: onHelp },
     { key: "feedback", label: t("sidebar.menu.feedback"), icon: <DiscordIcon size={17} />, onSelect: onFeedback },
     {
@@ -591,6 +597,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   const openCloudAccount = () => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
   const move = useAccountMove(state.config?.cloudHome === true, { onOpen: openCloudAccount, onPairPhone: () => dispatch(phonePairingSettingsAction()) });
   const accounts = useAccounts();
+  const contactSupport = useContactSupport(state.config?.cloudHome === true);
 
   const items = profileMenuItems({
     phone: simple
@@ -629,6 +636,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
     onHelp: () => void openExternalLink(HELP_CENTER_URL),
     onFeedback: () => void openExternalLink(FEEDBACK_URL),
     onAccount: openCloudAccount,
+    onContactSupport: contactSupport.open,
   });
   const noteworthy = update && updateNoteworthy(update.phase, update.pending) && !updateHasButton(update.phase);
   const needsYou = account?.automationsNeedYou === true;
@@ -703,6 +711,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
         )}
       />
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      {contactSupport.dialog}
       {accounts.sheet && <AccountsSheet adding={accounts.sheet.email} note={accounts.sheet.note} onClose={accounts.closeSheet} />}
       {phoneAppOpen && <PhoneAppDialog
         open
