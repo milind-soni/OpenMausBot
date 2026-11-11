@@ -19,6 +19,7 @@ import { integrationTables, repoVisibility } from "./integrationTables";
 import { storageScope, uploadTarget } from "./lib/storageValidators";
 import { githubLifecycleTables, githubSyncState } from "./githubLifecycleTables";
 import { serverStoreTables } from "./serverStoreTables";
+import { labelTables } from "./labelTables";
 import {
   assetTypeValidator,
   callSignalKindValidator,
@@ -519,4 +520,6 @@ export default defineSchema({
     .index("by_to", ["toUserId"])
     .index("by_to_and_createdAt", ["toUserId", "createdAt"])
     .index("by_from", ["fromUserId"]),
+
+  ...labelTables,
 });

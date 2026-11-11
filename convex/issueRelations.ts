@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { canEdit, projectMember, requireMember } from "./lib/permissions";
 import type { Id } from "./_generated/dataModel";
-import { cleanLabels, projectLabels } from "./lib/labels";
+import { cleanLabels, projectLabels, registerLabels, workspaceLabelRows } from "./lib/labels";
 
 const kind = v.union(v.literal("blocks"), v.literal("parent"));
 export const list = query({
@@ -29,9 +29,15 @@ export const labels = mutation({
   args: { sessionToken: v.string(), taskId: v.id("tasks"), labels: v.array(v.string()) }, returns: v.null(),
   handler: async (ctx, args) => {
     const task = await ctx.db.get(args.taskId);
-    if (!task || !canEdit((await requireMember(ctx, task.projectId, args.sessionToken)).member)) throw new ConvexError("You have view-only access");
-    const labels = cleanLabels(args.labels, await projectLabels(ctx, task.projectId));
-    await ctx.db.patch(task._id, { labels, updatedAt: Date.now() }); return null;
+    const access = task && await requireMember(ctx, task.projectId, args.sessionToken);
+    if (!task || !access || !canEdit(access.member)) throw new ConvexError("You have view-only access");
+    const teamId = access.project.teamId;
+    // The workspace registry's spelling wins, then the project's; new names join the registry.
+    const registry = teamId ? (await workspaceLabelRows(ctx, teamId)).map(row => row.name) : [];
+    const labels = cleanLabels(args.labels, [...await projectLabels(ctx, task.projectId), ...registry]);
+    await ctx.db.patch(task._id, { labels, updatedAt: Date.now() });
+    if (teamId) await registerLabels(ctx, teamId, labels);
+    return null;
   },
 });
 /** Labels already used in the project, for suggestions while labelling an issue. */
