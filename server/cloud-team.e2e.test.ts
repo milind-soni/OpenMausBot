@@ -337,3 +337,24 @@ it("a member's private chat keeps its own folder when the team's bot is given a 
     expect((await team.as(owner, "PATCH", `/api/bots/${bot.id}`, { cwd: null })).status).toBe(200);
   }
 }, hostTimeout(120_000));
+
+it("a signed-in member can fork her bot and room conversations, but not another member's private chat", async () => {
+  const own = await newThread(ada, "Ada's fork source");
+  await turn(ada, own, "A forkable question");
+  const ownAnchor = ((await messages(ada, own)).body.messages as Array<{ id: string; role: string; text?: string }>)
+    .find((message) => message.role === "user" && message.text === "A forkable question")!;
+  const botFork = await team.as(ada, "POST", `/api/bots/${bot.id}/tasks/${own}/forks`, { messageId: ownAnchor.id });
+  expect(botFork.status, JSON.stringify(botFork.body)).toBe(201);
+  expect(botFork.body.task.origin).toEqual({ threadId: own, messageId: ownAnchor.id });
+  expect((await team.as(cleo, "POST", `/api/bots/${bot.id}/tasks/${own}/forks`, { messageId: ownAnchor.id })).status).not.toBe(201);
+
+  const roomTask = await team.as(ada, "POST", `/api/groups/${roomId}/tasks`, { title: "Ada's room fork source" });
+  expect(roomTask.status, JSON.stringify(roomTask.body)).toBe(201);
+  const roomSource = roomTask.body.task.threadId as string;
+  await turn(ada, roomSource, "@Scout a room forkable question", roomId);
+  const roomAnchor = ((await messages(ada, roomSource)).body.messages as Array<{ id: string; role: string; text?: string }>)
+    .find((message) => message.role === "user" && message.text === "@Scout a room forkable question")!;
+  const roomFork = await team.as(ada, "POST", `/api/groups/${roomId}/tasks/${roomSource}/forks`, { messageId: roomAnchor.id });
+  expect(roomFork.status, JSON.stringify(roomFork.body)).toBe(201);
+  expect(roomFork.body.task.origin).toEqual({ threadId: roomSource, messageId: roomAnchor.id });
+}, hostTimeout(120_000));

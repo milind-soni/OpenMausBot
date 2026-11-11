@@ -35,7 +35,9 @@ it("focuses a fork search hit without selecting or switching the main conversati
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Matching");
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+  await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({
+    type: "focusMessage", threadId: "fork", messageId: "copied", matchText: "Matching",
+  }));
   expect(fixture.navigate).not.toHaveBeenCalled();
   expect(fixture.dispatch).toHaveBeenCalledWith({ type: "focusMessage", threadId: "fork", messageId: "copied", matchText: "Matching" });
   await act(async () => root.unmount());

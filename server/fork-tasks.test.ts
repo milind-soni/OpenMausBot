@@ -107,6 +107,17 @@ it("keeps the source thread's effective permissions without inheriting a pending
   expect(store.projectBotForTask(bot.id, pending.threadId)?.approvalGrant).toBeUndefined();
 });
 
+it("preserves an explicit no-folder choice when forking a bot conversation", async () => {
+  const store = await freshStore();
+  const bot = store.createBot();
+  const anchor = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "No working folder" });
+  store.patchTask(bot.id, bot.threadId, { cwd: null });
+  const fork = store.forkTask(bot.id, bot.threadId, anchor.id)!;
+  expect(fork.cwd).toBeNull();
+  expect(store.taskByThread(bot.id, fork.threadId)?.cwd).toBeNull();
+  expect(store.pinTaskCwd(bot.id, fork.threadId, join(home, "available-folder"))).toBeNull();
+});
+
 it("removes copied history when registering the fork fails", async () => {
   const store = await freshStore();
   const bot = store.createBot();

@@ -12,7 +12,7 @@ export function threadTitleFrom(title?: string): string {
 }
 
 export function buildTask(bot: BotRecord, title?: string, projectId?: string, openedBy?: TaskOpenedBy,
-  approvalMode?: "ask" | "full", modelSelection?: ModelSelection, cwd?: string): TaskRecord {
+  approvalMode?: "ask" | "full", modelSelection?: ModelSelection, cwd?: string | null): TaskRecord {
   const createdAt = Date.now();
   return {
     threadId: newId(),
