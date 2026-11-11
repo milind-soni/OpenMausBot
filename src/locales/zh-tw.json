@@ -6227,6 +6227,7 @@
   "place.view.ccNoHours.short": "時數已用完",
   "place.view.ccNoHours.line": "本月的 {hours} 小時雲端桌面時數已用完，將於 {month} 1 日恢復。",
   "place.view.ccNoHours.lineUnknown": "本月的雲端桌面時數已用完。",
+  "place.view.ccNoHours.lineTrial": "免費試用的雲端桌面時數已用完。完整額度從第一次付款開始。",
   "place.view.ccAtOnce.short": "使用中",
   "place.view.ccAtOnce.lineOne": "你的 {plan} 方案包含 1 台雲端桌面，目前由 {holders} 使用中。",
   "place.view.ccAtOnce.lineMany": "你的 {plan} 方案包含 {max} 台雲端桌面，目前由 {holders} 使用中。",

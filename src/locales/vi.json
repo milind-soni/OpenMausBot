@@ -4337,6 +4337,7 @@
   "place.view.ccNoHours.short": "Đã hết giờ sử dụng",
   "place.view.ccNoHours.line": "Đã dùng hết {hours} giờ desktop đám mây của tháng này. Số giờ sẽ được cấp lại vào ngày 1 {month}.",
   "place.view.ccNoHours.lineUnknown": "Đã dùng hết số giờ desktop đám mây của tháng này.",
+  "place.view.ccNoHours.lineTrial": "Đã dùng hết số giờ desktop đám mây của bản dùng thử miễn phí. Hạn mức đầy đủ bắt đầu từ lần thanh toán đầu tiên.",
   "place.view.ccAtOnce.short": "Đang sử dụng",
   "place.view.ccAtOnce.lineOne": "Gói {plan} của bạn bao gồm 1 desktop đám mây, và {holders} đang sử dụng.",
   "place.view.ccAtOnce.lineMany": "Gói {plan} của bạn bao gồm {max} desktop đám mây, và {holders} đang sử dụng.",

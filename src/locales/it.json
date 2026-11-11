@@ -5240,6 +5240,7 @@
   "place.view.ccNoHours.short": "Ore esaurite",
   "place.view.ccNoHours.line": "Le {hours} ore di desktop cloud di questo mese sono esaurite. Tornano il 1° {month}.",
   "place.view.ccNoHours.lineUnknown": "Le ore di desktop cloud di questo mese sono esaurite.",
+  "place.view.ccNoHours.lineTrial": "Le ore di desktop cloud della prova gratuita sono esaurite. L'allocazione completa inizia con il primo pagamento.",
   "place.view.ccAtOnce.short": "In uso",
   "place.view.ccAtOnce.lineOne": "Il tuo piano {plan} include 1 desktop cloud e lo sta usando {holders}.",
   "place.view.ccAtOnce.lineMany": "Il tuo piano {plan} include {max} desktop cloud e li stanno usando {holders}.",

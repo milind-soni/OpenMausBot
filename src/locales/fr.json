@@ -2131,6 +2131,7 @@
   "place.view.ccAsleep.line": "Le bureau cloud de {bot} est en veille. Il se réveille en quelques secondes quand {bot} en a besoin.",
   "place.view.ccNoHours.line": "Les {hours} heures de bureau cloud de ce mois sont épuisées. Elles reviennent le 1er {month}.",
   "place.view.ccNoHours.lineUnknown": "Les heures de bureau cloud de ce mois sont épuisées.",
+  "place.view.ccNoHours.lineTrial": "Les heures de bureau cloud de l'essai gratuit sont épuisées. L'allocation complète commence avec le premier paiement.",
   "place.view.ccAtOnce.lineOne": "Votre forfait {plan} inclut 1 bureau cloud, et {holders} l'utilise.",
   "place.view.ccAtOnce.lineMany": "Votre forfait {plan} inclut {max} bureaux cloud, et {holders} les utilisent.",
   "place.view.ccAtOnce.lineUnknown": "Tous les bureaux cloud inclus dans votre forfait sont utilisés.",
