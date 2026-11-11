@@ -1,4 +1,4 @@
-import { useContext, useState, useSyncExternalStore } from "react";
+import { useContext, useMemo, useSyncExternalStore } from "react";
 import { useStore, type AppState } from "./store";
 import { StoreSourceContext, type StoreActions, type StoreSource, type StoreValue } from "./store-context";
 
@@ -30,7 +30,7 @@ interface Selection<T> {
 /** Renders again only when the selected value changes under `equal`. A selector may be a new closure each render. */
 export function useStoreSelector<T>(selector: (state: AppState) => T, equal: (a: T, b: T) => boolean = Object.is): T {
   const source = useStoreSource();
-  const [last] = useState<{ current?: Selection<T> }>(() => ({}));
+  const last = useMemo<{ current?: Selection<T> }>(() => ({}), []);
   const read = () => {
     const state = source.getState();
     const previous = last.current;

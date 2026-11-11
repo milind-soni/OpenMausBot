@@ -2,9 +2,9 @@
 import { useStore, type AppState } from "@/state/store";
 import type * as StoreSelect from "@/state/store-select";
 
-export function plainStoreSelect(original: typeof StoreSelect): typeof StoreSelect {
+export function plainStoreSelect(original?: typeof StoreSelect): typeof StoreSelect {
   return {
-    ...original,
+    ...original!,
     useStoreSelector: <T,>(selector: (state: AppState) => T) => selector(useStore().state),
     useStoreDispatch: () => useStore().dispatch,
     useStoreActions: () => useStore(),
