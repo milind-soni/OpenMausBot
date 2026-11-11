@@ -21,7 +21,7 @@ import {
   tailWindowStart,
 } from "@/lib/transcript-window";
 import { reducedMotion } from "@/lib/onboarding";
-import { useStore } from "@/state/store";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export const AUTO_EXPAND_TOP_THRESHOLD = 250;
 
@@ -42,7 +42,9 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   transcriptShown?: boolean;
   hasMore?: boolean;
 }) {
-  const { state, dispatch } = useStore();
+  const focusMessage = useStoreSelector((state) => state.focusMessage);
+  const olderPending = useStoreSelector((state) => Boolean(state.loadingOlder[threadId]));
+  const dispatch = useStoreDispatch();
   const scrollRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
@@ -94,7 +96,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
 
   const appliedFocus = useRef<number | null>(null);
   useEffect(() => {
-    const focus = state.focusMessage;
+    const focus = focusMessage;
     if (!focus || focus.consumed || focus.threadId !== threadId || appliedFocus.current === focus.nonce) return;
     const targetIndex = messages.findIndex((message) => message.id === focus.messageId);
     if (targetIndex < 0) return;
@@ -102,7 +104,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     const range = focusWindowRange(messages.length, targetIndex);
     setBottomFollow(false);
     setTranscriptWindow({ key: transcriptKey, start: range.start, end: range.end });
-  }, [threadId, messages, setBottomFollow, state.focusMessage, transcriptKey]);
+  }, [threadId, messages, setBottomFollow, focusMessage, transcriptKey]);
   useFocusMessage(threadId, messages.length > 0);
 
   // `follow` is omitted on purpose: re-arming only arms future content and never scrolls.
@@ -150,7 +152,6 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     const nextEnd = Math.min(messages.length, endIndex + TRANSCRIPT_WINDOW_SIZE);
     setTranscriptWindow((w) => ({ ...w, end: nextEnd >= messages.length ? null : nextEnd }));
   };
-  const olderPending = Boolean(state.loadingOlder[threadId]);
   const loadOlder = () => {
     holdRowForPrepend();
     dispatch({ type: "loadOlderMessages", threadId });
