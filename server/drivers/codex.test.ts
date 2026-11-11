@@ -255,7 +255,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(existsSync(dump)).toBe(false);
   });
 
-  it("switches a bot's native skills off by path, and refuses its turn while its switches can't be read", async () => {
+  it("switches a bot's native skills off by path, and still runs its turn while its switches can't be read", async () => {
     const dump = join(scratch, "skills-off.json"); process.env.FAKE_CODEX_DUMP = dump;
     const skill = join(scratch, ".agents", "skills", "pdf", "SKILL.md");
     mkdirSync(dirname(skill), { recursive: true }); writeFileSync(skill, "---\nname: pdf\ndescription: PDFs.\n---\nSteps.\n");
@@ -269,12 +269,14 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(skillsConfig(dump)).not.toContain("name=");
 
     writeFileSync(choices, "{\"off\": [");
-    const refused = join(scratch, "skills-unreadable.json"); process.env.FAKE_CODEX_DUMP = refused;
-    await expect(instance.adapter.sendTurn({ threadId: "skills-unreadable", botId: "codex-skills-off", text: "hi" })).rejects.toThrow(/can't be read/);
-    expect(existsSync(refused)).toBe(false);
+    const damaged = join(scratch, "skills-unreadable.json"); process.env.FAKE_CODEX_DUMP = damaged;
+    recorder.events.length = 0;
+    await instance.adapter.sendTurn({ threadId: "skills-unreadable", botId: "codex-skills-off", text: "hi" });
+    await expect(recorder.until((e) => e.type === "turn.completed")).resolves.toMatchObject({ ok: true });
+    expect(skillsConfig(damaged)).toBe("");
   });
 
-  it("rebuilds a bot's native skill switches for each relaunch, and ends the turn if they turn unreadable", async () => {
+  it("rebuilds a bot's native skill switches for each relaunch, and keeps going if they turn unreadable", async () => {
     const skill = join(scratch, ".agents", "skills", "pdf", "SKILL.md");
     const choices = join(DATA_DIR, "skill-state", "codex-skills-retry", "native-skills.json");
     mkdirSync(dirname(choices), { recursive: true }); writeFileSync(choices, JSON.stringify({ off: ["pdf"] }));
@@ -294,10 +296,10 @@ describe("CodexDriver turns (fake app-server)", () => {
     process.env.FAKE_CODEX_STATE = join(scratch, "skills-retry-damaged");
     const damage = instance.adapter.onEvent((event) => { if (event.type === "turn.retrying") writeFileSync(choices, "{"); });
     await instance.adapter.sendTurn({ threadId: "skills-retry-damaged", botId: "codex-skills-retry", text: "hi" });
-    await expect(recorder.until((e) => e.type === "turn.completed", 15_000)).resolves.toMatchObject({ ok: false });
+    await expect(recorder.until((e) => e.type === "turn.completed", 15_000)).resolves.toMatchObject({ ok: true });
     damage();
-    expect(recorder.events.some((e) => e.type === "runtime.error" && /can't be read/.test((e as { message: string }).message))).toBe(true);
-    expect(readFileSync(join(scratch, "skills-retry-damaged"), "utf8")).toBe("1");
+    expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(false);
+    expect(readFileSync(join(scratch, "skills-retry-damaged"), "utf8")).toBe("2");
   }, 30_000);
 
   it("gates raw custom identities before mount renaming and disables ambient MCP servers", async () => {

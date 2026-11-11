@@ -62,10 +62,9 @@ text and extra work can increase token usage.
 
 With `skillsLibrary` on, the every-bot skills a bot was taken off live in
 `<data>/skill-state/<bot id>/library-opt-out.json`. If that file is there but
-can't be read or isn't a list of names, every library skill counts as off for
-that bot (skills assigned to it explicitly still apply) and the server logs it
-once. To recover, make the file readable and writable again (or delete it to
-give the bot every every-bot skill), then switch skills back on for the bot.
+can't be read or isn't a list of names, the bot keeps every every-bot skill and
+the server logs it once. Switching a skill off for the bot again writes a good
+file.
 
 ### Ordinary server lending has three states
 

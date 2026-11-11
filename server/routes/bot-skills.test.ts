@@ -211,7 +211,7 @@ describe("removing a skill from one bot", () => {
 describe("a bot's opt-outs from every-bot skills", () => {
   const optOutFile = (botId: string) => join(DATA_DIR, "skill-state", botId, "library-opt-out.json");
 
-  it("keeps every-bot skills off for a bot whose opt-out list is damaged or can't be read", () => {
+  it("keeps every-bot skills on for a bot whose opt-out list is damaged or can't be read", () => {
     const shared = "everyone-opt-out-check";
     expect(installLibrarySkill({ name: shared, instructions: learned(shared), source: "lib", reviewState: "approved" })).toMatchObject({ name: shared });
     expect(setLibrarySkillEveryBot(shared, true)).toMatchObject({ everyBot: true });
@@ -219,7 +219,7 @@ describe("a bot's opt-outs from every-bot skills", () => {
     writeFileSync(optOutFile("opt-out-damaged"), "[\"half-written");
 
     expect(resolveBotSkills("opt-out-none", []).map((skill) => skill.name)).toContain(shared);
-    expect(resolveBotSkills("opt-out-damaged", []).map((skill) => skill.name)).not.toContain(shared);
+    expect(resolveBotSkills("opt-out-damaged", []).map((skill) => skill.name)).toContain(shared);
     expect(resolveBotSkills("opt-out-damaged", [shared]).map((skill) => skill.name)).toContain(shared);
 
     if (process.platform === "win32" || process.getuid?.() === 0) return;
@@ -227,7 +227,7 @@ describe("a bot's opt-outs from every-bot skills", () => {
     writeFileSync(optOutFile("opt-out-unreadable"), "[]");
     chmodSync(dirname(optOutFile("opt-out-unreadable")), 0o000);
     try {
-      expect(resolveBotSkills("opt-out-unreadable", []).map((skill) => skill.name)).not.toContain(shared);
+      expect(resolveBotSkills("opt-out-unreadable", []).map((skill) => skill.name)).toContain(shared);
     } finally {
       chmodSync(dirname(optOutFile("opt-out-unreadable")), 0o700);
     }

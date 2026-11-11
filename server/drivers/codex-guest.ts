@@ -31,8 +31,7 @@ const isFile = (path: string) => {
 
 /** `-c skills.config=[…]` selecting each SKILL.md this bot switched off by absolute path: a `name` selector would also
  * match the same-named skills linked into the turn's `.agents/skills`. codex-cli (0.163.0–0.167.0) keeps
- * `[[skills.config]]` from config.toml in effect alongside it and reads the list once per turn. Throws
- * NativeSkillChoicesUnreadable. */
+ * `[[skills.config]]` from config.toml in effect alongside it and reads the list once per turn. */
 export function codexDisabledNativeSkillArgs(botId: string | undefined, env: Record<string, string | undefined>): string[] {
   if (!botId) return [];
   const denied = deniedNativeSkills(botId);

@@ -8,7 +8,7 @@ import { DATA_DIR } from "./config.ts";
 import { claudeDisabledNativeSkillRules } from "./drivers/claude-unusable-tools.ts";
 import { codexDisabledNativeSkillArgs, codexTurnConfigArgs, GUEST_CONFINED_CODEX_ARGS } from "./drivers/codex-guest.ts";
 import { setImportedSkillEnabled, storeImportedSkills } from "./imported-skills.ts";
-import { deniedNativeSkills, isNativeSkillEnabled, NativeSkillChoicesUnreadable, setNativeSkillEnabled } from "./native-skill-choices.ts";
+import { deniedNativeSkills, isNativeSkillEnabled, setNativeSkillEnabled } from "./native-skill-choices.ts";
 
 // HOME and the data folder are this test file's own temporary ones (server/testing/setup.ts).
 const HOME = join(DATA_DIR, "..");
@@ -53,16 +53,15 @@ describe("per-bot native skill switches", () => {
     expect(isNativeSkillEnabled("bot-a", "pdf")).toBe(true);
   });
 
-  it("refuses to guess when the bot's saved switches can't be read, and never writes over them", () => {
+  it("keeps every native skill on while the bot's saved switches can't be read, and lets a switch write a good file", () => {
     damage("bot-a");
-    expect(isNativeSkillEnabled("bot-a", "pdf")).toBe(false);
-    expect(() => deniedNativeSkills("bot-a")).toThrow(NativeSkillChoicesUnreadable);
-    expect(setNativeSkillEnabled("bot-a", "pdf", true)).toEqual({ error: expect.stringContaining("Fix or delete that file") });
-    expect(readFileSync(choicesFile("bot-a"), "utf8")).toBe("{\"off\": [");
-    expect(() => claudeDisabledNativeSkillRules("bot-a")).toThrow(NativeSkillChoicesUnreadable);
-    expect(() => codexTurnConfigArgs({ botId: "bot-a" }, env)).toThrow(NativeSkillChoicesUnreadable);
-    rmSync(choicesFile("bot-a"));
     expect(isNativeSkillEnabled("bot-a", "pdf")).toBe(true);
+    expect(deniedNativeSkills("bot-a")).toEqual({ names: [], origins: [] });
+    expect(claudeDisabledNativeSkillRules("bot-a")).toEqual([]);
+    expect(codexTurnConfigArgs({ botId: "bot-a" }, env)).toEqual([]);
+    expect(setNativeSkillEnabled("bot-a", "pdf", false)).toEqual({ off: ["pdf"] });
+    expect(JSON.parse(readFileSync(choicesFile("bot-a"), "utf8"))).toEqual({ off: ["pdf"] });
+    expect(isNativeSkillEnabled("bot-a", "pdf")).toBe(false);
   });
 });
 

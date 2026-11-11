@@ -181,7 +181,7 @@ describe("switching a native skill off for one bot", () => {
     expect(listed(hostFor("claudeAgent").host.listBotSkills(bot))).not.toContain("release-notes:native");
   });
 
-  it("shows every native skill off and keeps /name from expanding one while the bot's saved switches can't be read", () => {
+  it("shows every native skill on while the bot's saved switches can't be read", () => {
     const { host, bot } = hostFor("codex");
     plant(CODEX_SKILLS, "pdf");
     plant(AGENTS_SKILLS, "deploy");
@@ -189,8 +189,7 @@ describe("switching a native skill off for one bot", () => {
     writeFileSync(join(DATA_DIR, "skill-state", bot.id, "native-skills.json"), "{\"off\": [\"pd");
     const natives = host.listBotSkills(bot).filter((skill) => "origin" in skill && skill.origin === "native")
       .map((skill) => [skill.name, skill.enabled] as const).sort();
-    expect(natives).toEqual([["deploy", false], ["pdf", false]]);
-    expect(host.expandSkillCommand(bot, "main", "/pdf now", undefined, [], true)).toBe("/pdf now");
+    expect(natives).toEqual([["deploy", true], ["pdf", true]]);
   });
 });
 

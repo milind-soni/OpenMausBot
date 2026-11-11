@@ -289,10 +289,9 @@ path for the bot's turns, so a same-named skill in the turn's own
 keep applying. A skill brought in from this computer and switched off is kept
 out the same way, from the folder it came from. If the bot's saved switches
 (`<data>/skill-state/<bot id>/native-skills.json`) are there but can't be read,
-the page shows every such skill off, switches can't be changed, and the bot's
-Claude and Codex turns don't start, saying which file to fix or delete;
-deleting it resets those switches to on (skills from this computer switched
-off for the bot stay off).
+every such skill counts as on (skills from this computer switched off for the
+bot stay off), turns run as usual and the server logs it once; the next switch
+writes a good file.
 
 Open a bot’s **Tools → Access → MCP servers** to narrow the enabled global
 servers offered to it. Existing bots keep all enabled global servers until you
