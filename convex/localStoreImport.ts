@@ -82,10 +82,13 @@ export const inspect = internalQuery({
 
 /** Read-only: message ids Convex holds for one conversation, so the script can plan deletions made in the local store. */
 export const chatMessageIds = internalQuery({
-  args: { teamId: v.id("teams"), conversation: v.string(), cursor: v.union(v.string(), v.null()) },
+  args: { teamId: v.string(), conversation: v.string(), cursor: v.union(v.string(), v.null()) },
   returns: v.object({ ids: v.array(v.string()), isDone: v.boolean(), continueCursor: v.string() }),
   handler: async (ctx, a) => {
-    const page = await ctx.db.query("teamChatMessages").withIndex("by_team_conversation_created", q => q.eq("teamId", a.teamId).eq("conversation", a.conversation)).paginate({ numItems: 500, cursor: a.cursor });
+    // A marker can name a workspace id that is not valid here; it has no messages to compare.
+    const teamId = ctx.db.normalizeId("teams", a.teamId);
+    if (!teamId) return { ids: [], isDone: true, continueCursor: "" };
+    const page = await ctx.db.query("teamChatMessages").withIndex("by_team_conversation_created", q => q.eq("teamId", teamId).eq("conversation", a.conversation)).paginate({ numItems: 500, cursor: a.cursor });
     return { ids: page.page.map(row => row.messageId), isDone: page.isDone, continueCursor: page.continueCursor };
   },
 });
@@ -240,7 +243,7 @@ export async function localStoreOperation(ctx: ActionCtx, operation: string, a: 
       if (items.some(item => "plain" in item || "secrets" in item)) throw new ConvexError("Inspect takes keys, not secrets");
       return { result: await ctx.runQuery(internal.localStoreImport.inspect, { kind, items }) };
     case "migrate.chatMessageIds":
-      return { result: await ctx.runQuery(internal.localStoreImport.chatMessageIds, { teamId: a.teamId as Id<"teams">, conversation: String(a.conversation ?? ""), cursor: typeof a.cursor === "string" ? a.cursor : null }) };
+      return { result: await ctx.runQuery(internal.localStoreImport.chatMessageIds, { teamId: String(a.teamId ?? ""), conversation: String(a.conversation ?? ""), cursor: typeof a.cursor === "string" ? a.cursor : null }) };
     case "migrate.apply": {
       if (SEALED_KINDS.has(kind) && items.some(item => typeof item.plain !== "string")) throw new ConvexError(`Import kind ${kind} needs its secret`);
       return { result: await ctx.runMutation(internal.localStoreImport.apply, { kind, items: await sealItems(kind, items) }) };
