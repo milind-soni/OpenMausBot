@@ -157,7 +157,7 @@ describe("a Team Cloud", () => {
 
   it("keeps a confined turn from starting or changing a person's routine", async () => {
     const scout = await newBot("Routine starter");
-    const mine = (await team.as(ada, "POST", "/api/routines", { name: "Ada's", prompt: "routine-of-a-person", botId: scout.id, enabled: false, schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } })).body.routine;
+    const mine = (await team.as(ada, "POST", "/api/routines", { name: "Ada's", prompt: "routine-of-a-person", botId: scout.id, resultsThreadId: null, enabled: false, schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } })).body.routine;
     const { thread } = await webhookTurn(scout.id, "Starter hook", "marker-starter");
     const refused = await internal(scout.id, thread, "/api/internal/trigger-requests", { action: "run_now", triggerId: mine.id });
     expect(refused).toMatchObject({ status: 403, body: { error: OUTSIDE_STAYS_HERE } });

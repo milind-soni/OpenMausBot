@@ -12,6 +12,7 @@
 // OpenMausBot's fold.
 import type { IdleCompactResult } from "../contracts.ts";
 import { isContextMessage, type HandedState } from "../delta-context.ts";
+import { sinceFreshStart } from "../fresh-start.ts";
 import { wakeHoldOf } from "../routine-due.ts";
 import type { Routine, RoutineRun } from "../routines.ts";
 import { serverLine } from "../server-lines.ts";
@@ -99,14 +100,14 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
     const compact = deps.instance(instanceId)?.adapter.cacheKeepWarm?.compact;
     const session = store.taskByThread(botId, threadId)?.resumeCursors[instanceId];
     if (!compact || typeof session !== "string") return { ok: false, reason: "the conversation has no session to summarize" };
-    const result = await compact(threadId, { instructions: summaryInstructions(store.activePath(threadId)), session, signal: control.signal });
+    const result = await compact(threadId, { instructions: summaryInstructions(sinceFreshStart(store.activePath(threadId))), session, signal: control.signal });
     if (!result.ok) return { ok: false, reason: result.reason, retry: result.busy === true && !control.signal.aborted };
     deps.book(target, result);
     // Applied only to the conversation as it was: on the same session, and with no turn begun since (but the one waiting).
     const task = store.taskByThread(botId, threadId);
     if (task?.resumeCursors[instanceId] !== result.sessionBefore) return { ok: false, reason: "the conversation moved to another session" };
     if (control.signal.aborted || (!control.awaited() && deps.busy(botId, threadId))) return { ok: false, reason: "a turn started while summarizing" };
-    const { state, exchanges } = keptAfterSummary(store.activePath(threadId), result.session, task.handedMessages?.[instanceId]);
+    const { state, exchanges } = keptAfterSummary(sinceFreshStart(store.activePath(threadId)), result.session, task.handedMessages?.[instanceId]);
     store.setResumeCursor(botId, instanceId, result.session, threadId);
     store.setHandedMessages(botId, threadId, instanceId, state);
     store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(deps.language?.(threadId), "server.warmSummary.summarized"), ok: true } });

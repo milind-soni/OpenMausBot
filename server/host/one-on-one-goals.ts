@@ -16,7 +16,7 @@ export interface OneOnOneGoalDeps {
   store: Pick<Store, "appendMessage" | "bot" | "onChange" | "taskByThread" | "titleTaskFromFirstMessage">;
   cards: GoalCards;
   turns: GoalTurns;
-  /** startTurn would admit a turn in this conversation now. */
+  /** startTurn would admit a turn in this conversation now, and no teammate it handed work to is still working on it. */
   canStart(botId: string, threadId: string): boolean;
   startTurn(botId: string, text: string, opts: {
     threadId: string;

@@ -9,6 +9,7 @@ import type { SendTurnInput } from "../contracts.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { MESSAGE_FILE_MAX_BYTES } from "../message-file.ts";
 import { augmentedPath } from "../env-path.ts";
+import { cloudHomeConfigured } from "../cloud-home.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { AGENTS_TOOL_ALIASES } from "../../shared/agents-tool-names.ts";
 import { bridgedCallTarget, unbridgedServer } from "./agents-bridge.ts";
@@ -106,7 +107,7 @@ export class ChatMcpClient {
       // The desktop shell inherits Finder's bare PATH, where `npx`-style servers cannot find `node`.
       this.child = spawnCli(server.command, server.args, {
         stdio: ["pipe", "pipe", "pipe"], env: chatMcpEnvironment(server.env),
-        ...(configured ? { box: { allowEnv: Object.keys(server.env) } } : {}),
+        ...(configured ? { box: { allowEnv: Object.keys(server.env), configured: true } } : {}),
       }, "bot");
     } catch { throw new Error("MCP server could not start; check its command and installation"); }
     this.child.stdout.setEncoding("utf8");
@@ -357,14 +358,37 @@ async function savedOrBounded(value: string, tool: string, folder: string | unde
 /** Smaller models fill optional fields with "" instead of omitting them; for these a blank means omitted. */
 const BUILT_IN_BROWSER_BLANK_MEANS_OMITTED: Record<string, readonly string[]> = {
   agent_browser_read: ["url"],
+  agent_browser_screenshot: ["ref", "selector"],
 };
 
-function omitBlankDefaults(builtInBrowser: boolean, tool: string, args: unknown) {
-  if (!builtInBrowser || !object(args)) return;
+const ROUTE_LOOPBACK = /^(?:https?:\/\/)?(?:127\.0\.0\.1|localhost|\[::1\]|0\.0\.0\.0)(?::\d+)?(?:[/?#]|$)/iu;
+
+/** A screenshot names one target; a model that fills `ref` and `selector` (or a point) means the first, and the rest
+ * would otherwise fail the call as "Pass only one of ref, selector, or x and y." */
+export function normalizeBuiltInBrowserArgs(tool: string, args: unknown): void {
+  if (!object(args)) return;
   for (const field of BUILT_IN_BROWSER_BLANK_MEANS_OMITTED[tool] ?? []) {
     const value = args[field];
     if (typeof value === "string" && !value.trim()) delete args[field];
   }
+  if (tool !== "agent_browser_screenshot") return;
+  if (args.ref !== undefined && args.selector !== undefined) delete args.selector;
+  if (args.ref !== undefined || args.selector !== undefined) { delete args.x; delete args.y; }
+}
+
+/** On a self-hosted server the browser runs on the server; 127.0.0.1 there is the server itself, not the person's computer.
+ * Say so on the failed navigation instead of leaving only ERR_SOCKS_CONNECTION_FAILED, and point at the LAN address to use.
+ * Not on the desktop app, where the browser runs on the person's own computer, nor on a Cloud home, which has no such setting. */
+export function loopbackNavigationHint(tool: string, args: unknown, text: string, env: NodeJS.ProcessEnv = process.env): string {
+  if (env.OMB_DESKTOP_PARENT === "1" || cloudHomeConfigured(env)) return "";
+  if (!/^agent_browser_(?:open|navigate)$/u.test(tool) || !object(args) || typeof args.url !== "string") return "";
+  if (!ROUTE_LOOPBACK.test(args.url.trim()) || !/(?:ERR_[A-Z_]+|failed)/u.test(text)) return "";
+  return " That address is the loopback of the machine running this browser, not your own computer: open the site by the LAN address it answers on (for example http://192.168.1.20:8188), which must be reachable from the server, and allow it under Settings → Browser → Open sites on this server.";
+}
+
+function omitBlankDefaults(builtInBrowser: boolean, tool: string, args: unknown) {
+  if (!builtInBrowser) return;
+  normalizeBuiltInBrowserArgs(tool, args);
 }
 
 type CheckedTool = { tool: Record<string, unknown> & { name: string; inputSchema: Record<string, unknown> }; schema: ValidateFunction; check: ServerToolCheck };
@@ -683,7 +707,9 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       }
       if (result.structuredContent !== undefined) parts.push(JSON.stringify(result.structuredContent));
       if (unsupported) parts.unshift(`[${unsupported} unsupported MCP content item(s) omitted. The operation may have taken effect, but its full result cannot be represented; inspect its state before retrying.]`);
-      return { text: await savedOrBounded(parts.join("\n") || (images.length ? "Screenshot captured." : "(empty result)"), chatToolName(tool.server, tool.name), resultFolder, scrub), ok: result.isError !== true && unsupported === 0,
+      const body = parts.join("\n") || (images.length ? "Screenshot captured." : "(empty result)");
+      const hint = tool.builtInBrowser ? loopbackNavigationHint(tool.name, args, body) : "";
+      return { text: await savedOrBounded(body, chatToolName(tool.server, tool.name), resultFolder, scrub) + hint, ok: result.isError !== true && unsupported === 0,
         ...(images.length ? { images } : {}) };
     } catch (error) {
       await close();

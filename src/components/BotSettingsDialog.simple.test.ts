@@ -148,6 +148,8 @@ const { AvatarImageGenerator } = await import("./AvatarImageGenerator");
 const { AvatarFraming } = await import("./avatar-editing");
 const { MascotFaceColorPicker } = await import("./MascotFaceColorPicker");
 const { Switch } = await import("./SettingsPrimitives");
+const { OrgSkillsCard } = await import("./bot-settings/OrgSkillsCard");
+const { PackageProvenance } = await import("./bot-settings/PackageProvenance");
 
 afterAll(() => vi.unstubAllGlobals());
 
@@ -655,7 +657,7 @@ describe("the Details tab", () => {
 
   it("lists Find, Activity and the Inspector for this conversation as rows that run them, leaving Copy and Download to Share", () => {
     const rendered = botTab(makeBot());
-    expect([...rendered.html.matchAll(/data-panel-item="(\w+)"/g)].map((match) => match[1])).toEqual(["find", "activity", "inspector"]);
+    expect([...rendered.html.matchAll(/data-panel-item="([\w-]+)"/g)].map((match) => match[1])).toEqual(["find", "start-fresh", "activity", "inspector"]);
     expect(rendered.html).toContain(">Find in conversation<");
     const run = (key: string) => (rendered.nodes.find((node) => (node.props.item as { key?: string } | undefined)?.key === key)!.props.item as { onSelect: () => void }).onSelect();
     run("activity");
@@ -1223,7 +1225,12 @@ describe("the drill-in pages", () => {
     await Promise.resolve();
     expect(fixture.skills.refresh).toHaveBeenCalled();
     click(find(rendered, "data-panel-action", "remove-skill:triage"));
-    expect(fixture.skills.putAssignments).toHaveBeenCalledWith("triage", true);
+    expect(fixture.api).toHaveBeenCalledWith("/api/bots/scout/skills/triage", { method: "DELETE" });
+    expect(fixture.skills.putAssignments).not.toHaveBeenCalled();
+    fixture.skills.skills = [skill("pdf", true, "imported"), skill("engine-notes", true, "native")];
+    expect(has(body("skills"), "data-panel-action", "remove-skill:pdf")).toBe(false);
+    expect(has(body("skills"), "data-panel-action", "remove-skill:engine-notes")).toBe(false);
+    fixture.skills.skills = [shared, off];
 
     (find(rendered, "data-panel-form", "skill-import").props.onChange as (value: string) => void)("owner/repo");
     (find(body("skills"), "data-panel-form", "skill-import").props.onSubmit as () => void)();
@@ -1242,6 +1249,14 @@ describe("the drill-in pages", () => {
     expect(row(body("skills"), "skill:summarise").props.disabled).toBe(true);
     fixture.skills.skills = [];
     expect(body("skills").html).toContain("No skills yet.");
+  });
+
+  it("offers the organization's skills on the skills page, and says on Bot settings where an installed bot came from", async () => {
+    const offered = ofType(body("skills"), OrgSkillsCard)!;
+    expect(offered.props.bot).toMatchObject({ id: "scout" });
+    (offered.props.onAdded as () => void)();
+    expect(fixture.skills.refresh).toHaveBeenCalled();
+    expect(ofType(settingsPage(makeBot()), PackageProvenance)?.props.bot).toMatchObject({ id: "scout" });
   });
 
   it("keeps the bot's own private folder, or a folder chosen with the native picker, saved through the bot route", async () => {

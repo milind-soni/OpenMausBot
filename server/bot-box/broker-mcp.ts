@@ -34,11 +34,11 @@ export function brokerRemoteMcp(custom: Record<string, McpServerSpec>, turn: Bro
   // A turn starting on this conversation keeps its earlier grants alive (a long-lived engine process reuses them).
   broker.touchThread(turn.threadId);
   const out: Record<string, McpServerSpec> = {};
-  const grants: Record<string, { upstream: string; headers: Record<string, string> }> = {};
+  const grants: Record<string, { upstream: string; headers: Record<string, string>; mcpServer: string }> = {};
   const brokered: string[] = [];
   for (const [name, server] of Object.entries(custom)) {
     if (!("url" in server) || typeof server.url !== "string" || !NAME.test(name)) { out[name] = server; continue; }
-    grants[mcpGrantName(name)] = { upstream: server.url, headers: { ...server.headers } };
+    grants[mcpGrantName(name)] = { upstream: server.url, headers: { ...server.headers }, mcpServer: name };
     brokered.push(name);
   }
   if (!brokered.length) return custom;

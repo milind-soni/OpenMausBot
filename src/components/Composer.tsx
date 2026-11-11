@@ -1,4 +1,5 @@
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
+import { TeamAudienceLabel } from "./TeamSideSwitch";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { Mic, Paperclip, Square, X } from "lucide-react";
@@ -31,7 +32,7 @@ import {
   type ComposerSendSnapshot,
   type FailedComposerSend,
 } from "@/lib/drafts";
-import { DEVS_CHOICE, MentionMenu, teammateChoices, type MentionChoice } from "./MentionMenu"; import { useTeammates } from "@/state/team-people"; import { hiddenFromSidebar, useViewerEmail } from "@/lib/default-bot";
+import { DEVS_CHOICE, MentionMenu, teammateChoices, type MentionChoice } from "./MentionMenu"; import { useTeammates } from "@/state/team-people"; import { hiddenFromSidebar, useViewerEmail } from "@/lib/default-bot"; import { useMayAct } from "./SharedQueueLine";
 import { SlashCommandMenu } from "./SlashCommandMenu";
 import { MentionTextarea } from "./MentionTextarea";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
@@ -164,7 +165,7 @@ export function Composer({
     : `bot:${bot?.id ?? ""}:${bot?.threadId ?? ""}`;
   const [text, setText, attachments, setAttachments] = useComposerDraft(
     draftId,
-    !group && bot ? `bot:${bot.id}` : undefined,
+    !group && bot && !state.config?.team ? `bot:${bot.id}` : undefined,
   );
   const attachmentPending = useDraftAttachmentPending(draftId);
   const failedSends = useFailedComposerSends(draftId); const picks = mentionPicksFor(draftId);
@@ -403,8 +404,9 @@ export function Composer({
     requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.setSelectionRange(learn.length, learn.length); });
   };
 
-  const pendingCount = (state.pendingQueued[threadId] ?? []).length;
-  const queuedMessages = state.pendingQueued[threadId] ?? [];
+  const sharedChat = Boolean(state.config?.team && !group && profile?.tasks?.some((task) => task.threadId === threadId && !task.private));
+  const queuedMessages = sharedChat ? [] : state.pendingQueued[threadId] ?? [];
+  const pendingCount = queuedMessages.length;
   const canSteerQueued = composerCanSteerQueuedMessages(
     busy,
     locked,
@@ -502,7 +504,8 @@ export function Composer({
   const media = useLiveMedia();
   const callTarget = group?.id ?? bot?.id;
   const calling = callTarget !== undefined && (onCall === callTarget || (isLiveCallRunning(media.phase) && media.botId === callTarget));
-  const stoppable = busy || Boolean(!group && bot?.waitingForTeammates);
+  const mayAct = useMayAct(), mayStop = !sharedChat || mayAct(profile?.tasks?.find((task) => task.threadId === threadId)?.askedBy);
+  const stoppable = (busy || Boolean(!group && bot?.waitingForTeammates)) && mayStop;
   // Simple mode's round button is the call, Send while there is text, and Stop while the bot works.
   const stopInSlot = simpleDock && stoppable && !locked && !hasContent && !calling;
   const callShown = !simpleDock || (!hasContent && !stopInSlot);
@@ -754,7 +757,7 @@ export function Composer({
             else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, threadId, queueId });
           }}
           onEdit={locked ? undefined : editQueued}
-        />
+        /><TeamAudienceLabel bot={bot} group={group} />
         <div className="relative">
           {/* Plain canvas behind the composer and the strip below it, so the transcript ends at the composer
               with no fade. Simple mode starts it at the composer's top edge, Advanced at its middle. */}
@@ -924,7 +927,7 @@ export function Composer({
             )}
           />
           <div data-composer-actions className={cn("flex items-center", simpleDock ? "gap-2" : "gap-1", !singleRow && !simpleDock && "@max-[30rem]/composer:ml-auto", stacked && "ml-auto")}>
-          {(simpleDock ? stoppable : busy) && !locked && (
+          {(simpleDock ? stoppable : busy && mayStop) && !locked && (
           <button
             onClick={interruptTurn}
             aria-label={t("chat.stopTurn")}

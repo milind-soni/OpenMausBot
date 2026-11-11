@@ -60,6 +60,18 @@ Talk to them like contacts. Watch them work. Approve what matters.
 <br>
 <br>
 
+<sub>Inference provider sponsor</sub>
+<br>
+<a href="https://modelgo.ai/?utm_source=openmausbot&utm_medium=sponsorship&utm_content=readme&campaign_id=openmausbot&ad_group_id=readme">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/sponsors/modelgo-logo-white.svg">
+    <img src="docs/assets/sponsors/modelgo-logo.svg" alt="ModelGo (modelgo.ai)" height="22">
+  </picture>
+</a>
+
+<br>
+<br>
+
 <img src="docs/screenshots/hero.png" alt="OpenMausBot — a Telegram-style chat app where every chat is a real AI agent" width="900">
 
 </div>
@@ -260,6 +272,7 @@ expressions · screenshots of the bot's work folded into the transcript.
 | **Electron** | Desktop shells for macOS, Windows, and Ubuntu |
 | **React + Vite + Tailwind CSS** | The chat app UI and its build |
 | **Boat** ([boat.dev](https://boat.dev)) | Each bot's cloud computer · our sponsor |
+| **ModelGo** ([modelgo.ai](https://modelgo.ai/?utm_source=openmausbot&utm_medium=sponsorship&utm_content=readme&campaign_id=openmausbot&ad_group_id=readme)) | One API key for every model · our inference provider sponsor |
 | **Composio** | Connected apps — Gmail, Slack, GitHub, and more |
 | **Cua Driver** | Native computer use on your own machine |
 | **ElevenLabs · Fish Audio** | Hosted voices for bots that talk back |
@@ -365,14 +378,18 @@ pnpm package:linux    # Ubuntu x64: .deb + AppImage + verified CUA runtime
 
 ### Desktop capability status
 
-| Capability | macOS | Ubuntu 24.04 Xorg | Ubuntu 24.04 Wayland |
-|---|---|---|---|
-| Packaged app, embedded harness, local agent CLIs | Supported | Beta | Beta |
-| Composio and Boat/cloud computers | Supported | Beta | Beta |
-| Explicit preview-only local screen capture | Supported | Beta | Beta |
-| Bot control of this computer | Supported | Beta, explicit opt-in | Disabled: Wayland safety gate (Omarchy with Cua's Hyprland plugin: experimental) |
-| Native on-device dictation | Supported | Planned | Planned |
-| Dictation and Take turns calls through Fish Audio (needs a Fish Audio key) | Not used, on-device instead | Supported | Supported |
+| Capability | macOS | Windows x64 | Ubuntu 24.04 Xorg | Ubuntu 24.04 Wayland |
+|---|---|---|---|---|
+| Packaged app, embedded harness, local agent CLIs | Supported | Supported | Beta | Beta |
+| Composio and Boat/cloud computers | Supported | Supported | Beta | Beta |
+| Explicit preview-only local screen capture | Supported | Unavailable | Beta | Beta |
+| Bot control of this computer | Supported | Supported | Beta, explicit opt-in | Disabled: Wayland safety gate (Omarchy with Cua's Hyprland plugin: experimental) |
+| Native on-device dictation | Supported | Unavailable | Planned | Planned |
+| Dictation and Take turns calls through Fish Audio (needs a Fish Audio key) | Not used, on-device instead | Supported | Supported | Supported |
+
+On Windows, choose **This computer** to let a bot control the local desktop. The packaged app includes its own
+CUA driver and SDK; a separate Cua installation is not required. Local bot control is available even though the
+preview-only screen capture above is unavailable. See [Computer use & browser use](docs/computer-use-integration.md).
 
 The Linux preview is user-initiated and never enables local bot control or Auto routing. On Xorg, the reviewed Cua
 Driver 0.41.3 runtime starts only after explicit opt-in and without its full-screen cursor overlay. On Wayland the
@@ -457,6 +474,7 @@ small; adding a provider is one file in [`server/drivers/`](server/drivers/) plu
 No code needed at all for your own engines: any ACP-speaking CLI or OpenAI-compatible endpoint
 plugs in through config — see [`docs/custom-engines.md`](docs/custom-engines.md).
 Users can add their own MCP tool servers with zero code via [`docs/custom-mcp-servers.md`](docs/custom-mcp-servers.md).
+For configuration switches, defaults and model-call implications, see [Feature switches](docs/feature-flags.md).
 To run bots on OpenRouter, Fireworks AI, DeepSeek, Cline or your own OpenAI- or Anthropic-compatible provider,
 see [Other model providers](apps/docs/content/docs/providers/model-providers.mdx).
 
@@ -503,8 +521,13 @@ installation and pairing.
 
 Run `openmausbot setup` to reconfigure without resetting bots or conversations;
 the saved model default applies only to new bots. Native setup confirms provider
-sign-in; API setup asks before a potentially billable test message. API keys are
-saved as plaintext, not encrypted, in private `config.json` (`0600` on Unix).
+sign-in; API setup asks before a potentially billable test message. API keys
+from `openmausbot setup` and the server are saved as plaintext, not encrypted,
+in private `config.json` (`0600` on Unix). The packaged desktop app keeps your
+AI provider and service keys encrypted through the operating system instead;
+its `config.json` still holds OpenCode provider keys, keys given to one engine,
+and MCP header values in plaintext (a key a bot set from a secret card is kept
+in the Vault, and `config.json` holds only a pointer to it).
 See the [short setup guide](docs/cli-onboarding.md) for account differences,
 phone choices, credential storage, and cancellation.
 

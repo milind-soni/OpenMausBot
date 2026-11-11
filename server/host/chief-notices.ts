@@ -1,7 +1,6 @@
 import { failedTurnTool } from "../../shared/failed-turn.ts";
 import { admit } from "../admission.ts";
 import { memoryStopped } from "../engine-memory.ts";
-import { ESCALATIONS_THREAD_TITLE, EscalationLedger, escalationChip, escalationDeliverable, escalationText, type Escalation, type EscalationKind } from "../escalations.ts";
 import {
   AUTO_RETRY_LEAD, chiefForBot, INCIDENTS_THREAD_TITLE, OLD_INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentContext, incidentText, RETRY_BLOCKED, RETRY_LEAD,
   type Incident, type IncidentKind, type IncidentRetry,
@@ -16,8 +15,6 @@ import type { BotRecord, Message, Store } from "../store.ts";
 
 type PeerAsk = NonNullable<Message["peerAsk"]>;
 
-export type EscalationOutcome = "chief" | "person" | "muted" | "off" | "skipped" | "failed";
-
 export interface ChiefNoticeDeps {
   store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "groupByThread" | "createTask" | "appendMessage" | "messagesFor" | "activePath">;
   assignerOf(threadId: string): unknown;
@@ -26,7 +23,6 @@ export interface ChiefNoticeDeps {
   botAtThreadCapacity(botId: string): boolean;
   groupTurnActive(botId: string): boolean;
   startTurn(botId: string, text: string, opts: { threadId: string; unattended?: boolean; peerAsk: PeerAsk }): Promise<unknown>;
-  escalationsEnabled(): boolean;
   /** The thread's last run has ended but is still shutting down. */
   threadSettling?(threadId: string): boolean;
   /** The thread waits for a free slot and starts on its own. */
@@ -65,7 +61,6 @@ export const MEMORY_RETRY_TEXT = "[OpenMausBot started this again by itself, onc
 export function createChiefNotices(deps: ChiefNoticeDeps) {
   const { store } = deps;
   const incidentLedger = new IncidentLedger();
-  const escalationLedger = new EscalationLedger();
   const schedule = deps.schedule ?? ((run: () => void) => { setTimeout(run, 0).unref?.(); });
   const later = deps.later ?? ((run: () => void, ms: number) => { setTimeout(run, ms).unref?.(); });
   /** Each thread's last request a run stopped for memory was started again for: once a request. */
@@ -162,7 +157,8 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     if (!chief || !reachesChief(chief, bot, threadId)) return tellThePerson();
     const notices = store.tasks(chief.id).find((candidate) => (candidate.title === input.title || (input.title === INCIDENTS_THREAD_TITLE && candidate.title === OLD_INCIDENTS_THREAD_TITLE)) && !candidate.archivedAt &&
         (!routing || routing.startedBy(candidate.threadId) === (person ?? undefined)))
-      ?? store.createTask(chief.id, input.title, false, undefined, { botId: chief.id, name: chief.name, at: Date.now() });
+      ?? store.createTask(chief.id, input.title, false, undefined, { botId: chief.id, name: chief.name, at: Date.now() }, undefined, undefined, undefined,
+        routing && person ? (created) => routing.open(created.threadId, person) : undefined);
     if (!notices || notices.threadId === threadId) return tellThePerson();
     if (routing && person && routing.startedBy(notices.threadId) === undefined) routing.open(notices.threadId, person);
     store.appendMessage(notices.threadId, {
@@ -230,38 +226,5 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     });
   }
 
-  // Advisory: a delivery fault is logged and never reaches the gate, the turn fold or the caller's own outcome.
-  function reportEscalation(input: {
-    kind: EscalationKind; bot: BotRecord; threadId: string; gate: string; reason: string; alreadyNotified: boolean;
-  }): EscalationOutcome {
-    if (!deps.escalationsEnabled()) return "off";
-    try {
-      const { bot, threadId } = input;
-      if (deps.quietThread?.(bot.id, threadId)) return "skipped";
-      if (input.kind === "needs-input" && deps.assignerOf(threadId)) return "skipped";
-      const task = store.taskByThread(bot.id, threadId);
-      const group = store.groupByThread(threadId);
-      const escalation: Escalation = {
-        kind: input.kind,
-        bot,
-        threadId,
-        title: task?.title ?? null,
-        room: group?.name ?? null,
-        gate: input.gate,
-        reason: redactSecretsInText(input.reason),
-      };
-      const count = escalationLedger.note(threadId);
-      if (count.muted) return "muted";
-      const chief = chiefForBot(store.bots, bot);
-      return deliver({
-        chief: chief && escalationDeliverable(chief, bot) ? chief : null, title: ESCALATIONS_THREAD_TITLE, bot, threadId,
-        chip: escalationChip(escalation), text: escalationText(escalation, count), alreadyNotified: input.alreadyNotified,
-      });
-    } catch (error) {
-      console.warn(`escalation for thread ${input.threadId} not delivered: ${error instanceof Error ? error.message : String(error)}`);
-      return "failed";
-    }
-  }
-
-  return { reportIncident, reportEscalation, incidentRefused, retryRefusal, retryThread };
+  return { reportIncident, incidentRefused, retryRefusal, retryThread };
 }

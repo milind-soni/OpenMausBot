@@ -26,7 +26,12 @@ You'll get a response as soon as possible, normally within a few days.
   shared Full access is on, and get Full-access work done without a card. A worker-only relay token
   is the planned fix.
 - API keys live in `~/.openmausbot/config.json` and are write-only through the API (`configured`
-  booleans out, never values). Any path that echoes a stored secret back — API response, SSE event,
+  booleans out, never values). The packaged desktop app keeps AI provider and service keys in an
+  OS-encrypted store (`credentials.bin`) instead; OpenCode provider keys, per-engine `environment`
+  or `key` values, MCP env and header values and `mcp-oauth.json` stay plaintext on every install,
+  except a key a bot set from a secret card, which `config.json` holds only as a `vault:<id>` pointer
+  into the sealed Vault. Any path
+  that echoes a stored secret back — API response, SSE event,
   log line, argv visible in `ps` — is a vulnerability.
 - Agents run real CLIs (`claude`, `codex`) with the user's own privileges, and the permission broker
   is the consent layer for risky actions. Bypasses of the broker (approving without a user decision,

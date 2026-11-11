@@ -281,6 +281,15 @@ describe.skipIf(process.platform !== "linux")("Linux DEB upgrade hook", () => {
     expect(runRemoveHook(appRoot, "purge").status).toBe(0);
   });
 
+  it("treats pacman's post_remove, which passes the old version, as an uninstall", () => {
+    const { appRoot, apparmorDir } = fixture();
+    expect(runHook(appRoot).status).toBe(0);
+    const profile = path.join(apparmorDir, "openmausbot-browser");
+    const removed = runRemoveHook(appRoot, "0.1.149-1");
+    expect(removed.status, removed.stderr).toBe(0);
+    expect(fs.existsSync(profile)).toBe(false);
+  });
+
   it("removes an already unloaded profile without asking the kernel again", () => {
     const { appRoot, apparmorDir, systemRoot } = fixture();
     expect(runHook(appRoot).status).toBe(0);

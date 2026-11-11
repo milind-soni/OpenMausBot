@@ -31,6 +31,8 @@ export type McpServerListing = (StdioMcpListing | RemoteMcpListing) & {
   bot?: string;
   /** The bots it is off for, because it doesn't start for them. */
   offFor?: string[];
+  /** Its key was deleted from the Vault. */
+  keyOff?: boolean;
 };
 
 export function isRemoteMcpListing(server: McpServerListing): server is RemoteMcpListing {

@@ -1,0 +1,84 @@
+name: Server installer
+
+# The self-hosted server's installer (deploy/install.sh) on a stock ubuntu-24.04 runner, as a person runs it on a fresh
+# server: shellcheck, its checks against made-up servers, then the checks and a real install of the published image
+# (deploy/e2e/run.sh). It talks to no production service and needs no secret.
+on:
+  pull_request:
+    paths:
+      - deploy/install.sh
+      - deploy/e2e/**
+      - deploy/box/**
+      - deploy/update.sh
+      - connector/profiles/**
+      - deploy/Caddyfile
+      - deploy/docker-compose.yml
+      - scripts/server-installer.test.ts
+      - .github/workflows/server-installer.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-installer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: check, install, run again and uninstall on Ubuntu 24.04
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: shellcheck
+        run: shellcheck deploy/install.sh deploy/e2e/run.sh
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: The installer's checks against made-up servers
+        run: pnpm exec vitest run scripts/server-installer.test.ts
+      - name: Leave the 20 GB a server needs free for Docker
+        # The installer refuses a server with less, as it should; a runner sometimes has less to start with.
+        run: |
+          set -euo pipefail
+          free_gb() { df -BG --output=avail /var/lib/docker | tail -n 1 | tr -dc '0-9'; }
+          echo "free for Docker: $(free_gb) GB"
+          if [ "$(free_gb)" -lt 30 ]; then
+            sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+            echo "free for Docker now: $(free_gb) GB"
+          fi
+      - name: This checkout's server image, served from a registry on the runner
+        # Only an image with the hardened profile can run the bots' sandbox; until a release has it, the published
+        # image cannot show the installer turning the sandbox on, so this checkout's is built and installed instead.
+        id: image
+        run: |
+          set -euo pipefail
+          if ! grep -q 'OMB_IMAGE=server' Dockerfile; then
+            echo "this checkout's image has no hardened profile; installing the published release"
+            exit 0
+          fi
+          docker run -d --name installer-registry -p 127.0.0.1:5000:5000 registry:2 >/dev/null
+          docker build -q -t localhost:5000/openmausbot:e2e .
+          docker push -q localhost:5000/openmausbot:e2e
+          docker image rm localhost:5000/openmausbot:e2e >/dev/null
+          echo "image=localhost:5000/openmausbot:e2e" >> "$GITHUB_OUTPUT"
+      - name: Check, install, run again and uninstall
+        env:
+          OUT: ${{ runner.temp }}/server-installer
+          OMB_INSTALL_IMAGE: ${{ steps.image.outputs.image }}
+        run: bash deploy/e2e/run.sh
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: server-installer
+          path: ${{ runner.temp }}/server-installer
+          retention-days: 14

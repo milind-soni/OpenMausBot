@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { BotLogins } from "../bot-logins.ts";
 import { json, readBody } from "../harness/http.ts";
-import { OnePasswordLogins } from "../onepassword.ts";
+import { OnePasswordLogins, sdkOnePasswordClient } from "../onepassword.ts";
+import { fakeOnePasswordSdk } from "../testing/fake-onepassword.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { VaultStore } from "../vault-store.ts";
 import { createLoginRoutes } from "./logins.ts";
@@ -16,6 +17,7 @@ import { createVaultRoutes, VAULT_ERRORS } from "./vault.ts";
 
 const VALUE = "sk_test_fake-route-secret-1";
 const NEW_VALUE = "sk_test_fake-route-secret-2";
+const LINKED_VALUE = "secret_fake-linked-route-3";
 
 const servers: Server[] = [];
 const dirs: string[] = [];
@@ -24,13 +26,18 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-async function serve() {
+async function serve(onePasswordToken: string | null = null) {
   const dir = mkdtempSync(join(tmpdir(), "omb-vault-routes-"));
   dirs.push(dir);
   const store = new VaultStore({ dataDir: dir });
-  const onePassword = new OnePasswordLogins({ token: () => null, grants: () => ({}), connect: async () => { throw new Error("not in this test"); } });
-  const logins = new BotLogins(store, onePassword).routes((id) => ["pepper", "quill"].includes(id));
-  const routes = [createLoginRoutes(logins), createVaultRoutes({ logins, secrets: store })];
+  const { sdk } = fakeOnePasswordSdk({ token: "ops_fake-route-token", vaults: { v1: { title: "Shared", items: [
+    { id: "n1", title: "Notion token", category: "ApiCredentials", urls: [], fields: [{ id: "credential", title: "credential", fieldType: "Concealed", value: LINKED_VALUE }] },
+  ] } } });
+  const onePassword = new OnePasswordLogins({ token: () => onePasswordToken, grants: () => ({}), connect: (token) => sdkOnePasswordClient(sdk, token, "0.0.0") });
+  await onePassword.refresh();
+  const botLogins = new BotLogins(store, onePassword);
+  const logins = botLogins.routes((id) => ["pepper", "quill"].includes(id));
+  const routes = [createLoginRoutes(logins), createVaultRoutes({ logins, secrets: store, linked: () => botLogins.linkedSecrets(), keys: { usedBy: (item) => store.serversUsingKey(item) } })];
   const answers: string[] = [];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -50,6 +57,17 @@ async function serve() {
 }
 
 describe("the Vault routes", () => {
+  it("deleting a secret says which MCP servers lost their key, and a move's secret keeps its id and who may use it", async () => {
+    const { store, call } = await serve();
+    const added = await call("POST", "/api/vault/secrets", { id: "55555555-5555-4555-8555-555555555555", name: "Stripe", value: VALUE, bots: ["pepper"], source: "card", refOnly: true });
+    expect(added).toMatchObject({ status: 201, body: { secret: { id: "55555555-5555-4555-8555-555555555555", source: "card", refOnly: true, bots: ["pepper"] } } });
+    expect((await call("POST", "/api/vault/secrets", { id: "not an id!", name: "x", value: VALUE })).status).toBe(400);
+    store.grantMcpKeys("stripe", ["55555555-5555-4555-8555-555555555555"]);
+    expect(await call("DELETE", "/api/vault/secrets/55555555-5555-4555-8555-555555555555")).toMatchObject({ status: 200, body: { ok: true, keysOff: ["stripe"] } });
+    const plain = await call("POST", "/api/vault/secrets", { name: "Other", value: VALUE });
+    expect(await call("DELETE", `/api/vault/secrets/${plain.body.secret.id}`)).toMatchObject({ status: 200, body: { ok: true } });
+  });
+
   it("add, list, change and delete a secret beside the logins, and never return its value", async () => {
     const { store, call, answers } = await serve();
     await call("POST", "/api/logins", { site: "example.com", username: "alice", password: "fake-route-login-pass" });
@@ -90,5 +108,16 @@ describe("the Vault routes", () => {
     expect((await call("POST", "/api/vault")).status).toBe(405);
     expect((await call("PUT", `/api/vault/secrets/${id}`, {})).status).toBe(405);
     expect(store.secretValues()).toEqual([VALUE]);
+  });
+
+  it("list a linked 1Password secret beside the saved ones, by name only, and never change it", async () => {
+    const { call, answers } = await serve("ops_fake-route-token");
+    await call("POST", "/api/vault/secrets", { name: "Stripe secret key", value: VALUE });
+    const listed = await call("GET", "/api/vault");
+    expect(listed.body.secrets.map((secret: { name: string; source: string }) => [secret.name, secret.source])).toEqual([["Stripe secret key", "settings"], ["Notion token", "linked"]]);
+    expect(listed.body.secrets[1]).toEqual({ id: "1password:v1:n1", name: "Notion token", fields: [], source: "linked", provider: "1password", bots: "all", readOnly: true });
+    expect((await call("DELETE", "/api/vault/secrets/1password:v1:n1")).status).toBe(404);
+    expect((await call("PATCH", "/api/vault/secrets/1password:v1:n1", { name: "x" })).status).toBe(404);
+    for (const answer of answers) expect(answer).not.toContain(LINKED_VALUE);
   });
 });

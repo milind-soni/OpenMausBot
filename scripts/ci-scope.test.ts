@@ -78,7 +78,7 @@ describe("vitest matrix", () => {
     const count = (os: string) => include.filter((entry) => entry.os === os).length;
     expect([count("ubuntu-latest"), count("windows-latest"), count("macos-latest")]).toEqual([8, 8, 4]);
     expect(include.find((entry) => entry.os === "windows-latest" && entry.shard === 8))
-      .toEqual({ os: "windows-latest", part: "shard 8/8", shard: 8, shards: 8, files: "", e2e: "host", node_tests: false, workers: 1 });
+      .toEqual({ os: "windows-latest", part: "shard 8/8", shard: 8, shards: 8, files: "", e2e: "host", node_tests: false, workers: 2 });
     expect(include.filter((entry) => entry.node_tests).map((entry) => [entry.os, entry.shard]))
       .toEqual([["macos-latest", 1], ["ubuntu-latest", 1], ["windows-latest", 1]]);
     expect(include.filter((entry) => entry.e2e === "all").every((entry) => entry.os === "ubuntu-latest")).toBe(true);
@@ -188,6 +188,8 @@ describe("CI outputs", () => {
     expect(out.jobs).toEqual(["build", "vitest"]);
     expect(VITEST_SUBSETS["locale-tests"].files).toEqual([
       "src/",
+      "electron/cua-launch.test.mjs",
+      "electron/cua-windows-isolation.test.mjs",
       "electron/menu.test.mjs",
       "electron/updater.test.mjs",
       "scripts/generate-locale.test.mjs",
@@ -197,6 +199,7 @@ describe("CI outputs", () => {
       "scripts/testing/rail-profile-ui.e2e.test.ts",
       "scripts/testing/secret-card-descriptions.test.ts",
       "scripts/testing/team-own-chat.e2e.test.ts",
+      "scripts/testing/team-side-switch-ui.e2e.test.ts",
       "server/body-thread-guards.e2e.test.ts",
       "server/client-notifications.e2e.test.ts",
       "server/cloud-connections.e2e.test.ts",
@@ -212,19 +215,28 @@ describe("CI outputs", () => {
       "server/cloud-send-store.e2e.test.ts",
       "server/cloud-send.e2e.test.ts",
       "server/cloud-sync.e2e.test.ts",
+      "server/cloud-team-asker-owns.e2e.test.ts",
+      "server/cloud-team-away.e2e.test.ts",
       "server/cloud-team-browser.e2e.test.ts",
       "server/cloud-team-connections.e2e.test.ts",
       "server/cloud-team-engine-homes.e2e.test.ts",
       "server/cloud-team-gateway-mcp.e2e.test.ts",
       "server/cloud-team-inbox.e2e.test.ts",
+      "server/cloud-team-mausbot-reach.e2e.test.ts",
+      "server/cloud-team-new-chat-private.e2e.test.ts",
       "server/cloud-team-open-reach.e2e.test.ts",
+      "server/cloud-team-own-key-apps.e2e.test.ts",
       "server/cloud-team-owners.e2e.test.ts",
       "server/cloud-team-people.e2e.test.ts",
+      "server/cloud-team-per-person.e2e.test.ts",
       "server/cloud-team-phones.e2e.test.ts",
       "server/cloud-team-pictures.e2e.test.ts",
+      "server/cloud-team-presence.e2e.test.ts",
+      "server/cloud-team-privacy-holes.e2e.test.ts",
       "server/cloud-team-private.e2e.test.ts",
       "server/cloud-team-profile.e2e.test.ts",
       "server/cloud-team-requests.e2e.test.ts",
+      "server/cloud-team-routines.e2e.test.ts",
       "server/cloud-team-setup-request.e2e.test.ts",
       "server/cloud-team.e2e.test.ts",
       "server/host/brief-words.test.ts",
@@ -242,6 +254,7 @@ describe("CI outputs", () => {
       "server/shared-computers.e2e.test.ts",
       "server/shared-computers.gate.test.ts",
       "server/team-move.e2e.test.ts",
+      "server/team-welcome.e2e.test.ts",
       "server/use-my-mac.e2e.test.ts",
       "server/workspace-banner.e2e.test.ts",
       "scripts/server-locale-plugin.test.ts",
@@ -520,7 +533,8 @@ describe("the repository's import graph", () => {
       .filter((file) => !/[/\\]ci-scope\.(?:mjs|test\.ts)$/.test(file));
     const mentionsTranslations = (file: string) => {
       const text = readFileSync(file, "utf8");
-      return [...text.matchAll(/locales/g)].some((match) => !/^locales\W{1,6}en\.json/.test(text.slice(match.index, match.index + 24)));
+      // A browser extension's own _locales folder is not one of ours.
+      return [...text.matchAll(/(?<!_)locales/g)].some((match) => !/^locales\W{1,6}en\.json/.test(text.slice(match.index, match.index + 24)));
     };
     const readers = new Set(files.filter(mentionsTranslations));
     const affected = files

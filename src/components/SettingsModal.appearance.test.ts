@@ -306,6 +306,19 @@ describe("Settings → Appearance", () => {
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
+  it("renders, and search finds, every display setting Simple has no row for, in Advanced", () => {
+    const appearance = render();
+    for (const label of ["Interface font", "Chat width", "Choose tools layout", "Show threads", "Pinned bots as circles", "Universal pins",
+      "Show the run card"]) expect(appearance, label).toContain(`aria-label="${label}"`);
+    fixture.section = "general";
+    expect(render()).toContain(">Pinned panels<");
+    const section = (id: string) => SECTIONS.find((entry) => entry.id === id)!;
+    for (const query of ["font", "chat width", "toolbar", "show threads", "circles", "universal", "run card"]) {
+      expect(sectionMatches(section("appearance"), query), query).toBe(true);
+    }
+    expect(sectionMatches(section("general"), "web panel")).toBe(true);
+  });
+
   it("finds chat width and message colors in Appearance", () => {
     const appearance = SECTIONS.find((section) => section.id === "appearance")!;
     for (const query of ["width", "wide", "full width", "bubble", "color"]) {

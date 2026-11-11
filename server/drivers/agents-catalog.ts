@@ -248,13 +248,6 @@ const TOOL_DEFINITIONS = [
     } },
   },
   {
-    name: "raise_escalation",
-    description: "Flag a gate only the person can lift — a permission or decision your work is parked on and you cannot proceed without. One reason line, the person's own words where possible; the Chief of Staff (or the person directly) is told at once. Then end your turn and wait: the gate lifting resumes nothing on its own, so say plainly that you stopped and why. Not for failures (those report themselves), not for a credential or sign-in (use request_credential or request_sign_in, which resume you), and not to ask the person a question you could ask by ending your turn on it.",
-    inputSchema: { type: "object", additionalProperties: false, properties: {
-      reason: { type: "string", minLength: 1, description: "One line: what you need from the person and why your work is parked on it." },
-    }, required: ["reason"] },
-  },
-  {
     name: "list_bots",
     description:
       "List every other bot (agent) you can contact, in every department, with its department, model and current status. Call this to discover exact teammate IDs before assigning work or asking advice with coordinate_bots.",
@@ -511,12 +504,13 @@ const TOOL_DEFINITIONS = [
   {
     name: "fill_login",
     description:
-      "Sign in with a login the person saved in OpenMausBot or in their connected 1Password. Call it on the login page open in your browser: OpenMausBot types the username, password and any one-time code itself, submits each step, and says where the page went; you never see the password. A login fills on its own site, such as any page of example.com. With no saved login for the site, sign in another way the person allowed (a code sent to their own email, which you read and type in, is one), or call request_sign_in.",
+      "Sign in with a login the person saved in OpenMausBot or in their connected 1Password. Call it on the login page open in your browser: OpenMausBot types the username, password and any one-time code itself (also one emailed to a connected mailbox), submits each step, and says where the page went; you never see them. A login fills on its own site, such as any page of example.com. With no saved login for the site, sign in another way the person allowed, or call request_sign_in.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         username: { type: "string", description: "Which saved login to use when the site has more than one." },
+        email: { type: "string" },
         submit: { type: "boolean", description: "false: fill only, you submit." },
       },
     },
@@ -930,7 +924,6 @@ function catalogTools(profile: CatalogProfile) {
   const BOT_SCOPED_TOOLS = TOOL_DEFINITIONS.filter((tool) =>
     (profile.botId === WATCHER_OPTIONS_CARD_BOT_ID || !WATCHER_TOOL_NAMES.has(tool.name)) &&
     (profile.memoryEnabled !== false || (tool.name !== "memory_update" && tool.name !== "memory_log")) &&
-    (profile.escalations === true || tool.name !== "raise_escalation") &&
     (profile.computerSelection === true || tool.name !== "select_computer") &&
     (profile.room !== true || !ROOM_REFUSED_TOOL_NAMES.has(tool.name)) &&
     (profile.imageGeneration === true || !IMAGE_TOOL_NAMES.has(tool.name)) &&

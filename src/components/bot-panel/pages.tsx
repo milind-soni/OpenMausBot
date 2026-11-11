@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from "react";
-import { FolderOpen, Plus, Server } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { FileText, FolderOpen, Plus, Server } from "lucide-react";
 
 import { appSwitchPatch } from "@/lib/bot-app-access";
+import { cn } from "@/lib/cn";
 import { skillsLibraryEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import { mcpServersForBot, mcpServersOfBot, mcpSwitch, useMcpServers } from "@/lib/mcp-servers";
@@ -13,10 +14,14 @@ import { shortPath } from "@/lib/short-path";
 import { skillImportLines } from "@/lib/skill-import";
 import { useStore, type Bot } from "@/state/store";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
+import { connectAppFromBot } from "../AppGrantPrompt";
 import { ServiceIcon } from "../ServiceIcon";
 import { RoutineEditor } from "../RoutinesPage";
 import { useWorkingFolder } from "../bot-settings/AccessSection";
 import { useBotEditor } from "../bot-settings/BotEditorContext";
+import { inputCls } from "../bot-settings/field";
+import { ConflictNotice } from "../bot-settings/MemorySection";
+import { OrgSkillsCard } from "../bot-settings/OrgSkillsCard";
 import { SkillReviewDialog, skillSwitchOn, useManagedSkills, type ManagedSkill } from "../bot-settings/SkillsSection";
 import { useBotApps, type BotApp } from "../bot-settings/useBotApps";
 import { useChoosesVisibility, VisibilitySection } from "../bot-settings/VisibilitySection";
@@ -27,7 +32,7 @@ import { useOpenComputer, WherePage } from "./ComputerTab";
 import { SettingsPage } from "./SettingsPage";
 import { panelMemoryNotes, withMemoryNote, withoutMemoryNote, type PanelMemoryNote } from "./memory-notes";
 import type { SimplePageId } from "./page-registry";
-import { BotSwitch, buttonCls, Card, LinkRow, NoteRow, RadioRow, RowIcon, rowCls, RowText, SwitchRow, TextRow, TrashButton } from "./rows";
+import { BotSwitch, buttonCls, Card, ColRow, LinkRow, NoteRow, RadioRow, RowIcon, rowCls, RowText, SwitchRow, TextRow, TrashButton } from "./rows";
 import { MemoryUpkeepCards } from "./MemoryUpkeepCards";
 import { useMemoryDoc } from "./use-memory-doc";
 
@@ -117,10 +122,7 @@ export function AppsPage({ bot, derived }: PageContext) {
         <LinkRow
           data-panel-link="add-app"
           icon={Plus}
-          onClick={() => {
-            dispatch({ type: "toggleSettings", open: false });
-            dispatch({ type: "togglePlugins", open: true, surface: "apps" });
-          }}
+          onClick={() => connectAppFromBot(dispatch, bot.id)}
         >
           {t("botPanel.apps.connectAnother")}
         </LinkRow>
@@ -166,11 +168,13 @@ export function RoutinesPage({ bot, derived }: PageContext) {
 export function MemoryPage({ bot }: PageContext) {
   const memory = useMemoryDoc(bot);
   const [draft, setDraft] = useState("");
+  const [asText, setAsText] = useState<{ botId: string; doc: MemoryDoc } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const memoryOn = bot.memoryEnabled !== false;
   const notes = memory.docs ? panelMemoryNotes(memory.docs) : null;
   const index = memory.docs?.find((doc) => doc.path === MEMORY_INDEX) ?? null;
+  useEffect(() => setAsText(null), [bot.id, memoryOn]);
 
   const change = async (save: () => Promise<boolean>) => {
     if (saving) return false;
@@ -210,6 +214,21 @@ export function MemoryPage({ bot }: PageContext) {
     if (await write(index, withMemoryNote(index.text, draft))) setDraft("");
   };
 
+  if (memoryOn && asText?.botId === bot.id) {
+    return (
+      <MemoryTextEditor
+        bot={bot}
+        doc={asText.doc}
+        mine={memory.mine}
+        onDone={(saved) => {
+          if (saved) memory.setDoc(saved);
+          setAsText(null);
+          setError(null);
+        }}
+      />
+    );
+  }
+
   return (
     <>
       <Card>
@@ -241,10 +260,100 @@ export function MemoryPage({ bot }: PageContext) {
             onChange={setDraft}
             onSubmit={() => void add()}
           />
+          {index && (
+            <LinkRow data-panel-link="memory-text" icon={FileText} onClick={() => setAsText({ botId: bot.id, doc: index })}>
+              {t("botPanel.memory.editText")}
+            </LinkRow>
+          )}
         </Card>
       )}
       {memoryOn && !memory.mine && <MemoryUpkeepCards bot={bot} onChanged={memory.reload} />}
     </>
+  );
+}
+
+/** The whole MEMORY.md as text, saved against the hash it was opened at, so a note the bot writes meanwhile is a
+ * conflict to settle, never silently lost: Reload shows the bot's version and keeps what the person typed beside it. */
+function MemoryTextEditor({ bot, doc, mine, onDone }: {
+  bot: Bot;
+  doc: MemoryDoc;
+  mine: boolean;
+  onDone: (saved: MemoryDoc | null) => void;
+}) {
+  // A file not written yet has the empty file's hash, so the bot creating it meanwhile is a conflict too.
+  const [base, setBase] = useState({ text: doc.text, hash: doc.hash });
+  const [text, setText] = useState(doc.text);
+  const [conflict, setConflict] = useState<{ current: string; currentHash: string } | null>(null);
+  const [savedDraft, setSavedDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // The file is saved either way; a save that lands after the person moved to another bot must not show in that bot's list.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  const save = async (expectedHash: string) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await saveMemoryDoc(bot.id, doc.path, text, expectedHash, mine);
+      if (!mounted.current) return;
+      if (result.ok) onDone(result.doc);
+      else setConflict({ current: result.current, currentHash: result.currentHash });
+    } catch (cause) {
+      setError(errorText(cause, t("botPanel.library.memoryError")));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const reload = () => {
+    if (!conflict) return;
+    // A second Reload keeps the first kept draft too.
+    setSavedDraft((kept) => (kept === null || kept === text ? text : `${kept}\n\n${text}`));
+    setBase({ text: conflict.current, hash: conflict.currentHash });
+    setText(conflict.current);
+    setConflict(null);
+  };
+
+  return (
+    <Card>
+      <ColRow data-panel-row="memory-text">
+        {conflict && <ConflictNotice botName={bot.name} busy={saving} onReload={reload} onOverwrite={() => void save(conflict.currentHash)} />}
+        <textarea
+          data-memory-text=""
+          className={cn(inputCls, "min-h-[280px] resize-y font-mono text-[13px] leading-relaxed")}
+          value={text}
+          placeholder={t("memory.indexPlaceholder")}
+          aria-label={t("memory.botMemory")}
+          readOnly={saving}
+          onChange={(event) => setText(event.target.value)}
+        />
+        {error && <div className="text-[13px] text-warning">{error}</div>}
+        {savedDraft !== null && (
+          <div data-memory-draft="">
+            <div className="mb-1 text-[12px] text-ink-secondary">{t("memory.unsavedDraft")}</div>
+            <pre className="max-h-[160px] overflow-auto whitespace-pre-wrap rounded-lg border border-hairline/40 bg-inset p-3 font-mono text-[12px] leading-relaxed text-ink">
+              {savedDraft}
+            </pre>
+            <button type="button" className={cn(buttonCls, "mt-1")} onClick={() => setSavedDraft(null)}>{t("memory.dismissDraft")}</button>
+          </div>
+        )}
+        <div className="flex justify-end gap-2">
+          <button type="button" className={buttonCls} disabled={saving} onClick={() => onDone(null)}>{t("common.cancel")}</button>
+          <button
+            type="button"
+            data-panel-done="memory-text"
+            className={buttonCls}
+            disabled={saving || text === base.text}
+            onClick={() => void save(base.hash)}
+          >
+            {saving ? t("memory.saving") : t("memory.save")}
+          </button>
+        </div>
+      </ColRow>
+    </Card>
   );
 }
 
@@ -259,15 +368,12 @@ export function SkillsPage({ bot }: PageContext) {
 
   const remove = async (skill: ManagedSkill) => {
     if (skills.working) return;
-    if (!window.confirm(t("botPanel.skills.removeConfirm", { name: skill.name }))) return;
+    if (!window.confirm(t(skill.origin === "library" ? "skills.unassignConfirm" : "botPanel.skills.removeConfirm", { name: skill.name }))) return;
     skills.setWorking(skill.name);
     skills.setError("");
     try {
-      if (skill.origin === "library") await skills.putAssignments(skill.name, true);
-      else {
-        await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, { method: "DELETE" });
-        await skills.refresh();
-      }
+      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, { method: "DELETE" });
+      await skills.refresh();
     } catch (cause) {
       skills.setError(errorText(cause, t("botPanel.skills.removeFailed")));
     } finally {
@@ -318,11 +424,12 @@ export function SkillsPage({ bot }: PageContext) {
             checked={skillSwitchOn(skill)}
             disabled={Boolean(skills.working)}
             onChange={() => void skills.toggle(skill)}
-            extra={<TrashButton data-panel-action={`remove-skill:${skill.name}`} label={t("botPanel.skills.remove", { name: skill.name })} disabled={Boolean(skills.working)} onClick={() => void remove(skill)} />}
+            extra={skill.origin === "imported" || skill.origin === "native" ? undefined : <TrashButton data-panel-action={`remove-skill:${skill.name}`} label={t("botPanel.skills.remove", { name: skill.name })} disabled={Boolean(skills.working)} onClick={() => void remove(skill)} />}
           />
         ))}
         {skills.error && !skills.reviewing && <NoteRow tone="warn">{skills.error}</NoteRow>}
       </Card>
+      <OrgSkillsCard bot={bot} onAdded={() => void skills.refresh()} />
       <Card>
         <TextRow
           data-panel-form="skill-import"

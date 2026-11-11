@@ -186,4 +186,25 @@ describe("routines.json saves", () => {
     deliver({ type: "item.completed", itemType: "assistant_text", text: "Nearly there." });
     expect(onDisk().output).toBe("Nearly there.");
   });
+
+  it("retry failed progress writes before stopping for a backup or shutdown", async () => {
+    const { manager, routine, onDisk, deliver } = setup();
+    manager.runNow(routine.id);
+    await manager.tick();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      deliver({ type: "item.completed", itemType: "assistant_text", text: "Keep this completed step." });
+      vi.mocked(fs.renameSync).mockImplementationOnce(() => { throw Object.assign(new Error("disk full"), { code: "ENOSPC" }); });
+      vi.advanceTimersByTime(RUN_PROGRESS_WINDOW_MS);
+      expect(error).toHaveBeenCalled();
+      expect(onDisk().output).toBeUndefined();
+      manager.stop();
+      expect(onDisk().output).toBe("Keep this completed step.");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      error.mockRestore();
+      manager.close();
+    }
+  });
 });

@@ -156,6 +156,25 @@ jobs:
           test -n "$sse"                                                           # SSE streams, not buffered
           grep -q '"baseUrl":"https://localhost"' <<<"$(body -b "$jar" $H/api/webhooks)"   # OMB_WEBHOOK_PUBLIC_URL is advertised
           test "$(code $H/api/bots)" = 403                                        # and without the cookie it is still closed
+          # Caddy has its own container and reaches the server over a Unix socket, so HTTPS comes back by itself
+          # whenever the server does. When Caddy shared the server's network, each of these left it in the old,
+          # dead network: 443 refused while both containers said healthy.
+          C="docker compose -f deploy/docker-compose.yml"
+          back() { # $1: what happened; HTTPS through Caddy answers again within two minutes, and is still remote
+            for i in $(seq 1 60); do
+              if grep -q '^{"app":"openmausbot"}$' <<<"$(body $H/api/health || true)" && [ "$(code $H/api/bots)" = 403 ]; then echo "HTTPS back after: $1"; return 0; fi
+              sleep 2
+            done
+            $C ps; $C logs --tail 30; echo "HTTPS did not come back after: $1"; return 1
+          }
+          $C restart && back "docker compose restart"
+          launcher=$(docker top "$($C ps -q omb)" -eo pid,args | awk '/server-launcher/ { print $1; exit }')
+          test -n "$launcher"
+          sudo kill -9 "$launcher" && sleep 5 && back "kill -9 of the server process, restarted by Docker"
+          test "$(docker inspect -f '{{.RestartCount}}' "$($C ps -q omb)")" -ge 1
+          $C stop omb && $C start omb && back "docker compose stop omb, then start omb"
+          $C stop && $C start && back "docker compose stop, then start (the documented backup)"
+          grep -q error <<<"$(body -X POST $H/hooks/wh_nope)"                      # hooks reach the receiver's socket again
           docker compose -f deploy/docker-compose.yml down -v
       - name: Cloud Pro home image (--target cloud-home) boots, stays private and pairs on a signed request
         # The Fly home machine, built from the same runtime as the image above, with the environment

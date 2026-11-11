@@ -1,4 +1,3 @@
-import { createBotLimit } from "./host/starter-bot-limit.ts";
 import { describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,7 +11,7 @@ import type { BotRecord, OptionCardData } from "./store.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { DirectApply } from "./direct-apply.ts";
 
-function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean }>, plan: { starter: boolean } = { starter: false }) {
+function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean }>) {
   const bots: BotRecord[] = [];
   const messages: Array<{ id: string; role?: string; card?: OptionCardData }> = [];
   const teams = ["", "Work", "Engineering", "Private"];
@@ -50,7 +49,7 @@ function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean 
   const targetBusy = vi.fn((id: string, _sourceThreadId?: string) => Boolean(store.bot(id)?.busy));
   const validateChange = vi.fn();
   const canPersist = vi.fn((): { ok: true } | { ok: false; status: number; error: string } => ({ ok: true }));
-  const service = new TeamSetupRequestService({ store, teams: () => teams, maxBots: 100, hasTeamAuthority, botLimit: createBotLimit({ starter: () => plan.starter, bots: () => bots }),
+  const service = new TeamSetupRequestService({ store, teams: () => teams, maxBots: 100, hasTeamAuthority,
     canPersist, ownsThread: () => sourceExists, targetBusy, deleteBot, autoApply, validateChange,
     validateModel: (selection, current) => {
       if (!({ claude: ["sonnet", "opus"], codex: ["gpt-fixture"] }[selection.instanceId]?.includes(selection.model))) return "Model is not in the current catalog";
@@ -113,26 +112,24 @@ describe("reviewed Chief team setup", () => {
     expect(h.peer.chiefOfStaff).toBe(true);
     expect((await h.resolve(replace.requestId))?.duplicate).toBe(true);
   });
-  it.each(["conflict", "scope", "busy", "peer", "revision"])("cancels promotion after a %s change without partial mutation", async change => {
+  it.each(["conflict", "scope", "busy", "revision"])("cancels promotion after a %s change without partial mutation", async change => {
     const h = harness(); h.peer.section = "Engineering";
     const card = h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }]);
     if (change === "conflict") h.bot("New Chief", { section: "Engineering", chiefOfStaff: true });
     if (change === "scope") h.chief.managedSections = [];
     if (change === "busy") h.peer.busy = true;
-    if (change === "peer") h.chief.peers = [];
     if (change === "revision") h.peer.chiefOfStaff = true;
     const before = structuredClone(h.store.bots);
     expect((await h.resolve(card.requestId))?.result.state).toBe("cancelled");
     expect(h.store.bots).toEqual(before);
     expect(h.apply).not.toHaveBeenCalled();
   });
-  it("rejects malformed leadership and promotion outside team or peer scope", () => {
+  it("rejects malformed leadership and promotion outside the team", () => {
     const h = harness();
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: "true" } }])).toThrow();
     h.peer.section = "Private";
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }])).toThrow(/authorized/);
-    h.peer.section = "Engineering"; h.chief.peers = [];
-    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }])).toThrow(/peer scope/);
+    h.peer.section = "Engineering";
     h.chief.chiefOfStaff = false;
     expect(() => h.propose([{ action: "update", botId: h.chief.id, fields: { chiefOfStaff: true } }])).toThrow(/Only an active Chief/);
     expect(h.messages).toHaveLength(0);
@@ -269,11 +266,9 @@ describe("reviewed Chief team setup", () => {
     expect((await h.resolve(card.requestId))?.result).toMatchObject({ state: "cancelled", error: "@Ada changed. This setup was cancelled; review a new proposal." });
     expect(h.apply).not.toHaveBeenCalled();
   });
-  it("preserves existing elevated permissions and peer allowlists", () => {
+  it("preserves existing elevated permissions", () => {
     const h = harness(); h.peer.approvalMode = "full";
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { modelSelection: { instanceId: "codex", model: "gpt-fixture" } } }])).toThrow(/incompatible/);
-    h.chief.peers = [];
-    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { title: "X" } }])).toThrow(/peer scope/);
   });
   it("routes separately confirmed deletion through lifecycle guards once and never permits self-deletion", async () => {
     const h = harness();
@@ -622,63 +617,30 @@ describe("MausBot's Chief-level team setup", () => {
   });
 });
 
-describe("a Starter Cloud's limit on bots", () => {
+describe("a Chief making bots, whatever the plan", () => {
   const SELECTION = { instanceId: "claude", model: "sonnet" };
   const specialist = (key: string) => ({ action: "create", key, fields: { name: key, title: "Specialist", soul: "Work.", modelSelection: SELECTION, section: "Work" } });
   /** Clive and Ada are two; `others` more makes the count. */
-  const full = (others: number, starter = true) => {
-    const plan = { starter };
-    const app = harness(undefined, plan);
+  const full = (others: number) => {
+    const app = harness();
     for (let i = 0; i < others; i++) app.bot(`Other${i}`);
-    return { ...app, plan };
+    return app;
   };
 
-  it("refuses a proposal at the limit with the words a bot acts on, and shows no card", () => {
-    const app = full(3);
-    expect(() => app.propose([specialist("Scout")])).toThrow(expect.objectContaining({ status: 409, code: "bot_limit", message: expect.stringContaining("Do not retry") }));
-    expect(app.messages).toHaveLength(0);
-    expect(app.apply).not.toHaveBeenCalled();
+  it("proposes a sixth bot and more: making them is never refused for the plan", () => {
+    const app = full(10);
+    expect(app.propose([specialist("Scout"), specialist("Writer")]).requestId).toBeTruthy();
   });
 
-  it("refuses a whole setup that doesn't fit: no bot of it is made", async () => {
-    const app = full(2);
+  it("applies a whole setup past five bots", async () => {
+    const app = full(4);
     app.autoApply.mockReturnValue({ source: "profile" } as never);
-    await expect(app.submit([specialist("Scout"), specialist("Writer")])).rejects.toMatchObject({ status: 409, code: "bot_limit" });
-    expect(app.apply).not.toHaveBeenCalled();
-    expect(app.store.bots).toHaveLength(4);
+    await app.submit([specialist("Scout"), specialist("Writer")]);
+    expect(app.apply).toHaveBeenCalledTimes(1);
   });
 
-  it("takes a setup that fits", () => {
-    const app = full(2);
-    expect(app.propose([specialist("Scout")]).requestId).toBeTruthy();
-  });
-
-  it("at the limit still changes the bots it has", () => {
-    const app = full(3);
-    const proposal = app.propose([{ action: "update", botId: app.peer.id, fields: { title: "Lead" } }]);
-    expect(proposal.requestId).toBeTruthy();
-  });
-
-  it("asks again when the person confirms, and tells them, not the bot", async () => {
-    const app = full(2);
-    const { requestId } = app.propose([specialist("Scout")]);
-    app.bot("Late arrival");
-    const answered = await app.resolve(requestId);
-    expect(app.apply).not.toHaveBeenCalled();
-    expect(answered?.result).toMatchObject({ state: "cancelled", error: "You've reached the 5 bots Starter includes. To create more, upgrade this Cloud." });
-  });
-
-  it("makes what was proposed on Starter once the plan is bigger", async () => {
-    const app = full(2);
-    const { requestId } = app.propose([specialist("Scout")]);
-    app.bot("Late arrival");
-    app.plan.starter = false;
-    const answered = await app.resolve(requestId);
-    expect(answered?.result).toMatchObject({ state: "applied" });
-  });
-
-  it("has no such limit on another plan", () => {
-    const app = full(10, false);
-    expect(app.propose([specialist("Scout")]).requestId).toBeTruthy();
+  it("still holds the workspace's own ceiling", () => {
+    const app = full(97);
+    expect(() => app.propose([specialist("Scout"), specialist("Writer")])).toThrow(expect.objectContaining({ status: 409, message: "This setup exceeds the workspace bot limit" }));
   });
 });

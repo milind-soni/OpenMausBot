@@ -1,6 +1,8 @@
 // ~/.openmausbot/config.json, with env vars overriding its credentials.
 import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { dataHome } from "./data-dir.ts";
+import { signInFromEnv } from "./sign-in-env.ts";
+export { signInFromEnv };
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
@@ -29,7 +31,7 @@ import { deciderConfigSchema, type DeciderConfig } from "./decider/config.ts";
 import { liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } from "./live-config.ts";
 import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
 import { roomContextSettings } from "./room-context-settings.ts";
-import { MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES, MAX_LOCAL_VM_MAX_INSTANCES, MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES, MIN_LOCAL_VM_MAX_INSTANCES } from "./local-vm-settings.ts";
+import { localVmConfigSchema } from "./local-vm-settings.ts";
 export * from "./local-vm-settings.ts";
 
 const optionalText = z.string().optional();
@@ -87,23 +89,6 @@ const mcpConfigSchema = z.object({
     .max(MAX_MCP_CALL_TIMEOUT_MINUTES)
     .optional(),
 }).strict();
-/** Bot desktop isolation, default "shared"; `maxInstances` caps per-bot desktops or pool seats. Switching modes cold-starts every desktop. */
-const localVmConfigSchema = z.object({
-  mode: z.enum(["shared", "per-bot", "pool"]).optional(),
-  maxInstances: z
-    .number()
-    .int()
-    .min(MIN_LOCAL_VM_MAX_INSTANCES)
-    .max(MAX_LOCAL_VM_MAX_INSTANCES)
-    .optional(),
-  idleTimeoutMinutes: z
-    .number()
-    .int()
-    .min(MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES)
-    .max(MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES)
-    .optional(),
-  preserveInstalledApps: z.boolean().optional(),
-});
 /** A named browser session; its id names a durable Electron partition. */
 const browserProfileSchema = z.object({
   // Lowercase only: Chromium partition directories collide on case-insensitive filesystems.
@@ -258,8 +243,6 @@ const featureConfigSchema = z.object({
   roomMemoryCapture: z.boolean().optional(),
   /** Room jobs to several members run side by side, each in a thread of its own. Off unless true. */
   parallelRoomJobs: z.boolean().optional(),
-  /** A teammate parked on a gate only the person can lift is reported to its Chief of Staff. Off unless true. */
-  chiefEscalations: z.boolean().optional(),
   acpPlanLines: z.boolean().optional(), // An ACP agent's plan as activity lines. Off unless true.
 }).extend({ agentsToolBridge: z.boolean().optional(), savedSteps: z.boolean().optional() }); // agentsToolBridge: the find_tool / use_tool bridge, off unless true; savedSteps: repeat a computer task from its saved steps, on unless false
 const onboardingConfigSchema = z.object({
@@ -339,7 +322,7 @@ const appConfigSchema = z.object({
   mistral: z.object({ key: optionalText }).optional(),
   cerebras: z.object({ key: optionalText }).optional(), treg: z.object({ key: optionalText }).optional(), postiz: z.object({ key: optionalText, url: optionalText }).optional(),
   groq: z.object({ key: optionalText, url: optionalText }).optional(),
-  greenference: z.object({ key: optionalText }).optional(),
+  greenference: z.object({ key: optionalText }).optional(), modelgo: z.object({ key: optionalText }).optional(),
   meta: z.object({ key: optionalText, url: optionalText }).optional(),
   deepseek: z.object({ key: optionalText }).optional(),
   xai: z.object({ key: optionalText, url: optionalText }).optional(),
@@ -469,7 +452,7 @@ export interface AppConfig extends HelperConfig {
   mistral?: { key?: string };
   cerebras?: { key?: string }; treg?: { key?: string }; /** Postiz: an organisation API key and the server it belongs to (blank: Postiz Cloud). */ postiz?: { key?: string; url?: string };
   groq?: { key?: string; url?: string };
-  greenference?: { key?: string };
+  greenference?: { key?: string }; modelgo?: { key?: string };
   meta?: { key?: string; url?: string };
   /** DeepSeek API key for the DeepSeek Harness engine (`dsh`). */
   deepseek?: { key?: string };
@@ -499,8 +482,8 @@ export interface AppConfig extends HelperConfig {
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
-  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean };
-  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; chiefEscalations?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean; savedSteps?: boolean };
+  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean; memoryGb?: number; cpus?: number };
+  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean; savedSteps?: boolean };
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[]; firstTurnAt?: string };
   browserProfiles?: BrowserProfile[];
   browserEngine?: BrowserEngineConfig;
@@ -748,7 +731,7 @@ export function loadConfig(): AppConfig {
   }
   // Env wins over the file for every credential: the desktop shell injects them as env at spawn.
   for (const [name, env] of [["mistral", "MISTRAL_API_KEY"], ["cerebras", "CEREBRAS_API_KEY"], ["groq", "OMB_GROQ_API_KEY"], ["meta", "OMB_META_API_KEY"],
-    ["deepseek", "OMB_DEEPSEEK_API_KEY"], ["greenference", "OMB_GREENFERENCE_API_KEY"], ["xai", "XAI_API_KEY"]] as const) {
+    ["deepseek", "OMB_DEEPSEEK_API_KEY"], ["greenference", "OMB_GREENFERENCE_API_KEY"], ["modelgo", "OMB_MODELGO_API_KEY"], ["xai", "XAI_API_KEY"]] as const) {
     cfg[name] = { ...cfg[name], ...(process.env[env] !== undefined ? { key: process.env[env] } : {}) };
   }
   if (process.env.OMB_TREG_KEY !== undefined) cfg.treg = { ...cfg.treg, key: process.env.OMB_TREG_KEY }; if (process.env.OMB_POSTIZ_API_KEY !== undefined) cfg.postiz = { ...cfg.postiz, key: process.env.OMB_POSTIZ_API_KEY };
@@ -785,12 +768,8 @@ export function loadConfig(): AppConfig {
   if (process.env.OMB_OPENAI_IMAGE_KEY !== undefined) cfg.imageGen.key = process.env.OMB_OPENAI_IMAGE_KEY;
   if (process.env.OMB_CUSTOM_IMAGE_KEY !== undefined) cfg.imageGen.customApiKey = process.env.OMB_CUSTOM_IMAGE_KEY;
   if (process.env.OMB_GEMINI_IMAGE_KEY !== undefined) cfg.imageGen.geminiKey = process.env.OMB_GEMINI_IMAGE_KEY;
-  const splitEmails = (value: string) => value.split(/[,\s]+/).map((entry) => entry.trim().toLowerCase()).filter(Boolean);
-  if (process.env.OMB_SIGNIN_EMAILS !== undefined || process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined) {
-    cfg.signIn = { ...cfg.signIn };
-    if (process.env.OMB_SIGNIN_EMAILS !== undefined) cfg.signIn.admins = splitEmails(process.env.OMB_SIGNIN_EMAILS);
-    if (process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined) cfg.signIn.members = splitEmails(process.env.OMB_SIGNIN_MEMBER_EMAILS);
-  }
+  const signInEnv = signInFromEnv();
+  if (signInEnv.admins || signInEnv.members) cfg.signIn = { ...cfg.signIn, ...signInEnv };
   return cfg;
 }
 
@@ -813,7 +792,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.mistral?.key, "MISTRAL_API_KEY"],
     [patch.cerebras?.key, "CEREBRAS_API_KEY"], [patch.treg?.key, "OMB_TREG_KEY"], [patch.postiz?.key, "OMB_POSTIZ_API_KEY"],
     [patch.groq?.key, "OMB_GROQ_API_KEY"],
-    [patch.greenference?.key, "OMB_GREENFERENCE_API_KEY"],
+    [patch.greenference?.key, "OMB_GREENFERENCE_API_KEY"], [patch.modelgo?.key, "OMB_MODELGO_API_KEY"],
     [patch.meta?.key, "OMB_META_API_KEY"],
     [patch.deepseek?.key, "OMB_DEEPSEEK_API_KEY"],
     [patch.anthropic?.key, "OMB_ANTHROPIC_API_KEY"],
@@ -930,7 +909,7 @@ export function saveConfig(
   const keepImageModels = keepKeysOutOfImageModels(disk, checkedPatch.imageGen);
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "postiz", "groq", "greenference", "meta", "deepseek", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "postiz", "groq", "greenference", "modelgo", "meta", "deepseek", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
@@ -1129,6 +1108,7 @@ export function instanceOwnsRouting(
       return own(entry.environment?.GROQ_API_KEY) || ownUrl("https://api.groq.com/openai/v1", cfg.groq?.url);
     case "greenference":
       return own(entry.environment?.GREENFERENCE_API_KEY) || ownUrl("https://llm.eu.greenference.com/v1");
+    case "modelgo": return own(entry.environment?.MODELGO_API_KEY) || ownUrl("https://api.modelgo.ai/v1");
     case "meta":
       return own(entry.environment?.META_API_KEY) || ownUrl("https://api.meta.ai/v1", cfg.meta?.url);
     case "deepseekAgent":
@@ -1148,7 +1128,7 @@ function injectedEnvironment(cfg: AppConfig, instanceId: string, driver: string)
   if (driver === "mistral" && cfg.mistral?.key) environment.set("MISTRAL_API_KEY", cfg.mistral.key);
   if (driver === "cerebras" && cfg.cerebras?.key) environment.set("CEREBRAS_API_KEY", cfg.cerebras.key);
   if (driver === "groq" && cfg.groq?.key) environment.set("GROQ_API_KEY", cfg.groq.key);
-  if (driver === "greenference" && cfg.greenference?.key) environment.set("GREENFERENCE_API_KEY", cfg.greenference.key);
+  if (driver === "greenference" && cfg.greenference?.key) environment.set("GREENFERENCE_API_KEY", cfg.greenference.key); if (driver === "modelgo" && cfg.modelgo?.key) environment.set("MODELGO_API_KEY", cfg.modelgo.key);
   if (driver === "meta" && cfg.meta?.key) environment.set("META_API_KEY", cfg.meta.key);
   if (driver === "deepseekAgent" && cfg.deepseek?.key) environment.set("DEEPSEEK_API_KEY", cfg.deepseek.key);
   if (driver === "grok" && cfg.xai?.key) environment.set("XAI_API_KEY", cfg.xai.key);
