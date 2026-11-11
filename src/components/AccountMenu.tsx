@@ -74,13 +74,14 @@ export function cloudRowLabel(view: AccountsView | null): string {
  * in its ＋; with no rail beside this page (nothing to list but This computer, or the person hid it) it is here. On another page,
  * one row that opens the sheet, with no address. Signed out: nothing, as Settings has the sign-in. */
 export function accountMenuItems({ view, openSheet, noRail, signOut, add }: AccountsAccess): SidebarMenuItem[] {
-  if (openSheet) return [{ key: "accounts-sheet", label: t("accounts.manage"), icon: <UserRound size={18} />, onSelect: openSheet }];
+  if (openSheet) return [{ key: "accounts-sheet", label: t("accounts.manage"), icon: <UserRound size={16} />, onSelect: openSheet }];
   const active = view?.active;
   if (!active) return [];
+  // The menu's header already names the account in use: its own row shows only when it needs signing in again.
   return [
-    { key: "accounts-active", heading: t("accounts.heading"), label: active.email, title: active.email, checked: true, icon: <Check size={18} />, disabled: !active.signIn, ...(active.signIn ? { subtitle: t("accounts.needsSignIn") } : {}), onSelect: () => { if (active.signIn) add(active.email); } },
-    ...(noRail ? [{ key: "accounts-add", label: t("accounts.add"), icon: <Plus size={18} />, onSelect: () => add() }] : []),
-    { key: "accounts-sign-out", label: t("accounts.signOut"), icon: <LogOut size={18} />, onSelect: () => signOut(active.id) },
+    ...(active.signIn ? [{ key: "accounts-active", label: active.email, title: active.email, icon: <Check size={16} />, subtitle: t("accounts.needsSignIn"), onSelect: () => add(active.email) }] : []),
+    ...(noRail ? [{ key: "accounts-add", label: t("accounts.add"), icon: <Plus size={16} />, onSelect: () => add() }] : []),
+    { key: "accounts-sign-out", label: t("accounts.signOut"), icon: <LogOut size={16} />, onSelect: () => signOut(active.id) },
   ];
 }
 

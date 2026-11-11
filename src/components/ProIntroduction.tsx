@@ -5,7 +5,7 @@ import { useStore } from "@/state/store";
 import { buyOfferAllowed, cloudPlanLine, cloudPlanView, moneyBackLine, offerTrialDays, usd, type CloudPlanView } from "@/lib/cloud-plan";
 import { useCloudOffer } from "@/lib/use-cloud-offer";
 import { t } from "@/lib/i18n";
-import { SettingRow } from "./SettingsPrimitives";
+import { SettingRow, SettingsLinkRow } from "./SettingsPrimitives";
 import { UpgradeButton, type UpgradeUi } from "./CloudUsageMeter";
 import type { CloudUsage } from "../../electron/cloud-home.mjs";
 
@@ -108,4 +108,10 @@ export function CloudPlanFootnote() {
   const offer = useCloudOffer(offering, plan?.account?.offer);
   if (!offering) return null;
   return [t("pro.disclaimer"), moneyBackLine(offer)].filter(Boolean).join(" ");
+}
+
+/** Plan & billing's own row for the plans on offer. */
+export function ProCompareRow() {
+  const { dispatch } = useStore();
+  return <SettingsLinkRow title={t("pro.seePlans")} onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })} data={{ "data-plan-compare": "" }} />;
 }

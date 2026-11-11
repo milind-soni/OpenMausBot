@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
-import { Card, SIMPLE_CARD } from "./SettingsPrimitives";
+import { Card, SIMPLE_CARD, SettingsEmptyRow, SettingsGroup, SettingsLook, SettingsRows } from "./SettingsPrimitives";
 import { UsageSummaryCard } from "./CloudUsageMeter";
 import { formatPlanSpend, type PlanSpend } from "@/lib/plan-spend";
 
@@ -235,6 +235,20 @@ export function PlanUsageSummary() {
 
 export function PlanUsage() {
   const { report, loading, error, now, load } = usePlanUsage();
+  const settings = useContext(SettingsLook);
+
+  // Settings: an empty state is one quiet row, and Refresh is the section's action.
+  if (settings && (!report || report.providers.length === 0)) {
+    return (
+      <SettingsGroup label={t("settings.spending.aiLimits")} block="plan-usage"
+        actions={<button type="button" onClick={() => void load(true)} disabled={loading} className="settings-quiet flex cursor-pointer items-center gap-1.5">
+          {loading ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <RefreshCw size={14} aria-hidden="true" />}{t("planUsage.refresh")}
+        </button>}
+        footnote={error ? <span role="alert" className="text-danger">{error}</span> : undefined}>
+        <SettingsRows><SettingsEmptyRow>{loading && !report ? t("planUsage.loading") : t("planUsage.emptyShort")}</SettingsEmptyRow></SettingsRows>
+      </SettingsGroup>
+    );
+  }
 
   return (
     <Card title={t("planUsage.title")} subtitle={t("planUsage.subtitle")}>
