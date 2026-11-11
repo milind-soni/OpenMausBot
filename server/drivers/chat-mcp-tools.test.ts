@@ -205,7 +205,7 @@ describe("Chat MCP session", () => {
   });
 
   it.each([
-    ["browser", "Open the address with agent_browser_open first"],
+    ["browser", "Open the address with browser_agent_browser_open first, then call browser_agent_browser_read without url."],
     ["custom", "input schema"],
   ] as const)("names the way to read an address when agent_browser_read's url is hidden (%s)", async (mountAs, error) => {
     // agent-browser's read with its url hidden by slimBrowserToolList (email bug 1a1cb892)
@@ -216,6 +216,9 @@ describe("Chat MCP session", () => {
     const name = session.definitions[0]!.function.name;
     expect(() => session.validate(name, { url: "https://example.com/swagger.json" })).toThrow(error);
     expect(() => session.validate(name, { filter: 7 })).toThrow("input schema");
+    // a url of the wrong type, or another bad argument, keeps the schema error
+    expect(() => session.validate(name, { url: 7 })).toThrow("input schema");
+    expect(() => session.validate(name, { url: "https://example.com", filter: 7 })).toThrow("input schema");
     expect(() => session.validate(name, {})).not.toThrow();
   });
 

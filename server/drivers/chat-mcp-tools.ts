@@ -421,6 +421,18 @@ export function loopbackNavigationHint(tool: string, args: unknown, text: string
   return " That address is the loopback of the machine running this browser, not your own computer: open the site by the LAN address it answers on (for example http://192.168.1.20:8188), which must be reachable from the server, and allow it under Settings → Browser → Open sites on this server.";
 }
 
+/** agent-browser's read hides `url`: a call whose only misfit is a string url gets the way to read an address instead of the bare schema misfit. */
+function readsAddressOnly(tool: RegisteredTool, args: unknown): boolean {
+  if (!tool.builtInBrowser || !readsAroundBrowser({ name: tool.name, arguments: args }) || !object(args) || typeof args.url !== "string") return false;
+  const { url: _url, ...rest } = args;
+  return tool.schema(rest);
+}
+
+/** READ_OPEN_PAGE_ONLY with the tool names this chat registered for the browser server. */
+function readOpenPageOnly(server: string): string {
+  return READ_OPEN_PAGE_ONLY.replace(/agent_browser_(?:open|read)/gu, (tool) => chatToolName(server, tool));
+}
+
 function omitBlankDefaults(builtInBrowser: boolean, tool: string, args: unknown) {
   if (!builtInBrowser) return;
   normalizeBuiltInBrowserArgs(tool, args);
@@ -710,8 +722,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     if (selectionExcludes(tool, args)) throw new Error("Tool selection excludes this tool");
     omitBlankDefaults(tool.builtInBrowser, tool.name, args);
     if (!object(args) || (!(tool.searched && isDirectoryTool(tool.name)) && !tool.schema(args))) {
-      // agent-browser's read hides `url`; name the way to read an address instead of the bare schema misfit.
-      throw new Error(tool.builtInBrowser && readsAroundBrowser({ name: tool.name, arguments: args }) ? READ_OPEN_PAGE_ONLY : ARGUMENTS_MISFIT);
+      throw new Error(readsAddressOnly(tool, args) ? readOpenPageOnly(tool.server) : ARGUMENTS_MISFIT);
     }
   };
   const viewOf = (tool: RegisteredTool, args: Record<string, unknown>, title: string): ChatToolCallView => {
