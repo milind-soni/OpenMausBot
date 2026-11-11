@@ -4,7 +4,7 @@ import type { AppConfig } from "../config.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { voiceFailure } from "../tts/errors.ts";
 import { listSpeechModels, transcribe } from "../stt.ts";
-import { sttConfigSchema, sttNeedsKey, sttSavePatch, sttStatus, usableSttKey } from "../stt-config.ts";
+import { STT_INSECURE_KEY_ERROR, sttConfigSchema, sttKeySendable, sttNeedsKey, sttSavePatch, sttStatus, usableSttKey } from "../stt-config.ts";
 import * as tts from "../tts/index.ts";
 import { toUtterances, VOICE_FIRST_BLOCK_MAX_CHARS } from "../tts/speech-text.ts";
 import { userError, userErrorFields } from "../user-errors.ts";
@@ -27,6 +27,7 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
       if (!parsed.success) return json(res, 400, { error: "Invalid speech input settings." });
       const stt = { ...cfg.stt, ...sttSavePatch(cfg.stt, parsed.data) };
       if (stt.provider !== "openai" && stt.provider !== "gemini") return json(res, 400, { error: "Choose a speech input server first." });
+      if (parsed.data.key?.trim() && !sttKeySendable(stt)) return json(res, 400, { error: STT_INSECURE_KEY_ERROR });
       if (sttNeedsKey(stt) && !usableSttKey(stt)) return json(res, 409, { error: "Enter the speech input API key to load models." });
       try {
         return json(res, 200, { models: await listSpeechModels({ ...cfg, stt }) });

@@ -457,7 +457,8 @@ const __APP_VERSION__: string;
       setCredential?(
         name: "openaiApiKey" | "anthropicApiKey" | "openrouterApiKey" | "mistralApiKey" | "cerebrasApiKey" | "groqApiKey" | "greenferenceApiKey" | "modelgoApiKey" | "metaApiKey" | "deepseekApiKey" | "openaiCompatApiKey" | "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "sttKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey" | "geminiImageApiKey",
         value: string,
-        options?: { everyClaudeBot?: false },
+        /** `provider` and `baseUrl` are saved with an `sttKey`, binding the key to the endpoint it was entered for. */
+        options?: { everyClaudeBot?: false; provider?: string; baseUrl?: string },
       ): Promise<ConfigStatus>;
       /** In-app auto-update (packaged app only; dormant in dev). Updates
        * download by themselves. On this computer's page and the person's own

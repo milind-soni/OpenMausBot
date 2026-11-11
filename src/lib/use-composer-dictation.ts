@@ -19,7 +19,7 @@ export function useComposerDictation({ draftId, text, onText }: {
   const [speechError, setSpeechError] = useState<ReactNode>(null);
   const draft = useRef({ id: draftId, text });
   draft.current = { id: draftId, text };
-  const session = useRef({ draftId: "", base: "" });
+  const session = useRef<{ draftId: string; base: string; bridge?: typeof bridge }>({ draftId: "", base: "" });
   const cancel = useRef<(() => void) | null>(null);
   const finish = useRef<(() => void) | null>(null);
   const stop = useCallback(() => {
@@ -29,7 +29,7 @@ export function useComposerDictation({ draftId, text, onText }: {
 
   useEffect(() => {
     if (!recording) return;
-    if (!bridge || session.current.draftId !== draftId) {
+    if (!bridge || session.current.draftId !== draftId || session.current.bridge !== bridge) {
       setRecording(false);
       return;
     }
@@ -92,7 +92,7 @@ export function useComposerDictation({ draftId, text, onText }: {
       if (finish.current) finish.current();
       else stop();
     } else {
-      session.current = { draftId, base: text };
+      session.current = { draftId, base: text, bridge };
       setRecording(true);
     }
   };

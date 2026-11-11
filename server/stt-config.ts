@@ -35,9 +35,19 @@ export function sttSavePatch(current: SttConfig | undefined, patch: SttConfig): 
   return target !== sttKeyTarget(current) || asked.key !== undefined ? { ...asked, key: "", keyFor: "nowhere" } : asked;
 }
 
+const LOOPBACK_HOST = /^(localhost|127(\.\d{1,3}){3}|\[::1\])$/i;
+
+/** Security: a key travels only over https, or plain http to this computer. */
+export function sttKeySendable(config: SttConfig | undefined): boolean {
+  const url = URL.parse(sttBaseUrl(config));
+  return url?.protocol === "https:" || (url?.protocol === "http:" && LOOPBACK_HOST.test(url.hostname));
+}
+
+export const STT_INSECURE_KEY_ERROR = "A key can only be sent to an https:// address or a server on this computer.";
+
 export function usableSttKey(config: SttConfig | undefined): string | undefined {
   const target = config?.keyFor ?? sttKeyTarget(config);
-  return target === sttKeyTarget(config) ? config?.key?.trim() || undefined : undefined;
+  return target === sttKeyTarget(config) && sttKeySendable(config) ? config?.key?.trim() || undefined : undefined;
 }
 
 export function sttConfigWithEnv(config: SttConfig | undefined, env: NodeJS.ProcessEnv = process.env): SttConfig {

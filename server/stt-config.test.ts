@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sttConfigSchema, sttConfigWithEnv, sttSavePatch, sttStatus, usableSttKey } from "./stt-config.ts";
+import { sttConfigSchema, sttConfigWithEnv, sttKeySendable, sttSavePatch, sttStatus, usableSttKey } from "./stt-config.ts";
 import { STT_PRESETS } from "../shared/stt.ts";
 
 describe("speech input configuration", () => {
@@ -50,6 +50,16 @@ describe("speech input configuration", () => {
     }
     for (const preset of [STT_PRESETS.openai, STT_PRESETS.groq]) {
       expect(sttStatus({ stt: { provider: "openai", ...preset, model: "whisper-1" } }).configured).toBe(false);
+    }
+  });
+  it("sends a key only over https or to this computer", () => {
+    for (const baseUrl of ["https://stt.example.com/v1", "http://localhost:8000", "http://127.0.0.1:8000/v1", "http://[::1]:8000/v1"]) {
+      expect(sttKeySendable({ provider: "openai", baseUrl }), baseUrl).toBe(true);
+      expect(usableSttKey(sttSavePatch(undefined, { provider: "openai", baseUrl, key: "k" })), baseUrl).toBe("k");
+    }
+    for (const baseUrl of ["http://192.168.1.5:8000/v1", "http://whisper:8000/v1", "http://localhost.example.com/v1"]) {
+      expect(sttKeySendable({ provider: "openai", baseUrl }), baseUrl).toBe(false);
+      expect(usableSttKey(sttSavePatch(undefined, { provider: "openai", baseUrl, key: "k" })), baseUrl).toBeUndefined();
     }
   });
   it("adds /v1 to an API root that has no path", () => {

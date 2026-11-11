@@ -3,7 +3,9 @@
 In Settings → General → Speech input, choose OpenAI-compatible server, then
 OpenAI, Groq, or Custom or local server. Set the API base URL; one with no path
 (`http://localhost:8000`) gets `/v1`. The OpenAI and Groq presets need a key; any
-other server is used without one when the key is left blank. Click **Load models**, then
+other server is used without one when the key is left blank. A key is sent only
+to an https address or to a server on this computer (localhost, 127.0.0.1,
+::1); saving one for another plain http address is refused. Click **Load models**, then
 choose or type a transcription model ID. Models are discovered from that
 server's `/models` endpoint; there is no fixed model default or allowlist.
 The catalog can include models without speech support, so choose one supporting

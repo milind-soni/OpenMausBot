@@ -470,7 +470,7 @@ export function CallOverlay({ bot }: { bot: Bot }) {
 
 function Call({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
-  const bridge = speechBridge(state.config);
+  const [bridge] = useState(() => speechBridge(state.config));
   const speech = useSpeech();
   const initialPhase: Phase = bot.busy ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);

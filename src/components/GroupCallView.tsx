@@ -73,7 +73,7 @@ function questionIn(messages: Message[]): Message | undefined {
 
 function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const { state, dispatch } = useStore();
-  const bridge = speechBridge(state.config);
+  const [bridge] = useState(() => speechBridge(state.config));
   const speech = useSpeech();
   const initialPhase: Phase = group.working || group.busyBotId ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);

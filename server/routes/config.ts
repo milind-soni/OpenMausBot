@@ -1,6 +1,6 @@
 import { liveSavePatch } from "../live-config.ts";
 import { signInEnvRefusal } from "../sign-in-env.ts";
-import { sttSavePatch } from "../stt-config.ts";
+import { STT_INSECURE_KEY_ERROR, sttKeySendable, sttSavePatch } from "../stt-config.ts";
 import * as boat from "../boat.ts";
 import { boatCreateRecoverySnapshot, retireDeletedBoatCreate } from "../boat-create-idempotency.ts";
 import { boatDeletionSnapshot } from "../boat-delete-journal.ts";
@@ -535,6 +535,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         const spec = usedBrowserSessions.get(session) ?? (engineForSwitch.kind === "ready" ? browserSessionSpec(engineForSwitch.binaryPath, session, id) : null);
         return spec ? [{ session, spec }] : [];
       });
+      if (patch.stt?.key?.trim() && !sttKeySendable({ ...cfg.stt, ...patch.stt })) return json(res, 400, { error: STT_INSECURE_KEY_ERROR });
       let configWriteCommitted = false;
       const enginesBefore = engineLaunches(providerConfigs());
       const externalSecretStorage = url.searchParams.get("secretStorage") === "external";

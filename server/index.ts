@@ -11822,6 +11822,7 @@ function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean
     edition: { edition: status.edition.edition, features: status.edition.features },
     signIn: { admins: [], members: [] }, live: liveSettingsForClient(status.live), everyBotRules: undefined,
     vps: { configured: status.vps.configured, sshAlias: "" },
+    stt: { ...status.stt, baseUrl: "", configured: false },
     opencodeGo: { configured: status.opencodeGo.configured, providerKeys: [] },
     ...(CLOUD_TEAM ? { onboarding } : {}), profile: CLOUD_TEAM ? profile : { name: profile.name, email: "", ...(profile.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}) },
     browserProfiles: status.browserProfiles.map((profile) => Object.fromEntries(Object.entries(profile).filter(([key]) => key !== "partitionId"))),

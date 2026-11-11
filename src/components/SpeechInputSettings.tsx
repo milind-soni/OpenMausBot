@@ -83,7 +83,7 @@ function SpeechInputForm() {
         body: JSON.stringify({ stt: { provider, baseUrl: baseUrl.trim(), model: model.trim(),
           ...(!desktopKeySave && nextKey !== undefined ? { key: nextKey } : {}) } }),
       });
-      if (desktopKeySave && nextKey !== undefined) config = await desktopKeySave("sttKey", nextKey);
+      if (desktopKeySave && nextKey !== undefined) config = await desktopKeySave("sttKey", nextKey, { provider, baseUrl: baseUrl.trim() });
       dispatch({ type: "configStatus", config });
       setKey("");
       setRemoveKey(false);

@@ -128,6 +128,7 @@ beforeAll(async () => {
     instances: { fixture: { driver: "remote-session-test-shadow" } },
     profile: { name: "Security fixture", email: "private@example.invalid" },
     vps: { sshAlias: "fixture-private-host" },
+    stt: { provider: "openai", baseUrl: "http://stt-private.invalid:8000/v1", model: "fixture-whisper" },
     browserProfiles: [{ id: "fixture", name: "Fixture browser", partitionId: "fixture-private-partition" }],
   }));
   child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
@@ -512,6 +513,7 @@ describe("pairing", () => {
       expect(config.opencodeGo).toEqual({ configured: false, providerKeys: [] });
       expect(config.profile).toEqual({ name: "Updated fixture", email: "" });
       expect(config.vps).toEqual({ configured: true, sshAlias: "" });
+      expect(config.stt).toMatchObject({ provider: "openai", baseUrl: "", configured: false });
       expect(config.browserProfiles).toEqual([{ id: "fixture", name: "Fixture browser" }]);
     }
     function expectAdminConfig(config: any) {
@@ -520,6 +522,7 @@ describe("pairing", () => {
       expect(config.opencodeGo).toEqual({ configured: false, providerKeys: ["VENICE_API_KEY"] });
       expect(config.profile).toEqual({ name: "Updated fixture", email: "updated-private@example.invalid", aboutMe: "" });
       expect(config.vps).toEqual({ configured: true, sshAlias: "fixture-private-host" });
+      expect(config.stt).toMatchObject({ baseUrl: "http://stt-private.invalid:8000/v1", configured: true });
       expect(config.browserProfiles).toEqual([{ id: "fixture", name: "Fixture browser", partitionId: "fixture-private-partition" }]);
     }
     try {

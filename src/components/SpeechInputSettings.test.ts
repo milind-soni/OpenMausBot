@@ -117,7 +117,7 @@ it("saves the endpoint before placing a desktop credential in the OS store", asy
     await enterModel("whisper-fixture");
     await save();
     expect(JSON.parse(fixture.api.mock.calls[0]![1].body)).toEqual({ stt: { provider: "openai", ...STT_PRESETS.groq, model: "whisper-fixture" } });
-    expect(setCredential).toHaveBeenCalledWith("sttKey", "desktop-secret");
+    expect(setCredential).toHaveBeenCalledWith("sttKey", "desktop-secret", { provider: "openai", baseUrl: STT_PRESETS.groq.baseUrl });
     expect(fixture.api.mock.invocationCallOrder[0]).toBeLessThan(setCredential.mock.invocationCallOrder[0]!);
   } finally { delete window.ogb; }
 });
