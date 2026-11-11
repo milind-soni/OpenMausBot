@@ -143,4 +143,12 @@ describe("a finished reply as it goes out", () => {
     expect(savedReplyText("plain words")).toBe("plain words");
     expect(completed.type === "item.completed" && completed.itemType === "assistant_text" && completed.text).toBe(text);
   });
+
+  it("names a room reply's speaker on its words, and nothing on a direct chat's", () => {
+    const said = words("Hi ");
+    expect(publicReplyEvent(said, "b2")).toMatchObject({ botId: "b2", delta: "Hi " });
+    expect(publicReplyEvent(said)).toBe(said);
+    const thinking = { ...said, streamKind: "reasoning_text" } as RuntimeEvent;
+    expect(publicReplyEvent(thinking, "b2")).toBe(thinking);
+  });
 });

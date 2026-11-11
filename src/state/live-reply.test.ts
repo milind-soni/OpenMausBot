@@ -10,6 +10,7 @@ import {
   noteLiveReplyEvent,
   noteLiveReplyMessage,
   resetLiveReplies,
+  roomLiveSpeaker,
   settleLiveReplies,
   stopLiveReply,
   streamedReply,
@@ -174,9 +175,23 @@ describe("a reply as it streams from an older server", () => {
   it("names a room's speaker on the live row, as the saved message will", () => {
     delta("Room words ", "room");
     const from = { botId: "b1", name: "Pepper", color: "green" as const };
-    const [row] = liveReplyRows(liveReplies("room"), [], from).rows;
+    const [row] = liveReplyRows(liveReplies("room"), [], roomLiveSpeaker([{ id: "b1", ...from, color: "green" }], "b1")).rows;
     expect(row).toMatchObject({ role: "bot", kind: "text", from, turnId: "turn-1" });
     expect(row!.id.startsWith("live:")).toBe(true);
+  });
+
+  it("names the member the server says is speaking, whoever the room shows as busy", () => {
+    const members = [{ id: "b1", name: "Pepper", color: "green" as const }, { id: "b2", name: "Basil", color: "blue" as const }];
+    delta("Pepper speaks ", "room", { botId: "b1", itemId: "p" } as Partial<RuntimeEvent>);
+    note({ type: "item.completed", itemType: "assistant_text", text: "Pepper speaks.", itemId: "p" } as Partial<RuntimeEvent>, "room");
+    delta("Basil answers ", "room", { botId: "b2", itemId: "q" } as Partial<RuntimeEvent>);
+    for (const busy of ["b2", null, undefined]) {
+      const rows = liveReplyRows(liveReplies("room"), [], roomLiveSpeaker(members, busy)).rows;
+      expect(rows.map((row) => row.from?.name), `room busy with ${busy}`).toEqual(["Pepper", "Basil"]);
+    }
+    delta("Older server ", "u");
+    expect(liveReplyRows(liveReplies("u"), [], roomLiveSpeaker(members, "b2")).rows[0]!.from?.name, "an older server names no one: the busy member").toBe("Basil");
+    expect(liveReplyRows(liveReplies("u"), [], roomLiveSpeaker(members, null)).rows[0]!.from).toBeUndefined();
   });
 });
 

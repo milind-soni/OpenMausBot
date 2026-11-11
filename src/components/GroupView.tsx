@@ -328,7 +328,7 @@ export const Transcript = memo(function Transcript({
   const showThreads = useShowThreads();
   const showToolCalls = showToolCallsEnabled(state.config);
   const canReact = useCanReact(group.threadId);
-  const memberOf = (id?: string) => members.find((b) => b.id === id), speaker = memberOf(roomThreadSpeakerId(group, group.threadId) ?? undefined); const messages = useLiveTranscript(group.threadId, saved, transcript, speaker && { botId: speaker.id, name: speaker.name, color: speaker.color });
+  const memberOf = (id?: string) => members.find((b) => b.id === id); const messages = useLiveTranscript(group.threadId, saved, transcript, members, roomThreadSpeakerId(group, group.threadId));
   const folds = useMemo(() => roomTurnFolds(messages), [messages, locale]);
   const items = useMemo(() => groupActivityRuns(messages.filter(message =>
     !folds.hiddenIds.has(message.id) &&

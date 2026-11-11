@@ -14,6 +14,8 @@ export interface LiveReplyItem {
   /** The message id the server streamed it under; absent from a server older than item ids. */
   itemId?: string;
   turnId?: string;
+  /** A room reply: the member whose words these are. */
+  botId?: string;
   text: string;
   at: number;
   /** The engine finished the item; its saved message is on its way. */
@@ -86,12 +88,12 @@ export function noteLiveReplyEvent(event: RuntimeEvent): void {
     const at = event.itemId ? items.findIndex((item) => item.itemId === event.itemId) : legacyOpen(items, event.turnId);
     const growing = items[at];
     if (growing) {
-      if (!growing.done) put(threadId, { ...current, items: items.map((item, index) => index === at ? { ...item, text: item.text + event.delta } : item) });
+      if (!growing.done) put(threadId, { ...current, items: items.map((item, index) => index === at ? { ...item, text: item.text + event.delta, ...(event.botId ? { botId: event.botId } : {}) } : item) });
       return;
     }
     // The server opens a message only once the one before it is over: an earlier one still open never completes.
     const fresh: LiveReplyItem = { key: event.itemId ?? event.eventId, ...(event.itemId ? { itemId: event.itemId } : {}),
-      ...(event.turnId ? { turnId: event.turnId } : {}), text: event.delta, at: Date.now(), done: false };
+      ...(event.turnId ? { turnId: event.turnId } : {}), ...(event.botId ? { botId: event.botId } : {}), text: event.delta, at: Date.now(), done: false };
     put(threadId, { ...current, items: [...kept(items, (item) => item.done), fresh] });
   } else if (event.type === "item.completed" && event.itemType === "assistant_text") {
     if (!firstSeen(event.eventId)) return;
@@ -211,10 +213,24 @@ export function useHasLiveReply(threadId: string | null | undefined): boolean {
 }
 
 const rowCache = new WeakMap<LiveReplyItem, { text: string; message: Message }>();
+const sameSpeaker = (a: Message["from"], b: Message["from"]) =>
+  a === b || (a !== undefined && b !== undefined && a.botId === b.botId && a.name === b.name && a.color === b.color);
+
+/** Who a room's live row names: the member the server says speaks it, else (a server that does not say) `speakingNow`. */
+export type LiveSpeaker = (botId: string | undefined) => Message["from"] | undefined;
+type RoomMember = { id: string; name: string; color: NonNullable<Message["from"]>["color"] };
+
+/** The speaker resolver for a room's members; one per members list and current speaker, so rows keep their identity. */
+export function roomLiveSpeaker(members: readonly RoomMember[], speakingNow?: string | null): LiveSpeaker {
+  return (botId) => {
+    const member = members.find((bot) => bot.id === (botId ?? speakingNow));
+    return member ? { botId: member.id, name: member.name, color: member.color } : undefined;
+  };
+}
 
 /** The transcript rows the live items draw, after `transcript`'s own: an item whose saved message `transcript` holds
  * draws nothing, so the two never show together. */
-export function liveReplyRows(items: readonly LiveReplyItem[], transcript: readonly (Pick<Message, "id"> & { itemId?: string })[], from?: Message["from"]): { rows: Message[]; settled: string[] } {
+export function liveReplyRows(items: readonly LiveReplyItem[], transcript: readonly (Pick<Message, "id"> & { itemId?: string })[], speaker?: LiveSpeaker): { rows: Message[]; settled: string[] } {
   const rows: Message[] = [];
   const settled: string[] = [];
   const ids = new Set<string>(), itemIds = new Set<string>();
@@ -229,8 +245,9 @@ export function liveReplyRows(items: readonly LiveReplyItem[], transcript: reado
     }
     const text = liveReplyText(item);
     if (!text.trim()) continue;
+    const from = speaker?.(item.botId);
     let row = rowCache.get(item);
-    if (!row || row.text !== text || row.message.from !== from) {
+    if (!row || row.text !== text || !sameSpeaker(row.message.from, from)) {
       row = { text, message: { id: `${LIVE_ID}${item.key}`, role: "bot", kind: "text", text, at: item.at, ...(item.turnId ? { turnId: item.turnId } : {}), ...(from ? { from } : {}) } as Message };
       rowCache.set(item, row);
     }
@@ -242,19 +259,19 @@ export function liveReplyRows(items: readonly LiveReplyItem[], transcript: reado
 /** The rows a transcript window draws: `windowed` (a slice of the whole `transcript`), then the live items. An item is
  * matched against the whole transcript, so one saved outside the window is not drawn again; and live rows follow the
  * newest message, so a window that stops short of it (scrolled back, or opened at a found or pinned message) draws none. */
-export function withLiveRows(items: readonly LiveReplyItem[], windowed: Message[], transcript: readonly Message[], from?: Message["from"]): { rows: Message[]; settled: string[] } {
+export function withLiveRows(items: readonly LiveReplyItem[], windowed: Message[], transcript: readonly Message[], speaker?: LiveSpeaker): { rows: Message[]; settled: string[] } {
   if (!items.length) return { rows: windowed, settled: [] };
-  const drawn = liveReplyRows(items, transcript, from);
+  const drawn = liveReplyRows(items, transcript, speaker);
   const atEnd = windowed.at(-1)?.id === transcript.at(-1)?.id;
   return { rows: atEnd && drawn.rows.length ? [...windowed, ...drawn.rows] : windowed, settled: drawn.settled };
 }
 
-/** The `windowed` rows of `transcript` with the thread's streaming reply after them. */
-export function useLiveTranscript(threadId: string, windowed: Message[], transcript: readonly Message[], speaker?: Message["from"]): Message[] {
+/** The `windowed` rows of `transcript` with the thread's streaming reply after them; in a room, each live row names its
+ * speaker from `members`. */
+export function useLiveTranscript(threadId: string, windowed: Message[], transcript: readonly Message[], members?: readonly RoomMember[], speakingNow?: string | null): Message[] {
   const items = useLiveReplies(threadId);
-  const { botId, name, color } = speaker ?? {};
-  const from = useMemo(() => botId && name && color ? { botId, name, color } : undefined, [botId, name, color]);
-  const live = useMemo(() => withLiveRows(items, windowed, transcript, from), [items, windowed, transcript, from]);
+  const speaker = useMemo(() => members && roomLiveSpeaker(members, speakingNow), [members, speakingNow]);
+  const live = useMemo(() => withLiveRows(items, windowed, transcript, speaker), [items, windowed, transcript, speaker]);
   useEffect(() => settleLiveReplies(threadId, live.settled), [threadId, live.settled]);
   return live.rows;
 }

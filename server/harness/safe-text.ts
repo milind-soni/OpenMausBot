@@ -26,9 +26,12 @@ export function savedReplyText(text: string): string {
   return redactSecretsInText(text.includes("openmaus-goal>") ? visibleCoordinatorText(text) : text);
 }
 
-/** A runtime event as every client receives it: a reply's finished text masked as its saved message is. */
-export function publicReplyEvent(event: RuntimeEvent): RuntimeEvent {
-  return event.type === "item.completed" && event.itemType === "assistant_text" ? { ...event, text: savedReplyText(event.text) } : event;
+/** A runtime event as every client receives it: a reply's finished text masked as its saved message is, and a room
+ * reply's words naming the member who speaks them, so the app labels them right even as the speaker changes. */
+export function publicReplyEvent(event: RuntimeEvent, speakerId?: string): RuntimeEvent {
+  if (event.type === "item.completed" && event.itemType === "assistant_text") return { ...event, text: savedReplyText(event.text) };
+  if (event.type === "content.delta" && event.streamKind === "assistant_text" && speakerId) return { ...event, botId: speakerId };
+  return event;
 }
 
 function cleaned(text: string): string {
