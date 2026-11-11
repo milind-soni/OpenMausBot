@@ -5,14 +5,15 @@ import { afterEach, expect, it, vi } from "vitest";
 import { initialState, type Bot } from "@/state/store";
 import { BotListItem, botRowProps } from "./Sidebar";
 import { RecentChatsPopup, useRecentChatsPopup } from "./SidebarRecentChats";
+import { setSidebarHoverThreads } from "@/lib/sidebar-hover-threads";
 
 vi.mock("@/lib/interface-mode", async (original) => ({ ...await original<typeof import("@/lib/interface-mode")>(), useAdvancedMode: () => true }));
 vi.mock("@/lib/thread-preferences", async (original) => ({ ...await original<typeof import("@/lib/thread-preferences")>(), useShowThreads: () => true }));
-vi.mock("@/lib/sidebar-hover-threads", () => ({ useSidebarHoverThreads: () => true }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-afterEach(() => { document.body.innerHTML = ""; });
+afterEach(() => { document.body.innerHTML = ""; vi.useRealTimers(); });
 it("keeps selected chats in the popup and closes it when a chat is opened", async () => {
+  setSidebarHoverThreads(true);
   const bot: Bot = { id: "atlas", threadId: "one", name: "Atlas", title: "", description: "", notifications: true, color: "green", unread: false,
     modelSelection: { instanceId: "claude", model: "test" }, messages: [], tasks: [{ threadId: "one", title: "First", createdAt: 1 }, { threadId: "two", title: "Second", createdAt: 2 }] };
   const host = document.body.appendChild(document.createElement("div"));
@@ -35,6 +36,7 @@ it("keeps selected chats in the popup and closes it when a chat is opened", asyn
 });
 
 it("moves keyboard focus into recent chats and closes when focus leaves", async () => {
+  setSidebarHoverThreads(true);
   const bot: Bot = { id: "atlas", threadId: "one", name: "Atlas", title: "", description: "", notifications: true, color: "green", unread: false,
     modelSelection: { instanceId: "claude", model: "test" }, messages: [], tasks: [{ threadId: "one", title: "First", createdAt: 1 }, { threadId: "two", title: "Second", createdAt: 2 }] };
   const host = document.body.appendChild(document.createElement("div"));
@@ -47,6 +49,22 @@ it("moves keyboard focus into recent chats and closes when focus leaves", async 
   expect(popup.contains(document.activeElement)).toBe(true);
   await act(async () => { outside.focus(); });
   expect(document.querySelector('[data-recent-chats-popup="atlas"]')).toBeNull();
+  await act(async () => { root.unmount(); });
+});
+
+it("restores the inline arrow for a single chat when hover is disabled", async () => {
+  setSidebarHoverThreads(true);
+  const bot: Bot = { id: "solo", threadId: "one", name: "Solo", title: "", description: "", notifications: true, color: "green", unread: false,
+    modelSelection: { instanceId: "claude", model: "test" }, messages: [], tasks: [{ threadId: "one", title: "First", createdAt: 1 }] };
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  await act(async () => { root.render(createElement(BotListItem, botRowProps(initialState, vi.fn(), bot, { density: "comfortable", query: "", onMenu: vi.fn() }))); });
+  await act(async () => { setSidebarHoverThreads(false); });
+  const arrow = document.querySelector<HTMLButtonElement>('[aria-label="Expand Solo threads"]')!;
+  expect(arrow).not.toBeNull();
+  expect(arrow.className).not.toContain("opacity-0");
+  await act(async () => { arrow.click(); });
+  expect(document.querySelector('[data-sidebar-thread-row="one"]')).not.toBeNull();
   await act(async () => { root.unmount(); });
 });
 

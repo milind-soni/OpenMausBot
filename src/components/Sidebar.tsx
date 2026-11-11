@@ -696,11 +696,14 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const [creatingProject, setCreatingProject] = useState(false);
   const [threadsOpen, setThreadsOpen] = useSearchDisclosure(`bot:${bot.id}`, showThreads ? query : "", searchMatchesThreads(query, bot.tasks, bot.projects));
   useEffect(() => { if (reveal && showThreads) setThreadsOpen(true); }, [reveal, showThreads]);
-  const hasThreadList = (bot.tasks?.filter((task) => !task.routineRunId).length ?? 1) > 1 || (bot.projects?.length ?? 0) > 0 || Boolean(query);
+  const taskCount = bot.tasks?.filter((task) => !task.routineRunId).length ?? 1;
+  const hasThreadList = taskCount > 1 || (bot.projects?.length ?? 0) > 0 || Boolean(query);
+  const [singleThreadOpen, setSingleThreadOpen] = useState(false);
+  const inlineOpen = hasThreadList ? threadsOpen : singleThreadOpen;
   const iconOnly = density === "icons";
   const popupMode = advanced && showThreads && hoverThreads && !iconOnly && ((bot.tasks?.filter((task) => !task.routineRunId).length ?? 0) > 0 || (bot.projects?.length ?? 0) > 0);
   useEffect(() => { if (!popupMode) { cancelClose(); setPopover(null); } }, [popupMode]);
-  const expanded = showThreads && !popupMode && !iconOnly && threadsOpen && hasThreadList;
+  const expanded = showThreads && !popupMode && !iconOnly && inlineOpen && (hasThreadList || taskCount === 1);
   useEffect(() => { if (iconOnly) setRenaming(false); }, [iconOnly]);
   const simpleRow = !advanced && !showThreads && density === "comfortable";
   const simpleList = !advanced && !iconOnly;
@@ -880,13 +883,13 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
       >
         {body}
       </div>
-      {showThreads && !popupMode && !iconOnly && hasThreadList && <button
+      {showThreads && !popupMode && !iconOnly && (hasThreadList || taskCount === 1) && <button
         type="button"
-        aria-label={t(threadsOpen ? "task.collapseNamed" : "task.expandNamed", { name: bot.name })}
-        aria-expanded={threadsOpen}
-        onClick={() => setThreadsOpen((open) => !open)}
+        aria-label={t(inlineOpen ? "task.collapseNamed" : "task.expandNamed", { name: bot.name })}
+        aria-expanded={inlineOpen}
+        onClick={() => hasThreadList ? setThreadsOpen((open) => !open) : setSingleThreadOpen((open) => !open)}
         className="absolute left-0.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-ink-secondary outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-accent/60"
-      ><ChevronRight aria-hidden="true" size={13} className={cn("transition-transform", threadsOpen && "rotate-90")} /></button>}
+      ><ChevronRight aria-hidden="true" size={13} className={cn("transition-transform", inlineOpen && "rotate-90")} /></button>}
       {popupMode && <button type="button" aria-label={t("task.expandNamed", { name: bot.name })} aria-expanded={Boolean(popover)}
         onClick={(event) => { event.stopPropagation(); if (popover) setPopover(null); else openPopover(event.detail === 0); }}
         className="pointer-events-none absolute left-0.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 focus-visible:pointer-events-auto focus-visible:opacity-100 touch:pointer-events-auto touch:opacity-100 max-md:pointer-events-auto max-md:opacity-100"><span aria-hidden="true">⋯</span></button>}
@@ -911,7 +914,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     {popupMode && popover && <RecentChatsPopup popupRef={popupRef} botId={bot.id} position={popover} onEnter={cancelClose} onLeave={closeLater}>
       <BotThreadList {...props} onThreadOpened={() => setPopover(null)} activityLabel={liveActivityLabel(sidebarMessage(last))} query={bot.name.toLowerCase().includes(query.toLowerCase()) || bot.title.toLowerCase().includes(query.toLowerCase()) ? "" : query} />
     </RecentChatsPopup>}
-    {advanced && !popupMode && !iconOnly && threadsOpen && hasThreadList && <BotThreadList {...props} hidden={!showThreads}
+    {advanced && !popupMode && !iconOnly && inlineOpen && (hasThreadList || taskCount === 1) && <BotThreadList {...props} hidden={!showThreads}
       activityLabel={liveActivityLabel(sidebarMessage(last))}
       query={bot.name.toLowerCase().includes(query.toLowerCase()) || bot.title.toLowerCase().includes(query.toLowerCase()) ? "" : query} />}
     {(advanced || (!iconOnly && (waiting || unread || bot.tasks?.some(runningRoutineRun)))) && <SidebarBotActivity bot={bot} rowThreadId={selected ? bot.threadId : botOpensTo(bot, showThreads)} density={density} pendingQueued={pendingQueued} dispatch={dispatch} waitingOnly={!advanced} runsOnly={expanded} />}
