@@ -59,7 +59,7 @@ pnpm exec vitest run server/drivers/acp/omp.test.ts server/drivers/acp/custom-mo
 
 The contract tests use the repository's fake ACP CLI and disposable folders. They cover fresh and existing fleets, catalogs larger than 128 models without per-model discovery prompts, temporary discovery-session cleanup, model selection, local credential forwarding and denied permissions. Model discovery uses `PI_CODING_AGENT_SESSION_DIR` in a temporary directory so refreshes do not add empty sessions to the person's OMP history.
 
-The real 18.13.1 CLI was also checked with isolated homes and keyless synthetic providers: ACP initialization and authentication, model and thinking selection, a 2,000-model catalog, discovery-session isolation, a streamed turn through the production driver, and a second turn after recreating that driver with the same native session. The loopback provider received both turns and the resumed request contained the first turn's history. These checks do not prove a real provider account, a paid turn, native Windows behavior or packaged desktop integration.
+The following is a one-time author qualification against OMP 18.13.1, not a checked-in repeatable native fixture: with isolated homes and keyless synthetic providers, ACP initialization and authentication, model and thinking selection, a 2,000-model catalog, discovery-session isolation, a streamed turn through the production driver, and a second turn after recreating that driver with the same native session. The loopback provider received both turns and the resumed request contained the first turn's history. These checks do not prove a real provider account, a paid turn, native Windows behavior or packaged desktop integration.
 
 ## Slow or empty CLI version responses
 

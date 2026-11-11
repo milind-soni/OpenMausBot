@@ -13,9 +13,17 @@ const EMPTY: ModelCatalog = { default: "", options: [] };
 const AGENT_DEFAULT = { id: "agent-default", label: "OMP default (configured)" };
 const WORKSPACE_CREDENTIALS = new Set<string>(WORKSPACE_CREDENTIAL_ENV);
 const CREDENTIAL_ENV = PROVIDER_CREDENTIAL_ENV.filter((key) => !WORKSPACE_CREDENTIALS.has(key));
-// ponytail: variant probing stops at 128 models; add cached background surveys if large catalogs need every list upfront.
-const DISCOVERY: AcpDiscoveryOptions = { passthrough: AGENT_DEFAULT, custom: true, variants: true, variantLimit: 128, maxModels: 4096 };
+const MAX_DISCOVERED_MODELS = 4096;
+const VARIANT_DISCOVERY_MODEL_LIMIT = 128;
+const DISCOVERY: AcpDiscoveryOptions = {
+  passthrough: AGENT_DEFAULT,
+  custom: true,
+  variants: true,
+  variantLimit: VARIANT_DISCOVERY_MODEL_LIMIT,
+  maxModels: MAX_DISCOVERED_MODELS,
+};
 
+/** Discovers OMP models in a temporary session directory, so a refresh leaves no session in the person's history. */
 export async function resolveOmpModels(
   env: Record<string, string | undefined>,
   config: Pick<AcpConfig, "cli">,
