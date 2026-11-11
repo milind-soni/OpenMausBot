@@ -46,10 +46,6 @@ export class TextItems {
     return event;
   }
 
-  forget(threadId: string): void {
-    this.active.delete(threadId);
-  }
-
   private open(event: RuntimeEvent, whitespace: boolean): string | undefined {
     const { threadId, turnId } = event;
     const current = this.active.get(threadId);
