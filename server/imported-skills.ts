@@ -10,7 +10,7 @@
 // skills", Codex with the person's own CODEX_HOME) leaves the copy out, so no engine sees a skill twice.
 import { createHash, randomUUID } from "node:crypto";
 import {
-  closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync,
+  closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync,
   statSync, symlinkSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -299,11 +299,16 @@ function enabledFor(name: string, entry: ImportedSkillEntry, choices: Choices): 
 }
 
 const comparable = (path: string) => {
-  const resolved = resolve(path).replace(/^\\\\\?\\/, "");
+  let real = resolve(path);
+  try {
+    real = realpathSync(real);
+  } catch {}
+  const resolved = real.replace(/^\\\\\?\\/, "");
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 };
 
-/** Whether the turn's engine loads this skill from where it came from: its folder there still exists. */
+/** Whether the turn's engine loads this skill from where it came from: its folder there still exists. A ChatGPT-plan
+ * CODEX_HOME links its `skills` to the person's, so folders compare by where they really are. */
 function loadedInPlace(entry: ImportedSkillEntry, native: readonly string[]): boolean {
   if (!native.some((folder) => comparable(folder) === comparable(entry.root))) return false;
   return entryExistsWithoutFollowing(entry.origin);
@@ -387,6 +392,20 @@ export function setImportedSkillEnabled(botId: string, name: string, enabled: bo
   return importedSkillListings(botId, new Set()).find((skill) => skill.name === name)!;
 }
 
+export function importedSkillsSwitchedOff(botId: string): string[] {
+  return readChoices(botId).off.filter(isSkillName);
+}
+
+/** Takes `name` off this bot's switched-off list without approving anything: a flagged skill's copy still needs a
+ * read before it is listed. */
+export function switchImportedSkillBackOn(botId: string, name: string): void {
+  const choices = readChoices(botId);
+  if (!choices.off.includes(name)) return;
+  const next: Choices = { ...choices, off: choices.off.filter((other) => other !== name) };
+  mkdirSync(dirname(choicesPath(botId)), { recursive: true, mode: 0o700 });
+  writeFileAtomic(choicesPath(botId), `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+}
+
 /** The engine of one turn, as far as which skill folders it loads by itself. */
 export interface SkillTurnEngine {
   driverKind: string;
@@ -395,15 +414,15 @@ export interface SkillTurnEngine {
 }
 
 /** The skill folders a turn's engine loads in place: ~/.claude/skills for Claude Code with "Also use my Claude Code
- * skills" (or OMB_CLAUDE_INHERIT_USER_CONFIG), and the person's own $CODEX_HOME/skills for Codex, ChatGPT plan included. */
+ * skills" (or OMB_CLAUDE_INHERIT_USER_CONFIG); for Codex, its user and admin scopes. */
 export function nativeSkillFolders(
   engine: SkillTurnEngine | undefined,
   options: { claudeUserSkills: boolean; home?: string; env?: Record<string, string | undefined> },
 ): string[] {
   if (!engine) return [];
-  const home = options.home ?? homedir();
   const env = { ...(options.env ?? process.env), ...engine.environment };
   const absolute = (value: string | undefined) => (value && isAbsolute(value) ? value : null);
+  const home = absolute(engine.environment?.HOME) ?? options.home ?? homedir();
   if (engine.driverKind === "claudeAgent") {
     if (env.OMB_CLAUDE_INHERIT_USER_CONFIG === "1") return [join(absolute(env.CLAUDE_CONFIG_DIR) ?? join(home, ".claude"), "skills")];
     if (!options.claudeUserSkills) return [];
@@ -414,11 +433,16 @@ export function nativeSkillFolders(
       return [];
     }
   }
-  if (engine.driverKind === "codex") {
-    // A ChatGPT-plan instance signs in on a CODEX_HOME of its own, with the person's skills folder linked into it.
-    return [join(absolute(env.CODEX_HOME) ?? join(home, ".codex"), "skills")];
-  }
+  if (engine.driverKind === "codex") return codexSkillRoots(home, env.CODEX_HOME);
   return [];
+}
+
+/** The folders codex-cli (0.163.0–0.167.0) loads user and admin skills from, in its own order: $CODEX_HOME/skills (a
+ * ChatGPT-plan instance links the person's into its own home), ~/.agents/skills and /etc/codex/skills. It also reads
+ * `.agents/skills` from the turn's folder up to the repository root, where OpenMausBot links a bot's granted skills. */
+export function codexSkillRoots(home: string, codexHome: string | undefined): string[] {
+  const own = codexHome && isAbsolute(codexHome) ? codexHome : join(home, ".codex");
+  return [join(own, "skills"), join(home, ".agents", "skills"), ...(process.platform === "win32" ? [] : ["/etc/codex/skills"])];
 }
 
 /** After the bot's own skills, with a budget of its own, so bringing many in never pushes the bot's own out. `unlisted`

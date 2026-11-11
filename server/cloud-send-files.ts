@@ -168,7 +168,7 @@ async function takePart(deps: MoveFilesDeps, req: IncomingMessage, query: z.infe
   if (offset !== held) { await rawBody(req, 0); return { status: 409, body: { received: held } }; }
   const bytes = await rawBody(req, Math.min(FILE_PART_BYTES, size - held));
   if (!bytes) return { status: 413, body: { error: "the part runs past the file's size", received: held } };
-  if (bytes.length) {
+  if (bytes.length || size === 0) {
     const handle = await open(partial, "a", 0o600);
     try { await handle.write(bytes); } finally { await handle.close(); }
   }
