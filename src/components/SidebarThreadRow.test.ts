@@ -59,6 +59,20 @@ describe("sidebar thread visibility", () => {
     expect(visibleSidebarThreads(tasks, "0", "thread 9").map((task) => task.threadId)).toEqual(["9"]);
     expect(visibleSidebarThreads(tasks, "0", "missing")).toEqual([]);
   });
+  it("shows only each routine's newest run by default; older runs stay under Show all", () => {
+    const rows = [
+      { threadId: "chat", title: "Chat", createdAt: 50 },
+      ...[40, 30, 20].map((at) => ({ threadId: `daily-${at}`, title: "Daily brief", createdAt: at })),
+      { threadId: "weekly-10", title: "Weekly", createdAt: 10 },
+      { threadId: "daily-5", title: "Daily brief", createdAt: 5, unread: true },
+    ];
+    const runs = [...["daily-40", "daily-30", "daily-20", "daily-5"].map((threadId) => ({ routineId: "daily", threadId })), { routineId: "weekly", threadId: "weekly-10" }, { routineId: "room" }];
+    expect(visibleSidebarThreads(rows, "chat", "", [], false, runs).map((task) => task.threadId)).toEqual(["chat", "daily-40", "weekly-10", "daily-5"]);
+    expect(visibleSidebarThreads(rows, "daily-20", "", [], false, runs).map((task) => task.threadId)).toEqual(["chat", "daily-40", "daily-20", "weekly-10", "daily-5"]);
+    expect(visibleSidebarThreads(rows, "chat", "", [], true, runs)).toEqual(rows);
+    expect(visibleSidebarThreads(rows, "chat", "daily", [], false, runs)).toHaveLength(4);
+    expect(visibleSidebarThreads(rows, "chat").map((task) => task.threadId)).toEqual(rows.map((task) => task.threadId));
+  });
   it("keeps queued older threads visible", () => {
     const rows = tasks.map((task) => ({ ...task, queued: task.threadId === "9" }));
     expect(visibleSidebarThreads(rows, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "9"]);

@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState, type Dispatch, type ReactNode } from
 import { createPortal } from "react-dom";
 import { Archive, ArchiveRestore, BellOff, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2 } from "lucide-react";
 import type { Action, AppState, BotProject, Task } from "@/state/store";
+import type { RoutineRun } from "@/lib/routines";
 import { cn } from "@/lib/cn";
 import { MENU_SHEET } from "./menu-recipe";
 import { useHeldMenuMotion } from "./MenuMotion";
@@ -122,17 +123,25 @@ export function HelperThreadGroup<T>({ tasks, renderThread }: { tasks: T[]; rend
   </div>;
 }
 
-export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], showAll = false): T[] {
+/** Default list shows each routine's newest run only; older runs stay under "Show all". */
+export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], showAll = false, routineRuns: readonly Pick<RoutineRun, "routineId" | "threadId">[] = []): T[] {
   const needle = query.trim().toLowerCase();
   if (needle) {
     return tasks.filter((task) => task.title.toLowerCase().includes(needle) || folders.some((folder) => folder.id === task.projectId && folder.name.toLowerCase().includes(needle)));
   }
   if (showAll) return tasks;
   let open = 0;
+  const routineOf = new Map(routineRuns.flatMap((run) => run.threadId ? [[run.threadId, run.routineId] as const] : []));
+  const shownRoutines = new Set<string>();
   return orderedThreadList(tasks).filter((task) => {
     if (task.pinned === true) return true;
     if (task.openedBy?.burstId) return task.threadId === activeId || demandsAttention(task, activeId);
     if (isArchived(task)) return task.threadId === activeId;
+    const routineId = routineOf.get(task.threadId);
+    if (routineId !== undefined) {
+      if (shownRoutines.has(routineId)) return demandsAttention(task, activeId);
+      shownRoutines.add(routineId);
+    }
     return task.closedBy || isSnoozed(task)
       ? demandsAttention(task, activeId)
       : open++ < 6 || demandsAttention(task, activeId);
