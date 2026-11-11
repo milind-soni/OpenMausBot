@@ -13,7 +13,7 @@ export function SwatchRadios({ value, onChange, label, disabled = false, offset 
 }) {
   const focusable = value ?? CLOUD_SWATCH_ORDER[0];
   const plain = (option: CloudSwatch) => none && option === "slate";
-  return <div role="radiogroup" aria-label={label} aria-disabled={disabled || undefined} className="flex flex-wrap gap-2.5">
+  return <div role="radiogroup" aria-label={label} aria-disabled={disabled || undefined} className="flex flex-wrap gap-2.5 in-data-[settings-look=simple]:gap-2">
     {CLOUD_SWATCH_ORDER.map((option) => <button key={option} type="button" role="radio" aria-checked={option === value}
       aria-label={t(plain(option) ? "placeLook.none" : CLOUD_SWATCH_LABEL[option])} title={t(plain(option) ? "placeLook.none" : CLOUD_SWATCH_LABEL[option])}
       data-swatch={option} disabled={disabled} onClick={() => onChange(option)}
@@ -26,9 +26,9 @@ export function SwatchRadios({ value, onChange, label, disabled = false, offset 
         (event.currentTarget.parentElement?.querySelector(`[data-swatch="${next}"]`) as HTMLElement | null)?.focus();
       }}
       tabIndex={option === focusable ? 0 : -1}
-      className={cn("grid size-8 place-items-center rounded-full border transition-[box-shadow] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-default",
-        plain(option) ? "border-ink/55 text-ink/55" : "border-ink/10",
-        option === value && cn("ring-2 ring-ink/70 ring-offset-2", RING_OFFSET[offset]), disabled && option !== value && "opacity-50")}
+      className={cn("grid size-8 place-items-center rounded-full border transition-[box-shadow] in-data-[settings-look=simple]:size-5 in-data-[settings-look=simple]:border-[0.5px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-default",
+        plain(option) ? "border-ink/55 text-ink/55 in-data-[settings-look=simple]:border-hairline in-data-[settings-look=simple]:text-ink-tertiary" : "border-ink/10",
+        option === value && cn("ring-2 ring-ink/70 ring-offset-2 in-data-[settings-look=simple]:ring-ink", RING_OFFSET[offset]), disabled && option !== value && "opacity-50")}
       style={plain(option) ? undefined : { background: swatchFill(option) }}>
       {plain(option) && <span aria-hidden="true" className="h-[1.5px] w-[60%] -rotate-45 rounded-full bg-current" />}
     </button>)}

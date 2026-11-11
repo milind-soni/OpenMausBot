@@ -133,8 +133,10 @@ export function BotsPage() {
     {paused && <SettingsGroup block="awake"><SettingsRows><SettingRow title={t("settings.bots.awakeTitle")} subtitle={t("settings.bots.awakeLine")}><PausedBotsButton /></SettingRow></SettingsRows></SettingsGroup>}
     <SettingsGroup label={t("settings.bots.aboutYou")} description={t("settings.bots.aboutYouLine", { place: place.name })} block="about-you"
       footnote={ctx.here || !ctx.desktop ? t("settings.bots.aboutYouHome", { app: productName() }) : undefined}>
-      <Card><ProfileFields /></Card>
-      <SettingsRows><AwayEmailsSetting row /></SettingsRows>
+      <div className="flex flex-col gap-2">
+        <Card><ProfileFields /></Card>
+        <SettingsRows><AwayEmailsSetting row /></SettingsRows>
+      </div>
     </SettingsGroup>
     <SettingsGroup label={t("settings.bots.newBots")} block="new-bots">
       <SettingsRows><NewBotEffortRow /><DefaultBotSettings simple /></SettingsRows>
