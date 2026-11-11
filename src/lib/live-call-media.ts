@@ -1,10 +1,11 @@
 // Its data channel may only send session.close; everything else about the call runs on the harness.
 import { useSyncExternalStore } from "react";
-import type { LiveCallState, LiveEndReason } from "../../shared/wire";
+import type { LiveCallState, LiveEndReason, LiveFishTransport, LiveProvider } from "../../shared/wire";
 import { api, ApiError } from "@/state/store";
 import { openExternalLink } from "./app-links";
 import { endCall, startCall } from "./call";
 import { desktopCapabilitiesNow } from "./desktop";
+import { FishCall, isFishMicDenied, startFishAgentSession, type FishSessionStarter } from "./live-call-fish";
 import { t } from "./i18n";
 
 export type LiveMediaPhase = "idle" | "starting" | "live" | "ending" | "ended" | "failed";
@@ -20,6 +21,7 @@ export interface LiveMediaState {
   callId: string | null;
   botId: string | null;
   threadId: string | null;
+  provider?: LiveProvider;
   startedAt: number | null;
   muted: boolean;
   caption: string;
@@ -43,6 +45,7 @@ export interface LiveMediaDeps {
   capabilities(): DesktopCapabilities;
   pageMicrophone(): Promise<"allowed" | "refused" | undefined>;
   openInBrowser(url: string): void;
+  startFish: FishSessionStarter;
 }
 
 const IDLE: LiveMediaState = {
@@ -87,6 +90,7 @@ const defaults: LiveMediaDeps = {
     }
   },
   openInBrowser: (url) => void openExternalLink(url).catch(() => undefined),
+  startFish: startFishAgentSession,
 };
 let deps: LiveMediaDeps = defaults;
 
@@ -95,6 +99,8 @@ let generation = 0;
 let microphone: MediaStream | null = null;
 let peer: RTCPeerConnection | null = null;
 let channel: RTCDataChannel | null = null;
+let fishCall: FishCall | null = null;
+let fishConnected = false;
 let heardTimer: ReturnType<typeof setTimeout> | null = null;
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 let closeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -177,14 +183,17 @@ function liveClient(capabilities: DesktopCapabilities): "desktop" | "web" {
   return inWebBrowser(capabilities) ? "web" : "desktop";
 }
 
-export async function startLiveCall(target: { botId: string; threadId: string }): Promise<void> {
+/** `provider` is the service Call settings chose; the harness refuses a call that does not match it. */
+export async function startLiveCall(target: { botId: string; threadId: string; provider?: LiveProvider }): Promise<void> {
   if (isLiveCallRunning(state.phase)) return;
   release();
   const mine = ++generation;
   serverAttached = false;
-  set({ ...IDLE, phase: "starting", botId: target.botId, threadId: target.threadId });
+  const where = { botId: target.botId, threadId: target.threadId, ...(target.provider ? { provider: target.provider } : {}) };
+  set({ ...IDLE, phase: "starting", ...where });
   startCall(target.botId);
   try {
+    if (target.provider === "fish") return await startFishCall(target, mine);
     const stream = await deps.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     if (mine !== generation) return void stream.getTracks().forEach((track) => track.stop());
     microphone = stream;
@@ -246,11 +255,11 @@ export async function startLiveCall(target: { botId: string; threadId: string })
     const body = error instanceof ApiError ? (error.body as { needsKey?: boolean; activeCall?: LiveCallState } | undefined) : undefined;
     if (state.callId) void endOnServer(state.callId);
     release();
-    if (body?.needsKey) return set({ ...IDLE, needsKey: true, botId: target.botId, threadId: target.threadId });
-    if (body?.activeCall) return set({ ...IDLE, phase: "failed", botId: target.botId, threadId: target.threadId, busyWith: body.activeCall, notice: busyText(body.activeCall) });
-    const failed = { ...IDLE, phase: "failed" as const, botId: target.botId, threadId: target.threadId };
+    if (body?.needsKey) return set({ ...IDLE, needsKey: true, ...where });
+    if (body?.activeCall) return set({ ...IDLE, phase: "failed", ...where, busyWith: body.activeCall, notice: busyText(body.activeCall) });
+    const failed = { ...IDLE, phase: "failed" as const, ...where };
     if (error instanceof DOMException && error.name === "NotFoundError") return set({ ...failed, notice: t("call.live.micMissing"), action: "retry" });
-    if (error instanceof DOMException && error.name === "NotAllowedError") {
+    if ((error instanceof DOMException && error.name === "NotAllowedError") || isFishMicDenied(error)) {
       const pageMic = await deps.pageMicrophone();
       if (mine !== generation) return;
       return set({ ...failed, ...micBlocked(deps.capabilities(), pageMic) });
@@ -258,6 +267,50 @@ export async function startLiveCall(target: { botId: string; threadId: string })
     const hopeless = error instanceof LiveUnsupportedError || (error instanceof ApiError && (error.status === 401 || error.status === 403));
     set({ ...failed, action: hopeless ? null : "retry", notice: error instanceof Error ? error.message : String(error) });
   }
+}
+
+/** Fish's SDK opens the microphone and plays the agent itself; the harness follows the call through the relay. */
+async function startFishCall(target: { botId: string; threadId: string }, mine: number): Promise<void> {
+  const result = await deps.request<{ call: LiveCallState; transport: LiveFishTransport | { type: "webrtc" } }>("/api/live/session", {
+    method: "POST",
+    body: JSON.stringify({ botId: target.botId, threadId: target.threadId, client: liveClient(deps.capabilities()) }),
+    timeoutMs: 35_000,
+  });
+  if (mine !== generation) {
+    void endOnServer(result.call.callId);
+    return;
+  }
+  const seen = serverCall;
+  set({ callId: result.call.callId });
+  if (result.transport.type !== "fish") throw new Error(t("call.live.dropped"));
+  applyServerCall(result.call);
+  if (seen?.callId === result.call.callId) applyServerCall(seen);
+  if (mine !== generation) return;
+  const call = new FishCall(result.transport, {
+    request: deps.request,
+    connected: () => {
+      if (mine !== generation) return;
+      fishConnected = true;
+      stopConnectWait();
+      goLiveWhenReady();
+    },
+    heard: (text) => {
+      if (mine === generation) showHeard(text.slice(-HEARD_CHARS));
+    },
+    said: (text) => {
+      if (mine === generation) set({ caption: text.slice(-CAPTION_CHARS), heard: "" });
+    },
+    ended: () => {
+      if (mine === generation) onSessionClosed();
+    },
+    now: () => Date.now(),
+  }, deps.startFish);
+  fishCall = call;
+  connectTimer = setTimeout(() => {
+    if (mine === generation) void dropped(t("call.live.droppedNoAudio"));
+  }, MEDIA_CONNECT_TIMEOUT_MS);
+  await call.start();
+  if (mine === generation && state.muted) call.setMuted(true);
 }
 
 export async function hangUpLiveCall(): Promise<void> {
@@ -276,6 +329,7 @@ export async function hangUpLiveCall(): Promise<void> {
 
 export function setLiveMuted(muted: boolean): void {
   for (const track of microphone?.getAudioTracks() ?? []) track.enabled = !muted;
+  fishCall?.setMuted(muted);
   set({ muted });
 }
 
@@ -309,9 +363,9 @@ export function dismissStartPrompt(botId: string): void {
 }
 
 export function takeLiveCallAction(): void {
-  const { action, botId, threadId, phase } = state;
+  const { action, botId, threadId, phase, provider } = state;
   if (phase !== "failed") return;
-  if (action === "retry" && botId && threadId) void startLiveCall({ botId, threadId });
+  if (action === "retry" && botId && threadId) void startLiveCall({ botId, threadId, provider });
   else if (action === "open-in-browser" && globalThis.location?.href) deps.openInBrowser(globalThis.location.href);
 }
 
@@ -368,7 +422,7 @@ function applyServerCall(call: LiveCallState | null) {
 }
 
 function goLiveWhenReady() {
-  if (state.phase !== "starting" || !serverAttached || channel?.readyState !== "open") return;
+  if (state.phase !== "starting" || !serverAttached || (channel?.readyState !== "open" && !fishConnected)) return;
   set({ phase: "live", startedAt: Date.now() });
 }
 
@@ -382,9 +436,9 @@ function finish(notice: { text: string; dropped: boolean }, detail?: string) {
   sendClose();
   release();
   generation += 1;
-  const { botId, threadId } = state;
+  const { botId, threadId, provider } = state;
   set({
-    ...IDLE, phase: notice.dropped ? "failed" : "ended", botId, threadId,
+    ...IDLE, phase: notice.dropped ? "failed" : "ended", botId, threadId, ...(provider ? { provider } : {}),
     notice: detail?.trim() || notice.text, action: notice.dropped ? "retry" : null,
   });
   if (!notice.dropped) {
@@ -409,20 +463,24 @@ function onChannelMessage(raw: unknown) {
   } catch {
     return;
   }
-  if (event.type === "session.closed") {
-    stopCapturing();
-    stopConnectWait();
-    if (!closeTimer) void checkLiveSignIn();
-    closeTimer ??= setTimeout(() => finish({ text: t("call.live.ended"), dropped: false }), SERVER_CLOSE_GRACE_MS);
-    return;
-  }
+  if (event.type === "session.closed") return onSessionClosed();
   const next = applyCaption(state, event);
   if (next.caption === state.caption && next.heard === state.heard) return;
-  set(next);
-  if (event.type === "session.input_transcript.delta") {
-    if (heardTimer) clearTimeout(heardTimer);
-    heardTimer = setTimeout(() => set({ heard: "" }), HEARD_CLEAR_MS);
-  }
+  if (event.type === "session.input_transcript.delta") showHeard(next.heard);
+  else set(next);
+}
+
+function onSessionClosed() {
+  stopCapturing();
+  stopConnectWait();
+  if (!closeTimer) void checkLiveSignIn();
+  closeTimer ??= setTimeout(() => finish({ text: t("call.live.ended"), dropped: false }), SERVER_CLOSE_GRACE_MS);
+}
+
+function showHeard(heard: string) {
+  set({ heard });
+  if (heardTimer) clearTimeout(heardTimer);
+  heardTimer = setTimeout(() => set({ heard: "" }), HEARD_CLEAR_MS);
 }
 
 /** Autoplay was blocked: the next click or key press plays the audio (a user gesture allows play()). */
@@ -464,6 +522,9 @@ function sendClose() {
 function stopCapturing() {
   microphone?.getTracks().forEach((track) => track.stop());
   microphone = null;
+  fishCall?.close();
+  fishCall = null;
+  fishConnected = false;
 }
 
 function release() {

@@ -216,11 +216,15 @@ export function keyEntry(id: KeyId): KeyEntry {
   return entry;
 }
 
-/** With Azure OpenAI chosen for Live calls, the row for their key is about the Azure resource: required, and no OpenAI key. */
+/** With Azure OpenAI or Fish Audio chosen for Live calls, the row for their key is about that service: required, and no OpenAI key. */
 export function shownKeyEntry(id: KeyId, config: ConfigStatus | null | undefined): KeyEntry {
   const entry = keyEntry(id);
-  if (id !== "liveKey" || config?.live?.provider !== "azure" || !entry.target) return entry;
+  const provider = config?.live?.provider;
+  if (id !== "liveKey" || (provider !== "azure" && provider !== "fish") || !entry.target) return entry;
   const { shape: _openAiShape, ...target } = entry.target;
+  if (provider === "fish") {
+    return { ...entry, name: "Fish Audio", labelKey: "call.live.fishKeyField", purposeKey: "keys.purpose.liveKeyFish", target: { ...target, placeholder: "…", href: "https://fish.audio/app/api-keys/" } };
+  }
   return { ...entry, name: "Azure OpenAI", labelKey: "call.live.azureKeyField", purposeKey: "keys.purpose.liveKeyAzure", target: { ...target, placeholder: "…", href: "https://portal.azure.com" } };
 }
 

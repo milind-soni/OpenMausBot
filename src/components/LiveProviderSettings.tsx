@@ -5,7 +5,7 @@ import { api, useStore } from "@/state/store";
 import type { LiveProvider, LiveSettings } from "../../shared/wire";
 import { Select } from "./Select";
 
-type ProviderPatch = Partial<Pick<LiveSettings, "provider" | "azureEndpoint" | "azureDeployment">>;
+type ProviderPatch = Partial<Pick<LiveSettings, "provider" | "azureEndpoint" | "azureDeployment" | "fishAgentId">>;
 
 const FIELD = "w-full rounded-lg border border-hairline bg-inset px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent/60";
 
@@ -15,9 +15,11 @@ export function LiveProviderSettings() {
   const provider: LiveProvider = live.provider ?? "openai";
   const [endpoint, setEndpoint] = useState(live.azureEndpoint ?? "");
   const [deployment, setDeployment] = useState(live.azureDeployment ?? "");
+  const [agentId, setAgentId] = useState(live.fishAgentId ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const azureChanged = endpoint.trim() !== (live.azureEndpoint ?? "") || deployment.trim() !== (live.azureDeployment ?? "");
+  const agentChanged = agentId.trim() !== (live.fishAgentId ?? "");
 
   const save = async (patch: ProviderPatch) => {
     setSaving(true);
@@ -44,6 +46,7 @@ export function LiveProviderSettings() {
         >
           <option value="openai">{t("call.live.provider.openai")}</option>
           <option value="azure">{t("call.live.provider.azure")}</option>
+          <option value="fish">{t("call.live.provider.fish")}</option>
         </Select>
       </label>
       {provider === "azure" && (
@@ -81,6 +84,37 @@ export function LiveProviderSettings() {
           </label>
           <div className="text-[12px] text-ink-tertiary">{t("call.live.azureHint")}</div>
           {azureChanged && (
+            <button
+              type="submit"
+              disabled={saving}
+              className="self-start rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+            >
+              {t("common.save")}
+            </button>
+          )}
+        </form>
+      )}
+      {provider === "fish" && (
+        <form
+          className="flex flex-col gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void save({ fishAgentId: agentId.trim() });
+          }}
+        >
+          <label className="flex flex-col gap-1">
+            <span className="text-[12px] text-ink-secondary">{t("call.live.fishAgentId")}</span>
+            <input
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              value={agentId}
+              onChange={(event) => setAgentId(event.target.value)}
+              className={FIELD}
+            />
+          </label>
+          <div className="text-[12px] text-ink-tertiary">{t("call.live.fishHint")}</div>
+          {agentChanged && (
             <button
               type="submit"
               disabled={saving}

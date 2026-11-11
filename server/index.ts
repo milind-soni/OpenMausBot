@@ -321,7 +321,8 @@ import { createDecider, deciderReady, describeDecider } from "./decider/index.ts
 import { createStopLineRoutes } from "./routes/stop-line.ts"; import { decideRoomResponder } from "./decider/room-routing.ts"; import { roomRoutingInput } from "./host/room-routing-input.ts";
 import { createLiveSession, liveAttachUrl, liveHistoryFrom, LiveSessionError, type LiveBot, type LiveHistoryMessage } from "./live-call.ts";
 import { LiveCallController, LiveCallSignedOutError, openLiveSocket } from "./live-call-controller.ts";
-import { liveCallSettings, liveSettingsFor, liveSettingsForClient, saveLiveSettings } from "./live-settings.ts"; import { azureLiveCallRefusal, liveScopeRefusal } from "./live-access.ts";
+import { createFishLiveSession, endFishLiveSession, FishRelays } from "./live-fish.ts";
+import { liveCallSettings, liveSettingsFor, liveSettingsForClient, saveLiveSettings } from "./live-settings.ts"; import { azureLiveCallRefusal, fishLiveCallRefusal, liveScopeRefusal } from "./live-access.ts";
 import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-record.ts"; import { noteGroupTurn, turnsSince } from "./room-round-turns.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { createTtsRoutes } from "./routes/tts.ts";
@@ -12462,6 +12463,7 @@ function liveCallTitle(botId: string, threadId: string, excerpt: string): Promis
   const gate = threadTitleGate(bot);
   return gate.ok ? generateThreadTitle(gate.instance, excerpt, "call") : null;
 }
+const fishRelays = new FishRelays();
 const liveCalls = new LiveCallController({
   store,
   send: async ({ auth, botId, threadId, text, callId }) => {
@@ -12495,9 +12497,15 @@ const liveCalls = new LiveCallController({
   broadcast: (frame) => broadcast(frame, { adminOnly: true }),
   settings: () => liveCallSettings(cfg),
   azureRefusal: (auth) => azureLiveCallRefusal(auth, { othersOnLoopback: adminActivityRecording() }),
-  createSession: ({ key, endpoint, sdp, botId, threadId, voice }) => createLiveSession({ key, endpoint, sdp, voice, bot: liveBotFor(botId), history: liveHistoryFor(threadId), cloudHome: Boolean(CLOUD_HOME) }),
-  openSocket: openLiveSocket,
-  attachUrl: (sessionId, endpoint) => liveAttachUrl(sessionId, endpoint),
+  fishRefusal: (auth) => fishLiveCallRefusal(auth, { othersOnLoopback: adminActivityRecording() }),
+  createSession: async ({ key, endpoint, sdp, botId, threadId, voice }) => {
+    if (endpoint.provider !== "fish") return createLiveSession({ key, endpoint, sdp, voice, bot: liveBotFor(botId), history: liveHistoryFor(threadId), cloudHome: Boolean(CLOUD_HOME) });
+    const session = await createFishLiveSession({ key, endpoint, bot: liveBotFor(botId), history: liveHistoryFor(threadId), cloudHome: Boolean(CLOUD_HOME) });
+    const { token } = fishRelays.open(session.session_id, () => endFishLiveSession(session.session_id, key, endpoint));
+    return { sessionId: session.session_id, fish: { type: "fish", session, relayToken: token } };
+  },
+  openSocket: (url, key, endpoint) => endpoint.provider === "fish" ? fishRelays.socket(url) : openLiveSocket(url, key, endpoint),
+  attachUrl: (sessionId, endpoint) => endpoint.provider === "fish" ? sessionId : liveAttachUrl(sessionId, endpoint),
   speakable: (text) => toUtterances(text),
   // One "call" row per call: its id, times and length, never anything said on it.
   recordCall: (input) => {
@@ -12535,6 +12543,7 @@ ROUTES.push(createLiveRoutes({
     return { botId: bot.id, botName: bot.name, threadId: target };
   },
   settings: () => liveSettingsFor(cfg),
+  fishRelay: (sessionId, token) => fishRelays.find(sessionId, token),
   saveSettings: async (patch) => {
     if (providerConfigBusy) throw Object.assign(new Error("Settings are already being updated. Try again in a moment."), { status: 409 });
     saveLiveSettings(cfg, patch);

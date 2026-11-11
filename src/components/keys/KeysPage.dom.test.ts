@@ -95,11 +95,11 @@ describe("the keys page", () => {
     expect(rowsShown()).not.toContain("elevenlabs");
   });
 
-  it("offers the Live calls service, OpenAI or Azure OpenAI, on the separate live key row", () => {
+  it("offers the Live calls service, OpenAI, Azure OpenAI or Fish Audio, on the separate live key row", () => {
     setConfig({ ...fx.config, live: { configured: false, provider: "azure", voice: "", readTypedReplies: true, idleMinutes: 5 } });
     page();
     const select = row("liveKey")!.querySelector<HTMLSelectElement>("select")!;
-    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure"]);
+    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure", "fish"]);
     expect(select.value).toBe("azure");
     expect(row("liveKey")!.querySelector('input[type="url"]')).not.toBeNull();
   });
@@ -124,6 +124,19 @@ describe("the keys page", () => {
     expect(openAi.textContent).toContain("Optional");
     expect([...openAi.querySelectorAll("input")].map((input) => input.placeholder)).toContain("sk-…");
     expect(row("liveCalls")).not.toBeNull();
+  });
+
+  it("with Fish Audio chosen, the Live key row asks for a required Fish key and its agent id, with no OpenAI wording", () => {
+    setConfig({ ...fx.config, live: { configured: false, provider: "fish", fishAgentId: "agent_1", voice: "", readTypedReplies: true, idleMinutes: 5 } });
+    page();
+    const fish = row("liveKey")!;
+    expect(fish.textContent).toContain("Fish Audio");
+    expect(fish.textContent).toContain("Required");
+    expect(fish.textContent).not.toContain("instead of your OpenAI key");
+    expect([...fish.querySelectorAll("input")].map((input) => input.placeholder)).not.toContain("sk-…");
+    expect(fish.querySelector<HTMLAnchorElement>('a[href*="platform.openai.com"]')).toBeNull();
+    expect([...fish.querySelectorAll<HTMLInputElement>("input")].some((input) => input.value === "agent_1")).toBe(true);
+    expect(row("liveCalls")).toBeNull();
   });
 
   it("opens a section that holds a saved key, and counts what is connected", () => {

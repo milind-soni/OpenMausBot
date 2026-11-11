@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api, useStore, type ConfigStatus } from "@/state/store";
-import { liveDisclosure } from "@/lib/call-mode";
+import { liveDisclosure, liveKeyCopy } from "@/lib/call-mode";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 
 export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void; compact?: boolean }) {
   const { state, dispatch } = useStore();
-  const azure = state.config?.live?.provider === "azure";
+  const provider = state.config?.live?.provider;
+  const azure = provider === "azure";
+  const fish = provider === "fish";
+  const copy = liveKeyCopy(provider);
   const [key, setKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,17 +50,17 @@ export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void
         void save();
       }}
     >
-      <div className="text-[14px] font-medium text-ink">{t(azure ? "call.live.azureKeyTitle" : "call.live.keyTitle")}</div>
-      <div className="text-[13px] leading-[1.45] text-ink-secondary">{t(azure ? "call.live.azureKeyExplain" : "call.live.keyExplain")}</div>
-      <div className="text-[13px] leading-[1.45] text-ink-secondary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure })}</div>
+      <div className="text-[14px] font-medium text-ink">{t(copy.title)}</div>
+      <div className="text-[13px] leading-[1.45] text-ink-secondary">{t(copy.explain)}</div>
+      <div className="text-[13px] leading-[1.45] text-ink-secondary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, fish })}</div>
       <input
         type="password"
         autoComplete="off"
         spellCheck={false}
         value={key}
         onChange={(event) => setKey(event.target.value)}
-        placeholder={azure ? "…" : "sk-…"}
-        aria-label={t(azure ? "call.live.azureKeyField" : "call.live.keyField")}
+        placeholder={azure || fish ? "…" : "sk-…"}
+        aria-label={t(copy.field)}
         className="rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent/60"
       />
       {error && <div className="text-[12px] text-danger">{error}</div>}
