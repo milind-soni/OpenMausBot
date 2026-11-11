@@ -48,6 +48,21 @@ describe("publish-to-netlify skill guide", () => {
     expect(readdirSync(SKILL_DIR).sort()).toEqual(["SKILL.md", "deploy.mjs", "manifest.json", "site-record.md"]);
   });
 
+  it("loads the helper whatever line endings a checkout gave it", async () => {
+    const source = readFileSync(HELPER, "utf8");
+    expect(source.startsWith("#!")).toBe(false);
+    const folder = mkdtempSync(join(tmpdir(), "netlify-skill-crlf-"));
+    try {
+      const copy = join(folder, "deploy.mjs");
+      writeFileSync(copy, source.replace(/\r?\n/g, "\r\n"));
+      const loaded = await import(pathToFileURL(copy).href) as Helper;
+      expect(loaded.publishable("index.html")).toBe(true);
+      expect(loaded.publishable(".env")).toBe(false);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
   it("mounts when a bot is asked to put a site or app online, and not for a page or a report", () => {
     for (const text of ["Deploy this to Netlify", "build me a todo web app and deploy it", "make a website for my bakery", "publish the site so customers can see it",
       "turn this into a live app", "can you host it somewhere?"]) {
@@ -136,12 +151,14 @@ describe("publish-to-netlify helper: what may be uploaded", () => {
       writeFileSync(join(site, ".env"), "KEY=1");
       writeFileSync(join(site, ".openmausbot-secrets", "t1", "card"), "nfp_secret");
       writeFileSync(join(root, "outside.txt"), "private");
-      symlinkSync(join(root, "outside.txt"), join(site, "linked.txt"));
-      symlinkSync(root, join(site, "up"));
+      // Windows makes a file link only with a privilege CI lacks; a folder junction needs none.
+      const fileLinks = process.platform !== "win32";
+      if (fileLinks) symlinkSync(join(root, "outside.txt"), join(site, "linked.txt"));
+      symlinkSync(root, join(site, "up"), process.platform === "win32" ? "junction" : "dir");
 
       const { files, skipped } = helper.collectFiles(site);
       expect(files.map((file) => file.path)).toEqual(["assets/a b.css", "assets/copy.css", "index.html"]);
-      expect(skipped.sort()).toEqual([".env", ".openmausbot-secrets", "linked.txt", "up"]);
+      expect(skipped.sort()).toEqual([".env", ".openmausbot-secrets", ...(fileLinks ? ["linked.txt"] : []), "up"]);
       const { digest, bySha } = helper.buildDigest(files);
       expect(digest).toEqual({ "/assets/a b.css": sha1("body{}"), "/assets/copy.css": sha1("body{}"), "/index.html": sha1("<h1>hi</h1>") });
       expect(bySha.get(sha1("body{}"))?.path).toBe("assets/a b.css");
@@ -209,7 +226,7 @@ describe("publish-to-netlify helper, end to end against a stand-in on loopback",
   let tokenFile: string;
 
   const run = (args: string[], env: Record<string, string> = {}, cwd = project) => new Promise<{ code: number; stdout: string; stderr: string; json: Record<string, unknown> }>((done) => {
-    execFile(process.execPath, [HELPER, ...args], { cwd, env: { PATH: process.env.PATH ?? "", HOME: home, OMB_NETLIFY_API_URL: fake.url, ...env } }, (error, stdout, stderr) => {
+    execFile(process.execPath, [HELPER, ...args], { cwd, env: { PATH: process.env.PATH ?? "", HOME: home, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}), OMB_NETLIFY_API_URL: fake.url, ...env } }, (error, stdout, stderr) => {
       done({ code: error ? Number(error.code) : 0, stdout, stderr, json: JSON.parse(stdout.trim() || "{}") as Record<string, unknown> });
     });
   });
