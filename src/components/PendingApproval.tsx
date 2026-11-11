@@ -75,8 +75,23 @@ export function answeredStepPrompts(messages: Message[]): number {
 /** Answered step prompts after which the card says how to be asked less. */
 const ASKED_OFTEN_AFTER = 3;
 
-/** How the card's Always allow lasts: for good ("key") or only until the engine session ends ("session"). */
-export type AlwaysAllowScope = "key" | "session";
+/** How the card's Always allow lasts: for good ("key"), for this exact command in its folder ("command"), or only until
+ * the engine session ends ("session"). */
+export type AlwaysAllowScope = "key" | "command" | "session";
+
+/** The Always allow the card's actions offer, with the same eligibility and order as PendingApprovalActions. */
+export function alwaysAllowScope(pending: Pending, ownerOrAdmin: boolean | null, hasBot: boolean): AlwaysAllowScope | undefined {
+  if (isRoutineApproval(pending) || isSkillApproval(pending) || isProfileApproval(pending) || titledCard(pending.message.card)) return undefined;
+  if (pending.allowKey) return hasBot ? "key" : undefined;
+  if (ownerOrAdmin === true && pending.commandAllowlist) return "command";
+  return pending.allowSession ? "session" : undefined;
+}
+
+const ASKED_OFTEN_ALWAYS: Record<AlwaysAllowScope, { alone: LocaleKey; after: LocaleKey }> = {
+  key: { alone: "approval.askedOften.alwaysAllow", after: "approval.askedOften.orAlwaysAllow" },
+  command: { alone: "approval.askedOften.alwaysAllowCommand", after: "approval.askedOften.orAlwaysAllowCommand" },
+  session: { alone: "approval.askedOften.alwaysAllowSession", after: "approval.askedOften.orAlwaysAllowSession" },
+};
 
 /** A one-line hint once a conversation at Ask or Auto-accept edits has asked often, naming only the ways this card and
  * engine offer; it changes nothing by itself. */
@@ -86,10 +101,10 @@ export function askedOftenHint(mode: ApprovalMode, driverKind: string | undefine
     // Qwen's reviewer blocks the steps it judges risky instead of asking about them.
     const lead = t(driverKind === "qwenAgent" ? "approval.askedOften.approveForMeBlocks" : "approval.askedOften.approveForMe", { name: botName });
     if (!always) return lead;
-    return `${lead} ${t(always === "key" ? "approval.askedOften.orAlwaysAllow" : "approval.askedOften.orAlwaysAllowSession")}`;
+    return `${lead} ${t(ASKED_OFTEN_ALWAYS[always].after)}`;
   }
   if (!always) return undefined;
-  return t(always === "key" ? "approval.askedOften.alwaysAllow" : "approval.askedOften.alwaysAllowSession");
+  return t(ASKED_OFTEN_ALWAYS[always].alone);
 }
 
 export function spokenApprovalPrompt(pending: Pending, requester: string): string {
@@ -303,7 +318,7 @@ export function PendingApprovalActions({
   const isProfileRequest = isProfileApproval(pending);
   const titled = titledCard(pending.message.card);
   const durableRequest = isRoutineRequest || isSkillRequest || isProfileRequest || titled;
-  const canRememberCommand = ownerOrAdmin === true && !durableRequest && !pending.allowKey && Boolean(pending.commandAllowlist);
+  const scope = alwaysAllowScope(pending, ownerOrAdmin, Boolean(bot));
   const reviewedSha256 = pending.message.card?.skillRequest
     ? reviewedSkillSha256(pending.message.card.skillRequest)
     : undefined;
@@ -341,14 +356,13 @@ export function PendingApprovalActions({
       </>
     );
   }
-  const always = durableRequest ? null
-    : bot && pending.allowKey
-      ? { name: t("approval.action.alwaysAllow"), hint: t("approval.action.stopAsking", { name: bot.name, key: pending.allowKey }), run: () => decide("allow", true) }
-      : canRememberCommand && pending.commandAllowlist
-        ? { name: t("approval.action.alwaysAllowCommand"), hint: t("approval.action.alwaysAllowCommandHint", { cwd: pending.commandAllowlist.cwd }), run: () => decide("allow", false, true) }
-        : !pending.allowKey && pending.allowSession
-          ? { name: t("approval.action.alwaysAllowSession"), hint: t("approval.action.alwaysAllowSessionHint"), run: () => decide("allow", true) }
-          : null;
+  const always = scope === "key" && bot && pending.allowKey
+    ? { name: t("approval.action.alwaysAllow"), hint: t("approval.action.stopAsking", { name: bot.name, key: pending.allowKey }), run: () => decide("allow", true) }
+    : scope === "command" && pending.commandAllowlist
+      ? { name: t("approval.action.alwaysAllowCommand"), hint: t("approval.action.alwaysAllowCommandHint", { cwd: pending.commandAllowlist.cwd }), run: () => decide("allow", false, true) }
+      : scope === "session"
+        ? { name: t("approval.action.alwaysAllowSession"), hint: t("approval.action.alwaysAllowSessionHint"), run: () => decide("allow", true) }
+        : null;
   const more = showMore && !durableRequest ? [
     <button key="cancel" type="button" onClick={onCancelTurn} className={ASK_QUIET_ANSWER}>
       {t("approval.action.cancelTurn")}

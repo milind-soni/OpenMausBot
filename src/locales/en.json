@@ -1150,6 +1150,8 @@
   "approval.askedOften.orAlwaysAllowSession": "Or use Always allow this session for a step you trust, until the session ends.",
   "approval.askedOften.alwaysAllow": "Asked a lot? Use Always allow for a step you trust, and it won't ask about it again.",
   "approval.askedOften.alwaysAllowSession": "Asked a lot? Use Always allow this session for a step you trust, and it won't ask about it again until the session ends.",
+  "approval.askedOften.orAlwaysAllowCommand": "Or use Always allow this command for a command you trust in this folder.",
+  "approval.askedOften.alwaysAllowCommand": "Asked a lot? Use Always allow this command for a command you trust, and it won't ask about it again in this folder.",
   "approval.action.alwaysAllowSession": "Always allow this session",
   "approval.action.alwaysAllowSessionHint": "The provider stops asking about this action until the session ends",
   "approval.action.alwaysAllowCommand": "Always allow this command",

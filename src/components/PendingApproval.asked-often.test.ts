@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { Message } from "@/state/store";
-import { answeredStepPrompts, askedOftenHint, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
+import { alwaysAllowScope, answeredStepPrompts, askedOftenHint, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 
 type Card = NonNullable<Message["card"]>;
 let next = 0;
@@ -78,5 +78,20 @@ describe("asked-often hint on the approval card", () => {
     const hinted = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending, count: 1, index: 0, hint: askedOftenHint("ask", "codex", 3, "Scout", "key") }));
     expect(hinted).toContain("data-asked-often");
     expect(hinted).toContain("Approve for me");
+  });
+
+  it("matches the hint to the Always allow the card's buttons offer, command grants included", () => {
+    const commandAllowlist = { command: "ls -la", cwd: "/work", providerInstanceId: "claude" };
+    const [command] = pendingApprovals([prompt()]).map((pending) => ({ ...pending, commandAllowlist, allowSession: true }));
+    expect(alwaysAllowScope(command, true, true)).toBe("command");
+    expect(alwaysAllowScope(command, false, true)).toBe("session");
+    expect(alwaysAllowScope(command, null, true)).toBe("session");
+    expect(alwaysAllowScope({ ...command, allowKey: "Bash" }, true, true)).toBe("key");
+    expect(alwaysAllowScope({ ...command, allowKey: "Bash" }, true, false)).toBeUndefined();
+    expect(alwaysAllowScope({ ...command, allowSession: false }, false, true)).toBeUndefined();
+    const hint = askedOftenHint("ask", "openaiChat", 3, "Scout", "command");
+    expect(hint).toContain("Always allow this command");
+    expect(hint).not.toContain("until the session ends");
+    expect(askedOftenHint("ask", "codex", 3, "Scout", "command")).toContain("Always allow this command");
   });
 });
