@@ -2,8 +2,10 @@
 // revision, its memory and its conversation folders are its own, and an unattended run that waits for an approval to
 // read them only stalls. Only plain reads count: one of the reading commands below made of plain words alone, or a read
 // tool's own paths, with every path inside the bot's own folders once every link is followed.
-import { realpathSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { lstatSync, opendirSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { isAbsolute, join, parse, relative, resolve } from "node:path";
+import type { WorkspaceReadKind } from "../shared/runtime-events.ts";
 
 /** Commands that only read the files they name, with the flags that keep them that way: none that follows links out
  * (grep -R, rg -L), runs a program (rg --pre), follows a file forever (tail -f) or writes (sed -i). */
@@ -118,4 +120,72 @@ export function readsOwnFiles(dataDir: string, botId: string, ask: { command?: {
   if (ask.reads?.length) return readsOnly(ask.reads, "/", roots);
   const paths = ask.command ? readOnlyPaths(ask.command.command) : null;
   return Boolean(paths && ask.command && readsOnly(paths, ask.command.cwd, roots));
+}
+
+const WORKSPACE_READ_FIELDS: Record<string, readonly string[]> = {
+  Read: ["file_path", "offset", "limit", "pages"],
+  LS: ["path"],
+  Grep: ["path", "pattern", "glob", "type", "output_mode", "-A", "-B", "-C", "-n", "-i", "head_limit", "offset", "multiline"],
+  Glob: ["path", "pattern"],
+};
+
+export function workspaceReadKind(tool: string, input: Record<string, unknown>): WorkspaceReadKind | undefined {
+  const fields = WORKSPACE_READ_FIELDS[tool];
+  if (!Array.isArray(fields) || !Object.keys(input).every(key => fields.includes(key))) return undefined;
+  const rawGlob = tool === "Glob" ? input.pattern : input.glob;
+  const glob = typeof rawGlob === "string" ? rawGlob.replaceAll("\\", "/") : undefined;
+  if (glob !== undefined && (!/^[\w./*? -]+$/.test(glob) || glob.startsWith("/") || glob.split("/").includes(".."))) return undefined;
+  if ((tool === "Glob" || tool === "Grep") && typeof input.pattern !== "string") return undefined;
+  return tool === "Read" ? "file" : tool === "LS" ? "list" : "search";
+}
+
+const WINDOWS_DEVICE = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i;
+const PRIVATE_NAME = /^(?:\.|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.|$))|(?:^|[._ -])(?:credentials?|secrets?|passwords?|tokens?|private[-_ ]?keys?)(?:[._ -]|$)|\.(?:pem|key|pfx|p12|kdbx|jks|keystore)$/i;
+const pathParts = (path: string) => path.slice(parse(path).root.length).split(/[\\/]/).filter(Boolean);
+const plainName = (name: string) => !PRIVATE_NAME.test(name) && !WINDOWS_DEVICE.test(name) && !/[:\0*?]/.test(name) && !/[. ]$/.test(name);
+
+function plainLocalPath(path: string): boolean {
+  return isAbsolute(path) && !/^[\\/]{2}/.test(path) && pathParts(path).every(plainName);
+}
+
+const WORKSPACE_SCAN_LIMIT = 512;
+
+export function readsWorkspaceFiles(dataDir: string, root: string, path: string, kind: WorkspaceReadKind): boolean {
+  if (!plainLocalPath(root) || !plainLocalPath(path) || !inside(path, root)) return false;
+  try {
+    const workspace = realpathSync.native(root);
+    const target = realpathSync.native(path);
+    const data = realpathSync.native(dataDir);
+    const home = realpathSync.native(homedir());
+    if (relative(root, workspace) !== "" || !plainLocalPath(target)
+      || !inside(target, workspace)
+      || inside(home, workspace) || inside(data, workspace) || inside(workspace, data)) return false;
+
+    const rootStat = lstatSync(workspace);
+    if (!rootStat.isDirectory()) return false;
+    let remaining = WORKSPACE_SCAN_LIMIT;
+    function safeEntry(entry: string, descend: boolean): boolean {
+      if (--remaining < 0) return false;
+      const stat = lstatSync(entry);
+      if (stat.dev !== rootStat.dev) return false;
+      if (stat.isFile()) return stat.nlink === 1;
+      if (!stat.isDirectory()) return false;
+      if (!descend) return true;
+      const dir = opendirSync(entry);
+      try {
+        for (let child = dir.readSync(); child; child = dir.readSync()) {
+          if (!plainName(child.name) || !safeEntry(join(entry, child.name), kind === "search")) return false;
+        }
+        return true;
+      } finally {
+        dir.closeSync();
+      }
+    }
+
+    const stat = lstatSync(target);
+    if ((kind === "file" && !stat.isFile()) || (kind === "list" && !stat.isDirectory())) return false;
+    return safeEntry(target, kind !== "file");
+  } catch {
+    return false;
+  }
 }

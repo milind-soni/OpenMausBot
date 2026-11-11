@@ -58,7 +58,7 @@ import {
 import { appendNative } from "./native.ts";
 import type { KeepWarmContract } from "./claude-keepwarm.ts"; import { claudeForks } from "./claude-warm-summary.ts";
 import { BACKGROUND_CALL_TIMEOUT_MS, backgroundCallArgs, spawnBackgroundCall } from "./claude-background.ts"; import { withEndpointFolder } from "./claude-endpoint-folder.ts";
-import { permissionLaunchCwd, shellRequest } from "./permission-command.ts"; import { readToolPaths } from "../own-file-reads.ts";
+import { permissionLaunchCwd, shellRequest } from "./permission-command.ts"; import { readToolPaths, workspaceReadKind } from "../own-file-reads.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts"; import { claudeToolDraft } from "./tool-progress.ts";
 import {
@@ -1261,6 +1261,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                   ? nativeMode === "auto" ? "active" : "inactive"
                   : undefined;
               const questions = askQuestions(ask);
+               const reads = ask.kind === "permission" ? readToolPaths(ask.tool, ask.input) : undefined;
+               const readKind = reads && workspaceReadKind(ask.tool, ask.input);
               emit({
                 ...base(threadId, eventTurnId),
                 type: "request.opened",
@@ -1269,7 +1271,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 tool: ask.tool,
                 summary: askSummary(ask),
                 // The Bash command, for exact-command grants and for the safety floor.
-                ...shellRequest(ask.kind === "permission" && ask.tool === "Bash" ? ask.input.command : undefined, commandCwd), ...(ask.kind === "permission" && readToolPaths(ask.tool, ask.input) ? { reads: readToolPaths(ask.tool, ask.input) } : {}),
+                 ...shellRequest(ask.kind === "permission" && ask.tool === "Bash" ? ask.input.command : undefined, commandCwd),
+                 reads,
+                 workspaceRead: turn.cwd && commandCwd && readKind ? { root: commandCwd, kind: readKind } : undefined,
                 requiresExplicitApproval: ask.kind === "permission" && ask.tool === "Bash" && ask.input.dangerouslyDisableSandbox === true || undefined,
                 nativeReview,
                 allowSession: ask.kind === "permission" && !(controlsHost && typeof ask.tool === "string" && ask.tool.startsWith("mcp__computer")) ? true : undefined,

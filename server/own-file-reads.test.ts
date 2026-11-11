@@ -1,9 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { acpReadPaths, ownReadRoots, readOnlyPaths, readToolPaths, readsOwnFiles } from "./own-file-reads.ts";
+import { acpReadPaths, ownReadRoots, readOnlyPaths, readToolPaths, readsOwnFiles, readsWorkspaceFiles, workspaceReadKind } from "./own-file-reads.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -104,4 +104,37 @@ describe("a bot's own files", () => {
     expect(readsOwnFiles(data, "iris", { command: { command: "cat paul/MEMORY.md", cwd: conversation } })).toBe(false);
     expect(readsOwnFiles(data, "iris", { reads: [join(conversation, "paul", "MEMORY.md")] })).toBe(false);
   });
+});
+
+it("keeps project reads inside the pinned folder and searches out of linked or private subtrees", () => {
+  const fixture = realpathSync.native(mkdtempSync(join(tmpdir(), "omb-workspace-reads-")));
+  dirs.push(fixture);
+  const data = join(fixture, "data"), project = join(fixture, "project"), source = join(project, "src");
+  mkdirSync(data);
+  mkdirSync(source, { recursive: true });
+  const external = join(data, "outside.md"), file = join(source, "notes.md");
+  writeFileSync(external, "outside");
+  writeFileSync(file, "inside");
+  expect(readsWorkspaceFiles(data, project, file, "file")).toBe(true);
+  expect(readsWorkspaceFiles(data, project, source, "search")).toBe(true);
+  expect(readsWorkspaceFiles(data, project, external, "file")).toBe(false);
+  expect(readsWorkspaceFiles(data, fixture, external, "file")).toBe(false);
+  expect(readsWorkspaceFiles(data, data, external, "file")).toBe(false);
+
+  linkSync(external, join(source, "hard-link.md"));
+  symlinkSync(data, join(project, "linked"), "junction");
+  expect(readsWorkspaceFiles(data, project, join(source, "hard-link.md"), "file")).toBe(false);
+  expect(readsWorkspaceFiles(data, project, join(project, "linked", "outside.md"), "file")).toBe(false);
+  expect(readsWorkspaceFiles(data, project, project, "search")).toBe(false);
+
+  const env = join(source, ".env.local");
+  writeFileSync(env, "FIXTURE_TOKEN=fake");
+  expect(readsWorkspaceFiles(data, project, env, "file")).toBe(false);
+  expect(readsWorkspaceFiles(data, project, source, "list")).toBe(false);
+
+  expect(workspaceReadKind("Glob", { path: source, pattern: "src\\*.ts" })).toBe("search");
+  expect(workspaceReadKind("Glob", { path: source, pattern: "..\\secrets\\*.ts" })).toBeUndefined();
+  expect(workspaceReadKind("Glob", { path: source, pattern: "\\root\\*.ts" })).toBeUndefined();
+  expect(workspaceReadKind("Grep", { path: source, pattern: "token", glob: "src\\*.ts" })).toBe("search");
+  expect(readsWorkspaceFiles(data, project, join(source, "CON"), "file")).toBe(false);
 });
