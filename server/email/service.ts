@@ -5,8 +5,7 @@ import { EMAIL_SLUG, type EmailAccountView, type EmailConnectAnswer, type EmailC
 import { boxRefusal } from "../bot-box/egress-gate.ts";
 import { resolveTarget } from "../browser/egress/gate.ts";
 import { secretForms } from "../vault-store.ts";
-import { HELD_SECRET_MASK } from "../redact.ts";
-import { heldPiecesIn, heldTail, HeldShapes, maskHeldPieces } from "../held-pieces.ts";
+import { HELD_SECRET_MASK, longestSplittableForm } from "../redact.ts";
 import { EmailError, LASTING_SENDING_FAULTS, openGuard, pinned, sendingError, sendMessage, SendingError, testMailbox, testSending, type EmailGuard, type SendingFault } from "./client.ts";
 import { discoverMailServers, liveDiscoverDeps, smtpBeside, type DiscoverDeps, type MailCandidates } from "./discover.ts";
 import { EmailStore, MAX_EMAIL_ACCOUNTS, parseEmailAccount, type EmailAccount, type EmailServer } from "./store.ts";
@@ -101,8 +100,7 @@ type Sending = { smtp: EmailServer; login: Login } | { problem: string; tried?: 
 export function createEmailService(deps: EmailServiceDeps) {
   const store = new EmailStore(deps.dataDir);
   /** Masks every saved password, in every form it might be written, in whatever a bot or a transcript can read. */
-  const shapes = new HeldShapes(secretForms);
-  const scrub = (text: string) => maskHeldPieces(store.secretValues().flatMap(secretForms).reduce((safe, form) => (safe.includes(form) ? safe.split(form).join(HELD_SECRET_MASK) : safe), text), shapes.of(store.secretValues()));
+  const scrub = (text: string) => store.secretValues().flatMap(secretForms).reduce((safe, form) => (safe.includes(form) ? safe.split(form).join(HELD_SECRET_MASK) : safe), text);
   const guard = deps.guard ?? (deps.publicOnly ? publicGuard : openGuard);
   const live = { mailbox: testMailbox, sending: testSending, send: sendMessage, ...deps.test };
   const allowed = async (url: URL) => {
@@ -199,10 +197,8 @@ export function createEmailService(deps: EmailServiceDeps) {
     guard,
     status,
     scrub,
-    /** What a stream holds back for the saved passwords (held-pieces.ts `HeldShape.tail`). */
-    longest: () => heldTail(shapes.of(store.secretValues())),
-    /** Whether text holds a piece of a saved password (held-pieces.ts). */
-    begun: (text: string) => heldPiecesIn(text, shapes.of(store.secretValues())),
+    /** The length of the longest saved password, in any form a stream could cut partway. */
+    longest: () => longestSplittableForm(store.secretValues().flatMap(secretForms)),
     mounted: () => !deps.refusal && store.list().length > 0,
     slug: EMAIL_SLUG,
     /** Why this mailbox can't send, or nothing while it can. */

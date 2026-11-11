@@ -181,7 +181,7 @@ function customRequest(body: Record<string, unknown>): { label: string; reason: 
 export function createSecretCards(deps: SecretCardsDeps) {
   const { store, cfg, botLogins, vaultStore, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode } = deps;
   const vault = new SecretVault();
-  addHeldSecretScrubber((text) => vault.scrub(text), () => vault.longest(), (text) => vault.begun(text));
+  addHeldSecretScrubber((text) => vault.scrub(text), () => vault.longest());
 
   const custom = (secret: SecretRequestCardData): boolean => secret.target === CUSTOM_SECRET_TARGET;
   /** Saved where the card says: a named key in the settings or Logins, a custom secret behind its card. */

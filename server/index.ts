@@ -733,9 +733,9 @@ const threadStarters = new ThreadStarters(join(DATA_DIR, "thread-starters.json")
 const commandAllowlist = new CommandAllowlistStore(join(DATA_DIR, "command-allowlist.json"));
 // Every value saved in the Vault is scrubbed from whatever a bot or a transcript can read.
 const logins = new VaultStore({ dataDir: DATA_DIR, secretChanged: (item) => mcpServersHost.keyChanged(item) });
-removeRetiredAppFiles(DATA_DIR); const emailService = createEmailService({ dataDir: DATA_DIR, publicOnly: Boolean(CLOUD_HOME), refusal: CLOUD_TEAM ? "Email isn't on a Team Cloud yet: every bot there would read the same mailbox." : null }); addHeldSecretScrubber((text) => emailService.scrub(text), () => emailService.longest(), (text) => emailService.begun(text));
+removeRetiredAppFiles(DATA_DIR); const emailService = createEmailService({ dataDir: DATA_DIR, publicOnly: Boolean(CLOUD_HOME), refusal: CLOUD_TEAM ? "Email isn't on a Team Cloud yet: every bot there would read the same mailbox." : null }); addHeldSecretScrubber((text) => emailService.scrub(text), () => emailService.longest());
 const heldSecrets = new HeldSecrets(logins);
-addHeldSecretScrubber((text) => heldSecrets.scrub(text), () => heldSecrets.longest(), (text) => heldSecrets.begun(text));
+addHeldSecretScrubber((text) => heldSecrets.scrub(text), () => heldSecrets.longest());
 const onePassword = new OnePasswordLogins({
   token: () => logins.onePasswordToken(),
   grants: () => logins.onePasswordGrants(),

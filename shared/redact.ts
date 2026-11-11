@@ -91,9 +91,6 @@ interface HeldSecretScrubber {
   /** The length of the longest value it holds, in any form, that a stream could cut partway (see
    * `longestSplittableForm`); 0 when it holds none. */
   longest: () => number;
-  /** Whether text holds a piece of a held value whose tail `longest` counts only up to its first piece
-   * (server/held-pieces.ts): a stream stops there. */
-  begun?: (text: string) => boolean;
 }
 
 const heldSecretScrubbers = new Set<HeldSecretScrubber>();
@@ -101,8 +98,8 @@ const heldSecretScrubbers = new Set<HeldSecretScrubber>();
 /** Register a scrubber for held secret values, with the length of the longest one a stream could cut partway; returns
  * its removal. A stream holds back that many characters whatever they are, so such a value is masked whole and nothing
  * about it shows before. */
-export function addHeldSecretScrubber(scrub: (text: string) => string, longest: () => number, begun?: (text: string) => boolean): () => void {
-  const entry: HeldSecretScrubber = { scrub, longest, ...(begun ? { begun } : {}) };
+export function addHeldSecretScrubber(scrub: (text: string) => string, longest: () => number): () => void {
+  const entry: HeldSecretScrubber = { scrub, longest };
   heldSecretScrubbers.add(entry);
   return () => { heldSecretScrubbers.delete(entry); };
 }
@@ -128,12 +125,6 @@ export function heldSecretLongest(): number {
 /** Printable ASCII with no whitespace: a stream never cuts inside a run of it (shared/stream-hold.ts), so a value made
  * only of it is whole whenever any of it is sent, and is masked whole. */
 const UNSPLITTABLE = /^[\x21-\x7e]*$/;
-
-/** Whether `text` holds a piece of a held value (see `HeldSecretScrubber.begun`). */
-export function heldSecretBegun(text: string): boolean {
-  for (const { begun } of heldSecretScrubbers) if (begun?.(text)) return true;
-  return false;
-}
 
 /** The longest of `forms` that a stream could cut partway (one with whitespace or a character outside printable
  * ASCII), for a scrubber's `longest`; forms of printable ASCII alone need no held-back tail. */

@@ -7,7 +7,7 @@
 // event log included, sees only what is safe; a reply's finished text arrives with its completion, and the rest of
 // a thinking stream when the turn ends.
 import type { RuntimeEvent } from "../contracts.ts";
-import { heldSecretBegun, heldSecretLongest, redactSecretsInText, scrubHeldSecrets } from "../redact.ts";
+import { heldSecretLongest, redactSecretsInText, scrubHeldSecrets } from "../redact.ts";
 import { openPrivateKeyAt } from "../../shared/redact.ts";
 import { heldTailStart, wordSafeCut } from "../../shared/stream-hold.ts";
 import { stripLeakedSystemHarnessMessages } from "../../shared/system-message-guard.ts";
@@ -237,12 +237,6 @@ export class SafeText {
     stream.raw += delta;
     if (stream.stopped) return "";
     const window = stream.raw.slice(stream.base);
-    // A piece of a held value that spans lines: the value may be whole further on, and then its saved message hides
-    // its every line, so nothing more streams.
-    if (heldSecretBegun(window)) {
-      stream.stopped = true;
-      return "";
-    }
     const end = safeEnd(window);
     const out = end < 0 ? "" : stream.settled + spaced(window.slice(0, end));
     if (end < 0 || !out.startsWith(stream.sent)) {

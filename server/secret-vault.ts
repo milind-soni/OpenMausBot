@@ -11,8 +11,7 @@ import { join } from "node:path";
 import { SECRET_VALUE_MAX_BYTES } from "../shared/vault.ts";
 import { vaultPointer } from "./vault/mcp-keys.ts";
 import { secretForms } from "./vault-store.ts";
-import { HELD_SECRET_MASK } from "./redact.ts";
-import { heldPiecesIn, heldShape, heldTail, maskHeldPieces, type HeldShape } from "./held-pieces.ts";
+import { HELD_SECRET_MASK, longestSplittableForm } from "./redact.ts";
 import { inSecretFolder, SECRET_FOLDER } from "./secret-folder.ts";
 
 export { inSecretFolder, SECRET_FOLDER, SECRET_VALUE_MAX_BYTES };
@@ -83,7 +82,7 @@ export class SecretVault {
   private readonly byCard = new Map<string, { ref: string } | { file: string; until: number }>();
   /** "<thread>/<file name>" → until when, for files made from a Vault item rather than a card. */
   private readonly minted = new Map<string, number>();
-  private held: Array<{ forms: string[]; shape: HeldShape; until: number }> = [];
+  private held: Array<{ forms: string[]; until: number }> = [];
   private readonly now: () => number;
 
   constructor(now: () => number = Date.now) {
@@ -276,28 +275,19 @@ export class SecretVault {
       if (entry.until <= now) continue;
       for (const form of entry.forms) if (out.includes(form)) out = out.split(form).join(HELD_SECRET_MASK);
     }
-    return maskHeldPieces(out, this.liveShapes());
+    return out;
   }
 
-  /** What a stream holds back for the live values held (held-pieces.ts `HeldShape.tail`). */
+  /** The length of the longest live value held, in any form a stream could cut partway. */
   longest(): number {
-    return heldTail(this.liveShapes());
-  }
-
-  /** Whether text holds a piece of a live value held (held-pieces.ts). */
-  begun(text: string): boolean {
-    return heldPiecesIn(text, this.liveShapes());
-  }
-
-  private liveShapes(): HeldShape[] {
     const now = this.now();
-    return this.held.filter((entry) => entry.until > now).map((entry) => entry.shape);
+    return longestSplittableForm(this.held.filter((entry) => entry.until > now).flatMap((entry) => entry.forms));
   }
 
   private hold(value: string, until: number): void {
     const forms = secretForms(value).sort((a, b) => b.length - a.length);
     if (!forms.length) return;
-    this.held.push({ forms, shape: heldShape(value, forms), until });
+    this.held.push({ forms, until });
     if (this.held.length > HELD_LIMIT) this.held.shift();
   }
 }
