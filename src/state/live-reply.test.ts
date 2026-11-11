@@ -155,6 +155,15 @@ describe("a reply as it streams from an older server", () => {
     expect(liveReplyText({ text: "plain words", done: false })).toBe("plain ");
   });
 
+  it("shows nothing of a private key until its END line is in", () => {
+    const open = "Key:\n-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA secretbody\nmore ";
+    expect(liveReplyText({ text: open, done: false })).toBe("Key:\n");
+    expect(liveReplyText({ text: "Key:\n-----BEGIN RSA PRIV", done: false }), "a header still being written").toBe("Key:\n");
+    const closed = `${open}lines\n-----END RSA PRIVATE KEY-----\nDone `;
+    expect(liveReplyText({ text: closed, done: false })).not.toMatch(/MIIE|secretbody/);
+    expect(liveReplyText({ text: closed, done: false })).toContain("«redacted");
+  });
+
   it("draws nothing for a client abort sentence", () => {
     delta("The request was cancelled by the client.");
     complete("The request was cancelled by the client.");

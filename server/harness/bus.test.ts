@@ -405,18 +405,18 @@ describe("EventBus streamed text", () => {
     bus.publish(delta("Hel", { eventId: "d1" }));
     bus.publish(delta("lo, ", { eventId: "d2" }));
     vi.advanceTimersByTime(30);
-    bus.publish(delta("world", { eventId: "d3" }));
+    bus.publish(delta("world ", { eventId: "d3" }));
     expect(seen).toHaveLength(0);
 
     vi.advanceTimersByTime(20);
-    expect(summary(seen)).toEqual(["thread-1:assistant_text:Hello, world"]);
+    expect(summary(seen)).toEqual(["thread-1:assistant_text:Hello, world "]);
     expect(seen[0]).toMatchObject({ eventId: "d1", turnId: "turn-1" });
     await bus.flush();
-    expect(summary(logged("thread-1"))).toEqual(["thread-1:assistant_text:Hello, world"]);
+    expect(summary(logged("thread-1"))).toEqual(["thread-1:assistant_text:Hello, world "]);
 
-    bus.publish(delta("!", { eventId: "d4" }));
+    bus.publish(delta("again ", { eventId: "d4" }));
     vi.advanceTimersByTime(50);
-    expect(summary(seen)).toEqual(["thread-1:assistant_text:Hello, world", "thread-1:assistant_text:!"]);
+    expect(summary(seen)).toEqual(["thread-1:assistant_text:Hello, world ", "thread-1:assistant_text:again "]);
     await bus.flush();
   });
 
@@ -425,16 +425,16 @@ describe("EventBus streamed text", () => {
     const seen: RuntimeEvent[] = [];
     bus.subscribe((event) => seen.push(event));
 
-    bus.publish(delta("Let me check"));
+    bus.publish(delta("Let me check "));
     bus.publish(testEvent({ eventId: "tool", type: "item.started", itemType: "tool", title: "Read", turnId: "turn-1" }));
-    bus.publish(delta("Done"));
+    bus.publish(delta("Done "));
     bus.publish(testEvent({ eventId: "text", type: "item.completed", itemType: "assistant_text", text: "Let me check Done", turnId: "turn-1" }));
-    bus.publish(delta(" late"));
+    bus.publish(delta(" late "));
     bus.publish(testEvent({ eventId: "end", type: "turn.completed", ok: true, turnId: "turn-1" }));
 
     const expected = [
-      "thread-1:assistant_text:Let me check", "thread-1:item.started", "thread-1:assistant_text:Done",
-      "thread-1:item.completed", "thread-1:assistant_text: late", "thread-1:turn.completed",
+      "thread-1:assistant_text:Let me check ", "thread-1:item.started", "thread-1:assistant_text:Done ",
+      "thread-1:item.completed", "thread-1:assistant_text: late ", "thread-1:turn.completed",
     ];
     expect(summary(seen)).toEqual(expected);
     await bus.flush();
@@ -448,14 +448,14 @@ describe("EventBus streamed text", () => {
 
     bus.publish(delta("\n", { eventId: "w" }));
     bus.publish(delta("Let me ", { eventId: "a1" }));
-    bus.publish(delta("check.", { eventId: "a2" }));
+    bus.publish(delta("check. ", { eventId: "a2" }));
     bus.publish(testEvent({ eventId: "a", type: "item.completed", itemType: "assistant_text", text: "Let me check.", turnId: "turn-1" }));
     bus.publish(testEvent({ eventId: "tool", type: "item.started", itemType: "tool", title: "Read", turnId: "turn-1" }));
-    bus.publish(delta("Done.", { eventId: "b1" }));
+    bus.publish(delta("Done. ", { eventId: "b1" }));
     bus.publish(testEvent({ eventId: "b", type: "item.completed", itemType: "assistant_text", text: "Done.", turnId: "turn-1" }));
 
     const text = seen.filter((event) => event.type === "content.delta" || (event.type === "item.completed" && event.itemType === "assistant_text"));
-    expect(text.map((event) => event.type === "content.delta" ? event.delta : event.type)).toEqual(["Let me check.", "item.completed", "Done.", "item.completed"]);
+    expect(text.map((event) => event.type === "content.delta" ? event.delta : event.type)).toEqual(["Let me check. ", "item.completed", "Done. ", "item.completed"]);
     expect(text[0]!.itemId).toBeTruthy();
     expect(text[1]!.itemId, "a message's completion carries its words' id").toBe(text[0]!.itemId);
     expect(text[2]!.itemId).not.toBe(text[0]!.itemId);
@@ -468,18 +468,18 @@ describe("EventBus streamed text", () => {
     const seen: RuntimeEvent[] = [];
     bus.subscribe((event) => seen.push(event));
 
-    bus.publish(delta("a1"));
-    bus.publish(delta("b1", { threadId: "thread-2" }));
+    bus.publish(delta("a1 "));
+    bus.publish(delta("b1 ", { threadId: "thread-2" }));
     bus.publish(delta("thinking", { streamKind: "reasoning_text" }));
-    bus.publish(delta("a2"));
-    bus.publish(delta("next turn", { turnId: "turn-2" }));
-    bus.publish(delta("api error", { turnId: "turn-2", synthetic: true }));
-    bus.publish(delta("b2", { threadId: "thread-2" }));
-    expect(summary(seen)).toEqual(["thread-1:assistant_text:a1", "thread-1:reasoning_text:thinking", "thread-1:assistant_text:a2", "thread-1:assistant_text:next turn"]);
+    bus.publish(delta("a2 "));
+    bus.publish(delta("next turn ", { turnId: "turn-2" }));
+    bus.publish(delta("api error ", { turnId: "turn-2", synthetic: true }));
+    bus.publish(delta("b2 ", { threadId: "thread-2" }));
+    expect(summary(seen)).toEqual(["thread-1:assistant_text:a1 ", "thread-1:reasoning_text:thinking", "thread-1:assistant_text:a2 ", "thread-1:assistant_text:next turn "]);
 
     vi.advanceTimersByTime(50);
-    expect(summary(seen).slice(4).sort()).toEqual(["thread-1:assistant_text:api error", "thread-2:assistant_text:b1b2"]);
-    expect(seen.find((event) => event.type === "content.delta" && event.delta === "api error")?.synthetic).toBe(true);
+    expect(summary(seen).slice(4).sort()).toEqual(["thread-1:assistant_text:api error ", "thread-2:assistant_text:b1 b2 "]);
+    expect(seen.find((event) => event.type === "content.delta" && event.delta === "api error ")?.synthetic).toBe(true);
     await bus.flush();
   });
 
@@ -490,18 +490,48 @@ describe("EventBus streamed text", () => {
     const seen: RuntimeEvent[] = [];
     bus.subscribe((event) => seen.push(event));
 
-    emit(delta("from the adapter"));
-    bus.publish(delta("other engine", { threadId: "thread-2", providerInstanceId: "inst-2" }));
+    emit(delta("from the adapter "));
+    bus.publish(delta("other engine ", { threadId: "thread-2", providerInstanceId: "inst-2" }));
     bus.detach("inst-1");
-    expect(summary(seen)).toEqual(["thread-1:assistant_text:from the adapter", "thread-2:assistant_text:other engine"]);
+    expect(summary(seen)).toEqual(["thread-1:assistant_text:from the adapter ", "thread-2:assistant_text:other engine "]);
 
     // the server calls flush() as the process exits
-    bus.publish(delta("last words", { threadId: "thread-3" }));
+    bus.publish(delta("last words ", { threadId: "thread-3" }));
     bus.flush();
-    expect(summary(seen).at(-1)).toBe("thread-3:assistant_text:last words");
+    expect(summary(seen).at(-1)).toBe("thread-3:assistant_text:last words ");
     vi.advanceTimersByTime(100);
     expect(seen).toHaveLength(3);
     await bus.flush();
+  });
+
+  it("sends streamed words only as masked as the saved message, to every listener and the event log", async () => {
+    const remove = addHeldSecretScrubber((text) => text.replaceAll("Zq9vK2pLmw", "••••••"));
+    try {
+      const bus = new EventBus();
+      const seen: RuntimeEvent[] = [];
+      bus.subscribe((event) => seen.push(event));
+      const pieces = [
+        "Your password is Zq9v", "K2pLmw and the key:\n-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0B ",
+        "secretbody\n-----END PRIVATE KEY-----\nSure. <SYSTEM_MESSAGE>Background task ", "finished</SYSTEM_MESSAGE> Then ",
+        "<openmaus-goal>{\"status\": ", "\"done\"}</openmaus-goal> that is all.",
+      ];
+      const raw = pieces.join("");
+      for (const piece of pieces) {
+        bus.publish(delta(piece, { eventId: `p${piece.length}` }));
+        vi.advanceTimersByTime(50);
+      }
+      bus.publish(testEvent({ eventId: "done", type: "item.completed", itemType: "assistant_text", text: raw, turnId: "turn-1" }));
+      await bus.flush();
+      const streamed = seen.filter((event) => event.type === "content.delta").map((event) => event.type === "content.delta" ? event.delta : "");
+      for (const piece of streamed) expect(piece).not.toMatch(/Zq9v|K2pL|MIIE|secretbody|SYSTEM_MESSAGE|Background|openmaus-goal|status/);
+      expect(streamed.join("")).toMatch(/^Your password is •••••• and the key:\n-----BEGIN PRIVATE KEY-----\n«redacted \d+ chars»\n-----END PRIVATE KEY-----\nSure\.\s+Then\s+that is $/);
+      const log = readFileSync(join(EVENTS_DIR, "thread-1.ndjson"), "utf8");
+      expect(log).not.toMatch(/Zq9v|K2pL|MIIE|secretbody/);
+      const completed = seen.find((event) => event.type === "item.completed");
+      expect(completed?.type === "item.completed" && completed.itemType === "assistant_text" && completed.text, "the saved message is made from the text as written").toBe(raw);
+    } finally {
+      remove();
+    }
   });
 });
 

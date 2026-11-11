@@ -39,6 +39,21 @@ const KEY_PREFIXES: RegExp[] = [
 const KEY_PREFIX_TESTS = KEY_PREFIXES.map((re) => new RegExp(re.source));
 const PRIVATE_KEY_BLOCK = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
 
+const PRIVATE_KEY_HEADER = /-----BEGIN [A-Z ]*PRIVATE KEY-----/g;
+const PRIVATE_KEY_END = /-----END [A-Z ]*PRIVATE KEY-----/;
+/** `-----BEGIN RSA PRIVA`: a header still being written, which may yet open a private key. */
+const PARTIAL_KEY_HEADER = /-----BEGIN[A-Z ]*-{0,4}$/;
+
+/** Where text still being written opens a private key it has not closed, or may be about to; -1 when it does neither.
+ * A key's body is masked only once its END line is in, so streamed text waits from here. */
+export function openPrivateKeyAt(text: string): number {
+  PRIVATE_KEY_HEADER.lastIndex = 0;
+  for (let header = PRIVATE_KEY_HEADER.exec(text); header; header = PRIVATE_KEY_HEADER.exec(text)) {
+    if (!PRIVATE_KEY_END.test(text.slice(PRIVATE_KEY_HEADER.lastIndex))) return header.index;
+  }
+  return PARTIAL_KEY_HEADER.exec(text)?.index ?? -1;
+}
+
 /** Only shapes that are unmistakably a credential (a provider's key prefix, a private key block), never a name or a
  * placeholder: text holding one is a credential store, not instructions. */
 export function holdsCredential(text: string): boolean {
