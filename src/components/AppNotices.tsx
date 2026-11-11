@@ -164,8 +164,10 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const advancedBack = backDue && advanced;
   const simpleDue = SIMPLE_ONLY ? newLookDue : advancedBack || !promptSeen;
   const simpleBlocked = useOtherDialogOpen(simpleDue) || Boolean(state.liveCall && state.liveCall.status !== "ended");
-  const boatHere = boatOfferRuns(now()) && brandStatus().source !== "file";
-  const modelgoHere = modelgoOfferable(state.config?.managedPolicy);
+  // A sponsor's card is for whoever chooses a team's providers: its Owner and Admins, never its members.
+  const sponsorsHere = SPONSOR_CARDS_FOR_TEAM_MEMBERS || !state.config?.team || viewer?.canSave === true;
+  const boatHere = sponsorsHere && boatOfferRuns(now()) && brandStatus().source !== "file";
+  const modelgoHere = sponsorsHere && modelgoOfferable(state.config?.managedPolicy);
 
   const trial = plan?.trial;
   const key = trial ? trialKey(trial) : null;
@@ -221,7 +223,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     facts: { nowMs: now(), version: appVersion(), platform: announcementPlatform(globalThis.navigator?.userAgent), surface, plan: announcementPlan(surface, view, team),
       people: usedBefore(state.bots) ? "existing" : "new", locale: activeLocale(), conditions: announcementConditions(state) },
     seen: seenRecord, branded, admin: viewer?.canSave !== false,
-    sponsors: !providersRestricted(state.config?.managedPolicy) && (SPONSOR_CARDS_FOR_TEAM_MEMBERS || !team || viewer?.canSave === true),
+    sponsors: !providersRestricted(state.config?.managedPolicy) && sponsorsHere,
   });
   const announcement = picked && picked !== "wait" ? picked : null;
   const announcementNow = !picked || moving || welcomeFinishedThisLaunch() || launchDialogShown() === "mausbot" ? false

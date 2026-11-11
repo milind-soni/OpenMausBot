@@ -191,7 +191,8 @@ function ReplayAppTourButton() {
 }
 
 export function ReplayTourRow() {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
+  if (state.config?.team) return null;
   return (
     <SettingRow title={t("settings.welcome.title")} subtitle={t("settings.welcome.subtitleShort")}>
       <div className="flex flex-wrap justify-end gap-2">

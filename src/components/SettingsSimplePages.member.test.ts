@@ -4,8 +4,9 @@ import { beforeEach, expect, it, vi } from "vitest";
 
 import type { Disclose } from "./SettingsSimplePages";
 
-const fixture = vi.hoisted(() => ({ admin: false as boolean | null }));
+const fixture = vi.hoisted(() => ({ admin: false as boolean | null, team: false }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
+vi.mock("@/state/team-people", async (original) => ({ ...await original<object>(), useTeamPeople: () => (fixture.team ? { people: [], me: null, admin: fixture.admin === true, needsYou: [] } : null) }));
 vi.mock("./EnginesSettings", () => ({ EnginesSettings: () => "AI ACCOUNTS" }));
 vi.mock("./NewBotDialog", () => ({ DefaultBotSettings: () => "NEW BOT DEFAULTS" }));
 vi.mock("./LocalComputerSection", () => ({ LocalComputerSection: () => "CLOUD DESKTOPS" }));
@@ -28,13 +29,25 @@ const pages = () => [
   renderToStaticMarkup(createElement(SimpleBillingPage, { has, disclose, cloudAccount: null })),
 ].join("\n");
 
-beforeEach(() => { fixture.admin = false; });
+beforeEach(() => { fixture.admin = false; fixture.team = false; });
 
 it("shows a session without the admin scope a plain sentence instead of the installation's AI, computers and usage", () => {
   const html = pages();
   for (const hidden of ["AI ACCOUNTS", "NEW BOT DEFAULTS", "KEYS", "CLOUD DESKTOPS", "USAGE TABLE", "PLAN USAGE"]) expect(html).not.toContain(hidden);
   expect(html).toContain("Only an admin of this installation can change this.");
   expect(html).toContain("Only an admin of this installation can see usage.");
+});
+
+it("leaves them out for a team's member, with no word about an installation's admin", () => {
+  fixture.team = true;
+  const html = pages();
+  for (const hidden of ["AI ACCOUNTS", "NEW BOT DEFAULTS", "KEYS", "CLOUD DESKTOPS", "USAGE TABLE", "PLAN USAGE", "admin of this installation"]) expect(html).not.toContain(hidden);
+});
+
+it("keeps them for a team's admin", () => {
+  fixture.team = true; fixture.admin = true;
+  const html = pages();
+  for (const shown of ["AI ACCOUNTS", "NEW BOT DEFAULTS", "KEYS", "CLOUD DESKTOPS", "USAGE TABLE", "PLAN USAGE"]) expect(html).toContain(shown);
 });
 
 it("keeps them for an admin", () => {

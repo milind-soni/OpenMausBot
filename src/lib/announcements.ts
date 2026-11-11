@@ -14,8 +14,8 @@ import {
   type AnnouncementPlan, type AnnouncementPlatform, type AnnouncementSurface,
 } from "../../shared/announcements";
 
-/** Sponsor cards for a Team Cloud's members who are not its owner or an admin. Off: a sponsor's card is for whoever
- * chooses the team's providers. The owner's call; flip this to show them to every member. */
+/** Sponsor cards (the announcements' and the app's own) for a Team Cloud's members who are not its owner or an admin. Off:
+ * a sponsor's card is for whoever chooses the team's providers. The owner's call; flip this to show them to every member. */
 export const SPONSOR_CARDS_FOR_TEAM_MEMBERS = false;
 /** At most one sponsor card in this many days, per person. */
 export const SPONSOR_REST_DAYS = 7;

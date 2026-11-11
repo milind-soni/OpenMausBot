@@ -49,6 +49,7 @@ import { cn } from "@/lib/cn";
 import { meterPercent, resetLine } from "@/lib/usage-meter";
 import type { CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import { activeLocale, t } from "@/lib/i18n";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { FEEDBACK_URL, HELP_CENTER_URL, appVersion, openExternalLink } from "@/lib/app-links";
 import { useOtherServerName } from "@/lib/other-server";
 import { profileForSession, readSessionState, type SessionState } from "@/lib/session";
@@ -584,6 +585,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   const name = profileLabel(profile);
   const connectTo = (destination: PhoneDestination) => selectPhoneDestination(destination, { bridge: cloudPhone.bridge, dispatch });
   const remote = window.ogb?.remoteClient?.active === true;
+  const teamMember = useOwnerOrAdmin() === false && Boolean(state.config?.team);
   const besideRail = railShown(usePlaces());
   const filesReady = useCloudFilesReady();
   const cloudAccount = !remote && Boolean(window.ogb?.cloudAccount || (window.ogb?.cloudPlan && state.config?.cloudHome === true));
@@ -600,7 +602,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
         onConnect: connectTo,
         onGetApp: () => setPhoneAppOpen(true),
       }),
-    usage: !remote,
+    usage: !remote && !teamMember,
     usageSummary: cloudUsage ?? engineUsage,
     update: update?.item ?? null,
     updateTop: simple ? simpleUpdateTop(update) : null,
