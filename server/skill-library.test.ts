@@ -170,7 +170,8 @@ describe("bundled phone-connection skill", () => {
     expect(guide).toContain("Same Wi-Fi"); expect(guide).toContain("Anywhere, through MausBot");
     expect(guide).toContain('starts "Phone link:"');
     expect(guide).toContain("update the MausBot app on that phone");
-    expect(guide).toContain("pair it again");
+    expect(guide).toMatch(/open it once\s+on the same Wi-Fi as this computer/);
+    expect(guide.indexOf("open it once"), "the easy way first").toBeLessThan(guide.indexOf("pair it again"));
     expect(guide).toContain("never say the link ended or that their app is too old");
     for (const futile of ["off and on", "Try reconnecting", "force-quitting", "VPN"]) expect(guide).toContain(futile);
     expect(guide.split("\n").length).toBeLessThanOrEqual(60);

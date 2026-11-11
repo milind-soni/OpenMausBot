@@ -408,6 +408,20 @@ async function applySetting(
   }
 }
 
+/** hermes-agent's ACP `/steer` (acp_adapter/commands.py `_cmd_steer`; from 0.22.3 the gateway's `session.steer`,
+ * acp_adapter/gateway_commands.py) hands the text to the running turn, which reads it after its current tool batch or
+ * before its next model call, and answers with one of these lines. After "No active turn" Hermes runs the text as its
+ * next prompt before it answers the `/steer` prompt. */
+const HERMES_STEER_ANSWERS = [
+  ["⏩ Steer queued for the active turn:", "accepted"],
+  ["No active turn — queued for the next turn.", "accepted"],
+  ["⚠️ Steer failed:", "refused"],
+] as const;
+
+export function hermesSteerAnswer(chunk: string): "accepted" | "refused" | null {
+  return HERMES_STEER_ANSWERS.find(([line]) => chunk.startsWith(line))?.[1] ?? null;
+}
+
 const support: AcpSupport = {
   driverKind: "hermesAgent",
   displayName: "Hermes",
@@ -437,6 +451,7 @@ const support: AcpSupport = {
   // Hermes keeps the first MCP server it registers under a name for the process's life, so a new bearer needs a fresh process.
   restartOnMcpChange: true,
   resendsReasoningReply: true,
+  steer: { command: "steer", answer: hermesSteerAnswer },
   transformEnv: (env) => {
     // A leftover OPENAI_API_KEY makes Hermes auto-resolve to OpenRouter with no Authorization header.
     delete env.OPENAI_API_KEY;

@@ -25,9 +25,10 @@ can't tell why.
 1. Look in your instructions for a line that starts "Phone link:". It is there
    only when this computer's secure link for older phone apps has ended and a
    paired phone still has an older app. Then that is the cause. Tell them to
-   update the MausBot app on that phone from its app store, then pair it again
-   in Settings → Phone & devices: the phone's row there has Pair again. Once the
-   updated phone is paired, they can remove its old entry from the list.
+   update the MausBot app on that phone from its app store, then open it once
+   on the same Wi-Fi as this computer: that upgrades its pairing by itself. If
+   that doesn't reconnect it, they pair it again in Settings → Phone & devices
+   (the phone's row there has Pair again), then remove its old entry.
 2. With no such line, never say the link ended or that their app is too old.
    Check the usual things, one at a time: the computer is on and awake with
    OpenMausBot open; on the same Wi-Fi the phone connects; Anywhere, through
@@ -38,5 +39,5 @@ can't tell why.
 
 For an older app after the link ended, none of these help, so don't suggest
 them: turning Anywhere, through MausBot off and on, Try reconnecting,
-force-quitting or reinstalling the same app version, restarting the computer,
-or checking for a VPN.
+force-quitting the app away from that Wi-Fi, reinstalling the same app version,
+restarting the computer, or checking for a VPN.

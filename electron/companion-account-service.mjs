@@ -512,7 +512,7 @@ export function createCompanionAccountService({
       clientInstanceId,
       name: identity.name,
       platform: identity.platform,
-      appVersion: identity.appVersion,
+      appVersion: identity.appVersion, ...(identity.kind ? { kind: identity.kind } : {}),
     });
     // Persist the verified installation before provisioning, or each Retry rotates the credential until rate-limited.
     try {
@@ -531,7 +531,7 @@ export function createCompanionAccountService({
     };
     if (onDemand && (await currentNeed()) === false) return withoutTunnel();
     let relayOnly = null;
-    const endpoint = await client.ensureEndpoint(installation.credential, { appVersion: identity.appVersion, ...(await relay.legacyDevices().then((count) => (count === null ? {} : { legacyDevices: count }))) })
+    const endpoint = await client.ensureEndpoint(installation.credential, { appVersion: identity.appVersion, ...(identity.kind ? { kind: identity.kind } : {}), ...(await relay.legacyDevices().then((count) => (count === null ? {} : { legacyDevices: count }))) })
       .catch((error) => {
         if (error?.code !== "relay_capable") throw error;
         relayOnly = error.tunnel ?? "none";

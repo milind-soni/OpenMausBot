@@ -21,8 +21,10 @@ describe("phoneLinkPrompt", () => {
     expect(one).toContain("connects on the same Wi-Fi only");
     expect(one).toContain("\"No route to your computer\"");
     expect(one).toContain("\"Anywhere, through MausBot\" doesn't work");
-    expect(one).toContain("update the MausBot app on that phone, then pair it again in Settings → Phone & devices");
-    expect(one).toContain("Turning routes off and on, reconnecting, restarting the app or checking a VPN won't help");
+    expect(one).toContain("update the MausBot app on that phone, then open it once on the same Wi-Fi as this computer;"
+      + " if that doesn't reconnect it, they pair it again in Settings → Phone & devices");
+    expect(one.indexOf("open it once"), "the easy way first").toBeLessThan(one.indexOf("pair it again"));
+    expect(one).toContain("Turning routes off and on, Try reconnecting, force-quitting the app away from that Wi-Fi or checking a VPN won't help");
     expect(phoneLinkPrompt(2)).toContain("2 phones paired with this computer have an older app");
     expect(Buffer.byteLength(one, "utf8")).toBeLessThan(700);
   });

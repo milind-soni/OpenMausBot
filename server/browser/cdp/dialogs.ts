@@ -27,14 +27,17 @@ export class Dialogs {
 
   /** Frames in other renderers raise their dialogs on their own session. */
   watch(session: CdpSession): () => void {
+    const clear = () => {
+      if (this.#pending?.session === session) this.#closed();
+    };
     const offs = [
       session.on("Page.javascriptDialogOpening", (params) => this.#opened(session, params)),
-      session.on("Page.javascriptDialogClosed", () => {
-        if (this.#pending?.session === session) this.#closed();
-      }),
+      session.on("Page.javascriptDialogClosed", clear),
+      session.onDetach(clear),
     ];
     return () => {
       for (const off of offs) off();
+      clear();
     };
   }
 

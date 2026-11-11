@@ -19,7 +19,8 @@ export function phoneLinkPrompt(count: number = olderPhoneApps): string {
   const phones = count === 1 ? "1 phone paired with this computer has" : `${count} phones paired with this computer have`;
   return ` Phone link: this computer's secure link for older MausBot phone apps has ended, and ${phones} an older app that needed it, so it connects on the same Wi-Fi only.`
     + " If the person says their phone stopped connecting away from Wi-Fi, says \"No route to your computer\" or that \"Anywhere, through MausBot\" doesn't work, this is why:"
-    + " they update the MausBot app on that phone, then pair it again in Settings → Phone & devices. Turning routes off and on, reconnecting, restarting the app or checking a VPN won't help.";
+    + " they update the MausBot app on that phone, then open it once on the same Wi-Fi as this computer; if that doesn't reconnect it, they pair it again in Settings → Phone & devices."
+    + " Turning routes off and on, Try reconnecting, force-quitting the app away from that Wi-Fi or checking a VPN won't help.";
 }
 
 export function phoneLinkPart(): PromptPart {

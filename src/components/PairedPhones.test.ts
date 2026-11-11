@@ -42,7 +42,7 @@ describe("paired phones", () => {
     const rowFor = (device: PhoneDevice, controller: PhoneSetupController, onPairAgain?: () => void) =>
       createElement(PhoneRow, { device, connected: false, state: state(), c: controller, onRemoved: () => {}, onPairAgain });
     const markup = renderToStaticMarkup(rowFor(phone(), retired, () => {}));
-    expect(markup).toContain("This phone has an older MausBot app. Update the app, then pair it again here.");
+    expect(markup).toContain("This phone has an older MausBot app. Update the app, then open it once on the same Wi-Fi as this computer. If that doesn&#x27;t reconnect it, pair it again here.");
     expect(markup).toMatch(/<button type="button"[^>]*>Pair again<\/button>/);
     expect(renderToStaticMarkup(rowFor(phone(), retired)), "no way to pair from here: no button").not.toContain("Pair again");
     expect(renderToStaticMarkup(rowFor(phone({ e2eAt: NOW }), retired, () => {})), "a phone on the encrypted connection").not.toContain("older MausBot app");

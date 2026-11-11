@@ -4019,7 +4019,6 @@
   "vm.isolation.shared": "Współdzielone",
   "vm.isolation.perBot": "Dla botów",
   "vm.isolation.max": "Maksymalna liczba pulpitów dla botów",
-  "vm.isolation.maxDetail": "Ogranicza użycie miejsca i zasobów hosta; każdy działający pulpit może zużywać do 4 GB i 2 CPU.",
   "vm.isolation.maxAria": "Maksymalna liczba pulpitów dla botów",
   "vm.idle.label": "Zatrzymuj bezczynne pulpity po",
   "vm.idle.detail": "Dotyczy pulpitów współdzielonych i dla botów. Pulpit z trwającą turą nigdy nie jest zatrzymywany. Wyłączenie z powodu bezczynności zachowuje jego pliki i zainstalowane aplikacje.",
@@ -6844,8 +6843,10 @@
   "settings.simple.more.limits": "Limity",
   "settings.simple.more.open": "Otwórz",
   "phoneUpdate.title": "Zaktualizuj MausBot na telefonie",
-  "phoneUpdate.body": "{phone} ma starszą wersję aplikacji MausBot, która nie może już łączyć się z tym komputerem poza Twoją siecią Wi-Fi. Zaktualizuj aplikację na tym telefonie, a potem sparuj go ponownie.",
-  "phoneUpdate.bodyMany": "Twoje telefony ({count}) mają starszą wersję aplikacji MausBot, która nie może już łączyć się z tym komputerem poza Twoją siecią Wi-Fi. Zaktualizuj aplikację na każdym telefonie, a potem sparuj go ponownie.",
+  "phoneUpdate.body": "{phone} ma starszą wersję aplikacji MausBot, która nie może już łączyć się z tym komputerem poza Twoją siecią Wi-Fi. Zaktualizuj aplikację na tym telefonie, a potem otwórz ją raz w tej samej sieci Wi-Fi co ten komputer. Jeśli to nie przywróci połączenia, sparuj go ponownie.",
+  "phoneUpdate.bodyMany": "Twoje telefony ({count}) mają starszą wersję aplikacji MausBot, która nie może już łączyć się z tym komputerem poza Twoją siecią Wi-Fi. Zaktualizuj aplikację na każdym telefonie, a potem otwórz ją raz w tej samej sieci Wi-Fi co ten komputer. Jeśli to nie przywróci połączenia, sparuj go ponownie.",
   "phoneUpdate.open": "Otwórz Telefon i urządzenia",
-  "remote.devices.pairAgain": "Sparuj ponownie"
+  "remote.devices.pairAgain": "Sparuj ponownie",
+  "remote.devices.retired": "Ten telefon ma starszą wersję aplikacji MausBot. Zaktualizuj aplikację, a potem otwórz ją raz w tej samej sieci Wi-Fi co ten komputer. Jeśli to nie przywróci połączenia, sparuj go tutaj ponownie.",
+  "remote.devices.retiredNotice": "Telefony łączą się teraz z tym komputerem przez MausBot Relay, a starsze bezpieczne połączenie zostało wyłączone. Telefon ze starszą wersją aplikacji MausBot nie może już łączyć się poza Twoją siecią Wi-Fi. Zaktualizuj aplikację MausBot na tym telefonie, a potem otwórz ją raz w tej samej sieci Wi-Fi co ten komputer. Jeśli to nie przywróci połączenia, sparuj go tutaj ponownie."
 }

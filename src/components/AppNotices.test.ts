@@ -1551,7 +1551,8 @@ describe("Update MausBot on your phone", () => {
     const shown = await launch();
     expect(shown).toContain(TITLE); expect(shown).toContain('data-notice="phone-update"');
     for (const text of ["Ada&#x27;s iPhone has an older version of the MausBot app, which can no longer connect to this computer away from your Wi-Fi.",
-      "Update the app on that phone, then pair it again.", "Open Phone &amp; devices", "Not now"]) expect(shown).toContain(text);
+      "Update the app on that phone, then open it once on the same Wi-Fi as this computer. If that doesn&#x27;t reconnect it, pair it again.",
+      "Open Phone &amp; devices", "Not now"]) expect(shown).toContain(text);
     expect(shown).not.toContain("Work phone");
     expect(launchNotice()).toBe("phone-app-update");
   });
