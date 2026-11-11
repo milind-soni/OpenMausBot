@@ -75,7 +75,7 @@ export class ProviderAuthSessions {
     const flow = this.owned(instanceId, owner, flowId);
     if (!flow.instance.getAuthentication) throw failure("Sign-in status is unavailable for this provider.", 404);
     const status = await flow.instance.getAuthentication(flowId);
-    if (flow.revoked) throw failure("This sign-in session ended.", 404);
+    if (flow.revoked || this.flows.get(instanceId) !== flow || flow.flowId !== flowId) throw failure("This sign-in session ended.", 404);
     if (status.phase !== "waiting") flow.expiresAt = 0;
     if (status.phase === "succeeded") this.signedIn(instanceId);
     return status;
@@ -87,7 +87,8 @@ export class ProviderAuthSessions {
     flow.busy = true;
     try {
       await flow.instance.completeAuthentication(flowId, callbackUrl);
-      if (this.flows.get(instanceId) === flow) this.flows.delete(instanceId);
+      if (flow.revoked || this.flows.get(instanceId) !== flow) throw failure("This sign-in session ended.", 404);
+      this.flows.delete(instanceId);
       this.signedIn(instanceId);
     } finally { flow.busy = false; }
   }
@@ -95,6 +96,7 @@ export class ProviderAuthSessions {
   async cancel(instanceId: string, owner: string, flowId: string) {
     const flow = this.owned(instanceId, owner, flowId);
     flow.busy = true;
+    flow.revoked = true;
     try { await flow.instance.cancelAuthentication?.(); }
     finally { flow.busy = false; flow.expiresAt = 0; }
   }
