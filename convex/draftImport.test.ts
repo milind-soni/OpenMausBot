@@ -51,7 +51,7 @@ test("repository imports persist semantic Draft and repair a matched old board w
   const args = { sessionToken, repos: [{ name: "Repo import", repoUrl: "https://github.com/fixture/draft-import" }] };
   const [first] = await t.mutation(api.projects.importRepos, args);
   const board = await t.query(api.tasks.board, { sessionToken, projectId: first.projectId });
-  expect(board.columns[0]).toMatchObject({ title: "Draft", isDraft: true });
+  expect(board.columns[0]).toMatchObject({ title: "Backlog", isDraft: true });
   await t.run(async ctx => {
     await ctx.db.delete(board.columns[0]._id);
     await ctx.db.insert("tasks", { projectId: first.projectId, columnId: board.columns[1]._id, title: "Existing active", done: false, priority: "medium", order: 0, createdAt: 1, updatedAt: 1 });

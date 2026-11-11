@@ -91,7 +91,10 @@ async function resolveIssue(ctx: Ctx, access: Access, ref: string, write = false
 }
 
 function findColumn(columns: Doc<"columns">[], ref: string) {
-  const column = columns.find(c => c._id === ref.trim()) ?? columns.find(c => normalizeColumnTitle(c.title) === normalizeColumnTitle(ref));
+  const wanted = normalizeColumnTitle(ref);
+  // "Draft" and "Backlog" both name the draft column (new boards call it Backlog; older ones and agents say Draft).
+  const column = columns.find(c => c._id === ref.trim()) ?? columns.find(c => normalizeColumnTitle(c.title) === wanted)
+    ?? (wanted === "draft" || wanted === "backlog" ? columns.find(isDraftColumn) : undefined);
   if (!column) throw new ConvexError(`Column not found: ${ref}. Columns: ${columns.map(c => c.title).join(", ")}`);
   return column;
 }

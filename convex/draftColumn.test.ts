@@ -26,9 +26,9 @@ const context = async (f: Awaited<ReturnType<typeof fixture>>, taskId: string) =
   JSON.parse(await f.t.query(internal.integrations.context, { projectId: f.projectId, taskId: taskId as never })) as { task: { draft: boolean; done: boolean } };
 
 describe("Draft column", () => {
-  test("new boards start with a Draft column flagged as draft", async () => {
+  test("new boards start with a Backlog column flagged as draft", async () => {
     const f = await fixture();
-    expect(f.columns.map(column => column.title)).toEqual(["Draft", "Todo", "In progress"]);
+    expect(f.columns.map(column => column.title)).toEqual(["Backlog", "Todo", "In progress"]);
     expect(f.columns[0].isDraft).toBe(true);
     expect(f.columns.slice(1).some(column => column.isDraft)).toBe(false);
   });
@@ -121,7 +121,7 @@ describe("Draft column", () => {
   test("renaming a legacy unflagged Draft column keeps its issues private", async () => {
     const f = await fixture();
     const columnId = f.columns[0]._id;
-    await f.t.run(ctx => ctx.db.patch(columnId, { isDraft: undefined }));
+    await f.t.run(ctx => ctx.db.patch(columnId, { title: "Draft", isDraft: undefined }));
     const taskId = await f.create(columnId, "Existing private idea");
     await f.t.mutation(api.tasks.updateColumn, { sessionToken: f.sessionToken, projectId: f.projectId, columnId, title: "Ideas" });
     expect((await context(f, taskId)).task.draft).toBe(true);

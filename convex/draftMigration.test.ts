@@ -68,7 +68,7 @@ test("three bounded repair phases preserve old tasks and renamed Drafts across p
   }
   expect(columns[0].filter(isDraftColumn)).toHaveLength(1);
   expect(columns[0].find(column => column.title === "Idea")?.isDraft).toBeUndefined();
-  expect(columns[1][0]).toMatchObject({ _id: data.rows[1].columnId, title: "Draft", isDraft: true });
+  expect(columns[1][0]).toMatchObject({ _id: data.rows[1].columnId, title: "Backlog", isDraft: true });
   expect(columns[2][0]).toMatchObject({ _id: data.rows[2].columnId, title: "Renamed private ideas", isDraft: true });
   expect(columns[3].find(column => column._id === data.rows[3].columnId)?.isDraft).toBe(false);
   const second = await run();

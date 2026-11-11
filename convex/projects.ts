@@ -11,6 +11,7 @@ import type { MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { admitStorageReference, issueUpload, storageMetadata, validateUpload } from "./lib/storage";
 import { DEFAULT_WORKFLOW_COLUMNS, ensureDraftColumn } from "./lib/columns";
+import { DRAFT_COLUMN_TITLE } from "../lib/origin-columns";
 const accents = ["#111111", "#7c3aed", "#2563eb", "#059669", "#d97706", "#dc2626"];
 const callStaleMs = 30_000;
 
@@ -358,7 +359,7 @@ export async function createProjectRecord(ctx: MutationCtx, args: { teamId: Id<"
         title,
         order: index,
         isDone: false,
-        ...(title === "Draft" ? { isDraft: true } : {}),
+        ...(title === DRAFT_COLUMN_TITLE ? { isDraft: true } : {}),
         createdAt: now,
         updatedAt: now,
       });
@@ -448,7 +449,7 @@ export const importRepos = mutation({
           title,
           order: index,
           isDone: false,
-          ...(title === "Draft" ? { isDraft: true } : {}),
+          ...(title === DRAFT_COLUMN_TITLE ? { isDraft: true } : {}),
           createdAt: now,
           updatedAt: now,
         });
