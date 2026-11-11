@@ -659,6 +659,86 @@ describe("data_show", () => {
 });
 
 describe("data_export", () => {
+  it.each(["png", "svg"] as const)("keeps both concurrent %s exports instead of overwriting one", async (format) => {
+    const { ctx } = context();
+    await showCard(ctx, { kind: "chart", sql: "SELECT a FROM t", chart: { type: "pie", x: "a" }, title: "Share" });
+    const entered = deferred();
+    const finish = deferred();
+    let count = 0;
+    const render = async () => {
+      const n = ++count;
+      if (n === 2) entered.resolve();
+      await finish.promise;
+      return `image ${n}`;
+    };
+    ctx.renderer = { svg: render, png: async () => Buffer.from(await render()) };
+    const first = exportData(ctx, { id: "c_1", format });
+    const second = exportData(ctx, { id: "c_1", format });
+    await entered.promise;
+    finish.resolve();
+    const [a, b] = await Promise.all([first, second]);
+    expect(readFileSync(a.path, "utf8")).toBe("image 1");
+    expect(readFileSync(b.path, "utf8")).toBe("image 2");
+    expect(a.path).not.toBe(b.path);
+  });
+
+  it("reserves distinct CSV destinations before either database copy finishes", async () => {
+    const { ctx, database } = context();
+    const original = database.run.bind(database);
+    const entered = deferred();
+    const finish = deferred();
+    let count = 0;
+    database.run = async (sql, options) => {
+      if (sql.startsWith("COPY ")) {
+        if (++count === 2) entered.resolve();
+        await finish.promise;
+      }
+      return original(sql, options);
+    };
+    const first = exportData(ctx, { sql: "SELECT 1", format: "csv" });
+    const second = exportData(ctx, { sql: "SELECT 2", format: "csv" });
+    await entered.promise;
+    finish.resolve();
+    const [a, b] = await Promise.all([first, second]);
+    expect(a.path).not.toBe(b.path);
+    expect(existsSync(a.path)).toBe(true);
+    expect(existsSync(b.path)).toBe(true);
+  });
+
+  it("recognizes a pending export through another allowed directory alias", async () => {
+    const { ctx, dir } = context();
+    await showCard(ctx, { kind: "chart", sql: "SELECT a FROM t", chart: { type: "pie", x: "a" } });
+    symlinkSync(join(dir, "work"), join(dir, "work-alias"), "junction");
+    ctx.exportRoots = () => [join(dir, "work"), join(dir, "work-alias")];
+    const entered = deferred();
+    const finish = deferred();
+    let count = 0;
+    ctx.renderer.svg = async () => {
+      const n = ++count;
+      if (n === 2) entered.resolve();
+      await finish.promise;
+      return `image ${n}`;
+    };
+    const first = exportData(ctx, { id: "c_1", format: "svg", path: join(dir, "work", "same.svg") });
+    const second = exportData(ctx, { id: "c_1", format: "svg", path: join(dir, "work-alias", "same.svg") });
+    await entered.promise;
+    finish.resolve();
+    const [a, b] = await Promise.all([first, second]);
+    expect(readFileSync(a.path, "utf8")).toBe("image 1");
+    expect(readFileSync(b.path, "utf8")).toBe("image 2");
+  });
+
+  it("releases a destination when rendering fails before creating its file", async () => {
+    const { ctx, dir } = context();
+    await showCard(ctx, { kind: "chart", sql: "SELECT a FROM t", chart: { type: "pie", x: "a" }, title: "Share" });
+    const render = ctx.renderer.png;
+    ctx.renderer.png = async () => { throw new Error("renderer failed"); };
+    await expect(exportData(ctx, { id: "c_1", format: "png" })).rejects.toThrow("renderer failed");
+    ctx.renderer.png = render;
+    const next = await exportData(ctx, { id: "c_1", format: "png" });
+    expect(next.path).toBe(join(dir, "work", "share.png"));
+  });
+
   it("writes csv with COPY TO under the first allowed folder and numbers a repeat", async () => {
     const { ctx, database, dir } = context();
     await showCard(ctx, { kind: "table", sql: "SELECT * FROM orders", title: "Paid orders" });
