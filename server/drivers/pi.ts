@@ -188,7 +188,11 @@ export function ensurePiInstanceAgentDir(
         symlinkSync(target, link);
       } catch {
         // Symlinks require elevated privileges on Windows; fall back to a copy so auth works.
-        try { copyFileSync(target, link); } catch {}
+        try {
+          copyFileSync(target, link);
+        } catch (error) {
+          throw new Error(`pi: could not seed ${file} into ${dir}: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
     }
   }
@@ -212,13 +216,17 @@ export function ensurePiInjectModel(
   const path = join(dir, "models.json");
   // If models.json is a symlink to the operator's file (from ensurePiInstanceAgentDir seeding),
   // replace it with an owned copy so inject writes don't modify the operator's shared config.
+  let isSymlink = false;
   try {
-    if (lstatSync(path).isSymbolicLink()) {
-      const content = readFileSync(path, "utf8");
-      unlinkSync(path);
-      writeFileSync(path, content, { mode: 0o600 });
-    }
-  } catch {}
+    isSymlink = lstatSync(path).isSymbolicLink();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (isSymlink) {
+    const content = readFileSync(path, "utf8");
+    unlinkSync(path);
+    writeFileSync(path, content, { mode: 0o600 });
+  }
   let root: Record<string, unknown> = { providers: {} };
   if (existsSync(path)) {
     try {
@@ -280,9 +288,8 @@ export function ensurePiInjectModel(
 }
 
 function readPiDefaultModel(env: Record<string, string | undefined>): string {
-  const home = env.HOME || env.USERPROFILE || homedir();
   try {
-    const s = JSON.parse(readFileSync(`${home}/.pi/agent/settings.json`, "utf8")) as {
+    const s = JSON.parse(readFileSync(join(piAgentDir(env), "settings.json"), "utf8")) as {
       defaultProvider?: string;
       defaultModel?: string;
     };

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1304,6 +1304,46 @@ describe("ensurePiInstanceAgentDir", () => {
     const instanceDir = ensurePiInstanceAgentDir("inst-nofiles-" + randomUUID(), operatorDir, { HOME: home });
     expect(existsSync(join(instanceDir, "auth.json"))).toBe(false);
     expect(existsSync(join(instanceDir, "models.json"))).toBe(false);
+  });
+
+  // Permission-based failures cannot be forced on Windows or as root.
+  const canDenyWrites = process.platform !== "win32" && process.getuid?.() !== 0;
+
+  it.skipIf(!canDenyWrites)("reports a failed seed (symlink and copy both fail) instead of starting without auth", () => {
+    const operatorDir = join(home, ".pi", "agent");
+    mkdirSync(operatorDir, { recursive: true });
+    writeFileSync(join(operatorDir, "auth.json"), '{"token":"x"}');
+    const id = "inst-seedfail-" + randomUUID();
+    const instanceDir = join(home, ".openmausbot", "pi", id);
+    mkdirSync(instanceDir, { recursive: true });
+    chmodSync(instanceDir, 0o500);
+    try {
+      expect(() => ensurePiInstanceAgentDir(id, operatorDir, { HOME: home })).toThrow(/could not seed auth\.json/);
+    } finally {
+      chmodSync(instanceDir, 0o700);
+    }
+  });
+});
+
+describe("ensurePiInjectModel symlink detachment", () => {
+  let home: string;
+  beforeEach(() => { home = mkdtempSync(join(tmpdir(), "omb-pi-detach-")); });
+  afterEach(async () => { await removeTempDir(home); });
+  const canDenyWrites = process.platform !== "win32" && process.getuid?.() !== 0;
+
+  it.skipIf(!canDenyWrites)("throws and leaves the operator models.json untouched when the symlink cannot be detached", () => {
+    const operatorModels = join(home, "operator-models.json");
+    writeFileSync(operatorModels, '{"providers":{}}');
+    const agentDir = join(home, "agent");
+    mkdirSync(agentDir, { recursive: true });
+    symlinkSync(operatorModels, join(agentDir, "models.json"));
+    chmodSync(agentDir, 0o500);
+    try {
+      expect(() => ensurePiInjectModel("omlx::MiniMax-M3-4bit", { HOME: home, PI_CODING_AGENT_DIR: agentDir })).toThrow();
+      expect(readFileSync(operatorModels, "utf8")).toBe('{"providers":{}}');
+    } finally {
+      chmodSync(agentDir, 0o700);
+    }
   });
 });
 
