@@ -6,7 +6,7 @@ import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { IMAGE_DEFAULT_MODELS, IMAGE_MAX_PER_TURN_DEFAULT, IMAGE_MODEL_CHOICES, IMAGE_PROVIDERS, normalizeImageGenerationUrl, type ImageProvider, type ImageProviderTest } from "../../shared/image-generation";
 import { saveCredential } from "./keys/key-save";
-import { LearnMore, SETTINGS_INLINE_INPUT, SETTINGS_INPUT, SettingRow, SettingsField, SettingsFormFoot, SettingsGroup, SettingsRows, StatusDot } from "./SettingsPrimitives";
+import { LearnMore, SETTINGS_INLINE_INPUT, SETTINGS_INPUT, SettingRow, SettingsField, SettingsGroup, SettingsRows, StatusDot } from "./SettingsPrimitives";
 import { Select } from "./Select";
 import { productName } from "@/lib/brand";
 
@@ -297,10 +297,12 @@ function ProviderKeyCard({ provider, status }: { provider: ImageProvider; status
   };
 
   const keyState = t(configured ? "imageGen.key.saved" : provider === "custom" ? "imageGen.key.optional" : "imageGen.key.missing");
+  // The provider fold's key form (§6.5), in a card of its own: "Key", the field, its status under it, one line ending in
+  // Get a key, then the buttons right-aligned 8 below. No divider inside: it is one form.
   return (
     <SettingsGroup label={PROVIDER_LABEL[provider]} block={`images-${provider}`}>
       <SettingsRows>
-        <div className="flex flex-col gap-3 px-4 pb-1 pt-3">
+        <div className="flex flex-col gap-2 px-4 pb-4 pt-3" data-image-key-form="">
           {provider === "custom" && (
             <SettingsField label={t("imageGen.custom.url")}>
               <input
@@ -316,14 +318,18 @@ function ProviderKeyCard({ provider, status }: { provider: ImageProvider; status
               />
             </SettingsField>
           )}
-          <SettingsField label={t((own ?? shared!).label)}>
+          <SettingsField label={t("imageGen.key.label")} hint={<span className="flex flex-col gap-1">
+            <span role="status" className="flex items-center">{configured ? <StatusDot tone="success" /> : <span aria-hidden="true" className="mr-1.5 inline-block size-1.5 rounded-full bg-ink/20" />}{keyState}</span>
+            {verdict && <span role="status" className={verdict.ok ? "text-ink-secondary" : "text-danger"}>{verdict.text}</span>}
+            {error && <span role="alert" className="text-danger">{error}</span>}
+          </span>}>
             <input
               type="password"
               value={value}
               onChange={(event) => setValue(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" && value.trim() && void saveKey(value.trim())}
               disabled={saving}
-              placeholder={configured ? t("keys.replace") : t("imageGen.key.paste")}
+              placeholder={configured ? t("keys.replace") : t("keys.row.pasteKey")}
               aria-label={t((own ?? shared!).label)}
               autoComplete="off"
               spellCheck={false}
@@ -331,24 +337,23 @@ function ProviderKeyCard({ provider, status }: { provider: ImageProvider; status
             />
           </SettingsField>
           <p className="text-[13px] leading-[18px] text-ink-secondary">
-            {shared && <>{t(shared.note)}{" "}
+            {shared ? <>{t(shared.note)}{" "}
               <button type="button" onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}
-                className="cursor-pointer text-accent-text hover:underline">{t("imageGen.key.manage")}</button>{" "}</>}
-            {KEY_URL[provider] ? <a href={KEY_URL[provider]} target="_blank" rel="noreferrer" className="text-accent-text hover:underline focus-visible:underline">{t("imageGen.key.get")}</a> : t("imageGen.custom.help", { app: productName() })}
+                className="cursor-pointer text-accent-text hover:underline">{t("imageGen.key.manage")}</button>{" "}</>
+              : provider === "custom" ? <>{t("imageGen.custom.help", { app: productName() })}</>
+              : <>{t("imageGen.key.line", { app: productName(), provider: PROVIDER_LABEL[provider] })}{" "}</>}
+            {KEY_URL[provider] && <a href={KEY_URL[provider]} target="_blank" rel="noreferrer" className="text-accent-text hover:underline focus-visible:underline">{t("imageGen.key.get")}</a>}
           </p>
+          <div className="flex items-center justify-end gap-2" data-settings-form-foot="">
+            {configured && <button type="button" onClick={() => void saveKey("")} disabled={saving} data-danger="" className="settings-quiet mr-auto -ms-1.5 cursor-pointer">{t("keys.removeKey")}</button>}
+            {configured && <button type="button" onClick={() => void test()} disabled={testing || saving} className="ui-button ui-button-md cursor-pointer rounded-full">{testing ? t("keys.testing") : t("keys.test")}</button>}
+            <button type="button" onClick={() => void saveKey(value.trim())} disabled={saving || !value.trim()} className="ui-button ui-button-md cursor-pointer rounded-full">
+              {saving ? t("settings.threads.saving") : t("common.save")}
+            </button>
+          </div>
         </div>
-        <SettingsFormFoot status={<span className="flex flex-col gap-1">
-          <span role="status" className="flex items-center">{configured ? <StatusDot tone="success" /> : <span aria-hidden="true" className="mr-1.5 inline-block size-1.5 rounded-full bg-ink/20" />}{keyState}</span>
-          {verdict && <span role="status" className={verdict.ok ? "text-ink-secondary" : "text-danger"}>{verdict.text}</span>}
-          {error && <span role="alert" className="text-danger">{error}</span>}
-        </span>}>
-          {configured && <button type="button" onClick={() => void saveKey("")} disabled={saving} data-danger="" className="settings-quiet cursor-pointer">{t("keys.removeKey")}</button>}
-          {configured && <button type="button" onClick={() => void test()} disabled={testing || saving} className="ui-button ui-button-md cursor-pointer rounded-full">{testing ? t("keys.testing") : t("keys.test")}</button>}
-          <button type="button" onClick={() => void saveKey(value.trim())} disabled={saving || !value.trim()} className="ui-button ui-button-md cursor-pointer rounded-full">
-            {saving ? t("settings.threads.saving") : t("common.save")}
-          </button>
-        </SettingsFormFoot>
       </SettingsRows>
     </SettingsGroup>
   );
 }
+

@@ -2,15 +2,14 @@
 // with the one thing to do when it needs the person; My Cloud and teams are the Admin's. This app never stops a server:
 // Remove only forgets it here and signs this app out.
 import { useEffect, useState } from "react";
-import { Check, Cloud, Copy, Laptop, Plus, X } from "lucide-react";
+import { Check, Copy, Laptop, Plus, X } from "lucide-react";
 import { serverTransport } from "../../electron/server-address.mjs";
 import type { ServerInstall, ServerStatus } from "../../electron/server-status.mjs";
-import { cloudColor } from "@/lib/cloud-look";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { OwnServerLink, RailSheet } from "./PlaceAddSheet";
 import { SettingsLinkRow, SettingsRows, Switch } from "./SettingsPrimitives";
-import { CloudTile } from "./cloud-buy/parts";
+import { PlaceBadge } from "./settings/SettingsNav";
 
 type Saved = Awaited<ReturnType<NonNullable<NonNullable<Window["ogb"]>["environments"]>["state"]>>;
 type Entry = Saved["environments"][number];
@@ -100,7 +99,6 @@ export function ServerList({ saved, busy, sharingOffered, ownServers = [], appVe
       {rows.map((entry) => {
         const active = entry.id === saved.activeId;
         const status = byHand(entry) ? statusOf(entry.id) : undefined;
-        const Icon = entry.id === "local" ? Laptop : Cloud;
         const where = entry.id === "local" ? t("servers.localHint")
           : !byHand(entry) ? (entry.home ? t("servers.managed") : new URL(entry.origin!).host)
           : `${new URL(entry.origin!).host} · ${t(TRANSPORT[serverTransport(entry.origin!)])}`;
@@ -108,9 +106,10 @@ export function ServerList({ saved, busy, sharingOffered, ownServers = [], appVe
         const showUpdate = status?.behind === true && appVersion !== null && !hidden.includes(`${entry.id}:${status.version}`);
         return <div key={entry.id} data-server-row={entry.id} className="flex flex-col px-4 py-3">
           <div className="flex min-h-10 items-center gap-3">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary">
-              {cloudColor(entry.color) ? <CloudTile color={entry.color} size={20} /> : <Icon size={18} strokeWidth={1.75} aria-hidden="true" />}
-            </span>
+            {/* A place shows the same mark as on the rail, in the nav and on Phone & devices: its 24 px badge. */}
+            {entry.id === "local"
+              ? <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Laptop size={18} strokeWidth={1.75} aria-hidden="true" /></span>
+              : <span className="flex size-8 shrink-0 items-center justify-center"><PlaceBadge place={{ kind: entry.home || entry.cloud ? "cloud" : "server", name: entry.name, color: entry.color ?? null, named: true }} size={24} /></span>}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 truncate text-[14px] leading-5 text-ink">{entry.name}</div>
               <div data-server-where className="truncate text-[13px] leading-[18px] text-ink-secondary">{where}</div>

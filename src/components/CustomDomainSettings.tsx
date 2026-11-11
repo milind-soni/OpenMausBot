@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { Check, ChevronRight, Copy } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import { api } from "@/state/store";
-import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
-import { SETTINGS_INPUT, SettingRow, SettingsEmptyRow, SettingsField, SettingsGroup, SettingsRows } from "./SettingsPrimitives";
+import { LearnMore, SETTINGS_INPUT, SettingRow, SettingsEmptyRow, SettingsField, SettingsGroup, SettingsRows } from "./SettingsPrimitives";
+import { SettingsSkeletonRows } from "./settings/SettingsStates";
 
 export interface CustomDomainStatus {
   publicUrl: string | null;
@@ -86,34 +86,9 @@ export function customDomainProxyExample(status: Pick<CustomDomainStatus, "appPo
 }`;
 }
 
-/** Advanced server setup: a fold row in the domain's own card (no native triangle); the steps join that card. */
-export function CustomDomainGuide({ status, open = false, onToggle }: { status: CustomDomainStatus; open?: boolean; onToggle?: () => void }) {
-  return <>
-    <div data-settings-disclosure="domain-guide" data-settings-fold="">
-      <button type="button" aria-expanded={open} onClick={onToggle}
-        className="flex min-h-11 w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
-        <span className="min-w-0 flex-1 text-[14px] leading-5 text-ink">{t("settings.domain.guide")}</span>
-        <ChevronRight size={14} aria-hidden="true" className={cn("-mr-1 shrink-0 text-ink-tertiary transition-transform duration-150 motion-reduce:transition-none rtl:-scale-x-100", open && "rotate-90")} />
-      </button>
-    </div>
-    <div hidden={!open} className="flex flex-col gap-3 px-4 py-3 text-[13px] leading-[18px] text-ink-secondary">
-      <ol className="flex list-decimal flex-col gap-3 pl-4">
-        <li>{t("settings.domain.dns")}</li>
-        <li>
-          {t("settings.domain.proxy")}
-          <pre className="mt-2 overflow-x-auto font-mono text-[12px] leading-4 text-ink"><code>{customDomainProxyExample(status)}</code></pre>
-          <p className="mt-2">{t("settings.domain.proxyHint")}</p>
-        </li>
-        <li>{t("settings.domain.verifyHint")}</li>
-      </ol>
-      <p>{t("settings.domain.loopbackWarning")}</p>
-      {!status.serverIpv4 && <p>{t("settings.domain.ipAdminHint")}</p>}
-      <p>{t("settings.domain.scope")}{" "}
-        <a className="text-accent-text hover:underline focus-visible:underline" href="https://github.com/milind-soni/OpenMausBot/blob/main/docs/self-hosting.md#connect-a-custom-domain-in-settings" target="_blank" rel="noopener noreferrer">{t("settings.domain.fullGuide")}</a>
-      </p>
-    </div>
-  </>;
-}
+/** The self-hosting guide's section on custom domains: the server steps (DNS, the HTTPS proxy, ports) live there, behind
+ * the row's Learn more, never inline in Settings. */
+export const CUSTOM_DOMAIN_GUIDE_URL = "https://github.com/milind-soni/OpenMausBot/blob/main/docs/self-hosting.md#connect-a-custom-domain-in-settings";
 
 export function CustomDomainSettings() {
   const [status, setStatus] = useState<CustomDomainStatus | null>(null);
@@ -121,7 +96,7 @@ export function CustomDomainSettings() {
   const [busy, setBusy] = useState<"loading" | "saving" | "removing" | null>("loading");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [guide, setGuide] = useState(false);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -155,31 +130,39 @@ export function CustomDomainSettings() {
     } finally { setBusy(null); }
   };
 
+  // Address (§2.2): one row, "Your domain", with Connect domain opening the form in a fold under a divider: the field,
+  // the DNS record to copy, one helper line, and Save right-aligned 8 below. Only a self-hosted server shows it.
+  const connected = Boolean(status?.customDomain);
   return (
-    <SettingsGroup label={t("settings.domain.title")} description={t("settings.domain.subtitle")} block="address">
+    <SettingsGroup label={t("settings.domain.title")} block="address">
       <SettingsRows>
-        {busy === "loading" && <SettingsEmptyRow><span role="status">{t("settings.domain.loading")}</span></SettingsEmptyRow>}
+        {busy === "loading" && <SettingsSkeletonRows />}
         {status && !status.supported && <SettingsEmptyRow>{t("settings.domain.serverOnly")}</SettingsEmptyRow>}
         {status?.supported && <>
-          <form data-custom-domain-settings="" onSubmit={(event) => { event.preventDefault(); if (domain.trim() && !busy) void save(false); }} className="flex flex-col gap-3 px-4 py-3">
-            <SettingsField label={t("settings.domain.label")}>
-              <input id="custom-domain" type="text" value={domain} disabled={busy !== null} onChange={(event) => { setDomain(event.target.value); setNotice(null); setError(null); }}
-                placeholder="bots.yourcompany.com" autoCapitalize="none" autoCorrect="off" spellCheck={false} className={SETTINGS_INPUT} />
-            </SettingsField>
-            <CustomDomainDnsRecord domain={domain} serverIpv4={status.serverIpv4} />
-            <p className="text-[13px] leading-[18px] text-ink-secondary">{t("settings.domain.httpsNeeded")}</p>
-            {notice && <p role="status" className="text-[12px] leading-4 text-ink-secondary">{notice}</p>}
-            {error && <p role="alert" className="text-[12px] leading-4 text-danger">{error}</p>}
-            <div className="flex items-center justify-end gap-2">
-              {status.customDomain && <button type="button" disabled={busy !== null} onClick={() => void save(true)} data-danger="" className="settings-quiet mr-auto cursor-pointer">{busy === "removing" ? t("settings.domain.removing") : t("settings.domain.remove")}</button>}
-              <button type="submit" disabled={!domain.trim() || busy !== null} className="ui-button ui-button-md ui-button-primary rounded-full">
-                {busy === "saving" ? t("settings.domain.verifying") : t("settings.domain.verify")}
-              </button>
-            </div>
-          </form>
-          {status.publicUrl && <SettingRow title={t("settings.domain.current")} subtitle={<span className="break-all">{status.publicUrl}</span>}>{null}</SettingRow>}
-          {status.customDomain && <SettingsEmptyRow>{status.fallbackUrl ? t("settings.domain.fallback", { url: status.fallbackUrl }) : t("settings.domain.noFallback")}</SettingsEmptyRow>}
-          <CustomDomainGuide status={status} open={guide} onToggle={() => setGuide((value) => !value)} />
+          <SettingRow title={t("settings.domain.label")}
+            subtitle={connected && status.publicUrl ? <span className="break-all">{status.publicUrl}</span>
+              : <>{t("settings.domain.rowLine")}{" "}<LearnMore href={CUSTOM_DOMAIN_GUIDE_URL} /></>}
+            message={!open && notice ? <span role="status">{notice}</span> : undefined}>
+            <button type="button" className="ui-button" aria-expanded={open} data-custom-domain-open="" onClick={() => setOpen(!open)}>
+              {t(open ? "common.close" : connected ? "settings.domain.change" : "settings.domain.verify")}
+            </button>
+          </SettingRow>
+          {open && (
+            <form data-custom-domain-settings="" onSubmit={(event) => { event.preventDefault(); if (domain.trim() && !busy) void save(false); }} className="flex flex-col gap-2 px-4 pb-4 pt-3">
+              <SettingsField label={t("settings.domain.label")} hint={error ? <span role="alert" className="text-danger">{error}</span> : notice ? <span role="status">{notice}</span> : t("settings.domain.httpsFirst")}>
+                <input id="custom-domain" type="text" value={domain} disabled={busy !== null} onChange={(event) => { setDomain(event.target.value); setNotice(null); setError(null); }}
+                  placeholder="bots.yourcompany.com" autoCapitalize="none" autoCorrect="off" spellCheck={false} className={SETTINGS_INPUT} />
+              </SettingsField>
+              <CustomDomainDnsRecord domain={domain} serverIpv4={status.serverIpv4} />
+              <div className="flex items-center justify-end gap-2" data-settings-form-foot="">
+                {status.customDomain && <button type="button" disabled={busy !== null} onClick={() => void save(true)} data-danger="" className="settings-quiet mr-auto -ms-1.5 cursor-pointer">{busy === "removing" ? t("settings.domain.removing") : t("settings.domain.remove")}</button>}
+                <button type="submit" disabled={!domain.trim() || busy !== null} className="ui-button ui-button-md ui-button-primary rounded-full">
+                  {busy === "saving" ? t("settings.domain.verifying") : t("settings.domain.verify")}
+                </button>
+              </div>
+            </form>
+          )}
+          {open && status.customDomain && <SettingsEmptyRow>{status.fallbackUrl ? t("settings.domain.fallback", { url: status.fallbackUrl }) : t("settings.domain.noFallback")}</SettingsEmptyRow>}
         </>}
         {!status?.supported && error && <SettingsEmptyRow><span role="alert" className="text-danger">{error}</span></SettingsEmptyRow>}
       </SettingsRows>

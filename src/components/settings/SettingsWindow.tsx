@@ -6,7 +6,7 @@ import { glassPopupFrameStyle, glassPopupTopInset, GLASS_POPUP_GUTTER } from "@/
 import { scrollWithin } from "@/lib/scroll-within";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { setAdvancedMode } from "@/lib/interface-mode";
-import { useStore } from "@/state/store";
+import { api, useStore, type ConfigStatus } from "@/state/store";
 import { useIsTopLayer } from "../Layer";
 import { LicenseExpiryBanner } from "../LicenseExpiryBanner";
 import { shortcutLabel } from "../ShortcutHint";
@@ -139,6 +139,10 @@ export function SettingsWindow() {
   const shell: SettingsShell = { ctx, place, page: target.page, anchor, go };
   const missing = target.missing ? pageLabel(pageById(target.missing), place, ctx.desktop) : undefined;
   const showList = narrow && !narrowPage;
+  // Narrow header: the back label and the centred page title share 48 px of height; when the pair can't fit (half the
+  // width each side of the centre), the back button keeps only its chevron.
+  const compactBack = narrow && typeof window !== "undefined"
+    && window.innerWidth / 2 - 16 - (30 + t("settings.title").length * 7) < (pageLabel(page, place, ctx.desktop).length * 9) / 2;
   const closeButton = (
     <button type="button" onClick={close} aria-label={t("settings.close")} title={`${t("settings.close")} (${shortcutLabel("close-panel")})`}
       className={cn("ui-icon-button z-20 size-8 shrink-0 cursor-pointer rounded-full text-ink-secondary hover:bg-menu-hover hover:text-ink", !narrow && "absolute right-3 top-3")}>
@@ -161,11 +165,13 @@ export function SettingsWindow() {
                 <div className="relative flex h-12 items-center justify-between gap-2 px-2">
                   {showList ? <h2 className="flex-1 px-2 text-[16px] font-semibold leading-[22px] text-ink">{t("settings.title")}</h2> : (
                     <>
-                      <button type="button" data-settings-back="" onClick={() => { setNarrowPage(false); setQuery(""); }}
-                        className="flex h-8 shrink-0 cursor-pointer items-center gap-0.5 rounded-full pl-1 pr-2 text-[13px] font-medium leading-5 text-ink-secondary hover:bg-menu-hover hover:text-ink">
-                        <ChevronLeft size={16} aria-hidden="true" className="rtl:-scale-x-100" />{t("settings.title")}
+                      {/* "‹ Settings" when it fits beside the centred title; a longer pair (German, a long page name) keeps the
+                          chevron alone, so the title stays centred and clear of the close button. */}
+                      <button type="button" data-settings-back="" aria-label={compactBack ? t("settings.backTo") : undefined} onClick={() => { setNarrowPage(false); setQuery(""); }}
+                        className={cn("flex h-8 shrink-0 cursor-pointer items-center gap-0.5 rounded-full text-[13px] font-medium leading-5 text-ink-secondary hover:bg-menu-hover hover:text-ink", compactBack ? "w-8 justify-center" : "pl-1 pr-2")}>
+                        <ChevronLeft size={16} aria-hidden="true" className="rtl:-scale-x-100" />{!compactBack && t("settings.title")}
                       </button>
-                      <h2 className="pointer-events-none absolute left-1/2 top-1/2 max-w-[calc(100%-224px)] -translate-x-1/2 -translate-y-1/2 truncate text-center text-[16px] font-semibold leading-[22px] text-ink">{pageLabel(page, place, ctx.desktop)}</h2>
+                      <h2 className={cn("pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 truncate text-center text-[16px] font-semibold leading-[22px] text-ink", compactBack ? "max-w-[calc(100%-96px)]" : "max-w-[calc(100%-224px)]")}>{pageLabel(page, place, ctx.desktop)}</h2>
                     </>
                   )}
                   {closeButton}
@@ -187,7 +193,7 @@ export function SettingsWindow() {
                       <div key={target.page} data-settings-page-body={target.page} className={cn("flex flex-col gap-6", narrow && "px-4")}>
                         <LicenseExpiryBanner config={state.config} />
                         {page.owner === "place" && state.config === null
-                          ? state.error ? <SettingsUnreachable place={place.name} onRetry={() => location.reload()} />
+                          ? state.error ? <SettingsUnreachable place={place.name} onRetry={() => void api<ConfigStatus>("/api/config").then((config) => dispatch({ type: "configStatus", config })).catch(() => {})} />
                             : <><SettingsSkeletonCard place={place.name} /><SettingsSkeletonCard place={place.name} /></>
                           : <SettingsPageBody page={target.page} />}
                       </div>

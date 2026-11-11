@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Plus } from "lucide-react";
 import { productName } from "@/lib/brand";
-import { FEEDBACK_URL, HELP_CENTER_URL, appVersion, openExternalLink } from "@/lib/app-links";
+import { FEEDBACK_URL, HELP_CENTER_URL, openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
 import { AboutDialog } from "../../AboutDialog";
@@ -76,7 +76,7 @@ export function AppPage() {
         {desk && ctx.advanced && (window.ogb?.exportDiagnostics ? <DiagnosticsRow simple /> : <InertRow title={t("settings.app.diagnostics")}
           control={<button type="button" className="ui-button" tabIndex={-1}>{t("settings.diagnostics.export")}</button>} />)}
         <div data-settings-block="about" className="contents">
-          <SettingsLinkRow title={t("settings.app.about", { app: productName() })} value={appVersion()} onClick={() => setAbout(true)} />
+          <SettingsLinkRow title={t("settings.app.about", { app: productName() })} onClick={() => setAbout(true)} />
         </div>
       </SettingsRows>
     </SettingsGroup>

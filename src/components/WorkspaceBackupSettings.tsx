@@ -77,7 +77,7 @@ export function WorkspaceBackupSummaryView({ summary }: { summary: WorkspaceBack
   </div>;
 }
 
-export function WorkspaceBackupSettings() {
+export function WorkspaceBackupSettings({ compact = false }: { compact?: boolean } = {}) {
   const [status, setStatus] = useState<BackupStatus | null>(null);
   const [busy, setBusy] = useState<"export" | "preview" | "restore" | null>(null);
   const lock = useRef(false);
@@ -192,11 +192,13 @@ export function WorkspaceBackupSettings() {
           {(!status || status.busy) && <span role="status">{status?.busy ? t("backup.serverBusy") : t("backup.checkStatus")}{" "}<button type="button" onClick={() => void refresh()} className="cursor-pointer text-accent-text hover:underline">{t("connectors.action.retry")}</button></span>}
           {error && <span role="alert" className="block break-words text-danger">{error}</span>}
         </>}>
+        {/* Simple's Overview keeps Your data to one row: Import is the row's quiet second button. */}
+        {compact && <button type="button" className="settings-quiet cursor-pointer" disabled={disabled} data-backup-import="" onClick={() => setImporting(true)}>{t("backup.importAction")}</button>}
         <button type="button" className="ui-button" disabled={disabled} data-backup-export="" onClick={() => setExporting(true)}>{t("backup.exportAction")}</button>
       </SettingRow>
-      <SettingRow title={t("backup.import")} subtitle={t("backup.importShort")}>
+      {!compact && <SettingRow title={t("backup.import")} subtitle={t("backup.importShort")}>
         <button type="button" className="ui-button" disabled={disabled} data-backup-import="" onClick={() => setImporting(true)}>{t("backup.chooseFile")}</button>
-      </SettingRow>
+      </SettingRow>}
     </SettingsRows>
     {exporting && (
       <SettingsDialog title={t("backup.export")} onClose={closeExport}>

@@ -1777,10 +1777,36 @@ body {
   background-size: calc(100% - 32px) 0.5px;
   background-position: 16px 0;
 }
+/* Rows kept together in a `display: contents` wrapper (a group with a data hook) part from each other the same way. */
+[data-settings-rows] > .contents > :not([hidden]) ~ :not([hidden], .contents) {
+  background-image: linear-gradient(var(--settings-edge), var(--settings-edge));
+  background-repeat: no-repeat;
+  background-size: calc(100% - 32px) 0.5px;
+  background-position: 16px 0;
+}
 [data-settings-rows][data-settings-icons] > :not([hidden]) ~ :not([hidden], .contents),
-[data-settings-rows][data-settings-icons] > :not([hidden]) ~ .contents > :first-child {
+[data-settings-rows][data-settings-icons] > :not([hidden]) ~ .contents > :first-child,
+[data-settings-rows][data-settings-icons] > .contents > :not([hidden]) ~ :not([hidden], .contents) {
   background-size: calc(100% - 76px) 0.5px;
   background-position: 60px 0;
+}
+/* Narrow cards (§6.12): below 480 a select, a segmented control or a wide button (one marked data-settings-drop, such as
+   Pair a phone) drops under its text, 8 below the description and at the text's left edge; a select takes the full
+   width. Switches and small buttons stay on the right. */
+@container rows (max-width: 480px) {
+  [data-settings-control]:has(select, [data-settings-segmented], [data-settings-drop]) {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+  }
+  [data-settings-control] > [data-settings-select] {
+    flex: 1 1 auto;
+    max-width: none;
+    width: 100%;
+  }
+  [data-settings-control] > [data-settings-select] > select {
+    width: 100%;
+    max-width: none;
+  }
 }
 /* Narrow Midnight remaps the app's surfaces for the phone layout; Settings keeps the desktop sheet and card colours. */
 @media (max-width: 767.98px) {
@@ -2056,6 +2082,12 @@ body {
    red does not vanish while the user is fixing it. */
 :is(input, textarea, select):focus-visible:not([aria-invalid="true"]) {
   border-color: var(--color-focus);
+}
+/* Settings: every control shows keyboard focus the same way, as the 2 px focus ring a switch or a button gets (§6.10).
+   A select or a field there edges in a 0.5 px hairline, which a border-colour change can't make visible. */
+[data-settings-look] :is(select, textarea, input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [data-settings-search])):focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 0;
 }
 
 ::selection {
@@ -3096,6 +3128,11 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
 
 [data-skin="pop"][data-skin-preview] {
   box-shadow: 0 0 0 1.5px var(--color-ink), 2px 2px 0 1.5px var(--color-ink);
+}
+/* In Settings every preview has the same 0.5 px frame (the tile draws it), so Pop's own heavy outline never reads as the
+   chosen tile's ring; its inner card outlines stay. */
+[data-settings-look] [data-skin="pop"][data-skin-preview] {
+  box-shadow: none;
 }
 [data-skin="pop"][data-skin-preview] .bg-card {
   box-shadow: 0 0 0 1px var(--color-ink);

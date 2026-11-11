@@ -4,7 +4,7 @@ import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { LearnMore, SETTINGS_INPUT, SettingRow, SettingsField, SettingsFormFoot, SettingsGroup, SettingsRows, SettingsTag, StatusDot, Switch } from "./SettingsPrimitives";
+import { LearnMore, SETTINGS_INPUT, SettingRow, SettingsField, SettingsFormFoot, SettingsGroup, SettingsRows, StatusDot, Switch } from "./SettingsPrimitives";
 import { Select } from "./Select";
 import { WorkersAiKeyCard } from "./WorkersAiKeyCard";
 import { openKeySettings } from "./keys/key-focus";
@@ -90,7 +90,6 @@ export function deciderFailureText(result: { reason: string; status?: number }, 
   return key ? t(key) : t("decider.error.other");
 }
 
-const COMING_SOON: LocaleKey[] = ["decider.jobs.browserClicks", "decider.jobs.toolSelection", "decider.jobs.placement"];
 
 export function DecisionModelSettings() {
   const { state, dispatch } = useStore();
@@ -339,12 +338,7 @@ export function DecisionModelSettings() {
               className="cursor-pointer"
             />
           </SettingRow>
-          {COMING_SOON.map((label) => (
-            <div key={label} data-testid="decider-coming-soon" aria-disabled="true" className="flex min-h-11 items-center gap-1.5 px-4 py-3">
-              <span className="text-[14px] leading-5 text-ink-secondary">{t(label)}</span>
-              <SettingsTag>{t("decider.jobs.comingSoon")}</SettingsTag>
-            </div>
-          ))}
+          {/* Jobs that aren't built yet are not listed: a row nobody can use is noise (§6.5 Not applicable). */}
         </SettingsRows>
       </SettingsGroup>
     </>

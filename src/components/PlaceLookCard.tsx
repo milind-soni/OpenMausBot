@@ -8,6 +8,7 @@ import { useStore } from "@/state/store";
 import { PlacePicture } from "./PlacePicture";
 import { SettingRow, SettingsRows } from "./SettingsPrimitives";
 import { SwatchRadios } from "./SwatchRadios";
+import { useSettingsPlace } from "./settings/settings-place";
 
 /** The sidebar's look, as two rows of Settings: its colour, in the six swatches the rail's circles use, and its picture,
  * kept on the place's own server for everyone there. Both start plain. This computer's colour is the app's own; a
@@ -15,6 +16,8 @@ import { SwatchRadios } from "./SwatchRadios";
  * browser knows no colour, only the picture. */
 export function PlaceLookRows() {
   const look = usePlaceLook();
+  // The place's name from the one source Settings, the rail and the title bar share: never the raw entry's "This Mac".
+  const place = useSettingsPlace();
   const { state } = useStore();
   const admin = useOwnerOrAdmin() === true;
   const computer = window.ogb?.app?.ownPage === true;
@@ -30,9 +33,9 @@ export function PlaceLookRows() {
     : outcome === "unsupported" ? t("placeLook.unsupported") : null;
   return <>
     {look && <div data-place-look={look.change ?? "locked"}>
-      <SettingRow title={t("placeLook.sidebarColor")} subtitle={t("placeLook.colorLine", { place: look.name })}
+      <SettingRow title={t("placeLook.sidebarColor")} subtitle={t("placeLook.colorLine", { place: place.name })}
         message={outcome === "failed" ? <p role="alert" className="text-danger">{t("placeLook.failed")}</p> : note && <p className="text-ink-secondary">{note}</p>}>
-        <SwatchRadios value={pending ?? look.swatch} onChange={choose} label={computer ? t("placeLook.sidebarColor") : t("placeLook.aria", { name: look.name })}
+        <SwatchRadios value={pending ?? look.swatch} onChange={choose} label={computer ? t("placeLook.sidebarColor") : t("placeLook.aria", { name: place.name })}
           disabled={locked} offset="menu" none />
       </SettingRow>
     </div>}

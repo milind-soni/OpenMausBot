@@ -39,15 +39,20 @@ function PairWithCloud() {
   );
 }
 
+/** The phones of the person's other places, one row each. A place already offered by the "Pair with My Cloud" callout at
+ * the top is left out, so one screen never has two doors to the same place. */
 function OtherPlaces() {
   const { ctx } = useSettingsShell();
-  const others = useOtherPlaces("phone");
+  const { cloud, bridge } = useCloudPhoneDestination(ctx.here);
+  const callout = ctx.here && cloud === "ready" && Boolean(bridge);
+  const others = useOtherPlaces("phone").filter((place) => !(callout && place.kind === "cloud"));
   if (!ctx.desktop || ctx.client || others.length === 0) return null;
   return (
     <SettingsGroup label={t("settings.otherPlaces")} block="other-places">
       <SettingsRows icons>
         {others.map((place) => (
-          <SettingsLinkRow key={place.key} title={place.name} leading={<PlaceBadge place={{ kind: place.kind === "computer" ? "computer" : "cloud", name: place.name, color: place.color }} size={24} />}
+          <SettingsLinkRow key={place.key} title={place.name} subtitle={t("phone.otherPlace.line", { place: place.name })}
+            leading={<PlaceBadge place={{ kind: place.kind === "computer" ? "computer" : "cloud", name: place.name, color: place.color }} size={24} />}
             external onClick={place.open} data={{ "data-other-place": place.key }} />
         ))}
       </SettingsRows>

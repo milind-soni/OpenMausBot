@@ -24,9 +24,10 @@ async function page(start: PlaceLook | null, { answer = saved(start ?? COMPUTER)
   const pictures = { upload: vi.fn(async () => ({ ok: true })), remove: vi.fn(async () => ({ ok: true })) };
   vi.doMock("@/lib/place-banner", async (original) => ({ ...(await original<typeof import("@/lib/place-banner")>()),
     prepareBanner: async (file: Blob) => ({ ok: true, blob: file }), uploadBanner: pictures.upload, removeBanner: pictures.remove }));
-  let changed: () => void = () => {};
-  const workspaces = { look: vi.fn(async () => start), color: vi.fn(async (swatch: string | null) => answer(swatch)), onChanged: vi.fn((callback: () => void) => { changed = callback; return () => {}; }) };
-  Object.assign(window, { ogb: { app: { version: "0.1.131", ownPage: own }, workspaces } });
+  const heard = new Set<() => void>();
+  const workspaces = { state: vi.fn(async () => ({ local: own, name: start?.name ?? "This computer" })), look: vi.fn(async () => start), color: vi.fn(async (swatch: string | null) => answer(swatch)), onChanged: vi.fn((callback: () => void) => { heard.add(callback); return () => { heard.delete(callback); }; }) };
+  // This computer's own page has its phone link (the place-name source reads it), a Cloud's page does not.
+  Object.assign(window, { ogb: { app: { version: "0.1.131", ownPage: own }, workspaces, ...(own ? { companion: {} } : {}) } });
   const { setLocale } = await import("@/lib/i18n");
   setLocale("en");
   const { PlaceLookCard } = await import("./PlaceLookCard");
@@ -34,7 +35,7 @@ async function page(start: PlaceLook | null, { answer = saved(start ?? COMPUTER)
   root = createRoot(host);
   await act(async () => { root!.render(createElement("div", null, createElement(PlaceTint), createElement(PlaceLookCard))); });
   await act(async () => { await Promise.resolve(); });
-  return { workspaces, pictures, changed: () => changed() };
+  return { workspaces, pictures, changed: () => { for (const callback of heard) callback(); } };
 }
 const swatch = (name: string) => host.querySelector(`[data-swatch="${name}"]`) as HTMLButtonElement;
 const checked = () => [...host.querySelectorAll("[data-swatch]")].filter((button) => button.getAttribute("aria-checked") === "true").map((button) => button.getAttribute("data-swatch"));
@@ -155,7 +156,7 @@ it("a browser or an older app: no colour and no tint, only the place's picture",
   vi.resetModules();
   vi.doMock("@/state/store", () => ({ useStore: () => ({ state: { config: {} } }) }));
   vi.doMock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
-  Object.assign(window, { ogb: { workspaces: { state: vi.fn() } } });
+  Object.assign(window, { ogb: { workspaces: { state: vi.fn(async () => null) } } });
   const { PlaceLookCard } = await import("./PlaceLookCard");
   root = createRoot(host);
   await act(async () => { root!.render(createElement(PlaceLookCard)); });
@@ -169,4 +170,11 @@ it("main's word that the place changed (another window, the Admin, the rail): th
   await act(async () => { await Promise.resolve(); });
   expect(swatch("violet").getAttribute("aria-checked")).toBe("true");
   expect(tint()).toContain("var(--identity-purple)");
+});
+
+it("names this computer by the one place-name source: a rail entry still called This Mac reads This computer", async () => {
+  await page({ ...COMPUTER, name: "This Mac" }, { own: true });
+  const words = host.querySelector("[data-sidebar-look]")!.textContent!;
+  expect(words).toContain("Tints the top of the sidebar and This computer's circle.");
+  expect(words).not.toContain("This Mac");
 });

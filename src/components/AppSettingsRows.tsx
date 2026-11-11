@@ -8,7 +8,6 @@ import { completionPatch } from "@/lib/onboarding";
 import { updaterMessage, useUpdaterState } from "@/lib/updater";
 import { productName } from "../lib/brand";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
-import { NewBrowserSettings } from "./BrowserSettingsRows";
 import { MoreText, SettingRow, SettingsGroup, SettingsRows, Switch } from "./SettingsPrimitives";
 import { LearnedSkillsSettings } from "./ShareLearnedSkillsSettings";
 import { effortLabel } from "./ModelPicker";
@@ -411,7 +410,7 @@ export function ExperimentalFeaturesRow() {
   return (
     <SettingsGroup label={t("settings.experimental.title")} description={t("settings.experimental.short")} block="early-features">
       <SettingsRows>
-        <SettingRow title={t("settings.experimental.skillAuthoring")} subtitle={<MoreText short={t("settings.experimental.skillAuthoringShort")} long={t("settings.experimental.skillAuthoringDetail")} />}
+        <SettingRow title={t("settings.experimental.skillAuthoring")} tag={t("settings.early.tag")} subtitle={<MoreText short={t("settings.experimental.skillAuthoringShort")} long={t("settings.experimental.skillAuthoringDetail")} />}
           message={error ? <span role="alert" className="text-danger">{error}</span> : undefined}>
           <Switch
             checked={skillAuthoring}
@@ -421,8 +420,7 @@ export function ExperimentalFeaturesRow() {
             className="disabled:cursor-wait disabled:opacity-50"
           />
         </SettingRow>
-        <div className="px-4 py-3 empty:hidden"><LearnedSkillsSettings /></div>
-        <NewBrowserSettings />
+        <LearnedSkillsSettings />
       </SettingsRows>
     </SettingsGroup>
   );

@@ -365,13 +365,14 @@ describe("Simple mode's account menu", () => {
     return all;
   }, []);
 
-  it("is the same menu as Advanced, with Automations and Team map in their own group between Settings and Plan & billing", () => {
+  it("is the same menu as Advanced, with Automations and Team map in their own group between Settings and Plan & billing, and Help on its own", () => {
     const items = build();
     expect(groups(items)).toEqual([
       ["account"],
       ["phone-devices", "settings"],
       ["automations", "team-map"],
-      ["plan", "support"],
+      ["plan"],
+      ["support"],
     ]);
     expect(items.find((item) => item.key === "support")!.submenu!.map((item) => item.key)).toEqual(["help", "shortcuts", "feedback", "update", "about"]);
   });
@@ -452,7 +453,8 @@ describe("Simple mode's account menu", () => {
       ["account"],
       ["phone-devices", "settings"],
       ["automations", "team-map"],
-      ["plan", "support"],
+      ["plan"],
+      ["support"],
     ]);
     expect(groups(build({ move, update, updateTop: { label: "Update ready", action: "Restart" } })).slice(0, 2)).toEqual([["cloud-move"], ["update"]]);
     expect(groups(build({ move: [] }))[0]).toEqual(["account"]);

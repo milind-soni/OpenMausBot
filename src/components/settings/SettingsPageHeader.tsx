@@ -44,7 +44,9 @@ export function ScopeLine({ page, ctx, place }: { page: SettingsPage; ctx: Setti
   const text = page.owner === "place" ? forPlace(place.name)
     : page.owner === "account"
       ? ctx.desktop ? <><span className="text-ink">{t("settings.scope.account", { app: productName() })}</span>{everyPlace(ctx)}</> : <span className="text-ink-secondary">{t("settings.scope.browserAccount", { place: place.name })}</span>
-      : ctx.desktop ? <><span className="text-ink">{t("settings.scope.app", { app: productName() })}</span>{everyPlace(ctx)}</> : <span className="text-ink-secondary">{t("settings.scope.browser")}</span>;
+      // This app's settings are still kept per place's page until they follow the device (S1), so its line makes no
+      // "same on every place" promise yet; Your account's does, because the account is one.
+      : ctx.desktop ? <span className="text-ink">{t("settings.scope.app", { app: productName() })}</span> : <span className="text-ink-secondary">{t("settings.scope.browser")}</span>;
   return (
     <p data-settings-scope="" className="flex min-w-0 items-center gap-1.5 text-[13px] leading-[18px]">
       <span className="flex size-3.5 shrink-0 items-center justify-center overflow-hidden rounded-[4px]">{badge}</span>
@@ -56,7 +58,10 @@ export function ScopeLine({ page, ctx, place }: { page: SettingsPage; ctx: Setti
 export function SettingsPageHeader({ page, ctx, place, scrolled, narrow, missing }: {
   page: SettingsPage; ctx: SettingsContext; place: SettingsPlace; scrolled: boolean; narrow: boolean; missing?: string;
 }) {
-  const intro = page.id === "app" && !ctx.advanced ? "settings.app.introSimple" : INTRO[page.id];
+  // A browser has no updates of its own, so its This app intro leaves them out.
+  const intro = page.id !== "app" ? INTRO[page.id]
+    : !ctx.desktop ? ctx.advanced ? "settings.app.introBrowserAdvanced" : "settings.app.introBrowser"
+    : ctx.advanced ? INTRO.app : "settings.app.introSimple";
   const title = page.id === "account" ? t("settings.page.account") : pageLabel(page, place, ctx.desktop);
   return (
     <header data-settings-header="" className={cn("sticky top-0 z-10 flex flex-col gap-1 bg-(--settings-sheet) pb-5", narrow ? "px-8 pt-1" : "pl-4 pt-4",

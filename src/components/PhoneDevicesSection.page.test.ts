@@ -38,7 +38,10 @@ beforeEach(() => {
 describe("Phone & devices", () => {
   it("with nothing paired and no way in on, shows one task: pair, with where to get the app in plain words and the ways in folded into one row", () => {
     const html = page(true);
-    expect(html).toMatch(/Pair a phone[\s\S]*?Pair[\s\S]*?Install MausBot on your phone from the App Store or Google Play, then scan this code in the app\./);
+    // One untitled card: the row says "Your phone" and what to do, and the code (with "scan this code") is only in the dialog.
+    expect(html).toMatch(/Your phone[\s\S]*?Install MausBot on your phone from the App Store or Google Play, then pair it here\./);
+    expect(html).not.toContain("<h3");
+    expect(html).not.toContain("this code");
     expect(html, "no store or download link in the desktop app").not.toMatch(/data-phone-app|apps\.apple\.com|\.apk|<a [^>]*App Store/);
     expect(html).not.toContain("data-step-row");
     expect(html.match(/data-phone-pairing-action/g), "exactly one button is the pairing door").toHaveLength(1);
@@ -51,13 +54,19 @@ describe("Phone & devices", () => {
     expect(html, "no store code to scan: the pairing code is the only one").not.toMatch(/<svg[^>]*qr|Scan with your phone's camera/i);
   });
 
-  it("is the same page in Advanced, with the ways in open and More ways in under them", () => {
+  it("is the same page in Advanced: nothing paired and no way on reads as the same one closed row", () => {
     const html = page(false);
     const simple = page(true);
     expect(simple).toContain("data-reach-fold");
-    expect(html).not.toContain("data-reach-fold");
+    expect(html).toContain("data-reach-fold");
+    expect(html).not.toContain('data-route-row="wifi"');
+  });
+
+  it("in Advanced, with a way on, shows the ways in and keeps More ways in folded", () => {
+    f.state = state({ routes: routes({ wifi: true }) });
+    const html = page(false);
     expect(html).toMatch(/data-route-row="wifi"[\s\S]*?data-route-row="relay"[\s\S]*?Keep this computer awake[\s\S]*?More ways in/);
-    expect(html).toContain("Turn on a way for your phone to reach this computer first.");
+    expect(html).toMatch(/data-settings-disclosure="more-ways"[\s\S]*?aria-expanded="false"/);
   });
 
   it("shows each route on since its date as a switch, and lists paired phones with Pair a phone beside the list", () => {
@@ -87,7 +96,7 @@ describe("Pair a device", () => {
     const input = (route: string) => html.match(new RegExp(`<input[^>]*value="${route}"[^>]*>`))![0];
     expect(input("wifi")).toContain('checked=""');
     expect(input("relay"), "signed out: Anywhere can't be chosen yet, and says why").toContain('disabled=""');
-    expect(html).toContain("Needs a free MausBot sign-in");
+    expect(html).toContain("Needs a free MausBot sign-in.");
     expect(html).toContain('aria-label="Close"');
     expect(html).not.toContain('type="checkbox"');
     expect(html).toContain(">Turn on and show code<");

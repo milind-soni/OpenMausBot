@@ -12,6 +12,7 @@ import {
   Square,
   Trash2,
 } from "lucide-react";
+import { SettingsSkeletonRows } from "./settings/SettingsStates";
 import { Card, CommandLine, LearnMore, SETTINGS_INLINE_INPUT, Segmented, StatusDot } from "./SettingsPrimitives";
 import { MacLocalControl } from "./MacLocalControl";
 import { Select } from "./Select";
@@ -362,7 +363,7 @@ export function CloudComputersCard({
           onClick={onRefresh}
           disabled={loading || pending !== null}
           aria-label={t("vm.cloud.refreshAria")}
-          className="settings-quiet flex shrink-0 cursor-pointer items-center disabled:opacity-40"
+          className="settings-quiet -me-1.5 flex shrink-0 cursor-pointer items-center disabled:opacity-40"
         >
           {t("vm.refresh")}
         </button>
@@ -387,9 +388,8 @@ export function CloudComputersCard({
         className="mt-3 overflow-hidden rounded-xl border border-hairline/40"
       >
         {loading && instances.length === 0 ? (
-          <div className="flex items-center gap-2 px-3 py-4 text-[13px] text-ink-secondary">
-            <Loader2 size={13} className="animate-spin" /> {t("vm.cloud.checkingList")}
-          </div>
+          // Loading is two skeleton rows at their final height (§6.11), never a spinner.
+          <div role="status" aria-label={t("vm.cloud.checkingList")} className="flex flex-col"><SettingsSkeletonRows /></div>
         ) : unavailableReason ? (
           <div className="flex items-center gap-2 px-3 py-4 text-[13px] text-ink-secondary">
             <AlertTriangle size={14} className="shrink-0 text-warning" /> {unavailableReason}
@@ -531,9 +531,8 @@ export function LocalVmInventoryCard({
         className="mt-3 overflow-hidden rounded-xl border border-hairline/40"
       >
         {loading && instances.length === 0 ? (
-          <div className="flex items-center gap-2 px-3 py-4 text-[13px] text-ink-secondary">
-            <Loader2 size={13} className="animate-spin" /> {t("vm.perBot.checkingList")}
-          </div>
+          // Loading is two skeleton rows at their final height (§6.11), never a spinner.
+          <div role="status" aria-label={t("vm.perBot.checkingList")} className="flex flex-col"><SettingsSkeletonRows /></div>
         ) : unavailableReason ? (
           <div className="flex items-center gap-2 px-3 py-4 text-[13px] text-ink-secondary">
             <AlertTriangle size={14} className="shrink-0 text-warning" /> {unavailableReason}
@@ -1245,7 +1244,7 @@ export function LocalComputerSection() {
               setInventoryRefreshKey((key) => key + 1);
             }}
             disabled={loading || pending !== null}
-            className="settings-quiet cursor-pointer disabled:opacity-40"
+            className="settings-quiet cursor-pointer last:-me-1.5 disabled:opacity-40"
           >
             {t("vm.main.recheck")}
           </button>
@@ -1419,13 +1418,17 @@ export function LocalComputerSection() {
             </ActionButton>
           </div>
         )}
-        <div data-vm-folder="" className="break-all font-mono text-[12px] leading-4 text-ink-secondary">
-          {t("vm.safety.workspace", {
+        {/* One detail per line, "Label: value"; only an image's digest may break anywhere, never a word. */}
+        <div data-vm-folder="" className="flex flex-col font-mono text-[12px] leading-4 text-ink-secondary">
+          {[...t("vm.safety.workspace", {
             path: status?.workspace_path ?? t("vm.safety.notCreated"),
             driver: status?.driver_version ?? "0.37.0",
             image: status?.image_ref ?? t("vm.safety.notPrepared"),
+          }).split(" · "), ...(status?.base_image_ref ? [t("vm.safety.baseImage", { image: status.base_image_ref })] : [])].map((detail) => {
+            const at = detail.indexOf(": ");
+            const value = at < 0 ? detail : detail.slice(at + 2);
+            return <span key={detail} className="block">{at < 0 ? null : detail.slice(0, at + 2)}<span className={/[@:]sha256|^sha256|[0-9a-f]{24,}/.test(value) ? "[overflow-wrap:anywhere]" : "break-words"}>{value}</span></span>;
           })}
-          {status?.base_image_ref ? <> · {t("vm.safety.baseImage", { image: status.base_image_ref })}</> : null}
         </div>
       </Card>
       </>}

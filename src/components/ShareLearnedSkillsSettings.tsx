@@ -5,7 +5,7 @@ import { shareLearnedSkillsMode, skillAuthoringEnabled, skillsLibraryEnabled } f
 import { t } from "@/lib/i18n";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { SkillReviewSettings } from "./SkillReviewSettings";
-import { MoreText } from "./SettingsPrimitives";
+import { MoreText, Segmented, SettingRow } from "./SettingsPrimitives";
 
 const MODES = [
   { value: "off", label: "settings.experimental.shareSkillsOff" },
@@ -39,34 +39,15 @@ export function ShareLearnedSkillsSettings() {
   };
 
   return (
-    <div className="border-t-[0.5px] border-(--settings-edge) py-3 first:border-t-0" data-testid="share-learned-skills-settings">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="text-[14px] leading-5 text-ink">{t("settings.experimental.shareSkills")}</div>
-          <div className="mt-0.5 text-[13px] leading-[18px] text-ink-secondary">
-            {authoring ? <MoreText short={t("settings.experimental.shareSkillsShort")} long={t("settings.experimental.shareSkillsDetail")} /> : t("settings.experimental.shareSkillsNeedsAuthoring")}
-          </div>
-        </div>
-        <div className="inline-flex shrink-0 rounded-xl bg-inset p-1" role="radiogroup" aria-label={t("settings.experimental.shareSkillsAria")}>
-          {MODES.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              role="radio"
-              aria-checked={mode === option.value}
-              disabled={saving || !authoring}
-              onClick={() => void choose(option.value)}
-              className={cn(
-                "rounded-lg px-3 py-1.5 text-[13px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-                mode === option.value ? "bg-raised text-ink shadow" : "text-ink-secondary hover:text-ink",
-              )}
-            >
-              {t(option.label)}
-            </button>
-          ))}
-        </div>
-      </div>
-      {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
+    <div data-testid="share-learned-skills-settings" className="contents">
+      <SettingRow title={t("settings.experimental.shareSkills")} tag={t("settings.early.tag")}
+        subtitle={authoring ? <MoreText short={t("settings.experimental.shareSkillsShort")} long={t("settings.experimental.shareSkillsDetail")} /> : t("settings.experimental.shareSkillsNeedsAuthoring")}
+        message={error ? <span role="alert" className="text-danger">{error}</span> : undefined}>
+        <span className={cn("contents", (saving || !authoring) && "[&_button]:pointer-events-none [&_[role=radiogroup]]:opacity-40")}>
+          <Segmented value={mode} label={t("settings.experimental.shareSkillsAria")} onChange={(next) => void choose(next)}
+            options={MODES.map((option) => ({ value: option.value, label: t(option.label) }))} />
+        </span>
+      </SettingRow>
     </div>
   );
 }

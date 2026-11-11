@@ -268,7 +268,7 @@ export function UsageSection() {
             <SettingsRows>
               <div data-testid="usage-totals" className="contents">
                 {totals ? <>
-                  <SettingRow title={t("trace.stat.cost")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{t("usage.page.estimated", { cost: formatCost(totals.costUsd) })}</span></SettingRow>
+                  <SettingRow title={t("trace.stat.cost")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{totals.costUsd ? t("usage.page.estimated", { cost: formatCost(totals.costUsd) }) : formatCost(0)}</span></SettingRow>
                   <SettingRow title={t("usage.page.runs")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{String(list.roots.length)}{list.next !== undefined ? "+" : ""}</span></SettingRow>
                   <SettingRow title={t("trace.stat.errors")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{String(totals.errors)}</span></SettingRow>
                   <SettingRow title={t("trace.stat.time")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{totals.durationMs > 0 ? formatDuration(Math.max(1_000, totals.durationMs)) : "—"}</span></SettingRow>

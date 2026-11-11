@@ -1,6 +1,6 @@
 import { t } from "@/lib/i18n";
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Laptop, Loader2 } from "lucide-react";
+import { Laptop, Loader2, Plus } from "lucide-react";
 import { SETTINGS_INPUT, SettingRow, SettingsField, SettingsFoldRow, SettingsGroup, SettingsRows, Switch } from "./SettingsPrimitives";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { ComputerSharingSettings } from "./ComputerSharingSettings";
@@ -87,7 +87,8 @@ export function ConnectedWorkspacesSettings({ label, description }: { label?: st
   const locals = saved?.environments.filter(entry => entry.kind === "local") ?? [];
   const forgetEntry = locals.find(entry => entry.id === envForget);
   // This computer's own setups go by the place-name function: the first is This computer, never the machine's name.
-  const envLabel = (entry: { name: string; dataDir?: string | null }) => (entry.dataDir ? entry.name : t("rail.thisComputer"));
+  // The first one is "Default" here: "This computer" already names the place in Your computers just above.
+  const envLabel = (entry: { name: string; dataDir?: string | null }) => (entry.dataDir ? entry.name : t("connectedWorkspaces.defaultName"));
   return <>
     <SettingsGroup label={label} description={description} block="your-computers">
       {!saved ? <SettingsRows><SettingRow title={t(error ? "servers.yours.loadFailed" : "servers.yours.loading")}>{null}</SettingRow></SettingsRows> :
@@ -103,7 +104,7 @@ export function ConnectedWorkspacesSettings({ label, description }: { label?: st
             const confirming = forgetEntry?.id === entry.id;
             return <Fragment key={entry.id}>
               <SettingRow title={envLabel(entry)} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Laptop size={18} strokeWidth={1.75} aria-hidden="true" /></span>}
-                subtitle={<>{entry.dataDir ?? t("connectedWorkspaces.defaultFolderShort")}{entry.missing && <> · {t("connectedWorkspaces.missing")}</>}</>}>
+                subtitle={<>{entry.dataDir ?? t("connectedWorkspaces.mainFolder")}{entry.missing && <> · {t("connectedWorkspaces.missing")}</>}</>}>
                 {active ? <span className="text-[13px] leading-5 text-ink-secondary">{t("connectedWorkspaces.current")}</span> : <>
                   <button type="button" disabled={busy} aria-label={t("connectedWorkspaces.switchTo", { name: entry.name })} className="ui-button"
                     onClick={() => void perform(async () => {
@@ -135,7 +136,7 @@ export function ConnectedWorkspacesSettings({ label, description }: { label?: st
             </Fragment>;
           })}
           <SettingsFoldRow id="new-environment" title={t("connectedWorkspaces.newEnvironment")} open={newOpen} onToggle={() => setNewOpen(!newOpen)}
-            leading={<span aria-hidden="true" />}>
+            leading={<span aria-hidden="true" className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} strokeWidth={1.75} /></span>}>
             <form className="flex flex-col gap-3 py-3 pl-[60px] pr-4" onSubmit={(event) => {
               event.preventDefault();
               if (!envName.trim()) return;

@@ -85,11 +85,27 @@ export interface AiAppsImportViewProps {
   result: SetupImportResult | null;
   onChoose: (chosen: { skills: boolean; tools: boolean }) => void;
   onBring: () => void;
+  /** Settings' error line: Try again (look or bring again) and Skip (put the failure away) */
+  onRetry?: () => void;
+  onSkip?: () => void;
 }
 
-export function AiAppsImportView({ local, detection, chosen, status, result, onChoose, onBring }: AiAppsImportViewProps) {
+export function AiAppsImportView({ local, detection, chosen, status, result, onChoose, onBring, onRetry, onSkip }: AiAppsImportViewProps) {
   const working = status === "working";
   const settings = useContext(SettingsLook);
+  // In Settings a failure is the row's error line (§6.5: 12/16 danger, 4 under the description, ending in Try again),
+  // with Skip as the row's quiet button, never a dead end.
+  if (settings && local && (detection === null || status === "failed")) {
+    return (
+      <div data-import-section="apps" className="contents">
+        <SettingRow title={t("settings.import.appsTitle")} subtitle={t("settings.import.appsShort")}
+          message={<span role="alert" className="text-danger">{t(detection === null ? "settings.import.lookFailed" : "settings.import.bringFailed")}
+            {onRetry && <>{" "}<button type="button" data-import-retry="" className="cursor-pointer text-accent-text hover:underline focus-visible:underline" onClick={onRetry}>{t("common.tryAgain")}</button></>}</span>}>
+          {onSkip && <button type="button" data-import-skip="" className="settings-quiet cursor-pointer" onClick={onSkip}>{t("settings.import.skip")}</button>}
+        </SettingRow>
+      </div>
+    );
+  }
   const buttonClass = settings ? "ui-button self-end gap-1.5" : BUTTON;
   let body;
   if (!local) body = <p className="text-[13px] text-ink-secondary">{t("settings.import.appsLocalOnly")}</p>;
@@ -169,13 +185,15 @@ function AiAppsImport({ client, local }: { client: SetupImportClient; local: boo
   const [chosen, setChosen] = useState({ skills: true, tools: true });
   const [status, setStatus] = useState<"idle" | "working" | "failed">("idle");
   const [result, setResult] = useState<SetupImportResult | null>(null);
+  const [look, setLook] = useState(0);
 
   useEffect(() => {
     if (!local) return;
     const controller = new AbortController();
+    setDetection(undefined);
     client.detect(controller.signal).then(setDetection, () => setDetection(null));
     return () => controller.abort();
-  }, [client, local]);
+  }, [client, local, look]);
 
   const bring = async () => {
     if (!detection || status === "working") return;
@@ -192,7 +210,9 @@ function AiAppsImport({ client, local }: { client: SetupImportClient; local: boo
     }
   };
 
-  return <AiAppsImportView local={local} detection={detection} chosen={chosen} status={status} result={result} onChoose={setChosen} onBring={() => void bring()} />;
+  return <AiAppsImportView local={local} detection={detection} chosen={chosen} status={status} result={result} onChoose={setChosen} onBring={() => void bring()}
+    onRetry={() => (status === "failed" ? void bring() : setLook((count) => count + 1))}
+    onSkip={() => (status === "failed" ? setStatus("idle") : setDetection({ skills: [], tools: [] }))} />;
 }
 
 export function GrokImportSection() {

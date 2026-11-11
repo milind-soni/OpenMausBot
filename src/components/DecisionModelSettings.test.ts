@@ -113,10 +113,9 @@ describe("DecisionModelSettings", () => {
     expect(fixture.api).not.toHaveBeenCalled();
   });
 
-  it("lists the coming-soon jobs with no switch", () => {
+  it("lists only the jobs that work: no coming-soon rows", () => {
     const view = render();
-    for (const label of ["Browser clicks", "Tool selection", "Where work runs"]) expect(view.html).toContain(label);
-    expect(view.html.match(/Coming soon/g)).toHaveLength(3);
+    for (const label of ["Browser clicks", "Tool selection", "Where work runs", "Coming soon"]) expect(view.html).not.toContain(label);
     expect(view.switches).toHaveLength(2);
   });
 

@@ -168,7 +168,9 @@ export function TeamPeopleCard({ team }: { team: { name: string; cloudPage?: str
 
 /** One MausBot account, shown as two pages: `account` (who is signed in, sign in and out) and `plan` (the plan, its Cloud
  * and cancelling it). */
-export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamHome, onAddCloud, onSignIn, part = "plan", advanced = true, usage = null, upgrade, extra }: {
+export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamHome, onAddCloud, onSignIn, part = "plan", advanced = true, usage = null, upgrade, extra, avatar }: {
+  /** the person's picture, for the account card's leading slot */
+  avatar?: ReactNode;
   linkRequest?: number; cloudHome?: boolean; teamHome?: { name: string; cloudPage?: string }; onAddCloud?: () => void; onSignIn?: () => void;
   part?: "account" | "plan" | "sign-out"; advanced?: boolean;
   /** Plan & billing's This week, from the plan bridge */
@@ -179,7 +181,7 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamH
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudAccount;
   const { platform } = useDesktopCapabilities().capabilities.host;
   const [account, setAccount] = useState<CloudAccountState | null>(null);
-  const [busy, setBusy] = useState(false), [error, setError] = useState(false), [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false), [error, setError] = useState(false), [confirm, setConfirm] = useState<false | "sign-out" | "other-email">(false);
   const [addingEmail, setAddingEmail] = useState(false);
   const [homeFailed, setHomeFailed] = useState(false), [phoneFailed] = useState(false);
   const generation = useRef(0), revision = useRef(0), pending = useRef(false);
@@ -255,43 +257,41 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamH
   const errorLine = error && <p role="alert" className="px-4 text-[12px] leading-4 text-danger">{t("cloudAccount.actionFailed")}</p>;
 
   if (part === "account") {
+    // One layout on every rail (§1.6): an icon card with the person's picture in the first row's slot, who is signed in,
+    // and Sign out as the card's last row. A Cloud's page draws the same card with "from This computer" in that place.
+    const blank = <span aria-hidden="true" />;
     return <>
       <SettingsGroup label={t("settings.account.mausbot", { app: productName() })} block="mausbot-account">
-        <SettingsRows>
-          {(!account || view.kind === "unknown") && <SettingRow title={t("cloudAccount.loading")}>{!account && <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.state())}>{t("organization.refresh")}</button>}</SettingRow>}
-          {signedOut && <SettingRow title={t("settings.account.signInTitle", { app: productName() })} subtitle={t("settings.account.signInBody")} message={message && <p role="status">{message}</p>}>
+        <SettingsRows icons>
+          {(!account || view.kind === "unknown") && <SettingRow title={t("cloudAccount.loading")} leading={avatar ?? blank}>{!account && <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.state())}>{t("organization.refresh")}</button>}</SettingRow>}
+          {signedOut && <SettingRow title={t("settings.account.signInTitle", { app: productName() })} subtitle={t("settings.account.signInBody")} message={message && <p role="status">{message}</p>} leading={avatar ?? blank}>
             <button type="button" disabled={busy} className="ui-button ui-button-primary" data-account-sign-in="" onClick={() => onSignIn ? onSignIn() : void perform(() => bridge.begin())}>{t("settings.account.signIn")}</button>
           </SettingRow>}
-          {account?.status === "connecting" && <SettingRow title={t("cloudAccount.browser")} subtitle={enrollment ? `${t("cloudAccount.codeCheck")} ${t("cloudAccount.codeUntil", { time: time(enrollment.expiresAt) })}` : undefined}
+          {account?.status === "connecting" && <SettingRow title={t("cloudAccount.browser")} leading={avatar ?? blank} subtitle={enrollment ? `${t("cloudAccount.codeCheck")} ${t("cloudAccount.codeUntil", { time: time(enrollment.expiresAt) })}` : undefined}
             message={enrollment && <code data-cloud-code dir="ltr" className="select-all text-[20px] font-medium leading-7 tracking-[0.08em] text-ink">{enrollment.userCode}</code>}>
             <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.reopen())}>{t("organization.reopen")}</button>
             <button type="button" disabled={busy} className="settings-quiet cursor-pointer" onClick={() => void perform(() => bridge.cancel())}>{t("organization.cancel")}</button>
           </SettingRow>}
-          {signed && <SettingRow title={account.account?.email ?? t("settings.account.signedIn")} subtitle={message ? <p role="status">{message}</p> : t("settings.account.signedIn")}>
+          {signed && <SettingRow title={account.account?.email ?? t("settings.account.signedIn")} leading={avatar ?? blank} subtitle={message ? <p role="status">{message}</p> : t("settings.account.signedIn")}>
             {view.kind === "reauth"
               ? <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.signInAgain())}>{t("cloudAccount.signInAgain")}</button>
               : advanced && <button type="button" disabled={busy} className="settings-quiet cursor-pointer" onClick={() => void perform(() => bridge.refresh())}>{t("organization.refresh")}</button>}
           </SettingRow>}
+          {signed && <div data-settings-block="sign-out" className="contents"><SettingRow title={t("settings.account.signOut", { app: productName() })} leading={blank}>
+            <button type="button" disabled={busy} data-danger="" className="settings-quiet cursor-pointer" onClick={() => setConfirm("sign-out")}>{t("settings.account.signOutShort")}</button>
+          </SettingRow></div>}
         </SettingsRows>
         {signed && view.kind === "free" && !confirm && <p className="px-4 text-[12px] leading-4 text-ink-secondary">{t(window.ogb?.accounts ? "cloudAccount.otherEmailOrTeam" : "cloudAccount.otherEmail")}{" "}
-          <button type="button" data-cloud-other-email disabled={busy} className="cursor-pointer text-accent-text hover:underline" onClick={() => (window.ogb?.accounts ? setAddingEmail(true) : setConfirm(true))}>{t(window.ogb?.accounts ? "cloudAccount.addOtherEmail" : "cloudAccount.useOtherEmail")}</button></p>}
+          <button type="button" data-cloud-other-email disabled={busy} className="cursor-pointer text-accent-text hover:underline" onClick={() => (window.ogb?.accounts ? setAddingEmail(true) : setConfirm("other-email"))}>{t(window.ogb?.accounts ? "cloudAccount.addOtherEmail" : "cloudAccount.useOtherEmail")}</button></p>}
         {errorLine}
       </SettingsGroup>
       {addingEmail && <AccountsSheet adding="" onClose={() => setAddingEmail(false)} />}
-      {confirm && <SignOutConfirm here={t("rail.thisComputer")} cloud={null} onConfirm={() => perform(() => bridge.signOut())} onClose={() => setConfirm(false)} />}
+      {confirm && <SignOutConfirm here={t("rail.thisComputer")} cloud={confirm === "sign-out" && view.kind === "paid" ? t("cloudSetup.myCloud") : null}
+        onConfirm={() => perform(() => bridge.signOut())} onClose={() => setConfirm(false)} />}
     </>;
   }
-  if (part === "sign-out") {
-    // The page's last row, after Organization and Emails: Sign out, with the one confirm every Sign out uses.
-    return signed ? <div data-settings-block="sign-out" className="flex flex-col gap-2"><SettingsRows>
-      <SettingRow title={t("settings.account.signOut", { app: productName() })}>
-        <button type="button" disabled={busy} data-danger="" className="settings-quiet cursor-pointer" onClick={() => setConfirm(true)}>{t("settings.account.signOutShort")}</button>
-      </SettingRow>
-    </SettingsRows>
-      {confirm && <SignOutConfirm here={t("rail.thisComputer")} cloud={view.kind === "paid" ? t("cloudSetup.myCloud") : null}
-        onConfirm={() => perform(() => bridge.signOut())} onClose={() => setConfirm(false)} />}
-    </div> : null;
-  }
+  // Sign out is the account card's last row now; this part stays for callers that still ask for it.
+  if (part === "sign-out") return null;
 
   const cancelled = account?.status === "connected" && account.renewal?.cancelled === true;
   const primary = signedOut || (view.kind === "free" && buyOfferAllowed(view))

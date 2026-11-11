@@ -68,7 +68,7 @@ export function PhoneRow({ device, connected, state, c, onRemoved, onPairAgain, 
           <button type="button" className="ui-button shrink-0" data-pair-again="" onClick={onPairAgain}>{t("remote.devices.pairAgain")}</button>
         ) : (
           <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={t("remote.devices.more", { name: device.name })}
-            className="ui-button ui-button-md shrink-0 cursor-pointer rounded-full">{t("remote.devices.options")}</button>
+            className="ui-button ui-button-md shrink-0 cursor-pointer rounded-full">{t(open ? "common.close" : "remote.devices.options")}</button>
         )}
         <button type="button"
           disabled={c.busy}

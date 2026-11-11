@@ -289,18 +289,30 @@ export function hitLabel(hit: SearchHit, place: SettingsPlace, desktop: boolean)
 function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place: SettingsPlace; hit: SearchHit; query: string; onHit: (hit: SearchHit) => void }) {
   const entry = hit.entry;
   const label = hitLabel(hit, place, ctx.desktop);
-  const location = searchLocation(hit, place, ctx);
+  const where = searchWhere(hit, place, ctx);
+  const full = searchLocation(hit, place, ctx);
   const Icon = entry.jump ? null : pageById(entry.page).icon;
+  const tag = hit.advanced && !ctx.advanced;
+  // The title gets the whole width (up to two lines); the second line is "owner › page", where the owner gives way
+  // first so the page name always shows, and the Advanced tag follows it. The full path is the row's tooltip.
   return (
-    <button type="button" data-settings-hit={entry.id} onClick={() => onHit(hit)}
+    <button type="button" data-settings-hit={entry.id} onClick={() => onHit(hit)} title={full ? `${label} · ${full}` : label}
       className="flex w-full cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
       <span className="flex h-5 w-6 shrink-0 items-center justify-center text-ink-secondary">{Icon && <Icon size={16} strokeWidth={1.75} aria-hidden="true" />}</span>
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="flex min-w-0 items-center justify-start gap-1.5 text-[13px] leading-5 text-ink">
-          <span data-settings-hit-title="" className="min-w-0 flex-[0_1_auto] overflow-hidden text-ellipsis whitespace-nowrap">{highlight(label, query)}</span>
-          {hit.advanced && !ctx.advanced && <span className="flex flex-none"><SettingsTag>{t("settings.simple.advanced")}</SettingsTag></span>}
-        </span>
-        {location && <span data-settings-hit-location="" title={location} className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] leading-4 text-ink-secondary">{location}</span>}
+        <span data-settings-hit-title="" className="line-clamp-2 text-[13px] leading-5 text-ink [overflow-wrap:anywhere]">{highlight(label, query)}</span>
+        {(where || tag) && (
+          <span data-settings-hit-location="" className="flex min-w-0 items-center gap-1.5 text-[12px] leading-4 text-ink-secondary">
+            {where && (
+              <span className="flex min-w-0 flex-[0_1_auto] overflow-hidden whitespace-nowrap">
+                {/* The owner gives way a hundred times faster than the page, so the page name stays whole. */}
+                <span className="min-w-[1.5em] shrink-[100] overflow-hidden text-ellipsis">{where.owner}</span>
+                {where.page && <span className="min-w-0 shrink overflow-hidden text-ellipsis">{` › ${where.page}`}</span>}
+              </span>
+            )}
+            {tag && <span className="flex flex-none"><SettingsTag>{t("settings.simple.advanced")}</SettingsTag></span>}
+          </span>
+        )}
       </span>
       {entry.jump && <ArrowUpRight size={12} aria-hidden="true" className="mt-1 shrink-0 text-ink-tertiary" />}
     </button>
@@ -318,6 +330,18 @@ const PAGE_KEY: Partial<Record<SettingsPageId, Parameters<typeof t>[0]>> = {
   installations: "settings.section.workspaces", plan: "settings.page.plan", general: "settings.section.general", appearance: "settings.section.appearance",
 };
 
+/** A result's second line: its owner and its page ("This computer › Phone & devices"), or what a jump opens. */
+export function searchWhere(hit: SearchHit, place: SettingsPlace, ctx: SettingsContext): { owner: string; page?: string } | null {
+  const entry = hit.entry;
+  if (entry.jump) return { owner: searchLocation(hit, place, ctx) };
+  if (entry.id.startsWith("page:") && (entry.page === "overview" || entry.page === "account" || entry.page === "app")) return null;
+  const owner = PAGE_OWNER[entry.page];
+  const ownerName = hit.elsewhere ? t("rail.thisComputer") : owner === "place" ? place.name : ownerLabel(owner, place, ctx.desktop);
+  const pageKey = PAGE_KEY[entry.page];
+  return { owner: ownerName, ...(pageKey && !entry.id.startsWith("page:") ? { page: t(pageKey) } : {}) };
+}
+
+/** The full path, owner first ("This computer › Phone & devices › How your phone reaches this computer"): the tooltip. */
 export function searchLocation(hit: SearchHit, place: SettingsPlace, ctx: SettingsContext): string {
   const entry = hit.entry;
   if (entry.jump === "apps") return t("settings.search.opensApps");
@@ -333,13 +357,6 @@ export function searchLocation(hit: SearchHit, place: SettingsPlace, ctx: Settin
   const label = hitLabel(hit, place, ctx.desktop);
   if (entry.sectionKey && t(entry.sectionKey) !== label) parts.push(t(entry.sectionKey));
   if (entry.id.startsWith("page:") && (entry.page === "overview" || entry.page === "account" || entry.page === "app")) return "";
-  return shortPath(parts);
+  return parts.join(" › ");
 }
 
-/** One line: when a path is long, its middle parts go first ("This computer › … › Same Wi-Fi"), so the owner and the
- * row's own section survive. */
-export function shortPath(parts: string[], max = 44): string {
-  const full = parts.join(" › ");
-  if (full.length <= max || parts.length < 3) return full;
-  return [parts[0], "…", parts[parts.length - 1]].join(" › ");
-}

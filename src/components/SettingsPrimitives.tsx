@@ -83,6 +83,15 @@ export function Card({
   );
 }
 
+/** The 32 px leading slot. It gives back 6 px above and below, so it sits inside the 12 + 20 + 12 text block: a title-only
+ * row with a slot (or an empty one) is 44 like every other title-only row, and the text still starts at x + 60. */
+export const SLOT = "-my-1.5 flex size-8 shrink-0 items-center justify-center self-center @max-[480px]/rows:self-start";
+
+/** A control is at most 28 tall and gives back 4 px above and below, so the text block sets the row's height, never the
+ * control: a select, a button and a switch row are all 44 (§6.5). Dropped under the text at narrow widths, the row's
+ * 12 px gap less those 4 leaves the 8 the spec asks for. */
+const CONTROL_FIT = "-my-1";
+
 export function SettingRow({
   title,
   subtitle,
@@ -115,10 +124,10 @@ export function SettingRow({
       <div role="group" aria-labelledby={titleId} aria-disabled={quiet || undefined} data-setting-row="" data-settings-inert={quiet ? "" : undefined}
         title={quiet && typeof inertText === "string" ? inertText : undefined}
         className={cn("flex min-h-11 items-center gap-3 px-4 py-3", className)}>
-        {leading !== undefined && <span data-settings-slot="" className="flex size-8 shrink-0 items-center justify-center self-center @max-[480px]/rows:-mt-1.5 @max-[480px]/rows:self-start">{leading}</span>}
+        {leading !== undefined && <span data-settings-slot="" className={SLOT}>{leading}</span>}
         {/* The text column holds the title, its description, and the status or reason line; the control sits centred
             on the whole block, so an inert row's 40% control lines up with the row, not its first line. */}
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-6 gap-y-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-6 gap-y-3">
           <div className="flex min-w-[min(100%,7rem)] flex-1 flex-col">
             <div id={titleId} className={cn("flex min-w-0 items-center gap-1.5 text-[14px] leading-5", quiet ? "text-ink-secondary" : "text-ink")}>{title}{tag && <SettingsTag>{tag}</SettingsTag>}</div>
             {subtitle && <div className="mt-0.5 text-[13px] leading-[18px] text-ink-secondary">{subtitle}</div>}
@@ -126,7 +135,7 @@ export function SettingRow({
             {quiet && <div data-settings-reason="" className="mt-1 text-[12px] leading-4 text-ink-secondary">{inert}</div>}
           </div>
           {children != null && children !== false && (
-            <div data-settings-control="" className={cn("ml-auto flex shrink-0 items-center gap-2 self-center", quiet && "pointer-events-none opacity-40")} {...(quiet ? { inert: true } : {})}>{children}</div>
+            <div data-settings-control="" className={cn("ml-auto flex shrink-0 items-center gap-2 self-center", CONTROL_FIT, quiet && "pointer-events-none opacity-40")} {...(quiet ? { inert: true } : {})}>{children}</div>
           )}
         </div>
       </div>
@@ -166,8 +175,9 @@ export function SettingsGroup({ label, block, actions, footnote, description, ch
       className="flex scroll-mt-4 flex-col gap-2 has-[>[data-settings-rows]:empty]:hidden"
     >
       {(label || actions) && (
-        <div className="flex flex-col gap-0.5 px-4">
-          {/* The title and its one action share a 28 px line; the description runs under them, the full width. */}
+        <div className="flex flex-col gap-1 px-4">
+          {/* The title and its one action share a 28 px line; the description runs 4 under them, the full width, and the
+              card follows 8 below (§6.4's section description: the one place a section says more than its title). */}
           <div className="flex min-h-7 items-center justify-between gap-3">
             {label && <h3 id={labelId} className="min-w-0 text-[13px] font-medium leading-[18px] text-ink">{label}</h3>}
             {actions && <div data-settings-actions="" className="ml-auto flex shrink-0 items-center gap-2">{actions}</div>}
@@ -213,7 +223,7 @@ export function SettingsLinkRow({ title, subtitle, value, badge, leading, extern
   return (
     <button type="button" onClick={onClick} {...data}
       className="group flex min-h-11 w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none">
-      {leading !== undefined && <span data-settings-slot="" className="flex size-8 shrink-0 items-center justify-center">{leading}</span>}
+      {leading !== undefined && <span data-settings-slot="" className={SLOT}>{leading}</span>}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="text-[14px] leading-5 text-ink">{title}</span>
         {subtitle && <span className="text-[13px] leading-[18px] text-pretty text-ink-secondary">{subtitle}</span>}
@@ -244,7 +254,7 @@ export function SettingsFoldRow({ id, title, subtitle, value, leading, open, onT
     <div data-settings-disclosure={id} data-settings-fold="">
       <button type="button" aria-expanded={open} onClick={onToggle}
         className="group flex min-h-11 w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none">
-        {leading !== undefined && <span data-settings-slot="" className="flex size-8 shrink-0 items-center justify-center">{leading}</span>}
+        {leading !== undefined && <span data-settings-slot="" className={SLOT}>{leading}</span>}
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-[14px] leading-5 text-ink">{title}</span>
           {subtitle && <span className="text-[13px] leading-[18px] text-pretty text-ink-secondary">{subtitle}</span>}
@@ -308,8 +318,11 @@ export function SettingsField({ label, children, hint }: { label: ReactNode; chi
     </div>
   );
 }
-export const SETTINGS_INPUT = "h-8 w-full rounded-lg border-[0.5px] border-(--settings-edge) bg-app px-2.5 text-[13px] leading-5 text-ink outline-none placeholder:text-ink-tertiary focus:border-ink/25 focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-focus disabled:opacity-40";
-export const SETTINGS_INLINE_INPUT = "h-7 w-20 rounded-lg border-[0.5px] border-(--settings-edge) bg-app px-2 text-right text-[13px] leading-5 tabular-nums text-ink outline-none focus:border-ink/25 focus-visible:outline-2 focus-visible:outline-focus disabled:opacity-40";
+/** A field's 0.5 px edge is an inset hairline, like a card's: a 0.5 px border is rounded up to a whole pixel on some
+ * screens, which drew fields heavier than the cards and dividers around them. Keyboard focus is the 2 px ring. */
+export const FIELD_EDGE = "border-0 shadow-[inset_0_0_0_0.5px_var(--settings-edge,var(--color-hairline))]";
+export const SETTINGS_INPUT = `h-8 w-full rounded-lg ${FIELD_EDGE} bg-app px-2 text-[13px] leading-5 text-ink outline-none placeholder:text-ink-tertiary focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-focus disabled:opacity-40`;
+export const SETTINGS_INLINE_INPUT = `h-7 w-20 rounded-lg ${FIELD_EDGE} bg-app px-2 text-right text-[13px] leading-5 tabular-nums text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-focus disabled:opacity-40`;
 
 /** The one segmented control: a 28 px pill track; the chosen part is a card-coloured pill with an edge. */
 export function Segmented<T extends string>({ value, options, onChange, label }: {
@@ -343,10 +356,12 @@ export function LearnMore({ onClick, href, label }: { onClick?: () => void; href
 
 export function CommandLine({ command, copyLabel = "Copy command" }: { command: string; copyLabel?: string }) {
   const { state, copy } = useCopyFeedback(command);
+  // In Settings the command is a mono 12/16 line on the text edge (no box of its own, no extra inset), with its copy button.
+  const settings = useContext(SettingsLook);
 
   return (
-    <div className="flex items-center gap-2 rounded-lg bg-inset px-3 py-2">
-      <code className="min-w-0 flex-1 select-all overflow-x-auto whitespace-nowrap font-mono text-[12px] text-ink">
+    <div className={settings ? "flex items-center gap-2" : "flex items-center gap-2 rounded-lg bg-inset px-3 py-2"}>
+      <code className={cn("min-w-0 flex-1 select-all overflow-x-auto whitespace-nowrap font-mono text-[12px] text-ink", settings && "leading-4")}>
         {command}
       </code>
       <button

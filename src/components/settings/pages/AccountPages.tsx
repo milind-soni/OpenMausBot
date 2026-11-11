@@ -1,9 +1,10 @@
+import { ArrowUpRight } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { CLOUD_PLAN_URL } from "@/lib/app-links";
 import { productName } from "@/lib/brand";
 import { api, useStore } from "@/state/store";
 import { useState } from "react";
-import { InertReason, InertRow, useSwitchToComputer } from "../inert";
+import { InertRow, useSwitchToComputer } from "../inert";
 import { PlaceBadge, YouAvatar } from "../SettingsNav";
 import { SignOutConfirm } from "../SignOutConfirm";
 import { CloudAccountSettings } from "../../CloudAccountSettings";
@@ -35,20 +36,18 @@ export function AccountPage() {
       <SettingsRows>
         {elsewhere && computer.open
           ? <SettingsLinkRow title={t("settings.account.nameRow")} badge={computerBadge} value={t("settings.account.onPlace", { place: computer.name })} external onClick={computer.open} data={{ "data-account-name-row": "" }} />
-          : <SettingsLinkRow title={t("settings.account.nameRow")} value={profileLabel(profile)} onClick={() => go("bots", "about-you")} data={{ "data-account-name-row": "" }} />}
+          : <SettingsLinkRow title={t("settings.account.nameRow")} badge={<PlaceBadge place={place} size={14} />} value={profileLabel(profile)} onClick={() => go("bots", "about-you")} data={{ "data-account-name-row": "" }} />}
       </SettingsRows>
     </SettingsGroup>
-    {bridge && <CloudAccountSettings part="account" advanced={ctx.advanced} linkRequest={state.appSettingsCloudLink}
+    {bridge && <CloudAccountSettings part="account" advanced={ctx.advanced} linkRequest={state.appSettingsCloudLink} avatar={<YouAvatar size={32} />}
       onSignIn={() => dispatch({ type: "openCloudAdd", source: "app_settings", signIn: true })} />}
     {elsewhere && (
       <SettingsGroup label={t("settings.account.mausbot", { app: productName() })} block="mausbot-account">
         <SettingsRows icons>
-          {/* Who is signed in, with Refresh: a control This computer's page holds, so it is inert here with the reason. */}
-          <SettingRow title={email ?? t("settings.account.signedIn")} leading={<YouAvatar size={24} />}
-            subtitle={summary.signedIn === false ? t("settings.account.notSignedIn") : t("settings.account.signedIn")}
-            inert={ctx.advanced ? <InertReason /> : undefined} inertText={t("settings.inert.fromHere", { place: computer.name })}>
-            {ctx.advanced ? <button type="button" className="settings-quiet" tabIndex={-1}>{t("organization.refresh")}</button> : null}
-          </SettingRow>
+          {/* The same card as on This computer: who is signed in (live, it is the person's own), then the way to sign out
+              or switch accounts, which happens on This computer, in Sign out's place. Refresh is This computer's only. */}
+          <SettingRow title={email ?? t("settings.account.signedIn")} leading={<YouAvatar size={32} />}
+            subtitle={summary.signedIn === false ? t("settings.account.notSignedIn") : t("settings.account.signedIn")}>{null}</SettingRow>
           {sheet && <SettingsLinkRow title={t("accounts.manage")} leading={<span aria-hidden="true" />} onClick={() => void sheet.open().catch(() => {})} data={{ "data-account-manage": "" }} />}
           {computer.open && <SettingsLinkRow title={t("settings.account.fromHere", { place: computer.name })} leading={<span aria-hidden="true" />} external onClick={computer.open} data={{ "data-account-elsewhere": "" }} />}
         </SettingsRows>
@@ -69,9 +68,9 @@ export function AccountPage() {
     )}
     {ctx.organization ? (
       <SettingsGroup label={t("settings.section.organization")} block="organization">
-        <OrganizationSettings />
+        <OrganizationSettings simple={!ctx.advanced} />
       </SettingsGroup>
-    ) : elsewhere && (
+    ) : elsewhere && ctx.advanced && (
       // The organization sign-in is This computer's: it stays in place on a Cloud's page, inert, with the way there.
       <SettingsGroup label={t("settings.section.organization")} block="organization">
         <SettingsRows><InertRow title={t("settings.account.orgSignIn")} control={<button type="button" className="ui-button" tabIndex={-1}>{t("settings.account.signIn")}</button>} /></SettingsRows>
@@ -82,20 +81,19 @@ export function AccountPage() {
         <SettingsRows><UpdatesConsentRow /></SettingsRows>
       </SettingsGroup>
     )}
-    {bridge && <CloudAccountSettings part="sign-out" advanced={ctx.advanced} />}
   </>;
 }
 
 export function PlanPage() {
-  const { ctx, place, go } = useSettingsShell();
+  const { ctx, place } = useSettingsShell();
   const { state, dispatch } = useStore();
   const { usage, upgrade, dialog } = useCloudUsageSettings();
   if (!ctx.desktop) {
     return (
       <SettingsGroup block="plan">
         <SettingsRows>
-          <SettingRow title={t("settings.plan.browserTitle")} subtitle={t("settings.plan.browserLine")}>
-            <a className="ui-button ui-button-primary" href={CLOUD_PLAN_URL} target="_blank" rel="noreferrer">{t("settings.plan.openBilling")}</a>
+          <SettingRow title={t("settings.plan.browserTitle")} subtitle={t("settings.plan.browserLine", { app: productName() })}>
+            <a className="ui-button ui-button-primary inline-flex items-center gap-1" href={CLOUD_PLAN_URL} target="_blank" rel="noreferrer">{t("settings.plan.openBilling")}<ArrowUpRight size={12} aria-hidden="true" /></a>
           </SettingRow>
         </SettingsRows>
       </SettingsGroup>
@@ -104,7 +102,8 @@ export function PlanPage() {
   return <>
     <CloudAccountSettings part="plan" advanced={ctx.advanced} cloudHome={ctx.cloud} teamHome={state.config?.team} linkRequest={state.appSettingsCloudLink}
       usage={usage} upgrade={upgrade}
-      extra={!ctx.advanced && !ctx.client && !(ctx.team && !ctx.admin) ? <SpentRow place={place.name} onOpen={() => go("usage")} /> : undefined}
+      // A Cloud's own cost stays off its paid plan's card (§1.3: it must never read as a second bill).
+      extra={!ctx.advanced && !ctx.client && !(ctx.team && !ctx.admin) && (place.kind === "computer" || place.kind === "server") ? <SpentRow place={place.name} /> : undefined}
       onAddCloud={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}
       onSignIn={() => dispatch({ type: "openCloudAdd", source: "app_settings", signIn: true })} />
     {dialog}

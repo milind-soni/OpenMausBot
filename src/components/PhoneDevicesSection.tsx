@@ -237,7 +237,8 @@ function RouteCard({ route, chosen, disabled, onChoose, needs, action, hint }: {
           className="mt-0.5 size-4 shrink-0 accent-[var(--color-ink)] disabled:opacity-40" />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className={cn("text-[14px] leading-5", disabled ? "text-ink-secondary" : "text-ink")}>{t(ROUTE_TEXT[route].name, { app: productName() })}</span>
-          <span className="text-[13px] leading-[18px] text-ink-secondary">{keepWhole(t(ROUTE_LINE[route]))}</span>
+          {/* One measure for the card's text: the line wraps like the hint under it (no early "pretty" wrap). */}
+          <span className="text-[13px] leading-[18px] text-ink-secondary [text-wrap-style:auto]">{keepWhole(t(ROUTE_LINE[route]))}</span>
           {needs && <span className="text-[12px] leading-4 text-ink-secondary">{needs}</span>}
           {hint && <span className="mt-1 text-[12px] leading-4 text-ink-secondary">{hint}</span>}
         </span>
@@ -318,7 +319,7 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false, pla
                 <RouteCard route="relay" chosen={picked === "relay"} disabled={!signedIn} onChoose={() => setPicked("relay")}
                   needs={signedIn ? undefined : t("phone.pair.needsSignIn", { app: productName() })}
                   action={!signedIn && (
-                    <button type="button" className="cursor-pointer text-[12px] font-medium leading-4 text-accent-text hover:underline focus-visible:underline" data-pair-sign-in=""
+                    <button type="button" className="ui-button ui-button-md mt-1 rounded-full" data-pair-sign-in=""
                       onClick={() => { setStep("sign-in"); c.start(); }}>{t("phone.pair.signIn")}</button>
                   )} />
               )}
@@ -386,7 +387,8 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
   const revealed = useRef(0);
   const loaded = Boolean(state);
   const [pairing, setPairing] = useState<false | "device" | "https">(false);
-  const [showRoutes, setShowRoutes] = useState(!simple);
+  // Both modes start the same way: nothing paired and no way on reads as one closed row; Advanced only adds depth inside.
+  const [showRoutes, setShowRoutes] = useState(false);
   const [moreOpenAsked, setMoreOpen] = useState<boolean | null>(null);
   useEffect(() => {
     if (!focusRequest) revealed.current = 0;
@@ -413,7 +415,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
     return (
       <div className="flex flex-col gap-6" ref={pairingFlow} tabIndex={-1} data-phone-pairing="computer">
         {top}
-        <SettingsGroup label={t("phone.pair.section")} block="pair">
+        <SettingsGroup block="pair">
           <SettingsSkeletonCard place={placeName} />
         </SettingsGroup>
       </div>
@@ -429,12 +431,12 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
   const anyRoute = companionRoutesOn(state);
   const reachOpen = showRoutes || pairedCount > 0 || anyRoute;
   const moreWays = !simple || tailscaleOn || httpsOn;
-  const moreOpen = moreOpenAsked ?? (!simple || tailscaleOn || httpsOn);
+  const moreOpen = moreOpenAsked ?? (tailscaleOn || httpsOn);
   const pairAgain = c.busy || remoteBlocked ? undefined : () => setPairing("device");
   const pairButton = (
     <button type="button" aria-disabled={c.busy || Boolean(remoteBlocked) || undefined} disabled={c.busy} title={managedBy ?? undefined}
       onClick={() => { if (!remoteBlocked) setPairing("device"); }}
-      className={cn("ui-button ui-button-primary", remoteBlocked && "opacity-40")} data-pair-device="" data-phone-pairing-action="">
+      className={cn("ui-button ui-button-primary", remoteBlocked && "opacity-40")} data-pair-device="" data-phone-pairing-action="" data-settings-drop="">
       {t("phone.pair.button")}
     </button>
   );
@@ -446,7 +448,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
       {pairing && <PairDeviceDialog c={c} state={state} placeName={placeName} onClose={() => setPairing(false)} secureAddress={pairing === "https"} />}
 
       {pairedCount === 0 && !state.pairing ? (
-        <SettingsGroup label={t("phone.pair.section")} block="pair">
+        <SettingsGroup block="pair">
           <SettingsRows>
             <PairRow reason={remoteBlocked}>{pairButton}</PairRow>
           </SettingsRows>
@@ -493,7 +495,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
                 <SettingRow title={t("devices.route.https")} subtitle={t("devices.route.httpsDetail", { app: productName() })}
                   message={(httpsOn && hosted) || c.account?.status === "ready" || accountActionError ? <>
                     {httpsOn && hosted ? t("devices.route.httpsOn", { address: endpointHost(hosted.url) }) : null}
-                    {c.account?.status === "ready" && <span className="block">{t("remote.account.signedIn", { email: c.account.email ?? t("remote.account.yourAccount") })}</span>}
+                    {c.account?.status === "ready" && <span className="block">{t("devices.route.httpsAccount", { app: productName() })}</span>}
                     {accountActionError && <span className="block text-danger">{accountActionError}</span>}
                   </> : undefined}>
                   <span data-route-row="https" className="contents">
@@ -516,13 +518,11 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
   );
 }
 
-/** Pair: one row in a plain card. Where to get the phone app is said in plain words, with no link: the desktop app never
- * opens a store or a download. */
-export function PairRow({ reason, place, children }: { reason?: string | null; place?: string; children: React.ReactNode }) {
-  const line = t("phone.code.installAndScan", { app: productName() });
+/** Your phone: one row in an untitled plain card. Where to get the phone app is said in plain words, with no link: the
+ * desktop app never opens a store or a download. The code itself, and "scan this code", appear only in the dialog. */
+export function PairRow({ reason, children }: { reason?: string | null; children: React.ReactNode }) {
   return (
-    <SettingRow title={t("phone.pair.step")} subtitle={place ? `${line} ${t("phone.pair.alwaysOn", { place })}` : line}
-      message={reason ?? undefined}>
+    <SettingRow title={t("phone.pair.rowTitle")} subtitle={t("phone.pair.rowLine", { app: productName() })} message={reason ?? undefined}>
       {children}
     </SettingRow>
   );

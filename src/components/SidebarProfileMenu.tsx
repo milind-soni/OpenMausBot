@@ -488,12 +488,12 @@ export function profileMenuItems({
   const present = (...items: Array<SidebarMenuItem | null | false>) => items.filter((item): item is SidebarMenuItem => Boolean(item));
   const out: SidebarMenuItem[] = [...accounts.filter((item) => item.key !== "accounts-sign-out"),
     ...(signOut ? [{ key: "sign-out", label: t("accounts.signOut"), icon: <LogOut size={16} />, onSelect: signOut }]
-      : signOutElsewhere ? [{ key: "sign-out", label: t("sidebar.menu.signOutFrom", { place: signOutElsewhere.place }), icon: <LogOut size={16} />,
+      : signOutElsewhere ? [{ key: "sign-out", label: t("settings.account.fromHere", { place: signOutElsewhere.place }), icon: <LogOut size={16} />,
         trailing: <ArrowUpRight size={12} aria-hidden="true" className="text-ink-tertiary" />, onSelect: signOutElsewhere.open }]
       : accounts.filter((item) => item.key === "accounts-sign-out"))];
-  // Plan & billing follows Settings in the same group; Simple's own places sit between them.
+  // Plan & billing follows Settings (Simple's own places sit between them); both modes end with Help, then Sign out.
   const groups = simple
-    ? [move, present(raised), [account], present(phone, settings), simple.tools, present(plan, switchPlace, support), out]
+    ? [move, present(raised), [account], present(phone, settings), simple.tools, present(plan, switchPlace), [support], out]
     : [move, present(raised), [account], present(phone, settings, plan), present(switchPlace, support), out];
   return groups.filter((group) => group.length > 0)
     .flatMap((group, at) => group.map((item, index) => (at > 0 && index === 0 ? { ...item, separatorBefore: true } : item)));
@@ -535,8 +535,8 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   const openComputer = window.ogb?.rail?.openComputer;
   // A Cloud's page in the desktop window can't update the app: the row says where that happens, and goes there.
   const elsewhereUpdate: UpdateEntry | null = !desktopUpdate && !here && Boolean(window.ogb) && state.config?.cloudHome === true && openComputer ? {
-    phase: "idle", pending: false, label: t("settings.updates.check"),
-    item: { key: "update", label: t("settings.updates.check"), icon: <RefreshCw size={16} />, trailing: <ArrowUpRight size={12} aria-hidden="true" className="text-ink-tertiary" />, onSelect: () => void openComputer("app").catch(() => {}) },
+    phase: "idle", pending: false, label: t("settings.updates.checkFrom", { place: t("rail.thisComputer") }),
+    item: { key: "update", label: t("settings.updates.checkFrom", { place: t("rail.thisComputer") }), icon: <RefreshCw size={16} />, trailing: <ArrowUpRight size={12} aria-hidden="true" className="text-ink-tertiary" />, onSelect: () => void openComputer("app").catch(() => {}) },
   } : null;
   const update = desktopUpdate ?? elsewhereUpdate ?? serverUpdate;
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -662,7 +662,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
             )}
           >
             <span className="relative flex shrink-0">
-              <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={28} className="bg-ink/[0.08]" />
+              <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={28} />
               {moveDot && <span aria-hidden data-account-dot={moveDot} className={cn("absolute -right-0.5 -top-0.5 size-2 rounded-full ring-2 ring-app", DOT_COLOR[moveDot])} />}
             </span>
             <span className="flex min-w-0 flex-1 flex-col">

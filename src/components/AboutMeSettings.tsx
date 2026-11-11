@@ -1,3 +1,4 @@
+import { FIELD_EDGE } from "./SettingsPrimitives";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
@@ -35,7 +36,7 @@ export function AboutMeSettings() {
         onChange={(event) => controller.edit(event.target.value)}
         onBlur={() => void flush()}
         placeholder={t("settings.profile.aboutMeHelp")}
-        className="min-h-[96px] w-full resize-none rounded-lg border-[0.5px] border-(--settings-edge) bg-app px-2.5 py-1.5 text-[13px] leading-5 text-ink placeholder:text-ink-tertiary focus:border-ink/25 focus:outline-none"
+        className={`min-h-[96px] w-full resize-none rounded-lg ${FIELD_EDGE} bg-app px-2 py-1.5 text-[13px] leading-5 text-ink placeholder:text-ink-tertiary focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-focus`}
       />
       <LearnedFacts onChanged={(aboutMe) => { controller.confirm(aboutMe); dispatch({ type: "profileSaved", profile: { aboutMe } }); }} />
       <div className="text-[12px] leading-4 empty:hidden" role="status">

@@ -6,9 +6,8 @@ import { meterAmounts, meterLabel, meterPercent, resetLine } from "@/lib/usage-m
 import { CloudCancelSheet, endedLine, type CloudRenewalActions } from "../CloudCancelPlan";
 import { MeterBar, UpgradeButton, type UpgradeUi } from "../CloudUsageMeter";
 import { ProCompareRow } from "../ProIntroduction";
-import { SettingRow, SettingsGroup, SettingsLinkRow, SettingsRows } from "../SettingsPrimitives";
+import { SettingRow, SettingsGroup, SettingsRows } from "../SettingsPrimitives";
 import { fetchTraces, formatCost, usagePeriodRange } from "@/lib/usage-trace";
-import { setAdvancedMode } from "@/lib/interface-mode";
 
 const day = (value: number) => new Intl.DateTimeFormat(activeLocale(), { month: "short", day: "numeric" }).format(new Date(value));
 
@@ -110,16 +109,25 @@ export function planLayout({ title, subtitle, message, primary, usage, upgrade, 
 }
 
 /** Simple's line for what this place has cost this week; it opens Spending, turning Advanced mode on. */
-export function SpentRow({ place, onOpen }: { place: string; onOpen: () => void }) {
+/** Simple's "{place} spent": what this place has cost this week, as a plain row. Spending's detail is Advanced, so the
+ * row doesn't lead there (a click would turn the mode on); search still finds Spending, tagged Advanced. */
+export function SpentRow({ place }: { place: string }) {
   const [cost, setCost] = useState<number | null | undefined>(undefined);
   useEffect(() => {
     let alive = true;
     void fetchTraces(usagePeriodRange("week")).then((list) => { if (alive) setCost(list.totals.costUsd); }).catch(() => { if (alive) setCost(undefined); });
     return () => { alive = false; };
   }, []);
-  return <SettingsLinkRow title={t("settings.plan.spent", { place })} data={{ "data-plan-spent": "" }}
-    value={cost === undefined ? undefined : t("settings.plan.spentWeek", { cost: formatCost(cost) })}
-    onClick={() => { setAdvancedMode(true); onOpen(); }} />;
+  return <div data-plan-spent="" className="contents">
+    <SettingRow title={t("settings.plan.spent", { place })}>
+      {cost === undefined ? null : <span className="text-[13px] leading-5 text-ink-secondary">{spentWeekText(cost)}</span>}
+    </SettingRow>
+  </div>;
+}
+
+/** "Estimated $4.20 this week", or "Nothing yet this week" while nothing is known or spent: never a dash for a number. */
+export function spentWeekText(cost: number | null): string {
+  return cost == null || !Number.isFinite(cost) || cost <= 0 ? t("settings.plan.spentNothing") : t("settings.plan.spentWeek", { cost: formatCost(cost) });
 }
 
 export { endedLine };

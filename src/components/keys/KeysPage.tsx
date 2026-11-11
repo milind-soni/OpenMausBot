@@ -170,12 +170,14 @@ export function KeysPage({ bare = false, exclude = [] }: { bare?: boolean; exclu
   if (bare) {
     return (
       <div ref={pageRef} data-keys-page="">
-        <SettingsRows>
+        {/* The key rows inside lead with their provider's mark, so every row of this card keeps the 32 px slot column
+            (empty on the fold rows), and the card has one text edge and one divider inset (§6.5). */}
+        <SettingsRows icons>
           {sections.map(({ id, rows: sectionRows }) => {
             const section = KEY_SECTIONS.find((candidate) => candidate.id === id)!;
             const count = sectionRows.filter((entry) => connected(entry, state.config)).length;
             return (
-              <SettingsFoldRow key={id} id={`keys-${id}`} title={t(section.titleKey)} subtitle={t(section.purposeKey)}
+              <SettingsFoldRow key={id} id={`keys-${id}`} title={t(section.titleKey)} subtitle={t(section.purposeKey)} leading={<span aria-hidden="true" />}
                 value={count > 0 ? t("keys.section.connected", { count }) : undefined} open={open.has(id)} onToggle={() => toggle(id)}>
                 <div data-keys-section={id} className="flex flex-col gap-0.5 py-1.5">
                   {sectionRows.map((entry) => <KeyCatalogRow key={entry.id} entry={entry} visible={open.has(id)} />)}

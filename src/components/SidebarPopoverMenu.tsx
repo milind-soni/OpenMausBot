@@ -206,7 +206,7 @@ export function SidebarPopoverMenu({
   const [open, setOpen] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [submenu, setSubmenu] = useState<string | null>(null);
-  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number; fit?: number } | null>(null);
   const [subPosition, setSubPosition] = useState<{ left: number; top: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -280,7 +280,19 @@ export function SidebarPopoverMenu({
       const rail = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--rail-beside")) || 0;
       if (anchored) {
         const at = anchoredMenuPosition(trigger.getBoundingClientRect(), { width: menu.offsetWidth, height: menu.offsetHeight }, viewport, isRtl(trigger), align);
-        setPosition({ ...at, left: Math.max(at.left, rail + EDGE_MARGIN) });
+        let left = Math.max(at.left, rail + EDGE_MARGIN);
+        let fit: number | undefined;
+        // The account menu stays inside the sidebar it opens from: its right edge 8 in from the sidebar's edge, and a
+        // narrow sidebar takes a little off the menu's width rather than let it hang over the chat.
+        const side = width && !isRtl(trigger) ? trigger.closest("[data-sidebar-root]")?.getBoundingClientRect() : undefined;
+        if (width && side && side.width >= 240 + EDGE_MARGIN * 2) {
+          const edge = side.right - EDGE_MARGIN;
+          if (left + width > edge) {
+            left = Math.max(rail + EDGE_MARGIN, edge - width);
+            if (left + width > edge) fit = Math.max(240, edge - left);
+          }
+        }
+        setPosition({ ...at, left, fit });
       }
       const sub = subRef.current, row = subRowRef.current;
       if (sub && row) {
@@ -294,7 +306,7 @@ export function SidebarPopoverMenu({
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
-  }, [anchored, align, motion.shown, submenu, items.length]);
+  }, [anchored, align, motion.shown, submenu, items.length, width]);
 
   // Focus waits until the anchored sheet is placed: a hidden sheet cannot take focus.
   useEffect(() => {
@@ -374,7 +386,7 @@ export function SidebarPopoverMenu({
       onKeyDown={(event) => onMenuKey(event, false)}
       onPointerMove={(event) => intent.move({ x: event.clientX, y: event.clientY }, Boolean(submenu && subRowRef.current?.contains(event.target as Node)))}
       onPointerLeave={() => intent.leaveMenu()}
-      style={anchored ? { position: "fixed", left: position?.left ?? 0, top: position?.top ?? 0, minWidth: width ? undefined : MENU_MIN_WIDTH, width: width ? `min(${width}px, calc(100vw - var(--rail-beside, 0px) - ${EDGE_MARGIN * 2}px))` : "max-content", maxWidth: width ? undefined : `min(${MENU_MAX_WIDTH}px, calc(100vw - ${EDGE_MARGIN * 2}px))`, maxHeight: `calc(100vh - ${EDGE_MARGIN * 2}px)`, visibility: position ? undefined : "hidden" } : undefined}
+      style={anchored ? { position: "fixed", left: position?.left ?? 0, top: position?.top ?? 0, minWidth: width ? undefined : MENU_MIN_WIDTH, width: width ? `min(${position?.fit ?? width}px, calc(100vw - var(--rail-beside, 0px) - ${EDGE_MARGIN * 2}px))` : "max-content", maxWidth: width ? undefined : `min(${MENU_MAX_WIDTH}px, calc(100vw - ${EDGE_MARGIN * 2}px))`, maxHeight: `calc(100vh - ${EDGE_MARGIN * 2}px)`, visibility: position ? undefined : "hidden" } : undefined}
       className={cn(
         sheetClass,
         anchored ? "z-[60] overflow-y-auto" : "absolute z-40",

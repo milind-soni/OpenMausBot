@@ -97,7 +97,7 @@ export function NewBrowserSettings() {
 
   return (
     <div data-testid="new-browser-settings" className="contents">
-      <SettingRow title={t("settings.experimental.newBrowser")} subtitle={<MoreText short={t("settings.experimental.newBrowserShort")} long={t("settings.experimental.newBrowserDetail")} />}
+      <SettingRow title={t("settings.experimental.newBrowser")} tag={t("settings.early.tag")} subtitle={<MoreText short={t("settings.experimental.newBrowserShort")} long={t("settings.experimental.newBrowserDetail")} />}
         message={error ? <span role="alert" className="text-danger">{error}</span> : undefined}>
         <Switch
           checked={on}
