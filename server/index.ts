@@ -13,8 +13,7 @@ import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts";
 import { basename, join } from "node:path";
 import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntimeGrant } from "./external-runtime.ts";
 import { z } from "zod";
-import type { FeatureStatus } from "../shared/features.ts";
-import { acpPlanLinesEnabled } from "./drivers/acp/session-reports.ts";
+import { featureStatus } from "./feature-status.ts";
 import { selectReplay, replayToolCalls, DEFAULT_REBUILD_BYTES, MAX_SUMMARY_BYTES } from "./context-rebuild.ts";
 import { draftSummary, foldPoint } from "./compaction-summary.ts";
 import { compactBudget, compactionReading, contextWindowFor, shouldCompact } from "./context-budget.ts";
@@ -165,7 +164,6 @@ import {
   threadEventLogMaxBytes,
   threadEventLogRetentionDays,
   saveConfig,
-  showToolCallsEnabled,
   claudeUserMcpEnabled,
   skillAuthoringEnabled,
   skillReviewEnabled,
@@ -296,7 +294,7 @@ import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "./peer-delivery.t
 import { createRoomAccess, PRIVATE_CHAT_ROOM_WRITE } from "./host/room-access.ts";
 import { outsideRoomNote, sentRow, teammateResultRow, WAIT_CARD_CLOSED_REASON } from "./host/handoff-sent.ts";
 import { createWebhookRoomPost } from "./host/webhook-room-deps.ts";
-import { createRoomJobs, parallelRoomJobsEnabled, type RoomRoundLine } from "./host/room-jobs.ts";
+import { createRoomJobs, type RoomRoundLine } from "./host/room-jobs.ts";
 import { createDelegatedLevel } from "./host/delegated-level.ts";
 import { createLiveApprovalMode } from "./host/live-approval.ts";
 import { CONSENT_RULE, continuedOrigin, escapeNotes, labelledLine, OUTSIDE, peerLineText, peerProvenanceNote, quoteInNote, reportNote, requestWorkOrigin, type WorkOrigin } from "./peer-provenance.ts"; import { lineNote, PROVENANCE_PROMPT } from "./provenance-label.ts"; import { openRoomThread } from "./host/room-new-thread.ts"; import { createLineLabels } from "./host/line-labels.ts";
@@ -484,7 +482,7 @@ import { WebhookManager } from "./webhooks.ts";
 import { tieAutomationsToBots } from "./bot-automations.ts"; import { WaitManager } from "./waits.ts"; import { cancelWaitFromCard, createWaitHost, waitRunChat } from "./wait-host.ts"; import { createWaitRoutes, findWaitPeer, hostWaitRefusal, waitSourceRefusal, type WaitRouteContext } from "./routes/waits.ts";
 import type { WebhookTrigger } from "../shared/webhooks.ts";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "./proxy-paths.ts";
-import { agentsProxyLaunch, agentsToolBridgeEnabled, agentsToolBridgeEnv, applyAgentsBridge, bridgedToolTitle, turnEngine } from "./agents-bridge-switch.ts"; import { agentsServerEnv, botDrivenConversation, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, roomSkillsRefusal, type TurnKind } from "./agents-turn.ts";
+import { agentsProxyLaunch, agentsToolBridgeEnv, applyAgentsBridge, bridgedToolTitle, turnEngine } from "./agents-bridge-switch.ts"; import { agentsServerEnv, botDrivenConversation, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, roomSkillsRefusal, type TurnKind } from "./agents-turn.ts";
 import { harnessMcpTokenEnv } from "./harness-mcp-token.ts";
 import {
   loadBundledSkills,
@@ -11781,25 +11779,7 @@ function configStatus() {
       idleTimeoutMinutes: localVmIdleTimeoutMinutes(cfg),
       preserveInstalledApps: localVmPreservesInstalledApps(cfg),
     },
-    features: {
-      skillAuthoring: skillAuthoringEnabled(cfg),
-      skillReview: cfg.features?.skillReview === true,
-      skillReviewSteps: skillReviewSteps(cfg),
-      skillsLibrary: skillsLibraryEnabled(cfg),
-      shareLearnedSkills: skillsHost.mode(),
-      showToolCalls: showToolCallsEnabled(cfg),
-      browser: builtInBrowserEnabled(cfg),
-      sharedComputers: sharedComputersEnabled(cfg),
-      claudeUserMcp: claudeUserMcpEnabled(cfg),
-      claudeUserSkills: claudeUserSkillsEnabled(cfg),
-      autoRecall: autoRecallEnabled(cfg),
-      smartSetupChoices: cfg.features?.smartSetupChoices !== false,
-      acpPlanLines: acpPlanLinesEnabled(),
-      agentsToolBridge: agentsToolBridgeEnabled(cfg),
-      roomMemoryCapture: roomMemoryCaptureEnabled(cfg),
-      parallelRoomJobs: parallelRoomJobsEnabled(cfg),
-      llmThreadTitles: llmThreadTitlesEnabled(cfg), savedSteps: savedStepsEnabled(cfg), savedStepsHere: savedSteps.here(),
-    } satisfies FeatureStatus,
+    features: featureStatus(cfg, savedSteps.here()),
     onboarding: {
       completedAt: cfg.onboarding?.completedAt ?? "",
       version: cfg.onboarding?.version ?? 0,
