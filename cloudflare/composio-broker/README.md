@@ -49,6 +49,7 @@ Composio --signed POST--> /v1/composio/webhook --> D1 queue per installation <--
 | `PUT /v1/installation/cloud` `{grant}` | installation token | Marks the installation as a paid Cloud's from an Admin-signed grant. |
 | `POST /v1/installation/share` `{for}` | installation token | A one-time code (10 minutes, only its hash kept) that lets the installation `for` act as this installation's Composio user. |
 | `POST /v1/installation/adopt` `{code}` | installation token | Redeems a code minted for this installation: from then on it acts as that Composio user (`shared_user_id`). Refused with 409 `has_connections` while it has active connected accounts of its own, which stay reachable. The code is spent either way. |
+| `DELETE /v1/installation` | installation token | Erases the installation and what it created at Composio. See [Erasing an installation](#erasing-an-installation-and-what-the-broker-keeps). |
 | `GET /v1/stats/app-events?days=<1-90>` | `Bearer STATS_TOKEN` | Fleet totals per day (queued, delivered, duplicates, drops, expired, unrouted) and current counts. Counts only, never event contents or installation ids. |
 | cron `23 * * * *` | | Expires events not collected within 7 days, disables at Composio the triggers of installations that have not polled for 14 days (re-enabled on their next poll), keeps daily counts for 90 days. |
 
@@ -165,3 +166,42 @@ changes nothing.
    (step 1) before the code that uses it reaches `main`, because CI deploys
    every push to `main`. Without it, the hourly sweep of idle installations
    fails after it has expired old events.
+
+## Erasing an installation and what the broker keeps
+
+`DELETE /v1/installation`, with the installation's own token:
+
+| Answer | Means |
+| --- | --- |
+| `200 {erased: true, sharedUserKept}` | Everything is gone and the token no longer works. |
+| `202 {erased: false, more: true}` | Call again. One call makes at most 30 Composio deletes, to stay inside a Worker's per-request limits. |
+| `401` | Bad token, or already erased. |
+| `429`, `502`, `503` | Nothing is lost: the token still works, so call again. Finished work is not redone. |
+
+It removes share codes the installation minted or was named in, then at
+Composio its triggers and connected accounts (`revoke_on_delete=true`), then in
+one D1 transaction its rows in `trigger_bindings`, `events`, `event_drops`,
+`app_event_days`, `user_shares` and last `installations`. It needs migrations
+through `0004`; before that it answers 503 and changes nothing.
+
+A trigger another installation also binds stays at Composio. A Composio user
+another live installation still acts as (a desktop and its Cloud) keeps its
+connected accounts and unbound triggers: `sharedUserKept` is `true`, and they go
+when the last installation using that user is erased. An installation that
+adopted a shared user also clears its own original Composio user.
+
+Kept without an erase:
+
+| Data | Kept |
+| --- | --- |
+| `installations` | Indefinitely: only an erase removes a row. |
+| `events` | Unread: 7 days. Read: body cleared at once, the id kept for 7 days to spot duplicates. |
+| `trigger_bindings`, `event_drops` | Until the trigger is deleted. |
+| `app_event_days` | 90 days. Counts only. |
+| `user_shares` | Until used; an expired code, until the next code is minted. Hash only. |
+| Composio connected accounts and triggers | Until disconnected or deleted. A trigger is only paused after 14 days without a poll. |
+
+An erase does not reach Composio's tool router Sessions (the broker has no call
+that deletes one), the `''` row of `app_event_days` (deliveries no installation
+owned), Worker logs (which carry installation ids), or a copy of the token on
+the customer's side.

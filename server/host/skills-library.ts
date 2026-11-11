@@ -11,10 +11,11 @@ import {
   importedSkillListings, importedSkillsFor, importedSkillsPrompt, listedImportedSkills, nativeSkillFolders, readImportedSkillFile,
   readImportedSkills, type ImportedSkillView, type SkillTurnEngine,
 } from "../imported-skills.ts";
+import { disabledNativeSkillNames, isNativeSkillEnabled } from "../native-skill-choices.ts";
 import { nativeSkillListing, nativeSkills, projectSkillListing, projectSkills, projectSkillsPrompt, readNativeSkillFile, type NativeSkill } from "../native-skills.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { readSectionContext } from "../section-context.ts";
-import { listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
+import { librarySkillOptOuts, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
 import {
   conversationAssignedSkills,
   prepareShareNote,
@@ -95,7 +96,10 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     const natives = nativesFor(bot, threadId).filter((skill) => !names.has(skill.name));
     for (const skill of natives) names.add(skill.name);
     const project = projectFor(bot, threadId).filter((skill) => !names.has(skill.name));
-    return [...listed, ...natives.map(nativeSkillListing), ...project.map((skill) => projectSkillListing(skill, projectSkillsEnabled(cfg)))];
+    return [
+      ...listed, ...natives.map((skill) => nativeSkillListing(skill, isNativeSkillEnabled(bot.id, skill.name))),
+      ...project.map((skill) => projectSkillListing(skill, projectSkillsEnabled(cfg))),
+    ];
   };
   const readBotSkillFile = (bot: BotRecord, name: string): string | null => {
     const own = readSkillFile(bot.id, name);
@@ -103,7 +107,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     // Private wins collisions: a private skill that no longer verifies must not fall through to a same-named shared one.
     if (listSkills(bot.id).some((skill) => skill.name === name)) return null;
     // The library fallback is by assignment only, never by name alone.
-    if (skillsLibraryEnabled(cfg) && listLibrarySkills().some((skill) => skill.name === name && (skill.everyBot || bot.assignedSkills?.includes(name)))) return readLibrarySkillFile(name);
+    if (skillsLibraryEnabled(cfg) && listLibrarySkills().some((skill) => skill.name === name && (bot.assignedSkills?.includes(name) || (skill.everyBot && !librarySkillOptOuts(bot.id).has(name))))) return readLibrarySkillFile(name);
     if (readImportedSkills()[name]) return readImportedSkillFile(name);
     const native = nativesFor(bot).find((skill) => skill.name === name) ?? projectFor(bot, bot.threadId).find((skill) => skill.name === name);
     return native ? readNativeSkillFile(native) : null;
@@ -148,10 +152,13 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   /** The ones of those the turn's prompt lists and links into its task folder; it searches for the rest. */
   const listedImports = (bot: BotRecord, available: readonly ImportedSkillView[]) => listedImportedSkills(bot.id, available, aboutBot(bot));
 
-  /** The folder a thread's turns run in, as the store pins it on its first turn; null for a thread pinned to none. */
+  /** The folder a thread's turns run in, as `store.pinTaskCwd` pins it on its first turn: none for a task that already
+   * resumes a session, since moving it breaks the resume. */
   const threadFolder = (bot: BotRecord, threadId: string): string | null => {
     const task = store.taskByThread(bot.id, threadId);
-    return task?.cwd !== undefined ? task.cwd : bot.cwd ?? join(TASK_WORKSPACES_DIR, bot.id, threadId);
+    if (task?.cwd !== undefined) return task.cwd;
+    if (task && Object.keys(task.resumeCursors ?? {}).length > 0) return null;
+    return bot.cwd ?? join(TASK_WORKSPACES_DIR, bot.id, threadId);
   };
   /** Outside a turn, what the bot's main conversation would load. */
   const nativesFor = (bot: BotRecord, threadId = bot.threadId, instance = deps.instanceOf?.(bot.modelSelection.instanceId)) => {
@@ -304,8 +311,11 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       if (files.size < mentioned.length) add(importsFor(bot, assigned, instance));
       if (files.size < mentioned.length) {
         // A skill switched off on the Skills page stays off, even when the engine holds one of the same name.
-        const switched = new Set([...resolveBotSkills(bot.id, assigned), ...importedSkillListings(bot.id, new Set())]
-          .filter((skill) => !skill.enabled).map((skill) => skill.name));
+        const switched = new Set([
+          ...[...resolveBotSkills(bot.id, assigned), ...importedSkillListings(bot.id, new Set())]
+            .filter((skill) => !skill.enabled).map((skill) => skill.name),
+          ...disabledNativeSkillNames(bot.id),
+        ]);
         add(nativesFor(bot, threadId, instance).filter((skill) => !switched.has(skill.name)));
       }
       if (files.size < mentioned.length) add(projectInUse(bot, threadId, undefined, instance, assigned));

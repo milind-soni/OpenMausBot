@@ -6,17 +6,20 @@ const OWNER = "p_owner";
 const turn = { botId: "b1", threadId: "t1", generation: "g1" };
 const own = { id: "m1", role: "user", sender: { id: OWNER } };
 
-function lending({ lines = [own] as Record<string, unknown>[], flagged = false, room = false, team = null as string | null, starter = undefined as string | undefined, openedBy = undefined as object | undefined } = {}) {
+function lending({ lines = [own] as Record<string, unknown>[], flagged = false, room = false, team = null as string | null, starter = undefined as string | undefined, openedBy = undefined as object | undefined,
+  request = { messageId: "m1", generations: new Set(["g1"]) } as { messageId?: string; generations: Set<string>; origin?: unknown; automation?: string } } = {}) {
   const asked: string[] = [];
+  let opened = openedBy;
   const host = createCloudLendingTurns({
     store: {
       groupByThread: () => (room ? { threadId: "t1" } : undefined),
       messagesFor: () => lines,
       botByThread: () => ({ id: "b1" }),
-      taskByThread: () => ({ threadId: "t1", ...(openedBy ? { openedBy } : {}) }),
+      taskByThread: () => ({ threadId: "t1", ...(opened ? { openedBy: opened } : {}) }),
+      setTaskOpenedBy: (_botId: string, _threadId: string, next: object) => { opened = next; return null; },
     } as never,
     cloudHome: true, team,
-    directRequest: () => ({ messageId: "m1", generations: new Set(["g1"]) }),
+    directRequest: () => request as never,
     threadStarter: () => starter,
     ownerPerson: (person) => person === OWNER,
     cardAnswerer: () => undefined,
@@ -29,11 +32,51 @@ function lending({ lines = [own] as Record<string, unknown>[], flagged = false, 
     lentPlatform: () => "darwin",
   });
   if (room) host.roomTurnStarted("g1", { requestMessageId: "m1", cancelled: false } as never);
-  return { host, asked };
+  return { host, asked, opened: () => opened };
 }
 
 const handedIn = { id: "m1", role: "user", peerAsk: { botId: "b2" } };
 const webhookPost = { id: "w1", role: "bot", webhookPost: true };
+
+describe("handing the lent computer on (server/host/cloud-lending-turns.ts)", () => {
+  const proven = { kind: "user" as const, request: "Tidy Downloads", person: OWNER, lends: true as const };
+  const handedTurn = { messageId: undefined, generations: new Set(["g1"]), origin: proven };
+  it("a turn answering the owner's own clean line may hand it on; a card, a guest or a locked bot may not", () => {
+    expect(lending().host.handsOnLending(turn)).toBe(true);
+    expect(lending({ flagged: true }).host.handsOnLending(turn)).toBe(false);
+    expect(lending({ lines: [{ id: "m1", role: "user", sender: { id: "p_guest" } }] }).host.handsOnLending(turn)).toBe(false);
+    expect(lending({ lines: [own, { id: "g1", role: "user", sender: { id: "p_guest" } }] }).host.handsOnLending(turn)).toBe(false);
+  });
+  it("work already handed on that way may hand it on again; a routine's or webhook's run, a room or a Cloud team never can", () => {
+    expect(lending({ lines: [{ id: "brief", role: "bot" }], request: handedTurn }).host.handsOnLending(turn)).toBe(true);
+    expect(lending({ request: { messageId: "m1", generations: new Set(["g1"]), automation: "schedule" } }).host.handsOnLending(turn)).toBe(false);
+    expect(lending({ room: true }).host.handsOnLending(turn)).toBe(false);
+    expect(lending({ team: "Acme" }).host.handsOnLending(turn)).toBe(false);
+  });
+  it("a thread a turn like that opened passes the opened-by-a-bot gate; anyone else's opening still shuts it", () => {
+    const opened = { botId: "b2", name: "Two", at: 1 };
+    expect(lending({ lines: [{ id: "brief", role: "bot" }], request: handedTurn, openedBy: { ...opened, forOwner: true } }).host.cloudLendingRefusal(turn)).toBeNull();
+    expect(lending({ lines: [{ id: "brief", role: "bot" }], request: handedTurn, openedBy: opened }).host.cloudLendingRefusal(turn)).toBe("someone-else");
+  });
+  it("what a hand-off gets stops at the computer: the owner's phones take the owner's own conversation", () => {
+    const openedBy = { botId: "b2", name: "Two", at: 1, forOwner: true };
+    const handed = lending({ lines: [{ id: "brief", role: "bot" }], request: handedTurn, openedBy }).host;
+    expect(handed.cloudLendingRefusal(turn)).toBeNull();
+    expect(handed.cloudOwnTurnRefusal(turn)).toBe("unproven");
+    expect(lending().host.cloudOwnTurnRefusal(turn)).toBeNull();
+    expect(lending({ flagged: true }).host.cloudOwnTurnRefusal(turn)).toBe("memory-changed");
+  });
+  it("a hand-in from a turn that couldn't hand it on clears the record for good, and an unproven thread stays unproven", () => {
+    const openedBy = { botId: "b2", name: "Two", at: 1, forOwner: true };
+    const world = lending({ lines: [{ id: "brief", role: "bot" }], request: handedTurn, openedBy });
+    world.host.handedInUnproven("t1");
+    expect(world.opened()).toEqual({ botId: "b2", name: "Two", at: 1 });
+    expect(world.host.cloudLendingRefusal(turn)).toBe("someone-else");
+    const none = lending({ openedBy: { botId: "b2", name: "Two", at: 1 } });
+    none.host.handedInUnproven("t1");
+    expect(none.opened()).toEqual({ botId: "b2", name: "Two", at: 1 });
+  });
+});
 
 describe("what a turn hears when it can't use the lent Mac (server/host/cloud-lending-turns.ts)", () => {
   it("a turn every gate allows hears nothing", () => {
@@ -186,5 +229,49 @@ describe("a card lifts a lock only for the owner's own line (server/host/cloud-l
     const allowed = { id: "c1", role: "bot", card: { requestId: "q1", answered: "allow", answeredBy: { kind: "session", person: OWNER } } };
     expect(withLifts([webhookPost, own, allowed], { allowedAt: 2 }).host.cloudLendingView(turn)).toBe(true);
     expect(withLifts([webhookPost, own, allowed]).host.cloudLendingView(turn)).toBe(false);
+  });
+});
+
+describe("a routine someone else changed (email 1a1bca40)", () => {
+  const routinePrompt = { id: "m1", role: "user", automation: { routineId: "r1" } };
+  function routineRun({ trigger = "schedule" as "schedule" | "manual" | "webhook" | "startup", ownerStarted = false, ownerAuthored = false, flagged = false } = {}) {
+    const run = { id: "run1", routineId: "r1", threadId: "t1", triggerSource: trigger };
+    return createCloudLendingTurns({
+      store: {
+        groupByThread: () => undefined,
+        messagesFor: () => [routinePrompt],
+        botByThread: () => ({ id: "b1" }),
+        taskByThread: () => ({ threadId: "t1", routineRunId: "run1" }),
+      } as never,
+      cloudHome: true,
+      directRequest: () => ({ messageId: "m1", generations: new Set(["g1"]), automation: trigger }),
+      threadStarter: () => undefined,
+      ownerPerson: (person) => person === OWNER,
+      cardAnswerer: () => undefined,
+      activeRoutineRun: () => run as never,
+      ownerStartedRun: () => ownerStarted,
+      routineRunIsOwners: () => ownerAuthored,
+      memoryChangedBySomeoneElse: () => flagged,
+      routines: () => ({ listRoutines: () => [{ id: "r1", name: "Morning inbox" }] }) as never,
+      routineAuthors: { authored: () => ownerAuthored },
+      lentPlatform: () => "darwin",
+    });
+  }
+  const changed = "\"Morning inbox\" can't use your Mac because it isn't confirmed as yours: it was last changed or made outside your own chats. Open it and save it to make it yours again.";
+
+  it("its scheduled run is told, by name, how to make it theirs again", () => {
+    const host = routineRun();
+    expect(host.cloudLendingRefusal(turn)).toBe("not-owner");
+    expect(host.cloudLendingRefusalNotice(turn)).toBe(changed);
+    expect(host.cloudLendingRefusalForBot(turn)).toBe(`${changed} ${ONLY_THE_PERSON}`);
+    expect(routineRun({ trigger: "startup" }).cloudLendingRefusalNotice(turn)).toBe(changed);
+    expect(routineRun({ trigger: "manual", ownerStarted: true }).cloudLendingRefusalNotice(turn)).toBe(changed);
+  });
+  it("the owner's own routine still runs, and every other refusal keeps its words", () => {
+    expect(routineRun({ ownerAuthored: true }).cloudLendingRefusalNotice(turn)).toBeNull();
+    for (const host of [routineRun({ trigger: "webhook" }), routineRun({ trigger: "manual" }), routineRun({ flagged: true })]) {
+      expect(host.cloudLendingRefusalNotice(turn)).not.toBeNull();
+      expect(host.cloudLendingRefusalNotice(turn)).not.toContain("isn't confirmed as yours");
+    }
   });
 });

@@ -81,13 +81,13 @@ function lazy(open) {
 
 /** The move-in sign-in the team handed out, as a session the send uses. */
 function bearerSession(origin, token, fetchImpl) {
-  const request = (method, route, init) => fetchImpl(`${origin}${route}`, {
-    method, redirect: "error", credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(120_000), ...init,
+  const request = (method, route, { timeoutMs = 120_000, ...init }) => fetchImpl(`${origin}${route}`, {
+    method, redirect: "error", credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(timeoutMs), ...init,
     headers: { accept: "application/json", authorization: `Bearer ${token}`, ...init.headers },
   });
   return {
-    call: async (method, route, body) => answer(await request(method, route, body === undefined ? { headers: {} }
-      : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) })),
+    call: async (method, route, body, options) => answer(await request(method, route, { ...(options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {}), ...(body === undefined ? { headers: {} }
+      : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) })),
     upload: async (route, bytes, type) => answer(await request("POST", route, { headers: { "content-type": type }, body: bytes })),
     close: async () => { await request("POST", "/api/auth/logout", { headers: { "content-type": "application/json" }, body: "{}" }).then((response) => response.body?.cancel()); },
   };

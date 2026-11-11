@@ -6,6 +6,7 @@ import type { EffortLevel } from "../shared/wire.ts";
 import type {
   DriverKind, InstanceId, ModelVariantOption, RuntimeEventListener, ThreadId, TurnId,
 } from "../shared/runtime-events.ts";
+import type { LocalModelFacts, OllamaProblem } from "../shared/local-model.ts";
 import type { ProviderIcon } from "../shared/provider-icon.ts";
 
 export type { CloudBackend, EffortLevel, ModelSelection } from "../shared/wire.ts";
@@ -371,6 +372,8 @@ export interface ProviderSnapshot {
     title: string;
     message: string;
   };
+  /** Set with `unavailable` on a server recognised as Ollama: what stops it, for the app to say in its own words. */
+  ollama?: OllamaProblem;
 }
 
 // How a user installs this engine; onboarding, the picker and settings render from it.
@@ -482,6 +485,9 @@ export interface ModelCatalog {
     variants?: ModelVariantOption[];
     /** The organization of the signed-in account turned this model off: the engine would answer with another. */
     orgBlocked?: true;
+    /** The installed CLI is too old for this model: the version it needs. */
+    needsCliUpdate?: string;
+    local?: LocalModelFacts;
   }>;
 }
 

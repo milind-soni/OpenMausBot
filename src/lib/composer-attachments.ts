@@ -178,6 +178,7 @@ const DOCUMENT_MIMES: Readonly<Record<string, string>> = {
   odt: "application/vnd.oasis.opendocument.text",
   ods: "application/vnd.oasis.opendocument.spreadsheet",
   odp: "application/vnd.oasis.opendocument.presentation",
+  xmind: "application/vnd.xmind.workbook",
 };
 
 const ACCEPTED_DOCUMENT_MIMES = new Set(Object.values(DOCUMENT_MIMES));

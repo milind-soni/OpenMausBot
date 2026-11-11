@@ -14,6 +14,7 @@ const said = (id: string, at: number, person: string | undefined, more: Partial<
 const botLine = (id: string, at: number): ActingLine => ({ id, at, role: "bot" });
 const ask = (id: string, at: number): ActingLine => ({ id, at, role: "user", peerAsk: { botId: "chief" } });
 const userOrigin = (person?: string): WorkOrigin => ({ kind: "user", request: "File the notes in Notion", ...(person ? { person } : {}) });
+const lending = (person?: string): WorkOrigin => ({ kind: "user", request: "File the notes in Notion", ...(person ? { person } : {}), lends: true });
 
 function world(options: { threads?: Record<string, ActingLine[]>; rooms?: string[]; direct?: Record<string, DirectRequest>; runs?: Record<string, RoomRun> } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "omb-acting-person-"));
@@ -27,6 +28,29 @@ function world(options: { threads?: Record<string, ActingLine[]>; rooms?: string
   return { people, handed, dir };
 }
 const request = (generation: string, more: Partial<DirectRequest> = {}): DirectRequest => ({ generation, generations: new Set([generation]), ...more });
+
+describe("work handed on keeps the lent computer only from the hand-on's own record", () => {
+  it("a hand-on that could use it passes it on, once; the origin it was built on never carries it", () => {
+    const { people } = world({ threads: { ada: [said("m1", 10, ADA)] }, direct: { ada: request("g1", { messageId: "m1" }) } });
+    people.handOn({ threadId: "ada", generation: "g1" }, { id: "node-1", rootId: "root-x" }, true);
+    expect(people.handedOrigin(userOrigin(), "node-1")).toEqual(lending(ADA));
+    people.handOn({ threadId: "ada", generation: "g1" }, { id: "node-1", rootId: "root-x" }, false);
+    expect(people.handedOrigin(userOrigin(), "node-1"), "recorded once").toEqual(lending(ADA));
+    expect(people.handedOrigin(lending(BEN), "node-unknown"), "nothing recorded, nothing kept").toEqual(userOrigin());
+    expect(withPerson(lending(BEN), ADA), "no record for this hop").toEqual(userOrigin(ADA));
+    expect(withPerson(lending(), null), "for nobody, it lends nothing").toEqual(userOrigin());
+    expect(withPerson(OUTSIDE, ADA, true)).toEqual(OUTSIDE);
+    expect(workOriginSchema.parse(lending(ADA))).toEqual(lending(ADA));
+  });
+  it("survives a restart with the record, and a hand-on that couldn't use it keeps the person but not the computer", () => {
+    const { people, dir } = world({ threads: { ada: [said("m1", 10, ADA)] }, direct: { ada: request("g1", { messageId: "m1" }) } });
+    people.handOn({ threadId: "ada", generation: "g1" }, { id: "kept", rootId: "r" }, true);
+    people.handOn({ threadId: "ada", generation: "g1" }, { id: "plain", rootId: "r" });
+    const reread = new HandedPeople(join(dir, "handed-people.json"));
+    expect(reread.get("kept")).toMatchObject({ person: ADA, lends: true });
+    expect(reread.get("plain")).toEqual({ person: ADA, at: expect.any(Number) });
+  });
+});
 
 describe("a turn started by a person's own line acts for them", () => {
   it("in any one-on-one conversation, for that turn generation only, until it is stopped", () => {
@@ -185,6 +209,9 @@ describe("what work in one person's private chat hands back", () => {
   it("to a chat others read: only where the result is, never the result or what was observed", () => {
     expect(privateHandBack(done, place(null))).toEqual({ ok: true, text: "Done. The result is in Helper's chat with Ada." });
     expect(privateHandBack({ ok: false, text: "Gmail said the board's thread is gone." }, place(null)).text).toBe("It stopped before it finished. The result is in Helper's chat with Ada.");
+    const approval: Parameters<typeof privateHandBack>[0] = privateHandBack({ ok: true, text: "Did not run.", approvalAsk: "Approve “Bash: cat salary.csv”?" }, place(null));
+    expect(approval.approvalAsk, "an unanswered approval names no private action").toBe("Helper has a question for Ada, in Helper's chat with Ada.");
+    expect(approval.privateQuestion).toBe(true);
     expect(privateHandBack(done, place(BEN)).text, "another person's private chat reads none of hers").toBe("Done. The result is in Helper's chat with Ada.");
   });
 

@@ -30,3 +30,7 @@ export declare function acquireDataDirLeaseForProcess(
 export declare function clearRecordsFromOtherMachines(
   dataDir: string,
 ): { path: string; host: string; pid: number }[];
+
+export declare function clearRecordsFromEarlierRunOfThisContainer(
+  dataDir: string,
+): { path: string; host: string; pid: number }[];

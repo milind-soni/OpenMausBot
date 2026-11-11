@@ -18,6 +18,7 @@ import {
   pairingSurfaceCopy,
   RouteNotices,
   shouldHydrateCompanionEmail,
+  showTunnelRetiredNotice,
 } from "./PhoneDevicesSection";
 import type { PhoneSetupController } from "./PhoneSetupFlow";
 
@@ -247,5 +248,18 @@ describe("the update's notes about routes it kept on", () => {
     expect(html.match(/>Turn off</g)).toHaveLength(2);
     expect(html.match(/>OK</g)).toHaveLength(2);
     expect(renderToStaticMarkup(createElement(RouteNotices, { c, notices: [] }))).toBe("");
+  });
+});
+
+describe("the notice after the secure address ended for old phone apps", () => {
+  const phone = (extra: Record<string, unknown> = {}) => ({ id: "p", name: "Phone", lastSeenAt: 1, ...extra }) as never;
+
+  it("shows only while a paired phone has not used the encrypted connection", () => {
+    expect(showTunnelRetiredNotice({ tunnelRetired: true }, { devices: [phone()] })).toBe(true);
+    expect(showTunnelRetiredNotice({ tunnelRetired: true }, { devices: [phone({ e2eAt: 5 }), phone()] })).toBe(true);
+    expect(showTunnelRetiredNotice({ tunnelRetired: true }, { devices: [phone({ e2eAt: 5 })] })).toBe(false);
+    expect(showTunnelRetiredNotice({ tunnelRetired: true }, { devices: [] })).toBe(false);
+    expect(showTunnelRetiredNotice({}, { devices: [phone()] })).toBe(false);
+    expect(showTunnelRetiredNotice(null, null)).toBe(false);
   });
 });

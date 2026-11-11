@@ -1,7 +1,7 @@
 // ＋ at the end of the rail: one sheet of choices. A new workspace on this computer (named here, then main opens it), a new
 // organization on the Team plan the person pays for (when they run one), buy a Cloud (the buying sheet: another Cloud right
 // here, or the first one on this computer's own sheet), or connect to a server of the person's own.
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Building2, Cloud, Laptop, Loader2, Server, UserRound, X } from "lucide-react";
 import type { CloudSwatch } from "../../electron/cloud-list.mjs";
 import type { RailAddChoices, RailPlace } from "../../electron/cloud-rail.mjs";
@@ -17,6 +17,7 @@ import { computerName, createLocal, placeInitials, suggestedLocalName } from "@/
 import { AddCloudFlow } from "./cloud-buy/AddCloudFlow";
 import { NewOrganization } from "./cloud-buy/NewOrganization";
 import { BackLink, FIELD, Heading, PRIMARY_WIDE } from "./cloud-buy/parts";
+import { Layer, useIsTopLayer } from "./Layer";
 import { SwatchRadios } from "./SwatchRadios";
 
 const PAIR_COMMAND = "npx openmausbot pair";
@@ -146,12 +147,19 @@ function Choice({ icon, title, sub, onClick, kind }: { icon: ReactNode; title: s
 const FOCUSABLE = "button:not([disabled]):not([tabindex='-1']), input:not([disabled]):not([tabindex='-1']), [href], [tabindex='0']";
 
 /** The sheet over the app, like the buying sheet's: Escape and Close close it, Tab stays in it, focus goes back after. */
-export function RailSheet({ wide = false, focusKey, onClose, children }: { wide?: boolean; focusKey: string; onClose: () => void; children: ReactNode }) {
+export function RailSheet(props: { wide?: boolean; focusKey: string; onClose: () => void; children: ReactNode }) {
+  return <Layer modal><RailSheetCard {...props} /></Layer>;
+}
+
+function RailSheetCard({ wide = false, focusKey, onClose, children }: { wide?: boolean; focusKey: string; onClose: () => void; children: ReactNode }) {
   const sheet = useRef<HTMLDivElement>(null);
+  const isTop = useIsTopLayer();
+  const close = useEffectEvent(onClose);
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
+      if (!isTop()) return;
+      if (event.key === "Escape") { event.preventDefault(); close(); return; }
       if (event.key !== "Tab") return;
       const controls = [...(sheet.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])];
       if (!controls.length) return;
@@ -161,7 +169,7 @@ export function RailSheet({ wide = false, focusKey, onClose, children }: { wide?
     };
     window.addEventListener("keydown", onKey, true);
     return () => { window.removeEventListener("keydown", onKey, true); if (opener?.isConnected) opener.focus(); };
-  }, [onClose]);
+  }, [isTop]);
   useEffect(() => {
     if (sheet.current?.contains(document.activeElement) && document.activeElement !== sheet.current) return;
     (sheet.current?.querySelector<HTMLElement>("[data-autofocus]") ?? sheet.current?.querySelector<HTMLElement>("#cloud-add-title"))?.focus();

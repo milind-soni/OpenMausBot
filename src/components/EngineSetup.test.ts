@@ -350,3 +350,32 @@ describe("API-key engine setup", () => {
     expect(render(instance({ state: "unavailable", reason: "`kimi` CLI not found" }))).not.toContain("data-engine-setup-api-key");
   });
 });
+
+describe("Ollama setup", () => {
+  it("says why Ollama can't answer instead of asking for an API key", () => {
+    vi.stubGlobal("window", { ogb: { platform: "darwin" } });
+    const reason = "Ollama isn't running at http://127.0.0.1:11434. Open the Ollama app or run `ollama serve`.";
+    const ollama: InstanceInfo = {
+      instanceId: "openaiCompat", driverKind: "openai-compat", displayName: "Ollama", access: "api", serverKind: "ollama",
+      models: { default: "", options: [] }, snapshot: { state: "unavailable", reason },
+      install: { docsUrl: "https://openrouter.ai/keys", settings: "connections", signInCommand: "Save an OpenAI-compatible API key." },
+    };
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: ollama })));
+    expect(markup).toContain("Ollama isn&#x27;t running at http://127.0.0.1:11434");
+    expect(markup).not.toContain("API key");
+  });
+
+  it("says it in the app's own words when the engine names the problem, with the command to run", () => {
+    vi.stubGlobal("window", { ogb: { platform: "darwin" } });
+    const ollama: InstanceInfo = {
+      instanceId: "openaiCompat", driverKind: "openai-compat", displayName: "Ollama", access: "api", serverKind: "ollama",
+      models: { default: "", options: [] },
+      snapshot: { state: "unavailable", reason: "Ollama has no models yet.", ollama: { state: "no-models", url: "http://127.0.0.1:11434" } },
+    };
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: ollama })));
+    expect(markup).toContain('data-ollama-state="no-models"');
+    expect(markup).toContain("ollama pull llama3.2");
+    expect(markup).toContain("Check again");
+    expect(markup).not.toContain("Ollama has no models yet.");
+  });
+});

@@ -19,13 +19,14 @@ import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSe
 import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { describeSpawnFailure, execCli, killCliTree, sharedBoxScope, spawnCli } from "../../procs.ts";
 import { runAcpOneShot } from "./background-text.ts";
-import { sanitizeAcpToolMessage } from "./tool-log.ts";
+import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
 import {
   classifyQuiet, describeQuiet, formatQuietLimit, quietNoticeText, lastSeenPhrase, LIMIT_WORDS, LogTail, promptIdleTimeoutMs, quietKey, quietNoticeMs, quietTickMs, quietVerdict, sampleProcessTree,
   type LogSignal, type ProcessSample, type QuietState,
 } from "./quiet-status.ts";
 import { readSessionReport } from "./session-reports.ts";
+import { acpTurnSteering, advertisedCommands, type AcpSteerSupport } from "./steer.ts";
 import { pickSessionModel, SessionModelControls, type AcpModelSelection } from "./session-model-controls.ts";
 import { notThisCli, versionFromProbe } from "./version-probe.ts"; import { engineHomes } from "../../engine-homes/engine-homes.ts";
 
@@ -107,12 +108,12 @@ export interface AcpSupport {
   modelVariants?: boolean;
   /** Default CLI binary name if the instance config doesn't override it. */
   defaultCli: string;
-  /** Optional live model catalog; a failed lookup keeps the last usable one. `config` lets a support ask the binary
-   *  it will spawn, not whatever is on PATH; `fresh` is the person's Refresh, which may bypass the CLI's own cache. */
+  /** Optional live model catalog; a failed lookup keeps the last usable one. `config` lets a support ask the binary it will
+   *  spawn, not whatever is on PATH; `fresh` is the person's Refresh; `allowEnv`, the instance's own keys for the bot box. */
   resolveModels?(
     environment: Record<string, string | undefined>,
     config: AcpConfig,
-    instanceId: string, fresh?: boolean,
+    instanceId: string, fresh?: boolean, allowEnv?: readonly string[],
   ): ModelCatalog | Promise<ModelCatalog>;
   /** Some managed agents are not probed at app startup; their Refresh is the only lookup. */
   resolveModelsOnCreate?: boolean;
@@ -175,6 +176,8 @@ export interface AcpSupport {
   resumeMethod?: "load" | "resume";
   /** Some agents acknowledge a live load without applying new MCP credentials. */
   restartOnMcpChange?: boolean; /** The turn's MCP servers come from launcher-owned configuration, not ACP session parameters. */ mcpServersFromLaunch?: boolean;
+  /** How the agent takes a person's message into its running turn; without it a message sent mid-turn waits for the next. */
+  steer?: AcpSteerSupport;
   /** hermes-agent 0.22.4 re-sends a streamed reply whole under its messageId, as its `💭` reasoning block, a blank line,
    * then the reply; that chunk is dropped instead of appended. */
   resendsReasoningReply?: boolean;
@@ -216,7 +219,7 @@ export interface AcpSupport {
   isAuthenticated(
     env: Record<string, string | undefined>,
     config: AcpConfig,
-    instanceId: string,
+    instanceId: string, allowEnv?: readonly string[],
   ): boolean | Promise<boolean>;
   /** Refuse a first-party cloud turn before spawning when snapshot auth is
    * false. Local injected models deliberately bypass this subscription gate. */
@@ -351,7 +354,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         instanceId,
         fixed: support.models,
         startFromSaved: Boolean(support.resolveModels) && support.resolveModelsOnCreate === false,
-        resolve: support.resolveModels && ((fresh) => support.resolveModels!(childEnv(), config, instanceId, fresh)),
+        resolve: support.resolveModels && ((fresh) => { const env = childEnv(); return support.resolveModels!(env, config, instanceId, fresh, instanceEnvNames(input.environment, env)); }),
       });
       const refreshModels = (fresh?: boolean) => catalog.refresh(fresh);
       let startupModelRefresh: Promise<void> | null = null;
@@ -477,42 +480,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         for (const listener of listeners) listener(event);
       };
 
-    // Inline images stay on the wire but never go into the native log as base64.
-      const nativeLogMessage = (msg: any): unknown => {
-        let redacted = msg;
-        const prompt = msg?.method === "session/prompt" ? msg?.params?.prompt : null;
-        if (Array.isArray(prompt)) {
-          redacted = {
-            ...msg,
-            params: {
-              ...msg.params,
-              prompt: prompt.map((content: any) =>
-                content?.type === "image" && typeof content.data === "string"
-                  ? { ...content, data: `[image data: ${content.data.length} base64 chars]` }
-                  : content
-              ),
-            },
-          };
-        }
-        const content = redacted?.params?.update?.content;
-        if (
-          redacted?.method !== "session/update" ||
-          redacted?.params?.update?.sessionUpdate !== "agent_message_chunk" ||
-          content?.type !== "image" ||
-          typeof content.data !== "string"
-        ) return support.sanitizeToolPayload ? sanitizeAcpToolMessage(redacted) : redacted;
-        redacted = {
-          ...redacted,
-          params: {
-            ...redacted.params,
-            update: {
-              ...redacted.params.update,
-              content: { ...content, data: `[image data: ${content.data.length} base64 chars]` },
-            },
-          },
-        };
-        return support.sanitizeToolPayload ? sanitizeAcpToolMessage(redacted) : redacted;
-      };
+      const nativeLogMessage = (msg: any): unknown => acpNativeLogMessage(msg, support.sanitizeToolPayload === true);
       const base = (threadId: string, turnId: string) => ({
         eventId: newEventId(),
         provider: DRIVER_KIND,
@@ -866,6 +834,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           if (msg.method !== "session/update") return;
           const p = msg.params ?? {};
           if (p._meta?.isReplay === true) return;
+          session.commands = advertisedCommands(p.update) ?? session.commands;
           const current = session.current;
           if (support.modelVariants && p.update?.sessionUpdate === "config_option_update") {
             if (current && !current.state.settled && session.sessionId && p.sessionId === session.sessionId) current.receiveModelVariants(p.update);
@@ -876,7 +845,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
           if (!current || !current.state.promptSent) return;
           const u = filterUpdate ? filterUpdate(p.update ?? {}) : p.update ?? {};
-          if (!u) return;
+          if (!u || (u.sessionUpdate === "agent_message_chunk" && typeof u.content?.text === "string" && current.steering?.swallow(u.content.text))) return;
           const finished = u.status === "completed" || u.status === "failed";
           const toolEnded = (itemId: string | undefined) => {
             current.state.producedItem = true;
@@ -1040,7 +1009,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           support.requireAuthenticationBeforeSpawn
           && !skipSubscriptionAuthForLocalInject(turn.model)
         ) {
-          const authenticated = await support.isAuthenticated(env, turnConfig, instanceId);
+          const authenticated = await support.isAuthenticated(env, turnConfig, instanceId, instanceEnvNames(input.environment, env));
           requireRunning();
           if (!authenticated) {
             emit({ ...base(threadId, turnId), type: "turn.started" });
@@ -1186,6 +1155,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           stopQuietWatch: null,
           flushAssistantText,
           receiveModelVariants,
+          steering: support.steer && acpTurnSteering(support.steer,
+            () => state.promptSent && !state.settled && !state.stopped && !session.closing && session.commands?.has(support.steer!.command) === true,
+            (text) => request("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text }] }, undefined, undefined, promptIdleTimeoutMs())),
         };
 
         const interrupt = () => {
@@ -1465,6 +1437,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   `${last ? ` (last seen: ${lastSeenPhrase(last)})` : ""}. Send the message again to retry.`;
               },
               );
+            const steersOut = current.steering?.promptAnswered();
+            if (steersOut && !state.stopped) { current.flushAssistantText(); await steersOut; }
             if (pendingSplitReceipt) {
               // session/prompt resolving is the acceptance boundary: a rejected prompt leaves no receipt.
               if (state.usageCompacted) {
@@ -1602,7 +1576,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           });
         });
         if (!probe.version) return { state: "unavailable", reason: probe.reason, ...(probe.other ? { notEngineCli: true } : {}) };
-        return { state: "available", version: probe.version, authenticated: await support.isAuthenticated(env, config, instanceId) };
+        return { state: "available", version: probe.version, authenticated: await support.isAuthenticated(env, config, instanceId, instanceEnvNames(input.environment, env)) };
       };
 
     /** Memory upkeep's one-shot: a fresh process and session, no MCP servers, an empty folder, and
@@ -1611,7 +1585,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         if (startupModelRefresh) await startupModelRefresh;
         const turnConfig: AcpConfig = { ...config, fullAuto: false };
         const env = childEnv(turnConfig);
-        if (support.requireAuthenticationBeforeSpawn && !(await support.isAuthenticated(env, turnConfig, instanceId))) {
+        if (support.requireAuthenticationBeforeSpawn && !(await support.isAuthenticated(env, turnConfig, instanceId, instanceEnvNames(input.environment, env)))) {
           throw new Error(support.loginNote);
         }
         const cwd = mkdtempSync(join(await support.oneShotFolder?.() ?? tmpdir(), "omb-acp-memory-"));
@@ -1622,8 +1596,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const spawnEnv = launch.env ?? env;
           return await runAcpOneShot({
             displayName: support.displayName,
-            spawn: spawnCli,
-            kill: killCliTree,
+            spawn: spawnCli, kill: killCliTree, box: { allowEnv: instanceEnvNames(input.environment, spawnEnv) },
             command: launch.command,
             argv: [...(launch.args ?? []), ...support.spawnArgs(turnConfig, turn)],
             env: spawnEnv,
@@ -1688,9 +1661,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             localComputerMcp: true,
             contextReading: "meter",
             engineAdmission: true, ...(support.askTool ? { askTool: { kind: "native" as const, name: support.askTool } } : {}),
+            ...(support.steer ? { queueing: true } : {}),
           },
           sendTurn,
           interruptTurn: async (threadId) => active.get(threadId)?.interrupt(),
+          ...(support.steer ? { steer: async (threadId: string, text: string, images?: readonly TurnImageInput[]) =>
+            images?.length ? "refused" as const : await sessions.get(threadId)?.current?.steering?.steer(text) ?? "refused" } : {}),
           respondToRequest: async (threadId, requestId, decision) => {
             const turn = active.get(threadId);
             const finish = turn?.asks.get(requestId);

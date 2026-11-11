@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowUpRight, X } from "lucide-react";
 import { CLOUD_PLAN_URL } from "@/lib/app-links";
-import { botRoom, closeBotLimit, planRefusal, showBotLimit, useBotLimitReason, type BotLimitReason } from "@/lib/bot-limit";
+import { botRoom, closeBotLimit, planRefusal, showBotLimit, useBotLimitReason, useCreatedPausedBot, type BotLimitReason } from "@/lib/bot-limit";
 import { cloudPlanLabel } from "@/lib/cloud-plan";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -28,11 +28,11 @@ export function BotLimitPopup() {
     seen.current = next.seen;
     if (next.show) showBotLimit(next.show);
   }, [loaded, turns?.refusedAt]);
-  const reason = useBotLimitReason();
-  return reason ? <BotLimitDialog reason={reason} onClose={closeBotLimit} /> : null;
+  const reason = useBotLimitReason(), created = useCreatedPausedBot();
+  return reason ? <BotLimitDialog reason={reason} created={created} onClose={closeBotLimit} /> : null;
 }
 
-function BotLimitDialog({ reason, onClose }: { reason: BotLimitReason; onClose: () => void }) {
+function BotLimitDialog({ reason, created, onClose }: { reason: BotLimitReason; created: string | null; onClose: () => void }) {
   const { state } = useStore();
   const bridge = usageBridge(state.config?.cloudHome === true);
   const plan = useCloudPlanSnapshot(bridge);
@@ -46,7 +46,8 @@ function BotLimitDialog({ reason, onClose }: { reason: BotLimitReason; onClose: 
   const settled = upgraded !== null || goingThrough;
   const limit = state.config?.botLimit, awake = state.config?.awakeLimit;
   const noRoom = limit !== undefined && botRoom(state) === 0;
-  const picking = reason === "paused" && awake !== undefined && !settled;
+  const picking = (reason === "paused" || reason === "created") && awake !== undefined && !settled;
+  const createdName = state.bots.find((bot) => bot.id === created)?.name ?? "";
 
   useEffect(() => {
     document.querySelector<HTMLElement>(`${POPUP} button`)?.focus();
@@ -75,9 +76,11 @@ function BotLimitDialog({ reason, onClose }: { reason: BotLimitReason; onClose: 
   const title = upgraded ? t("usageMeter.done", { plan: cloudPlanLabel(upgraded) })
     : goingThrough ? t("usageMeter.pending")
       : reason === "tasks" ? t("botLimit.tasks.title", { count: state.config?.planTurns?.running ?? 2 })
-        : reason === "paused" ? t("botLimit.paused.title", { count: awake ?? limit ?? 5 })
-          : noRoom ? t("botLimit.title", { count: limit }) : t("botLimit.titleTooMany");
-  const body = reason === "tasks" ? t("botLimit.tasks.body") : reason === "paused" ? t("botLimit.paused.body", { count: awake ?? limit ?? 5 }) : null;
+        : reason === "created" ? t("botLimit.created.title", { name: createdName })
+          : reason === "paused" ? t("botLimit.paused.title", { count: awake ?? limit ?? 5 })
+            : noRoom ? t("botLimit.title", { count: limit }) : t("botLimit.titleTooMany");
+  const body = reason === "tasks" ? t("botLimit.tasks.body") : reason === "paused" ? t("botLimit.paused.body", { count: awake ?? limit ?? 5 })
+    : reason === "created" ? t("botLimit.created.body", { count: awake ?? 5 }) : null;
   // A person's other Cloud reads its plan but upgrades on its Plan page; a browser tab or a paired device has no bridge at all.
   const inApp = Boolean(bridge && (usage || plan === null));
 
@@ -89,7 +92,7 @@ function BotLimitDialog({ reason, onClose }: { reason: BotLimitReason; onClose: 
           <div aria-hidden="true"><MausAvatar color="chrome" size={52} state="idle" animated={false} /></div>
           <h2 id={TITLE} className="mt-5 text-[19px] font-semibold leading-6 tracking-[-0.012em] [text-wrap:balance]">{title}</h2>
           {!settled && <p id={BODY} className="mt-1.5 text-[14px] leading-5 text-ink-secondary [text-wrap:pretty]">{body ?? t(inApp ? "botLimit.body" : "botLimit.bodyElsewhere")}</p>}
-          {picking && <AwakeBotsPicker limit={awake} onSaved={onClose} />}
+          {picking && <AwakeBotsPicker limit={awake} onSaved={onClose} {...(reason === "created" && created ? { swapIn: created } : {})} />}
           {settled ? (
             <button type="button" onClick={onClose} className={cn(PRIMARY_BUTTON, "mt-5 w-full justify-center")}>{t("roomCard.gotIt")}</button>
           ) : usage ? (

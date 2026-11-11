@@ -117,7 +117,11 @@ button. Sign in opens the provider's page in your browser, which returns to
 OpenMausBot when you approve. The server then shows **Signed in**, and Test
 lists its tools. A server that lists its tools before you sign in but refuses
 tool calls the same way (an HTTP 401 pointing at those sign-in details) shows
-**Sign in** too.
+**Sign in** too. Test first calls a tool name no server has. If the server
+answers that without asking who is calling, as Gmail's MCP server does, Test
+calls one of the server's own tools once, with no arguments: only a tool the
+server marks read-only and not destructive, and that requires arguments, so it
+has nothing to work on. Background checks never do this.
 
 - **Which servers work.** The authorization server must support PKCE with
   S256. If it lets apps register themselves (dynamic client registration),
@@ -415,7 +419,8 @@ the original.
 
 A project can ship skills for any AI agent in `agents/skills`, `.agents/skills`
 or `.claude/skills`. When a bot works in such a folder (or one below it, up to
-the git root), its **Skills** page lists them under **In this project**, with
+the git root; outside a repository, only the working folder itself counts), its
+**Skills** page lists them under **In this project**, with
 the switch **Use the project's skills**. They stay out of every prompt until
 that switch is on, since they are the checkout's own instructions; it applies
 to every bot, and in `config.json` it is `"features": { "projectSkills": true }`.

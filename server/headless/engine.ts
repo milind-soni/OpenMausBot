@@ -15,6 +15,7 @@ export const ENGINE_KINDS: Record<string, { config: string; instance: string; ap
   xai: { config: "xai", instance: "xaiApi", baseUrl: "allowed" },
   groq: { config: "groq", instance: "groq", baseUrl: "allowed" },
   greenference: { config: "greenference", instance: "greenference", baseUrl: "no" },
+  modelgo: { config: "modelgo", instance: "modelgo", baseUrl: "no" },
   mistral: { config: "mistral", instance: "mistral", baseUrl: "no" },
   cerebras: { config: "cerebras", instance: "cerebras", baseUrl: "no" },
 };

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -14,10 +15,14 @@ import { TASK_WORKSPACES_DIR } from "./workspace.ts";
 // HOME and the data folder are this test file's own temporary ones (server/testing/setup.ts).
 const HOME = join(DATA_DIR, "..");
 const USER_SKILLS = join(HOME, ".claude", "skills");
+const CODEX_SKILLS = join(HOME, ".codex", "skills");
 const SHARED = join(TASK_WORKSPACES_DIR, ".claude", "skills");
 const PROJECTS = join(HOME, "projects");
 afterEach(() => {
-  for (const dir of [TASK_WORKSPACES_DIR, USER_SKILLS, PROJECTS]) rmSync(dir, { recursive: true, force: true });
+  if (!DATA_DIR.startsWith(join(tmpdir(), "omb-test-home-"))) throw new Error(`refusing to clean ${DATA_DIR}: not this test's home`);
+  for (const dir of [TASK_WORKSPACES_DIR, USER_SKILLS, CODEX_SKILLS, PROJECTS, join(DATA_DIR, "skill-state")]) {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 const skillMd = (name: string) => `---\nname: ${name}\ndescription: Works with ${name}.\n---\n\nFollow the steps.\n`;
@@ -27,14 +32,14 @@ function plant(root: string, name: string): string {
   return join(root, name, "SKILL.md");
 }
 
-function hostFor(driverKind: string, options: { cfg?: AppConfig; cwd?: string; threadCwd?: string | null } = {}) {
+function hostFor(driverKind: string, options: { cfg?: AppConfig; cwd?: string; threadCwd?: string | null; resumed?: boolean } = {}) {
   const id = `bot-${randomUUID().slice(0, 8)}`;
   const bot = { id, threadId: "main", modelSelection: { instanceId: "engine", model: "m" }, ...(options.cwd ? { cwd: options.cwd } : {}) } as BotRecord;
   const host = createSkillsLibraryHost({
     store: {
       bot: () => undefined,
       messagesFor: () => [],
-      taskByThread: (_botId: string, threadId: string) => (threadId === "pinned" ? { cwd: options.threadCwd } : undefined),
+      taskByThread: (_botId: string, threadId: string) => (threadId === "pinned" ? { cwd: options.threadCwd, resumeCursors: options.resumed ? { engine: "s1" } : {} } : undefined),
     } as unknown as Store,
     cfg: options.cfg ?? ({} as AppConfig),
     appendSkillRequestCard: () => ({ requestId: "", summary: "" }),
@@ -155,6 +160,18 @@ describe("skills the engine loads by itself", () => {
   });
 });
 
+describe("switching a native skill off for one bot", () => {
+  it("shows enabled false on the Skills page and keeps /name from expanding it", async () => {
+    const { setNativeSkillEnabled } = await import("./native-skill-choices.ts");
+    const { host, bot } = hostFor("codex");
+    plant(join(HOME, ".codex", "skills"), "pdf");
+    expect(host.listBotSkills(bot).find((skill) => skill.name === "pdf")).toMatchObject({ origin: "native", enabled: true });
+    setNativeSkillEnabled(bot.id, "pdf", false);
+    expect(host.listBotSkills(bot).find((skill) => skill.name === "pdf")).toMatchObject({ origin: "native", enabled: false });
+    expect(host.expandSkillCommand(bot, "main", "/pdf summarise", undefined, [], true)).toBe("/pdf summarise");
+  });
+});
+
 describe("skills a project ships for any agent", () => {
   const repo = join(PROJECTS, "repo");
   const trusted = { features: { projectSkills: true } } as AppConfig;
@@ -191,12 +208,29 @@ describe("skills a project ships for any agent", () => {
     expect(on.host.expandSkillCommand(on.bot, "main", "/claude-skill go", undefined, [], true)).toContain(`Read ${JSON.stringify(paths.claude)}`);
   });
 
+  it("outside a repository, come from the working folder alone", () => {
+    const loose = join(PROJECTS, "loose", "app");
+    plant(join(PROJECTS, "loose", "agents", "skills"), "above");
+    const here = plant(join(loose, ".agents", "skills"), "here");
+    const { host, bot } = hostFor("codex", { cwd: loose, cfg: trusted });
+    expect(listed(host.listBotSkills(bot))).toEqual(["here:project"]);
+    expect(host.skillsIndex(bot, "main")).toContain(JSON.stringify(here));
+  });
+
   it("follow the folder a turn really works in", () => {
     const paths = plantRepo();
     const { host, bot } = hostFor("codex", { cfg: trusted });
     expect(host.skillsIndex(bot, "main")).toBe("");
     expect(host.skillsIndex(bot, "main", undefined, repo)).toContain(JSON.stringify(paths.agents));
     expect(host.skillsIndex(bot, "main", undefined, null)).toBe("");
+  });
+
+  it("never run from the bot's folder for a resumed thread that will stay where its session is", () => {
+    plantRepo();
+    const { host, bot } = hostFor("codex", { cwd: repo, cfg: trusted, resumed: true });
+    expect(listed(host.listBotSkills(bot, "pinned"))).toEqual([]);
+    expect(host.expandSkillCommand(bot, "pinned", "/claude-skill go", undefined, [], true)).toBe("/claude-skill go");
+    expect(host.expandSkillCommand(bot, "main", "/claude-skill go", undefined, [], true)).toContain("claude-skill");
   });
 
   it("leave .claude/skills to Claude Code, which loads it by itself", () => {

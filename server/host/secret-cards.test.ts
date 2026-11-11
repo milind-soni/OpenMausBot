@@ -53,6 +53,7 @@ function fixture(language?: string, linked?: (vaultStore: VaultStore) => SecretC
 describe("the card a bot asks for a key or secret with", () => {
   it.each([
     ["greenferenceApiKey", "secretCard.greenference.description"],
+    ["modelgoApiKey", "secretCard.modelgo.description"],
     ["geminiTtsKey", "secretCard.geminiTts.description"],
   ] as const)("keeps the fallback and structured description for %s", async (credentialId, baseCode) => {
     const { cards, lines, bot } = fixture();
@@ -114,7 +115,7 @@ describe("a secret a card saves to the Vault", () => {
     expect(one.vaultStore.listSecrets()).toMatchObject([{ name: "Stripe secret key", source: "card", bots: ["ledger"], refOnly: true }]);
     const fromCard = refIn(one.resumed[0]);
     expect(fromCard).toBeDefined();
-    const spent = one.cards.redeemMcpServer({ env: { STRIPE_SECRET_KEY: fromCard } }, "ledger", "t1");
+    const spent = one.cards.redeemMcpServer({ env: { STRIPE_SECRET_KEY: fromCard } }, "ledger", "t1", "stripe");
     if (spent.ok) spent.commit();
     const again = await ask(one, "t2", { label: "stripe-secret-key" });
     expect(again.status).toBe(200);
@@ -122,10 +123,24 @@ describe("a secret a card saves to the Vault", () => {
     expect(fresh).toBeDefined();
     expect(fresh).not.toBe(fromCard);
     expect(one.lines.filter((line) => line.kind === "secret")).toHaveLength(1);
-    const used = one.cards.redeemMcpServer({ env: { STRIPE_SECRET_KEY: fresh } }, "ledger", "t2");
-    expect(used.ok && used.value).toEqual({ env: { STRIPE_SECRET_KEY: KEY } });
+    const used = one.cards.redeemMcpServer({ env: { STRIPE_SECRET_KEY: fresh } }, "ledger", "t2", "stripe");
+    const pointer = `vault:${one.vaultStore.listSecrets()[0]!.id}`;
+    expect(used.ok && used.value).toEqual({ env: { STRIPE_SECRET_KEY: pointer } });
     expect(one.vaultStore.listSecrets()[0]!.lastUsedAt).toBeGreaterThan(0);
     expect(JSON.stringify([one.lines, one.resumed, again, one.vaultStore.listSecrets()])).not.toContain(KEY);
+  });
+
+  it("redeems as a vault: pointer to the saved item, kept out of config.json, and gives only that server the item once it is saved", async () => {
+    const one = fixture();
+    const card = await ask(one, "t1");
+    one.cards.saveCustomSecret("ledger", "t1", String(card.body.messageId), KEY);
+    const item = one.vaultStore.listSecrets()[0]!.id;
+    const redeemed = one.cards.redeemMcpServer({ headers: { Authorization: `Bearer ${refIn(one.resumed[0])}` } }, "ledger", "t1", "stripe");
+    expect(redeemed.ok && redeemed.value).toEqual({ headers: { Authorization: `Bearer vault:${item}` } });
+    expect(JSON.stringify(redeemed)).not.toContain(KEY);
+    expect(one.vaultStore.mcpServerKeys("stripe")).toEqual([]);
+    if (redeemed.ok) redeemed.commit();
+    expect(one.vaultStore.mcpServerKeys("stripe")).toEqual([item]);
   });
 
   it("is not another bot's, and a file for one saved for OpenMausBot's tools only needs its own card", async () => {
@@ -154,6 +169,39 @@ describe("a secret a card saves to the Vault", () => {
     expect(card.status).toBe(201);
     one.cards.saveCustomSecret("ledger", "t1", String(card.body.messageId), "sk_test_fake-card-vault-2");
     expect(one.vaultStore.secretValues()).toEqual(["sk_test_fake-card-vault-2"]);
+  });
+});
+
+describe("Use a saved one on a secret card", () => {
+  const KEY = "sk_test_fake-picked-1";
+  const card = async (one: ReturnType<typeof fixture>, extra: Record<string, unknown> = {}) =>
+    String((await one.cards.requestCredential(one.bot, "t1", { label: "Stripe secret key", reason: "For test charges.", delivery: "ref", ...extra })).body.messageId);
+
+  it("offers saved secrets whose names could fit, by name only; picking one lets the bot use it and answers the card", async () => {
+    const one = fixture();
+    const kept = one.vaultStore.saveSecret({ name: "STRIPE_LIVE_KEY", value: KEY, source: "settings", bots: ["quill"] });
+    one.vaultStore.saveSecret({ name: "GitHub token", value: "ghp_fake-unrelated", source: "settings", bots: "all" });
+    const id = await card(one);
+    expect(one.cards.savedChoices("ledger", "t1", id)).toEqual([{ id: kept.id, name: "STRIPE_LIVE_KEY" }]);
+    expect(await one.cards.useSavedSecret("ledger", "t1", id, kept.id)).toMatchObject({ status: 200, body: { provided: true, resumed: true } });
+    expect(one.vaultStore.listSecrets().find((secret) => secret.id === kept.id)).toMatchObject({ bots: ["quill", "ledger"], lastUsedAt: expect.any(Number) });
+    const ref = /secret-ref:[0-9a-f]{32}/u.exec(one.resumed[0]!)?.[0];
+    const used = one.cards.redeemMcpServer({ env: { STRIPE: ref } }, "ledger", "t1", "stripe");
+    expect(used.ok && used.value).toEqual({ env: { STRIPE: `vault:${kept.id}` } });
+    expect(one.cards.savedChoices("ledger", "t1", id)).toEqual([]);
+    expect(await one.cards.useSavedSecret("ledger", "t1", id, kept.id)).toMatchObject({ status: 409 });
+    expect(JSON.stringify([one.lines, one.resumed])).not.toContain(KEY);
+  });
+
+  it("never offers one given only to the app's own tools for a file, the same-named one the bot already has, or one not offered", async () => {
+    const one = fixture();
+    one.vaultStore.saveSecret({ name: "Stripe test key", value: "fake-ref-only", source: "card", bots: ["quill"], refOnly: true });
+    expect(one.cards.savedChoices("ledger", "t1", await card(one, { delivery: "file" }))).toEqual([]);
+    one.vaultStore.saveSecret({ name: "Stripe secret key", value: "fake-wrong-one", source: "settings", bots: ["ledger"] });
+    const replace = await card(one, { replace: true });
+    expect(one.cards.savedChoices("ledger", "t1", replace).map((choice) => choice.name)).toEqual(["Stripe test key"]);
+    expect(await one.cards.useSavedSecret("ledger", "t1", replace, "not-offered")).toMatchObject({ status: 404 });
+    expect(one.resumed).toEqual([]);
   });
 });
 
@@ -392,8 +440,8 @@ describe("a secret a linked 1Password holds", () => {
     expect(one.calls.filter((call) => call === "items.getAll v1 n1")).toHaveLength(2);
     expect(one.held).toEqual([NOTION]);
     const ref = /secret-ref:[0-9a-f]{32}/u.exec(String(answer.body.text))?.[0];
-    const used = one.cards.redeemMcpServer({ env: { NOTION_TOKEN: ref } }, "ledger", "t1");
-    expect(used.ok && used.value).toEqual({ env: { NOTION_TOKEN: NOTION } });
+    const used = one.cards.redeemMcpServer({ env: { NOTION_TOKEN: ref } }, "ledger", "t1", "stripe");
+    expect(used.ok && used.value).toEqual({ env: { NOTION_TOKEN: expect.stringMatching(/^vault:linked-[0-9a-f]{32}$/u) } });
     expect(one.lines).toEqual([]);
     expect(one.vaultStore.listSecrets()).toEqual([]);
     expect(JSON.stringify(answer)).not.toContain(NOTION);
@@ -420,6 +468,20 @@ describe("a secret a linked 1Password holds", () => {
     expect((await ask(one)).status).toBe(200);
     expect(await ask(one, { replace: true })).toMatchObject({ status: 201 });
     expect(one.held).toEqual([]);
+  });
+
+  it("is offered on a card asking under another name, read from 1Password only when picked", async () => {
+    const one = linked();
+    const id = String((await ask(one, { label: "Notion workspace key" })).body.messageId);
+    expect(one.held).toEqual([]);
+    const choices = one.cards.savedChoices("ledger", "t1", id);
+    expect(choices).toEqual([{ id: expect.any(String), name: "Notion token", provider: "1password" }]);
+    expect(await one.cards.useSavedSecret("ledger", "t1", id, choices[0]!.id)).toMatchObject({ status: 200 });
+    expect(one.held).toEqual([NOTION]);
+    const ref = /secret-ref:[0-9a-f]{32}/u.exec(one.resumed[0]!)?.[0];
+    const used = one.cards.redeemMcpServer({ env: { NOTION_TOKEN: ref } }, "ledger", "t1", "stripe");
+    expect(used.ok && used.value).toEqual({ env: { NOTION_TOKEN: expect.stringMatching(/^vault:linked-[0-9a-f]{32}$/u) } });
+    expect(one.vaultStore.listSecrets()).toEqual([]);
   });
 
   it("tells the bot in plain words when 1Password can't be read, with no card", async () => {

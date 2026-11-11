@@ -3,10 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { initialState, StoreContext, type AppState, type Bot, type Message } from "@/state/store";
-import { needsYouVersion, setTeamPeople, type TeamPeople } from "@/state/team-people";
+import { needsYouVersion, retryTeamPeople, setTeamPeople, type TeamPeople } from "@/state/team-people";
 
 import { InboxAnswers, InboxCaption, RelayLabel } from "./InboxLine";
-import { inboxBotOf, SidebarPeople } from "./SidebarPeople";
+import { inboxBotOf, peopleInOrder, SidebarPeople } from "./SidebarPeople";
 import { pendingApprovals, PendingApprovalPanel } from "./PendingApproval";
 
 const CLEO = { email: "cleo@acme.test", name: "Cleo", role: "owner" };
@@ -24,14 +24,22 @@ const line = (inbox: Message["inbox"], extra: Partial<Message> = {}): Message =>
 afterEach(() => setTeamPeople(null));
 
 describe("the team's people in the sidebar", () => {
-  it("lists everyone with their face, you first, and says what a click does", () => {
+  it("shows everyone as a row of faces, you first, and says what a click does", () => {
     setTeamPeople(asBen);
     const markup = render(createElement(SidebarPeople, { compact: false }));
-    expect(markup).toContain(">People<");
+    expect(markup).toContain('aria-label="People"');
     expect(markup.indexOf("ben@acme.test")).toBeLessThan(markup.indexOf("cleo@acme.test"));
     expect(markup).toMatch(/aria-label="Your inbox: everything sent to you"[^>]*data-person="ben@acme.test"/);
-    expect(markup).toContain("Ben (you)");
     expect(markup).toMatch(/aria-label="Write to Cleo"[^>]*data-person="cleo@acme.test"/);
+  });
+
+  it("is faces only: no row per person that reads as a chat with them, and no heading", () => {
+    setTeamPeople(asBen);
+    const markup = render(createElement(SidebarPeople, { compact: false }));
+    expect(markup).not.toContain(">People<");
+    expect(markup).not.toContain(">Cleo<");
+    expect(markup).not.toMatch(/>Ben[^<]*</);
+    expect(markup).toContain("flex-wrap");
   });
 
   it("shows nothing off a team, or for a team of one", () => {
@@ -47,11 +55,11 @@ describe("the team's people in the sidebar", () => {
     setTeamPeople({ ...asBen, admin: true });
     const listed = render(createElement(SidebarPeople, { compact: false }), { config });
     expect(listed).toContain(invite);
-    expect(listed).toContain("Invite someone</span>");
+    expect(listed).toContain('aria-label="Invite someone"');
     expect(listed.indexOf("cleo@acme.test")).toBeLessThan(listed.indexOf(invite));
     setTeamPeople({ ...asBen, people: [BEN], admin: true });
     const alone = render(createElement(SidebarPeople, { compact: false }), { config });
-    expect(alone).toContain(">People<");
+    expect(alone).toContain('aria-label="People"');
     expect(alone).toContain(invite);
     const rail = render(createElement(SidebarPeople, { compact: true }), { config });
     expect(rail).toContain(invite);
@@ -94,6 +102,44 @@ describe("the team's people in the sidebar", () => {
     expect(inboxBotOf([mausbot, cleos, chief], BEN.email)?.id).toBe("mc");
     expect(inboxBotOf([mausbot, cleos], BEN.email)?.id).toBe("mm");
     expect(inboxBotOf([cleos], BEN.email)).toBeUndefined();
+  });
+});
+
+describe("who is here, in the people list", () => {
+  const ADA = { email: "ada@acme.test", name: "Ada", role: "member" };
+  const config = { team: { id: "team-acme", name: "Acme" } } as AppState["config"];
+
+  it("puts a dot on whoever is here now and lists them after you and before the rest, with no time for the others", () => {
+    setTeamPeople({ ...asBen, presence: true, people: [{ ...ADA, here: false }, { ...CLEO, here: true }, { ...BEN, here: true }] });
+    const markup = render(createElement(SidebarPeople, { compact: false }), { config });
+    expect(markup.indexOf("ben@acme.test")).toBeLessThan(markup.indexOf("cleo@acme.test"));
+    expect(markup.indexOf("cleo@acme.test")).toBeLessThan(markup.indexOf("ada@acme.test"));
+    expect(markup).toMatch(/aria-label="Write to Cleo. Here now"[^>]*data-person="cleo@acme.test"/);
+    expect(markup).toMatch(/aria-label="Write to Ada"[^>]*data-person="ada@acme.test"/);
+    expect(markup.match(/data-here-dot/g)).toHaveLength(1);
+    expect(peopleInOrder([ADA, CLEO, BEN].map((person) => ({ ...person, here: person === ADA }))).map((person) => person.name)).toEqual(["Ben", "Ada", "Cleo"]);
+  });
+
+  it("shows no dot and no time against a server that says nothing about presence", () => {
+    setTeamPeople(asBen);
+    const markup = render(createElement(SidebarPeople, { compact: false }), { config });
+    expect(markup).not.toContain("data-here-dot");
+    expect(markup).toContain('aria-label="Write to Cleo"');
+  });
+
+  it("says the people are loading, and when they could not be read offers to try again", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+    try {
+      retryTeamPeople();
+      expect(render(createElement(SidebarPeople, { compact: false }), { config })).toContain("Loading people…");
+      await vi.waitFor(() => expect(render(createElement(SidebarPeople, { compact: false }), { config })).toContain("data-people-retry"));
+      const failed = render(createElement(SidebarPeople, { compact: false }), { config });
+      expect(failed).toContain("Couldn&#x27;t load people");
+      expect(render(createElement(SidebarPeople, { compact: true }), { config }), "nothing on the rail").toBe("");
+      expect(render(createElement(SidebarPeople, { compact: false })), "nothing off a team").toBe("");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

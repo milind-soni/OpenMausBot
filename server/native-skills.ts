@@ -81,12 +81,15 @@ export function nativeSkills(
 const PROJECT_SKILL_DIRS = [".agents/skills", "agents/skills", ".claude/skills"];
 
 /** The skills a project ships for any agent, in the folders the engine does not load by itself, from `cwd` up to the
- * nearest git root; the nearer folder wins a name. None for a folder inside `dataDir`: those are the app's own, and hold
- * links to the bot's own skills. */
+ * nearest git root, or in `cwd` alone outside a repository, so a folder above the project never counts as part of it;
+ * the nearer folder wins a name. None for a folder inside `dataDir`: those are the app's own, and hold links to the
+ * bot's own skills. */
 export function projectSkills(engine: SkillTurnEngine, options: { cwd: string; dataDir: string; home?: string }): NativeSkill[] {
   if (isInside(options.cwd, options.dataDir)) return [];
   const dirs = engine.driverKind === "claudeAgent" ? PROJECT_SKILL_DIRS.filter((dir) => dir !== ".claude/skills") : PROJECT_SKILL_DIRS;
-  return skillsIn(projectLevels(options.cwd, options.home ?? homedir()).flatMap((level) => dirs.map((dir) => join(level, dir))));
+  const levels = projectLevels(options.cwd, options.home ?? homedir());
+  const inRepo = levels.some((level) => entryExistsWithoutFollowing(join(level, ".git")));
+  return skillsIn((inRepo ? levels : levels.slice(0, 1)).flatMap((level) => dirs.map((dir) => join(level, dir))));
 }
 
 /** After the skills from this computer, in a turn's skills index. */
@@ -102,12 +105,12 @@ export function projectSkillsPrompt(skills: readonly NativeSkill[]): string {
   }, skills);
 }
 
-/** Bot Settings → Skills and the `/` menu: always on, and changed only where it lives. */
-export function nativeSkillListing(skill: NativeSkill): SkillListing & { origin: "native" } {
+/** Bot Settings → Skills and the `/` menu. `enabled` is this bot's switch (default on); the files stay where the engine loads them. */
+export function nativeSkillListing(skill: NativeSkill, enabled = true): SkillListing & { origin: "native" } {
   return {
     name: skill.name,
     description: skill.description,
-    enabled: true,
+    enabled,
     editable: false,
     source: skill.source,
     sha256: skill.sha256,
@@ -120,7 +123,7 @@ export function nativeSkillListing(skill: NativeSkill): SkillListing & { origin:
 
 /** Shown with the bot's skills whether or not they are on, so the owner sees what a project would bring. */
 export function projectSkillListing(skill: NativeSkill, enabled: boolean): SkillListing & { origin: "project" } {
-  return { ...nativeSkillListing(skill), enabled, origin: "project" };
+  return { ...nativeSkillListing(skill, enabled), origin: "project" };
 }
 
 export function readNativeSkillFile(skill: NativeSkill): string | null {

@@ -17,9 +17,12 @@ import {
 } from "./PhoneSetupFlow";
 import { companionPairingMode } from "../lib/phone-setup";
 import { revealPhonePairing } from "../lib/phone-pairing";
+import { showTunnelRetiredNotice } from "../lib/phone-link";
 import { PhonesList } from "./PhonesList";
 import { PairedPhones } from "./PairedPhones";
+import { TailnetComputers } from "./TailnetComputers";
 import { Card, Switch } from "./SettingsPrimitives";
+import { Layer } from "./Layer";
 import { productName } from "../lib/brand";
 import { useStore } from "@/state/store";
 
@@ -28,6 +31,7 @@ export {
   companionPairingMode,
   loadCompanionBridgeState,
   shouldHydrateCompanionEmail,
+  showTunnelRetiredNotice,
 };
 
 export interface CompanionPanelStatus {
@@ -199,6 +203,8 @@ function RouteRow({ c, state, route, blocked }: { c: PhoneSetupController; state
 
 type PairStep = "consent" | "pairing";
 
+const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
+
 /** Pair a device: says what it will turn on before anything listens, then shows the code. */
 export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
   c: PhoneSetupController;
@@ -221,8 +227,33 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
     setStep("pairing");
     c.useLocal();
   };
-  return (
-    <div role="dialog" aria-modal="true" aria-label={step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}
+  const close = step === "consent" ? onClose : () => { c.cancel(); onClose(); };
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const box = root.current;
+    if (box && !box.contains(document.activeElement)) box.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    return () => { if (before?.isConnected) before.focus(); };
+  }, []);
+  // Settings also handles Escape and Tab; capture them first so they act on this dialog only.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const box = root.current;
+      if (!box || event.defaultPrevented || event.isComposing || (event.key !== "Escape" && event.key !== "Tab")) return;
+      event.preventDefault();
+      if (event.key === "Escape") { close(); return; }
+      const controls = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((control) => control.getClientRects().length);
+      if (!controls.length) return;
+      const at = controls.indexOf(document.activeElement as HTMLElement);
+      const next = at < 0 ? (event.shiftKey ? -1 : 0) : at + (event.shiftKey ? -1 : 1);
+      controls.at(next % controls.length)!.focus();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [close]);
+  // An ancestor with backdrop-filter becomes the containing block for `fixed`, so it renders through Layer, on the body.
+  const dialog = (
+    <div ref={root} role="dialog" aria-modal="true" aria-label={step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" data-pair-dialog={step}>
       <div className="flex max-h-full w-full max-w-[460px] flex-col gap-4 overflow-y-auto rounded-2xl bg-card p-5 shadow-xl">
         <div className="text-[15px] font-semibold text-ink">{step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}</div>
@@ -243,7 +274,7 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
               {chosen.length === 0 && <div role="alert" className="text-[12px] text-danger">{t("devices.pair.pickOne")}</div>}
             </div>
             <div className="flex justify-end gap-2">
-              <button type="button" className={button} onClick={onClose}>{t("common.cancel")}</button>
+              <button type="button" className={button} onClick={close}>{t("common.cancel")}</button>
               <button type="button" disabled={chosen.length === 0 || c.busy} onClick={() => void begin()}
                 className="rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-40">{t("devices.route.turnOn")}</button>
             </div>
@@ -253,13 +284,14 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
             <PhoneSetupFlowView controller={c} />
             <div className="text-[12px] leading-relaxed text-ink-secondary">{reachLine(state)}</div>
             <div className="flex justify-end">
-              <button type="button" className={button} onClick={() => { c.cancel(); onClose(); }}>{t("devices.pair.done")}</button>
+              <button type="button" className={button} onClick={close}>{t("devices.pair.done")}</button>
             </div>
           </>
         )}
       </div>
     </div>
   );
+  return <Layer modal>{dialog}</Layer>;
 }
 
 /** A pairing code still open: anyone holding it can pair until it runs out, so it can be revoked here. */
@@ -331,6 +363,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
   const tailscaleOn = state.routes?.tailscale?.on === true;
   const httpsOn = state.routes?.https?.on === true;
   const hosted = state.endpoints?.find((endpoint) => endpoint.kind === "hosted");
+  const pairAgain = c.busy || remoteBlocked ? undefined : () => setPairing("device");
   const pairButton = (label: string) => (
     <button type="button" disabled={c.busy || Boolean(remoteBlocked)} title={managedBy ?? undefined} onClick={() => setPairing("device")}
       className="w-fit rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white disabled:opacity-40" data-pair-device="">
@@ -350,7 +383,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
         ) : (
           <div className="flex flex-col gap-3 rounded-xl border border-hairline/40 bg-card px-4 py-3">
             <div className="text-[13px] font-medium text-ink">{t("devices.simple.yourPhone")}</div>
-            <PairedPhones c={c} state={state} />
+            <PairedPhones c={c} state={state} onPairAgain={pairAgain} />
             <div className="text-[12px] text-ink-secondary">
               {reachLine(state)}{" "}
               <button type="button" className="text-accent hover:underline" onClick={() => setShowRoutes(true)}>{t("devices.change")}</button>
@@ -373,8 +406,13 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
 
       <section className="flex flex-col gap-2" data-devices-block="paired">
         <div className="text-[13px] font-medium text-ink">{t("devices.paired")}</div>
+        {showTunnelRetiredNotice(c.account, state) && (
+          <p role="status" data-devices-notice="tunnel-retired" className="rounded-xl bg-inset px-3 py-2.5 text-[13px] leading-relaxed text-ink">
+            {t("remote.devices.retiredNotice")}
+          </p>
+        )}
         <OpenCodeRow c={c} state={state} />
-        {pairedCount ? <PairedPhones c={c} state={state} /> : !state.pairing && <div className="text-[12px] text-ink-secondary">{t("devices.pairedNone")}</div>}
+        {pairedCount ? <PairedPhones c={c} state={state} onPairAgain={pairAgain} /> : !state.pairing && <div className="text-[12px] text-ink-secondary">{t("devices.pairedNone")}</div>}
         <PhonesList />
       </section>
 
@@ -421,6 +459,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
                 </div>
               </div>
             )}
+            {tailscaleOn && state.routes?.tailscale?.name && <TailnetComputers c={c} state={state} blocked={managedBy} simple={simple} />}
             <div className="flex items-start justify-between gap-4 border-t border-hairline/30 pt-4" data-route-row="https">
               <div className="min-w-0">
                 <div className="text-[13px] text-ink">{t("devices.route.https")}</div>
