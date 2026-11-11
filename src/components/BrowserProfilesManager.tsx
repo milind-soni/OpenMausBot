@@ -1,5 +1,6 @@
 import { useContext, useEffect, useId, useState } from "react";
-import { SETTINGS_INPUT, SettingRow, SettingsEmptyRow, SettingsLook, SettingsRows } from "./SettingsPrimitives";
+import { SETTINGS_INPUT, SettingRow, SettingsEmptyRow, SettingsField, SettingsGroup, SettingsLook, SettingsRows } from "./SettingsPrimitives";
+import { SettingsDialog } from "./settings/SettingsDialog";
 import { Globe, Plus, Trash2 } from "lucide-react";
 import { api, ApiError, useStore, type Bot, type BotAnnouncement, type BrowserProfile, type ConfigStatus } from "@/state/store";
 import { browserProfileDeletionBlockReason, browserProfilesMutation, newBrowserProfileId } from "@/lib/browser-profiles";
@@ -28,6 +29,7 @@ export function BrowserProfilesManager({ bot, onProfileChanged, disabled = false
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
   const fieldId = useId();
   const locked = busy || disabled || canManage !== true;
@@ -161,9 +163,11 @@ export function BrowserProfilesManager({ bot, onProfileChanged, disabled = false
   </>;
   if (settingsLook && !currentBot) {
     return (
+      <SettingsGroup label={t("settings.profiles.title")} block="profiles"
+        actions={<button type="button" disabled={locked || profiles.length >= 20} className="ui-button ui-button-md rounded-full" data-profile-add="" onClick={() => { setAdding(true); setName(""); setError(""); }}>{t("settings.profiles.add")}</button>}>
       <div className="flex min-w-0 flex-col gap-2" aria-busy={busy}>
         <SettingsRows>
-          {!profiles.length && <SettingsEmptyRow>{t("settings.profiles.sharedEmpty")}</SettingsEmptyRow>}
+          {!profiles.length && <SettingsEmptyRow>{t("settings.profiles.noneYet")}</SettingsEmptyRow>}
           {profiles.map((profile) => {
             const users = usersOf(profile.id);
             const blocked = browserProfileDeletionBlockReason(bots, profile.id);
@@ -190,15 +194,25 @@ export function BrowserProfilesManager({ bot, onProfileChanged, disabled = false
               </SettingRow>
             );
           })}
-          <form className="flex items-center gap-2 px-4 py-3" onSubmit={(event) => { event.preventDefault(); void create(); }}>
-            <label htmlFor={`${fieldId}-new`} className="sr-only">{t("settings.profiles.newName")}</label>
-            <input id={`${fieldId}-new`} value={name} onChange={(event) => setName(event.target.value)} maxLength={40} required disabled={locked || profiles.length >= 20} placeholder={t("settings.profiles.newName")} className={SETTINGS_INPUT} />
-            <button type="submit" disabled={locked || !name.trim() || profiles.length >= 20} className="ui-button shrink-0">{t("settings.profiles.add")}</button>
-          </form>
         </SettingsRows>
         {profiles.length >= 20 && <p className="px-4 text-[12px] leading-4 text-ink-secondary">{t("settings.profiles.limit")}</p>}
-        {error && <p role="alert" className="px-4 text-[12px] leading-4 text-danger">{error}</p>}
+        {error && !adding && <p role="alert" className="px-4 text-[12px] leading-4 text-danger">{error}</p>}
       </div>
+      {adding && (
+        <SettingsDialog title={t("settings.profiles.addTitle")} onClose={() => setAdding(false)}
+          footer={<>
+            <button type="button" className="ui-button ui-button-md rounded-full" onClick={() => setAdding(false)}>{t("common.cancel")}</button>
+            <button type="submit" form={`${fieldId}-new-form`} disabled={locked || !name.trim()} className="ui-button ui-button-md ui-button-primary rounded-full">{t("settings.profiles.add")}</button>
+          </>}>
+          <form id={`${fieldId}-new-form`} className="flex flex-col gap-2" onSubmit={(event) => { event.preventDefault(); void create().then(() => setAdding(false)); }}>
+            <SettingsField label={t("settings.profiles.newName")}>
+              <input id={`${fieldId}-new`} value={name} onChange={(event) => setName(event.target.value)} maxLength={40} required disabled={locked} className={SETTINGS_INPUT} />
+            </SettingsField>
+            {error && <p role="alert" className="text-[12px] leading-4 text-danger">{error}</p>}
+          </form>
+        </SettingsDialog>
+      )}
+      </SettingsGroup>
     );
   }
   return (

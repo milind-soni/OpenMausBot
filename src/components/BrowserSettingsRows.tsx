@@ -4,9 +4,7 @@ import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } fro
 import { t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { api, useStore, type ConfigStatus } from "@/state/store";
-import { SettingRow, Switch } from "./SettingsPrimitives";
-import { useSettingsPlace } from "./settings/settings-place";
-import { productName } from "@/lib/brand";
+import { MoreText, SettingRow, Switch } from "./SettingsPrimitives";
 
 /** Saves one config change through PATCH /api/config, one at a time, and shows the server's answer or its error. */
 function useConfigSave() {
@@ -42,14 +40,15 @@ export function BuiltInBrowserRow() {
 
   return (
     <SettingRow
-    title={t("settings.experimental.browserAria")}
+    title={t("settings.browser.rowTitle")}
+    // While it's on, the line says how it stands (Ready, or that it installs on first use), not what the switch does.
     subtitle={desktopBrowser
         ? browser
-        ? t("settings.browser.onShort")
+        ? t("settings.ai.ready")
         : t("settings.browser.offShort")
         : browserBlockedOnWindows
         ? t("settings.experimental.browserWindows")
-        : browserInstallable ? t("settings.browser.notInstalledShort")
+        : browserInstallable ? (browser ? t("settings.browser.installsFirst") : t("settings.browser.notInstalledShort"))
         : browserUnavailableReason(state.config)}
     message={error ? <p role="alert" className="text-danger">{error}</p> : null}
     >
@@ -70,14 +69,13 @@ export function ServerSitesRow() {
   const { state } = useStore();
   const owner = useOwnerOrAdmin();
   const on = state.config?.browserEngine?.serverSites;
-  const place = useSettingsPlace();
   const { saving, error, save } = useConfigSave();
   if (on === undefined || owner !== true || !builtInBrowserEnabled(state.config)) return null;
 
   return (
     <SettingRow
       title={t("settings.browser.localSites")}
-      subtitle={t("settings.browser.localSitesLine", { place: place.name, app: productName() })}
+      subtitle={t("settings.browser.localSitesPlain")}
       message={error ? <p role="alert" className="text-danger">{error}</p> : null}
     >
       <Switch
@@ -99,7 +97,7 @@ export function NewBrowserSettings() {
 
   return (
     <div data-testid="new-browser-settings" className="contents">
-      <SettingRow title={t("settings.experimental.newBrowser")} subtitle={t("settings.experimental.newBrowserDetail")}
+      <SettingRow title={t("settings.experimental.newBrowser")} subtitle={<MoreText short={t("settings.experimental.newBrowserShort")} long={t("settings.experimental.newBrowserDetail")} />}
         message={error ? <span role="alert" className="text-danger">{error}</span> : undefined}>
         <Switch
           checked={on}

@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Segmented, SettingsEmptyRow, SettingsGroup, SettingsLook, SettingsRows } from "./SettingsPrimitives";
+import { SettingRow, SettingsEmptyRow, SettingsGroup, SettingsLook, SettingsRows } from "./SettingsPrimitives";
 import { ArrowLeft, ChevronRight, Download, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { activeLocale, documentLanguage, t } from "@/lib/i18n";
@@ -115,25 +115,7 @@ function WhereItWent({ range, version, onBudget }: { range: { from: string; to: 
   const byBot = useUsageGroups(range, "bot", version);
   const byOther = useUsageGroups(range, other, version);
   useEffect(() => { onBudget(byBot?.budget ?? null); }, [byBot, onBudget]);
-  if (settings) {
-    return (
-      <SettingsGroup label={t("usage.page.where")} block="where"
-        actions={<Segmented label={t("usage.history.groupBy")} value={other} onChange={setOther} options={OTHER_GROUPINGS.map((option) => ({ value: option, label: t(GROUP_LABEL_KEYS[option]) }))} />}>
-        <SettingsRows>
-          <div className="grid gap-6 px-4 py-3 md:grid-cols-2">
-            <div className="flex flex-col gap-2">
-              <div className="text-[12px] leading-4 text-ink-secondary">{t(GROUP_LABEL_KEYS.bot)}</div>
-              {byBot ? <GroupBars groupBy="bot" groups={byBot.groups} /> : <Loader2 size={14} className="animate-spin text-ink-secondary" />}
-            </div>
-            <div className="flex flex-col gap-2">
-              <div className="text-[12px] leading-4 text-ink-secondary">{t(GROUP_LABEL_KEYS[other])}</div>
-              {byOther?.groupBy === other ? <GroupBars groupBy={other} groups={byOther.groups} /> : <Loader2 size={14} className="animate-spin text-ink-secondary" />}
-            </div>
-          </div>
-        </SettingsRows>
-      </SettingsGroup>
-    );
-  }
+  if (settings) return null;
   return (
     <section className="rounded-2xl border border-hairline/50 bg-card p-5" aria-label={t("usage.page.where")}>
       <h3 className="text-[15px] font-medium text-ink">{t("usage.page.where")}</h3>
@@ -160,6 +142,37 @@ function WhereItWent({ range, version, onBudget }: { range: { from: string; to: 
         </div>
       </div>
     </section>
+  );
+}
+
+const SETTINGS_GROUPINGS: readonly UsageGroupBy[] = ["bot", ...OTHER_GROUPINGS];
+
+/** Settings' Where it went: a select (by bot, model, person…) as the section's action, then one row per item. */
+function SettingsWhereItWent({ range, version, onBudget }: { range: { from: string; to: string }; version: number; onBudget: (budget: BudgetState | null) => void }) {
+  const { state } = useStore();
+  const [by, setBy] = useState<UsageGroupBy>("bot");
+  const byBot = useUsageGroups(range, "bot", version);
+  const groups = useUsageGroups(range, by, version);
+  useEffect(() => { onBudget(byBot?.budget ?? null); }, [byBot, onBudget]);
+  const top = groups?.groupBy === by ? [...groups.groups].sort((a, b) => headlineTokens(b) - headlineTokens(a)).filter((group) => headlineTokens(group) > 0).slice(0, 8) : null;
+  return (
+    <SettingsGroup label={t("usage.page.where")} block="where"
+      actions={<Select value={by} onChange={(event) => setBy(event.target.value as UsageGroupBy)} aria-label={t("usage.history.groupBy")}>
+        {SETTINGS_GROUPINGS.map((option) => <option key={option} value={option}>{t(GROUP_LABEL_KEYS[option])}</option>)}
+      </Select>}>
+      <SettingsRows>
+        {!top ? <SettingsEmptyRow>{t("common.checking")}</SettingsEmptyRow>
+          : top.length === 0 ? <SettingsEmptyRow>{t("usage.page.whereEmpty")}</SettingsEmptyRow>
+          : top.map((group) => (
+            <SettingRow key={group.key} title={by === "model" ? modelName(group.label, state.instances) : usageGroupLabel(by, group)}
+              subtitle={t("usage.page.turns", { count: String(group.turns) })}>
+              <span className="text-[13px] leading-5 tabular-nums text-ink-secondary">
+                {formatTokens(headlineTokens(group))}{hasFiniteCost(group.costUsd) && group.costUsd > 0 ? ` · ${formatCost(group.costUsd)}` : ""}
+              </span>
+            </SettingRow>
+          ))}
+      </SettingsRows>
+    </SettingsGroup>
   );
 }
 
@@ -236,12 +249,7 @@ export function UsageSection() {
   const untimed = list?.roots.some((root) => !root.timed);
 
   if (settings) {
-    const periodControls = <span className="flex items-center gap-2">
-      <Select size="sm" value={period} onChange={(event) => { setPeriod(event.target.value as UsagePeriod); setOpen(null); }} aria-label={t("usage.history.period")}>
-        {USAGE_PERIODS.map((option) => <option key={option} value={option}>{t(PERIOD_LABEL_KEYS[option])}</option>)}
-      </Select>
-      <a href={usageExportHref(range)} download className="ui-button">{t("usage.history.export")}</a>
-    </span>;
+    const totals = list?.totals;
     return (
       <div className="flex flex-col gap-6" data-testid="usage-page">
         {open ? (
@@ -251,16 +259,26 @@ export function UsageSection() {
             </button>
           )} />
         ) : <>
-          <SettingsGroup label={t(PERIOD_LABEL_KEYS[period])} block="totals" actions={periodControls} footnote={error ? <span role="alert" className="text-danger">{error}</span> : undefined}>
+          {/* The period select is the section's one action; the totals are rows. */}
+          <SettingsGroup label={t("usage.page.summary")} block="totals"
+            actions={<Select value={period} onChange={(event) => { setPeriod(event.target.value as UsagePeriod); setOpen(null); }} aria-label={t("usage.history.period")}>
+              {USAGE_PERIODS.map((option) => <option key={option} value={option}>{t(PERIOD_LABEL_KEYS[option])}</option>)}
+            </Select>}
+            footnote={error ? <span role="alert" className="text-danger">{error}</span> : undefined}>
             <SettingsRows>
-              <div data-testid="usage-totals">
-                {list ? <StatStrip items={totalsStats(list.totals, t("trace.stat.time"))} />
-                  : <SettingsEmptyRow><Loader2 size={14} className="mr-2 animate-spin" />{t("common.checking")}</SettingsEmptyRow>}
+              <div data-testid="usage-totals" className="contents">
+                {totals ? <>
+                  <SettingRow title={t("trace.stat.cost")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{t("usage.page.estimated", { cost: formatCost(totals.costUsd) })}</span></SettingRow>
+                  <SettingRow title={t("usage.page.runs")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{String(list.roots.length)}{list.next !== undefined ? "+" : ""}</span></SettingRow>
+                  <SettingRow title={t("trace.stat.errors")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{String(totals.errors)}</span></SettingRow>
+                  <SettingRow title={t("trace.stat.time")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{totals.durationMs > 0 ? formatDuration(Math.max(1_000, totals.durationMs)) : "—"}</span></SettingRow>
+                </> : <SettingsEmptyRow>{t("common.checking")}</SettingsEmptyRow>}
               </div>
             </SettingsRows>
           </SettingsGroup>
-          <WhereItWent range={range} version={version} onBudget={setBudget} />
-          <SettingsGroup label={t("usage.page.runs")} block="runs" footnote={untimed ? t("usage.page.untimedNote") : undefined}>
+          <SettingsWhereItWent range={range} version={version} onBudget={setBudget} />
+          <SettingsGroup label={t("usage.page.runs")} block="runs" footnote={untimed ? t("usage.page.untimedNote") : undefined}
+            actions={<a href={usageExportHref(range)} download className="ui-button ui-button-md rounded-full">{t("usage.history.export")}</a>}>
             <SettingsRows>
               {list && !list.roots.length && <SettingsEmptyRow>{t("usage.page.runsEmpty")}</SettingsEmptyRow>}
               {list?.roots.length ? <ul className="flex flex-col p-1">{list.roots.map((root) => <RunRow key={root.id} root={root} onOpen={() => setOpen({ id: root.id, at: root.startedAt })} />)}</ul> : null}

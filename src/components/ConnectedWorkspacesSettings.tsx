@@ -11,7 +11,8 @@ import { sharedComputersEnabled } from "@/lib/feature-flags";
 type SavedWorkspaces = Awaited<ReturnType<NonNullable<NonNullable<Window["ogb"]>["environments"]>["state"]>>;
 
 
-export function ConnectedWorkspacesSettings() {
+/** Your computers (the places list, with its label), then Environments on this computer as a section of its own. */
+export function ConnectedWorkspacesSettings({ label, description }: { label?: string; description?: string } = {}) {
   const advanced = useAdvancedMode();
   const [newOpen, setNewOpen] = useState(false);
   const bridge = window.ogb?.environments;
@@ -88,10 +89,12 @@ export function ConnectedWorkspacesSettings() {
   // This computer's own setups go by the place-name function: the first is This computer, never the machine's name.
   const envLabel = (entry: { name: string; dataDir?: string | null }) => (entry.dataDir ? entry.name : t("rail.thisComputer"));
   return <>
-    {!saved ? <SettingsRows><SettingRow title={t(error ? "servers.yours.loadFailed" : "servers.yours.loading")}>{null}</SettingRow></SettingsRows> :
-      <ServerList saved={saved} busy={busy} sharingOffered={sharingOffered} ownServers={ownServers} appVersion={window.ogb?.app?.version ?? null} onShare={share}
-        onSwitch={(id) => void perform(async () => { await bridge.switch(id); return true; })} onForget={(id) => void perform(() => bridge.forget(id))} onComputerAccess={setComputerId} />}
-    {saved && error && <p role="alert" className="px-4 text-[12px] leading-4 text-danger">{error}</p>}
+    <SettingsGroup label={label} description={description} block="your-computers">
+      {!saved ? <SettingsRows><SettingRow title={t(error ? "servers.yours.loadFailed" : "servers.yours.loading")}>{null}</SettingRow></SettingsRows> :
+        <ServerList saved={saved} busy={busy} sharingOffered={sharingOffered} ownServers={ownServers} appVersion={window.ogb?.app?.version ?? null} onShare={share}
+          onSwitch={(id) => void perform(async () => { await bridge.switch(id); return true; })} onForget={(id) => void perform(() => bridge.forget(id))} onComputerAccess={setComputerId} />}
+      {saved && error && <p role="alert" className="px-4 text-[12px] leading-4 text-danger">{error}</p>}
+    </SettingsGroup>
     {advanced && saved?.packaged && (
       <SettingsGroup label={t("connectedWorkspaces.localTitle")} description={t("connectedWorkspaces.localSubtitle")} block="environments">
         <SettingsRows icons>
@@ -100,7 +103,7 @@ export function ConnectedWorkspacesSettings() {
             const confirming = forgetEntry?.id === entry.id;
             return <Fragment key={entry.id}>
               <SettingRow title={envLabel(entry)} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Laptop size={18} strokeWidth={1.75} aria-hidden="true" /></span>}
-                subtitle={<>{entry.dataDir ?? t("connectedWorkspaces.defaultFolder")}{entry.missing && <> · {t("connectedWorkspaces.missing")}</>}</>}>
+                subtitle={<>{entry.dataDir ?? t("connectedWorkspaces.defaultFolderShort")}{entry.missing && <> · {t("connectedWorkspaces.missing")}</>}</>}>
                 {active ? <span className="text-[13px] leading-5 text-ink-secondary">{t("connectedWorkspaces.current")}</span> : <>
                   <button type="button" disabled={busy} aria-label={t("connectedWorkspaces.switchTo", { name: entry.name })} className="ui-button"
                     onClick={() => void perform(async () => {

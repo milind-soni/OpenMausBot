@@ -11,24 +11,27 @@ const RING_OFFSET = { panel: "ring-offset-panel", card: "ring-offset-card", menu
 export function SwatchRadios({ value, onChange, label, disabled = false, offset = "panel", none = false }: {
   value: CloudSwatch | null; onChange: (swatch: CloudSwatch) => void; label: string; disabled?: boolean; offset?: keyof typeof RING_OFFSET; none?: boolean;
 }) {
-  const focusable = value ?? CLOUD_SWATCH_ORDER[0];
   const plain = (option: CloudSwatch) => none && option === "slate";
+  // With None offered it comes first, and it is the choice while there is no colour.
+  const order = none ? (["slate", ...CLOUD_SWATCH_ORDER.filter((option) => option !== "slate")] as CloudSwatch[]) : CLOUD_SWATCH_ORDER;
+  const chosen = (option: CloudSwatch) => option === value || (none && value === null && option === "slate");
+  const focusable = value ?? order[0];
   return <div role="radiogroup" aria-label={label} aria-disabled={disabled || undefined} className="flex flex-wrap gap-2.5 in-data-[settings-look=simple]:gap-2">
-    {CLOUD_SWATCH_ORDER.map((option) => <button key={option} type="button" role="radio" aria-checked={option === value}
+    {order.map((option) => <button key={option} type="button" role="radio" aria-checked={chosen(option)}
       aria-label={t(plain(option) ? "placeLook.none" : CLOUD_SWATCH_LABEL[option])} title={t(plain(option) ? "placeLook.none" : CLOUD_SWATCH_LABEL[option])}
       data-swatch={option} disabled={disabled} onClick={() => onChange(option)}
       onKeyDown={(event) => {
         const delta = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
         if (!delta) return;
         event.preventDefault();
-        const next = CLOUD_SWATCH_ORDER[(CLOUD_SWATCH_ORDER.indexOf(option) + delta + CLOUD_SWATCH_ORDER.length) % CLOUD_SWATCH_ORDER.length]!;
+        const next = order[(order.indexOf(option) + delta + order.length) % order.length]!;
         onChange(next);
         (event.currentTarget.parentElement?.querySelector(`[data-swatch="${next}"]`) as HTMLElement | null)?.focus();
       }}
       tabIndex={option === focusable ? 0 : -1}
       className={cn("grid size-8 place-items-center rounded-full border transition-[box-shadow] in-data-[settings-look=simple]:size-5 in-data-[settings-look=simple]:border-[0.5px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-default",
         plain(option) ? "border-ink/55 text-ink/55 in-data-[settings-look=simple]:border-hairline in-data-[settings-look=simple]:text-ink-tertiary" : "border-ink/10",
-        option === value && cn("ring-2 ring-ink/70 ring-offset-2 in-data-[settings-look=simple]:ring-ink", RING_OFFSET[offset]), disabled && option !== value && "opacity-50")}
+        chosen(option) && cn("ring-2 ring-ink/70 ring-offset-2 in-data-[settings-look=simple]:ring-ink", RING_OFFSET[offset]), disabled && !chosen(option) && "opacity-50")}
       style={plain(option) ? undefined : { background: swatchFill(option) }}>
       {plain(option) && <span aria-hidden="true" className="h-[1.5px] w-[60%] -rotate-45 rounded-full bg-current" />}
     </button>)}

@@ -5,6 +5,7 @@ import { t } from "@/lib/i18n";
 import { glassPopupFrameStyle, glassPopupTopInset, GLASS_POPUP_GUTTER } from "@/lib/glass-popup";
 import { scrollWithin } from "@/lib/scroll-within";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { setAdvancedMode } from "@/lib/interface-mode";
 import { useStore } from "@/state/store";
 import { useIsTopLayer } from "../Layer";
 import { LicenseExpiryBanner } from "../LicenseExpiryBanner";
@@ -15,7 +16,7 @@ import { useSwitchToComputer } from "./inert";
 import { KEY_CATALOG, keyMatches, type KeyEntry } from "../keys/key-catalog";
 import { openKeySettings } from "../keys/key-focus";
 import { useSettingsContext, useSettingsPlace } from "./settings-context";
-import { pageById, resolveSettingsTarget, searchSettings, visiblePages, type SearchHit, type SettingsPageId } from "./settings-index";
+import { needsAdvanced, pageById, resolveSettingsTarget, searchSettings, visiblePages, type SearchHit, type SettingsPageId } from "./settings-index";
 import { SettingsShellContext, type SettingsShell } from "./settings-shell";
 import { SettingsNav, hitLabel, pageLabel } from "./SettingsNav";
 import { SettingsPageHeader } from "./SettingsPageHeader";
@@ -71,6 +72,8 @@ export function SettingsWindow() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [anchor, target.page]);
+  // A link, a notice or a search result that asks for what only Advanced mode shows turns Advanced on and lands there.
+  useEffect(() => { if (target.advanced) setAdvancedMode(true); }, [target.advanced]);
   useEffect(() => window.ogb?.onOpenAppSettings?.(() => setQuery("")), []);
   useEffect(markOpened, []);
 
@@ -94,7 +97,13 @@ export function SettingsWindow() {
     if (entry.jump === "shortcuts") { close(); dispatch({ type: "toggleShortcuts", open: true }); return; }
     if (entry.jump === "bot") { close(); return; }
     if (hit.elsewhere) { computer.open?.(); return; }
+    if (hit.advanced || needsAdvanced({ page: entry.page, anchor: entry.anchor }, ctx)) setAdvancedMode(true);
     go(entry.page, entry.anchor);
+  };
+  /** Turning Advanced off on a page Simple doesn't show lands on the place's Overview; anywhere else it stays put. */
+  const setAdvanced = (on: boolean) => {
+    if (!on && !pageById(target.page).when({ ...ctx, advanced: false })) dispatch({ type: "toggleAppSettings", open: true, section: "overview" });
+    setAdvancedMode(on);
   };
 
   useEffect(() => {
@@ -166,7 +175,7 @@ export function SettingsWindow() {
             <div className="flex min-h-0 flex-1">
               {(!narrow || showList) && (
                 <SettingsNav ctx={ctx} place={place} pages={pages} current={narrow ? null : target.page} query={query} hits={hits} narrow={narrow}
-                  onQuery={setQuery} onOpen={(next) => go(next)} onHit={openHit} keyHits={keyHits} onKey={openKey} onClose={close} />
+                  onQuery={setQuery} onOpen={(next) => go(next)} onHit={openHit} keyHits={keyHits} onKey={openKey} onClose={close} onAdvanced={setAdvanced} />
               )}
               {(!narrow || !showList) && (
                 <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">

@@ -5,7 +5,9 @@ import { productName } from "@/lib/brand";
 import { computerInventoryRequest } from "@/lib/computer-requests";
 import { useStore } from "@/state/store";
 import { LocalComputerSection } from "../LocalComputerSection";
-import { SettingRow, SettingsGroup, SettingsMark, SettingsRows, StatusDot } from "../SettingsPrimitives";
+import { SettingRow, SettingsGroup, SettingsLinkRow, SettingsMark, SettingsRows, StatusDot } from "../SettingsPrimitives";
+import { useAccountSummary } from "./account-summary";
+import { useOtherPlaces } from "./settings-context";
 import { SettingsDialog } from "./SettingsDialog";
 import { useSettingsShell } from "./settings-shell";
 
@@ -70,11 +72,24 @@ export function DesktopKinds() {
     void read<{ configured: boolean; available: boolean }>("vps").then(setVps);
   }, [cloudHome]);
   useEffect(load, [load]);
+  const summary = useAccountSummary();
+  const others = useOtherPlaces("desktops");
+  const myCloud = others.find((other) => other.kind === "cloud");
+  // With a paid plan, Cloud desktops are My Cloud's: on This computer the row says so and goes there.
+  const onMyCloud = !cloudHome && summary.paid && !cloud?.configured;
   const privateKind: Kind = local?.ready ? "ready" : local?.runtime ? "setup" : "none";
-  const cloudKind: Kind = cloudHome ? "elsewhere" : cloud?.configured ? (cloud.available ? "ready" : "attention") : "none";
+  const cloudKind: Kind = cloudHome ? "elsewhere" : onMyCloud ? "elsewhere" : cloud?.configured ? (cloud.available ? "ready" : "attention") : "none";
   const serversKind: Kind = vps?.configured ? (vps.available ? "ready" : "attention") : "none";
   const row = (kind: Kind, title: string, line: string, icon: React.ReactNode, onSetUp: () => void, data: string) => {
-    const status = statusLine(kind, place.name);
+    const status = statusLine(kind, onMyCloud && data === "cloud" ? myCloud?.name ?? t("cloudSetup.myCloud") : place.name);
+    if (kind === "elsewhere" && onMyCloud && data === "cloud") {
+      return (
+        <div data-desktop-kind={data} className="contents">
+          <SettingsLinkRow title={title} leading={<SettingsMark>{icon}</SettingsMark>} subtitle={<><StatusDot tone={status.tone} />{status.text} · {line}</>}
+            external onClick={() => myCloud?.open()} data={{ "data-desktop-elsewhere": "" }} />
+        </div>
+      );
+    }
     return (
       <div data-desktop-kind={data} className="contents">
         <SettingRow title={title} leading={<SettingsMark>{icon}</SettingsMark>}

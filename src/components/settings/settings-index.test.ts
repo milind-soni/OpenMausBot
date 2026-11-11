@@ -3,7 +3,7 @@ import { setLocale, t } from "@/lib/i18n";
 import { en } from "@/locales";
 import type { AppSettingsSection } from "@/state/store";
 import {
-  LEGACY_SETTINGS, SETTINGS_INDEX, SETTINGS_PAGES, fullContext, resolveSettingsTarget, searchSettings, visiblePages,
+  ADVANCED_PAGES, LEGACY_SETTINGS, SETTINGS_INDEX, SETTINGS_PAGES, fullContext, needsAdvanced, resolveSettingsTarget, searchSettings, visiblePages,
   type SettingsContext,
 } from "./settings-index";
 
@@ -34,8 +34,45 @@ describe("the pages", () => {
     expect(ids(ctx).filter((id) => PLACE_PAGES.includes(id))).toEqual(expected);
   });
 
-  it("is the same in Simple and Advanced: Advanced only adds rows", () => {
-    expect(ids(fullContext({ advanced: true }))).toEqual(ids(fullContext({ advanced: false })));
+  // Owner decision (Nov 11): Simple shows eight entries; Advanced adds You and your bots, Desktops & browser, Spending,
+  // Data and General in their places.
+  it.each(["local only", "This computer, with My Cloud", "My Cloud's page in the desktop window", "My Cloud in a browser (owner)"] as const)(
+    "shows Simple's eight entries for %s", (who) => {
+      expect(ids({ ...PEOPLE[who], advanced: false })).toEqual(["overview", "phone", "ai", "vault", "account", "plan", "app", "appearance"]);
+    });
+
+  it("is shorter in Simple: the five Advanced pages come back in Advanced, in place", () => {
+    const simple = ids(fullContext({ advanced: false }));
+    for (const page of ADVANCED_PAGES) expect(simple).not.toContain(page);
+    expect(ids(fullContext()).filter((id) => simple.includes(id))).toEqual(simple);
+  });
+
+  it("turns Advanced on for a link, a notice or a search hit that asks for an Advanced page or row from Simple", () => {
+    const simple = fullContext({ advanced: false });
+    expect(resolveSettingsTarget("general", simple)).toEqual({ page: "general", advanced: true });
+    expect(resolveSettingsTarget("backups", simple)).toEqual({ page: "data", anchor: "backups", advanced: true });
+    expect(resolveSettingsTarget("decisionModel", simple)).toEqual({ page: "ai", anchor: "routing", advanced: true });
+    expect(resolveSettingsTarget("phone", simple)).toEqual({ page: "phone" });
+    expect(needsAdvanced({ page: "general" }, fullContext())).toBe(false);
+  });
+
+  it.each(Object.keys(LEGACY_SETTINGS) as AppSettingsSection[])("lands old link %s on a real page in Simple too", (id) => {
+    for (const ctx of Object.values(PEOPLE)) {
+      const simple = { ...ctx, advanced: false };
+      const target = resolveSettingsTarget(id, simple);
+      expect(SETTINGS_PAGES.find((page) => page.id === target.page)?.when({ ...simple, advanced: Boolean(target.advanced) })).toBe(true);
+    }
+  });
+
+  it("finds every Advanced-only row from Simple, marked Advanced; Simple's own homes win for moved rows", () => {
+    const simple = fullContext({ advanced: false });
+    for (const query of ["parallel threads", "effort", "spending", "send", "storage"]) {
+      const hit = find(query, simple)[0];
+      expect(hit, query).toBeDefined();
+      expect(hit!.advanced, query).toBe(true);
+    }
+    expect(find("language", simple)[0]?.entry.page).toBe("app");
+    expect(find("backups", simple)[0]?.entry.page).toBe("overview");
   });
 
   it("names Phone & devices the same on every place: there is no This server page", () => {
@@ -127,12 +164,14 @@ describe("search", () => {
   });
 
   it("finds Advanced rows from Simple too, so they can be used in place", () => {
-    expect(first("parallel threads", fullContext({ advanced: false }))?.advanced).toBe(true);
+    expect(find("parallel threads", fullContext({ advanced: false }))[0]?.advanced).toBe(true);
   });
 
   it("lists This computer's rows under On your other places on My Cloud's rail, and never with one place", () => {
     const wifi = find("wifi", PEOPLE["My Cloud's page in the desktop window"]);
     expect(wifi.find((hit) => hit.entry.id === "wifi")?.elsewhere).toBe(true);
+    // My Cloud has no Same Wi-Fi of its own, so its own phone page isn't offered for it.
+    expect(wifi.some((hit) => hit.entry.id === "page:phone")).toBe(false);
     expect(find("wifi", PEOPLE["My Cloud in a browser (owner)"]).some((hit) => hit.entry.id === "wifi")).toBe(false);
   });
 

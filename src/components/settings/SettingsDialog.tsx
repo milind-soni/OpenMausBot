@@ -5,6 +5,19 @@ import { Layer } from "../Layer";
 
 const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+/** A dialog's title and its close button on one line: the 32 px button centred on the 16/22 title. */
+export function DialogTitle({ title, onClose }: { title: string; onClose: () => void }) {
+  return (
+    <div className="-my-[5px] -mr-2 flex items-center justify-between gap-2" data-dialog-title="">
+      <div className="min-w-0 text-[16px] font-semibold leading-[22px] text-ink">{title}</div>
+      <button type="button" onClick={onClose} aria-label={t("common.close")}
+        className="ui-icon-button size-8 shrink-0 cursor-pointer rounded-full text-ink-secondary hover:bg-menu-hover hover:text-ink">
+        <X size={16} aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
 /** A small dialog over Settings: 440 wide, a 16/22 title, the 32 px close at 12/12, and its buttons at the bottom
  * right with the one primary last. It keeps Escape and Tab to itself while open. */
 export function SettingsDialog({ title, onClose, children, footer, label }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; label?: string }) {
@@ -33,11 +46,7 @@ export function SettingsDialog({ title, onClose, children, footer, label }: { ti
       <div ref={root} role="dialog" aria-modal="true" aria-label={label ?? title} data-settings-look="simple" data-settings-dialog=""
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
         <div className="relative flex max-h-full w-full max-w-[440px] flex-col gap-4 overflow-y-auto rounded-2xl border-[0.5px] border-(--settings-edge) bg-app p-6 text-ink shadow-xl">
-          <button type="button" onClick={onClose} aria-label={t("common.close")}
-            className="ui-icon-button absolute right-3 top-3 size-8 cursor-pointer rounded-full text-ink-secondary hover:bg-menu-hover hover:text-ink">
-            <X size={16} aria-hidden="true" />
-          </button>
-          <div className="pr-8 text-[16px] font-semibold leading-[22px] text-ink">{title}</div>
+          <DialogTitle title={title} onClose={onClose} />
           {children}
           {footer && <div className="flex items-center justify-end gap-2">{footer}</div>}
         </div>

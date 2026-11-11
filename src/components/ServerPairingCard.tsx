@@ -8,11 +8,10 @@ import { isOwnerOrAdmin, readSessionState, type SessionState } from "../lib/sess
 import { readMembership } from "../lib/membership";
 import { codeUntil, lastSeen } from "../lib/pairing-time";
 import { revealPhonePairing, takePairOnOpen } from "../lib/phone-pairing";
-import { SettingRow, SettingsGroup, SettingsRows } from "./SettingsPrimitives";
+import { SettingsGroup, SettingsRows } from "./SettingsPrimitives";
 import { Layer } from "./Layer";
-import { StepRow } from "./PhoneDevicesSection";
-import { StoreLinks } from "./PhoneAppLinks";
-import { Smartphone, X } from "lucide-react";
+import { DialogTitle, PairRow } from "./PhoneDevicesSection";
+import { Smartphone } from "lucide-react";
 import { productName } from "@/lib/brand";
 import { Select } from "./Select";
 import { cn } from "@/lib/cn";
@@ -118,10 +117,10 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     return (
       <div ref={root} tabIndex={-1} data-phone-pairing="server" className="flex scroll-mt-4 flex-col gap-6 focus:outline-none">
         <SettingsGroup label={t("phone.pair.section")} block="pair">
-          <SettingsRows icons>
-            <StepRow step={1} title={t("phone.pair.step")} subtitle={t("phone.pair.stepLine", { app: productName() })} reason={reason}>
+          <SettingsRows>
+            <PairRow reason={reason}>
               <button type="button" aria-disabled="true" data-phone-pairing-action={reveal ? "" : undefined} title={reason} className="ui-button ui-button-primary opacity-40">{t("phone.pair.button")}</button>
-            </StepRow>
+            </PairRow>
           </SettingsRows>
           <p data-server-pairing-chat-only className="px-4 text-[12px] leading-4 text-ink-secondary">{t(pairingCodes ? "remote.serverPairing.chatOnly" : "remote.serverPairing.portalChatOnly")}</p>
         </SettingsGroup>
@@ -167,11 +166,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       <div role="dialog" aria-modal="true" aria-label={t("phone.pair.dialogTitle", { place: placeName })} data-settings-look="simple" data-pair-dialog="code"
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onMouseDown={(event) => event.target === event.currentTarget && setOffer(null)}>
         <div className="relative flex max-h-full w-full max-w-[440px] flex-col gap-4 overflow-y-auto rounded-2xl border-[0.5px] border-(--settings-edge) bg-app p-6 shadow-xl">
-          <button type="button" onClick={() => setOffer(null)} aria-label={t("common.close")}
-            className="ui-icon-button absolute right-3 top-3 size-8 cursor-pointer rounded-full text-ink-secondary hover:bg-menu-hover hover:text-ink">
-            <X size={16} aria-hidden="true" />
-          </button>
-          <div className="pr-8 text-[16px] font-semibold leading-[22px] text-ink">{t("phone.pair.dialogTitle", { place: placeName })}</div>
+          <DialogTitle title={t("phone.pair.dialogTitle", { place: placeName })} onClose={() => setOffer(null)} />
           {expired ? (
             <p className="text-[13px] leading-[18px] text-ink-secondary">{t("remote.serverPairing.expired")}</p>
           ) : (
@@ -221,10 +216,9 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     </Select>
   ) : null;
   const pairRow = (
-    <StepRow step={listed.length ? 1 : 2} title={t("phone.pair.step")} reason={pairingCodes ? null : t("remote.serverPairing.portalShort")}
-      subtitle={t("phone.pair.stepLine", { app: productName() })}>
+    <PairRow reason={pairingCodes ? null : t("remote.serverPairing.portalShort")} place={cloudHome ? placeName : undefined}>
       {choices}{pairButton}
-    </StepRow>
+    </PairRow>
   );
 
   return (
@@ -232,16 +226,12 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       {offerPanel}
       {listed.length === 0 ? (
         <SettingsGroup label={t("phone.pair.section")} block="pair">
-          <SettingsRows icons>
-            {pairingCodes && <StepRow step={1} title={t("phone.pair.getApp")} subtitle={<StoreLinks />}>{null}</StepRow>}
-            {pairRow}
-          </SettingsRows>
+          <SettingsRows>{pairRow}</SettingsRows>
           {!simple && pairingCodes && !cloudHome && computerName !== null && <SettingsRows><ComputerNameRow saved={computerName} onSaved={setComputerName} className="px-4 py-3" /></SettingsRows>}
           {!pairingCodes && <p data-server-pairing-portal className="px-4 text-[12px] leading-4 text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
         </SettingsGroup>
       ) : (
-        <>
-          <SettingsGroup label={t(pairingCodes ? "devices.paired" : "remote.serverPairing.portalDevices")} block="paired" actions={pairingCodes ? <span className="flex items-center gap-2">{choices}{pairButton}</span> : undefined}>
+        <SettingsGroup label={t(pairingCodes ? "devices.paired" : "remote.serverPairing.portalDevices")} block="paired" actions={pairingCodes ? <span className="flex items-center gap-2">{choices}{pairButton}</span> : undefined}>
             <SettingsRows icons>
               {listed.map((device) => (
                 <div key={device.id} className="flex min-h-16 items-center gap-3 px-4 py-3" data-paired-device={device.id}>
@@ -260,12 +250,6 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
             </SettingsRows>
             {!pairingCodes && <p data-server-pairing-portal className="px-4 text-[12px] leading-4 text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
           </SettingsGroup>
-          {pairingCodes && (
-            <SettingsGroup label={t("phone.pair.getApp")} block="get-app">
-              <SettingsRows><SettingRow title={t("phone.pair.forPhones", { app: productName() })} subtitle={<StoreLinks />}>{null}</SettingRow></SettingsRows>
-            </SettingsGroup>
-          )}
-        </>
       )}
       {error ? <p className="px-4 text-[12px] leading-4 text-danger">{error}</p> : null}
     </div>

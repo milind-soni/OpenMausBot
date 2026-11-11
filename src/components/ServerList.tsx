@@ -9,7 +9,7 @@ import { cloudColor } from "@/lib/cloud-look";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { OwnServerLink, RailSheet } from "./PlaceAddSheet";
-import { SettingsLinkRow, SettingsRows, SettingsTag, Switch } from "./SettingsPrimitives";
+import { SettingsLinkRow, SettingsRows, Switch } from "./SettingsPrimitives";
 import { CloudTile } from "./cloud-buy/parts";
 
 type Saved = Awaited<ReturnType<NonNullable<NonNullable<Window["ogb"]>["environments"]>["state"]>>;
@@ -112,7 +112,7 @@ export function ServerList({ saved, busy, sharingOffered, ownServers = [], appVe
               {cloudColor(entry.color) ? <CloudTile color={entry.color} size={20} /> : <Icon size={18} strokeWidth={1.75} aria-hidden="true" />}
             </span>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5 truncate text-[14px] leading-5 text-ink">{entry.name}{entry.home && <SettingsTag>{t("servers.homeTag")}</SettingsTag>}</div>
+              <div className="flex items-center gap-1.5 truncate text-[14px] leading-5 text-ink">{entry.name}</div>
               <div data-server-where className="truncate text-[13px] leading-[18px] text-ink-secondary">{where}</div>
               <StatusLine status={status} onTryNow={() => void bridge?.retry?.(entry.id)} onPairAgain={() => pairAgain(entry)} onEdit={() => editAddress(entry)} />
             </div>

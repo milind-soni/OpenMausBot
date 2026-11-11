@@ -24,5 +24,7 @@ export function InertReason({ reason }: { reason?: string }) {
 /** A row that applies here but can't be changed from this page: it stays in place, its control at 40%, with the reason
  * and the way there under it. */
 export function InertRow({ title, subtitle, control, reason }: { title: string; subtitle?: ReactNode; control?: ReactNode; reason?: string }) {
-  return <SettingRow title={title} subtitle={subtitle} inert={<InertReason reason={reason} />}>{control ?? null}</SettingRow>;
+  const computer = useSwitchToComputer();
+  const text = reason ?? t("settings.inert.fromHere", { place: computer.name });
+  return <SettingRow title={title} subtitle={subtitle} inert={<InertReason reason={reason} />} inertText={text}>{control ?? null}</SettingRow>;
 }

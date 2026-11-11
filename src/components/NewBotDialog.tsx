@@ -371,7 +371,7 @@ export function DefaultBotSettings({ simple = false }: { simple?: boolean }) {
   // One control per row: the defaults open their editor; sharing them as a preset is a row of its own.
   if (simple) return <>
     <SettingsLinkRow title={t("newBot.defaults")} subtitle={t("settings.newBot.defaultsLine")} onClick={() => setOpen(true)} data={{ "data-new-bot-defaults": "" }} />
-    <SettingsLinkRow title={t("newBot.sharePreset")} onClick={() => setSharing(true)} data={{ "data-new-bot-share": "" }} />
+    <SettingRow title={t("newBot.sharePresetRow")}><button type="button" className="ui-button" data-new-bot-share="" onClick={() => setSharing(true)}>{t("newBot.shareAction")}</button></SettingRow>
     {dialogs}
   </>;
 

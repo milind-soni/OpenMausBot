@@ -56,7 +56,7 @@ export function ScopeLine({ page, ctx, place }: { page: SettingsPage; ctx: Setti
 export function SettingsPageHeader({ page, ctx, place, scrolled, narrow, missing }: {
   page: SettingsPage; ctx: SettingsContext; place: SettingsPlace; scrolled: boolean; narrow: boolean; missing?: string;
 }) {
-  const intro = INTRO[page.id];
+  const intro = page.id === "app" && !ctx.advanced ? "settings.app.introSimple" : INTRO[page.id];
   const title = page.id === "account" ? t("settings.page.account") : pageLabel(page, place, ctx.desktop);
   return (
     <header data-settings-header="" className={cn("sticky top-0 z-10 flex flex-col gap-1 bg-(--settings-sheet) pb-5", narrow ? "px-8 pt-1" : "pl-4 pt-4",

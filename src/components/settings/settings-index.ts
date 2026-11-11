@@ -14,6 +14,9 @@ export interface SettingsContext {
   desktop: boolean;
   /** this computer's own page */
   here: boolean;
+  /** main says this page is the app's home (home:page): This computer's page, or My Cloud's own page once it is home.
+   * The one source for whether This app's rows (Open at login, Logs and diagnostics) and the account live here. */
+  home: boolean;
   /** a MausBot Cloud's page, personal or a team's */
   cloud: boolean;
   team: boolean;
@@ -44,6 +47,11 @@ export interface SettingsPage {
 const notClient = (ctx: SettingsContext) => !ctx.client;
 /** What only an admin can use: a team's member isn't offered it at all (the installation's AI, desktops, spending, data). */
 const adminPage = (ctx: SettingsContext) => !ctx.client && !(ctx.team && !ctx.admin);
+/** A page Simple mode leaves out: its everyday rows show elsewhere in Simple (Overview, This app, Plan & billing). */
+const advancedOnly = (when: (ctx: SettingsContext) => boolean) => (ctx: SettingsContext) => ctx.advanced && when(ctx);
+/** Simple mode's eight entries: the place (Overview, Phone & devices, AI, Vault), Your account (Plan & billing) and
+ * This app (Appearance). Advanced adds You and your bots, Desktops & browser, Spending, Data and General. */
+export const ADVANCED_PAGES: readonly SettingsPageId[] = ["bots", "desktops", "usage", "data", "general"];
 
 export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "overview", owner: "place", labelKey: "settings.page.overview", synonyms: ["overview", "place", "status", "version", "domain", "address", "sidebar"], when: () => true },
@@ -51,15 +59,15 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     synonyms: ["phone", "pair", "pairing", "qr", "code", "iphone", "android", "mobile", "tablet", "device", "devices", "wifi", "wi-fi", "anywhere", "relay", "remote", "companion", "tailscale", "connect your phone", "get the phone app", "pair a device", "this server", "remote access"] },
   { id: "ai", owner: "place", labelKey: "settings.group.ai", icon: Sparkles, when: adminPage,
     synonyms: ["ai", "models", "model providers", "providers", "engines", "api keys", "keys", "key", "claude", "codex", "openai", "anthropic", "ollama", "lm studio", "local model"] },
-  { id: "bots", owner: "place", labelKey: "settings.page.bots", icon: Bot, when: notClient,
+  { id: "bots", owner: "place", labelKey: "settings.page.bots", icon: Bot, when: advancedOnly(notClient),
     synonyms: ["all bots", "bots", "about you", "about me", "profile", "new bots", "defaults", "effort", "limits", "rules"] },
-  { id: "desktops", owner: "place", labelKey: "settings.page.desktops", icon: Monitor, when: adminPage,
+  { id: "desktops", owner: "place", labelKey: "settings.page.desktops", icon: Monitor, when: advancedOnly(adminPage),
     synonyms: ["bot desktops", "computer", "desktop", "desktops", "browser", "built-in browser", "private desktop", "sandbox", "docker", "podman", "container", "vps", "own server", "cloud desktops"] },
   { id: "vault", owner: "place", labelKey: "settings.section.vault", icon: LockKeyhole, when: notClient,
     synonyms: ["vault", "password", "passwords", "login", "logins", "secrets", "1password", "2fa"] },
-  { id: "usage", owner: "place", labelKey: "settings.page.spending", icon: Coins, when: adminPage,
+  { id: "usage", owner: "place", labelKey: "settings.page.spending", icon: Coins, when: advancedOnly(adminPage),
     synonyms: ["spending", "usage", "cost", "costs", "tokens", "money", "runs", "export csv"] },
-  { id: "data", owner: "place", labelKey: "settings.page.data", icon: Archive, when: adminPage,
+  { id: "data", owner: "place", labelKey: "settings.page.data", icon: Archive, when: advancedOnly(adminPage),
     synonyms: ["data", "backup", "backups", "export", "import", "restore", "storage", "attachments", "activity", "audit"] },
   { id: "people", owner: "place", labelKey: "settings.section.people", icon: Users,
     when: (ctx) => !ctx.client && ctx.admin && (ctx.team || (!ctx.desktop && !ctx.cloud)),
@@ -72,7 +80,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     synonyms: ["plan", "billing", "subscription", "invoice", "receipt", "payment", "card", "upgrade", "trial", "cancel", "refund", "usage & billing", "mausbot cloud", "weekly", "limits"] },
   { id: "app", owner: "app", labelKey: "settings.page.app", when: () => true,
     synonyms: ["this app", "updates", "update", "version", "help", "about", "servers", "your computers", "environments", "diagnostics", "logs", "tour"] },
-  { id: "general", owner: "app", labelKey: "settings.section.general", icon: SlidersHorizontal, when: () => true,
+  { id: "general", owner: "app", labelKey: "settings.section.general", icon: SlidersHorizontal, when: advancedOnly(() => true),
     synonyms: ["general", "language", "typing", "send", "enter", "notifications", "sounds", "startup", "login", "analytics", "privacy", "talk"] },
   { id: "appearance", owner: "app", labelKey: "settings.section.appearance", icon: Palette, when: () => true,
     synonyms: ["appearance", "theme", "skin", "looks", "dark mode", "light mode", "font", "chat width", "layout", "threads", "pins"] },
@@ -116,18 +124,26 @@ export const LEGACY_SETTINGS: Record<Exclude<AppSettingsSection, SettingsPageId>
 
 const isPage = (id: AppSettingsSection): id is SettingsPageId => SETTINGS_PAGES.some((page) => page.id === id);
 
+/** True when a row or section is one Advanced mode adds (on a page Simple shows, or on an Advanced-only page). */
+export function needsAdvanced(target: SettingsTarget, ctx: SettingsContext): boolean {
+  if (ctx.advanced || !pageById(target.page).when({ ...ctx, advanced: true })) return false;
+  if (!pageById(target.page).when(ctx)) return true;
+  return Boolean(target.anchor && SETTINGS_INDEX.some((entry) => entry.page === target.page && entry.anchor === target.anchor && entry.advanced));
+}
+
 /** Where a request for Settings lands here: its page (or Overview when that page can't exist on this place) and the
- * section to scroll to. */
-export function resolveSettingsTarget(requested: AppSettingsSection, ctx: SettingsContext): SettingsTarget & { missing?: SettingsPageId } {
+ * section to scroll to. A page or row only Advanced mode shows comes back with `advanced`: opening it turns Advanced on. */
+export function resolveSettingsTarget(requested: AppSettingsSection, ctx: SettingsContext): SettingsTarget & { missing?: SettingsPageId; advanced?: true } {
   const target = isPage(requested) ? { page: requested } : LEGACY_SETTINGS[requested](ctx);
+  if (needsAdvanced(target, ctx)) return { ...target, advanced: true };
   if (pageById(target.page).when(ctx)) return target;
   return { page: "overview", missing: target.page };
 }
 
-/** A context with every page showing, for tests and previews to narrow down. */
+/** A context with every page showing (Advanced mode), for tests and previews to narrow down. */
 export const fullContext = (over: Partial<SettingsContext> = {}): SettingsContext => ({
-  desktop: true, here: true, cloud: false, team: false, client: false, admin: true, places: false, plan: true,
-  organization: false, environments: true, installations: false, skills: false, advanced: false, ...over,
+  desktop: true, here: true, home: true, cloud: false, team: false, client: false, admin: true, places: false, plan: true,
+  organization: false, environments: true, installations: false, skills: false, advanced: true, ...over,
 });
 
 /** One row, section or page search can open. `label` beats `labelKey` where the name is not a string of the app's. */
@@ -145,6 +161,8 @@ export interface SettingsIndexEntry {
   when?: (ctx: SettingsContext) => boolean;
   /** opens something outside Settings instead of a row */
   jump?: "apps" | "automations" | "shortcuts" | "bot";
+  /** where Simple mode shows this row, when that is another page than Advanced's (General's language on This app) */
+  simple?: { page: SettingsPageId; anchor?: string };
 }
 
 const desk = (ctx: SettingsContext) => ctx.desktop && !ctx.client;
@@ -154,7 +172,6 @@ const browserAdmin = (ctx: SettingsContext) => !ctx.desktop && ctx.admin;
 export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "pair", page: "phone", anchor: "pair", labelKey: "phone.pair.button", sectionKey: "phone.pair.section", topFor: ["phone", "pair", "pairing", "qr", "iphone", "android", "this server", "pair a device", "connect your phone"],
     synonyms: ["code", "mobile", "tablet", "companion", "get the phone app"] },
-  { id: "get-app", page: "phone", anchor: "pair", labelKey: "phone.pair.getApp", sectionKey: "phone.pair.section", synonyms: ["app store", "download", "get the phone app"] },
   { id: "paired", page: "phone", anchor: "paired", labelKey: "devices.paired", synonyms: ["devices", "remove", "revoke", "pair again"] },
   { id: "wifi", page: "phone", anchor: "reach", labelKey: "devices.route.wifi", sectionKey: "phone.reach.title", when: hereOnly, synonyms: ["wifi", "wi-fi", "lan", "local network"] },
   { id: "relay", page: "phone", anchor: "reach", labelKey: "devices.route.relay", sectionKey: "phone.reach.title", when: hereOnly, synonyms: ["anywhere", "relay", "away"] },
@@ -184,7 +201,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "saved-steps", page: "desktops", anchor: "automation", labelKey: "settings.savedSteps.title", advanced: true, synonyms: ["repeat", "saved steps", "without ai"] },
   { id: "vault", page: "vault", labelKey: "settings.section.vault", topFor: ["password", "passwords", "login", "logins"], synonyms: ["secrets", "1password", "2fa", "totp"] },
   { id: "spending", page: "usage", labelKey: "settings.page.spending", topFor: ["spending", "cost", "costs", "tokens", "money"], synonyms: ["usage"] },
-  { id: "backups", page: "data", anchor: "backups", labelKey: "settings.section.backups", synonyms: ["export", "restore", "full backup"] },
+  { id: "backups", page: "data", anchor: "backups", labelKey: "settings.section.backups", simple: { page: "overview", anchor: "your-data" }, synonyms: ["export", "restore", "full backup"] },
   { id: "bring-in", page: "data", anchor: "bring-in", labelKey: "settings.data.bringIn", synonyms: ["import", "move from", "bring"] },
   { id: "move", page: "data", anchor: "move", labelKey: "settings.data.move", when: hereOnly, topFor: ["keep here", "move back", "bring back", "move to cloud"] },
   { id: "storage", page: "data", anchor: "storage", labelKey: "settings.data.storage", synonyms: ["attachments", "clear attachments", "event log", "cleanup", "retention"] },
@@ -199,17 +216,17 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "updates", page: "app", anchor: "updates", labelKey: "settings.updates.title", when: desk, synonyms: ["update", "version", "check for updates", "release"] },
   { id: "your-computers", page: "app", anchor: "your-computers", labelKey: "settings.app.computers", when: desk, synonyms: ["servers", "connect to a server", "environments", "switch"] },
   { id: "help", page: "app", anchor: "help", labelKey: "sidebar.menu.helpShort", synonyms: ["help center", "feedback", "diagnostics", "logs", "tour", "welcome tour"] },
-  { id: "language", page: "general", anchor: "typing", labelKey: "settings.language.title", synonyms: ["language", "translate"] },
+  { id: "language", page: "general", anchor: "typing", labelKey: "settings.language.title", simple: { page: "app", anchor: "typing" }, synonyms: ["language", "translate"] },
   { id: "send-key", page: "general", anchor: "typing", labelKey: "settings.sendKey.title", synonyms: ["enter", "return", "shift+enter", "new line", "keyboard"] },
   { id: "talk", page: "general", anchor: "typing", labelKey: "settings.search.talk", when: desk, topFor: ["voice", "microphone", "mic", "dictation", "talk"] },
-  { id: "notifications", page: "general", anchor: "notifications", labelKey: "notifications.title", topFor: ["notifications", "notify", "alerts", "sounds"], synonyms: ["mute", "silent", "chime", "feed"] },
+  { id: "notifications", page: "general", anchor: "notifications", labelKey: "notifications.title", simple: { page: "app", anchor: "typing" }, topFor: ["notifications", "notify", "alerts", "sounds"], synonyms: ["mute", "silent", "chime", "feed"] },
   { id: "startup", page: "general", anchor: "startup", labelKey: "settings.general.startup", when: desk, synonyms: ["open at login", "startup", "launch"] },
   { id: "analytics", page: "general", anchor: "privacy", labelKey: "settings.general.privacy", synonyms: ["analytics", "usage analytics", "privacy", "telemetry"] },
   { id: "light-dark", page: "appearance", anchor: "look", labelKey: "settings.theme.lightOrDark", topFor: ["dark mode", "night mode", "light mode"], synonyms: ["dark", "light", "system"] },
   { id: "theme", page: "appearance", anchor: "look", labelKey: "settings.theme.title", synonyms: ["skin", "looks", "themes"] },
   { id: "bubbles", page: "appearance", anchor: "look", labelKey: "settings.userBubbles.simpleTitle", synonyms: ["message color", "my messages", "bubbles"] },
   { id: "tool-calls", page: "appearance", anchor: "chat", labelKey: "settings.appearance.chat", synonyms: ["tool calls", "this run", "chat width", "font", "typeface"] },
-  { id: "layout", page: "appearance", anchor: "appearance", labelKey: "settings.appearance.layout", synonyms: ["show your computers", "rail", "window frame", "title bar", "threads", "tools layout", "pinned", "circles", "universal pins", "pinned panels"] },
+  { id: "layout", page: "appearance", anchor: "appearance", labelKey: "settings.appearance.layout", advanced: true, synonyms: ["show your computers", "rail", "window frame", "title bar", "threads", "tools layout", "pinned", "circles", "universal pins", "pinned panels"] },
   { id: "apps", page: "overview", labelKey: "settings.search.apps", jump: "apps", synonyms: ["apps", "gmail", "slack", "calendar", "notion", "connect app", "integrations"] },
   { id: "bot-settings", page: "overview", labelKey: "settings.search.bot", jump: "bot", synonyms: ["approvals", "safety", "routines", "memory", "bot's notifications"] },
   { id: "shortcuts", page: "app", labelKey: "sidebar.menu.shortcuts", jump: "shortcuts", synonyms: ["keyboard shortcuts", "hotkeys", "cheat sheet"] },
@@ -220,11 +237,15 @@ export interface SearchHit {
   /** the row exists only on another place on the rail */
   elsewhere: boolean;
   score: number;
+  /** only Advanced mode shows it: choosing it turns Advanced on */
+  advanced?: boolean;
 }
 
 const PAGE_TOP: Partial<Record<SettingsPageId, readonly string[]>> = {
   phone: ["phone", "phones", "pair", "pairing", "qr", "phone pairing", "mobile"],
 };
+
+const LOCAL_ONLY_WORDS = ["wifi", "wi-fi", "lan", "local network", "tailscale"];
 
 const norm = (text: string) => text.toLocaleLowerCase().replace(/\s+/g, " ").trim();
 
@@ -247,19 +268,26 @@ export function searchSettings(rawQuery: string, ctx: SettingsContext, label: (e
   const query = norm(rawQuery);
   if (!query) return [];
   const hits: SearchHit[] = [];
-  const pages = visiblePages(ctx);
-  for (const page of pages) {
+  // Search finds everything Advanced mode would show; what Simple leaves out comes back marked `advanced`.
+  const every = { ...ctx, advanced: true };
+  const simpleHides = (page: SettingsPageId) => !pageById(page).when(ctx);
+  for (const page of visiblePages(every)) {
+    // A place with no Same Wi-Fi of its own doesn't offer its phone page for "wifi": This computer's row does.
+    if (page.id === "phone" && !ctx.here && LOCAL_ONLY_WORDS.includes(query)) continue;
     // A page named by the word itself ("phone", "pair") comes before its own rows.
     const top = PAGE_TOP[page.id] ?? [];
     const value = top.includes(query) ? 101 : score(query, pageLabel(page), page.synonyms, []) - 1;
-    if (value > 0) hits.push({ entry: { id: `page:${page.id}`, page: page.id, labelKey: page.labelKey }, elsewhere: false, score: value });
+    if (value > 0) hits.push({ entry: { id: `page:${page.id}`, page: page.id, labelKey: page.labelKey }, elsewhere: false, score: value, advanced: simpleHides(page.id) || undefined });
   }
-  for (const entry of SETTINGS_INDEX) {
+  for (const listed of SETTINGS_INDEX) {
+    // Simple shows some of an Advanced page's rows on a page of its own: search lands there instead.
+    const entry = !ctx.advanced && listed.simple ? { ...listed, ...listed.simple } : listed;
     const value = score(query, label(entry), entry.synonyms ?? [], entry.topFor ?? []);
     if (!value) continue;
-    const pageHere = pageById(entry.page).when(ctx);
-    const here = pageHere && (entry.when?.(ctx) ?? true);
-    if (here) hits.push({ entry, elsewhere: false, score: value });
+    const pageHere = pageById(entry.page).when(every);
+    const here = pageHere && (entry.when?.(every) ?? true);
+    const advanced = !ctx.advanced && (Boolean(entry.advanced) || simpleHides(entry.page));
+    if (here) hits.push({ entry, elsewhere: false, score: value, advanced: advanced || undefined });
     else if (ctx.places && ctx.desktop && entry.when === hereOnly && !ctx.here) hits.push({ entry, elsewhere: true, score: value });
   }
   const seen = new Set<string>();

@@ -53,6 +53,7 @@ const navPages = (html: string) => [...html.matchAll(/data-settings-page="([a-z]
 
 describe("the Settings window", () => {
   it("opens with the place, Your account and This app, each headed by an identity row", () => {
+    fixture.advanced = true;
     const html = render();
     expect(navPages(html)).toEqual(["overview", "phone", "ai", "bots", "desktops", "vault", "usage", "data", "account", "app", "general", "appearance"]);
     expect(html).toContain("This computer");
@@ -73,15 +74,48 @@ describe("the Settings window", () => {
     const account = render("account");
     expect(account).toContain("Your MausBot account");
     expect(account).not.toContain("Same on every place");
-    expect(render("general")).toContain("MausBot on this device");
+    expect(render("appearance")).toContain("MausBot on this device");
   });
 
-  it("is one tree in Simple and Advanced; Advanced only adds rows", () => {
+  // Owner decision (Nov 11): Simple's nav is shorter. Eight entries, the same for every person and every rail.
+  const SIMPLE_NAV = ["overview", "phone", "ai", "vault", "account", "plan", "app", "appearance"];
+  const SIMPLE_PEOPLE: Array<[string, () => void]> = [
+    ["a person with only this computer", () => vi.stubGlobal("window", desktopHere({ cloudAccount: { state: () => new Promise(() => {}), onState: () => () => {} } }))],
+    ["This computer's rail, with My Cloud", () => vi.stubGlobal("window", desktopHere({ cloudAccount: { state: () => new Promise(() => {}), onState: () => () => {} }, workspaces: { state: () => new Promise(() => {}), places: () => new Promise(() => {}) } }))],
+    ["My Cloud's rail in the desktop window", () => { vi.stubGlobal("window", { ogb: { platform: "darwin", cloudPlan: { state: () => new Promise(() => {}) }, workspaces: { state: () => new Promise(() => {}), places: () => new Promise(() => {}) } } }); fixture.config = { cloudHome: true }; }],
+    ["My Cloud in a browser", () => { vi.stubGlobal("window", {}); fixture.config = { cloudHome: true }; }],
+  ];
+  it.each(SIMPLE_PEOPLE)("shows Simple's eight entries for %s", (_who, set) => {
+    set();
+    fixture.advanced = false;
+    expect(navPages(render("overview"))).toEqual(SIMPLE_NAV);
+    fixture.advanced = true;
+    const advanced = navPages(render("overview"));
+    for (const page of ["bots", "desktops", "usage", "data", "general"]) expect(advanced).toContain(page);
+  });
+
+  it("keeps the rows a Simple person needs: language and notifications on This app, backups on Overview", () => {
+    fixture.advanced = false;
+    const app = render("app");
+    expect(app).toContain('data-settings-block="typing"');
+    expect(app).toContain("Updates, language, notifications and help.");
+    expect(render("overview")).toContain("Your data");
+    fixture.advanced = true;
+    expect(render("app")).not.toContain('data-settings-block="typing"');
+    expect(render("overview")).not.toContain("Your data");
+  });
+
+  it("turns Advanced on for a link to a page Simple doesn't show, and lands there", () => {
+    fixture.advanced = false;
+    expect(render("general")).toMatch(/data-settings-page-open="general"/);
+    expect(render("backups")).toMatch(/data-settings-page-open="data"/);
+  });
+
+  it("adds rows in Advanced on the pages both modes show", () => {
     fixture.advanced = false;
     const simple = render("appearance");
     fixture.advanced = true;
     const advanced = render("appearance");
-    expect(navPages(simple)).toEqual(navPages(advanced));
     expect(simple).not.toContain("Chat width");
     expect(advanced).toContain("Chat width");
     expect(simple).toContain("Light or dark");
@@ -89,7 +123,7 @@ describe("the Settings window", () => {
   });
 
   it("keeps the Advanced mode switch in the nav footer on every page, and flips it from there", () => {
-    for (const page of ["overview", "phone", "general"] as const) expect(render(page)).toContain('id="settings-advanced-mode"');
+    for (const page of ["overview", "phone", "appearance"] as const) expect(render(page)).toContain('id="settings-advanced-mode"');
     const toggle = fixture.switches.find((props) => props["aria-labelledby"] === "settings-advanced-mode")!;
     toggle.onClick!({} as never);
     expect(fixture.setAdvancedMode).toHaveBeenCalledWith(true);
@@ -110,13 +144,29 @@ describe("the Settings window", () => {
     expect(phone).not.toContain("This server");
     expect(phone).toContain("My Cloud");
     expect(render("overview")).toContain("Always on");
+    fixture.advanced = true;
     const app = render("general");
     expect(app).toContain("Open at login");
     expect(app).toContain('data-settings-inert=""');
   });
 
+  it("decides This app's rows and the account's place from one home: a Cloud page that is the app's home has them live", () => {
+    fixture.advanced = true;
+    fixture.config = { cloudHome: true };
+    const cloudPage = (home: boolean) => vi.stubGlobal("window", { ogb: { platform: "darwin", workspaces: { state: () => new Promise(() => {}), places: () => new Promise(() => {}) },
+      rail: { openComputer: () => Promise.resolve() },
+      ...(home ? { home: {}, openAtLogin: { state: () => new Promise(() => {}), set: () => new Promise(() => {}) }, exportDiagnostics: () => Promise.resolve() } : {}) } });
+    cloudPage(false);
+    expect(render("general")).toContain('data-settings-inert=""');
+    expect(render("app")).toMatch(/Logs and diagnostics[\s\S]*data-settings-reason/);
+    cloudPage(true);
+    expect(render("general")).not.toContain('data-settings-inert=""');
+    expect(render("account")).not.toContain("On This computer");
+  });
+
   it("in a browser: This browser, saved in this browser, with no startup or window rows", () => {
     vi.stubGlobal("window", {});
+    fixture.advanced = true;
     fixture.config = { cloudHome: true };
     const general = render("general");
     expect(general).toContain("This browser");
@@ -143,7 +193,7 @@ describe("the Settings window", () => {
   });
 
   it("uses one switch and one button family: the window draws every row in the Settings look", () => {
-    expect(render("general")).toContain('data-settings-look="simple"');
+    expect(render("appearance")).toContain('data-settings-look="simple"');
   });
 });
 
@@ -160,5 +210,16 @@ describe("the outer menu", () => {
   it("puts your account first, then Phone & devices and Settings, in both modes", () => {
     expect(items(false)).toEqual(["account", "phone-devices", "settings", "plan", "support"]);
     expect(items(true)).toEqual(["account", "phone-devices", "settings", "automations", "plan", "support"]);
+  });
+
+  it("keeps Plan & billing in Settings' group in Advanced, with no divider between them", () => {
+    const rows = profileMenuItems({
+      phone: { key: "phone-devices", label: "Phone & devices", onSelect: () => {} }, update: null,
+      header: { name: "Ada Lovelace", line: "Not signed in", avatar: null, onOpen: () => {} },
+      plan: { key: "plan", label: "Plan & billing", onSelect: () => {} },
+      onSettings: () => {}, onShortcuts: () => {}, onAbout: () => {}, onHelp: () => {}, onFeedback: () => {},
+    });
+    expect(rows.find((item) => item.key === "plan")?.separatorBefore).toBeFalsy();
+    expect(rows.find((item) => item.key === "support")?.separatorBefore).toBe(true);
   });
 });

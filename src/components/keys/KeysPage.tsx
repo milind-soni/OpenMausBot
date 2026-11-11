@@ -13,7 +13,7 @@ import { OllamaServer } from "../OllamaServer";
 import { KEY_CATALOG, KEY_SECTIONS, keyMatches, savedState, type KeyEntry, type KeyId, type KeySectionId } from "./key-catalog";
 import { finishKeyFocus, useKeyFocus, type KeyFocusRequest } from "./key-focus";
 import { AnthropicEveryClaudeBot, OpenAiCompatUrl, OpenCodeProviderKeys, VpsConnection } from "./KeyPanels";
-import { KEY_ROW, KeyRow, MaskedKey, RowHeading, type KeyStatus } from "./KeyRow";
+import { KEY_CONTENT, KEY_ROW, KeyRow, MaskedKey, RowHeading, type KeyStatus } from "./KeyRow";
 
 const CARD = "rounded-xl bg-card in-data-[settings-look=simple]:rounded-[12px] in-data-[settings-look=simple]:border-[0.5px] in-data-[settings-look=simple]:border-(--settings-edge) in-data-[settings-look=simple]:bg-menu";
 const HIGHLIGHT_MS = 1600;
@@ -46,7 +46,7 @@ function PanelRow({ entry, visible }: { entry: KeyEntry; visible: boolean }) {
   return (
     <div data-key-row={entry.id} role="group" aria-labelledby={titleId} className={KEY_ROW}>
       <RowHeading entry={entry} status={status} titleId={titleId} />
-      <div className="flex flex-col gap-2 pl-8">{PANELS[entry.id]?.(visible)}</div>
+      <div className={cn("flex flex-col gap-2", KEY_CONTENT)}>{PANELS[entry.id]?.(visible)}</div>
     </div>
   );
 }
@@ -60,7 +60,7 @@ function ElsewhereRow({ entry }: { entry: KeyEntry }) {
   return (
     <div data-key-row={entry.id} role="group" aria-labelledby={titleId} className={KEY_ROW}>
       <RowHeading entry={entry} status={status} titleId={titleId} />
-      <div className="flex flex-col gap-2 pl-8">
+      <div className={cn("flex flex-col gap-2", KEY_CONTENT)}>
         {saved.configured && <div className="flex"><MaskedKey saved={saved} label={t(entry.labelKey)} /></div>}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {entry.whereKey && <span className="min-w-0 flex-1 text-[12px] leading-4 text-ink-secondary">{t(entry.whereKey)}</span>}

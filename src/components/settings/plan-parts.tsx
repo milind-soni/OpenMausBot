@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { CloudRenewal } from "../../../electron/cloud-list.mjs";
 import type { CloudUsage } from "../../../electron/cloud-home.mjs";
 import { activeLocale, t } from "@/lib/i18n";
@@ -6,7 +6,9 @@ import { meterAmounts, meterLabel, meterPercent, resetLine } from "@/lib/usage-m
 import { CloudCancelSheet, endedLine, type CloudRenewalActions } from "../CloudCancelPlan";
 import { MeterBar, UpgradeButton, type UpgradeUi } from "../CloudUsageMeter";
 import { ProCompareRow } from "../ProIntroduction";
-import { SettingRow, SettingsGroup, SettingsRows } from "../SettingsPrimitives";
+import { SettingRow, SettingsGroup, SettingsLinkRow, SettingsRows } from "../SettingsPrimitives";
+import { fetchTraces, formatCost, usagePeriodRange } from "@/lib/usage-trace";
+import { setAdvancedMode } from "@/lib/interface-mode";
 
 const day = (value: number) => new Intl.DateTimeFormat(activeLocale(), { month: "short", day: "numeric" }).format(new Date(value));
 
@@ -37,22 +39,26 @@ export function ThisWeek({ usage, upgrade }: { usage: CloudUsage; upgrade?: Upgr
   );
 }
 
-/** The last row: Cancel plan (Cancel trial), a quiet button that opens the cancel flow. */
+/** The plan card's last row: a title-only row whose quiet Cancel plan (Cancel trial) opens the cancel flow. */
 export function CancelPlanRow({ renewal, actions, onChanged }: { renewal: CloudRenewal; actions: CloudRenewalActions; onChanged?: () => void }) {
   const [open, setOpen] = useState(false);
   if (renewal.cancelled) return null;
-  return (
-    <SettingsGroup block="cancel">
-      <SettingsRows>
-        <SettingRow title={renewal.renewsAt ? t(renewal.trial ? "settings.plan.trialEnds" : "settings.plan.renews", { date: day(renewal.renewsAt) }) : t(renewal.trial ? "cloudCancel.titleTrial" : "cloudCancel.titlePlan")}>
-          <button type="button" data-cloud-cancel="renewing" data-danger="" className="settings-quiet cursor-pointer" onClick={() => setOpen(true)}>
-            {t(renewal.trial ? "cloudCancel.cancelTrial" : "cloudCancel.cancelPlan")}
-          </button>
-        </SettingRow>
-      </SettingsRows>
-      {open && <CloudCancelSheet renewal={renewal} actions={actions} onClose={(changed) => { setOpen(false); if (changed) onChanged?.(); }} />}
-    </SettingsGroup>
-  );
+  return <>
+    <div data-settings-block="cancel" className="contents">
+      <SettingRow title={t(renewal.trial ? "cloudCancel.cancelTrial" : "cloudCancel.cancelPlan")}>
+        <button type="button" data-cloud-cancel="renewing" data-danger="" className="settings-quiet cursor-pointer" onClick={() => setOpen(true)}>
+          {t("settings.plan.cancelAction")}
+        </button>
+      </SettingRow>
+    </div>
+    {open && <CloudCancelSheet renewal={renewal} actions={actions} onClose={(changed) => { setOpen(false); if (changed) onChanged?.(); }} />}
+  </>;
+}
+
+/** "Renews on Dec 3" ("Trial ends on Dec 3"): the plan row's own status line. */
+export function renewalLine(renewal?: CloudRenewal | null): string | undefined {
+  if (!renewal || renewal.cancelled || !renewal.renewsAt) return undefined;
+  return t(renewal.trial ? "settings.plan.trialEnds" : "settings.plan.renews", { date: day(renewal.renewsAt) });
 }
 
 /** Keep my plan: the page's one primary while the plan is cancelled. */
@@ -70,32 +76,49 @@ export function KeepPlanButton({ actions, onChanged }: { actions: CloudRenewalAc
   </>;
 }
 
-/** One Plan & billing page on every rail: the plan with its one primary, This week, the links, and Cancel plan last.
- * Called as a function (no state of its own), so the tree it returns is the caller's own. */
-export function planLayout({ title, subtitle, message, primary, usage, upgrade, links, cancel, footnote }: {
+/** One Plan & billing page on every rail: one Plan card (the plan with its one primary, Compare plans, the way to My
+ * Cloud, Cancel plan last), then This week. Called as a function (no state of its own), so the tree it returns is the
+ * caller's own. */
+export function planLayout({ title, subtitle, message, primary, usage, upgrade, links, extra, cancel, footnote }: {
   title: string;
   subtitle?: ReactNode;
   message?: ReactNode;
   primary?: ReactNode;
   usage?: CloudUsage | null;
   upgrade?: UpgradeUi;
-  /** Open My Cloud (absent on My Cloud's own page), then Compare plans */
+  /** Open My Cloud (absent on My Cloud's own page) and the like, after Compare plans */
   links?: ReactNode;
+  /** Simple's What this place cost row */
+  extra?: ReactNode;
+  /** the last row: Cancel plan */
   cancel?: ReactNode;
   footnote?: ReactNode;
 }) {
   return <>
     <SettingsGroup label={t("settings.simple.billing.plan")} block="plan" footnote={footnote}>
       <SettingsRows>
-        <SettingRow title={title} subtitle={subtitle} message={message}>{primary ?? null}</SettingRow>
+        <SettingRow title={title} subtitle={subtitle} message={message || undefined}>{primary ?? null}</SettingRow>
+        <ProCompareRow />
+        {links}
+        {extra}
+        {cancel}
       </SettingsRows>
     </SettingsGroup>
     {usage && usage.meters.length > 0 && <ThisWeek usage={usage} upgrade={upgrade} />}
-    <SettingsGroup block="plan-links">
-      <SettingsRows>{links}<ProCompareRow /></SettingsRows>
-    </SettingsGroup>
-    {cancel}
   </>;
+}
+
+/** Simple's line for what this place has cost this week; it opens Spending, turning Advanced mode on. */
+export function SpentRow({ place, onOpen }: { place: string; onOpen: () => void }) {
+  const [cost, setCost] = useState<number | null | undefined>(undefined);
+  useEffect(() => {
+    let alive = true;
+    void fetchTraces(usagePeriodRange("week")).then((list) => { if (alive) setCost(list.totals.costUsd); }).catch(() => { if (alive) setCost(undefined); });
+    return () => { alive = false; };
+  }, []);
+  return <SettingsLinkRow title={t("settings.plan.spent", { place })} data={{ "data-plan-spent": "" }}
+    value={cost === undefined ? undefined : t("settings.plan.spentWeek", { cost: formatCost(cost) })}
+    onClick={() => { setAdvancedMode(true); onOpen(); }} />;
 }
 
 export { endedLine };

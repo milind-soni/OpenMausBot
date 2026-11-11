@@ -11,7 +11,7 @@ import {
 } from "@/lib/feature-flags";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
-import { Switch } from "./SettingsPrimitives";
+import { MoreText, Switch } from "./SettingsPrimitives";
 
 export function SkillReviewSettings() {
   const { state, dispatch } = useStore();
@@ -61,12 +61,12 @@ export function SkillReviewSettings() {
   };
 
   return (
-    <div className="mt-4 border-t border-hairline/30 pt-4" data-testid="skill-review-settings">
+    <div className="border-t-[0.5px] border-(--settings-edge) py-3 first:border-t-0" data-testid="skill-review-settings">
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-[14px] font-medium text-ink">{t("settings.experimental.skillReview")}</div>
-          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            {t(authoring ? "settings.experimental.skillReviewDetail" : "settings.experimental.skillReviewNeedsAuthoring")}
+          <div className="text-[14px] leading-5 text-ink">{t("settings.experimental.skillReview")}</div>
+          <div className="mt-0.5 text-[13px] leading-[18px] text-ink-secondary">
+            {authoring ? <MoreText short={t("settings.experimental.skillReviewShort")} long={t("settings.experimental.skillReviewDetail")} /> : t("settings.experimental.skillReviewNeedsAuthoring")}
           </div>
         </div>
         <Switch

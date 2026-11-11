@@ -5,6 +5,7 @@ import { shareLearnedSkillsMode, skillAuthoringEnabled, skillsLibraryEnabled } f
 import { t } from "@/lib/i18n";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { SkillReviewSettings } from "./SkillReviewSettings";
+import { MoreText } from "./SettingsPrimitives";
 
 const MODES = [
   { value: "off", label: "settings.experimental.shareSkillsOff" },
@@ -38,12 +39,12 @@ export function ShareLearnedSkillsSettings() {
   };
 
   return (
-    <div className="mt-4 border-t border-hairline/30 pt-4" data-testid="share-learned-skills-settings">
+    <div className="border-t-[0.5px] border-(--settings-edge) py-3 first:border-t-0" data-testid="share-learned-skills-settings">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="min-w-0 flex-1">
-          <div className="text-[14px] font-medium text-ink">{t("settings.experimental.shareSkills")}</div>
-          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            {t(authoring ? "settings.experimental.shareSkillsDetail" : "settings.experimental.shareSkillsNeedsAuthoring")}
+          <div className="text-[14px] leading-5 text-ink">{t("settings.experimental.shareSkills")}</div>
+          <div className="mt-0.5 text-[13px] leading-[18px] text-ink-secondary">
+            {authoring ? <MoreText short={t("settings.experimental.shareSkillsShort")} long={t("settings.experimental.shareSkillsDetail")} /> : t("settings.experimental.shareSkillsNeedsAuthoring")}
           </div>
         </div>
         <div className="inline-flex shrink-0 rounded-xl bg-inset p-1" role="radiogroup" aria-label={t("settings.experimental.shareSkillsAria")}>

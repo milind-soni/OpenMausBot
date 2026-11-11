@@ -43,7 +43,7 @@ export function DiagnosticsRow({ simple = false }: { simple?: boolean }) {
   const here = Boolean(window.ogb?.exportDiagnostics);
   return (
     <SettingRow
-      title={t("settings.diagnostics.title")}
+      title={t("settings.app.diagnostics")}
       subtitle={<>{t(simple ? "settings.simple.diagnostics" : "settings.diagnostics.subtitle")}
         {here && window.ogb?.openLogsFolder && <>{" "}<LearnMore label={t("settings.diagnostics.openLogs")} onClick={() => void openLogs()} /></>}</>}
       message={folder || result || !here ? <>

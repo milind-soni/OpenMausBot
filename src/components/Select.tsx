@@ -29,13 +29,13 @@ export function Select({
   const settings = useContext(SettingsLook);
   if (settings) variant = "ghost";
   return (
-    <div data-settings-select={settings ? "" : undefined} className={cn("relative inline-flex min-w-0", settings ? "min-w-[160px] max-w-[240px]" : className)}>
+    <div data-settings-select={settings ? "" : undefined} className={cn("relative inline-flex min-w-0", settings ? "min-w-[160px] max-w-[240px] [width:var(--settings-select-width,auto)]" : className)}>
       {/* The platform draws the open list (white by default) while the options inherit the skin's ink, so they get the menu colour. */}
       <select
         {...props}
         className={cn(
           "peer min-w-0 cursor-pointer appearance-none truncate [color-scheme:var(--code-color-scheme)] [&_option]:bg-menu [&_option]:text-ink disabled:cursor-default disabled:opacity-50",
-          settings ? "w-auto min-w-full max-w-[240px]" : "w-full",
+          settings ? "w-auto min-w-full max-w-[min(240px,var(--settings-select-width,240px))]" : "w-full",
           VARIANTS[variant],
           variant === "ghost" ? GHOST.select : SIZES[size].select,
         )}

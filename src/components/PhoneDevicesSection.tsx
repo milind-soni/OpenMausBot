@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { t } from "@/lib/i18n";
-import { X } from "lucide-react";
 import { SettingsSkeletonCard } from "./settings/SettingsStates";
 import { cn } from "@/lib/cn";
-import { StoreLinks } from "./PhoneAppLinks";
 import type { CompanionAccountState } from "../types/ogb";
 import {
   PhoneSetupFlowView,
@@ -26,6 +24,8 @@ import { PairedPhones } from "./PairedPhones";
 import { TailnetComputers } from "./TailnetComputers";
 import { LearnMore, SettingRow, SettingsFoldRow, SettingsGroup, SettingsLinkRow, SettingsRows, Switch } from "./SettingsPrimitives";
 import { Layer } from "./Layer";
+import { DialogTitle } from "./settings/SettingsDialog";
+export { DialogTitle };
 import { productName } from "../lib/brand";
 import { useStore } from "@/state/store";
 
@@ -189,8 +189,18 @@ const TAILSCALE_HELP = "https://tailscale.com/kb/1017/install";
 
 const ROUTE_LINE = { wifi: "phone.reach.wifiLine", relay: "phone.reach.anywhereLine" } as const;
 
-function RouteRow({ c, state, route, blocked }: { c: PhoneSetupController; state: CompanionState; route: "wifi" | "relay"; blocked: string | null }) {
+function RouteRow({ c, state, route, blocked, onSignIn }: { c: PhoneSetupController; state: CompanionState; route: "wifi" | "relay"; blocked: string | null; onSignIn?: () => void }) {
   const current = state.routes?.[route];
+  // Anywhere needs a free MausBot sign-in: signed out, it stays in place, inert, with the way to sign in under it.
+  const needsSignIn = route === "relay" && c.account?.available !== false && c.account?.status !== "ready";
+  if (needsSignIn && !current?.on && !blocked) {
+    return (
+      <SettingRow title={t(ROUTE_TEXT[route].name, { app: productName() })} subtitle={t(ROUTE_LINE[route])} inertText={t("phone.pair.needsSignInLine", { app: productName() })}
+        inert={<>{t("phone.pair.needsSignInLine", { app: productName() })}{onSignIn && <>{" "}<button type="button" className="pointer-events-auto cursor-pointer text-accent-text hover:underline" data-relay-sign-in="" onClick={onSignIn}>{t("phone.pair.signIn")}</button></>}</>}>
+        <span data-route-row={route} className="contents"><Switch checked={false} aria-label={t(ROUTE_TEXT[route].name, { app: productName() })} tabIndex={-1} /></span>
+      </SettingRow>
+    );
+  }
   const inert = Boolean(blocked) && !current?.on;
   return (
     <SettingRow title={t(ROUTE_TEXT[route].name, { app: productName() })} subtitle={t(ROUTE_LINE[route])}
@@ -208,23 +218,31 @@ type PairRoute = "wifi" | "relay";
 
 const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 
-/** One route to choose, as a radio card: the name, a line, and what it still needs. */
-function RouteCard({ route, chosen, disabled, onChoose, needs, children }: {
-  route: PairRoute; chosen: boolean; disabled?: boolean; onChoose: () => void; needs?: ReactNode; children?: ReactNode;
+/** A short line keeps compound words such as "End-to-end" whole: its hyphens never break a line. */
+const keepWhole = (text: string) => text.replace(/(\p{L})-(?=\p{L})/gu, "$1\u2011");
+
+/** One route to choose, as a radio card: the name, a line, and what it still needs. A selected card has a 1 px ink edge. */
+function RouteCard({ route, chosen, disabled, onChoose, needs, action, hint }: {
+  route: PairRoute; chosen: boolean; disabled?: boolean; onChoose: () => void; needs?: ReactNode;
+  /** under the needs line, at the text's edge: Sign in */
+  action?: ReactNode;
+  /** a note for this way only, under its line (the local network permission) */
+  hint?: ReactNode;
 }) {
   return (
     <div data-route-card={route} data-chosen={chosen ? "" : undefined}
-      className={cn("flex flex-col gap-2 rounded-[12px] bg-menu px-4 py-3 shadow-[inset_0_0_0_0.5px_var(--settings-edge)]", chosen && "shadow-[inset_0_0_0_2px_var(--color-ink)]")}>
+      className={cn("flex flex-col gap-1 rounded-[12px] bg-menu px-4 py-3", chosen ? "shadow-[inset_0_0_0_1px_var(--color-ink)]" : "shadow-[inset_0_0_0_0.5px_var(--settings-edge)]")}>
       <label className={cn("flex items-start gap-3", disabled ? "cursor-default" : "cursor-pointer")}>
         <input type="radio" name="pair-route" value={route} checked={chosen} disabled={disabled} onChange={onChoose}
           className="mt-0.5 size-4 shrink-0 accent-[var(--color-ink)] disabled:opacity-40" />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className={cn("text-[14px] leading-5", disabled ? "text-ink-secondary" : "text-ink")}>{t(ROUTE_TEXT[route].name, { app: productName() })}</span>
-          <span className="text-[13px] leading-[18px] text-ink-secondary">{t(ROUTE_LINE[route])}</span>
+          <span className="text-[13px] leading-[18px] text-ink-secondary">{keepWhole(t(ROUTE_LINE[route]))}</span>
           {needs && <span className="text-[12px] leading-4 text-ink-secondary">{needs}</span>}
+          {hint && <span className="mt-1 text-[12px] leading-4 text-ink-secondary">{hint}</span>}
         </span>
-        {children}
       </label>
+      {action && <div className="pl-7">{action}</div>}
     </div>
   );
 }
@@ -289,28 +307,23 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false, pla
     <div ref={root} role="dialog" aria-modal="true" aria-label={title}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" data-pair-dialog={step} data-settings-look="simple">
       <div className="relative flex max-h-full w-full max-w-[440px] flex-col gap-4 overflow-y-auto rounded-2xl border-[0.5px] border-(--settings-edge) bg-app p-6 shadow-xl">
-        <button type="button" onClick={close} aria-label={t("common.close")}
-          className="ui-icon-button absolute right-3 top-3 size-8 cursor-pointer rounded-full text-ink-secondary hover:bg-menu-hover hover:text-ink">
-          <X size={16} aria-hidden="true" />
-        </button>
-        <div className="pr-8 text-[16px] font-semibold leading-[22px] text-ink">{title}</div>
+        <DialogTitle title={title} onClose={close} />
         {step === "consent" ? (
           <>
             <p className="text-[13px] leading-[18px] text-ink-secondary">{t("phone.pair.howReach")}</p>
             <div role="radiogroup" aria-label={t("phone.pair.howReach")} className="flex flex-col gap-2">
-              <RouteCard route="wifi" chosen={picked === "wifi"} onChoose={() => setPicked("wifi")} />
-              {localHint && <p data-local-network-hint="" className="px-4 text-[12px] leading-4 text-ink-secondary">{t("phone.pair.localNetworkHint", { app: productName() })}</p>}
+              <RouteCard route="wifi" chosen={picked === "wifi"} onChoose={() => setPicked("wifi")}
+                hint={localHint ? <span data-local-network-hint="">{t("phone.pair.localNetworkHint", { app: productName() })}</span> : undefined} />
               {relayAvailable && (
                 <RouteCard route="relay" chosen={picked === "relay"} disabled={!signedIn} onChoose={() => setPicked("relay")}
-                  needs={signedIn ? undefined : t("phone.pair.needsSignIn", { app: productName() })}>
-                  {!signedIn && (
-                    <button type="button" className="ui-button shrink-0 self-center" data-pair-sign-in=""
-                      onClick={(event) => { event.preventDefault(); setStep("sign-in"); c.start(); }}>{t("phone.pair.signIn")}</button>
-                  )}
-                </RouteCard>
+                  needs={signedIn ? undefined : t("phone.pair.needsSignIn", { app: productName() })}
+                  action={!signedIn && (
+                    <button type="button" className="cursor-pointer text-[12px] font-medium leading-4 text-accent-text hover:underline focus-visible:underline" data-pair-sign-in=""
+                      onClick={() => { setStep("sign-in"); c.start(); }}>{t("phone.pair.signIn")}</button>
+                  )} />
               )}
             </div>
-            <p className="text-[12px] leading-4 text-ink-secondary">{t("phone.pair.foot")}</p>
+            <p className="text-[12px] leading-4 text-ink-secondary">{t("phone.pair.footShort")}</p>
             <div className="flex justify-end gap-2">
               <button type="button" className="ui-button" onClick={close}>{t("common.cancel")}</button>
               <button type="button" disabled={c.busy} onClick={() => void begin()} className="ui-button ui-button-primary" data-pair-turn-on="">{t("phone.pair.turnOnShow")}</button>
@@ -434,25 +447,19 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
 
       {pairedCount === 0 && !state.pairing ? (
         <SettingsGroup label={t("phone.pair.section")} block="pair">
-          <SettingsRows icons>
-            <StepRow step={1} title={t("phone.pair.getApp")} subtitle={<StoreLinks />}>{null}</StepRow>
-            <StepRow step={2} title={t("phone.pair.step")} subtitle={t("phone.pair.stepLine", { app: productName() })} reason={remoteBlocked}>{pairButton}</StepRow>
+          <SettingsRows>
+            <PairRow reason={remoteBlocked}>{pairButton}</PairRow>
           </SettingsRows>
         </SettingsGroup>
       ) : (
-        <>
-          <SettingsGroup label={t("devices.paired")} block="paired" actions={pairButton}>
-            {showTunnelRetiredNotice(c.account, state) && (
-              <p role="status" data-devices-notice="tunnel-retired" className="px-4 text-[12px] leading-4 text-warning">{t("remote.devices.retiredShort")}</p>
-            )}
-            {remoteBlocked && <p role="status" className="px-4 text-[12px] leading-4 text-ink-secondary">{remoteBlocked}</p>}
-            {state.pairing && <SettingsRows><OpenCodeRow c={c} state={state} /></SettingsRows>}
-            <PairedPhones c={c} state={state} onPairAgain={pairAgain} />
-          </SettingsGroup>
-          <SettingsGroup label={t("phone.pair.getApp")} block="get-app">
-            <SettingsRows><SettingRow title={t("phone.pair.forPhones", { app: productName() })} subtitle={<StoreLinks />}>{null}</SettingRow></SettingsRows>
-          </SettingsGroup>
-        </>
+        <SettingsGroup label={t("devices.paired")} block="paired" actions={pairButton}>
+          {showTunnelRetiredNotice(c.account, state) && (
+            <p role="status" data-devices-notice="tunnel-retired" className="px-4 text-[12px] leading-4 text-warning">{t("remote.devices.retiredShort")}</p>
+          )}
+          {remoteBlocked && <p role="status" className="px-4 text-[12px] leading-4 text-ink-secondary">{remoteBlocked}</p>}
+          {state.pairing && <SettingsRows><OpenCodeRow c={c} state={state} /></SettingsRows>}
+          <PairedPhones c={c} state={state} onPairAgain={pairAgain} />
+        </SettingsGroup>
       )}
 
       {!reachOpen ? (
@@ -465,7 +472,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
         <SettingsGroup label={t("phone.reach.title")} block="reach">
           <SettingsRows>
             <RouteRow c={c} state={state} route="wifi" blocked={managedBy} />
-            <RouteRow c={c} state={state} route="relay" blocked={managedBy} />
+            <RouteRow c={c} state={state} route="relay" blocked={managedBy} onSignIn={() => setPairing("device")} />
             <SettingRow title={t("remote.keepAwake")} subtitle={t("phone.reach.awakeLine")} inert={!anyRoute ? t("remote.keepAwakeNeedsRoute") : undefined}>
               <Switch checked={state.keepAwake} aria-label={t("remote.keepAwakeAria")} disabled={c.busy || !anyRoute}
                 onClick={() => void c.act((companion) => companion.keepAwake(!state.keepAwake))} />
@@ -506,6 +513,18 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
       <PhonesList />
       {(c.error || state.error) && <div className="px-4 text-[12px] leading-4 text-danger">{c.error ?? state.error}</div>}
     </div>
+  );
+}
+
+/** Pair: one row in a plain card. Where to get the phone app is said in plain words, with no link: the desktop app never
+ * opens a store or a download. */
+export function PairRow({ reason, place, children }: { reason?: string | null; place?: string; children: React.ReactNode }) {
+  const line = t("phone.pair.installPlain", { app: productName() });
+  return (
+    <SettingRow title={t("phone.pair.step")} subtitle={place ? `${line} ${t("phone.pair.alwaysOn", { place })}` : line}
+      message={reason ?? undefined}>
+      {children}
+    </SettingRow>
   );
 }
 

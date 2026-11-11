@@ -63,21 +63,27 @@ beforeEach(() => {
 });
 
 describe("AutomaticRecoverySettings", () => {
-  it("starts off and explains scope, bounded recovery, no replay, provider charges and that a bot's own backups need no switch", () => {
+  it("starts off with one short line, and Learn more explains scope, no replay, provider charges and a bot's own backups", () => {
     const view = render();
     expect(view.toggle.props.checked).toBe(false);
     expect(view.engine.props.disabled).toBe(true);
     expect(view.save.props.disabled).toBe(true);
-    expect(view.html).toContain("If an ACP model provider (such as Qwen or OpenCode) fails before starting, try a backup once. Work that may have already run is not replayed.");
-    expect(view.html).toContain("direct bot threads, including Chief and work handed on");
-    expect(view.html).toContain("Channels are not included");
-    expect(view.html).toContain("Only this thread switches; bot defaults stay unchanged.");
-    expect(view.html).toContain("Permissions stay unchanged; some provider switches need confirmation.");
-    expect(view.html).toContain("can incur charges from its provider");
-    expect(view.html).toContain('for="automatic-recovery-engine"');
-    expect(view.html).toContain('for="automatic-recovery-model"');
-    expect(view.html).toContain("Bots with backups of their own (Model → Backup models for this bot) use those instead, whether or not this is on.");
-    expect(view.html).toContain('aria-describedby="automatic-recovery-help automatic-recovery-scope automatic-recovery-own"');
+    expect(view.html).toContain("If a provider fails before it starts, try a backup once.");
+    expect(view.html).toContain("Learn more");
+    expect(view.html).not.toContain("Channels are not included");
+    expect(view.html).toContain('aria-label="Backup provider"');
+    expect(view.html).toContain('aria-label="Backup model"');
+    expect(view.html).toContain('aria-describedby="automatic-recovery-help"');
+    // Learn more (the fourth piece of state) opens the rest under the row.
+    fixture.values[3] = true;
+    const more = render().html;
+    expect(more).toContain("If an ACP model provider (such as Qwen or OpenCode) fails before starting, try a backup once. Work that may have already run is not replayed.");
+    expect(more).toContain("direct bot threads, including Chief and work handed on");
+    expect(more).toContain("Channels are not included");
+    expect(more).toContain("Only this thread switches; bot defaults stay unchanged.");
+    expect(more).toContain("Permissions stay unchanged; some provider switches need confirmation.");
+    expect(more).toContain("can incur charges from its provider");
+    expect(more).toContain("Bots with backups of their own (Model → Backup models for this bot) use those instead, whether or not this is on.");
   });
 
   it("requires a ready backup, preserves drafts through broadcasts and failed saves, and saves only once", async () => {

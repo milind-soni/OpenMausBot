@@ -173,11 +173,11 @@ export function ThreadCleanupSettings() {
   return (
     <SettingsGroup label={t("settings.threadCleanup.title")} block="cleanup">
       <SettingsRows>
-        <SettingRow title={t("settings.threadCleanup.retention.title")} subtitle={<>{t("settings.threadCleanup.retention.short")}{confirmedRetentionDays !== null && field("retention")}</>}>
+        <SettingRow title={t("settings.threadCleanup.retention.title")} subtitle={confirmedRetentionDays !== null ? <>{t("settings.threadCleanup.retention.short")}{field("retention")}</> : t("settings.threadCleanup.retention.plain")}>
           <Switch id="thread-log-retention-enabled" checked={confirmedRetentionDays !== null} disabled={pending !== null}
             aria-label={t("settings.threadCleanup.retention.title")} onClick={() => toggleRetention(confirmedRetentionDays === null)} />
         </SettingRow>
-        <SettingRow title={t("settings.threadCleanup.cap.title")} subtitle={<>{t("settings.threadCleanup.cap.short")}{confirmedCapBytes !== null && field("cap")}</>}
+        <SettingRow title={t("settings.threadCleanup.cap.title")} subtitle={confirmedCapBytes !== null ? <>{t("settings.threadCleanup.cap.short")}{field("cap")}</> : t("settings.threadCleanup.cap.plain")}
           message={pending !== null ? <span role="status">{t("settings.threadCleanup.saving")}</span> : error ? <span role="alert" className="text-danger">{error}</span> : undefined}>
           <Switch id="thread-log-cap-enabled" checked={confirmedCapBytes !== null} disabled={pending !== null}
             aria-label={t("settings.threadCleanup.cap.title")} onClick={() => toggleCap(confirmedCapBytes === null)} />

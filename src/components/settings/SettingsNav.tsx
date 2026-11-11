@@ -39,7 +39,13 @@ export function PlaceBadge({ place, size }: { place: Pick<SettingsPlace, "kind" 
 }
 
 export function AppIcon({ size }: { size: number }) {
-  return <img src="/app-icon.svg" alt="" width={size} height={size} className="shrink-0 rounded-[6px]" style={{ width: size, height: size }} />;
+  // A 0.5 px edge keeps the tile's shape on a dark sheet, where its own black would melt into Midnight's.
+  return (
+    <span className="relative shrink-0" style={{ width: size, height: size }}>
+      <img src="/app-icon.svg" alt="" width={size} height={size} className="rounded-[6px]" style={{ width: size, height: size }} />
+      <span aria-hidden="true" className="absolute inset-0 rounded-[6px] shadow-[inset_0_0_0_0.5px_var(--settings-edge)]" />
+    </span>
+  );
 }
 
 export function YouAvatar({ size }: { size: number }) {
@@ -101,9 +107,9 @@ function PageItem({ page, label, current, dot, onOpen }: { page: SettingsPage; l
     <button type="button" data-settings-page={page.id} data-settings-section={page.id} aria-current={current ? "page" : undefined} onClick={onOpen}
       className={cn(NAV_ITEM, current ? "bg-menu-active font-medium" : "hover:bg-menu-hover")}>
       <span className="flex w-6 shrink-0 justify-center">{Icon && <Icon size={16} strokeWidth={1.75} aria-hidden="true" className={current ? "text-ink" : "text-ink-secondary"} />}</span>
-      <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)]" title={label}>
-        <span className="min-w-0 truncate [grid-area:1/1]">{label}</span>
-        <span aria-hidden="true" className="invisible h-0 min-w-0 truncate font-medium [grid-area:1/1]">{label}</span>
+      <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] overflow-hidden" title={label}>
+        <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap [grid-area:1/1]">{label}</span>
+        <span aria-hidden="true" className="invisible h-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-medium [grid-area:1/1]">{label}</span>
       </span>
       {dot && <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", dot === "success" ? "bg-success" : "bg-warning")} />}
     </button>
@@ -125,6 +131,8 @@ export interface NavProps {
   onKey: (entry: KeyEntry) => void;
   onClose: () => void;
   narrow: boolean;
+  /** the footer's Advanced mode switch */
+  onAdvanced?: (on: boolean) => void;
 }
 
 export function SettingsSearchField({ query, onQuery, onClose, onFirst }: { query: string; onQuery: (query: string) => void; onClose: () => void; onFirst: () => void }) {
@@ -144,7 +152,7 @@ export function SettingsSearchField({ query, onQuery, onClose, onFirst }: { quer
         }}
         placeholder={t("settings.searchAria")}
         aria-label={t("settings.searchAria")}
-        className="h-full w-full min-w-0 bg-transparent text-[13px] leading-5 text-ink outline-none placeholder:text-ink-tertiary"
+        className="h-full w-full min-w-0 text-ellipsis bg-transparent text-[13px] leading-5 text-ink outline-none placeholder:text-ink-tertiary"
       />
       {query ? (
         <button type="button" aria-label={t("settings.search.clear")} onClick={() => onQuery("")} className="flex size-4 shrink-0 cursor-pointer items-center justify-center text-ink-tertiary hover:text-ink">
@@ -167,7 +175,7 @@ function moveFocus(event: ReactKeyboardEvent<HTMLElement>) {
   items[next]?.focus();
 }
 
-export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, onKey, onQuery, onOpen, onHit, onClose, narrow }: NavProps) {
+export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, onKey, onQuery, onOpen, onHit, onClose, narrow, onAdvanced = setAdvancedMode }: NavProps) {
   const summary = useAccountSummary();
   const { profile } = useYou();
   // Until main shares the account with a Cloud's page, its email is the one the place knows you by.
@@ -215,18 +223,18 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, 
           );
         })}
       </div>
-      {!SIMPLE_ONLY && <AdvancedModeFooter narrow={narrow} />}
+      {!SIMPLE_ONLY && <AdvancedModeFooter narrow={narrow} onChange={onAdvanced} />}
     </nav>
   );
 }
 
-function AdvancedModeFooter({ narrow }: { narrow: boolean }) {
+function AdvancedModeFooter({ narrow, onChange }: { narrow: boolean; onChange: (on: boolean) => void }) {
   const advanced = useAdvancedMode();
   return (
     <div data-settings-block="advanced-mode" title={t("settings.advancedMode.tooltip")}
       className={cn("flex h-12 shrink-0 items-center justify-between gap-3 border-t-[0.5px] border-(--settings-edge)", narrow ? "px-4" : "px-5")}>
       <span id="settings-advanced-mode" className="text-[13px] leading-5 text-ink">{t("settings.advancedMode.title")}</span>
-      <Switch checked={advanced} aria-labelledby="settings-advanced-mode" data-settings-advanced-switch="" onClick={() => setAdvancedMode(!advanced)} />
+      <Switch checked={advanced} aria-labelledby="settings-advanced-mode" data-settings-advanced-switch="" onClick={() => onChange(!advanced)} />
     </div>
   );
 }
@@ -288,11 +296,11 @@ function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place
       className="flex w-full cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
       <span className="flex h-5 w-6 shrink-0 items-center justify-center text-ink-secondary">{Icon && <Icon size={16} strokeWidth={1.75} aria-hidden="true" />}</span>
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="flex items-center gap-1.5 text-[13px] leading-5 text-ink">
-          <span className="truncate">{highlight(label, query)}</span>
-          {entry.advanced && !ctx.advanced && <SettingsTag>{t("settings.simple.advanced")}</SettingsTag>}
+        <span className="flex min-w-0 items-center justify-start gap-1.5 text-[13px] leading-5 text-ink">
+          <span data-settings-hit-title="" className="min-w-0 flex-[0_1_auto] overflow-hidden text-ellipsis whitespace-nowrap">{highlight(label, query)}</span>
+          {hit.advanced && !ctx.advanced && <span className="flex flex-none"><SettingsTag>{t("settings.simple.advanced")}</SettingsTag></span>}
         </span>
-        {location && <span className="line-clamp-2 text-[12px] leading-4 text-ink-secondary">{location}</span>}
+        {location && <span data-settings-hit-location="" title={location} className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] leading-4 text-ink-secondary">{location}</span>}
       </span>
       {entry.jump && <ArrowUpRight size={12} aria-hidden="true" className="mt-1 shrink-0 text-ink-tertiary" />}
     </button>
@@ -317,13 +325,21 @@ export function searchLocation(hit: SearchHit, place: SettingsPlace, ctx: Settin
   if (entry.jump === "automations") return t("settings.search.opensAutomations");
   if (entry.jump === "shortcuts") return t("settings.search.opensShortcuts");
   const owner = PAGE_OWNER[entry.page];
-  // The place on screen goes without saying; another place, your account and this app are named.
-  const ownerName = hit.elsewhere ? t("rail.thisComputer") : owner === "place" ? null : ownerLabel(owner, place, ctx.desktop);
+  // Every location starts with its owner (the place, Your account, This app), so the path reads the same everywhere.
+  const ownerName = hit.elsewhere ? t("rail.thisComputer") : owner === "place" ? place.name : ownerLabel(owner, place, ctx.desktop);
   const pageKey = PAGE_KEY[entry.page];
-  const parts: string[] = ownerName ? [ownerName] : [];
+  const parts: string[] = [ownerName];
   if (pageKey && !entry.id.startsWith("page:")) parts.push(t(pageKey));
   const label = hitLabel(hit, place, ctx.desktop);
   if (entry.sectionKey && t(entry.sectionKey) !== label) parts.push(t(entry.sectionKey));
-  if (parts.length === 0 && entry.id.startsWith("page:")) return owner === "place" ? place.name : "";
-  return parts.join(" › ");
+  if (entry.id.startsWith("page:") && (entry.page === "overview" || entry.page === "account" || entry.page === "app")) return "";
+  return shortPath(parts);
+}
+
+/** One line: when a path is long, its middle parts go first ("This computer › … › Same Wi-Fi"), so the owner and the
+ * row's own section survive. */
+export function shortPath(parts: string[], max = 44): string {
+  const full = parts.join(" › ");
+  if (full.length <= max || parts.length < 3) return full;
+  return [parts[0], "…", parts[parts.length - 1]].join(" › ");
 }

@@ -1,4 +1,4 @@
-import { createContext, useContext, useId, type ComponentProps, type ReactNode } from "react";
+import { createContext, useContext, useId, useState, type ComponentProps, type ReactNode } from "react";
 import { ArrowUpRight, Check, ChevronRight, Copy, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
@@ -52,7 +52,7 @@ export function Card({
   if (useContext(SettingsLook) && nested) {
     // Never a card in a card: a Card inside another is a titled part of it, set off by a divider.
     return (
-      <section className="flex flex-col gap-2 border-t-[0.5px] border-(--settings-edge) pt-4 first:border-t-0 first:pt-0" data-settings-subcard="">
+      <section className="flex flex-col gap-2 border-t-[0.5px] border-(--settings-edge) pt-4 first-of-type:border-t-0 first-of-type:pt-0" data-settings-subcard="">
         {title && <h4 className="text-[13px] font-medium leading-[18px] text-ink">{title}</h4>}
         {subtitle && <p className="text-[13px] leading-[18px] text-ink-secondary">{subtitle}</p>}
         {children}
@@ -90,6 +90,7 @@ export function SettingRow({
   tag,
   leading,
   inert,
+  inertText,
 }: {
   title: string;
   subtitle?: React.ReactNode;
@@ -102,26 +103,29 @@ export function SettingRow({
   leading?: ReactNode;
   /** the row applies here but can't be changed from this page: control at 40%, quiet text and the reason under it */
   inert?: ReactNode;
+  /** the reason as plain words, for the row's tooltip */
+  inertText?: string;
 }) {
   const titleId = useId();
   if (useContext(SettingsLook)) {
     const quiet = inert != null && inert !== false;
     return (
       <div role="group" aria-labelledby={titleId} aria-disabled={quiet || undefined} data-setting-row="" data-settings-inert={quiet ? "" : undefined}
+        title={quiet && typeof inertText === "string" ? inertText : undefined}
         className={cn("flex min-h-11 items-center gap-3 px-4 py-3", className)}>
         {leading !== undefined && <span data-settings-slot="" className="flex size-8 shrink-0 items-center justify-center self-center @max-[480px]/rows:-mt-1.5 @max-[480px]/rows:self-start">{leading}</span>}
-        <div className="flex min-w-0 flex-1 flex-col justify-center">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <div className="flex min-w-[min(100%,7rem)] flex-1 flex-col gap-0.5">
-              <div id={titleId} className={cn("flex items-center gap-1.5 text-[14px] leading-5", quiet ? "text-ink-secondary" : "text-ink")}>{title}{tag && <SettingsTag>{tag}</SettingsTag>}</div>
-              {subtitle && <div className="text-[13px] leading-[18px] text-pretty text-ink-secondary">{subtitle}</div>}
-            </div>
-            {children != null && children !== false && (
-              <div className={cn("ml-auto flex shrink-0 items-center gap-2", quiet && "pointer-events-none opacity-40")} {...(quiet ? { inert: true } : {})}>{children}</div>
-            )}
+        {/* The text column holds the title, its description, and the status or reason line; the control sits centred
+            on the whole block, so an inert row's 40% control lines up with the row, not its first line. */}
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-6 gap-y-2">
+          <div className="flex min-w-[min(100%,7rem)] flex-1 flex-col">
+            <div id={titleId} className={cn("flex min-w-0 items-center gap-1.5 text-[14px] leading-5", quiet ? "text-ink-secondary" : "text-ink")}>{title}{tag && <SettingsTag>{tag}</SettingsTag>}</div>
+            {subtitle && <div className="mt-0.5 text-[13px] leading-[18px] text-ink-secondary">{subtitle}</div>}
+            {message && <div className="mt-1 text-[12px] leading-4 text-ink-secondary">{message}</div>}
+            {quiet && <div data-settings-reason="" className="mt-1 text-[12px] leading-4 text-ink-secondary">{inert}</div>}
           </div>
-          {message && <div className="mt-1 text-[12px] leading-4 text-ink-secondary">{message}</div>}
-          {quiet && <div data-settings-reason="" className="mt-1 text-[12px] leading-4 text-ink-secondary">{inert}</div>}
+          {children != null && children !== false && (
+            <div data-settings-control="" className={cn("ml-auto flex shrink-0 items-center gap-2 self-center", quiet && "pointer-events-none opacity-40")} {...(quiet ? { inert: true } : {})}>{children}</div>
+          )}
         </div>
       </div>
     );
@@ -160,12 +164,13 @@ export function SettingsGroup({ label, block, actions, footnote, description, ch
       className="flex scroll-mt-4 flex-col gap-2 has-[>[data-settings-rows]:empty]:hidden"
     >
       {(label || actions) && (
-        <div className="flex min-h-7 items-center justify-between gap-3 px-4">
-          <div className="flex min-w-0 flex-col gap-0.5">
-            {label && <h3 id={labelId} className="text-[13px] font-medium leading-[18px] text-ink">{label}</h3>}
-            {description && <p className="text-[13px] leading-[18px] text-ink-secondary">{description}</p>}
+        <div className="flex flex-col gap-0.5 px-4">
+          {/* The title and its one action share a 28 px line; the description runs under them, the full width. */}
+          <div className="flex min-h-7 items-center justify-between gap-3">
+            {label && <h3 id={labelId} className="min-w-0 text-[13px] font-medium leading-[18px] text-ink">{label}</h3>}
+            {actions && <div data-settings-actions="" className="ml-auto flex shrink-0 items-center gap-2">{actions}</div>}
           </div>
-          {actions}
+          {description && <p className="text-[13px] leading-[18px] text-ink-secondary">{description}</p>}
         </div>
       )}
       {children}
@@ -174,8 +179,21 @@ export function SettingsGroup({ label, block, actions, footnote, description, ch
   );
 }
 
-export function SettingsRows({ children, icons = false }: { children: ReactNode; icons?: boolean }) {
-  return <div data-settings-rows="" data-settings-icons={icons ? "" : undefined} className={cn(SIMPLE_CARD, "@container/rows flex flex-col overflow-hidden empty:hidden")}>{children}</div>;
+/** One card of rows. `selectWidth` gives every select in the card one width, so their left edges line up. */
+export function SettingsRows({ children, icons = false, selectWidth }: { children: ReactNode; icons?: boolean; selectWidth?: number }) {
+  // A Card drawn inside these rows is a titled part of this card (never a card in a card).
+  return <div data-settings-rows="" data-settings-icons={icons ? "" : undefined} className={cn(SIMPLE_CARD, "@container/rows flex flex-col overflow-hidden empty:hidden")}
+    style={selectWidth ? { ["--settings-select-width" as string]: `${selectWidth}px` } : undefined}><InCard.Provider value={true}>{children}</InCard.Provider></div>;
+}
+
+/** The last line of a card holding a small form (a backup model, a key): its status on the left, Save on the right. */
+export function SettingsFormFoot({ status, children }: { status?: ReactNode; children: ReactNode }) {
+  return (
+    <div data-settings-form-foot="" className="flex min-h-11 items-center justify-end gap-3 px-4 py-2">
+      {status && <div className="mr-auto min-w-0 text-[12px] leading-4 text-ink-secondary">{status}</div>}
+      {children}
+    </div>
+  );
 }
 
 /** A row that goes somewhere: the whole row is the button, with a value and a chevron (an arrow when it leaves Settings). */
@@ -306,6 +324,12 @@ export function Segmented<T extends string>({ value, options, onChange, label }:
       ))}
     </div>
   );
+}
+
+/** A description kept to its short form (≤ 140 characters), with Learn more opening the full text in its place. */
+export function MoreText({ short, long }: { short: ReactNode; long: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return open ? <>{long}</> : <>{short}{" "}<LearnMore onClick={() => setOpen(true)} /></>;
 }
 
 /** Learn more, as a link at the end of a description. */

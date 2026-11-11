@@ -458,7 +458,7 @@
       "phoneApp.next": "e55df4f8f4c0b24b2bf33c7922e2ac240b793ed7042027b07c9e37cda88612e5",
       "sidebar.menu.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
       "sidebar.menu.about": "4efca0d10c5feb8e9b35eb1d994f2905bb71714e6a271f511d713b539ea5faa1",
-      "sidebar.menu.help": "e2f55c84f3b4841d23d20232c3a8e80b91056350cb7397e957200144f2c54c92",
+      "sidebar.menu.help": "a78cebc44214256ba361dcee3f1cc1408e55ea6940c65067615abd4fdcc2d788",
       "sidebar.menu.feedback": "8235980b80addfc790ff8e275e29ac9049155c5f7506c8f4a5c012aeb25677b4",
       "sidebar.update.startingDownload": "22309b1d4e146c9dd700570d71a350447dd5c2807bb5387e0c943fc489876b01",
       "sidebar.update.downloading": "3c85b17154cb04a1cb52598f42c81f464157a8a7e3b5079d31c7ac3081442d67",
@@ -3531,7 +3531,7 @@
       "settings.plan.trialEnds": "75a58d319d7bf1d456c207465aaefe1e8f5f13009f1ce1ce00dab18b6250f48b",
       "settings.newBotEffort.short": "3140eed1b6942024bc5e67c981b040f9f215e2907966fab684ce1fe30119afdd",
       "cloudAccount.manage": "9041c6aa2c3d4670f671ee3d31b06106f961054e1cdbe7d302ff6dc115a7d14a",
-      "settings.plan.cloudReadyLine": "1a620923d5b8d20c419014b52ec0ad3e1c026710f373f1e372d9a0673699f46e"
+      "settings.plan.cloudReadyLine": "8238a9b3b7c5844f7a63b02c67af3cd99dcb118af89dcdd0bb40c6e846a521aa"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -4844,7 +4844,7 @@
       "sidebar.menu.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
       "sidebar.menu.about": "4efca0d10c5feb8e9b35eb1d994f2905bb71714e6a271f511d713b539ea5faa1",
       "sidebar.menu.shortcuts": "e9bef0b0f3c25e6eaf3a754817a8b4f62e1c8473cb2be3e190975926dbf72d6f",
-      "sidebar.menu.help": "e2f55c84f3b4841d23d20232c3a8e80b91056350cb7397e957200144f2c54c92",
+      "sidebar.menu.help": "a78cebc44214256ba361dcee3f1cc1408e55ea6940c65067615abd4fdcc2d788",
       "sidebar.menu.feedback": "8235980b80addfc790ff8e275e29ac9049155c5f7506c8f4a5c012aeb25677b4",
       "sidebar.update.startingDownload": "22309b1d4e146c9dd700570d71a350447dd5c2807bb5387e0c943fc489876b01",
       "sidebar.update.downloading": "3c85b17154cb04a1cb52598f42c81f464157a8a7e3b5079d31c7ac3081442d67",
@@ -9669,7 +9669,7 @@
       "settings.plan.renews": "adf81f65c2727c1a89c529c9eece25307f64ab5590a89d35751b777f295ddb97",
       "settings.plan.trialEnds": "75a58d319d7bf1d456c207465aaefe1e8f5f13009f1ce1ce00dab18b6250f48b",
       "settings.newBotEffort.short": "3140eed1b6942024bc5e67c981b040f9f215e2907966fab684ce1fe30119afdd",
-      "settings.plan.cloudReadyLine": "1a620923d5b8d20c419014b52ec0ad3e1c026710f373f1e372d9a0673699f46e"
+      "settings.plan.cloudReadyLine": "8238a9b3b7c5844f7a63b02c67af3cd99dcb118af89dcdd0bb40c6e846a521aa"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -10047,7 +10047,7 @@
       "phoneApp.next": "e55df4f8f4c0b24b2bf33c7922e2ac240b793ed7042027b07c9e37cda88612e5",
       "sidebar.menu.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
       "sidebar.menu.about": "4efca0d10c5feb8e9b35eb1d994f2905bb71714e6a271f511d713b539ea5faa1",
-      "sidebar.menu.help": "e2f55c84f3b4841d23d20232c3a8e80b91056350cb7397e957200144f2c54c92",
+      "sidebar.menu.help": "a78cebc44214256ba361dcee3f1cc1408e55ea6940c65067615abd4fdcc2d788",
       "sidebar.menu.feedback": "8235980b80addfc790ff8e275e29ac9049155c5f7506c8f4a5c012aeb25677b4",
       "sidebar.update.startingDownload": "22309b1d4e146c9dd700570d71a350447dd5c2807bb5387e0c943fc489876b01",
       "sidebar.update.downloading": "3c85b17154cb04a1cb52598f42c81f464157a8a7e3b5079d31c7ac3081442d67",
@@ -13042,7 +13042,7 @@
       "settings.plan.trialEnds": "75a58d319d7bf1d456c207465aaefe1e8f5f13009f1ce1ce00dab18b6250f48b",
       "settings.newBotEffort.short": "3140eed1b6942024bc5e67c981b040f9f215e2907966fab684ce1fe30119afdd",
       "cloudAccount.manage": "9041c6aa2c3d4670f671ee3d31b06106f961054e1cdbe7d302ff6dc115a7d14a",
-      "settings.plan.cloudReadyLine": "1a620923d5b8d20c419014b52ec0ad3e1c026710f373f1e372d9a0673699f46e"
+      "settings.plan.cloudReadyLine": "8238a9b3b7c5844f7a63b02c67af3cd99dcb118af89dcdd0bb40c6e846a521aa"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -13420,7 +13420,7 @@
       "phoneApp.next": "e55df4f8f4c0b24b2bf33c7922e2ac240b793ed7042027b07c9e37cda88612e5",
       "sidebar.menu.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
       "sidebar.menu.about": "4efca0d10c5feb8e9b35eb1d994f2905bb71714e6a271f511d713b539ea5faa1",
-      "sidebar.menu.help": "e2f55c84f3b4841d23d20232c3a8e80b91056350cb7397e957200144f2c54c92",
+      "sidebar.menu.help": "a78cebc44214256ba361dcee3f1cc1408e55ea6940c65067615abd4fdcc2d788",
       "sidebar.menu.feedback": "8235980b80addfc790ff8e275e29ac9049155c5f7506c8f4a5c012aeb25677b4",
       "sidebar.update.startingDownload": "22309b1d4e146c9dd700570d71a350447dd5c2807bb5387e0c943fc489876b01",
       "sidebar.update.downloading": "3c85b17154cb04a1cb52598f42c81f464157a8a7e3b5079d31c7ac3081442d67",
@@ -16267,7 +16267,7 @@
       "settings.plan.trialEnds": "75a58d319d7bf1d456c207465aaefe1e8f5f13009f1ce1ce00dab18b6250f48b",
       "settings.newBotEffort.short": "3140eed1b6942024bc5e67c981b040f9f215e2907966fab684ce1fe30119afdd",
       "cloudAccount.manage": "9041c6aa2c3d4670f671ee3d31b06106f961054e1cdbe7d302ff6dc115a7d14a",
-      "settings.plan.cloudReadyLine": "1a620923d5b8d20c419014b52ec0ad3e1c026710f373f1e372d9a0673699f46e"
+      "settings.plan.cloudReadyLine": "8238a9b3b7c5844f7a63b02c67af3cd99dcb118af89dcdd0bb40c6e846a521aa"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -17750,7 +17750,7 @@
       "sidebar.menu.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
       "sidebar.menu.about": "4efca0d10c5feb8e9b35eb1d994f2905bb71714e6a271f511d713b539ea5faa1",
       "sidebar.menu.shortcuts": "e9bef0b0f3c25e6eaf3a754817a8b4f62e1c8473cb2be3e190975926dbf72d6f",
-      "sidebar.menu.help": "e2f55c84f3b4841d23d20232c3a8e80b91056350cb7397e957200144f2c54c92",
+      "sidebar.menu.help": "a78cebc44214256ba361dcee3f1cc1408e55ea6940c65067615abd4fdcc2d788",
       "sidebar.menu.feedback": "8235980b80addfc790ff8e275e29ac9049155c5f7506c8f4a5c012aeb25677b4",
       "sidebar.update.startingDownload": "22309b1d4e146c9dd700570d71a350447dd5c2807bb5387e0c943fc489876b01",
       "sidebar.update.downloading": "3c85b17154cb04a1cb52598f42c81f464157a8a7e3b5079d31c7ac3081442d67",
@@ -24062,7 +24062,7 @@
       "settings.plan.renews": "adf81f65c2727c1a89c529c9eece25307f64ab5590a89d35751b777f295ddb97",
       "settings.plan.trialEnds": "75a58d319d7bf1d456c207465aaefe1e8f5f13009f1ce1ce00dab18b6250f48b",
       "settings.newBotEffort.short": "3140eed1b6942024bc5e67c981b040f9f215e2907966fab684ce1fe30119afdd",
-      "settings.plan.cloudReadyLine": "1a620923d5b8d20c419014b52ec0ad3e1c026710f373f1e372d9a0673699f46e"
+      "settings.plan.cloudReadyLine": "8238a9b3b7c5844f7a63b02c67af3cd99dcb118af89dcdd0bb40c6e846a521aa"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -26224,7 +26224,7 @@
       "about.version": "a18745121bb8af6d1a0c689cfb3c2a2245d10d5fe3b37ff37c8b69fd74773dfa",
       "about.connectedTo": "7eba311e0e3c7146cf09856dae9934abad7b60e15b5a60679db755aab63541f9",
       "sidebar.menu.shortcuts": "e9bef0b0f3c25e6eaf3a754817a8b4f62e1c8473cb2be3e190975926dbf72d6f",
-      "sidebar.menu.help": "e2f55c84f3b4841d23d20232c3a8e80b91056350cb7397e957200144f2c54c92",
+      "sidebar.menu.help": "a78cebc44214256ba361dcee3f1cc1408e55ea6940c65067615abd4fdcc2d788",
       "sidebar.menu.feedback": "8235980b80addfc790ff8e275e29ac9049155c5f7506c8f4a5c012aeb25677b4",
       "sidebar.menu.usageUsed": "752394990a65af5f4729431d67f8381333aa1b519f26d5689a4caff7c041053c",
       "sidebar.menu.resets": "67580d3746b9181d3a6ee49b1d6e64b13d10aece48bd4ac643a40f6b76cd1e8a",
@@ -34305,7 +34305,7 @@
       "settings.plan.renews": "adf81f65c2727c1a89c529c9eece25307f64ab5590a89d35751b777f295ddb97",
       "settings.plan.trialEnds": "75a58d319d7bf1d456c207465aaefe1e8f5f13009f1ce1ce00dab18b6250f48b",
       "settings.newBotEffort.short": "3140eed1b6942024bc5e67c981b040f9f215e2907966fab684ce1fe30119afdd",
-      "settings.plan.cloudReadyLine": "1a620923d5b8d20c419014b52ec0ad3e1c026710f373f1e372d9a0673699f46e"
+      "settings.plan.cloudReadyLine": "8238a9b3b7c5844f7a63b02c67af3cd99dcb118af89dcdd0bb40c6e846a521aa"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -34937,7 +34937,7 @@
       "phoneApp.next": "e55df4f8f4c0b24b2bf33c7922e2ac240b793ed7042027b07c9e37cda88612e5",
       "sidebar.menu.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
       "sidebar.menu.about": "4efca0d10c5feb8e9b35eb1d994f2905bb71714e6a271f511d713b539ea5faa1",
-      "sidebar.menu.help": "e2f55c84f3b4841d23d20232c3a8e80b91056350cb7397e957200144f2c54c92",
+      "sidebar.menu.help": "a78cebc44214256ba361dcee3f1cc1408e55ea6940c65067615abd4fdcc2d788",
       "sidebar.menu.feedback": "8235980b80addfc790ff8e275e29ac9049155c5f7506c8f4a5c012aeb25677b4",
       "sidebar.update.startingDownload": "22309b1d4e146c9dd700570d71a350447dd5c2807bb5387e0c943fc489876b01",
       "sidebar.update.downloading": "3c85b17154cb04a1cb52598f42c81f464157a8a7e3b5079d31c7ac3081442d67",
@@ -41988,7 +41988,7 @@
       "settings.plan.renews": "adf81f65c2727c1a89c529c9eece25307f64ab5590a89d35751b777f295ddb97",
       "settings.plan.trialEnds": "75a58d319d7bf1d456c207465aaefe1e8f5f13009f1ce1ce00dab18b6250f48b",
       "settings.newBotEffort.short": "3140eed1b6942024bc5e67c981b040f9f215e2907966fab684ce1fe30119afdd",
-      "settings.plan.cloudReadyLine": "1a620923d5b8d20c419014b52ec0ad3e1c026710f373f1e372d9a0673699f46e"
+      "settings.plan.cloudReadyLine": "8238a9b3b7c5844f7a63b02c67af3cd99dcb118af89dcdd0bb40c6e846a521aa"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -42926,7 +42926,7 @@
       "phoneApp.next": "e55df4f8f4c0b24b2bf33c7922e2ac240b793ed7042027b07c9e37cda88612e5",
       "sidebar.menu.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
       "sidebar.menu.about": "4efca0d10c5feb8e9b35eb1d994f2905bb71714e6a271f511d713b539ea5faa1",
-      "sidebar.menu.help": "e2f55c84f3b4841d23d20232c3a8e80b91056350cb7397e957200144f2c54c92",
+      "sidebar.menu.help": "a78cebc44214256ba361dcee3f1cc1408e55ea6940c65067615abd4fdcc2d788",
       "sidebar.menu.feedback": "8235980b80addfc790ff8e275e29ac9049155c5f7506c8f4a5c012aeb25677b4",
       "sidebar.update.startingDownload": "22309b1d4e146c9dd700570d71a350447dd5c2807bb5387e0c943fc489876b01",
       "sidebar.update.downloading": "3c85b17154cb04a1cb52598f42c81f464157a8a7e3b5079d31c7ac3081442d67",
@@ -51986,7 +51986,7 @@
       "settings.plan.renews": "adf81f65c2727c1a89c529c9eece25307f64ab5590a89d35751b777f295ddb97",
       "settings.plan.trialEnds": "75a58d319d7bf1d456c207465aaefe1e8f5f13009f1ce1ce00dab18b6250f48b",
       "settings.newBotEffort.short": "3140eed1b6942024bc5e67c981b040f9f215e2907966fab684ce1fe30119afdd",
-      "settings.plan.cloudReadyLine": "1a620923d5b8d20c419014b52ec0ad3e1c026710f373f1e372d9a0673699f46e"
+      "settings.plan.cloudReadyLine": "8238a9b3b7c5844f7a63b02c67af3cd99dcb118af89dcdd0bb40c6e846a521aa"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -52481,7 +52481,7 @@
       "phoneApp.next": "e55df4f8f4c0b24b2bf33c7922e2ac240b793ed7042027b07c9e37cda88612e5",
       "sidebar.menu.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
       "sidebar.menu.about": "4efca0d10c5feb8e9b35eb1d994f2905bb71714e6a271f511d713b539ea5faa1",
-      "sidebar.menu.help": "e2f55c84f3b4841d23d20232c3a8e80b91056350cb7397e957200144f2c54c92",
+      "sidebar.menu.help": "a78cebc44214256ba361dcee3f1cc1408e55ea6940c65067615abd4fdcc2d788",
       "sidebar.menu.feedback": "8235980b80addfc790ff8e275e29ac9049155c5f7506c8f4a5c012aeb25677b4",
       "sidebar.update.startingDownload": "22309b1d4e146c9dd700570d71a350447dd5c2807bb5387e0c943fc489876b01",
       "sidebar.update.downloading": "3c85b17154cb04a1cb52598f42c81f464157a8a7e3b5079d31c7ac3081442d67",
@@ -55649,7 +55649,7 @@
       "settings.plan.trialEnds": "75a58d319d7bf1d456c207465aaefe1e8f5f13009f1ce1ce00dab18b6250f48b",
       "settings.newBotEffort.short": "3140eed1b6942024bc5e67c981b040f9f215e2907966fab684ce1fe30119afdd",
       "cloudAccount.manage": "9041c6aa2c3d4670f671ee3d31b06106f961054e1cdbe7d302ff6dc115a7d14a",
-      "settings.plan.cloudReadyLine": "1a620923d5b8d20c419014b52ec0ad3e1c026710f373f1e372d9a0673699f46e"
+      "settings.plan.cloudReadyLine": "8238a9b3b7c5844f7a63b02c67af3cd99dcb118af89dcdd0bb40c6e846a521aa"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -56769,7 +56769,7 @@
       "sidebar.menu.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
       "sidebar.menu.about": "4efca0d10c5feb8e9b35eb1d994f2905bb71714e6a271f511d713b539ea5faa1",
       "sidebar.menu.shortcuts": "e9bef0b0f3c25e6eaf3a754817a8b4f62e1c8473cb2be3e190975926dbf72d6f",
-      "sidebar.menu.help": "e2f55c84f3b4841d23d20232c3a8e80b91056350cb7397e957200144f2c54c92",
+      "sidebar.menu.help": "a78cebc44214256ba361dcee3f1cc1408e55ea6940c65067615abd4fdcc2d788",
       "sidebar.menu.feedback": "8235980b80addfc790ff8e275e29ac9049155c5f7506c8f4a5c012aeb25677b4",
       "sidebar.update.startingDownload": "22309b1d4e146c9dd700570d71a350447dd5c2807bb5387e0c943fc489876b01",
       "sidebar.update.downloading": "3c85b17154cb04a1cb52598f42c81f464157a8a7e3b5079d31c7ac3081442d67",
@@ -61287,7 +61287,7 @@
       "settings.plan.renews": "adf81f65c2727c1a89c529c9eece25307f64ab5590a89d35751b777f295ddb97",
       "settings.plan.trialEnds": "75a58d319d7bf1d456c207465aaefe1e8f5f13009f1ce1ce00dab18b6250f48b",
       "settings.newBotEffort.short": "3140eed1b6942024bc5e67c981b040f9f215e2907966fab684ce1fe30119afdd",
-      "settings.plan.cloudReadyLine": "1a620923d5b8d20c419014b52ec0ad3e1c026710f373f1e372d9a0673699f46e"
+      "settings.plan.cloudReadyLine": "8238a9b3b7c5844f7a63b02c67af3cd99dcb118af89dcdd0bb40c6e846a521aa"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -62407,7 +62407,7 @@
       "sidebar.menu.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
       "sidebar.menu.about": "4efca0d10c5feb8e9b35eb1d994f2905bb71714e6a271f511d713b539ea5faa1",
       "sidebar.menu.shortcuts": "e9bef0b0f3c25e6eaf3a754817a8b4f62e1c8473cb2be3e190975926dbf72d6f",
-      "sidebar.menu.help": "e2f55c84f3b4841d23d20232c3a8e80b91056350cb7397e957200144f2c54c92",
+      "sidebar.menu.help": "a78cebc44214256ba361dcee3f1cc1408e55ea6940c65067615abd4fdcc2d788",
       "sidebar.menu.feedback": "8235980b80addfc790ff8e275e29ac9049155c5f7506c8f4a5c012aeb25677b4",
       "sidebar.update.startingDownload": "22309b1d4e146c9dd700570d71a350447dd5c2807bb5387e0c943fc489876b01",
       "sidebar.update.downloading": "3c85b17154cb04a1cb52598f42c81f464157a8a7e3b5079d31c7ac3081442d67",
@@ -66925,7 +66925,7 @@
       "settings.plan.renews": "adf81f65c2727c1a89c529c9eece25307f64ab5590a89d35751b777f295ddb97",
       "settings.plan.trialEnds": "75a58d319d7bf1d456c207465aaefe1e8f5f13009f1ce1ce00dab18b6250f48b",
       "settings.newBotEffort.short": "3140eed1b6942024bc5e67c981b040f9f215e2907966fab684ce1fe30119afdd",
-      "settings.plan.cloudReadyLine": "1a620923d5b8d20c419014b52ec0ad3e1c026710f373f1e372d9a0673699f46e"
+      "settings.plan.cloudReadyLine": "8238a9b3b7c5844f7a63b02c67af3cd99dcb118af89dcdd0bb40c6e846a521aa"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -68389,7 +68389,7 @@
       "sidebar.menu.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
       "sidebar.menu.about": "4efca0d10c5feb8e9b35eb1d994f2905bb71714e6a271f511d713b539ea5faa1",
       "sidebar.menu.shortcuts": "e9bef0b0f3c25e6eaf3a754817a8b4f62e1c8473cb2be3e190975926dbf72d6f",
-      "sidebar.menu.help": "e2f55c84f3b4841d23d20232c3a8e80b91056350cb7397e957200144f2c54c92",
+      "sidebar.menu.help": "a78cebc44214256ba361dcee3f1cc1408e55ea6940c65067615abd4fdcc2d788",
       "sidebar.menu.feedback": "8235980b80addfc790ff8e275e29ac9049155c5f7506c8f4a5c012aeb25677b4",
       "sidebar.update.startingDownload": "22309b1d4e146c9dd700570d71a350447dd5c2807bb5387e0c943fc489876b01",
       "sidebar.update.downloading": "3c85b17154cb04a1cb52598f42c81f464157a8a7e3b5079d31c7ac3081442d67",
@@ -73821,7 +73821,7 @@
       "settings.plan.renews": "adf81f65c2727c1a89c529c9eece25307f64ab5590a89d35751b777f295ddb97",
       "settings.plan.trialEnds": "75a58d319d7bf1d456c207465aaefe1e8f5f13009f1ce1ce00dab18b6250f48b",
       "settings.newBotEffort.short": "3140eed1b6942024bc5e67c981b040f9f215e2907966fab684ce1fe30119afdd",
-      "settings.plan.cloudReadyLine": "1a620923d5b8d20c419014b52ec0ad3e1c026710f373f1e372d9a0673699f46e"
+      "settings.plan.cloudReadyLine": "8238a9b3b7c5844f7a63b02c67af3cd99dcb118af89dcdd0bb40c6e846a521aa"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -75307,7 +75307,7 @@
       "sidebar.menu.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
       "sidebar.menu.about": "4efca0d10c5feb8e9b35eb1d994f2905bb71714e6a271f511d713b539ea5faa1",
       "sidebar.menu.shortcuts": "e9bef0b0f3c25e6eaf3a754817a8b4f62e1c8473cb2be3e190975926dbf72d6f",
-      "sidebar.menu.help": "e2f55c84f3b4841d23d20232c3a8e80b91056350cb7397e957200144f2c54c92",
+      "sidebar.menu.help": "a78cebc44214256ba361dcee3f1cc1408e55ea6940c65067615abd4fdcc2d788",
       "sidebar.menu.feedback": "8235980b80addfc790ff8e275e29ac9049155c5f7506c8f4a5c012aeb25677b4",
       "sidebar.update.startingDownload": "22309b1d4e146c9dd700570d71a350447dd5c2807bb5387e0c943fc489876b01",
       "sidebar.update.downloading": "3c85b17154cb04a1cb52598f42c81f464157a8a7e3b5079d31c7ac3081442d67",
@@ -80779,7 +80779,7 @@
       "settings.plan.renews": "adf81f65c2727c1a89c529c9eece25307f64ab5590a89d35751b777f295ddb97",
       "settings.plan.trialEnds": "75a58d319d7bf1d456c207465aaefe1e8f5f13009f1ce1ce00dab18b6250f48b",
       "settings.newBotEffort.short": "3140eed1b6942024bc5e67c981b040f9f215e2907966fab684ce1fe30119afdd",
-      "settings.plan.cloudReadyLine": "1a620923d5b8d20c419014b52ec0ad3e1c026710f373f1e372d9a0673699f46e"
+      "settings.plan.cloudReadyLine": "8238a9b3b7c5844f7a63b02c67af3cd99dcb118af89dcdd0bb40c6e846a521aa"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -82229,7 +82229,7 @@
       "sidebar.menu.settings": "74a883a037bc227f91891ab654a753d3a99f31ab06ae5b5d2b6e594a692b41f8",
       "sidebar.menu.about": "4efca0d10c5feb8e9b35eb1d994f2905bb71714e6a271f511d713b539ea5faa1",
       "sidebar.menu.shortcuts": "e9bef0b0f3c25e6eaf3a754817a8b4f62e1c8473cb2be3e190975926dbf72d6f",
-      "sidebar.menu.help": "e2f55c84f3b4841d23d20232c3a8e80b91056350cb7397e957200144f2c54c92",
+      "sidebar.menu.help": "a78cebc44214256ba361dcee3f1cc1408e55ea6940c65067615abd4fdcc2d788",
       "sidebar.menu.feedback": "8235980b80addfc790ff8e275e29ac9049155c5f7506c8f4a5c012aeb25677b4",
       "sidebar.update.startingDownload": "22309b1d4e146c9dd700570d71a350447dd5c2807bb5387e0c943fc489876b01",
       "sidebar.update.downloading": "3c85b17154cb04a1cb52598f42c81f464157a8a7e3b5079d31c7ac3081442d67",
@@ -87540,7 +87540,7 @@
       "settings.plan.renews": "adf81f65c2727c1a89c529c9eece25307f64ab5590a89d35751b777f295ddb97",
       "settings.plan.trialEnds": "75a58d319d7bf1d456c207465aaefe1e8f5f13009f1ce1ce00dab18b6250f48b",
       "settings.newBotEffort.short": "3140eed1b6942024bc5e67c981b040f9f215e2907966fab684ce1fe30119afdd",
-      "settings.plan.cloudReadyLine": "1a620923d5b8d20c419014b52ec0ad3e1c026710f373f1e372d9a0673699f46e"
+      "settings.plan.cloudReadyLine": "8238a9b3b7c5844f7a63b02c67af3cd99dcb118af89dcdd0bb40c6e846a521aa"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -89299,7 +89299,7 @@
       "about.version": "a18745121bb8af6d1a0c689cfb3c2a2245d10d5fe3b37ff37c8b69fd74773dfa",
       "about.connectedTo": "7eba311e0e3c7146cf09856dae9934abad7b60e15b5a60679db755aab63541f9",
       "sidebar.menu.shortcuts": "e9bef0b0f3c25e6eaf3a754817a8b4f62e1c8473cb2be3e190975926dbf72d6f",
-      "sidebar.menu.help": "e2f55c84f3b4841d23d20232c3a8e80b91056350cb7397e957200144f2c54c92",
+      "sidebar.menu.help": "a78cebc44214256ba361dcee3f1cc1408e55ea6940c65067615abd4fdcc2d788",
       "sidebar.menu.feedback": "8235980b80addfc790ff8e275e29ac9049155c5f7506c8f4a5c012aeb25677b4",
       "sidebar.menu.usageUsed": "752394990a65af5f4729431d67f8381333aa1b519f26d5689a4caff7c041053c",
       "sidebar.menu.resets": "67580d3746b9181d3a6ee49b1d6e64b13d10aece48bd4ac643a40f6b76cd1e8a",
@@ -95004,7 +95004,7 @@
       "settings.plan.renews": "adf81f65c2727c1a89c529c9eece25307f64ab5590a89d35751b777f295ddb97",
       "settings.plan.trialEnds": "75a58d319d7bf1d456c207465aaefe1e8f5f13009f1ce1ce00dab18b6250f48b",
       "settings.newBotEffort.short": "3140eed1b6942024bc5e67c981b040f9f215e2907966fab684ce1fe30119afdd",
-      "settings.plan.cloudReadyLine": "1a620923d5b8d20c419014b52ec0ad3e1c026710f373f1e372d9a0673699f46e"
+      "settings.plan.cloudReadyLine": "8238a9b3b7c5844f7a63b02c67af3cd99dcb118af89dcdd0bb40c6e846a521aa"
     }
   }
 }

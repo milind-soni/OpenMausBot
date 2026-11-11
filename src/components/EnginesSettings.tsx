@@ -424,8 +424,10 @@ function simpleStatus(instance: InstanceInfo, ready: boolean): { tone: "success"
     return { tone: "success", text: email ? `${t("settings.ai.ready")} · ${email}` : t("settings.ai.ready") };
   }
   if (instance.snapshot.ollama) return { tone: null, text: ollamaShortStatus(instance.snapshot.ollama) };
-  return instance.snapshot.state === "available" && instance.snapshot.authenticated === false
-    ? { tone: "warning", text: t("settings.ai.attention") } : { tone: null, text: t("settings.ai.notSetUp") };
+  if (instance.snapshot.state === "available" && instance.snapshot.authenticated === false) return { tone: "warning", text: t("settings.ai.attention") };
+  // What it still needs, in a few plain words: an account sign-in or a key.
+  const needs = instance.authentication !== undefined ? t("settings.ai.needsAccountOrKey") : t("settings.ai.needsKey");
+  return { tone: null, text: `${t("settings.ai.notSetUp")} · ${needs}` };
 }
 
 /** One provider: its mark in the 32 px slot, the status under the name, and one Set up / Manage that opens its fold

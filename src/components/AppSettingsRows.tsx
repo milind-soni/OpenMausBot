@@ -9,7 +9,7 @@ import { updaterMessage, useUpdaterState } from "@/lib/updater";
 import { productName } from "../lib/brand";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { NewBrowserSettings } from "./BrowserSettingsRows";
-import { SettingRow, SettingsGroup, SettingsRows, Switch } from "./SettingsPrimitives";
+import { MoreText, SettingRow, SettingsGroup, SettingsRows, Switch } from "./SettingsPrimitives";
 import { LearnedSkillsSettings } from "./ShareLearnedSkillsSettings";
 import { effortLabel } from "./ModelPicker";
 import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire";
@@ -322,7 +322,7 @@ export function PinnedCirclesRow() {
 export function RunCardRow() {
   const enabled = useShowRunCard();
   return (
-    <SettingRow title={t("settings.runCard.title")} subtitle={t("settings.runCard.subtitle")}>
+    <SettingRow title={t("settings.runCard.rowTitle")} subtitle={t("settings.runCard.line")}>
       <Switch
         checked={enabled}
         aria-label={t("settings.runCard.show")}
@@ -411,7 +411,7 @@ export function ExperimentalFeaturesRow() {
   return (
     <SettingsGroup label={t("settings.experimental.title")} description={t("settings.experimental.short")} block="early-features">
       <SettingsRows>
-        <SettingRow title={t("settings.experimental.skillAuthoring")} subtitle={t("settings.experimental.skillAuthoringDetail")}
+        <SettingRow title={t("settings.experimental.skillAuthoring")} subtitle={<MoreText short={t("settings.experimental.skillAuthoringShort")} long={t("settings.experimental.skillAuthoringDetail")} />}
           message={error ? <span role="alert" className="text-danger">{error}</span> : undefined}>
           <Switch
             checked={skillAuthoring}
@@ -432,9 +432,6 @@ export function BrowserProfilesRow() {
   const { state } = useStore();
   const profiles = state.config?.browserProfiles ?? [];
   if (!builtInBrowserEnabled(state.config) && profiles.length === 0) return null;
-  return (
-    <SettingsGroup label={t("settings.profiles.title")} block="profiles">
-      <BrowserProfilesManager />
-    </SettingsGroup>
-  );
+  // The manager draws its own section, with Add as the section's action.
+  return <BrowserProfilesManager />;
 }

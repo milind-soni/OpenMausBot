@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  ArrowUpRight,
   Archive,
   ArrowDownToLine,
   ArrowLeftRight,
@@ -30,6 +31,7 @@ import { usePhonePlaceState, type PhonePlaceState } from "./settings/phone-statu
 import { useSettingsPlace } from "./settings/settings-place";
 import { AccountMoveStatus, useAccountMove, type AccountMoveKind } from "./AccountMove";
 import { InitialsAvatar } from "./Avatar";
+import { SignOutConfirm } from "./settings/SignOutConfirm";
 import { AboutDialog } from "./AboutDialog";
 import { CloudTile } from "./cloud-buy/parts";
 import { usageBridge } from "./CloudUsageMeter";
@@ -437,6 +439,7 @@ export function profileMenuItems({
   onFeedback,
   onWhatsNew,
   signOut = null,
+  signOutElsewhere = null,
 }: {
   phone: SidebarMenuItem | null;
   update: SidebarMenuItem | null;
@@ -458,6 +461,8 @@ export function profileMenuItems({
   onWhatsNew?: () => void;
   /** the last row while someone is signed in, where signing out can work from this page */
   signOut?: (() => void) | null;
+  /** a Cloud's page in the desktop window: Sign out happens on This computer, and this row goes there */
+  signOutElsewhere?: { place: string; open: () => void } | null;
 }): SidebarMenuItem[] {
   const raised: SidebarMenuItem | null = update && updateTop ? {
     ...update,
@@ -479,10 +484,14 @@ export function profileMenuItems({
   const support: SidebarMenuItem = { key: "support", label: t("sidebar.menu.helpShort"), icon: <LifeBuoy size={16} />, submenu: help, onSelect: () => {} };
   const present = (...items: Array<SidebarMenuItem | null | false>) => items.filter((item): item is SidebarMenuItem => Boolean(item));
   const out: SidebarMenuItem[] = [...accounts.filter((item) => item.key !== "accounts-sign-out"),
-    ...(signOut ? [{ key: "sign-out", label: t("accounts.signOut"), icon: <LogOut size={16} />, onSelect: signOut }] : accounts.filter((item) => item.key === "accounts-sign-out"))];
+    ...(signOut ? [{ key: "sign-out", label: t("accounts.signOut"), icon: <LogOut size={16} />, onSelect: signOut }]
+      : signOutElsewhere ? [{ key: "sign-out", label: t("sidebar.menu.signOutFrom", { place: signOutElsewhere.place }), icon: <LogOut size={16} />,
+        trailing: <ArrowUpRight size={12} aria-hidden="true" className="text-ink-tertiary" />, onSelect: signOutElsewhere.open }]
+      : accounts.filter((item) => item.key === "accounts-sign-out"))];
+  // Plan & billing follows Settings in the same group; Simple's own places sit between them.
   const groups = simple
     ? [move, present(raised), [account], present(phone, settings), simple.tools, present(plan, switchPlace, support), out]
-    : [move, present(raised), [account], present(phone, settings), present(plan, switchPlace, support), out];
+    : [move, present(raised), [account], present(phone, settings, plan), present(switchPlace, support), out];
   return groups.filter((group) => group.length > 0)
     .flatMap((group, at) => group.map((item, index) => (at > 0 && index === 0 ? { ...item, separatorBefore: true } : item)));
 }
@@ -523,11 +532,12 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   const openComputer = window.ogb?.rail?.openComputer;
   // A Cloud's page in the desktop window can't update the app: the row says where that happens, and goes there.
   const elsewhereUpdate: UpdateEntry | null = !desktopUpdate && !here && Boolean(window.ogb) && state.config?.cloudHome === true && openComputer ? {
-    phase: "idle", pending: false, label: t("sidebar.menu.checkFromHere", { place: t("rail.thisComputer") }),
-    item: { key: "update", label: t("sidebar.menu.checkFromHere", { place: t("rail.thisComputer") }), icon: <RefreshCw size={16} />, onSelect: () => void openComputer("app").catch(() => {}) },
+    phase: "idle", pending: false, label: t("settings.updates.check"),
+    item: { key: "update", label: t("settings.updates.check"), icon: <RefreshCw size={16} />, trailing: <ArrowUpRight size={12} aria-hidden="true" className="text-ink-tertiary" />, onSelect: () => void openComputer("app").catch(() => {}) },
   } : null;
   const update = desktopUpdate ?? elsewhereUpdate ?? serverUpdate;
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState<"desktop" | "browser" | null>(null);
   const [session, setSession] = useState<SessionState | null>(null);
   const triggerRef = useRef<HTMLSpanElement>(null);
 
@@ -589,10 +599,13 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
     onHelp: () => void openExternalLink(HELP_CENTER_URL),
     onFeedback: () => void openExternalLink(FEEDBACK_URL),
     onWhatsNew: () => void openExternalLink(RELEASES_URL),
+    // Every Sign out asks first: "Sign out of MausBot?" and what keeps running.
     signOut: accounts.view?.active ? null
-      : !desktop && session?.kind === "session" ? () => { void api("/api/auth/logout", { method: "POST" }).finally(() => location.reload()); }
-      : desktop && !remote && window.ogb?.cloudAccount && summary.signedIn ? () => { void window.ogb?.cloudAccount?.signOut().catch(() => {}); }
+      : !desktop && session?.kind === "session" ? () => setSigningOut("browser")
+      : desktop && !remote && window.ogb?.cloudAccount && summary.signedIn ? () => setSigningOut("desktop")
       : null,
+    signOutElsewhere: desktop && !remote && !here && !window.ogb?.cloudAccount && summary.signedIn && openComputer
+      ? { place: t("rail.thisComputer"), open: () => void openComputer("account").catch(() => {}) } : null,
   });
   const noteworthy = update && updateNoteworthy(update.phase, update.pending) && !updateHasButton(update.phase);
   const needsYou = account?.automationsNeedYou === true;
@@ -668,6 +681,11 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
         )}
       />
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      {signingOut && <SignOutConfirm browser={signingOut === "browser"} here={signingOut === "browser" ? place.name : t("rail.thisComputer")}
+        cloud={signingOut === "desktop" && summary.plan ? t("cloudSetup.myCloud") : null} onClose={() => setSigningOut(null)}
+        onConfirm={() => signingOut === "browser"
+          ? api("/api/auth/logout", { method: "POST" }).finally(() => location.reload())
+          : window.ogb?.cloudAccount?.signOut()} />}
       {accounts.sheet && <AccountsSheet adding={accounts.sheet.email} note={accounts.sheet.note} onClose={accounts.closeSheet} />}
     </>
   );

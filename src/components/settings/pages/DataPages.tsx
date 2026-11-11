@@ -37,7 +37,7 @@ export function DataPage() {
       <SettingsRows><AttachmentStorageSettings /></SettingsRows>
     </SettingsGroup>
     {ctx.advanced && <ThreadCleanupSettings />}
-    {!ctx.desktop && ctx.admin && <SettingsGroup label={t("settings.section.activity")} block="activity"><ActivitySection /></SettingsGroup>}
+    {!ctx.desktop && ctx.admin && <ActivitySection />}
   </>;
 }
 

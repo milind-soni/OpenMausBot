@@ -25,6 +25,7 @@ export function useSettingsContext(): SettingsContext {
   return {
     desktop,
     here: pageIsThisComputer(),
+    home: pageIsThisComputer() || Boolean(ogb?.home),
     cloud,
     team,
     client,

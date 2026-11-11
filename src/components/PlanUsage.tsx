@@ -240,7 +240,7 @@ export function PlanUsage() {
   // Settings: an empty state is one quiet row, and Refresh is the section's action.
   if (settings && (!report || report.providers.length === 0)) {
     return (
-      <SettingsGroup label={t("planUsage.title")} block="plan-usage"
+      <SettingsGroup label={t("settings.spending.aiLimits")} block="plan-usage"
         actions={<button type="button" onClick={() => void load(true)} disabled={loading} className="settings-quiet flex cursor-pointer items-center gap-1.5">
           {loading ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <RefreshCw size={14} aria-hidden="true" />}{t("planUsage.refresh")}
         </button>}

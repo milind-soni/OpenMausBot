@@ -67,9 +67,13 @@ export function submenuPosition(menu: Box, row: Box, submenu: Size, viewport: Si
   const preferred = fits(after) ? after : fits(before) ? before : after;
   const maxLeft = Math.max(EDGE_MARGIN, viewport.width - submenu.width - EDGE_MARGIN);
   const maxTop = Math.max(EDGE_MARGIN, viewport.height - submenu.height - EDGE_MARGIN);
+  // Level with its row (its first item beside the row); with no room below, it flips up so its last item sits beside
+  // the row instead of sliding up the screen.
+  const down = row.top - 6;
+  const top = down + submenu.height <= viewport.height - EDGE_MARGIN ? down : row.bottom + 6 - submenu.height;
   return {
     left: Math.min(Math.max(preferred, EDGE_MARGIN), maxLeft),
-    top: Math.min(Math.max(row.top - 6, EDGE_MARGIN), maxTop),
+    top: Math.min(Math.max(top, EDGE_MARGIN), maxTop),
   };
 }
 
@@ -94,10 +98,13 @@ function MenuRows({
   items,
   openSubmenu,
   engaged = false,
+  dense = false,
   onItem,
   onRowEnter,
   onRowLeave,
 }: {
+  /** the account menu: rows on a 32 px pitch, 4 px around each divider */
+  dense?: boolean;
   items: SidebarMenuItem[];
   openSubmenu?: string | null;
   engaged?: boolean;
@@ -108,7 +115,7 @@ function MenuRows({
   return (
     <>
       {items.map((item) => (
-        <div key={item.key} className="flex flex-col gap-1">
+        <div key={item.key} className={cn("flex flex-col", !dense || item.separatorBefore || item.heading ? "gap-1" : undefined, dense && item.separatorBefore && "pt-1")}>
           {item.separatorBefore && <div role="separator" className={MENU_ITEM_SEPARATOR} />}
           {item.heading && <div className={MENU_HEADING}>{item.heading}</div>}
           <button
@@ -127,7 +134,7 @@ function MenuRows({
             className={cn(
               "flex min-h-8 w-full items-center gap-2 rounded-lg px-2 py-1.5 text-start text-[14px] leading-5 disabled:opacity-60 focus-visible:bg-menu-hover focus-visible:outline-none",
               item.large && "min-h-12 py-1.5",
-              item.active || (item.submenu && openSubmenu === item.key && engaged) ? "bg-menu-active text-ink" : "text-ink hover:bg-menu-hover",
+              item.active || (item.submenu && openSubmenu === item.key && (engaged || dense)) ? "bg-menu-active text-ink" : "text-ink hover:bg-menu-hover",
             )}
           >
             {item.icon && (
@@ -352,7 +359,9 @@ export function SidebarPopoverMenu({
   };
 
   const openItem = submenu ? items.find((item) => item.key === submenu) : undefined;
-  const sheetClass = cn(MENU_SHEET, "overflow-hidden");
+  // The account menu (a fixed width) is dense: rows on a 32 px pitch with 4 px padding (§6.13).
+  const dense = width !== undefined;
+  const sheetClass = cn(MENU_SHEET, "overflow-hidden", dense && "gap-0 p-1");
 
   const sheet = motion.shown && (
     <div
@@ -375,6 +384,7 @@ export function SidebarPopoverMenu({
     >
       <MenuRows
         items={items}
+        dense={dense}
         openSubmenu={submenu}
         engaged={engaged}
         onItem={selectItem}
@@ -398,10 +408,11 @@ export function SidebarPopoverMenu({
       onPointerLeave={() => setEngaged(false)}
       onFocus={() => setEngaged(true)}
       onBlur={(event) => { if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) setEngaged(false); }}
-      style={{ position: "fixed", left: subPosition?.left ?? 0, top: subPosition?.top ?? 0, minWidth: 200, width: "max-content", maxWidth: `min(${MENU_MAX_WIDTH}px, calc(100vw - ${EDGE_MARGIN * 2}px))`, maxHeight: `calc(100vh - ${EDGE_MARGIN * 2}px)`, visibility: subPosition ? undefined : "hidden" }}
+      style={{ position: "fixed", left: subPosition?.left ?? 0, top: subPosition?.top ?? 0, minWidth: 200, width: dense ? 240 : "max-content", maxWidth: `min(${MENU_MAX_WIDTH}px, calc(100vw - ${EDGE_MARGIN * 2}px))`, maxHeight: `calc(100vh - ${EDGE_MARGIN * 2}px)`, visibility: subPosition ? undefined : "hidden" }}
       className={cn(sheetClass, "z-[61] animate-pop-in overflow-y-auto")}
     >
       <MenuRows
+        dense={dense}
         items={openItem.submenu}
         onItem={(item) => {
           item.onSelect();

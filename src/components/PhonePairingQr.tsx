@@ -5,7 +5,6 @@ import { QRCodeSVG } from "qrcode.react";
 import { t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";
 import { productName } from "@/lib/brand";
-import { PhoneAppLinks } from "./PhoneAppLinks";
 import type { PhoneSetupController } from "./PhoneSetupFlow";
 
 /** A fresh code while this screen is open; the previous one stays valid to its two-minute end, so a phone mid-scan
@@ -72,7 +71,7 @@ export function PhonePairingQr({ c, signedIn }: { c: PhoneSetupController; signe
       <div className="mt-5 flex w-full px-2">
         <button onClick={copy} className="text-[12px] text-ink-secondary hover:text-ink">{t("phone.code.e2e.copyLink")}</button>
       </div>
-      <PhoneAppLinks className="mt-4 w-full px-2 text-left text-[12px] text-ink-secondary" />
+      <p className="mt-4 w-full px-2 text-left text-[12px] text-ink-secondary">{t("phone.pair.installPlain", { app: productName() })}</p>
       {copied && (
         <div role="status" className="mt-3 rounded-lg bg-inset px-3 py-1.5 text-[12px] text-ink">{t("phone.code.e2e.copied")}</div>
       )}

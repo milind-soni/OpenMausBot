@@ -133,6 +133,16 @@ export function AiAppsImportView({ local, detection, chosen, status, result, onC
       </>
     );
   }
+  if (settings && !local) {
+    // Only the desktop app on the computer running MausBot can read that computer's AI apps: the row stays, inert.
+    return (
+      <div data-import-section="apps" className="contents">
+        <SettingRow title={t("settings.import.appsTitle")} subtitle={t("settings.import.appsShort")} inert={t("settings.import.appsLocalOnly")} inertText={t("settings.import.appsLocalOnly")}>
+          <button type="button" className="ui-button" tabIndex={-1}>{t("settings.import.choose")}</button>
+        </SettingRow>
+      </div>
+    );
+  }
   if (settings) {
     return (
       <div data-import-section="apps" className="flex flex-col gap-2 px-4 py-3">
@@ -191,7 +201,7 @@ export function GrokImportSection() {
   if (useContext(SettingsLook)) {
     return (
       <div data-import-section="grok" className="flex flex-col">
-        <SettingRow title={t("settings.import.moveTitle")} subtitle={t("settings.import.grokSubtitle")}>
+        <SettingRow title={t("settings.import.moveTitle")} subtitle={t("settings.import.grokLine")}>
           <button type="button" className="ui-button" data-grok-move-open aria-expanded={open} onClick={() => { setStarted(true); setOpen(!open); }}>{t(open ? "common.close" : "settings.import.moveAction")}</button>
         </SettingRow>
         {started && <div className={open ? "px-4 pb-3" : "hidden"}><GrokMoveDialog inline onClose={() => { setStarted(false); setOpen(false); }} /></div>}

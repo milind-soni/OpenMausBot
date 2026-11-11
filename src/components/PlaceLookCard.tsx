@@ -22,7 +22,7 @@ export function PlaceLookRows() {
   const [outcome, setOutcome] = useState<PlaceColorOutcome | null>(null);
   const locked = look?.change === null;
   const choose = (swatch: CloudSwatch) => {
-    if (!look || locked || pending || swatch === look.swatch) return;
+    if (!look || locked || pending || swatch === (look.swatch ?? "slate")) return;
     setPending(swatch); setOutcome(null);
     void choosePlaceColor(swatch).then((answer) => { setPending(null); setOutcome(answer); });
   };
@@ -30,13 +30,13 @@ export function PlaceLookRows() {
     : outcome === "unsupported" ? t("placeLook.unsupported") : null;
   return <>
     {look && <div data-place-look={look.change ?? "locked"}>
-      <SettingRow title={t("placeLook.sidebarColor")} subtitle={computer ? t("placeLook.sidebarColorSub") : t("placeLook.sub", { name: look.name })}
+      <SettingRow title={t("placeLook.sidebarColor")} subtitle={t("placeLook.colorLine", { place: look.name })}
         message={outcome === "failed" ? <p role="alert" className="text-danger">{t("placeLook.failed")}</p> : note && <p className="text-ink-secondary">{note}</p>}>
         <SwatchRadios value={pending ?? look.swatch} onChange={choose} label={computer ? t("placeLook.sidebarColor") : t("placeLook.aria", { name: look.name })}
           disabled={locked} offset="menu" none />
       </SettingRow>
     </div>}
-    <PlacePicture banner={state.config?.workspaceBanner ?? null} canChange={admin} subtitle={t(computer ? "placeLook.sidebarPictureSub" : "placeLook.sharedPictureSub")} />
+    <PlacePicture banner={state.config?.workspaceBanner ?? null} canChange={admin} subtitle={t("placeLook.pictureLine")} />
   </>;
 }
 

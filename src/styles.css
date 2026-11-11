@@ -1764,6 +1764,8 @@ body {
   font-weight: 500;
   color: var(--color-ink-secondary);
 }
+/* A quiet button's text ends on the control edge (card right − 16), like a filled button's edge. */
+[data-settings-look] :is([data-settings-control], [data-settings-actions], [data-settings-form-foot]) > .settings-quiet:last-child { margin-inline-end: -6px; }
 [data-settings-look] .settings-quiet:enabled:hover { color: var(--color-ink); background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
 [data-settings-look] .settings-quiet[data-danger]:enabled:hover { color: var(--color-danger); }
 /* Rows in a card part with a hairline that starts where their text starts: 16 in, 60 in a card whose rows lead with an icon. */
@@ -1787,8 +1789,9 @@ body {
     --color-menu: #1f1f1f;
   }
 }
-/* Descriptions wrap without leaving one word alone on a line. */
-[data-settings-look] :is(p, span, div) { text-wrap: pretty; }
+/* Descriptions wrap without leaving one word alone on a line. Only the wrap style: `text-wrap: pretty` would also set
+   the wrap mode back to wrap and undo every one-line, ellipsis label (nav items, search results, sub-lines). */
+[data-settings-look] :is(p, span, div) { text-wrap-style: pretty; }
 [data-settings-highlight] {
   animation: settings-highlight 1.2s ease-out;
 }
@@ -2017,6 +2020,11 @@ body {
 :focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
+}
+/* Settings: nav items, identity rows, search results and whole-row buttons (link, fold and card rows) take an inset
+   ring, so it is never clipped by the card or drawn into the nav's edge. */
+[data-settings-look] :is([data-settings-page], [data-settings-hit], [data-settings-key-result], [data-settings-rows] > button, [data-settings-rows] > * > button[aria-expanded], [data-settings-fold] > button, [data-settings-rows] > button[data-pair-with-cloud]):focus-visible {
+  outline-offset: -2px;
 }
 /* A menu row shows keyboard focus as its hover fill. */
 [role="menu"] :is(button, [role^="menuitem"]):focus-visible {

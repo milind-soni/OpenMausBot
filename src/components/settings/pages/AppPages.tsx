@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Plus } from "lucide-react";
 import { productName } from "@/lib/brand";
 import { FEEDBACK_URL, HELP_CENTER_URL, appVersion, openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
@@ -27,8 +28,10 @@ import { versionLine } from "../settings-context";
 import { useSettingsShell } from "../settings-shell";
 import { PlaceBadge } from "../SettingsNav";
 import { InertRow, useSwitchToComputer } from "../inert";
+import { useOtherPlaces } from "../settings-context";
 
-const elsewhere = (bridge: unknown, ctx: { desktop: boolean; here: boolean; client: boolean }) => ctx.desktop && !ctx.client && !ctx.here && !bridge;
+/** A row this page can't change because it lives on This computer: not on the app's own home page (main's home:page). */
+const elsewhere = (bridge: unknown, ctx: { desktop: boolean; here: boolean; home: boolean; client: boolean }) => ctx.desktop && !ctx.client && !ctx.here && !ctx.home && !bridge;
 
 export function AppPage() {
   const { ctx } = useSettingsShell();
@@ -41,19 +44,27 @@ export function AppPage() {
       <SettingsGroup label={t("settings.updates.title")} block="updates">
         <SettingsRows>
           {window.ogb?.updater ? <UpdatesRow title={versionLine()} />
-            : <InertRow title={versionLine()} reason={t("settings.inert.checkFromHere", { place: computer.name })}
-              control={<button type="button" className="ui-button" tabIndex={-1}>{t("settings.updates.check")}</button>} />}
+            // On the app's own page with no updater (a package or store build), the version is live and says why
+            // there is no button; only another place's page names This computer.
+            : ctx.home || ctx.client ? <SettingRow title={versionLine()} subtitle={t("settings.updates.fromPackage")}>{null}</SettingRow>
+              : <InertRow title={versionLine()} reason={t("settings.inert.checkFromHere", { place: computer.name })}
+                control={<button type="button" className="ui-button" tabIndex={-1}>{t("settings.updates.check")}</button>} />}
         </SettingsRows>
       </SettingsGroup>
     )}
-    {ctx.desktop && (
-      <SettingsGroup label={t("settings.app.computers")} description={t("settings.app.computersLine")} block="your-computers">
-        {window.ogb?.environments ? <ConnectedWorkspacesSettings /> : !ctx.client && (
-          <SettingsRows><InertRow title={t("connectedWorkspaces.localTitle")} control={<button type="button" className="ui-button" tabIndex={-1}>{t("connectedWorkspaces.newEnvironment")}</button>} /></SettingsRows>
-        )}
-        <RemoteComputerSection hideWhenUnavailable legacyOnly />
+    {/* Simple keeps language and notifications here, since General is an Advanced page. */}
+    {!ctx.advanced && (
+      <SettingsGroup label={t("settings.app.languageNotifications")} block="typing">
+        <SettingsRows selectWidth={208}>
+          <LanguageRow simple />
+          <NotificationRows simple />
+        </SettingsRows>
       </SettingsGroup>
     )}
+    {ctx.desktop && (window.ogb?.environments
+      ? <ConnectedWorkspacesSettings label={t("settings.app.computers")} description={t("settings.app.computersLine")} />
+      : !ctx.client && <PlacesFromHere />)}
+    {ctx.desktop && <RemoteComputerSection hideWhenUnavailable legacyOnly />}
     <SettingsGroup label={t("sidebar.menu.helpShort")} block="help">
       <SettingsRows>
         <SettingsLinkRow title={t("sidebar.menu.help")} external onClick={() => void openExternalLink(HELP_CENTER_URL)} />
@@ -73,11 +84,40 @@ export function AppPage() {
   </>;
 }
 
+/** A Cloud's page in the desktop window: the places list reads the rail through the workspaces bridge, which works on
+ * every page; only the environments on this computer need This computer's own page. */
+function PlacesFromHere() {
+  const { place } = useSettingsShell();
+  const others = useOtherPlaces("app");
+  const workspaces = window.ogb?.workspaces;
+  if (!workspaces) return null;
+  return <>
+    <SettingsGroup label={t("settings.app.computers")} description={t("settings.app.computersLine")} block="your-computers">
+      <SettingsRows icons>
+        <SettingRow title={place.name} leading={<PlaceBadge place={place} size={24} />} subtitle={t("servers.managed")}>
+          <span className="text-[13px] leading-5 text-ink-secondary">{t("servers.current")}</span>
+        </SettingRow>
+        {others.map((other) => (
+          <SettingRow key={other.key} title={other.name} leading={<PlaceBadge place={{ kind: other.kind === "computer" ? "computer" : "cloud", name: other.name, color: other.color }} size={24} />}
+            subtitle={other.kind === "computer" ? t("servers.localHint") : undefined}>
+            <button type="button" className="ui-button" data-place-switch={other.key} onClick={other.open}>{t("servers.switch")}</button>
+          </SettingRow>
+        ))}
+        {workspaces.add && <SettingsLinkRow title={t("connect.title")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} strokeWidth={1.75} aria-hidden="true" /></span>}
+          onClick={() => void workspaces.add?.("address")} data={{ "data-server-connect": "" }} />}
+      </SettingsRows>
+    </SettingsGroup>
+    <SettingsGroup label={t("connectedWorkspaces.localTitle")} block="environments">
+      <SettingsRows><InertRow title={t("connectedWorkspaces.localTitle")} control={<button type="button" className="ui-button" tabIndex={-1}>{t("connectedWorkspaces.newEnvironment")}</button>} /></SettingsRows>
+    </SettingsGroup>
+  </>;
+}
+
 export function GeneralPage() {
   const { ctx, place, go } = useSettingsShell();
   return <>
     <SettingsGroup label={t("settings.simple.group.typing")} block="typing">
-      <SettingsRows>
+      <SettingsRows selectWidth={208}>
         <LanguageRow simple />
         <SendKeyRow simple />
         <FollowUpRow simple />
@@ -130,7 +170,8 @@ export function AppearancePage() {
         {ctx.advanced && <FontRow />}
       </SettingsRows>
     </SettingsGroup>
-    <SettingsGroup label={t("settings.appearance.layout")} block="appearance">
+    {/* Simple keeps the Look card and Tool calls; the window's layout is Advanced. */}
+    {ctx.advanced && <SettingsGroup label={t("settings.appearance.layout")} block="appearance">
       <SettingsRows>
         <ChromeRailRow />
         <WindowFrameRow />
@@ -139,7 +180,7 @@ export function AppearancePage() {
         {ctx.advanced && <PinnedCirclesRow />}
         {ctx.advanced && <UniversalPinsRow />}
       </SettingsRows>
-    </SettingsGroup>
+    </SettingsGroup>}
     {ctx.advanced && <PinnedPanelsSettings />}
   </>;
 }
