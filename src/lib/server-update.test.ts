@@ -126,6 +126,13 @@ describe("the Update server row", () => {
     expect(view({ status: button({ mode: "held" }) })).toMatchObject({ subtitle: "Updates are on hold on this server.", action: null });
   });
 
+  it("says a build of main is not one the app updates, with the command that moves it to stable", () => {
+    expect(view({ status: button({ mode: "command", why: "unreleased", command: "cd /opt/openmausbot && sudo ./update.sh --allow-older" }) })).toEqual({
+      label: "Version 0.1.151 is available for this server", action: null, busy: false,
+      subtitle: "This server runs a build of main, which the app doesn't update. To move it to the stable version, on the server run: cd /opt/openmausbot && sudo ./update.sh --allow-older",
+    });
+  });
+
   it("shows nothing to press for this computer's app or a Cloud we run", () => {
     expect(view({ check: check({ install: "managed", available: false }), status: button({ mode: "none" }) })).toEqual({ label: "Kept up to date for you", action: null, busy: false });
     expect(view({ check: check({ install: "desktop", available: false }) }).action).toBeNull();
@@ -169,6 +176,12 @@ describe("the Update server row", () => {
     );
     expect(view({ status: button({ run: { outcome: "not-changed", reason: "too-soon", from: "0.1.150", at: 1 } }) }).note).toBe(
       "The server wasn't changed. Updates were asked for too often. Try again in a few minutes.",
+    );
+    expect(view({ status: button({ run: { outcome: "not-changed", reason: "not-retried", target: "0.1.151", from: "0.1.150", at: 1 } }) }).note).toBe(
+      "The server wasn't changed. The update to v0.1.151 didn't work on this server before, so the app won't try it again. To try it by hand, on the server run: cd /opt/openmausbot && sudo ./update.sh",
+    );
+    expect(view({ status: button({ setup: "cd /srv/deploy && sudo ./update-runner.sh --install", run: { outcome: "not-changed", reason: "stale", from: "0.1.150", at: 1 } }) }).note).toBe(
+      "The server wasn't changed. The server's update.sh is newer than the copy the button uses. On the server, run: cd /srv/deploy && sudo ./update-runner.sh --install",
     );
     expect(view({ status: button({ run: { outcome: "not-started", from: "0.1.150", at: 1 } }) }).note).toBe(
       "The server didn't start the update. On the server, run: systemctl status openmausbot-update.path",

@@ -29,12 +29,13 @@ const RUNNING_FOR_MS = 2 * 60 * 60_000;
 const SHOWN_FOR_MS = 60 * 60_000;
 const PENDING_FILE = "server-update.json";
 
-const REASONS: readonly ServerUpdateReason[] = ["busy", "refused", "older", "held", "too-soon", "no-updater", "failed"];
+const REASONS: readonly ServerUpdateReason[] = ["busy", "refused", "older", "held", "too-soon", "no-updater", "failed", "not-retried", "stale", "unreleased"];
 export type HostResult = "updated" | "rolled-back" | "rollback-failed" | ServerUpdateReason;
 const RESULTS: readonly HostResult[] = ["updated", "rolled-back", "rollback-failed", ...REASONS];
 
-export interface HostRunner { layout: "installer" | "compose"; dir: string; held: boolean }
-export interface HostRun { run: number; state: "running" | "done"; result?: HostResult; at: number }
+/** `release`: the running image is labelled with a released version (false for a build of main). */
+export interface HostRunner { layout: "installer" | "compose"; dir: string; held: boolean; release: boolean }
+export interface HostRun { run: number; state: "running" | "done"; result?: HostResult; at: number; version?: string }
 export interface HostFacts {
   runner: HostRunner | null;
   /** This server can leave a file in the request folder. */
@@ -68,7 +69,7 @@ export function parseRunner(text: string | null): HostRunner | null {
   const layout = f.get("layout");
   const dir = f.get("dir");
   if ((layout !== "installer" && layout !== "compose") || !dir || !/^\/[A-Za-z0-9/._-]{0,200}$/.test(dir)) return null;
-  return { layout, dir, held: f.get("held") === "yes" };
+  return { layout, dir, held: f.get("held") === "yes", release: f.get("release") !== "no" };
 }
 
 export function parseRun(text: string | null): HostRun | null {
@@ -80,7 +81,8 @@ export function parseRun(text: string | null): HostRun | null {
   if (!/^\d{1,9}$/.test(f.get("run") ?? "") || !/^\d{1,12}$/.test(f.get("at") ?? "")) return null;
   if (state !== "running" && state !== "done") return null;
   if (state === "done" && !(result && RESULTS.includes(result))) return null;
-  return { run, state, at: at * 1000, ...(state === "done" ? { result } : {}) };
+  const version = f.get("version");
+  return { run, state, at: at * 1000, ...(state === "done" ? { result } : {}), ...(version && /^\d+\.\d+\.\d+$/.test(version) ? { version } : {}) };
 }
 
 export function readHostFacts(dir: string | undefined): HostFacts {
@@ -126,7 +128,7 @@ export function runOf(pending: PendingUpdate | null, last: HostRun | null, versi
       return now - last.at < RUNNING_FOR_MS ? { ...base, outcome: "running" } : { ...base, outcome: "not-changed", reason: "failed" };
     }
     if (now - last.at > SHOWN_FOR_MS) return undefined;
-    return { ...base, to: version, ...outcomeOf(last.result, pending.from, version) };
+    return { ...base, to: version, ...(last.version ? { target: last.version } : {}), ...outcomeOf(last.result, pending.from, version) };
   }
   if (now - pending.at < START_WAIT_MS) return { ...base, outcome: "requested" };
   if (now - pending.at > SHOWN_FOR_MS) return undefined;
@@ -151,10 +153,13 @@ export function serverUpdateStatus(input: {
   const run = runOf(pending, facts.last, version, now);
   const retryAt = pending && now - pending.at < REQUEST_GAP_MS ? pending.at + REQUEST_GAP_MS : undefined;
   const extra = { ...(run ? { run } : {}), ...(retryAt ? { retryAt } : {}) };
+  if (runner && !runner.release) {
+    return { ...base, ...extra, mode: "command", why: "unreleased", command: `cd ${runner.dir} && sudo ./update.sh --allow-older` };
+  }
   if (runner && input.followsStable !== false) {
     const own = {
       command: `cd ${runner.dir} && sudo ./update.sh`, rollback: `cd ${runner.dir} && sudo ./update.sh --rollback`,
-      logs: `cd ${runner.dir} && sudo docker compose logs --tail 50 omb`,
+      logs: `cd ${runner.dir} && sudo docker compose logs --tail 50 omb`, setup: `cd ${runner.dir} && sudo ./update-runner.sh --install`,
     };
     return { ...base, ...own, ...extra, mode: runner.held ? "held" : "button" };
   }

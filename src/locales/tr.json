@@ -5621,5 +5621,8 @@
   "native.update.notNow": "Şimdi değil",
   "serverUpdate.notBack": "Sunucu henüz geri gelmedi",
   "serverUpdate.notBackDetail": "Güncelleme 15 dakikadan uzun süredir devam ediyor.",
-  "serverUpdate.goBack": "Önceki sürüme dönmek için: {command}"
+  "serverUpdate.goBack": "Önceki sürüme dönmek için: {command}",
+  "serverUpdate.reason.notRetried": "v{version} sürümüne güncelleme bu sunucuda daha önce işe yaramadı, bu yüzden uygulama yeniden denemeyecek. Elle denemek için sunucuda şunu çalıştırın: {command}",
+  "serverUpdate.reason.stale": "Sunucudaki update.sh, düğmenin kullandığı kopyadan daha yeni. Sunucuda şunu çalıştırın: {command}",
+  "serverUpdate.reason.unreleased": "Bu sunucu main dalının bir derlemesini çalıştırıyor; uygulama bunu güncellemez. Kararlı sürüme geçirmek için sunucuda şunu çalıştırın: {command}"
 }

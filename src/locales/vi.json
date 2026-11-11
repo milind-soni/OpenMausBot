@@ -5621,5 +5621,8 @@
   "native.update.notNow": "Để sau",
   "serverUpdate.notBack": "Máy chủ vẫn chưa quay lại",
   "serverUpdate.notBackDetail": "Việc cập nhật đã kéo dài hơn 15 phút.",
-  "serverUpdate.goBack": "Để quay về phiên bản trước: {command}"
+  "serverUpdate.goBack": "Để quay về phiên bản trước: {command}",
+  "serverUpdate.reason.notRetried": "Bản cập nhật lên v{version} đã không chạy được trên máy chủ này, nên ứng dụng sẽ không thử lại. Để tự thử, chạy trên máy chủ: {command}",
+  "serverUpdate.reason.stale": "update.sh trên máy chủ mới hơn bản sao mà nút đang dùng. Trên máy chủ, chạy: {command}",
+  "serverUpdate.reason.unreleased": "Máy chủ này đang chạy bản dựng từ main, ứng dụng không cập nhật bản này. Để chuyển sang phiên bản ổn định, chạy trên máy chủ: {command}"
 }

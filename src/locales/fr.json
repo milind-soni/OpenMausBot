@@ -3349,5 +3349,8 @@
   "native.update.notNow": "Pas maintenant",
   "serverUpdate.notBack": "Le serveur n'est pas encore revenu",
   "serverUpdate.notBackDetail": "La mise à jour dure depuis plus de 15 minutes.",
-  "serverUpdate.goBack": "Pour revenir à la version d'avant : {command}"
+  "serverUpdate.goBack": "Pour revenir à la version d'avant : {command}",
+  "serverUpdate.reason.notRetried": "La mise à jour vers la v{version} n'a pas marché sur ce serveur, donc l'app ne la retentera pas. Pour essayer à la main, lancez sur le serveur : {command}",
+  "serverUpdate.reason.stale": "Le update.sh du serveur est plus récent que la copie qu'utilise le bouton. Sur le serveur, lancez : {command}",
+  "serverUpdate.reason.unreleased": "Ce serveur utilise une build de main, que l'app ne met pas à jour. Pour le passer à la version stable, lancez sur le serveur : {command}"
 }

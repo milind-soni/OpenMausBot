@@ -9997,5 +9997,8 @@
   "agentEndpoints.codexTitle": "Codex direct API",
   "agentEndpoints.codexHint": "使用 API 金鑰執行原生 Codex 代理：可連接 OpenAI，或支援 Responses API 的閘道。每個連線都有各自的金鑰和 Codex 設定，費用由該 URL 背後的供應商計收。",
   "settings.simple.account.noNameHint": "尚未設定",
-  "settings.simple.account.yourName": "你的名稱"
+  "settings.simple.account.yourName": "你的名稱",
+  "serverUpdate.reason.notRetried": "更新到 v{version} 之前在此伺服器上沒有成功，所以應用程式不會再試。要手動嘗試，請在伺服器上執行：{command}",
+  "serverUpdate.reason.stale": "伺服器上的 update.sh 比按鈕使用的副本更新。請在伺服器上執行：{command}",
+  "serverUpdate.reason.unreleased": "此伺服器執行的是 main 的建置版本，應用程式不會更新它。要切換到穩定版，請在伺服器上執行：{command}"
 }

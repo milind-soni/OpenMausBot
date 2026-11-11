@@ -3639,5 +3639,8 @@
   "native.update.notNow": "Не зараз",
   "serverUpdate.notBack": "Сервер ще не повернувся",
   "serverUpdate.notBackDetail": "Оновлення триває вже понад 15 хвилин.",
-  "serverUpdate.goBack": "Щоб повернути попередню версію: {command}"
+  "serverUpdate.goBack": "Щоб повернути попередню версію: {command}",
+  "serverUpdate.reason.notRetried": "Оновлення до v{version} уже не спрацювало на цьому сервері, тож застосунок не пробуватиме знову. Щоб спробувати вручну, виконайте на сервері: {command}",
+  "serverUpdate.reason.stale": "update.sh на сервері новіший за копію, яку використовує кнопка. На сервері виконайте: {command}",
+  "serverUpdate.reason.unreleased": "Цей сервер працює на збірці main, яку застосунок не оновлює. Щоб перевести його на стабільну версію, виконайте на сервері: {command}"
 }

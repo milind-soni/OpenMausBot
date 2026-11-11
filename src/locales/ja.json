@@ -7792,5 +7792,8 @@
   "native.update.notNow": "後で",
   "serverUpdate.notBack": "サーバーはまだ戻っていません",
   "serverUpdate.notBackDetail": "更新が始まってから 15 分以上たっています。",
-  "serverUpdate.goBack": "前のバージョンに戻すには：{command}"
+  "serverUpdate.goBack": "前のバージョンに戻すには：{command}",
+  "serverUpdate.reason.notRetried": "v{version} への更新はこのサーバーで以前うまくいかなかったため、アプリからは再試行しません。手動で試すには、サーバーで実行してください：{command}",
+  "serverUpdate.reason.stale": "サーバーの update.sh が、ボタンが使うコピーより新しくなっています。サーバーで実行してください：{command}",
+  "serverUpdate.reason.unreleased": "このサーバーは main のビルドで動いており、アプリからは更新しません。安定版に移すには、サーバーで実行してください：{command}"
 }

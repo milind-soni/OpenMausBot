@@ -6121,5 +6121,8 @@
   "native.update.notNow": "Ahora no",
   "serverUpdate.notBack": "El servidor aún no ha vuelto",
   "serverUpdate.notBackDetail": "Lleva más de 15 minutos actualizándose.",
-  "serverUpdate.goBack": "Para volver a la versión anterior: {command}"
+  "serverUpdate.goBack": "Para volver a la versión anterior: {command}",
+  "serverUpdate.reason.notRetried": "La actualización a la v{version} ya falló en este servidor, así que la app no la volverá a intentar. Para intentarlo a mano, ejecuta en el servidor: {command}",
+  "serverUpdate.reason.stale": "El update.sh del servidor es más nuevo que la copia que usa el botón. En el servidor, ejecuta: {command}",
+  "serverUpdate.reason.unreleased": "Este servidor usa una compilación de main, que la app no actualiza. Para pasarlo a la versión estable, ejecuta en el servidor: {command}"
 }

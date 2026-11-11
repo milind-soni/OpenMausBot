@@ -20,7 +20,7 @@ afterEach(() => {
 
 const NOW = 1_800_000_000_000;
 const available: UpdateCheck = { current: "0.1.150", install: "docker", latest: "0.1.151", available: true, command: "git pull && ./update.sh" };
-const runner: HostFacts = { runner: { layout: "installer", dir: "/opt/openmausbot", held: false }, writable: true, last: { run: 3, state: "done", result: "updated", at: NOW - 86_400_000 } };
+const runner: HostFacts = { runner: { layout: "installer", dir: "/opt/openmausbot", held: false, release: true }, writable: true, last: { run: 3, state: "done", result: "updated", at: NOW - 86_400_000 } };
 
 /** The two folders the installer's compose.yaml gives the server, as the runner leaves them, and a data folder. */
 function host(options: { runnerFile?: string | null; last?: string; writable?: boolean } = {}) {
@@ -49,11 +49,13 @@ const admin = { kind: "session", sessionId: "s1", label: "Laptop", email: "owner
 
 describe("what the host's runner wrote", () => {
   it("reads only the fields it knows, in the shapes it expects", () => {
-    expect(parseRunner("layout=installer\ndir=/opt/openmausbot\nheld=no\n")).toEqual({ layout: "installer", dir: "/opt/openmausbot", held: false });
-    expect(parseRunner("layout=compose\ndir=/srv/OpenMausBot/deploy\nheld=yes\n")).toEqual({ layout: "compose", dir: "/srv/OpenMausBot/deploy", held: true });
+    expect(parseRunner("layout=installer\ndir=/opt/openmausbot\nheld=no\nrelease=yes\n")).toEqual({ layout: "installer", dir: "/opt/openmausbot", held: false, release: true });
+    expect(parseRunner("layout=compose\ndir=/srv/OpenMausBot/deploy\nheld=yes\nrelease=no\n")).toEqual({ layout: "compose", dir: "/srv/OpenMausBot/deploy", held: true, release: false });
     for (const bad of [null, "", "layout=podman\ndir=/opt/x", "layout=installer\ndir=relative", "layout=installer\ndir=/opt/x; rm -rf /"]) expect(parseRunner(bad), String(bad)).toBeNull();
     expect(parseRun("run=4\nstate=running\nat=1700000000\nran=1700000000\n")).toEqual({ run: 4, state: "running", at: 1_700_000_000_000 });
     expect(parseRun("run=4\nstate=done\nresult=rolled-back\nat=1700000000\n")).toEqual({ run: 4, state: "done", result: "rolled-back", at: 1_700_000_000_000 });
+    expect(parseRun("run=5\nstate=done\nresult=not-retried\nat=1\nversion=0.1.151\n")).toEqual({ run: 5, state: "done", result: "not-retried", at: 1000, version: "0.1.151" });
+    expect(parseRun("run=5\nstate=done\nresult=stale\nat=1\nversion=x;y\n")).toEqual({ run: 5, state: "done", result: "stale", at: 1000 });
     for (const bad of ["run=x\nstate=done\nresult=updated\nat=1", "run=1\nstate=done\nresult=whatever\nat=1", "run=1\nstate=done\nat=1", "run=1\nstate=odd\nat=1"]) expect(parseRun(bad), bad).toBeNull();
   });
 
@@ -74,9 +76,15 @@ describe("the button's state", () => {
     expect(status({})).toEqual({
       mode: "button", current: "0.1.150", latest: "0.1.151", available: true, activeTurns: 2,
       command: "cd /opt/openmausbot && sudo ./update.sh", rollback: "cd /opt/openmausbot && sudo ./update.sh --rollback",
-      logs: "cd /opt/openmausbot && sudo docker compose logs --tail 50 omb",
+      logs: "cd /opt/openmausbot && sudo docker compose logs --tail 50 omb", setup: "cd /opt/openmausbot && sudo ./update-runner.sh --install",
     });
     expect(status({ facts: { ...runner, runner: { ...runner.runner!, held: true } } }).mode).toBe("held");
+  });
+
+  it("never offers the button for a build of main: it says so, with the command that moves it to stable", () => {
+    expect(status({ facts: { ...runner, runner: { ...runner.runner!, release: false } } })).toMatchObject({
+      mode: "command", why: "unreleased", command: "cd /opt/openmausbot && sudo ./update.sh --allow-older",
+    });
   });
 
   it("shows the command, not the button, when the check follows every release, which update.sh does not take", () => {
@@ -109,6 +117,7 @@ describe("the button's state", () => {
     expect(runOf(pending, { run: 4, state: "done", result: "rolled-back", at: NOW + 60_000 }, "0.1.150", NOW + 61_000)).toMatchObject({ outcome: "rolled-back", to: "0.1.150" });
     expect(runOf(pending, { run: 4, state: "done", result: "rollback-failed", at: NOW + 60_000 }, "0.1.150", NOW + 61_000)?.outcome).toBe("rollback-failed");
     expect(runOf(pending, { run: 4, state: "done", result: "too-soon", at: NOW + 60_000 }, "0.1.150", NOW + 61_000)).toMatchObject({ outcome: "not-changed", reason: "too-soon" });
+    expect(runOf(pending, { run: 4, state: "done", result: "not-retried", at: NOW + 60_000, version: "0.1.151" }, "0.1.150", NOW + 61_000)).toMatchObject({ outcome: "not-changed", reason: "not-retried", target: "0.1.151" });
     expect(runOf(pending, runner.last, "0.1.150", NOW + START_WAIT_MS + 1)?.outcome).toBe("not-started");
     // A run cut off (a reboot) is not "updating" for ever; an old outcome is not shown for ever.
     expect(runOf(pending, { run: 4, state: "running", at: NOW }, "0.1.150", NOW + 3 * 60 * 60_000)).toMatchObject({ outcome: "not-changed", reason: "failed" });

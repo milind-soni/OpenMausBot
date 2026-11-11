@@ -95,7 +95,16 @@ const REASON_TEXT: Record<ServerUpdateReason, LocaleKey> = {
   "too-soon": "serverUpdate.reason.tooSoon",
   "no-updater": "serverUpdate.reason.noUpdater",
   failed: "serverUpdate.reason.failed",
+  "not-retried": "serverUpdate.reason.notRetried",
+  stale: "serverUpdate.reason.stale",
+  unreleased: "serverUpdate.reason.unreleased",
 };
+
+/** The command each reason names, from what the server said. */
+function reasonText(reason: ServerUpdateReason, status: ServerUpdateStatus, target?: string): string {
+  const command = reason === "stale" ? status.setup : status.command;
+  return t(REASON_TEXT[reason], { version: target ?? status.latest ?? "", command: command ?? "" });
+}
 
 const APP_ANSWER_TEXT: Partial<Record<AppUpdateAnswer, LocaleKey>> = {
   downloading: "serverUpdate.appDownloading",
@@ -114,7 +123,7 @@ function runNote(status: ServerUpdateStatus | null): Pick<ServerUpdateView, "not
       const detail = status!.rollback ? ` ${t("serverUpdate.runOnServer", { command: status!.rollback })}` : "";
       return { note: `${t("serverUpdate.rollbackFailed")}${detail}`, noteTone: "danger" };
     }
-    case "not-changed": return { note: `${t("serverUpdate.notChanged")} ${t(REASON_TEXT[run.reason ?? "failed"])}`, noteTone: "danger" };
+    case "not-changed": return { note: `${t("serverUpdate.notChanged")} ${reasonText(run.reason ?? "failed", status!, run.target)}`, noteTone: "danger" };
     case "not-started": return { note: `${t("serverUpdate.notStarted")} ${t("serverUpdate.runOnServer", { command: "systemctl status openmausbot-update.path" })}`, noteTone: "danger" };
     default: return {};
   }
@@ -162,6 +171,10 @@ export function serverUpdateView(input: {
     return { label: t("sidebar.update.reloadPage", { version: check.current }), subtitle: t("sidebar.update.pageVersion", { version: bundle }), action: "reload", busy: false, ...extra };
   }
   const appBehind = Boolean(input.app && newerVersion(check.current, input.app));
+  if (status?.why === "unreleased") {
+    const label = check.available && check.latest ? t("serverUpdate.available", { version: check.latest }) : `v${check.current}`;
+    return { label, subtitle: reasonText("unreleased", status), action: null, busy: false, ...extra };
+  }
   if (check.available && check.latest) {
     const label = t(appBehind ? "serverUpdate.availableBoth" : "serverUpdate.available", { version: check.latest });
     if (status?.mode === "button") return { label, action: "update-server", busy: false, ...extra };

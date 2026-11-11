@@ -9,13 +9,19 @@
 #
 # SECURITY: anything that runs as the server's user can leave the request, a bot included where the bots' sandbox is
 # off, so the requester is treated as hostile. The request is a file that exists, and nothing else: this script never
-# reads it, follows it or passes on anything from it, and the only thing it can cause is the standard update, run by
-# root's copy of update.sh with OMB_UPDATE_BY_RUNNER=1: the stable version, only when the running image's own label is
-# older (never what the server says it runs), a copy of the data first that never removes the copies before it, and the
-# old version back when the new one is not healthy. It cannot choose a version, an image, a URL, a flag or a path,
-# cannot roll back, and cannot make updates that change something come closer than GAP_S seconds apart. Every file this
-# writes is in STATE, root's folder, of which the server's container sees only `request` (its own) and `status`
-# (read-only); it never sees this script, update.sh, .env or the Compose files.
+# reads it, follows it or passes on anything from it. What any request can cause, at most once per stable image:
+#   - root's copy of update.sh, run with OMB_UPDATE_BY_RUNNER=1: the stable version, only when it is not older than the
+#     running image's own label (never what the server says it runs), a copy of the data first, and the old version
+#     back when the new one is not healthy;
+#   - after a rollback, never that same stable image again on this server until a person runs update.sh or another
+#     stable image is out (STATE/blocked), so a server that fails a version cannot be stopped and copied over and over;
+#   - the runner's own copies of the data are capped at the newest one; a person's own copy is never removed.
+# Runs that stop the server are GAP_S apart; runs with nothing to do are answered from STATE/idle for IDLE_S without
+# asking GitHub or the registry, and any two runs are QUIET_S apart. It cannot choose a version, an image, a URL, a flag
+# or a path, and cannot roll back. Every file this writes is in STATE, root's folder, of which the server's container
+# sees only `request` (its own) and `status` (read-only). In a checkout, the folder's owner decides what root's
+# `docker compose up` starts (the Compose files and .env are theirs), so --install wants that owner to be root or able
+# to run Docker already.
 set -u
 
 SBIN_DIR=${OMB_SBIN_DIR:-/usr/local/sbin}
@@ -24,6 +30,7 @@ STATE=${OMB_UPDATE_STATE_DIR:-/var/lib/openmausbot-update}
 POLICY=${OMB_UPDATE_POLICY:-/etc/mausbot/policy.json}
 GAP_S=${OMB_RUNNER_GAP_S:-240}
 QUIET_S=${OMB_RUNNER_QUIET_S:-30}
+IDLE_S=${OMB_RUNNER_IDLE_S:-300}
 UNIT=openmausbot-update
 RUNNER=openmausbot-update-runner
 INSTALLER_MARK="# Written by MausBot's installer (deploy/install.sh)"
@@ -33,6 +40,9 @@ IN_CONTAINER=/run/omb-update
 REQUESTS="$STATE/request"
 STATUS="$STATE/status"
 UPDATER="$STATE/update.sh"
+BLOCKED="$STATE/blocked"
+IDLE="$STATE/idle"
+VERSION_LABEL=org.opencontainers.image.version
 
 say() { printf '%s\n' "$*"; }
 fail() {
@@ -44,6 +54,7 @@ DIR=${OMB_INSTALL_DIR:-}
 MODE=run
 USER_IDS=""
 RESTART=yes
+TRUST_OWNER=no
 while [ $# -gt 0 ]; do
   case "$1" in
     --install) MODE=install ;;
@@ -51,6 +62,7 @@ while [ $# -gt 0 ]; do
     --dir) [ $# -ge 2 ] || fail "--dir needs a folder."; DIR=$2; shift ;;
     --user) [ $# -ge 2 ] || fail "--user needs UID:GID."; USER_IDS=$2; shift ;;
     --no-restart) RESTART=no ;;
+    --trust-folder-owner) TRUST_OWNER=yes ;;
     -h | --help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) fail "Unknown option: $1" ;;
   esac
@@ -84,14 +96,30 @@ write_status() { # file, then key=value lines
   printf '%s\n' "$@" | place "$STATUS/$file" 644
 }
 status_value() { sed -n "s/^$2=//p" "$STATUS/$1" 2>/dev/null | head -n 1; }
+state_value() { sed -n "s/^$2=//p" "$STATE/$1" 2>/dev/null | head -n 1; }
 number() { case "$1" in '' | *[!0-9]*) echo 0 ;; *) echo "$1" ;; esac; }
 held() { grep -Eq '"updates"[[:space:]]*:[[:space:]]*"hold"' "$POLICY" 2>/dev/null; }
 held_word() { if held; then echo yes; else echo no; fi; }
-# The server's container, and when it started: unchanged across a run, the run stopped nothing.
+server_container() { (cd "$DIR" && docker compose ps -aq omb) 2>/dev/null | head -n 1; }
+# The server's container, and when it started: unchanged across a run, the run stopped nothing. A server that restarts by
+# itself during a run makes that run count as one that did.
 server_mark() {
-  cid=$( (cd "$DIR" && docker compose ps -aq omb) 2>/dev/null | head -n 1)
+  cid=$(server_container)
   [ -z "$cid" ] || docker inspect -f '{{.Id}} {{.State.StartedAt}}' "$cid" 2>/dev/null
 }
+server_image() {
+  cid=$(server_container)
+  [ -z "$cid" ] || docker inspect -f '{{.Image}}' "$cid" 2>/dev/null
+}
+# yes when the running image is labelled with a released version (a build of main is labelled with its branch).
+released() {
+  image=$(server_image)
+  label=$( [ -z "$image" ] || docker image inspect -f "{{index .Config.Labels \"$VERSION_LABEL\"}}" "$image" 2>/dev/null)
+  if printf '%s' "$label" | grep -Eqx 'v?[0-9]+\.[0-9]+\.[0-9]+'; then echo yes; else echo no; fi
+}
+write_runner() { write_status runner "layout=$1" "dir=$DIR" "held=$(held_word)" "release=$(released)"; }
+# The install's update.sh, when it is a file and root's copy is the same; a checkout's after a git pull is newer.
+same_updater() { [ -f "$DIR/update.sh" ] && [ ! -L "$DIR/update.sh" ] && cmp -s "$DIR/update.sh" "$UPDATER"; }
 
 # update.sh's exit code, as the server reads it (deploy/update.sh lists them).
 result_of() {
@@ -106,29 +134,42 @@ result_of() {
   esac
 }
 
-# systemd starts this when the request appears or the owner's policy changes: the policy's hold is said again either way.
+# systemd starts this when the request appears, the owner's policy changes or .env does (an update pins its image there):
+# what the status says of the hold and of the running image is said again each time.
 run_requested() {
   [ -d "$STATUS" ] || exit 0
   layout=$(status_value runner layout)
-  if [ -n "$layout" ]; then write_status runner "layout=$layout" "dir=$DIR" "held=$(held_word)"; fi
+  if [ -n "$layout" ]; then write_runner "$layout"; fi
   [ -e "$REQUESTS/request" ] || [ -L "$REQUESTS/request" ] || exit 0
   # The server's file, in the server's folder: removed (a link itself, never what it names), never read.
   rm -rf -- "$REQUESTS/request"
   run=$(($(number "$(status_value last run)") + 1))
   ran=$(number "$(status_value last ran)")
-  # Runs that change nothing are cheap, so they never use up the gap; they only come no closer than QUIET_S apart.
   since=$(($(date +%s) - $(number "$(status_value last at)")))
   if [ "$since" -lt "$QUIET_S" ]; then sleep $((QUIET_S - since)); fi
   now=$(date +%s)
-  done_with() { write_status last "run=$run" state=done "result=$1" "at=$(date +%s)" "ran=$ran"; }
+  version=""
+  done_with() { write_status last "run=$run" state=done "result=$1" "at=$(date +%s)" "ran=$ran" ${version:+"version=$version"}; }
   if held; then done_with held; return; fi
+  image=$(server_image)
+  if [ "$(released)" != yes ]; then done_with unreleased; return; fi
+  if [ ! -f "$UPDATER" ] || [ ! -f "$DIR/update.sh" ] || [ -L "$DIR/update.sh" ]; then done_with no-updater; return; fi
+  if ! same_updater; then done_with stale; return; fi
+  # Nothing to do a moment ago, on the same image: the same answer, without asking GitHub or the registry again.
+  if [ "$(state_value idle image)" = "$image" ] && [ $((now - $(number "$(state_value idle at)"))) -lt "$IDLE_S" ]; then done_with updated; return; fi
   if [ $((now - ran)) -lt "$GAP_S" ]; then done_with too-soon; return; fi
-  if [ ! -f "$UPDATER" ]; then done_with no-updater; return; fi
-  write_status last "run=$run" state=running "at=$now" "ran=$ran"
+  target=$(OMB_UPDATE_BY_RUNNER=1 bash "$UPDATER" --dir "$DIR" --print-target </dev/null 2>/dev/null) || { done_with refused; return; }
+  version=${target##* }
+  if [ "$(state_value blocked image)" = "$image" ] && [ "$(state_value blocked target)" = "${target% *}" ]; then done_with not-retried; return; fi
+  write_status last "run=$run" state=running "at=$now" "ran=$ran" "version=$version"
   before=$(server_mark)
   code=0
   OMB_UPDATE_BY_RUNNER=1 bash "$UPDATER" --dir "$DIR" </dev/null || code=$?
   if [ -z "$before" ] || [ "$before" != "$(server_mark)" ]; then ran=$now; fi
+  rm -f "$IDLE"
+  if [ "$code" = 0 ] && [ "$ran" != "$now" ]; then printf '%s\n' "image=$image" "at=$now" | place "$IDLE" 600; fi
+  if [ "$code" = 1 ]; then printf '%s\n' "image=$image" "target=${target% *}" | place "$BLOCKED" 600; fi
+  if [ "$code" = 0 ] && [ "$ran" = "$now" ]; then rm -f "$BLOCKED"; fi
   done_with "$(result_of "$code")"
 }
 
@@ -182,6 +223,17 @@ data_owner() {
   stat -c '%u:%g' "$source" 2>/dev/null || stat -f '%u:%g' "$source" 2>/dev/null
 }
 
+# SECURITY: in a checkout the folder's owner can change what root runs here (its Compose files and .env decide what
+# `docker compose up` starts). Fine when that owner is root or may run Docker already; anyone else, only when asked.
+check_owner() {
+  owner=$(stat -c %u "$DIR" 2>/dev/null || stat -f %u "$DIR" 2>/dev/null)
+  [ "$owner" = 0 ] && return 0
+  name=$(stat -c %U "$DIR" 2>/dev/null || stat -f %Su "$DIR" 2>/dev/null)
+  case " $(id -nG "$name" 2>/dev/null) " in *" docker "*) return 0 ;; esac
+  [ "$TRUST_OWNER" = yes ] && return 0
+  fail "$DIR belongs to ${name:-user $owner}, who cannot run Docker. Whoever owns it can change what root runs when the app asks for an update (its Compose files and .env decide what docker compose up starts). Move it to a folder root owns, or run this again with --trust-folder-owner if that is what you want."
+}
+
 install_button() {
   need_root --install
   if ! command -v systemctl >/dev/null 2>&1 || [ ! -d "$SYSTEMD_DIR" ]; then
@@ -191,6 +243,11 @@ install_button() {
   layout=$(layout_of)
   [ -n "$layout" ] || fail "There is no compose.yaml or docker-compose.yml in $DIR. Name the install's folder: --dir PATH"
   [ "$layout" = installer ] || check_override
+  check_owner
+  other=$(status_value runner dir)
+  if [ -n "$other" ] && [ "$other" != "$DIR" ]; then
+    fail "This server's button already updates $other: one install per server. To move it: sudo $0 --remove --dir $other, then run this again."
+  fi
   [ -n "$USER_IDS" ] || USER_IDS=$(data_owner)
   case "$USER_IDS" in
     *[!0-9:]* | : | :* | *: | *:*:* | "") fail "Could not tell who owns the server's data. Start it first (docker compose up -d), or name the owner: --user UID:GID" ;;
@@ -204,7 +261,7 @@ install_button() {
   place "$SBIN_DIR/$RUNNER" 755 <"$0"
   # Root's own settings at the time of the install, never anything the server writes.
   extra=""
-  for name in OMB_STABLE_URL OMB_NEWEST_URL OMB_UPDATE_WAIT_S OMB_RUNNER_GAP_S OMB_RUNNER_QUIET_S; do
+  for name in OMB_STABLE_URL OMB_NEWEST_URL OMB_UPDATE_WAIT_S OMB_RUNNER_GAP_S OMB_RUNNER_QUIET_S OMB_RUNNER_IDLE_S; do
     value=$(printenv "$name" || true)
     case "$value" in '' | *[!A-Za-z0-9:/._-]*) ;; *) extra="$extra $name=$value" ;; esac
   done
@@ -215,6 +272,7 @@ Description=Runs MausBot's update.sh when the server asks (Settings, Update serv
 [Path]
 PathExists=$REQUESTS/request
 PathChanged=$POLICY
+PathChanged=$DIR/.env
 
 [Install]
 WantedBy=multi-user.target
@@ -232,7 +290,8 @@ UNIT
   systemctl enable --now "$UNIT.path" >/dev/null 2>&1 || fail "systemd did not switch on $UNIT.path. See: systemctl status $UNIT.path"
   [ "$layout" = installer ] || write_override
   [ -f "$STATUS/last" ] || write_status last run=0 state=done result=updated at=0 ran=0
-  write_status runner "layout=$layout" "dir=$DIR" "held=$(held_word)"
+  rm -f "$BLOCKED" "$IDLE"
+  write_runner "$layout"
   if [ "$RESTART" = yes ]; then
     say "Restarting the server so it sees the button's folders..."
     (cd "$DIR" && docker compose up -d --no-build) >/dev/null || fail "docker compose up -d did not finish. Run it in $DIR."

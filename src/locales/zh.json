@@ -7680,5 +7680,8 @@
   "native.update.notNow": "以后再说",
   "serverUpdate.notBack": "服务器尚未恢复",
   "serverUpdate.notBackDetail": "更新已持续超过 15 分钟。",
-  "serverUpdate.goBack": "要回到之前的版本：{command}"
+  "serverUpdate.goBack": "要回到之前的版本：{command}",
+  "serverUpdate.reason.notRetried": "更新到 v{version} 之前在此服务器上没有成功，所以应用不会再试。要手动尝试，请在服务器上运行：{command}",
+  "serverUpdate.reason.stale": "服务器上的 update.sh 比按钮使用的副本更新。请在服务器上运行：{command}",
+  "serverUpdate.reason.unreleased": "此服务器运行的是 main 的构建版本，应用不会更新它。要切换到稳定版，请在服务器上运行：{command}"
 }

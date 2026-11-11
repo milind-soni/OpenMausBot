@@ -43,8 +43,12 @@ WAIT_S=${OMB_UPDATE_WAIT_S:-120}
 ENGINE_WAIT_S=${OMB_UPDATE_ENGINE_WAIT_S:-120}
 POLL_S=${OMB_UPDATE_POLL_S:-5}
 # Set by update-runner.sh: an update the server asked for (the app's Update server button). Whatever runs as the server's
-# user can ask, so such a run trusts nothing the server says, and never removes an earlier copy of the data.
+# user can ask, so such a run trusts nothing the server says, labels its copy of the data as the runner's, and removes
+# only the runner's own earlier copies, never one a person's run made.
 BY_RUNNER=${OMB_UPDATE_BY_RUNNER:-}
+RUNNER_COPY="com.mausbot.by=runner"
+# The runner's own folder: a person's run here lets the button try again a version it gave up on (update-runner.sh).
+RUNNER_STATE=${OMB_UPDATE_STATE_DIR:-/var/lib/openmausbot-update}
 KEEP_TAG="openmausbot-before-update:local"
 BACKUP_ROLE="com.mausbot.role=update-backup"
 
@@ -75,7 +79,7 @@ exec 3>&1
 exec 4<&0 </dev/null
 say() {
   printf '%s\n' "$*" >&3 2>/dev/null
-  if [ -d "$STATE" ]; then printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$LOG" 2>/dev/null; fi
+  if [ -d "$STATE" ] && [ ! -L "$STATE" ] && [ ! -L "$LOG" ]; then printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$LOG" 2>/dev/null; fi
   return 0
 }
 refuse() {
@@ -197,7 +201,28 @@ phase() {
   write_record "$JOURNAL"
 }
 
+file_owner() { stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null; }
+# SECURITY: root runs this in a folder its owner can change (a checkout), at a person's sudo or at the server's request.
+# Nothing is written through a link there, nor into a .update that belongs to anyone but this user or the folder's owner.
+unsafe_path() {
+  local path owner
+  for path in "$STATE" "$JOURNAL" "$JOURNAL.tmp" "$LAST" "$LAST.tmp" "$LOCK" "$LOG" "$STATE/env.before" "$STATE/env.absent" \
+    "$STATE/compose.yaml.before" "$STATE/Caddyfile.before" .env .env.update.tmp compose.yaml compose.yaml.update.tmp Caddyfile Caddyfile.update.tmp; do
+    if [ -L "$path" ]; then printf '%s is a link' "${path#"$DIR"/}"; return 0; fi
+  done
+  if [ -d "$STATE" ]; then
+    owner=$(file_owner "$STATE")
+    if [ "$owner" != "$(id -u)" ] && [ "$owner" != "$(file_owner "$DIR")" ]; then printf '.update belongs to someone else'; return 0; fi
+  fi
+  return 1
+}
+
 take_lock() {
+  local unsafe
+  if unsafe=$(unsafe_path); then
+    printf '%s\n' "$DIR/$unsafe, so nothing was changed: this script does not write through it. Remove it, then run this again."
+    exit 4
+  fi
   if ! mkdir -p "$STATE" 2>/dev/null || ! chmod 700 "$STATE" 2>/dev/null || [ ! -w "$STATE" ] || [ ! -w "$DIR" ]; then
     printf '%s\n' "$DIR cannot be written by this user, so the update could not keep its journal or change .env. Nothing was changed. Run it as the user who owns $DIR, or with sudo."
     exit 4
@@ -241,16 +266,20 @@ new_backup_name() {
   printf '%s' "$name"
 }
 make_backup_volume() { # name image
-  docker volume create --label "$BACKUP_ROLE" --label "com.mausbot.project=$J_project" --label "com.mausbot.data=$J_data" --label "com.mausbot.image=$2" "$1" >/dev/null
+  local by=()
+  [ "$BY_RUNNER" = 1 ] && by=(--label "$RUNNER_COPY")
+  docker volume create --label "$BACKUP_ROLE" --label "com.mausbot.project=$J_project" --label "com.mausbot.data=$J_data" --label "com.mausbot.image=$2" ${by[@]+"${by[@]}"} "$1" >/dev/null
 }
 copy_aside() { # data backup image: copy, then check the copy against the data, file by file
   docker run --rm --network none --user 0:0 --label com.mausbot.role=update-helper -v "$1:/from:ro" -v "$2:/to" --entrypoint cp "$3" -a /from/. /to/ || return 1
   helper "$3" "$1:/from:ro" "$2:/to:ro" -- "$VERIFY"'same /from /to'
 }
-# Every copy of this install's data but the one this update made: dropped once that one has been checked.
+# Every copy of this install's data but the one this update made, dropped once that one has been checked; on a run the
+# server asked for, only the runner's own earlier copies.
 drop_older_copies() {
-  local volume
-  for volume in $(docker volume ls -q --filter "label=$BACKUP_ROLE" --filter "label=com.mausbot.data=$J_data" 2>/dev/null); do
+  local volume only=()
+  [ "$BY_RUNNER" = 1 ] && only=(--filter "label=$RUNNER_COPY")
+  for volume in $(docker volume ls -q --filter "label=$BACKUP_ROLE" --filter "label=com.mausbot.data=$J_data" ${only[@]+"${only[@]}"} 2>/dev/null); do
     [ "$volume" = "$J_backup" ] || docker volume rm -f "$volume" >>"$LOG" 2>&1
   done
 }
@@ -627,6 +656,38 @@ interrupted() {
   exit 130
 }
 
+# The image and version a plain run takes: the stable channel's, or the newest release before any is stable. Sets
+# CHANNEL, J_target and J_version, or refuses.
+resolve_target() {
+  CHANNEL=""
+  if [ -n "$WANT_IMAGE" ]; then
+    J_target=$WANT_IMAGE
+  elif [ -n "$WANT_VERSION" ]; then
+    J_target="$REPO:v$WANT_VERSION"
+    J_version=$WANT_VERSION
+  else
+    fetch "$STABLE_URL"
+    case $? in
+      0)
+        CHANNEL=stable
+        J_target=$(printf '%s' "$BODY" | json_top image)
+        J_version=$(printf '%s' "$BODY" | json_top version)
+        printf '%s' "$J_target" | grep -Eq "$PINNED" && is_version "$J_version" || refuse "The stable channel names no image this script accepts. Nothing was changed."
+        ;;
+      1)
+        # No version has been made stable yet: the newest release, as the server's own update check says then.
+        fetch "$NEWEST_URL" || refuse "Could not find the newest release ($NEWEST_URL). Nothing was changed. To name a version yourself: ./update.sh --version X.Y.Z"
+        J_version=$(printf '%s' "$BODY" | json_top tag_name)
+        J_version=${J_version#v}
+        is_version "$J_version" || refuse "The newest release names no version this script accepts. Nothing was changed."
+        CHANNEL=newest
+        J_target="$REPO:v$J_version"
+        ;;
+      *) refuse "Could not read the stable channel ($STABLE_URL). Nothing was changed. To name a version yourself: ./update.sh --version X.Y.Z" ;;
+    esac
+  fi
+}
+
 usage() {
   sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
@@ -643,6 +704,7 @@ while [ $# -gt 0 ]; do
     --yes | -y) ASSUME_YES=yes ;;
     --replace-local-build) REPLACE_BUILD=yes ;;
     --allow-older) ALLOW_OLDER=yes ;;
+    --print-target) MODE=target ;;
     -h | --help) usage 0 ;;
     *) printf 'Unknown option: %s\n\n' "$1"; usage 4 ;;
   esac
@@ -650,12 +712,20 @@ while [ $# -gt 0 ]; do
 done
 if [ -n "$WANT_VERSION" ] && ! is_version "$WANT_VERSION"; then refuse "--version takes a released version such as 0.1.151."; fi
 
+# update-runner.sh asks what a plain run would take before it runs one: "image version", nothing changed.
+if [ "$MODE" = target ]; then
+  resolve_target
+  printf '%s %s\n' "$J_target" "$J_version"
+  exit 0
+fi
+
 docker compose version >/dev/null 2>&1 || refuse "This needs Docker with the Compose plugin (docker compose version)."
 [ -f docker-compose.yml ] || [ -f compose.yaml ] || [ -n "${COMPOSE_FILE:-}" ] || refuse "There is no docker-compose.yml or compose.yaml in $DIR. Name the install's folder: ./update.sh --dir PATH"
 
 if [ "$MODE" != check ]; then
   take_lock
   trap interrupted INT TERM
+  if [ "$BY_RUNNER" != 1 ] && grep -qx "dir=$DIR" "$RUNNER_STATE/status/runner" 2>/dev/null; then rm -f "$RUNNER_STATE/blocked" 2>/dev/null; fi
   recover
 fi
 
@@ -692,34 +762,7 @@ if [ "$BY_RUNNER" = 1 ]; then
 fi
 is_version "$RUNNING_VERSION" || RUNNING_VERSION=$J_previous_version
 
-CHANNEL=""
-if [ -n "$WANT_IMAGE" ]; then
-  J_target=$WANT_IMAGE
-elif [ -n "$WANT_VERSION" ]; then
-  J_target="$REPO:v$WANT_VERSION"
-  J_version=$WANT_VERSION
-else
-  fetch "$STABLE_URL"
-  case $? in
-    0)
-      CHANNEL=stable
-      J_target=$(printf '%s' "$BODY" | json_top image)
-      J_version=$(printf '%s' "$BODY" | json_top version)
-      printf '%s' "$J_target" | grep -Eq "$PINNED" && is_version "$J_version" || refuse "The stable channel names no image this script accepts. Nothing was changed."
-      ;;
-    1)
-      # No version has been made stable yet: the newest release, as the server's own update check says then.
-      fetch "$NEWEST_URL" || refuse "Could not find the newest release ($NEWEST_URL). Nothing was changed. To name a version yourself: ./update.sh --version X.Y.Z"
-      J_version=$(printf '%s' "$BODY" | json_top tag_name)
-      J_version=${J_version#v}
-      is_version "$J_version" || refuse "The newest release names no version this script accepts. Nothing was changed."
-      CHANNEL=newest
-      J_target="$REPO:v$J_version"
-      ;;
-    *) refuse "Could not read the stable channel ($STABLE_URL). Nothing was changed. To name a version yourself: ./update.sh --version X.Y.Z" ;;
-  esac
-fi
-
+resolve_target
 # Why the version asked for may not replace the one running without --allow-older, or nothing.
 older_reason() {
   if [ -z "$J_version" ]; then
@@ -824,9 +867,9 @@ phase swap
 # The new copy is checked, and from here on an interruption puts it back: the copy from the update before may go now,
 # and with it the way back to that one.
 rm -f "$LAST"
-# SECURITY: a server that damaged its own data and then asked for an update would otherwise leave this copy, of the
-# damaged data, as the only one. Copies from such updates stay until a person's own run removes them.
-[ "$BY_RUNNER" = 1 ] || drop_older_copies
+# SECURITY: on a run the server asked for, a person's own copy stays: a server that damaged its own data and then asked
+# would otherwise leave this copy, of the damaged data, as the only one.
+drop_older_copies
 say "Starting $(new_name)…"
 if old_installer_layout; then
   if move_installer_layout; then say "Caddy moves to its own container, so HTTPS stays up whenever the server restarts on its own."

@@ -21,7 +21,10 @@ export type ServerUpdateOutcome =
   | "not-started";
 
 /** Why an update changed nothing (`not-changed`), as the host's runner said it. */
-export type ServerUpdateReason = "busy" | "refused" | "older" | "held" | "too-soon" | "no-updater" | "failed";
+/** `not-retried`: the stable version rolled back on this server before, and is not tried again from the app. `stale`: a
+ * checkout's update.sh is newer than root's copy the button runs. `unreleased`: the server runs a build of main. */
+export type ServerUpdateReason =
+  | "busy" | "refused" | "older" | "held" | "too-soon" | "no-updater" | "failed" | "not-retried" | "stale" | "unreleased";
 
 export interface ServerUpdateRun {
   outcome: ServerUpdateOutcome;
@@ -29,6 +32,8 @@ export interface ServerUpdateRun {
   /** The version that ran when the update was asked for, and the one that answers now. */
   from: string;
   to?: string;
+  /** The version the host's runner tried, when it says. */
+  target?: string;
   /** When it was asked for (ms since the epoch). */
   at: number;
 }
@@ -43,6 +48,10 @@ export interface ServerUpdateStatus {
   rollback?: string;
   /** What shows the server's own log on the host, when it does not come back. */
   logs?: string;
+  /** What refreshes the button's copy of update.sh on the host. */
+  setup?: string;
+  /** `unreleased`: the server runs a build of main, which the button does not update; `command` moves it to stable. */
+  why?: "unreleased";
   /** Turns running now, which an update stops. */
   activeTurns: number;
   run?: ServerUpdateRun;

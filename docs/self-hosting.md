@@ -1493,7 +1493,8 @@ Its admins can also press **Update server** in **Settings → Updates**, which r
 that same script on the server; a Docker checkout gets the button with
 `sudo deploy/update-runner.sh --install`. Until the bots' sandbox is on for
 self-hosted servers, a bot can ask for the same update, so the runner allows only
-the standard forward update and keeps every copy of the data. [How it works and
+the standard forward update, once per stable release, and never removes your own
+copy of the data. [How it works and
 what it can and cannot do](deploy-vps.md#from-the-app-update-server).
 
 ```sh
