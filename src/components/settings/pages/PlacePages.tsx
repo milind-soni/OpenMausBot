@@ -31,7 +31,7 @@ import { useSidebarPhoneStatus } from "../../SidebarPhoneButton";
 import { KeysPage } from "../../keys/KeysPage";
 import { useKeyFocus } from "../../keys/key-focus";
 import { BrowserProfilesRow, ExperimentalFeaturesRow, NewBotEffortRow } from "../../AppSettingsRows";
-import { useServerUpdateItem } from "../../SidebarProfileMenu";
+import { ServerUpdateRow } from "../../ServerUpdateRow";
 import { versionLine } from "../settings-context";
 import { useSettingsShell } from "../settings-shell";
 import { AdvancedSection } from "../AdvancedSection";
@@ -60,16 +60,6 @@ function useGroupedNote(): [boolean, () => void] {
   return [shown, () => { setShown(false); try { localStorage.setItem(GROUPED_NOTE, "dismissed"); } catch { /* storage may be blocked */ } }];
 }
 
-function ServerVersionRow() {
-  const entry = useServerUpdateItem(true);
-  if (!entry) return null;
-  return (
-    <SettingRow title={versionLine()} subtitle={entry.phase === "idle" ? undefined : [entry.label, entry.item.subtitle].filter(Boolean).join(" ")}>
-      <button type="button" className="ui-button" disabled={entry.item.disabled} onClick={entry.item.onSelect}>{t("settings.updates.check")}</button>
-    </SettingRow>
-  );
-}
-
 export function OverviewPage() {
   const { ctx, place, go } = useSettingsShell();
   const { state, dispatch } = useStore();
@@ -87,7 +77,7 @@ export function OverviewPage() {
         </div>
       </SettingsRows>
     )}
-    {ctx.desktop ? null : !ctx.cloud && <SettingsGroup block="version"><SettingsRows><ServerVersionRow /></SettingsRows></SettingsGroup>}
+    {!ctx.here && !ctx.client && !window.ogb?.updater && <SettingsGroup block="version"><SettingsRows><ServerUpdateRow title={versionLine()} /></SettingsRows></SettingsGroup>}
     <SettingsGroup label={t("settings.overview.glance")} block="glance">
       <SettingsRows>
         {!ctx.client && <SettingsLinkRow title={t("settings.section.phoneDevices")} value={phoneValue} onClick={() => go("phone")} data={{ "data-glance": "phone" }} />}

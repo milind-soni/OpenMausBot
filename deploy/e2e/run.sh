@@ -80,6 +80,26 @@ install_until_https() { # evidence-file [the install command, when not the usual
   through_caddy "the install"
 }
 
+# The folders above the install, as the Update server button checks them (update-runner.sh): a fresh Ubuntu server has
+# / and /opt root's and closed to others. A CI image may not; it is set as a server has it, never the check weakened.
+prepare_like_a_server() {
+  stat -c '%U:%G %a %n' / /opt /srv 2>/dev/null || true
+  getfacl -p / /opt /srv 2>/dev/null || true
+  for folder in / /opt /srv; do
+    [ -d "$folder" ] || continue
+    # A default ACL hands new folders under it modes no umask decides; a server has none.
+    if getfacl -p "$folder" 2>/dev/null | grep -q '^default:'; then
+      echo "CI host: $folder has a default ACL; removed, as on a server"
+      sudo setfacl -b "$folder"
+    fi
+    if [ "$(stat -c %u "$folder")" != 0 ] || [ $((8#$(stat -c %a "$folder") & 8#022)) != 0 ]; then
+      echo "CI host: $folder is $(stat -c '%U:%G %a' "$folder"); made root's and closed to others, as on a server"
+      sudo chown root:root "$folder" && sudo chmod go-w "$folder"
+    fi
+  done
+}
+prepare_like_a_server
+
 step "the checks alone, with a name that points nowhere: one thing to fix, nothing changed"
 status=0
 containers_before=$(sudo docker ps -aq | sort)
@@ -148,6 +168,16 @@ if [ -f "$ROOT/deploy/update.sh" ]; then
 else
   sudo test ! -e "$DIR/update.sh" || fail "an update.sh appeared from nowhere"
   echo "this checkout has no deploy/update.sh; nothing to place"
+fi
+
+step "the Update server button: systemd watches for the server's request, which only the server's own folder takes"
+if [ -f "$ROOT/deploy/update-runner.sh" ]; then
+  systemctl is-enabled --quiet openmausbot-update.path || fail "the button's path unit is not enabled"
+  sudo grep -qx "layout=installer" /var/lib/openmausbot-update/status/runner || fail "the runner did not say it is there"
+  in_server() { (cd "$DIR" && sudo docker compose exec -T omb sh -c "$1"); }
+  in_server 'test -w /run/omb-update/request' || fail "the server cannot leave a request"
+  if in_server 'echo x > /run/omb-update/status/last' 2>/dev/null; then fail "the server can write the runner's status"; fi
+  echo "the request folder is the server's, the status folder is read-only to it"
 fi
 
 step "HTTPS comes back by itself whenever the server restarts without Caddy"
