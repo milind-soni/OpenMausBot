@@ -317,6 +317,33 @@ describe("picking a model that has reasoning levels", () => {
   }
 });
 
+describe("DeepSeek thinking choices before a conversation starts", () => {
+  it("offers catalog choices, saves the chosen variant, and restores it after remount without session events", async () => {
+    const model = "deepseek-official/deepseek-v4-flash";
+    const models = { default: model, options: [{ id: model, label: "DeepSeek V4 Flash",
+      variants: ["off", "low", "high", "max"].map(id => ({ id, label: id })) }] };
+    fixture.instances = [{ instanceId: "deepseek", driverKind: "deepseekAgent", displayName: "DeepSeek Harness",
+      snapshot: { state: "available", authenticated: true }, capabilities: { modelVariants: true }, models }];
+    const selected = { ...scout(), modelSelection: { instanceId: "deepseek", model } };
+    render(selected);
+    await openWith("click");
+    const select = document.querySelector<HTMLSelectElement>('select[aria-label="Reasoning variant"]')!;
+    expect(select).not.toBeNull();
+    expect([...select.options].map(option => option.textContent)).toEqual(["Use session setting", "off", "low", "high", "max"]);
+    select.value = "1";
+    flushSync(() => select.dispatchEvent(new Event("change", { bubbles: true })));
+    const saved = fixture.dispatch.mock.lastCall![0];
+    expect(saved).toMatchObject({ type: "setModel", botId: selected.id, threadId: selected.threadId,
+      selection: { instanceId: "deepseek", model, variant: "low" } });
+    flushSync(() => root.unmount());
+    root = createRoot(host);
+    render({ ...selected, modelSelection: saved.selection });
+    await openWith("click");
+    const restored = document.querySelector<HTMLSelectElement>('select[aria-label="Reasoning variant"]')!;
+    expect(restored.selectedOptions[0].textContent).toBe("low");
+  });
+});
+
 describe("clearing a search after a pick that keeps the menu open", () => {
   it("keeps focus in the Simple menu when Escape removes the picked row, so the next Escape still closes it", async () => {
     fixture.instances = [claude(numbered(14))];
