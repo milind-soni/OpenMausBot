@@ -65,11 +65,10 @@ export function appCallOutcome(status: number, bytes: Uint8Array, contentType: s
     ? frame.result.content.flatMap((item: { type?: unknown; text?: unknown }) => (item?.type === "text" && typeof item.text === "string" ? [item.text] : []))
     : [];
   const errors: string[] = [];
-  let parsed = false;
   for (const text of texts) {
-    try { failedErrors(JSON.parse(text), 0, errors); parsed = true; } catch {}
+    try { failedErrors(JSON.parse(text), 0, errors); } catch {}
   }
-  if (!parsed && frame.result.isError === true) errors.push(...texts);
+  if (frame.result.isError === true) errors.push(...texts);
   if (!errors.length) return { ok: true };
   return classify(errors.join("\n").slice(0, 4_000)) ?? { ok: true };
 }
