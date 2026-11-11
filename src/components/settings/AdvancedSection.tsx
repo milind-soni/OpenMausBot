@@ -10,7 +10,7 @@ export function AdvancedSection({ anchor, children }: { anchor: string; children
   if (ctx.advanced) return <>{children}</>;
   if (asked !== anchor) return null;
   return (
-    <div data-settings-from-search={anchor} className="flex flex-col gap-2">
+    <div data-settings-from-search={anchor} data-settings-block={anchor} className="flex scroll-mt-4 flex-col gap-2">
       <p className="px-4 text-[12px] leading-4 text-ink-secondary">
         {t("settings.search.advancedNote")}{" "}
         <button type="button" className="cursor-pointer text-accent-text hover:underline" onClick={() => setAdvancedMode(true)}>{t("settings.search.turnOnAdvanced")}</button>
