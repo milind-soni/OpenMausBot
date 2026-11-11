@@ -53,11 +53,15 @@
 .issue-key-matches small { color: var(--text-3); font-size: var(--text-sm); }
 .issue-key-matches button:hover { border-color: var(--border-3); }
 
+/* Narrow screens: one scrolling column, properties under the description. */
 @media (max-width: 900px) {
-  .issue-page-layout { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
-  .issue-page-scroll { overflow: visible; }
-  .issue-page-rail { order: -1; border-left: 0; border-bottom: 1px solid var(--border-1); overflow: visible; }
-  .issue-page-main { padding: var(--space-6) var(--space-4) var(--space-10); }
+  .issue-page-layout { display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
+  .issue-page-scroll { flex: none; min-height: auto; overflow: visible; }
+  .issue-page-rail { flex: none; overflow: visible; border-left: 0; border-top: 1px solid var(--border-1); }
+  .issue-page-main { padding: var(--space-6) var(--space-4) var(--space-8); }
+  .issue-page-topbar { padding-left: var(--space-3); }
+  .issue-page-crumb { display: none; }
+  .issue-page-topbar h1 > svg { display: none; }
 }
 
 /* Sub-issues. */
@@ -89,8 +93,9 @@
 .label-chip-more { color: var(--text-3); }
 .task-labels .label-chip { height: 20px; font-size: var(--text-xs); }
 /* On a card, labels take what room is left and clip rather than widen the card. */
-.task-meta > .label-chips { flex: 0 1 auto; min-width: 0; }
-.task-meta > .label-chips .label-chip { flex-shrink: 1; min-width: 0; }
+.task-card { grid-template-columns: minmax(0, 1fr); }
+.task-meta { flex-wrap: wrap; row-gap: var(--space-1); }
+.task-meta > .label-chips { flex-wrap: wrap; max-width: 100%; overflow: visible; }
 .issue-labels > .label-chip { gap: 6px; padding-right: 2px; color: var(--text-1); }
 .issue-labels > .label-chip > button { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--text-3); }
 .issue-labels > .label-chip > button:hover { background: var(--surface-5); color: var(--text-1); }
@@ -132,6 +137,7 @@
 .view-popover-list > button > svg:last-child { color: var(--text-3); }
 .view-popover-list > p { margin: 0; padding: var(--space-2); color: var(--text-3); font-size: var(--text-sm); }
 .view-popover-list .origin-user-avatar { --avatar-size: 16px; }
+.origin-dropdown .view-popover-list > button > :is(.label-dot, .label-check, .origin-user-avatar, .task-menu-no-assignee) { flex: none; }
 .display-popover { gap: var(--space-1); padding: var(--space-2) var(--space-3) var(--space-3); overflow-y: auto; }
 .display-layout { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-1); margin-bottom: var(--space-2); }
 .origin-dropdown .display-layout button { justify-content: center; gap: 6px; height: 32px; border: 1px solid var(--border-2); border-radius: var(--radius-sm); color: var(--text-2); }
