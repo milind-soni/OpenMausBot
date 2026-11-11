@@ -80,7 +80,12 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   person's own* (below): then every member connects their own, and only their own chats use it. A person's
   connections from elsewhere have no way in: a share code, a moved MCP sign-in or a mailbox is refused with
   *"Personal connections never enter Acme. Ask an admin to connect it for Acme."* A login from a sign-in card is saved by
-  an Admin only, for the whole team.
+  an Admin only, for the whole team. A secret (an API key, a token) a person types into a bot's card in their own private
+  chat is theirs: that bot uses it only in their own chats with it (and their routines there), never in another
+  member's chat, a shared chat, a group chat or an MCP server, all of which get the card as if nothing were saved. They
+  see and delete it in Settings → Vault, which shows a member their own secrets only; an Admin's Vault, exports and
+  backups never list it, and leaving the team deletes it. A secret an Admin saves in Settings → Vault, or one typed into a
+  card in a shared chat or a group chat, is the team's. One saved before this rule is the team's.
 - **Browsers.** Each private chat with a bot drives that person's own browser of the bot, each group chat the group
   chat's, and the bot's main chat the team's: separate Chrome profiles, saved sign-ins and live views, so a site one
   member signed in to in their chat never opens signed in for another member. The live view shows the browser of the
@@ -929,6 +934,9 @@ opens the team's page on the Cloud site (`/cloud/team/<id>`), not a chat. Nothin
 
 - **Saved logins per member.** A login saved from a sign-in card is the team's (an Admin saves it, for every bot in the
   team); per-member saved logins are not built. Sign-ins a member makes in their own browser stay in it (above).
+- **A secret typed into a card outside a private chat.** In a bot's shared chats and group chats the card is entered by
+  whoever looks after the bot there (the Admins when nobody does), and what they type is the team's, for that bot
+  everywhere, as before; only a private chat's secrets are the person's own.
 - **The new browser engine and temporary browsers in a box.** The new engine (`browserEngine.engine: "chrome"`, off by
   default) starts Chrome itself over a pipe and is not boxed; a temporary browser is boxed, but a file a turn uploads
   into it is not reachable from its box.

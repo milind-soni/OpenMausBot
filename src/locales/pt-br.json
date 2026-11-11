@@ -3698,6 +3698,8 @@
   "settings.vault.title": "Cofre",
   "settings.vault.subtitle": "Senhas e chaves que seus bots podem usar. Os bots nunca as veem: o app {app} digita a senha na página de login pelo bot e entrega a chave às ferramentas dele sem mostrá-la.",
   "settings.vault.adminOnly": "Só um admin desta instalação pode ver e alterar o Cofre.",
+  "settings.vault.memberSubtitle": "Chaves que você deu a um bot nos seus próprios chats. Só você pode usá-las, nos seus chats com esse bot: nenhum colega e nenhum admin as vê.",
+  "settings.vault.memberEmpty": "Nada salvo ainda. Uma chave que você digitar no cartão de um bot no seu próprio chat aparece aqui.",
   "settings.vault.loading": "Carregando o Cofre…",
   "settings.vault.loadError": "Não foi possível carregar o Cofre.",
   "settings.vault.empty": "Nada salvo ainda. Adicione um login ou um segredo aqui, ou salve um quando um bot pedir.",
