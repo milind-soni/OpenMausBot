@@ -4,6 +4,7 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { agentAccess } from "./agentAccess";
 import { getSessionUser, hashToken } from "./auth";
 import { canEdit, getActiveTeamMember, projectMember } from "./permissions";
+import { isConversationMember } from "./chatAccess";
 export type StorageScope = Doc<"storageAdmissions">["scope"];
 export type UploadTarget = Doc<"storageUploadIntents">["target"];
 type Ctx = QueryCtx | MutationCtx;
@@ -34,6 +35,16 @@ export async function writableUploadScope(ctx: Ctx, user: Doc<"users">, target: 
     const agent = await ctx.db.get(target.agentId);
     if (!agent || agent.archivedAt !== undefined || !(await agentAccess(ctx, agent, user))?.canEdit) throw new ConvexError("No upload access");
     return agent.projectId ? { kind: "project", projectId: agent.projectId } : { kind: "workspace", teamId: agent.teamId };
+  }
+  if (target.kind === "chat") {
+    const member = await getActiveTeamMember(ctx, target.teamId, user.email);
+    if (!member || (member.userId && member.userId !== user._id) || !canEdit(member)) throw new ConvexError("No upload access");
+    if (target.conversation && !await isConversationMember(ctx, target.teamId, target.conversation, user._id)) throw new ConvexError("No upload access");
+    if (!target.projectId) return { kind: "workspace", teamId: target.teamId };
+    const project = await ctx.db.get(target.projectId);
+    const projectRole = project?.teamId === target.teamId ? await projectMember(ctx, project, user) : null;
+    if (!projectRole || !canEdit(projectRole)) throw new ConvexError("No upload access");
+    return { kind: "project", projectId: target.projectId };
   }
   if (target.kind === "drawing") {
     if (target.canvasId) {

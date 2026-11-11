@@ -5,6 +5,7 @@ import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { hashToken } from "./lib/auth";
 import { addStorageScope, uploadLimit, validateUpload, writableUploadScope } from "./lib/storage";
+import { recordChatFile } from "./lib/chatAccess";
 import { BodyTooLarge, readBoundedBytes } from "../lib/http-body";
 
 async function uploadUser(ctx: MutationCtx, intent: Doc<"storageUploadIntents">) {
@@ -89,6 +90,7 @@ export const completeUpload = internalMutation({
     if (!metadata) throw new ConvexError("File not found");
     validateUpload(intent.target, metadata.size, metadata.contentType ?? args.contentType);
     await addStorageScope(ctx, args.storageId, scope, metadata.contentType ?? args.contentType);
+    if (intent.target.kind === "chat") await recordChatFile(ctx, intent.target, intent.userId, args.storageId, metadata.size, metadata.contentType ?? args.contentType);
     await ctx.db.patch(intent._id, { state: "complete", storageId: args.storageId });
     return null;
   },
