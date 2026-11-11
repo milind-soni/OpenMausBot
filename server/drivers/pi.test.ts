@@ -1331,6 +1331,17 @@ describe("ensurePiInjectModel symlink detachment", () => {
   afterEach(async () => { await removeTempDir(home); });
   const canDenyWrites = process.platform !== "win32" && process.getuid?.() !== 0;
 
+  it("replaces a dangling models.json symlink with an instance-owned file", () => {
+    const agentDir = join(home, "agent");
+    mkdirSync(agentDir, { recursive: true });
+    symlinkSync(join(home, "deleted-operator-models.json"), join(agentDir, "models.json"));
+    const split = ensurePiInjectModel("omlx::MiniMax-M3-4bit", { HOME: home, PI_CODING_AGENT_DIR: agentDir });
+    expect(split).toEqual({ provider: "omlx", modelId: "MiniMax-M3-4bit" });
+    expect(lstatSync(join(agentDir, "models.json")).isSymbolicLink()).toBe(false);
+    expect(existsSync(join(home, "deleted-operator-models.json"))).toBe(false);
+    expect(readFileSync(join(agentDir, "models.json"), "utf8")).toContain("omlx");
+  });
+
   it.skipIf(!canDenyWrites)("throws and leaves the operator models.json untouched when the symlink cannot be detached", () => {
     const operatorModels = join(home, "operator-models.json");
     writeFileSync(operatorModels, '{"providers":{}}');

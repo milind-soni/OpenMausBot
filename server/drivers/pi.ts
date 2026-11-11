@@ -223,9 +223,15 @@ export function ensurePiInjectModel(
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
   if (isSymlink) {
-    const content = readFileSync(path, "utf8");
+    let content: string | null = null;
+    try {
+      content = readFileSync(path, "utf8");
+    } catch (error) {
+      // Dangling link (operator deleted the file after seeding): drop it and start from an owned file.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
     unlinkSync(path);
-    writeFileSync(path, content, { mode: 0o600 });
+    if (content !== null) writeFileSync(path, content, { mode: 0o600 });
   }
   let root: Record<string, unknown> = { providers: {} };
   if (existsSync(path)) {
