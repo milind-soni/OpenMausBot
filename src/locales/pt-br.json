@@ -5764,7 +5764,6 @@
   "remote.serverPairing.scope.admin": "Acesso total",
   "remote.serverPairing.scope.client": "Somente chat e aprovações",
   "remote.serverPairing.create": "Criar código de pareamento",
-  "remote.serverPairing.camera": "Ou escaneie com a câmera do celular para abrir no navegador.",
   "teamPhone.title": "Abrir no seu celular",
   "teamPhone.subtitle": "Leia este código com o app {app} no celular. Seu celular abre {team} com sua conta de usuário e as conversas que você vê aqui.",
   "teamPhone.stays": "Seu celular continua conectado enquanto a equipe {team} estiver aberta neste app.",

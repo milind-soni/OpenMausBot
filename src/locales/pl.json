@@ -4976,7 +4976,6 @@
   "remote.serverPairing.scope.admin": "Pełny dostęp",
   "remote.serverPairing.scope.client": "Tylko czat i zatwierdzenia",
   "remote.serverPairing.create": "Utwórz kod parowania",
-  "remote.serverPairing.camera": "Możesz też zeskanować go aparatem telefonu, aby otworzyć go w przeglądarce.",
   "teamPhone.title": "Otwórz na telefonie",
   "teamPhone.subtitle": "Zeskanuj ten kod aplikacją {app} na telefon. Telefon otworzy {team} w twoim imieniu, z czatami, które tu widzisz.",
   "teamPhone.stays": "Telefon pozostaje zalogowany, dopóki w tej aplikacji otwarte jest {team}.",

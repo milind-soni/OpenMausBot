@@ -2028,7 +2028,6 @@
   "remote.serverPairing.scope.admin": "Accès complet",
   "remote.serverPairing.scope.client": "Discussion et approbations uniquement",
   "remote.serverPairing.create": "Créer un code d’association",
-  "remote.serverPairing.camera": "Ou scannez-le avec l'appareil photo de votre téléphone pour l'ouvrir dans le navigateur.",
   "teamPhone.title": "Ouvrir sur votre téléphone",
   "teamPhone.subtitle": "Scannez ce code avec l’app {app} sur votre téléphone. Votre téléphone ouvre {team} en votre nom, avec les chats que vous voyez ici.",
   "teamPhone.stays": "Votre téléphone reste connecté tant que {team} est ouvert dans cette app.",

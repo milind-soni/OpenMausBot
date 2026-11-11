@@ -4842,7 +4842,6 @@
   "remote.serverPairing.scope.admin": "Accesso completo",
   "remote.serverPairing.scope.client": "Solo chat e approvazioni",
   "remote.serverPairing.create": "Crea codice di abbinamento",
-  "remote.serverPairing.camera": "Oppure scansionalo con la fotocamera del telefono per aprirlo nel browser.",
   "teamPhone.title": "Apri sul telefono",
   "teamPhone.subtitle": "Scansiona questo codice con l'app {app} per il telefono. Il telefono apre {team} come te, con le chat che vedi qui.",
   "teamPhone.stays": "Il telefono resta connesso finché {team} è aperto in questa app.",

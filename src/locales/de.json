@@ -2105,7 +2105,6 @@
   "remote.serverPairing.scope.admin": "Vollzugriff",
   "remote.serverPairing.scope.client": "Nur Chat und Freigaben",
   "remote.serverPairing.create": "Kopplungscode erstellen",
-  "remote.serverPairing.camera": "Oder scanne ihn mit der Kamera deines Handys, um ihn im Browser zu öffnen.",
   "teamPhone.title": "Auf dem Handy öffnen",
   "teamPhone.subtitle": "Scanne diesen Code mit der {app}-App auf deinem Handy. Dein Handy öffnet {team} als du, mit den Chats, die du hier siehst.",
   "teamPhone.stays": "Dein Handy bleibt angemeldet, solange {team} in dieser App geöffnet ist.",

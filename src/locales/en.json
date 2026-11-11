@@ -6078,7 +6078,6 @@
   "remote.serverPairing.scope.admin": "Full access",
   "remote.serverPairing.scope.client": "Chat and approvals only",
   "remote.serverPairing.create": "Create pairing code",
-  "remote.serverPairing.camera": "Or scan it with your phone's camera to open it in the browser.",
   "teamPhone.title": "Open on your phone",
   "teamPhone.subtitle": "Scan this code with the {app} phone app. Your phone opens {team} as you, with the chats you see here.",
   "teamPhone.stays": "Your phone stays signed in while {team} is open in this app.",

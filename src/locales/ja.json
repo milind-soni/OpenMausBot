@@ -5613,7 +5613,6 @@
   "remote.serverPairing.scope.admin": "フルアクセス",
   "remote.serverPairing.scope.client": "チャットと承認のみ",
   "remote.serverPairing.create": "ペアリングコードを作成",
-  "remote.serverPairing.camera": "スマートフォンのカメラでスキャンすると、ブラウザーで開くこともできます。",
   "teamPhone.title": "スマートフォンで開く",
   "teamPhone.subtitle": "このコードをスマートフォンの {app} アプリでスキャンしてください。スマートフォンにあなたとして {team} が開き、ここで見ているチャットが表示されます。",
   "teamPhone.stays": "このアプリで {team} を開いている間、スマートフォンはサインインしたままです。",

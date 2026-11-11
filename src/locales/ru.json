@@ -5029,7 +5029,6 @@
   "remote.serverPairing.scope.admin": "Полный доступ",
   "remote.serverPairing.scope.client": "Только чат и подтверждения",
   "remote.serverPairing.create": "Создать код сопряжения",
-  "remote.serverPairing.camera": "Или отсканируйте его камерой телефона, чтобы открыть в браузере.",
   "teamPhone.title": "Открыть на телефоне",
   "teamPhone.subtitle": "Отсканируйте этот код в приложении {app} для телефона. На телефоне откроется {team} от вашего имени — с теми чатами, которые вы видите здесь.",
   "teamPhone.stays": "Телефон остаётся авторизованным, пока {team} открыт в этом приложении.",

@@ -4620,7 +4620,6 @@
   "remote.serverPairing.scope.admin": "Acceso completo",
   "remote.serverPairing.scope.client": "Solo chat y aprobaciones",
   "remote.serverPairing.create": "Crear código de vinculación",
-  "remote.serverPairing.camera": "O escanéalo con la cámara del teléfono para abrirlo en el navegador.",
   "teamPhone.title": "Abrir en tu teléfono",
   "teamPhone.subtitle": "Escanea este código con la app de {app} en tu teléfono. Tu teléfono abre {team} como tú, con los chats que ves aquí.",
   "teamPhone.stays": "Tu teléfono sigue con la sesión iniciada mientras {team} esté abierto en esta app.",

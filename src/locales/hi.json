@@ -2028,7 +2028,6 @@
   "remote.serverPairing.scope.admin": "पूरी पहुँच",
   "remote.serverPairing.scope.client": "केवल चैट और अनुमोदन",
   "remote.serverPairing.create": "जोड़ने का कोड बनाएँ",
-  "remote.serverPairing.camera": "या इसे ब्राउज़र में खोलने के लिए अपने फ़ोन के कैमरे से स्कैन करें।",
   "teamPhone.title": "अपने फ़ोन पर खोलें",
   "teamPhone.subtitle": "इस कोड को अपने फ़ोन के {app} ऐप से स्कैन करें। आपका फ़ोन {team} को आपके नाम से खोलेगा, उन्हीं चैट के साथ जो आप यहाँ देखते हैं।",
   "teamPhone.stays": "जब तक इस ऐप में {team} खुला है, आपका फ़ोन साइन इन रहता है।",

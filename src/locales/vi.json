@@ -4008,7 +4008,6 @@
   "remote.serverPairing.scope.admin": "Toàn quyền truy cập",
   "remote.serverPairing.scope.client": "Chỉ trò chuyện và phê duyệt",
   "remote.serverPairing.create": "Tạo mã ghép nối",
-  "remote.serverPairing.camera": "Hoặc quét bằng máy ảnh của điện thoại để mở trong trình duyệt.",
   "teamPhone.title": "Mở trên điện thoại của bạn",
   "teamPhone.subtitle": "Quét mã này bằng ứng dụng {app} trên điện thoại của bạn. Điện thoại sẽ mở {team} với tư cách của bạn, cùng các cuộc trò chuyện bạn thấy ở đây.",
   "teamPhone.stays": "Điện thoại vẫn đăng nhập khi {team} đang mở trong ứng dụng này.",

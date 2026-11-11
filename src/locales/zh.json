@@ -5599,7 +5599,6 @@
   "remote.serverPairing.scope.admin": "完全访问",
   "remote.serverPairing.scope.client": "仅聊天和审批",
   "remote.serverPairing.create": "生成配对代码",
-  "remote.serverPairing.camera": "也可以用手机相机扫描，在浏览器中打开。",
   "teamPhone.title": "在手机上打开",
   "teamPhone.subtitle": "用手机上的 {app} 应用扫描此码。手机会以你的身份打开 {team}，显示你在这里看到的聊天。",
   "teamPhone.stays": "只要在此应用中打开着 {team}，手机就会保持登录。",

@@ -5807,7 +5807,6 @@
   "remote.serverPairing.scope.admin": "完整存取權",
   "remote.serverPairing.scope.client": "僅限對話與核准",
   "remote.serverPairing.create": "建立配對碼",
-  "remote.serverPairing.camera": "也可以用手機相機掃描，在瀏覽器中開啟。",
   "teamPhone.title": "在手機上開啟",
   "teamPhone.subtitle": "用手機上的 {app} App 掃描此碼。手機會以你的身分開啟 {team}，顯示你在這裡看到的聊天。",
   "teamPhone.stays": "只要在此 App 中開著 {team}，手機就會保持登入。",

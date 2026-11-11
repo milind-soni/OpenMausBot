@@ -4008,7 +4008,6 @@
   "remote.serverPairing.scope.admin": "Tam erişim",
   "remote.serverPairing.scope.client": "Yalnızca sohbet ve onaylar",
   "remote.serverPairing.create": "Eşleştirme kodu oluştur",
-  "remote.serverPairing.camera": "Ya da tarayıcıda açmak için telefonunuzun kamerasıyla tarayın.",
   "teamPhone.title": "Telefonunuzda açın",
   "teamPhone.subtitle": "Bu kodu telefonunuzdaki {app} uygulamasıyla tarayın. Telefonunuz {team} alanını sizin adınıza, burada gördüğünüz sohbetlerle açar.",
   "teamPhone.stays": "{team} bu uygulamada açık olduğu sürece telefonunuzun oturumu açık kalır.",
