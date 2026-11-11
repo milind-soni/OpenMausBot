@@ -18,6 +18,7 @@ import {
   type OmbChartSpec,
 } from "../../shared/data-surface.ts";
 import { compileToolSchema, schemaProblems } from "../mcp-schema-validator.ts";
+import { tableIdentifierParts } from "./identifiers.ts";
 import type { DataSheetStore } from "./sheet.ts";
 import { DataFailure, type BotDatabase, type ChartCompiler, type ChartRenderer, type DataConnection, type DataExtension, type RunOptions, type RunResult, type VegaLiteValidator } from "./types.ts";
 
@@ -613,8 +614,6 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   return { tables, warnings, elapsedMs: Date.now() - started };
 }
 
-const IDENTIFIER_LIKE = /^\s*("[^"]+"|[A-Za-z_][\w$]*)(\.("[^"]+"|[A-Za-z_][\w$]*)){0,2}\s*$/;
-
 export interface DescribeOutput { name?: string; sql?: string; rowCount: number; columns: DataColumn[]; truncated?: boolean; elapsedMs: number }
 
 export async function describeTarget(ctx: DataContext, target: string): Promise<DescribeOutput> {
@@ -622,7 +621,7 @@ export async function describeTarget(ctx: DataContext, target: string): Promise<
   let relation: string;
   let name: string | undefined;
   let sql: string | undefined;
-  if (IDENTIFIER_LIKE.test(target)) {
+  if (tableIdentifierParts(target)) {
     name = await ctx.database.resolveTable(target.trim());
     relation = name;
   } else {

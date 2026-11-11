@@ -330,6 +330,19 @@ describe("data_load", () => {
 });
 
 describe("data_describe saved results", () => {
+  it.each(['"Revenue ""USD"""', ' main . "分析" ', "café"])("routes identifier %j to catalog resolution", async (target) => {
+    const { ctx, database } = context();
+    database.resolveTable = async (name) => {
+      database.calls.push({ method: "resolveTable", target: name });
+      return "main.resolved";
+    };
+    const result = await runDataTool(ctx, "data_describe", { target });
+    expect(result.isError).toBeUndefined();
+    expect(database.calls.map((call) => call.method)).toEqual(["resolveTable", "describe"]);
+    expect(result.structuredContent).toHaveProperty("name");
+    expect(result.structuredContent).not.toHaveProperty("sql");
+  });
+
   it("reads the latest saved SQL after a person edits it, without rerunning queries", async () => {
     const { ctx, database, sheet } = context();
     await showCard(ctx, { kind: "table", sql: "SELECT 1", title: "First" });
