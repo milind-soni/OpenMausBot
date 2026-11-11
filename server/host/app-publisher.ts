@@ -12,7 +12,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { canonicalRoots, containedBy, readContained } from "../pages/bundle.ts";
 import { inSecretFolder, SECRET_FILE_REFUSAL } from "../secret-folder.ts";
 import { HostingRefusal, megabytes, OWN_NETLIFY, type HostedApp, type HostingAllowance, type IncludedHosting } from "./included-hosting.ts";
-import { readSite, SITE_FILE } from "./netlify-sites.ts";
+import { findNetlifySites, readSite, SITE_FILE } from "./netlify-sites.ts";
 
 /** Must match `SECRET_NAMES`, `SKIPPED_FOLDERS` and `SKIPPED_FILES` in skills/publish-to-netlify/deploy.mjs. */
 const SECRET_NAMES = [
@@ -111,6 +111,10 @@ async function locateFolder(requested: string, roots: readonly string[], what: s
 export interface AppPublisherDeps {
   hosting: IncludedHosting;
   botName: (botId: string) => string;
+  /** The folder every conversation with this bot reaches: where a project lives so a later conversation finds it. */
+  botFolder: (botId: string) => string;
+  /** The person's home folder: a bot folder that holds all of it is never searched for records. */
+  home: string;
   env: NodeJS.ProcessEnv;
   fetch?: typeof fetch;
   now?: () => number;
@@ -173,9 +177,20 @@ export function createAppPublisher(deps: AppPublisherDeps) {
     if ((await readSite(file, deps.env))?.hosting === "included") await unlink(file).catch(() => {});
   }
 
+  /** The turn's folders with the bot's shared one first, so a relative path names the same folder in every conversation. */
+  function folders(input: Pick<AppPublishInput, "botId" | "roots">): string[] {
+    const shared = resolve(deps.botFolder(input.botId));
+    return [...input.roots.filter((root) => resolve(root) === shared), ...input.roots.filter((root) => resolve(root) !== shared)];
+  }
+
+  async function inSharedFolder(botId: string, folder: string): Promise<boolean> {
+    const shared = await realpath(deps.botFolder(botId)).catch(() => null);
+    return shared !== null && containedBy(shared, folder);
+  }
+
   async function place(input: AppPublishInput): Promise<{ dir: string; project: string; key: string }> {
-    const dir = await locateFolder(input.path, input.roots, "path");
-    const project = input.project?.trim() ? await locateFolder(input.project, input.roots, "project") : dir;
+    const dir = await locateFolder(input.path, folders(input), "path");
+    const project = input.project?.trim() ? await locateFolder(input.project, folders(input), "project") : dir;
     if (!containedBy(project, dir)) throw new HostingRefusal("failed", "path must be the project folder or a folder inside it (for example project \"shop\" and path \"shop/dist\").");
     return { dir, project, key: await hosting.keyFor(input.botId, project) };
   }
@@ -253,10 +268,12 @@ export function createAppPublisher(deps: AppPublisherDeps) {
         if (app.state !== "ready") {
           return { status: 200, body: { ok: true, ...outcome, pending: true, ...common, message: "The app was sent and is still being processed. It is not live yet and has not failed. Check it with check_app_hosting in a minute; don't publish again." } };
         }
+        const tied = started.created && !await inSharedFolder(input.botId, project)
+          ? { note: "This project is in this conversation's folder, so another conversation with you won't find it. Keep it here only if it is this person's alone on a team; otherwise build the next app under sites/ in your shared bot folder." } : {};
         const message = outcome.live ? "Published. The link is public: anyone who has it can open it."
           : outcome.liveStatus === 200 ? "The link answers, but not as a web page, so a browser would show the page's source. Don't call it published."
             : "The publish is ready, but the link did not answer as a page yet. Check it with check_app_hosting in a minute.";
-        return { status: 200, body: { ok: true, ...outcome, ...common, message } };
+        return { status: 200, body: { ok: true, ...outcome, ...common, message, ...tied } };
       } catch (error) {
         return refused(error);
       }
@@ -268,8 +285,12 @@ export function createAppPublisher(deps: AppPublisherDeps) {
         const { allowance } = await hosting.list();
         const included = { ...said(allowance), limits: `${megabytes(allowance.limits.maxBytes)} and ${allowance.limits.maxFiles} files an app, ${megabytes(allowance.limits.maxFileBytes)} a file` };
         const folder = input.project?.trim() || input.path?.trim();
-        if (!folder) return { status: 200, body: { ok: true, ...included } };
-        const project = await locateFolder(folder, input.roots, "path");
+        if (!folder) {
+          const found = await findNetlifySites(folders(input), { home: deps.home, env: deps.env }).catch(() => []);
+          const projects = found.map((site) => ({ title: site.title, folder: dirname(site.file), ...(site.url ? { url: site.url } : {}), on: site.hosting ? "included hosting" : "the person's own Netlify" }));
+          return { status: 200, body: { ok: true, ...included, projects } };
+        }
+        const project = await locateFolder(folder, folders(input), "path");
         const key = await hosting.keyFor(input.botId, project);
         const app = await hosting.app(key);
         const existing = await readSite(join(project, SITE_FILE), deps.env);
@@ -283,7 +304,7 @@ export function createAppPublisher(deps: AppPublisherDeps) {
     /** Deletes the app published from this folder: its link stops working and its place in the plan is free. */
     async remove(input: Omit<AppPublishInput, "title">): Promise<AppPublishAnswer> {
       try {
-        const project = await locateFolder(input.project?.trim() || input.path, input.roots, "path");
+        const project = await locateFolder(input.project?.trim() || input.path, folders(input), "path");
         const key = await hosting.keyFor(input.botId, project);
         const app = await hosting.app(key).catch(async (error: unknown) => {
           if (error instanceof HostingRefusal && error.code === "not_found") await forgetRecord(project);

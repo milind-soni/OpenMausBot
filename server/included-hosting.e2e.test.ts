@@ -23,7 +23,7 @@ interface Fixture {
   newBot(name: string): Promise<any>;
   workspace(bot: { id: string }): string;
   /** Runs one turn of `bot` with these tool steps. `refusals`: some step is refused, which the scripted engine ends its turn as failed for. */
-  turn(bot: any, steps: Array<{ tool: string; arguments: unknown }>, options?: { refusals?: boolean }): Promise<{ evidence: string; tools: string[]; results: Array<{ error: boolean; text: string }> }>;
+  turn(bot: any, steps: Array<{ tool: string; arguments: unknown }>, options?: { refusals?: boolean; task?: string }): Promise<{ evidence: string; tools: string[]; results: Array<{ error: boolean; text: string }> }>;
 }
 
 async function withFixture(test: (f: Fixture) => Promise<void>, options: { hosting: boolean; apps?: number }) {
@@ -43,10 +43,10 @@ async function withFixture(test: (f: Fixture) => Promise<void>, options: { hosti
       engineLaunch: () => readFileSync(session.fixtureDumpPath, "utf8"),
       newBot: async (name) => (await cli("new-bot", "--name", name)).bot,
       workspace: (bot) => join(session.info.dataDir, "workspaces", bot.id),
-      turn: async (bot, steps, { refusals = false } = {}) => {
+      turn: async (bot, steps, { refusals = false, task = bot.activeTaskId } = {}) => {
         writeFileSync(planPath, JSON.stringify({ [bot.id]: { steps, reply: "Done." } }));
-        await cli("send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", "Publish it.");
-        expect((await cli("wait", "--bot", bot.id, "--task", bot.activeTaskId, "--timeout", "60")).status).toBe(refusals ? "failed" : "settled");
+        await cli("send", "--bot", bot.id, "--task", task, "--text", "Publish it.");
+        expect((await cli("wait", "--bot", bot.id, "--task", task, "--timeout", "60")).status).toBe(refusals ? "failed" : "settled");
         const evidence = turnFor(bot.id).evidence;
         return {
           evidence: JSON.stringify(evidence),
@@ -98,7 +98,7 @@ it("lets a bot publish a folder of its own through the server, lists it with the
   ]);
   expect(tools).toEqual(expect.arrayContaining(HOSTING_TOOLS));
   expect(results.map((result) => result.error)).toEqual([false, false, false]);
-  expect(JSON.parse(results[0]!.text)).toEqual({ ok: true, apps: "0 of 10", publishesThisMonth: "0 of 200", limits: "25 MB and 500 files an app, 8 MB a file" });
+  expect(JSON.parse(results[0]!.text)).toEqual({ ok: true, apps: "0 of 10", publishesThisMonth: "0 of 200", limits: "25 MB and 500 files an app, 8 MB a file", projects: [] });
   const published = JSON.parse(results[1]!.text);
   expect(published).toMatchObject({ ok: true, state: "ready", live: true, created: true, files: 1, uploaded: 1, skipped: [".env"], apps: "1 of 10", publishesThisMonth: "1 of 200" });
   expect(await (await fetch(published.url)).text()).toContain("<h1>Bakery order page</h1>");
@@ -150,3 +150,26 @@ it("tells the bot in plain words when the plan's apps are used up, and publishes
   expect(f.fake.apps.size).toBe(0);
   expect(existsSync(join(f.workspace(bot), "second", SITE_FILE))).toBe(false);
 }, { hosting: true, apps: 1 }), 180_000);
+
+it("lets a second conversation with the same bot find the app in the bot's shared folder and publish it again to the same link", async () => withFixture(async (f) => {
+  const bot = await f.newBot("Publisher");
+  const project = join(f.workspace(bot), "sites", "bakery");
+  site(project, "Bakery order page");
+  const first = JSON.parse((await f.turn(bot, [{ tool: "publish_app", arguments: { path: "sites/bakery", title: "Bakery order page" } }])).results[0]!.text);
+  expect(first).toMatchObject({ ok: true, live: true, created: true });
+  expect(first).not.toHaveProperty("note");
+
+  const { task } = await f.api(`/api/bots/${bot.id}/tasks`, { title: "A week later", select: false });
+  expect(task.threadId).not.toBe(bot.activeTaskId);
+  writeFileSync(join(project, "index.html"), "<!doctype html><title>Bakery</title><h1>Bakery, now with cakes</h1>");
+  const later = await f.turn(bot, [
+    { tool: "check_app_hosting", arguments: {} },
+    { tool: "publish_app", arguments: { path: "sites/bakery", title: "Bakery order page" } },
+  ], { task: task.threadId });
+  expect(JSON.parse(later.results[0]!.text).projects).toEqual([{ title: "Bakery order page", folder: project, on: "included hosting" }]);
+  expect(JSON.parse(later.results[1]!.text)).toMatchObject({ ok: true, live: true, created: false, url: first.url, apps: "1 of 10" });
+  expect(f.fake.apps.size).toBe(1);
+  expect(await (await fetch(first.url)).text()).toContain("now with cakes");
+  expect((await f.api("/api/published-apps", undefined, "GET")).apps).toHaveLength(1);
+}, { hosting: true }), 180_000);
+

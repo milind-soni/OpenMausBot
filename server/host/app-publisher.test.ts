@@ -29,7 +29,7 @@ function site(botId: string, folder: string, title = "Bakery order page") {
 }
 function publisher(over: Partial<Parameters<typeof createAppPublisher>[0]> = {}) {
   const hosting = createIncludedHosting({ credential: () => credential, dataDir, warn: (line) => warnings.push(line) });
-  return { hosting, publisher: createAppPublisher({ hosting, botName: (id) => (id === "mira" ? "Mira" : "Otto"), env: {}, pollMs: 10, waitMs: 3_000, linkWaitMs: 400, ...over }) };
+  return { hosting, publisher: createAppPublisher({ hosting, botName: (id) => (id === "mira" ? "Mira" : "Otto"), botFolder: workspace, home: "/nowhere/home", env: {}, pollMs: 10, waitMs: 3_000, linkWaitMs: 400, ...over }) };
 }
 const record = (botId: string, folder: string) => JSON.parse(readFileSync(join(workspace(botId), folder, SITE_FILE), "utf8")) as Record<string, unknown>;
 const everything = (answer: AppPublishAnswer, ...more: unknown[]) => JSON.stringify([answer, warnings, ...more]);
@@ -138,8 +138,59 @@ describe("publishing a bot's folder on the plan's included hosting", () => {
 
   it("says how much of the plan is used before anything is published", async () => {
     const answer = await publisher().publisher.status({ botId: "mira", roots: roots("mira") });
-    expect(answer).toEqual({ status: 200, body: { ok: true, apps: "0 of 10", publishesThisMonth: "0 of 200", limits: "25 MB and 500 files an app, 8 MB a file" } });
+    expect(answer).toEqual({ status: 200, body: { ok: true, apps: "0 of 10", publishesThisMonth: "0 of 200", limits: "25 MB and 500 files an app, 8 MB a file", projects: [] } });
     expect(fake.requests).toEqual(["GET /apps"]);
+  });
+});
+
+describe("a project in the bot's shared folder, from any conversation with that bot", () => {
+  const conversation = (threadId: string) => join(dataDir, "task-workspaces", "mira", threadId);
+  const turnRoots = (threadId: string) => { mkdirSync(conversation(threadId), { recursive: true }); return [conversation(threadId), workspace("mira")]; };
+
+  it("lets a second conversation find the app and publish it again to the same link", async () => {
+    site("mira", "sites/bakery");
+    const { publisher: made } = publisher();
+    const first = await made.publish({ botId: "mira", roots: turnRoots("monday"), path: "sites/bakery", title: "Bakery order page" });
+    expect(first.body).toMatchObject({ ok: true, live: true, created: true });
+    expect(first.body).not.toHaveProperty("note");
+
+    const found = await made.status({ botId: "mira", roots: turnRoots("friday") });
+    // The record's address is a loopback one here, which a record is never trusted for; a real https one is listed.
+    expect(found.body.projects).toEqual([{ title: "Bakery order page", folder: join(workspace("mira"), "sites", "bakery"), on: "included hosting" }]);
+    write("mira", "sites/bakery/index.html", PAGE("Bakery, now with cakes"));
+    const second = await made.publish({ botId: "mira", roots: turnRoots("friday"), path: "sites/bakery", title: "Bakery order page" });
+    expect(second.body).toMatchObject({ ok: true, live: true, created: false, url: first.body.url, uploaded: 1, apps: "1 of 10" });
+    expect(fake.apps.size).toBe(1);
+    expect(await (await fetch(String(second.body.url))).text()).toContain("now with cakes");
+  });
+
+  it("reads a relative path in the shared folder first, whatever the conversation's own folder holds", async () => {
+    site("mira", "sites/bakery");
+    const { publisher: made } = publisher();
+    const first = await made.publish({ botId: "mira", roots: turnRoots("monday"), path: "sites/bakery", title: "Bakery order page" });
+    mkdirSync(join(conversation("friday"), "sites", "bakery"), { recursive: true });
+    writeFileSync(join(conversation("friday"), "sites", "bakery", "index.html"), PAGE("A stray copy"));
+    const second = await made.publish({ botId: "mira", roots: turnRoots("friday"), path: "sites/bakery", title: "Bakery order page" });
+    expect(second.body).toMatchObject({ created: false, url: first.body.url });
+    expect(existsSync(join(conversation("friday"), "sites", "bakery", SITE_FILE))).toBe(false);
+  });
+
+  it("says so when a new app's project is in one conversation's folder, where no other conversation finds it", async () => {
+    mkdirSync(join(conversation("monday"), "bakery"), { recursive: true });
+    writeFileSync(join(conversation("monday"), "bakery", "index.html"), PAGE("Bakery order page"));
+    const { publisher: made } = publisher();
+    const first = await made.publish({ botId: "mira", roots: turnRoots("monday"), path: "bakery", title: "Bakery order page" });
+    expect(first.body).toMatchObject({ ok: true, live: true, created: true });
+    expect(String(first.body.note)).toContain("another conversation with you won't find it");
+    expect((await made.publish({ botId: "mira", roots: turnRoots("monday"), path: "bakery", title: "Bakery order page" })).body).not.toHaveProperty("note");
+    expect((await made.publish({ botId: "mira", roots: turnRoots("friday"), path: "bakery", title: "Bakery order page" })).body.error).toBe("No folder was found at bakery. Pass the exact path of the folder to publish.");
+    expect((await made.status({ botId: "mira", roots: turnRoots("friday") })).body.projects).toEqual([]);
+  });
+
+  it("lists a site on the person's own Netlify account beside the included ones", async () => {
+    write("mira", `sites/rota/${SITE_FILE}`, JSON.stringify({ version: 1, siteId: "3f2a6c1e", url: "https://staff-rota.netlify.app", title: "Staff rota" }));
+    expect((await publisher().publisher.status({ botId: "mira", roots: turnRoots("friday") })).body.projects)
+      .toEqual([{ title: "Staff rota", folder: join(workspace("mira"), "sites", "rota"), url: "https://staff-rota.netlify.app/", on: "the person's own Netlify" }]);
   });
 });
 
@@ -367,7 +418,7 @@ describe("deleting, a takedown and a server with no included hosting", () => {
       return fetch(input, init);
     }) as typeof fetch;
     const hosting = createIncludedHosting({ credential: () => credential, dataDir, fetch: spy });
-    const made = createAppPublisher({ hosting, botName: () => "Mira", env: {}, fetch: spy, pollMs: 10, linkWaitMs: 400 });
+    const made = createAppPublisher({ hosting, botName: () => "Mira", botFolder: workspace, home: "/nowhere/home", env: {}, fetch: spy, pollMs: 10, linkWaitMs: 400 });
     expect((await made.publish({ botId: "mira", roots: roots("mira"), path: "bakery", title: "Bakery order page" })).body).toMatchObject({ live: true });
     const live = seen.filter((call) => call.url.includes("/live/"));
     expect(live.length).toBeGreaterThan(0);

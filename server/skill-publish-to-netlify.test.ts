@@ -12,6 +12,7 @@ import { PAGE_MAX_BYTES, PAGE_MAX_FILES } from "../shared/published-page.ts";
 import { parseSkillMd, scanSkillText } from "../shared/skill-md.ts";
 import { DEFAULT_HOSTING_LIMITS } from "./host/included-hosting.ts";
 import { loadBundledSkills, selectBundledSkills } from "./skill-library.ts";
+import { workspaceLocationsPrompt } from "./workspace.ts";
 import { startFakeNetlify, type FakeNetlify } from "./testing/fake-netlify.ts";
 
 const SKILL_DIR = join(process.cwd(), "skills", "publish-to-netlify");
@@ -59,7 +60,7 @@ describe("publish-to-netlify skill guide", () => {
   });
 
   it("states the rules a bot must keep, with the real tool names and limits", () => {
-    expect(guide.split("\n").length).toBeLessThanOrEqual(185);
+    expect(guide.split("\n").length).toBeLessThanOrEqual(200);
     for (const tool of ["request_credential", "publish_page", "show_html", "select_computer", "copy_to_computer", "copy_from_computer", "exec_status"]) expect(guide, tool).toContain(tool);
     expect(guide).toContain(`up to ${PAGE_MAX_BYTES / 1024 / 1024} MB and ${PAGE_MAX_FILES} files`);
     expect(guide).toContain("https://app.netlify.com/user/applications#personal-access-tokens");
@@ -79,6 +80,18 @@ describe("publish-to-netlify skill guide", () => {
     expect(guide).toMatch(/--make-public[^.]*only after they say/);
     expect(guide).toMatch(/Early Access/);
     expect(guide).toMatch(/Never promise that it is always on/);
+  });
+
+  it("keeps a project where every conversation with the bot finds it, and looks for it before starting another", () => {
+    const where = guide.slice(guide.indexOf("## Where the project lives"), guide.indexOf("## Included hosting first"));
+    expect(where).toContain("`<sharedBotFolder>/sites/<short-name>/`");
+    expect(where).toMatch(/not in this\s+conversation's folder/);
+    expect(where).toMatch(/Before you create a project, look for it/);
+    expect(where).toContain(helper.SITE_FILE);
+    expect(where).toMatch(/never start a second copy/);
+    expect(where).toMatch(/--project/);
+    expect(where).toMatch(/private chat/);
+    expect(workspaceLocationsPrompt("bot-1", "/work")).toContain("sharedBotFolder");
   });
 
   it("puts the plan's included hosting first, and says when the person's own Netlify account is the way", () => {
@@ -314,6 +327,23 @@ describe("publish-to-netlify helper, end to end against a stand-in on loopback",
     const broken = await run(["--dir", join(project, "dist"), "--token-file", tokenFile, "--project", elsewhere]);
     expect(String(broken.json.error)).toMatch(/has no valid siteId/);
     expect(fake.requests.filter((request) => request === "POST /api/v1/sites")).toHaveLength(2);
+  });
+
+  it("lets a second conversation with the bot update the same site, from the project in the bot's shared folder", async () => {
+    const shared = join(home, "workspaces", "bot-1", "sites", "bakery"), monday = join(home, "task-workspaces", "bot-1", "monday"), friday = join(home, "task-workspaces", "bot-1", "friday");
+    for (const folder of [shared, monday, friday]) mkdirSync(folder, { recursive: true });
+    writeFileSync(join(shared, "index.html"), "<h1>Bakery</h1>");
+    const sitesBefore = fake.requests.filter((request) => request === "POST /api/v1/sites").length;
+    const first = await run(["--dir", shared, "--project", shared, "--token-file", tokenFile, "--title", "Bakery"], {}, monday);
+    expect(first.json).toMatchObject({ ok: true, created: true, live: true });
+    expect(readdirSync(monday)).toEqual([]);
+
+    writeFileSync(join(shared, "index.html"), "<h1>Bakery, now with cakes</h1>");
+    const second = await run(["--dir", shared, "--project", shared, "--token-file", tokenFile], {}, friday);
+    expect(second.json).toMatchObject({ ok: true, created: false, live: true, siteId: first.json.siteId, url: first.json.url, uploaded: 1 });
+    expect(fake.requests.filter((request) => request === "POST /api/v1/sites")).toHaveLength(sitesBefore + 1);
+    expect(readdirSync(friday)).toEqual([]);
+    expect(JSON.parse(readFileSync(join(shared, helper.SITE_FILE), "utf8"))).toMatchObject({ siteId: first.json.siteId, title: "Bakery" });
   });
 
   it("leaves a project whose app is on the plan's included hosting alone: no deploy, check, change or delete", async () => {

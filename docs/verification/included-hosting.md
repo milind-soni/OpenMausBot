@@ -26,6 +26,12 @@ pnpm exec vitest run server/host/included-hosting.test.ts server/host/app-publis
   the data folder and `/` are refused before the relay is asked anything. Dotfiles, env files, keys, `node_modules` and
   links are left out and named; the filter is the publish helper's, checked path by path against
   `skills/publish-to-netlify/deploy.mjs`. A record swapped for a link is replaced, never written through.
+- A project lives in the bot's shared folder (`workspaces/<bot>/sites/<name>`), which every conversation with the bot
+  reaches: a relative `path` is read there first, so a second conversation publishes the same app to the same link,
+  and `check_app_hosting` with no path lists the projects already published from the turn's folders. A new app
+  published from one conversation's own folder is published, with a note that no other conversation will find it.
+  The helper for the person's own Netlify account does the same with `--project`
+  (`server/skill-publish-to-netlify.test.ts`).
 - Only the files the relay does not hold are uploaded. The publish waits for `ready`, opens a new app to everyone
   where the relay still keeps new apps private, and checks that the link answers as `text/html`. A publish still being
   processed is said to be so, not live and not failed, and `check_app_hosting` picks it up.
@@ -60,7 +66,8 @@ pnpm exec vitest run server/host/published-apps-included.test.ts server/routes/p
 pnpm exec vitest run server/included-hosting.e2e.test.ts
 ```
 
-Three launched fixtures. Without the relay's address and token a bot is shown neither `publish_app` nor
+Four launched fixtures. In the last, a second conversation with the same bot finds the app in the bot's shared folder
+and publishes it again to the same link. Without the relay's address and token a bot is shown neither `publish_app` nor
 `check_app_hosting` and `GET /api/published-apps` has no count. With them, a scripted bot calls the real tools: the
 count, a publish of its own folder (its `.env` left out), and the app's state; a path to its neighbour's folder, by
 full path and by `..`, is refused in plain words. The app is listed with `included: { used: 1, max: 10 }`, and deleted

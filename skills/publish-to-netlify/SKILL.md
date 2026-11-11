@@ -29,6 +29,21 @@ Publish only when the person asks. If they only asked you to build something, sh
   unreleased plans), ask before publishing, and say exactly what would become public.
 - Publish only the output folder, never your whole working folder.
 
+## Where the project lives
+
+Keep each site or app in your shared bot folder, one folder per app: `<sharedBotFolder>/sites/<short-name>/`
+(`sharedBotFolder` is in your file locations; `sites/bakery-orders`, say). Build it there, not in this
+conversation's folder: every conversation with you reaches the shared folder, so a later one can change the same app
+and keep its link, while a project in one conversation's folder is out of reach of the others.
+
+- Before you create a project, look for it: list `<sharedBotFolder>/sites/`, and search `sharedBotFolder` and your
+  current folder for `.netlify-site.json` (`check_app_hosting` with no path lists what it finds). If the app is
+  there, work in that folder and publish from it again; never start a second copy.
+- Name that folder whatever folder you are in: `--project` and `--dir` for `deploy.mjs`, `project` and `path` for
+  `publish_app` (a relative `path` such as `sites/bakery-orders` is read in the shared folder first).
+- On a team, an app a person wants for themselves alone, asked for in their private chat with you, stays in this
+  conversation's folder instead: the shared folder is the whole team's.
+
 ## Included hosting first
 
 If you have the `publish_app` and `check_app_hosting` tools, this Cloud's plan includes hosting: use it first. There is no token card and the
@@ -38,7 +53,8 @@ person needs no Netlify account. It takes static files only: up to 25 MB and 500
 2. Publishing is public at once, so the person sees what goes out first: show it with `show_html` when it fits a chat
    page, otherwise say what you built and what it does. Publish only when they say yes.
 3. Call `publish_app` with `path` (the output folder), a `title`, and `project` when the output is inside a project
-   folder. Pass the same ones every time: the same link is updated. It writes `.netlify-site.json` there too.
+   folder. Pass the same ones every time, in any conversation: the same link is updated. It writes
+   `.netlify-site.json` there too.
    `"live": true`: reply with the link (`url`), what you published in a line or two, and that the link is public.
    `"pending": true`: it is still being processed; call `check_app_hosting` with the same folder once, a minute later.
 4. Delete an app as "Delete a published site" says, with `action: "delete"` and the same folder.

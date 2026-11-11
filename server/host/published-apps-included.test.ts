@@ -42,7 +42,7 @@ const folders = (bot: { id: string; threadId: string; tasks?: ReadonlyArray<{ th
 
 function made(over: Partial<PublishedAppsDeps> = {}) {
   const hosting = createIncludedHosting({ credential: () => credential, dataDir });
-  const publisher = createAppPublisher({ hosting, botName: (id) => bots.find((bot) => bot.id === id)?.name ?? "", env: {}, pollMs: 10, linkWaitMs: 300 });
+  const publisher = createAppPublisher({ hosting, botName: (id) => bots.find((bot) => bot.id === id)?.name ?? "", botFolder: workspace, home: "/nowhere/home", env: {}, pollMs: 10, linkWaitMs: 300 });
   const apps = createPublishedApps({
     bots: () => bots, rooms: () => rooms, messages: (threadId) => messages[threadId] ?? [], folders, ownFolder,
     pages: () => [], unpublishPage: async () => ({ status: 200, text: "Unpublished." }), netlifyToken: () => null,

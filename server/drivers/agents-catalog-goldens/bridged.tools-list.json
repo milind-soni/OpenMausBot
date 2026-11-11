@@ -399,7 +399,7 @@
           },
           "path": {
             "type": "string",
-            "description": "The folder to publish, in your working folder: the built output, with index.html at its top."
+            "description": "The folder to publish: the built output, with index.html at its top. A relative path is looked for in your shared bot folder first (sites/<app>), so every conversation names the same app."
           },
           "project": {
             "type": "string",

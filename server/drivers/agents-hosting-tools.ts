@@ -23,7 +23,7 @@ export const HOSTING_TOOL_DEFINITIONS = [
       additionalProperties: false,
       properties: {
         action: { type: "string", enum: ["publish", "delete"], description: "publish (default) or delete." },
-        path: { type: "string", description: "The folder to publish, in your working folder: the built output, with index.html at its top." },
+        path: { type: "string", description: "The folder to publish: the built output, with index.html at its top. A relative path is looked for in your shared bot folder first (sites/<app>), so every conversation names the same app." },
         project: PROJECT,
         title: { type: "string", maxLength: 120, description: "publish: what the app is, in a few words." },
       },
@@ -33,7 +33,7 @@ export const HOSTING_TOOL_DEFINITIONS = [
   {
     name: "check_app_hosting",
     description:
-      "Read the plan's included app hosting: how many of its apps and this month's publishes are in use (\"3 of 10\") and its size limits. With path, also how the app published from that folder is doing. Changes nothing.",
+      "Read the plan's included app hosting: how many of its apps and this month's publishes are in use (\"3 of 10\") and its size limits. Without path, also the projects already published from your folders: look there before starting a new one. With path, how the app published from that folder is doing. Changes nothing.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
