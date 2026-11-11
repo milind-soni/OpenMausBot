@@ -8,7 +8,7 @@ import { passageMatcher } from "./memory-entries.ts";
 import { mergeTopicText, parseTopicHeader } from "./memory-topics.ts";
 import { applyMoves, MAX_MOVES, organizeCandidates, ORGANIZE_MARKER, organizePrompt, parseMoves } from "./memory-organize.ts";
 import { flushMemoryJournal, readMemoryJournal, revertMemoryChange } from "./memory-journal.ts";
-import { applyTidy, contradictionBudget, contradictionCandidates, parseContradictions, planTidy } from "./memory-tidy.ts";
+import { applyTidy, contradictionBudget, contradictionCandidates, contradictionPrompt, parseContradictions, planTidy } from "./memory-tidy.ts";
 import { createMemoryUpkeep, MAX_PENDING_THREADS, NO_TEXT_ENGINE, type UpkeepBot, type UpkeepEngine } from "./memory-upkeep.ts";
 import { closeMessageDb } from "./message-db.ts";
 import { aboutMeLine, appendAboutMe, clearForgotten, commitLearned, listLearnedFacts, planLearned, rememberForgotten, removeLearned } from "./profile-learned.ts";
@@ -162,6 +162,25 @@ describe("tidy plan", () => {
     expect(parseContradictions('{"pairs":[{"a":0,"b":0,"keep":"a"},{"a":0,"b":9,"keep":"a"},{"a":1,"b":2,"keep":"x"},{"a":2,"b":1,"keep":"b"},{"a":1,"b":2,"keep":"a"}]}', 3)).toEqual([
       { a: 2, b: 1, keep: "b" },
     ]);
+  });
+
+  it("never supersedes a note outside the contradiction prompt", () => {
+    const text = Array.from({ length: 205 }, (_, index) => `- 2026-09-01 · Project ${index} has its own deadline`).join("\n");
+    const candidates = contradictionCandidates(text, TODAY);
+    const prompt = contradictionPrompt(candidates);
+    expect(candidates).toHaveLength(205);
+    expect(prompt).toContain("[199] (2026-09-01) Project 199");
+    expect(prompt).not.toContain("[200]");
+    const pairs = parseContradictions(JSON.stringify({ pairs: [
+      { a: 0, b: 200, keep: "a" },
+      { a: 204, b: 1, keep: "b" },
+      { a: 2, b: 199, keep: "b" },
+    ] }), candidates.length);
+    expect(pairs).toEqual([{ a: 2, b: 199, keep: "b" }]);
+    const next = applyTidy(text, planTidy(text, TODAY, pairs), TODAY).text;
+    expect(next).toContain("- 2026-09-01 · Project 200 has its own deadline");
+    expect(next).toContain("- 2026-09-01 · Project 204 has its own deadline");
+    expect(next).toContain("~~Project 2 has its own deadline~~");
   });
 });
 

@@ -31,6 +31,7 @@ const KEY_PREFIXES: RegExp[] = [
   /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, // aws access key id, long-term (AKIA) or temporary STS (ASIA)
   /\bAIza[0-9A-Za-z_-]{30,}/g, // google api key
   /\bnpm_[A-Za-z0-9]{20,}/g, // npm
+  /\bntn_[A-Za-z0-9]{46}(?![A-Za-z0-9_-])/g, // notion integration tokens
   /\bwhsec_[A-Za-z0-9_-]{20,}/g, // webhook secrets, alone or in an automation's address
   /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g, // sendgrid api keys
   /\bbak_[A-Za-z0-9_-]{20,}/g, // Bot API keys
