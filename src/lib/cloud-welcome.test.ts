@@ -3,7 +3,7 @@ vi.mock("@/state/store", async (original) => ({ ...await original<typeof import(
 import { api } from "@/state/store";
 import { CLOUD_SETUP_HIDDEN, CLOUD_WELCOME_DONE, welcomeStepHint } from "./cloud-setup";
 import {
-  cloudFirstRun, cloudWelcomeShown, cloudWelcomeVisible, endWelcomeHere, markWelcomeSeen, noteWelcomeHints, resetCloudWelcome,
+  cloudFirstRun, cloudWelcomeShown, cloudWelcomeVisible, endWelcomeHere, keepFinishedWelcome, markWelcomeSeen, noteWelcomeHints, resetCloudWelcome,
   returnToWelcome, saveWelcomeHints, stepAsideWelcome, takeWelcomeRequest, useCloudWelcome, WELCOME_SAVE_RETRY_MS, welcomeCredit,
   withEarlyHints,
 } from "./cloud-welcome";
@@ -48,6 +48,14 @@ describe("the welcome in this session", () => {
     renderToStaticMarkup(createElement(Probe));
     return value!;
   };
+
+  it("a finished list recorded as it shows stays on this page, and is gone once the person leaves it", async () => {
+    expect(cloudWelcomeShown("ended", await read()), "a welcome that ended before this page").toBe(false);
+    keepFinishedWelcome();
+    expect(cloudWelcomeShown("ended", await read())).toBe(true);
+    endWelcomeHere();
+    expect(cloudWelcomeShown("ended", await read())).toBe(false);
+  });
 
   it("shows while pending, steps aside when the person leaves it, and comes back where Continue setup asks", async () => {
     expect(cloudWelcomeShown("pending", await read())).toBe(true);

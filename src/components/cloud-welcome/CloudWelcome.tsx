@@ -9,7 +9,7 @@ import {
   CLOUD_SETUP_MOVE_SKIPPED, CLOUD_WELCOME_DONE, CLOUD_WELCOME_SHOWN, WELCOME_STEPS, welcomeStepFinished, welcomeStepHint, welcomeView, welcomeViewAfter,
   type WelcomeStep, type WelcomeView,
 } from "@/lib/cloud-setup";
-import { endWelcomeHere, markWelcomeSeen, saveWelcomeHints, stepAsideWelcome, takeWelcomeRequest, useCloudWelcome, withEarlyHints } from "@/lib/cloud-welcome";
+import { endWelcomeHere, keepFinishedWelcome, markWelcomeSeen, saveWelcomeHints, stepAsideWelcome, takeWelcomeRequest, useCloudWelcome, withEarlyHints } from "@/lib/cloud-welcome";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { hintSeen, type OnboardingStatus } from "@/lib/onboarding";
@@ -73,7 +73,8 @@ export function CloudWelcome() {
   const navigated = useRef(false);
   const visible = state.bots.filter((bot) => !bot.hidden);
   const bot = visible.find((candidate) => candidate.chiefOfStaff) ?? visible[0] ?? null;
-  const cloudHasWork = visible.length > 1 || state.groups.length > 0;
+  const team = Boolean(state.config?.team);
+  const cloudHasWork = visible.filter((candidate) => !candidate.defaultBot?.person).length > 1 || state.groups.length > 0;
   const sendBridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudSendPage;
   // An older app still offers Copy this computer by hand: it moves bots here by itself only once updated.
   const older = Boolean(sendBridge && window.ogb && "cloudMove" in window.ogb);
@@ -99,6 +100,14 @@ export function CloudWelcome() {
     navigated.current = false;
     heading.current?.focus();
   }, [view]);
+
+  // A team's Owner reads the finished list once: it is recorded as it shows, and stays on this page until they leave it.
+  useEffect(() => {
+    if (view !== "done" || !team || hintSeen(record, CLOUD_WELCOME_DONE)) return;
+    keepFinishedWelcome();
+    remember([CLOUD_WELCOME_DONE]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, team]);
 
   const anchor = useRef<string | null>(null);
   const reanchor = useRef(false);
@@ -158,12 +167,12 @@ export function CloudWelcome() {
   let content;
   if (view === "bring" && asking) content = null;
   else if (view === "bring") {
-    content = <WelcomeBring name={name} team={Boolean(state.config?.team)} desktop={Boolean(sendBridge)} older={older} cloudHasWork={cloudHasWork} sent={sent && { state: sent.state, arrived: sent.state === "sent" && sent.last ? countedList(sent.last.sent) : null }} headingRef={heading}
+    content = <WelcomeBring name={name} team={team} desktop={Boolean(sendBridge)} older={older} cloudHasWork={cloudHasWork} sent={sent && { state: sent.state, arrived: sent.state === "sent" && sent.last ? countedList(sent.last.sent) : null }} headingRef={heading}
       onTeam={() => { reanchor.current = true; }}
       onFinish={finishBring} />;
   } else if (view === "engine") content = <WelcomeEngine name={name} headingRef={heading} onFinish={() => finish("engine")} />;
   else if (view === "files") content = <WelcomeFiles name={name} headingRef={heading} onFinish={() => finish("files")} />;
-  else content = <WelcomeDone name={name} bot={bot} headingRef={heading} onSayHi={sayHi} onJob={giveJob} invite={people?.me?.role === "owner" ? teamPeoplePage(state.config?.team) : null} />;
+  else content = <WelcomeDone name={name} bot={bot} team={team} headingRef={heading} onSayHi={sayHi} onJob={giveJob} invite={people?.me?.role === "owner" ? teamPeoplePage(state.config?.team) : null} />;
 
   return <main data-cloud-welcome={view} className="@container/welcome relative flex h-full min-w-0 flex-1 flex-col bg-app">
     <WindowDragStrip />

@@ -134,6 +134,9 @@ export const SIMPLE_PAGES: SimpleSettingsPage[] = [
     keywords: ["update", "version", "release", "product updates", "newsletter", "email updates", "welcome", "tour", "diagnostics", "logs", "support"] },
 ];
 
+/** What only an admin can use: a team's member isn't offered these at all. */
+export const TEAM_ADMIN_SECTIONS: readonly AppSettingsSection[] = ["engines", "connections", "decisionModel", "imageGeneration", "computer", "usage", "backups", "import"];
+
 export const SIMPLE_HIDDEN_SECTIONS: readonly AppSettingsSection[] = ["backups", "experimental", "workspaces", "skills", "decisionModel", "imageGeneration"];
 
 
@@ -218,7 +221,8 @@ function SettingsDialog() {
     .filter((entry) => entry.id !== "workspaces" || workspacesAvailable(state.config))
     .filter((entry) => entry.id !== "people" || (!window.ogb && state.config?.cloudHome !== true))
     .filter((entry) => entry.id !== "activity" || (!window.ogb && ownerOrAdmin === true))
-    .filter((entry) => entry.id !== "botAccess" || (Boolean(state.config?.team) && ownerOrAdmin === true));
+    .filter((entry) => entry.id !== "botAccess" || (Boolean(state.config?.team) && ownerOrAdmin === true))
+    .filter((entry) => !(state.config?.team && ownerOrAdmin === false && TEAM_ADMIN_SECTIONS.includes(entry.id)));
   const availableSections = baseSections.filter((entry) => entry.id !== "skills" || skillsLibraryEnabled(state.config));
   const visibleSections = availableSections.filter((entry) => sectionMatches(entry, q));
 
@@ -336,7 +340,7 @@ function SettingsDialog() {
   const computerPairs = currentPhonePairingTarget(state.config?.cloudHome === true) === "computer";
   const remoteAccess = {
     client: <RemoteComputerSection hideWhenUnavailable legacyOnly />,
-    domain: remoteActive || thisComputer ? null : <CustomDomainSettings />,
+    domain: remoteActive || thisComputer || (state.config?.team && ownerOrAdmin === false) ? null : <CustomDomainSettings />,
     // Security: the server decides who may pair (an owner or admin session), not this gate.
     pairing: thisComputer ? null : <ServerPairingCard cloudHome={state.config?.cloudHome === true} focusRequest={computerPairs ? 0 : phoneFocus} team={state.config?.team?.name} teamPhoneBlocked={state.config?.managedPolicy?.remoteAccess === false ? t("policy.teamRemoteBlocked", { organization: state.config.managedPolicy.organizationName }) : null} simple={!advanced} />,
     companion: thisComputer ? <PhoneDevicesSection profileEmail={state.config?.profile?.email} focusRequest={phoneFocus} simple={!advanced} /> : null,

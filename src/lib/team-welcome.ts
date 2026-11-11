@@ -54,9 +54,14 @@ export const teamWelcomeShownThisLaunch = () => shownThisLaunch;
 /** Only for tests: the record is module state. */
 export function resetTeamWelcome(): void { asked.clear(); shownThisLaunch = false; publish(null); }
 
-/** A User's first time in the team: they have a record and haven't seen it. An Admin has the Cloud's own welcome. */
-export function teamWelcomeDue(input: { team: { id: string } | null | undefined; canSave: boolean | undefined; record: TeamWelcomeRecord | null | undefined }): boolean {
-  return Boolean(input.team) && input.canSave === false && Boolean(input.record) && input.record!.welcomedAt === null;
+/** Everyone invited to a team: all but its Owner, who set it up. A Team Cloud too old to say the role knows only who can't change it. */
+export function invitedToTeam(viewer: { canSave: boolean; teamRole?: string } | null | undefined): boolean {
+  return Boolean(viewer) && (viewer!.teamRole ? viewer!.teamRole !== "owner" : !viewer!.canSave);
+}
+
+/** An invited person's first time in the team: they have a record and haven't seen it. The Owner has the Cloud's own welcome. */
+export function teamWelcomeDue(input: { team: { id: string } | null | undefined; invited: boolean; record: TeamWelcomeRecord | null | undefined }): boolean {
+  return Boolean(input.team) && input.invited && Boolean(input.record) && input.record!.welcomedAt === null;
 }
 
 interface WelcomeBot { id: string; name: string; title?: string; description?: string; soul?: string; hidden?: boolean; defaultBot?: { person?: string } | null; yourAccess?: string }

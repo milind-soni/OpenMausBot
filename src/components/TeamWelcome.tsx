@@ -12,7 +12,7 @@ import { api, openBot, useStore } from "@/state/store";
 import { useTeamPeople } from "@/state/team-people";
 
 /**
- * A User's first screen in a team, once: the team by its name and who invited them, who else is in it, the bots shared with
+ * An invited person's first screen in a team, once: the team by its name and who invited them, who else is in it, the bots shared with
  * them, the one privacy rule, and one thing to do, a chat with a bot. Seen is kept on the team's Cloud for this person alone
  * (PUT /api/me/welcome), so it shows once whichever device they open first, in the app or a browser.
  */
