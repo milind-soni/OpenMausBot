@@ -10,6 +10,7 @@ import { allThreadRows, BotDeleteMenuItem, useDeleteAllThreads } from "./BotMenu
 import { HideDefaultBotItem } from "./DefaultBotControls";
 import { navigateThreadMenu } from "./BotProjects";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
+import { userBotMenu } from "@/lib/own-team-bot";
 import { botUnreadThreadIds, markBotRead } from "@/lib/folder-read";
 import { ownerMenuLabel, pickOwnerOf } from "./TeamOwner";
 import { mayChangeOwner, useTeamPeople } from "@/state/team-people";
@@ -162,6 +163,10 @@ export function BotContextMenu({
     : visibleBotCount <= 1
       ? t("sidebar.bot.archiveBlockedLast")
       : undefined;
+  const user = userBotMenu(bot, team?.me?.email), ownEdit = Boolean(team) && user.duplicate;
+  const ownDelete = () => !team || !user.delete ? []
+    : user.delete === "shared" ? [item(<Trash2 size={16} />, t("common.delete"), undefined, { danger: true, disabled: true, hint: t("sidebar.bot.deleteSharedAdminOnly") })]
+      : [<BotDeleteMenuItem key="delete" deleting={deleting} className={MENU_ITEM} onClick={() => { onClose(); onDelete(bot); }} />];
   const chiefItem = () => item(
     <Crown size={16} className={bot.chiefOfStaff ? "text-accent" : "text-ink-secondary"} />,
     bot.chiefOfStaff ? t("sidebar.bot.removeChief") : t("sidebar.bot.makeChief"),
@@ -260,7 +265,7 @@ export function BotContextMenu({
     const moreItems = remoteClient ? [editProfile, owner, ...deleteAll] : [
       editProfile,
       team ? null : chiefItem(),
-      member ? null : item(<Copy size={16} className="text-ink-secondary" />, t("sidebar.bot.duplicate"), () => dispatch({ type: "duplicateBot", botId: bot.id })),
+      member && !ownEdit ? null : item(<Copy size={16} className="text-ink-secondary" />, t("sidebar.bot.duplicate"), () => dispatch({ type: "duplicateBot", botId: bot.id })),
       owner,
       ...moveToTeam.items(bot, item),
       ...moveToCloud.items(bot, item),
@@ -280,7 +285,7 @@ export function BotContextMenu({
     );
     const threads = [divider("threads"), newThread, viewThreads, setMain];
     const moreRow = flyoutButton("more", moreRef, <MoreHorizontal size={16} className="text-ink-secondary" />, t("sidebar.bot.more"));
-    const leave = bot.defaultBot ? [<HideDefaultBotItem key="hide" bot={bot} onDone={onClose} className={MENU_ITEM} />] : member ? [] : [
+    const leave = bot.defaultBot ? [<HideDefaultBotItem key="hide" bot={bot} onDone={onClose} className={MENU_ITEM} />] : member ? ownDelete() : [
       item(<Archive size={16} className="text-ink-secondary" />, t("sidebar.bot.archive"), () => onArchive(bot), { disabled: archiveBlocked, hint: archiveHint }),
       <BotDeleteMenuItem key="delete" deleting={deleting} className={MENU_ITEM} onClick={() => { onClose(); onDelete(bot); }} />,
     ];
@@ -417,7 +422,7 @@ export function BotContextMenu({
           openForSettings();
           if (!state.settingsOpen) dispatch({ type: "toggleSettings", open: true });
         }),
-        !member && item(<Copy size={16} className="text-ink-secondary" />, t("sidebar.bot.duplicate"), () =>
+        (!member || ownEdit) && item(<Copy size={16} className="text-ink-secondary" />, t("sidebar.bot.duplicate"), () =>
           dispatch({ type: "duplicateBot", botId: bot.id }),
         ),
         divider("d2"),
@@ -425,7 +430,7 @@ export function BotContextMenu({
           void copyText(bot.threadId);
         }),
         divider("d3"), ...moveToTeam.items(bot, item), ...moveToCloud.items(bot, item),
-        ...(bot.defaultBot ? [<HideDefaultBotItem key="hide" bot={bot} onDone={onClose} className={MENU_ITEM} />] : member ? [] : [
+        ...(bot.defaultBot ? [<HideDefaultBotItem key="hide" bot={bot} onDone={onClose} className={MENU_ITEM} />] : member ? ownDelete() : [
           item(<Archive size={16} className="text-ink-secondary" />, t("sidebar.bot.archive"), () => onArchive(bot), { disabled: archiveBlocked, hint: archiveHint }),
           <BotDeleteMenuItem key="delete" deleting={deleting} className={MENU_ITEM} onClick={() => { onClose(); onDelete(bot); }} />,
         ]),

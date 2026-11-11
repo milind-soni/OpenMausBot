@@ -105,8 +105,9 @@ it("keeps every member's session across a restart, waits to sleep only while it 
   expect(sleep.body.busy).not.toContain("team");
   expect((await team.signed("GET", "/api/cloud/power")).status).toBe(200);
   expect((await team.signed("GET", "/api/cloud/health")).status).toBe(200);
-  // A member reaches nothing an admin does: the team's setup is the admins'.
-  expect((await team.as(ada, "POST", "/api/bots", { name: "Nope" })).status).toBe(403);
+  // A member reaches nothing an admin does: the team's setup is the admins', and so is what a bot may do.
+  expect((await team.as(ada, "POST", "/api/webhooks", { name: "Nope" })).status).toBe(403);
+  expect((await team.as(ada, "POST", "/api/bots", { name: "Nope", approvalMode: "full" })).status).toBe(403);
 }, hostTimeout(90_000));
 
 let adaThread = "", roomId = "", roomThread = "";

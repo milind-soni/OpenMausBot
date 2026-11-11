@@ -190,6 +190,93 @@ describe("a team bot is its maker's until they share it", () => {
     expect(await notices("rui"), "adding someone who could already use it sends nothing").toEqual([]);
   });
 
+  it("a User makes a bot of their own: private to them, with nothing an admin alone sets, and the admin's saved defaults stay out of it", async () => {
+    const defaults = await as("ada", "PATCH", "/api/config", { newBotDefaults: { profile: { soul: "The admin's instructions.\n", approvalMode: "auto", alwaysAllow: ["Bash(*)"], section: "Sales" }, memory: {}, skills: [], routines: [] } });
+    expect(defaults.status, JSON.stringify(defaults.body)).toBe(200);
+    const adas = await made("ada", {});
+    expect(adas, "an admin's New bot takes the saved defaults").toMatchObject({ soul: "The admin's instructions.\n", section: "Sales", approvalMode: "auto" });
+
+    const own = await made("rui", { name: "Rui's own", description: "Drafts quotes." });
+    expect(own).toMatchObject({ createdBy: RUI.email, access: PRIVATE, yourAccess: "edit" });
+    await startsPrivate(own, "rui", ["marta"]);
+    // What an admin alone sets is as the server gives any bot nobody set up: a bot an admin makes without the saved defaults.
+    const bare = (await made("ada", { useDefaults: false })) as Bot & Record<string, unknown>;
+    const seen = (await botOf("ada", own.id)) as Bot & Record<string, unknown>;
+    const adminSet = (bot: Record<string, unknown>) => ["approvalMode", "autoApprove", "alwaysAllow", "cwd", "computer", "browser", "section", "reportsTo", "chiefOfStaff", "managedSections", "toolScope", "composio", "mcpServers"].map((field) => [field, bot[field]]);
+    expect(adminSet(seen)).toEqual(adminSet(bare));
+    expect([seen.soul || "", seen.section, seen.autoApprove ?? false, seen.alwaysAllow ?? [], seen.reportsTo]).toEqual(["", undefined, false, [], undefined]);
+    const unnamed = await made("rui", {});
+    expect(unnamed.name).toBeTruthy();
+    expect((await botOf("ada", unnamed.id) as Bot & { soul?: string }).soul || "").toBe("");
+
+    const before = (await bots("ada")).length;
+    for (const [field, value] of Object.entries({
+      approvalMode: "full", autoApprove: true, alwaysAllow: ["Bash(*)"], cwd: "/tmp", computer: "cloud", browser: true, section: "Sales", reportsTo: MARTA.email,
+      chiefOfStaff: true, managedSections: ["Sales"], toolScope: { allow: ["native:*"] }, visibility: "everyone", preset: "anything", id: "rui-picked-this-id",
+    })) {
+      for (const body of [{ name: "Nope", [field]: value }, { name: "Nope", settings: { [field]: value } }]) {
+        const refused = await as("rui", "POST", "/api/bots", body);
+        expect(refused.status, `${field}: ${JSON.stringify(refused.body)}`).toBe(403);
+        expect(refused.body.error).toBe(`forbidden: "${field}" is an admin's to set`);
+      }
+    }
+    expect((await bots("ada")).length, "none of those made a bot").toBe(before);
+  });
+
+  it("a User changes their own bot as someone who can edit it, and never what an admin alone sets", async () => {
+    const own = await made("rui", { name: "Editable" });
+    const changed = await as("rui", "PATCH", `/api/bots/${own.id}`, { name: "Quotes desk", title: "Quotes", soul: "Quote list prices only.\n", composio: false });
+    expect(changed.status, JSON.stringify(changed.body)).toBe(200);
+    expect(changed.body.bot).toMatchObject({ name: "Quotes desk", soul: "Quote list prices only.\n" });
+    for (const [field, value] of Object.entries({
+      approvalMode: "full", autoApprove: true, alwaysAllow: ["Bash(*)"], cwd: "/tmp", computer: "cloud", browser: true, section: "Sales", reportsTo: MARTA.email,
+      chiefOfStaff: true, managedSections: ["Sales"], toolScope: { allow: ["native:*"] }, visibility: "everyone",
+    })) {
+      const refused = await as("rui", "PATCH", `/api/bots/${own.id}`, { [field]: value });
+      expect(refused.status, `${field}: ${JSON.stringify(refused.body)}`).toBe(403);
+      expect(refused.body.error).toBe(`forbidden: "${field}" is an admin's to change`);
+    }
+    for (const [method, path, body] of [
+      ["POST", "/api/webhooks", { botId: own.id, name: "Hook" }],
+      ["PUT", `/api/bots/${own.id}/memory/file`, { path: "MEMORY.md", text: "x" }],
+      ["GET", "/api/bot-defaults", undefined],
+      ["POST", "/api/teams/import?mode=add", { format: "openmaus.team", version: 2, team: { name: "Mine", members: [{ key: "a", name: "A" }] } }],
+    ] as const) {
+      expect((await as("rui", method, path, body)).status, `${method} ${path}`).toBe(403);
+    }
+    // An admin manages it as any team bot, and still reads none of its owner's private chats with it.
+    const raised = await as("ada", "PATCH", `/api/bots/${own.id}`, { section: "Sales" });
+    expect(raised.status, JSON.stringify(raised.body)).toBe(200);
+    const chat = await as("rui", "POST", `/api/bots/${own.id}/tasks`, {});
+    expect(chat.status, JSON.stringify(chat.body)).toBe(201);
+    for (const admin of ["ada", "olive"]) expect((await as(admin, "GET", `/api/threads/${chat.body.task.threadId}/messages?limit=5`)).status, admin).toBe(404);
+  });
+
+  it("a User shares their own bot and deletes it only while nobody else can use it", async () => {
+    const own = await made("rui", { name: "Short-lived" });
+    expect((await as("marta", "DELETE", `/api/bots/${own.id}`)).status, "to anyone else it does not exist").toBe(404);
+    const shared = await as("rui", "PUT", `/api/bots/${own.id}/access`, { everyone: "none", people: { [MARTA.email]: "edit" } });
+    expect(shared.status, JSON.stringify(shared.body)).toBe(200);
+    expect((await inbox("marta")).some((row) => row.text === "Rui shared Short-lived with you.")).toBe(true);
+    expect((await botOf("marta", own.id))?.yourAccess).toBe("edit");
+    const whileShared = await as("rui", "DELETE", `/api/bots/${own.id}`);
+    expect([whileShared.status, whileShared.body.error]).toEqual([403, "Only an admin can delete a bot that is shared. Stop sharing it first, or ask an admin."]);
+    expect((await as("marta", "DELETE", `/api/bots/${own.id}`)).status, "someone it is shared with, even to edit").toBe(403);
+    expect((await botOf("rui", own.id))?.name).toBe("Short-lived");
+
+    const adas = await made("ada", { name: "Ada's, shared with Rui" });
+    expect((await as("ada", "PUT", `/api/bots/${adas.id}/access`, { everyone: "none", people: { [RUI.email]: "edit" } })).status).toBe(200);
+    expect((await as("rui", "DELETE", `/api/bots/${adas.id}`)).status, "a bot he can edit but does not look after").toBe(403);
+    const mausbot = (await bots("rui")).find((bot) => (bot as Bot & { defaultBot?: { person?: string } }).defaultBot?.person === RUI.email);
+    if (mausbot) expect((await as("rui", "DELETE", `/api/bots/${mausbot.id}`)).status, "his own MausBot stays").toBe(409);
+
+    expect((await as("rui", "PUT", `/api/bots/${own.id}/access`, PRIVATE)).status).toBe(200);
+    const gone = await as("rui", "DELETE", `/api/bots/${own.id}`);
+    expect(gone.status, JSON.stringify(gone.body)).toBe(200);
+    for (const who of ["rui", "ada", "olive"]) expect((await bots(who)).some((bot) => bot.id === own.id), who).toBe(false);
+    expect((await as("ada", "DELETE", `/api/bots/${adas.id}`)).status, "an admin deletes any team bot, shared or not").toBe(200);
+  });
+
   it("what was shared before stays shared across a restart, and what was private stays private", async () => {
     const before = Object.fromEntries((await bots("olive")).map((bot) => [bot.id, bot.access]));
     const martas = (await bots("marta")).map((bot) => bot.id).sort();
@@ -198,6 +285,21 @@ describe("a team bot is its maker's until they share it", () => {
     expect(Object.fromEntries((await bots("olive")).map((bot) => [bot.id, bot.access]))).toEqual(before);
     expect((await bots("marta")).map((bot) => bot.id).sort()).toEqual(martas);
   }, hostTimeout(120_000));
+});
+
+describe("the team's bot limit", () => {
+  it("counts a User's bots with everyone's: at the limit theirs is refused in the same words as an admin's", async () => {
+    for (let count = (await bots("olive")).length; count < 100; count++) {
+      const filler = await as("ada", "POST", "/api/bots", { name: `Filler ${count}`, useDefaults: false });
+      if (filler.status !== 201) break;
+    }
+    const all = (await bots("olive")).length;
+    const adminToo = await as("ada", "POST", "/api/bots", { name: "One more", useDefaults: false });
+    expect(adminToo.status, `${all} bots: ${JSON.stringify(adminToo.body)}`).toBe(409);
+    const refused = await as("rui", "POST", "/api/bots", { name: "One more" });
+    expect([refused.status, refused.body.error]).toEqual([409, adminToo.body.error]);
+    expect(refused.body.error).toMatch(/limited to 100 bots/);
+  }, hostTimeout(240_000));
 });
 
 describe("anywhere but a team", () => {

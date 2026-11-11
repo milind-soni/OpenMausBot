@@ -1,9 +1,10 @@
 // A team bot is its maker's until they share it, in the real app on a real Team Cloud (OMB_CLOUD_ROLE=team, each person
-// paired with the Admin's signed claim) in headless Chrome. Rui, an admin, makes a bot with New bot: it is private, under
-// Just me only, and Marta, a User, neither sees it nor reaches it by id. Rui shares it with Marta from the Share button at
-// the top right of the chat: her face shows beside it, she gets one line in her inbox and can chat, and another User
-// still sees nothing. The Templates form states who can use a new bot, preset to Just me. `/?connect=bots` opens Bot
-// access for an admin and nothing for a User. Run with OMB_UI_E2E=1; OMB_TEAM_PRIVATE_SHOTS=DIR keeps the screenshots.
+// paired with the Admin's signed claim) in headless Chrome. Rui, a User, makes a bot with New bot: it is private, under
+// Just me only, and Marta, another User, neither sees it nor reaches it by id. Rui shares it with Marta from the Share
+// button at the top right of the chat: her face shows beside it, she gets one line in her inbox and can chat, and a
+// third User still sees nothing. Rui's menu deletes a bot of his own, and says why it can't while the bot is shared. An
+// admin's Templates form states who can use a new bot, preset to Just me. `/?connect=bots` opens Bot access for an admin
+// and nothing for a User. Run with OMB_UI_E2E=1; OMB_TEAM_PRIVATE_SHOTS=DIR keeps the screenshots.
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -23,7 +24,7 @@ if (!enabled) console.info("skipping the private-until-shared UI e2e: set OMB_UI
 
 const SHOTS = process.env.OMB_TEAM_PRIVATE_SHOTS || join(REPO_ROOT, ".omb-scratch", "team-private-default");
 const DESKTOP = ["1280", "800"] as const, PHONE = ["390", "844"] as const;
-const PEOPLE = { olive: "owner", rui: "admin", marta: "member", ben: "member" } as const;
+const PEOPLE = { olive: "owner", ada: "admin", rui: "member", marta: "member", ben: "member" } as const;
 type Who = keyof typeof PEOPLE;
 const address = (who: Who) => `${who}@acme.test`;
 
@@ -161,16 +162,22 @@ async function openAs(who: Who, size: readonly [string, string], query = "") {
     await fx?.close();
   }, hostTimeout(120_000));
 
-  it("New bot makes a bot only Rui and the admins can use: under Just me only, and a User neither sees it nor reaches it", async () => {
+  it("a User's New bot makes a bot only he and the admins can use: under Just me only, and another User neither sees it nor reaches it", async () => {
     const rui = await openAs("rui", DESKTOP);
     await rui.ready();
     const before = new Set((await botsOf("rui")).map((bot) => bot.id));
     await rui.click('button[aria-label="New or share"]');
     await rui.until(`[...document.querySelectorAll('[role="menu"] [role="menuitem"]')].some((item) => /^new bot$/i.test(item.textContent.trim()))`);
+    const offered = await rui.evaluate<string[]>(`[...document.querySelectorAll('[role="menu"] [role="menuitem"]')].map((item) => item.textContent.trim())`);
+    expect(offered, "a User is offered New bot").toEqual(expect.arrayContaining(["New bot", "New group chat"]));
+    expect(offered, "and no Templates, which stay an admin's").not.toContain("Templates");
+    await rui.shot("00-rui-user-plus-menu-desktop");
     await rui.evaluate(`[...document.querySelectorAll('[role="menu"] [role="menuitem"]')].find((item) => /^new bot$/i.test(item.textContent.trim())).click(); true`);
     await expect.poll(async () => (await botsOf("rui")).filter((bot) => !before.has(bot.id)).length, { timeout: 60_000, interval: 500 }).toBe(1);
     quotes = (await botsOf("rui")).find((bot) => !before.has(bot.id))!;
     expect(quotes.access, "Only people added, nobody added").toEqual({ everyone: "none", people: {} });
+    expect([(quotes as Bot & { createdBy?: string }).createdBy, quotes.yourAccess], "he looks after it").toEqual([address("rui"), "edit"]);
+    for (const admin of ["olive", "ada"] as const) expect((await botsOf(admin)).find((bot) => bot.id === quotes.id)?.yourAccess, admin).toBe("edit");
 
     await rui.until(`document.querySelector('[data-sidebar-bot-row="${quotes.id}"]') && document.querySelector('textarea[placeholder^="Message"]')`);
     await expect.poll(rui.audience, { timeout: 30_000 }).toBe("me:Private · only you");
@@ -261,6 +268,39 @@ async function openAs(who: Who, size: readonly [string, string], query = "") {
     await rui.close();
   }, hostTimeout(480_000));
 
+  it("a User's menu deletes a bot of his own, and says why it can't while the bot is shared", async () => {
+    const made = await team.as(tokens.rui, "POST", "/api/bots", { name: "Scratchpad" });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    const scratch = made.body.bot.id as string;
+    const rui = await openAs("rui", DESKTOP);
+    await rui.ready();
+    const menu = async (id: string) => {
+      await rui.until(`document.querySelector('[data-sidebar-bot-row="${id}"]')`);
+      await rui.evaluate(`(() => { const row = document.querySelector('[data-sidebar-bot-row="${id}"]'); const box = row.getBoundingClientRect();
+        row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: box.left + 20, clientY: box.top + 10 })); return true; })()`);
+      await rui.until("document.querySelector('[data-bot-menu]')");
+      return rui.evaluate<Array<[string, boolean, string]>>(`[...document.querySelectorAll('[data-bot-menu] [role="menuitem"], [data-bot-menu] button')].map((item) => [item.textContent.trim(), item.disabled, item.title])`);
+    };
+    const closeMenu = async () => { await rui.browser("press", "Escape"); await rui.until("!document.querySelector('[data-bot-menu]')"); };
+
+    expect((await menu(quotes.id)).find(([label]) => label === "Delete"), "shared with everyone: shown, with why").toEqual(["Delete", true, "Only an admin can delete a shared bot. Stop sharing it first."]);
+    await rui.shot("17-rui-menu-shared-bot-delete-is-admins-desktop");
+    await closeMenu();
+    expect((await menu(scout)).some(([label]) => label === "Delete"), "no Delete on a bot he does not look after").toBe(false);
+    await closeMenu();
+
+    expect((await menu(scratch)).find(([label]) => label === "Delete")?.slice(0, 2)).toEqual(["Delete", false]);
+    await rui.shot("18-rui-menu-own-bot-delete-desktop");
+    await rui.evaluate(`[...document.querySelectorAll('[data-bot-menu] button')].find((item) => item.textContent.trim() === "Delete").click(); true`);
+    await rui.until(`document.querySelector('[role="alertdialog"]')`);
+    await rui.shot("19-rui-delete-confirm-desktop");
+    await rui.evaluate(`[...document.querySelectorAll('[role="alertdialog"] button')].find((button) => /delete/i.test(button.textContent)).click(); true`);
+    await expect.poll(async () => (await botsOf("ada")).some((bot) => bot.id === scratch), { timeout: 60_000, interval: 500 }).toBe(false);
+    await rui.until(`!document.querySelector('[data-sidebar-bot-row="${scratch}"]')`);
+    expect((await botsOf("rui")).some((bot) => bot.id === quotes.id), "the shared one is still there").toBe(true);
+    await rui.close();
+  }, hostTimeout(420_000));
+
   it("at phone width the header keeps the bot's name: faces fold into a count, and each mark still opens Share", async () => {
     const shared = await team.as(tokens.rui, "PUT", `/api/bots/${quotes.id}/access`, { everyone: "none", people: { [address("marta")]: "chat", [address("ben")]: "chat" } });
     expect(shared.status, JSON.stringify(shared.body)).toBe(200);
@@ -294,11 +334,11 @@ async function openAs(who: Who, size: readonly [string, string], query = "") {
     await marta.close();
   }, hostTimeout(420_000));
 
-  it("the Templates form says who can use the new bot, preset to Just me; choosing Everyone in Acme shares it from the start", async () => {
-    const rui = await openAs("rui", DESKTOP);
+  it("an admin's Templates form says who can use the new bot, preset to Just me; choosing Everyone in Acme shares it from the start", async () => {
+    const rui = await openAs("ada", DESKTOP);
     await rui.ready();
     const addFromTemplates = async (everyone: boolean) => {
-      const before = new Set((await botsOf("rui")).map((bot) => bot.id));
+      const before = new Set((await botsOf("ada")).map((bot) => bot.id));
       await rui.click('button[aria-label="New or share"]');
       await rui.until(`[...document.querySelectorAll('[role="menu"] [role="menuitem"]')].some((item) => /templates/i.test(item.textContent))`);
       await rui.evaluate(`[...document.querySelectorAll('[role="menu"] [role="menuitem"]')].find((item) => /templates/i.test(item.textContent)).click(); true`);
@@ -313,11 +353,11 @@ async function openAs(who: Who, size: readonly [string, string], query = "") {
           select.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
         await rui.until(`document.querySelector('[data-new-bot-shared]').dataset.newBotShared === "everyone"`);
       }
-      await rui.shot(everyone ? "13-rui-form-everyone-desktop" : "12-rui-form-just-me-desktop");
+      await rui.shot(everyone ? "13-admin-form-everyone-desktop" : "12-admin-form-just-me-desktop");
       await rui.evaluate(`[...document.querySelectorAll('[role="dialog"][aria-label] button')].find((button) => button.textContent.trim() === "Create bot").click(); true`);
-      await expect.poll(async () => (await botsOf("rui")).filter((bot) => !before.has(bot.id)).length, { timeout: 90_000, interval: 500 }).toBe(1);
+      await expect.poll(async () => (await botsOf("ada")).filter((bot) => !before.has(bot.id)).length, { timeout: 90_000, interval: 500 }).toBe(1);
       await rui.until("!document.querySelector('[data-new-bot-shared]')");
-      return (await botsOf("rui")).find((bot) => !before.has(bot.id))!;
+      return (await botsOf("ada")).find((bot) => !before.has(bot.id))!;
     };
     const mine = await addFromTemplates(false);
     expect(mine.access).toEqual({ everyone: "none", people: {} });

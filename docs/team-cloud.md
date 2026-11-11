@@ -10,7 +10,7 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 - **Signing in.** Each person pairs from the app with a link the Admin signs for them; the machine shows the team's name
   wherever a server names itself. Owners and Admins get everything an admin session can do (Super admin and Admin in the
   app); a Member (User) uses each bot as far as it is shared with them (below, "Who can use a bot"), uses rooms and
-  makes routines, and connects no app and makes no webhook. Owners and Admins also get **Invite someone** under People in
+  makes routines and bots of their own (below, "A User's own bot"), and connects no app and makes no webhook. Owners and Admins also get **Invite someone** under People in
   the sidebar, in Simple too and when they are alone on the team: it opens the team's People page on the Cloud in their
   browser, where they sign in if that browser hasn't yet.
   With Azure OpenAI chosen for Live calls, only an Owner or
@@ -666,6 +666,22 @@ allow, folders), where it runs, its department, whom it answers to or directs, c
   reach each other only with the same audience (above), so a private Chief makes private bots and a shared one bots
   shared with the same people. And the team's first bot, which nobody made, is everyone's. New bot's form states
   General access as Just me or Everyone in Acme, preset to Just me. Bots made before this are untouched.
+- **A User's own bot.** A User makes a bot with New bot (`POST /api/bots`, which the handler opens to a Team Cloud
+  member and to no other session without the admin scope). It is theirs: they look after it, it is private to them,
+  and they change it as anyone who can edit a bot does. The request takes only what Can edit lets a person change
+  (`memberBotCreateViolation`, the same fields as the edit rule): its name, picture, instructions, profile, model, and
+  which of the team's connected apps and MCP servers it uses. Anything an admin alone sets is refused by name, at
+  creation and on every later edit (403 *"approvalMode" is an admin's to set*): what it may do on its computer, where
+  it runs, its department, whom it answers to or directs, a crown, its tool selection, a preset, its sharing at
+  creation (it starts private; they share it after). The admin's saved New bot defaults are not applied to it, so
+  those settings are what the server gives any bot nobody set up. Templates, packages, backups and the Grok Bot
+  import stay an admin's: they carry skills, notes, routines and approval levels. The team's bot limit counts every
+  bot alike, and the team's rules apply to a User's bot as to any other. An admin sees and changes it as any team
+  bot, and still reads none of its owner's private chats with it. **Deleting:** a User deletes a bot they look after
+  while nobody else can use it (`DELETE /api/bots/<id>`, `server/host/member-bots.ts`). Once it is shared with anyone,
+  or for any bot they do not look after, deleting stays with the admins, as it always was: the app shows Delete with
+  the reason, *"Only an admin can delete a shared bot. Stop sharing it first."*, and the route answers 403 in the same
+  words. Duplicate is offered for a bot they can edit and copies who it is and how it looks.
 - **Being told.** Sharing a bot with a person (`PUT /api/bots/<id>/access` newly naming a User who could not use it)
   puts one line in that person's inbox, "Ada shared Quotes with you.", linked to the bot (`server/host/share-notice.ts`).
   Sharing with everyone tells nobody, and neither does adding an admin or someone who could already use it.

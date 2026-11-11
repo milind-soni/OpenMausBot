@@ -2209,6 +2209,7 @@
   "sidebar.bot.archiveBlockedLast": "Mantenha pelo menos um bot ativo",
   "sidebar.bot.deleteCheckingTitle": "Excluindo este bot e qualquer desktop que pertença a ele",
   "sidebar.bot.deleteChecking": "Excluindo o bot e seu desktop…",
+  "sidebar.bot.deleteSharedAdminOnly": "Só um administrador pode excluir um bot compartilhado. Pare de compartilhá-lo primeiro.",
   "sidebar.bot.deletingRow": "Excluindo o bot e qualquer desktop que pertença a ele…",
   "sidebar.bot.deletingAria": "{name}, excluindo o bot e qualquer desktop que pertença a ele",
   "sidebar.bot.archived": "Bot {name} arquivado",

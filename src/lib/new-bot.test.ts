@@ -72,11 +72,12 @@ describe("New bot", () => {
     expect(botLimitReason()).toBeNull();
   });
 
-  it("makes nothing for a User on a team, however it was asked for", async () => {
+  it("makes a User's own bot on a team with one bare request: no defaults read, no department, nobody named to look after it", async () => {
     setTeamPeople({ ...team, admin: false });
     const { calls, request } = server();
-    expect(await newBot(request)).toEqual([]);
-    expect(calls).toEqual([]);
+    const sent = await newBot(request, { section: "Sales" });
+    expect(calls).toEqual([{ method: "POST", path: "/api/bots", body: {} }]);
+    expect(sent[0]).toMatchObject({ type: "botAdded", bot: { id: "created" } });
   });
 
   it("makes a bot at once from the New bot defaults and opens its chat", async () => {

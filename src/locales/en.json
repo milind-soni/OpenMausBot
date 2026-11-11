@@ -2375,6 +2375,7 @@
   "sidebar.bot.archiveBlockedLast": "Keep at least one active bot",
   "sidebar.bot.deleteCheckingTitle": "Deleting this bot and any desktop it owns",
   "sidebar.bot.deleteChecking": "Deleting the bot and its desktop…",
+  "sidebar.bot.deleteSharedAdminOnly": "Only an admin can delete a shared bot. Stop sharing it first.",
   "sidebar.bot.deletingRow": "Deleting the bot and any desktop it owns…",
   "sidebar.bot.deletingAria": "{name}, deleting the bot and any desktop it owns",
   "sidebar.bot.archived": "{name} archived",

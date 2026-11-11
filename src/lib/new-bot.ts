@@ -47,9 +47,14 @@ export function announceNewBot(dispatch: (action: Action) => void, bot: Bot, war
   if (paused) showCreatedPaused(bot.id);
 }
 
-/** A paired device may not read the host's New bot defaults: the host applies them to an empty request. Auto on this
- * computer needs the person's own OK, so a bot whose defaults ask for it starts on Ask. */
+/** A team's User makes a bot of their own, which takes the server's own defaults: its department, whom it answers to
+ * and what it may do are an admin's. A paired device may not read the host's New bot defaults: the host applies them to
+ * an empty request. Auto on this computer needs the person's own OK, so a bot whose defaults ask for it starts on Ask. */
 async function createNewBot(section: string | undefined, bots: readonly Bot[], team: TeamPeople | null, request: typeof api) {
+  if (team?.admin === false) {
+    const { bot, paused } = await request<{ bot: Bot; paused?: true }>("/api/bots", { method: "POST", body: "{}" });
+    return { bot, warnings: [] as string[], startsOnAsk: false, ...(paused ? { paused } : {}) };
+  }
   if (typeof window !== "undefined" && window.ogb?.remoteClient?.active) {
     const { bot, paused } = await request<{ bot: Bot; paused?: true }>("/api/bots", { method: "POST", body: JSON.stringify(section === undefined ? {} : { section }) });
     return { bot, warnings: [] as string[], startsOnAsk: false, ...(paused ? { paused } : {}) };
@@ -71,7 +76,6 @@ async function createNewBot(section: string | undefined, bots: readonly Bot[], t
 /** New bot: a bot made at once from the New bot defaults, with its chat open and ready for the first message. */
 export async function makeNewBot(action: Extract<Action, { type: "newBot" }>, bots: readonly Bot[], dispatch: (action: Action) => void,
   showThreads: boolean, request: typeof api = api): Promise<void> {
-  if (currentTeamPeople()?.admin === false) return;
   let made: Awaited<ReturnType<typeof createNewBot>>;
   try {
     made = await createNewBot(action.section, bots, currentTeamPeople(), request);

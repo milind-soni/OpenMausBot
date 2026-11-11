@@ -144,6 +144,12 @@ it("a blocked engine is refused for a chat turn and a routine, for an Admin and 
     expect(sent.body.error).toMatch(/^Acme does not allow the Claude engine\. .*ask a team admin\.$/);
     expect(engineRan()).toBe(false);
   }
+  // A bot a User made is the team's too: the rule applies to it as to any other.
+  const own = await team.as(ada, "POST", "/api/bots", { name: "Ada's own", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
+  expect(own.status, JSON.stringify(own.body)).toBe(201);
+  const ownTurn = await team.as(ada, "POST", `/api/bots/${own.body.bot.id}/messages`, { text: "blocked on my own bot" });
+  expect([ownTurn.status, ownTurn.body.error], JSON.stringify(ownTurn.body)).toEqual([409, expect.stringMatching(/^Acme does not allow the Claude engine\./)]);
+  expect(engineRan()).toBe(false);
   const routine = await routineRun("Blocked engine");
   expect(routine.words).toMatch(/Acme does not allow the Claude engine/);
   expect(engineRan()).toBe(false);

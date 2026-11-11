@@ -6,8 +6,9 @@ import { accessOf, memberLevel } from "./bot-visibility.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { createDefaultBot } from "./default-bot.ts";
+import { memberDeleteRefusal, SHARED_BOT_DELETE_REFUSAL } from "./host/member-bots.ts";
 import { privateUntilShared, sharedAsMaker, sharedUnlessRestricted, teamCreator } from "./new-bot-sharing.ts";
-import type { RequestAuth } from "./request-auth.ts";
+import { memberBotCreateViolation, memberBotPatchViolation, requiredScope, type RequestAuth } from "./request-auth.ts";
 import { Store, type BotRecord } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
@@ -110,3 +111,48 @@ describe("how a new bot is shared", () => {
     expect(memberLevel(now.bot(admins.id)!, MARTA)).toBe("none");
   });
 });
+
+describe("a Team Cloud member's own bot", () => {
+  const ADMIN_ONLY = ["approvalMode", "autoApprove", "alwaysAllow", "cwd", "computer", "cloudBackend", "vpsAlias", "browser", "browserProfile", "section",
+    "reportsTo", "createdBy", "chiefOfStaff", "managedSections", "toolScope", "helperModel", "visibility", "access", "preset", "id", "threadId", "defaultBot"];
+
+  it("takes at creation only what someone who can edit a bot may change", () => {
+    expect(memberBotCreateViolation({})).toBeNull();
+    expect(memberBotCreateViolation({ name: "Quotes", title: "Prices", description: "Quotes prices", color: "blue", modelSelection: { instanceId: "claude", model: "m" },
+      useDefaults: true, settings: { soul: "Be brief.", composio: true, mcpServers: ["orders"], connectorTools: {} } })).toBeNull();
+    for (const field of ADMIN_ONLY) {
+      expect(memberBotCreateViolation({ name: "Quotes", [field]: "x" }), field).toBe(field);
+      if (field !== "threadId") expect(memberBotPatchViolation({ [field]: "x" }, "edit", false, true), `${field} on edit`).toBe(field);
+      expect(memberBotCreateViolation({ name: "Quotes", settings: { [field]: "x" } }), `settings.${field}`).toBe(field);
+    }
+    expect(memberBotCreateViolation({ settings: "full access" })).toBe("settings");
+  });
+
+  it("is made and deleted through routes a member reaches, each of which decides for itself", () => {
+    expect(requiredScope("POST", "/api/bots")).toBe("client");
+    expect(requiredScope("DELETE", "/api/bots/b1")).toBe("client");
+    for (const [method, path] of [["GET", "/api/bot-defaults"], ["GET", "/api/bot-presets"], ["POST", "/api/teams/import"], ["POST", "/api/webhooks"], ["PUT", "/api/bots/b1/memory/file"]] as const) {
+      expect(requiredScope(method, path), path).toBe("admin");
+    }
+  });
+
+  it("is theirs to delete only while nobody else can use it", () => {
+    const session = (email: string, scopes: string[], membershipAuthority?: "team") => ({ kind: "session", scopes, session: { email, membershipAuthority } }) as unknown as RequestAuth;
+    const rui = session(RUI, ["client"], "team");
+    const own = { name: "Quotes", createdBy: RUI, access: { everyone: "none" as const, people: {} }, visibility: { people: [RUI] } };
+    expect(memberDeleteRefusal(rui, own, true)).toBeNull();
+    expect(memberDeleteRefusal(rui, { ...own, access: { everyone: "none", people: { [RUI]: "edit" } } }, true), "their own entry is nobody else").toBeNull();
+    expect(memberDeleteRefusal(rui, { ...own, access: { everyone: "none", people: { [MARTA]: "view" } } }, true)).toBe(SHARED_BOT_DELETE_REFUSAL);
+    expect(memberDeleteRefusal(rui, { ...own, access: { everyone: "chat", people: {} } }, true)).toBe(SHARED_BOT_DELETE_REFUSAL);
+    expect(memberDeleteRefusal(rui, { name: "Old", createdBy: RUI }, true), "set up before levels, everyone").toBe(SHARED_BOT_DELETE_REFUSAL);
+    const refused = "forbidden: this session lacks the admin scope";
+    expect(memberDeleteRefusal(rui, { ...own, createdBy: ADA, access: { everyone: "none", people: { [RUI]: "edit" } } }, true), "someone else's, even one they can edit").toBe(refused);
+    expect(memberDeleteRefusal(rui, { ...own, reportsTo: ADA }, true), "handed on").toBe(refused);
+    expect(memberDeleteRefusal(rui, null, true)).toBe(refused);
+    expect(memberDeleteRefusal(rui, own, false), "off a team").toBe(refused);
+    expect(memberDeleteRefusal(session(RUI, ["client"]), own, true), "a session the team did not pair").toBe(refused);
+    expect(memberDeleteRefusal(session(ADA, ["admin", "client"], "team"), { ...own, access: { everyone: "chat", people: {} } }, true)).toBeNull();
+    expect(memberDeleteRefusal({ kind: "loopback" } as unknown as RequestAuth, own, false)).toBeNull();
+  });
+});
+
