@@ -3088,7 +3088,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     const hydrationFallback = setTimeout(hydrate, 1_000);
 
-    const readsInFlight = new Set<string>();
+    // One read per conversation at a time; an unread frame meanwhile asks for exactly one more once it finishes.
+    const readsInFlight = new Map<string, boolean>();
+    const sendRead = (botId: string, threadId: string | undefined, key: string): void => {
+      readsInFlight.set(key, false);
+      void fetch(`/api/bots/${botId}/read`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) }).catch(() => {}).finally(() => {
+        const again = readsInFlight.get(key); readsInFlight.delete(key);
+        if (again && alive) sendRead(botId, threadId, key);
+      });
+    };
     const stopFrames = store.handleFrames((frame) => { handleFrame(frame); stateRef.current = store.getState(); });
     handleFrame = (frame) => {
       if (frame.kind === "config") bumpPeripheralVersion("config", "instances");
@@ -3142,10 +3150,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             if (selectedTask) selectedTask.unread = false;
             bot.unread = botShowsUnread(bot);
             const read = `${bot.id}:${shown}`;
-            if (!readsInFlight.has(read)) {
-              readsInFlight.add(read);
-              void fetch(`/api/bots/${bot.id}/read`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId: shown }) }).catch(() => {}).finally(() => readsInFlight.delete(read));
-            }
+            if (readsInFlight.has(read)) readsInFlight.set(read, true);
+            else sendRead(bot.id, shown, read);
           }
           rawDispatch({
             type: "botPatched",
