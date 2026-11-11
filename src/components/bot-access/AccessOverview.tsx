@@ -217,7 +217,7 @@ function PersonBotRow({ bot, person, team, teamName, apply }: {
         <span className="block truncate text-[12px] leading-4 text-ink-secondary">{!own && !owns && level === access.everyone ? t("botAccess.everyoneUse", { team: teamName }) : ownerLine(bot, team)}</span>
       </span>
       <span className="min-w-0 shrink-0 text-[13px] text-ink-secondary">
-        {owns ? <span className="px-2">{t("lookedAfter.badge")}</span> : own ? (
+        {owns ? <span className="px-2">{t("lookedAfter.owner")}</span> : own ? (
           <button type="button" data-access-remove={bot.id} aria-label={t("botAccess.overview.removeFrom", { name: person.name, bot: bot.name })}
             onClick={() => void apply(bot, withPerson(access, person.email, null), t("botAccess.overview.toastRemoved", { name: person.name, bot: bot.name }))}
             className="rounded-md px-2 py-1 hover:bg-ink/[0.06] hover:text-ink">{t("botAccess.remove")}</button>

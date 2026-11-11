@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+import { setTeamPeople } from "@/state/team-people";
 import { ChatErrorBanner, ChatNotice } from "./ChatErrorBanner";
 
 const source = (name: string) => readFileSync(new URL(`../${name}`, import.meta.url), "utf8");
@@ -27,6 +28,19 @@ describe("ChatErrorBanner", () => {
     expect(markup).toContain("<details");
     expect(markup).toContain(">Details</summary>");
     expect(markup).toContain("502 Bad Gateway");
+  });
+
+  it("tells a team's member who can do it instead of the server's refusal, which stays under Details", () => {
+    const refusal = 'forbidden: this session may change how a bot looks, not "name" (needs the admin scope)';
+    const banner = () => renderToStaticMarkup(createElement(ChatErrorBanner, { message: refusal, onDismiss: () => undefined }));
+    expect(banner(), "off a team as before").not.toContain("<details");
+    try {
+      setTeamPeople({ people: [], me: null, admin: false, needsYou: [] });
+      expect(banner()).toContain("<p>Only the owner or an admin can do that.</p>");
+      expect(banner()).toContain("<details");
+      setTeamPeople({ people: [], me: null, admin: true, needsYou: [] });
+      expect(banner(), "an admin reads what the server said").not.toContain("<details");
+    } finally { setTeamPeople(null); }
   });
 
   it("shows a sentence as it is, with nothing to expand", () => {

@@ -1,4 +1,4 @@
-import { typedOpenCodeModel } from "../../../shared/opencode-model-id.ts";
+import { openCodeRunsTypedModel, typedOpenCodeModel } from "../../../shared/opencode-model-id.ts";
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -28,11 +28,17 @@ export function declareOpenCodeModels(env: Record<string, string | undefined>, b
   env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ ...config, provider: providers });
 }
 
-/** The OpenCode id of a model typed by hand, declared to OpenCode for this process; undefined for any other id.
- * OpenCode (1.19.4) refuses `session/set_config_option` for a model its catalog lacks ("model not found"). */
-export function declareTypedOpenCodeModel(env: Record<string, string | undefined>, savedId: string): string | undefined {
+/** The OpenCode id of a model typed by hand, declared to OpenCode for this process when OpenCode can run it, and left
+ * undeclared otherwise; undefined for any other id. OpenCode (1.19.4, 2.2.5) refuses `session/set_config_option` for a
+ * model its catalog lacks ("model not found"), so an undeclared one runs as any model it no longer offers. */
+export function declareTypedOpenCodeModel(
+  env: Record<string, string | undefined>,
+  savedId: string,
+  listed: ReadonlyArray<{ id: string }>,
+): string | undefined {
   const model = typedOpenCodeModel(savedId);
   if (!model) return undefined;
+  if (!openCodeRunsTypedModel(model, listed)) return model;
   const separator = model.indexOf("/");
   declareOpenCodeModels(env, { [model.slice(0, separator)]: [model.slice(separator + 1)] });
   return model;

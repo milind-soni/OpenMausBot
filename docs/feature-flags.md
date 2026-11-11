@@ -60,6 +60,12 @@ text and extra work can increase token usage.
 | `agentsToolBridge` | Off, except eligible local-model turns | Lists a smaller tool catalog with `find_tool` and `use_tool`. | Tool lookup can add model calls; smaller initial context is not a guaranteed saving. See [Agents tool bridge](agents-tool-bridge.md) for eligibility and measurements. |
 | `savedSteps` | On | Allows saving and repeating computer tasks from their steps on a supported host. | Currently requires a Mac server. Enabling it does not add host support. |
 
+With `skillsLibrary` on, the every-bot skills a bot was taken off live in
+`<data>/skill-state/<bot id>/library-opt-out.json`. If that file is there but
+can't be read or isn't a list of names, the bot keeps every every-bot skill and
+the server logs it once. Switching a skill off for the bot again writes a good
+file.
+
 ### Ordinary server lending has three states
 
 For an ordinary self-hosted server that is not the bots' home,

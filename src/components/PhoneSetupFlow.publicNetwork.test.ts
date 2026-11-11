@@ -79,3 +79,28 @@ describe("the Wi-Fi pairing panel on a Windows Public network", () => {
     }
   });
 });
+
+describe("the pairing code", () => {
+  const qrCodes = (html: string) => html.match(/fill="#111111"/g)?.length ?? 0;
+  const e2e = { ...state, e2e: { enabled: true, relay: "off" as const, node: null, descriptor: null } };
+
+  it("is the only code on screen and says to scan it inside the app", () => {
+    for (const over of [{}, { state: e2e }]) {
+      const html = render(over);
+      expect(qrCodes(html)).toBe(1);
+      expect(html).toContain("Open MausBot on your phone and scan this code.");
+      expect(html).toContain("Scan it from inside the MausBot app, not the camera.");
+    }
+  });
+
+  it("links the phone app without a code of its own", () => {
+    const html = render({ state: e2e });
+    expect(html).toContain("install MausBot from the App Store, or download it for Android.");
+    expect(html).toMatch(/data-phone-app="ios"[^>]*>App Store</);
+    expect(html).toMatch(/data-phone-app="android"[^>]*>Android</);
+  });
+
+  it("says nothing about scanning once the code expired", () => {
+    expect(render({ pairingExpired: true })).not.toContain("scan this code");
+  });
+});
