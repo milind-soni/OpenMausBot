@@ -229,6 +229,9 @@ describe("a bot's opt-outs from every-bot skills", () => {
     expect(resolveBotSkills("opt-out-none", []).map((skill) => skill.name)).toContain(shared);
     expect(resolveBotSkills("opt-out-damaged", []).map((skill) => skill.name)).not.toContain(shared);
     expect(resolveBotSkills("opt-out-damaged", [shared]).map((skill) => skill.name)).toContain(shared);
+    mkdirSync(dirname(optOutFile("opt-out-bad-name")), { recursive: true });
+    writeFileSync(optOutFile("opt-out-bad-name"), JSON.stringify(["not a skill name"]));
+    expect(resolveBotSkills("opt-out-bad-name", []).map((skill) => skill.name)).not.toContain(shared);
 
     if (process.platform === "win32" || process.getuid?.() === 0) return;
     mkdirSync(dirname(optOutFile("opt-out-unreadable")), { recursive: true });

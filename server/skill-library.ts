@@ -336,7 +336,7 @@ export function librarySkillOptOuts(botId: string): ReadonlySet<string> {
   }
   try {
     const parsed = libraryOptOutSchema.safeParse(JSON.parse(text));
-    if (parsed.success) return new Set(parsed.data.filter(isSkillName));
+    if (parsed.success && parsed.data.every(isSkillName)) return new Set(parsed.data);
   } catch {}
   return everyLibrarySkillOff(path, "not a list of skill names");
 }
