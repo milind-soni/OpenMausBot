@@ -1,0 +1,337 @@
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
+import { connect, createServer as createTcpServer, type AddressInfo, type Socket } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { PAGE_MAX_BYTES, PAGE_MAX_FILES } from "../shared/published-page.ts";
+import { parseSkillMd, scanSkillText } from "../shared/skill-md.ts";
+import { loadBundledSkills, selectBundledSkills } from "./skill-library.ts";
+import { startFakeNetlify, type FakeNetlify } from "./testing/fake-netlify.ts";
+
+const SKILL_DIR = join(process.cwd(), "skills", "publish-to-netlify");
+const HELPER = join(SKILL_DIR, "deploy.mjs");
+
+interface Helper {
+  SITE_FILE: string;
+  publishable(path: string): boolean;
+  collectFiles(dir: string): { files: Array<{ path: string; full: string; size: number }>; skipped: string[] };
+  buildDigest(files: Array<{ path: string; full: string }>): { digest: Record<string, string>; bySha: Map<string, { path: string }> };
+  uploadPath(path: string): string;
+  apiBase(env: Record<string, string | undefined>): string;
+  proxyFor(url: URL, env: Record<string, string | undefined>): URL | null;
+  openTunnel(proxy: URL, host: string, port: number): Promise<Socket>;
+}
+const helper = await import(pathToFileURL(HELPER).href) as Helper;
+
+const sha1 = (text: string) => createHash("sha1").update(text).digest("hex");
+
+describe("publish-to-netlify skill guide", () => {
+  const skills = loadBundledSkills(join(process.cwd(), "skills"));
+  const skill = skills.find((entry) => entry.manifest.id === "publish-to-netlify");
+  const guide = skill?.instructions ?? "";
+  const ids = (text: string) => selectBundledSkills(text, [], skills).map((entry) => entry.manifest.id);
+
+  it("is a valid skill that the scanner has nothing to say about", () => {
+    expect(skill?.manifest.defaultEnabled).toBe(true);
+    const parsed = parseSkillMd(guide);
+    expect(parsed).toMatchObject({ name: "publish-to-netlify" });
+    expect(scanSkillText(guide)).toEqual([]);
+    expect(scanSkillText(readFileSync(HELPER, "utf8"))).toEqual([]);
+    expect(readdirSync(SKILL_DIR).sort()).toEqual(["SKILL.md", "deploy.mjs", "manifest.json"]);
+  });
+
+  it("mounts when a bot is asked to put a site or app online, and not for a page or a report", () => {
+    for (const text of ["Deploy this to Netlify", "build me a todo web app and deploy it", "make a website for my bakery", "publish the site so customers can see it",
+      "turn this into a live app", "can you host it somewhere?"]) {
+      expect(ids(text), text).toContain("publish-to-netlify");
+    }
+    for (const text of ["summarise this report", "make a dashboard of last month's sales", "check the competitor's website for prices", "publish this page", "what's on my calendar"]) {
+      expect(ids(text), text).not.toContain("publish-to-netlify");
+    }
+  });
+
+  it("states the rules a bot must keep, with the real tool names and limits", () => {
+    expect(guide.split("\n").length).toBeLessThanOrEqual(140);
+    for (const tool of ["request_credential", "publish_page", "show_html", "select_computer", "copy_to_computer", "copy_from_computer", "exec_status"]) expect(guide, tool).toContain(tool);
+    expect(guide).toContain(`up to ${PAGE_MAX_BYTES / 1024 / 1024} MB and ${PAGE_MAX_FILES} files`);
+    expect(guide).toContain("https://app.netlify.com/user/applications#personal-access-tokens");
+    expect(guide).toContain("deploy.mjs");
+    expect(guide).toContain(helper.SITE_FILE);
+    expect(guide).toMatch(/link is public/);
+    expect(guide).toMatch(/no sign-in for visitors/);
+    expect(guide).toMatch(/token never goes to the cloud computer/);
+    expect(guide).toContain('"access": "private"');
+    expect(guide).toContain("contentType");
+    expect(guide).toMatch(/--make-public[^.]*only after they say/);
+    expect(guide).toMatch(/Early Access/);
+    expect(guide).toMatch(/Never promise that it is always on/);
+  });
+});
+
+describe("publish-to-netlify helper: what may be uploaded", () => {
+  it("keeps secrets, dotfiles, env files, keys and dependencies out", () => {
+    for (const path of ["index.html", "assets/app.js", "img/logo.png", "_redirects", "_headers", ".well-known/security.txt", "docs/environment.html", "env.js", "keyboard.js", "data/monkey.json"]) {
+      expect(helper.publishable(path), path).toBe(true);
+    }
+    for (const path of [".env", ".env.production", "app/.env.local", "prod.env", "env", "env.local", ".openmausbot-secrets/t1/card", ".git/config", ".netlify-site.json", ".netlify/state.json",
+      ".DS_Store", "node_modules/x/index.js", "site/node_modules/x.js", "server.pem", "tls/private.key", "cert.p12", "id_rsa", "id_ed25519.pub", "credentials.json", "secrets.yaml",
+      "service-account.prod.json", "what?.html", "a#b.html", "__MACOSX/x", "Thumbs.db", ""]) {
+      expect(helper.publishable(path), path).toBe(false);
+    }
+  });
+
+  it("walks a folder without following links, and builds Netlify's digest", () => {
+    const root = mkdtempSync(join(tmpdir(), "netlify-skill-digest-"));
+    try {
+      const site = join(root, "site");
+      mkdirSync(join(site, "assets"), { recursive: true });
+      mkdirSync(join(site, ".openmausbot-secrets", "t1"), { recursive: true });
+      writeFileSync(join(site, "index.html"), "<h1>hi</h1>");
+      writeFileSync(join(site, "assets", "a b.css"), "body{}");
+      writeFileSync(join(site, "assets", "copy.css"), "body{}");
+      writeFileSync(join(site, ".env"), "KEY=1");
+      writeFileSync(join(site, ".openmausbot-secrets", "t1", "card"), "nfp_secret");
+      writeFileSync(join(root, "outside.txt"), "private");
+      symlinkSync(join(root, "outside.txt"), join(site, "linked.txt"));
+      symlinkSync(root, join(site, "up"));
+
+      const { files, skipped } = helper.collectFiles(site);
+      expect(files.map((file) => file.path)).toEqual(["assets/a b.css", "assets/copy.css", "index.html"]);
+      expect(skipped.sort()).toEqual([".env", ".openmausbot-secrets", "linked.txt", "up"]);
+      const { digest, bySha } = helper.buildDigest(files);
+      expect(digest).toEqual({ "/assets/a b.css": sha1("body{}"), "/assets/copy.css": sha1("body{}"), "/index.html": sha1("<h1>hi</h1>") });
+      expect(bySha.get(sha1("body{}"))?.path).toBe("assets/a b.css");
+      expect(helper.uploadPath("assets/a b.css")).toBe("assets/a%20b.css");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("sends the token to Netlify or a loopback stand-in only", () => {
+    expect(helper.apiBase({})).toBe("https://api.netlify.com/api/v1");
+    expect(helper.apiBase({ OMB_NETLIFY_API_URL: "http://127.0.0.1:4010/api/v1" })).toBe("http://127.0.0.1:4010/api/v1");
+    for (const elsewhere of ["https://evil.example/api/v1", "http://127.0.0.1.evil.example:80/", "http://localhost:4010", "http://10.0.0.5:4010", "http://127.0.0.1:4010@evil.example/"]) {
+      expect(helper.apiBase({ OMB_NETLIFY_API_URL: elsewhere }), elsewhere).toBe("https://api.netlify.com/api/v1");
+    }
+  });
+
+  it("uses the commands' own proxy for https, and honours NO_PROXY", () => {
+    const api = new URL("https://api.netlify.com/api/v1/sites");
+    expect(helper.proxyFor(api, {})).toBeNull();
+    expect(helper.proxyFor(api, { HTTPS_PROXY: "http://127.0.0.1:3128" })?.host).toBe("127.0.0.1:3128");
+    expect(helper.proxyFor(api, { http_proxy: "http://127.0.0.1:3128" })?.host).toBe("127.0.0.1:3128");
+    expect(helper.proxyFor(api, { HTTPS_PROXY: "http://127.0.0.1:3128", NO_PROXY: "localhost,.netlify.com" })).toBeNull();
+    expect(helper.proxyFor(new URL("http://127.0.0.1:4010/api/v1"), { HTTPS_PROXY: "http://127.0.0.1:3128" })).toBeNull();
+  });
+
+  it("opens a CONNECT tunnel through a proxy, and reports a refusal", async () => {
+    const echo = createTcpServer((socket) => socket.on("data", (chunk) => socket.write(`echo:${chunk}`)));
+    await new Promise<void>((done) => echo.listen(0, "127.0.0.1", done));
+    const echoPort = (echo.address() as AddressInfo).port;
+    const asked: string[] = [];
+    const proxy = createHttpServer();
+    proxy.on("connect", (req, client) => {
+      asked.push(req.url ?? "");
+      if (req.url !== `allowed.example:${echoPort}`) return client.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+      const upstream = connect(echoPort, "127.0.0.1", () => {
+        client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+        upstream.pipe(client);
+        client.pipe(upstream);
+      });
+    });
+    await new Promise<void>((done) => proxy.listen(0, "127.0.0.1", done));
+    const proxyUrl = new URL(`http://127.0.0.1:${(proxy.address() as AddressInfo).port}`);
+    try {
+      const socket = await helper.openTunnel(proxyUrl, "allowed.example", echoPort);
+      const answer = new Promise<string>((done) => socket.once("data", (chunk) => done(chunk.toString())));
+      socket.write("ping");
+      expect(await answer).toBe("echo:ping");
+      socket.destroy();
+      await expect(helper.openTunnel(proxyUrl, "refused.example", 443)).rejects.toThrow(/proxy refused the connection to refused\.example \(403\)/);
+      expect(asked).toEqual([`allowed.example:${echoPort}`, "refused.example:443"]);
+    } finally {
+      proxy.closeAllConnections();
+      proxy.close();
+      echo.close();
+    }
+  });
+});
+
+describe("publish-to-netlify helper, end to end against a stand-in on loopback", () => {
+  const TOKEN = "nfp_FixtureTokenNeverReal0123456789abcdef";
+  let fake: FakeNetlify;
+  let home: string;
+  let project: string;
+  let tokenFile: string;
+
+  const run = (args: string[], env: Record<string, string> = {}, cwd = project) => new Promise<{ code: number; stdout: string; stderr: string; json: Record<string, unknown> }>((done) => {
+    execFile(process.execPath, [HELPER, ...args], { cwd, env: { PATH: process.env.PATH ?? "", HOME: home, OMB_NETLIFY_API_URL: fake.url, ...env } }, (error, stdout, stderr) => {
+      done({ code: error ? Number(error.code) : 0, stdout, stderr, json: JSON.parse(stdout.trim() || "{}") as Record<string, unknown> });
+    });
+  });
+  const filesHoldingToken = (folder: string): string[] => readdirSync(folder, { withFileTypes: true, recursive: true })
+    .filter((entry) => entry.isFile() && readFileSync(join(entry.parentPath, entry.name)).includes(TOKEN))
+    .map((entry) => join(entry.parentPath, entry.name));
+
+  beforeAll(async () => {
+    fake = await startFakeNetlify(TOKEN);
+    home = mkdtempSync(join(tmpdir(), "netlify-skill-home-"));
+    project = join(home, "workspace", "bakery");
+    mkdirSync(join(project, "dist", "assets"), { recursive: true });
+    mkdirSync(join(project, ".openmausbot-secrets", "thread1"), { recursive: true, mode: 0o700 });
+    tokenFile = join(project, ".openmausbot-secrets", "thread1", "card1");
+    writeFileSync(tokenFile, `${TOKEN}\n`, { mode: 0o600 });
+    writeFileSync(join(project, "dist", "index.html"), "<h1>Bakery</h1>");
+    writeFileSync(join(project, "dist", "assets", "app.js"), "console.log('v1')");
+    writeFileSync(join(project, "dist", ".env"), "STRIPE=sk_live_never");
+    writeFileSync(join(project, "dist", "server.pem"), "-----BEGIN PRIVATE KEY-----");
+    mkdirSync(join(project, "dist", "node_modules", "dep"), { recursive: true });
+    writeFileSync(join(project, "dist", "node_modules", "dep", "index.js"), "module.exports = 1");
+  });
+  afterAll(async () => {
+    await fake.stop();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it("creates a site on the first publish, uploads only what may go out, and confirms the link answers", async () => {
+    const first = await run(["--dir", "dist", "--token-file", tokenFile]);
+    expect(first.stderr).toBe("");
+    expect(first.json).toMatchObject({ ok: true, created: true, state: "ready", live: true, access: "public", liveStatus: 200, files: 2, uploaded: 2 });
+    expect([...fake.uploads].sort()).toEqual(["/assets/app.js", "/index.html"]);
+    expect(first.json.skipped).toEqual([".env", "node_modules", "server.pem"]);
+
+    const record = JSON.parse(readFileSync(join(project, helper.SITE_FILE), "utf8")) as Record<string, string>;
+    expect(Object.keys(record).sort()).toEqual(["adminUrl", "name", "siteId", "url"]);
+    expect(record.siteId).toBe(first.json.siteId);
+    expect(await (await fetch(String(first.json.url))).text()).toBe("<h1>Bakery</h1>");
+    expect((await fetch(`${first.json.url}.env`)).status).toBe(404);
+  });
+
+  it("publishes a change to the same site and link, uploading only the changed file", async () => {
+    const before = JSON.parse(readFileSync(join(project, helper.SITE_FILE), "utf8")) as Record<string, string>;
+    const uploadsBefore = fake.uploads.length;
+    writeFileSync(join(project, "dist", "assets", "app.js"), "console.log('v2')");
+    const second = await run(["--dir", "dist", "--token-file", tokenFile]);
+    expect(second.json).toMatchObject({ ok: true, created: false, siteId: before.siteId, url: before.url, live: true, files: 2, uploaded: 1 });
+    expect(fake.uploads.slice(uploadsBefore)).toEqual(["/assets/app.js"]);
+    expect(fake.requests.filter((request) => request === "POST /api/v1/sites")).toHaveLength(1);
+    expect([...fake.sites.keys()]).toEqual([before.siteId]);
+    expect(await (await fetch(`${before.url}assets/app.js`)).text()).toBe("console.log('v2')");
+  });
+
+  it("publishes a draft beside the live site without changing it", async () => {
+    writeFileSync(join(project, "dist", "index.html"), "<h1>Bakery, draft</h1>");
+    const draft = await run(["--dir", "dist", "--token-file", tokenFile, "--draft"]);
+    const record = JSON.parse(readFileSync(join(project, helper.SITE_FILE), "utf8")) as Record<string, string>;
+    expect(draft.json).toMatchObject({ ok: true, draft: true, live: true });
+    expect(draft.json.url).not.toBe(record.url);
+    expect(await (await fetch(String(draft.json.url))).text()).toBe("<h1>Bakery, draft</h1>");
+    expect(await (await fetch(record.url!)).text()).toBe("<h1>Bakery</h1>");
+    writeFileSync(join(project, "dist", "index.html"), "<h1>Bakery</h1>");
+  });
+
+  it("keeps the token in its secret file only: not in output, the site record, the home folder or what was uploaded", async () => {
+    const again = await run(["--dir", "dist", "--token-file", tokenFile]);
+    expect(again.stdout + again.stderr).not.toContain(TOKEN);
+    expect(filesHoldingToken(home)).toEqual([tokenFile]);
+    for (const site of fake.sites.values()) for (const bytes of site.live.values()) expect(bytes.includes(TOKEN)).toBe(false);
+    expect(fake.refused).toEqual([]);
+  });
+
+  it("refuses to publish a file that contains the token, or a folder that holds the token file", async () => {
+    const requestsBefore = fake.requests.length;
+    writeFileSync(join(project, "dist", "config.js"), `const key = "${TOKEN}"`);
+    const leaking = await run(["--dir", "dist", "--token-file", tokenFile]);
+    rmSync(join(project, "dist", "config.js"));
+    expect(leaking).toMatchObject({ code: 1, json: { ok: false, error: "config.js contains the Netlify token; remove it before publishing" } });
+
+    const whole = await run(["--dir", ".", "--token-file", tokenFile]);
+    expect(whole).toMatchObject({ code: 1, json: { ok: false } });
+    expect(String(whole.json.error)).toMatch(/token file is inside the folder to publish/);
+    expect(fake.requests.length).toBe(requestsBefore);
+  });
+
+  it("says plainly what Netlify answered, without the token", async () => {
+    const wrong = join(project, ".openmausbot-secrets", "thread1", "card2");
+    writeFileSync(wrong, "nfp_RevokedTokenNeverReal", { mode: 0o600 });
+    const denied = await run(["--dir", "dist", "--token-file", wrong]);
+    expect(denied).toMatchObject({ code: 1, json: { ok: false, error: "Starting the deploy: Netlify answered 401: Access Denied" } });
+    expect(denied.stdout).not.toContain("nfp_Revoked");
+    rmSync(wrong);
+
+    fake.failNext(429, { code: 429, message: "Too many deploys" });
+    const limited = await run(["--dir", "dist", "--token-file", tokenFile]);
+    expect(limited.json).toMatchObject({ ok: false, error: "Starting the deploy: Netlify answered 429: Too many deploys" });
+
+    const elsewhere = join(home, "workspace", "taken");
+    mkdirSync(elsewhere, { recursive: true });
+    fake.failNext(422, { errors: { subdomain: ["must be unique"] } });
+    const taken = await run(["--dir", join(project, "dist"), "--token-file", tokenFile, "--project", elsewhere, "--name", "bakery"]);
+    expect(taken.json).toMatchObject({ ok: false, error: 'Creating the site: Netlify answered 422: {"subdomain":["must be unique"]}' });
+    expect(readdirSync(elsewhere)).toEqual([]);
+  });
+
+  it("does not make a second site when the recorded one is gone, and never ignores a broken record", async () => {
+    const elsewhere = join(home, "workspace", "gone");
+    mkdirSync(elsewhere, { recursive: true });
+    writeFileSync(join(elsewhere, helper.SITE_FILE), JSON.stringify({ siteId: "deleted-site", url: "https://gone.netlify.app" }));
+    const gone = await run(["--dir", join(project, "dist"), "--token-file", tokenFile, "--project", elsewhere]);
+    expect(gone.json).toMatchObject({ ok: false, error: "Starting the deploy: Netlify answered 404: Not Found" });
+
+    writeFileSync(join(elsewhere, helper.SITE_FILE), JSON.stringify({ url: "https://gone.netlify.app" }));
+    const broken = await run(["--dir", join(project, "dist"), "--token-file", tokenFile, "--project", elsewhere]);
+    expect(String(broken.json.error)).toMatch(/has no valid siteId/);
+    expect(fake.requests.filter((request) => request === "POST /api/v1/sites")).toHaveLength(2);
+  });
+
+  it("reports a new account's site as deployed but private, and opens it only when asked to", async () => {
+    const guarded = await startFakeNetlify(TOKEN, { teamLogin: true });
+    const elsewhere = join(home, "workspace", "guarded");
+    mkdirSync(elsewhere, { recursive: true });
+    const args = ["--token-file", tokenFile, "--project", elsewhere];
+    try {
+      const first = await run(["--dir", join(project, "dist"), ...args], { OMB_NETLIFY_API_URL: guarded.url });
+      expect(first).toMatchObject({ code: 0, json: { ok: true, created: true, state: "ready", live: false, access: "private", liveStatus: 401 } });
+      expect(guarded.requests.some((request) => request.startsWith("PATCH "))).toBe(false);
+      expect((await fetch(String(first.json.url))).status).toBe(401);
+
+      const opened = await run(["--make-public", ...args], { OMB_NETLIFY_API_URL: guarded.url });
+      expect(opened.json).toMatchObject({ ok: true, live: true, access: "public", siteId: first.json.siteId, url: first.json.url });
+      expect(guarded.requests.filter((request) => request.startsWith("PATCH "))).toEqual([`PATCH /api/v1/sites/${String(first.json.siteId)}`]);
+      expect(guarded.requests.filter((request) => /^POST .*\/deploys$/.test(request))).toHaveLength(1);
+      expect(await (await fetch(String(first.json.url))).text()).toBe("<h1>Bakery</h1>");
+
+      const nothing = await run(["--make-public", "--token-file", tokenFile, "--project", join(home, "workspace")], { OMB_NETLIFY_API_URL: guarded.url });
+      expect(String(nothing.json.error)).toMatch(/\.netlify-site\.json is missing; publish the site first/);
+    } finally {
+      await guarded.stop();
+    }
+  });
+
+  it("publishes a one-file site under its own name, and does not call a root served as plain text live", async () => {
+    const single = join(home, "workspace", "single");
+    mkdirSync(join(single, "out"), { recursive: true });
+    writeFileSync(join(single, "out", "index.html"), "<h1>One file</h1>");
+    const deploysBefore = fake.deploys.size;
+    const first = await run(["--dir", "out", "--token-file", tokenFile, "--project", single], {}, single);
+    expect(first.json).toMatchObject({ ok: true, live: true, files: 1, uploaded: 1, contentType: "text/html; charset=UTF-8" });
+    const sent = [...fake.deploys.values()].slice(deploysBefore).map((deploy) => deploy.files);
+    expect(sent).toEqual([{ "/index.html": sha1("<h1>One file</h1>") }]);
+    expect(fake.uploads.at(-1)).toBe("/index.html");
+
+    fake.rootContentType = "text/plain; charset=UTF-8";
+    const plain = await run(["--dir", "out", "--token-file", tokenFile, "--project", single], {}, single);
+    fake.rootContentType = "text/html; charset=UTF-8";
+    expect(plain.json).toMatchObject({ ok: true, state: "ready", live: false, access: "public", liveStatus: 200, contentType: "text/plain; charset=UTF-8" });
+  });
+
+  it("needs an index.html at the top of the published folder", async () => {
+    const empty = await run(["--dir", "dist/assets", "--token-file", tokenFile]);
+    expect(String(empty.json.error)).toMatch(/has no index\.html at its top/);
+  });
+});
