@@ -35,6 +35,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { BASH_MAX_TIMEOUT_MS } from "../system-prompt.ts";
 import { ephemeralWorkspaceTokenPath } from "../workspace-backup-policy.ts";
+import { registerPathDir, resetPathCacheForTests } from "../env-path.ts";
 import * as procs from "../procs.ts";
 import * as localInject from "./local-inject.ts";
 
@@ -1971,6 +1972,31 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     });
   });
 
+  it.skipIf(process.platform === "win32")("re-probes the CLI when PATH starts resolving `claude` to a different, older copy", async () => {
+    // A Mac with Homebrew's 2.1.321 and an nvm 2.1.197: a PATH rescan put the nvm copy first, and every turn
+    // still passed 2.1.321's --system-prompt-snapshot to it ("unknown option") until the next snapshot.
+    const dump = join(scratch, "path-swap.json");
+    const copy = (name: string, version: string, refusesSnapshotFlag = false) => {
+      const dir = join(scratch, name);
+      mkdirSync(dir);
+      const refuse = refusesSnapshotFlag ? `for a in "$@"; do [ "$a" = --system-prompt-snapshot ] && { echo "error: unknown option '$a'" >&2; exit 1; }; done\n` : "";
+      writeFileSync(join(dir, "claude"), `#!/bin/sh\n${refuse}FAKE_CLAUDE_VERSION=${version} exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+      return dir;
+    };
+    const newer = copy("newer", "2.1.321"), older = copy("older", "2.1.197", true);
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, { FAKE_CLAUDE_DUMP: dump }, { cli: "claude" });
+      expect(await instance.snapshot()).toMatchObject({ version: "2.1.321 (Claude Code)" });
+      registerPathDir(older);
+      await instance.adapter.sendTurn({ threadId: "t-path-swap", text: "hi" });
+      expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--system-prompt-snapshot");
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
   it("withholds --autocompact from a CLI above the floor whose --help does not list it", async () => {
     // 2.1.129 clears the 2.1.122 floor yet rejects the flag ("unknown option")
     const dump = join(scratch, "no-autocompact-cli.json");

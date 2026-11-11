@@ -9,7 +9,7 @@ import { join, dirname, isAbsolute, normalize } from "node:path";
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { writeFileAtomicIfChanged } from "../atomic.ts";
-import { augmentedPath } from "../env-path.ts";
+import { augmentedPath, findCliCandidates } from "../env-path.ts";
 import { brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
 import { cliVersionProbe } from "../cli-version-probe.ts";
 import { claudeAuthStatus } from "./claude-auth-status.ts";
@@ -802,12 +802,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     }))?.pending ?? null;
 
     // Whether `claude --help` lists --autocompact (2.1.129 rejects it despite the floor); a launch refusing it keeps it off for that version (every refusing version is remembered).
-    let [cliHasAutocompact, cliHelpVersion]: [boolean | null, string | null] = [null, null], autocompactRefusedBy = new Set<string>();
+    let [cliHasAutocompact, cliHelpVersion]: [boolean | null, string | null] = [null, null], autocompactRefusedBy = new Set<string>(), cliProbedAt: string | undefined;
     const readCliVersion = cliVersionProbe(config.cli);
-    const ensureCliVersion = async (env: NodeJS.ProcessEnv): Promise<void> => {
-      if (cliVersionChecked) return;
+    const ensureCliVersion = async (env: NodeJS.ProcessEnv): Promise<void> => { // and again once PATH finds another copy (an nvm one ahead of Homebrew's)
+      const at = findCliCandidates(config.cli, env.PATH ?? "")[0], reprobed = cliVersionChecked;
+      if (reprobed && at === cliProbedAt) return;
       const probe = await readCliVersion(env);
-      if ("version" in probe) [cliVersion, cliVersionChecked] = [parseClaudeCliVersion(probe.version), true];
+      if ("version" in probe) [cliVersion, cliVersionChecked, cliProbedAt] = [parseClaudeCliVersion(probe.version), true, at];
+      if (reprobed && "version" in probe && probe.version !== cliHelpVersion) await readCliHelp(probe.version, env);
     };
     let helpRead: { version: string; done: Promise<void> } | null = null;
     const readCliHelp = (version: string, env: NodeJS.ProcessEnv): Promise<void> => {
@@ -1038,9 +1040,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const compactWindow = autoCompactWindow(turnEnvironment);
       const passedAutocompact = Boolean(compactWindow) && cliHasAutocompact === true; if (compactWindow && passedAutocompact) args.push("--autocompact", compactWindow);
       // --resume keeps the recorded system prompt, so every turn refreshes it.
-      if (cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) {
-        args.push("--system-prompt-snapshot", "off");
-      }
+      if (cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) args.push("--system-prompt-snapshot", "off");
       const turnModel = config.managed ? turn.model : await resolveClaudeTurnModel(turn.model, turnEnvironment, config.endpointModels);
       const injected = config.managed || config.endpointModels ? { model: turnModel ?? null, injected: false } : applyClaudeInject({ ...turnEnvironment }, turnModel);
       if (injected.model) args.push("--model", injected.model);
@@ -1913,7 +1913,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const probe = await readCliVersion(env);
       if (!("version" in probe)) return { state: "unavailable", reason: probe.reason };
       const { version } = probe;
-      [cliVersion, cliVersionChecked] = [parseClaudeCliVersion(version), true];
+      [cliVersion, cliVersionChecked, cliProbedAt] = [parseClaudeCliVersion(version), true, findCliCandidates(config.cli, env.PATH ?? "")[0]];
       if (!config.managed && !config.endpointModels) models = withCliVersionGate(models, "claude", cliVersion);
       if (version !== cliHelpVersion) await readCliHelp(version, env);
       const update = claudeCliUpdate(version, config.cli);
