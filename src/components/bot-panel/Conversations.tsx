@@ -9,6 +9,9 @@ import { api, currentTaskBot, openBotThread, useStore, visibleMessages, type Bot
 import { lastLine } from "../sidebar-preview";
 import { isArchived, orderedThreadList, SidebarThreadRow, stampClock, threadRecency, threadRowActions, useRelativeNow } from "../SidebarThreadRow";
 import { filterTasks } from "../TaskPicker";
+import { useConversationSide } from "../TeamSideSwitch";
+import { tasksOfSide } from "@/state/team-side";
+import { CardLabel, panelActionCls } from "./rows";
 
 export const CONVERSATIONS_SHOWN = 3;
 const PANEL_ROW_LOOK = "[&_.font-semibold]:font-medium [&_time]:text-[12px] [&_time]:text-ink-tertiary [&_span.bg-accent]:size-2";
@@ -59,14 +62,17 @@ export function BotConversations({ bot }: { bot: Bot }) {
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const generatedTitles = llmThreadTitlesEnabled(state.config);
   const actions = useMemo(() => {
-    const { onRename, onRegenerateTitle, onDelete, onMove, onPin } = threadRowActions(bot.id, dispatch, generatedTitles);
-    return { onRename, onRegenerateTitle, onDelete, onMove, onPin };
+    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive } = threadRowActions(bot.id, dispatch, generatedTitles);
+    return { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive };
   }, [bot.id, dispatch, generatedTitles]);
 
-  const conversations = orderedThreadList((bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }])
-    .filter((task) => !task.routineRunId && (!isArchived(task) || task.threadId === bot.threadId)))
+  const side = useConversationSide(bot);
+  const tasks = bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }];
+  const threads = (side ? tasksOfSide({ ...bot, tasks }, side) : tasks)
+    .filter((task) => !task.routineRunId)
     .map((task) => {
       const thread = currentTaskBot(bot, task.threadId);
       return {
@@ -74,9 +80,11 @@ export function BotConversations({ bot }: { bot: Bot }) {
         turnStartedAt: thread.turnStartedAt ?? undefined, queued: Boolean(state.pendingQueued[task.threadId]?.length),
       };
     });
+  const conversations = orderedThreadList(threads.filter((task) => !isArchived(task) || task.threadId === bot.threadId));
+  const archived = orderedThreadList(threads.filter((task) => isArchived(task) && task.threadId !== bot.threadId));
   const needle = query.trim();
   const collapsed = conversations.filter((task, index) => index < CONVERSATIONS_SHOWN || task.threadId === bot.threadId);
-  const recent = useRecentMessages(bot, needle || expanded ? conversations : collapsed);
+  const recent = useRecentMessages(bot, [...(needle || expanded ? conversations : collapsed), ...(showArchived ? archived : [])]);
   const preview = (threadId: string) => {
     const messages = recent(threadId);
     return messages ? lastLine(currentTaskBot(bot, threadId), messages, state.instances, false) : undefined;
@@ -105,32 +113,42 @@ export function BotConversations({ bot }: { bot: Bot }) {
     setSearching(false);
   };
 
-  const listed = conversations.length >= 2;
+  // An open search stays up even if archiving leaves one conversation, so it can still be cleared.
+  // An archived open conversation stays listed too, so it is not hidden while it is open.
+  const listed = conversations.length >= 2 || searching || conversations.some((task) => task.threadId === bot.threadId && isArchived(task));
+  const row = (task: (typeof threads)[number]) => (
+    <div role="listitem" key={task.threadId} data-conversation={task.threadId}>
+      <SidebarThreadRow panel preview={preview(task.threadId)} task={task} ownerId={bot.id} current={task.threadId === bot.threadId}
+        folders={bot.projects} now={stampClock(threadRecency(task), now)} locale={activeLocale()} onSelect={select} {...actions} />
+    </div>
+  );
 
   return (
-    <section data-panel-card="conversations" aria-label={t("botPanel.conversations.title")} className="mt-3.5">
-      <div className={cn("flex items-center gap-2", listed && "mb-2")}>
+    <section data-panel-card="conversations" aria-label={t("botPanel.conversations.title")}>
+      <CardLabel action={listed && (
         <button
           type="button"
-          data-conversations-new
-          aria-label={t("botPanel.conversations.new")}
-          onClick={startNew}
-          className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-full bg-ink/[0.05] px-3.5 text-[14px] font-medium text-ink transition-colors hover:bg-ink/[0.09]"
+          data-conversations-search
+          aria-label={t("botPanel.conversations.search")}
+          title={t("botPanel.conversations.search")}
+          aria-pressed={searching}
+          onClick={() => (searching ? stopSearching() : setSearching(true))}
+          className={cn("-me-1 flex size-6 shrink-0 items-center justify-center rounded-[6px] text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink", searching && "bg-ink/[0.06] text-ink")}
         >
-          <SquarePen size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
-          <span className="truncate">{t("botPanel.conversations.new")}</span>
+          <Search size={14} aria-hidden="true" />
         </button>
-        {listed && (
+      )}>{t("botPanel.conversations.title")}</CardLabel>
+      <div className={cn("flex items-center gap-2", listed && "mb-2")}>
+        {bot.yourAccess !== "view" && side !== "team" && (
           <button
             type="button"
-            data-conversations-search
-            aria-label={t("botPanel.conversations.search")}
-            title={t("botPanel.conversations.search")}
-            aria-pressed={searching}
-            onClick={() => (searching ? stopSearching() : setSearching(true))}
-            className={cn("flex size-9 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink", searching && "bg-ink/[0.06] text-ink")}
+            data-conversations-new
+            aria-label={t("botPanel.conversations.new")}
+            onClick={startNew}
+            className={cn(panelActionCls, "flex-1")}
           >
-            <Search size={15} aria-hidden="true" />
+            <SquarePen size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+            <span className="truncate">{t("botPanel.conversations.new")}</span>
           </button>
         )}
       </div>
@@ -149,26 +167,11 @@ export function BotConversations({ bot }: { bot: Bot }) {
           }}
           placeholder={t("botPanel.conversations.searchPlaceholder", { name: bot.name })}
           aria-label={t("botPanel.conversations.searchPlaceholder", { name: bot.name })}
-          className="mb-1.5 w-full rounded-[10px] border border-hairline/60 bg-inset px-3 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-focus"
+          className="mb-1.5 w-full rounded-[8px] border border-hairline/60 bg-inset px-3 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-focus"
         />
       )}
       {listed && <div role="list" aria-label={t("botPanel.conversations.title")} className={cn("flex flex-col gap-px", PANEL_ROW_LOOK)}>
-        {shown.map((task) => (
-          <div role="listitem" key={task.threadId} data-conversation={task.threadId}>
-            <SidebarThreadRow
-              panel
-              preview={preview(task.threadId)}
-              task={task}
-              ownerId={bot.id}
-              current={task.threadId === bot.threadId}
-              folders={bot.projects}
-              now={stampClock(threadRecency(task), now)}
-              locale={activeLocale()}
-              onSelect={select}
-              {...actions}
-            />
-          </div>
-        ))}
+        {shown.map(row)}
       </div>}
       {listed && needle && shown.length === 0 && (
         <p className="px-3 py-3 text-[13px] text-ink-secondary">{t("task.noMatch", { query: needle })}</p>
@@ -184,6 +187,23 @@ export function BotConversations({ bot }: { bot: Bot }) {
           {expanded ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
           {expanded ? t("botPanel.conversations.showFewer") : t("botPanel.conversations.showMore", { count: hidden })}
         </button>
+      )}
+      {!needle && archived.length > 0 && (
+        <button
+          type="button"
+          data-conversations-archived
+          aria-expanded={showArchived}
+          onClick={() => setShowArchived((open) => !open)}
+          className="mt-0.5 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink"
+        >
+          {showArchived ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+          {t("task.archivedList", { count: archived.length })}
+        </button>
+      )}
+      {!needle && showArchived && archived.length > 0 && (
+        <div role="list" aria-label={t("task.archivedList", { count: archived.length })} className={cn("flex flex-col gap-px", PANEL_ROW_LOOK)}>
+          {archived.map(row)}
+        </div>
       )}
     </section>
   );

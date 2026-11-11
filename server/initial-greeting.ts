@@ -8,6 +8,8 @@ const GREETINGS: { en: Greeting } & Record<string, Greeting> = {
   en: (name, person) => `Hi${person ? ` ${person}` : ""}, I'm ${name}. What would you like me to do?`,
   es: (name, person) => `Hola${person ? ` ${person}` : ""}, soy ${name}. ¿Qué te gustaría que hiciera?`,
   "pt-br": (name, person) => `Oi${person ? ` ${person}` : ""}, eu sou ${name}. O que você gostaria que eu fizesse?`,
+  ko: (name, person) => `안녕하세요${person ? `, ${person}님` : ""}. 저는 ${name}입니다. 무엇을 도와드릴까요?`,
+  "zh-tw": (name, person) => `嗨${person ? ` ${person}` : ""}，我是 ${name}。你想要我幫你做什麼？`,
 };
 
 /** What the bot says the moment Set me up is pressed: no model is asked, so it is written here. */
@@ -15,6 +17,8 @@ const SETUP_REQUEST_LINES: { en: string } & Record<string, string> = {
   en: "Great. Tell me what you'd like help with, in your own words, and I'll set myself up for it. For example: \"sort my inbox every morning\" or \"research our competitors every week\".",
   es: "Genial. Cuéntame con tus propias palabras en qué te gustaría que te ayude y me prepararé para ello. Por ejemplo: \"ordena mi bandeja de entrada cada mañana\" o \"investiga a nuestros competidores cada semana\".",
   "pt-br": "Ótimo. Me conte com suas palavras em que você gostaria de ajuda e eu me preparo para isso. Por exemplo: \"organize minha caixa de entrada toda manhã\" ou \"pesquise nossos concorrentes toda semana\".",
+  ko: "좋아요. 도움이 필요한 일을 편하게 말씀해 주시면 거기에 맞게 제가 설정할게요. 예: \"매일 아침 받은편지함 정리해 줘\", \"매주 경쟁사 조사해 줘\".",
+  "zh-tw": "好的。用你自己的話告訴我想要幫忙的事，我會照著設定好自己。例如：「每天早上整理我的收件匣」或「每週研究我們的競爭對手」。",
 };
 
 /** The answers a blank bot's greeting offers on its setup card. Picking one sets the bot up for its words, as
@@ -26,6 +30,10 @@ const SETUP_CHOICES: { en: readonly string[] } & Record<string, readonly string[
     "Reservas, compras y recados", "Datos, hojas de cálculo e informes"],
   "pt-br": ["Pesquisar e aprofundar temas", "Ficar de olho nas coisas para mim", "E-mail, agenda e mensagens",
     "Reservas, compras e tarefas", "Dados, planilhas e relatórios"],
+  ko: ["리서치와 주제 깊이 파고들기", "이것저것 지켜보기", "이메일, 캘린더, 메시지",
+    "예약, 쇼핑, 심부름", "데이터, 스프레드시트, 보고서"],
+  "zh-tw": ["研究與深入探討主題", "幫我留意各種事情", "電子郵件、行事曆和訊息",
+    "預約、購物和跑腿", "資料、試算表和報告"],
 };
 
 export function setupChoices(language?: string): string[] {

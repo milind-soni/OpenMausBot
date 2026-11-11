@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import "./server-line-packs.ts";
 import { chiefForBot, INCIDENT_HARD_LIMIT, INCIDENT_RETRY_LIMIT, IncidentLedger, incidentChip, incidentRequest, incidentText, type Incident } from "./incidents.ts";
 import { withPeerProvenance } from "./peer-provenance.ts";
 
@@ -89,13 +90,13 @@ describe("incident wording", () => {
 
   it("names the bot, the thread and what happened, marks the quoted text as data, and tells the Chief what to do", () => {
     const text = incidentText(incident, { count: 1, mayRetry: true, muted: false });
-    expect(text.startsWith("[Incident report from OpenMausBot — not from the person.")).toBe(true);
+    expect(text.startsWith("[From OpenMausBot · incident report · information only — not from the person.")).toBe(true);
     expect(text).toContain("Ada's run in its thread #Invoice reconciliation failed: \"exit_before_result\".");
     expect(text).toContain('The request there was: "Reconcile the September invoices. Thanks"');
     expect(text).toContain('Ada last said: "Starting the reconciliation now"');
     expect(text).toContain('retry_thread with bot_id "ada" and thread_id "t-ada"');
     expect(text).not.toContain("incident on that thread");
-    expect(incidentChip(incident)).toBe('Incident: Ada\'s run in its thread #Invoice reconciliation failed: "exit_before_result"');
+    expect(incidentChip(incident)).toBe('Ada hit a problem: its run in its thread #Invoice reconciliation failed: "exit_before_result"');
   });
 
   it("counts repeats and, once retries are used up, asks for the person instead of another retry", () => {
@@ -108,9 +109,19 @@ describe("incident wording", () => {
   });
 
   it("words a stall, a start failure, a routine and a room each in their own terms", () => {
-    expect(incidentChip({ ...incident, kind: "stalled", detail: "" })).toBe("Incident: Ada's run in its thread #Invoice reconciliation stopped after showing no activity");
-    expect(incidentChip({ ...incident, kind: "could-not-start", title: null })).toContain("Ada's run in its main conversation could not start");
-    expect(incidentChip({ ...incident, kind: "routine-failed", title: "Inbox digest" })).toContain("Ada's scheduled routine in its thread #Inbox digest failed");
-    expect(incidentChip({ ...incident, room: "Standup" })).toContain('Ada\'s run in the room "Standup" failed');
+    expect(incidentChip({ ...incident, kind: "stalled", detail: "" })).toBe("Ada hit a problem: its run in its thread #Invoice reconciliation stopped after showing no activity");
+    expect(incidentChip({ ...incident, kind: "could-not-start", title: null })).toContain("Ada hit a problem: its run in its main conversation could not start");
+    expect(incidentChip({ ...incident, kind: "routine-failed", title: "Inbox digest" })).toContain("Ada hit a problem: its scheduled routine in its thread #Inbox digest failed");
+    expect(incidentChip({ ...incident, room: "Standup" })).toContain('Ada hit a problem: its run in the room "Standup" failed');
+  });
+
+  it("tells the person in their language, while the Chief's report stays English", () => {
+    expect(incidentChip(incident, "de")).toBe("Ada hatte ein Problem: Die Ausführung im Thread #Invoice reconciliation ist fehlgeschlagen: „exit_before_result“");
+    expect(incidentChip({ ...incident, kind: "stalled", detail: "" }, "de"))
+      .toBe("Ada hatte ein Problem: Die Ausführung im Thread #Invoice reconciliation wurde gestoppt, weil sie keine Aktivität mehr zeigte");
+    expect(incidentChip({ ...incident, kind: "routine-failed", title: null, room: "Standup" }, "de"))
+      .toBe("Ada hatte ein Problem: Die geplante Routine im Raum „Standup“ ist fehlgeschlagen: „exit_before_result“");
+    expect(incidentChip({ ...incident, kind: "could-not-start", title: null, detail: "" }, "de")).toBe("Ada hatte ein Problem: Die Ausführung in der Hauptunterhaltung konnte nicht starten");
+    expect(incidentText(incident, { count: 1, mayRetry: true, muted: false })).toContain("Ada's run in its thread #Invoice reconciliation failed");
   });
 });

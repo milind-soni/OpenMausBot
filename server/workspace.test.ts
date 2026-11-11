@@ -117,7 +117,7 @@ describe("workspace", () => {
   });
 
   it("treats localized factory memory seeds as empty", () => {
-    for (const [language, heading] of [["pt-BR", "# Memória"], ["es", "# Memoria"], ["en", "# Memory"]] as const) {
+    for (const [language, heading] of [["pt-BR", "# Memória"], ["es", "# Memoria"], ["en", "# Memory"], ["zh-TW", "# 記憶"], ["zh-Hant", "# 記憶"], ["zh_HK", "# 記憶"], ["zh-MO", "# 記憶"]] as const) {
       const bot = `${BOT}-${language}`;
       const dir = ensureWorkspace(bot, language);
       expect(readFileSync(join(dir, "MEMORY.md"), "utf8")).toContain(heading);
@@ -450,6 +450,21 @@ describe("workspace", () => {
     expect(loadMemory(BOT)?.truncated).toBe(false);
   });
 
+  // A teammate's hand-off on a Cloud runs in a task folder, with its writes refused: this was the one prompt with no memory path.
+  it("tells a turn whose notes would be refused where its topic notes are, with or without a MEMORY.md", () => {
+    writeMemoryTopic(BOT, "regulars.md", "---\ntitle: Regulars\n---\n- Code MOSS-42\n");
+    const folder = JSON.stringify(workspaceDir(BOT));
+    const withoutMemory = memorySystemPrompt(BOT, { managedWrites: true, fileTools: true, writesRefused: true });
+    expect(withoutMemory).toContain("- memory/regulars.md");
+    expect(withoutMemory).toContain(`paths are relative to ${folder}, not your working folder`);
+    writeMemoryFile(BOT, "- The owner likes figs.");
+    const withMemory = memorySystemPrompt(BOT, { managedWrites: true, fileTools: true, writesRefused: true });
+    expect(withMemory).toContain("- memory/regulars.md");
+    expect(withMemory).toContain(`paths are relative to ${folder}, not your working folder`);
+    // With no file tools it can't open a path, so it is told how to look instead.
+    expect(memorySystemPrompt(BOT, { managedWrites: true, fileTools: false, writesRefused: true })).toContain("look it up with session_search");
+  });
+
   it("tells a turn whose notes would be refused where facts go, and still shows it the memory", () => {
     const empty = memorySystemPrompt(BOT, { managedWrites: true, fileTools: true, writesRefused: true });
     expect(empty).toContain("Notes cannot be saved from this conversation");
@@ -465,6 +480,9 @@ describe("workspace", () => {
     expect(refused).not.toContain(REMEMBER_AND_FORGET);
     expect(REMEMBER_AND_FORGET).toContain("save it now with memory_update append");
     expect(REMEMBER_AND_FORGET).toContain("call memory_update with action forget");
+    // a preference for all their bots is saved once, never passed on to each bot
+    expect(REMEMBER_AND_FORGET).toContain("saved once with memory_update action prefer");
+    expect(REMEMBER_AND_FORGET).toContain("Never pass it on to each bot.");
   });
 
   it("requires explicit remove to delete a memory passage", () => {

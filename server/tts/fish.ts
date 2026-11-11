@@ -1,5 +1,6 @@
 // The API key stays on the harness: the renderer gets only voice metadata and audio bytes.
 import type { FishTtsModel } from "../config.ts";
+import { userErrorThrown } from "../user-errors.ts";
 
 const API = (process.env.OMB_FISH_AUDIO_API || "https://api.fish.audio").replace(/\/+$/, "");
 export const DEFAULT_FISH_MODEL: FishTtsModel = "s2.1-pro";
@@ -64,6 +65,7 @@ export async function verifyKey(key: string): Promise<VerifyResult> {
     // The public catalog needs no key, so it proves nothing; `self=true` answers 401 for an absent or invalid Bearer token.
     const res = await fetch(`${API}/model?page_size=1&self=true`, {
       headers: { authorization: `Bearer ${key}` },
+      redirect: "error",
       signal: AbortSignal.timeout(20_000),
     });
     if (res.ok) return { ok: true };
@@ -78,6 +80,7 @@ async function fishGet(key: string, path: string): Promise<{ status: number; bod
   try {
     response = await fetch(`${API}${path}`, {
       headers: { authorization: `Bearer ${key}` },
+      redirect: "error",
       signal: AbortSignal.timeout(20_000),
     });
   } catch {
@@ -196,6 +199,7 @@ export async function synthesize(
         mp3_bitrate: 64,
         latency: "normal",
       }),
+      redirect: "error",
       signal: AbortSignal.timeout(60_000),
     });
   } catch {
@@ -203,4 +207,28 @@ export async function synthesize(
   }
   if (!res.ok) throw new Error(errorMessage(res.status, "speaking", await safeBody(res)));
   return { bytes: new Uint8Array(await res.arrayBuffer()), mime: "audio/mpeg" };
+}
+
+export async function transcribe(audio: Uint8Array, mime: string, key: string): Promise<string> {
+  const form = new FormData();
+  form.append("audio", new Blob([audio as Uint8Array<ArrayBuffer>], { type: mime }), "speech.wav");
+  form.append("ignore_timestamps", "true");
+  form.append("diarize", "false");
+  form.append("tag_audio_events", "false");
+  let res: Response;
+  try {
+    res = await fetch(`${API}/v1/asr`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, model: "transcribe-1-pro" },
+      body: form,
+      redirect: "error",
+      signal: AbortSignal.timeout(60_000),
+    });
+  } catch {
+    throw userErrorThrown("serverError.voice.fishTranscribeConnection");
+  }
+  const body = await safeBody(res);
+  if (!res.ok) throw new Error(errorMessage(res.status, "hearing you", body));
+  const text = body && typeof body === "object" ? (body as Record<string, unknown>).text : undefined;
+  return typeof text === "string" ? text.trim() : "";
 }

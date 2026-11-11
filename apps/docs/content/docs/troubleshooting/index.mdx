@@ -4,7 +4,7 @@ description: Find the failing layer first, then apply the smallest safe fix.
 icon: Wrench
 ---
 
-Most OpenMausBot failures come from one of four layers: the desktop app, a local agent CLI, a connected service, or a computer backend.
+Most MausBot failures come from one of four layers: the desktop app, a local agent CLI, a connected service, or a computer backend.
 
 <Cards>
   <Card title="Where are my logs?" href="/docs/troubleshooting/logs" description="Where the logs are on Windows, macOS and Linux, and how to share them with secrets removed." />
@@ -22,7 +22,7 @@ the last entry in the @ list) and a few words about what went wrong, then send.
 Typing it is the decision to send: there is nothing else to press.
 
 The bot answering the message adds a short summary: what you said went wrong,
-what it saw itself in the conversation, and steps to reproduce. OpenMausBot adds
+what it saw itself in the conversation, and steps to reproduce. MausBot adds
 its own facts: the app version, the computer's system, whether it runs on the
 desktop or the Cloud, the bot's engine and model, recent errors in that
 conversation, the server's latest warnings and errors, and the conversation's
@@ -36,11 +36,18 @@ If the report cannot go yet (no connection, or too many reports in the last
 hour), the line says so: the report is saved and sent on its own later, so there
 is no need to send it again.
 
+Under your message you can follow what becomes of it: *Got it, we're looking*,
+then *Fixed in 0.1.135, coming in your next update* once the team has fixed it.
+When the app (or the Cloud) runs that version, you get one message in the same
+chat, *Fixed in 0.1.135. Want to try again?*, and one notification. The app asks
+the MausBot team about your reports about once an hour and each time it starts;
+it sends only the reports' ids.
+
 ## Collect useful evidence
 
 Before opening an issue, record:
 
-- OpenMausBot version and operating system;
+- MausBot version and operating system;
 - selected engine and model;
 - the exact visible error, not only “it failed”;
 - whether the same agent CLI works directly in a terminal;

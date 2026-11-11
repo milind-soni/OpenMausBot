@@ -73,14 +73,17 @@ export function remoteClipboardWriteAllowed(permission, requestingUrlOrOrigin, a
  *   homeOrigin?: () => string | null }} context
  *   Every getter is read per request, so a sign-out or server switch withdraws access at once. `homeOrigin`: My Cloud
  *   once the person's bots moved there (home-window.mjs), whose page alone may show notifications besides this
- *   computer's.
+ *   computer's and the active remote server's.
  */
 export function appPermissionHandlers({ rendererOrigin, mainContents, cloudHomeOrigin, cloudHomeRestoring = () => null, activeRemoteOrigin = () => null,
   activeRemoteMicrophone = () => false, askRemoteMicrophone = () => null, homeOrigin = () => null }) {
-  const notifiesAtHome = (contents, permission, requesting, details) => {
-    const home = webOrigin(homeOrigin());
-    return permission === "notifications" && Boolean(home) && Boolean(contents) && contents === mainContents() &&
-      details?.isMainFrame === true && webOrigin(requesting) === home;
+  // Notifications for the main window's main frame on `origin`: My Cloud as home, or the remote server the person
+  // switched to (Settings → Notifications there has no browser site settings to fall back on).
+  // Fullscreen too, so a chat video's own fullscreen button works there (it still needs the person's click).
+  const notifiesAs = (origin, contents, permission, requesting, details) => {
+    const page = webOrigin(origin);
+    return (permission === "notifications" || permission === "fullscreen") && Boolean(page) && Boolean(contents) &&
+      contents === mainContents() && details?.isMainFrame === true && webOrigin(requesting) === page;
   };
   const asksAsCloud = (contents, permission, requesting, details) =>
     Boolean(contents) && contents === mainContents() && mainFrameMicrophoneAllowed(permission, requesting, requesting, details);
@@ -95,7 +98,8 @@ export function appPermissionHandlers({ rendererOrigin, mainContents, cloudHomeO
     (asksAsCloud(contents, permission, requesting, details) && mainFrameMicrophoneAllowed(permission, requesting, cloudHomeOrigin(), details)) ||
     (asksAsRemote(contents, permission, requesting, details) && activeRemoteMicrophone() === true) ||
     clipboardWrite(contents, permission, requesting, details) ||
-    notifiesAtHome(contents, permission, requesting, details);
+    notifiesAs(homeOrigin(), contents, permission, requesting, details) ||
+    notifiesAs(activeRemoteOrigin(), contents, permission, requesting, details);
   return {
     // Only a request may wait (Electron answers through the callback); the rule runs again after any wait.
     request: (contents, permission, callback, details) => {
@@ -123,7 +127,11 @@ export function appPermissionHandlers({ rendererOrigin, mainContents, cloudHomeO
   };
 }
 
-// Both explicit IPC links and window.open must use the same web-only policy.
+// Both explicit IPC links and window.open use this one policy: a web link, or an email draft the person sends themselves.
+export function externalLinkUrl(rawUrl) {
+  return typeof rawUrl === "string" && /^\s*mailto:/i.test(rawUrl) ? emailDraftUrl(rawUrl) : externalWebUrl(rawUrl);
+}
+
 export function externalWebUrl(rawUrl) {
   if (typeof rawUrl !== "string") throw new Error("A web address is required");
   let url;
@@ -134,5 +142,25 @@ export function externalWebUrl(rawUrl) {
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("Only web links can be opened");
   if (url.username || url.password) throw new Error("Web links must not include user credentials");
+  return url.toString();
+}
+
+const EMAIL_DRAFT_FIELDS = new Set(["subject", "body"]);
+
+/** Security: one address, and only a subject and a body, so a link can add no recipient and attach no file (some mail
+ * clients honour an `attach` field). */
+export function emailDraftUrl(rawUrl) {
+  let url, address;
+  try {
+    url = new URL(rawUrl);
+    address = decodeURIComponent(url.pathname);
+  } catch {
+    throw new Error("That email link is invalid");
+  }
+  if (url.protocol !== "mailto:") throw new Error("Only email links can be drafted");
+  if (!/^[^\s@,;]+@[^\s@,;]+$/.test(address)) throw new Error("An email link names one address");
+  if ([...url.searchParams.keys()].some(field => !EMAIL_DRAFT_FIELDS.has(field.toLowerCase()))) {
+    throw new Error("An email link carries only a subject and a body");
+  }
   return url.toString();
 }

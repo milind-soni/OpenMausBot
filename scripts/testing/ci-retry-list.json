@@ -56,6 +56,13 @@
       "owner": "milind-soni",
       "reason": "Failed 8 runs (7 branches, 2 main runs) since Sep 24, Windows; same commit later green.",
       "since": "2026-10-08"
+    },
+    {
+      "file": "server/browser/viewers/viewers.e2e.test.ts",
+      "test": "a phone's v1 live view on real Chrome > sends the events and fields the agent-browser engine sent, step for step",
+      "owner": "milind-soni",
+      "reason": "Failed 11 times since Oct 26 in browser driver S4 (ubuntu-latest), on the host and in the container; five of the six logged failures are one stall of about 50 s in which navigate through tab-new get no picture. Not reproduced in 72 runs on ubuntu-latest on Oct 29. Each attempt starts its own Chrome.",
+      "since": "2026-10-29"
     }
   ]
 }

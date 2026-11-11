@@ -1,6 +1,7 @@
 import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 import { Check, LoaderCircle } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { imeComposing } from "@/lib/send-key";
 import { widgetNumber, widgetString, type WidgetNode } from "../../../shared/widget";
 import { ChatMarkdown } from "../ChatMarkdown";
 import { WidgetChart } from "./WidgetChart";
@@ -57,7 +58,7 @@ export function WidgetNodeView({ node, where }: { node: WidgetNode; where: Widge
       const ink = INK[widgetString(node, "color") ?? ""];
       if (!(where.item && where.lead)) return <WidgetGlyph name={node.name} size={size} className={ink} />;
       return (
-        <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-inset group-hover/row:bg-composer group-aria-checked/row:bg-composer", ink ?? "text-ink-secondary")}>
+        <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-[8px] bg-inset group-hover/row:bg-composer group-aria-checked/row:bg-composer", ink ?? "text-ink-secondary")}>
           <WidgetGlyph name={node.name} size={size} />
         </span>
       );
@@ -130,7 +131,7 @@ function Layout({ node, where }: { node: WidgetNode; where: WidgetWhere }) {
   if (!isForm || where.form) return <div className={className} style={style}>{children}</div>;
   const onKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
     const target = event.target;
-    if (event.key !== "Enter" || event.nativeEvent.isComposing || !(target instanceof HTMLInputElement) || target.type === "checkbox" || target.type === "radio") return;
+    if (event.key !== "Enter" || imeComposing(event.nativeEvent) || !(target instanceof HTMLInputElement) || target.type === "checkbox" || target.type === "radio") return;
     event.preventDefault();
     const ref = submitRef(node, form);
     if (ref) form.press(ref);

@@ -1,8 +1,14 @@
 # CI job selection
 
 Every PR still runs the workflow, its `static` job and the `CI` gate: locale
-validation, lint, the CI-selection tests and the verification-documentation
-checks always run. Selection never skips the entire workflow.
+validation, lint, the announcements file's check
+(`scripts/check-announcements.mjs`, which installs download from main within
+the hour, so it fails on any invalid edit), the CI-selection tests, the
+verification-documentation checks and the source guards always run. Selection never skips the entire
+workflow. The source guards are the tests that only read the source (the
+vocabulary and locale checks, the size and route ratchets, and the like): they
+take seconds, and they run in `static` as well as in the shards, so a change
+that breaks one fails before the run asks for its runners.
 
 `scripts/ci-scope.mjs` sorts a pull request's changed files (a local
 merge-base diff, rename detection off, so a moved file selects its old path
@@ -13,14 +19,20 @@ too) into areas, and runs only the jobs some area can affect:
 | docs | `*.md` at the root, everything under `docs/` and `apps/docs/`, `.github/FUNDING.yml` | lint, the docs tests (the three vitest files that read the docs) on Linux |
 | locales | `src/locales/*.json` except `en.json`, `src/locales/*.test.ts` | the build, the locale tests: every `src/` test and `scripts/generate-locale.test.mjs` in two Linux shards, with the Electron node tests |
 | web | the rest of `src/`, `public/`, the root `*-preview.html` pages | the build, the eight Linux shards, the renderer smoke |
-| script tests | `scripts/**/*.test.*` | the Linux and Windows shards, the renderer smoke, browser identity |
-| server | `server/`, `shared/`, `enterprise/`, `companion/`, `evals/`, `skills/`, `deploy/`, the composio broker, the Dockerfile, and the renderer files the server or a smoke loads | the build, Linux and Windows shards, behavior evals, packaged server, open-source edition, the macOS smokes, renderer smoke, browser identity, browser driver, Linux package |
-| desktop | `electron/`, `build/`, `electron-builder.yml`, `index.html` | the same as server |
+| script tests | `scripts/**/*.test.*` | the Linux shards (and Windows', see Windows), the renderer smoke, browser identity |
+| server | `server/`, `shared/`, `enterprise/`, `companion/`, `evals/`, `skills/`, `deploy/`, the composio broker, the Dockerfile, and the renderer files the server or a smoke loads | the build, Linux shards (and Windows', see Windows), behavior evals, packaged server, open-source edition, the macOS smokes, renderer smoke, browser identity, browser driver, Linux package |
+| Windows computer control | the `electron/` modules that start computer control and lend a PC's screen: `cua`, `cua-failure`, `cua-connection`, `capabilities`, `screen-status`, `shared-cua-connection`, `shared-computer-access`, `lent-screen-tools`, `lent-screen-failures`, `paced-typing` | the same as server, and Windows CUA |
+| desktop | the rest of `electron/`, `build/`, `electron-builder.yml`, `index.html` | the same as server |
 | control plane | `cloudflare/control-plane/` | the control-plane job |
+| announcements | `announcements/`: the cards file, its JSON Schema and pictures | nothing beyond `static`, which validates them |
 | everything | anything else: `.github/` workflows, `package.json`, the lockfile and workspace, tsconfig, vite and vitest config, `third_party/`, `scripts/` code, unknown paths | every job |
 
-The build is static's typecheck, Electron syntax check and UI build. Several
-areas run the union of their jobs. Why the mapping is what it is:
+`static` also validates `server/model-manifest/model-manifest.json` with `scripts/check-model-manifest.mjs`: installs
+download that file from main within hours of a change, so it is checked on every event and fails on any invalid edit.
+
+The build is the `build` job: typecheck, Electron syntax check and UI build,
+about three minutes, beside the shards rather than ahead of them. Several areas
+run the union of their jobs. Why the mapping is what it is:
 
 - The server imports a few renderer files (`SRC_OUTSIDE_RENDERER`), and the
   renderer imports Electron modules, so a server or desktop change can affect
@@ -29,17 +41,35 @@ areas run the union of their jobs. Why the mapping is what it is:
 - The macOS smokes run the packaged server inside Electron (approval modes,
   app frames, phone relay, login handoff), so a server change runs them.
 - A renderer change runs no Windows or macOS shard: the renderer's tests read
-  the platform from the desktop bridge, never the host. Main still runs both.
+  the platform from the desktop bridge, never the host. The full lane still
+  runs both.
 - English (`en.json`) is the text every test reads, so it is web. Other
   catalogs are read only by `src/` tests, the locale generator's test and an
   Electron node test; `scripts/ci-scope.test.ts` fails if another test starts
   reading them, or the docs, without being listed.
-- Windows CUA and the Linux ARM64 cloudflared installer test only their own
-  scripts and pinned downloads, so only `scripts/` and dependency changes run
-  them.
+- Windows CUA starts computer control the way the installed app does and
+  takes a Cloud's first look at the PC through the lend path, so a change to
+  those Electron modules runs it, as do `scripts/` and dependency changes. The
+  Linux ARM64 cloudflared installer tests only its own script and pinned
+  download.
 
-Pushes to main, merge groups, manual runs (the release branch's CI, which
-`prepare-release.yml` starts, and the release lane) never use the areas:
+## Lanes: pull requests, main and the full lane
+
+Only pull requests use the areas. Every other event runs one of two fixed
+sets (`laneOf` in `scripts/ci-scope.mjs`):
+
+| Event | Lane | What runs |
+| --- | --- | --- |
+| `pull_request` | its areas | the table above, with Linux shards, and Windows jobs only for a change that can break Windows (Windows below) |
+| `push` to main, `merge_group` | main | static (lint and the CI checks), the build, the eight Linux and eight Windows shards with the Electron node tests, the macOS smokes job, behavior evals, the Linux and Windows packaged server smokes, the open-source edition, the control plane, the renderer smoke and Linux and Windows browser identity |
+| `schedule` (nightly, 21:17 UTC), `workflow_dispatch` (manual runs, the release branch's CI that `prepare-release.yml` starts, and the release lane) | full | every job on every platform: also the Windows and macOS shards, the Windows packaged server and Windows CUA smokes, Windows and macOS browser identity, the browser driver on all three, the Linux package and the Linux ARM64 installer |
+
+The main lane runs Linux, Windows and one macOS job. The macOS shards, the
+Windows CUA smoke and every smoke that needs a second macOS runner wait for
+the night or a release. A change that breaks only Windows shows up in its own
+PR when it can (Windows below), and otherwise in main's run after it merges; a
+change that breaks only macOS shows up in the nightly run or in the release
+lane, which only an emergency `ship_without_ci` release skips.
 
 - A push to main is scoped by its own commits (`before..after`): docs only
   (root Markdown, Markdown under `docs/`, `.github/FUNDING.yml`), or a
@@ -47,26 +77,44 @@ Pushes to main, merge groups, manual runs (the release branch's CI, which
   the runtime jobs. It does so only when the commit before the push has a green
   CI run of its own. Main's waiting run is replaced by each push, so without
   that check a replaced run's code would never be tested. Every other push runs
-  everything.
-- Merge groups and manual runs always run all jobs. Empty or unreadable diffs,
-  and a previous commit whose CI cannot be read, also fall back to all jobs.
+  the main lane.
+- A push whose commit already passed the `CI` gate in a merge group runs only
+  the control-plane job (the broker deploy needs it). The merge queue lands
+  its group's own commit, so the merge group's run tested exactly what the push
+  brings; `ci-scope.mjs` reads that run's gate job, which can pass before the
+  run's last job has finished.
+- Merge groups always run the main lane, whatever they change. Empty or
+  unreadable push diffs, and a commit whose CI cannot be read, fall back to the
+  main lane; a pull request whose diff cannot be read falls back to every job
+  on every platform.
 
-The single `CI` gate keeps the existing required dependencies. `static`
-outputs the selected job ids; the gate wants each required job to have passed
+The single `CI` gate keeps the existing required dependencies, and adds
+`build`. `static` outputs the selected job ids; the gate wants each required job to have passed
 when it was selected and to have been skipped when it was not. Failures,
 cancellations, a missing or malformed selection and unexpected runs or skips
 fail the gate. Advisory jobs remain advisory. A new push to a PR cancels that
-PR's older run; main's concurrency is unchanged (see Main and releases).
+PR's older run (see Main and releases for every other group).
 
 The separate shared-terminal smoke workflow is manual-only: its tests already
 run in the Windows Vitest/Electron jobs.
 
 ## Vitest shards
 
-The suite runs one file at a time, so a shard takes as long as its files added
-up, and the slowest shard sets how long a PR and a release wait. Linux and
-Windows run eight shards each, macOS four (main, merge groups and manual runs
-only); `scripts/ci-scope.mjs` builds the matrix.
+The slowest shard sets how long a PR and a release wait. Linux and Windows run
+eight shards each, macOS four (the full lane only); `scripts/ci-scope.mjs`
+builds the matrix.
+
+**Files at once.** A Linux shard runs four files at a time (`VITEST_WORKERS`,
+`OMB_VITEST_WORKERS` in `vite.config.ts`), one for each of the runner's vCPUs.
+Most of a shard's time is waiting on real servers and fake engines: one file at
+a time it took 16 minutes with the machine 70% idle, and four at a time 5.
+A Windows shard runs two files at a time: one at a time it took 9 to 14
+minutes and was the last job of every run that had one. macOS shards, and
+every local run, still run one file at a time. So
+that files side by side never share a port, each worker picks from its own
+(`server/testing/worker-port.ts`); a test that picks a port some other way can
+meet another file's. Files share the runner's CPU, so test and hook
+timeouts double there, as on Windows (`server/testing/host-timeout.ts`).
 
 **Which files run where.** Linux runs every file. Most e2e files drive
 OMB's own logic through a real server and fake engines, which is the same on
@@ -93,20 +141,46 @@ counts one second, or the median e2e time if it is an e2e file. Every file
 still runs exactly once, and each shard job logs a `duration-sequencer:` line
 with its share.
 
-Refresh the times from a few recent main runs (they have all three platforms)
-when shards drift apart:
+Refresh the times from a few recent nightly or manual runs (they have all
+three platforms) when shards drift apart:
 
 ```sh
 node scripts/testing/update-shard-weights.mjs --run <run id> --run <run id> --run <run id>
 ```
 
-To run one CI shard locally, use the same OS, `--shard` and `OMB_VITEST_E2E`:
-`OMB_VITEST_E2E=host pnpm exec vitest run --shard=3/8` is Windows shard 3 on a
-Windows machine.
-The locale and docs tests are the same command with their files first:
-`pnpm exec vitest run src/ scripts/generate-locale.test.mjs --shard=1/2` is
-locale tests 1/2 (those jobs set `OMB_VITEST_SUBSET`, so the sequencer does not
-warn that most weighted files are missing).
+To reproduce a failing Vitest job locally:
+
+1. Use the checkout revision shown in that job's log and install its locked
+   dependencies with `pnpm install --frozen-lockfile`. A PR's CI checkout may
+   be a merge commit rather than the branch tip.
+2. Use the same OS. Shard weights are platform-specific, so Windows shard 3
+   and Linux shard 3 do not contain the same files.
+3. Copy the expanded command from **Run tests**, including any file filters
+   and the complete `--shard=n/count` fraction. Copy its `OMB_VITEST_E2E`,
+   `OMB_VITEST_SUBSET` and `OMB_VITEST_WORKERS` environment values too. On Boat, the static job
+   contains each shard's output in a `vitest (ubuntu-latest, ...)` lane's
+   log group; the lane uses the same matrix values.
+
+For example, a full Windows shard 3/8 uses PowerShell syntax:
+
+```powershell
+$env:OMB_VITEST_E2E = "host"
+$env:OMB_VITEST_SUBSET = ""
+$env:OMB_VITEST_WORKERS = "2"
+pnpm exec vitest run --shard=3/8
+```
+
+The full Linux shard 3/8 uses a POSIX shell:
+
+```sh
+OMB_VITEST_E2E=all OMB_VITEST_SUBSET= OMB_VITEST_WORKERS=4 pnpm exec vitest run --shard=3/8
+```
+
+Docs and locale jobs select smaller file lists and have their own shard
+counts. Keep their file filters: removing them changes the set the sequencer
+divides, even with the same `--shard`. `OMB_VITEST_SUBSET` suppresses the CI
+warning about missing weighted files; the command's file filters select the
+tests. Copy the current job's list rather than assuming it is the full suite.
 
 Deleting or renaming a test file in the weights fails
 `scripts/testing/duration-sequencer.test.ts` until its entry is removed or
@@ -120,12 +194,48 @@ seven (four Vitest shards, two smokes, the iOS job with its hour-long
 simulator suite). With 25 open PRs the macOS jobs waited a median of six and a
 half hours. Now:
 
-- A PR runs the Vitest shards on Ubuntu and Windows; main pushes, merge groups
-  and manual runs add four macOS shards, which run the host e2e files only.
-  Only a couple of test blocks are macOS-only.
-- Every PR's macOS checks are one job: the packaged-server smoke and the
-  Electron smokes.
+- A PR runs the Vitest shards on Ubuntu (and Windows where its change can
+  break Windows), a push to main or a merge group on Ubuntu and Windows; the
+  full lane adds four macOS shards, which run the host e2e files only. Only a
+  couple of test blocks are macOS-only.
+- Every PR's, push's and merge group's macOS checks are one job: the
+  packaged-server smoke and the Electron smokes.
 - `ci-stop-closed.yml` cancels a PR's CI run when the PR is merged or closed. PR runs share a group named by the PR number (`ci-pr-<n>`), never by `github.ref`: a merged PR's closed event reports the base branch as `github.ref`, which made every merge cancel main's CI (fixed Oct 3 2026).
+
+## Windows
+
+Windows runners are slow to get and a Windows shard takes as long as a Linux
+one, so a pull request runs the Windows jobs (the eight shards, the packaged
+server smoke, browser identity, the browser driver and, for a change that can
+affect anything or to the Electron modules it starts, the CUA smoke) only when
+its change can break Windows first
+(`windowsReason` in `scripts/ci-scope.mjs`):
+
+- the PR carries the `windows` label;
+- a path names Windows (`win`, `win32`, `windows`, `nsis`, `powershell` as a
+  word of the path, `.ps1`, `.cmd`, `.bat`, `.exe`), or is the desktop app and
+  its installer (`electron/`, `build/`, `electron-builder.yml`), the
+  dependencies (`package.json`, the lockfile and workspace, `.npmrc`,
+  `third_party/`), `.gitattributes`, `vite.config.ts`, a script that builds,
+  bundles, prepares, packages, stages or smokes the app, or what decides how
+  the Windows shards run (`ci.yml`, `ci-scope.mjs`, the host e2e list, the
+  shard weights, the retry list and runner, `server/testing/host-timeout.ts`);
+- it changes one of the e2e files the Windows shards also run
+  (`scripts/testing/host-e2e.ts`);
+- an added or removed line of its code (not docs or translations) names
+  Windows: `win32`, `Windows`, `windows-latest`, PowerShell, `cmd.exe`,
+  `.exe`, `path.win32`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `PATHEXT`,
+  `ComSpec`, `windowsHide` or `windowsVerbatimArguments`.
+
+The static job's log says which one (`CI scope: Windows runs for …`). Every
+other PR leaves Windows to main's push run after it merges, the nightly run and
+the release lane. Over October 2026's last 300 merges this ran Windows on 37%
+of PRs instead of 81%.
+
+To run Windows on any PR, add the `windows` label, then re-run the CI workflow
+(or push): the static job reads the PR's labels when it runs. Adding the label
+alone starts nothing, because a run for every label change would cancel the
+PR's running checks.
 
 ## Browser driver (S4)
 
@@ -161,9 +271,10 @@ answered by an upload, a dropdown list drawn by the viewer, a download served
 to it, the page's cursor and copied text).
 
 - The job uses the runner's installed Google Chrome (`OMB_CDP_E2E=1`) on the
-  same platforms as the vitest shards: Linux and Windows on PRs, plus macOS
-  on main, merge groups and manual runs. Linux runs under Xvfb so the
-  headed-identity case has a display.
+  same platforms as the vitest shards: Linux, and Windows where a PR runs it,
+  on PRs, all three in the full lane. Pushes to main and merge groups leave it
+  out. Linux runs
+  under Xvfb so the headed-identity case has a display.
 - On Linux it then builds the server image's `runtime` stage and runs the
   suites inside it as a non-root user against the image's Chrome for
   Testing, with `OMB_BROWSER_SANDBOX=0` because the image has no setuid
@@ -191,32 +302,37 @@ to it, the page's cursor and copied text).
 
 ## Main and releases
 
-Main keeps one CI run going and one waiting. Each merge replaces the waiting
-run, and the running one always finishes, so a burst of merges costs two full
-runs instead of one per merge (fifteen queued behind each other in October
-2026, with the release waiting behind them).
+Main's pushes keep one CI run going and one waiting. Each merge replaces the
+waiting run, and the running one always finishes, so a burst of merges costs
+two runs instead of one per merge (fifteen queued behind each other in October
+2026, with the release waiting behind them). Every other run has a group no
+push can join, so nothing a merge does cancels it: a merge group is named by
+its own ref, and the nightly run and each manual run (the release branch's CI
+and the release lane among them) by their event and branch.
 
 `release.yml` ships only a commit whose code passed CI
 (`scripts/release-ci.mjs`, overlapping the platform builds). A run counts only
-when its `CI` gate passed and every vitest job actually ran and passed, so a
-scoped run (docs- or version-only, vitest skipped) is never proof. The script
-accepts, in order:
+when its `CI` gate passed and every platform's every vitest shard ran and
+passed. A scoped run (docs- or version-only, vitest skipped) is never proof,
+and neither is a partial one: a push to main or a merge group runs Linux's and
+Windows' shards only. The script accepts, in order:
 
-1. a finished run on the release commit itself;
-2. a finished push, merge-queue or manual run on any commit with the same git
-   tree. This is the all-OS manual run `prepare-release.yml` starts on the
-   `release/v<version>` branch, whenever main did not move before the merge;
+1. a finished full run on the release commit itself;
+2. a finished full run on any commit with the same git tree: the all-OS manual
+   run `prepare-release.yml` starts on the `release/v<version>` branch,
+   whenever main did not move before the merge, or a nightly run;
 3. when the release commit's only change from its parent is `package.json`'s
-   `"version"` (all the bump touches), the parent's proof by 1 or 2. A parent
-   run still going is waited for; a red parent, or one that skipped its
-   tests, never counts.
+   `"version"` (all the bump touches), the parent's proof by 1 or 2. A parent's
+   nightly or manual run still going is waited for; a red parent, or one that
+   skipped its tests or ran only some platforms, never counts.
 
-If none of these exists and main's run for the commit was replaced, never ran
-or skipped the tests, the script starts CI on the commit in its own lane: a
-`release-ci/v<version>` branch that no merge can touch, deleted afterwards. A
-red verdict stops the release; re-run the failed CI jobs
-(`gh run rerun <id> --failed`), and the waiting release picks up the new
-attempt. A red where every failed job never started a step (a macOS runner
+Otherwise the script starts CI on the commit in its own lane: a
+`release-ci/v<version>` branch that no merge can touch, run as a manual run of
+every job on every platform, and deleted afterwards. It does not wait for the
+commit's push or merge-group run first, which could only come back partial,
+but a red one that has finished stops the release. A red verdict stops the
+release; re-run the failed CI jobs (`gh run rerun <id> --failed`), and the
+waiting release picks up the new attempt. A red where every failed job never started a step (a macOS runner
 "failed to be acquired") is not a verdict. On the release lane's own run the
 script re-runs the failed jobs once itself
 (`POST /actions/runs/<id>/rerun-failed-jobs`, which the job's
@@ -237,7 +353,7 @@ are bounded per file: once a listed test fails all three attempts, that is a
 real failure, and the file's later listed tests get no retry. Otherwise a
 regression that breaks a whole fixture (six listed tests share
 `server/delta-context.e2e.test.ts`) would triple their wall time and push the
-Linux shard past its 20-minute cap, and a timed-out job loses the failing
+Linux shard past its 25-minute cap, and a timed-out job loses the failing
 tests' annotations and this summary. The cost: a real flake listed after a
 broken test in the same file is not retried in that run. A listed
 test that needed a retry is written to the vitest job's summary and raised as
@@ -256,8 +372,124 @@ The packaged-server smoke asks the OS for free ports (listen on port 0)
 instead of picking them at random: a random pick inside a range Windows
 reserves failed with `listen EACCES 127.0.0.1:497xx`.
 
+## Linux on Boat
+
+GitHub runs a limited number of jobs at once for the whole account, and each
+PR's run used to be about thirty of them, so with twenty agents opening PRs a
+run waited hours for runners. While the repository variable **`BOAT_CI`** is
+`on`, a run's Linux work goes to one [Boat](https://docs.boat.dev/ci) VM
+instead (Settings → Secrets and variables → Actions → Variables; anything but
+`on` switches it off, and CI runs as it always has).
+
+- **Which runs.** A push to main, a merge group, and a PR whose branch is in
+  this repository, when the repository owner authored the PR and both pushed
+  and started the run (`github.actor`, `github.triggering_actor`). Boat runs a
+  public repository's job only for the users on its allow-list
+  (`boat ci public milind-soni on --users "milind-soni"`) and fails any
+  other job at once (a teammate's PR got nine failed Boat jobs that way), so
+  every other run stays on GitHub: forks, teammates, bots, re-runs by anyone
+  else, the nightly run and manual runs (the release lane needs every
+  platform's shards by name). To give a teammate Boat too, add them to Boat's
+  list and to the condition in `ci.yml`'s `static` job. To run Windows on a PR
+  as well, label it `windows` (Windows above).
+- **What changes.** `static` runs on `boat-xlarge` (16 vCPU, 32 GB) and is
+  named "preflight + Linux tests (Boat)". After its usual checks it
+  runs the Linux vitest shards, behavior evals and the Linux packaged server
+  smoke side by side as lanes of that VM (`scripts/ci-linux-lanes.mjs`, the
+  same commands as their GitHub jobs), and prints each lane's log in a group
+  when it ends. GitHub keeps only 10 error annotations per step, so when many
+  tests fail, the lane groups in the log are the full record. `ci-scope.mjs` leaves those jobs out of the selection, so the
+  `CI` gate reads them as skipped by design and `static`'s result covers
+  them. The Windows jobs, the macOS smokes, the advisory Linux jobs (open-source
+  edition, control plane, renderer smoke, browser identity and driver, Linux
+  package, ARM installer) and the `CI` gate stay on GitHub's runners.
+- **The VM made like a GitHub runner.** Boat's runner gives its processes
+  `cap_dac_read_search`, and its image has a desktop (`DISPLAY`), the
+  coding agents (Claude, Codex, Hermes, …) and a working `bwrap`. The lanes run
+  under `setpriv` without the capability, with `DISPLAY` unset, `C.UTF-8` and
+  UTC, and the step before them deletes the agents and `bwrap`. Otherwise
+  permission tests read files set to mode 000, the server starts Boat's
+  Hermes in every test home, and Team Cloud turns run in boxes they never get
+  on GitHub.
+- **Cost.** One Boat start per run, and the account's daily start limit is
+  shared with customers' Cloud computers: keep it to one job. The job takes
+  about 25 minutes: 4 for setup and the checks, 21 for the lanes, whose
+  slowest shard sets the time.
+- **Where to look.** `boat ci` (setup, problems, the last jobs), `boat ci job
+  <job id>` and `boat ci logs <job id> --follow`, or the CI on Boat VMs tab
+  of the Boat dashboard. The job id is the GitHub job's id.
+- **If Boat is down.** Set `BOAT_CI` to `off`: new runs go back to GitHub's
+  runners. A queued Boat job does not move; cancel the run and re-run it.
+
 ## Required check
 
 The `main-ci-gate` ruleset requires the single `CI` check (it replaced the
 three legacy `typecheck + test (<os>)` names in September 2026). Renaming the
 `gate` job needs the ruleset updated first, or every PR waits forever.
+
+## Merge queue
+
+Two PRs that were each green have broken main together. A merge queue tests
+each PR on top of what lands before it: GitHub builds a merge group (the PR
+squashed onto main and the groups ahead of it), CI runs the main lane on it as
+a `merge_group` event, and the group's commit lands only when its `CI` check
+passes. The workflow is ready: the `merge_group` trigger, a concurrency group
+per merge group, the main lane, and the same `CI` check name.
+
+GitHub offers the queue only to repositories an organization owns ("Pull
+request merge queues are available in any public repository owned by an
+organization", GitHub's docs, October 2026). `milind-soni/OpenMausBot` is
+owned by a user account, so the rule below appears only after the repository
+moves to an organization (such as `SupaMaus`). The move changes the URL the
+desktop updater reads (see Updater migration invariant in `releasing.md`), so
+it is the owner's decision. Then:
+
+**Settings → Rules → Rulesets → `main-ci-gate` → Edit** (it targets the
+default branch):
+
+1. Keep **Require status checks to pass** with the one check `CI` (source:
+   GitHub Actions). The same rule applies to the PR before it can join the
+   queue and to the merge group in it. **Require branches to be up to date
+   before merging** stays off: the queue brings each PR up to date itself.
+2. Add **Require merge queue** with:
+   - **Merge method:** Squash.
+   - **Build concurrency:** 3. Each group's run is 17 jobs, one of them on
+     macOS; an organization on the Team plan runs 60 jobs and 5 macOS jobs at
+     once, shared with every PR's run.
+   - **Minimum group size:** 1, **maximum group size:** 5, **wait time to meet
+     the minimum group size:** 0 minutes, so a PR alone starts at once.
+   - **Require all queue entries to pass required checks** (Only merge
+     non-failing pull requests): on. Every PR's own group must pass, not only
+     the last of the PRs merged together, so every commit the queue lands on
+     main was tested.
+   - **Status check timeout:** 60 minutes (a main-lane run takes about 25).
+3. Save. PRs then show **Merge when ready** instead of the merge button;
+   `gh pr merge --squash` adds a PR to the queue, or turns on auto-merge when
+   its checks have not passed yet.
+
+The same rule through the API, keeping the ruleset's existing check:
+
+```sh
+gh api -X PUT repos/<org>/OpenMausBot/rulesets/<main-ci-gate id> --input - <<'JSON'
+{"rules": [
+  {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "CI", "integration_id": 15368}],
+    "strict_required_status_checks_policy": false, "do_not_enforce_on_create": false}},
+  {"type": "merge_queue", "parameters": {"merge_method": "SQUASH", "max_entries_to_build": 3, "min_entries_to_merge": 1,
+    "max_entries_to_merge": 5, "min_entries_to_merge_wait_minutes": 0, "grouping_strategy": "ALLGREEN",
+    "check_response_timeout_minutes": 60}}
+]}
+JSON
+```
+
+`ci-stop-closed.yml` only cancels a closed PR's own group (`ci-pr-<n>`), so it
+never touches a merge group's run. The push that lands a group's commit runs
+only the control-plane job and the broker deploy, because the merge group
+already tested that exact commit. To turn the queue off, remove the **Require
+merge queue** rule; nothing in the workflow needs to change.
+
+While the repository stays user-owned, the one setting that stops two green PRs
+from landing red together is **Require branches to be up to date before
+merging** on the same ruleset: a PR merges only after CI passed on it with
+main's newest commit in it. Every merge then makes the other open PRs update
+their branch and run CI again before they can merge, so it trades merge
+throughput for that guarantee.

@@ -11,7 +11,7 @@ import type { BrowserTarget } from "../service.ts";
 import { jpegSize, startService, until, type RealService } from "../testing/real-service.ts";
 import type { Viewer, ViewerOptions, ViewerOutput } from "./core.ts";
 import { LiveV1 } from "./live-v1.ts";
-import { v1Differences } from "./testing/v1-compare.ts";
+import { v1Differences, v1StepShown } from "./testing/v1-compare.ts";
 import { normalizeV1, runV1Session, startV1Pages } from "./testing/v1-session.ts";
 
 const suite = CHROME ? describe : describe.skip;
@@ -280,10 +280,11 @@ suite("a phone's v1 live view on real Chrome", () => {
     const target = { session: "bot-golden", key: "bot:golden" };
     const live = new LiveV1({ service: real.service, target: () => target });
     try {
+      // A loaded runner's Chrome can paint a step's picture after the usual settle; the step waits for it.
       const records = await runV1Session({
         open: (res) => live.open({ botId: "bot", session: target.session, owner: "local-owner", isCurrent: () => true, res }),
         action: (viewerId, body) => live.action({ viewerId, botId: "bot", owner: "local-owner", body }),
-      }, pages.origin);
+      }, pages.origin, { shown: (record) => v1StepShown(normalizeV1([record], pages.origin)[0]!) });
       expect(v1Differences(normalizeV1(records, pages.origin))).toEqual([]);
     } finally {
       live.closeAll();

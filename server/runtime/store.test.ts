@@ -199,6 +199,20 @@ describe("runtime store: request marks", () => {
     store.insert(child("bad", root, { approved: "yes" as unknown as boolean }), { kind: "enqueued", at: 4_000 });
     expect(() => store.get("bad")).toThrow(/does not match the record schema/);
   });
+
+  it("round-trips a question its requester decides and who answered it, and refuses an answerer it does not know", () => {
+    const store = open();
+    const root = assignment("root", { status: "running" });
+    store.insert(root, { kind: "enqueued", at: 1_000 });
+    const parked = child("parked", root, { status: "needs_input", question: "CSV or Excel?", decide: { default: "CSV" } });
+    const open2 = child("open", root, { status: "needs_input", question: "Which format?", decide: {} });
+    const relayed = child("relayed", root, { answer: "Excel", answeredBy: { kind: "bot", botId: "chief" } });
+    const defaulted = child("defaulted", root, { answer: "CSV", answeredBy: { kind: "default" } });
+    for (const row of [parked, open2, relayed, defaulted]) store.insert(row, { kind: "enqueued", at: 2_000 });
+    for (const row of [parked, open2, relayed, defaulted]) expect(store.get(row.id)).toEqual(row);
+    store.insert(child("bad", root, { answeredBy: { kind: "someone" } as unknown as Assignment["answeredBy"] }), { kind: "enqueued", at: 3_000 });
+    expect(() => store.get("bad")).toThrow(/does not match the record schema/);
+  });
 });
 
 describe("runtime store: a root's cards and continuation", () => {

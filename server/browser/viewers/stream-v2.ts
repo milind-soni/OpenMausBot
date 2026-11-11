@@ -11,7 +11,7 @@ import type { Socket } from "node:net";
 
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 
-import { BrowserHostError, SETUP_COMMAND } from "../chrome/host-setup.ts";
+import { BrowserHostError } from "../chrome/host-setup.ts";
 import type { BrowserService, BrowserTarget } from "../service.ts";
 import { FRAME_CAP_LIMITS, type Viewer, type ViewerOptions, type ViewerOutput } from "./core.ts";
 import { requestedSize } from "./viewport.ts";
@@ -306,7 +306,8 @@ export class StreamV2 {
       if (session.closed || session.closing) await viewer.close({ dropped: session.lost && session.theirs() });
       else session.attached(viewer, this.#service);
     } catch (error) {
-      if (error instanceof BrowserHostError) session.close(STREAM_CLOSE.hostSetup, JSON.stringify({ need: error.kind, command: SETUP_COMMAND }));
+      // The viewer knows the fix for each need: a close reason holds at most 123 bytes, too few for the steps link.
+      if (error instanceof BrowserHostError) session.close(STREAM_CLOSE.hostSetup, JSON.stringify({ need: error.kind }));
       else session.close(STREAM_CLOSE.failed, "The browser could not start.");
     }
   }

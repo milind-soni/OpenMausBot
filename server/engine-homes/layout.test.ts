@@ -29,6 +29,9 @@ linux("an audience's engine home", () => {
     expect(homed.shared).toContainEqual({ source: "/data/.codex/auth.json", target: `${bob}/.codex/auth.json` });
     expect(homed.shared).toContainEqual({ source: "/data/.grok/auth.json", target: `${bob}/.grok/auth.json` });
     expect(homed.shared).toContainEqual({ source: "/data/.local/share/opencode/auth.json", target: `${bob}/.local/share/opencode/auth.json` });
+    for (const file of ["kimi-code.json", "kimi-code-env-0e4f99c69cc27850.json"]) {
+      expect(homed.shared).toContainEqual({ source: `/data/.kimi-code/credentials/${file}`, target: `${bob}/.kimi-code/credentials/${file}` });
+    }
     // Transcripts and session state are never shared: only sign-in files are named.
     for (const file of homed.shared) expect(file.target).not.toMatch(/projects|sessions|history/);
     expect(homed.shared.every((file) => file.target.startsWith(`${bob}/`))).toBe(true);

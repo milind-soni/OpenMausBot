@@ -12,6 +12,8 @@ export interface CloudListEntry {
   runsOn: "cloud" | "server";
   status: CloudListStatus;
   origin: string | null;
+  /** The addresses it answered at before it moved to another provider, when the Admin says: never its `origin`. */
+  formerOrigins?: string[];
   /** A Team or Business Cloud: the team behind its People. */
   teamId: string | null;
   /** The account's oldest open Cloud of its own: My Cloud. */
@@ -25,7 +27,16 @@ export interface CloudListEntry {
   lastSeenAt?: number;
   /** The OpenMausBot version it runs, for an update reminder. */
   version?: string;
+  /** Ended, stopped or with a payment problem, its files still kept: when they are deleted (ms). */
+  deleteAfter?: number;
+  /** Its owner may take it off their list (one of their own, in no team, that ended or was never paid for): the Admin's word. */
+  removable?: true;
+  /** A Ready Cloud whose plan sleeps: whether it is asleep now. */
+  power?: import("./cloud-power.mjs").CloudPower;
 }
+/** What this app says of a listed Cloud it doesn't open: ended, its checkout not finished, a payment problem, or being set up. */
+export type CloudState = "ended" | "checkout" | "payment" | "setup";
+export declare function cloudState(cloud: Pick<CloudListEntry, "status"> | null | undefined): CloudState | null;
 /**
  * The account's own plan's renewal, as the Admin says it for the account that pays (display only): a free trial (`trial`), its
  * renewal off (`cancelled`), when it renews (`renewsAt`) or, once cancelled, ends (`endsAt`; null: the end of the period paid
@@ -49,6 +60,9 @@ export declare const CLOUD_ID: RegExp;
 export declare const CLOUD_NAME_LIMIT: number;
 export declare function cleanCloudListName(value: unknown): string | null;
 export declare function ownCloud(cloud: CloudListEntry | null | undefined): boolean;
+/** My Cloud as the verified session names it: its address, its id in the list, and the addresses it had before a move to
+ * another provider. */
+export declare function myCloudOf(state: unknown): { origin: string | null; id: string | null; formerOrigins: string[] } | null;
 export declare function signedInServers(clouds: CloudListEntry[] | null | undefined): CloudListEntry[];
 export declare function releaseVersion(value: unknown): string | null;
 export declare function olderRelease(version: unknown, latest: unknown): boolean;
@@ -60,3 +74,5 @@ export declare function cloudSetupProgress(cloud: CloudListEntry | null | undefi
 export declare function swatchColor(swatch: unknown): import("./cloud-buy.mjs").CloudColor | null;
 export declare function listedColors(clouds: CloudListEntry[] | null | undefined): Array<{ home?: true; teamId?: string; color: import("./cloud-buy.mjs").CloudColor | null }>;
 export declare function ownCloudPlaces(clouds: CloudListEntry[] | null | undefined): Array<{ id: string; role: string; name: string; color: import("./cloud-buy.mjs").CloudColor | null; origin: string }>;
+export declare function withoutOldCloudHome<T extends { environments: any[]; activeId: string }>(saved: T, state: unknown): T;
+export declare function homeLook(state: unknown): { name: string; color: string | null } | null;

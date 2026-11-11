@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { engineInstallRoots } from "../engine-roots.ts";
-import { BOX_MUTATIONS, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, visibleInBox, type BoxMutation, type BoxSetup } from "./plan.ts";
+import { BOX_MUTATIONS, CPU_LIST_FILES, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, visibleInBox, type BoxMutation, type BoxSetup } from "./plan.ts";
 
 const home = "/data";
 const dataDir = "/data/.openmausbot";
@@ -13,7 +13,7 @@ const setup = (mutate?: BoxMutation[]): BoxSetup => ({
 });
 const cwd = join(dataDir, "task-workspaces", "bot-a", "thread-1");
 const turn = (mutate?: BoxMutation[]) => planBox(setup(mutate), {
-  command: "/usr/local/bin/claude", args: ["-p", "--mcp-config", "/tmp/omb-mcp-x/mcp.json", "--append-system-prompt-file=/tmp/omb-system-y/prompt.txt"],
+  command: "/usr/local/bin/claude", args: ["-p", "--additional-mcp-config", "@/tmp/omb-copilot-mcp-x/config.json", "--append-system-prompt-file=/tmp/omb-system-y/prompt.txt"],
   cwd, env: { PATH: "/usr/bin", HOME: home, CLAUDE_CONFIG_DIR: "/data/.claude" }, rw: [join(dataDir, "perm-abc.sock")],
 });
 
@@ -30,7 +30,7 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(plan, join(dataDir, "workspaces", "bot-a", "MEMORY.md"))).toBe("rw");
     expect(visibleInBox(plan, join(dataDir, "perm-abc.sock"))).toBe("rw");
     expect(visibleInBox(plan, "/data/.claude/settings.json")).toBe("rw");
-    expect(visibleInBox(plan, "/tmp/omb-mcp-x/mcp.json")).toBe("ro");
+    expect(visibleInBox(plan, "/tmp/omb-copilot-mcp-x/config.json")).toBe("ro");
     expect(visibleInBox(plan, "/tmp/omb-system-y/prompt.txt")).toBe("ro");
     expect(visibleInBox(plan, "/app/dist-server/index.js")).toBe("ro");
     expect(visibleInBox(plan, "/usr/local/bin/claude")).toBe("ro");
@@ -42,6 +42,17 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(plan, "/tmp/other-turn/mcp.json")).toBe("none");
     expect(visibleInBox(plan, "/.fly/api")).toBe("none");
     expect(visibleInBox(plan, "/root/.ssh/id_ed25519")).toBe("none");
+  });
+
+  it("a process the bot's conversations share sees all of that bot's conversation folders and uploads, and no other bot's", () => {
+    const plan = planBox(setup(), { command: "opencode", args: ["acp"], cwd, env: { HOME: home }, botThreads: true });
+    expect(plan.botId).toBe("bot-a");
+    for (const own of ["task-workspaces/bot-a/thread-1/a.md", "task-workspaces/bot-a/thread-2/notes.md", "workspaces/bot-a/MEMORY.md"]) expect(visibleInBox(plan, join(dataDir, own)), own).toBe("rw");
+    expect(visibleInBox(plan, join(dataDir, "box-uploads", "bot-a", "thread-2", "photo.png"))).toBe("ro");
+    for (const hidden of ["task-workspaces/bot-b/thread-9/notes.md", "workspaces/bot-b/MEMORY.md", "box-uploads/bot-b/thread-9/x.png", "messages.db"]) {
+      expect(visibleInBox(plan, join(dataDir, hidden)), hidden).toBe("none");
+    }
+    expect(visibleInBox(turn(), join(dataDir, "box-uploads", "bot-a", "thread-2", "photo.png")), "one conversation's box keeps only its own uploads").toBe("none");
   });
 
   it("writes the bubblewrap argv in mount order, with its own namespaces and the bridged sockets", () => {
@@ -112,6 +123,33 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(plan, "/data/.openmausbot/messages.db")).toBe("none");
   });
 
+  it("a relay socket goes in at /run/omb/relay.sock only for a box with its own network", () => {
+    const relay = `${dataDir}/box/relay-ab12.sock`;
+    const plan = planBox(setup(), { command: "/usr/bin/agy", args: [], cwd, env: { HOME: home }, relay });
+    expect(bwrapArgs(plan).join(" ")).toContain(`--bind ${relay} /run/omb/relay.sock`);
+    expect(visibleInBox(plan, "/run/omb/relay.sock")).toBe("rw");
+    expect(visibleInBox(plan, relay)).toBe("none");
+    expect(visibleInBox(plan, `${dataDir}/box/egress.sock`)).toBe("none");
+    const shared = planBox(setup(), { command: "/opt/chrome", args: [], env: {}, net: "shared", relay });
+    expect(bwrapArgs(shared).join(" ")).not.toContain(relay);
+  });
+
+  it("has the machine's CPU list read-only and nothing else of /sys, so a TCMalloc runtime (Antigravity) can start", () => {
+    // Measured on a Fly Cloud home (2, 4 and 8 shared CPUs): without `possible` Google's runtime stops at start with
+    // "tcmalloc/internal/sysinfo.h:76] CHECK in NumCPUs" and exit 134; with it, initialize answers.
+    const command = join(dataDir, "tools", "antigravity-acp", "linux-x64", "versions", "abc", "agy_acp_server.par");
+    for (const plan of [turn(), planBox(setup(), { command, args: ["--uid="], cwd, env: { HOME: home } })]) {
+      expect(visibleInBox(plan, "/sys/devices/system/cpu/possible")).toBe("ro");
+      expect(visibleInBox(plan, "/sys/devices/system/cpu/online")).toBe("ro");
+      for (const hidden of ["/sys/devices/system/cpu/vulnerabilities/spectre_v2", "/sys/class/net/eth0/address", "/sys/fs/cgroup/memory.max", "/sys/kernel/mm"]) {
+        expect(visibleInBox(plan, hidden), hidden).toBe("none");
+      }
+      const text = bwrapArgs(plan).join(" ");
+      for (const file of CPU_LIST_FILES) expect(text).toContain(`--ro-bind-try ${file} ${file}`);
+      expect(text).not.toMatch(/--(?:ro-)?bind(?:-try)? \/sys /);
+    }
+  });
+
   it("Antigravity's own profile (GEMINI_HOME) goes back read-write, and no other account's", () => {
     const profile = join(dataDir, "providers", "antigravity", "a".repeat(64));
     const plan = planBox(setup(), { command: join(dataDir, "tools", "antigravity-acp", "linux-x64", "versions", "abc", "agy_acp_server"), args: ["--uid="], cwd, env: { HOME: home, GEMINI_HOME: profile } });
@@ -163,6 +201,45 @@ linuxBox("the box plan", () => {
     expect(bwrapArgs(plan).join(" ")).not.toContain("--tmpfs /srv/omb");
   });
 
+  it("shows no path on the command line that is in the data folder or holds it, unless the caller named it", () => {
+    for (const { dataDir, home } of [{ dataDir: "/data/.openmausbot", home: "/data" }, { dataDir: "/srv/omb", home: "/home/maus" }]) {
+      const server = ["config.json", "sessions.json", "messages.db", "workspaces/other/MEMORY.md"].map((file) => join(dataDir, file));
+      const ask = (args: string[], ro: string[] = []) => planBox({ ...setup(), dataDir, home }, { command: "/bin/sh", args, cwd: join(dataDir, "task-workspaces", "b", "t"), env: {}, botId: "b", ro });
+      for (const args of [server, [dataDir], [`--model=${server[0]}`], [`@${server[0]}`], [join(dataDir, "..")], [join(dataDir, "workspaces", "..")], ["/srv", "/var"]]) {
+        const plan = ask(args);
+        for (const file of server) expect(visibleInBox(plan, file), `${dataDir}: ${args.join(" ")}`).toBe("none");
+      }
+      // A server whose program is in the bot's own folder still finds it: with the bot known its folder is there
+      // anyway, and without one (a configured server run for a chat) the file itself is shown, read-only.
+      expect(visibleInBox(ask([join(dataDir, "workspaces", "b", "tools", "server.js")]), join(dataDir, "workspaces", "b", "tools", "server.js"))).not.toBe("none");
+      const noBot = planBox({ ...setup(), dataDir, home }, { command: "python3", args: [join(dataDir, "workspaces", "b", "tools", "server.py")], env: {}, configured: true });
+      expect(visibleInBox(noBot, join(dataDir, "workspaces", "b", "tools", "server.py"))).toBe("ro");
+      expect(visibleInBox(noBot, join(dataDir, "config.json"))).toBe("none");
+      // Never another bot's for a box that has a bot, and never the folder of every bot.
+      expect(visibleInBox(ask([join(dataDir, "workspaces", "other", "MEMORY.md")]), join(dataDir, "workspaces", "other", "MEMORY.md"))).toBe("none");
+      for (const all of [join(dataDir, "workspaces"), join(dataDir, "task-workspaces")]) {
+        expect(visibleInBox(planBox({ ...setup(), dataDir, home }, { command: "ls", args: [all], env: {}, configured: true }), join(all, "other", "MEMORY.md"))).toBe("none");
+      }
+      expect(visibleInBox(ask(["--token", join(dataDir, "hook-tokens", "t", "token")], [join(dataDir, "hook-tokens", "t")]), join(dataDir, "hook-tokens", "t", "token"))).toBe("ro");
+      expect(visibleInBox(ask(["--mcp-config", "/tmp/omb-mcp-1/mcp.json"]), "/tmp/omb-mcp-1/mcp.json")).toBe("ro");
+      expect(visibleInBox(ask([]), join(dataDir, "bots", "b", "SOUL.md"))).toBe("ro");
+    }
+  });
+
+  it("makes nothing of the data folder writable for a configured server's environment, but the bot's own folders", () => {
+    const dataDir = "/data/.openmausbot";
+    const ask = (env: Record<string, string>, configured: boolean) => planBox({ ...setup(), dataDir, home: "/data" }, { command: "sh", args: [], cwd: join(dataDir, "task-workspaces", "b", "t"), env, botId: "b", configured });
+    for (const value of [join(dataDir, "config.json"), join(dataDir, "box"), dataDir, join(dataDir, "workspaces", "other"), "/"]) {
+      for (const name of ["XDG_CACHE_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "TMPDIR"]) {
+        const plan = ask({ [name]: value }, true);
+        for (const file of ["config.json", "box/harness.sock", "messages.db", "workspaces/other/MEMORY.md"]) expect(visibleInBox(plan, join(dataDir, file)), `${name}=${value}`).toBe("none");
+      }
+    }
+    expect(visibleInBox(ask({ XDG_CACHE_HOME: join(dataDir, "workspaces", "b", "cache") }, true), join(dataDir, "workspaces", "b", "cache", "x"))).toBe("rw");
+    // An engine OpenMausBot starts keeps the home it was given there.
+    expect(visibleInBox(ask({ CODEX_HOME: join(dataDir, "providers", "codex-1") }, false), join(dataDir, "providers", "codex-1", "auth.json"))).toBe("rw");
+  });
+
   it("each mutation opens exactly the hole it names", () => {
     const base = turn();
     const flips: Record<BoxMutation, (plan: ReturnType<typeof turn>) => boolean> = {
@@ -192,6 +269,6 @@ linuxBox("the box plan", () => {
     expect(taskWorkspaceIds("/data/projects/x", dataDir)).toBeNull();
     expect(taskWorkspaceIds(join(dataDir, "task-workspaces"), dataDir)).toBeNull();
     expect(taskWorkspaceIds(join(dataDir, "task-workspaces", "../../etc", "x"), dataDir)).toBeNull();
-    expect(argvPaths(["-p", "--mcp-config", "/tmp/a/mcp.json", "--settings=/tmp/b/s.json", "/", "relative/file", "--model", "x"])).toEqual(["/tmp/a/mcp.json", "/tmp/b/s.json"]);
+    expect(argvPaths(["-p", "--mcp-config", "/tmp/a/mcp.json", "--additional-mcp-config", "@/tmp/copilot/mcp.json", "--settings=/tmp/b/s.json", "/", "relative/file", "--model", "x"])).toEqual(["/tmp/a/mcp.json", "/tmp/copilot/mcp.json", "/tmp/b/s.json"]);
   });
 });

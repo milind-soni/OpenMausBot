@@ -16,7 +16,14 @@ export const OWN_PROFILE_UNAVAILABLE =
   "Computer control on this computer cannot attach to the person's own signed-in browser profile, and nothing the person can turn on changes that: do not retry strategy existing_profile, and never ask them to grant it or to start anything with a flag. For work on a website, use your own browser: if select_computer offers browser, select it and end your turn. The request continues there, in the person's own Chrome when this bot's browser profile is My Chrome, and fill_login can sign in there with the person's saved logins, 1Password included. With no browser of your own, use a cloud computer if select_computer offers one, or a connected app. Only when the task needs the person's own signed-in session and nothing else works, use their screen: launch_app with urls opens the page in their own browser; read it with get_window_state and act with click, type_text and press_key, and call request_sign_in when the site needs them to sign in. " +
   PLAIN_WORDS;
 
+/** On Omarchy, Cua's Hyprland plugin gives bots their own seats; Chromium and Electron bind only the person's seat, so
+ * background input to them is refused with `client_not_bound`. Web pages go through the bot's own browser instead. */
+export const WEB_PAGES_USE_BROWSER =
+  "This app's window does not take a bot's background input on this desktop: Chromium, Chrome and Electron apps only listen to the person's own mouse and keyboard. For a website, use your own browser: if select_computer offers browser, select it and end your turn. For a native app, act on an element from get_window_state with its element_token. Do not switch to delivery_mode \"foreground\" just to get around this; that takes the person's mouse and keyboard. " +
+  PLAIN_WORDS;
+
 const REFUSAL_CODE = "browser_consent_required";
+const NOT_BOUND = "client_not_bound";
 
 function isObject(value: unknown): value is JsonObject {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -29,17 +36,29 @@ function refusesOwnProfile(result: JsonObject): boolean {
   return code === REFUSAL_CODE && typeof message === "string" && message.includes("existing-profile");
 }
 
-/** One MCP stdio frame from the local driver; only an existing-profile refusal is parsed and changed. */
+function refusesUnboundClient(result: JsonObject): boolean {
+  const structured = result.structuredContent;
+  return isObject(structured) && structured.reason === NOT_BOUND;
+}
+
+/** One MCP stdio frame from the local driver; only an existing-profile refusal and an unbound-client refusal (a
+ * browser window on Omarchy) are parsed and changed. */
 export function localComputerResultLine(line: string): string {
-  if (!line.includes(REFUSAL_CODE)) return line;
+  if (!line.includes(REFUSAL_CODE) && !line.includes(NOT_BOUND)) return line;
   let frame: unknown;
   try {
     frame = JSON.parse(line);
   } catch {
     return line;
   }
-  if (!isObject(frame) || !isObject(frame.result) || !Array.isArray(frame.result.content) || !refusesOwnProfile(frame.result)) return line;
-  const content = [...frame.result.content, { type: "text", text: OWN_PROFILE_UNAVAILABLE }];
+  if (!isObject(frame) || !isObject(frame.result) || !Array.isArray(frame.result.content)) return line;
+  const guidance = refusesOwnProfile(frame.result)
+    ? OWN_PROFILE_UNAVAILABLE
+    : refusesUnboundClient(frame.result)
+      ? WEB_PAGES_USE_BROWSER
+      : null;
+  if (!guidance) return line;
+  const content = [...frame.result.content, { type: "text", text: guidance }];
   return JSON.stringify({ ...frame, result: { ...frame.result, content } });
 }
 

@@ -13,7 +13,7 @@ import { hostTimeout } from "./testing/host-timeout.ts";
 import { openSse, type SseRecorder } from "./testing/sse.ts";
 
 const STALLED = "No activity for 20 minutes — the routine was stopped";
-const SIGN_IN = "This bot's AI is signed out. Sign in again in Settings → Model providers.";
+const SIGN_IN = "This bot's AI is signed out. Sign in again in Settings → AI.";
 const ROUTINE_HEADER = '[Routine "Inbox brief" — do this now:]';
 
 let fixture: VerificationServer | undefined;
@@ -47,7 +47,7 @@ async function server(env: NodeJS.ProcessEnv = {}) {
   ].join("\n"), { mode: 0o700 });
   engine("happy");
   await api("PATCH", "/api/instances/claude", { cli: wrapper });
-  // Chief first makes the starter its team's Chief, which answers a teammate's failed run with a Team incidents turn of
+  // Chief first makes the starter its team's Chief, which answers a teammate's failed run with a Problems to look at turn of
   // its own on the same engine. Stepped down, what these runs tell the owner is theirs alone.
   const starter = (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.chiefOfStaff);
   await api("PATCH", `/api/bots/${starter.id}`, { chiefOfStaff: false });

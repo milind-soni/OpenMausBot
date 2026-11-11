@@ -47,6 +47,13 @@ describe("sidebar thread visibility", () => {
     expect(visibleSidebarThreads(rows, "8").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "7", "8", "9"]);
     expect(visibleSidebarThreads(rows, "8", "", [], true)).toEqual(rows);
   });
+
+  it("leaves a burst's parts to its card, unless one is open or needs the person", () => {
+    const openedBy = { botId: "b", name: "Bot", at: 1, burstId: "run-1" };
+    const parts = [{ threadId: "quiet", title: "Quiet", openedBy }, { threadId: "open", title: "Open", openedBy }, { threadId: "asks", title: "Asks", openedBy, unread: true }];
+    expect(visibleSidebarThreads(parts, "open").map((task) => task.threadId).sort()).toEqual(["asks", "open"]);
+    expect(visibleSidebarThreads(parts, "open", "", [], true)).toEqual(parts);
+  });
   it("searches folder names and historical thread titles without the recent-row limit", () => {
     expect(visibleSidebarThreads(tasks, "0", " RESEARCH ", [{ id: "research", name: "Research" }]).map((task) => task.threadId)).toEqual(["8", "9"]);
     expect(visibleSidebarThreads(tasks, "0", "thread 9").map((task) => task.threadId)).toEqual(["9"]);
@@ -322,7 +329,7 @@ describe("thread title direction", () => {
   it("renders the title with dir=auto and leaves the time a fixed column", () => {
     const arabic = "انسخ محتوى الذكاء الاصطناعي وصمم منشورات";
     const arabicClass = titleSpan(row(arabic), arabic);
-    const englishClass = titleSpan(row("New thread"), "New thread");
+    const englishClass = titleSpan(row("New thread"), "Untitled chat");
     const withByline = titleSpan(row("QA PR 245", { botId: "scout", name: "Scout", at: 1 }), "QA PR 245");
     for (const classes of [arabicClass, englishClass, withByline]) {
       expect(classes).toContain("min-w-0");
@@ -686,6 +693,18 @@ describe("Thread link", () => {
     expect(markup.indexOf("</button>")).toBeLessThan(markup.indexOf(">#42</a>"));
     expect(markup.indexOf(">#42</a>")).toBeLessThan(markup.indexOf("<time"));
   });
+
+  // The bot panel's taller rows align to the top; the time column is pushed down to the title line and the chip must be too.
+  it("lines the chip up with the title in the bot panel's taller rows", () => {
+    const now = Date.UTC(2026, 8, 25, 12, 0, 0);
+    const render = (panel: boolean) => renderToStaticMarkup(createElement(SidebarThreadRow, {
+      task: { threadId: "t", title: "Fix", updatedAt: now - 3_600_000, link: "https://github.com/o/r/pull/42" },
+      ownerId: "b", current: false, now, panel, preview: "Last line", onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
+    }));
+    const chipClass = (markup: string) => /<a [^>]*class="([^"]*)"[^>]*>#42<\/a>/.exec(markup)?.[1].split(" ") ?? [];
+    expect(chipClass(render(true))).toContain("mt-2.5");
+    expect(chipClass(render(false))).not.toContain("mt-2.5");
+  });
 });
 
 describe("helper threads a bot opened", () => {
@@ -693,22 +712,26 @@ describe("helper threads a bot opened", () => {
   const thread = (threadId: string, patch: Record<string, unknown> = {}) =>
     ({ threadId, title: threadId, createdAt: 1, updatedAt: 1, ...patch }) as any;
 
-  it("folds open bot-opened threads into a group and keeps the person's own threads", () => {
-    const tasks = [thread("mine"), thread("email", { openedBy: opener, busy: true }), thread("pricing", { openedBy: opener })];
+  it("folds idle bot-opened threads into a group and keeps the person's own threads", () => {
+    const tasks = [thread("mine"), thread("email", { openedBy: opener }), thread("pricing", { openedBy: opener })];
     const { own, helpers } = partitionHelperThreads(tasks, "mine");
     expect(own.map((task) => task.threadId)).toEqual(["mine"]);
     expect(helpers.map((task) => task.threadId)).toEqual(["email", "pricing"]);
   });
 
-  it("keeps a helper thread in view while it needs the person", () => {
+  it("keeps a helper thread in view while it needs the person or is doing something, as the phone lists it", () => {
     const tasks = [
       thread("open-now", { openedBy: opener }),
       thread("approval", { openedBy: opener, activity: "waiting-on-you" }),
       thread("reply", { openedBy: opener, unread: true }),
       thread("pinned", { openedBy: opener, pinned: true }),
+      thread("working", { openedBy: opener, busy: true }),
+      thread("thinking", { openedBy: opener, activity: "working" }),
+      thread("waiting", { openedBy: opener, waitingForTeammates: true }),
+      thread("queued", { openedBy: opener, queued: true }),
     ];
     const { own, helpers } = partitionHelperThreads(tasks, "open-now");
-    expect(own.map((task) => task.threadId)).toEqual(["open-now", "approval", "reply", "pinned"]);
+    expect(own.map((task) => task.threadId)).toEqual(["open-now", "approval", "reply", "pinned", "working", "thinking", "waiting", "queued"]);
     expect(helpers).toEqual([]);
   });
 

@@ -1,5 +1,13 @@
 import { redactSecretsInText } from "./redact.ts";
 import type { Message } from "./store.ts";
+import { toolResultPrefix } from "./tool-results.ts";
+
+export const UNTITLED_TASK = "New task";
+
+export function titleFromMessage(text: string): string {
+  const line = text.trim().split("\n")[0]!.trim();
+  return line.length > 48 ? `${toolResultPrefix(line, 47)}…` : line || UNTITLED_TASK;
+}
 
 export const TITLE_INPUT_MAX_CHARS = 1_500;
 const EXCERPT_MAX_MESSAGES = 12;

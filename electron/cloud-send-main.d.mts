@@ -8,7 +8,7 @@ export function installCloudSend(deps: {
   ipcMain: { handle(channel: string, handler: (...args: any[]) => unknown): void };
   cloudPage(event: unknown): "local" | "cloud" | null;
   server(): { postMessage(message: unknown): void } | null | undefined;
-  local(route: string, init?: { method?: string }): Promise<Response>;
+  local(route: string, init?: { method?: string; timeoutMs?: number }): Promise<Response>;
   home(): CloudTarget | null;
   cookieFetch: typeof fetch;
   reconnect(origin: string): Promise<boolean>;
@@ -17,15 +17,20 @@ export function installCloudSend(deps: {
   window(): { isDestroyed(): boolean; webContents: { send(channel: string, value: unknown): void; mainFrame: { url: string } } } | null;
   localOrigin(): string;
   fetch?: typeof fetch;
+  t?(key: string, params?: Record<string, string | number>): string;
   engineWaitMs?: number;
+  patience?: { stallMs?: number; waits?: number[]; blips?: number[] };
   space?: { disk(): unknown; grow(sizeGb: number): Promise<unknown> };
   move?: () => { view(): unknown; seen(): unknown; retry(): Promise<unknown> } | null;
+  botMove?: () => { view(): unknown; seen(): unknown } | null;
   /** The one session every pass of the move uses (move-session.mjs). */
   moveSession?: { open(target: CloudTarget): Promise<CloudSendSession> };
 }): {
   receive(proc: unknown, message: unknown): boolean;
-  move(options?: { final?: boolean }): Promise<CloudSendOutcome>;
-  check(): Promise<CloudMoveCheck>;
+  /** This computer's server's private port, asked as a send asks it: another move's sends share it. */
+  handoff(what: { kind: string; [key: string]: unknown }): Promise<any>;
+  move(options?: { final?: boolean; scope?: string }): Promise<CloudSendOutcome>;
+  check(options?: { scope?: string; stopped?(): boolean }): Promise<CloudMoveCheck>;
   switches(): Record<string, boolean>;
   snapshot(): CloudSendSnapshot;
   publish(): void;

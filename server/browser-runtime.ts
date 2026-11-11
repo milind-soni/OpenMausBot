@@ -1,11 +1,12 @@
 import { killCliTree, spawnCli } from "./procs.ts";
 import { scrubHeldSecrets } from "../shared/redact.ts";
-import { DEFAULT_BROWSER_RESULT_BUDGET, describePageChange, OBSERVE_PAGE_SCRIPT, parsePageState, READ_OPEN_PAGE_ONLY, readsAroundBrowser, scrubBrowserResult, shapeBrowserToolResult, slimBrowserToolList, stripHarnessOwnedArguments, type PageState } from "./browser-tool-shape.ts";
+import { DEFAULT_BROWSER_RESULT_BUDGET, describePageChange, OBSERVE_PAGE_SCRIPT, parsePageState, READ_OPEN_PAGE_ONLY, readsAroundBrowser, scrubBrowserResult, shapeBrowserToolResult, slimBrowserToolList, stripHarnessOwnedArguments, verifiedBrowserNavigation, type PageState } from "./browser-tool-shape.ts";
 import { BrowserLanes } from "./browser-lane.ts";
 import { PageSizes, type PageSize } from "./browser-page-size.ts";
 import { SECRET_ON_PAGE, SecretHolds, type SecretHold } from "./browser-secret-hold.ts";
 import type { BrowserSteps, StepCall, StepContext } from "./browser-steps.ts";
 import { HARNESS_CALL_BUDGET_MS } from "./harness-budget.ts";
+import { launchSettingsKey } from "./browser-launch-key.ts";
 
 export interface BrowserSpawnSpec {
   command: string;
@@ -54,6 +55,7 @@ const LANE_BUSY = "Your previous browser call is still running; wait for it to f
 export const BROWSER_CALL_DEFAULTS = { requestTimeoutMs: 120_000, laneWaitMs: 30_000, callBudgetMs: HARNESS_CALL_BUDGET_MS, followUpReserveMs: 15_000 } as const;
 const RESTART_COST = "a restart closes every tab and loses page state such as form input";
 const LATE = Symbol("late");
+
 const PAGE_ACTIONS: ReadonlySet<string> = new Set([
   "agent_browser_click", "agent_browser_fill", "agent_browser_type", "agent_browser_press",
   "agent_browser_check", "agent_browser_uncheck", "agent_browser_select", BROWSER_UPLOAD_TOOL, BROWSER_HOVER_TOOL,
@@ -153,7 +155,7 @@ class BrowserClient {
     this.onClose = onClose;
     this.onRequestTimeout = onRequestTimeout;
     this.child = spawnCli(spec.command, spec.args, {
-      env: browserRuntimeEnv(spec.env), stdio: ["pipe", "pipe", "pipe"], shell: false,
+      env: browserRuntimeEnv(spec.env), stdio: ["pipe", "pipe", "pipe"], shell: false, botWork: true,
     });
     this.child.stderr.resume();
     this.child.stdout.on("data", (chunk: Buffer) => this.read(chunk));
@@ -606,9 +608,7 @@ export class BrowserRuntime {
           beforeDispatch?.();
           const navigation = result as { content?: unknown[]; structuredContent?: unknown };
           const page = observation as { content?: unknown[]; isError?: boolean } | null;
-          const observed = page?.isError !== true && Array.isArray(page?.content) && page.content.some((item) =>
-            item && typeof item === "object" && (item as { type?: unknown }).type === "text" &&
-            typeof (item as { text?: unknown }).text === "string" && (item as { text: string }).text.trim().length > 0);
+          const observed = verifiedBrowserNavigation(args, observation);
           result = {
             content: [
               ...(Array.isArray(navigation.content) ? navigation.content : []),
@@ -667,7 +667,7 @@ export class BrowserRuntime {
   }
 
   private connect(session: string, spec: BrowserSpawnSpec): ClientEntry {
-    const key = JSON.stringify([spec.command, spec.args, Object.entries(spec.env).sort(([a], [b]) => a.localeCompare(b))]);
+    const key = launchSettingsKey(spec);
     const existing = this.clients.get(session);
     if (existing && existing.key !== key) throw new Error("Browser launch settings changed. Close the browser before reconnecting.");
     if (existing) return existing;

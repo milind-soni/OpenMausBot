@@ -43,10 +43,12 @@ const DONE_ASSIGNMENT = {
   children: [], inbox: [],
 };
 let lastAssignmentStatusUrl: string | null = null;
+let lastModelsUrl: string | undefined;
 let assignmentStatusResponse: unknown = DONE_ASSIGNMENT;
 let assignmentStatusCode = 200;
 let lastThreadBody: any = null;
 let threadCalls = 0;
+let threadsList: unknown = { threads: [] };
 let threadResponse: unknown = { threadId: "thread-new", title: "QA: PR #1", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
 let computerRequests: { method: string; url: string; body: unknown }[] = [];
 let computerResponse: unknown = { current: "local", available: ["local", "vm"] };
@@ -257,6 +259,17 @@ beforeAll(async () => {
       lastAssignmentStatusUrl = req.url;
       res.writeHead(assignmentStatusCode, { "content-type": "application/json" });
       res.end(JSON.stringify(assignmentStatusResponse));
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/models")) {
+      lastModelsUrl = req.url;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ current: { instanceId: "claude", model: "claude-sonnet-5" }, engines: [{ instanceId: "codex", name: "Codex", models: ["gpt-5.5"] }] }));
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/threads?")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(threadsList));
       return;
     }
     if (req.method === "POST" && req.url === "/api/internal/threads") {
@@ -628,11 +641,14 @@ describe("agents-proxy MCP surface", () => {
       "coordinate_bots",
       "assignment_status",
       "list_bots",
+      "usage_limits",
       "list_rooms",
       "select_computer",
       "list_threads",
       "close_thread",
       "start_thread",
+      "burst",
+      "list_models",
       "vm_exec",
       "attach_file",
       "show_widget",
@@ -651,6 +667,7 @@ describe("agents-proxy MCP surface", () => {
       "fill_login",
       "decide",
       "extract",
+      "message_person",
       "report_bug",
       "memory_update",
       "retry_thread",
@@ -659,12 +676,15 @@ describe("agents-proxy MCP surface", () => {
       "trigger_info",
       "trigger",
       "delete_trigger",
+      "wait_until",
+      "list_waits",
+      "cancel_wait",
       "propose_profile",
       "propose_model",
       "propose_team_memory",
       "skills_list",
       "skill_manage",
-      "add_mcp_server",
+      "mcp_server",
     ]);
     const tool = (name: string) => list.result.tools.find((entry: { name: string }) => entry.name === name);
     const coordinate = tool("coordinate_bots");
@@ -672,8 +692,8 @@ describe("agents-proxy MCP surface", () => {
     expect(coordinate.description).toContain("consult true asks a question");
     expect(coordinate.description).toContain('reply "none" is a one-way notice');
     expect(coordinate.description).toContain("never call assignment_status in the same turn");
-    expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when"]);
-    expect(coordinate.inputSchema.properties.thread.enum).toEqual(["standing", "new"]);
+    expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when", "answers"]);
+    expect(coordinate.inputSchema.properties.thread).toEqual({ type: "string", description: expect.stringContaining("new: a new thread on the teammate") });
     expect(coordinate.inputSchema.properties.reply.enum).toEqual(["resume", "none"]);
     expect(coordinate.inputSchema.properties.consult.type).toBe("boolean");
     const status = tool("assignment_status");
@@ -691,7 +711,8 @@ describe("agents-proxy MCP surface", () => {
     expect(credential.description).toContain("on a secure card in the app or a QR-paired phone, never in chat");
     expect(credential.description).toContain("onePasswordToken: a 1Password service account token");
     expect(credential.description).toContain("You never see the value");
-    expect(Object.keys(credential.inputSchema.properties)).toEqual(["credential_id", "label", "reason", "placeholder", "delivery"]);
+    expect(Object.keys(credential.inputSchema.properties)).toEqual(["credential_id", "address", "label", "reason", "placeholder", "delivery", "replace"]);
+    expect(credential.inputSchema.properties.address.description).toMatch(/^credential_id email only/);
     expect(credential.inputSchema.required).toBeUndefined();
   });
 
@@ -745,9 +766,9 @@ describe("agents-proxy MCP surface", () => {
     const readNames = [
       "tool_result_read",
       "list_shared_computers",
-      "assignment_status", "list_bots", "list_rooms", "list_threads",
-      "list_team_setup",
-      "session_search", "trigger_info", "skills_list",
+      "assignment_status", "list_bots", "usage_limits", "list_rooms", "list_threads",
+      "list_models", "list_team_setup",
+      "session_search", "trigger_info", "list_waits", "skills_list",
     ];
     expect(list.result.tools.filter((tool: any) => tool.annotations?.readOnlyHint)
       .map((tool: any) => tool.name)).toEqual(readNames);
@@ -953,12 +974,11 @@ describe("agents-proxy MCP surface", () => {
     expect(postCalls).toBe(before + 4);
   });
 
-  it("start_thread: a job on yourself, with the one bot_id it accepts, and the teammate case pointed at coordinate_bots", async () => {
+  it("start_thread: a job on yourself, naming no bot, and the teammate case pointed at coordinate_bots", async () => {
     const list = await rpc("tools/list");
     const start = list.result.tools.find((tool: { name: string }) => tool.name === "start_thread");
     expect(start.inputSchema.required).toEqual(["title", "message"]);
-    expect(Object.keys(start.inputSchema.properties)).toEqual(["title", "message", "bot_id", "folder"]);
-    expect(start.inputSchema.properties.bot_id).toEqual({ type: "string", enum: ["bot-asker"], description: "Leave out, or use your own bot ID. For teammates use coordinate_bots." });
+    expect(Object.keys(start.inputSchema.properties)).toEqual(["title", "message", "folder", "model_selection", "report_back"]);
     expect(start.description).toContain("Open a separate job on yourself");
     expect(start.description).toContain('use coordinate_bots for teammates (thread "new" opens a fresh thread on them)');
     expect(start.description).toContain("do not retry it");
@@ -980,6 +1000,34 @@ describe("agents-proxy MCP surface", () => {
       expect(lastThreadBody).toEqual({
         fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", title: "QA: PR #9", message: "Review the login fix.", depth: 0, toBotId: "bot-helper",
       });
+    } finally {
+      threadResponse = previous;
+    }
+  });
+
+  it("list_models forwards search and hands back the server's menu as is", async () => {
+    const res = await callTool("list_models", { search: " gpt 5.5 " });
+    expect(res.result.isError).toBeFalsy();
+    expect(lastModelsUrl).toBe("/api/internal/models?search=gpt%205.5");
+    expect(JSON.parse(res.result.content[0].text)).toMatchObject({ engines: [{ instanceId: "codex", models: ["gpt-5.5"] }] });
+    await callTool("list_models", {});
+    expect(lastModelsUrl).toBe("/api/internal/models");
+  });
+
+  it("start_thread on another model forwards the model and report_back, and says the result resumes the opener", async () => {
+    const previous = threadResponse;
+    threadResponse = { receipts: [{ botId: "bot-asker", outcome: "queued", detail: "handed to the coordinator", requestId: "asg-own-1", threadId: "thread-own" }],
+      self: true, reportBack: true, title: "Review: GPT", botId: "bot-asker", threadId: "thread-own", requestId: "asg-own-1" };
+    try {
+      const modelSelection = { instanceId: "codex", model: "gpt-5.5", effort: "high" };
+      const res = await callTool("start_thread", { title: "Review: GPT", message: "Review the diff.", model_selection: modelSelection, report_back: true });
+      const text = res.result.content[0].text;
+      expect(res.result.isError).toBeFalsy();
+      expect(text).toContain("Opened thread #Review: GPT on yourself [thread id: thread-own].");
+      expect(text).toContain("its result comes back to this conversation and resumes you automatically (assignment id: asg-own-1)");
+      expect(text).toContain("finish your turn");
+      expect(lastThreadBody).toEqual({ fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", title: "Review: GPT", message: "Review the diff.",
+        depth: 0, modelSelection, reportBack: true });
     } finally {
       threadResponse = previous;
     }
@@ -1155,7 +1203,7 @@ describe("agents-proxy MCP surface", () => {
   it("asks for any other secret by its name, reason and delivery, never its value", async () => {
     const res = await callTool("request_credential", { label: "Stripe secret key", reason: "To create test charges.", placeholder: "sk_test_…", delivery: "file" });
     expect(res.result.isError).toBeFalsy();
-    expect(res.result.content[0].text).toMatch(/^A secure card for OpenCode API key is ready in OpenMausBot, on the computer and on a freshly QR-paired phone\. End this turn now/u);
+    expect(res.result.content[0].text).toMatch(/^A secure card for OpenCode API key is now in this conversation, in the app and on a QR-paired phone, and the person was notified\. If they can't find it, tell them it is in this conversation, and the notification opens it\. End this turn now/u);
     expect(lastCredentialBody).toEqual({
       fromBotId: "bot-asker",
       fromThreadId: "thread-asker-routine",
@@ -1163,7 +1211,10 @@ describe("agents-proxy MCP surface", () => {
       reason: "To create test charges.",
       placeholder: "sk_test_…",
       delivery: "file",
+      replace: false,
     });
+    await callTool("request_credential", { label: "Stripe secret key", reason: "The saved key was refused.", delivery: "ref", replace: true });
+    expect(lastCredentialBody).toMatchObject({ label: "Stripe secret key", delivery: "ref", replace: true });
   });
 
   it("rejects credential ids outside the fixed allowlist locally", async () => {
@@ -1233,6 +1284,19 @@ describe("agents-proxy MCP surface", () => {
     assignmentStatusResponse = { outstanding: [] };
     expect((await callTool("assignment_status", {})).result.content[0].text).toBe("Nothing outstanding: no assignment of this conversation is still open.");
     assignmentStatusResponse = DONE_ASSIGNMENT;
+  });
+
+  it("assignment_status and list_threads say why a queued handoff has not started, with its handoff id", async () => {
+    const waiting = "waiting for a free thread slot: Ops is already running 3 of 3 threads at once";
+    assignmentStatusResponse = { outstanding: [{ id: "asg-q", botId: "bot-ops", botName: "Ops", status: "queued", waiting }] };
+    threadsList = { threads: [{ threadId: "t-q", botId: "bot-ops", botName: "Ops", title: "Export CSV", state: "queued", waiting, delegationId: "asg-q", own: false, unread: false, openedAt: 1 }] };
+    try {
+      expect((await callTool("assignment_status", {})).result.content[0].text).toContain(`- asg-q → @Ops: queued, not started yet: ${waiting}`);
+      expect((await callTool("list_threads", {})).result.content[0].text).toContain(`#Export CSV (on @Ops, queued: ${waiting}) [thread id: t-q] [delegation id: asg-q]`);
+    } finally {
+      assignmentStatusResponse = DONE_ASSIGNMENT;
+      threadsList = { threads: [] };
+    }
   });
 
   it("assignment_status with an id renders status, outcome, the result head and the assignment's own hand-offs", async () => {
@@ -1979,12 +2043,37 @@ describe("agents-proxy MCP surface", () => {
     expect(res.error.code).toBe(-32602);
   });
 
+  it("finds the enabled skills that fit a task, with where to read each, and never a disabled one", async () => {
+    const before = skillsResponse;
+    const invoiceFile = "/data/imported-skills/invoice-reminders/SKILL.md";
+    skillsResponse = {
+      skills: [
+        ...(before as { skills: unknown[] }).skills,
+        { name: "invoice-reminders", description: "Chases unpaid invoices.", enabled: true, listed: false, editable: false, file: invoiceFile, origin: "imported" },
+        { name: "expense-audit", description: "UNREVIEWED expense audit.", enabled: false, editable: false, origin: "imported" },
+      ],
+      staged: [],
+    };
+    try {
+      const listed = await callTool("skills_list", {});
+      expect(listed.result.content[0].text).toContain("invoice-reminders (enabled, imported, not in your prompt: search to read it)");
+      const found = (await callTool("skills_list", { query: "chase unpaid invoices and expenses" })).result.content[0].text as string;
+      expect(found).toContain(`- invoice-reminders: Chases unpaid invoices. Read ${JSON.stringify(invoiceFile)}.`);
+      expect(found).toContain("- learned-expense: PRIVATE LEARNED INSTRUCTIONS");
+      expect(found).not.toContain("UNREVIEWED");
+      expect(found).not.toContain("file-expense");
+      expect((await callTool("skills_list", { query: "deploy a preview" })).result.content[0].text).toContain("No enabled skill matches");
+    } finally {
+      skillsResponse = before;
+    }
+  });
+
   it("lists, views, and stages skills without enabling them", async () => {
     const list = await rpc("tools/list");
     const manage = list.result.tools.find((t: { name: string }) => t.name === "skill_manage");
     expect(JSON.stringify(manage.inputSchema)).not.toMatch(/"(oneOf|anyOf|allOf|const|format)":/);
-    expect(manage.inputSchema.required).toEqual(["action", "skill_md", "source"]);
-    expect(manage.inputSchema.properties.action.enum).toEqual(["create", "update"]);
+    expect(manage.inputSchema.required).toEqual(["action"]);
+    expect(manage.inputSchema.properties.action.enum).toEqual(["create", "update", "enable", "disable", "delete"]);
 
     const listed = await callTool("skills_list", {});
     expect(listed.result.content[0].text).toContain("file-expense");
@@ -2051,6 +2140,28 @@ describe("agents-proxy MCP surface", () => {
     });
     expect(missingTarget.result.isError).toBe(true);
     expect(missingTarget.result.content[0].text).toContain("needs skill_name");
+    expect(lastSkillStageBody).toBeNull();
+
+    const missingSkillMd = await callTool("skill_manage", { action: "create", source: "conversation" });
+    expect(missingSkillMd.result.isError).toBe(true);
+    expect(missingSkillMd.result.content[0].text).toContain("needs skill_md");
+    expect(lastSkillStageBody).toBeNull();
+  });
+
+  it("sends turning a skill on, off or deleting it to the skill stage route", async () => {
+    for (const [action, verb] of [["enable", "turn on"], ["disable", "turn off"], ["delete", "delete"]] as const) {
+      lastSkillStageBody = null;
+      const switched = await callTool("skill_manage", { action, skill_name: " learned-expense " });
+      expect(lastSkillStageBody).toEqual({ fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", action, skill_name: "learned-expense" });
+      expect(switched.result.isError).toBeFalsy();
+      expect(switched.result.content[0].text).toContain(`to ${verb} skill “learned-expense”`);
+      expect(switched.result.content[0].text).toContain("wait for the decision");
+    }
+
+    lastSkillStageBody = null;
+    const unnamed = await callTool("skill_manage", { action: "delete" });
+    expect(unnamed.result.isError).toBe(true);
+    expect(unnamed.result.content[0].text).toContain("needs skill_name to delete a skill");
     expect(lastSkillStageBody).toBeNull();
   });
 });
@@ -2258,11 +2369,13 @@ describe("coordinate_bots arguments", () => {
     });
     await callTool("coordinate_bots", { bot_ids: ["bot-helper"], message: "notice", reply: "none", doneWhen: "  ", reason: " " });
     expect(lastCoordinateBody).toEqual({ botIds: ["bot-helper"], message: "notice", reply: "none" });
+    await callTool("coordinate_bots", { bot_ids: ["bot-helper"], message: "add a chart", thread: "8d3a9fd7-f6bb-4e7b-9e36-153c6e520728" });
+    expect(lastCoordinateBody).toEqual({ botIds: ["bot-helper"], message: "add a chart", thread: "8d3a9fd7-f6bb-4e7b-9e36-153c6e520728" });
   });
 
   it("refuses a thread, reply or consult value outside the contract before contacting the server", async () => {
     for (const args of [
-      { bot_ids: ["bot-helper"], message: "m", thread: "fresh" },
+      { bot_ids: ["bot-helper"], message: "m", thread: "a fresh one" },
       { bot_ids: ["bot-helper"], message: "m", reply: "poll" },
       { bot_ids: ["bot-helper"], message: "m", consult: "yes" },
       { bot_ids: ["bot-helper"], message: "m", done_when: ["x"] },
@@ -2270,7 +2383,7 @@ describe("coordinate_bots arguments", () => {
       lastCoordinateBody = null;
       const res = await callTool("coordinate_bots", args);
       expect(res.result.isError, JSON.stringify(args)).toBe(true);
-      expect(res.result.content[0].text).toContain('thread ("standing" or "new"), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false) and done_when are optional');
+      expect(res.result.content[0].text).toContain('thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when and answers are optional');
       expect(lastCoordinateBody).toBeNull();
     }
   });
@@ -2296,7 +2409,7 @@ describe("coordinate_bots arguments", () => {
     });
     expect(res.result.isError).toBe(true);
     const text = res.result.content[0].text;
-    for (const field of ["bot_ids", "message", "group_id", "reason", "rework", "thread", "reply", "consult", "in_my_folder", "done_when"]) {
+    for (const field of ["bot_ids", "message", "group_id", "reason", "rework", "thread", "reply", "consult", "in_my_folder", "done_when", "answers"]) {
       expect(text).toContain(field);
     }
     expect(text).toContain("botIds");
@@ -2349,7 +2462,7 @@ describe("tool bridge", () => {
   /** The main child's switches: a Chief with skills and shared computers. */
   const CHIEF = { OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1", OMB_CHIEF_OF_STAFF: "1", OMB_COMPUTER_SELECTION: "1" };
   const CHIEF_ONLY = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
-  const HOT = ["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "request_credential", "request_sign_in", "fill_login", "memory_update"];
+  const HOT = ["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "request_credential", "request_sign_in", "fill_login", "message_person", "memory_update"];
   let chief: Rpc;
   let plain: Rpc;
   let off: Rpc;

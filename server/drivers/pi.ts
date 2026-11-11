@@ -1,3 +1,5 @@
+import { piModelId } from "./pi-model-id.ts";
+import { RuntimeNoticeError, runtimeErrorText } from "./runtime-notice-error.ts";
 // The pi coding agent (@earendil-works/pi-coding-agent) over its own stdio JSON-RPC mode
 // (`pi --mode rpc --no-session`), not ACP. pi is BYOK and reads ~/.pi/agent/auth.json itself, so
 // this driver holds no key; resumeCursor is pi's `sessionFile` (switch_session).
@@ -6,9 +8,10 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { PROVIDER_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "../config.ts";
-import { openStartupModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
+import { openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { augmentedPath } from "../env-path.ts";
-import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
+import { describeSpawnFailure, execCliBoxed, killCliTree, spawnCli } from "../procs.ts";
+import { instanceEnvNames } from "../bot-box/env.ts";
 import {
   deletePromptSplitReceipt,
   promptHalves,
@@ -31,7 +34,6 @@ import type {
   RuntimeEventListener,
   SendTurnInput,
   SteerOutcome,
-  TurnImageInput,
 } from "../contracts.ts";
 import { EFFORT_LEVELS } from "../../shared/wire.ts";
 import { newEventId, newId } from "../contracts.ts";
@@ -46,8 +48,10 @@ import {
 import { appendNative } from "./native.ts";
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
 import { buildMcpServers } from "./pi-mcp-servers.ts";
+import { noticeFailure } from "../chat-notices.ts";
 
-import { decodePiFrame, PiRpcChunks, piLineReader } from "./pi-rpc.ts";
+import { decodePiFrame, PiRpcChunks, piLineReader, readPiPromptImages } from "./pi-rpc.ts";
+import { PiRunUsage, type PiUsage, type TurnUsage } from "./pi-usage.ts";
 export { decodePiFrame, PiRpcChunks, piLineReader } from "./pi-rpc.ts";
 
 const DRIVER_KIND = "piAgent";
@@ -62,24 +66,9 @@ const PI_AGENT_END_GRACE_MS = 60_000;
 /** A prompt sent before pi answers new_session or switch_session runs on a session pi then replaces, so the turn waits
  *  for that answer however long it takes, and says so in the chat after this long. */
 const PI_SESSION_SLOW_MS = 20_000;
-const PI_SESSION_SLOW = "Pi is taking longer than usual to start this conversation's session. The turn goes on when Pi answers. Press Stop to cancel it.";
 
 /** pi answered success:false: an explicit refusal from a live runtime, not a transport failure. */
 class PiRpcRefusalError extends Error {}
-
-type PiPromptImage = {
-  type: "image";
-  data: string;
-  mimeType: TurnImageInput["mime"];
-};
-
-function readPiPromptImages(turn: SendTurnInput): PiPromptImage[] {
-  return (turn.images ?? []).map((image) => ({
-    type: "image",
-    data: readFileSync(image.path).toString("base64"),
-    mimeType: image.mime,
-  }));
-}
 
 /** Native logs go into bug reports: keep the RPC shape and size, never image bytes. */
 function piNativeLogMessage(message: Record<string, unknown>): Record<string, unknown> {
@@ -106,11 +95,6 @@ interface PiModelEntry {
   name?: string;
 }
 
-function piModelId(model: unknown): string | null {
-  const entry = model as Partial<PiModelEntry> | null | undefined;
-  return typeof entry?.provider === "string" && entry.provider && typeof entry.id === "string" && entry.id
-    ? `${entry.provider}/${entry.id}` : null;
-}
 interface PiModelsResponse {
   type: "response";
   command: "get_available_models";
@@ -274,11 +258,14 @@ function readPiDefaultModel(env: Record<string, string | undefined>): string {
   }
 }
 
+/** Security: Pi loads its extensions from ~/.pi/agent on every start, so while the bot box is on its model list runs in
+ * the box, as a bot's turn does. `allowEnv`: the keys the instance's own settings put in `env`. */
 export async function fetchPiModels(
   cli: string,
   env: Record<string, string | undefined>,
+  allowEnv: readonly string[] = [],
 ): Promise<ModelCatalog> {
-  const child = spawnCli(cli, PI_ARGS, { stdio: ["pipe", "pipe", "pipe"], env });
+  const child = spawnCli(cli, PI_ARGS, { stdio: ["pipe", "pipe", "pipe"], env, box: { allowEnv } });
   return new Promise((resolve) => {
     let done = false;
     const fallbackDefault = readPiDefaultModel(env);
@@ -315,14 +302,10 @@ export async function fetchPiModels(
 export async function updatePiModelCatalog(
   cli: string,
   env: Record<string, string | undefined>,
+  allowEnv: readonly string[] = [],
 ): Promise<boolean> {
   return new Promise((resolve) => {
-    execCli(
-      cli,
-      PI_MODEL_UPDATE_ARGS,
-      { env, timeout: 60_000, maxBuffer: 1024 * 1024 },
-      (error) => resolve(!error),
-    );
+    execCliBoxed(cli, PI_MODEL_UPDATE_ARGS, { env, timeout: 60_000, maxBuffer: 1024 * 1024, box: { allowEnv } }, (error) => resolve(!error));
   });
 }
 
@@ -357,8 +340,8 @@ interface PiEvent {
   args?: unknown;
   result?: unknown;
   isError?: boolean;
-  message?: { stopReason?: string; errorMessage?: string; usage?: { input?: number; output?: number } };
-  usage?: { input?: number; output?: number };
+  message?: { role?: string; stopReason?: string; errorMessage?: string; usage?: PiUsage };
+  usage?: PiUsage;
   isTerminal?: boolean;
   willRetry?: boolean;
   id?: string;
@@ -397,10 +380,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
     const catalogEnv = piEnvironment({ ...process.env, ...input.environment });
     let models = EMPTY;
     const readModels = async () => {
-      let base = models;
+      let base = models, listed = false;
       try {
-        const resolved = await fetchPiModels(config.cli, catalogEnv);
-        if (resolved.options.length) base = resolved;
+        const resolved = await fetchPiModels(config.cli, catalogEnv, instanceEnvNames(input.environment, catalogEnv));
+        if (resolved.options.length) [base, listed] = [resolved, true];
       } catch {}
       try {
         const next = await applyPiLocalCatalog(base, catalogEnv);
@@ -408,10 +391,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       } catch {
         if (base.options.length) models = base;
       }
-      try { writeStartupModelCache(instanceId, models); } catch {}
+      try { if (!listed) unconfirmedModelCatalog(models); writeStartupModelCache(instanceId, models); } catch {}
     };
     const refreshModels = async () => {
-      await updatePiModelCatalog(config.cli, catalogEnv);
+      await updatePiModelCatalog(config.cli, catalogEnv, instanceEnvNames(input.environment, catalogEnv));
       await readModels();
     };
     const startupModelRefresh = (await openStartupModelCatalog({
@@ -467,8 +450,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       let settled = false;
       let completion: Promise<void> | null = null;
       let endStopReason: string | undefined;
-      let endUsage: { input?: number; output?: number } | undefined;
-      let completionOutcome: { ok: boolean; stopReason: string; usage?: { input: number; output: number } } | null = null;
+      const runUsage = new PiRunUsage();
+      let completionOutcome: { ok: boolean; stopReason: string; cost?: number; usage?: TurnUsage } | null = null;
       let endErrorMessage: string | undefined;
       let agentEndTimer: ReturnType<typeof setTimeout> | null = null;
       const images = readPiPromptImages(turn);
@@ -550,11 +533,12 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
       };
 
-      const settle = (ok: boolean, stopReason?: string | null, usage = endUsage): Promise<void> => {
+      const settle = (ok: boolean, stopReason?: string | null, usage = runUsage.usage): Promise<void> => {
         if (completion) return completion;
         const outcome = completionOutcome ??= {
           ok, stopReason: stopReason ?? (ok ? "end_turn" : "failed"),
-          ...(usage ? { usage: { input: usage.input ?? 0, output: usage.output ?? 0 } } : {}),
+          ...(usage ? { usage } : {}),
+          ...(runUsage.cost === undefined ? {} : { cost: runUsage.cost }),
         };
         settled = true;
         if (agentEndTimer) {
@@ -597,10 +581,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             type: "runtime.error",
             message: String(endErrorMessage ?? "pi turn failed").slice(0, 2_000),
           });
-          settle(false, "failed", endUsage);
+          settle(false, "failed", runUsage.usage);
           return;
         }
-        settle(true, sr === "cancelled" || sr === "aborted" ? "cancelled" : "end_turn", endUsage);
+        settle(true, sr === "cancelled" || sr === "aborted" ? "cancelled" : "end_turn", runUsage.usage);
       };
 
       const stop = () => {
@@ -746,13 +730,16 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           case "auto_compaction_end": {
             if (agentEndTimer) clearTimeout(agentEndTimer);
             agentEndTimer = null;
-            // pi compaction (manual or automatic) can absorb the turn that carried the standing prompt.
-            if (sessionReady && sessionFile) {
+            if (sessionReady && sessionFile) { // pi compaction (manual or automatic) can absorb the turn that carried the standing prompt
               compactionObserved = true;
               deletePromptSplitReceipt("pi", JSON.stringify([threadId, sessionFile]));
             }
+            if (evt.type.endsWith("compaction_end") && typeof (evt as { result?: { summary?: unknown } }).result?.summary === "string" && /\S/.test((evt as { result: { summary: string } }).result.summary) && !(evt as { aborted?: boolean }).aborted && !(evt as { errorMessage?: string }).errorMessage) { flushAssistantText(); emit({ ...base(threadId, turnId), type: "context.compacted" }); }
             return;
           }
+          case "message_end":
+            if (evt.message?.role === "assistant") runUsage.add(evt.message.usage);
+            return;
           case "turn_end":
           {
             // A killed child can still flush one buffered frame after the turn settled.
@@ -760,8 +747,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             if (agentEndTimer) clearTimeout(agentEndTimer);
             agentEndTimer = null;
             const sr = evt.message?.stopReason;
-            const usage = evt.usage ?? evt.message?.usage;
-            if (usage) endUsage = { input: (endUsage?.input ?? 0) + (usage.input ?? 0), output: (endUsage?.output ?? 0) + (usage.output ?? 0) };
+            runUsage.endTurn(evt.usage ?? evt.message?.usage);
             // toolUse: pi ran a tool and auto-continues; the next turn_end carries the outcome.
             if (sr === "toolUse" || sr === "tool_use" || sr === "tool_calls") return;
             endStopReason = sr;
@@ -834,7 +820,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         const command = sessionPath ? "switch_session" : "new_session";
         const hsPromise = awaitResponse(command, Infinity);
         send(sessionPath ? { type: "switch_session", sessionPath } : { type: "new_session" });
-        const slow = setTimeout(() => emit({ ...base(threadId, turnId), type: "runtime.notice", message: PI_SESSION_SLOW }), PI_SESSION_SLOW_MS);
+        const slow = setTimeout(() => emit({ ...base(threadId, turnId), type: "runtime.notice", ...noticeFailure("chat.notice.piSessionSlow") }), PI_SESSION_SLOW_MS);
         const hs = (await hsPromise.finally(() => clearTimeout(slow))) as { sessionFile?: string; sessionId?: string } | undefined;
         if (hs?.sessionFile) sessionFile = hs.sessionFile;
         sessionId = sessionFile ?? hs?.sessionId ?? null;
@@ -851,10 +837,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           const modelPromise = awaitResponse("set_model");
           send({ type: "set_model", provider: chosen.provider, modelId: chosen.modelId });
           confirmedModel = piModelId(await modelPromise);
-          if (!confirmedModel) throw new Error("Pi did not confirm the selected model");
+          if (!confirmedModel) throw new RuntimeNoticeError("Pi did not confirm the selected model", "chat.notice.piModelNotConfirmed");
         } catch (error) {
           if (!settled) {
-            emit({ ...base(threadId, turnId), type: "runtime.error", message: String((error as Error).message) });
+            emit({ ...base(threadId, turnId), type: "runtime.error", message: String((error as Error).message), text: runtimeErrorText(error) });
             await settle(false);
           }
           return { turnId };
@@ -999,7 +985,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           phoneMcp: true,
           customMcp: true,
           browserMcp: true,
-          dataMcp: true, highlevelMcp: true, deviceMcp: true,
+          dataMcp: true, emailMcp: true, deviceMcp: true,
           localComputerMcp: true,
           images: true,
           nativeImageInput: true,

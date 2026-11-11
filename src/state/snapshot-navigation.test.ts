@@ -87,7 +87,7 @@ beforeEach(async () => {
     if (path.startsWith("/api/groups/room/tasks/room-b")) return json({ group: room("b", "fresh-room-b") });
     if (path === "/api/bots/bot/messages" || path === "/api/groups/room/messages") sends.push(JSON.parse(String(init?.body)));
     if (path === "/api/instances") return json({ instances: [] });
-    if (path === "/api/routines") return json({ routines: [], runs: [] });
+    if (path.startsWith("/api/routines?since=")) return json({ routines: [], runs: [] });
     if (path === "/api/webhooks") return json({ webhooks: [], attempts: [] });
     return json({});
   });
@@ -149,6 +149,17 @@ describe("navigation while a reconnect snapshot is in flight", () => {
     switchResponse.resolve(json({ bot: bot("b", "fresh-b") }));
     await vi.waitFor(() => expect(shown().threadId).toBe("b"));
     expect(shown().messages.map(message => message.id)).toEqual(["fresh-b"]);
+  });
+
+  it("ends a pending switch whose response carries no bot", async () => {
+    await resync();
+    switchResponse = deferred();
+    flushSync(() => dispatch({ type: "switchTask", botId: "bot", threadId: "b" }));
+    await applySnapshot();
+    expect(shown().switchingTo).toBe("b");
+    switchResponse.resolve(json({}));
+    await vi.waitFor(() => expect(shown().switchingTo).toBeUndefined());
+    expect(shown().threadId).toBe("a");
   });
 
   it("keeps the room thread opened after the request started", async () => {

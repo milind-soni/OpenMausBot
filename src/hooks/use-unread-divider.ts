@@ -9,7 +9,8 @@ export function useUnreadDivider({ threadId, messages, following }: {
   following: boolean;
 }): { messageId: string | null; fading: boolean } {
   const { state, dispatch } = useStore();
-  const messageId = state.unreadDivider?.threadId === threadId ? state.unreadDivider.messageId : null;
+  const divider = state.unreadDivider;
+  const messageId = divider && divider.threadId === threadId ? divider.messageId : null;
   const newestOwnId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i]!.role === "user" && !peerLine(messages[i]!)) return messages[i]!.id;

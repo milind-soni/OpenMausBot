@@ -3,7 +3,7 @@ export type FontId = (typeof FONT_IDS)[number];
 
 export const DEFAULT_FONT: FontId = "skin";
 
-const KEY = "omb-font";
+export const FONT_KEY = "omb-font";
 
 function isFontId(value: unknown): value is FontId {
   return FONT_IDS.includes(value as FontId);
@@ -19,7 +19,7 @@ function getStore(): Storage | undefined {
 
 export function readFont(): FontId {
   try {
-    const stored = getStore()?.getItem(KEY);
+    const stored = getStore()?.getItem(FONT_KEY);
     return isFontId(stored) ? stored : DEFAULT_FONT;
   } catch {
     return DEFAULT_FONT;
@@ -30,7 +30,7 @@ export function applyFont(id: FontId): void {
   if (id === DEFAULT_FONT) delete document.documentElement.dataset.font;
   else document.documentElement.dataset.font = id;
   try {
-    getStore()?.setItem(KEY, id);
+    getStore()?.setItem(FONT_KEY, id);
   } catch {
   }
 }

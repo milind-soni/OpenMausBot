@@ -7,6 +7,7 @@ export const PASSKEY_HELP_URL = "https://docs.openmausbot.com/docs/troubleshooti
 export const FEEDBACK_URL = "https://discord.gg/9Wb8MEpXRs";
 export const RELEASES_URL = `${APP_REPOSITORY}/releases`;
 export const PRICING_URL = "https://www.openmausbot.com/pricing";
+export const CLOUD_PLAN_URL = "https://cloud.openmausbot.com/cloud";
 export function withSource(url: string, source: string): string {
   const target = new URL(url);
   target.searchParams.set("src", source);
@@ -36,4 +37,10 @@ export async function openExternalLink(url: string): Promise<void> {
     return;
   }
   window.open(url, "_blank", "noopener,noreferrer");
+}
+
+/** A browser hands a mailto: link to its own mail app; the desktop app's window may not navigate to one, so main opens it. */
+export async function openEmailDraft(url: string): Promise<void> {
+  if (window.ogb) return openExternalLink(url);
+  window.location.href = url;
 }

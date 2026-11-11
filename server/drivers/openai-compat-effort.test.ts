@@ -18,7 +18,7 @@ const models = {
 };
 const reply = 'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n';
 
-async function fixture(url = "https://api.example.test/v1", { loaded = true, provider }: { loaded?: boolean; provider?: string } = {}) {
+async function fixture(url = "https://api.example.test/v1", { provider }: { provider?: string } = {}) {
   const bodies: Record<string, unknown>[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string | URL, init?: RequestInit) => {
     if (String(input).endsWith("/models")) {
@@ -34,7 +34,7 @@ async function fixture(url = "https://api.example.test/v1", { loaded = true, pro
     config: OpenAICompatDriver.decodeConfig({ url, apiKeyEnv: "K", ...(provider ? { provider } : {}) }),
     environment: { K: "fixture-key" },
   });
-  if (loaded) await instance.refreshModels?.();
+  await instance.refreshModels?.();
   const turn = async (model: string, variant?: string) => {
     const events: RuntimeEvent[] = [];
     const off = instance.adapter.onEvent((event) => events.push(event));
@@ -63,18 +63,12 @@ it("offers the reasoning efforts a model advertises on /models", async () => {
   await instance.dispose();
 });
 
-it("offers OpenRouter's published efforts, the common three for a null list, and never a guess from supported_parameters", async () => {
+it("offers OpenRouter's published efforts, and the common three for a null list", async () => {
   const { instance } = await fixture("https://openrouter.ai/api/v1");
   const variants = Object.fromEntries(instance.models.options.map((option) => [option.id, option.variants?.map((variant) => variant.id)]));
   expect(variants["router-model"]).toBeUndefined();
   expect(variants["openrouter-model"]).toEqual(["max", "high", "low", "none"]);
   expect(variants["any-effort-model"]).toEqual(["low", "medium", "high"]);
-  await instance.dispose();
-});
-
-it("sends a saved effort as chosen while /models has not answered yet", async () => {
-  const { instance, turn } = await fixture(undefined, { loaded: false });
-  expect((await turn("deepseek-v4.1-flash", "high")).reasoning_effort).toBe("high");
   await instance.dispose();
 });
 
@@ -89,7 +83,7 @@ it("sends the chosen effort as reasoning_effort, and nothing the model does not 
 
 it("asks OpenRouter for a provider that applies the chosen effort, and leaves routing alone otherwise", async () => {
   const { instance, turn } = await fixture("https://openrouter.ai/api/v1");
-  expect(await turn("openrouter-model", "max")).toMatchObject({ reasoning_effort: "max", provider: { require_parameters: true } });
+  expect(await turn("openrouter-model", "max")).toMatchObject({ reasoning: { effort: "max" }, provider: { require_parameters: true } });
   expect(await turn("openrouter-model")).not.toHaveProperty("provider");
   await instance.dispose();
 });

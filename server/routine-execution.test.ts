@@ -26,10 +26,10 @@ describe("foreignPaths", () => {
 
 describe("composeExecutionPrompt", () => {
   it("heads scheduled and manual runs with what to do now, and leaves webhook runs to their own boundary", () => {
-    expect(composeExecutionPrompt({ name: "Daily [brief]\n", trigger: "schedule", runOn: "maus" }, "Write it", undefined))
-      .toBe('[Scheduled routine "Daily brief" — do this now:]\nWrite it');
-    expect(composeExecutionPrompt({ name: "Daily", trigger: "startup", runOn: "maus" }, "Write it", undefined))
-      .toBe('[Routine "Daily" — do this now:]\nWrite it');
-    expect(composeExecutionPrompt({ name: "Hook", trigger: "webhook", runOn: "maus" }, "Payload block", undefined)).toBe("Payload block");
+    expect(composeExecutionPrompt({ id: "routine-id", name: "Daily [brief]\n", trigger: "schedule", runOn: "maus" }, "Write it", undefined))
+      .toBe('[Scheduled routine "Daily brief" — do this now:]\nTrigger id: routine-id\nWrite it');
+    expect(composeExecutionPrompt({ id: "routine-id", name: "Daily", trigger: "startup", runOn: "maus" }, "Write it", undefined))
+      .toBe('[Routine "Daily" — do this now:]\nTrigger id: routine-id\nWrite it');
+    expect(composeExecutionPrompt({ id: "hook-id", name: "Hook", trigger: "webhook", runOn: "maus" }, "Payload block", undefined)).toBe("Payload block");
   });
 });

@@ -39,7 +39,7 @@ vi.mock("./EnginesSettings", () => ({ EnginesSettings: marker("engines") }));
 vi.mock("./DecisionModelSettings", () => ({ DecisionModelSettings: marker("decisionModel") }));
 vi.mock("./RemoteComputerSection", () => ({ RemoteComputerSection: marker("companion") }));
 vi.mock("./CustomDomainSettings", () => ({ CustomDomainSettings: () => null }));
-vi.mock("./CompanionSection", () => ({ CompanionSection: () => null }));
+vi.mock("./PhoneDevicesSection", () => ({ PhoneDevicesSection: () => null }));
 vi.mock("./ServerPairingCard", () => ({ ServerPairingCard: () => null }));
 vi.mock("./ConnectedWorkspacesSettings", () => ({ ConnectedWorkspacesSettings: marker("desktopWorkspaces") }));
 vi.mock("./LocalComputerSection", () => ({ LocalComputerSection: marker("computer") }));
@@ -49,8 +49,8 @@ vi.mock("./PeopleSection", () => ({ PeopleSection: marker("people") }));
 vi.mock("./ActivitySection", () => ({ ActivitySection: marker("activity") }));
 vi.mock("./UsageSection", () => ({ UsageSection: marker("usage") }));
 vi.mock("./ImportSettings", () => ({ ImportSettings: marker("import") }));
-vi.mock("./LoginsSettings", () => ({ LoginsSettings: marker("logins") }));
-vi.mock("./BrowserSettingsRows", () => ({ BuiltInBrowserRow: marker("browser") }));
+vi.mock("./VaultSettings", () => ({ VaultSettings: marker("logins") }));
+vi.mock("./BrowserSettingsRows", () => ({ BuiltInBrowserRow: marker("browser"), ServerSitesRow: () => null }));
 
 const { SettingsModal } = await import("./SettingsModal");
 
@@ -61,9 +61,9 @@ function publish() {
   for (const listener of Array.from(fx.listeners)) listener();
 }
 
-const search = () => host.querySelector<HTMLInputElement>("[data-settings-search]")!;
-const result = (id: string) => host.querySelector<HTMLButtonElement>(`[data-settings-key-result="${id}"]`);
-const row = (id: string) => host.querySelector<HTMLElement>(`[data-key-row="${id}"]`)!;
+const search = () => document.querySelector<HTMLInputElement>("[data-settings-search]")!;
+const result = (id: string) => document.querySelector<HTMLButtonElement>(`[data-settings-key-result="${id}"]`);
+const row = (id: string) => document.querySelector<HTMLElement>(`[data-key-row="${id}"]`)!;
 
 function type(value: string) {
   flushSync(() => {
@@ -119,7 +119,7 @@ describe("searching Settings for a key", () => {
   it("says plainly when nothing matches", () => {
     flushSync(() => root.render(createElement(SettingsModal)));
     type("zzzz");
-    expect(host.textContent).toContain("Nothing matches “zzzz”");
-    expect(host.querySelector("[data-settings-key-result]")).toBeNull();
+    expect(document.body.textContent).toContain("Nothing matches “zzzz”");
+    expect(document.querySelector("[data-settings-key-result]")).toBeNull();
   });
 });

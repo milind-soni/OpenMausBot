@@ -9,9 +9,10 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
-import { HALLOWEEN_BODIES, type HalloweenBody, type HalloweenBodyId } from "../../shared/halloween-bodies";
+import { CARVED_BODIES, type CarvedBody, type CarvedBodyId } from "../../shared/carved-bodies";
 import type { CursorAvatarHandle } from "./CursorAvatar";
-import { usePrefersReducedMotion } from "./mascot-clock";
+import { mascotClock, usePrefersReducedMotion } from "./mascot-clock";
+import { frameFloorMs, nextFrameAt } from "./mascot-motion";
 import { mascotFaceInk, type MascotFaceColor } from "../../shared/bot-avatar";
 
 /** Where the face looks and how it feels. */
@@ -42,7 +43,7 @@ export type CarvedGeometry = {
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 /** Every attribute the face needs for a pose. */
-export function carvedGeometry(body: HalloweenBody, p: CarvedPose): CarvedGeometry {
+export function carvedGeometry(body: CarvedBody, p: CarvedPose): CarvedGeometry {
   const e = body.eyes;
   const ax = Math.abs(p.gx);
   const lean = -p.gx * 9;
@@ -134,7 +135,7 @@ export function vivid(hex: string): string {
   return `#${[ch(h + 1 / 3), ch(h), ch(h - 1 / 3)].map((v) => Math.round(v * 255).toString(16).padStart(2, "0")).join("")}`;
 }
 
-export function carvedFills(body: HalloweenBody, color: MausColor): { body: string; accent: string } {
+export function carvedFills(body: CarvedBody, color: MausColor): { body: string; accent: string } {
   const accent = vivid(MAUS_COLORS[color] ?? MAUS_COLORS.green);
   if (body.paint === "bone") return { body: body.bone ?? "#f1ede6", accent };
   if (body.paint === "pale") return { body: mix(MAUS_COLORS[color] ?? MAUS_COLORS.green, "#ffffff", 0.86), accent };
@@ -142,7 +143,7 @@ export function carvedFills(body: HalloweenBody, color: MausColor): { body: stri
 }
 
 export type CarvedAvatarProps = {
-  body: HalloweenBodyId;
+  body: CarvedBodyId;
   color: MausColor;
   faceColor?: MascotFaceColor | null;
   size?: number;
@@ -159,7 +160,7 @@ function CarvedAvatarComponent(
   { body: bodyId, color, faceColor, size = 44, state = "idle", motion = "none", motionKey = 0, gaze, trackPointer = true, animated = true, label }: CarvedAvatarProps,
   ref: React.Ref<CursorAvatarHandle>,
 ) {
-  const body = HALLOWEEN_BODIES[bodyId];
+  const body = CARVED_BODIES[bodyId];
   const faceInk = mascotFaceInk(faceColor);
   const uid = useId().replace(/:/g, "");
   const reduced = usePrefersReducedMotion();
@@ -214,7 +215,6 @@ function CarvedAvatarComponent(
 
   useEffect(() => {
     if (!live) return;
-    let frame = 0;
     let last = performance.now();
     let glanceAt = last + 900 + Math.random() * 2600;
     let blinkAt = last + 1500 + Math.random() * 3500;
@@ -251,11 +251,11 @@ function CarvedAvatarComponent(
       const blink = since >= 1 ? 0 : since < 0.45 ? since / 0.45 : 1 - (since - 0.45) / 0.55;
       p.shut += (Math.max(want.shut, blink) - p.shut) * (blink > 0 ? 1 : k(10));
       paint(p);
-      frame = requestAnimationFrame(step);
+      return nextFrameAt(now, frameFloorMs(size));
     };
-    frame = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(frame);
-  }, [body, live]);
+    const ticket = mascotClock().add(step, group.current?.ownerSVGElement);
+    return () => ticket.remove();
+  }, [body, live, size]);
 
   const onPointerMove = (event: ReactPointerEvent<HTMLSpanElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();

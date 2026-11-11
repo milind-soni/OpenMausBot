@@ -173,6 +173,11 @@ export class CompanionViewerRelay {
     this.#upgrades.clear();
   }
 
+  /** Whether rewriteJoinResponse may change this path's answer, which it does to the whole parsed body. */
+  rewritesJoin(path: string): boolean {
+    return BOT_JOIN_PATH.test(path);
+  }
+
   rewriteJoinResponse(path: string, value: unknown, deviceId?: string, controlLeaseId?: string | null): unknown {
     const join = BOT_JOIN_PATH.exec(path);
     const botId = join?.[1];

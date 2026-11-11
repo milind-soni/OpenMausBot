@@ -180,6 +180,26 @@ const ja: FirstHourWords = {
   overnight: (done) => `あなたが寝ている間に、${done}をしました。`,
 };
 
+const ko: FirstHourWords = {
+  greeting: (name, bot) => `안녕하세요${name ? `, ${name}님` : ""}! 저는 비서실장 ${bot}입니다. 클라우드에 있어서 컴퓨터가 꺼져 있어도 계속 일해요. 어떤 일을 덜어 드릴까요?`,
+  connect: "오늘 확인할 일을 살펴볼 수 있게 Gmail과 Google 캘린더를 연결해 주세요. 각각 한 번만 로그인하면 돼요. 저는 읽고 초안만 써요. 허락 없이 보내거나, 수락하거나, 삭제하지 않아요.",
+  connected: "연결됐어요. 지금은 첫 살펴보기를 하지 못했어요. 계속 지켜보다가 확인할 일이 생기면 알려 드릴게요.",
+  briefOn: "매일 아침 8시에 확인할 일을 정리한 브리핑을 보내 드릴게요.",
+  phoneTitle: "휴대폰에서도 만나요",
+  phoneBody: "아침 브리핑과 확인할 일이 휴대폰으로 와요.",
+  phoneButton: "휴대폰 연결",
+  firstLookReady: "첫 살펴보기가 준비됐어요",
+  firstBriefReady: "첫 브리핑이 준비됐어요",
+  sorted: (n) => `이메일 ${n}개 정리`,
+  drafted: (n) => `답장 초안 ${n}개 작성`,
+  prepped: (n) => `회의 ${n}개 준비`,
+  routines: (n) => `루틴 ${n}개 실행`,
+  list: (items) => items.join(", "),
+  time: (minutes) => { const { unit, n } = roundedTime(minutes); return unit === "minutes" ? `약 ${n}분` : `약 ${n}시간`; },
+  recap: (done, time) => `지금까지 한 일: ${done}. ${time}을 아꼈어요.`,
+  overnight: (done) => `주무시는 동안 한 일: ${done}.`,
+};
+
 const zh: FirstHourWords = {
   greeting: (name, bot) => `你好${name ? `，${name}` : ""}！我是 ${bot}，你的幕僚长。我在你的 Cloud 上，所以电脑关机时我也在工作。你想让我帮你分担什么？`,
   connect: "为了看清今天有哪些事需要你，请连接 Gmail 和 Google 日历。各登录一次即可。我只读取内容并写草稿：没有你的同意，不会发送、接受或删除任何东西。",
@@ -343,7 +363,7 @@ const tr: FirstHourWords = {
   overnight: (done) => `Sen uyurken ${done}.`,
 };
 
-const WORDS = { en, de, es, fr, hi, it, ja, pl, "pt-br": ptBr, ru, tr, uk, vi, zh, "zh-tw": zhTw };
+const WORDS = { en, de, es, fr, hi, it, ja, ko, pl, "pt-br": ptBr, ru, tr, uk, vi, zh, "zh-tw": zhTw };
 
 export const FIRST_HOUR_LANGUAGES = Object.keys(WORDS);
 export const firstHourWords = (language: string | undefined): FirstHourWords => byLanguage(WORDS, language);

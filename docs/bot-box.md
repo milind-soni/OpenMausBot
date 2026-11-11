@@ -13,13 +13,17 @@ its database, its settings, other bots' folders and other turns' processes are n
 | `HOME`, read-write | The engines' own logins and settings (`~/.claude`, `~/.codex`, `~/.grok`). On a Team Cloud this is the turn's audience's engine home instead, with the team's engine sign-in files bound into it, and the server's HOME is not there at all ([team-cloud.md](team-cloud.md#engine-homes)) |
 | the data folder (`~/.openmausbot`), **an empty private folder** | `messages.db`, `config.json`, logins, the server's sockets, every other bot's folders are not there |
 | put back inside it: the turn's working folder and the bot's own folder (`workspaces/<bot>`), read-write | What the turn works on, and the bot's memory and skills |
-| put back: this turn's permission socket and the files its command line names (MCP config, system prompt), read-only | What the driver made for this one process |
+| put back: this turn's permission socket (the engine's question and approval helper reaches the server through it), and, read-only, the conversation's own hook token folder (the hook helper's bearer, renewed each turn) and the files its command line names (MCP config, system prompt) | What the driver made for this one process |
 | private `/tmp`, `/var/tmp`, `/run`, `/dev`, `/proc` | Its own PID namespace: other turns' processes do not exist for it |
+| `/sys/devices/system/cpu/possible` and `online`, read-only; nothing else of `/sys` | The machine's CPU count. Programs built with TCMalloc (Google's Antigravity runtime) stop themselves at start without it (exit 134) |
 | a network namespace with loopback only | Two loopback ports are bridged to unix sockets from outside (below); nothing else on the machine's loopback is reachable, and there is no route out |
 
 The environment is an allow-list (`server/bot-box/env.ts`): the engine's own settings and keys, the harness capability
-tokens and a few names a shell expects. Every `OMB_CLOUD_*` setting, the server's own placement (`OMB_DATA_DIR`,
-`OMB_PORT`) and the workspace credentials are refused whatever a driver passed.
+tokens and a few names a shell expects. Of OpenMausBot's own `OMB_*` variables only those a bot's engine, hooks and MCP
+proxies read pass (`BOX_ENV_OMB_NAMES`); every other one an operator sets on the server, such as `OMB_SIGNIN_SMTP_URL`,
+stays out. Every `OMB_CLOUD_*` setting, the server's own placement (`OMB_DATA_DIR`, `OMB_PORT`), the CLI's session
+token and server address (`OPENMAUSBOT_TOKEN`, `OPENMAUSBOT_URL`) and the workspace credentials are refused whatever
+a driver passed.
 
 ## The two gates
 
@@ -34,6 +38,15 @@ tokens and a few names a shell expects. Every `OMB_CLOUD_*` setting, the server'
 
 A box with the host's network (`net: "shared"`, for a browser whose Chrome already goes through its own gate) has
 neither bridge.
+
+## The sign-in relay
+
+An engine that signs in through a callback on `127.0.0.1` (Antigravity's Google sign-in) listens on the box's own
+loopback, which the server cannot reach. That box alone gets one more unix socket (`server/bot-box/relay.ts`), bound in
+at `/run/omb/relay.sock`: the in-box Node bridge dials out to it and keeps one connection waiting, and when someone
+pastes the redirect from another computer the server writes the callback's port on that connection and sends the
+request through it. Only the server ever chooses the port, the box reaches nothing new on the host, and the server never
+connects to a path inside the box.
 
 ## When it is on
 
@@ -56,6 +69,8 @@ checks it guards.
 
 ## What it does not do yet
 
+- **Local VM (Docker) computer use.** The computer MCP talks to the Local VM over the host's Docker socket. The box does not expose that socket (mounting it would be root-equivalent on the host), so with the bot box on a Local VM turn fails early with a clear message instead of "MCP server exited". Use this computer, a Cloud computer, or turn the box off for Local VM work.
+
 - The engines' subscription logins (`~/.claude`, `~/.codex`) are in the box, because the engine needs them. API keys
   stay in the environment until the credential broker (T0b) replaces them with per-turn tokens.
 - The box runs as the server's own user inside a user namespace; a separate Linux user per bot needs a privileged
@@ -75,13 +90,21 @@ drops whatever credential header the client sent, adds the real key, and forward
 (the base URL the server had, or the provider's default); the box cannot choose the upstream. A URL MCP server's
 headers ride the same way (`server/bot-box/broker-mcp.ts`): the turn's server list carries
 `http://127.0.0.1:18080/b/<token>/mcp-<name>` with no headers, and that token is kept for the conversation's later
-turns while the servers are the same, so a long-lived engine process keeps its MCP sessions. A request for the grant
+turns while the servers are the same, so a long-lived engine process keeps its MCP sessions. A URL server the engine
+reports as failed when it started gets the conversation a new token on its next turn, so the engine starts again and
+reconnects; the chat says the server didn't connect and that it connects again on the next message. A request for the grant
 itself goes to the upstream exactly as it was given (a server at `/mcp` is reached at `/mcp`, never `/mcp/`, which a
 Cloudflare Worker answers with 404), anything below it below that address, with the client's query beside the
-upstream's own. Connected apps (Composio,
-HighLevel) were already behind the harness (`/api/internal/connectors/*` with a per-turn bearer) and stay there.
+upstream's own. MCP Settings → **Test** reaches a URL server the same way where turns are boxed
+(`server/bot-box/broker-probe.ts`): a grant made like a turn's, through the broker's socket, revoked when the test
+ends. A server that answers directly but not through the broker fails the test with "Your bots can't reach this
+server", never "Connected", and says the fault is ours. A tool call a URL server refuses with HTTP 401 is answered by the
+broker as a failed tool result that names the server and what to do (`server/bot-box/broker-mcp-refusal.ts`): passed through,
+the 401 starts the engine's own sign-in, which cannot work because the broker drops any `Authorization` the engine sends, and
+Claude Code then says only "Error dialing <address>", since the address holds a token. Connected apps (Composio) were already behind the harness
+(`/api/internal/connectors/*` with a per-turn bearer) and stay there.
 
-A key whose CLI takes no base URL from the environment (xAI, Mistral, Groq, Cerebras, MiniMax, Kimi, Cursor, Factory,
+A key whose CLI takes no base URL from the environment (xAI, Mistral, Groq, Greenference, ModelGo, Cerebras, MiniMax, Kimi, Cursor, Factory,
 Cline, OpenCode, OpenRouter's own variable) stays raw in that box, and the report names it under `broker.unbrokered`,
 so the gap is visible. The self-check adds six broker checks (29 in all): the key is nowhere in the box's environment
 or files, the base URL is the broker, a call with the token reaches the upstream with the real key, a wrong token is
@@ -94,10 +117,10 @@ or files, the base URL is the broker, a call with the token reaches the upstream
 | Mount namespace (bubblewrap) | every boxed process | reading the server's data folder, other bots' folders, other turns' files in `/tmp`, `/.fly`; writing anywhere but its own folders | reading HOME's engine logins (the engine's own identity); a path a driver puts back on purpose |
 | PID namespace | every boxed process | seeing, reading the environment of, or signalling another turn's or the server's processes | nothing inside the same box |
 | Network namespace + the two gates | every boxed process with its own network | reaching this machine's other listeners, the local network, link-local, metadata, Fly's private network; any route out except the egress gate; any server route except `/api/internal/*` | what the harness routes allow with a valid per-turn bearer; a public destination |
-| Environment allow-list | every boxed process | `OMB_CLOUD_*`, the server's placement, workspace credentials, any unlisted name | the engines' own settings |
+| Environment allow-list | every boxed process | `OMB_CLOUD_*`, the server's placement, workspace credentials, any `OMB_*` setting a boxed process does not read, any unlisted name | the engines' own settings |
 | Credential broker (T0b) | every boxed process with its own network | holding a provider key or an MCP header; using a token after its process or conversation ends; choosing the upstream | keys with no base-URL setting (named in the report); subscription logins |
 | seccomp filter (T0c) | every boxed process on x86-64 | 34 system calls that only reach the kernel's attack surface: mount family, kernel modules, bpf, perf, userfaultfd, the kernel keyring, `open_by_handle_at`, `setns`, kexec, reboot, swap, clock setting, I/O ports (EPERM); a process of another architecture (killed) | anything an engine, shell, git, npm, python or Chrome uses: all allowed |
-| `hidepid=invisible` on the host's /proc (T0c) | the whole machine, set by the root supervisor at boot | a `maus` process outside a box (the browser engine, a helper) listing or reading root's processes | `maus` processes seeing each other; a box has its own /proc anyway |
+| `hidepid=invisible` on the host's /proc (T0c) | the whole machine, set by the root supervisor at boot, which then starts itself again through `setpriv` without CAP_SYS_ADMIN and CAP_SETPCAP (an own server's connector grants those two only for that remount, and only to an image that drops them) | a `maus` process outside a box (the browser engine, a helper) listing or reading root's processes | `maus` processes seeing each other; a box has its own /proc anyway |
 | `/.fly` root-only (T0c) | the whole machine | a `maus` process reaching Fly's local API socket | nothing else |
 
 Not built, and why: a **separate Linux user per bot**. The server runs as `maus` under a root supervisor and cannot

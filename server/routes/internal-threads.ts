@@ -1,8 +1,9 @@
 import { chiefTidies } from "../chief-of-staff.ts";
-import type { Coordinator } from "../coordinator.ts";
+import type { Coordinator, HandoffView } from "../coordinator.ts";
 import { reachablePeers } from "../peer-roster.ts";
 import type { BotRecord, Store, TaskRecord } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+import { conversationLanguage, serverLine } from "../server-lines.ts";
 
 type ThreadState = "running" | "waiting-on-you" | "queued" | "idle" | "closed";
 
@@ -10,13 +11,15 @@ interface ThreadRow {
   threadId: string; botId: string; botName: string; title: string;
   state: ThreadState;
   unread: boolean; openedAt: number; delegationId?: string; own: boolean;
+  /** Why a queued handoff hasn't started (host/queued-reason.ts). */
+  waiting?: string;
   openedBy?: string;
 }
 
 /** Only dispatch inside the internal capability gate: `from` and `fromThreadId` come from the caller's capability. */
 export function createInternalThreadRoutes(deps: {
   store: Pick<Store, "bot" | "bots" | "tasks" | "taskByThread" | "appendMessage" | "patchTask" | "setTaskClosedBy">;
-  coordinator: Pick<Coordinator, "awaitingAnswer" | "parkedDirect" | "activeDirect">;
+  coordinator: Pick<Coordinator, "awaitingAnswer" | "parkedDirect" | "activeDirect" | "active">;
   from: BotRecord;
   fromThreadId: string;
   ownsThread(botId: string, threadId: string): boolean;
@@ -24,6 +27,8 @@ export function createInternalThreadRoutes(deps: {
   shown(threadId: string): boolean;
   threadBusy(botId: string, threadId: string): boolean;
   queuedThreadPosition(botId: string, threadId: string): number | null;
+  /** `showTitle`: the caller is the receiver, so its own busy threads it may see can be named. */
+  queuedReason(node: HandoffView, showTitle?: (threadId: string) => boolean): string;
 }): RouteHandler {
   const { store, coordinator, from, fromThreadId } = deps;
   return async ({ res, path, method, json }) => {
@@ -42,12 +47,18 @@ export function createInternalThreadRoutes(deps: {
         if (task.closedBy) return "closed" as const;
         return "idle" as const;
       };
+      // A queued handoff says why it waits and which handoff it is, so a bot can tell the person and match a report.
+      const queued = (bot: BotRecord, task: TaskRecord, state: ThreadState): Pick<ThreadRow, "waiting" | "delegationId"> => {
+        const node = state === "queued" ? coordinator.active().find((n) => n.threadId === task.threadId && n.botId === bot.id && !n.groupId && n.status === "queued") : undefined;
+        return node ? { waiting: deps.queuedReason(node, bot.id === from.id ? deps.shown : undefined), delegationId: node.id } : {};
+      };
       for (const task of store.tasks(from.id)) {
         if (!deps.shown(task.threadId)) continue;
+        const state = stateOf(from, task);
         rows.push({
           threadId: task.threadId, botId: from.id, botName: from.name, title: task.title,
-          state: stateOf(from, task), unread: task.unread === true, openedAt: task.openedBy?.at ?? task.createdAt,
-          delegationId: task.openedBy?.delegationId, own: true,
+          state, unread: task.unread === true, openedAt: task.openedBy?.at ?? task.createdAt,
+          delegationId: task.openedBy?.delegationId, own: true, ...queued(from, task, state),
         });
       }
       for (const peer of reachablePeers(store.bots, from)) {
@@ -56,10 +67,11 @@ export function createInternalThreadRoutes(deps: {
           if (!opener || !deps.shown(task.threadId)) continue;
           const mine = opener.botId === from.id;
           if (!mine && !chiefTidies(from, task, store.bot(opener.botId), peer)) continue;
+          const state = stateOf(peer, task);
           rows.push({
             threadId: task.threadId, botId: peer.id, botName: peer.name, title: task.title,
-            state: stateOf(peer, task), unread: task.unread === true, openedAt: opener.at,
-            delegationId: opener.delegationId, own: false,
+            state, unread: task.unread === true, openedAt: opener.at,
+            delegationId: opener.delegationId, own: false, ...queued(peer, task, state),
             ...(mine ? {} : { openedBy: opener.name }),
           });
         }
@@ -94,7 +106,7 @@ export function createInternalThreadRoutes(deps: {
       role: "bot",
       kind: "activity",
       from: { botId: from.id, name: from.name, color: from.color },
-      tool: { name: `Closed by @${from.name}`, ok: true },
+      tool: { name: serverLine(conversationLanguage(threadId), "server.teammates.closedBy", { bot: from.name }), ok: true },
     });
     if (task.unread) store.patchTask(owner.id, threadId, { unread: false });
     store.setTaskClosedBy(owner.id, threadId, { botId: from.id, name: from.name, at: Date.now() });

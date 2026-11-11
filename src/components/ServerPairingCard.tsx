@@ -6,12 +6,13 @@ import { copyText, type CopyFeedback } from "@/lib/copy-text";
 import { api } from "@/state/store";
 import { isOwnerOrAdmin, readSessionState, type SessionState } from "../lib/session";
 import { readMembership } from "../lib/membership";
-import { lastSeen, minutesLeft } from "../lib/pairing-time";
+import { codeUntil, lastSeen } from "../lib/pairing-time";
 import { revealPhonePairing } from "../lib/phone-pairing";
 import { Card, SettingRow, SIMPLE_CARD } from "./SettingsPrimitives";
 import { Select } from "./Select";
 import { cn } from "@/lib/cn";
 import { TeamPhoneCard } from "./TeamPhoneCard";
+import { ComputerNameRow } from "./ComputerNameRow";
 
 export interface PairingOffer {
   id: string;
@@ -49,9 +50,10 @@ export function shownDevices(devices: PairedDevice[], cloudHome: boolean): Paire
 const button = "ui-button ui-button-primary";
 const quiet = "ui-button";
 
-export function ServerPairingCard({ initialSession = null, initialPairingCodes = true, cloudHome = false, focusRequest = 0, team, simple = false }: { initialSession?: SessionState | null; initialPairingCodes?: boolean; cloudHome?: boolean; focusRequest?: number; team?: string; simple?: boolean }) {
+export function ServerPairingCard({ initialSession = null, initialPairingCodes = true, cloudHome = false, focusRequest = 0, team, teamPhoneBlocked = null, simple = false, reveal = true }: { initialSession?: SessionState | null; initialPairingCodes?: boolean; cloudHome?: boolean; focusRequest?: number; team?: string; teamPhoneBlocked?: string | null; simple?: boolean; /** False where another pairing flow owns the page's focus. */ reveal?: boolean }) {
   const [session, setSession] = useState<SessionState | null>(initialSession);
   const [pairingCodes, setPairingCodes] = useState(initialPairingCodes);
+  const [computerName, setComputerName] = useState<string | null>(null);
   const [scope, setScope] = useState<"admin" | "client">("admin");
   const [offer, setOffer] = useState<PairingOffer | null>(null);
   const [devices, setDevices] = useState<PairedDevice[]>([]);
@@ -78,7 +80,10 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       setSession(state);
       if (canPairDevices(state)) void loadDevices();
       if (state.kind === "loopback" || state.kind === "session") {
-        void api("/api/config").then((config) => setPairingCodes(readMembership(config).pairingCodes)).catch(() => {});
+        void api("/api/config").then((config) => {
+          setPairingCodes(readMembership(config).pairingCodes);
+          if (canPairDevices(state)) setComputerName(typeof config?.computerName === "string" ? config.computerName : "");
+        }).catch(() => {});
       }
     });
   }, []);
@@ -97,7 +102,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   if (team && session?.kind === "session" && session.team) {
     return (
       <div ref={root} tabIndex={-1} data-phone-pairing="server" className="scroll-mt-4 rounded-xl focus:outline-none">
-        <TeamPhoneCard team={team} />
+        <TeamPhoneCard team={team} blocked={teamPhoneBlocked} />
       </div>
     );
   }
@@ -158,7 +163,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
               ) : null}
               <div className="min-w-[200px] flex-1">
                 <div className="font-mono text-[18px] tracking-[0.14em] text-ink">{offer.code}</div>
-                <div className="mt-1 text-[13px] text-ink-secondary">{t("remote.serverPairing.expires", { minutes: minutesLeft(offer.expiresAt, now) })}</div>
+                <div className="mt-1 text-[13px] text-ink-secondary">{codeUntil(offer.expiresAt)}</div>
                 {offer.url ? (
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <code className="break-all text-[12px] text-ink-secondary">{offer.url}</code>
@@ -174,12 +179,16 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
           )}
         </div>
   ) : null;
+  // Loaded with the config; a personal cloud has no computer of its own to name.
+  const nameRow = (className: string) => pairingCodes && !cloudHome && computerName !== null
+    ? <ComputerNameRow saved={computerName} onSaved={setComputerName} className={className} /> : null;
   const scopeName = (device: PairedDevice) => t(device.scopes.includes("admin") ? "remote.serverPairing.scope.admin" : "remote.serverPairing.scope.client");
 
   if (simple) {
     return (
       <div ref={root} tabIndex={-1} data-phone-pairing="server" className="flex scroll-mt-4 flex-col gap-1.5 focus:outline-none">
         <div data-settings-rows="" className={cn(SIMPLE_CARD, "flex flex-col")}>
+          {nameRow("px-4 py-2.5")}
           <SettingRow title={t("settings.simple.computer.pair")} subtitle={pairingCodes ? cloudHome ? t("remote.serverPairing.cloudPersonal") : undefined : t("remote.serverPairing.portal")}>
             {pairingCodes ? (
               <div className="flex items-center gap-2">
@@ -189,7 +198,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
                     <option value="client">{t("remote.serverPairing.scope.client")}</option>
                   </Select>
                 )}
-                <button type="button" data-phone-pairing-action onClick={() => void create()} disabled={busy} className="ui-button">
+                <button type="button" data-phone-pairing-action={reveal ? "" : undefined} onClick={() => void create()} disabled={busy} className="ui-button">
                   {busy ? t("remote.serverPairing.creating") : t("settings.simple.computer.createCode")}
                 </button>
               </div>
@@ -222,6 +231,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     <div ref={root} tabIndex={-1} data-phone-pairing="server" className="scroll-mt-4 rounded-xl focus:outline-none">
     <Card title={t("remote.serverPairing.title")} subtitle={t(pairingCodes ? "remote.serverPairing.subtitle" : "remote.serverPairing.portalSubtitle")}>
       {pairingCodes && cloudHome ? <p data-server-pairing-personal className="mt-3 text-[13px] text-ink-secondary">{t("remote.serverPairing.cloudPersonal")}</p> : null}
+      {nameRow("mt-3")}
       {pairingCodes ? <div className="mt-3 flex flex-wrap items-center gap-3">
         {cloudHome ? null : <>
           <label className="flex items-center gap-1.5 text-[13px] text-ink">
@@ -233,7 +243,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
             {t("remote.serverPairing.scope.client")}
           </label>
         </>}
-        <button type="button" data-phone-pairing-action onClick={() => void create()} disabled={busy} className={button}>
+        <button type="button" data-phone-pairing-action={reveal ? "" : undefined} onClick={() => void create()} disabled={busy} className={button}>
           {busy ? t("remote.serverPairing.creating") : t("remote.serverPairing.create")}
         </button>
       </div> : <p data-server-pairing-portal className="mt-3 text-[13px] text-ink-secondary">{t("remote.serverPairing.portal")}</p>}

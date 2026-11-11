@@ -3,6 +3,7 @@
 import environmentsModule from "./environments.cjs";
 
 const { LOCAL_ID, parseEnvironments, serializeEnvironments } = environmentsModule;
+export const ENVIRONMENTS_SAVE_FAILED = "environments-save-failed";
 
 /**
  * @param {{ file(): string, fs: typeof import("node:fs"), path: typeof import("node:path"), log?(line: string): void }} deps
@@ -31,7 +32,7 @@ export function createEnvironmentsFile({ file, fs, path, log = () => {} }) {
       } catch (error) {
         try { fs.rmSync(temporary, { force: true }); } catch {}
         log(`environments save failed: ${error?.message ?? error}`);
-        throw new Error("Could not save server connections on this computer. Please try again.");
+        throw Object.assign(new Error("Could not save server connections on this computer. Please try again."), { code: ENVIRONMENTS_SAVE_FAILED });
       }
     },
   };

@@ -6,7 +6,8 @@ import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
 
 import { loadAppCards } from "./bot-settings/useBotApps";
-import { preloadConnectedApps, type ToolkitCard } from "./PluginsPanel";
+import { preloadConnectedApps } from "@/lib/connected-apps";
+import type { ToolkitCard } from "./ServiceIcon";
 import { ELEVATED_CONTROL, ELEVATED_HOVER } from "./elevated";
 import { SIMPLE_TOP_BUTTON } from "./SidebarSimpleTop";
 
@@ -53,7 +54,7 @@ function AppFaceIcon({ face, className }: { face: AppFace; className?: string })
   const [failed, setFailed] = useState(0);
   const src = sources[failed];
   return (
-    <span data-app-face={face.slug} className={cn("flex size-[18px] shrink-0 items-center justify-center overflow-hidden rounded-md bg-white p-px ring-[1.5px] ring-composer", className)}>
+    <span data-app-face={face.slug} className={cn("flex size-[18px] shrink-0 items-center justify-center overflow-hidden rounded-md p-px motion-safe:transition-colors group-hover/apps:bg-white group-focus-visible/apps:bg-white", className)}>
       {src
         ? <img src={src} alt="" draggable={false} className="size-4 object-contain" onError={() => setFailed((count) => count + 1)} />
         : <span className="text-[10px] font-semibold leading-none text-neutral-700">{face.label.slice(0, 1).toUpperCase()}</span>}
@@ -82,9 +83,10 @@ export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
     >
       {circle ? <Puzzle size={18} strokeWidth={1.5} aria-hidden="true" /> : <>
         <span className="min-w-0 truncate">{label}</span>
-        <span aria-hidden="true" className="flex shrink-0 items-center">
+        {/* The logos rest grey and apart, with no tile, so the sidebar's loudest colour is never an ad; hover brings the tiles and colour back. */}
+        <span aria-hidden="true" data-app-faces="" className="flex shrink-0 items-center gap-1 opacity-60 grayscale motion-safe:transition-[filter,opacity] group-hover/apps:opacity-100 group-hover/apps:grayscale-0 group-hover/apps:invert-0 group-hover/apps:mix-blend-normal group-focus-visible/apps:opacity-100 group-focus-visible/apps:grayscale-0 group-focus-visible/apps:invert-0 group-focus-visible/apps:mix-blend-normal">
           {faces.map((face, index) => <AppFaceIcon key={face.slug} face={face}
-            className={cn(index > 0 && "-ms-1.5", faces.length > 1 && FAN[index === 0 ? 0 : index === faces.length - 1 ? 2 : 1], "motion-safe:transition-transform motion-safe:duration-150")} />)}
+            className={cn(faces.length > 1 && FAN[index === 0 ? 0 : index === faces.length - 1 ? 2 : 1], "motion-safe:transition-transform motion-safe:duration-150")} />)}
         </span>
       </>}
     </button>

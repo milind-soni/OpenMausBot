@@ -34,6 +34,8 @@ const ENGINES: Readonly<Record<string, EngineRow>> = {
   deepseekAgent: { resume: true },
   clineAgent: { resume: true },
   copilotAgent: { resume: true },
+  commandCodeAgent: { resume: true },
+  kiroAgent: { resume: true },
   customAcp: { resume: true },
   "openai-compat": CHAT_ROW,
   grok: CHAT_ROW,
@@ -41,6 +43,8 @@ const ENGINES: Readonly<Record<string, EngineRow>> = {
   mistral: CHAT_ROW,
   cerebras: CHAT_ROW,
   groq: CHAT_ROW,
+  greenference: CHAT_ROW,
+  modelgo: CHAT_ROW,
   meta: CHAT_ROW,
 };
 

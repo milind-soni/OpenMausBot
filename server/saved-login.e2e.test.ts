@@ -203,6 +203,30 @@ it.skipIf(process.platform === "win32")("fills a login saved for example.com on 
   }
 }, 120_000);
 
+it.skipIf(process.platform === "win32")("fills a login kept to one bot on its guest browser even while another bot uses guest too, since each guest browser is its own", async () => {
+  const browser = await browserFixture("https://accounts.example.com/login");
+  const { page, api, evidence, answered } = browser;
+  try {
+    expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
+    const capacity = (await api("POST", "/api/bots", { name: "Capacity" })).body.bot;
+    const costs = (await api("POST", "/api/bots", { name: "Costs" })).body.bot;
+    for (const bot of [capacity, costs]) expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "browser", browserProfile: "guest" })).status).toBe(200);
+    expect((await api("POST", "/api/logins", { site: "example.com", username: USERNAME, password: PASSWORD, bots: [capacity.id] })).status).toBe(201);
+    const logins = (await api("GET", "/api/logins")).body.logins as Array<{ bots: unknown }>;
+    expect(logins).toEqual([expect.objectContaining({ bots: [capacity.id] })]);
+    writeFileSync(browser.planPath, JSON.stringify({ [capacity.id]: { turns: [{ steps: [{ tool: "fill_login", arguments: { submit: false } }], reply: "Filled." }] } }));
+
+    await runControlOmb(["send", "--bot", capacity.id, "--task", capacity.threadId, "--text", "Sign in to example.com.", "--url", browser.base]);
+    await expect.poll(() => evidence().length, { timeout: 20_000 }).toBe(1);
+    expect(answered(0, "fill_login")[0].isError).toBeFalsy();
+    expect(evidence()[0].system).toContain(`example.com (${USERNAME})`);
+    expect(page.sent).toEqual([]);
+    expect(JSON.stringify(evidence())).not.toContain(PASSWORD);
+  } finally {
+    await browser.close();
+  }
+}, 120_000);
+
 // Auto mounts this computer only on macOS and Windows, and the stand-in browser is a shebang script.
 it.runIf(process.platform === "darwin")("on Auto, signs in in the bot's own browser beside this computer, never on the person's screen", async () => {
   // What the desktop app hands its own server once computer control is ready; the driver itself never runs here.
@@ -227,7 +251,7 @@ it.runIf(process.platform === "darwin")("on Auto, signs in in the bot's own brow
     const [turn] = evidence();
     expect(turn.system).toContain("Two surfaces are mounted");
     expect(turn.system).toContain("Web tasks → the built-in browser");
-    expect(turn.system).toContain("use, in this order: your built-in browser, a cloud computer if select_computer offers one, a connected app");
+    expect(turn.system).toContain("use, in this order: a connected app that does it, your built-in browser, a cloud computer if select_computer offers one");
     const [filled] = answered(0, "fill_login");
     expect(filled.isError).toBeFalsy();
     expect(filled.content[0].text).toBe(`Filled the username and the password for ${USERNAME} on example.com and submitted it; the page is now https://example.com/invoices (“Invoices”). Check you are signed in.`);

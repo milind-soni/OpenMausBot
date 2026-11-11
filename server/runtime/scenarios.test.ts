@@ -831,7 +831,7 @@ describe("§2 cancel and stop awaiting", () => {
     invariants(w);
   });
 
-  it("S17 stopRequester: queued children cancelled, the running child keeps going and reports, the requester never resumes", async () => {
+  it("S17 stopRequester: queued and running children are stopped with it, and the requester never resumes", async () => {
     const w = world();
     const root = beginChief(w);
     const a = ok(enqueueFrom(w, root, workFor("dev", "Build")));
@@ -843,20 +843,15 @@ describe("§2 cancel and stop awaiting", () => {
     expect(get(w, a.id).status).toBe("running");
     expect(get(w, b.id).status).toBe("queued");
 
-    const left = w.rt.stopRequester(chiefOwner, "person stopped the chat");
-    expect(left.map((x) => x.id)).toEqual([a.id]);
+    w.rt.stopRequester(chiefOwner, "person stopped the chat");
     expect(get(w, b.id)).toMatchObject({ status: "cancelled", outcome: "stopped" });
     expect(get(w, root.id)).toMatchObject({ status: "cancelled", outcome: "stopped" });
-    expect(get(w, a.id).status).toBe("running");
-    expect(w.runner.runs(a.id)[0].signal!.aborted).toBe(false);
-    expect(w.runner.running.has(a.id)).toBe(true);
-    await drain(w);
-    expect(get(w, a.id).status).toBe("running");
+    expect(get(w, a.id)).toMatchObject({ status: "cancelled", outcome: "stopped" });
+    expect(w.runner.runs(a.id)[0].signal!.aborted).toBe(true);
     invariants(w);
 
-    w.runner.release(a.id, complete("late but done"));
     await drain(w);
-    expect(get(w, a.id)).toMatchObject({ status: "completed", outcome: "done", result: "late but done" });
+    expect(get(w, a.id)).toMatchObject({ status: "cancelled", outcome: "stopped" });
     expect(w.runner.reports(a.id)).toHaveLength(1);
     expect(w.runner.reports(a.id)[0].parent?.id).toBe(root.id);
     expect(w.runner.reports(b.id)).toHaveLength(1);

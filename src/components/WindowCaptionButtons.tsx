@@ -3,7 +3,8 @@ import { Minus, Square, Copy, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 
-/** Drawn by the renderer because the WCO overlay API cannot style hover. */
+/** Drawn by the renderer because the WCO overlay API cannot style hover. They fill the right end of the window frame's
+ * top bar (WindowFrameBar), which keeps their width clear. */
 export function WindowCaptionButtons({ visible }: { visible: boolean }) {
   const [maximized, setMaximized] = useState(false);
 
@@ -28,7 +29,7 @@ export function WindowCaptionButtons({ visible }: { visible: boolean }) {
   // style.
   const noDrag = { WebkitAppRegion: "no-drag" } as CSSProperties;
   const captionButton = cn(
-    "flex h-[26px] w-11 items-center justify-center text-ink-secondary",
+    "flex h-7 w-11 items-center justify-center text-ink-secondary",
     "hover:bg-raised hover:text-ink active:bg-raised/60",
   );
 

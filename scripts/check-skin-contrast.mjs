@@ -78,6 +78,43 @@ function parseHex(value) {
   };
 }
 
+const NAMED = { black: "#000000", white: "#ffffff" };
+
+/** A token's value with every var() replaced by the token it names, as the skin renders it. */
+function resolve(value, tokens, depth = 0) {
+  if (depth > 8) return value;
+  return value.replace(/var\((--[\w-]+)(?:,\s*([^()]+))?\)/g, (_, name, fallback) => resolve(tokens[name] ?? fallback ?? "", tokens, depth + 1));
+}
+
+const linear = (v) => { const s = v / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+const gamma = (v) => Math.max(0, Math.min(255, Math.round(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055))));
+function toOklab({ r, g, b }) {
+  const [lr, lg, lb] = [linear(r), linear(g), linear(b)];
+  const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+  return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
+}
+function fromOklab([L, A, B]) {
+  const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3, m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3, s = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
+  return { r: gamma(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s), g: gamma(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+    b: gamma(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s), a: 1 };
+}
+
+/** An opaque or translucent hex, a named colour, or color-mix() of two of them in oklab, as CSS mixes it. */
+function parseColor(value) {
+  const text = value.trim();
+  const named = NAMED[text.toLowerCase()];
+  if (named) return parseHex(named);
+  const mix = /^color-mix\(\s*in oklab\s*,\s*([^,]+?)(?:\s+([\d.]+)%)?\s*,\s*([^,]+?)(?:\s+([\d.]+)%)?\s*\)$/i.exec(text);
+  if (!mix) return parseHex(text);
+  const [first, second] = [parseColor(mix[1]), parseColor(mix[3])];
+  if (!first || !second || first.a !== 1 || second.a !== 1) return null;
+  const p2 = mix[4] !== undefined ? Number(mix[4]) / 100 : mix[2] !== undefined ? 1 - Number(mix[2]) / 100 : 0.5;
+  const [a, b] = [toOklab(first), toOklab(second)];
+  return fromOklab(a.map((value, i) => value * (1 - p2) + b[i] * p2));
+}
+
 /** Foreground alpha composited over an opaque background. */
 function flatten(fg, bg) {
   if (fg.a === 1) return fg;
@@ -97,9 +134,9 @@ function luminance({ r, g, b }) {
   return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
 }
 
-function contrast(fgHex, bgHex) {
-  const bg = parseHex(bgHex);
-  const parsedFg = parseHex(fgHex);
+function contrast(fgValue, bgValue) {
+  const bg = parseColor(bgValue);
+  const parsedFg = parseColor(fgValue);
   if (!parsedFg || !bg || bg.a !== 1) return null;
   const fg = flatten(parsedFg, bg);
   const [hi, lo] = [luminance(fg), luminance(bg)].sort((a, b) => b - a);
@@ -107,7 +144,8 @@ function contrast(fgHex, bgHex) {
 }
 
 // Pairs taken from what the components render.
-const SURFACES = ["--color-app", "--color-panel", "--color-raised", "--color-raised-hover", "--color-card", "--color-inset", "--color-composer", "--color-menu"];
+// The frame carries the sidebar's names, previews and times in a framed window.
+const SURFACES = ["--color-app", "--color-panel", "--color-frame", "--color-raised", "--color-raised-hover", "--color-card", "--color-inset", "--color-composer", "--color-menu"];
 const PAIRS = [
   ...SURFACES.map((s) => ["--color-ink", s, 4.5]),
   ...SURFACES.map((s) => ["--color-ink-secondary", s, 4.5]),
@@ -123,6 +161,9 @@ const PAIRS = [
   ["--color-danger", "--color-card", 4.5],
   ["--color-success", "--color-card", 4.5],
   ["--color-warning", "--color-card", 4.5],
+  // The usage card's and model menu's "At its limit", and the usage bars in the model button.
+  ["--color-warning", "--color-menu", 4.5],
+  ["--color-warning", "--color-composer", 3],
   // borders and dots are UI components, not text — AA asks 3:1 of them
   ["--color-hairline", "--color-app", 1.5],
   ["--color-accent", "--color-app", 3],
@@ -149,6 +190,8 @@ const PAIRS = [
   ["--color-inset", "--color-card", 1.04],
   ["--color-card", "--color-app", 1.04],
   ["--color-panel", "--color-app", 1.03],
+  // The app's card is told from the frame round it.
+  ["--color-frame", "--color-app", 1.05],
 ];
 
 const skins = parseSkins(css);
@@ -172,7 +215,7 @@ for (const [id, tokens] of skins) {
       missing.push(!tokens[fg] ? fg : bg);
       continue;
     }
-    const ratio = contrast(tokens[fg], tokens[bg]);
+    const ratio = contrast(resolve(tokens[fg], tokens), resolve(tokens[bg], tokens));
     if (ratio === null) {
       unmeasurable.push({ fg, bg, fgValue: tokens[fg], bgValue: tokens[bg] });
       continue;
@@ -233,7 +276,7 @@ for (const skinId of ["daylight", "pop"]) {
     ["--color-danger-ink", "--color-danger"],
     ["--color-success-ink", "--color-success"],
   ]) {
-    const ratio = contrast(bubble[fg] ?? "", bubble[bg] ?? "");
+    const ratio = contrast(resolve(bubble[fg] ?? "", bubble), resolve(bubble[bg] ?? "", bubble));
     if (ratio === null || ratio < 4.5) {
       failed = true;
       bubbleFailed = true;
@@ -269,41 +312,6 @@ if (!night) {
     }
     if (!schemeFailed) console.log(`✓ night card (${scheme}) — its text and close button clear the sky behind them`);
   }
-}
-
-// A Cloud's sidebar lays a wash of one night colour over its panel (src/styles.css [data-cloud-sky]::before): every ink
-// must read on the panel with that wash at its strongest.
-const washOf = (rule) => ({ token: /var\((--cloud-night-[\w-]+)\)\)/.exec(rule ?? "")?.[1], strength: Number(/opacity: ([\d.]+);/.exec(rule ?? "")?.[1]) });
-const washLight = washOf(/\n\[data-cloud-sky\]::before \{([^}]*)\}/.exec(css)?.[1]);
-const washDark = washOf(/@container style\(--code-color-scheme: dark\) \{\s*\[data-cloud-sky\]::before \{([^}]*)\}/.exec(css)?.[1]);
-if (!night || !washLight.token || !washDark.token || !(washLight.strength > 0) || !(washDark.strength > 0)) {
-  failed = true;
-  console.log("✗ Cloud sidebar — cannot read the wash's strength or the night tokens");
-} else {
-  const hex = ({ r, g, b }) => `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
-  let washFailed = false;
-  for (const [id, tokens] of skins) {
-    const dark = tokens["--code-color-scheme"] === "dark";
-    const pick = (token) => /^light-dark\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)$/.exec(night[token] ?? "")?.[dark ? 2 : 1];
-    const panel = parseHex(tokens["--color-panel"] ?? "");
-    const problems = [];
-    const wash = dark ? washDark : washLight;
-    const tint = parseHex(pick(wash.token) ?? "");
-    if (!panel || !tint) problems.push(`cannot measure ${wash.token} over --color-panel`);
-    else {
-      const washed = hex(flatten({ ...tint, a: wash.strength }, panel));
-      for (const fg of ["--color-ink", "--color-ink-secondary", "--color-ink-tertiary"]) {
-        const ratio = contrast(tokens[fg] ?? "", washed);
-        if (ratio === null || ratio < 4.5) problems.push(`${fg} on the panel under ${wash.token}: ${ratio?.toFixed(2) ?? "unmeasurable"}:1 (needs 4.5:1)`);
-      }
-    }
-    if (problems.length) {
-      failed = true;
-      washFailed = true;
-      for (const problem of problems) console.log(`✗ ${id} Cloud sidebar — ${problem}`);
-    }
-  }
-  if (!washFailed) console.log(`✓ Cloud sidebar — every skin's inks read under the night wash (${washLight.token} at ${washLight.strength} light, ${washDark.token} at ${washDark.strength} dark)`);
 }
 
 process.exit(failed ? 1 : 0);

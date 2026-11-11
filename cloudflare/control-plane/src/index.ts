@@ -12,15 +12,9 @@ import {
   provisionManagedEndpoint,
   sweepManagedEndpointCleanup,
 } from "./endpoints";
-import {
-  claimHighLevelFlow,
-  HIGHLEVEL_CALLBACK_PATH,
-  highLevelCallback,
-  refreshHighLevelToken,
-  startHighLevelFlow,
-  sweepHighLevelFlows,
-} from "./highlevel";
 import { registerPushDevice, sendPush, unregisterPushDevice } from "./push";
+import { issueRelayToken, relayAdoption } from "./relay";
+import { releaseTunnels, tunnelReleaseHealth } from "./tunnel-release";
 import { capacityHealth, reportEndpointAccountProblems, scanTunnelCapacity } from "./tunnel-capacity";
 import {
   createInstallation,
@@ -79,7 +73,6 @@ async function route(
   requestId: string,
   cloudflareFetch: CloudflareFetch,
   apnsFetch: typeof fetch,
-  highLevelFetch: typeof fetch,
 ) {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") return preflight(request, config);
@@ -141,6 +134,10 @@ async function route(
     }
   }
 
+  if (request.method === "POST" && url.pathname === "/v1/installations/self/relay-token") {
+    return issueRelayToken(request, env);
+  }
+
   if (request.method === "POST" && url.pathname === "/v1/installations/self/push/register") {
     return registerPushDevice(request, env);
   }
@@ -149,21 +146,6 @@ async function route(
   }
   if (request.method === "POST" && url.pathname === "/v1/installations/self/push/send") {
     return sendPush(request, env, apnsFetch, requestId);
-  }
-
-  // The HighLevel relay carries no credential: the random state and the
-  // tokens themselves are the secrets, and every route is limited per address.
-  if (request.method === "POST" && url.pathname === "/v1/highlevel/start") {
-    return startHighLevelFlow(request, env);
-  }
-  if (request.method === "GET" && url.pathname === HIGHLEVEL_CALLBACK_PATH) {
-    return highLevelCallback(request, env, highLevelFetch, requestId);
-  }
-  if (request.method === "POST" && url.pathname === "/v1/highlevel/claim") {
-    return claimHighLevelFlow(request, env);
-  }
-  if (request.method === "POST" && url.pathname === "/v1/highlevel/refresh") {
-    return refreshHighLevelToken(request, env, highLevelFetch, requestId);
   }
 
   const rotate = url.pathname.match(ROTATE_ROUTE);
@@ -194,7 +176,6 @@ async function route(
 export function createWorker(
   cloudflareFetch: CloudflareFetch = fetch,
   apnsFetch: typeof fetch = fetch,
-  highLevelFetch: typeof fetch = fetch,
 ) {
   return {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -211,10 +192,14 @@ export function createWorker(
         // gate hosted sign-in on it. Provider capacity is reported beside it
         // so a full quota never hides sign-in, recovery, or local pairing.
         const capacity = await capacityHealth(env, healthConfig, ctx).catch(() => null);
+        const adoption = await relayAdoption(env).catch(() => null);
+        const release = await tunnelReleaseHealth(env, healthConfig).catch(() => null);
         return secureResponse(json({
           ok: true,
           service: "openmausbot-control-plane",
           ...(capacity === null ? {} : { capacity }),
+          ...(adoption === null ? {} : { relayAdoption: adoption }),
+          ...(release === null ? {} : { tunnelRelease: release }),
         }), request, null, requestId);
       }
 
@@ -222,16 +207,12 @@ export function createWorker(
       try {
         config = readConfig(env);
         const origin = request.headers.get("origin");
-        // HighLevel sends the person's browser to the callback: a top-level
-        // navigation that may carry any Origin (or `null` after a cross-site
-        // redirect) and never one of ours. It is a public GET like /healthz.
-        const publicNavigation = request.method === "GET" && url.pathname === HIGHLEVEL_CALLBACK_PATH;
-        if (origin && !publicNavigation && !config.allowedOrigins.has(origin)) {
+        if (origin && !config.allowedOrigins.has(origin)) {
           return secureResponse(errorResponse(403, "origin_not_allowed"), request, config, requestId);
         }
         const boundedRequest = await withBoundedRequestBody(request);
         return secureResponse(
-          await route(boundedRequest, env, ctx, config, requestId, cloudflareFetch, apnsFetch, highLevelFetch),
+          await route(boundedRequest, env, ctx, config, requestId, cloudflareFetch, apnsFetch),
           request,
           config,
           requestId,
@@ -271,6 +252,17 @@ export function createWorker(
             errorCode: "endpoint_internal",
           }));
         }
+        // Marks only, like the scan: tunnels the relay has replaced, and
+        // those a version cutoff ends. The sweep below removes them.
+        try {
+          await releaseTunnels(env, config, requestId);
+        } catch {
+          console.error(JSON.stringify({
+            message: "managed endpoint tunnel release failed",
+            requestId,
+            errorCode: "endpoint_internal",
+          }));
+        }
         try {
           await sweepManagedEndpointCleanup(env, config, cloudflareFetch, requestId);
         } catch {
@@ -287,15 +279,6 @@ export function createWorker(
             message: "managed endpoint account check failed",
             requestId,
             errorCode: "endpoint_internal",
-          }));
-        }
-        try {
-          await sweepHighLevelFlows(env, requestId);
-        } catch {
-          console.error(JSON.stringify({
-            message: "highlevel flow sweep failed",
-            requestId,
-            errorCode: "highlevel_internal",
           }));
         }
       })());

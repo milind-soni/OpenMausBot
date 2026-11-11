@@ -36,6 +36,7 @@ import {
 } from "./browser-engine.ts";
 import { AGENT_BROWSER_VERSION, agentBrowserReleaseUrl, agentBrowserReleaseVersion, resolveAgentBrowserReleaseAsset } from "./browser-engine-release.ts";
 import { browserBundlePaths, browserBundleSpec, SUPPORTED_BROWSER_TARGETS } from "./browser-bundle-release.ts";
+import { spawnBotWork } from "./oom-score.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
 const posix = process.platform !== "win32";
@@ -43,6 +44,10 @@ const scratch: string[] = [];
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   return { ...actual, spawn: vi.fn(actual.spawn) };
+});
+vi.mock("./oom-score.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./oom-score.ts")>();
+  return { ...actual, spawnBotWork: vi.fn(actual.spawnBotWork) };
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -80,10 +85,23 @@ describe("sizing the page of a launched browser", () => {
 
   it("sets the standard viewport through the session's own launch environment", async () => {
     vi.mocked(spawn).mockImplementation(() => viewportChild(JSON.stringify({ success: true, data: { width: 1280, height: 720 } })));
+    vi.mocked(spawnBotWork).mockClear();
     expect(await setBrowserViewport("/engine", env)).toBe(true);
+    // A call can start the session's daemon and its Chrome: they are the bot's, first in line when memory runs out.
+    expect(spawnBotWork).toHaveBeenCalledTimes(1);
     expect(vi.mocked(spawn).mock.calls[0]?.[0]).toBe("/engine");
     expect(vi.mocked(spawn).mock.calls[0]?.[1]).toEqual(["set", "viewport", "1280", "720", "--json", "--no-webmcp"]);
     expect(vi.mocked(spawn).mock.calls[0]?.[2]?.env).toMatchObject(env);
+  });
+
+  it.runIf(process.platform === "linux")("starts the engine, and the daemon and Chrome it starts, first in line when memory runs out", async () => {
+    const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+    vi.mocked(spawn).mockImplementation(actual.spawn);
+    const dir = mkdtempSync(join(tmpdir(), "omb-engine-score-"));
+    scratch.push(dir);
+    const engine = join(dir, "agent-browser");
+    writeFileSync(engine, `#!/bin/sh\n[ "$(cat /proc/self/oom_score_adj)" = 1000 ] && echo '{"success":true}' || echo '{"success":false}'\n`, { mode: 0o755 });
+    expect(await setBrowserViewport(engine, env)).toBe(true);
   });
 
   it("reports failure instead of throwing", async () => {
@@ -584,6 +602,23 @@ describe("restoring exactly one browser profile", () => {
 });
 
 describe("finding the browser engine", () => {
+  it("resolves Android to the statically linked Linux build instead of reporting it missing", () => {
+    // Android is bionic, not musl, so isMusl() is false there; the asset that actually
+    // runs is the statically linked musl build, which needs no interpreter.
+    expect(isMusl("android")).toBe(false);
+
+    const android = resolveAgentBrowserReleaseAsset("android", "arm64");
+    expect(android).not.toBeNull();
+    expect(android!.asset).toBe("agent-browser-linux-musl-arm64");
+    expect(android!.target).toBe("linux-musl-arm64");
+
+    // Every other platform keeps the key it had before.
+    expect(resolveAgentBrowserReleaseAsset("linux", "arm64", true)!.target).toBe("linux-musl-arm64");
+    expect(resolveAgentBrowserReleaseAsset("linux", "arm64", false)!.target).toBe("linux-arm64");
+    expect(resolveAgentBrowserReleaseAsset("linux", "x64", false)!.target).toBe("linux-x64");
+    expect(resolveAgentBrowserReleaseAsset("darwin", "arm64")!.target).toBe("darwin-arm64");
+  });
+
   it("pins the native-verified Windows revision in both download and desktop manifests", () => {
     const asset = resolveAgentBrowserReleaseAsset("win32", "x64")!;
     expect(asset).toEqual({

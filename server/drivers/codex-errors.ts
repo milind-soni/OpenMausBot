@@ -2,6 +2,9 @@ import { cloudHomeConfigured } from "../cloud-home.ts";
 import { hostTimeZone } from "../turn-clock.ts";
 import { USAGE_LIMIT } from "./retry.ts";
 import { CODEX_USAGE_LIMIT_REACHED } from "../../shared/codex-usage-limit.ts";
+import type { ServerText } from "../../shared/server-text.ts";
+import { noticeFailure } from "../chat-notices.ts";
+import { plainRecord } from "./codex-app-approval.ts";
 
 /** How a Codex turn reaches OpenAI: OpenMausBot's ChatGPT plan, Codex's own sign-in, or any other provider. */
 export type CodexRoute = "plan" | "own" | "other";
@@ -60,7 +63,23 @@ export function codexLimitFacts(raw: string, route: CodexRoute, codexErrorInfo?:
   return { limit: /\busage limit for \S+?\.(?:\s|$)/i.test(raw) ? "model" : "engine", ...(at === undefined ? {} : { limitResetsAt: at }) };
 }
 
+// ChatGPT's words, reported 2026-11-03, for a model its /models lists but the plan can't use through Codex:
+// "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account."
+const PLAN_MODEL_REFUSED = /model is not supported when using Codex with a ChatGPT account/i;
+
+/** A ChatGPT plan turn refused because the signed-in account can't use the selected model. */
+export function codexPlanModelRefused(value: string, route: CodexRoute): boolean {
+  return route === "plan" && PLAN_MODEL_REFUSED.test(value);
+}
+
+export function codexUserFailure(value: string, route: CodexRoute, codexErrorInfo?: unknown): { message: string; text?: ServerText } {
+  return codexPlanModelRefused(value, route)
+    ? noticeFailure("chat.notice.codexModelUnavailable")
+    : { message: codexUserError(value, route, codexErrorInfo) };
+}
+
 export function codexUserError(value: string, route: CodexRoute, codexErrorInfo?: unknown): string {
+  if (codexPlanModelRefused(value, route)) return noticeFailure("chat.notice.codexModelUnavailable").message;
   if (route === "plan" && value.includes("subscription_sharing_usage_limit_exceeded")) {
     return "subscription_sharing_usage_limit_exceeded: Your ChatGPT plan usage limit was reached. Manage usage in ChatGPT Settings, or explicitly choose another provider.";
   }
@@ -96,10 +115,12 @@ export function codexSignInExpired(raw: string): string {
 
 export class CodexRpcError extends Error {
   code: unknown;
+  data: unknown;
 
-  constructor(error: { code?: unknown; message?: string }) {
+  constructor(error: { code?: unknown; message?: string; data?: unknown }) {
     super(error.message ?? JSON.stringify(error));
     this.code = error.code;
+    this.data = error.data;
   }
 }
 
@@ -108,6 +129,12 @@ export function missingNativeCodexThread(error: unknown, cursor: string): boolea
   return error instanceof CodexRpcError && error.code === -32600 &&
     error.message === `no rollout found for thread id ${cursor}`;
 }
+
+/** codex-cli 0.167.0 refuses to resume a session saved under another provider: "This chat uses custom, but your current
+ * provider is magpie. Switch to custom to continue.", with data { type: "modelProviderMismatch" }. */
+export const codexProviderMismatch = (error: unknown): boolean =>
+  error instanceof CodexRpcError && error.code === -32600 &&
+  plainRecord(error.data)?.type === "modelProviderMismatch";
 
 /** Codex refuses to resume an archived session: "session <id> is archived. Run `codex unarchive <id>` to unarchive it first." */
 export const archivedNativeCodexThread = (error: unknown, cursor: string): boolean =>

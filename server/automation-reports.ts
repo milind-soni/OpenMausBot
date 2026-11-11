@@ -7,10 +7,13 @@
 import { liveCardKind } from "../shared/live-approval.ts";
 import type { AutomationLine } from "../shared/routine-run.ts";
 import { signInWaits } from "../shared/sign-in-request.ts";
+import { intlLocale } from "./language.ts";
 import { needsInputQuestion } from "./runtime-coordinator.ts";
 import type { RoutineManager, RoutineRun } from "./routines.ts";
+import { serverLine } from "./server-lines.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
 import { hostTimeZone } from "./turn-clock.ts";
+import { AUTHORITY, fromNote, routineWho } from "./provenance-label.ts";
 
 const QUIET = /^[\s*_`"'.!-]*nothing new[\s*_`"'.!-]*$/i;
 const NEEDS_INPUT = /^\s*needs input:\s*/i;
@@ -36,31 +39,35 @@ const localTime = (at: number) =>
   inHostZone(at, "en-CA", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).replace(",", "");
 
 // ICU 72+ puts a narrow no-break space (U+202F) before AM/PM.
-const clockTime = (at: number) => inHostZone(at, "en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" }).replace(/\s/g, " ");
+const clockTime = (at: number, language?: string) =>
+  inHostZone(at, intlLocale(language), { hour: "numeric", minute: "2-digit", timeZoneName: "short" }).replace(/\s/g, " ");
 
-/** The line a run with nothing new posts when the automation's line before it in the chat said a run failed. */
-export function recoveredText(name: string, at: number): string {
-  return `Recovered: ${name} finished OK at ${clockTime(at)}`;
+/** The line a run with nothing new posts when the automation's line before it in the chat said a run failed, in the
+ * language of the chat's person. */
+export function recoveredText(name: string, at: number, language?: string): string {
+  return serverLine(language, "server.runs.recovered", { name, time: clockTime(at, language) });
 }
 
 /** How the chat's own session reads an automation's line: as its own report, named and dated. */
 export function automationContextText(line: AutomationLine, at: number, text: string): string {
-  const what = line.failed ? "could not finish" : line.needsYou ? "asked" : line.recovered ? "recovered" : "reported";
-  return `[Your automation ${JSON.stringify(line.name)} ${what} at ${localTime(at)}:]\n${text}`;
+  const what = line.partial ? "was partly done" : line.failed ? "could not finish" : line.needsYou ? "asked" : line.recovered ? "recovered" : "reported";
+  return `${fromNote(routineWho(line.name), `run, ${what} at ${localTime(at)}`, AUTHORITY.info)}\n${text}`;
 }
 
-/** A sign-in, connection or credential card still waiting on the person, in plain words; null once it is settled. */
-export function waitingCardText(message: Pick<Message, "kind" | "signIn" | "connector" | "secret">): string | null {
+/** A sign-in, connection or credential card still waiting on the person, in plain words in their language; null once
+ * it is settled. */
+export function waitingCardText(message: Pick<Message, "kind" | "signIn" | "connector" | "secret">, language?: string): string | null {
   const { signIn, connector, secret } = message;
   if (message.kind === "signin" && signIn && signInWaits(signIn) && !signIn.resumed && !signIn.stopped) {
     const reason = signIn.reason?.trim();
-    return `I need you to sign in to ${signIn.site}${reason ? `: ${reason}${/[.!?]$/.test(reason) ? "" : "."}` : "."}`;
+    return reason ? serverLine(language, "server.connect.signInWhy", { site: signIn.site, reason: /[.!?]$/.test(reason) ? reason : `${reason}.` })
+      : serverLine(language, "server.connect.signIn", { site: signIn.site });
   }
   if (message.kind === "connector" && connector && connector.status !== "connected" && !connector.dismissed && !connector.resumed && !connector.stopped) {
-    return `I need you to connect ${connector.label}.`;
+    return serverLine(language, "server.connect.app", { app: connector.label });
   }
   if (message.kind === "secret" && secret && !secret.provided && !secret.dismissed && !secret.superseded && !secret.resumed && !secret.stopped) {
-    return `I need your ${secret.label}.`;
+    return serverLine(language, "server.connect.secret", { label: secret.label });
   }
   return null;
 }
@@ -70,6 +77,17 @@ export function newestAutomationLines(messages: readonly Pick<Message, "id" | "a
   const newest = new Map<string, string>();
   for (const message of messages) if (message.automation) newest.set(message.automation.routineId, message.id);
   return new Set(newest.values());
+}
+
+const saidLine = (message: Message) => message.role === "bot" && message.kind === "text";
+/** A person's line that starts a turn, not one folded into a turn already running. */
+const asks = (message: Message) => message.role === "user" && !message.steered && !message.aside;
+
+/** The lines of the turn that holds this line: after the person's line that started it, up to their next. */
+function turnOf(path: readonly Message[], line: Message): Message[] {
+  const at = path.findIndex((message) => message.id === line.id);
+  const next = path.findIndex((message, index) => index > at && asks(message));
+  return path.slice(path.findLastIndex((message, index) => index < at && asks(message)) + 1, next < 0 ? undefined : next);
 }
 
 type Waiting =
@@ -87,6 +105,8 @@ export interface AutomationReportDeps {
   notify(kind: "done" | "question", bot: BotRecord, threadId: string, detail: string): void;
   /** A run that delivers to the brief completed: its answer is the brief's to read. */
   brief?(run: RoutineRun, turnId?: string): void;
+  /** The language a line in this conversation is written in (server/server-lines.ts); absent, English. */
+  threadLanguage?(threadId: string): string | undefined;
 }
 
 export function createAutomationReports(deps: AutomationReportDeps) {
@@ -101,7 +121,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     return bot && task && !task.routineRunId ? { bot, threadId: task.threadId } : null;
   };
 
-  const lineOf = (run: RoutineRun, extra: Pick<AutomationLine, "needsYou" | "failed" | "recovered" | "copyOf">): AutomationLine => ({
+  const lineOf = (run: RoutineRun, extra: Pick<AutomationLine, "needsYou" | "failed" | "partial" | "recovered" | "copyOf">): AutomationLine => ({
     routineId: run.routineId, runId: run.id, name: run.routineName, trigger: run.eventSource ?? run.triggerSource ?? (run.manual ? "manual" : "schedule"),
     executionThreadId: run.threadId!, scheduledFor: run.scheduledFor, ...extra,
   });
@@ -109,11 +129,18 @@ export function createAutomationReports(deps: AutomationReportDeps) {
   /** The reply a run ends with: its last turn's last text, or after a restart the last one a turn settled on. */
   const replyOf = (run: RoutineRun, messageId?: string) => {
     const path = run.threadId ? store.activePath(run.threadId) : [];
-    const said = (message: Message) => message.role === "bot" && message.kind === "text";
-    return messageId ? path.find((message) => message.id === messageId) : path.findLast((message) => said(message) && message.turnTerminal) ?? path.findLast(said);
+    return messageId ? path.find((message) => message.id === messageId) : path.findLast((message) => saidLine(message) && message.turnTerminal) ?? path.findLast(saidLine);
   };
 
-  const read = (message: Message | undefined) => readRunReply(message?.text ?? "", Boolean(message?.attachments?.length));
+  /** The files the reply's turn sent the person, in order: its attach_file lines' and the reply's own, without the
+   * images its tools returned. */
+  const sentWith = (run: RoutineRun, reply: Message | undefined): NonNullable<Message["attachments"]> => {
+    if (!reply) return [];
+    return turnOf(store.activePath(run.threadId!), reply).flatMap((message) => message.role === "bot" && message.kind === "text" ? message.attachments ?? [] : [])
+      .filter((file) => file.kind !== "image" || !file.fromTool);
+  };
+
+  const read = (run: RoutineRun, message: Message | undefined) => readRunReply(message?.text ?? "", sentWith(run, message).length > 0);
 
   /** The automation's line before this run's in the chat, written or still waiting ahead of it, says a run failed. */
   const lastSaidFailed = (run: RoutineRun, threadId: string): boolean => {
@@ -133,7 +160,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
   /** An option card is copied whole and answered through its request; any other card the run waits on is named. */
   const writeCopy = (line: Extract<Waiting, { kind: "card" }>, target: { bot: BotRecord; threadId: string }) => {
     const original = store.messagesFor(line.threadId).find((message) => message.id === line.messageId);
-    const named = original ? waitingCardText(original) : null;
+    const named = original ? waitingCardText(original, deps.threadLanguage?.(target.threadId)) : null;
     if (!original || (!named && !liveCardKind(original.card))) return;
     const automation = lineOf(line.run, { needsYou: true, copyOf: original.id });
     store.appendMessage(target.threadId, named ? { role: "bot", kind: "text", text: named, automation } : { role: "bot", kind: "options", card: { ...original.card! }, automation });
@@ -161,18 +188,20 @@ export function createAutomationReports(deps: AutomationReportDeps) {
       return true;
     }
     const source = line.kind === "reply" ? replyOf(run, line.messageId) : undefined;
-    const said: RunReply = line.kind === "reply" ? read(source)
-      : { quiet: false, text: line.detail ? `This run didn't finish: ${line.detail}` : "This run didn't finish." };
+    const language = deps.threadLanguage?.(target.threadId);
+    const said: RunReply = line.kind === "reply" ? read(run, source)
+      : { quiet: false, text: line.detail ? serverLine(language, run.partial ? "server.runs.partlyDoneWhy" : "server.runs.didNotFinishWhy", { detail: line.detail }) : serverLine(language, "server.runs.didNotFinish") };
     const recovered = said.quiet && lastSaidFailed(run, target.threadId);
     if (said.quiet && !recovered) {
       deps.routines()?.noteReport(run.id, { state: "quiet" });
       return true;
     }
-    const reply: Extract<RunReply, { quiet: false }> = said.quiet ? { quiet: false, text: recoveredText(run.routineName, run.finishedAt ?? Date.now()) } : said;
+    const reply: Extract<RunReply, { quiet: false }> = said.quiet ? { quiet: false, text: recoveredText(run.routineName, run.finishedAt ?? Date.now(), language) } : said;
+    const files = recovered ? [] : sentWith(run, source);
     const posted = store.appendMessage(target.threadId, {
       role: "bot", kind: "text", text: reply.text,
-      ...(source?.attachments?.length && !recovered ? { attachments: source.attachments } : {}),
-      automation: lineOf(run, line.kind === "failure" ? { failed: true } : recovered ? { recovered: true } : reply.question ? { needsYou: true } : {}),
+      ...(files.length ? { attachments: files } : {}),
+      automation: lineOf(run, line.kind === "failure" ? { failed: true, ...(run.partial ? { partial: true as const } : {}) } : recovered ? { recovered: true } : reply.question ? { needsYou: true } : {}),
     });
     deps.routines()?.noteReport(run.id, { state: "posted", threadId: target.threadId, messageId: posted.id });
     deps.wrote(target.bot, target.threadId);
@@ -234,8 +263,11 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     runSettled(run: RoutineRun, turnId?: string): void {
       if (run.target !== "bot" || run.status !== "completed" || !run.threadId) return;
       if (run.deliver === "brief") return deps.brief?.(run, turnId);
-      const said = turnId ? store.activePath(run.threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId) : replyOf(run);
-      const reply = read(said);
+      const path = store.activePath(run.threadId);
+      const earlier = (message: Message) => asks(message) || (message.turnId !== undefined && message.turnId !== turnId);
+      const said = turnId ? path.findLast((message) => saidLine(message) && message.turnId === turnId) ?? path.slice(path.findLastIndex(earlier) + 1).findLast(saidLine)
+        : replyOf(run);
+      const reply = read(run, said);
       const bot = store.bot(run.botId);
       const target = destination(run);
       if (target && (!reply.quiet || lastSaidFailed(run, target.threadId))) hold(run.id, { kind: "reply", run, ...(said ? { messageId: said.id } : {}) });

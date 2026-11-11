@@ -26,6 +26,7 @@ export type BotUpdatePatch = Partial<
     | "replyStyle"
     | "voice"
     | "voiceNotes"
+    | "voiceNoteEveryReply"
     | "xResearch"
     | "pinned"
     | "hidden"
@@ -34,7 +35,6 @@ export type BotUpdatePatch = Partial<
     | "section"
     | "pinnedMessageId"
     | "chiefOfStaff"
-    | "approvePeerComms"
     | "composio"
     | "browser"
     | "browserProfile"
@@ -48,21 +48,21 @@ export type BotUpdatePatch = Partial<
   connectorTools?: Bot["connectorTools"] | null;
   connectorScopes?: Bot["connectorScopes"] | null;
   phoneApps?: Bot["phoneApps"] | null;
-  /** null: talks to every bot again. */
-  peers?: string[] | null;
   /** The server's proof the local-auto warning was shown: wire-only, never folded into bot state. */
   acknowledgeLocalAuto?: boolean;
   applyToAllThreads?: boolean;
   keepThreadModels?: boolean;
   /** With modelSelection: the thread this client shows. Body only: Bot.threadId is the server's selection. */
   threadId?: string;
+  /** The conversation to make main ("Set as main thread"); null clears it. Body only: the bot shows it as mainThreadId. */
+  mainThreadChoice?: string | null;
 };
 
 export type BotStatePatch = Omit<
   BotUpdatePatch,
-  "computer" | "connectorTools" | "connectorScopes" | "phoneApps" | "peers" | "acknowledgeLocalAuto" | "applyToAllThreads" | "keepThreadModels" | "threadId"
+  "computer" | "connectorTools" | "connectorScopes" | "phoneApps" | "acknowledgeLocalAuto" | "applyToAllThreads" | "keepThreadModels" | "threadId" | "mainThreadChoice"
 > & {
-  peers?: string[];
+  mainThreadId?: string;
   computer?: Bot["computer"];
   connectorTools?: Bot["connectorTools"];
   connectorScopes?: Bot["connectorScopes"];
@@ -88,6 +88,7 @@ export interface BotPatchQueueOptions {
     patch: BotUpdatePatch,
     signal: AbortSignal,
     current: BotAnnouncement,
+    leaving: boolean,
   ) => Promise<BotAnnouncement>;
   reconcile: (botId: string, signal: AbortSignal) => Promise<BotAnnouncement | null>;
   onAuthoritative: (bot: BotAnnouncement, optimisticOverlay: BotStatePatch) => void;
@@ -97,6 +98,8 @@ export interface BotPatchQueueOptions {
 export interface BotPatchQueue {
   enqueue: (botId: string, patch: BotUpdatePatch, fallback: BotAnnouncement) => void;
   flush: (botId: string) => Promise<BotAnnouncement | null>;
+  /** Sends every edit still waiting out its pause now: the page is going away. */
+  flushAll: () => void;
   overlayFor: (botId: string) => BotStatePatch;
   cancel: (botId: string) => void;
   /** Undo a dispose: StrictMode's dev mount probe runs the cleanup once against the same memoized queue. */
@@ -117,11 +120,11 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
     applyToAllThreads: _allThreads,
     keepThreadModels: _keepThreadModels,
     threadId: _threadId,
+    mainThreadChoice,
     computer,
     connectorTools,
     connectorScopes,
     phoneApps,
-    peers,
     ...fields
   } = patch;
   const normalized: BotStatePatch = { ...fields };
@@ -133,7 +136,8 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
   else if (connectorScopes !== undefined) normalized.connectorScopes = connectorScopes;
   if (phoneApps === null) normalized.phoneApps = undefined;
   else if (phoneApps !== undefined) normalized.phoneApps = phoneApps;
-  if (peers !== undefined) normalized.peers = peers ?? undefined;
+  // A pending choice shows as the bot's main thread, so a broadcast during the save does not revert it.
+  if (typeof mainThreadChoice === "string") normalized.mainThreadId = mainThreadChoice;
   return normalized;
 };
 
@@ -148,7 +152,7 @@ export function createBotPatchQueue(options: BotPatchQueueOptions): BotPatchQueu
     for (const resolve of entry.idleWaiters.splice(0)) resolve(entry.fallback);
   };
 
-  const drain = async (entry: BotPatchQueueEntry): Promise<void> => {
+  const drain = async (entry: BotPatchQueueEntry, leaving = false): Promise<void> => {
     if (disposed || entry.running || entry.timer !== null || !hasFields(entry.pending)) return;
     entry.running = true;
     const patch = entry.pending;
@@ -158,7 +162,7 @@ export function createBotPatchQueue(options: BotPatchQueueOptions): BotPatchQueu
     entry.controller = controller;
 
     try {
-      const bot = await options.send(entry.botId, patch, controller.signal, entry.fallback);
+      const bot = await options.send(entry.botId, patch, controller.signal, entry.fallback, leaving);
       if (disposed || entry.cancelled) return;
       entry.fallback = bot;
       options.onAuthoritative(bot, stateOverlay(entry.pending));
@@ -253,6 +257,15 @@ export function createBotPatchQueue(options: BotPatchQueueOptions): BotPatchQueu
       return idle;
     },
 
+    flushAll() {
+      for (const entry of entries.values()) {
+        if (entry.timer === null) continue;
+        clearTimeout(entry.timer);
+        entry.timer = null;
+        void drain(entry, true);
+      }
+    },
+
     overlayFor(botId) {
       const entry = entries.get(botId);
       return entry ? stateOverlay({ ...entry.inFlight, ...entry.pending }) : {};
@@ -282,5 +295,19 @@ export function createBotPatchQueue(options: BotPatchQueueOptions): BotPatchQueu
       }
       entries.clear();
     },
+  };
+}
+
+/** Browsers cancel an ordinary request when the page reloads; a keepalive one still arrives, if its body is under 64 KiB. */
+export const keepaliveFits = (body: string) => new TextEncoder().encode(body).length < 60_000;
+
+/** Saves every edit still waiting at once (`flushAll`) when the page is left; returns the listeners' removal. */
+export function flushWhenLeaving(queue: Pick<BotPatchQueue, "flushAll">, target: Pick<Window, "addEventListener" | "removeEventListener">): () => void {
+  const leaving = () => queue.flushAll();
+  target.addEventListener("pagehide", leaving);
+  target.addEventListener("beforeunload", leaving);
+  return () => {
+    target.removeEventListener("pagehide", leaving);
+    target.removeEventListener("beforeunload", leaving);
   };
 }

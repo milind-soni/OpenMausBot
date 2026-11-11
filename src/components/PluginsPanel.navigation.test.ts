@@ -40,25 +40,29 @@ vi.mock("@/state/store", () => ({
     dispatch: fixture.dispatch,
   }),
 }));
-vi.mock("./McpServersPanel", () => ({
-  McpServersPanel: ({ embedded, whopCard }: { embedded?: boolean; whopCard?: boolean }) => whopCard
-    ? createElement("div", { "data-whop-card": true }, "Connect Whop")
-    : createElement("div", { "data-embedded": String(Boolean(embedded)) }, "MCP inventory"),
-}));
+vi.mock("./McpServersPanel", async () => {
+  const { HOSTED_MCP_APPS } = await import("@/lib/hosted-mcp-apps");
+  return {
+    McpServersPanel: ({ embedded, hostedCards }: { embedded?: boolean; hostedCards?: { shown(id: string): boolean } }) => hostedCards
+      ? createElement("div", { "data-hosted-cards": true }, HOSTED_MCP_APPS.filter((app) => hostedCards.shown(app.id)).map((app) => createElement("div", { key: app.id, "data-hosted-app": app.id }, `Connect ${app.label}`)))
+      : createElement("div", { "data-embedded": String(Boolean(embedded)) }, "MCP inventory"),
+  };
+});
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 vi.mock("./Avatar", () => ({ BotAvatar: ({ bot }: { bot: Bot }) => createElement("span", { "data-avatar": bot.id }) }));
-// The native HighLevel card has its own DOM suite; here it is a marker so tile counts stay the catalog's.
-vi.mock("./HighLevelCard", () => ({
-  HighLevelCard: () => createElement("div", { "data-highlevel-card": true }, "Connect HighLevel"),
-}));
 vi.mock("./XCard", () => ({
   X_CARD_SEARCH: "x twitter treg tweets posts",
   XCard: () => createElement("div", { "data-x-card": true }, "X (Twitter)"),
 }));
+vi.mock("./EmailCard", () => ({
+  EmailCard: () => createElement("div", { "data-email-card": true }, "Email"),
+}));
 vi.mock("./PostizCard", () => ({
   PostizCard: () => createElement("div", { "data-postiz-card": true }, "Postiz"),
 }));
+import { HOSTED_MCP_APPS } from "@/lib/hosted-mcp-apps";
 import { APPS_PREVIEW_COUNT, PluginsPanel, USED_BY_AVATAR_SIZE, botsUsingService } from "./PluginsPanel";
+import { connectedInventoryCopy } from "@/lib/connector-status";
 import { FACE_BOX } from "./cursor-face-data";
 import { MASCOT_BODIES } from "../../shared/mascot-bodies";
 
@@ -66,12 +70,13 @@ const CARDS = 0;
 const CONFIGURED = 3;
 const STATUS = 6;
 const PHASE = 13;
-const HIGHLEVEL_CONNECTED = 21;
-const X_CONNECTED = 22;
+const X_CONNECTED = 21;
 const CATEGORY = 20;
-const POSTIZ_CONNECTED = 23;
+const POSTIZ_CONNECTED = 22;
+const EMAIL_CONNECTED = 23;
 const MODE = 4;
 const SEARCH = 15;
+const HOSTED_CONNECTED = 18;
 const TAB = 16;
 
 type Node = ReactElement<{ children?: ReactNode; "aria-pressed"?: boolean; "data-apps-filter"?: string; onClick?: () => void; [key: string]: unknown }>;
@@ -116,41 +121,57 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Apps pop-up", () => {
-  it("connects Whop inside the apps grid without a Composio key or MCP detour", () => {
+  it("connects each hosted app inside the apps grid without a Composio key or MCP detour", () => {
     fixture.overrides.set(CONFIGURED, false);
     const { html, nodes: tree } = render();
-    expect(html).toContain("Connect Whop");
-    expect(html).not.toContain("Set up Whop");
     const grid = tree.find((node) => node.props["data-apps-grid"] !== undefined)!;
-    expect(nodes(grid).some((node) => node.props.whopCard === true)).toBe(true);
+    expect(nodes(grid).some((node) => node.props.hostedCards !== undefined)).toBe(true);
+    for (const app of HOSTED_MCP_APPS) {
+      expect(html).toContain(`Connect ${app.label}`);
+      expect(html).not.toContain(`Set up ${app.label}`);
+    }
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
-  it("counts Whop among connected apps", () => {
-    fixture.overrides.set(18, true);
-    const { html } = render();
-    expect(html).toContain("2 connected");
-  });
-  it("shows the native HighLevel card in the grid and counts it once connected", () => {
-    const { html, nodes: tree } = render();
-    const grid = tree.find((node) => node.props["data-apps-grid"] !== undefined)!;
-    expect(nodes(grid).some((node) => node.props.onConnection !== undefined && node.props.refreshKey !== undefined)).toBe(true);
-    expect(html).toContain("Connect HighLevel");
-    expect(html).toContain("1 connected");
-    fixture.overrides.set(HIGHLEVEL_CONNECTED, true);
+  it("counts every connected hosted app among connected apps", () => {
+    const everyApp = (connected: boolean) => Object.fromEntries(HOSTED_MCP_APPS.map((app) => [app.id, connected]));
+    fixture.overrides.set(HOSTED_CONNECTED, everyApp(true));
+    expect(render().html).toContain(`${1 + HOSTED_MCP_APPS.length} connected`);
+    fixture.overrides.set(HOSTED_CONNECTED, { ...everyApp(false), [HOSTED_MCP_APPS[0].id]: true });
     expect(render().html).toContain("2 connected");
   });
-  it("hides HighLevel from the Connected tab until it is connected, and from a search that does not name it", () => {
-    fixture.overrides.set(16, "connected");
-    fixture.overrides.set(HIGHLEVEL_CONNECTED, false);
-    const wrapper = (tree: Node[]) => tree.find((node) => node.props["data-native-card"] === "highlevel")!;
-    expect(wrapper(render().nodes).props.className).toBe("hidden");
-    fixture.overrides.set(HIGHLEVEL_CONNECTED, true);
-    expect(wrapper(render().nodes).props.className).toBe("contents");
-    fixture.overrides.set(16, "marketplace");
-    fixture.overrides.set(15, "growably");
-    expect(wrapper(render().nodes).props.className).toBe("contents");
-    fixture.overrides.set(15, "zendesk");
-    expect(wrapper(render().nodes).props.className).toBe("hidden");
+  it.each(HOSTED_MCP_APPS)("finds $label by its own name and shows no other hosted card", (app) => {
+    fixture.overrides.set(SEARCH, app.label.toLowerCase());
+    const html = render().html;
+    expect(html).toContain(`data-hosted-app="${app.id}"`);
+    expect(html.match(/data-hosted-app="/g)).toHaveLength(1);
+  });
+  it("shows a hosted card under Connected only while it is not known to be disconnected", () => {
+    fixture.overrides.set(TAB, "connected");
+    expect(render().html).toContain(`data-hosted-app="${HOSTED_MCP_APPS[0].id}"`);
+    fixture.overrides.set(HOSTED_CONNECTED, Object.fromEntries(HOSTED_MCP_APPS.map((app) => [app.id, app === HOSTED_MCP_APPS[0]])));
+    const html = render().html;
+    expect(html).toContain(`data-hosted-app="${HOSTED_MCP_APPS[0].id}"`);
+    for (const other of HOSTED_MCP_APPS.slice(1)) expect(html).not.toContain(`data-hosted-app="${other.id}"`);
+  });
+  it.each(["agentcard", "opencommerce"])("finds Agentcard by %s and shows no other hosted card", (word) => {
+    fixture.overrides.set(SEARCH, word);
+    const html = render().html;
+    expect(html).toContain('data-hosted-app="agentcard"');
+    expect(html.match(/data-hosted-app="/g)).toHaveLength(1);
+  });
+  it("counts Whop and Agentcard both under Connected", () => {
+    fixture.overrides.set(HOSTED_CONNECTED, { whop: true, agentcard: true });
+    expect(render().html).toContain("3 connected");
+    fixture.overrides.set(TAB, "connected");
+    const html = render().html;
+    expect(html).toContain('data-hosted-app="whop"');
+    expect(html).toContain('data-hosted-app="agentcard"');
+  });
+  it("names the connected hosted apps in the setup notice", () => {
+    fixture.overrides.set(CONFIGURED, false);
+    fixture.overrides.set(HOSTED_CONNECTED, Object.fromEntries(HOSTED_MCP_APPS.map((app) => [app.id, true])));
+    const html = render().html;
+    expect(html).toContain(`Connected: ${new Intl.ListFormat("en", { style: "long", type: "conjunction" }).format(HOSTED_MCP_APPS.map((app) => app.label))}.`);
   });
   it("shows the Postiz card in the grid and under Social, with a Social pill, and counts it once connected", () => {
     const wrapper = (tree: Node[]) => tree.find((node) => node.props["data-native-card"] === "postiz")!;
@@ -188,6 +209,24 @@ describe("Apps pop-up", () => {
     fixture.overrides.set(SEARCH, "twitter");
     expect(wrapper(render().nodes).props.className).toBe("contents");
     fixture.overrides.set(SEARCH, "gmail");
+    expect(wrapper(render().nodes).props.className).toBe("hidden");
+  });
+  it("shows the email card in the grid for every install and counts it once a mailbox is connected", () => {
+    const wrapper = (tree: Node[]) => tree.find((node) => node.props["data-native-card"] === "email")!;
+    const { html, nodes: tree } = render();
+    expect(nodes(wrapper(tree)).some((node) => node.props.onConnection !== undefined && node.props.refreshKey !== undefined)).toBe(true);
+    expect(wrapper(tree).props.className).toBe("contents");
+    expect(html).toContain("1 connected");
+    fixture.overrides.set(EMAIL_CONNECTED, true);
+    expect(render().html).toContain("2 connected");
+    fixture.overrides.set(TAB, "connected");
+    expect(wrapper(render().nodes).props.className).toBe("contents");
+    fixture.overrides.set(EMAIL_CONNECTED, false);
+    expect(wrapper(render().nodes).props.className).toBe("hidden");
+    fixture.overrides.set(TAB, "marketplace");
+    fixture.overrides.set(SEARCH, "imap");
+    expect(wrapper(render().nodes).props.className).toBe("contents");
+    fixture.overrides.set(SEARCH, "twitter");
     expect(wrapper(render().nodes).props.className).toBe("hidden");
   });
   it("leaves out the managed install's dead Twitter tile, which the X card replaces, unless it is already connected", () => {
@@ -533,6 +572,102 @@ describe("Apps pop-up", () => {
     expect(fixture.overrides.get(20)).toBe("Productivity");
   });
 
+  const MCP_SERVERS = 24, SUGGESTIONS = 28;
+  const headings = (html: string) => [...html.matchAll(/<h3 id="[^"]*"[^>]*>([^<]*)/g)].map((match) => match[1]);
+  const tiles = (html: string) => [...html.matchAll(/data-app-tile="([^"]*)"/g)].map((match) => match[1]).filter((slug) => !HOSTED_MCP_APPS.some((app) => app.id === slug));
+  const server = (name: string, extra: Record<string, unknown> = {}) => ({ name, type: "http", url: `https://${name}.example/mcp`, headerKeys: [], enabled: true, ...extra });
+  const suggestedAction = (tree: Node[]) => tree.find((node) => node.props.id === "apps-section-suggested")!.props.viewAll as { label: string; onClick: () => void } | undefined;
+
+  it("searches the whole catalog from the Connected view and from a category, not only what they show", () => {
+    fixture.overrides.set(TAB, "connected");
+    fixture.overrides.set(SEARCH, "notion");
+    let { html, nodes: tree } = render();
+    expect(tiles(html)).toEqual(["notion"]);
+    expect(headings(html)).toEqual(["Search results"]);
+    expect(chip(tree, "connected").props["aria-pressed"]).toBe(true);
+
+    fixture.overrides.set(TAB, "marketplace");
+    fixture.overrides.set(CATEGORY, "Design");
+    fixture.overrides.set(SEARCH, " Notion ");
+    ({ html } = render());
+    expect(tiles(html)).toEqual(["notion"]);
+  });
+
+  it("searches an app's category too, in any word order", () => {
+    fixture.overrides.set(CARDS, [{ ...card("sheets"), label: "Sheet Thing", categories: ["Spreadsheets"] }, card("gmail")]);
+    fixture.overrides.set(SEARCH, "spreadsheets thing");
+    expect(tiles(render().html)).toEqual(["sheets"]);
+  });
+
+  it("shows Suggested for you after Connected, the same tiles, with the on-demand button", () => {
+    fixture.overrides.set(SUGGESTIONS, { cards: [card("notion"), card("gmail")], pick: "available" });
+    const { html, nodes: tree } = render();
+    expect(headings(html).slice(0, 2)).toEqual(["Connected", "Suggested for you"]);
+    expect(html).toContain('data-apps-section="apps-section-suggested"');
+    expect(html.match(/data-app-tile="notion"/g)!.length).toBeGreaterThanOrEqual(2);
+    expect(suggestedAction(tree)!.label).toBe("Show suggested");
+    vi.mocked(api).mockClear();
+    suggestedAction(tree)!.onClick();
+    expect(vi.mocked(api).mock.calls).toEqual([["/api/connectors/suggestions/pick", { method: "POST" }]]);
+  });
+
+  it("drops an app from Suggested once it is connected, and leaves the section out when nothing is left", () => {
+    fixture.overrides.set(SUGGESTIONS, { cards: [card("slack")], pick: "available" });
+    expect(headings(render().html)).not.toContain("Suggested for you");
+    fixture.overrides.set(STATUS, {});
+    expect(headings(render().html)[0]).toBe("Suggested for you");
+  });
+
+  it("points to Settings for a key when no decision model is available, and hides the button after a pick", () => {
+    fixture.overrides.set(SUGGESTIONS, { cards: [card("notion")], pick: "needs-key" });
+    let { html, nodes: tree } = render();
+    expect(suggestedAction(tree)!.label).toBe("Add a Jev key in Settings");
+    suggestedAction(tree)!.onClick();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "togglePlugins", open: false });
+    expect(fixture.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "toggleAppSettings", open: true }));
+
+    fixture.overrides.set(SUGGESTIONS, { cards: [card("notion")], pick: "picked" });
+    ({ html, nodes: tree } = render());
+    expect(suggestedAction(tree)).toBeUndefined();
+    expect(html).toContain("Picked for what you&#x27;ve connected");
+  });
+
+  it("counts connected MCP servers, one rule, and never a hosted app's or one that is off or signed out", () => {
+    fixture.overrides.set(MCP_SERVERS, [
+      server("docs"),
+      server("signedin", { auth: "signed-in" }),
+      { name: "local", command: "npx", args: ["x"], envKeys: [], enabled: true },
+      server("needs", { auth: "needs-sign-in" }),
+      server("off", { enabled: false }),
+      server("hosted", { url: HOSTED_MCP_APPS[0]!.url, auth: "signed-in" }),
+    ]);
+    expect(render().html).toContain("4 connected");
+  });
+
+  it("hands the Connected view's search to the MCP tiles, and only there", () => {
+    fixture.overrides.set(MCP_SERVERS, [server("docs"), server("wiki")]);
+    const props = (tree: Node[]) => tree.find((node) => node.props.hostedCards)!.props.hostedCards as { ownServers?: { shown(one: unknown): boolean; manage(): void } };
+    expect(props(render().nodes).ownServers).toBeUndefined();
+    fixture.overrides.set(TAB, "connected");
+    fixture.overrides.set(SEARCH, "wiki");
+    const { ownServers } = props(render().nodes);
+    expect(ownServers!.shown(server("wiki"))).toBe(true);
+    expect(ownServers!.shown(server("docs"))).toBe(false);
+    ownServers!.manage();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "togglePlugins", open: true, surface: "mcp" });
+  });
+
+  it("doesn't call the Connected view empty while an MCP server is listed there", () => {
+    fixture.overrides.set(STATUS, {});
+    fixture.overrides.set(TAB, "connected");
+    fixture.overrides.set(21, false); fixture.overrides.set(22, false); fixture.overrides.set(23, false);
+    fixture.overrides.set(18, Object.fromEntries(HOSTED_MCP_APPS.map((app) => [app.id, false])));
+    const emptyTitle = connectedInventoryCopy("ready").title;
+    expect(render().html).toContain(emptyTitle);
+    fixture.overrides.set(MCP_SERVERS, [server("docs")]);
+    expect(render().html).not.toContain(emptyTitle);
+  });
+
   it("pairs the search with an MCP servers pill and puts the connected count, with app icons, in the header", () => {
     const { html, nodes: tree } = render();
     expect(chip(tree, "mcp").props["aria-pressed"]).toBe(false);
@@ -550,7 +685,7 @@ describe("Apps pop-up", () => {
     expect(html).toContain(`Show all ${APPS_PREVIEW_COUNT + 5} apps`);
   });
 
-  it("keeps the per-bot banner, stale notice and self-host key link reachable", () => {
+  it("keeps the stale notice reachable and no longer sends people to a settings page for per-bot access", () => {
     fixture.instances = [claude];
     fixture.bots = [bot("scout", { composio: false })];
     fixture.overrides.set(7, true);
@@ -558,8 +693,7 @@ describe("Apps pop-up", () => {
     expect(html).toContain("Showing what was connected last time");
     fixture.overrides.set(7, false);
     ({ html } = render());
-    expect(html).toContain("Not every bot can use these apps.");
-    expect(html).toContain("Allow scout");
+    expect(html).not.toContain("Settings → Access");
   });
 
   it("names the bots that use a connected app", () => {

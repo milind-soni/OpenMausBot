@@ -5,7 +5,7 @@ import type { BotRecord } from "../store.ts";
 import { createDelegatedLevel, type DelegatedLevelDeps, type Hop } from "./delegated-level.ts";
 
 // Clive (a Chief) handed work to Ada, and Ada's turn hands work on: the chain is the hand-off nodes' parents.
-function world(levels: Record<string, ApprovalMode>, nodes: Record<string, Hop>, guest = new Set<string>()) {
+function world(levels: Record<string, ApprovalMode>, nodes: Record<string, Hop>, guest = new Set<string>(), outside = new Set<string>()) {
   const bots: Record<string, Partial<BotRecord>> = {
     clive: { id: "clive", name: "Clive", chiefOfStaff: true }, ada: { id: "ada", name: "Ada" }, bea: { id: "bea", name: "Bea" }, ola: { id: "ola", name: "Ola" },
   };
@@ -21,7 +21,7 @@ function world(levels: Record<string, ApprovalMode>, nodes: Record<string, Hop>,
   const level = (botId: string, threadId: string) => levels[`${botId}:${threadId}`] ?? levels[botId] ?? "ask";
   const delegated = createDelegatedLevel({
     store, node: id => nodes[id], sourceLevel: level, turnLevel: (bot, _peer, threadId) => level(bot.id, threadId),
-    driverKind: () => "claudeAgent", guestDriven: threadId => guest.has(threadId),
+    driverKind: () => "claudeAgent", guestDriven: threadId => guest.has(threadId), handsNoLevel: threadId => outside.has(threadId),
   });
   return { ...delegated, patched, lines, bot: (id: string) => bots[id] as BotRecord };
 }
@@ -45,9 +45,20 @@ describe("a Chief's level, every hop down", () => {
       { botId: "bea", threadId: "bea-work", approvalMode: "auto", autoApprove: false, alwaysAllow: [] },
     ]);
     expect(w.lines).toEqual([
-      "Approve for me — delegated by Clive, a Chief of Staff on Approve for me",
-      "Approve for me — delegated by Ada, from Clive, a Chief of Staff on Approve for me",
+      "Approve for me — handed on by Clive, a Chief of Staff on Approve for me",
+      "Approve for me — handed on by Ada, from Clive, a Chief of Staff on Approve for me",
     ]);
+  });
+
+  it("brings nothing down from work that came in from outside: the teammate keeps its own level", () => {
+    const w = world({ "clive:clive-chat": "full" }, chain, new Set(), new Set(["clive-chat"]));
+    w.apply(w.bot("clive"), "clive-chat", "root", w.bot("ada"), "ada-work");
+    expect(w.patched).toEqual([]);
+    expect(w.lines).toEqual([]);
+    expect(w.levelOf({ botId: "ada", threadId: "ada-work" }, chain["to-ada"]).chief).toBeUndefined();
+    const below = world({ "clive:clive-chat": "full", "ada:ada-work": "ask" }, chain, new Set(), new Set(["ada-work"]));
+    below.apply(below.bot("ada"), "ada-work", "to-ada", below.bot("bea"), "bea-work");
+    expect(below.patched).toEqual([]);
   });
 
   it("runs a room turn at the level its hand-off's chain brings down, and a guest's room at Ask", () => {

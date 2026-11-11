@@ -3,18 +3,27 @@ import { Bug, ChevronDown, ChevronRight, RefreshCw, X } from "lucide-react";
 import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
-import { formatTime, toRows, type InspectorEntry, type InspectorPage, type InspectorRow } from "@/lib/inspector";
+import { formatTime, toRows, type InspectorPage, type InspectorRow } from "@/lib/inspector";
 import { listenLiveFrames } from "@/lib/live-events";
 import type { RuntimeEvent } from "../../shared/runtime-events";
 import { RunLog } from "./RunLog";
 import { timelineEvents } from "@/lib/taskTimeline";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
+import { capital } from "@/lib/automations";
+import type { LocaleKey } from "@/locales";
+import { appendInspectorRuntime, mergeInspectorSnapshot, INSPECTOR_WINDOW_LIMIT } from "@/lib/inspector-window";
+
+const tabLabel = (key: LocaleKey) => (activeLocale() === "en" ? t(key) : capital(t(key)));
 
 type Lens = "run" | "events" | "raw";
 
+/**
+ * Disk persistence can lag behind live delivery, even for equal-time events.
+ * Native expansion resets on a loaded snapshot: its positional keys are not identities.
+ */
 export function InspectorPanel({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
-  const { padClass, dragProps } = useCaptionChrome();
+  const { dragProps } = useCaptionChrome();
   const threadId = bot.threadId;
   const [lens, setLens] = useState<Lens>("run");
   const activity = useMemo(() => timelineEvents(visibleMessages(bot), bot), [bot]);
@@ -31,12 +40,13 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
     const controller = new AbortController();
     loadAbort.current = controller;
     try {
-      const res = await fetch(`/api/threads/${threadId}/events?limit=400`, { signal: controller.signal });
+      const res = await fetch(`/api/threads/${threadId}/events?limit=${INSPECTOR_WINDOW_LIMIT}`, { signal: controller.signal });
       if (!res.ok) throw new Error(`${res.status}`);
       // SAFETY: the same-version harness's typed inspector endpoint; malformed transport data is handled by catch.
       const next = (await res.json()) as InspectorPage;
       if (controller.signal.aborted) return;
-      setPage(next);
+      setPage((previous) => mergeInspectorSnapshot(previous, next));
+      setExpanded((previous) => new Set([...previous].filter((key) => key.startsWith("runtime:"))));
       setError(null);
     } catch (e) {
       if (controller.signal.aborted) return;
@@ -50,7 +60,6 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
     setPage(null);
     setExpanded(new Set());
     stickToBottom.current = true;
-    void load();
     return () => loadAbort.current?.abort();
   }, [load]);
 
@@ -60,21 +69,20 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
     let refreshGeneration = 0;
     let refreshing = false;
     const pendingRuntime: RuntimeEvent[] = [];
+    let batch: RuntimeEvent[] = [];
+    let batchTimer: ReturnType<typeof setTimeout> | null = null;
 
+    const flushBatch = () => {
+      if (batchTimer) clearTimeout(batchTimer);
+      batchTimer = null;
+      const events = batch;
+      batch = [];
+      if (events.length) setPage((prev) => appendInspectorRuntime(prev, events));
+    };
     const appendRuntime = (runtime: RuntimeEvent) => {
-      setPage((prev) => {
-        // eventId is canonical, so a replayed entry already in the snapshot is a no-op.
-        if (
-          prev?.entries.some(
-            (entry) => entry.kind === "runtime" && entry.data.eventId === runtime.eventId,
-          )
-        ) {
-          return prev;
-        }
-        const entry: InspectorEntry = { kind: "runtime", at: runtime.createdAt, data: runtime };
-        if (!prev) return { entries: [entry], total: { runtime: 1, native: 0 } };
-        return { entries: [...prev.entries, entry], total: { ...prev.total, runtime: prev.total.runtime + 1 } };
-      });
+      batch.push(runtime);
+      if (batch.length >= INSPECTOR_WINDOW_LIMIT) flushBatch();
+      else batchTimer ??= setTimeout(flushBatch, 16);
     };
 
     const flushPendingRuntime = () => {
@@ -82,6 +90,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
     };
 
     const refresh = async () => {
+      flushBatch();
       const generation = ++refreshGeneration;
       refreshing = true;
       await load();
@@ -107,11 +116,14 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
         }
       },
     });
+    requestRefresh();
     return () => {
       alive = false;
       if (managedRefresh.current === requestRefresh) managedRefresh.current = () => {};
       stopLive();
       if (settle) clearTimeout(settle);
+      if (batchTimer) clearTimeout(batchTimer);
+      batch = [];
     };
   }, [threadId, load]);
 
@@ -122,9 +134,18 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   const rows = useMemo(() => toRows(entries), [entries]);
 
   useEffect(() => {
+    const retained = new Set(["runtime", "native"].flatMap((kind) =>
+      toRows(page?.entries.filter((entry) => entry.kind === kind) ?? []).map((row) => `${row.kind}:${row.key}`)));
+    setExpanded((previous) => {
+      const next = new Set([...previous].filter((key) => retained.has(key)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [page]);
+
+  useEffect(() => {
     const el = listRef.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [page?.entries.length, rows.length, lens]);
+  }, [page, rows.length, lens]);
   const onScroll = () => {
     const el = listRef.current;
     if (!el) return;
@@ -143,15 +164,15 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   const total = lens === "raw" ? (page?.total.native ?? 0) : (page?.total.runtime ?? 0);
 
   return (
-    <aside aria-label="Inspector" className="animate-panel-in absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel md:static md:z-auto md:w-[min(460px,45vw)] md:shrink-0">
-      <div {...dragProps} className={cn("flex items-center justify-between px-4 py-3", padClass)}>
+    <aside aria-label={t("inspector.title")} className="animate-panel-in absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel md:static md:z-auto md:w-[min(460px,45vw)] md:shrink-0">
+      <div {...dragProps} className="flex items-center justify-between px-4 py-3">
         <span className="flex items-center gap-2 text-[15px] font-semibold text-ink">
-          <Bug size={16} className="text-ink-secondary" /> Inspector
+          <Bug size={16} className="text-ink-secondary" /> {t("inspector.title")}
         </span>
         <button
           onClick={() => dispatch({ type: "toggleInspector", open: false })}
-          aria-label="Close the Inspector"
-          title="Close the Inspector"
+          aria-label={t("inspector.close")}
+          title={t("inspector.close")}
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
         >
           <X size={18} />
@@ -181,32 +202,33 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
               tabIndex={lens === l ? 0 : -1}
               onClick={() => setLens(l)}
               className={cn(
-                "rounded-md px-2.5 py-1 text-[12px] font-medium capitalize",
+                "rounded-md px-2.5 py-1 text-[12px] font-medium",
+                activeLocale() === "en" && "capitalize",
                 lens === l ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink",
               )}
             >
-              {l === "run" ? t("inspector.run.title") : l}
+              {tabLabel(l === "run" ? "inspector.run.title" : l === "events" ? "inspector.tab.events" : "inspector.tab.raw")}
             </button>
           ))}
         </div>
         {lens !== "run" && <span className="ml-auto text-[11px] text-ink-secondary">
-          {page ? (shown < total ? `last ${shown} of ${total}` : `${shown} entries`) : "loading…"}
+          {page ? (shown < total ? t("inspector.entries.lastOf", { shown, total }) : t("inspector.entries.count", { count: shown })) : t("inspector.entries.loading")}
         </span>}
-        {lens !== "run" && <button onClick={() => managedRefresh.current()} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" title="Reload from disk">
+        {lens !== "run" && <button onClick={() => managedRefresh.current()} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" title={t("inspector.reload")}>
           <RefreshCw size={14} />
         </button>}
       </div>
 
       <div role="tabpanel" id={`inspector-panel-${lens}`} aria-labelledby={`inspector-tab-${lens}`} tabIndex={0} className="flex min-h-0 flex-1 flex-col outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60">
       {lens === "run" ? <RunLog key={threadId} events={activity} /> : <div ref={listRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto font-mono text-[12px]">
-        {error && <div className="px-4 py-3 text-danger">couldn't load: {error}</div>}
+        {error && <div className="px-4 py-3 text-danger">{t("inspector.loadFailed", { error })}</div>}
         {page && rows.length === 0 && !error && (
           <div className="px-4 py-6 text-ink-secondary">
-            {lens === "raw" ? "No native protocol messages recorded for this thread yet." : "No runtime events for this thread yet."}
+            {t(lens === "raw" ? "inspector.emptyRaw" : "inspector.emptyEvents")}
           </div>
         )}
         {rows.map((row) => (
-          <Row key={row.key} row={row} open={expanded.has(row.key)} onToggle={() => toggle(row.key)} />
+          <Row key={row.key} row={row} open={expanded.has(`${row.kind}:${row.key}`)} onToggle={() => toggle(`${row.kind}:${row.key}`)} />
         ))}
       </div>}
       </div>

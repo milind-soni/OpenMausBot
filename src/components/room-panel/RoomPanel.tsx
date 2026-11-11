@@ -115,7 +115,7 @@ function InstructionsRow({ group }: { group: Group }) {
 
 export function RoomPanel({ group, overlay = false }: { group: Group; overlay?: boolean }) {
   const { state } = useStore();
-  const { padClass, dragProps } = useCaptionChrome();
+  const { dragProps } = useCaptionChrome();
   const [page, setPage] = useState<RoomPage | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
   const dialogRef = useRef<HTMLElement>(null);
@@ -180,7 +180,7 @@ export function RoomPanel({ group, overlay = false }: { group: Group; overlay?: 
         onKeyDown={onKeyDown}
         className={sidePanelCls(overlay, true)}
       >
-        <div {...dragProps} className={cn("flex h-[52px] shrink-0 items-center justify-end gap-2 px-3.5", padClass)}>
+        <div {...dragProps} className="flex h-[52px] shrink-0 items-center justify-end gap-2 px-3.5">
           <RoomMoreMenu group={group} />
           <button type="button" onClick={() => closeRoomPanel({ refocus: true })} aria-label={t("botSettings.simple.close")} className={roundButtonCls}>
             <X size={16} className="pointer-events-none" />

@@ -3,7 +3,8 @@
 // while a computer is on, up to its own eight-hour auto-stop.
 import * as boat from "../boat.ts";
 import { boatCreateRecoverySnapshot } from "../boat-create-idempotency.ts";
-import { hasPendingBoatDeletionForBot } from "../boat-delete-journal.ts";
+import { BOAT_DELETING, BOAT_DELETION_FINISHED, hasPendingBoatDeletionForBot } from "../boat-delete-journal.ts";
+import { backgroundCommandRunning } from "../cloud-computer-background.ts";
 import { ComputerIdleTimer } from "../computer-idle.ts";
 import type { AppConfig } from "../config.ts";
 import { redactSecretsInText } from "../redact.ts";
@@ -16,6 +17,11 @@ export const CLOUD_COMPUTER_IDLE_MS = Math.max(1_000, Number(process.env.OMB_CLO
  * minutes or more often never waits on a wake: each wake spends one start from the Boat account's pool, shared by every customer. */
 export const ROUTINE_DUE_SOON_MS = 30 * 60_000;
 const MAX_LISTING_RETRY_MS = 60 * 60_000;
+/** Above a slow first start; Boat's own ready wait is 90 seconds. */
+export const CLOUD_COMPUTER_START_BUDGET_MS = Math.max(1_000, Number(process.env.OMB_CLOUD_COMPUTER_START_BUDGET_MS) || 150_000);
+export const CLOUD_COMPUTER_STARTING = "The cloud computer is still starting. This call was not performed. Take a fresh screenshot in a moment.";
+export const CLOUD_COMPUTER_DID_NOT_START = "the cloud computer didn't start in time";
+const REMOVAL_POLL_MS = 3_000;
 
 type ScheduledRoutine = Pick<Routine, "botId" | "runOn" | "enabled" | "nextRunAt">;
 
@@ -58,9 +64,12 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
     if (!boat.boatConfigured(cfg) || hasPendingBoatDeletionForBot(owner)) return forget(owner);
     if (boatCreateRecoverySnapshot().some((entry) => entry.botId === owner && !entry.resolved)) return "busy";
     const machine = await boat.findBoat(cfg, owner);
+    if (closed) return;
     const state = typeof machine?.state === "string" ? machine.state : null;
     if (!state || boat.SLEEPING_BOAT_STATES.has(state)) return forget(owner);
     if (boat.boatTurnLifecycleAction(state) !== "attach" || busy(owner)) return "busy";
+    if (typeof machine?.id === "string" && await backgroundCommandRunning(cfg, machine.id)) return "busy";
+    if (closed) return;
     let release: () => void;
     try {
       release = deps.claim(owner);
@@ -103,11 +112,13 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
     used(held.owner);
   }
 
-  async function start(bot: BotRecord, turn: TurnOwner) {
+  /** `existingOnly`: wake or attach the bot's computer, but never create one (null when it has none). Every wait inside
+   * fits `budgetMs`. */
+  async function start(bot: BotRecord, turn: TurnOwner, opts: { existingOnly?: boolean; budgetMs?: number } = {}) {
     attached(turn, bot.id);
     starting.set(bot.id, (starting.get(bot.id) ?? 0) + 1);
     try {
-      return await startBotBoat(bot);
+      return await startBotBoat(bot, opts.existingOnly === true, Date.now() + (opts.budgetMs ?? CLOUD_COMPUTER_START_BUDGET_MS));
     } finally {
       const left = (starting.get(bot.id) ?? 1) - 1;
       if (left > 0) starting.set(bot.id, left);
@@ -115,23 +126,38 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
     }
   }
 
-  async function startBotBoat(bot: BotRecord) {
+  async function startBotBoat(bot: BotRecord, existingOnly: boolean, deadline: number) {
     let b = await boat.findBoat(cfg, bot.id);
     const lifecycleOf = () => boat.boatTurnLifecycleAction(typeof b?.state === "string" ? b.state : null);
     let lifecycle = lifecycleOf();
+    if (lifecycle === "provision" && existingOnly) return null;
     if (lifecycle === "provision") {
       broadcast({ kind: "computer", botId: bot.id, state: "provisioning", place: "cloud" });
-      await boat.provisionBoat(cfg, bot.id, bot.name);
+      await provisionOnceRemoved(bot, deadline);
       b = await boat.findBoat(cfg, bot.id);
       lifecycle = lifecycleOf();
     }
     // An archived Boat answers every action with an error until it resumes: wake it once here.
     if (lifecycle === "wake") {
       broadcast({ kind: "computer", botId: bot.id, state: "waking", place: "cloud" });
-      b = (await boat.readyBoat(cfg, bot.id)) ?? b;
+      b = (await boat.readyBoat(cfg, bot.id, Math.max(1_000, deadline - Date.now()))) ?? b;
       lifecycle = lifecycleOf();
     }
     return b && lifecycle === "attach" ? b : null;
+  }
+
+  /** A start that failed removes the computer it created, so the next one can meet that removal still under way. */
+  async function provisionOnceRemoved(bot: BotRecord, deadline: number): Promise<void> {
+    for (;;) {
+      try {
+        await boat.provisionBoat(cfg, bot.id, bot.name);
+        return;
+      } catch (error) {
+        const code = (error as { code?: unknown } | null)?.code;
+        if ((code !== BOAT_DELETING && code !== BOAT_DELETION_FINISHED) || closed || Date.now() + REMOVAL_POLL_MS >= deadline) throw error;
+        if (code === BOAT_DELETING) await new Promise(resolve => setTimeout(resolve, REMOVAL_POLL_MS));
+      }
+    }
   }
 
   /** At startup: what a previous run left on gets the same window. Orphans (no owner left) stay for Settings → Computers. */

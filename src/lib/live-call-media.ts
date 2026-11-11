@@ -255,7 +255,7 @@ export async function startLiveCall(target: { botId: string; threadId: string })
       if (mine !== generation) return;
       return set({ ...failed, ...micBlocked(deps.capabilities(), pageMic) });
     }
-    const hopeless = error instanceof LiveUnsupportedError || (error instanceof ApiError && error.status === 401);
+    const hopeless = error instanceof LiveUnsupportedError || (error instanceof ApiError && (error.status === 401 || error.status === 403));
     set({ ...failed, action: hopeless ? null : "retry", notice: error instanceof Error ? error.message : String(error) });
   }
 }

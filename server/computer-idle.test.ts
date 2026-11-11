@@ -132,6 +132,27 @@ describe("ComputerIdleTimer", () => {
     expect(suspend).toHaveBeenCalledOnce();
   });
 
+  type Stop = { promise: Promise<void | "busy">; resolve: (outcome: void | "busy") => void; reject: (error: Error) => void };
+  it.each([
+    ["fails", (stop: Stop) => stop.reject(new Error("provider 503"))],
+    ["finds work arrived", (stop: Stop) => stop.resolve("busy")],
+  ])("stays cancelled when a stop already under way %s", async (_, settle) => {
+    const stop = {} as Stop;
+    stop.promise = new Promise((resolve, reject) => Object.assign(stop, { resolve, reject }));
+    const suspend = vi.fn(() => stop.promise);
+    const failed = vi.fn();
+    const idle = new ComputerIdleTimer(1_000, () => false, suspend, failed);
+
+    idle.touch();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(suspend).toHaveBeenCalledOnce();
+    idle.cancel();
+    settle(stop);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(suspend).toHaveBeenCalledOnce();
+    expect(failed).not.toHaveBeenCalled();
+  });
+
   it("does not arm a cancelled timer when the window changes", async () => {
     const suspend = vi.fn(async () => {});
     const idle = new ComputerIdleTimer(1_000, () => false, suspend);

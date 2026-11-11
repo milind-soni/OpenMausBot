@@ -7,7 +7,7 @@ tool output.
 
 ## What is included
 
-- Better Auth 1.7.1 with email OTP, signed bearer sessions, hashed OTP storage,
+- Better Auth 1.7.7 with email OTP, signed bearer sessions, hashed OTP storage,
   and D1-backed IP plus recipient rate limits.
 - A Cloudflare Email Sending binding that produces both HTML and plain-text OTP
   messages. Authentication responses remain generic even when delivery fails;
@@ -46,7 +46,15 @@ or by a Worker deployed before it, keep their account) and moves capacity
 state to one row per account (`managed_endpoint_account_capacity`, seeded from
 the `0006` row, which stays but is no longer written). Endpoint rows
 deliberately do not cascade away with a hard installation deletion: losing the
-tunnel and DNS IDs would make operator cleanup impossible.
+tunnel and DNS IDs would make operator cleanup impossible. `0011` drops
+`account.issuer` and its unique index: `0001` created them for Better Auth
+1.7.1, and from 1.7.3 Better Auth never writes the column, so it would refuse
+any new account row. Apply `0011` before deploying a Worker on Better Auth
+1.7.7.
+`0013` drops `highlevel_flows` and `highlevel_ip_rate_limits`, the HighLevel
+OAuth relay's tables from `0009` and `0010`, with any sealed token payload still
+in them. Apply it after deploying a Worker without that relay: an older Worker
+still reads those tables.
 
 ## API surface
 
@@ -63,6 +71,7 @@ tunnel and DNS IDs would make operator cleanup impossible.
 | `POST` | `/v1/installations/self/push/register` | installation credential |
 | `POST` | `/v1/installations/self/push/unregister` | installation credential |
 | `POST` | `/v1/installations/self/push/send` | installation credential |
+| `POST` | `/v1/installations/self/relay-token` | installation credential |
 
 Installation registration requires a stable `clientInstanceId`, a display
 `name`, and a `platform` of `darwin`, `windows`, or `linux`; `appVersion` is
@@ -167,10 +176,11 @@ no configured account acts on (see **Several Cloudflare accounts**) are
 skipped. Rows run five at a time (the Workers limit is six connections
 awaiting headers), and a run stops
 starting new rows in an account as soon as that account's API answers `429`.
-At ten provider calls per row the default is about
-200 calls per run: a sixth of the API token's 1,200 requests per five minutes,
-and far below the Workers Paid limit of 10,000 subrequests per invocation. On
-Workers Free (50 subrequests per invocation) set the limit to 4. Failed
+At up to 14 provider calls per row (four of them only when a forced removal
+meets a tunnel that is still connected) the default is at most about 290 calls per
+run: under a quarter of the API token's 1,200 requests per five minutes, and far
+below the Workers Paid limit of 10,000 subrequests per invocation. On Workers
+Free (50 subrequests per invocation) set the limit to 3. Failed
 scheduled cleanups back off from five minutes through 15 minutes, one hour,
 six hours, and then 24 hours. Once a deletion has been pending for 24 hours,
 each eligible sweep emits a distinct aggregate operator-attention log without
@@ -271,7 +281,7 @@ A failure in one account is logged and never stops the others:
    - `inactive` (never ran), with no activation time, created at least two
      days ago; or
    - `down` with its last connection ended at least
-     `OMB_TUNNEL_OFFLINE_RECLAIM_DAYS` (default 21, minimum 3) days ago and no
+     `OMB_TUNNEL_OFFLINE_RECLAIM_DAYS` (default 21, minimum 1) days ago and no
      later activation.
 
    `healthy` and `degraded` tunnels, any reported connection, an unknown
@@ -577,48 +587,145 @@ no new endpoint while another account has room.
 Each account adds two Cloudflare reads to every cron run (a tunnel page and a
 DNS count), and each move two lookups in the old account. Tokens created by
 the same Cloudflare user share its 1,200 requests per five minutes. On
-Workers Free, four accounts with `OMB_CLEANUP_SWEEP_LIMIT` 4 use the whole
-50-subrequest budget, hence at most three extra accounts.
+Workers Free, three accounts with `OMB_CLEANUP_SWEEP_LIMIT` 3 use the whole
+50-subrequest budget; a fourth needs the limit at 2.
 
-### HighLevel OAuth relay
+### MausBot Relay
 
-OpenMausBot's native HighLevel (GoHighLevel, and white-labels such as Growably)
-integration signs a person in through a Marketplace app registered to us. The
-app's client secret lives only in this Worker; the harness (desktop or a Cloud
-home) never sees it. Routes, none of which need an installation credential: the
-random `state` and the tokens themselves are the secrets, and each route is
-rate-limited per caller address.
+Phones reach a desktop through MausBot Relay, end-to-end encrypted: the relay passes sealed bytes and can't open them
+(`companion/src/e2e/README.md`). This Worker only lets a computer onto the relay. It mints a 12-hour host token signed
+with Ed25519; the relay holds only the public key and checks tokens offline, so it can't mint one itself.
 
-| Route | Does |
-| --- | --- |
-| `POST /v1/highlevel/start` | Mints a 32-byte `state`, stores only `HKDF(state, "lookup")`, returns the white-label authorization URL (`marketplace.leadconnectorhq.com/v2/oauth/chooselocation`) with our client id, redirect URL and scopes. |
-| `GET /v1/highlevel/callback?code&state` | HighLevel sends the person's browser here. Exchanges the code (`POST services.leadconnectorhq.com/oauth/token`, `user_type=Location`), seals the token payload with AES-GCM under `HKDF(state, "wrap")`, shows a plain "Connected" page. Never echoes query parameters. |
-| `POST /v1/highlevel/claim {state}` | The harness collects the payload once (404 before the callback, 410 after); the row is emptied. |
-| `POST /v1/highlevel/refresh {refreshToken}` | Refreshes with the client secret; HighLevel's refusal is `401 highlevel_refresh_rejected`. |
+`POST /v1/installations/self/relay-token` with the installation credential and
+`{"appVersion":"0.1.150","devices":{"e2e":2,"legacy":1}}` (counts of paired phones on the encrypted connection and on the
+old one; no identifiers) answers:
 
-Rows live at most ten minutes (`highlevel_flows`, swept by the cron). Without the
-raw state a row opens nothing, and no plaintext token is ever written to D1.
-Logs carry counts and error codes, never codes or tokens.
+| Status | Body | When |
+| --- | --- | --- |
+| 200 | `{token, hostId, nodes, expiresAt, refreshAfter}` (times in ms) | this computer is in the rollout |
+| 503 | `relay_unavailable` | no signing key yet, `RELAY_DISABLED` on, outside the rollout, or blocked (`relay_blocked_at`). The desktop stays on Wi-Fi and Tailscale |
+| 401 | `unauthorized` | the installation credential is invalid or expired |
+| 429 | `rate_limited` | more than 60 an hour |
+
+- **Host id.** 16 random bytes made once per installation (`installations.relay_host_id`, unique). Phones learn it at
+  pairing; it never changes.
+- **Token.** `b64u(payload) "." b64u(Ed25519 signature over the first part)`, payload
+  `{"v":1,"kid","hid","iid","iat","exp"}` in that order, `exp = iat + 12 h`. The desktop refreshes after an hour.
+  Minted tokens match the V8 test vector byte for byte.
+- **Nodes.** Ordered by rendezvous hash, highest `SHA256(hostId ‖ node)[0:8]` first, so each computer prefers one node
+  and load splits evenly. A node listed in `RELAY_NODES_AMERICAS` goes first for a request whose `cf.continent` is NA or
+  SA.
+- **Rollout.** `RELAY_ROLLOUT_PERCENT` admits a computer when `SHA256(hostId)[0:2] mod 100` is below it, so a computer
+  stays in as the number grows; `RELAY_ALLOW_INSTALLATIONS` admits named installations (the team) at any percentage.
+- **Adoption.** Every request records its counts in `relay_adoption`, in the rollout or not; `/healthz` reports
+  `relayAdoption: {e2eDevices, legacyDevices, installs}` over the last 30 days. The tunnel path retires on these numbers.
+- **Usage per day** (`migrations/0014`). `relay_daily` counts installations once per UTC day and kind: `seen` (asked
+  for a token), `token` (got one), `e2e` (reported end-to-end phones), `new` (asked for the first time). It holds only
+  the day, the kind and a count; `relay_adoption.first_seen_at`, `token_at` and `e2e_at` tell a request whether its
+  installation was already counted today. The stats dashboard (stats.openmausbot.com) charts it. A Worker without the
+  migration keeps minting tokens and writing `relay_adoption`, and logs `relay_daily_schema` once per isolate.
+- **Tunnels.** From `RELAY_CAPABLE_MIN_VERSION`, a desktop at that version or later that the relay can carry (it is
+  on, the computer is inside the rollout and not blocked) and that reports `legacyDevices: 0` gets `409 relay_capable`
+  instead of a tunnel, whether it never had one or is coming back after a release or reclaim. An endpoint it already
+  holds keeps working. A desktop the relay cannot carry gets a tunnel as before. See **Releasing tunnels**.
+
+### Releasing tunnels
+
+A running desktop keeps its connector up, so idle reclaim never sees its tunnel as idle. These rules give tunnels back
+once the relay has replaced them. Each switch is off in `wrangler.jsonc`; all need migrations `0015` and `0016`. The cron only
+marks rows `deleting` (at most 20 a run, every reason together) and the cleanup sweep removes them; the row and its
+hostname stay, so a later provisioning call returns the same address.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `RELAY_TUNNEL_RELEASE_PERCENT` | `0` | Share of computers (the relay rollout's stable hash) whose tunnel is released once it is proven on the relay |
+| `RELAY_TUNNEL_RELEASE_DAYS` | `3` | The wait: no old phone reported for this long. Three days outlasts a weekend away, so a phone that still dials the tunnel has had working days to be counted and stop the wait |
+| `TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT` | `0` | Share of relay-served computers that give up their tunnel whatever phones are paired. Old phone apps stop connecting from outside the home network |
+| `TUNNEL_MIN_APP_VERSION` | empty | A desktop below it gets `426 update_required` and its tunnel is removed. A missing version counts as below |
+| `TUNNEL_REASON_MIN_VERSION` | empty | First desktop release that reads `tunnel` on `409 relay_capable` and keeps asking afterwards. Only from it is a full account answered with `relay_capable` |
+| `OMB_TUNNEL_RECLAIM_PREVIEW_DAYS` | empty | Dry run of idle reclaim at another offline period; counted, never acted on |
+
+- **Proven on the relay** means: a relay token in the last two days, a phone report in the last two days with at
+  least one phone on the encrypted connection and no old phone, and no old phone reported for the whole wait
+  (`relay_adoption.legacy_clear_at`, cleared by any report that counts an old phone). A phone that has used the
+  encrypted connection never dials the tunnel again, so such a tunnel carries nothing. The checks are repeated inside
+  the marking SQL, so a report that lands during the run wins.
+- **One rule for "on the relay".** The cron and provisioning both ask `relayAdmits` (`src/relay.ts`): the relay is
+  on, the computer is not blocked, and it is inside `RELAY_ROLLOUT_PERCENT` or named in `RELAY_ALLOW_INSTALLATIONS`.
+  So the cron never marks a tunnel that provisioning would hand straight back. To give up a tunnel that works, a
+  computer must also hold a relay token from the last two days: the cron always requires it, and under the cutoff
+  provisioning requires it whenever the row still holds a tunnel.
+- **The stored release.** `installations.app_version` is refreshed by every relay-token request (hourly on a
+  relay-capable desktop), as well as at registration and on `POST .../endpoint`. The cron applies
+  `TUNNEL_MIN_APP_VERSION` only to a computer that called in the last two days: had it updated to a relay-capable
+  release it would have said so. A computer that has been off is left to idle reclaim. One case is still judged by
+  a stale release: a desktop that updated with the relay route turned off. Its tunnel is removed, its next request
+  reports the real release and the same address comes back.
+- **Online computers.** Cloudflare refuses to delete a tunnel that has active connections (API error 1022, recorded as
+  `cf_tunnel_connected`), and a running desktop's cloudflared is connected. For a release, an owner's delete or a
+  revoked installation, the sweep then drops the tunnel's connections (`DELETE .../cfd_tunnel/{id}/connections`) and
+  deletes again at once, for at most two rounds, the last with `?cascade=true` (what `cloudflared tunnel delete
+  --force` sends; not in the public API reference); a deleted tunnel's connector token no longer connects. Idle reclaim never does this: a tunnel that answers
+  "still connected" is left, and its next attempt finds it connected and cancels.
+- **Backpressure.** A run marks at most what one cleanup sweep removes (`OMB_CLEANUP_SWEEP_LIMIT`, at most 20) minus
+  the rows already waiting for cleanup. While the sweep is failing or rate-limited nothing more is marked. A forced
+  removal still refused as connected after its rounds does not count as waiting: it backs off (5 minutes up to 24
+  hours) and retries while the sweep and the marking go on. A marked row is a final delete: its owner is answered
+  `409 endpoint_busy` until the sweep has removed it.
+- **Self-hosted servers.** A server (`openmausbot serve --tunnel`, a fleet container with `OMB_INSTALLATION_CREDENTIAL`)
+  has no phone relay of its own: its tunnel is its public address (web UI, the desktop app's connection to it,
+  webhooks). Provisioning never answers a server `relay_capable` (no `retired`, no `full`; at the limit it gets
+  `503 endpoint_capacity`), and the cron never marks a server's tunnel for `relay_proven` or `legacy_cutoff`. The
+  version cutoff still applies (`426`, and `min_version`). A server that uses the relay and does not ask for a tunnel
+  simply has none. An installation is a server when it says so: optional `kind: "desktop" | "server"` on
+  `POST /v1/installations`, `POST .../self/endpoint` and `POST .../self/relay-token`, stored in `installations.kind`
+  (migration `0016`; the latest report wins). The request schemas are strict, so this Worker must accept `kind` before
+  any client release sends it. An installation that has never said is judged by what every release up to 0.1.152
+  does: the desktop reports `legacyDevices` whenever its companion runs and asks for relay tokens, a server does
+  neither. So `POST .../endpoint` without `legacyDevices`, from an installation with no `relay_adoption` row, is
+  treated as a server. A desktop that has never asked for a relay token and provisions while its companion is off is
+  treated the same way, and gets a tunnel as before the cutoff.
+- **Coming back.** `POST /v1/installations/self/endpoint` creates a tunnel again, with the same hostname, when the
+  desktop reports an old phone (outside the cutoff), or the relay cannot carry it: `RELAY_DISABLED: "1"`, a lower
+  `RELAY_ROLLOUT_PERCENT`, or `relay_blocked_at`. With the relay switched off the cron releases nothing on the
+  relay's account either, so a relay outage is answered by that one switch.
+- **At the tunnel limit** a desktop the relay carries, at `TUNNEL_REASON_MIN_VERSION` or later, is answered
+  `409 {"error":"relay_capable","tunnel":"full"}` instead of `503 endpoint_capacity`: it pairs new phones over the
+  relay and keeps asking for its old phones. An earlier release takes any `relay_capable` as "nothing more to do"
+  and would stop retrying, so it keeps the 503. Under the old-phone cutoff the answer is `"tunnel":"retired"` for
+  every relay-capable release; the earlier ones carry on without a tunnel and say nothing.
+- **Reading before switching.** `/healthz` reports counts only:
+
+```json
+"tunnelRelease": {
+  "relayProven": { "percent": 0, "days": 3, "eligible": 41 },
+  "legacyPhoneCutoff": { "percent": 0, "eligible": 1630 },
+  "minAppVersion": { "on": false, "eligible": 212 }
+}
+```
+
+  `relayProven.eligible` is what the release clears at 100%; `legacyPhoneCutoff.eligible` what the cutoff clears
+  beyond that (both assume the relay rollout is at 100%); `minAppVersion.eligible` the tunnels of desktops seen in
+  the last two days below `TUNNEL_MIN_APP_VERSION`, or below `RELAY_CAPABLE_MIN_VERSION` while no minimum is set. `capacity.reclaim.preview` is
+  `{ "offlineDays": 1, "eligible": 37 }` once every account has finished a full pass at the preview period (about 50
+  minutes per 1,000 tunnels), and `eligible: null` until then.
+- **Order.** Apply migrations `0015` and `0016` and deploy with everything off. Read `tunnelRelease`. Raise
+  `RELAY_TUNNEL_RELEASE_PERCENT` 10, 50, 100. After the desktop release that explains the cutoff is out, set
+  `TUNNEL_REASON_MIN_VERSION` to that release, then raise `TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT` 10, then 100, and last
+  set `TUNNEL_MIN_APP_VERSION`.
 
 Setup, once:
 
-1. Register the Marketplace app (private, sub-account, installable by agency and
-   sub-account). Redirect URL: `https://accounts.openmausbot.com/v1/highlevel/callback`.
-   Scopes: `contacts.readonly contacts.write opportunities.readonly opportunities.write conversations.readonly locations.readonly calendars.readonly users.readonly`.
-2. Put the client id in `vars.HIGHLEVEL_CLIENT_ID` (it is public: it appears in the
-   authorization URL). Keep `HIGHLEVEL_REDIRECT_URL` and `HIGHLEVEL_SCOPES` in step
-   with the app.
-3. `wrangler d1 migrations apply DB --config wrangler.jsonc` (0009 and 0010).
-   On a running Worker, apply 0010 before deploying a Worker built from this
-   code: its callback marks the flow in `callback_at`. An older Worker
-   ignores the column.
-4. `wrangler secret put HIGHLEVEL_CLIENT_SECRET --config wrangler.jsonc`. It is
-   deliberately not in `secrets.required`: until it exists the routes answer
-   `503 highlevel_unavailable`.
-5. `wrangler deploy --config wrangler.jsonc`.
-
-A private app stops accepting installs past five external agencies; publish it
-(HighLevel review) before that.
+1. `wrangler d1 migrations apply DB --config wrangler.jsonc --remote` (0012, and 0014 for the daily counts; apply 0014
+   before deploying the Worker that writes it).
+2. Make a key pair: a 32-byte Ed25519 seed for this Worker, its public key for the relay's `RELAY_TOKEN_KEYS`
+   (`{"k1":"<b64u public key>"}`). `wrangler secret put RELAY_TOKEN_SIGNING_KEY --config wrangler.jsonc` with the seed as
+   base64url. Until it exists every request answers 503. Once it is set it is listed in `secrets.required`: a deploy
+   keeps only the secrets listed there, so an unlisted one is dropped. Set it before deploying a config that lists it.
+3. Admit the team with `RELAY_ALLOW_INSTALLATIONS`, then raise `RELAY_ROLLOUT_PERCENT` 10, 50, 100 while watching the
+   relay alerts. `RELAY_DISABLED: "1"` turns every token off at once; tokens already issued expire within 12 hours.
+4. To rotate, give the relay both public keys, set `RELAY_TOKEN_KID` and the new secret, deploy, then drop the old key
+   from the relay after 12 hours.
 
 ## Local checks
 

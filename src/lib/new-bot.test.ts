@@ -9,13 +9,14 @@ vi.mock("@/state/thread-navigation", async (importOriginal) => ({
 import type { Action, Bot } from "@/state/store";
 import { setTeamChats } from "@/state/team-chats";
 import { setTeamPeople, type TeamPeople } from "@/state/team-people";
+import { botLimitReason, closeBotLimit, createdPausedBot } from "./bot-limit";
 import { makeNewBot, type BotDefaultsAnswer } from "./new-bot";
 
 const ME = { email: "ada@acme.test", name: "Ada", role: "member", you: true as const };
 const BOB = { email: "bob@acme.test", name: "Bob", role: "admin" };
-const team: TeamPeople = { people: [ME, BOB], me: ME, admin: false, needsYou: [] };
+const team: TeamPeople = { people: [ME, BOB], me: ME, admin: true, needsYou: [] };
 
-function server(answer: Partial<BotDefaultsAnswer> = {}, fail?: { on: "POST" | "PATCH"; error: string }) {
+function server(answer: Partial<BotDefaultsAnswer> = {}, fail?: { on: "POST" | "PATCH"; error: string }, paused = false) {
   const calls: Array<{ method: string; path: string; body: Record<string, unknown> }> = [];
   let bot: Bot | null = null;
   const request = vi.fn(async (path: string, init?: RequestInit) => {
@@ -29,7 +30,7 @@ function server(answer: Partial<BotDefaultsAnswer> = {}, fail?: { on: "POST" | "
     if (path === "/api/bots" && method === "POST") {
       bot = { id: "created", threadId: "created-main", name: body.name, title: "", description: "", soul: "", color: "green", notifications: true,
         unread: false, messages: [], section: body.section, modelSelection: body.modelSelection ?? { instanceId: "", model: "" } } as Bot;
-      return { bot };
+      return paused ? { bot, paused: true } : { bot };
     }
     if (path === "/api/bots/created" && method === "PATCH") { bot = { ...bot!, ...body }; return { bot }; }
     return {};
@@ -44,9 +45,40 @@ async function newBot(request: never, action: Partial<Extract<Action, { type: "n
 }
 
 beforeEach(() => { fixture.track.mockReset(); fixture.openBot.mockReset(); });
-afterEach(() => { vi.unstubAllGlobals(); setTeamPeople(null); setTeamChats(null); });
+afterEach(() => { vi.unstubAllGlobals(); setTeamPeople(null); setTeamChats(null); closeBotLimit(); });
 
 describe("New bot", () => {
+  it("leaves an older server's refusal of a sixth Starter bot to the popup: no error line beside it, and no onError", async () => {
+    const onError = vi.fn();
+    const request = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === "/api/bot-defaults") return { defaults: { profile: {}, memory: {}, skills: [], routines: [] }, modelSelection: { instanceId: "claude", model: "sonnet" }, suggestedName: "Pixel" };
+      if (init?.method === "POST") throw Object.assign(new Error("You've reached the 5 bots Starter includes."), { body: { code: "bot_limit" } });
+      return {};
+    });
+    expect(await newBot(request as never, { onError })).toEqual([]);
+    expect(onError).not.toHaveBeenCalled();
+    expect(fixture.track).not.toHaveBeenCalled();
+  });
+
+  it("makes a Starter bot past the five awake, opens its chat, and offers to swap it in", async () => {
+    const { request } = server({}, undefined, true);
+    const sent = await newBot(request);
+    expect(sent[0]).toMatchObject({ type: "botAdded", bot: { id: "created" } });
+    expect([botLimitReason(), createdPausedBot()]).toEqual(["created", "created"]);
+  });
+
+  it("opens no popup for a bot made awake", async () => {
+    await newBot(server().request);
+    expect(botLimitReason()).toBeNull();
+  });
+
+  it("makes nothing for a User on a team, however it was asked for", async () => {
+    setTeamPeople({ ...team, admin: false });
+    const { calls, request } = server();
+    expect(await newBot(request)).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
   it("makes a bot at once from the New bot defaults and opens its chat", async () => {
     const { calls, request, created } = server();
     const sent = await newBot(request);

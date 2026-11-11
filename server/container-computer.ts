@@ -10,7 +10,29 @@ import { promisify } from "node:util";
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 import { workspacePreparationDockerfile } from "./container-workspace.ts";
 import { DATA_DIR } from "./config.ts";
-import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.ts";
+import {
+  applyResourcesBeforeStart,
+  DEFAULT_DESKTOP_RESOURCES,
+  PIDS_LIMIT,
+  raisePidsLimit,
+  resourceArgs,
+  type DesktopResources,
+} from "./container-limits.ts";
+import {
+  appleResourcesAreLimited,
+  currentHostUser,
+  DESKTOP_FLAGS_LABEL,
+  DESKTOP_FLAGS_VERSION,
+  desktopCapArgs,
+  desktopRootIsHostRoot,
+  dockerSecurityIsHardened,
+  GUEST_UID,
+  guestIdsCommand,
+  guestIdsFor,
+  podmanSecurityIsHardened,
+  type DockerHardeningConfig,
+  type HostUser,
+} from "./container-isolation.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
 const run = promisify(execFile);
@@ -30,7 +52,7 @@ export const BASE_IMAGE = `${BASE_IMAGE_REPOSITORY}@${BASE_IMAGE_DIGEST}`;
 // localhost/ is explicit: Podman prepends it to unqualified build tags and may then resolve the name on Docker Hub.
 // Image and container labels, not this mutable tag, decide compatibility.
 export const IMAGE_REPOSITORY = "localhost/openmausbot/cua-local-vm";
-export const IMAGE_LAYER_VERSION = "7";
+export const IMAGE_LAYER_VERSION = "8";
 export const IMAGE_LAYER_LABEL = "com.openmausbot.image-layer";
 export const IMAGE = `${IMAGE_REPOSITORY}:driver-${CUA_DRIVER_VERSION}-v${IMAGE_LAYER_VERSION}`;
 export const CONTAINER = "openmausbot-computer";
@@ -51,7 +73,12 @@ export type LifecycleAction = "pull" | "run" | "start" | "stop" | "remove";
 
 const INTERNAL_VIEWER_PORT = 6901;
 const HOST_VIEWER_PORT = 6080;
-const MEMORY_BYTES = 4 * 1024 * 1024 * 1024;
+export interface DesktopRunOptions {
+  platform: NodeJS.Platform;
+  resources: DesktopResources;
+  /** The account that owns the workspace on the host. */
+  hostUser: HostUser | null;
+}
 
 export interface LocalVmTarget {
   key: string;
@@ -152,7 +179,7 @@ RUN set -eux; \\
     echo '6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2  /usr/local/share/licenses/noto-cjk/OFL.txt' | sha256sum -c -; \\
     fc-cache -f
 ${workspacePreparationDockerfile(VM_WORKSPACE_GUEST)}
-# A bot's own desktop: a 200 ms (not 800) watch for windows an action opens still sees Firefox popups; no cursor glide; plain logs.
+# A bot's own desktop: a 200 ms (not 800) watch for windows an action opens still sees Firefox popups; no cursor glide; plain logs; Chrome's own sandbox off, since it needs namespaces this hardened container (capabilities dropped, runtime seccomp) refuses and Chrome exits with code 21; the container is the isolation boundary here.
 RUN printf '%s\\n' \\
       '#!/bin/sh' \\
       '/usr/local/bin/prepare-openmausbot-workspace.sh' \\
@@ -162,7 +189,7 @@ RUN printf '%s\\n' \\
       '  if [ "$attempt" -ge 45 ]; then echo "X display :1 did not become ready within 45 seconds" >&2; exit 1; fi' \\
       '  sleep 1' \\
       'done' \\
-      'exec env CUA_DRIVER_INSTALL_CHANNEL=python_package CUA_DRIVER_RS_TELEMETRY_ENABLED=0 CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS=200 NO_COLOR=1 ${CUA_EXECUTABLE} serve --socket ${CUA_SOCKET} --permission-mode standard --cursor-reduced-motion on' \\
+      'exec env CUA_DRIVER_BROWSER_NO_SANDBOX=1 CUA_DRIVER_INSTALL_CHANNEL=python_package CUA_DRIVER_RS_TELEMETRY_ENABLED=0 CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS=200 NO_COLOR=1 ${CUA_EXECUTABLE} serve --socket ${CUA_SOCKET} --permission-mode standard --cursor-reduced-motion on' \\
       > /usr/local/bin/start-openmausbot-cua-driver.sh \\
     && chmod 0755 /usr/local/bin/start-openmausbot-cua-driver.sh
 RUN printf '%s\\n' \\
@@ -184,7 +211,7 @@ LABEL ${MANAGED_LABEL}="1" \\
 `;
 }
 
-async function sh(cmd: string, args: string[], timeout = 8000): Promise<{ stdout: string }> {
+export async function sh(cmd: string, args: string[], timeout = 8000): Promise<{ stdout: string }> {
   const resolved = resolveCliSpawn(cmd, args);
   const { stdout } = await run(resolved.command, resolved.args, {
     timeout,
@@ -471,6 +498,7 @@ export async function containerComputerStatus(
   options: { probeDesktop?: boolean } = {},
 ): Promise<ContainerComputerStatus> {
   const status = emptyStatus(platform, target);
+  const host = currentHostUser(platform);
   const runtimeStatus = await containerRuntimeStatus(runner, platform);
   status.available = runtimeStatus.available;
   status.runtime = runtimeStatus.runtime;
@@ -521,9 +549,7 @@ export async function containerComputerStatus(
       status.persistence = appleWorkspaceMountIsSafe(detail?.configuration?.mounts, platform, target.workspaceDir)
         ? "durable"
         : "unsafe";
-      const resources = detail?.configuration?.resources;
-      status.security =
-        (resources?.memoryInBytes ?? 0) >= MEMORY_BYTES && resources?.cpus === 2 ? "hardened" : "unsafe";
+      status.security = appleResourcesAreLimited(detail?.configuration?.resources) ? "hardened" : "unsafe";
       status.viewer_url = viewerUrl(viewerPassword(detail?.configuration?.environment), status.viewer_port);
     } else {
       const inspected = JSON.parse(stdout) as Array<{
@@ -546,6 +572,7 @@ export async function containerComputerStatus(
         Image?: string;
       }>;
       const detail = inspected[0];
+      const rootIsHostRoot = desktopRootIsHostRoot(status.runtime, platform, host);
       status.container = detail?.State?.Running ? "running" : "stopped";
       status.stopped_at = status.container === "stopped" ? detail?.State?.FinishedAt ?? null : null;
       status.network = dockerPortsAreLocal(detail?.HostConfig?.PortBindings) ? "loopback" : "unsafe";
@@ -553,6 +580,7 @@ export async function containerComputerStatus(
       status.imageMatches =
         detail?.Config?.Image === IMAGE &&
         imageLabelsMatch(detail?.Config?.Labels) &&
+        (!rootIsHostRoot || detail?.Config?.Labels?.[DESKTOP_FLAGS_LABEL] === DESKTOP_FLAGS_VERSION) &&
         status.image_id !== null &&
         normalizeImageId(detail?.Image) === status.image_id;
       status.managed = containerOwnershipLabelsMatch(detail?.Config?.Labels, target);
@@ -565,8 +593,10 @@ export async function containerComputerStatus(
       ) ? "durable" : "unsafe";
       status.security = (
         status.runtime === "podman"
-          ? podmanSecurityIsHardened(detail?.HostConfig, detail?.EffectiveCaps, detail?.BoundingCaps)
-          : dockerSecurityIsHardened(detail?.HostConfig)
+          ? podmanSecurityIsHardened(detail?.HostConfig, detail?.EffectiveCaps, detail?.BoundingCaps, {
+            requireNoNewPrivileges: rootIsHostRoot,
+          })
+          : dockerSecurityIsHardened(detail?.HostConfig, { requireNoNewPrivileges: rootIsHostRoot })
       ) ? "hardened" : "unsafe";
       status.viewer_url = viewerUrl(viewerPassword(detail?.Config?.Env), status.viewer_port);
     }
@@ -741,91 +771,11 @@ function appleWorkspaceMountIsSafe(
   );
 }
 
-export interface DockerHardeningConfig {
-  Memory?: number;
-  MemorySwap?: number;
-  NanoCpus?: number;
-  PidsLimit?: number | null;
-  CapDrop?: string[] | null;
-  CapAdd?: string[] | null;
-  Privileged?: boolean;
-  PidMode?: string;
-  IpcMode?: string;
-  UTSMode?: string;
-  ShmSize?: number;
-  Devices?: unknown[] | null;
-  DeviceRequests?: unknown[] | null;
-  SecurityOpt?: string[] | null;
-  UsernsMode?: string;
-  CgroupnsMode?: string;
-  OomKillDisable?: boolean | null;
-  AutoRemove?: boolean;
-  RestartPolicy?: { Name?: string; MaximumRetryCount?: number };
-}
-
-/** Shared isolation contract for Local VM and VPS containers; Podman alone needs chroot for Firefox's sandbox. */
-export function dockerSecurityIsHardened(
-  config: DockerHardeningConfig | undefined,
-  options: { restartPolicy?: "no" | "unless-stopped" | "any"; podmanBrowserSandbox?: boolean } = {},
-): boolean {
-  if (!config) return false;
-  const capDrop = (config.CapDrop ?? []).map((cap) => cap.toLowerCase());
-  const capAdd = (config.CapAdd ?? [])
-    .map((cap) => cap.toLowerCase().replace(/^cap_/, ""))
-    .sort();
-  const unsafeSecurityOption = (config.SecurityOpt ?? []).some((option) => /(?:^|=)(?:unconfined|disable)$/i.test(option));
-  const restartPolicy = config.RestartPolicy?.Name;
-  const restartPolicyOk =
-    options.restartPolicy === "any" || (options.restartPolicy === "unless-stopped"
-      ? restartPolicy === "unless-stopped"
-      : restartPolicy === undefined || restartPolicy === "" || restartPolicy === "no");
-  return (
-    capDrop.includes("all") &&
-    capAdd.join(",") === (options.podmanBrowserSandbox ? "setgid,setuid,sys_chroot" : "setgid,setuid") &&
-    config.Privileged === false &&
-    !config.PidMode &&
-    config.IpcMode === "private" &&
-    !config.UTSMode &&
-    (!config.Devices || config.Devices.length === 0) &&
-    (!config.DeviceRequests || config.DeviceRequests.length === 0) &&
-    !unsafeSecurityOption &&
-    !config.UsernsMode &&
-    config.CgroupnsMode === "private" &&
-    config.AutoRemove !== true &&
-    restartPolicyOk
-  );
-}
-
-/** Podman normalizes HostConfig capability and namespace fields in inspect output, so its effective/bounding sets decide. */
-export function podmanSecurityIsHardened(
-  config: DockerHardeningConfig | undefined,
-  effectiveCaps: string[] | undefined,
-  boundingCaps: string[] | undefined,
-): boolean {
-  if (!config) return false;
-  const normalizeCaps = (caps: string[] | undefined) => (caps ?? [])
-    .map((cap) => cap.toLowerCase().replace(/^cap_/, ""))
-    .sort();
-  const exactCaps = "setgid,setuid,sys_chroot";
-  if (normalizeCaps(effectiveCaps).join(",") !== exactCaps) return false;
-  if (normalizeCaps(boundingCaps).join(",") !== exactCaps) return false;
-  return dockerSecurityIsHardened({
-    ...config,
-    CapDrop: ["all"],
-    CapAdd: effectiveCaps,
-    PidMode: config.PidMode === "private" ? "" : config.PidMode,
-    UTSMode: config.UTSMode === "private" ? "" : config.UTSMode,
-    // Rootless keep-id maps the workspace owner to the guest cua account; never arbitrary userns sharing or host namespaces.
-    UsernsMode: config.UsernsMode === "private" || config.UsernsMode === "keep-id:uid=1000,gid=1000"
-      ? "" : config.UsernsMode,
-    CgroupnsMode: config.CgroupnsMode || "private",
-  }, { podmanBrowserSandbox: true });
-}
-
 export function containerRunArgs(
   runtime: Runtime,
   password = "CHANGE_ME",
   target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
+  desktop: DesktopRunOptions = { platform: process.platform, resources: DEFAULT_DESKTOP_RESOURCES, hostUser: null },
 ): string[] {
   if (runtime === "container" && target.key !== SHARED_LOCAL_VM_TARGET.key) {
     throw new Error("Per-bot Local VMs require Docker or Podman because Apple container requires a fixed host port");
@@ -848,51 +798,30 @@ export function containerRunArgs(
     `${WORKSPACE_LABEL}=1`,
     "--label",
     `${TARGET_LABEL}=${target.label}`,
+    "--label",
+    `${DESKTOP_FLAGS_LABEL}=${DESKTOP_FLAGS_VERSION}`,
   );
   if (runtime === "container") {
     // Apple container already places each Linux container in a lightweight VM.
-    common.push(
-      "--memory",
-      "4g",
-      "--cpus",
-      "2",
-      "--cap-drop",
-      "ALL",
-      "--cap-add",
-      "SETUID",
-      "--cap-add",
-      "SETGID",
-      "--shm-size",
-      "512m",
-    );
+    common.push(...resourceArgs(desktop.resources, { swap: false }), ...desktopCapArgs(runtime), "--shm-size", "512m");
   } else {
     common.push(
       "--hostname",
       target.containerName,
-      "--memory",
-      "4g",
-      "--memory-swap",
-      "4g",
-      "--cpus",
-      "2",
+      ...resourceArgs(desktop.resources, { swap: true }),
       "--pids-limit", String(PIDS_LIMIT),
       // Pinned: a daemon with host-mode IPC/cgroup defaults would create a container the hardening check then rejects.
       "--ipc",
       "private",
       "--cgroupns",
       "private",
-      "--cap-drop",
-      "ALL",
-      "--cap-add",
-      "SETUID",
-      "--cap-add",
-      "SETGID",
+      ...desktopCapArgs(runtime),
       "--shm-size",
       "512m",
     );
   }
-  // Podman's default seccomp profile gates chroot on this capability, and Firefox chroots to build its sandbox.
-  if (runtime === "podman") common.push("--cap-add", "SYS_CHROOT");
+  if (desktopRootIsHostRoot(runtime, desktop.platform, desktop.hostUser)) common.push("--security-opt", "no-new-privileges");
+  const guestIds = guestIdsFor(runtime, desktop.platform, desktop.hostUser);
   common.push(
     "--mount",
     runtime === "podman"
@@ -906,12 +835,21 @@ export function containerRunArgs(
       : `127.0.0.1::${INTERNAL_VIEWER_PORT}`,
     IMAGE,
   );
+  if (guestIds) common.push(...guestIdsCommand(guestIds));
   return common;
 }
 
-async function ensureVmWorkspace(platform: NodeJS.Platform, target: LocalVmTarget): Promise<void> {
+async function ensureVmWorkspace(platform: NodeJS.Platform, target: LocalVmTarget, runtime: Runtime): Promise<void> {
   await mkdir(target.workspaceDir, { recursive: true, mode: 0o700 });
-  if (platform !== "win32") await chmod(target.workspaceDir, 0o700);
+  if (platform === "win32") return;
+  await chmod(target.workspaceDir, 0o700);
+  const host = currentHostUser(platform);
+  if (host?.uid !== 0 || !desktopRootIsHostRoot(runtime, platform, host)) return;
+  // -h: a link the bot left in its workspace must never hand a host file to uid 1000.
+  await run("chown", ["-R", "-h", `${GUEST_UID}:${GUEST_UID}`, target.workspaceDir], { timeout: 5 * 60_000 }).catch((error: unknown) => {
+    // A root service without CAP_CHOWN still gets its desktop; only the workspace stays unwritable to it.
+    console.warn(`Local VM: could not give uid ${GUEST_UID} the folder ${target.workspaceDir}: ${error instanceof Error ? error.message : error}`);
+  });
 }
 
 function baseImagePullArgs(runtime: Runtime): string[] {
@@ -923,7 +861,7 @@ async function prepareManagedImage(runtime: Runtime, runner: CommandRunner): Pro
   const context = await mkdtemp(join(tmpdir(), "openmausbot-cua-image-"));
   try {
     await writeFile(join(context, "Dockerfile"), managedImageDockerfile(), { mode: 0o600 });
-    await runner(runtime, ["build", "-t", IMAGE, context], 10 * 60_000);
+    await runner(runtime, ["build", ...(runtime === "container" ? [] : ["--force-rm"]), "-t", IMAGE, context], 10 * 60_000); // the legacy builder keeps a failed step's container without --force-rm
   } finally {
     await rm(context, { recursive: true, force: true });
   }
@@ -934,6 +872,7 @@ export async function containerComputerAction(
   runner: CommandRunner = sh,
   platform: NodeJS.Platform = process.platform,
   target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
+  resources: DesktopResources = DEFAULT_DESKTOP_RESOURCES,
 ): Promise<ContainerComputerStatus> {
   if (runner === sh && platform === process.platform) screenshotStatusCache.delete(target.key);
   const before = await containerComputerStatus(runner, platform, target);
@@ -969,10 +908,17 @@ export async function containerComputerAction(
   if (action === "pull") {
     await prepareManagedImage(runtime, runner);
   } else {
-    if (action === "run") await ensureVmWorkspace(platform, target);
+    if (action === "run") await ensureVmWorkspace(platform, target, runtime);
+    if (action === "start" && runtime !== "container") {
+      await applyResourcesBeforeStart(target.containerName, resources, (args, timeoutMs) => runner(runtime, args, timeoutMs));
+    }
     const args =
       action === "run"
-        ? containerRunArgs(runtime, randomBytes(6).toString("base64url"), target)
+        ? containerRunArgs(runtime, randomBytes(6).toString("base64url"), target, {
+          platform,
+          resources,
+          hostUser: currentHostUser(platform),
+        })
         : action === "remove"
           ? ["rm", runtime === "container" ? "--force" : "-f", target.containerName]
           : [action, target.containerName];
@@ -1216,7 +1162,11 @@ export function setupCommands(
     run:
       runtime === "container" && target.key !== SHARED_LOCAL_VM_TARGET.key
         ? null
-        : command(containerRunArgs(runtime, "CHANGE_ME", target)),
+        : command(containerRunArgs(runtime, "CHANGE_ME", target, {
+          platform,
+          resources: DEFAULT_DESKTOP_RESOURCES,
+          hostUser: null,
+        })),
     start: command(["start", target.containerName]),
     stop: command(["stop", target.containerName]),
     remove: command(["rm", runtime === "container" ? "--force" : "-f", target.containerName]),

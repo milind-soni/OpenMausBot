@@ -1,0 +1,32 @@
+{
+  "$schema": "../../../announcements/announcements.schema.json",
+  "version": 1,
+  "updatedAt": "2026-12-01T09:00:00Z",
+  "cards": [
+    {
+      "id": "tip-first-api-key",
+      "kind": "tip",
+      "label": { "en": "Tip", "de": "Tipp" },
+      "title": { "en": "Your bots can use any AI provider", "de": "Deine Bots können jeden KI-Anbieter nutzen" },
+      "body": {
+        "en": "Paste an API key once and every bot here can use it. You can change which model a bot uses at any time.",
+        "de": "Füge einmal einen API-Schlüssel ein, und jeder Bot hier kann ihn nutzen. Das Modell eines Bots kannst du jederzeit ändern."
+      },
+      "primary": { "label": { "en": "Open API keys", "de": "API-Schlüssel öffnen" }, "action": { "open": "api_keys" } },
+      "ends": "2027-02-01T00:00:00Z",
+      "audience": { "people": "new", "when": ["no_api_key"], "surfaces": ["desktop", "cloud"] }
+    },
+    {
+      "id": "sponsor-acme-credit-2026-12",
+      "kind": "sponsor",
+      "label": "Sponsor",
+      "title": "Acme Inference: $5 of free credit",
+      "body": "Acme Inference sponsors MausBot. New accounts get $5 of credit for any model they serve.",
+      "primary": { "label": "Get a key", "action": { "open_url": "https://example.com/acme?utm_source=openmausbot&utm_medium=sponsorship" } },
+      "secondary": { "label": "Add a key", "action": { "open": "api_keys" } },
+      "starts": "2026-12-01T00:00:00Z",
+      "ends": "2026-12-15T00:00:00Z",
+      "audience": { "minVersion": "0.1.153", "plans": ["none", "cloud"] }
+    }
+  ]
+}

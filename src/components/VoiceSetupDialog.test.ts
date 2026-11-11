@@ -282,7 +282,7 @@ describe("voice set-up pop-up", () => {
   it("says the voice is ready and starts the call from there", () => {
     const view = render({ ready: true, callName: "Standup" });
     expect(view.html).toContain('role="status"');
-    expect(view.html).toContain("Voice is ready — you can call Standup now.");
+    expect(view.html).toContain("Voice is ready. You can call Standup now.");
     expect(view.html).toContain('data-state="happy"');
     click(byAttribute(view, "data-voice-setup-start"));
     expect(view.props.onStartCall).toHaveBeenCalledOnce();

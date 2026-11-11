@@ -50,7 +50,7 @@ const frame = (markup: string) => {
 };
 
 const row = (candidate: Bot, selectedId = initialState.selectedId) =>
-  botRowProps({ ...initialState, selectedId, activeView: "chat" }, vi.fn(), candidate, { density: "comfortable", quiet: false, query: "", onMenu: vi.fn() });
+  botRowProps({ ...initialState, selectedId, activeView: "chat" }, vi.fn(), candidate, { density: "comfortable", query: "", onMenu: vi.fn() });
 
 function renderCircle(candidate: Bot, selected = false) {
   return renderToStaticMarkup(createElement(PinnedBotCircle, row(candidate, selected ? candidate.id : initialState.selectedId)));

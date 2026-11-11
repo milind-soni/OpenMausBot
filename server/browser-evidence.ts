@@ -7,7 +7,6 @@ import { open, readFile, stat, statfs as statfsAsync } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import type { Writable } from "node:stream";
 
-import { Header } from "tar";
 
 import { writeFileAtomic } from "./atomic.ts";
 
@@ -75,6 +74,7 @@ export class BrowserEvidence {
   readonly root: string;
   private statfs: Statfs;
   private now: () => number;
+  private freeFloor: number;
   private counter: { next: number; reserved: number } | null = null;
   private threadBytes = new Map<string, number>();
   private stepBytes = new Map<string, number>();
@@ -88,10 +88,12 @@ export class BrowserEvidence {
   private unsubscribe?: () => void;
   private sweeping: Promise<void> | null = null;
 
-  constructor(options: { root: string; statfs?: Statfs; now?: () => number }) {
+  /** `freeFloor`: the free space below which no screenshot is kept, EVIDENCE_LIMITS.freeFloor unless a test scales it down. */
+  constructor(options: { root: string; statfs?: Statfs; now?: () => number; freeFloor?: number }) {
     this.root = options.root;
     this.statfs = options.statfs ?? statfsAsync;
     this.now = options.now ?? Date.now;
+    this.freeFloor = options.freeFloor ?? EVIDENCE_LIMITS.freeFloor;
   }
 
   attach(deps: EvidenceDeps): this {
@@ -283,6 +285,7 @@ export class BrowserEvidence {
       out.once("drain", settle);
       out.once("close", closed);
     });
+    const { Header } = await import("tar");
     const entry = async (path: string, body: Buffer | { file: string; size: number }, mtime: Date) => {
       const bytes = Buffer.isBuffer(body) ? body.length : body.size;
       const block = Buffer.alloc(512);
@@ -365,7 +368,7 @@ export class BrowserEvidence {
     try {
       const fs = await this.statfs(this.root).catch(() => this.statfs(join(this.root, "..")));
       const free = Number(fs.bavail) * Number(fs.bsize);
-      this.budget = { cap: Math.min(EVIDENCE_LIMITS.totalBytes, Math.floor(free * EVIDENCE_LIMITS.freeShare)), low: free < EVIDENCE_LIMITS.freeFloor };
+      this.budget = { cap: Math.min(EVIDENCE_LIMITS.totalBytes, Math.floor(free * EVIDENCE_LIMITS.freeShare)), low: free < this.freeFloor };
     } catch {}
     const expired = this.now() - EVIDENCE_LIMITS.retentionMs;
     let total = 0;

@@ -9,9 +9,11 @@ import {
   filterToolsListFrame,
   parseConnectorAllowedToolsEnv,
   parseConnectorServiceSlugsEnv,
-  withAuthConfigParameter,
+  withConnectionParameters,
 } from "./connector-advertisement.ts";
 import { APP_TOOL_NAMES_ENV, APP_TOOLS_ENV, appToolAnswer, appToolCall, appToolEntries, parseAppToolsEnv } from "./connector-app-tools.ts";
+import { ARGUMENT_REFUSAL, argumentRefusalNote, fitArguments, fittedArgumentsNote } from "./connector-arguments.ts";
+import { annotateFailedCall } from "./connector-scope-hint.ts";
 import { withSignedOutHint } from "./connector-signed-out-hint.ts";
 import { AUTH_CONFIG_ID } from "../shared/connector-availability.ts";
 import { fitToolListResult } from "./mcp-tool-schema.ts";
@@ -35,6 +37,7 @@ const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 const INITIALIZE_RELAY_TIMEOUT_MS = 1_000;
 const RELAY_TIMEOUT_MS = 10 * 60_000;
 const TOOLS_LIST_RETRY_MS = 500;
+const TOOLS_LIST_RELAY_TIMEOUT_MS = 5_000;
 
 function parsedHeaders(): Record<string, string> {
   try {
@@ -50,6 +53,10 @@ function parsedHeaders(): Record<string, string> {
 
 const upstreamHeaders = parsedHeaders();
 let upstreamSessionId = "";
+/** Each listed tool's input schema, as the connector service listed it: what a call's arguments are fitted to. */
+const SCHEMAS = new Map<string, unknown>();
+/** The connected apps this bot may use, named when a refused call might read as "no such tool". */
+const USABLE_APPS = ALLOWED_TOOLS ? SERVICE_SLUGS.filter((slug) => Object.hasOwn(ALLOWED_TOOLS, slug)) : SERVICE_SLUGS;
 const send = (message: Json) => process.stdout.write(`${JSON.stringify(message)}\n`);
 
 function textResult(id: unknown, text: string, isError = false): Json {
@@ -211,6 +218,19 @@ async function showConnectorCards(items: ConnectorRequest[]): Promise<string> {
   return typeof body.authConfigNote === "string" && body.authConfigNote ? ` ${body.authConfigNote}` : "";
 }
 
+/** The harness's answer to a bot's search of the catalog. */
+async function findApps(query: string): Promise<string> {
+  const response = await fetch(`${HARNESS}/api/internal/connectors/find`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify({ botId: BOT_ID, threadId: THREAD_ID, query }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  const body = (await response.json().catch(() => ({}))) as { error?: unknown; text?: unknown };
+  if (!response.ok || typeof body.text !== "string") throw new Error(String(body.error ?? `could not search the apps (HTTP ${response.status})`));
+  return body.text;
+}
+
 /** The upstream list with the app tools after it, unless it already has one by that name. */
 function withAppTools(frame: Json): Json {
   const result = frame.result as { tools?: unknown } | undefined;
@@ -220,13 +240,50 @@ function withAppTools(frame: Json): Json {
   return { ...frame, result: { ...result, tools: [...result.tools, ...added] } };
 }
 
+function rememberSchemas(frame: Json): Json {
+  const tools = (frame.result as { tools?: unknown } | undefined)?.tools;
+  if (Array.isArray(tools)) {
+    for (const tool of tools) {
+      const { name, inputSchema } = (tool ?? {}) as { name?: unknown; inputSchema?: unknown };
+      if (typeof name === "string" && inputSchema !== undefined) SCHEMAS.set(name, inputSchema);
+    }
+  }
+  return frame;
+}
+
+/** A call refused over its arguments says how to call again; one whose arguments were fitted says how they were read. */
+function withArgumentNotes(name: string, response: Json, changed: readonly string[]): Json {
+  const error = response.error as { message?: unknown } | undefined;
+  if (error && typeof error.message === "string" && ARGUMENT_REFUSAL.test(error.message)) {
+    return textResult(response.id, `${error.message}\n\n${argumentRefusalNote(name, SCHEMAS.get(name), USABLE_APPS)}`, true);
+  }
+  if (annotateFailedCall(response, ARGUMENT_REFUSAL, (tools) => argumentRefusalNote(tools[0] ?? name, SCHEMAS.get(tools[0] ?? name), USABLE_APPS), [name])) return response;
+  const result = response.result as { content?: unknown; isError?: unknown } | undefined;
+  if (changed.length && result && result.isError !== true && Array.isArray(result.content)) result.content.push({ type: "text", text: fittedArgumentsNote(name, changed) });
+  return response;
+}
+
 function fittedList(frame: Json): Json {
   if ((!SCHEMA_PROFILE && TOOL_LIMIT === undefined) || !("result" in frame)) return frame;
   const log = (line: string) => process.stderr.write(`connector-proxy: ${line}\n`);
   return { ...frame, result: capToolListResult(fitToolListResult(frame.result, SCHEMA_PROFILE, log), TOOL_LIMIT, log) };
 }
 
-async function handle(message: Json): Promise<void> {
+async function listTools(message: Json): Promise<Json> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt) await delay(TOOLS_LIST_RETRY_MS);
+    try {
+      const response = await relay(message, TOOLS_LIST_RELAY_TIMEOUT_MS);
+      if (response && !response.error && Array.isArray((response.result as Json | undefined)?.tools)) return response;
+    } catch {
+    }
+  }
+  process.stderr.write("connector-proxy: Connected apps are temporarily unavailable; start a new session to retry discovery.\n");
+  return { jsonrpc: "2.0", id: message.id, result: { tools: [] } };
+}
+
+async function handle(received: Json): Promise<void> {
+  let message = received;
   const id = message.id;
   const method = String(message.method ?? "");
   // OpenCode and other MCP clients mark a stdio server failed unless initialize returns capabilities and serverInfo.
@@ -248,9 +305,14 @@ async function handle(message: Json): Promise<void> {
     }
     return;
   }
+  let changed: string[] = [];
   if (method === "tools/call") {
+    const given = (message.params ?? {}) as Json;
+    const name = String(given.name ?? "");
+    const fitted = SCHEMAS.has(name) ? fitArguments(given.arguments, SCHEMAS.get(name)) : { args: given.arguments, changed: [] };
+    changed = fitted.changed;
+    if (changed.length) message = { ...message, params: { ...given, arguments: fitted.args } };
     const params = (message.params ?? {}) as Json;
-    const name = String(params.name ?? "");
     const { requests, badAuthConfig } = /MANAGE_CONNECTIONS$/i.test(name)
       ? connectorAdds(params.arguments)
       : { requests: [], badAuthConfig: false };
@@ -267,6 +329,11 @@ async function handle(message: Json): Promise<void> {
       ));
       return;
     }
+    const find = /MANAGE_CONNECTIONS$/i.test(name) ? (params.arguments as { find?: unknown } | undefined)?.find : undefined;
+    if (typeof find === "string" && find.trim()) {
+      send(textResult(id, await findApps(find)));
+      return;
+    }
     if (/WAIT_FOR_CONNECTIONS$/i.test(name)) {
       send(textResult(id, "OpenMausBot is handling connection completion and will continue the task automatically."));
       return;
@@ -280,13 +347,13 @@ async function handle(message: Json): Promise<void> {
     }
   }
   try {
-    // The engine lists tools once per session, so one failed listing would leave the whole session without them.
     const response = method === "tools/list"
-      ? await relay(message).catch(() => delay(TOOLS_LIST_RETRY_MS).then(() => relay(message)))
+      ? await listTools(message)
       : await relay(message);
     if (response && id !== undefined) {
-      send(method === "tools/list" ? fittedList(withAppTools(withAuthConfigParameter(ALLOWED_TOOLS ? filterToolsListFrame(response, ALLOWED_TOOLS, SERVICE_SLUGS) : response)))
-        : method === "tools/call" ? withSignedOutHint(message, response, SERVICE_SLUGS) : response);
+      const name = String((message.params as Json | undefined)?.name ?? "");
+      send(method === "tools/list" ? fittedList(rememberSchemas(withAppTools(withConnectionParameters(ALLOWED_TOOLS ? filterToolsListFrame(response, ALLOWED_TOOLS, SERVICE_SLUGS) : response))))
+        : method === "tools/call" ? withArgumentNotes(name, withSignedOutHint(message, response, SERVICE_SLUGS), changed) : response);
     }
   } catch (error) {
     if (id === undefined) return;

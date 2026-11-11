@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -8,15 +9,20 @@ import { createSkillsLibraryHost } from "./host/skills-library.ts";
 import { skillExport } from "./skill-export.ts";
 import { installSkill, setSkillEnabled } from "./skills.ts";
 import type { BotRecord, Store } from "./store.ts";
+import { noteTypedSend } from "./typed-sends.ts";
 import { TASK_WORKSPACES_DIR } from "./workspace.ts";
 
 // HOME and the data folder are this test file's own temporary ones (server/testing/setup.ts).
 const HOME = join(DATA_DIR, "..");
 const USER_SKILLS = join(HOME, ".claude", "skills");
+const CODEX_SKILLS = join(HOME, ".codex", "skills");
 const SHARED = join(TASK_WORKSPACES_DIR, ".claude", "skills");
 const PROJECTS = join(HOME, "projects");
 afterEach(() => {
-  for (const dir of [TASK_WORKSPACES_DIR, USER_SKILLS, PROJECTS]) rmSync(dir, { recursive: true, force: true });
+  if (!DATA_DIR.startsWith(join(tmpdir(), "omb-test-home-"))) throw new Error(`refusing to clean ${DATA_DIR}: not this test's home`);
+  for (const dir of [TASK_WORKSPACES_DIR, USER_SKILLS, CODEX_SKILLS, PROJECTS, join(DATA_DIR, "skill-state")]) {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 const skillMd = (name: string) => `---\nname: ${name}\ndescription: Works with ${name}.\n---\n\nFollow the steps.\n`;
@@ -64,9 +70,30 @@ describe("skills the engine loads by itself", () => {
     expect(host.listBotSkills(bot).find((skill) => skill.name === "no-frontmatter")?.description).toBe("Just do the thing.");
     expect(host.listBotSkills(bot).find((skill) => skill.name === "bot-notes")).toMatchObject({ enabled: true, editable: false });
     expect(host.readBotSkillFile(bot, "growth-data-expert")).toBe(skillMd("growth-data-expert"));
-    expect(host.expandSkillCommand(bot, "main", "/growth-data-expert find churn")).toContain(`Read ${JSON.stringify(shared)}`);
-    expect(host.expandSkillCommand(bot, "main", "/bot-notes")).toContain(`Read ${JSON.stringify(own)}`);
-    expect(host.expandSkillCommand(bot, "main", "/mine go")).toContain(JSON.stringify(join("workspaces", bot.id, "skills", "mine")).slice(1, -1));
+    expect(host.expandSkillCommand(bot, "main", "/growth-data-expert find churn", undefined, [], true)).toContain(`Read ${JSON.stringify(shared)}`);
+    expect(host.expandSkillCommand(bot, "main", "/bot-notes", undefined, [], true)).toContain(`Read ${JSON.stringify(own)}`);
+    expect(host.expandSkillCommand(bot, "main", "/mine go", undefined, [], true)).toContain(JSON.stringify(join("workspaces", bot.id, "skills", "mine")).slice(1, -1));
+  });
+
+  it("run mid-message from what a person typed, alongside the bot's own, and stay off when switched off", () => {
+    const { host, bot } = hostFor("claudeAgent");
+    const shared = plant(SHARED, "growth-data-expert");
+    plant(SHARED, "mine-off");
+    installSkill(bot.id, "local", [{ path: "SKILL.md", content: skillMd("mine") }]);
+    setSkillEnabled(bot.id, "mine", true);
+    installSkill(bot.id, "local", [{ path: "SKILL.md", content: skillMd("mine-off") }]);
+    const typed = (text: string) => {
+      const sendId = randomUUID();
+      noteTypedSend("main", sendId, text);
+      return host.expandSkillCommand(bot, "main", text, undefined, [{ sendId, text }]);
+    };
+    const both = typed("find churn with /growth-data-expert, then /mine");
+    expect(both).toContain("ran 2 of your skills with /growth-data-expert, /mine");
+    expect(both).toContain(`${JSON.stringify(shared)} for /growth-data-expert`);
+    expect(both).toMatch(new RegExp(`workspaces[\\\\/]+${bot.id}[\\\\/]+skills[\\\\/]+mine[\\\\/]+SKILL\\.md" for /mine`));
+    expect(both).toContain("Request: find churn with /growth-data-expert, then /mine");
+    expect(typed("Skip it, /mine-off")).toBe("Skip it, /mine-off");
+    expect(host.expandSkillCommand(bot, "main", "find churn with /growth-data-expert")).toBe("find churn with /growth-data-expert");
   });
 
   it("stay out of a bot or team package, which carries only the bot's own, library and imported skills", () => {
@@ -86,7 +113,7 @@ describe("skills the engine loads by itself", () => {
     plant(SHARED, "mine");
     installSkill(bot.id, "local", [{ path: "SKILL.md", content: skillMd("mine") }]);
     expect(listed(host.listBotSkills(bot))).toEqual(["mine:own"]);
-    expect(host.expandSkillCommand(bot, "main", "/mine go")).toBe("/mine go");
+    expect(host.expandSkillCommand(bot, "main", "/mine go", undefined, [], true)).toBe("/mine go");
   });
 
   it("come from the folder a thread really works in, up to its git root", () => {
@@ -100,12 +127,12 @@ describe("skills the engine loads by itself", () => {
     const project = hostFor("claudeAgent", { cwd: join(repo, "app") });
     expect(listed(project.host.listBotSkills(project.bot))).toEqual(["repo-skill:native"]);
     const pinned = hostFor("claudeAgent", { threadCwd: repo });
-    expect(pinned.host.expandSkillCommand(pinned.bot, "pinned", "/repo-skill")).toContain("repo-skill");
+    expect(pinned.host.expandSkillCommand(pinned.bot, "pinned", "/repo-skill", undefined, [], true)).toContain("repo-skill");
     expect(listed(pinned.host.listBotSkills(pinned.bot, "pinned"))).toEqual(["repo-skill:native"]);
     expect(listed(pinned.host.listBotSkills(pinned.bot))).toEqual(["task-folder-skill:native"]);
-    expect(pinned.host.expandSkillCommand(pinned.bot, "main", "/repo-skill")).toBe("/repo-skill");
+    expect(pinned.host.expandSkillCommand(pinned.bot, "main", "/repo-skill", undefined, [], true)).toBe("/repo-skill");
     const none = hostFor("claudeAgent", { threadCwd: null });
-    expect(none.host.expandSkillCommand(none.bot, "pinned", "/task-folder-skill")).toBe("/task-folder-skill");
+    expect(none.host.expandSkillCommand(none.bot, "pinned", "/task-folder-skill", undefined, [], true)).toBe("/task-folder-skill");
   });
 
   it.skipIf(process.platform === "win32")("never read a SKILL.md that is itself a link", () => {
@@ -114,7 +141,7 @@ describe("skills the engine loads by itself", () => {
     symlinkSync(plant(join(DATA_DIR, "elsewhere"), "secret"), join(SHARED, "linked", "SKILL.md"));
     expect(host.listBotSkills(bot)).toEqual([]);
     expect(host.readBotSkillFile(bot, "linked")).toBeNull();
-    expect(host.expandSkillCommand(bot, "main", "/linked go")).toBe("/linked go");
+    expect(host.expandSkillCommand(bot, "main", "/linked go", undefined, [], true)).toBe("/linked go");
   });
 
   it("include ~/.claude/skills only with \"Also use my Claude Code skills\", and no task folders for other engines", () => {
@@ -126,9 +153,22 @@ describe("skills the engine loads by itself", () => {
     expect(listed(off.host.listBotSkills(off.bot))).toEqual(["both:native", "shared-one:native"]);
     const on = hostFor("claudeAgent", { cfg: { features: { claudeUserSkills: true } } as AppConfig });
     expect(listed(on.host.listBotSkills(on.bot))).toEqual(["both:native", "personal-one:native", "shared-one:native"]);
-    expect(on.host.expandSkillCommand(on.bot, "main", "/both")).toContain(`Read ${JSON.stringify(personal)}`);
+    expect(on.host.expandSkillCommand(on.bot, "main", "/both", undefined, [], true)).toContain(`Read ${JSON.stringify(personal)}`);
     const other = hostFor("geminiAgent", { cfg: { features: { claudeUserSkills: true } } as AppConfig });
     expect(listed(other.host.listBotSkills(other.bot))).toEqual([]);
-    expect(other.host.expandSkillCommand(other.bot, "main", "/shared-one")).toBe("/shared-one");
+    expect(other.host.expandSkillCommand(other.bot, "main", "/shared-one", undefined, [], true)).toBe("/shared-one");
   });
 });
+
+describe("switching a native skill off for one bot", () => {
+  it("shows enabled false on the Skills page and keeps /name from expanding it", async () => {
+    const { setNativeSkillEnabled } = await import("./native-skill-choices.ts");
+    const { host, bot } = hostFor("codex");
+    plant(join(HOME, ".codex", "skills"), "pdf");
+    expect(host.listBotSkills(bot).find((skill) => skill.name === "pdf")).toMatchObject({ origin: "native", enabled: true });
+    setNativeSkillEnabled(bot.id, "pdf", false);
+    expect(host.listBotSkills(bot).find((skill) => skill.name === "pdf")).toMatchObject({ origin: "native", enabled: false });
+    expect(host.expandSkillCommand(bot, "main", "/pdf summarise", undefined, [], true)).toBe("/pdf summarise");
+  });
+});
+

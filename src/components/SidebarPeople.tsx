@@ -1,6 +1,8 @@
-// On a Team Cloud: the team's people, with their pictures. Your own row opens your inbox, your chat with your Chief where
-// everything sent to you arrives, with the inbox's list beside it, and counts the asks waiting on you there. Anyone
-// else's puts @their name in the composer, which reaches their inbox once sent.
+// On a Team Cloud: the team's people as a row of faces above the bots, you first, with a dot on whoever is here now when
+// the server says so. People are who you share with and who you mention, never a chat of their own: your own face opens
+// your inbox, a teammate's puts @their name in the composer on screen. For the team's admins, one more opens the team's
+// People page, where invitations are sent, so someone alone on a new team still has a way to bring people in.
+import { UserPlus } from "lucide-react";
 import { botOwner } from "../../shared/bot-owner";
 import { openAsksOf } from "@/lib/bot-unread";
 import { cn } from "@/lib/cn";
@@ -9,8 +11,9 @@ import { t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { openBot, openThread, useStore, type AppState, type Bot } from "@/state/store";
 import { openInbox } from "@/state/inbox";
-import { useTeamPeople, type TeamPerson } from "@/state/team-people";
+import { retryTeamPeople, useTeamPeople, useTeamPeopleStatus, type TeamPerson } from "@/state/team-people";
 import { PersonFace } from "./TeamOwner";
+import { HereDot } from "./TeamPresence";
 
 /** The bot that is this person's inbox: their own Chief, else their own MausBot. */
 export function inboxBotOf(bots: readonly Bot[], email: string | undefined): Bot | undefined {
@@ -28,22 +31,61 @@ function openComposer(state: Pick<AppState, "activeView" | "selectedId" | "group
   return bot ? `bot:${bot.id}:${bot.threadId}` : null;
 }
 
+/** Where a team's admins invite people: the Team admin's People page on the Cloud that runs this team. */
+export function teamPeoplePage(team: { id: string; cloudPage?: string } | null | undefined): string | null {
+  return team?.cloudPage ? `${team.cloudPage}/team/${encodeURIComponent(team.id)}/people` : null;
+}
+
 const focusComposer = () => requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-tour="composer"] textarea')?.focus());
 
-export function SidebarPeople({ compact }: { compact: boolean }) {
+/** You first, then whoever is here now, then everyone else, each by name. */
+export function peopleInOrder(people: readonly TeamPerson[]): TeamPerson[] {
+  return [...people].sort((a, b) => Number(Boolean(b.you)) - Number(Boolean(a.you)) || Number(b.here === true) - Number(a.here === true) || a.name.localeCompare(b.name));
+}
+
+/** A teammate's row label: what pressing it does, and that they are here now when they are. */
+const teammateLabel = (person: TeamPerson, presence: boolean) =>
+  t(presence && person.here ? "sidebar.people.mentionHere" : "sidebar.people.mention", { name: person.name });
+
+/** While the people load, or when they could not: a quiet line in their place, with a way to try again. */
+function PeopleStatusLine({ compact }: { compact: boolean }) {
+  const status = useTeamPeopleStatus();
+  if (compact || status === "ready") return null;
+  return (
+    <section aria-label={t("sidebar.people.title")} data-sidebar-people={status} className="px-2 pb-1">
+      <div className="px-2 pb-0.5 pt-1 text-[11px] font-medium text-ink-tertiary">{t("sidebar.people.title")}</div>
+      {status === "loading" ? <div role="status" className="px-2 py-1 text-[13px] text-ink-tertiary">{t("sidebar.people.loading")}</div> : (
+        <div role="alert" className="flex items-center gap-2 px-2 py-1 text-[13px] text-ink-secondary">
+          <span className="min-w-0 flex-1 truncate">{t("sidebar.people.failed")}</span>
+          <button type="button" onClick={retryTeamPeople} data-people-retry className="shrink-0 rounded-md px-1.5 text-[12px] font-medium text-accent hover:bg-raised/60">{t("sidebar.people.retry")}</button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** `onOpened`: a row was chosen (the phone's full-screen list closes then). */
+export function SidebarPeople({ compact, onOpened }: { compact: boolean; onOpened?: () => void }) {
   const team = useTeamPeople();
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
-  if (!team || team.people.length < 2) return null;
+  if (!team) return state.config?.team ? <PeopleStatusLine compact={compact} /> : null;
+  const invite = team.admin ? teamPeoplePage(state.config?.team) : null;
+  if (team.people.length < 2 && !invite) return null;
   const me = team.me;
-  const people = [...team.people].sort((a, b) => Number(Boolean(b.you)) - Number(Boolean(a.you)) || a.name.localeCompare(b.name));
+  const presence = team.presence === true;
+  const people = peopleInOrder(team.people);
   const inbox = inboxBotOf(state.bots, me?.email);
   const inboxThread = inbox?.tasks?.find((task) => task.inbox)?.threadId;
   const waiting = inbox ? openAsksOf(inbox) : 0;
   const open = (person: TeamPerson) => {
+    openPerson(person);
+    onOpened?.();
+  };
+  const openPerson = (person: TeamPerson) => {
     if (person.you) {
       if (inbox) openBot(dispatch, inbox, showThreads);
-      if (inboxThread) openInbox({ tab: waiting ? "needs-you" : undefined });
+      if (inboxThread) openInbox();
       return;
     }
     const tag = `@${person.name} `;
@@ -55,27 +97,40 @@ export function SidebarPeople({ compact }: { compact: boolean }) {
     } else if (inbox) openBot(dispatch, inbox, showThreads);
     focusComposer();
   };
+  const face = compact ? 22 : 26;
   return (
-    <section aria-label={t("sidebar.people.title")} data-sidebar-people className={cn(compact ? "px-1" : "px-2 pb-1")}>
-      {!compact && <div className="px-2 pb-0.5 pt-1 text-[11px] font-medium text-ink-tertiary">{t("sidebar.people.title")}</div>}
-      <ul className={cn("flex", compact ? "flex-col items-center gap-1" : "flex-col")}>
+    <section aria-label={t("sidebar.people.title")} data-sidebar-people className={cn(compact ? "px-1" : "px-2 pb-1.5 pt-0.5")}>
+      <ul className={cn("flex items-center gap-1", compact ? "flex-col" : "flex-wrap")}>
         {people.map((person) => {
-          const label = !person.you ? t("sidebar.people.mention", { name: person.name })
+          const label = !person.you ? teammateLabel(person, presence)
             : waiting ? t("sidebar.people.yourInboxWaiting", { count: waiting }) : t("sidebar.people.yourInbox");
+          const here = presence && !person.you && person.here === true;
           return (
             <li key={person.email}>
               <button type="button" onClick={() => open(person)} aria-label={label} title={label} data-person={person.email}
-                className={cn("relative flex w-full min-w-0 items-center gap-2 rounded-lg text-left text-[13px] text-ink hover:bg-raised/60", compact ? "p-1" : "px-2 py-1")}>
-                <PersonFace person={person} size={compact ? 22 : 18} />
-                {!compact && <span className="min-w-0 flex-1 truncate">{person.you ? t("sidebar.people.you", { name: person.name }) : person.name}</span>}
+                className="relative flex rounded-full p-1 hover:bg-raised/60">
+                <span className="relative inline-flex shrink-0" data-person-here={here || undefined}>
+                  <PersonFace person={person} size={face} />
+                  {here && <HereDot size={face} />}
+                </span>
                 {person.you && waiting > 0 && (
                   <span aria-hidden="true" data-inbox-waiting={waiting}
-                    className={cn("rounded-full bg-warning px-1.5 text-[11px] font-semibold tabular-nums text-panel", compact && "absolute -right-0.5 -top-0.5 px-1 text-[10px]")}>{waiting}</span>
+                    className="absolute -right-0.5 -top-0.5 rounded-full bg-warning px-1 text-[10px] font-semibold tabular-nums text-panel">{waiting}</span>
                 )}
               </button>
             </li>
           );
         })}
+        {invite && (
+          <li>
+            <a href={invite} target="_blank" rel="noreferrer" aria-label={t("sidebar.people.invite")} title={t("sidebar.people.invite")} data-people-invite
+              className="flex items-center justify-center rounded-full p-1 text-ink-secondary hover:bg-raised/60 hover:text-ink">
+              <span className="flex items-center justify-center rounded-full border border-dashed border-hairline" style={{ width: face, height: face }}>
+                <UserPlus aria-hidden="true" size={compact ? 13 : 14} strokeWidth={1.75} className="shrink-0" />
+              </span>
+            </a>
+          </li>
+        )}
       </ul>
     </section>
   );

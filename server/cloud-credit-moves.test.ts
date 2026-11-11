@@ -116,6 +116,31 @@ describe("which engine a Cloud home's bots run on while it has the trial credit"
     expect(moved()).toEqual({});
   });
 
+  it("once the person had an AI of their own here, signing out of it leaves every bot where it is: the credit takes none, and they are away", () => {
+    const moves = make();
+    moves.settle([credit(), claude(false), codex(false)]);
+    moves.settle([credit(), claude(true), codex(false)]);
+    expect(bots.filter((entry) => entry.id !== "unset").map((entry) => entry.modelSelection.instanceId)).toEqual(["claude", "claude", "claude", "claude"]);
+    expect(moves.away([credit(), claude(true), codex(false)])).toBe(false);
+    // Signed out of Claude, read again after a restart too: nothing moves onto the credit.
+    const later = make();
+    later.settle([credit(), claude(false), codex(false)]);
+    expect(find("copied").modelSelection).toEqual({ instanceId: "claude", model: "claude-opus-4-8" });
+    expect(find("seeded").modelSelection.instanceId).toBe("claude");
+    expect(later.due(find("copied"), "copied-main", [credit(), claude(false), codex(false)])).toBe(false);
+    expect(later.away([credit(), claude(false), codex(false)])).toBe(true);
+    // A sign-in that can't be read yet might be back, and a credit-only engine is never the person's own.
+    expect(later.away([credit(), claude(undefined), codex(false)])).toBe(false);
+  });
+
+  it("someone who never had an AI of their own here is never away, and a send that only reads the engines remembers no sign-in", () => {
+    const moves = make();
+    expect(moves.due(find("seeded"), "seeded-main", [credit(), claude(true), codex(false)])).toBe(true);
+    expect(moves.away([credit(), claude(false), codex(false)])).toBe(false);
+    moves.settle([credit(), claude(false), codex(false)]);
+    expect(find("copied").modelSelection).toEqual({ instanceId: CREDIT, model: "claude-sonnet-5" });
+  });
+
   it("an engine whose sign-in can't be read never takes the bots off the credit", () => {
     make().settle([credit(), claude(undefined), codex(false)]);
     expect(find("seeded").modelSelection.instanceId).toBe(CREDIT);

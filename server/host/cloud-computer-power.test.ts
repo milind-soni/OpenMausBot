@@ -292,6 +292,44 @@ describe("cloud computer power", () => {
     expect(sleeps().sort()).toEqual(["new", "slow"]);
   });
 
+  it("an existing-only start wakes the bot's computer but never creates one", async () => {
+    expect(await power.start(bot("gone"), turn("t1"), { existingOnly: true })).toBeNull();
+    expect(fake.provisionBoat).not.toHaveBeenCalled();
+    expect(broadcasts).toEqual([]);
+
+    fake.states.set("asleep", "archived");
+    expect(await power.start(bot("asleep"), turn("t2"), { existingOnly: true })).toMatchObject({ state: "ready" });
+    expect(fake.provisionBoat).not.toHaveBeenCalled();
+  });
+
+  it("waking a stopped computer waits the whole start budget, not a shorter wait of its own", async () => {
+    fake.states.set("asleep", "archived");
+    await power.start(bot("asleep"), turn("t1"), { budgetMs: 150_000 });
+    expect(fake.readyBoat.mock.calls[0]![2]).toBeGreaterThan(140_000);
+  });
+
+  it("a create that meets the previous computer still being removed waits for the removal, then creates", async () => {
+    const refusals = [{ code: "computer_deleting" }, { code: "computer_deleting" }, { code: "previous_deletion_finished" }];
+    fake.provisionBoat = vi.fn(async (_cfg, owner: string) => {
+      const refusal = refusals.shift();
+      if (refusal) throw Object.assign(new Error("the previous cloud computer is still being removed"), refusal);
+      fake.states.set(owner, "ready");
+    });
+    const started = power.start(bot("again"), turn("t1"), { budgetMs: 150_000 });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(started).resolves.toMatchObject({ state: "ready" });
+    expect(fake.provisionBoat).toHaveBeenCalledTimes(4);
+  });
+
+  it("a removal that outlasts the start budget fails the start with its own reason", async () => {
+    fake.provisionBoat = vi.fn(async () => { throw Object.assign(new Error("this cloud computer is being deleted"), { code: "computer_deleting" }); });
+    const started = power.start(bot("stuck"), turn("t1"), { budgetMs: 20_000 });
+    const failed = expect(started).rejects.toThrow("is being deleted");
+    await vi.advanceTimersByTimeAsync(20_000);
+    await failed;
+    expect(fake.provisionBoat.mock.calls.length).toBeLessThanOrEqual(8);
+  });
+
   it("a start that outlives its turn keeps the computer on until the start is done", async () => {
     let created!: () => void;
     fake.provisionBoat = vi.fn(() => new Promise<void>(resolve => { created = () => { fake.states.set("new", "ready"); resolve(); }; }));

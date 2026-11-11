@@ -2,9 +2,10 @@
 set -eu
 
 # dpkg runs the old postrm during an upgrade too. Keep the installed profile
-# until the package is actually removed or purged.
+# until the package is actually removed or purged. pacman's post_remove runs
+# only on removal and passes the old version instead of an action word.
 case "${1:-}" in
-  remove|purge) ;;
+  remove|purge|[0-9]*) ;;
   *) exit 0 ;;
 esac
 

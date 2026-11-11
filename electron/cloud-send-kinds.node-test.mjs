@@ -56,9 +56,15 @@ function filesSides({ here, there = [], free = 1e12, volume = 1e12, disk = null,
   const stored = new Map(there.map((entry) => [entry.path, { ...entry }]));
   const uploads = [], failed = [];
   const parts = new Map();
+  const listings = [];
   const session = {
     call: async (method, route, body) => {
-      if (method === "GET" && route === "/api/cloud-send/files") return { ok: true, status: 200, body: { files: [...stored.values()], space: { freeBytes: typeof free === "function" ? free() : free, volumeBytes: volume } } };
+      const listing = /^\/api\/cloud-send\/files(?:\?bot=([\w-]+))?$/u.exec(route);
+      if (method === "GET" && listing) {
+        listings.push(route);
+        const files = [...stored.values()].filter((entry) => !listing[1] || entry.path.split("/")[1] === listing[1]);
+        return { ok: true, status: 200, body: { files, space: { freeBytes: typeof free === "function" ? free() : free, volumeBytes: volume } } };
+      }
       if (method === "POST" && route === "/api/cloud-send/chats/attachments") return { ok: true, status: 200, body: { missing: body.names } };
       throw new Error(`unexpected ${method} ${route}`);
     },
@@ -94,7 +100,7 @@ function filesSides({ here, there = [], free = 1e12, volume = 1e12, disk = null,
     ...(disk || grow ? { space: { disk: () => disk, grow } } : {}),
   });
   const ctx = { origin: "https://omb-u-1.fly.dev", session, result: { failed } };
-  return { kinds, ctx, stored, uploads, failed, state };
+  return { kinds, ctx, stored, uploads, failed, state, listings };
 }
 
 test("the bots' files go once My Cloud has room for them and the attachments still to go; on a conflict, beside My Cloud's own", async () => {
@@ -106,6 +112,7 @@ test("the bots' files go once My Cloud has room for them and the attachments sti
   assert.equal(sides.stored.get("workspaces/b1/notes.md").sha256, sha("their own"), "My Cloud's own file is never written over");
   assert.deepEqual(sides.ctx.result.files, { sent: 1, kept: 1 });
   assert.deepEqual(sides.state.files, { "workspaces/b1/notes (Mac).md": sha("mine") });
+  assert.deepEqual(sides.listings, ["/api/cloud-send/files?bot=b1"], "My Cloud lists the files of the bots that go, a bot at a time, never every bot's at once");
 });
 
 test("a file the move put there that conflicts only when it lands goes beside, and a part My Cloud holds already is not sent again", async () => {

@@ -1,12 +1,16 @@
 // ~/.openmausbot/config.json, with env vars overriding its credentials.
-import { readFileSync, mkdirSync, existsSync, renameSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
+import { dataHome } from "./data-dir.ts";
+import { signInFromEnv } from "./sign-in-env.ts";
+export { signInFromEnv };
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
-import { normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shared/image-generation.ts";
+import type { ImageGenerationConfig } from "../shared/image-generation.ts";
+import { imageGenConfigSchema, imageGenPatchSchema, keepKeysOutOfImageModels, type ImageGenCredentialPatch } from "./image-generation-config.ts";
 import { botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { defaultBotThreads, MAX_CONCURRENT_BOT_THREADS } from "./bot-thread-limits.ts";
 import { anthropicKeyEnv } from "./anthropic-key-env.ts";
 import { withoutComputerEngine } from "./computer-engine-removal.ts";
 import { newBotDefaultsSchema, type NewBotDefaults } from "./new-bot-defaults.ts";
@@ -20,12 +24,14 @@ import { PROVIDER_ICON_PRESETS, providerIconError } from "../shared/provider-ico
 import { helperStoredShape, type HelperConfig } from "./side-jobs.ts";
 import { loopGuardConfigSchema, type LoopGuardConfig } from "./host/loop-guard.ts";
 import { migrateLegacyFeatureFlags } from "./legacy-feature-flags.ts";
+import { settledFileCache, settledFileStamp } from "./settled-file.ts";
 import { isRemoteMcpServer, mcpServerServes, parseStoredMcpServer } from "./mcp-registry.ts"; import { postizKeyHeaders } from "./postiz/connection.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 import { deciderConfigSchema, type DeciderConfig } from "./decider/config.ts";
+import { liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } from "./live-config.ts";
 import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
 import { roomContextSettings } from "./room-context-settings.ts";
-import { MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES, MAX_LOCAL_VM_MAX_INSTANCES, MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES, MIN_LOCAL_VM_MAX_INSTANCES } from "./local-vm-settings.ts";
+import { localVmConfigSchema } from "./local-vm-settings.ts";
 export * from "./local-vm-settings.ts";
 
 const optionalText = z.string().optional();
@@ -43,8 +49,6 @@ export const MAX_ROOM_TURN_TIMEOUT_MINUTES = 1_440;
 export const DEFAULT_MCP_CALL_TIMEOUT_MINUTES = 10;
 export const MIN_MCP_CALL_TIMEOUT_MINUTES = 1;
 export const MAX_MCP_CALL_TIMEOUT_MINUTES = 60;
-export const DEFAULT_MAX_CONCURRENT_BOT_THREADS = 3;
-export const MAX_CONCURRENT_BOT_THREADS = 16;
 /** The floor keeps a log tail large enough for the event inspector's recent-line window. */
 export const MIN_THREAD_EVENT_LOG_BYTES = 256 * 1024;
 export const MAX_THREAD_EVENT_LOG_BYTES = 4 * 1024 * 1024 * 1024;
@@ -85,23 +89,6 @@ const mcpConfigSchema = z.object({
     .max(MAX_MCP_CALL_TIMEOUT_MINUTES)
     .optional(),
 }).strict();
-/** Bot desktop isolation, default "shared"; `maxInstances` caps per-bot desktops or pool seats. Switching modes cold-starts every desktop. */
-const localVmConfigSchema = z.object({
-  mode: z.enum(["shared", "per-bot", "pool"]).optional(),
-  maxInstances: z
-    .number()
-    .int()
-    .min(MIN_LOCAL_VM_MAX_INSTANCES)
-    .max(MAX_LOCAL_VM_MAX_INSTANCES)
-    .optional(),
-  idleTimeoutMinutes: z
-    .number()
-    .int()
-    .min(MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES)
-    .max(MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES)
-    .optional(),
-  preserveInstalledApps: z.boolean().optional(),
-});
 /** A named browser session; its id names a durable Electron partition. */
 const browserProfileSchema = z.object({
   // Lowercase only: Chromium partition directories collide on case-insensitive filesystems.
@@ -256,10 +243,8 @@ const featureConfigSchema = z.object({
   roomMemoryCapture: z.boolean().optional(),
   /** Room jobs to several members run side by side, each in a thread of its own. Off unless true. */
   parallelRoomJobs: z.boolean().optional(),
-  /** A teammate parked on a gate only the person can lift is reported to its Chief of Staff. Off unless true. */
-  chiefEscalations: z.boolean().optional(),
   acpPlanLines: z.boolean().optional(), // An ACP agent's plan as activity lines. Off unless true.
-}).extend({ agentsToolBridge: z.boolean().optional() }); // the find_tool / use_tool bridge; off unless true
+}).extend({ agentsToolBridge: z.boolean().optional(), savedSteps: z.boolean().optional() }); // agentsToolBridge: the find_tool / use_tool bridge, off unless true; savedSteps: repeat a computer task from its saved steps, on unless false
 const onboardingConfigSchema = z.object({
   completedAt: z.string().trim().max(40).optional(),
   version: z.number().int().min(0).max(1000).optional(),
@@ -277,7 +262,7 @@ const instanceConfigSchema = z.object({
       .refine((icon) => providerIconError(icon) === null, { message: "Invalid provider icon" }),
   ]).optional(),
   environment: z.record(z.string(), z.string()).optional(),
-  enabled: z.boolean().optional(),
+  enabled: z.boolean().optional(), hidden: z.boolean().optional(),
   access: z.enum(["subscription", "custom", "api"]).optional(),
   config: z.json().optional(),
 });
@@ -337,6 +322,7 @@ const appConfigSchema = z.object({
   mistral: z.object({ key: optionalText }).optional(),
   cerebras: z.object({ key: optionalText }).optional(), treg: z.object({ key: optionalText }).optional(), postiz: z.object({ key: optionalText, url: optionalText }).optional(),
   groq: z.object({ key: optionalText, url: optionalText }).optional(),
+  greenference: z.object({ key: optionalText }).optional(), modelgo: z.object({ key: optionalText }).optional(),
   meta: z.object({ key: optionalText, url: optionalText }).optional(),
   deepseek: z.object({ key: optionalText }).optional(),
   xai: z.object({ key: optionalText, url: optionalText }).optional(),
@@ -379,12 +365,13 @@ const appConfigSchema = z.object({
   vps: vpsConfigSchema.optional(),
   /** OpenCode key, plus `providerKeys` for its other providers by the env name OpenCode reads; both write-only and only for its child. */
   opencodeGo: z.object({ apiKey: optionalText, providerKeys: z.record(z.string(), z.string()).optional() }).optional(),
-  /** `provider`: "elevenlabs" (default, `key`), "fish" (`fishKey`, `fishModel`), "system", "xai" (`xai.key`) or "chatterbox" (local; `baseUrl`, `model`). */
+  /** `provider`: "elevenlabs" (default, `key`), "fish" (`fishKey`, `fishModel`), "system", "xai" (`xai.key`), "gemini" (`geminiKey`, `model`), "openai" (`openai.key`) or "chatterbox" (local; `baseUrl`, `model`). */
   tts: z.object({
     key: optionalText,
     fishKey: optionalText,
+    geminiKey: optionalText,
     voice: optionalText,
-    provider: z.enum(["elevenlabs", "fish", "system", "chatterbox", "xai"]).optional(),
+    provider: z.enum(["elevenlabs", "fish", "system", "chatterbox", "xai", "gemini", "openai"]).optional(),
     baseUrl: z
       .string()
       .trim()
@@ -392,37 +379,16 @@ const appConfigSchema = z.object({
       .refine((value) => !value || /^https?:\/\//i.test(value), "the Chatterbox server address must start with http:// or https://")
       .optional(),
     model: optionalText,
-    fishModel: z.enum(FISH_TTS_MODELS).optional(),
+    fishModel: z.enum(FISH_TTS_MODELS).optional(), everyReply: z.boolean().optional(), // a voice note with every reply unless a bot's voiceNoteEveryReply says otherwise
   }).optional(),
   decider: deciderConfigSchema.optional(),
-  /** Live calls: `key` is an OpenAI key for Live calls only; without one they use `openai.key`. `voice` is a GPT-Live voice. */
-  live: z.object({
-    key: optionalText,
-    voice: z.string().trim().max(40).regex(/^[a-z]*$/, "a Live voice is a lowercase built-in voice name").optional(),
-    readTypedReplies: z.boolean().optional(),
-    idleMinutes: z.number().int().min(1).max(60).optional(),
-  }).optional(),
-  /** Avatar provider credentials stay separate; choosing a router never reuses a cloud key. */
-  imageGen: z.object({
-    provider: z.enum(["openai", "xai", "custom"]).optional(),
-    key: optionalText,
-    customApiKey: optionalText,
-    customUrl: z.string().trim().max(2048).transform((value, ctx) => {
-      if (!value) return "";
-      try { return normalizeImageGenerationUrl(value); } catch (error) {
-        ctx.addIssue({ code: "custom", message: (error as Error).message });
-        return z.NEVER;
-      }
-    }).optional(),
-    customModel: z.string().trim().max(200).refine(
-      (value) => !["\r", "\n", "\0"].some((character) => value.includes(character)),
-      "Use a model ID without control characters",
-    ).optional(),
-  }).optional(),
-  /** Non-secret profile details; aboutMe is shared with every bot. */
-  profile: z.object({ name: optionalText, email: optionalText, aboutMe: z.string().max(24_000).optional(), avatarUrl: z.union([z.literal(""), botAvatarUrlSchema]).optional() }).optional(),
-  /** UI language override (BCP-47, lowercase); absent follows the system. */
-  language: optionalText,
+  live: liveConfigSchema.optional(),
+  /** Image provider credentials stay separate; choosing a router never reuses a cloud key. */
+  imageGen: imageGenConfigSchema.optional(),
+  /** Non-secret profile details; aboutMe is shared with every bot, and so are everyBotRules, ahead of each bot's own instructions. */
+  everyBotRules: z.string().max(24_000).optional(), profile: z.object({ name: optionalText, email: optionalText, aboutMe: z.string().max(24_000).optional(), avatarUrl: z.union([z.literal(""), botAvatarUrlSchema]).optional() }).optional(),
+  /** UI language override (BCP-47, lowercase), absent follows the system; what a paired phone calls this computer, "" for the default. */
+  language: optionalText, computerName: z.string().trim().max(63).optional(),
   rooms: roomConfigSchema.optional(),
   mcp: mcpConfigSchema.optional(),
   context: z.object({
@@ -436,7 +402,7 @@ const appConfigSchema = z.object({
     /** Local hour (0-23) after which the nightly tidy-up runs. */
     tidyHour: z.number().int().min(0).max(23).optional(),
   }).strict().optional(),
-  threads: threadsConfigSchema.optional(),
+  threads: threadsConfigSchema.optional(), /** Burst mode on an open-source install; a Cloud's plan sets it instead. `maxParallel`: burst threads running at once (default 10). */ burst: z.object({ maxParallel: z.number().int().min(1).max(100).optional() }).strict().optional(),
   /** Minimum days of decision-log month files kept; OMB_DECISION_RETENTION_DAYS wins. */
   decisions: z.object({ retentionDays: z.number().int().min(1).max(3650).optional() }).strict().optional(),
   loopGuard: loopGuardConfigSchema.optional(),
@@ -461,7 +427,7 @@ const storedAppConfigSchema = appConfigSchema.extend(helperStoredShape).extend({
   }).optional(),
 });
 const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers: true, cliStartup: true, customDomain: true })
-  .extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional() });
+  .extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional(), imageGen: imageGenPatchSchema.optional() });
 const jsonObjectSchema = z.record(z.string(), z.json());
 
 export interface AppConfig extends HelperConfig {
@@ -481,11 +447,12 @@ export interface AppConfig extends HelperConfig {
     phone?: "ios" | "android";
   };
   mcpServers?: Record<string, unknown>;
-  language?: string;
+  language?: string; computerName?: string;
   xai?: { key?: string; url?: string };
   mistral?: { key?: string };
   cerebras?: { key?: string }; treg?: { key?: string }; /** Postiz: an organisation API key and the server it belongs to (blank: Postiz Cloud). */ postiz?: { key?: string; url?: string };
   groq?: { key?: string; url?: string };
+  greenference?: { key?: string }; modelgo?: { key?: string };
   meta?: { key?: string; url?: string };
   /** DeepSeek API key for the DeepSeek Harness engine (`dsh`). */
   deepseek?: { key?: string };
@@ -505,18 +472,18 @@ export interface AppConfig extends HelperConfig {
   /** A named host from the user's SSH config. Authentication stays with SSH. */
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string; providerKeys?: Record<string, string> };
-  tts?: { key?: string; fishKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai"; baseUrl?: string; model?: string; fishModel?: FishTtsModel };
+  tts?: { key?: string; fishKey?: string; geminiKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai"; baseUrl?: string; model?: string; fishModel?: FishTtsModel; everyReply?: boolean };
   decider?: DeciderConfig;
   imageGen?: ImageGenerationConfig;
-  live?: { key?: string; voice?: string; readTypedReplies?: boolean; idleMinutes?: number };
-  profile?: { name?: string; email?: string; aboutMe?: string; avatarUrl?: string };
+  live?: LiveConfig;
+  profile?: { name?: string; email?: string; aboutMe?: string; avatarUrl?: string }; everyBotRules?: string;
   rooms?: { turnTimeoutMinutes: number };
   mcp?: { callTimeoutMinutes?: number };
-  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
+  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number }; burst?: { maxParallel?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
-  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean };
-  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; chiefEscalations?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean };
+  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean; memoryGb?: number; cpus?: number };
+  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean; savedSteps?: boolean };
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[]; firstTurnAt?: string };
   browserProfiles?: BrowserProfile[];
   browserEngine?: BrowserEngineConfig;
@@ -636,10 +603,6 @@ export function cacheKeepWarmSettings(cfg: AppConfig): { enabled: boolean; windo
   return { enabled: cfg.cacheKeepWarm?.enabled === true, windowMinutes: cfg.cacheKeepWarm?.windowMinutes ?? DEFAULT_WINDOW_MINUTES };
 }
 
-export function maxConcurrentBotThreads(cfg: { threads?: { maxConcurrentPerBot?: number } }): number {
-  return cfg.threads?.maxConcurrentPerBot ?? DEFAULT_MAX_CONCURRENT_BOT_THREADS;
-}
-
 export function threadEventLogMaxBytes(cfg: AppConfig): number | null {
   const cap = cfg.threads?.eventLogMaxBytes;
   return typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? cap : null;
@@ -694,10 +657,10 @@ export function builtInBrowserEnabled(cfg: AppConfig, _env: NodeJS.ProcessEnv = 
   return cfg.features?.browser !== false;
 }
 
-/** Security: off unless true because a read-only folder grant can still be escalated to a shell. */
-export function sharedComputersEnabled(cfg: AppConfig): boolean {
-  return cfg.features?.sharedComputers === true;
-}
+/** Security: every paired session may lend its computer only when true, because a read-only folder grant can still be escalated to a shell. */
+export function sharedComputersEnabled(cfg: AppConfig): boolean { return cfg.features?.sharedComputers === true; }
+/** A self-hosted server's own admin pairings may lend their computer unless this is false (each desktop asks its person first). */
+export function ownerLendingEnabled(cfg: AppConfig): boolean { return cfg.features?.sharedComputers !== false; }
 
 export function claudeUserMcpEnabled(cfg: Pick<AppConfig, "features">): boolean {
   return cfg.features?.claudeUserMcp === true;
@@ -730,8 +693,8 @@ export function changedInstanceIds(before: Record<string, unknown>, after: Recor
     .filter((id) => !isDeepStrictEqual(before[id], after[id]));
 }
 
-export const DATA_DIR = process.env.OMB_DATA_DIR ?? join(homedir(), ".openmausbot");
-const LEGACY_DATA_DIR = join(homedir(), ".opengrokbot");
+export const DATA_DIR = process.env.OMB_DATA_DIR || join(dataHome(), ".openmausbot");
+const LEGACY_DATA_DIR = join(dataHome(), ".opengrokbot");
 export const EVENTS_DIR = join(DATA_DIR, "events");
 export const NATIVE_DIR = join(DATA_DIR, "native");
 
@@ -747,11 +710,12 @@ export function ensureDirs() {
 }
 
 let lastIgnoredConfigWarning = "";
+const storedConfig = settledFileCache(() => join(DATA_DIR, "config.json"), () => parseStoredConfig(parseJson(readFileSync(join(DATA_DIR, "config.json"), "utf8"))));
 
 export function loadConfig(): AppConfig {
   let cfg: AppConfig = {};
   try {
-    cfg = parseStoredConfig(parseJson(readFileSync(join(DATA_DIR, "config.json"), "utf8")));
+    cfg = structuredClone(storedConfig.read());
     lastIgnoredConfigWarning = "";
   } catch (error) {
     if ((error as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") {
@@ -766,19 +730,11 @@ export function loadConfig(): AppConfig {
     }
   }
   // Env wins over the file for every credential: the desktop shell injects them as env at spawn.
-  cfg.mistral = { ...cfg.mistral };
-  if (process.env.MISTRAL_API_KEY !== undefined) cfg.mistral.key = process.env.MISTRAL_API_KEY;
-  cfg.cerebras = { ...cfg.cerebras };
-  if (process.env.CEREBRAS_API_KEY !== undefined) cfg.cerebras.key = process.env.CEREBRAS_API_KEY;
+  for (const [name, env] of [["mistral", "MISTRAL_API_KEY"], ["cerebras", "CEREBRAS_API_KEY"], ["groq", "OMB_GROQ_API_KEY"], ["meta", "OMB_META_API_KEY"],
+    ["deepseek", "OMB_DEEPSEEK_API_KEY"], ["greenference", "OMB_GREENFERENCE_API_KEY"], ["modelgo", "OMB_MODELGO_API_KEY"], ["xai", "XAI_API_KEY"]] as const) {
+    cfg[name] = { ...cfg[name], ...(process.env[env] !== undefined ? { key: process.env[env] } : {}) };
+  }
   if (process.env.OMB_TREG_KEY !== undefined) cfg.treg = { ...cfg.treg, key: process.env.OMB_TREG_KEY }; if (process.env.OMB_POSTIZ_API_KEY !== undefined) cfg.postiz = { ...cfg.postiz, key: process.env.OMB_POSTIZ_API_KEY };
-  cfg.groq = { ...cfg.groq };
-  if (process.env.OMB_GROQ_API_KEY !== undefined) cfg.groq.key = process.env.OMB_GROQ_API_KEY;
-  cfg.meta = { ...cfg.meta };
-  if (process.env.OMB_META_API_KEY !== undefined) cfg.meta.key = process.env.OMB_META_API_KEY;
-  cfg.deepseek = { ...cfg.deepseek };
-  if (process.env.OMB_DEEPSEEK_API_KEY !== undefined) cfg.deepseek.key = process.env.OMB_DEEPSEEK_API_KEY;
-  cfg.xai = { ...cfg.xai };
-  if (process.env.XAI_API_KEY !== undefined) cfg.xai.key = process.env.XAI_API_KEY;
   // Never ANTHROPIC_API_KEY: an operator's stray variable must not move every Claude bot onto API billing.
   cfg.anthropic = { ...cfg.anthropic };
   if (process.env.OMB_ANTHROPIC_API_KEY !== undefined) cfg.anthropic.key = process.env.OMB_ANTHROPIC_API_KEY;
@@ -803,20 +759,17 @@ export function loadConfig(): AppConfig {
   const presetVoice = process.env.OMB_TTS_DEFAULT_VOICE?.trim();
   if (presetVoice && !cfg.tts.voice?.trim() && (cfg.tts.provider ?? "elevenlabs") === "elevenlabs") cfg.tts.voice = presetVoice;
   if (process.env.OMB_FISH_AUDIO_API_KEY !== undefined) cfg.tts.fishKey = process.env.OMB_FISH_AUDIO_API_KEY;
+  if (process.env.OMB_GEMINI_API_KEY !== undefined) cfg.tts.geminiKey = process.env.OMB_GEMINI_API_KEY;
   cfg.decider = { ...cfg.decider };
   if (process.env.OMB_JEV_API_KEY !== undefined) cfg.decider.key = process.env.OMB_JEV_API_KEY;
   if (process.env.OMB_OPENROUTER_DECIDER_KEY !== undefined) cfg.decider.openrouterKey = process.env.OMB_OPENROUTER_DECIDER_KEY; if (process.env.OMB_WORKERS_AI_TOKEN !== undefined) cfg.decider.workersAiToken = process.env.OMB_WORKERS_AI_TOKEN;
-  cfg.live = { ...cfg.live };
-  if (process.env.OMB_OPENAI_LIVE_KEY !== undefined) cfg.live.key = process.env.OMB_OPENAI_LIVE_KEY;
+  cfg.live = liveConfigWithEnv(cfg.live);
   cfg.imageGen = { ...cfg.imageGen };
   if (process.env.OMB_OPENAI_IMAGE_KEY !== undefined) cfg.imageGen.key = process.env.OMB_OPENAI_IMAGE_KEY;
   if (process.env.OMB_CUSTOM_IMAGE_KEY !== undefined) cfg.imageGen.customApiKey = process.env.OMB_CUSTOM_IMAGE_KEY;
-  const splitEmails = (value: string) => value.split(/[,\s]+/).map((entry) => entry.trim().toLowerCase()).filter(Boolean);
-  if (process.env.OMB_SIGNIN_EMAILS !== undefined || process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined) {
-    cfg.signIn = { ...cfg.signIn };
-    if (process.env.OMB_SIGNIN_EMAILS !== undefined) cfg.signIn.admins = splitEmails(process.env.OMB_SIGNIN_EMAILS);
-    if (process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined) cfg.signIn.members = splitEmails(process.env.OMB_SIGNIN_MEMBER_EMAILS);
-  }
+  if (process.env.OMB_GEMINI_IMAGE_KEY !== undefined) cfg.imageGen.geminiKey = process.env.OMB_GEMINI_IMAGE_KEY;
+  const signInEnv = signInFromEnv();
+  if (signInEnv.admins || signInEnv.members) cfg.signIn = { ...cfg.signIn, ...signInEnv };
   return cfg;
 }
 
@@ -824,12 +777,7 @@ export function loadConfig(): AppConfig {
 export function cacheUntilConfigChanges<T>(derive: (config: AppConfig) => T): () => T {
   let cached: { stamp: string; value: T } | null = null;
   return () => {
-    let stamp: string | null = null;
-    try {
-      const file = statSync(join(DATA_DIR, "config.json"), { bigint: true });
-      if (Date.now() - Number(file.mtimeMs) >= 2_000) stamp = `${file.ino}:${file.size}:${file.mtimeNs}:${file.ctimeNs}`;
-    } catch {
-    }
+    const stamp = settledFileStamp(join(DATA_DIR, "config.json"));
     if (stamp !== null && cached?.stamp === stamp) return cached.value;
     const value = derive(loadConfig());
     cached = stamp === null || lastIgnoredConfigWarning !== "" ? null : { stamp, value };
@@ -838,12 +786,13 @@ export function cacheUntilConfigChanges<T>(derive: (config: AppConfig) => T): ()
 }
 
 /** Keeps process.env in step with a saved credential ("" drops the var), because loadConfig() prefers env. */
-export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "newBots">>): void {
+export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "newBots" | "imageGen">> & { imageGen?: ImageGenCredentialPatch }): void {
   const secrets: Array<[value: string | undefined, name: string]> = [
     [patch.xai?.key, "XAI_API_KEY"],
     [patch.mistral?.key, "MISTRAL_API_KEY"],
     [patch.cerebras?.key, "CEREBRAS_API_KEY"], [patch.treg?.key, "OMB_TREG_KEY"], [patch.postiz?.key, "OMB_POSTIZ_API_KEY"],
     [patch.groq?.key, "OMB_GROQ_API_KEY"],
+    [patch.greenference?.key, "OMB_GREENFERENCE_API_KEY"], [patch.modelgo?.key, "OMB_MODELGO_API_KEY"],
     [patch.meta?.key, "OMB_META_API_KEY"],
     [patch.deepseek?.key, "OMB_DEEPSEEK_API_KEY"],
     [patch.anthropic?.key, "OMB_ANTHROPIC_API_KEY"],
@@ -855,10 +804,12 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.opencodeGo?.apiKey, "OPENCODE_API_KEY"],
     [patch.tts?.key, "OMB_TTS_KEY"],
     [patch.tts?.fishKey, "OMB_FISH_AUDIO_API_KEY"],
+    [patch.tts?.geminiKey, "OMB_GEMINI_API_KEY"],
     [patch.decider?.key, "OMB_JEV_API_KEY"],
     [patch.decider?.openrouterKey, "OMB_OPENROUTER_DECIDER_KEY"], [patch.decider?.workersAiToken, "OMB_WORKERS_AI_TOKEN"],
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
     [patch.imageGen?.customApiKey, "OMB_CUSTOM_IMAGE_KEY"],
+    [patch.imageGen?.geminiKey, "OMB_GEMINI_IMAGE_KEY"],
     [patch.live?.key, "OMB_OPENAI_LIVE_KEY"],
   ];
   for (const [value, name] of secrets) {
@@ -871,6 +822,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.anthropic?.url, "OMB_ANTHROPIC_API_URL"],
     [patch.openaiCompat?.model, "OPENAI_COMPAT_MODEL"],
     [patch.openaiCompat?.provider, "OPENAI_COMPAT_PROVIDER"],
+    ...liveSettingEnv(patch.live),
   ];
   for (const [value, name] of settings) {
     if (value === undefined) continue;
@@ -938,9 +890,10 @@ export function onConfigSaved(listener: (before: JsonObject, after: JsonObject) 
 
 /** Secrets are never echoed back; callers report configured-or-not only. */
 export function saveConfig(
-  patch: Partial<Omit<AppConfig, "threads" | "newBots">> & {
+  patch: Partial<Omit<AppConfig, "threads" | "newBots" | "imageGen">> & {
     threads?: z.output<typeof threadsPatchSchema>;
     newBots?: z.output<typeof newBotsPatchSchema>;
+    imageGen?: z.output<typeof imageGenPatchSchema>;
   },
   options: { replaceInstances?: boolean } = {},
 ): void {
@@ -951,24 +904,26 @@ export function saveConfig(
     if (parsed.success) disk = parsed.data;
   } catch {
   }
-  const checkedPatch = appConfigSchema.partial().extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional() }).parse(patch);
+  const checkedPatch = appConfigSchema.partial().extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional(), imageGen: imageGenPatchSchema.optional() }).parse(patch);
   const before = configSaveListeners.size ? structuredClone(disk) : disk;
+  const keepImageModels = keepKeysOutOfImageModels(disk, checkedPatch.imageGen);
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "postiz", "groq", "meta", "deepseek", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "postiz", "groq", "greenference", "modelgo", "meta", "deepseek", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
     const merged: JsonObject = current.success ? { ...current.data } : {};
-    if (key === "threads" && !current.success) merged.maxConcurrentPerBot = DEFAULT_MAX_CONCURRENT_BOT_THREADS;
-    Object.assign(merged, section);
+    if (key === "threads" && !current.success) merged.maxConcurrentPerBot = defaultBotThreads();
+    Object.assign(merged, section, key === "browserEngine" && checkedPatch.browserEngine?.egress ? { egress: { ...jsonObjectSchema.safeParse(merged.egress).data, ...checkedPatch.browserEngine.egress } } : {}); // a partial egress patch keeps the stored allow-list
     for (const [sectionKey, sectionValue] of Object.entries(section as Record<string, unknown>)) {
       if (sectionValue === null) delete merged[sectionKey];
     }
     disk[key] = merged;
   }
+  keepImageModels();
   if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps);
-  if (checkedPatch.language !== undefined) disk.language = checkedPatch.language;
+  for (const key of ["language", "computerName", "everyBotRules"] as const) if (checkedPatch[key] !== undefined) disk[key] = checkedPatch[key];
   if (checkedPatch.customDomain !== undefined) disk.customDomain = checkedPatch.customDomain;
   if (checkedPatch.signIn !== undefined) disk.signIn = checkedPatch.signIn;
   // Replace the section so clearing a backup cannot revive the old selection.
@@ -1051,6 +1006,7 @@ export function saveConfig(
   }
   mkdirSync(DATA_DIR, { recursive: true });
   writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });
+  storedConfig.forget();
   for (const listener of configSaveListeners) {
     try {
       listener(before, disk);
@@ -1150,6 +1106,9 @@ export function instanceOwnsRouting(
       return own(entry.environment?.CEREBRAS_API_KEY) || ownUrl("https://api.cerebras.ai/v1");
     case "groq":
       return own(entry.environment?.GROQ_API_KEY) || ownUrl("https://api.groq.com/openai/v1", cfg.groq?.url);
+    case "greenference":
+      return own(entry.environment?.GREENFERENCE_API_KEY) || ownUrl("https://llm.eu.greenference.com/v1");
+    case "modelgo": return own(entry.environment?.MODELGO_API_KEY) || ownUrl("https://api.modelgo.ai/v1");
     case "meta":
       return own(entry.environment?.META_API_KEY) || ownUrl("https://api.meta.ai/v1", cfg.meta?.url);
     case "deepseekAgent":
@@ -1169,6 +1128,7 @@ function injectedEnvironment(cfg: AppConfig, instanceId: string, driver: string)
   if (driver === "mistral" && cfg.mistral?.key) environment.set("MISTRAL_API_KEY", cfg.mistral.key);
   if (driver === "cerebras" && cfg.cerebras?.key) environment.set("CEREBRAS_API_KEY", cfg.cerebras.key);
   if (driver === "groq" && cfg.groq?.key) environment.set("GROQ_API_KEY", cfg.groq.key);
+  if (driver === "greenference" && cfg.greenference?.key) environment.set("GREENFERENCE_API_KEY", cfg.greenference.key); if (driver === "modelgo" && cfg.modelgo?.key) environment.set("MODELGO_API_KEY", cfg.modelgo.key);
   if (driver === "meta" && cfg.meta?.key) environment.set("META_API_KEY", cfg.meta.key);
   if (driver === "deepseekAgent" && cfg.deepseek?.key) environment.set("DEEPSEEK_API_KEY", cfg.deepseek.key);
   if (driver === "grok" && cfg.xai?.key) environment.set("XAI_API_KEY", cfg.xai.key);

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 
 import { t } from "@/lib/i18n";
-import { lastSeen, minutesLeft } from "@/lib/pairing-time";
+import { codeUntil, lastSeen } from "@/lib/pairing-time";
 import { api } from "@/state/store";
 import { Card } from "./SettingsPrimitives";
 
@@ -20,7 +20,7 @@ function phoneRow(phone: Pick<TeamPhone, "label" | "email">): string {
 }
 
 /** A Team Cloud's "Open on your phone", for every member: one code, made for whoever is signed in, and the phones it opened. */
-export function TeamPhoneCard({ team }: { team: string }) {
+export function TeamPhoneCard({ team, blocked }: { team: string; blocked?: string | null }) {
   const [offer, setOffer] = useState<TeamPhoneCode | null>(null);
   const [phones, setPhones] = useState<TeamPhone[] | null>(null);
   const [current, setCurrent] = useState<string | null>(null);
@@ -81,10 +81,11 @@ export function TeamPhoneCard({ team }: { team: string }) {
   return (
     <Card title={t("teamPhone.title")} subtitle={t("teamPhone.subtitle", { team })}>
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        <button type="button" data-phone-pairing-action onClick={() => void create()} disabled={busy} className="ui-button ui-button-primary">
+        <button type="button" data-phone-pairing-action onClick={() => void create()} disabled={busy || Boolean(blocked)} title={blocked ?? undefined} className="ui-button ui-button-primary">
           {busy ? t("remote.serverPairing.creating") : t("remote.serverPairing.create")}
         </button>
       </div>
+      {blocked ? <p role="status" data-team-phone-blocked className="mt-3 text-[13px] text-ink-secondary">{blocked}</p> : null}
       {offer ? (
         <div data-team-phone-code className="mt-4 rounded-lg border border-hairline/40 bg-inset p-4">
           {expired ? <p className="text-[13px] text-ink-secondary">{t("remote.serverPairing.expired")}</p> : (
@@ -96,7 +97,7 @@ export function TeamPhoneCard({ team }: { team: string }) {
               ) : null}
               <div className="min-w-[200px] flex-1">
                 <div className="font-mono text-[18px] tracking-[0.14em] text-ink">{offer.code}</div>
-                <div className="mt-1 text-[13px] text-ink-secondary">{t("remote.serverPairing.expires", { minutes: minutesLeft(offer.expiresAt, now) })}</div>
+                <div className="mt-1 text-[13px] text-ink-secondary">{codeUntil(offer.expiresAt)}</div>
                 {offer.url ? null : <p className="mt-3 text-[13px] text-ink-secondary">{offer.hint ?? t("remote.serverPairing.noLink")}</p>}
               </div>
             </div>

@@ -106,7 +106,7 @@ const HEALTH = /diabet|insulin|glucos|glicos|blood sugar|medicat|medicament|pres
 /** Links, email addresses, and digits (dates, amounts, phone numbers). */
 const UNSAFE = /https?:\/\/|www\.|@|\d/i;
 const SCRIPT: Record<string, RegExp> = {
-  ja: /[぀-ヿ一-鿿]/, zh: /[一-鿿]/, ru: /[Ѐ-ӿ]/, uk: /[Ѐ-ӿ]/, hi: /[ऀ-ॿ]/,
+  ja: /[぀-ヿ一-鿿]/, zh: /[一-鿿]/, ko: /[가-힣]/, ru: /[Ѐ-ӿ]/, uk: /[Ѐ-ӿ]/, hi: /[ऀ-ॿ]/,
 };
 
 /** The last JSON array of strings in the reply, fences and prose around it ignored: some engines hand back their

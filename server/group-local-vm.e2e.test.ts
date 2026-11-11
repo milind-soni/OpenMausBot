@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { writeFileAtomic } from "./atomic.ts";
 import { cloudHomePrompt } from "./system-prompt.ts";
+import { availableTools, catalogProfileFromEnv } from "./drivers/agents-catalog.ts";
 import { CONTROL_BUSY, CONTROL_REFUSAL_PLAIN, controlRefusal, createControlClient } from "./control-client.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
@@ -53,7 +54,7 @@ const dump = () => until(() => {
   if (!existsSync(dumpFile)) return null;
   try { return JSON.parse(readFileSync(dumpFile, "utf8")); } catch { return null; }
 }, Boolean);
-// The seeded Chief answers a failed run with a Team incidents turn on this same engine, and that turn writes the dump.
+// The seeded Chief answers a failed run with a Problems to look at turn on this same engine, and that turn writes the dump.
 async function stepDownSeededChief() {
   const seeded = (await api("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff);
   if (seeded) await api("PATCH", `/api/bots/${seeded.id}`, { chiefOfStaff: false });
@@ -309,16 +310,17 @@ describe("Group Local VM ownership on the real isolated server", () => {
 
       rmSync(dumpFile, { force: true });
       await api("POST", `/api/bots/${bots[2].id}/messages`, { text: "Wait for an available seat." });
+      const waitingComputer = computer(await dump());
+      void gate(waitingComputer).catch(() => undefined);
       await until(async () => {
         const state = await api("GET", "/api/bots?messages=30");
         return state.bots.find((bot: any) => bot.id === bots[2].id)?.messages
           .some((message: any) => String(message.tool?.name ?? "").startsWith("Waiting for its turn on this computer"));
       }, Boolean);
-      expect(existsSync(dumpFile)).toBe(false);
       const waitingStatus = await api("GET", `/api/bots/${bots[2].id}/local-computer`);
       const holder = waitingStatus.target_key === "pool:0" ? bots[0] : bots[1];
       await api("POST", `/api/bots/${holder.id}/interrupt`, {}); await idle(holder.id);
-      expect(JSON.stringify(computer(await dump()))).toContain(waitingStatus.container_name);
+      expect(JSON.stringify(waitingComputer)).toContain(waitingStatus.container_name);
       expect(readState().containers.filter((key: string) => key.startsWith("pool:")).sort()).toEqual(["pool:0", "pool:1"]);
     } finally {
       vmState({ ...readState(), blockedTarget: undefined });
@@ -586,6 +588,10 @@ describe("Group Local VM ownership on the real isolated server", () => {
       expect(computer(after)).toBeTruthy();
       expect(after.systemPrompt).toContain("Local VM");
       expect(after.systemPrompt).not.toContain("call select_computer");
+      // The continuation, which may not pick again, is listed the agents tools its request was, select_computer too.
+      const agentsTools = (dumped: any) => availableTools(catalogProfileFromEnv(dumped.mcpConfig.mcpServers.agents.env));
+      expect(agentsTools(after)).toEqual(agentsTools(before));
+      expect(agentsTools(after).map((tool) => tool.name)).toContain("select_computer");
       await idle(bot.id);
       const state = await api("GET", "/api/bots?messages=30");
       const saved = state.bots.find((b: any) => b.id === bot.id);
@@ -598,6 +604,36 @@ describe("Group Local VM ownership on the real isolated server", () => {
     } finally {
       writeFileSync(finishFile, "finish");
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle(bot.id);
+      await api("DELETE", `/api/bots/${bot.id}`);
+      await api("PUT", "/api/config", { box: { token: "" } });
+    }
+  });
+
+  it("lets a chat tool's Auto start a stopped private desktop before waking a sleeping cloud computer", async () => {
+    vmState({ containers: ["shared"], stopped: ["shared"] }); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot } = await api("POST", "/api/bots", { name: "Chat prefers its desktop" });
+    try {
+      await api("PUT", "/api/config", { box: { token: "box_fixture" } });
+      await api("PATCH", `/api/bots/${bot.id}`, { computer: "browser", browser: false });
+      const environmentId = readFileSync(join(fixtureHome, "data", "environment-id"), "utf8").trim();
+      const scope = createHash("sha256").update(environmentId).digest("hex").slice(0, 12);
+      const prefix = bot.id.slice(0, 8).replace(/[^a-z0-9]/g, "");
+      const suffix = createHash("sha256").update(bot.id).digest("hex").slice(0, 6);
+      boatRow = { id: "bx_23456789", name: `ogb-${scope}-${prefix}-${suffix}`, state: "archived" };
+      await api("POST", `/api/bots/${bot.id}/messages`, { text: "Open Chrome on an available computer" });
+      const token = ((await dump()) as any).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+      const call = (method: string, body?: unknown) => fetch(base + "/api/internal/computer/select", { method,
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      const listed = await (await call("GET")).json() as any, offered = listed.options;
+      // Works on Browser with the browser off: chosen, but not to be had, so Auto picks.
+      expect(listed.chosen).toBe("browser");
+      expect(offered).toContainEqual(expect.objectContaining({ surface: "cloud", ready: false, canStart: true }));
+      expect(offered).toContainEqual(expect.objectContaining({ surface: "vm", ready: false, available: true }));
+      expect(await (await call("POST", { surface: "auto" })).json()).toMatchObject({ status: "pending", surface: "vm" });
+    } finally {
+      writeFileSync(finishFile, "finish");
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle(bot.id);
+      boatRow = null;
       await api("DELETE", `/api/bots/${bot.id}`);
       await api("PUT", "/api/config", { box: { token: "" } });
     }
@@ -1100,11 +1136,11 @@ describe("Group Local VM ownership on the real isolated server", () => {
       await idle(auto.id);
       const incidents = await until(async () => {
         const state = await api("GET", "/api/bots?messages=0");
-        const thread = state.bots.find((b: any) => b.id === chief.id)?.tasks?.find((t: any) => t.title === "Team incidents");
+        const thread = state.bots.find((b: any) => b.id === chief.id)?.tasks?.find((t: any) => t.title === "Problems to look at");
         return thread ? (await api("GET", `/api/threads/${thread.threadId}/messages?limit=100`)).messages : null;
       }, (msgs: any) => Array.isArray(msgs) && msgs.some((m: any) =>
-        m.kind === "activity" && String(m.tool?.name ?? "").startsWith("Incident:")));
-      const chips = incidents.filter((m: any) => m.kind === "activity" && String(m.tool?.name ?? "").startsWith("Incident:"));
+        m.kind === "activity" && String(m.tool?.name ?? "").includes(" hit a problem: ")));
+      const chips = incidents.filter((m: any) => m.kind === "activity" && String(m.tool?.name ?? "").includes(" hit a problem: "));
       expect(chips).toHaveLength(1);
       expect(String(chips[0]?.tool?.name)).toContain("computer unavailable — the Local VM could not be claimed for this turn");
       expect(chips[0]?.threadRef?.botId).toBe(auto.id);

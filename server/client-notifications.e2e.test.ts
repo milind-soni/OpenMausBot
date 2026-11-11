@@ -6,6 +6,10 @@ import { launchCloudSendFixture } from "../scripts/testing/cloud-send-fixture.ts
 import { personKey } from "./person-key.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
+/** On a Team Cloud a notification's read mark is each person's own (`read_by`); its one `read` mark stays untouched. */
+const readBy = (db: DatabaseSync, person: string) => db.prepare("SELECT id FROM notification_log WHERE EXISTS (SELECT 1 FROM json_each(coalesce(read_by, '[]')) WHERE value = ?) ORDER BY id")
+  .all(person).map((row) => row.id);
+
 it("lets a Team Cloud member list and read only their own notification feed", async () => {
   const fixture = await launchCloudSendFixture({ onePasswordToken: "synthetic-notifications-token",
     team: { id: "team-notifications", name: "Notifications" } });
@@ -38,8 +42,9 @@ it("lets a Team Cloud member list and read only their own notification feed", as
         expect((await team.as(member.token!, "POST", `/api/notifications/${id}/read`)).status, id).toBe(404);
       }
       expect((await team.as(member.token!, "POST", "/api/notifications/read-all")).status).toBe(200);
-      expect(db.prepare("SELECT id FROM notification_log WHERE read = 1 ORDER BY id").all().map((row) => row.id)).toEqual(["own-a", "own-b"]);
-      expect(db.prepare("SELECT id FROM notification_log WHERE read = 0 ORDER BY id").all().map((row) => row.id)).toEqual(["owners-ask", "private", "spend", "targeted"]);
+      expect(readBy(db, personKey({ id: "", email: "bob@notifications.test" }))).toEqual(["own-a", "own-b"]);
+      expect(readBy(db, ada), "Bob's reads are his alone").toEqual([]);
+      expect(db.prepare("SELECT id FROM notification_log WHERE read = 1").all(), "nobody's read reaches the one mark").toEqual([]);
     } finally {
       db.close();
     }
@@ -48,7 +53,7 @@ it("lets a Team Cloud member list and read only their own notification feed", as
   }
 }, hostTimeout(120_000));
 
-it("keeps admin spend alerts unread when a Team Cloud member opens a shared conversation", async () => {
+it("reads only the opener's notifications in shared conversations and keeps spend alerts for admins", async () => {
   const fixture = await launchCloudSendFixture({ onePasswordToken: "synthetic-spend-read-token",
     team: { id: "team-spend-read", name: "Spend reads" } });
   try {
@@ -70,22 +75,32 @@ it("keeps admin spend alerts unread when a Team Cloud member opens a shared conv
     await unread();
     const db = new DatabaseSync(join(team.home, ".openmausbot", "messages.db"));
     try {
-      const insert = db.prepare("INSERT INTO notification_log(id, at, kind, bot_id, bot_name, thread_id, title, body) VALUES (?, ?, 'spend', ?, 'Scout', ?, 'Fixture spend', '$12 of $20 spent')");
-      insert.run("shared-spend", Date.now(), bot.id, bot.mainThreadId);
-      insert.run("workspace-spend", Date.now(), bot.id, "");
+      const insert = db.prepare("INSERT INTO notification_log(id, at, kind, bot_id, bot_name, thread_id, title, body, for_person) VALUES (?, ?, ?, ?, 'Scout', ?, 'Fixture', '', ?)");
+      const ada = personKey({ id: "", email: "ada@notifications.test" });
+      const bob = personKey({ id: "", email: "bob@notifications.test" });
+      for (const [id, kind, threadId, person] of [
+        ["shared-spend", "spend", bot.mainThreadId, null], ["workspace-spend", "spend", "", null],
+        ["shared-done", "done", bot.mainThreadId, null], ["adas-ask", "question", bot.mainThreadId, ada],
+        ["bobs-ask", "question", bot.mainThreadId, bob],
+      ] as const) insert.run(id, Date.now(), kind, bot.id, threadId, person);
       for (const [path, threadId] of [
         [`/api/bots/${bot.id}/read`, bot.mainThreadId],
         [`/api/bots/${bot.id}/tasks/${bot.mainThreadId}`, bot.mainThreadId],
         [`/api/groups/${group.id}/read`, group.threadId],
         [`/api/groups/${group.id}/tasks/${group.threadId}`, group.threadId],
       ]) {
-        db.prepare("UPDATE notification_log SET read = 0").run();
-        db.prepare("UPDATE notification_log SET thread_id = ? WHERE id = 'shared-spend'").run(threadId);
-        expect(await unread()).toEqual(["shared-spend", "workspace-spend"]);
-        expect((await team.as(member.token!, "POST", path, { threadId })).status, path).toBe(200);
-        expect(await unread(), path).toEqual(["shared-spend", "workspace-spend"]);
-        expect((await team.as(owner.token!, "POST", path, { threadId })).status, path).toBe(200);
-        expect(await unread(), path).toEqual(["workspace-spend"]);
+        db.prepare("UPDATE notification_log SET thread_id = ? WHERE id != 'workspace-spend'").run(threadId);
+        // Bob opening the conversation reads his own, and leaves Ada's list (unread() is hers) as it was.
+        for (const [token, reader, readIds, unreadIds] of [
+          [member.token!, bob, ["bobs-ask", "shared-done"], ["adas-ask", "shared-done", "shared-spend", "workspace-spend"]],
+          [owner.token!, ada, ["adas-ask", "shared-done", "shared-spend"], ["workspace-spend"]],
+        ] as const) {
+          db.prepare("UPDATE notification_log SET read = 0, read_by = NULL").run();
+          expect(await unread()).toEqual(["adas-ask", "shared-done", "shared-spend", "workspace-spend"]);
+          expect((await team.as(token, "POST", path, { threadId })).status, path).toBe(200);
+          expect(readBy(db, reader), path).toEqual(readIds);
+          expect(await unread(), path).toEqual(unreadIds);
+        }
       }
     } finally {
       db.close();

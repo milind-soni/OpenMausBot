@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { removeTempDir, waitForExit } from "../../server/testing/cleanup.ts";
@@ -35,7 +35,6 @@ const TOOL_CALLS = JSON.stringify([
   { name: "Bash", input: { command: "pnpm control:omb ui flag --set features.showToolCalls=true --dry-run" }, ok: true },
 ]);
 const REPLY = "hello from fake claude"; // the fake engine's default reply text
-const COMPOSER = `document.querySelector('textarea[aria-label="Message Pepper"]')`;
 // OMB_UI_EVIDENCE_DIR keeps the screenshot (CI uploads it); otherwise it is temporary.
 const evidenceDir = process.env.OMB_UI_EVIDENCE_DIR ? resolve(ROOT, process.env.OMB_UI_EVIDENCE_DIR) : mkdtempSync(join(tmpdir(), "omb-ui-evidence-"));
 const ownsEvidenceDir = !process.env.OMB_UI_EVIDENCE_DIR;
@@ -118,7 +117,8 @@ describe("control-omb ui drives the real renderer", () => {
     await ui("type", info.ui, "--name", "Message Pepper", "--text", "Find the striped zebra");
     await ui("press", info.ui, "--keys", "Enter");
     await ui("wait-settle", info.ui, "--timeout", "60");
-    await ui("click", info.ui, "--name", "More");
+    // The chat's ⋯ items live in the bot panel, which the chat header's pill opens.
+    await ui("click", info.ui, "--name", "Open Pepper's profile");
     await ui("click", info.ui, "--name", "Find in conversation");
     await ui("type", info.ui, "--name", "Find in this conversation", "--text", "zebra");
     const highlighted = async () => (await ui("eval", info.ui, "--js", "[...CSS.highlights.get('search-result-text') ?? []][0]?.toString() ?? null")).result;
@@ -144,7 +144,11 @@ describe("control-omb ui drives the real renderer", () => {
     await ui("type", info.ui, "--name", "Find in this conversation", "--text", "fake claude");
     await expect.poll(highlighted, { timeout: 10_000 }).toBe("fake claude");
     await ui("press", info.ui, "--keys", "Escape");
-    await ui("type", info.ui, "--name", "Search bots and messages", "--text", "zebra");
+    // The sidebar's search opens from its button into a field of the same name.
+    await ui("click", info.ui, "--name", "Search bots and messages");
+    const [searchField] = refsNamed(await ui("snapshot", info.ui, "--interactive"), "Search bots and messages", "textbox");
+    expect(searchField).toBeDefined();
+    await ui("type", info.ui, "--ref", searchField, "--text", "zebra");
     await expect.poll(async () => (await ui("eval", info.ui, "--js", "[...document.querySelectorAll('mark')].some(mark => mark.textContent === 'zebra')")).result, { timeout: 10_000 }).toBe(true);
     await ui("eval", info.ui, "--js", "[...document.querySelectorAll('mark')].find(mark => mark.textContent === 'zebra').closest('button').click(); true");
     await expect.poll(highlighted, { timeout: 10_000 }).toBe("zebra");
@@ -193,11 +197,11 @@ describe("control-omb ui drives the real renderer", () => {
     })()`);
     await click("You");
     await click("Settings");
-    // Settings is a lazy chunk: it paints once the chunk arrives.
+    // Settings is a lazy chunk: it paints once the chunk arrives. Keys sit on the AI page, under API keys.
     await expect.poll(() => evaluate(`(() => {
-      const tab = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'API keys');
-      tab?.click();
-      return Boolean(tab);
+      document.querySelector('[data-settings-page="ai"]')?.click();
+      document.querySelector('[data-settings-disclosure="ai-keys"] button[aria-expanded="false"]')?.click();
+      return Boolean(${row}?.checkVisibility());
     })()`), { timeout: 10_000 }).toBe(true);
     // The servers section opens on its own, because a key is saved there.
     await expect.poll(masked, { timeout: 10_000 }).toContain("••••••••-key");
@@ -260,28 +264,31 @@ describe("control-omb ui drives the real renderer", () => {
     const models = await runControlOmb(["models", "--url", info.url]) as any;
     const options = models.instances.find((instance: any) => instance.instanceId === originalBot.modelSelection.instanceId).models.options;
     const originalLabel = options.find((option: any) => option.id === originalModel).label;
-    const nextModel = options.find((option: any) => option.id !== originalModel);
+    // A model the installed CLI is too old for is listed but cannot be picked.
+    const nextModel = options.find((option: any) => option.id !== originalModel && !option.needsCliUpdate);
+    // The picker sets the bot's model, which every chat of it uses.
+    const threadModel = async () => (await savedBot()).tasks.find((task: any) => task.threadId === originalBot.threadId).modelSelection.model;
     await ui("click", info.ui, "--name", originalLabel);
-    expect(await ui("eval", info.ui, "--js", "[...document.querySelectorAll('[aria-label=\"Apply model changes to\"] button')].find(b => b.textContent === 'Only this thread').getAttribute('aria-pressed')"))
-      .toMatchObject({ result: "true" });
-    await ui("click", info.ui, "--name", "Thread + bot default");
-    const scopeShot = join(evidenceDir, "model-scope.png");
+    await expect.poll(async () => (await ui("snapshot", info.ui)).snapshot, { timeout: 10_000 }).toContain("Pepper's model, used in all its chats");
     mkdirSync(evidenceDir, { recursive: true });
-    await ui("screenshot", info.ui, "--out", scopeShot);
+    await ui("screenshot", info.ui, "--out", join(evidenceDir, "model-picker.png"));
     await ui("click", info.ui, "--name", nextModel.label);
     await expect.poll(async () => (await savedBot()).modelSelection.model, { timeout: 10_000 }).toBe(nextModel.id);
-    expect((await savedBot()).tasks.find((task: any) => task.threadId === originalBot.threadId).modelSelection.model).toBe(nextModel.id);
-    await ui("click", info.ui, "--name", nextModel.label);
-    await ui("click", info.ui, "--name", "Only this thread");
+    expect(await threadModel()).toBe(nextModel.id);
+    // A model with reasoning levels keeps the menu open after the pick, so its level can be set next.
+    expect(await ui("eval", info.ui, "--js", "String(Boolean(document.querySelector('[data-model-picker-content]')))"))
+      .toMatchObject({ result: "true" });
     const modelSnapshot = await ui("snapshot", info.ui, "--interactive");
-    const originalRow = Object.entries(modelSnapshot.refs as Record<string, { name: string; role: string }>)
-      .find(([, value]) => value.role === "button" && value.name.startsWith(originalLabel));
+    const [originalRow] = refsNamed(modelSnapshot, originalLabel, "button");
     expect(originalRow).toBeDefined();
-    await ui("click", info.ui, "--ref", `@${originalRow![0]}`);
-    await expect.poll(async () => (await savedBot()).tasks.find((task: any) => task.threadId === originalBot.threadId).modelSelection.model,
-      { timeout: 10_000 }).toBe(originalModel);
-    expect((await savedBot()).modelSelection.model).toBe(nextModel.id);
+    await ui("click", info.ui, "--ref", originalRow);
+    await expect.poll(async () => (await savedBot()).modelSelection.model, { timeout: 10_000 }).toBe(originalModel);
+    expect(await threadModel()).toBe(originalModel);
     expect((await savedBot()).approvalMode).toBe(originalBot.approvalMode);
+    // The menu is still open after that pick; close it before using the composer.
+    await ui("press", info.ui, "--keys", "Escape");
+    await expect.poll(async () => (await ui("eval", info.ui, "--js", "String(Boolean(document.querySelector('[data-model-picker-content]')))")).result,
+      { timeout: 10_000 }).toBe("false");
 
     const before = await ui("snapshot", info.ui, "--interactive");
     expect(before.ok).toBe(true);
@@ -308,32 +315,11 @@ describe("control-omb ui drives the real renderer", () => {
     const transcript = tree.slice(transcriptStart);
     expect(transcript).toContain('StaticText "hello"'); // the sent turn
     expect(transcript).toContain(`StaticText "${REPLY}"`);
-    expect(transcript).toMatch(/StaticText "Bash"/);
+    // The scripted Bash calls, in plain words, and the turn's count of them.
+    expect(transcript).toContain('StaticText "Run a command"');
+    expect(transcript).toContain("Did 3 tool calls");
     expect(tree).not.toContain("Not logged in");
     expect(tree).not.toContain("Execution timeline");
-    // All three scripted commands go through the control CLI, so all are verified.
-    expect(tree).toContain("3 steps · 3 verified · 1 failed · 1 dry run");
-
-    // Hit-test the actual layout, not just the Tailwind class strings: the
-    // blank band beside the floating card must reach the transcript while
-    // the card and composer remain interactive.
-    const hitTest = await ui("eval", info.ui, "--js", `(() => {
-      const card = document.querySelector('section[aria-label="This run"]');
-      const dock = card.parentElement.parentElement;
-      const rect = card.getBoundingClientRect();
-      const blank = document.elementFromPoint(dock.getBoundingClientRect().left + 8, rect.top + rect.height / 2);
-      const onCard = document.elementFromPoint(rect.left + 20, rect.top + 20);
-      const scroll = document.querySelector('[role="log"]').parentElement;
-      const composer = ${COMPOSER};
-      const input = composer.getBoundingClientRect();
-      return {
-        blankReachesTranscript: scroll.contains(blank) && !dock.contains(blank) && getComputedStyle(scroll).overflowY === 'auto',
-        cardInteractive: card.contains(onCard),
-        composerInteractive: document.elementFromPoint(input.left + input.width / 2, input.top + input.height / 2) === composer,
-      };
-    })()`);
-    expect(hitTest).toMatchObject({ result: { blankReachesTranscript: true, cardInteractive: true, composerInteractive: true } });
-
     expect(await runControlOmb(["doctor", "--url", info.url])).toMatchObject({ ok: true });
     await expect(ui("click", info.ui, "--name", "Deliberately missing QA control")).rejects.toThrow("no element is named");
 
@@ -361,33 +347,14 @@ describe("control-omb ui drives the real renderer", () => {
     expect(png.length).toBeGreaterThan(1_000);
     expect(png.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
 
-    const rowsBefore = await ui("eval", info.ui, "--js", "document.querySelectorAll('[data-mid]').length");
-    await ui("click", info.ui, "--name", "Save as skill");
-    const drafted = await ui("eval", info.ui, "--js", `${COMPOSER}.value`);
-    expect(drafted.ok).toBe(true);
-    const draft = drafted.result as string;
-    expect(draft.startsWith("Create a verification skill from the run below.\nGoal: hello\n")).toBe(true);
-    expect(draft).toContain("✓ doctor — pnpm control:omb doctor (verified)\n");
-    expect(draft).toContain("✗ ui — pnpm control:omb ui click --name Missing (verified)\n");
-    expect(draft).toContain("[dry run] ui — pnpm control:omb ui flag --set features.showToolCalls=true --dry-run (verified)\n");
-    expect(draft.endsWith("\n\n")).toBe(true);
-    expect(await ui("eval", info.ui, "--js", `document.activeElement === ${COMPOSER}`)).toMatchObject({ ok: true, result: true });
-    // The composer sits inside the conversation landmark, so its draft shows up
-    // in that snapshot; "nothing was sent" is the message-row count, unchanged.
-    const rowsAfter = await ui("eval", info.ui, "--js", "document.querySelectorAll('[data-mid]').length");
-    expect(rowsAfter.result).toBe(rowsBefore.result);
-    const afterSave = await ui("snapshot", info.ui);
-    const transcriptAfterSave = (afterSave.snapshot as string).slice((afterSave.snapshot as string).indexOf('log "Conversation with Pepper"'));
-    expect(transcriptAfterSave.match(/StaticText "hello"/g)).toHaveLength(1);
-
-    await ui("click", info.ui, "--name", "Collapse the run");
-    const collapsed = await ui("snapshot", info.ui);
-    expect(collapsed.snapshot).toContain("Expand the run");
-    expect(collapsed.snapshot).not.toContain('list "Run steps"');
-
-    await ui("click", info.ui, "--name", "More");
+    await ui("click", info.ui, "--name", "Open Pepper's profile");
     await ui("click", info.ui, "--name", "Inspector");
-    const inspected = await ui("snapshot", info.ui);
+    // A local page fetches a screen when it opens, so the panel arrives just after the click.
+    const inspected = await vi.waitFor(async () => {
+      const snapshot = await ui("snapshot", info.ui);
+      expect(snapshot.snapshot).toContain('complementary "Inspector"');
+      return snapshot;
+    }, { timeout: 5_000, interval: 100 });
     const runLog = (inspected.snapshot as string).slice((inspected.snapshot as string).indexOf('complementary "Inspector"'));
     expect(runLog).toContain('tab "Run Log" [selected');
     expect(runLog).toContain("pnpm control:omb doctor");

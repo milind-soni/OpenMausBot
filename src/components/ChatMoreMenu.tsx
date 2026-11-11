@@ -1,5 +1,5 @@
 import { useMemo, useState, type JSX } from "react";
-import { Bug, Copy, Cpu, Download, Gauge, ListChecks, MessagesSquare, Monitor, MoreHorizontal, Search, Share, SquarePen, UserRound } from "lucide-react";
+import { Bug, Copy, Cpu, Download, Gauge, ListChecks, MessagesSquare, Monitor, MoreHorizontal, RotateCcw, Search, Share, SquarePen, UserRound } from "lucide-react";
 import { currentTaskBot, openBotThread, useStore, visibleMessages, type Bot } from "@/state/store";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -14,11 +14,16 @@ import {
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
+import { useContextAction } from "./ContextWarning";
 import { ELEVATED_CONTROL, ELEVATED_HOVER, ELEVATED_OPEN } from "./elevated";
 import { ShortcutHint } from "./ShortcutHint";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { orderedThreadList } from "./SidebarThreadRow";
 import { openBotSettings } from "./bot-panel/panel-link";
+import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
+import { UsageBars } from "./EngineUsage";
+import { useConversationSide } from "./TeamSideSwitch";
+import { tasksOfSide } from "@/state/team-side";
 
 /** One item list for the chat's ⋯ menu wherever it sits; it lists the threads whenever the sidebar hides them. The
  * Simple bot panel draws the same items as rows, and its Share button holds the two that export. */
@@ -33,8 +38,11 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const usage = usageSummary(bot, state.instances);
   const hasMessages = messages.length > 0;
+  const contextAction = useContextAction();
+  const atFreshStart = messages.at(-1)?.compaction?.fresh === true;
   const transcript = () => formatTranscriptMarkdown({ title: bot.name, messages, botName: bot.name, isGroup: false });
-  const threads = showThreads ? [] : orderedThreadList((profile.tasks ?? []).filter((task) => !task.routineRunId));
+  const side = useConversationSide(profile);
+  const threads = showThreads ? [] : orderedThreadList((side ? tasksOfSide(profile, side) : profile.tasks ?? []).filter((task) => !task.routineRunId));
   const selection = profile.modelSelection;
   const modelName = phoneHeader && selection
     ? state.instances.find((candidate) => candidate.instanceId === selection.instanceId)?.models.options.find((option) => option.id === selection.model)?.label ?? selection.model
@@ -54,6 +62,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       label: t("model.simple.model"),
       icon: <Cpu size={16} />,
       value: modelName,
+      trailing: <UsageBars engine={selection?.instanceId} hover={false} />,
       onSelect: () => openBotSettings(dispatch, "model"),
     } satisfies SidebarMenuItem]),
     {
@@ -75,7 +84,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       onSelect: () => requestChatFind(bot.threadId),
     },
     ...phoneScreen,
-    ...(showThreads ? [] : [{
+    ...(showThreads || side === "team" ? [] : [{
       key: "new-thread",
       heading: t("task.list"),
       separatorBefore: true,
@@ -86,6 +95,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
     // With one thread there is nothing to switch to.
     ...(threads.length < 2 ? [] : [{
       key: "threads",
+      ...(side === "team" ? { heading: t("task.list"), separatorBefore: true } : {}),
       label: t("task.switch"),
       icon: <MessagesSquare size={16} />,
       value: String(threads.length),
@@ -97,6 +107,14 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       })),
       onSelect: () => {},
     } satisfies SidebarMenuItem]),
+    {
+      key: "start-fresh",
+      label: t("chat.startFresh"),
+      icon: <RotateCcw size={16} />,
+      disabled: bot.busy || contextAction.pending || !hasMessages || atFreshStart,
+      title: t(bot.busy ? "contextWarning.busy" : "chat.startFresh.hint"),
+      onSelect: () => contextAction.run(`/api/bots/${profile.id}/start-fresh`, { threadId: bot.threadId }),
+    },
     {
       key: "copy",
       heading: t("chat.export.heading"),
@@ -180,18 +198,31 @@ export function ChatMoreMenu({ bot, phoneHeader = false }: { bot: Bot; phoneHead
 
 export const EXPORT_ITEMS = ["copy", "download"];
 
-/** The bot panel's round Share button: copy or download this conversation. */
+/** The bot panel's round Share button: on a team who has access, with copying or downloading this conversation under
+ * the ⋯ of its header; anywhere else a menu of those two. */
 export function ChatShareMenu({ bot, className }: { bot: Bot; className: string }): JSX.Element {
-  return <ShareMenu key={bot.threadId} bot={bot} className={className} />;
+  return useTeamName() ? <ShareBotButton bot={bot} className={className} headerMenu={<ExportMore key={bot.threadId} bot={bot} />} />
+    : <ShareMenu key={bot.threadId} bot={bot} className={className} />;
+}
+
+const exportItems = (items: SidebarMenuItem[]): SidebarMenuItem[] => items.filter((item) => EXPORT_ITEMS.includes(item.key)).map((item) => ({
+  ...item, heading: undefined, separatorBefore: false, label: t(item.key === "copy" ? "chat.export.copyConversation" : "chat.export.downloadConversation"),
+}));
+
+function ExportMore({ bot }: { bot: Bot }) {
+  const { items } = useChatMoreItems(bot);
+  return (
+    <SidebarPopoverMenu items={exportItems(items)} ariaLabel={t("chat.more")} align="end" triggerTitle={t("chat.more")}
+      triggerClassName="flex shrink-0 rounded-md p-1.5 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.06]"
+      renderTrigger={() => <MoreHorizontal size={16} aria-hidden="true" />} />
+  );
 }
 
 function ShareMenu({ bot, className }: { bot: Bot; className: string }) {
   const { items } = useChatMoreItems(bot);
   return (
     <SidebarPopoverMenu
-      items={items.filter((item) => EXPORT_ITEMS.includes(item.key)).map((item) => ({
-        ...item, heading: undefined, separatorBefore: false, label: t(item.key === "copy" ? "chat.export.copyConversation" : "chat.export.downloadConversation"),
-      }))}
+      items={exportItems(items)}
       ariaLabel={t("chat.export.heading")}
       triggerClassName="rounded-full"
       triggerTitle={t("chat.export.heading")}

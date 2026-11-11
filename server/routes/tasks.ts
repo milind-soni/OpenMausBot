@@ -18,7 +18,9 @@ import type { MessagePage } from "./channels.ts";
 import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { sawThread } from "../thread-presence.ts";
-import { readThreadNotifications } from "./notifications.ts";
+import { refusalBody, userError } from "../user-errors.ts";
+import type { ServerErrorBody } from "../../shared/server-text.ts";
+import { readThreadNotifications, type NotificationListed } from "./notifications.ts";
 
 type HostedModels = NonNullable<ReturnType<typeof hostedModelPolicy>>;
 
@@ -50,6 +52,7 @@ export interface TaskRouteDeps {
   supportsApprovalMode(selection: ModelSelection, mode: ApprovalMode): boolean;
   threadBusy(botId: string, threadId: string): boolean;
   broadcast(payload: Record<string, unknown>): void;
+  notificationListed: NotificationListed;
   publicBot(bot: BotRecord): WireBot;
   wireBot(bot: BotRecord): WireBot;
   wireTask(task: TaskRecord, botModel: ModelSelection): WireTask;
@@ -57,10 +60,10 @@ export interface TaskRouteDeps {
   messagePage(threadId: string, limit: number | undefined): MessagePage;
   checkedModelSelection(raw: unknown, current?: { selection: ModelSelection; busy: boolean }, requireAvailableModel?: boolean):
     | { ok: true; selection: ModelSelection }
-    | { ok: false; status: number; error: string };
+    | ({ ok: false; status: number } & ServerErrorBody);
   checkedTaskModelSwitch(current: BotRecord, raw: unknown, updateBotDefault: boolean, resetApprovalToAsk: boolean, requireAvailableModel?: boolean):
     | { ok: true }
-    | { ok: false; status: number; error: string };
+    | ({ ok: false; status: number } & ServerErrorBody);
   threadTitleGate(bot: Pick<BotRecord, "modelSelection">): { ok: true; instance: ProviderInstance } | { ok: false; refusal: string };
   generateThreadTitle(provider: ProviderInstance, text: string, source: ThreadTitleSource): Promise<string | null>;
   settleDirectFollowup(generation: string | undefined): void;
@@ -77,7 +80,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
   const {
     store, hostedModels, coordinator, handoffs, skillReview, threadStarters, phoneSecretSubmissions, titleRegenerations,
     directTurnGenerationByThread, actorKey, cloudOwnerSession, cloudThreadRefusal, sharedWorkspaceFullAccessEnabled,
-    supportsApprovalMode, threadBusy, broadcast, publicBot, wireBot, wireTask, pageSize, messagePage, checkedModelSelection,
+    supportsApprovalMode, threadBusy, broadcast, notificationListed, publicBot, wireBot, wireTask, pageSize, messagePage, checkedModelSelection,
     checkedTaskModelSwitch, threadTitleGate, generateThreadTitle, settleDirectFollowup, clearTurnDigestState,
     revokeInternalCapabilitiesForThread, stagedSkillCleanupsForThread, rejectDeletedThreadSkillStages,
   } = deps;
@@ -192,10 +195,10 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       if (body.projectId !== undefined && (typeof body.projectId !== "string" || !store.project(bot.id, body.projectId))) {
         return json(res, 400, { error: "projectId must belong to this bot" });
       }
-      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, body.select !== false, body.projectId, undefined, body.approvalMode, undefined, cwd);
+      // Who opened it decides who may answer its cards on a shared workspace, and on a team who sees it at all.
+      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, body.select !== false, body.projectId, undefined, body.approvalMode, undefined, cwd,
+        auth.kind === "session" ? (created) => threadStarters.set(created.threadId, actorKey(auth)) : undefined);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
-      // Who opened it decides who may answer its cards on a shared workspace.
-      if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
       return json(res, 201, { bot: publicBot(store.bot(bot.id)!), task: wireTask(task, store.bot(bot.id)!.modelSelection) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/delete$/);
@@ -231,7 +234,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       if (!switched) return json(res, 404, { error: "no such task" });
       sawThread(m[2]);
       deps.threadRead?.(auth, m[2]);
-      readThreadNotifications(m[2], broadcast, auth);
+      readThreadNotifications(m[2], broadcast, notificationListed(auth));
       const wiredSwitch = wireBot(switched);
       const switchedSettings = { ...wiredSwitch, tasks: wiredSwitch.tasks ?? [] };
       // "0": settings only; a positive page: that tail; omitted: the whole thread (search hits can be older than a page).
@@ -255,7 +258,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
         return json(res, 403, { error: "On this Cloud only its owner can change how a bot asks for approval, or its default model." });
       }
       if (body.updateBotDefault === true && !ownerOrAdmin(auth)) {
-        return json(res, 403, { error: "forbidden: this session may change this thread's model, not the bot's default (needs the admin scope)" });
+        return json(res, 403, userError("serverError.model.defaultAdmin"));
       }
       for (const key of ["requireAvailableModel", "acknowledgeLocalAuto", "updateBotDefault", "resetApprovalToAsk"] as const) {
         if (body[key] !== undefined && typeof body[key] !== "boolean") return json(res, 400, { error: `${key} must be a boolean` });
@@ -352,7 +355,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       if (body.modelSelection !== undefined) {
         if (current.approvalGrant) return json(res, 409, { error: "the bot's approval mode is still being confirmed" });
         const checked = checkedModelSelection(body.modelSelection, { selection: current.modelSelection, busy: threadBusy(current.id, current.threadId) }, body.requireAvailableModel === true);
-        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        if (!checked.ok) return json(res, checked.status, refusalBody(checked));
         patch.modelSelection = checked.selection;
       }
       if (body.approvalMode !== undefined || body.autoApprove !== undefined) {
@@ -380,7 +383,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
         const checked = checkedTaskModelSwitch({ ...current,
           ...(patch.approvalMode ? { approvalMode: patch.approvalMode, autoApprove: patch.autoApprove } : {}),
         }, patch.modelSelection, body.updateBotDefault === true, body.resetApprovalToAsk === true, body.requireAvailableModel === true);
-        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        if (!checked.ok) return json(res, checked.status, refusalBody(checked));
       }
       const task = patch.modelSelection
         ? store.switchTaskModel(m[1], m[2], patch.modelSelection, body.updateBotDefault === true, body.resetApprovalToAsk === true,

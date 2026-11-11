@@ -379,3 +379,53 @@ describe("DeepSeek Harness after a provider was added in dsh since its process s
     expect(f.launches()).toBe(2);
   });
 });
+
+// dsh 0.2 refuses session/resume of a session still open in the same process (-32602 "session is already active"),
+// so a turn whose tools changed must not resume on the live process: the message went unanswered.
+describe("DeepSeek Harness when a turn's tools change", () => {
+  const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fake-acp-cli.ts");
+  let cleanup: (() => Promise<void>) | null = null;
+  afterEach(async () => {
+    await cleanup?.();
+    cleanup = null;
+  });
+
+  it("resumes the session in a fresh process instead of the one where it is still open", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-deepseek-active-"));
+    const instance = await DeepSeekAgentDriver.create({
+      instanceId: "deepseek-active", displayName: "DeepSeek Harness", enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false, workspace: scratch },
+      environment: {
+        HOME: scratch, USERPROFILE: scratch, DSH_HOME: join(scratch, "dsh"), DEEPSEEK_API_KEY: "sk-fixture",
+        FAKE_ACP_REJECT_LIVE_LOAD_FILE: join(scratch, "reject"), FAKE_ACP_REJECT_LIVE_LOAD_DSH: "1",
+        FAKE_ACP_LAUNCH_COUNT_FILE: join(scratch, "launches"), FAKE_ACP_RPC_APPEND_FILE: join(scratch, "rpc.jsonl"),
+        FAKE_ACP_DUMP: join(scratch, "dump"),
+      },
+    });
+    const recorder = recordEvents(instance.adapter);
+    cleanup = async () => {
+      recorder.stop();
+      await instance.dispose();
+      await removeTempDir(scratch);
+    };
+    writeFileSync(join(scratch, "reject"), "1");
+    const agents = (token: string) => ({ agents: { command: process.execPath, args: [FAKE_CLI], env: { OMB_COMMS_TOKEN: token } } });
+    const run = async (text: string, token: string, resumeCursor?: string) => {
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "t-active", text, integrations: agents(token), ...(resumeCursor ? { resumeCursor } : {}) });
+      return recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    };
+    expect(await run("one", "token-one")).toMatchObject({ ok: true });
+    const second = await run("two", "token-two", "fake-acp-session");
+    expect(recorder.events.filter((event) => event.type === "runtime.error")).toEqual([]);
+    expect(second).toMatchObject({ ok: true });
+    const calls = readFileSync(join(scratch, "rpc.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as { pid: number; method: string; sessionId?: string });
+    expect(calls.filter((call) => call.method === "session/new")).toHaveLength(1);
+    expect(calls.filter((call) => call.method === "session/resume").map((call) => call.sessionId)).toEqual(["fake-acp-session"]);
+    expect(calls.filter((call) => call.method === "session/prompt")).toHaveLength(2);
+    expect(Number(readFileSync(join(scratch, "launches"), "utf8"))).toBe(2);
+    const servers = JSON.parse(readFileSync(join(scratch, "dump.mcp.json"), "utf8")) as Array<{ name: string }>;
+    const agentsServer = JSON.stringify(servers.find((server) => server.name === "agents"));
+    expect(agentsServer).toContain("OMB_COMMS_TOKEN");
+    expect(agentsServer).toContain("token-two");
+  });
+});

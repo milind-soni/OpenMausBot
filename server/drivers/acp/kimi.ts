@@ -1,24 +1,17 @@
 // Kimi Code: Moonshot's `kimi acp` on the Kimi Code subscription login
-// (~/.kimi-code/credentials/kimi-code.json), not a Moonshot API key. Verified on kimi-code 0.29.1.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+// (~/.kimi-code/credentials), not a Moonshot API key. Verified on kimi-code 0.29.1.
+import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ModelCatalog } from "../../contracts.ts";
+import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
 import { decodeInjectId, hostApiKey, LOCAL_HOSTS, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { currentEngineCatalog } from "../../model-manifest/manifest.ts";
+import { ENGINE_MODEL_ID } from "../../model-manifest/schema.ts";
 
-const STATIC_KIMI_MODELS: ModelCatalog = {
-  default: "kimi-code/k3",
-  options: [
-    { id: "kimi-code/k3", label: "Kimi K3" },
-    { id: "kimi-code/k3-256k", label: "Kimi K3 256K" },
-    { id: "kimi-code/kimi-for-coding", label: "Kimi for Coding" },
-    { id: "kimi-code/kimi-for-coding-highspeed", label: "Kimi for Coding Highspeed" },
-  ],
-};
-
-const SLUG = /^[a-z0-9][a-z0-9._:/-]*$/i;
+const SLUG = ENGINE_MODEL_ID.kimi;
 const LOCAL_PROVIDER_PREFIXES = LOCAL_HOSTS.map((host) => `${host.id}/`);
 
 function isLocalInjectAlias(slug: string): boolean {
@@ -29,9 +22,78 @@ function kimiDataRoot(env: Record<string, string | undefined>): string {
   return env.KIMI_CODE_HOME || join(env.HOME || env.USERPROFILE || homedir(), ".kimi-code");
 }
 
-function credentialsPath(env: Record<string, string | undefined>) {
-  return join(kimiDataRoot(env), "credentials", "kimi-code.json");
+/** kimi-code 2.4.1 (resolveKimiTokenStorageName) keeps a kimi.com login in credentials/kimi-code.json and a kimi.ai
+ * one, the region it picks outside China, in credentials/kimi-code-env-<hash>.json. */
+const KIMI_TOKEN_FILE = /^kimi-code(?:-env-[0-9a-f]+)?\.json$/;
+
+/** kimi-code 2.4.1 (revokedTombstone) keeps a sign-in the provider refused as a file with both tokens empty, and reads an
+ * unparseable file as no sign-in. */
+function kimiTokenHeld(path: string): boolean {
+  try {
+    const token: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (!token || typeof token !== "object") return false;
+    const { access_token: access, refresh_token: refresh } = token as Record<string, unknown>;
+    return !(access === "" && refresh === "");
+  } catch {
+    return false;
+  }
 }
+
+/** Reads the child's own data root (a custom HOME or KIMI_CODE_HOME), never the server user's. */
+function kimiSignedIn(env: Record<string, string | undefined>): boolean {
+  const credentials = join(kimiDataRoot(env), "credentials");
+  try {
+    return readdirSync(credentials).some((name) => KIMI_TOKEN_FILE.test(name) && kimiTokenHeld(join(credentials, name)));
+  } catch {
+    return false;
+  }
+}
+
+/** The sign-out probe: a credential folder that cannot be read is `unknown`, so sign-out refuses instead of
+ * reporting a removal that never happened. `kimiSignedIn` keeps its boolean contract for turn gating. */
+function kimiSignInState(env: Record<string, string | undefined>): DeviceSignInState {
+  const credentials = join(kimiDataRoot(env), "credentials");
+  let names: string[];
+  try {
+    names = readdirSync(credentials);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "signed-out" : "unknown";
+  }
+  return names.some((name) => KIMI_TOKEN_FILE.test(name) && kimiTokenHeld(join(credentials, name))) ? "signed-in" : "signed-out";
+}
+
+/** Kimi Code 2.4.1 ships no logout command, so sign-out removes the credential files the login created — the same
+ * cleanup the sign-out flow confirms afterwards. */
+function kimiRemoveCredentials(env: Record<string, string | undefined>): void {
+  const credentials = join(kimiDataRoot(env), "credentials");
+  for (const name of readdirSync(credentials)) {
+    if (KIMI_TOKEN_FILE.test(name)) unlinkSync(join(credentials, name));
+  }
+}
+
+/** Never the CLI's own words, which may carry tokens (kimi-code 2.4.1 ends with "Login failed: …" or "Login cancelled: …",
+ * and after 900s with "Login failed: Device authorization timed out"). */
+function kimiLoginFailure(output: string): string {
+  if (/expired|timed out/i.test(output)) return "The Kimi sign-in code expired. Start sign-in again for a new code.";
+  if (/denied|login cancelled/i.test(output)) return "Kimi sign-in was declined in the browser. Start sign-in again to try once more.";
+  return "Kimi sign-in did not finish. Check the server's connection, then try again.";
+}
+
+/** `kimi login`, Kimi Code's device-code login (kimi-code 2.4.1). Kimi has no status or logout command, so the
+ * stored credential files are both the sign-in check and what sign-out removes. */
+export const KIMI_DEVICE_SIGN_IN: DeviceSignIn = {
+  provider: "kimi",
+  product: "Kimi",
+  account: "Kimi Code",
+  homeEnv: "KIMI_CODE_HOME",
+  homeDir: ".kimi-code",
+  loginArgs: ["login"],
+  install: "Install it with Moonshot's installer (https://code.kimi.com), or from Settings when this server has npm, then try again.",
+  failure: kimiLoginFailure,
+  signedIn: kimiSignedIn,
+  signInState: kimiSignInState,
+  removeCredentials: kimiRemoveCredentials,
+};
 
 function quoteToml(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
@@ -430,14 +492,15 @@ function stripKimiModelEnv(env: Record<string, string | undefined>): void {
 }
 
 function readKimiModelCatalog(env: Record<string, string | undefined>): ModelCatalog {
+  const fixed = currentEngineCatalog("kimi");
   const dataRoot = kimiDataRoot(env);
   let text = "";
   try {
     text = readFileSync(join(dataRoot, "config.toml"), "utf8");
   } catch {
-    return STATIC_KIMI_MODELS;
+    return fixed;
   }
-  const options = STATIC_KIMI_MODELS.options.map((o) => ({ ...o }));
+  const options = fixed.options.map((o) => ({ ...o }));
   const seen = new Set(options.map((o) => o.id));
   let current: { slug: string; name?: string } | null = null;
   const flush = () => {
@@ -470,18 +533,18 @@ function readKimiModelCatalog(env: Record<string, string | undefined>): ModelCat
     if (current && (key === "name" || key === "label") && value) current.name = value;
   }
   flush();
-  return { default: STATIC_KIMI_MODELS.default, options };
+  return { default: fixed.default, options };
 }
 
 const support: AcpSupport = {
   driverKind: "kimiAgent",
   displayName: "Kimi",
   // The CLI's own catalog aliases (~/.kimi-code/config.toml; `kimi provider list` reports the same four).
-  models: STATIC_KIMI_MODELS,
+  get models() { return currentEngineCatalog("kimi"); },
   resolveModels: (env) => mergeLocalInject(readKimiModelCatalog(env), env),
   defaultCli: "kimi",
   nativeSource: "kimi.acp",
-  loginNote: "Kimi Code CLI is not signed in — run `kimi login` in a terminal",
+  loginNote: "Kimi is not signed in to your Kimi Code account — choose Sign in to Kimi in engine setup",
 
   install: {
     command: {
@@ -489,9 +552,11 @@ const support: AcpSupport = {
       linux: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
       win32: "irm https://code.kimi.com/kimi-code/install.ps1 | iex",
     },
+    npmPackage: "@moonshot-ai/kimi-code",
     docsUrl: "https://moonshotai.github.io/kimi-code/en/guides/getting-started.html",
     signInCommand: "kimi login",
   },
+  deviceSignIn: KIMI_DEVICE_SIGN_IN,
 
   // -m is a global commander option and must precede `acp` (0.29.1).
   resolveTurnModel: (model, env) => (model ? ensureKimiInjectAlias(model, env) : model),
@@ -513,8 +578,7 @@ const support: AcpSupport = {
   // The only authMethod is {id:"login", type:"terminal"}, a device-code flow ACP cannot drive.
   pickAuthMethod: () => null,
   authFailure: "continue",
-  // The child's own data root: a custom HOME or KIMI_CODE_HOME, never the server user's.
-  isAuthenticated: (env) => existsSync(credentialsPath(env)),
+  isAuthenticated: kimiSignedIn,
 
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 };

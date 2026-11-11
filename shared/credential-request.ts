@@ -1,3 +1,4 @@
+import { MODELGO_URL } from "./modelgo.ts";
 /**
  * Credentials an agent may ask the person to provide through an inline
  * card. The id is the entire authority surface: agents never choose a
@@ -28,6 +29,12 @@ export const CREDENTIAL_TARGETS = {
     placeholder: "Paste your ElevenLabs API key",
     helpUrl: "https://elevenlabs.io/app/settings/api-keys",
   },
+  geminiTtsKey: {
+    label: "Gemini speech API key",
+    description: "Generates spoken replies, voice notes and call speech with Gemini.",
+    placeholder: "Paste your Google AI Studio API key",
+    helpUrl: "https://aistudio.google.com/api-keys",
+  },
   fishAudioKey: {
     label: "Fish Audio API key",
     description: "Enables Fish Audio voices in calls.",
@@ -36,7 +43,7 @@ export const CREDENTIAL_TARGETS = {
   },
   openaiImageApiKey: {
     label: "OpenAI API key",
-    description: "Used only to generate custom bot avatar images.",
+    description: "Used to generate images in chats and bot avatars when OpenAI is the image provider.",
     placeholder: "sk-…",
     helpUrl: "https://platform.openai.com/api-keys",
   },
@@ -50,7 +57,7 @@ export const CREDENTIAL_TARGETS = {
     label: "Composio API key",
     description: "Connects apps such as Gmail, Slack and GitHub through your own Composio project.",
     placeholder: "ak_…",
-    helpUrl: "https://dashboard.composio.dev",
+    helpUrl: "https://dashboard.composio.dev/~/project/settings/api-keys",
   },
   openaiApiKey: {
     label: "OpenAI API key",
@@ -88,6 +95,18 @@ export const CREDENTIAL_TARGETS = {
     placeholder: "gsk_…",
     helpUrl: "https://console.groq.com/keys",
   },
+  greenferenceApiKey: {
+    label: "Greenference API key",
+    description: "Runs Greenference models with your own key.",
+    placeholder: "Paste your Greenference API key",
+    helpUrl: "https://greenference.com/dashboard/tokens",
+  },
+  modelgoApiKey: {
+    label: "ModelGo API key",
+    description: "Runs ModelGo models with your own key.",
+    placeholder: "Paste your ModelGo API key",
+    helpUrl: MODELGO_URL,
+  },
   metaApiKey: {
     label: "Meta API key",
     description: "Runs Meta's models with your own key.",
@@ -106,16 +125,16 @@ export type CredentialTargetId = keyof typeof CREDENTIAL_TARGETS;
 /** Saved in the sealed login store, not the settings file. */
 export type LoginCredentialTargetId = "onePasswordToken";
 export type ConfigCredentialTargetId = Exclude<CredentialTargetId, LoginCredentialTargetId>;
-/** AI provider keys: the server's config only, like Settings → Keys, and refused where Admin manages the models. */
+/** AI provider keys: refused where Admin manages the models, and typed only in the computer's own app or a desktop paired to it, never on a phone. */
 export const PROVIDER_CREDENTIAL_TARGETS = [
-  "openaiApiKey", "anthropicApiKey", "openrouterApiKey", "mistralApiKey", "cerebrasApiKey", "groqApiKey", "metaApiKey", "deepseekApiKey",
+  "openaiApiKey", "anthropicApiKey", "openrouterApiKey", "mistralApiKey", "cerebrasApiKey", "groqApiKey", "greenferenceApiKey", "modelgoApiKey", "metaApiKey", "deepseekApiKey",
 ] as const satisfies readonly ConfigCredentialTargetId[];
-export type DesktopCredentialSlot = Exclude<ConfigCredentialTargetId, (typeof PROVIDER_CREDENTIAL_TARGETS)[number]>;
+export type DesktopCredentialSlot = ConfigCredentialTargetId;
 export type CredentialConfig = {
   xai?: { key?: string };
   box?: { token?: string };
   opencodeGo?: { apiKey?: string };
-  tts?: { key?: string; fishKey?: string };
+  tts?: { key?: string; fishKey?: string; geminiKey?: string };
   imageGen?: { key?: string };
   composio?: { apiKey?: string };
   openai?: { key?: string };
@@ -124,6 +143,8 @@ export type CredentialConfig = {
   mistral?: { key?: string };
   cerebras?: { key?: string };
   groq?: { key?: string };
+  greenference?: { key?: string };
+  modelgo?: { key?: string };
   meta?: { key?: string };
   deepseek?: { key?: string };
   /** Not in the settings file: the server fills it from its login store. */
@@ -149,10 +170,9 @@ export function isProviderCredentialTarget(id: CredentialTargetId): boolean {
   return (PROVIDER_CREDENTIAL_TARGETS as readonly string[]).includes(id);
 }
 
-/** The desktop's encrypted-store slot that holds this key, where Settings saves it; null for a key Settings keeps in the
- * server's config. A paired phone can save only a key with a slot. */
+/** The desktop's encrypted-store slot that holds this key, where Settings saves it; null for the 1Password token, which Logins keeps. */
 export function desktopCredentialSlot(id: CredentialTargetId): DesktopCredentialSlot | null {
-  return isConfigCredentialTarget(id) && !isProviderCredentialTarget(id) ? id as DesktopCredentialSlot : null;
+  return isConfigCredentialTarget(id) ? id : null;
 }
 
 /** Where a card saves what the person typed: the 1Password token goes to Logins, which checks it reaches 1Password. */
@@ -172,6 +192,8 @@ export function credentialConfigPatch(id: ConfigCredentialTargetId, value: strin
       return { opencodeGo: { apiKey: value } };
     case "ttsKey":
       return { tts: { key: value } };
+    case "geminiTtsKey":
+      return { tts: { geminiKey: value } };
     case "fishAudioKey":
       return { tts: { fishKey: value } };
     case "openaiImageApiKey":
@@ -191,6 +213,10 @@ export function credentialConfigPatch(id: ConfigCredentialTargetId, value: strin
       return { cerebras: { key: value } };
     case "groqApiKey":
       return { groq: { key: value } };
+    case "greenferenceApiKey":
+      return { greenference: { key: value } };
+    case "modelgoApiKey":
+      return { modelgo: { key: value } };
     case "metaApiKey":
       return { meta: { key: value } };
     case "deepseekApiKey":
@@ -208,6 +234,8 @@ export function credentialIsConfigured(config: CredentialConfig, id: CredentialT
       return Boolean(config.opencodeGo?.apiKey);
     case "ttsKey":
       return Boolean(config.tts?.key);
+    case "geminiTtsKey":
+      return Boolean(config.tts?.geminiKey);
     case "fishAudioKey":
       return Boolean(config.tts?.fishKey);
     case "openaiImageApiKey":
@@ -228,6 +256,10 @@ export function credentialIsConfigured(config: CredentialConfig, id: CredentialT
       return Boolean(config.cerebras?.key);
     case "groqApiKey":
       return Boolean(config.groq?.key);
+    case "greenferenceApiKey":
+      return Boolean(config.greenference?.key);
+    case "modelgoApiKey":
+      return Boolean(config.modelgo?.key);
     case "metaApiKey":
       return Boolean(config.meta?.key);
     case "deepseekApiKey":

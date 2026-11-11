@@ -60,7 +60,7 @@ const CONTROLS = {
   usage: 'data-testid="group-usage-chip"',
   folder: 'title="Group working folder"',
   responder: 'aria-label="Default responder"',
-  members: 'aria-label="Manage members — 9 bots in this group"',
+  members: 'aria-label="Manage members: 9 bots in this group"',
 };
 const shown = (markup: string) => Object.entries(CONTROLS).filter(([, mark]) => markup.includes(mark)).map(([name]) => name);
 const BULLETIN = "Desk HQ: the recruiting desk&#x27;s room.";

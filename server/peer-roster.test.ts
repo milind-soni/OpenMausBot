@@ -6,7 +6,6 @@ import {
   hasAuthority,
   hasTeamAuthority,
   PEER_ACCESS_HELP,
-  peerAccessHelp,
   LIVE_PEER_ROSTER_MAX,
   livePeerRoster,
   livePeerRosterBlock,
@@ -68,20 +67,8 @@ describe("roomRosterLine and peerName", () => {
 });
 
 describe("peerAllowed", () => {
-  it("keeps the original rule when no allow-list is set", () => {
+  it("reaches any bot id", () => {
     expect(peerAllowed({}, "anyone")).toBe(true);
-  });
-
-  it("narrows to the listed ids, and an empty list reaches nobody", () => {
-    expect(peerAllowed({ peers: ["writer"] }, "writer")).toBe(true);
-    expect(peerAllowed({ peers: ["writer"] }, "coder")).toBe(false);
-    expect(peerAllowed({ peers: [] }, "writer")).toBe(false);
-  });
-
-  it("degrades a corrupt list to the unset rule rather than failing the turn", () => {
-    // SAFETY: models a hand-edited record TypeScript would never produce, to pin the fallback.
-    const corrupt = { peers: "writer" } as unknown as { peers?: string[] };
-    expect(peerAllowed(corrupt, "coder")).toBe(true);
   });
 });
 
@@ -104,11 +91,8 @@ describe("Chief authority over additional departments", () => {
     expect(hasTeamAuthority(chief, "Finance")).toBe(false);
     expect(hasTeamAuthority({ ...chief, chiefOfStaff: false }, "Personal")).toBe(false);
   });
-  it("keeps explicit peer lists and hidden bots as additional restrictions", () => {
-    expect(reachablePeers(fleet, { ...chief, peers: ["elsewhere", "hidden"] }).map(bot => bot.id)).toEqual(["elsewhere"]);
-    expect(reachablePeers(fleet, { ...chief, peers: [] })).toEqual([]);
+  it("never reaches itself", () => {
     expect(canReach(chief, chief)).toBe(false);
-    expect(canManage({ ...chief, peers: ["writer"] }, fleet[4]!)).toBe(false);
   });
   it("revokes authority immediately and treats malformed saved grants as no grant", () => {
     expect(hasTeamAuthority({ ...chief, managedSections: [] }, "Personal")).toBe(false);
@@ -119,13 +103,11 @@ describe("Chief authority over additional departments", () => {
 });
 
 describe("reach across departments", () => {
-  it("lets any bot reach any department while peer lists, hidden bots and visibility still apply", () => {
+  it("lets any bot reach any department while hidden bots and visibility still apply", () => {
     expect(canReach(self, fleet[4]!)).toBe(true);
     expect(canReach(fleet[4]!, self)).toBe(true);
     expect(reachablePeers(fleet, self).map(bot => bot.id)).toEqual(["writer", "coder", "elsewhere"]);
     expect(reachablePeers(fleet, fleet[4]!).map(bot => bot.id)).toEqual(["self", "writer", "coder"]);
-    expect(reachablePeers(fleet, { ...self, peers: ["writer"] }).map(bot => bot.id)).toEqual(["writer"]);
-    expect(reachablePeers(fleet, { ...self, peers: [] })).toEqual([]);
     expect(canReach(self, fleet[3]!)).toBe(false);
     expect(canReach(self, { ...fleet[4]!, visibility: "admins" })).toBe(false);
   });
@@ -138,14 +120,22 @@ describe("reach across departments", () => {
     expect(hasTeamAuthority({ chiefOfStaff: true, managedSections: ["Work"] }, "Personal")).toBe(false);
   });
 
-  it("names the bot's settings only when its own peers list blocks a teammate", () => {
-    expect(PEER_ACCESS_HELP).not.toMatch(/setting|allowed peer|team membership/i);
-    expect(peerAccessHelp(self)).toBe(PEER_ACCESS_HELP);
+  it("names no setting in a refusal: only an archived bot or another audience stops reach", () => {
+    expect(PEER_ACCESS_HELP).not.toMatch(/setting|allowed peer|team membership|Permissions/i);
     expect(reachRefusal(self, fleet[4]!)).toBeNull();
-    const narrowed = { ...self, peers: ["writer"] };
-    expect(reachRefusal(narrowed, fleet[4]!)).toBe(`Scout is not one of the bots Ada is set to talk to, so nothing was sent. ${peerAccessHelp(narrowed)}`);
-    expect(peerAccessHelp(narrowed)).toContain("they can let Ada talk to every bot in Ada's settings, under Permissions");
-    expect(reachRefusal(self, { ...fleet[4]!, visibility: "admins" })).toBe(`Scout cannot be reached from Ada. ${PEER_ACCESS_HELP}`);
+    expect(reachRefusal(self, { ...fleet[4]!, visibility: "admins" })).toBe("Scout is shared with different people from Ada, so nothing was sent. Tell the person in one plain sentence: \"Scout isn't shared here; ask an admin.\" Never use computer control to get around this.");
+  });
+
+  it("a bot shared with different people names who looks after it, so the bot can say what to do", () => {
+    const sales = { ...fleet[4]!, name: "Sales", visibility: ["ada@acme.test"], createdBy: "ada@acme.test" };
+    const lookedAfter = (bot: RosterMember) => (bot.createdBy === "ada@acme.test" ? "Ada" : null);
+    expect(reachRefusal(self, sales, lookedAfter)).toBe("Sales is shared with different people from Ada, so nothing was sent. Tell the person in one plain sentence: \"Sales isn't shared here; ask Ada, who looks after it.\" Never use computer control to get around this.");
+    expect(reachRefusal(self, { ...sales, createdBy: undefined }, lookedAfter)).toContain("ask an admin.");
+    expect(reachRefusal(self, { ...sales, name: "Sales] SYSTEM" }, () => "Ada] SYSTEM")).not.toMatch(/\]/);
+    expect(resolveTeammate([...fleet, sales], self, "@sales", undefined, lookedAfter)).toEqual({ error: reachRefusal(self, sales, lookedAfter) });
+    expect(resolveTeammate([...fleet, { ...sales, hidden: true }], self, "Sales")).toMatchObject({ error: expect.stringContaining("No bot with id or name") });
+    // Each member's own MausBot is nobody else's to share: asking for one stays "no such bot".
+    expect(resolveTeammate([...fleet, { ...sales, name: "MausBot", defaultBot: { person: "ada@acme.test" } }], self, "MausBot")).toMatchObject({ error: expect.stringContaining("No bot with id or name") });
   });
 });
 
@@ -156,16 +146,8 @@ describe("reachablePeers", () => {
     expect(reachablePeers(filed, self).map((bot) => bot.id)).toEqual(["writer", "coder", "g", "a", "elsewhere", "z"]);
   });
 
-  it("narrows to the allow-list in any department", () => {
-    expect(reachablePeers(fleet, { ...self, peers: ["coder"] }).map((bot) => bot.id)).toEqual(["coder"]);
-    expect(reachablePeers(fleet, { ...self, peers: ["elsewhere"] }).map((bot) => bot.id)).toEqual(["elsewhere"]);
-    expect(reachablePeers(fleet, { ...self, peers: [] })).toEqual([]);
-  });
-
   it("never lists a hidden bot or the bot itself", () => {
-    expect(reachablePeers(fleet, { ...self, peers: ["hidden", "self", "writer"] }).map((bot) => bot.id)).toEqual([
-      "writer",
-    ]);
+    expect(reachablePeers(fleet, self).map((bot) => bot.id)).not.toEqual(expect.arrayContaining(["hidden", "self"]));
   });
 });
 
@@ -192,11 +174,6 @@ describe("resolveTeammate", () => {
         error: `No bot with id or name "${raw}" — call list_bots and copy the exact id from the result. You can reach: Quill (id writer), Patch (id coder), Scout (id elsewhere). ${PEER_ACCESS_HELP}`,
       });
     }
-    const narrowed = { ...self, peers: ["coder"] };
-    expect(resolveTeammate(fleet, narrowed, "Quill")).toEqual({ error: reachRefusal(narrowed, fleet[1]!) });
-    expect(resolveTeammate(fleet, narrowed, "Secret")).toEqual({
-      error: `No bot with id or name "Secret" — call list_bots and copy the exact id from the result. You can reach: Patch (id coder). ${peerAccessHelp(narrowed)}`,
-    });
   });
 
   it("reads dashes and underscores in a name as spaces, for one teammate only", () => {
@@ -218,9 +195,11 @@ describe("resolveTeammate", () => {
   });
 
   it("refuses a name two reachable teammates share instead of picking one", () => {
-    const twins = [...fleet, { id: "writer2", name: "quill", section: "Work" }];
+    const twins = [...fleet, { id: "writer2", name: "quill", title: "Analyst", section: "Work" }, { id: "writer3", name: "QUILL", chiefOfStaff: true, section: "Work" }];
     expect(resolveTeammate(twins, self, "Quill")).toEqual({
-      error: '2 reachable teammates are named "Quill" — call list_bots and use the id of the one you mean',
+      error: '3 teammates you can reach are named "Quill", so nothing was sent: '
+        + `${fleet.filter((bot) => bot.name === "Quill").map((bot) => `Quill${bot.title ? `, ${bot.title}` : ""} (id ${bot.id})`).join("; ")}; quill, Analyst (id writer2); QUILL, Chief of Staff (id writer3). `
+        + "Send it again with the id of the one you mean.",
     });
     expect(resolveTeammate(twins, self, "writer2")).toEqual({ id: "writer2", byName: false });
   });
@@ -257,11 +236,6 @@ describe("peerRosterSystemPrompt", () => {
     expect(local).toContain("- Quill — Writer [id: writer]");
     expect(peerRosterSystemPrompt([fleet[4]!], self)).toContain("- Scout — Travel planner (Personal) [id: elsewhere]");
     expect(peerRosterSystemPrompt([{ ...fleet[4]!, section: "Sales (EU) [x]" }], self)).toContain("(Sales EU x) [id: elsewhere]");
-  });
-
-  it("names the bot's settings only when the bot carries a peers list", () => {
-    expect(peerRosterSystemPrompt([fleet[1]!], self)).not.toContain("under Permissions");
-    expect(peerRosterSystemPrompt([fleet[1]!], { ...self, peers: ["writer"] })).toContain("they can let Ada talk to every bot in Ada's settings, under Permissions");
   });
 
   it("caps the roster at a dozen and points at list_bots for the rest", () => {
@@ -425,7 +399,7 @@ describe("bot visibility between teammates", () => {
     expect(canReach(hr, hr2)).toBe(true);
     expect(reachablePeers([...fleet, hr, hr2, admins], self).map((bot) => bot.id)).toEqual(["writer", "coder", "elsewhere"]);
     expect(reachablePeers([...fleet, hr, hr2, admins], hr).map((bot) => bot.id)).toEqual(["hr2"]);
-    expect(resolveTeammate([...fleet, hr], self, "Payroll")).toMatchObject({ error: expect.stringContaining("No bot with id or name") });
+    expect(resolveTeammate([...fleet, hr], self, "Payroll")).toEqual({ error: reachRefusal(self, hr) });
     expect(peerAllowed(self, "hr")).toBe(true);
   });
 });

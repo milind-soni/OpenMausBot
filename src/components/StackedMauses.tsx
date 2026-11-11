@@ -6,8 +6,8 @@ import { BotAvatar } from "./Avatar";
 
 export function StackedMauses({ members, density, large = false }: { members: Bot[]; density: SidebarDensity; large?: boolean }) {
   const iconOnly = density === "icons";
-  const slotSize = iconOnly ? "size-12" : large ? "size-9" : density === "compact" ? "size-7" : "size-8";
-  const singleSize = iconOnly ? 44 : large ? 36 : density === "compact" ? 26 : 32;
+  const slotSize = iconOnly ? "size-12" : large ? "size-9" : "size-8";
+  const singleSize = iconOnly ? 44 : large ? 36 : 32;
   if (members.length <= 1) {
     const b = members[0];
     return (

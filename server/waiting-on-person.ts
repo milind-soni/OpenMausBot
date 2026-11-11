@@ -1,27 +1,37 @@
 // The engines' own prompts stay the only gates: nothing here answers, holds or grants anything.
+import type { PersonWaitKind } from "../shared/person-wait.ts";
 import type { RuntimeEvent } from "./contracts.ts";
 import { redactSecretsInText } from "./redact.ts";
+import { serverLine } from "./server-lines.ts";
 
 type Resolved = Extract<RuntimeEvent, { type: "request.resolved" }>;
 
-export function settledWaitingChip(name: string, kind: string, behavior: Resolved["behavior"], source: Resolved["source"]): { name: string; ok: boolean } {
+/** `language`: the conversation's where the row is shown. */
+export function settledWaitingChip(name: string, kind: string, behavior: Resolved["behavior"], source: Resolved["source"], language?: string): { name: string; ok: boolean } {
   const who = `@${name}`;
   const question = kind === "answer";
+  const line = (key: Parameters<typeof serverLine>[1]) => serverLine(language, key, { who });
   // A timeout or closed turn says so even when the engine filed it as an answer (Claude's note for an unanswered question).
   if (source === "timeout") return question
-    ? { name: `Nobody answered ${who}'s question in time`, ok: false }
-    : { name: `Nobody answered ${who}'s approval in time — that step did not run`, ok: false };
+    ? { name: line("server.teammates.noAnswerInTime"), ok: false }
+    : { name: line("server.teammates.noApprovalInTime"), ok: false };
   if (source === "system" || source === "unavailable") return question
-    ? { name: `${who}'s turn ended before anyone answered its question`, ok: false }
-    : { name: `${who}'s approval closed before anyone answered — that step did not run`, ok: false };
-  if (behavior === "deny") return { name: question ? `${who}'s question was dismissed` : `${who}'s request was denied`, ok: false };
+    ? { name: line("server.teammates.turnEndedBeforeAnswer"), ok: false }
+    : { name: line("server.teammates.approvalClosed"), ok: false };
+  if (behavior === "deny") return { name: line(question ? "server.teammates.questionDismissed" : "server.teammates.requestDenied"), ok: false };
   return source === "user"
-    ? { name: `${who} got your ${question ? "answer" : "approval"}`, ok: true }
-    : { name: question ? `${who}'s question was answered` : `${who}'s request was approved`, ok: true };
+    ? { name: line(question ? "server.teammates.gotYourAnswer" : "server.teammates.gotYourApproval"), ok: true }
+    : { name: line(question ? "server.teammates.questionAnswered" : "server.teammates.requestApproved"), ok: true };
 }
 
-export function queuedBehindPersonText(name: string, kind: "approval" | "question" | "review", title: string): string {
-  return `Queued for @${name} behind your ${kind === "question" ? "answer" : kind} in “${title}”`;
+/** A running turn waited on the person; once they answer it works again. A conversation resting on a card runs no turn
+ * and keeps waiting. */
+export const turnWaitedOnPerson = <T extends { activity?: string; busy?: boolean }>(waiting: T | null | undefined): waiting is T =>
+  waiting?.activity === "waiting-on-you" && waiting.busy === true;
+
+export function queuedBehindPersonText(name: string, kind: PersonWaitKind, title: string, language?: string): string {
+  return serverLine(language, kind === "question" ? "server.teammates.queuedBehind.answer" : kind === "approval" ? "server.teammates.queuedBehind.approval"
+    : "server.teammates.queuedBehind.review", { bot: name, title });
 }
 
 const MAX_ACTIONS = 10;
@@ -53,6 +63,16 @@ export class UnansweredApprovals {
     const action = actionLine(tool, summary);
     noted.actions = noted.actions.filter(candidate => candidate !== action);
     if (!noted.actions.length) this.byThread.delete(threadId);
+  }
+
+  /** What parks work handed on after an approval went unanswered: a question that lasts past this turn. The person's answer
+   * lets the bot try again, and the engine's own prompt still gates the action. Undefined when none went unanswered. */
+  ask(threadId: string, turnId: string | undefined, who: string, language?: string): string | undefined {
+    const noted = this.byThread.get(threadId);
+    if (!noted || noted.turnId !== turnId || !noted.actions.length) return undefined;
+    // withDefault reads the first "Default:", so an action's own words must not look like one.
+    const actions = noted.actions.map(action => `“${action.replace(/\bdefault:/gi, "default :")}”`).join(", ");
+    return `${serverLine(language, noted.actions.length === 1 ? "server.teammates.approvalAsk.one" : "server.teammates.approvalAsk.many", { who, actions })}\nDefault: ${serverLine(language, "server.teammates.approvalAsk.retry")}`;
   }
 
   annotate(threadId: string, turnId: string | undefined, text: string, ok: boolean): string {

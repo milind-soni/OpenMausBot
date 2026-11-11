@@ -17,7 +17,6 @@ import {
   LocalVmInventoryCard,
   cloudComputerActionPlan,
   cloudComputerInventoryState,
-  computerInventoryRequest,
   confirmComputerAction,
   localVmInventoryState,
   parseLocalVmIdleTimeoutMinutes,
@@ -31,6 +30,7 @@ import {
   type LocalVmInventoryInstance,
   type VpsComputerInventoryInstance,
 } from "./LocalComputerSection";
+import { computerInventoryRequest } from "@/lib/computer-requests";
 import { VpsComputersCard } from "./VpsComputersCard";
 
 const cloudVm: LocalVmInventoryInstance = {
@@ -84,7 +84,7 @@ describe("computer inventory request wiring", () => {
     expect(request).toBeNull();
     expect(confirm).toHaveBeenCalledOnce();
     expect(confirm).toHaveBeenCalledWith(
-      "Delete Research's Local VM? Its durable folder and website sign-ins are kept. Apps installed inside the desktop and files outside the durable folder are deleted.",
+      "Delete Research's private desktop? Its durable folder and website sign-ins are kept. Apps installed inside the desktop and files outside the durable folder are deleted.",
     );
   });
 
@@ -231,7 +231,7 @@ describe("Local VM inventory UI", () => {
     }));
 
     expect(markup).toContain("Not managed");
-    expect(markup).toContain("not managed by OpenMausBot");
+    expect(markup).toContain("not managed by MausBot");
     expect(markup).toContain("remove it directly in Docker or Podman");
     expect(markup).not.toContain(">Delete</button>");
     expect(markup).not.toContain("Container labels do not match");
@@ -297,6 +297,9 @@ describe("cloud computer inventory UI", () => {
     const disconnected = renderCard({ configured: false });
     expect(disconnected).toContain("Boat is not connected");
     expect(disconnected).not.toContain("No cloud desktops found");
+    expect(disconnected.match(/Boat is not connected/g)).toHaveLength(1);
+    expect(disconnected).toContain("Connect your Boat account");
+    expect(disconnected).not.toContain("aria-busy");
 
     const unavailable = renderCard({ unavailableReason: "boat.dev is unavailable" });
     expect(unavailable).toContain("boat.dev is unavailable");
@@ -480,7 +483,7 @@ describe("VPS computer inventory UI", () => {
     expect(markup).toContain("SSH host: production-vps");
     expect(markup).toContain("Research");
     expect(markup).toContain("Owned by this bot");
-    expect(markup).toContain("Orphaned VPS computer · ID ef123456");
+    expect(markup).toContain("Leftover desktop · ID ef123456");
     expect(markup).toContain("Its bot no longer exists");
     expect(markup).toContain("Running");
     expect(markup).toContain("Stopped");
@@ -496,7 +499,7 @@ describe("VPS computer inventory UI", () => {
     const markup = renderCard({ instances: [{ ...ownedVps, inUse: true }] });
 
     expect(markup).toContain("In use");
-    expect(markup).toContain("Stop this bot&#x27;s work before removing its VPS computer.");
+    expect(markup).toContain("Stop this bot&#x27;s work before removing its desktop.");
     expect(markup).toContain("disabled=\"\"");
   });
 
@@ -507,9 +510,12 @@ describe("VPS computer inventory UI", () => {
   });
 
   it("keeps disconnected, unavailable, and empty states distinct", () => {
-    expect(renderCard({ configured: false, aliases: [] })).toContain("VPS is not configured");
+    const disconnected = renderCard({ configured: false, aliases: [] });
+    expect(disconnected).toContain("To use your own VPS, add its SSH alias");
+    expect(disconnected.match(/No VPS is set up yet/g)).toHaveLength(1);
+    expect(disconnected).not.toContain("aria-busy");
     expect(renderCard({ unavailableReason: "SSH host cannot be reached" })).toContain("SSH host cannot be reached");
-    expect(renderCard()).toContain("No OpenMaus-managed VPS computers found");
+    expect(renderCard()).toContain("No MausBot desktops found on your VPS");
   });
 
   it("tags computers on more than one server and keeps reachable rows beside the warning", () => {
@@ -560,14 +566,14 @@ describe("Settings → Computers on an OMB Cloud home", () => {
   const cards = () => [...renderToStaticMarkup(createElement(LocalComputerSection)).matchAll(/<div class="text-\[16px\] font-semibold text-ink[^"]*">([^<]+)<\/div>/g)].map((match) => match[1]);
 
   it("sets up a Local VM on a desktop or self-hosted server", () => {
-    expect(cards()).toEqual(expect.arrayContaining(["Cloud desktops", "Local VM", "Setup"]));
+    expect(cards()).toEqual(expect.arrayContaining(["Cloud desktops", "Private desktops", "Setup"]));
   });
 
   it("shows no Local VM, and no steps to install one, where it cannot exist", () => {
     storeFixture.config = { cloudHome: true };
     const titles = cards();
     expect(titles).toContain("Cloud desktops");
-    expect(titles).not.toContain("Local VM");
+    expect(titles).not.toContain("Private desktops");
     expect(titles).not.toContain("Setup");
   });
 });

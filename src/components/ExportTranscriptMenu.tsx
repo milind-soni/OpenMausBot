@@ -3,6 +3,7 @@ import { Check, Copy, Download, Share } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
+import { t } from "@/lib/i18n";
 import {
   copyTranscriptToClipboard,
   downloadMarkdownTranscript,
@@ -98,7 +99,7 @@ export function ExportTranscriptMenu({
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        aria-label="Export conversation"
+        aria-label={t("chat.export.label")}
         aria-haspopup="menu"
         aria-expanded={open}
         className={cn(
@@ -106,7 +107,7 @@ export function ExportTranscriptMenu({
           open ? "text-accent" : "text-ink-secondary hover:text-ink",
           className,
         )}
-        title="Export conversation as Markdown"
+        title={t("chat.export.title")}
       >
         <Share size={18} />
       </button>
@@ -114,16 +115,16 @@ export function ExportTranscriptMenu({
       {motion.shown && (
         <div
           role="menu"
-          aria-label="Export options"
+          aria-label={t("chat.export.options")}
           className={cn("absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}
         >
           <div className={MENU_HEADING}>
-            Export Conversation
+            {t("chat.export.menuTitle")}
           </div>
 
           {!hasMessages ? (
             <div className="px-2 py-1.5 text-[12px] text-ink-secondary">
-              No messages to export yet.
+              {t("chat.export.empty")}
             </div>
           ) : (
             <>
@@ -139,13 +140,13 @@ export function ExportTranscriptMenu({
                   <Copy size={16} className="shrink-0 text-ink-secondary" />
                 )}
                 <span className="flex-1 truncate">
-                  {copied ? "Copied to clipboard!" : "Copy as Markdown"}
+                  {t(copied ? "chat.export.copiedToClipboard" : "chat.export.copy")}
                 </span>
               </button>
 
               {copyFailed && (
                 <div role="status" className="px-2 py-1.5 text-[12px] text-ink-secondary">
-                  Clipboard unavailable. Download the Markdown file instead.
+                  {t("chat.export.clipboardUnavailable")}
                 </div>
               )}
 
@@ -156,7 +157,7 @@ export function ExportTranscriptMenu({
                 className="ui-menu-row text-ink"
               >
                 <Download size={16} className="shrink-0 text-ink-secondary" />
-                <span className="flex-1 truncate">Download as .md</span>
+                <span className="flex-1 truncate">{t("chat.export.download")}</span>
               </button>
             </>
           )}

@@ -1,23 +1,190 @@
-# Self-hosting the OpenMausBot server
+# Self-hosting the MausBot server
 
-Run the harness server on an always-on Linux box (a VPS, a home server, a
-Mac mini in a closet) and pair browsers, the desktop app, or phones with it.
-The npm CLI supports a managed public tunnel, Tailscale, or your own proxy.
+To keep MausBot and its agents on your current computer and use a VPS only as a
+bot’s remote desktop, see [Bring Your Own VPS](byo-vps.md) and the
+[published setup guide](https://docs.openmausbot.com/docs/computers/byo-vps).
 
-> **Security first:** by default a self-hosted server trusts loopback as its
-> owner — any process that can reach `127.0.0.1:8799` has full control,
-> including the shell your bots can use. A browser is the exception: even on
-> this machine it signs in once (see [A browser signs in](#a-browser-signs-in)).
-> **Never expose that port directly and never bind it to a public interface.** Reach it through an SSH tunnel, a
-> private network you trust, or an authenticated remote path below. Requests
-> through the managed tunnel or a correctly configured proxy require a paired
-> session. If several people use one server, read
-> [Loopback trust](#loopback-trust-owner-or-service) below.
+Run the server on a machine you control (a VPS, a home server, a Mac mini in a
+closet). Then connect the desktop app, browsers and phones to it. Every path
+below ends the same way: the server prints **one link**, and you paste it into
+MausBot under **＋ → Connect to a server**.
 
-Step by step, for a server you do not have yet: [Deploy OpenMausBot on a
-VPS](deploy-vps.md) walks through the three ways in (public address, own
-domain, Tailscale), signing engines in, pairing, keeping it running,
-updating and backups. This page is the reference behind it.
+> **Security first:** the server listens on `127.0.0.1:8799`, and a program on
+> that machine counts as its owner. Never forward that port yourself. Let one
+> of the ways in below reach it: `--public-url`, `--domain`, `--tunnel`,
+> `--tailscale` or `--lan`. Every device that comes in through one of them has
+> to pair. If several people share one server, read
+> [Loopback trust](#loopback-trust-owner-or-service).
+
+For server feature switches, defaults and configuration-file instructions, see
+[Feature switches](feature-flags.md).
+
+## Pick a way in
+
+| You have | Run | Link it prints |
+|---|---|---|
+| HTTPS in front already (cloudflared, Caddy, nginx) | `npx openmausbot serve --public-url https://maus.example.com` | `https://maus.example.com/pair#code=…` |
+| A domain name, and ports 80 and 443 open | `npx openmausbot serve --domain maus.example.com` | `https://maus.example.com/pair#code=…` |
+| Tailscale on the server and your devices | `npx openmausbot serve --tailscale` | `https://<machine>.<tailnet>.ts.net/pair#code=…` |
+| Only this network (home or office) | `npx openmausbot serve --lan` | `http://192.168.1.20:8799/pair#code=…` |
+| Nothing at all | `npx openmausbot login`, then `npx openmausbot serve --tunnel` | `https://c-….openmausbot.com/pair#code=…` |
+| Only the phone app, from anywhere (a machine with no tunnel address, for now) | `npx openmausbot login --relay`, then `npx openmausbot serve --relay` | a QR for the MausBot app ([MausBot Relay](phone-relay-server.md)) |
+
+`--lan` can be added to any of the others. Plain `http://` is only for a
+private network: the desktop app accepts it on LAN addresses, Tailscale
+addresses and `*.local` names, and shows "Private network, not encrypted". It
+refuses plain http on the open internet.
+
+## Golden paths
+
+### With Node (npx or a global install)
+
+On any machine with Node 24 or newer:
+
+```sh
+npx openmausbot setup                                        # once: AI access and a default model
+npx openmausbot serve --public-url https://maus.example.com  # or --domain, --tailscale, --lan, --tunnel
+```
+
+In a terminal, `serve` checks the address and prints one pairing block:
+
+```
+MausBot 0.1.147 · server "hetzner-1"
+data: /home/maus/.openmausbot
+Reach    https://maus.example.com   ✓ answers as this server (11:04)
+
+Pairing code   7KQ2-M9XD-H4TP   works once, until 11:14 · everything
+Link           https://maus.example.com/pair#code=7KQ2-M9XD-H4TP
+
+  Desktop app   ＋ → Connect to a server, paste the link
+  Phone         scan with your camera or the MausBot app
+
+  ▄▄▄▄▄▄▄ ▄ ▄▄ ▄▄▄▄▄▄▄   (QR of the link)
+For a phone (chat and approvals only)   npx openmausbot pair --phone
+New code later   npx openmausbot pair
+Stop with Ctrl+C
+```
+
+Each way in has its own Reach line:
+
+- `--lan`: `http://192.168.1.20:8799   this network only, not encrypted`
+- `--tailscale`: `… · your tailnet`
+- `--tunnel`: `… · MausBot web address`
+
+Paste the link into MausBot: **＋ → Connect to a server**. The sheet names the
+server it found ("✓ hetzner-1 · MausBot 0.1.147 · HTTPS"), and **Connect to
+hetzner-1** finishes. You can also type the address (`maus.example.com`,
+`192.168.1.20:8799`) and the pairing code in their own fields.
+
+`serve` with no way in mints no code. It lists the ways in instead. Every
+command the CLI prints starts the way you started it (`npx openmausbot`,
+`openmausbot`, `pnpm omb`, or `docker compose exec omb openmausbot`), so you
+can paste it as is.
+
+### Already have cloudflared, Caddy or nginx in front
+
+Point your tunnel or proxy at `http://127.0.0.1:8799` (webhooks:
+`http://127.0.0.1:8800`). Keep the original `Host`, set `X-Forwarded-Proto`,
+and don't buffer the event stream ([details](#putting-a-proxy-in-front)).
+Then:
+
+```sh
+npx openmausbot serve --public-url https://maus.example.com
+```
+
+Setting `OMB_PUBLIC_URL=https://maus.example.com` in the environment works the
+same way. If the Reach line says
+`✗ https://maus.example.com doesn't reach this server`, the tunnel points
+somewhere else. Fix that, then run `npx openmausbot status` to check again.
+
+### Docker on your computer or home network
+
+From a checkout of the repository:
+
+```sh
+docker compose up -d --build                  # http://localhost:8080 on this machine
+docker compose exec omb openmausbot pair      # a code, and a sign-in link for this machine's browser
+```
+
+To pair from other devices on the same network, publish the port there and
+name the address they use:
+
+```sh
+OMB_BIND_ADDRESS=0.0.0.0 OMB_PUBLIC_URL=http://192.168.1.20:8080 docker compose up -d
+docker compose exec omb openmausbot pair      # Link http://192.168.1.20:8080/pair#code=…
+```
+
+Do this only on a machine behind your router. A machine with a public address
+would answer the whole internet over plain http. More options are in
+[the local Compose setup](../deploy/local/README.md).
+
+### Docker with your own domain
+
+On a fresh Ubuntu 22.04 or 24.04 server (x86-64), one command checks the
+server, installs MausBot under `/opt/openmausbot` and ends with HTTPS on your
+domain:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --domain maus.example.com
+cd /opt/openmausbot && sudo docker compose exec omb openmausbot pair   # Link https://<DOMAIN>/pair#code=…
+```
+
+Add `--check` to only check the server. Running it again repairs;
+`sudo /opt/openmausbot/update.sh` updates, with a copy of the data first;
+`--uninstall` stops the server and keeps your data. The checks, the files it
+writes and what it contacts are in
+[Deploy on a VPS](deploy-vps.md#quick-start-one-command-on-your-own-domain).
+
+By hand, on any system with Docker:
+
+```sh
+git clone https://github.com/milind-soni/OpenMausBot && cd OpenMausBot/deploy
+cp .env.example .env                          # set DOMAIN (and ENGINES)
+docker compose pull omb && docker compose up -d
+docker compose exec omb openmausbot pair      # Link https://<DOMAIN>/pair#code=…
+```
+
+Caddy gets the certificate. See [Docker (with HTTPS on your own domain)](#docker-with-https-on-your-own-domain).
+
+### Keep it running (a service)
+
+```sh
+npx openmausbot service install --public-url https://maus.example.com   # the same way-in options as serve
+```
+
+This writes a systemd unit (Linux) or a launchd agent (macOS) with the same
+options, and prints the `sudo` lines that install it. Run from npx, it first
+installs a copy of this exact version beside your data, because npm prunes
+its npx cache. The service log never shows a code. Get one with:
+
+```sh
+npx openmausbot pair
+```
+
+## Troubleshooting
+
+| You see | It means | Do this |
+|---|---|---|
+| "That's a pairing code. Also enter the server's address, like http://192.168.1.20:8799." | A code went into the address field. | Type the server's address in the first field; the code moves to its own field. |
+| "http://… is on the open internet and isn't encrypted…" | A plain http link to a public address. | Use its https address, or put HTTPS in front: `--public-url` behind cloudflared or Caddy, `--domain`, or `--tailscale`. |
+| "This points at this computer (127.0.0.1), not at the server." | A link to `127.0.0.1` or `localhost`, which is the computer you're on. | Use the address other devices reach the server at: run `openmausbot pair` on the server, or choose a way in. |
+| "Can't reach 192.168.1.20:8799. Check the server is running and reachable from this computer." | Nothing answers there. | Start it with a way in (`serve --lan` for this network), and check a firewall allows the port. |
+| "maus.example.com doesn't exist yet." / "…certificate isn't valid yet." | DNS or the certificate isn't ready. | Wait for the DNS record, or give a new server a minute. |
+| "That address answers, but it isn't a MausBot server." | Something else answers there, often a proxy pointing at the wrong port. | Point it at `http://127.0.0.1:8799`. |
+| "That's a sign-in code from an email…" / "That's a code from an older MausBot…" / "That's a script key…" | The wrong kind of code. | On the server, run `openmausbot pair` for a 12-character pairing code. |
+| "Too many wrong codes. Try again at 11:19." | Five wrong codes in five minutes from one address. | Wait until then, or make a new code. |
+| `Reach    ✗ https://… doesn't reach this server (connection refused).` | Your tunnel or proxy doesn't reach port 8799. | Point it at `http://127.0.0.1:8799`, then run `openmausbot status`. |
+| `Reach    ✗ https://… answers as a different server.` | The address leads to another MausBot server. | Point the tunnel at this machine's port. |
+| `Reach    … https://… doesn't answer yet` (`--domain`) | DNS isn't pointing here yet, or ports 80 and 443 are closed. | Fix the A record and open the ports; the certificate follows. |
+| `--lan: this machine has no private network address…` | A VPS with only a public address. | Use `--public-url`, `--domain` or `--tailscale`. |
+| `tailscale: HTTPS certificates are off for this tailnet, so this server listens on http://…` | Tailscale can't serve HTTPS yet, so the server listens on its own tailnet address. It works, and only your tailnet reaches it. | For an `https://` address, turn on HTTPS certificates at https://login.tailscale.com/admin/dns, then run `serve --tailscale` again. |
+| `No MausBot server is running here. Start it: … serve` | `pair` found no server on this port. | Start it, or pass the server's `--port` and `--data-dir`. |
+| `Get a pairing code: openmausbot pair` and no code | The server runs as a service or under `docker compose logs`, where codes stay out of logs. | Run that command in a terminal. |
+| "This shared server takes no pairing commands from this machine." | The server runs with `OMB_LOOPBACK_TRUST=service`. | Let people sign in with their email (`openmausbot access add you@example.com`), or pair from a signed-in admin's Settings. |
+
+## Reference
+
+The rest of this page explains each part in detail.
 
 ## What works headless (and what doesn't)
 
@@ -44,91 +211,74 @@ Desktop-only for now (needs the Mac/Linux app):
 
 - dictation/voice, controlling the host desktop
 
-## Quickest: one command with Node
+## Ways in, in detail
 
-On any machine with Node 24 or newer (a VPS, a Mac mini, a Raspberry Pi):
+`npx openmausbot start` (or plain `npx openmausbot`) is the guided start. It
+asks for AI access, an account or API key, and the default model, then opens
+the workspace in this machine's browser. `setup` only configures, and `serve`
+starts without questions from the saved configuration and the flags you give
+it (for services and scripts). The [setup guide](cli-onboarding.md) explains
+the choices. The npm package does not include engine CLIs (`claude`,
+`codex`, …); setup can install and sign in the supported ones. Run setup,
+engine sign-ins and the server as the same unprivileged user: engine
+credentials live in that user's home, not all under `.openmausbot`. For a
+Linux service, the [VPS guide](deploy-vps.md#before-you-start) covers the
+account, engines and browser libraries. After installing browser libraries
+as administrator, run `npx openmausbot browser install` as the service user
+too.
 
-```sh
-npx openmausbot start
-```
-
-First launch asks you to choose AI access, connect an account or API key,
-and choose the default model for new bots. Existing sign-ins can be reused;
-Codex also offers device-code login for SSH. API-key connections currently
-support chat, not agent tools or computer use. The [setup guide](cli-onboarding.md)
-explains the choices, key storage, and how to run setup again safely.
-
-It then starts the server and keeps your data in `~/.openmausbot`. If you
-choose phone access, it prints a pairing link and QR code only after checking
-the HTTPS connection. Choosing **Skip for now** keeps the workspace local-only
-and creates no pairing invitation. Use `npx openmausbot setup` to configure without starting, or
-`npx openmausbot serve` to start non-interactively with your existing config
-(for services and scripts).
-
-The npm package does not include engine CLIs (`claude`, `codex`, …); setup
-can offer to install and sign in supported engines on this machine.
-Run setup, engine authentication, and the server as the same unprivileged
-operating-system user. Engine credentials live in that user's CLI-specific
-directories, not all under `.openmausbot`.
-
-For a Linux service, the [VPS guide](deploy-vps.md#before-you-start) shows the
-account setup, engine installation, and browser dependency installation.
-After installing browser libraries as administrator, also run
-`npx openmausbot browser install` as the service user so that user's browser
-is present. Three ways to make the server reachable from elsewhere:
-
-- **On your Tailscale network, no domain needed:**
-  `npx openmausbot serve --tailscale`. Tailscale terminates HTTPS with its
-  own certificate and the link uses this machine's MagicDNS name, so only
-  devices on your tailnet can reach it. Needs Tailscale signed in and HTTPS
-  certificates enabled for the tailnet (admin console → DNS).
-- **A public address, no domain, no proxy, no open port:**
-
-  ```sh
-  npx openmausbot login          # once: an emailed code signs this machine in
-  npx openmausbot serve --tunnel
-  ```
-
-  `login` reserves an address like `https://c-….openmausbot.com` for this
-  machine; `serve --tunnel` connects it through a Cloudflare tunnel (the same
-  one the desktop app uses for its companion) and prints the pairing link at
-  that address. The first run downloads `cloudflared` (pinned version and
-  digest) into the data dir. Only traffic through the tunnel reaches the
-  server, and it still has to pair: the tunnel lands on a separate listener
-  the server treats as "through a proxy", never as the owner. That listener
-  also gzips JSON replies of 1 KB or more when the client accepts gzip, since
-  the hop to Cloudflare runs on this machine's upload uncompressed; the
-  loopback port never compresses. `npx openmausbot logout` releases the
-  address. The account credentials live in
-  `~/.openmausbot/tunnel-account.json` (mode 0600).
-  Starting it from a fleet or a container, where nobody can type an emailed
-  code? Set `OMB_INSTALLATION_CREDENTIAL` to the installation credential the
-  fleet issued and skip `login`: the address and connector token are fetched
-  at every start and nothing is written to disk. A rejected credential stops
+- **`--public-url URL`**: you already have HTTPS in front. The address must
+  be https, or http on a private network. After start, `serve` fetches
+  `URL/.well-known/openmausbot/environment` and prints whether it answers
+  with this server's own id. The pairing link uses that address either way.
+- **`--domain NAME`**: point the domain's A record at this machine and open
+  ports 80 and 443. The server downloads a pinned Caddy once into its data
+  dir, writes the same Caddyfile the Docker stack uses, runs it as a child,
+  and Caddy gets and renews the certificate from Let's Encrypt. On Linux,
+  binding ports 80 and 443 as a normal user needs one privilege grant. When
+  Caddy reports the refusal, `serve` prints the exact `setcap` command to run
+  once.
+- **`--tailscale`**: needs Tailscale signed in. With HTTPS certificates off
+  for the tailnet (admin console → DNS), or `tailscale serve` not allowed for
+  this user, the server listens on this machine's own tailnet addresses at
+  `http://<name>:<port>` and answers only tailnet peers that use that exact
+  name. Otherwise `serve` checks that
+  no other MausBot server already answers on this machine's name. Then it
+  runs `tailscale serve --https=443 http://127.0.0.1:8799` in the foreground,
+  so the share ends when `serve` stops. A marker file in the data dir lets the
+  next start turn off a share that a crashed run left behind. It never
+  touches a share you made yourself. Only devices on your tailnet can reach
+  it.
+- **`--lan`**: listens on every IPv4 address and drops any connection whose
+  local or remote end isn't private (loopback, 10/8, 172.16/12, 192.168/16,
+  100.64/10, link-local). The link uses this network's address, read again
+  for every code, so a new Wi-Fi network needs no restart. Docker bridges, VM
+  networks and VPN tunnels are skipped. A machine with no private address
+  says so and stays on loopback. Plain http travels in clear, so use it only
+  on a network you trust.
+- **`--tunnel`**: `npx openmausbot login` reserves an address like
+  `https://c-….openmausbot.com` for this machine (an emailed code signs it
+  in). `serve --tunnel` connects it through a Cloudflare tunnel, the same one
+  the desktop app uses for its companion. The first run downloads
+  `cloudflared` (pinned version and digest) into the data dir. Only traffic
+  through the tunnel reaches the server, and it still has to pair: the tunnel
+  lands on a separate listener that the server treats as "through a proxy",
+  never as the owner. That listener gzips JSON replies of 1 KB or more when
+  the client accepts gzip; the loopback port never compresses.
+  `npx openmausbot logout` releases the address. The account credentials
+  live in `~/.openmausbot/tunnel-account.json` (mode 0600). Started from a
+  fleet or a container, where nobody can type an emailed code? Set
+  `OMB_INSTALLATION_CREDENTIAL` to the installation credential the fleet
+  issued and skip `login`. The address and connector token are fetched at
+  every start, and nothing is written to disk. A rejected credential stops
   the start with a clear message rather than serving locally.
-- **Your own domain, still one command:**
-
-  ```sh
-  npx openmausbot serve --domain maus.example.com
-  ```
-
-  Point the domain's A record at this machine and open ports 80 and 443.
-  The server downloads a pinned Caddy once into its data dir, writes the
-  same Caddyfile the Docker stack uses, runs it as a child, and Caddy gets
-  and renews the certificate from Let's Encrypt. On Linux, binding ports 80
-  and 443 as a normal user needs one privilege grant; when Caddy reports the
-  refusal, `serve` prints the exact `setcap` command to run once.
-- **Behind your own proxy or domain:** `npx openmausbot serve --public-url
-  https://maus.example.com`, with the proxy rules from "Putting a proxy in
-  front".
 
 Later: `npx openmausbot pair --label "Kitchen iPad"` for another device
-(`--client` for one that may chat but not change settings), and
-`npx openmausbot sessions` to see or revoke them. `openmausbot serve` is a
-plain foreground process. For unattended use, follow the
-[systemd example](deploy-vps.md#keep-it-running), which installs a chosen
-release and runs its binary directly. Restarting that service does not
-implicitly download a new release.
+(`--phone` for one that may chat but not change settings), and
+`npx openmausbot devices` to see or sign them out. `openmausbot serve` is a
+plain foreground process. For unattended use, run `service install` (above)
+or follow the [systemd example](deploy-vps.md#keep-it-running). Restarting a
+service never downloads a new release on its own.
 
 ## Connect ChatGPT from the browser
 
@@ -208,6 +358,10 @@ For local Docker Desktop or private Tailscale access without a public domain,
 use the [local Compose setup](../deploy/local/README.md). It defaults to
 `http://localhost:8080` and supports optional `.env` overrides.
 
+On Ubuntu, the [installer](deploy-vps.md#quick-start-one-command-on-your-own-domain)
+sets this up with one command, keeping the data in `/opt/openmausbot/data`.
+The rest of this section is the same setup by hand.
+
 One tenant = one container for the server plus Caddy for HTTPS.
 Requirements: Docker with Compose, a DNS name pointing at the machine, and
 ports 80/443 open.
@@ -218,9 +372,13 @@ cp .env.example .env            # set DOMAIN
 docker compose pull omb && docker compose up -d
 ```
 
-That uses the image CI publishes on every `main` push
-(`ghcr.io/milind-soni/openmausbot`, tagged `latest`, `sha-…` and `v…`).
-To build from your checkout instead: `docker compose up -d --build`.
+That starts the image CI publishes on every `main` push
+(`ghcr.io/milind-soni/openmausbot:latest`; each release is also tagged `v…`,
+and the one our own Clouds have run for 48 hours is `stable`). Move to the
+stable version right away with `./update.sh`, which pins it by digest in
+`.env`. To build from your checkout instead: `docker compose up -d --build`. The
+build needs about 6 GB of memory: on a smaller server, add swap first or use
+the published image.
 
 Then sign the engine CLIs in **inside the container** (their logins live on
 the `data` volume, so they survive restarts and image upgrades) and mint a
@@ -228,11 +386,11 @@ pairing code for your first device:
 
 ```sh
 docker compose exec omb claude                       # each CLI you listed in ENGINES
-docker compose exec omb node dist-server/openmausbot.js pair # prints a code, a link and a QR
+docker compose exec omb openmausbot pair             # prints a code, a link and a QR
 ```
 
-Open the link (`https://<DOMAIN>/pair#code=…`) in a browser and it is
-paired; see "Using it from your computer" for what a session is. Webhook
+Paste the link (`https://<DOMAIN>/pair#code=…`) into MausBot under **＋ →
+Connect to a server**, or open it in a browser, and it is paired; see "Using it from your computer" for what a session is. Webhook
 URLs (`https://<DOMAIN>/hooks/wh_…`) work without a session, and that is the
 base the app prints on new hooks because the stack sets
 `OMB_WEBHOOK_PUBLIC_URL`.
@@ -244,16 +402,24 @@ What the stack does, so you can adapt it:
   `--build-arg ENGINES="…"` (or `ENGINES=` in `.env`) bakes engine CLIs
   into the image.
 - [`deploy/docker-compose.yml`](../deploy/docker-compose.yml) runs Caddy
-  **in the server's network namespace**, so Caddy reaches the server on
-  `127.0.0.1` and the server never binds anything public.
+  in its own container. It reaches the server over two Unix sockets in a
+  shared in-memory volume (`OMB_TUNNEL_SOCKET`, `OMB_WEBHOOK_SOCKET`), so the
+  server never binds anything but loopback, and a request that comes through
+  Caddy is a remote one, as one through any proxy is. Caddy used to share the
+  server's network instead; then a server container restarted on its own (a
+  crash, `docker compose restart`, `stop omb`) came back in a new network and
+  left Caddy refusing HTTPS in the old one while both showed healthy.
 - [`deploy/Caddyfile`](../deploy/Caddyfile) terminates TLS and forwards
   the real `Host` plus `X-Forwarded-For`/`X-Forwarded-Proto`; the server's
   own pairing is the login. A shared-password `basic_auth` block is there,
   commented out, if you want a second wall in front of pairing.
 
-Upgrade with `docker compose pull omb && docker compose up -d` (or
-`git pull && docker compose up -d --build`). State (chats, routines,
-engine logins, paired sessions) is on the `data` volume; back that up.
+Update with `git pull && ./update.sh`: it copies the data aside, starts the
+stable version, and puts the old version and the data back if the new one
+does not come up healthy ([what it does, step by step](deploy-vps.md#update)).
+A build from source updates with `git pull && docker compose up -d --build`.
+State (chats, routines, engine logins, paired sessions) is on the `data`
+volume; back that up.
 
 The published image installs the current Chrome for Testing whenever a new
 Stable ships. A build from source keeps the Chrome (and any `ENGINES`) it
@@ -281,7 +447,7 @@ OMB_DATA_DIR="$HOME/.openmausbot" OMB_PORT=8799 \
 For something durable, let the CLI write the service for you:
 
 ```sh
-npx openmausbot service install --domain maus.example.com   # or --tunnel, --tailscale, or nothing
+npx openmausbot service install --domain maus.example.com   # or --public-url, --tunnel, --tailscale, --lan
 ```
 
 It renders a systemd unit (Linux) or a launchd agent (macOS) that runs the
@@ -289,9 +455,11 @@ same `openmausbot serve …` with your options, restarts it if it stops, and,
 for `--domain`, grants the unit the capability to bind ports 80 and 443
 without root. The file is written next to your data and the two commands
 that install and start it are printed (they need `sudo` on Linux).
-`openmausbot service uninstall` prints the reverse. Install the package
-permanently first (`npm install -g openmausbot`): a service must not point
-at an `npx` cache that npm may prune.
+`openmausbot service uninstall` prints the reverse. Run from `npx`, it
+first installs a copy of the same version into `<data dir>/app/<version>`,
+because npm may prune its npx cache. The unit points at that copy. Not being
+a terminal, the service writes no pairing code into its log: run
+`npx openmausbot pair` when you need one.
 
 Engine CLIs read their logins from the service user's home: sign them in
 from Settings → Engines (below), or as that user in a terminal, before you
@@ -415,37 +583,50 @@ reach it. On the server:
 ```sh
 npx openmausbot pair                         # npm install
 pnpm omb pair                                # from a checkout
-docker compose exec omb node dist-server/openmausbot.js pair   # Docker
+docker compose exec omb openmausbot pair     # Docker
 ```
 
-It prints a 12-character code (single use, five minutes) and, when the
-server knows its public address (`OMB_PUBLIC_URL`, set by the Docker stack),
-a link like `https://maus.example.com/pair#code=XXXX-XXXX-XXXX`. Open the
-link, or open `/pair` on the address you use and type the code. The browser
-gets a session cookie (30 days, renewed on use up to 180 days from pairing, revocable) and the app loads. Sessions are
-listed and revoked at `GET`/`DELETE /api/auth/sessions` for now; a Settings
-screen follows.
+It prints a 12-character pairing code (it works once, for 10 minutes, or up
+to a day with `--ttl 24h`) and the link with the code in it, built from the
+address the server is reached at (`--public-url`, `--domain`, `--tunnel`,
+`--tailscale`, `--lan`, or `OMB_PUBLIC_URL`). Open the link, or open `/pair`
+on that address and type the code. The browser gets a session cookie (30
+days, renewed on use up to 180 days from pairing, revocable) and the app
+loads. `npx openmausbot devices` lists the paired devices and
+`devices revoke ID` signs one out.
 
-From the **desktop app**, use the server dropdown above Search → **Connect
-to a server…**, or **Settings → Servers**. Enter the server's
-HTTPS address or full pairing link, with an optional name. Custom domains and
-Cloudflare tunnel addresses work; Tailscale is not required. Generate a fresh
-link for each device: `npx openmausbot pair --label "My desktop"` creates an
-owner link without the phone wizard; add `--client` for chat-only access.
-A code already used by your phone cannot also pair your desktop.
+From the **desktop app**, choose **＋ → Connect to a server** and paste the
+link. You can also type the address (`maus.example.com`,
+`192.168.1.20:8799`, a `*.ts.net` name) and the pairing code in its own
+field. The sheet looks the address up and names what it found, for example
+"✓ hetzner-1 · MausBot 0.1.147 · HTTPS". A bare address tries https first,
+then plain http when the address is private. Plain http works only on a
+private network (LAN addresses, Tailscale's 100.64/10 and `*.ts.net`,
+`*.local`); a public http address is refused with what to do instead.
+Generate a fresh code for each device: `npx openmausbot pair --label "My
+desktop"` gives full access, and `--phone` gives chat and approvals only. A
+code already used by your phone cannot also pair your desktop.
 
-Confirm the server address in the app's connection dialog, then finish pairing
-on the server page. The app stays signed in across restarts. The workspace
-dropdown switches between **This computer** and saved hosted workspaces, without
-moving bots or chats. The **Server** menu and **Add Server from Copied Pairing
-Link…** remain available there too (on Windows and Linux press Alt to show
-the menu bar). The separate **Desktop companion** option in Settings is for
-the six-digit code from another desktop app, not a self-hosted server's
-12-character code. Older hosted UIs may not show the dropdown; use the native
-Server menu to switch back until the server is updated.
+**Connect to hetzner-1** opens the server's own page with the code, and the
+app stays signed in across restarts. The rail at the window's left edge
+switches between this computer and each server, without moving bots or
+chats. A link copied elsewhere also works from the **Server** menu's **Add
+Server from Copied Pairing Link…** (on Windows and Linux, press Alt to show
+the menu bar).
 
-After pairing, **Share this computer?** offers **Choose access** or **Not now**.
-Nothing is shared automatically. In **Settings → Servers → Computer
+**Let your server use this computer.** When the desktop pairs with a code for
+everything (the server's owner), it asks once: **Let <server> use this
+computer?** with **Allow** or **Not now**. Allow lets the server's bots see and
+use the apps on this computer's screen, and run the MCP servers you keep for
+it, while the app is open. Folders and the terminal are added in **Settings →
+Servers**, where each server of yours has a **Share this computer** switch and
+**Choose what it can use**; the switch turns it off at once, and the menu bar's
+OpenMausBot item pauses it with your Clouds. The server needs nothing turned on:
+it takes a computer from its owner's pairings only, and a phone code or another
+person's pairing is never asked. Set `features.sharedComputers` to `false` in the
+server's config to turn this off, or to `true` to let every paired session lend
+its computer. Nothing is shared without that Allow, unless you make the server
+your bots' home (below). In **Settings → Servers → Computer
 access**, choose read-only folders and optionally allow edits. Unrestricted
 terminal and screen/app control are separate opt-ins, confirmed in a native
 dialog. They can access information outside the selected folders. Share only
@@ -454,12 +635,36 @@ A folder read takes a file of up to 2 MiB and a write at most 256 KiB;
 transfers do not follow links or delete files. Local screen control also needs OS permissions and a supported
 desktop driver. Microphone access is not included.
 
-**Bring this computer's bots and chats.** Export a backup from this computer in
-**Settings → Backups → Export backup**, then import it on the server in
-**Settings → Backups → Import backup**. API keys, engine sign-ins and paired
-devices stay where they are on both sides; routines arrive paused. An older
-desktop app's **Copy this computer here** is answered with "Update OpenMausBot
-to bring your bots here by itself."
+**Make the server your bots' home.** Bots work together only within one
+place: bots on this computer can't reach bots on the server. To bring them
+together, right-click the server's circle at the window's left edge and choose
+**Make <server> my home**. The app moves this computer's bots, chats, memory,
+skills, logins, apps and keys, and routines there the way it moves them to My
+Cloud: everything is copied while you keep working, then at a quiet moment this
+computer stops for good, the rest goes, both sides are checked, and the server
+switches on what was on here, so no routine ever runs twice. The account area
+says how it goes, and after a day of failing it says the move needs you, with
+Try again. Afterwards the server is what the window opens, and this computer
+works for it by itself as it does for My Cloud: no access dialog, only the
+menu bar's item with Pause.
+
+Until then, a bot that asks for a teammate living in your other place says where
+that teammate lives and how to bring them together, instead of only that it
+can't reach it: the app tells each place of yours the names of the bots your
+other places have, and nothing more.
+
+This is offered only for a server that is yours alone: you paired with it as an
+admin, and its sign-in list names no members and no other admin (Settings →
+People). A server other people sign in to keeps the explicit **Share this
+computer?** flow above, and its bots stay where they are. Both sides need this
+release: an older server says to update it first.
+
+To move by hand instead, export a backup from this computer in **Settings →
+Backups → Export backup**, then import it on the server in **Settings → Backups
+→ Import backup**. API keys, engine sign-ins and paired devices stay where they
+are on both sides; routines arrive paused. An older desktop app's **Copy this
+computer here** is answered with "Update OpenMausBot to bring your bots here by
+itself."
 
 Only conversations you start yourself on that server can use what you share;
 other people's bots, routines and webhooks there cannot. Keys and sign-in
@@ -477,11 +682,19 @@ revoke its session there when reachable again, or if the device is gone.
 What this changes about the trust model: the server still binds loopback
 and still trusts programs on loopback as the owner, though never a browser
 (below). A **paired session** is the second way in: a bearer token or the cookie, same-origin only, with a scope (`admin`
-by default, `--client` for a device that may chat but not change settings or
-pair others). Five bad codes from one address lock that address out for ten
-minutes. Over plain HTTP (a LAN address without TLS) the cookie is not
-marked `Secure` and travels in clear: use the Docker stack, Tailscale, or
-another TLS front for anything beyond a trusted private network.
+by default, `--phone` for a device that may chat but not change settings or
+pair others). Five wrong codes in five minutes from one address lock that
+address out for five minutes ("Too many wrong codes. Try again at 11:19.").
+Behind a proxy that names no client, every visitor looks like this machine,
+so those wrong codes never lock anyone out: after five of them the open
+codes stop working and a new one has to be made. Over plain HTTP (`--lan`,
+or a LAN address without TLS) the cookie is not marked `Secure` and travels
+in clear: use HTTPS (`--public-url` behind your proxy, `--domain`,
+`--tailscale`) for anything beyond a trusted private network.
+
+A loopback request counts as the owner only when it really comes from this
+machine. A client on the LAN that writes `Host: 127.0.0.1` is still a
+stranger.
 
 Native clients (CLI, scripts) send the token as `Authorization: Bearer …`
 and take a 5-minute ticket from `POST /api/auth/stream-ticket` for the
@@ -498,7 +711,7 @@ address of its own:
 
 ```sh
 ssh -L 8799:localhost:8799 you@your-server
-# then run `openmausbot pair` on the server and open the "this computer:" link it prints
+# then run `openmausbot pair` on the server and open the "Browser on this machine" link it prints
 ```
 
 The browser signs in once through the tunnel, like any browser on the server
@@ -514,11 +727,11 @@ server, even when it runs on the same machine. Programs are unaffected: the
 CLI, scripts, `curl` and the companion send neither header.
 
 So the first time you open the web UI in a browser on the server's own
-machine, it shows the sign-in page. `openmausbot serve` and `openmausbot pair`
-print a link for it:
+machine, it shows the sign-in page. With no way in, `openmausbot pair` prints
+a link for it:
 
 ```
-this computer: http://127.0.0.1:8799/pair#code=XXXX-XXXX-XXXX
+  Browser on this machine     http://127.0.0.1:8799/pair#code=XXXX-XXXX-XXXX
 ```
 
 Open it and choose **Connect** (or type the code on the sign-in page); the browser
@@ -571,14 +784,15 @@ it too and is always `service` (docs/cloud-pro.md).
 
 With `service` on a self-hosted server:
 
-- `openmausbot serve` still prints the first pairing code. It hands the
-  server it starts a one-off secret over the server's stdin (never its
-  environment, which every engine inherits), and that secret opens the
+- `openmausbot serve` in a terminal still prints the first pairing code. It
+  hands the server it starts a one-off secret over the server's stdin (never
+  its environment, which every engine inherits), and that secret opens the
   pairing route for that CLI alone. Pass `--no-pair` to skip the code; if
-  the server refuses one anyway, `serve` says why and keeps running.
-- `openmausbot pair` and `openmausbot sessions`, run later from another
+  the server refuses one anyway, `serve` says why and keeps running. Not in
+  a terminal (a service), it prints no code and points at email sign-in.
+- `openmausbot pair` and `openmausbot devices`, run later from another
   terminal, are refused like any other admin change and say so. Pair from
-  Settings → Remote access while signed in as an admin, or let people sign
+  the server's Settings while signed in as an admin, or let people sign
   in with their email (`openmausbot access add you@example.com`, which edits
   the sign-in list on disk).
 - A browser on an SSH tunnel gets the sign-in page instead of the app.
@@ -623,18 +837,39 @@ npx openmausbot access list
 
 An entry is an address or `@domain` (everyone at that domain). Admins get
 the same access as a pairing code from `openmausbot serve`; users get the
-chat-only scope, the same as `openmausbot pair --client`. The same lists live
+chat-only scope, the same as `openmausbot pair --phone`. The same lists live
 in `config.json` under `signIn.admins` and `signIn.members` and can be changed
-through the settings API without a restart; the environment variables win
-when set, which is how a container or a service unit is bootstrapped.
+through the settings API without a restart. An environment variable that
+names someone wins over its list, which is how a container or a service unit
+is bootstrapped; while it does, Settings refuses to change that list and says
+which variable to change instead. One that is empty, as `.env.example` and the
+Compose files leave them, leaves the list to Settings.
 
 The code itself comes from `accounts.openmausbot.com`, the OpenMausBot
 account service, so your server needs no email credentials. Your server asks
 it to send the code, checks the answer, and then issues its own session
 cookie: the browser only ever talks to your server, and who is welcome is
-decided only by your allow-list. Wrong codes count against the same lockout
-as pairing codes. Sessions from a sign-in show the email in
-`openmausbot sessions` and can be revoked the same way.
+decided only by your allow-list. Wrong codes count against a lockout of
+their own: ten in a minute from one address pause sign-in there for a minute. Sessions from a sign-in show the email in
+`openmausbot devices` and can be revoked the same way.
+
+To send the codes through your own mail server instead, so nobody signs in
+through the account service and no MausBot account is made, give the server
+an SMTP address:
+
+```sh
+OMB_SIGNIN_SMTP_URL="smtps://signin%40yourcompany.com:PASSWORD@smtp.yourcompany.com:465"
+OMB_SIGNIN_SMTP_FROM="OpenMausBot <signin@yourcompany.com>"   # else the user name, if it is an address
+```
+
+`smtps://` uses TLS from the start (port 465); `smtp://` upgrades with
+STARTTLS (port 587) and refuses a server that cannot, unless the mail server
+is on this machine (`smtp://localhost:25`). Write the user name and password
+URL-encoded (`@` is `%40`). Your server then makes each code itself: 8 digits,
+single use, ten minutes and five tries, kept only as a hash in memory (a
+restart ends the open ones), and at most one every 30 seconds per address.
+The allow-list, the lockout and the sessions work as above. Keep the URL in
+the service's environment file, never on a command line.
 
 ### Inviting people
 
@@ -749,6 +984,14 @@ On the Workspaces screen, creating a client workspace shows the same kind of
 link for that workspace's admin, so a client gets one address, one workspace
 and one link.
 
+## Announcements from the project
+
+When someone opens the app, the server downloads the project's public announcements file from GitHub
+(`raw.githubusercontent.com`, at most once an hour, a plain GET with nothing of yours in it) and its pages may show one of
+its cards in the corner: product news, a tip, or a sponsor's offer, each once per person
+([docs/announcements.md](announcements.md)). Set `OMB_DISABLE_ANNOUNCEMENTS=1` in the server's environment to never
+download it and never show those cards.
+
 ## Attachment storage
 
 Files people attach, and pictures a bot shows inline, live in the
@@ -757,6 +1000,12 @@ old messages still point at it, so the server stops taking new files once the
 folder holds 512 MB. A team fills that sooner: set
 `OMB_ATTACHMENTS_MAX_BYTES` in the server's environment and restart, for
 example `OMB_ATTACHMENTS_MAX_BYTES=4294967296` for 4 GB.
+
+One file can be up to 100 MB, whether a person sends it or a bot attaches it;
+that setting does not change it. It matches Cloudflare's upload ceiling, so a
+tunnel carries it too. A video or audio file over 25 MB does not play inside
+the chat, but it still downloads, and so does a file a bot links to, up to
+500 MB.
 
 ## Putting a proxy in front
 
@@ -773,9 +1022,11 @@ Any reverse proxy works, given three things:
 3. **Do not buffer** the event stream (`flush_interval -1` in Caddy,
    `proxy_buffering off` in nginx); the UI streams events over SSE.
 
-Plus one convenience: set `OMB_PUBLIC_URL=https://your.domain` so pairing
-links, and `OMB_WEBHOOK_PUBLIC_URL=https://your.domain` so hook URLs, are
-printed with the public address. [`deploy/Caddyfile`](../deploy/Caddyfile)
+Then start with `serve --public-url https://your.domain` (or set
+`OMB_PUBLIC_URL=https://your.domain`) so pairing links, and
+`OMB_WEBHOOK_PUBLIC_URL=https://your.domain` so hook URLs, are printed with
+the public address. `serve` checks the address answers as this server and
+says so on its Reach line. [`deploy/Caddyfile`](../deploy/Caddyfile)
 is the reference implementation.
 
 ## Opening a desktop from another device
@@ -821,9 +1072,9 @@ The iOS app pairs with a server the same way a laptop does: scan the QR
 code that `openmausbot serve` (or `openmausbot pair`) prints, paste the
 whole `https://host/pair#code=…` link into the address field on the pairing
 screen, or type the address and then the code. The phone gets a session of
-its own, listed and revocable with `openmausbot sessions`. What it may do is
+its own, listed and revocable with `openmausbot devices`. What it may do is
 the code's scope: a code from `openmausbot pair` carries `admin` and the app
-shows everything; a code from `openmausbot pair --client` (also what the
+shows everything; a code from `openmausbot pair --phone` (also what the
 guided phone setup mints) can chat, approve and read, and the app hides
 creating bots and sections, changing models, generating avatars, connecting
 apps and cloud desktops — those stay with the owner. A server reinstalled at
@@ -832,16 +1083,15 @@ than present the old session to it.
 
 Both native apps pair this way. `openmausbot pair --phone android` prints the
 app-scheme QR that Android's scanner needs, and the iOS app accepts either
-that QR or the web link. Pass `--phone` whenever nothing is watching the
-terminal, such as `docker compose exec omb node dist-server/openmausbot.js
-pair --phone android --public-url https://your-domain`, since a scripted run
-never reaches the question the interactive command asks. Nothing extra to install, and the phone becomes a
-session like any other.
+that QR or the web link, for example `docker compose exec omb openmausbot
+pair --phone android --public-url https://your-domain`. `pair` never asks
+questions, so it works the same from a script. Nothing extra to install, and
+the phone becomes a session like any other.
 
 Older way, still supported, and only useful on a LAN or a tailnet: run the
 companion sidecar next to the harness and pair by its own QR. It advertises
 on your private networks (Tailscale-aware) and issues its own per-device
-credentials, which are **not** `openmausbot sessions` and are revoked from
+credentials, which are **not** `openmausbot devices` and are revoked from
 its own page at the `127.0.0.1:8811/#token=…` link it prints. It also serves phones over cleartext HTTP
 on port 8810, so do not expose it from a public server. It ships only in a
 git checkout: neither the npm package nor the Docker image contains it.
@@ -884,24 +1134,56 @@ no AI to carry on, it says the bot waits instead. Nobody is asked.
   then the backups chosen for the bot or in Automatic recovery; then the AI a
   new bot would get. Only an AI that can run a turn now (installed, signed in,
   allowed by your organisation, not limited itself) with the tools and the
-  working folder the current one has. Never another sign-in to the same
-  subscription, which would rotate accounts around the provider's limit; a
-  pay-per-use API key on the same AI is fine.
+  working folder the current one has, and one the conversation's approval level
+  can move to without asking (Auto-accept edits stays on an AI that has it).
+  Never another sign-in to the same subscription, which would rotate accounts
+  around the provider's limit; a pay-per-use API key on the same AI is fine.
 - **What moves.** The person's message that met the limit is sent again on that
   AI, in that conversation alone; the bot's own model and its other
-  conversations stay where they are. While the limit lasts, every new turn
-  (a person's, a routine's, a webhook's) goes straight to that AI without
-  asking the limited one first, and a routine run the limit stopped starts
-  again on it.
+  conversations stay where they are. While the limit lasts, every new turn and
+  conversation of every bot that uses the limited AI (a person's, a routine's,
+  a webhook's) goes straight to that AI without asking the limited one first,
+  and a routine run the limit stopped starts again on it.
 - **How long.** The limited AI is held until the reset it named, or for an hour
-  when it named none. One model's own limit holds that model alone, and for at
-  most six hours before it is tried again. A conversation that moved goes back
-  once its AI's limit has reset, with one line saying so.
+  when it named none or named one already past; the next turn after that hour
+  checks it again. One model's own limit holds that model alone, and for at
+  most six hours before it is tried again. The holds are saved
+  (`limit-holds.json`, `limit-takeover-holds.json`), so a restart, an update or
+  a sleep the Cloud was stopped for keeps them. A conversation that moved goes
+  back once its AI's limit has reset, with one line saying so.
+
+An engine that posts the provider's raw error as its whole reply instead of
+failing the turn (omp's ACP mode sends `429 {"type":"error",…} retry-after-ms=…`
+that way) has that turn count as failed, not as a reply, and the person reads
+it in plain words. It is a usage limit when its words say so, or when it is a
+429 whose wait runs past two minutes, and is then held until that wait ends;
+a shorter wait is a rate limit to try again after. A reply that only quotes
+such an error among other words stays a reply.
 
 This is on by default. Start the server with `OMB_QUOTA_SWITCH=0` to switch it
 off: then only the backups Automatic recovery names take over, and the
 notification says the bot waits. Any other value, or none, leaves it on. It
 has no setting in `config.json` yet.
+
+### When an engine is signed out
+
+When a turn stops because its AI is signed out (its sign-in expired or was
+revoked), the person hears it once, in that conversation and as a
+notification: "Claude is signed out on the Cloud. Sign in again in Settings →
+AI to keep using it.", with a Sign in button that opens those settings. Each
+later refused turn still shows that it failed, with no second notice; its
+Chief gets one incident, not one a turn. An account out of credit, which some
+engines stop the same way, is no sign-out.
+
+The backups a turn its AI never started would get carry on meanwhile (the
+bot's own backup AIs, or else the app-wide backup while Automatic recovery is
+on), by the same rules as a usage limit (another sign-in to the same AI is fine
+here, since nothing is rotated around a limit): the person's message is sent
+again there, every new turn and conversation starts there, and a conversation
+that moved goes back once the AI is signed in again in the app, or a turn on it
+works. No AI is picked for a sign-out by itself, so with no such backup nothing
+moves. A new turn tries the signed-out AI again an hour after its last refusal,
+unless its status still says signed out.
 
 ### Which engine a new bot uses
 
@@ -1177,7 +1459,7 @@ The note needs an engine that accepts a message in the middle of a turn
 only the stop, and only if you set it. The note and the stop do not cover bots
 on API models or turns in a room yet.
 
-Bots on API models (xAI, Mistral, Groq, Cerebras, Meta, MiniMax or an
+Bots on API models (xAI, Mistral, Groq, Greenference, ModelGo, Cerebras, Meta, MiniMax or an
 OpenAI-compatible endpoint) end a turn as failed when a tool call failed and
 the bot then answered. With the loop guard on, set `loopGuard.correctiveRounds`
 (0-5, default 0) and such a bot is sent back to re-run the failed call up to
@@ -1200,22 +1482,50 @@ is not a positive finite number (empty, `65m`, `0`, a negative number,
 `Infinity`, `1e309`) leaves the default. Set them in the server's environment
 and restart it; the restart stops every running turn.
 
-A turn in a room also has a work ceiling of its own, `rooms.turnTimeoutMinutes`
-in `config.json` (default 5 minutes, 1-1440, which one conversation can
-replace). It stops a member's turn even while its tool runs, and these two
+A turn in a room also has a limit of its own, `rooms.turnTimeoutMinutes` in
+`config.json` (default 5 minutes, 1-1440, which one conversation can replace).
+It stops a member's turn that shows no progress for that long. While one of the
+turn's tools runs, the turn may show nothing for up to 60 minutes (the longest
+an MCP call can be set to take) or the room's limit if that is longer. These two
 settings do not change it.
 
 ## Updating
 
-For the npm service, [install the chosen new version](deploy-vps.md#update)
-as the service user while the server is stopped, then start it again.
-For a foreground invocation, `npx --yes openmausbot@X.Y.Z serve --tunnel`
-selects a particular published release; replace `X.Y.Z` with that version.
+Self-hosted servers follow the **stable** channel: a released version that our
+own Clouds have run for 48 hours, named by the image tag `stable` and by
+[`stable.json`](https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json).
+`latest` follows `main` and is not for a server you rely on. The update check
+(`GET /api/updates/check`, **Check for updates** in the app) compares the
+server with the stable version; `OMB_UPDATE_CHANNEL=newest` makes it follow
+every release instead.
+
+A server installed with the [installer](deploy-vps.md#quick-start-one-command-on-your-own-domain)
+updates with `sudo /opt/openmausbot/update.sh`, which the installer puts there.
 
 ```sh
-docker compose -f deploy/docker-compose.yml pull omb && docker compose -f deploy/docker-compose.yml up -d   # Docker
+cd deploy && git pull && ./update.sh                                    # Docker: copy the data, update, roll back on failure
 git pull && pnpm install && sudo systemctl restart openmausbot          # from source
 ```
+
+`deploy/update.sh` is the whole routine for a Docker Compose install: the
+stable image by digest, a copy of `/data` first, a health check that includes
+"an engine can still start a bot", and the old image and the copy put back
+when the check fails. It is safe to interrupt and to run twice, carries on
+when the terminal closes, never goes to an older version unless told to
+(`--allow-older`; a server on `latest` moves to stable once the stable version
+is newer than the one it reports), and asks before it puts back data from an
+update an earlier run left unfinished.
+[Every step, the rollback and the exit codes](deploy-vps.md#update).
+
+For the npm service there is no one-command updater yet:
+[do the same steps by hand](deploy-vps.md#paths-a-and-c-npm-with-the-service-above-the-same-steps-by-hand),
+as the service user while the server is stopped. For a foreground invocation,
+`npx --yes openmausbot@X.Y.Z serve --tunnel` selects a particular published
+release; replace `X.Y.Z` with that version.
+
+The desktop and phone apps work with any server version that was the stable
+one within the last 90 days. An older server keeps running, but the app says
+it is behind, and newer features may not work until it is updated.
 
 Routines and queued work survive restarts. A teammate turn in flight runs
 again once at the next start, told to check what it already did, and the bot

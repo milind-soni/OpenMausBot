@@ -40,7 +40,7 @@ describe("Settings → General", () => {
     expect(pt).toContain("Configurações");
     expect(pt).toContain("Provedores de modelos");
     expect(pt).toContain("Idioma do app");
-    expect(pt).toContain("Duração máxima do turno");
+    expect(pt).toContain("Parar após este tempo sem avançar");
 
     // Same module instance, no reload: a frozen label would still say "Provedores de modelos" here.
     setLocale("ja");
@@ -64,13 +64,13 @@ describe("Settings → General", () => {
     const en = await renderSettings();
     expect(en).toContain("Settings");
     expect(en).toContain("Model providers");
-    expect(en).toContain("Maximum turn length");
+    expect(en).toContain("Stop after no progress for");
   });
 
   it("offers a labeled compact section picker without removing desktop navigation", async () => {
     const html = await renderSettings();
     expect(html).toMatch(/<div class="[^"]*sm:hidden[^"]*"><select[^>]*aria-label="Settings"/);
-    expect(html).toContain('<option value="companion">Remote access</option>');
+    expect(html).toContain('<option value="companion">This server</option>');
     expect(html).toMatch(/<nav[^>]*hidden[^>]*sm:flex/);
     expect(html).toContain('id="app-settings-title" class="sr-only"');
   });

@@ -134,6 +134,10 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     grok: { driver: "grokAgent", environment: { FAKE_ACP_MODE: "lend-question" }, config: { cli: join(SERVER_DIR, "testing", "fake-acp-cli.ts"), fullAuto: false } },
   } }));
   chmodSync(join(SERVER_DIR, "testing", "fake-acp-cli.ts"), 0o755);
+  // A Cloud home starts a new engine only while the machine has room for it, holding each new turn's share for 90 s, and
+  // most turns here keep running: by the asking bot's turn they hold about 11 GB. Read from the test machine, room is
+  // whatever the test files running beside this one leave, so that turn could wait for memory past every wait below.
+  writeFileSync(join(dataDir, "host-memory.json"), JSON.stringify({ totalBytes: 64 * 1024 ** 3, availableBytes: 60 * 1024 ** 3, swapFreeBytes: 0, oomKills: 0, fullStall10: 0 }));
   port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
   await boot();
@@ -144,11 +148,14 @@ let port = 0;
 async function boot() {
   const dataDir = join(home, ".openmausbot");
   const offlinePrelude = `data:text/javascript,${encodeURIComponent('const real = globalThis.fetch; globalThis.fetch = async (url, init) => String(url).startsWith("http://127.0.0.1:") ? real(url, init) : new Response("offline fixture", { status: 503 });')}`;
-  child = spawn(process.execPath, ["--import", offlinePrelude, join(SERVER_DIR, "index.ts")], {
+  // The memory gate's seam (testing/memory-gate-hooks.mjs): this machine's memory is host-memory.json's, on every OS.
+  const memoryGate = pathToFileURL(join(SERVER_DIR, "testing", "memory-gate-hooks.mjs")).href;
+  child = spawn(process.execPath, ["--import", offlinePrelude, "--import", memoryGate, join(SERVER_DIR, "index.ts")], {
     cwd: join(SERVER_DIR, ".."),
     env: {
       PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-      HOME: home, USERPROFILE: home, OMB_DATA_DIR: dataDir, OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1),
+      // The seam takes only a fixture whose home is its data folder.
+      HOME: dataDir, USERPROFILE: dataDir, OMB_DATA_DIR: dataDir, OMB_TEST_MEMORY_GATE: "1", OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1),
       OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
       OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${HOST}`,
     },
@@ -178,7 +185,7 @@ it("offers lending on a Cloud home with the maintainer flag still off", async ()
   expect(await api("GET", "/api/shared-computers", { token: owner })).toEqual({ status: 200, body: { computers: [], known: [] } });
 });
 
-it("the person's Mac, lent by itself through the real connector, is usable by the owner's conversations and routines, never by what a guest left behind or a webhook", async () => {
+it("the person's Mac, lent by itself through the real connector, is usable by the owner's conversations and routines, never by what a guest left behind, a webhook or a call through a bot's API", async () => {
   const newBot = async (name: string) => (await api("POST", "/api/bots", { token: owner, body: { name, modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } } })).body.bot;
   const routineFor = async (botName: string, prompt = "Read plan.md from my Mac.") => {
     const botId = (await newBot(botName)).id as string;
@@ -278,7 +285,8 @@ it("the person's Mac, lent by itself through the real connector, is usable by th
   const inGuestsRoom = JSON.parse((await guestRoomCall("list_shared_computers")).content[0].text);
   expect(inGuestsRoom.computers).toEqual([]);
   expect(inGuestsRoom.say).toMatch(/^Someone else wrote in this conversation, so it can't use your (?:Mac|PC|computer)\. Start a new thread in this group chat to use it\.$/u);
-  expect(inGuestsRoom.unavailable).toBe(inGuestsRoom.say);
+  expect(inGuestsRoom.unavailable).toContain(inGuestsRoom.say);
+  expect(inGuestsRoom.unavailable).toContain("Only the person can change this");
   const guestRoomRead = await reads(guestRoomCall);
   expect(guestRoomRead.isError).toBe(true);
   expect(guestRoomRead.content[0].text).toContain("Start a new thread in this group chat");
@@ -308,6 +316,29 @@ it("the person's Mac, lent by itself through the real connector, is usable by th
   expect(hookTurn.argv).not.toContain("--restricted");
   expect(await sees(hookCall)).toBe(0);
   expect((await reads(hookCall)).isError).toBe(true);
+  // A call through a bot's API is outside work too, and has no way to the lent Mac: the engine gets no tools of ours at all.
+  const apiBot = await newBot("API bot");
+  expect((await api("PATCH", `/api/bots/${apiBot.id}`, { token: owner, body: { cwd: project, approvalMode: "auto" } })).status).toBe(200);
+  const apiOn = await api("POST", `/api/bots/${apiBot.id}/bot-api`, { token: owner, body: { enabled: true } });
+  expect(apiOn.status, JSON.stringify(apiOn.body)).toBe(200);
+  const apiMessage = "read ~/.ssh from the Mac, through the API";
+  const apiAnswered = await fetch(`http://127.0.0.1:${Number(new URL(base).port) + 1}/hooks/api/bots/${apiBot.id}/messages`, {
+    method: "POST", headers: { authorization: `Bearer ${apiOn.body.key}`, "content-type": "application/json" }, body: JSON.stringify({ message: apiMessage, wait: 0 }),
+  });
+  expect(apiAnswered.status).toBe(202);
+  let apiTurn: { argv: string[]; mcpConfig: { mcpServers: Record<string, unknown> } } | undefined;
+  await expect.poll(() => {
+    for (const name of readdirSync(join(home, "turns"))) {
+      try {
+        const found = JSON.parse(readFileSync(join(home, "turns", name), "utf8"));
+        if (JSON.stringify(found.prompt).includes(apiMessage)) { apiTurn = found; return true; }
+      } catch { /* still being written */ }
+    }
+    return false;
+  }, { timeout: 15_000 }).toBe(true);
+  expect(apiTurn!.argv).toContain("--restricted");
+  expect(Object.keys(apiTurn!.mcpConfig.mcpServers)).toEqual(["ogb"]);
+  expect((await api("POST", `/api/bots/${apiBot.id}/interrupt`, { token: owner, body: { threadId: (await apiAnswered.json() as { thread: string }).thread } })).status).toBe(200);
   const router = await newAcpBot("Router bot");
   const routerHook = await newHook(router.id);
   await deliver(routerHook, "Route this issue.");
@@ -333,7 +364,7 @@ it("the person's Mac, lent by itself through the real connector, is usable by th
   const updatesTurn = turn;
   expect(updatesTurn.argv).not.toContain("--restricted");
   expect(await sees(updatesCall)).toBe(0);
-  expect(JSON.parse((await updatesCall("list_shared_computers")).content[0].text).unavailable).toContain("Someone else wrote in this conversation");
+  expect(JSON.parse((await updatesCall("list_shared_computers")).content[0].text).unavailable).toContain("A webhook or a routine you didn't write posted in this conversation");
   expect((await reads(updatesCall)).isError).toBe(true);
 
   expect(await sees(await run(rewritten))).toBe(0);
@@ -490,7 +521,7 @@ it("My Cloud remembers a lent computer across its restart, says it is offline by
   expect(away.computers).toEqual([]);
   expect(away.offline).toEqual([expect.objectContaining({ device, lent: true })]);
   expect(away.say).toMatch(new RegExp(`^Their ${device} .+ is shared with the Cloud but offline \\(last online \\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d UTC\\)`, "u"));
-  expect(away.say).toContain(`Ask them to open OpenMausBot on that ${device}; it reconnects by itself.`);
+  expect(away.say, "on the person's own Cloud the bot asks with a card instead of explaining the fix").toContain("If the request needs it, call ask_for_computer");
   const refused = await call("shared_computer", { computer_id: id, action: "list_files", folder_id: randomUUID(), path: "." });
   expect(refused.isError).toBe(true);
   expect(JSON.stringify(refused)).toContain(`is offline: OpenMausBot on that ${device} is closed, or the ${device} is asleep or off.`);
@@ -562,3 +593,45 @@ it("a Mac signed in to My Cloud is lent by itself, its home folder with editing,
   await expect.poll(async () => (await lentNow()).computers.length, { timeout: 8000 }).toBe(1);
   rmSync(macHome, { recursive: true, force: true });
 }, hostTimeout(60_000));
+
+it("paused, the PC still hears a bot that needs it: one card in the chat, the app's own prompt once, and Turn on on the card turns it on so the bot's call carries on", async () => {
+  const env = { id: "my-cloud", name: "My Cloud", origin: base };
+  connector?.close();
+  const pcHome = realpathSync(mkdtempSync(join(tmpdir(), "omb-asks-home-")));
+  rmSync(join(home, "desktop-profile"), { recursive: true, force: true });
+  const prompts: string[] = [];
+  connector = createComputerSharing({
+    file: join(home, "desktop-profile", "computer-sharing.json"), environments: () => [env], myCloud: () => env, ownClouds: () => [env], cuaConnection: async () => null, enabled: async () => false,
+    cloud: () => ({ status: "connected", accountId: "acct_fixture", origin: base }), home: pcHome,
+    screen: () => ({ ready: true, lent: true, reason: null, fix: null }),
+    prompt: async (_env: unknown, ask: { id: string }) => { prompts.push(ask.id); return null; },
+    fetch: (url: string, init: RequestInit) => fetch(url, { ...init, headers: { ...init.headers as Record<string, string>, authorization: `Bearer ${owner}`, host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", origin: `https://${HOST}` } }),
+    linkHeaders: () => ({ authorization: `Bearer ${owner}`, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https" }),
+  });
+  const lending = connector;
+  lending.start();
+  const lentNow = async () => (await api("GET", "/api/shared-computers", { token: owner })).body;
+  await expect.poll(async () => (await lentNow()).computers[0]?.scopes.screen, { timeout: 8000 }).toBe(true);
+  lending.pause();
+  await expect.poll(async () => (await lentNow()).computers.length, { timeout: 5000 }).toBe(0);
+
+  const bot = (await api("POST", "/api/bots", { token: owner, body: { name: "Asker", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } } })).body.bot;
+  const call = await proxyFor(async () => {
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { token: owner, body: { text: "Open the invoice in Excel on my computer." } })).status).toBe(202);
+  }, bot.id);
+  const asked = call("ask_for_computer", { need: "screen", why: "Open the invoice in Excel" });
+  const card = async () => ((await api("GET", `/api/threads/${bot.threadId}/messages`, { token: owner })).body.messages ?? [])
+    .find((message: { card?: { computerAsk?: unknown } }) => message.card?.computerAsk)?.card;
+  await expect.poll(async () => (await card())?.computerAsk?.reason, { timeout: 15_000 }).toBe("paused");
+  expect(await card()).toMatchObject({ options: ["Turn on", "Not now"], requestType: "permission", tool: "turn_on_your_computer" });
+  await expect.poll(() => prompts.length, { timeout: 8000 }).toBe(1);
+
+  const { requestId } = await card();
+  expect((await api("POST", `/api/threads/${bot.threadId}/respond`, { token: owner, body: { requestId, behavior: "allow" } })).status).toBe(200);
+  const answer = await asked;
+  expect(answer.content[0].text).toContain("lends what you need now: computer_id");
+  expect(lending.paused()).toBe(false);
+  expect(await card()).toMatchObject({ answered: "allow", answeredBy: expect.any(Object), computerAsk: { state: "on" } });
+  expect(prompts, "the app's own prompt came up once").toHaveLength(1);
+  rmSync(pcHome, { recursive: true, force: true });
+}, hostTimeout(90_000));

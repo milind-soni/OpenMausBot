@@ -65,6 +65,19 @@ function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[]; language?
 }
 
 describe("the brief", () => {
+  it.each(["completed", "failed"] as const)("includes a routine %s just after local midnight", async (status) => {
+    const s = setup({ needsYou: [{ kind: "signed-out", id: "sign-in", at: 0, instanceId: "claude", botIds: [] }] });
+    s.advance(21_643);
+    const run = (name: string, finishedAt: number): RoutineRun => ({
+      id: name, routineId: name, routineName: name, target: "bot", botId: s.chief.id, runOn: "maus",
+      scheduledFor: finishedAt, status, manual: false, createdAt: finishedAt, finishedAt,
+    });
+    s.runs.push(run("Before midnight", Date.parse("2026-10-22T03:59:59.999Z")), run("After midnight", Date.parse("2026-10-22T04:00:00.001Z")));
+    await s.brief.active("desktop", "America/New_York", "en");
+    expect(s.shown()).toContain("After midnight");
+    expect(s.shown()).not.toContain("Before midnight");
+  });
+
   it("counts only the emails it leaves out, and still says how many new ones wait", () => {
     const emails = Array.from({ length: 8 }, (_, at) => ({ messageId: `m${at}`, threadId: `t${at}`, from: `Sender ${at} <s${at}@x.test>`, subject: `Subject ${at}`, needsReply: false }));
     const shown = JSON.stringify(briefCard({ now: Date.parse("2026-10-22T08:00:00Z"), timeZone: "UTC", intro: false, needs: [], meetings: null, emails, waiting: 3, routines: [] }).card);
@@ -155,7 +168,7 @@ describe("the brief", () => {
     expect(shown).toContain("Aguardando sua resposta · Ada precisa dos números.");
     expect(shown).toContain("Sessão encerrada em Claude");
     expect(shown).not.toMatch(/Needs you|Waiting on your reply|Thursday/);
-    expect(widgetActions(root).map((entry) => entry.label)).toEqual(expect.arrayContaining(["Rascunhar resposta para Ada", "Abrir no Gmail", "Dispensar o e-mail de Ada"]));
+    expect(widgetActions(root).map((entry) => entry.label)).toEqual(expect.arrayContaining(["Criar rascunho de resposta para Ada", "Abrir no Gmail", "Dispensar o e-mail de Ada"]));
     expect(s.notified).toEqual(["Seu resumo: 2 precisam de você"]);
   });
 
@@ -277,6 +290,14 @@ describe("the brief", () => {
     expect(s.shown()).toContain("Reconnect Gmail in Connected apps.");
     expect(s.shown()).toContain("Claude is signed out");
     expect(s.shown()).toContain("8:09 AM · Standup");
+  });
+
+  it("points to Connected apps when one of several accounts was read and refused", async () => {
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [{ app: "gmail", signedOut: false, severalAccounts: true }] });
+    expect(s.shown()).toContain("Reconnect Gmail in Connected apps.");
+    expect(s.shown()).not.toContain("I'll try again soon.");
   });
 
   it("waits for a busy chat instead of writing into a turn", async () => {

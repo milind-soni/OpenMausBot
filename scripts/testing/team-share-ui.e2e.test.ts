@@ -124,7 +124,7 @@ describe("Share team in the real renderer", () => {
     await evaluate(`(() => { const input = document.querySelector('[role=dialog] input[type=file]'); const transfer = new DataTransfer(); transfer.items.add(new File([window.__shareText], 'sales-desk-1.0.0.openmaus.json', { type: 'application/json' })); input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("2 bots · shared department");
     const preview = await snapshot();
-    for (const line of ["Shared instructions", "Routines: 1 · paused", "Starter notes: 1", "Included skills — added switched off"]) {
+    for (const line of ["Shared instructions", "Routines: 1 · paused", "Starter notes: 1", "Included skills (added switched off)"]) {
       expect(preview).toContain(line);
     }
     expect(preview).not.toContain("Connections to finish");

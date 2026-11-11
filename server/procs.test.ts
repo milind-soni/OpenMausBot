@@ -91,15 +91,17 @@ describe("execCli timeout", () => {
 });
 
 describe("out of memory", () => {
-  it.runIf(process.platform === "linux")("a bot's engine is the first the kernel stops, and anything else keeps its score", async () => {
+  it.runIf(process.platform === "linux")("a bot's engine and its other work are the first the kernel stops, and anything else keeps its score", async () => {
     const forever = ["-e", "setInterval(() => {}, 1000)"];
     const engine = spawnCli(process.execPath, forever, { stdio: ["pipe", "pipe", "pipe"] }, "bot");
+    const browser = spawnCli(process.execPath, forever, { stdio: ["pipe", "pipe", "pipe"], botWork: true });
     const other = spawnCli(process.execPath, forever, { stdio: ["pipe", "pipe", "pipe"] });
     try {
       expect(readFileSync(`/proc/${engine.pid}/oom_score_adj`, "utf8").trim()).toBe("1000");
+      expect(readFileSync(`/proc/${browser.pid}/oom_score_adj`, "utf8").trim()).toBe("1000");
       expect(readFileSync(`/proc/${other.pid}/oom_score_adj`, "utf8").trim()).toBe(readFileSync("/proc/self/oom_score_adj", "utf8").trim());
     } finally {
-      await Promise.all([killCliTree(engine), killCliTree(other)]);
+      await Promise.all([killCliTree(engine), killCliTree(browser), killCliTree(other)]);
     }
   });
 });
@@ -109,7 +111,7 @@ describe("CLI version probes", () => {
     const timedOut = await new Promise<Error | null>((resolve) => {
       execCli(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { timeout: 200 }, (error) => resolve(error));
     });
-    expect(cliVersionReader("claude")(timedOut, "")).toEqual({ reason: expect.stringContaining("took longer than 8 seconds") });
+    expect(cliVersionReader("claude")(timedOut, "")).toEqual({ reason: expect.stringContaining("took longer than 30 seconds") });
     const read = cliVersionReader("claude");
     expect(read(null, " 2.1.302\n")).toEqual({ version: "2.1.302" });
     expect(read(timedOut, "")).toEqual({ version: "2.1.302" });
@@ -118,5 +120,16 @@ describe("CLI version probes", () => {
     });
     expect(read(trapped, "")).toEqual({ version: "2.1.302" });
     expect(read(Object.assign(new Error("spawn claude ENOENT"), { code: "ENOENT" }), "")).toEqual({ reason: "`claude` CLI not found" });
+  }, hostTimeout(20_000));
+
+  it("names a timeout, not a missing CLI, when a busy server reads the answer only after the timeout", async () => {
+    const late = await new Promise<{ err: Error | null; stdout: string }>((resolve) => {
+      execCli(process.execPath, ["-e", "process.stdout.write('2.1.302')"], { timeout: 100 }, (err, stdout) => resolve({ err, stdout }));
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_500);
+    });
+    expect(cliVersionReader("claude")(late.err, late.stdout)).toEqual({ reason: expect.stringContaining("took longer than 30 seconds") });
+    const read = cliVersionReader("claude");
+    expect(read(null, "2.1.302")).toEqual({ version: "2.1.302" });
+    expect(read(late.err, late.stdout)).toEqual({ version: "2.1.302" });
   }, hostTimeout(20_000));
 });

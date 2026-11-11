@@ -12,22 +12,32 @@ import type { SessionRegistry } from "../sessions.ts";
 export interface CloudSignedHostDeps {
   cloudHome: CloudHomeConfig | null;
   health: Omit<CloudHealthDeps, "box">;
-  sessions: Pick<SessionRegistry, "openPairing" | "attemptAllowed" | "noteFailure" | "clearFailures">;
+  sessions: Pick<SessionRegistry, "openPairing" | "revokeMember" | "attemptAllowed" | "noteFailure" | "clearFailures">;
   /** The home's power once the server listens (a late-bound singleton of index.ts). */
   power: () => Pick<CloudPower, "report" | "prepareSleep"> | null;
   box: () => BoxReport;
   /** A Team Cloud's shared connections and AI for its admins; used only when the home is a Team Cloud. */
   teamAdmin?: { summary(): Promise<TeamAdminSummary> };
+  /** A Team Cloud's pairing claim said who invited this member: kept for their welcome (team-welcome.ts). */
+  invited?: (member: string, by: string) => void;
+  /** The team's rule turned remote access off: no browser sign-in for a User. */
+  memberBrowserOff?: () => boolean;
   /** A Team Cloud's member left (the Admin's signed request): delete what was theirs alone. */
   memberLeft?: (email: string) => Promise<Record<string, unknown>>;
+  /** A Team Cloud's rules changed on the Admin (its signed nudge): fetch them now. */
+  policyChanged?: () => void;
+  /** The plan was cancelled, or renews again (the Admin's signed request): routines wait while it is cancelled. */
+  plan?: (cancelled: boolean) => void;
+  /** Which plan this Cloud is on now (the Admin's signed request). */
+  planTier?: (tier: string) => void;
 }
 
 export function createCloudSignedHost(deps: CloudSignedHostDeps): { cloudHealth: CloudHealth | null; cloudSigned: ReturnType<typeof createCloudSignedRoutes> | null } {
   const cloudHealth = deps.cloudHome ? createCloudHealth({ ...deps.health, box: deps.box }) : null;
   const cloudSigned = deps.cloudHome && cloudHealth
     ? createCloudSignedRoutes({ secret: deps.cloudHome.bootstrapSecret, sessions: deps.sessions, team: deps.cloudHome.team, health: cloudHealth, power: deps.power, box: deps.box,
-      ...(deps.cloudHome.team && deps.teamAdmin ? { teamAdmin: deps.teamAdmin } : {}),
-      ...(deps.cloudHome.team && deps.memberLeft ? { memberLeft: deps.memberLeft } : {}) })
+      ...(deps.cloudHome.team && deps.teamAdmin ? { teamAdmin: deps.teamAdmin } : {}), ...(deps.cloudHome.team && deps.invited ? { invited: deps.invited } : {}), ...(deps.cloudHome.team && deps.memberBrowserOff ? { memberBrowserOff: deps.memberBrowserOff } : {}),
+      ...(deps.cloudHome.team && deps.memberLeft ? { memberLeft: deps.memberLeft } : {}), ...(deps.cloudHome.team && deps.policyChanged ? { policyChanged: deps.policyChanged } : {}), ...(deps.plan ? { plan: deps.plan } : {}), ...(deps.planTier ? { planTier: deps.planTier } : {}) })
     : null;
   return { cloudHealth, cloudSigned };
 }

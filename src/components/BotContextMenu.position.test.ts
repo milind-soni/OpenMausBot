@@ -29,6 +29,7 @@ vi.mock("@/state/store", async (importOriginal) => {
 
 const { BotContextMenu } = await import("./Sidebar");
 const { t } = await import("@/lib/i18n");
+const { setTeamPeople } = await import("@/state/team-people");
 const bot: Bot = {
   id: "dumpling", threadId: "thread", name: "Dumpling", title: "", description: "", notifications: true,
   color: "green", unread: false, messages: [], modelSelection: { instanceId: "test", model: "test" },
@@ -46,7 +47,7 @@ beforeEach(() => {
     removeEventListener: (name: string) => listeners.delete(name),
   });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); setTeamPeople(null); });
 
 function render(x = 990, y = 795) {
   return renderToStaticMarkup(createElement(BotContextMenu, {
@@ -110,6 +111,13 @@ describe("bot actions menu viewport placement", () => {
     expect(negative.style).toEqual({ top: "8px", left: "8px" });
   });
 
+  it("lets Simple pin or unpin a bot first, and offers no folders", () => {
+    const html = render();
+    expect(html.indexOf(t("sidebar.bot.pin"))).toBeGreaterThan(-1);
+    expect(html.indexOf(t("sidebar.bot.pin"))).toBeLessThan(html.indexOf(t("sidebar.copyConversationId")));
+    for (const key of ["folder.new", "task.folder.new"] as const) expect(html, key).not.toContain(`>${t(key)}<`);
+  });
+
   it("keeps Advanced's flat list of bot actions, drawn on the shared menu sheet", () => {
     fixture.advanced = true;
     const html = render();
@@ -119,5 +127,16 @@ describe("bot actions menu viewport placement", () => {
     expect(html).not.toContain(t("sidebar.bot.more"));
     expect(html).toContain("rounded-[var(--radius-menu)]");
     expect(html).not.toContain("shadow-2xl");
+  });
+
+  it("offers no Chief of Staff crown on a team, where each person's MausBot is their Chief", () => {
+    fixture.advanced = true;
+    setTeamPeople({ people: [{ email: "ada@acme.test", name: "Ada", role: "admin", you: true }], me: { email: "ada@acme.test", name: "Ada", role: "admin", you: true }, admin: true, needsYou: [] });
+    const html = render();
+    expect(html).not.toContain(t("sidebar.bot.makeChief"));
+    expect(html).toContain(t("sidebar.bot.pin"));
+    setTeamPeople(null);
+    fixture.effects = [];
+    expect(render()).toContain(t("sidebar.bot.makeChief"));
   });
 });

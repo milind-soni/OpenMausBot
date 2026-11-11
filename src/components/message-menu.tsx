@@ -84,7 +84,7 @@ export function useBotMessageMenu({
 
 export function userMessageMenu({ messageId, onEdit, pin }: { messageId: string; onEdit?: () => void; pin?: PinAction }): MessageMenuItem[] {
   return [
-    ...(onEdit ? [{ key: "edit", icon: <Pencil {...ACTION_ICON} />, label: t("chat.editMessage"), onSelect: onEdit }] : []),
+    ...(onEdit ? [{ key: "edit", icon: <Pencil {...ACTION_ICON} />, label: t("chat.editMessage"), onSelect: onEdit, idleOnly: true }] : []),
     ...pinItem(pin),
     idItem(messageId),
   ];

@@ -5,6 +5,7 @@ import { answerAsleep, type CloudPower } from "../cloud-power.ts";
 import type { DeviceLinks } from "../device-links.ts";
 import { requestSource, type RequestAuth } from "../request-auth.ts";
 import type { SessionRecord } from "../sessions.ts";
+import { desktopPresence, type Answerer, type ComputerAsks } from "../computer-asks.ts";
 import { responseGone, sharedComputerRegistration, type SharedComputers } from "../shared-computers.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 import type { Upgrades } from "./upgrades.ts";
@@ -12,7 +13,8 @@ import type { Upgrades } from "./upgrades.ts";
 const LINK = /^\/api\/shared-computers\/([\w-]+)\/link$/;
 
 export function createSharedComputerRoutes(deps: {
-  enabled: () => boolean;
+  /** For this request: the maintainer flag, a Cloud home or a moved home; or, on a server only its one owner signs in to, that owner. */
+  enabled: (auth: RequestAuth) => boolean;
   computers: SharedComputers;
   sessionLive: (id: string) => boolean;
   environmentId: string;
@@ -25,15 +27,18 @@ export function createSharedComputerRoutes(deps: {
   /** A Cloud home's device links (a lent computer's internet connection); null elsewhere, where the path 404s. */
   links: DeviceLinks | null;
   upgrades: Upgrades;
+  /** On the person's own Cloud: what its bots ask of their computer, and the app there saying how it is. */
+  asks?: Pick<ComputerAsks, "present"> | null;
+  answerer?: (auth: RequestAuth) => Answerer;
 }): RouteHandler {
   deps.upgrades.route((path) => LINK.test(path));
   return async ({ req, res, path, method, auth, json, readBody }: RouteContext): Promise<typeof PASS | void> => {
     if (path !== "/api/shared-computers" && !path.startsWith("/api/shared-computers/")) return PASS;
-    if (method === "GET" && path === "/api/shared-computers" && deps.enabled()) {
+    if (method === "GET" && path === "/api/shared-computers" && deps.enabled(auth)) {
       return json(res, 200, { computers: deps.computers.status(deps.principal(auth)), known: deps.computers.known(deps.principal(auth)) });
     }
     const link = LINK.exec(path);
-    if (link && method === "GET" && deps.enabled() && deps.links) {
+    if (link && method === "GET" && deps.enabled(auth) && deps.links) {
       const pending = deps.upgrades.pending(req);
       if (!pending) return json(res, 426, { error: "WebSocket upgrade required" });
       if (auth.kind !== "session") return json(res, 403, { error: "Pair this desktop first" });
@@ -45,11 +50,11 @@ export function createSharedComputerRoutes(deps: {
       res.detachSocket(pending.socket);
       return;
     }
-    if (method !== "POST" || path === "/api/shared-computers" || !deps.enabled()) return PASS;
+    if (method !== "POST" || path === "/api/shared-computers" || !deps.enabled(auth)) return PASS;
     if (auth.kind !== "session") return json(res, 403, { error: "Pair this desktop first" });
     if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) return json(res, 415, { error: "JSON required" });
     const body = await readBody(req, 4_000_000);
-    if (!deps.enabled()) return json(res, 404, { error: `no route: ${method} ${path}` });
+    if (!deps.enabled(auth)) return json(res, 404, { error: `no route: ${method} ${path}` });
     if (!deps.sessionLive(auth.session.id)) return json(res, 401, { error: "Session ended" });
     const secret = String(req.headers["x-omb-computer-secret"] ?? "");
     if (path === "/api/shared-computers/connect") {
@@ -60,6 +65,19 @@ export function createSharedComputerRoutes(deps: {
       if (deps.cloudHomeLender && !auth.scopes.includes("admin")) return json(res, 403, { error: "Only your own computers can be shared with the Cloud. On this computer, choose Open the Cloud in Settings → MausBot Cloud first." });
       deps.computers.register(registration, { session: auth.session.id, person: deps.cloudHomeLender ?? deps.personKey(auth.session) }, secret);
       return json(res, 200, { ok: true });
+    }
+    if (path === "/api/shared-computers/asks") {
+      if (!deps.asks || !deps.cloudHomeLender) return json(res, 404, { error: "not found" });
+      if (!auth.scopes.includes("admin")) return json(res, 403, { error: "Only your own computers can answer the Cloud's bots." });
+      const parsed = desktopPresence.safeParse(body);
+      if (!parsed.success) return json(res, 400, { error: "Invalid computer state" });
+      const power = deps.power();
+      if (power?.sleeping()) return answerAsleep(res, json);
+      const { heard, answers, ...state } = parsed.data;
+      const news = await deps.asks.present(state, answers, deps.answerer?.(auth) ?? { kind: "worker" }, heard,
+        power ? AbortSignal.any([responseGone(res), power.sleepSignal()]) : responseGone(res));
+      if (power?.sleeping()) return answerAsleep(res, json);
+      return json(res, 200, news);
     }
     const route = /^\/api\/shared-computers\/([\w-]+)\/(poll|lease|result|disconnect)$/.exec(path);
     if (!route) return json(res, 404, { error: "not found" });
