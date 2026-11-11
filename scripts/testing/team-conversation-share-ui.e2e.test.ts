@@ -128,7 +128,7 @@ async function openAs(who: Who, size: readonly [string, string]) {
       const own = ((await as(who, "GET", "/api/bots?messages=0")).body.bots as Array<{ id: string; defaultBot?: { person?: string } }>).find((bot) => bot.defaultBot?.person === emails[who])!;
       expect((await as(who, "PATCH", `/api/bots/${own.id}`, { welcomed: true, sidebarHidden: false, pinned: true })).status).toBe(200);
     }
-    const created = await as("olive", "POST", "/api/bots", { name: "Scout" });
+    const created = await as("olive", "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     scout = created.body.bot.id;
   }, hostTimeout(300_000));

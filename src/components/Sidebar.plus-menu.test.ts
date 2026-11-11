@@ -2,7 +2,7 @@
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, admin: true as boolean | null }));
+const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, admin: true as boolean | null, team: false }));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
   useState: (initial: unknown) => {
@@ -37,7 +37,7 @@ vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false, setAdvanc
 vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: original.initialState, dispatch: vi.fn() }) };
+  return { ...original, useStore: () => ({ state: fixture.team ? { ...original.initialState, config: { team: { id: "acme", name: "Acme" } } } : original.initialState, dispatch: vi.fn() }) };
 });
 
 import { Sidebar } from "./Sidebar";
@@ -60,9 +60,10 @@ function render() {
   fixture.index = 0;
   return nodes(drawSidebar({ open: true, onClose: () => {} }));
 }
-function plusMenu(admin: boolean | null) {
+function plusMenu(admin: boolean | null, team = false) {
   fixture.values = [];
   fixture.admin = admin;
+  fixture.team = team;
   render().find((node) => node.type === "button" && String(node.props["aria-label"]).startsWith("New"))!.props.onClick!();
   return render().filter((node) => node.props.role === "menuitem").map((node) => words(node.props.children));
 }
@@ -72,7 +73,12 @@ describe("the sidebar's + menu", () => {
     for (const admin of [true, null]) expect(plusMenu(admin)).toEqual(["New bot", "New group chat", "Templates"]);
   });
 
-  it("offers neither to a User, who keeps New group chat", () => {
+  it("offers a team's User a new bot of their own, and templates only to its admins", () => {
+    expect(plusMenu(false, true)).toEqual(["New bot", "New group chat"]);
+    expect(plusMenu(true, true)).toEqual(["New bot", "New group chat", "Templates"]);
+  });
+
+  it("offers neither to someone without the admin scope anywhere else, who keeps New group chat", () => {
     expect(plusMenu(false)).toEqual(["New group chat"]);
   });
 });

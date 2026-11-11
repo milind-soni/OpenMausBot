@@ -355,7 +355,7 @@ describe("resolveRequestAuth", () => {
     const csrf = resolve({ host: "bots.example.com", cookie: `${cookieName}=${token}`, origin: "https://evil.example" }, "/api/bots", "POST");
     expect(csrf.error).toBe("forbidden: cross-origin request");
     expect(sessions.list()[0]?.expiresAt).toBe(session.expiresAt);
-    const overScope = resolve({ authorization: `Bearer ${token}` }, "/api/bots", "POST");
+    const overScope = resolve({ authorization: `Bearer ${token}` }, "/api/webhooks", "POST");
     expect(overScope.status).toBe(403);
     expect(sessions.list()[0]?.expiresAt).toBe(session.expiresAt);
     const { ticket } = sessions.issueStreamTicket(session.id);

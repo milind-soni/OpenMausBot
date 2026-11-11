@@ -156,7 +156,7 @@ beforeAll(async () => {
   ben = (await team.pair(BEN)).token!;
   await bots(ben);
   const create = async (body: Record<string, unknown>) => {
-    const created = await team.as(cleo, "POST", "/api/bots", body);
+    const created = await team.as(cleo, "POST", "/api/bots", { visibility: "everyone", ...body });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     return created.body.bot as Bot;
   };

@@ -16,8 +16,11 @@ export function useTeamName(): string | null {
   return typeof team?.name === "string" && team.name ? team.name : null;
 }
 
-/** A bot's Share button on a team: opens who has access. `headerMenu` holds what else the button offers there. */
-export function ShareBotButton({ bot, className, headerMenu, iconSize = 16 }: { bot: Bot; className: string; headerMenu?: ReactNode; iconSize?: number }) {
+/** A bot's Share button on a team: opens who has access. `headerMenu` holds what else the button offers there, and
+ * `leading` what sits before the button and opens the same dialog. */
+export function ShareBotButton({ bot, className, headerMenu, iconSize = 16, leading }: {
+  bot: Bot; className: string; headerMenu?: ReactNode; iconSize?: number; leading?: (open: () => void) => ReactNode;
+}) {
   const teamName = useTeamName();
   const [open, setOpen] = useState(false);
   const [change, setChange] = useState<AccessChange | null>(null);
@@ -25,6 +28,7 @@ export function ShareBotButton({ bot, className, headerMenu, iconSize = 16 }: { 
   if (!teamName) return null;
   return (
     <>
+      {leading?.(() => setOpen(true))}
       <button type="button" data-panel-share data-share-bot-button aria-label={t("botAccess.share")} title={t("botAccess.share")}
         aria-haspopup="dialog" onClick={() => setOpen(true)} className={className}>
         <Share size={iconSize} aria-hidden="true" className="pointer-events-none" />

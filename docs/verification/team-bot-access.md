@@ -108,6 +108,30 @@ checkout of the code before levels.
 | The card in the owner's inbox | ![](evidence/team-bot-access/ask-card-ada-inbox.png) |
 | After Allow | ![](evidence/team-bot-access/ask-allowed-bob.png) |
 
+## A new bot is its maker's until they share it
+
+```sh
+pnpm exec vitest run server/cloud-team-private-default.e2e.test.ts server/new-bot-sharing.test.ts server/host/share-notice.test.ts
+OMB_UI_E2E=1 OMB_TEAM_PRIVATE_SHOTS=/tmp/private-shots pnpm exec vitest run scripts/testing/team-private-default-ui.e2e.test.ts
+```
+
+The first runs a real Team Cloud with an Owner, an Admin and two Users and makes a bot every way one comes to exist
+(New bot, a preset, a copy, a package, a backup, a bot a User moves in): each starts as Only people added with nobody
+added, another User gets 404 for it on every route that names it and never lists or finds it, a request that says who
+sees it wins, sharing it with one person puts one line in that person's inbox, and a new bot on this computer and on My
+Cloud carries no sharing at all. The store's test covers a bot a Chief makes (shared exactly as the Chief) and bots saved
+before this (unchanged). The second drives the real app in headless Chrome: a User's New bot is under Just me only, a
+User neither sees it nor reaches it, the header's Share adds her and shows her face beside it, she reads the line in her
+inbox and chats, a narrow header folds the faces into a count, the Templates form states General access preset to Just
+me, and `/?connect=bots` opens Bot access for an admin and nothing for a User.
+
+A User makes a bot of their own too. The first test makes one as a User against the real routes: it is private and
+theirs, each setting an admin alone makes is refused by name at creation and on edit, the admin's saved New bot
+defaults stay out of it, another User gets 404, they share it, they delete it only while nobody else can use it, the
+team's bot limit refuses theirs in an admin's words, and `server/cloud-team-rules.e2e.test.ts` refuses a blocked
+engine on it. In the app run the maker is a User. Moving a bot in from My Cloud is driven through its routes in the
+first test and through the real move in `server/team-move.e2e.test.ts`.
+
 ## Not proven here
 
 - No real Admin, phone, Slack worker or model was involved: the Admin's pairing is signed by the fixture, a relayed
