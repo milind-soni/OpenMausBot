@@ -21,11 +21,11 @@ export function IssueDelegate({ sessionToken, projectId, taskId, delegateId, del
   const delegate = useMutation(api.issueActivity.delegate);
   const options = [
     { value: "", label: "No agent", icon: <Bot size={14} /> },
-    ...(agents ?? []).map(agent => ({ value: agent.id as string, label: agent.name, icon: <AgentMark /> })),
+    ...(agents ?? []).map(agent => ({ value: agent.id as string, label: agent.name, icon: <Bot size={14} className="agent-icon" /> })),
     // A delegate whose connection was since unlisted still shows by name until someone changes it.
-    ...(delegateId && agents && !agents.some(agent => agent.id === delegateId) ? [{ value: delegateId as string, label: delegateName ?? "Agent", icon: <AgentMark /> }] : []),
+    ...(delegateId && agents && !agents.some(agent => agent.id === delegateId) ? [{ value: delegateId as string, label: delegateName ?? "Agent", icon: <Bot size={14} className="agent-icon" /> }] : []),
   ];
-  return <IssueSelect label="Agent" caption="Delegate to agent" icon={delegateId ? <AgentMark /> : <Bot size={14} />} placeholder="No agent" value={delegateId ?? ""} options={options} disabled={disabled || agents === undefined}
+  return <IssueSelect label="Agent" caption="Delegate to agent" icon={<Bot size={14} className={delegateId ? "agent-icon" : undefined} />} placeholder="No agent" value={delegateId ?? ""} options={options} disabled={disabled || agents === undefined}
     onChange={value => void delegate({ sessionToken, projectId, taskId, grantId: (value || null) as Id<"connectorGrants"> | null }).catch(error => onError(errorText(error, "Could not delegate the issue")))} />;
 }
 

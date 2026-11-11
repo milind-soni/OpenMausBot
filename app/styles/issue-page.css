@@ -309,3 +309,4 @@ span.criterion-text { cursor: default; }
 .agent-activity-body { margin: var(--space-1) 0 0; padding: var(--space-2) var(--space-3); border-left: 2px solid color-mix(in srgb, var(--violet) 45%, transparent); background: var(--surface-2); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; color: var(--text-2); font-size: var(--text-base); white-space: pre-wrap; }
 .task-assignee-pair { display: inline-flex; align-items: center; gap: 2px; }
 .task-delegate { display: inline-grid; }
+.agent-icon, .issue-property[data-field="agent"] .agent-icon, [role="option"] .agent-icon { color: var(--violet); }

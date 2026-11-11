@@ -33,7 +33,7 @@ export function AgentSettings({ sessionToken }: { sessionToken: string }) {
 
     <section className="settings-group">
       <h4>How agents work here</h4>
-      <p className="settings-note">An agent is one of your connections that you mark as taking issues. People delegate an issue to it from the issue&apos;s Agent field; the human assignee stays. The agent hears about it through the issue.delegated webhook and <code>get_inbox</code>, and reports back in the issue&apos;s Activity.</p>
+      <p className="settings-note">An agent is one of your connections that you mark as taking issues. People delegate an issue to it from the issue&apos;s Agent field; the human assignee stays. The agent hears about it through the <code>issue.delegated</code> webhook and <code>get_inbox</code>, and reports back in the issue&apos;s Activity.</p>
       <p className="settings-note">The rule doesn&apos;t change: an agent refines the issue with its owner first, in comments. It builds only after the owner confirms. Needs spec stays a note until it has a description and acceptance criteria. Delegating starts nothing on its own.</p>
     </section>
 
