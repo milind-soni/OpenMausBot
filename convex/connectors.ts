@@ -9,7 +9,7 @@ import { createTaskRecord, deleteTaskRecord, updateTaskRecord } from "./tasks";
 import { priorityValidator } from "./lib/validators";
 import { isMcpConnectorToken } from "../lib/mcp-tokens";
 
-/** Personal access tokens and OAuth grants work only through the permission-checked MCP tools (convex/mcp.ts). */
+/** Personal access tokens and OAuth grants work only through the MCP tools (convex/mcp.ts), which never delete. */
 function rejectMcpToken(token: string) {
   if (isMcpConnectorToken(token)) throw new ConvexError("This token only works with the Origin MCP server");
 }

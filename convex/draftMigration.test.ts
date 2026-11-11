@@ -77,7 +77,7 @@ test("three bounded repair phases preserve old tasks and renamed Drafts across p
   for (const [index, row] of data.rows.entries()) expect((await t.query(api.tasks.board, { sessionToken: data.sessionToken, projectId: row.projectId })).columns).toEqual(columns[index]);
 });
 
-test.each([true, false])("legacy workflow repair preserves issues without gating GitHub synchronization (deep existing Draft: %s)", async deepDraft => {
+test.each([true, false])("large legacy Idea lookup fails closed until repair resolves semantic Draft (deep existing Draft: %s)", async deepDraft => {
   const t = convexTest(schema, modules);
   const data = await t.run(async ctx => {
     const projectId = await ctx.db.insert("projects", { name: "Large old board", ownerEmail: "draft-lookup@example.test", accent: "#123456", status: "active", repoUrl: "https://github.com/fixture/large-draft", githubWorkspaceAccess: true, createdAt: 1, updatedAt: 1 });
@@ -97,25 +97,25 @@ test.each([true, false])("legacy workflow repair preserves issues without gating
   const targets = async () => JSON.parse(await t.query(internal.integrations.unlinkedTasks, { cursor: null })).rows.map((row: { taskId: string }) => row.taskId);
   const snapshot = () => t.run(async ctx => Promise.all([data.ideaTask, data.deepTask, data.linkedTask].map(id => ctx.db.get(id))));
   const before = await snapshot();
-  expect(JSON.parse(await context()).task.done).toBe(false);
-  expect(await targets()).toContain(data.ideaTask);
-  expect(await targets()).toContain(data.deepTask);
+  await expect(context()).rejects.toThrow("Workflow repair required");
+  expect(await targets()).not.toContain(data.ideaTask);
+  if (deepDraft) expect(await targets()).not.toContain(data.deepTask);
   let cursor: string | null = null;
   do {
     const receipt: { cursor: string; isDone: boolean } = await t.mutation(internal.tasks.flagDraftColumns, { cursor });
     cursor = receipt.isDone ? null : receipt.cursor;
   } while (cursor);
   if (deepDraft) expect(JSON.parse(await context()).task.draft).toBe(false);
-  else expect(JSON.parse(await context()).task.draft).toBe(false);
+  else await expect(context()).rejects.toThrow("Workflow repair required");
   do {
     const receipt: { cursor: string; isDone: boolean } = await t.mutation(internal.tasks.selectLegacyDraftCandidates, { cursor });
     cursor = receipt.isDone ? null : receipt.cursor;
   } while (cursor);
-  if (!deepDraft) expect(JSON.parse(await context()).task.draft).toBe(false);
+  if (!deepDraft) await expect(context()).rejects.toThrow("Workflow repair required");
   await t.mutation(internal.tasks.repairProjectDrafts, { cursor: null });
   expect(JSON.parse(await context()).task.draft).toBe(!deepDraft);
-  expect(await targets()).toContain(data.ideaTask);
-  expect(await targets()).toContain(data.deepTask);
+  expect((await targets()).includes(data.ideaTask)).toBe(deepDraft);
+  if (deepDraft) expect(await targets()).not.toContain(data.deepTask);
   expect(await snapshot()).toEqual(before);
 });
 

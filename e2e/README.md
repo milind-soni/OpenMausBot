@@ -24,33 +24,9 @@ two runners sharing its backend/Next build directory; use separate worktrees for
 simultaneous invocations. Only remove a stale `.origin-data-e2e/runner.lock` after
 checking that its recorded PID has exited.
 
-On NixOS, use the checked-in free FHS runtime so the pinned Playwright Chromium and
-anonymous Convex binaries can load their Linux dependencies without changing global
-libraries or replacing the browser with a different revision:
-
-```sh
-origin_nix_bash="$(nix-build e2e/nixos.nix -A bootstrapShell --no-out-link)" &&
-  NIX_BUILD_SHELL="$origin_nix_bash/bin/bash" \
-  nix-shell e2e/nixos.nix --run 'steam-run npm run e2e -- --workers=1'
-```
-
-The shell pins nixpkgs revision `1d060086d60cb76a40cf37109f979d88a5bd6396`
-and its content hash. The explicit `NIX_BUILD_SHELL` also pins nix-shell's bootstrap
-Bash, which otherwise independently looks up `<nixpkgs>`, even when the shell's
-dependencies are pinned. This command needs no `NIX_PATH`, channel or flake registry.
-The first use needs network access if that source or its dependencies are not cached.
-It supplies Node 24 and the free `steam-run` runtime plus Chromium's NSS, NSPR,
-accessibility and Xcomposite libraries. It does not install Steam or change the
-owner's browser profile.
-
-Create the isolated checkout beneath your real `$HOME`, as the Origin runner does.
-Do not put it in `/tmp` or symlink it there: the FHS runtime has a private `/tmp`,
-so a host temporary checkout is not visible inside it. Keep that isolation enabled.
-The same local-backend guards and fixture isolation still apply.
-
-Alternatively, point `PLAYWRIGHT_BROWSERS_PATH` at a browser directory prepared for
-the exact installed Playwright version. The runner skips installation when that
-directory already contains its expected Chromium executable:
+On systems where Playwright's downloaded Chromium cannot run (for example NixOS), point
+`PLAYWRIGHT_BROWSERS_PATH` at a browser directory prepared for the same Playwright version; the
+runner then skips its own install:
 
 ```sh
 PLAYWRIGHT_BROWSERS_PATH=/path/to/prepared/browsers ORIGIN_E2E_PORT=3135 npm run e2e

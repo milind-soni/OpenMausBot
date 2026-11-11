@@ -24,8 +24,6 @@ import { useAnchoredPopover } from "./use-anchored-popover";
 import { SheetHeader } from "./sheet-header";
 import { useWorkspaceOnline } from "./workspace-connection";
 import { IssueDeleteDialog, IssueToastHost, LoadingState, showIssueToast, type OpenReference, type ProjectWithUi } from "./issue-shared";
-import { IssueExecution } from "./execution-runs";
-import { GitHubSyncStatus } from "./github-sync-status";
 
 type Priority = "low" | "medium" | "high";
 type Fields = { title: string; description: string; priority: Priority; assignedToEmail: string; dueDate: string };
@@ -352,8 +350,6 @@ function TaskModalContent({
             <div><dt>Updated</dt><dd title={formatDateTime(details.task.updatedAt)}>{formatDate(details.task.updatedAt)}</dd></div>
           </dl>
         </aside>
-        <GitHubSyncStatus projectId={projectId} taskId={taskId} task={details.task} sessionToken={sessionToken} canEdit={canEdit} />
-        <IssueExecution key={taskId} projectId={projectId} taskId={taskId} sessionToken={sessionToken} canEdit={canEdit} />
         <IssueRelations sessionToken={sessionToken} projectId={projectId} taskId={taskId} canEdit={canEdit} onOpen={openReference} />
         {!!attachments.length && <div className="issue-attachments" aria-label="Attachments">{attachments.map(asset => asset.localFileId
           ? <LocalAttachment key={asset._id} file={{ id: asset.localFileId, name: asset.name, size: asset.size || 0, contentType: asset.contentType || "application/octet-stream" }} sessionToken={sessionToken} scope={`teamId=${workspace._id}`} />

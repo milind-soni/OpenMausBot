@@ -33,12 +33,12 @@ describe("Draft column", () => {
     expect(f.columns.slice(1).some(column => column.isDraft)).toBe(false);
   });
 
-  test("the mirror tick includes Draft issues while retaining their workflow column", async () => {
+  test("the mirror tick skips draft issues and the context says which issues are drafts", async () => {
     const f = await fixture();
     const draft = await f.create(f.columns[0]._id, "Idea");
     const todo = await f.create(f.columns[1]._id, "Planned");
     const { rows } = JSON.parse(await f.t.query(internal.integrations.unlinkedTasks, { cursor: null })) as { rows: { taskId: string }[] };
-    expect(rows.map(row => row.taskId).sort()).toEqual([draft, todo].sort());
+    expect(rows.map(row => row.taskId)).toEqual([todo]);
     expect((await context(f, draft)).task.draft).toBe(true);
     expect((await context(f, todo)).task.draft).toBe(false);
     await f.t.mutation(api.tasks.moveTask, { sessionToken: f.sessionToken, projectId: f.projectId, taskId: draft, columnId: f.columns[1]._id });
@@ -46,13 +46,13 @@ describe("Draft column", () => {
     expect(after.rows.map(row => row.taskId).sort()).toEqual([draft, todo].sort());
   });
 
-  test("a GitHub close completes a synchronized issue even while it is in Draft", async () => {
+  test("a GitHub issue closed while its Origin issue is in Draft does not complete it, but one closed after it leaves Draft does", async () => {
     const f = await fixture();
     const taskId = await f.create(f.columns[0]._id, "Parked");
     const link = (state: "open" | "closed", updatedAt: number) => f.t.mutation(internal.integrations.linkIssue, { projectId: f.projectId, taskId, repoUrl, number: 7, issueUrl: `${repoUrl}/issues/7`, state, updatedAt });
     await link("open", 1000);
     await link("closed", 2000);
-    expect((await context(f, taskId)).task.done).toBe(true);
+    expect((await context(f, taskId)).task.done).toBe(false);
     await f.t.mutation(api.tasks.moveTask, { sessionToken: f.sessionToken, projectId: f.projectId, taskId, columnId: f.columns[1]._id });
     await link("open", 3000);
     expect((await context(f, taskId)).task.done).toBe(false);
@@ -60,26 +60,28 @@ describe("Draft column", () => {
     expect((await context(f, taskId)).task.done).toBe(true);
   });
 
-  test("moving back to Draft retains the same GitHub issue", async () => {
+  test("an issue moved back to Draft forgets its removed GitHub issue and gets a new one when it leaves", async () => {
     const f = await fixture();
     const taskId = await f.create(f.columns[1]._id, "Planned");
     await f.t.mutation(internal.integrations.linkIssue, { projectId: f.projectId, taskId, repoUrl, number: 7, issueUrl: `${repoUrl}/issues/7`, state: "open", updatedAt: 1000 });
-    await f.t.mutation(api.tasks.moveTask, { sessionToken: f.sessionToken, projectId: f.projectId, taskId, columnId: f.columns[0]._id });
-    const task = JSON.parse(await f.t.query(internal.integrations.context, { projectId: f.projectId, taskId })).task;
-    expect(task.githubIssueNumber).toBe(7);
-    expect(task.githubIssueUrl).toBe(`${repoUrl}/issues/7`);
-    const { rows } = JSON.parse(await f.t.query(internal.integrations.unlinkedTasks, { cursor: null }));
-    expect(rows).toEqual([]);
+    await f.t.mutation(internal.integrations.unlinkIssue, { projectId: f.projectId, taskId, number: 8 });
+    expect(JSON.parse(await f.t.query(internal.integrations.context, { projectId: f.projectId, taskId })).task.githubIssueNumber).toBe(7);
+    await f.t.mutation(internal.integrations.unlinkIssue, { projectId: f.projectId, taskId, number: 7 });
+    const task = JSON.parse(await f.t.query(internal.integrations.context, { projectId: f.projectId, taskId })).task as Record<string, unknown>;
+    expect(task.githubIssueNumber).toBeUndefined();
+    expect(task.githubIssueUrl).toBeUndefined();
+    const { rows } = JSON.parse(await f.t.query(internal.integrations.unlinkedTasks, { cursor: null })) as { rows: { taskId: string }[] };
+    expect(rows.map(row => row.taskId)).toEqual([taskId]);
   });
 
-  test("the legacy GitHub issue action queues Draft issues", async () => {
+  test("the legacy GitHub issue action keeps Draft issues private", async () => {
     const f = await fixture();
     const taskId = await f.create(f.columns[0]._id, "Confidential draft");
-    expect(await f.t.action(api.github.createIssueForTask, { sessionToken: f.sessionToken, projectId: f.projectId, taskId }))
-      .toMatchObject({ ok: false, message: expect.stringContaining("queued") });
+    await expect(f.t.action(api.github.createIssueForTask, { sessionToken: f.sessionToken, projectId: f.projectId, taskId }))
+      .rejects.toThrow("Draft");
   });
 
-  test("repository snapshots complete synchronized Draft issues", async () => {
+  test("legacy repository snapshots do not complete parked Draft issues", async () => {
     const f = await fixture();
     const taskId = await f.create(f.columns[0]._id, "Parked");
     await f.t.mutation(internal.integrations.linkIssue, { projectId: f.projectId, taskId, repoUrl, number: 7, issueUrl: `${repoUrl}/issues/7`, state: "open", updatedAt: 1000 });
@@ -88,10 +90,10 @@ describe("Draft column", () => {
       issues: [{ number: 7, title: "Parked", state: "closed", url: `${repoUrl}/issues/7`, updatedAt: 2000 }], pullRequests: [],
     });
     await snapshot();
-    expect((await context(f, taskId)).task.done).toBe(true);
+    expect((await context(f, taskId)).task.done).toBe(false);
     await f.t.mutation(api.tasks.moveTask, { sessionToken: f.sessionToken, projectId: f.projectId, taskId, columnId: f.columns[1]._id });
     await snapshot();
-    expect((await context(f, taskId)).task.done).toBe(true);
+    expect((await context(f, taskId)).task.done).toBe(false);
     await f.t.mutation(internal.integrations.completeMergedIssue, { projectId: f.projectId, taskId, repoUrl, issueNumber: 7, pullRequest: { number: 9, headSha: "a".repeat(40), mergeSha: "b".repeat(40), mergedAt: 3000 } });
     expect((await context(f, taskId)).task.done).toBe(true);
   });
@@ -105,7 +107,7 @@ describe("Draft column", () => {
     expect(columns.find(column => column._id === todo)).toMatchObject({ title: "Ideas", isDraft: true });
   });
 
-  test("newly created Draft columns remain synchronized after a rename", async () => {
+  test("newly created Draft columns stay private after a rename", async () => {
     const f = await fixture();
     const columnId = await f.t.mutation(api.tasks.createColumn, { sessionToken: f.sessionToken, projectId: f.projectId, title: "Draft" });
     const taskId = await f.create(columnId, "Unannounced idea");
@@ -113,10 +115,10 @@ describe("Draft column", () => {
 
     expect((await context(f, taskId)).task.draft).toBe(true);
     const { rows } = JSON.parse(await f.t.query(internal.integrations.unlinkedTasks, { cursor: null })) as { rows: { taskId: string }[] };
-    expect(rows.map(row => row.taskId)).toContain(taskId);
+    expect(rows.map(row => row.taskId)).not.toContain(taskId);
   });
 
-  test("renaming a legacy unflagged Draft column preserves its workflow flag", async () => {
+  test("renaming a legacy unflagged Draft column keeps its issues private", async () => {
     const f = await fixture();
     const columnId = f.columns[0]._id;
     await f.t.run(ctx => ctx.db.patch(columnId, { isDraft: undefined }));

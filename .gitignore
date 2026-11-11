@@ -12,8 +12,6 @@ skills-lock.json
 npm-debug.log*
 .origin-data*/
 *.tsbuildinfo
-__pycache__/
-*.py[cod]
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

@@ -13,7 +13,6 @@ import { compareStoredColumns, compareWorkflowColumns, DEFAULT_WORKFLOW_COLUMNS,
 import { DRAFT_COLUMN_TITLE, isLegacyIdeaColumn } from "../lib/origin-columns";
 import { compareTaskOrder, planTaskMove } from "../lib/task-order";
 import schema from "./schema";
-import { enqueueIssue } from "./githubLifecycle";
 
 const columnDoc = v.object({ ...schema.tables.columns.validator.fields, _id: v.id("columns"), _creationTime: v.number() });
 const taskDoc = v.object({ ...schema.tables.tasks.validator.fields, _id: v.id("tasks"), _creationTime: v.number() });
@@ -242,7 +241,8 @@ export const deleteColumn = mutation({
       const target = args.moveToColumnId ? await ctx.db.get(args.moveToColumnId) : null;
       if (!target || target._id === column._id || target.projectId !== args.projectId) throw new ConvexError("Choose a destination for the issues in this column");
       if (isDoneColumn(target) && tasks.some(task => !task.done)) throw new ConvexError("Complete the open issues before moving them to Done");
-      for (const [index, task] of tasks.entries()) await ctx.db.patch(task._id, { columnId: target._id, order: Date.now() + index, updatedAt: Date.now() });
+      for (const [index, task] of tasks.entries()) await ctx.db.patch(task._id, { columnId: target._id, order: Date.now() + index, updatedAt: Date.now(),
+        ...(!task.done && task.githubIssueNumber && isDraftColumn(column) && !isDraftColumn(target) ? { githubIssueReopenRequested: true } : {}) });
     }
     await ctx.db.delete(args.columnId);
     await ensureDraftColumn(ctx, args.projectId);
@@ -301,7 +301,6 @@ export async function createTaskRecord(ctx: MutationCtx, args: { projectId: Id<"
       createdAt: now,
       updatedAt: now,
     });
-    await enqueueIssue(ctx, (await ctx.db.get(taskId))!);
     await changeOpenIssueCount(ctx, args.projectId, done ? 0 : 1);
     await touchProject(ctx, args.projectId);
     if (project?.teamId && assignee) await notify(ctx, { teamId: project.teamId, email: assignee.email, actorId, kind: "assignment", eventId: `created:${taskId}`, projectId: project._id, taskId });
@@ -428,7 +427,6 @@ export async function updateTaskRecord(ctx: MutationCtx, args: { projectId: Id<"
     if (patch.done === true && !task.done) patch.githubIssueReopenRequested = undefined;
     if (patch.done !== undefined) await recordCompletion(ctx, task, patch.done);
     await ctx.db.patch(args.taskId, patch);
-    if (args.title !== undefined || args.description !== undefined || args.done !== undefined) await enqueueIssue(ctx, (await ctx.db.get(args.taskId))!);
     if (patch.assignedToEmail && patch.assignedToEmail !== task.assignedToEmail) {
       const project = await ctx.db.get(args.projectId);
       if (project?.teamId) await notify(ctx, { teamId: project.teamId, email: patch.assignedToEmail, actorId, kind: "assignment", eventId: `assigned:${task._id}:${crypto.randomUUID()}`, projectId: project._id, taskId: task._id });
@@ -457,7 +455,8 @@ export async function moveTaskRecord(ctx: MutationCtx, args: { projectId: Id<"pr
     if (!column || column.projectId !== args.projectId) throw new ConvexError("Column not found");
     if (!task.done && isDoneColumn(column)) throw new ConvexError("Complete this issue before moving it to Done");
     const reopenAsDraft = task.done && isDraftColumn(column);
-    const reopen = reopenAsDraft;
+    const previousColumn = task.githubIssueNumber && !task.done && !isDraftColumn(column) ? await ctx.db.get(task.columnId) : null;
+    const reopen = Boolean(previousColumn && isDraftColumn(previousColumn));
     const columnTasks = await ctx.db.query("tasks").withIndex("by_column", (q) => q.eq("columnId", args.columnId)).collect();
     const plan = planTaskMove(columnTasks, args.taskId, args.beforeTaskId);
     if (plan.noop && !reopen && !reopenAsDraft) return;
@@ -466,10 +465,6 @@ export async function moveTaskRecord(ctx: MutationCtx, args: { projectId: Id<"pr
     await ctx.db.patch(args.taskId, { columnId: args.columnId, order, updatedAt: Date.now(), ...(reopen ? { githubIssueReopenRequested: true } : {}),
       ...(reopenAsDraft ? { done: false, completionPullRequest: undefined } : {}) });
     if (reopenAsDraft) await changeOpenIssueCount(ctx, args.projectId, 1);
-    if (reopenAsDraft) {
-      await recordCompletion(ctx, task, false);
-      await enqueueIssue(ctx, (await ctx.db.get(args.taskId))!);
-    }
     await touchProject(ctx, args.projectId);
 }
 
@@ -618,10 +613,9 @@ export const authorizeLocalFile = query({
   },
 });
 
-export async function deleteTaskRecord(ctx: MutationCtx, args: { projectId: Id<"projects">; taskId: Id<"tasks"> }, fromGitHub = false) {
+export async function deleteTaskRecord(ctx: MutationCtx, args: { projectId: Id<"projects">; taskId: Id<"tasks"> }) {
     const task = await ctx.db.get(args.taskId);
     if (!task || task.projectId !== args.projectId) throw new ConvexError("Issue not found");
-    if (!fromGitHub) await enqueueIssue(ctx, task, true);
     const comments = await ctx.db.query("taskComments").withIndex("by_task", (q) => q.eq("taskId", args.taskId)).collect();
     const assets = await ctx.db.query("taskAssets").withIndex("by_task", (q) => q.eq("taskId", args.taskId)).collect();
     for (const comment of comments) await ctx.db.delete(comment._id);

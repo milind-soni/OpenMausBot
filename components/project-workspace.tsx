@@ -18,8 +18,6 @@ import { ContentSkeleton } from "./content-skeleton";
 import { ConfirmButton } from "./confirm-button";
 import { useWorkspace } from "./workspace-context";
 import type { AuthUser } from "./origin-app";
-import { ExecutionSettings } from "./execution-settings";
-import { GitHubSyncStatus } from "./github-sync-status";
 
 export type TabKey = "issues" | "assets" | "vault" | "repo" | "feedback" | "settings";
 type ProjectIconType = "default" | "emoji" | "icon" | "image";
@@ -357,7 +355,7 @@ function SettingsTab({ project, sessionToken }: { project: ProjectWithUi; sessio
     try { await updateProject({ projectId: project._id, sessionToken, status }); }
     catch (error) { setStatusError(errorText(error, "Could not update project")); }
   };
-  if (!["owner", "admin"].includes(project.memberRole)) return <div className="project-settings"><section className="project-settings-section"><h2>Automation & environments</h2><ExecutionSettings key={project._id} projectId={project._id} sessionToken={sessionToken} /></section><section className="project-settings-section"><h2>Members</h2><ProjectMembers projectId={project._id} sessionToken={sessionToken} /></section></div>;
+  if (!["owner", "admin"].includes(project.memberRole)) return <div className="project-settings"><section className="project-settings-section"><h2>Members</h2><ProjectMembers projectId={project._id} sessionToken={sessionToken} /></section></div>;
   const previewProject = iconType === "image" ? { iconType: "image", iconUrl: preview || (project.iconType === "image" ? project.iconUrl : null) } : { iconType, iconValue: iconType === "emoji" ? iconEmoji : iconName };
   return <div className="project-settings">
     <section className="project-settings-section" aria-labelledby="project-settings-general">
@@ -384,10 +382,6 @@ function SettingsTab({ project, sessionToken }: { project: ProjectWithUi; sessio
           <button className="primary-button compact" disabled={busy || !dirty}>{busy && <Loader2 className="spin" size={13} />}{saved && !dirty ? "Saved" : "Save"}</button>
         </div>
       </form>
-    </section>
-    <section className="project-settings-section" aria-labelledby="project-settings-automation">
-      <h2 id="project-settings-automation">Automation & environments</h2>
-      <ExecutionSettings key={project._id} projectId={project._id} sessionToken={sessionToken} />
     </section>
     <section className="project-settings-section" aria-labelledby="project-settings-members">
       <h2 id="project-settings-members">Members</h2>
@@ -422,7 +416,6 @@ function RepoTab({ project, sessionToken }: { project: Doc<"projects"> & { membe
     return <section className="repo-dashboard">
       <ProjectEmpty icon={creating ? Loader2 : GitBranch} spin={creating} title={creating ? "Creating repository" : "No repository"}>
         {project.githubRepoError && <p className="notice danger" role="alert">{project.githubRepoError}</p>}
-        {project.githubSyncError && <p className="notice danger" role="alert">GitHub synchronization: {project.githubSyncError}</p>}
         {admin && !creating && <button className="primary-button compact" onClick={() => setSettingsOpen(true)}><GitBranch size={14} />Connect repository</button>}
       </ProjectEmpty>
       {settings}
@@ -435,8 +428,6 @@ function RepoTab({ project, sessionToken }: { project: Doc<"projects"> & { membe
         {github.loading && github.settled && <Loader2 className="spin repo-refreshing" size={14} aria-label="Refreshing" />}
         {admin && <button className="ghost-button compact" onClick={() => setSettingsOpen(true)}><Settings2 size={14} />Configure</button>}
       </div>
-      <GitHubSyncStatus projectId={project._id} sessionToken={sessionToken} canEdit={admin} />
-      {project.githubSyncError && <p className="notice danger" role="alert">GitHub synchronization: {project.githubSyncError}</p>}
       {github.error && <div className="notice danger" role="alert">{github.error}</div>}
       {github.snapshot?.commitsError && <div className="notice">{github.snapshot.commitsError}</div>}
       {!github.error && <div className="segmented-control repo-switch" role="group" aria-label="Show">{([["commits", "Commits", commits?.length], ["issues", "Issues", github.snapshot?.issues.length], ["pulls", "Pull requests", github.snapshot?.pullRequests.length]] as const).map(([key, label, count]) => <button key={key} type="button" className={shown === key ? "active" : ""} aria-pressed={shown === key} onClick={() => setShown(key)}>{label}{count ? <span>{count}</span> : null}</button>)}</div>}

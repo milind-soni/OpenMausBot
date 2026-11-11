@@ -13,11 +13,5 @@ export function parseGitHubEvent(body: string, kind: string, deliveryId: string)
   if (numbers.length > 100 || numbers.some(n => !Number.isSafeInteger(n) || Number(n) < 1) || (["issues", "pull_request", "pull_request_review"].includes(kind) && !numbers.length)) throw new Error("Invalid issue or PR number");
   const headSha = ["check_run", "check_suite"].includes(kind) ? item?.head_sha : undefined;
   if (["check_run", "check_suite"].includes(kind) && (typeof headSha !== "string" || !/^[a-f0-9]{40,64}$/i.test(headSha))) throw new Error("Invalid head SHA");
-  let issueEvent: { deleted: boolean; repoId: number; nodeId: string; updatedAt: number } | undefined;
-  if (kind === "issues") {
-    const repoId = payload.repository?.id, nodeId = payload.issue?.node_id, updatedAt = Date.parse(payload.issue?.updated_at);
-    if (!Number.isSafeInteger(repoId) || repoId < 1 || typeof nodeId !== "string" || !nodeId || !Number.isFinite(updatedAt) || payload.issue?.pull_request) throw new Error("Invalid issue identity");
-    issueEvent = { deleted: payload.action === "deleted", repoId, nodeId, updatedAt };
-  }
-  return { repoUrl: `https://github.com/${repo}`, numbers: numbers as number[], headSha: headSha as string | undefined, issueEvent, deliveryId, fingerprint: createHash("sha256").update(`${kind}\n${body}`).digest("hex") };
+  return { repoUrl: `https://github.com/${repo}`, numbers: numbers as number[], headSha: headSha as string | undefined, deliveryId, fingerprint: createHash("sha256").update(`${kind}\n${body}`).digest("hex") };
 }

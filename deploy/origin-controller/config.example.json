@@ -1,6 +1,0 @@
-{
-  "url": "https://origin.example.invalid/api/execution/controller",
-  "tailscaleBinary": "/usr/bin/tailscale",
-  "boxdBinary": "/opt/origin-controller/boxd/0.3.3/boxd",
-  "peers": []
-}

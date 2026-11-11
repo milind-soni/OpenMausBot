@@ -26,14 +26,14 @@ async function fixture() {
 }
 
 describe("Draft defaults at the task and workflow boundary", () => {
-  test("an omitted task column defaults to Draft and participates in GitHub discovery", async () => {
+  test("an omitted task column defaults to Draft and stays out of GitHub discovery", async () => {
     const f = await fixture();
     const taskId = await f.create("Private new idea");
     const task = await f.t.run(ctx => ctx.db.get(taskId));
     expect(task?.columnId).toBe(f.columns[0]._id);
     expect(task?.done).toBe(false);
     const targets = JSON.parse(await f.t.query(internal.integrations.unlinkedTasks, { cursor: null }));
-    expect(targets.rows.map((row: { taskId: string }) => row.taskId)).toContain(taskId);
+    expect(targets.rows.map((row: { taskId: string }) => row.taskId)).not.toContain(taskId);
   });
 
   test("an explicit valid active column remains authoritative", async () => {
@@ -108,7 +108,7 @@ describe("Draft defaults at the task and workflow boundary", () => {
     expect((await f.t.run(ctx => ctx.db.get(taskId)))?.columnId).toBe(f.columns[0]._id);
   });
 
-  test("repair keeps renamed and additional Draft columns without adopting a separate Idea", async () => {
+  test("repair keeps renamed and additional Drafts private without adopting a separate Idea", async () => {
     const f = await fixture();
     await f.t.run(ctx => ctx.db.patch(f.columns[0]._id, { title: "Private backlog", order: 50 }));
     const otherDraft = await f.t.mutation(api.tasks.createColumn, { sessionToken: f.sessionToken, projectId: f.projectId, title: "Draft" });
@@ -120,7 +120,7 @@ describe("Draft defaults at the task and workflow boundary", () => {
     expect(board.columns.find(column => column._id === idea)).toMatchObject({ title: "Idea" });
     expect(board.tasks.find(task => task._id === taskId)?.columnId).toBe(otherDraft);
     const targets = JSON.parse(await f.t.query(internal.integrations.unlinkedTasks, { cursor: null }));
-    expect(targets.rows.map((row: { taskId: string }) => row.taskId)).toContain(taskId);
+    expect(targets.rows.map((row: { taskId: string }) => row.taskId)).not.toContain(taskId);
   });
 
   test("explicit false Draft flags and explicit active task choices survive repair", async () => {
@@ -189,7 +189,7 @@ describe("Draft defaults at the task and workflow boundary", () => {
     expect((await f.t.run(ctx => ctx.db.get(explicit)))?.priority).toBe("low");
   });
 
-  test("pending legacy Idea tasks participate in mirror discovery before repair", async () => {
+  test("pending legacy Idea tasks stay out of mirror discovery and publish context before repair", async () => {
     const f = await fixture();
     const taskId = await f.t.run(async ctx => {
       await ctx.db.patch(f.columns[0]._id, { title: "Idea", isDraft: undefined });
@@ -198,7 +198,7 @@ describe("Draft defaults at the task and workflow boundary", () => {
     const context = JSON.parse(await f.t.query(internal.integrations.context, { projectId: f.projectId, taskId }));
     expect(context.task.draft).toBe(true);
     const targets = JSON.parse(await f.t.query(internal.integrations.unlinkedTasks, { cursor: null }));
-    expect(targets.rows.map((row: { taskId: string }) => row.taskId)).toContain(taskId);
+    expect(targets.rows.map((row: { taskId: string }) => row.taskId)).not.toContain(taskId);
   });
 
   test.each(["existing Draft", "explicit false"])("ordinary Idea remains publishable with %s", async control => {

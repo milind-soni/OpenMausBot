@@ -1,6 +1,6 @@
 # Origin
 
-A self-hosted team workspace: projects with an issue board, inbox, chat, calls, a shared Draw canvas, GitHub sync and supervised coding runners. Built with Next.js and Convex.
+A self-hosted team workspace: projects with an issue board, inbox, chat, calls, a shared Draw canvas and GitHub sync. Built with Next.js and Convex.
 
 ## Run locally
 
@@ -49,14 +49,6 @@ Checks: `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`, `npm r
 
    The app listens on `127.0.0.1:3000`; put an HTTPS reverse proxy in front that overwrites `X-Real-IP`, set `ORIGIN_TRUSTED_PROXY=1`, and persist the `origin-data` volume. Deploy the Convex backend before a new web image. Details, email, TURN and the pre-deploy checklist: [deploy/README.md](deploy/README.md).
 
-### Coding machines and subscription usage
-
-Settings → Machines enrolls a Node.js service on each approved machine. Origin starts the chosen native CLI in a separate Git worktree; it does not open a desktop terminal. Follow output and approvals in Origin, or inspect the local service journal. Existing interactive CLI installations and personal checkouts remain separate.
-
-Settings → Accounts & usage shows native account identity, subscription windows, reset times and freshness. Execution settings select account, harness, model, effort and fallback priority per workspace, project or task. NixOS is preferred; Mac is Apple-only unless explicitly selected. Boxd or Boat may be used only when eligible local machines are independently confirmed offline, not merely busy or paused. Cloud provider switching is explicit.
-
-Verification and a runnable smoke check gate merging the exact task SHA into `main`; deployment is a separate receipt. Scoped automation environments do not replace the personal passphrase vault. Enrollment, update and cloud safety details: [supervised execution](deploy/README.md#8-supervised-coding-execution).
-
 ## Connect AI agents (MCP)
 
 Origin is a remote MCP server at `https://<your-origin>/api/mcp` (Streamable HTTP). Agents act as you, with your workspace and project permissions. Settings → Agents has the URL, per-client setup and access tokens.
@@ -78,8 +70,7 @@ claude mcp add --transport http origin https://<your-origin>/api/mcp --header "A
 ```
 
 - **Tested with:** Claude Code 2.1 (token), Codex 0.166, OpenCode 1.19 and omp 18.14 (token and OAuth). ChatGPT developer mode uses OAuth and needs a public HTTPS address.
-- **Tools:** `get_workspace`, `list_projects`, `list_issues`, `get_issue`, `get_inbox`, `list_members`; with write access, `create_issue`, `update_issue`, `move_issue`, `delete_issue`, `add_comment`.
-- **Execution tools:** `list_execution_hosts`, `get_execution_usage`, `list_execution_runs`, `get_execution_run`; with write access, `start_execution_run`, `cancel_execution_run`, `message_execution_run`, `set_execution_policy`. Policy changes cannot grant cloud spending, paid API access, or weaker verification and merge gates.
+- **Tools:** `get_workspace`, `list_projects`, `list_issues`, `get_issue`, `get_inbox`, `list_members`, and with write access `create_issue`, `update_issue`, `move_issue`, `add_comment`.
 
 Revoke connections and tokens in Settings → Agents.
 

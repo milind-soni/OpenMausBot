@@ -7,7 +7,7 @@ import { hashToken } from "./lib/auth";
 import { canEdit, projectMember, projectPeople, requireTeamMember } from "./lib/permissions";
 import { compareWorkflowColumns, isDoneColumn, isDraftColumn, normalizeColumnTitle } from "./lib/columns";
 import { priorityValidator } from "./lib/validators";
-import { addCommentRecord, createTaskRecord, deleteTaskRecord, moveTaskRecord, updateTaskRecord } from "./tasks";
+import { addCommentRecord, createTaskRecord, moveTaskRecord, updateTaskRecord } from "./tasks";
 import { containsMention, mentionToken } from "../lib/issue-mentions";
 import { OAUTH_GRANT_PREFIX, PAT_PREFIX } from "../lib/mcp-tokens";
 import { compareTaskOrder } from "../lib/task-order";
@@ -334,16 +334,6 @@ export const addComment = mutation({
     const mentions = (await projectPeople(ctx, project)).filter(p => containsMention(a.body, mentionToken(p))).slice(0, 20).map(p => ({ userId: p.userId, token: mentionToken(p) }));
     const commentId = await addCommentRecord(ctx, { projectId: project._id, taskId: task._id, body: a.body, mentions }, access.user, project);
     return json({ id: commentId, issueId: task._id, mentioned: mentions.map(m => m.token) });
-  }),
-});
-
-export const deleteIssue = mutation({
-  args: { ...token, issueId: v.string() }, returns: v.string(),
-  handler: (ctx, a) => guard(async () => {
-    const access = await writer(ctx, a.token);
-    const { task, project } = await resolveIssue(ctx, access, a.issueId, true);
-    await deleteTaskRecord(ctx, { projectId: project._id, taskId: task._id });
-    return json({ id: task._id, deleted: true, githubDeletion: "queued" });
   }),
 });
 

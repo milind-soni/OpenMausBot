@@ -6,7 +6,6 @@ import { recordCompletion } from "./lib/completions";
 import { agentsTables } from "./agentsTables";
 import { internal } from "./_generated/api";
 import { reserveTaskBranch } from "./lib/taskBranches";
-import { enqueueIssue } from "./githubLifecycle";
 
 export const prState = v.union(v.literal("draft"), v.literal("open"), v.literal("closed"), v.literal("merged"));
 export const snapshot = v.object({ number: v.number(), url: v.string(), branch: v.string(), headSha: v.string(), baseSha: v.string(), state: prState, checks: v.string(), review: v.string(), mergeable: v.union(v.boolean(), v.null()), githubUpdatedAt: v.number() });
@@ -77,9 +76,8 @@ export async function applySnapshot(ctx: MutationCtx, row: Doc<"taskPullRequests
   const wasActive = row.state === "open" || row.state === "draft";
   if (active && (!row.githubUpdatedAt || !wasActive)) { previousColumnId = !row.githubUpdatedAt && row.previousColumnId ? row.previousColumnId : task.columnId; if (review) columnId = review._id; }
   if (s.state === "closed" && wasActive && previousColumnId && columns.some(c => c._id === previousColumnId)) columnId = previousColumnId;
-  const newlyMerged = s.state === "merged" && row.state !== "merged";
-  const done = newlyMerged ? true : task.done;
-  if (newlyMerged) {
+  const done = s.state === "merged";
+  if (done) {
     let doneColumn = columns.find(c => c._id === project.githubDoneColumnId) ?? columns.find(c => c.isDone || /^done$/i.test(c.title.trim()));
     if (!doneColumn) {
       const id = await ctx.db.insert("columns", { projectId: project._id, title: "Done", isDone: true, order: Math.max(-1, ...columns.map(c => c.order)) + 1, createdAt: Date.now(), updatedAt: Date.now() });
@@ -91,7 +89,6 @@ export async function applySnapshot(ctx: MutationCtx, row: Doc<"taskPullRequests
   if (task.done !== done) await changeOpenIssueCount(ctx, project._id, done ? -1 : 1);
   if (task.githubTaskMode !== "pull_request" || task.done !== done || task.columnId !== columnId) {
     await ctx.db.patch(task._id, { githubTaskMode: "pull_request", done, columnId, updatedAt: Date.now() });
-    if (task.done !== done) await enqueueIssue(ctx, (await ctx.db.get(task._id))!);
     await touchProject(ctx, project._id);
   }
   await ctx.db.patch(row._id, { ...s, repository: repoName(s.url.split("/pull/")[0]), previousColumnId, appliedSequence: sequence, updatedAt: Date.now() });
@@ -174,8 +171,7 @@ export const delivery = internalMutation({
     const old = await ctx.db.query("githubDeliveries").withIndex("by_deliveryId", q => q.eq("deliveryId", a.deliveryId)).unique();
     if (old && old.fingerprint !== a.fingerprint) throw new ConvexError("Delivery payload collision");
     if (a.finishLease !== undefined) { if (old?.lease === a.finishLease) await ctx.db.patch(old._id, { state: "done" }); return null; }
-    if (old?.state === "done") return null;
-    if (old && old.lease > Date.now() - 90000) throw new ConvexError("Delivery already processing; retry after its lease expires");
+    if (old && (old.state === "done" || old.lease > Date.now() - 90000)) return null;
     const lease = Date.now();
     if (old) await ctx.db.patch(old._id, { state: "processing", lease });
     else await ctx.db.insert("githubDeliveries", { deliveryId: a.deliveryId, fingerprint: a.fingerprint, state: "processing", lease, expiresAt: Date.now() + 30 * 86400000 });

@@ -42,8 +42,6 @@ From the repository root:
 docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 ```
 
-The image builds Next.js once and runs its standalone Node server; development tooling is not started in production. Runner source is included for authenticated bootstrap and signed release downloads.
-
 The app listens on `127.0.0.1:3000`. Route your HTTPS reverse proxy to it. Preserve `Host`, set `X-Forwarded-Proto`, and **overwrite** `X-Real-IP` with the actual client address, then set `ORIGIN_TRUSTED_PROXY=1` in `.env`. With nginx:
 
 ```nginx
@@ -73,17 +71,11 @@ One GitHub App serves every workspace on the instance, so only the instance oper
 | Request user authorization (OAuth) during installation | off |
 | Setup URL | `https://origin.example.com/api/github/oauth/install` |
 | Webhook | active, URL `https://origin.example.com/api/github/webhook`, secret = `GITHUB_WEBHOOK_SECRET` |
-| Repository permissions | Administration, Contents, Issues, Pull requests: read and write; Checks, Commit statuses, Deployments, Metadata: read |
+| Repository permissions | Administration, Contents, Issues, Pull requests: read and write; Checks, Metadata: read |
 | Events | Issues, Pull request, Pull request review, Check suite, Check run |
 | Where can it be installed | Any account (members connect their own personal accounts) |
 
 Then install the App on the accounts that own the repositories and finish account authorization for each workspace from **Settings > Integrations**.
-
-The setup button posts GitHub's App manifest to `https://github.com/settings/apps/new`. Origin's CSP permits that exact external form destination, not arbitrary external form submissions; preserve this exception if a reverse proxy adds its own CSP. Setup remains limited to three attempts per minute per authorized operator and returns HTTP 429 with `Retry-After` when exhausted.
-
-An older workspace's legacy GitHub token does not configure this instance-wide App. New workspaces remain unavailable until the operator completes App setup. The web OAuth callback then shares the verified App installation through `teamGitHub`, so backend repository creation and scoped runner credentials use the same workspace connection. Reconnect preserves other workspaces; disconnect removes only the selected workspace's shared connection and retains its repositories. Authorization is checked again when the connection is committed.
-
-Existing App installations must approve added read-only Commit statuses and Deployments permissions. Merge checks still respect required reviews, branch protection and rulesets; the integration never bypasses them.
 
 Repository creation uses the connected administrator's personal account and creates private repositories. For an existing repository, an admin must approve workspace access. A fine-grained project token is an optional alternative; never ask ordinary members for a server-wide token.
 
@@ -117,12 +109,11 @@ Allow TCP/UDP 3478 and UDP 49160-49260. Keep the TURN secret identical in the ap
 
 Run through this before every production deploy:
 
-- [ ] **Convex first, verified target.** Follow section 7 for an existing installation. Use `convex deploy` only for the explicitly selected production deployment; a hosted app can legitimately use a named development deployment. Export the actual target before pushing additive schema/functions, then build and start the web image.
+- [ ] **Convex first.** `npx convex deploy` with the production deploy key (kept in your secret store, never in the repo or a shell profile), then build and start the web image.
 - [ ] **Scheduled jobs.** In the Convex dashboard (Schedules), every pending job targets a function the new release still has. Jobs for the stubbed `agentRuns.promoteQueued`, `standup.runAll` and `standup.runProject` finish as no-ops (section 7).
 - [ ] **Convex env** (`npx convex env list`): `ORIGIN_INTEGRATION_SECRET` equal to the server's, `ORIGIN_SEALING_KEY` unchanged, `ORIGIN_PUBLIC_URL` is the HTTPS origin without a trailing slash, `ORIGIN_SIGNUP_MODE` as intended.
-- [ ] **Server `.env`:** `NEXT_PUBLIC_CONVEX_URL` and `NEXT_PUBLIC_CONVEX_SITE_URL` point at the verified live deployment (they are baked in at build time), same `ORIGIN_PUBLIC_URL` and `ORIGIN_INTEGRATION_SECRET`, GitHub variables when you use an existing App.
+- [ ] **Server `.env`:** `NEXT_PUBLIC_CONVEX_URL` and `NEXT_PUBLIC_CONVEX_SITE_URL` point at the production deployment (they are baked in at build time), same `ORIGIN_PUBLIC_URL` and `ORIGIN_INTEGRATION_SECRET`, GitHub variables when you use an existing App.
 - [ ] **`ORIGIN_TRUSTED_PROXY=1`** only when the proxy overwrites `X-Real-IP`; otherwise leave it unset.
-- [ ] **Runtime dependency audit:** review `npm audit --omit=dev` before cutover. Apply compatible security fixes and exercise the affected runtime behavior; do not use forced major upgrades merely to clear an audit count. Sanitizer version overrides must not restore a known-vulnerable release.
 - [ ] **`ORIGIN_ADMIN_EMAILS`** lists the operator accounts, and those accounts exist.
 - [ ] **`/data/origin`** is the persisted volume and has a current backup.
 - [ ] **Smoke after deploy:** sign in, open a project board and an issue, send a chat message, check that `https://origin.example.com/api/mcp` answers 401 without a token, and read the app and Convex logs for errors. The full list is in section 5.
@@ -131,118 +122,8 @@ Run through this before every production deploy:
 
 Do not replace or import production data merely to publish code.
 
-1. **Verify the existing backend target, then push Convex before the web image.** Read the running web image's `NEXT_PUBLIC_CONVEX_URL`; do not assume the CLI's default production deployment is the hosted application's backend. For an existing development deployment, use `npx convex dev --once --env-file <private-target-file>` with the verified `CONVEX_DEPLOYMENT`, not an unqualified `convex deploy`. Export that exact named deployment before mutation. New web code calls new Convex functions; schema changes must remain additive so the previous web image can be restored.
+1. **Deploy Convex first, then the web image.** New web code calls Convex functions that only exist after `npx convex deploy`; old web code keeps working against the new functions because changes are additive.
 2. **Pending jobs for removed functions are absorbed.** This release removes the desktop-only modules. Production may still hold scheduled jobs for `agentRuns.promoteQueued`, `standup.runAll`, `standup.runProject` (or an in-flight run of the old `agentRuns.expireStale` and `realtime.cleanup` crons); this release keeps no-op stubs with the same names and arguments (`convex/agentRuns.ts`, `convex/standup.ts`, `convex/realtime.ts`), so those jobs finish without doing anything. The stubs are removed in a later release, so do not skip this release when upgrading from the desktop backend.
 3. **Crons.** Convex replaces the cron table on deploy, so the removed crons (including the daily 07:00 UTC standup) stop afterwards.
 4. **Check the reverse proxy** sets `X-Real-IP` as above before setting `ORIGIN_TRUSTED_PROXY=1`.
 5. After the web image is up, run the checks in section 5.
-
-## 8. Supervised coding execution
-
-Origin owns issue state, execution policy, approvals and receipts. A runner is a Node.js 24 service on each coding machine, not a Claude skill. It starts the explicitly selected native CLI in an isolated worktree. Origin always exposes redacted logs and approvals; optional Herdr and Rex consoles provide another task view without opening or focusing the desktop application. Personal checkouts and existing CLI installations are not replaced. Assigning a human issue owner does not dispatch coding: use **Develop** or the authorized `start_execution_run` tool.
-
-A worktree isolates Git state, not operating-system access. Native coding tools run with the runner user's filesystem privileges, subject to their supported approval controls. Use a separate OS account or disposable cloud worker for code that must not share your personal user's access.
-
-### Enroll a local machine
-
-1. From a trusted Origin checkout, run `node runner/cli.mjs install`. This writes the versioned runner, local alias and systemd-user/launchd assets; it does not start them.
-2. In **Settings > Machines**, select the machine kind, exact Tailscale name and explicitly approved projects. Generate a one-time enrollment.
-3. Run the displayed command on that machine. Paste the separate token only into its hidden terminal prompt, never into shell arguments, chat or source. Enrollment expires after fifteen minutes and is single-use.
-4. Run the activation command printed by the installer. For a foreground run instead, use `node runner/cli.mjs run`.
-
-`origin-runner status --refresh` inspects native sign-in, model and usage metadata without sending a model prompt. `pause` prevents new claims; `resume` clears the local pause/stop request; `stop` requests cancellation and a durable stopped receipt. A stop request or lost connection is not proof that execution has stopped.
-
-Runner `1.2.1` fixes macOS service startup on busy desktops: launchd now inherits the system's per-user process limit instead of imposing `NumberOfProcesses=256`, which can prevent every native child from starting even when this runner is idle. Existing service files are not rewritten by a runner update. For an existing affected Mac, wait for confirmed idle, back up its Origin plist, unload only `com.origin.runner`, remove `SoftResourceLimits.NumberOfProcesses` with `plutil`, validate the plist, then bootstrap that same service. Do not terminate unrelated user processes to make room under the old cap. Linux retains its runner-scoped cgroup task limit.
-
-The private configuration defaults to `~/.config/origin-runner/config.json` (owner-only, mode 0600). State defaults to `~/.local/share/origin-runner`: bare repository caches under `repositories/`, per-run worktrees under `worktrees/`, sessions and durable receipts beside them. The runner pushes verified task/checkpoint branches, never the protected base branch. It does not reset personal repositories or silently reuse an old worktree.
-
-### Herdr and Rex task consoles and desktop connections
-
-Install the native `hc`/Herdr core (the new desktop core, not the older `herdr` TUI). Keep the desktop core available in the selected session. With the worker cleanly stopped, run `origin-runner herdr enable`, then start its existing supervisor. This creates a background **Origin task console**, not a duplicate of the coding harness's native interactive UI. The chosen OMP/Claude/Codex/Pi process keeps its structured protocol, process guardian and resource controls.
-
-Both consoles use one private IPC socket in `runner/run-console.mjs`, one input ledger and one managed coding process. They show bounded, redacted progress. Enter task text for a follow-up, `/cancel` to request cancellation, or `/quit` to detach without stopping execution. The socket authenticates the local owner; each control refreshes Origin authorization and the lease, and durable input IDs prevent replay. Tool approvals remain in the owner's Origin UI. Hermes uses the existing scoped get/message/cancel tools: no personal-terminal enumeration, arbitrary keystrokes, administrative shell or raw Herdr/Rex access.
-
-`origin-runner herdr enable --cloud` additionally opts this desktop into active Boxd/Boat task connections; `herdr disable` removes this integration's owned aliases. Both changes require the worker to be stopped and explicitly restarted. `herdr status` reports local configuration; **Settings > Machines** shows the latest worker observation. Run details contain the last reported terminal identity, not a guarantee that it remains open after a run, core restart or host reboot.
-
-Runner `1.2.0` adds independently optional Rex support. Install reviewed Rex `0.1.0-preview.13`, explicitly start a private Unix-socket server, and set `config.rex.executable` to its absolute binary path and `config.rex.server` to `unix:///absolute/private/server.sock`. With the worker stopped, use `origin-runner rex enable`, optionally `--cloud`, then restart the existing supervisor. `rex status` reports prerequisites; `rex disable` removes only Origin-owned cloud aliases/transports, never a personal server.
-
-Rex launches only the fixed Origin viewer, with no login/recovery shell, autostart or focus. Herdr and Rex may be enabled together; failure of one optional viewer does not disable the other or the coding run. Origin shows the reported Rex session/window/block IDs as metadata, not executable links or authorization. Rex is beta: this integration pins the reviewed preview rather than automatically installing snapshots.
-
-Rex `hosts` entries are CLI-only and do not synchronize into its Mac GUI. Add a private server address or forwarded Unix socket with the Mac app's **Add Remote Host** control. Rex has a Linux server/CLI, not a Linux desktop GUI. Local servers should remain socket-only or use Rex's identity-aware Tailscale listener with same-owner access; never enable anonymous access or expose a public listener.
-
-Both cloud bootstraps pin verified Herdr core `0.1.18` and Rex `0.1.0-preview.13` in the dedicated `origin-runner` account. Herdr uses the `origin-cloud` session; Rex uses a private socket and no public listener. Console installation failures are recorded separately as prerequisites without pretending readiness or blocking an otherwise authorized coding worker. Current owner/project authorization, a live allocation and fresh worker readiness are required before Origin grants a short-lived desktop connection. Grants renew only while eligible, do not extend the VM's idle deadline, and expired/revoked aliases are removed. Rex's fixed nonroot Unix-socket relay closes on revocation or expiry. Desktop native Boxd/Boat login is separate from Origin's write-only provider key; no provider key is copied to a desktop.
-
-Discovery does not start or resume a VM. The transport checks native provider state before reconnecting; Boat refreshes its rotating SSH endpoint/host-key information through its native CLI. Never disable SSH host-key verification. Boxd SSH can itself wake a hibernated machine, so its native API cannot eliminate the external-hibernation race between checking state and connecting; connection grants and controller-managed stops remain bounded. Real provider lifecycle/billing validation is required before enabling cloud use.
-
-### Accounts, policies and secrets
-
-- Sign in locally using the native CLI. Metadata is deduplicated by owner/provider/account identity; OAuth credentials remain on that machine. Do not copy NixOS OAuth caches into cloud images.
-- Idle runners refresh native metadata once per minute; discovery itself can take longer. Active runs retain honest timestamps rather than inventing fresh quotas. A newer telemetry-free native profile cannot erase known quota windows from another profile of the same account; old evidence remains explicitly stale.
-- Workspace defaults, project policies and task overrides choose account, harness, model, effort and fallback order. NixOS is preferred for portable projects. Mac is Apple-only unless explicitly selected.
-- Cloud fallback requires recent independent evidence that every eligible local machine is offline. Busy, paused, stale, missing authentication and unknown presence are not permission to spend on cloud compute.
-- API billing requires explicit permission on the actual selected native profile. Unknown billing is blocked, and the runner rechecks the accepted billing type before executing. Native subscription sign-in does not turn off provider-side paid extras.
-- Opaque native credentials without verifiable identity require an explicit owner-verified local binding; a present Pi credential alone is not treated as authenticated account identity. No guessed model catalog, quota or identity is used.
-- Automation environments are separate from the personal passphrase vault. Grant secrets only to explicit project/environment/host scopes. Temporary application variables stay outside the checkout and are removed before a stopped receipt; provider keys are not injected into coding CLI authentication.
-
-### Merge and deployment receipts
-
-Configure both verification commands and a runnable smoke check before starting. Automatic merge is enabled by default. Origin verifies the exact pushed head and configured base (`main` by default). With no applicable GitHub protections or rules, it advances the base using a non-forced fast-forward to that exact verified commit and confirms the merged PR receipt. Protected branches retain enforced up-to-date checks and required reviews; unknown rules or bypass privileges never silently weaken those gates.
-
-If another task advances the base, Origin queues a **verification-only** attempt (runner `1.1.0` or later): it preserves the prior checkpoint and stop receipt, creates a new attempt-specific worktree, merges the current base without force, and reruns tests and smoke. It does not spend another model turn or require a fresh coding account. Conflicts or failing checks block the merge; an explicit continuation may start coding to resolve them. Successful independent tasks need no manual merge. Repository merge locks and Git ancestry checks protect concurrent completions.
-
-A lost merge response is recovered by a read-only exact-head PR lookup, including when GitHub already closed the issue. Closed issues never authorize another merge.
-
-Deployment is separate. Origin reads GitHub deployment/status evidence for the exact confirmed merge SHA, shows its environment, event timestamp and last-check timestamp, and continues observing later status changes. Missing or inaccessible evidence remains unknown. A successful check, merge or push to `main` does not itself deploy an application; configure the application's release pipeline separately.
-
-### Private cloud workers
-
-Configure Boxd and Boat independently in the write-only credential forms. Boxd is the default selection, not an automatic credit-spending fallback. Zero reported Boxd credits stop admission; unknown balance is not confirmed exhaustion. Switching to Boat is an explicit policy change.
-
-Workers reuse one journaled private machine per owner/project/provider. Uncertain creation never triggers a duplicate create. Native login is still required on each private worker. An unready allocation cannot claim work; recovery revalidates authorization and local-offline eligibility. Missing login/heartbeat cannot hold an unused paid machine indefinitely. Provider persistence is not a backup guarantee.
-
-Boxd automatic idle hibernation is disabled before bootstrap, but this does not promise that the provider can never capture memory. Its observed cold-stop state is distinct from verified application-environment cleanup. Boat archival can retain a machine, so it is never treated as process-termination proof on its own: uncertain runs stay fenced unless the guest supervisor's shutdown is independently acknowledged. Boat's `noEnv` setting persists from creation; resume must not redundantly request credential scrubbing. Private custom-home OAuth persistence and both providers' actual systemd/cgroup behavior require live validation before enabling workers.
-
-Cloud console installers create worker-owned XDG parent directories before starting the nonroot services. Rex downloads follow HTTPS-only redirects without relaxing the pinned checksum, and its service waits for the private Unix API before reporting successful startup. A real Boxd VM has exercised console startup, cold stop/start and file persistence; this does not establish native coding-account authentication or prove Boat's guest lifecycle.
-
-Boxd admission uses a dedicated native billing collector, not the SDK's subscription-status field. Install its pinned CLI as root with `python3 deploy/origin-controller/controller.py install-boxd`, then complete a fresh native `boxd auth login` as `origin-controller-native` with `HOME=/var/lib/origin-controller` and `XDG_CONFIG_HOME=/var/lib/origin-controller/.config`; do not copy another machine's OAuth files. Set `boxdBinary` in the controller configuration to `/opt/origin-controller/boxd/0.3.3/boxd`. Deploy the Origin controller endpoint before updating the collector and its static-account systemd unit, preserving the existing bearer credential and peer mappings.
-
-The authenticated collector first obtains the API-key-bound organization and credential revision from Origin, then checks that the native CLI reports that exact organization. Only supported EUR/USD credit balances with safe integer amounts, unsettled charges deducted and evidence no older than 60 seconds authorize admission. Failed collection, stale evidence, organization/revision mismatch and unknown billing fail closed; native OAuth credentials never leave the collector's private HOME.
-
-Automatic top-up remains the owner's choice in Boxd Billing. Origin neither inspects nor changes that setting and does not require it to be OFF. If enabled there, Boxd may charge the configured payment method; the native credit check is not a card-spending cap. Fresh positive credits, project authorization, local-offline eligibility and the private worker's own coding-account login are still required. Replacing the API key invalidates its previous billing evidence.
-
-### Updates and the phone gateway
-
-Runner/native-tool maintenance is idle-only, with verified immutable releases, preflight checks, persistent quarantine and rollback. Only explicitly runner-managed tool prefixes may be changed; existing Nix, Homebrew and personal/global installs receive package-manager instructions instead. `install --files-only` is for externally supervised cloud workers and creates no user service. Local installations prefer a stable Node 24 executable alias so a package-manager replacement does not strand the service.
-
-HTTPS enrollment pins that Origin instance's Ed25519 public key and same-origin release URL. The server persists the private signing key as owner-only `/data/origin/runner-signing.key`; back it up with the application volume. Losing or replacing it requires explicit owner trust review/re-enrollment, not automatic acceptance of a different key. Increment `runner/security.mjs`'s `VERSION` whenever publishing changed runner code; never change the bytes of an already published version.
-
-Automatic updates are disabled until the local owner opts in. Initialize each desired tool against its exact local account first; this selects a private executable without copying or replacing that account's OAuth profile:
-
-```sh
-origin-runner update --tools --tool codex --initialize --account LOCAL_ACCOUNT_ID --approve
-origin-runner update --automatic --enable --tool codex --runner --approve
-```
-
-The running supervisor checks daily while idle. It applies only compatible stable releases, preserves the previous version, and reports checks/results in **Settings > Machines**. Major compatibility changes (minor changes for a `0.x` tool), quarantined versions, ambiguous stop state and unmanaged installations require explicit action. Native subscription authentication remains separate; updating a binary cannot repair expired login or provider billing.
-
-`origin-runner update --check` checks signed runner releases without applying them. `origin-runner update --tools --check` checks native tools. Use `update --automatic --disable --approve` to disable automatic application without modifying personal CLI installations.
-
-The dedicated Hetzner controller setup is in `deploy/origin-controller/`. Configure `ORIGIN_EXECUTION_TEAM_ID` on the Origin server and `ORIGIN_EXECUTION_CONTROLLER_TOKEN_HASH` as the SHA-256 hex digest of a separately generated, high-entropy 32–200 character bearer. Keep the raw bearer in the controller's owner-only `service-token` file, supplied through systemd `LoadCredential`; never reuse an owner MCP or worker token. The server stores only its digest and accepts controller ticks only for that workspace.
-
-After local enrollment, map each Origin host ID to its stable Tailscale peer ID and full DNS name in `/etc/origin-controller/config.json`. An empty mapping reports no presence evidence: it cannot establish that local machines are offline or authorize cloud fallback. Run `systemctl start origin-controller.service` successfully before enabling `origin-controller.timer`.
-
-The pinned, nonroot Hermes operator commands are documented at the top of `deploy/hermes/manage.py`. Hermes receives scoped Origin MCP controls, not provider cloud keys, a Docker socket or root access. Its model/login is separate from coding CLI subscriptions.
-
-Hermes runs as the dedicated account's **default profile**, not a separately forced named-profile gateway. Its private data root is pinned by a bind mount; a read-only `runtime-installs` index contains administrator-owned symlinks to immutable release-specific PM state. `HERMES_RUNTIME_DIR` retains the original tool-store pathname. This preserves native absolute-path checks and runtime identity without copying facts, exposing builder profiles, or using `--force`, `--replace`, or deprecated `gateway.standalone`. The real external supervisor is declared explicitly. Native owner login/pairing uses the same protected mount layout and requires the gateway already stopped.
-
-When deploying this layout over an existing supervised installation: stop the idle gateway, deploy the updated supervisor/repair assets and service unit, run the same-pin `repair-offline` command, then `systemctl daemon-reload` and start the service. The protected index retains earlier stage entries for rollback. Only validated supervised stages are activation/recovery targets; unprepared legacy installs require separate administrator migration. Changing the Hermes chat model does not change Origin's project/task coding harness, model or fallback policy.
-
-Personal WhatsApp pairing requires the owner's risk acknowledgement and QR scan. Hermes uses its documented Baileys path, not an official Meta bot API; account restrictions and protocol changes remain possible. Allowlist senders. The dedicated service stays disabled until native model login, scoped Origin MCP authorization and pairing are complete.
-
-The pinned WhatsApp runtime includes a narrowly reviewed backport of [Baileys PR 2765](https://github.com/WhiskeySockets/Baileys/pull/2765), reviewed at commit `042fe1f3ddacf63ac2288837fbc8a395556bbb6e` while still unmerged. It handles pre-login companion-registration refreshes and notification acknowledgements without replacing an existing identity. The native pairing wizard selects the prepared immutable bridge and requires a real `creds.me.id`, not merely a credentials file or the unreliable `registered` flag.
-
-Deploy `runtime_repair.py` with `manage.py`. Exact input/output hashes gate every repair; drift fails before writes, and the repair identity is part of the immutable stage path. No live `node_modules` edits or fork installation are used. For an already-stopped installation, run `manage.py repair-offline --release /opt/origin-hermes-admin/release.json --maintenance`. This permits only the existing upstream pin, refuses running gateway/login processes, stages and probes before activation, and preserves both private HOME and the previous release. It never starts the gateway. `recover --maintenance` handles interrupted offline activation without restoring HOME or starting the service. Older supervised stage receipts remain valid for rollback.
-
-Regression checks: `python -m unittest discover -s deploy/hermes -p 'test_*.py'`; with Node 26+ and a prepared source tree, `HERMES_REPAIR_TEST_ROOT=/absolute/staged/source node --test deploy/hermes/test_whatsapp_repair.mjs`. The protocol check exercises the actual installed SDK, cryptography, credential persistence and decoded ACKs with an isolated fake WebSocket; it does not contact WhatsApp or prove phone acceptance. The candidate probe separately executes the native dotenv/config loaders, bridge resolver and identity checks without live credentials or network access.
-
-Hermes's daily timer checks metadata only by default. Administrator `enable-auto-updates` opt-in requires authenticated health and an explicit managed chat model. Its automatic scope is deliberately restricted to same-minor stable changes in reviewed cache/compaction modules and inert documentation/tests; other runtime, gateway, auth, policy, installer or dependency changes require a reviewed pinned update. This is **not an always-latest guarantee**. Both automatic and manual application retain the idle/drain/backup/effective-policy/health/rollback gates in `deploy/hermes/manage.py`. The runtime and dependencies remain root-owned; only the private coordinator data and exact PM locks/leases are service-writable. Human chat smoke is still required: health checks do not send an LLM prompt.

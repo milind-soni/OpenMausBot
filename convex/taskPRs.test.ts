@@ -121,36 +121,29 @@ describe("PR lifecycle and missed event recovery", () => {
     await f.t.run(ctx => ctx.db.patch(f.projectId, { repoUrl: "https://github.com/test/changed" }));
     expect(await f.t.mutation(internal.taskPRs.sync, { id, sequence: latest + 2, snapshot: { ...f.s, state: "merged", githubUpdatedAt: 2000 } })).toBe(false);
   });
-  test("issue closure and reopening remain bidirectional even when a task also has a pull request", async () => {
-    const f = await fixture(); await f.t.mutation(internal.taskPRs.humanContext, { sessionToken: f.sessionToken, projectId: f.projectId, taskId: f.taskId, choosePR: true });
+  test("issue closure needs trusted merge evidence, and issue-mode reopening still applies", async () => {
+    const f = await fixture(); await f.t.mutation(internal.taskPRs.humanContext, { sessionToken: f.sessionToken, projectId: f.projectId, taskId: f.taskId, choosePR: true }); // Protect before the first PR link exists.
     const issue = { projectId: f.projectId, taskId: f.taskId, repoUrl, number: 42, issueUrl: `${repoUrl}/issues/42`, state: "closed" as const, updatedAt: 2000 };
     await f.t.mutation(internal.integrations.linkIssue, issue);
-    expect((await f.t.run(ctx => ctx.db.get(f.taskId)))!.done).toBe(true);
+    expect((await f.t.run(ctx => ctx.db.get(f.taskId)))!.done).toBe(false);
     await f.link({ ...f.s, state: "merged", githubUpdatedAt: 3000 });
     await f.t.mutation(internal.integrations.linkIssue, { ...issue, state: "open", updatedAt: 4000 });
-    expect((await f.t.run(ctx => ctx.db.get(f.taskId)))!.done).toBe(false);
+    expect((await f.t.run(ctx => ctx.db.get(f.taskId)))!.done).toBe(true);
     const g = await fixture(); await g.t.mutation(internal.integrations.linkIssue, { ...issue, taskId: g.taskId, projectId: g.projectId });
-    expect((await g.t.run(ctx => ctx.db.get(g.taskId)))!.done).toBe(true);
+    expect((await g.t.run(ctx => ctx.db.get(g.taskId)))!.done).toBe(false);
     await g.t.mutation(internal.integrations.completeMergedIssue, { projectId: g.projectId, taskId: g.taskId, repoUrl, issueNumber: 42, pullRequest: { number: 9, headSha: sha("a"), mergeSha: sha("b"), mergedAt: 2500 } });
     expect((await g.t.run(ctx => ctx.db.get(g.taskId)))!.done).toBe(true);
     await g.t.mutation(internal.integrations.linkIssue, { ...issue, taskId: g.taskId, projectId: g.projectId, state: "open", updatedAt: 3000 });
     expect((await g.t.run(ctx => ctx.db.get(g.taskId)))!.done).toBe(false);
-  });
-  test("repeated merged PR snapshots do not undo an explicit issue reopen", async () => {
-    const f = await fixture();
-    const { id } = await f.link({ ...f.s, state: "merged", githubUpdatedAt: 2000 });
-    await f.t.mutation(api.tasks.updateTask, { sessionToken: f.sessionToken, projectId: f.projectId, taskId: f.taskId, done: false });
-    await f.t.mutation(internal.taskPRs.sync, { id, sequence: 2, snapshot: { ...f.s, state: "merged", githubUpdatedAt: 3000 } });
-    expect((await f.t.run(ctx => ctx.db.get(f.taskId)))!.done).toBe(false);
   });
 });
 
 describe("Delivery dedupe and finalize authority", () => {
   test("delivery claims are atomic, leased, deduplicated and payload-bound", async () => {
     const f = await fixture(), a = { deliveryId: "signed-delivery-1", fingerprint: "a".repeat(64) };
-    const claims = await Promise.allSettled([f.t.mutation(internal.taskPRs.delivery, a), f.t.mutation(internal.taskPRs.delivery, a)]);
-    expect(claims.filter(result => result.status === "fulfilled")).toHaveLength(1);
-    const lease = (claims.find(result => result.status === "fulfilled") as PromiseFulfilledResult<number>).value;
+    const claims = await Promise.all([f.t.mutation(internal.taskPRs.delivery, a), f.t.mutation(internal.taskPRs.delivery, a)]);
+    expect(claims.filter(n => n !== null)).toHaveLength(1);
+    const lease = claims.find(n => n !== null)!;
     await f.t.mutation(internal.taskPRs.delivery, { ...a, finishLease: lease });
     expect(await f.t.mutation(internal.taskPRs.delivery, a)).toBeNull();
     await expect(f.t.mutation(internal.taskPRs.delivery, { ...a, fingerprint: "b".repeat(64) })).rejects.toThrow("collision");

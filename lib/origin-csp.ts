@@ -38,7 +38,7 @@ export function originCsp(environment: Environment = {}, nonce?: string): string
     "frame-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'none'",
-    "form-action 'self' https://github.com/settings/apps/new",
+    "form-action 'self'",
     "frame-ancestors 'none'",
   ].join("; ");
 }

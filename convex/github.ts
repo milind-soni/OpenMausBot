@@ -1,11 +1,12 @@
 import { ConvexError, v } from "convex/values";
 import { action, internalMutation, query } from "./_generated/server";
 import { api, internal } from "./_generated/api";
-import { canEdit, requireMember, touchProject } from "./lib/permissions";
+import { canEdit, changeOpenIssueCount, requireMember, touchProject } from "./lib/permissions";
 import { DEFAULT_OWNER_EMAIL } from "./lib/auth";
+import { recordCompletion } from "./lib/completions";
+import { isDraftColumn } from "./lib/columns";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { applyIncoming } from "./githubLifecycle";
 
 type ParsedRepo = { owner: string; repo: string };
 type GitHubIssueSnapshot = {
@@ -56,6 +57,20 @@ function githubHeaders(useServerToken = false) {
   return headers;
 }
 
+function taskKey(id: string) {
+  return `ORI-${id.slice(-4).toUpperCase()}`;
+}
+
+function manualIssueUrl(repo: ParsedRepo, task: Doc<"tasks">, origin?: string) {
+  const title = encodeURIComponent(task.title);
+  const lines = [
+    task.description || "",
+    "",
+    `Origin task: ${taskKey(task._id)}`,
+    origin ? `Origin workspace: ${origin.replace(/\/$/, "")}` : "",
+  ].filter(Boolean);
+  return `https://github.com/${repo.owner}/${repo.repo}/issues/new?title=${title}&body=${encodeURIComponent(lines.join("\n"))}`;
+}
 
 export const listPullRequests = query({
   args: { projectId: v.id("projects"), sessionToken: v.string() },
@@ -173,6 +188,8 @@ export const createIssueForTask = action({
       sessionToken: args.sessionToken,
       taskId: args.taskId,
     })) as { task: Doc<"tasks">; columns: Doc<"columns">[] };
+    const column = details.columns.find(item => item._id === details.task.columnId);
+    if (column && isDraftColumn(column)) throw new ConvexError("Draft issues stay in Origin. Move this issue to an active column before publishing it.");
     const parsed = parseGitHubRepo(project.repoUrl);
     if (!parsed) return { ok: false, issueUrl: "", manualUrl: "", message: "Add a valid GitHub repo URL in Settings." };
 
@@ -185,8 +202,12 @@ export const createIssueForTask = action({
         message: `Already linked to GitHub issue #${details.task.githubIssueNumber}.`,
       };
     }
-    await ctx.runMutation(api.githubLifecycle.retry, { sessionToken: args.sessionToken, projectId: args.projectId, taskId: args.taskId });
-    return { ok: false, issueUrl: "", manualUrl: "", message: "GitHub issue synchronization queued. Draft issues are included; check the issue sync status for the result." };
+    return {
+      ok: false,
+      issueUrl: "",
+      manualUrl: manualIssueUrl(parsed, details.task, args.origin),
+      message: "Use Origin's connected repository integration for automatic issue creation, or open this prefilled GitHub issue.",
+    };
   },
 });
 
@@ -204,7 +225,17 @@ export const linkTaskIssue = internalMutation({
   handler: async (ctx, args) => {
     const { project } = await requireEditor(ctx, args.projectId, args.sessionToken);
     if (project.repoUrl !== args.repoUrl) throw new ConvexError("Repository changed; sync cancelled");
-    await applyIncoming(ctx, { projectId: args.projectId, taskId: args.taskId, repoUrl: args.repoUrl, number: args.githubIssueNumber, state: args.githubIssueState, updatedAt: Date.now() });
+    const task = await ctx.db.get(args.taskId);
+    if (!task || task.projectId !== args.projectId) throw new ConvexError("Issue not found");
+    if (task.githubIssueNumber && task.githubIssueNumber !== args.githubIssueNumber) throw new ConvexError("Issue already linked");
+    await ctx.db.patch(args.taskId, {
+      githubIssueNumber: args.githubIssueNumber,
+      githubIssueUrl: args.githubIssueUrl,
+      githubIssueState: args.githubIssueState,
+      githubIssueSyncedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    await touchProject(ctx, args.projectId);
     return null;
   },
 });
@@ -243,7 +274,74 @@ export const upsertRepoSnapshot = internalMutation({
     const { project } = await requireEditor(ctx, args.projectId, args.sessionToken);
     if (project.repoUrl !== args.repoUrl) throw new ConvexError("Repository changed; sync cancelled");
     const now = Date.now();
-    for (const issue of args.issues) await applyIncoming(ctx, { projectId: args.projectId, repoUrl: args.repoUrl, number: issue.number, title: issue.title, description: issue.body ?? "", state: issue.state, updatedAt: issue.updatedAt });
+    const columns = await ctx.db
+      .query("columns")
+      .withIndex("by_project_order", (q) => q.eq("projectId", args.projectId))
+      .take(20);
+    const open = columns.filter(column => !(column.isDone ?? column.title.toLowerCase() === "done"));
+    const todoColumn = open.find(column => !isDraftColumn(column)) ?? open[0] ?? columns[0];
+    const existingTasks = await ctx.db
+      .query("tasks")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .take(500);
+    let nextOrder = existingTasks.length ? Math.max(...existingTasks.map((task) => task.order)) + 1 : 0;
+
+    if (todoColumn) {
+      for (const issue of args.issues) {
+        const existing = await ctx.db
+          .query("tasks")
+          .withIndex("by_project_githubIssueNumber", (q) =>
+            q.eq("projectId", args.projectId).eq("githubIssueNumber", issue.number),
+          )
+          .unique();
+        const patch = {
+          title: issue.title,
+          description: issue.body,
+          githubIssueNumber: issue.number,
+          githubIssueUrl: issue.url,
+          githubIssueState: issue.state,
+          githubIssueSyncedAt: now,
+          githubIssueUpdatedAt: issue.updatedAt,
+          done: false,
+          columnId: todoColumn._id,
+          updatedAt: issue.updatedAt || now,
+        };
+        if (existing) {
+          if ((existing.githubIssueUpdatedAt || 0) > issue.updatedAt) continue;
+          const column = await ctx.db.get(existing.columnId);
+          patch.done = existing.done;
+          if (issue.state === "open" && existing.githubIssueState === "closed") patch.done = false;
+          if (column && isDraftColumn(column)) patch.done = existing.done;
+          if (existing.githubTaskMode === "pull_request" || await ctx.db.query("taskPullRequests").withIndex("by_taskId", q => q.eq("taskId", existing._id)).first()) patch.done = existing.done;
+          if (issue.state === "open" && existing.githubIssueState !== "closed") patch.done = existing.done;
+          patch.columnId = existing.columnId;
+          await recordCompletion(ctx, existing, patch.done, issue.updatedAt);
+          await ctx.db.patch(existing._id, { ...patch, ...(issue.state === "open" ? { githubIssueReopenRequested: undefined,
+            ...(existing.githubIssueState === "closed" ? { completionPullRequest: undefined } : {}) } : {}) });
+          if (existing.done !== patch.done) await changeOpenIssueCount(ctx, args.projectId, patch.done ? -1 : 1);
+        } else {
+          await ctx.db.insert("tasks", {
+            teamId: (await ctx.db.get(args.projectId))?.teamId,
+            projectId: args.projectId,
+            columnId: patch.columnId,
+            title: issue.title,
+            description: issue.body,
+            priority: "medium",
+            done: false,
+            githubIssueNumber: issue.number,
+            githubIssueUrl: issue.url,
+            githubIssueState: issue.state,
+            githubIssueSyncedAt: now,
+            githubIssueUpdatedAt: issue.updatedAt,
+            order: nextOrder,
+            createdAt: now,
+            updatedAt: issue.updatedAt || now,
+          });
+          nextOrder += 1;
+          await changeOpenIssueCount(ctx, args.projectId, patch.done ? 0 : 1);
+        }
+      }
+    }
 
     for (const pullRequest of args.pullRequests) {
       const existing = await ctx.db

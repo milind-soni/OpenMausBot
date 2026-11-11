@@ -200,7 +200,7 @@ test("a merge receipt completes a mirrored issue once, and stale or repeated Git
   await f.t.mutation(internal.integrations.linkIssue, args);
   expect((await f.t.query(api.tasks.details, { sessionToken: f.owner.token, projectId: f.shared, taskId: f.issue })).task.done).toBe(false);
   await f.t.mutation(internal.integrations.completeMergedIssue, receipt);
-  expect((await f.t.query(api.tasks.details, { sessionToken: f.owner.token, projectId: f.shared, taskId: f.issue })).task.done).toBe(false);
+  expect((await f.t.query(api.tasks.details, { sessionToken: f.owner.token, projectId: f.shared, taskId: f.issue })).task.done).toBe(true);
 });
 
 test("repository linking normalizes URLs and only workspace admins approve credential use", async () => {

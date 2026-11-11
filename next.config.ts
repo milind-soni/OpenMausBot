@@ -2,8 +2,6 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  output: "standalone",
-  experimental: { cpus: 2 },
   allowedDevOrigins: ["127.0.0.1"],
   async headers() {
     return [{ source: "/excalidraw/:path*", headers: [{ key: "Access-Control-Allow-Origin", value: "*" }] }];

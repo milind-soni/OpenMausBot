@@ -1,8 +1,8 @@
-# Historical desktop-backend upgrade rehearsal
+# Upgrading production from the desktop backend
 
-This records the local rehearsal on 2026-11-01, not the current deployment runbook. At that time the production baseline was `desktop-archive:backend/convex`; the rehearsal preserved its schema while pushing the web app's `convex/` on top. Nothing in this rehearsal was run against production.
-
-For an existing hosted web installation, follow [the current upgrade procedure](README.md#7-upgrade-an-existing-installation), verify its actual Convex URL and deployment name, and back up that exact target. Do not infer the live target from this historical record or the CLI's default production selection.
+Production Convex runs `desktop-archive:backend/convex`. This release keeps that schema byte for byte and pushes the
+web app's `convex/` on top. The steps below were rehearsed on a local copy (2026-11-01). Nothing was run against
+production.
 
 ## Rehearsal (local only)
 

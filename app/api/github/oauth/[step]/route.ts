@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { getConvexClient, limitLocalAction, requireLocalWorkspace, sessionTokenFromRequest } from "@/lib/localRealtime";
-import { consumeGithubState, createGithubState, exchangeGitHubToken, githubAppConfig, githubAuthorizeUrl, githubRequest, peekGithubState } from "@/lib/github-workspace";
+import { consumeGithubState, createGithubState, exchangeGitHubToken, githubAppConfig, githubAuthorizeUrl, githubRequest, peekGithubState, saveWorkspaceGitHub } from "@/lib/github-workspace";
 import { originUrl } from "@/lib/integration-bridge";
 import { errorText } from "@/lib/error-text";
 
@@ -15,7 +15,6 @@ export async function POST(request: NextRequest, context: { params: Promise<{ st
     if (!["owner", "admin"].includes(user.workspaceRole)) throw new Error("Workspace admin access required");
     limitLocalAction(`github-connect:${user._id}`, 10, 60000);
     const app = githubAppConfig(); if (!app) throw new Error("The Origin GitHub App has not been configured yet");
-    if (!app.appId || !app.privateKey) throw new Error("The instance operator must finish configuring the Origin GitHub App before connecting a workspace");
     const projectId = request.nextUrl.searchParams.get("projectId") || undefined;
     if (projectId) {
       const project = await getConvexClient().query(api.projects.get, { sessionToken: sessionTokenFromRequest(request), projectId: projectId as Id<"projects"> });
@@ -44,7 +43,6 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ste
     workspaceSlug = pending.slug;
     const app = githubAppConfig(); const code = request.nextUrl.searchParams.get("code");
     if (!app || !code || request.nextUrl.searchParams.has("error")) throw new Error("GitHub connection cancelled");
-    if (!app.appId || !app.privateKey) throw new Error("The Origin GitHub App configuration is incomplete");
     const access = await getConvexClient().query(api.workspaces.access, { sessionToken: pending.sessionToken, teamId: pending.teamId as Id<"teams"> });
     if (!["owner", "admin"].includes(access.role)) throw new Error("Workspace admin access required");
     const token = await exchangeGitHubToken({ client_id: app.clientId, client_secret: app.clientSecret, code, code_verifier: pending.verifier, redirect_uri: `${originUrl()}/api/github/oauth/callback` });
@@ -62,9 +60,15 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ste
     }
     const currentAccess = await getConvexClient().query(api.workspaces.access, { sessionToken: pending.sessionToken, teamId: pending.teamId as Id<"teams"> });
     if (!["owner", "admin"].includes(currentAccess.role)) throw new Error("Workspace admin access required");
-    await getConvexClient().action(api.teamGitHub.share, {
-      sessionToken: pending.sessionToken, teamId: pending.teamId as Id<"teams">,
-      app: { ...app, appId: app.appId, privateKey: app.privateKey }, token,
+    await getConvexClient().mutation(api.integrations.configure, { sessionToken: pending.sessionToken, teamId: pending.teamId as Id<"teams">, login: account.login, autoCreate: true });
+    saveWorkspaceGitHub(pending.teamId, account.login, account.id, pending.userId, token);
+    after(async () => {
+      try {
+        const projects = await getConvexClient().query(api.projects.listForUser, { sessionToken: pending.sessionToken, teamId: pending.teamId as Id<"teams"> });
+        for (const project of projects) if (!project.repoUrl && project.githubRepoState === "awaiting_connection") {
+          await getConvexClient().mutation(api.integrations.retryRepo, { sessionToken: pending.sessionToken, projectId: project._id });
+        }
+      } catch { console.warn("GitHub connected; pending repository retries can be started from the project"); }
     });
     const redirect = new URL(`${originUrl()}/${encodeURIComponent(pending.slug)}`);
     redirect.searchParams.set("github", "connected");

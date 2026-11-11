@@ -60,21 +60,23 @@ describe("legacy GitHub issue creation", () => {
     const results = await Promise.allSettled([f.call(), f.call()]);
     expect.soft(post).toHaveBeenCalledTimes(0);
     expect.soft((await f.t.run(ctx => ctx.db.get(f.taskId)))?.githubIssueNumber).toBeUndefined();
-    for (const result of results) expect.soft(result).toMatchObject({ status: "fulfilled", value: { ok: false, issueUrl: "", manualUrl: "", message: expect.stringContaining("queued") } });
+    for (const result of results) expect.soft(result).toMatchObject({ status: "fulfilled", value: { ok: false, issueUrl: "", manualUrl: expect.stringContaining(`${repoUrl}/issues/new?`) } });
   });
 
-  test("an unconfigured legacy publisher leaves durable pending work instead of a duplicate-prone manual URL", async () => {
+  test("an unconfigured legacy publisher retains the prefilled manual URL", async () => {
     vi.stubEnv("GITHUB_TOKEN", "");
     const result = await (await fixture()).call();
     expect(result).toMatchObject({ ok: false, issueUrl: "" });
-    expect(result.manualUrl).toBe("");
-    expect(result.message).toContain("queued");
+    const manual = new URL(result.manualUrl);
+    expect(manual.origin + manual.pathname).toBe(`${repoUrl}/issues/new`);
+    expect(manual.searchParams.get("title")).toBe("Synthetic issue");
+    expect(manual.searchParams.get("body")).toContain("Fixture description");
     expect(post).not.toHaveBeenCalled();
   });
 
-  test("an ordinary active editor can queue synchronization without server-token authority", async () => {
+  test("an ordinary active editor retains manual sharing without server-token authority", async () => {
     const result = await (await fixture({ email: "member@issues.example", role: "member" })).call();
-    expect(result).toMatchObject({ ok: false, issueUrl: "", manualUrl: "", message: expect.stringContaining("queued") });
+    expect(result).toMatchObject({ ok: false, issueUrl: "", manualUrl: expect.stringContaining(`${repoUrl}/issues/new?`) });
     expect(post).not.toHaveBeenCalled();
   });
 
@@ -99,10 +101,10 @@ describe("legacy GitHub issue creation", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  test("Draft queues the same lifecycle work as every other issue", async () => {
+  test("Draft remains private even when legacy credentials are configured", async () => {
     const f = await fixture();
     await f.t.run(ctx => ctx.db.patch(f.columnId, { isDraft: true }));
-    expect(await f.call()).toMatchObject({ ok: false, message: expect.stringContaining("queued") });
+    await expect(f.call()).rejects.toThrow("Draft issues stay in Origin");
     expect(post).not.toHaveBeenCalled();
   });
 
