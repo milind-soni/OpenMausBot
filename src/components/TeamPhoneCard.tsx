@@ -98,7 +98,7 @@ export function TeamPhoneCard({ team, blocked }: { team: string; blocked?: strin
               <div className="min-w-[200px] flex-1">
                 <div className="font-mono text-[18px] tracking-[0.14em] text-ink">{offer.code}</div>
                 <div className="mt-1 text-[13px] text-ink-secondary">{codeUntil(offer.expiresAt)}</div>
-                {offer.url ? null : <p className="mt-3 text-[13px] text-ink-secondary">{offer.hint ?? t("remote.serverPairing.noLink")}</p>}
+                {offer.url ? <p className="mt-2 text-[12px] text-ink-tertiary">{t("remote.serverPairing.camera")}</p> : <p className="mt-3 text-[13px] text-ink-secondary">{offer.hint ?? t("remote.serverPairing.noLink")}</p>}
               </div>
             </div>
           )}

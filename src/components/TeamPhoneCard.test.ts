@@ -77,6 +77,7 @@ describe("Open on your phone, on a Team Cloud: the phones it opened", () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     flushSync(() => host.querySelector<HTMLButtonElement>("[data-phone-pairing-action]")!.click());
     await vi.waitFor(() => expect(host.querySelector("[data-team-phone-code]")).not.toBeNull());
+    expect(host.querySelector("[data-team-phone-code]")!.textContent).toContain("Or scan it with your phone's camera to open it in the browser.");
     fixture.phones = [phone("ph-ada", "Ada's iPhone", "ada@acme.test")];
     await vi.advanceTimersByTimeAsync(PHONE_ARRIVAL_POLL_MS);
     await vi.waitFor(() => expect(rows()).toHaveLength(1));
