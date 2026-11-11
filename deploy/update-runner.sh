@@ -23,6 +23,8 @@
 # `docker compose up` starts (the Compose files and .env are theirs), so --install and every run want that owner to be
 # root, able to run Docker already, or trusted at --install, and the folder and those above it closed to anyone else.
 set -u
+# Every file and folder this makes has its mode set by the write; nothing is left to the caller's umask.
+umask 022
 
 SBIN_DIR=${OMB_SBIN_DIR:-/usr/local/sbin}
 SYSTEMD_DIR=${OMB_SYSTEMD_DIR:-/etc/systemd/system}

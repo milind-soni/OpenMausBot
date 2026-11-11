@@ -84,8 +84,14 @@ install_until_https() { # evidence-file [the install command, when not the usual
 # / and /opt root's and closed to others. A CI image may not; it is set as a server has it, never the check weakened.
 prepare_like_a_server() {
   stat -c '%U:%G %a %n' / /opt /srv 2>/dev/null || true
+  getfacl -p / /opt /srv 2>/dev/null || true
   for folder in / /opt /srv; do
     [ -d "$folder" ] || continue
+    # A default ACL hands new folders under it modes no umask decides; a server has none.
+    if getfacl -p "$folder" 2>/dev/null | grep -q '^default:'; then
+      echo "CI host: $folder has a default ACL; removed, as on a server"
+      sudo setfacl -b "$folder"
+    fi
     if [ "$(stat -c %u "$folder")" != 0 ] || [ $((8#$(stat -c %a "$folder") & 8#022)) != 0 ]; then
       echo "CI host: $folder is $(stat -c '%U:%G %a' "$folder"); made root's and closed to others, as on a server"
       sudo chown root:root "$folder" && sudo chmod go-w "$folder"
