@@ -1979,7 +1979,6 @@
   "relay.reply": "{name}이(가) 답했어요",
   "relay.assistant": "{name}의 비서가 답했어요",
   "sidebar.people.title": "사람",
-  "sidebar.people.you": "{name}(나)",
   "sidebar.people.yourInbox": "받은편지함: 나에게 온 모든 것",
   "sidebar.people.yourInboxWaiting": "받은편지함: 나를 기다리는 것 {count}개",
   "sidebar.people.invite": "다른 사람 초대",

@@ -833,7 +833,6 @@
   "relay.reply": "{name} hat geantwortet",
   "relay.assistant": "Der Assistent von {name} hat geantwortet",
   "sidebar.people.title": "Personen",
-  "sidebar.people.you": "{name} (du)",
   "sidebar.people.yourInbox": "Dein Posteingang: alles, was an dich geht",
   "sidebar.people.yourInboxWaiting": "Dein Posteingang: wartet auf dich, {count}",
   "sidebar.people.invite": "Jemanden einladen",

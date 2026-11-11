@@ -694,7 +694,6 @@
   "relay.reply": "{name} ने जवाब दिया",
   "relay.assistant": "{name} के सहायक ने जवाब दिया",
   "sidebar.people.title": "लोग",
-  "sidebar.people.you": "{name} (आप)",
   "sidebar.people.yourInbox": "आपका इनबॉक्स: आपको भेजा गया सब कुछ",
   "sidebar.people.yourInboxWaiting": "आपका इनबॉक्स: आपके इंतज़ार में, {count}",
   "sidebar.people.invite": "किसी को आमंत्रित करें",

@@ -1421,7 +1421,6 @@
   "relay.reply": "{name} đã trả lời",
   "relay.assistant": "Trợ lý của {name} đã trả lời",
   "sidebar.people.title": "Mọi người",
-  "sidebar.people.you": "{name} (bạn)",
   "sidebar.people.yourInbox": "Hộp thư của bạn: mọi thứ gửi cho bạn",
   "sidebar.people.yourInboxWaiting": "Hộp thư của bạn: đang chờ bạn, {count}",
   "sidebar.people.invite": "Mời ai đó",
