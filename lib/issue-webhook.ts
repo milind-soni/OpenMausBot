@@ -3,13 +3,21 @@
  * signature. Shared by Convex (convex/issueWebhooks.ts), scripts/origin-webhook-test.mjs and the tests, so it imports
  * nothing and uses only WebCrypto.
  *
- * Headers: `X-Origin-Event` (issue.created | issue.updated), `X-Origin-Delivery` (the event id) and
+ * Headers: `X-Origin-Event` (issue.created | issue.updated | issue.delegated), `X-Origin-Delivery` (the event id) and
  * `X-Origin-Signature: sha256=<hex>`, the HMAC-SHA256 of the raw body under the webhook secret (like GitHub's).
+ *
+ * issue.delegated fires when an issue is delegated to an agent, or the agent is removed. Its `issue.delegate` is the
+ * agent now on the issue (null when removed) and `changes.delegate` names the agent before and after. Other events
+ * carry `issue.delegate` only while an agent is on the issue, so payloads for issues without one are unchanged.
  */
 
-export type IssueWebhookEvent = "issue.created" | "issue.updated";
+export type IssueWebhookEvent = "issue.created" | "issue.updated" | "issue.delegated";
 export type IssueWebhookCriterion = { text: string; checked: boolean };
-export type IssueWebhookChanges = { status?: { from: string; to: string }; completed?: { from: boolean; to: boolean } };
+export type IssueWebhookDelegate = { id: string; name: string };
+export type IssueWebhookChanges = {
+  status?: { from: string; to: string }; completed?: { from: boolean; to: boolean };
+  delegate?: { from: IssueWebhookDelegate | null; to: IssueWebhookDelegate | null };
+};
 export type IssueWebhookPayload = {
   id: string;
   type: IssueWebhookEvent;
@@ -18,7 +26,7 @@ export type IssueWebhookPayload = {
   project: { id: string; name: string; repo: string | null };
   issue: {
     id: string; key: string; title: string; description: string; labels: string[]; url: string; status: string; completed: boolean;
-    assignee: { email: string; name: string } | null; acceptanceCriteria: IssueWebhookCriterion[];
+    assignee: { email: string; name: string } | null; delegate?: IssueWebhookDelegate | null; acceptanceCriteria: IssueWebhookCriterion[];
   };
   changes: IssueWebhookChanges | null;
 };
@@ -31,6 +39,8 @@ export type IssueWebhookInput = {
   issue: {
     id: string; key: string; title: string; description?: string; labels?: readonly string[]; status: string; completed: boolean;
     assignee?: { email: string; name?: string } | null; acceptanceCriteria?: readonly IssueWebhookCriterion[];
+    /** The agent on the issue; leave it out when there is none (issue.delegated sends null instead). */
+    delegate?: IssueWebhookDelegate | null;
   };
   changes?: IssueWebhookChanges | null;
   /** ORIGIN_PUBLIC_URL; without it `issue.url` stays a path. */
@@ -82,6 +92,7 @@ export function issueWebhookPayload(input: IssueWebhookInput): IssueWebhookPaylo
       status: input.issue.status,
       completed: input.issue.completed,
       assignee: input.issue.assignee?.email ? { email: input.issue.assignee.email, name: input.issue.assignee.name || input.issue.assignee.email } : null,
+      ...(input.issue.delegate ? { delegate: { id: input.issue.delegate.id, name: input.issue.delegate.name } } : input.type === "issue.delegated" ? { delegate: null } : {}),
       acceptanceCriteria: (input.issue.acceptanceCriteria ?? []).map(item => ({ text: item.text, checked: item.checked })),
     },
     changes: input.type === "issue.created" ? null : input.changes ?? null,
@@ -131,6 +142,7 @@ export function issueWebhookUrlError(value: string) {
 
 /** A sample event for scripts/origin-webhook-test.mjs. */
 export function sampleIssueWebhookPayload(type: IssueWebhookEvent = "issue.created", origin?: string) {
+  const agent = { id: "sample_agent", name: "Grok Bot" };
   return issueWebhookPayload({
     type,
     occurredAt: Date.now(),
@@ -139,8 +151,9 @@ export function sampleIssueWebhookPayload(type: IssueWebhookEvent = "issue.creat
     issue: {
       id: "sample_issue", key: "ORI-AB12", title: "Rough note: import issues from a CSV", description: "", labels: ["Needs spec"],
       status: type === "issue.created" ? "Draft" : "Todo", completed: false, assignee: null, acceptanceCriteria: [],
+      ...(type === "issue.delegated" ? { delegate: agent } : {}),
     },
-    changes: type === "issue.updated" ? { status: { from: "Draft", to: "Todo" } } : null,
+    changes: type === "issue.updated" ? { status: { from: "Draft", to: "Todo" } } : type === "issue.delegated" ? { delegate: { from: null, to: agent } } : null,
     origin,
   });
 }

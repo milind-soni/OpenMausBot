@@ -31,9 +31,17 @@ async function messageRow(ctx: Ctx, viewer: ChatViewer, id: string) {
 }
 const parse = (row: Doc<"teamChatMessages">) => JSON.parse(row.payload) as ChatMessage;
 
-async function page(ctx: Ctx, viewer: ChatViewer, before: number) {
+/**
+ * Up to PAGE messages before `before`, or the newest PAGE without it. The newest page must not be bounded by
+ * Date.now(): Convex caches a query by its arguments and the index range it read, and a message sent later falls
+ * outside a "created < now" range, so the cached (stale) page would keep being served.
+ */
+async function page(ctx: Ctx, viewer: ChatViewer, before?: number) {
   const rows = await ctx.db.query("teamChatMessages")
-    .withIndex("by_team_conversation_created", q => q.eq("teamId", viewer.teamId).eq("conversation", viewer.conversation).lt("created", before))
+    .withIndex("by_team_conversation_created", q => {
+      const conversation = q.eq("teamId", viewer.teamId).eq("conversation", viewer.conversation);
+      return before === undefined ? conversation : conversation.lt("created", before);
+    })
     .order("desc").take(PAGE);
   return rows.reverse().map(row => row.payload);
 }
@@ -45,7 +53,7 @@ export const list = query({
   handler: async (ctx, a) => {
     const viewer = await requireChat(ctx, a);
     if (a.focus) return page(ctx, viewer, (await messageRow(ctx, viewer, a.focus)).created + 1);
-    return page(ctx, viewer, a.before || Date.now() + 1);
+    return page(ctx, viewer, a.before || undefined);
   },
 });
 

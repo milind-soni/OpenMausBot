@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useContext, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import clsx from "clsx";
 import { Check, Plus, Tag } from "lucide-react";
 import type { FunctionReturnType } from "convex/server";
@@ -28,16 +28,22 @@ export function LabelDot({ color }: { color: string }) {
   return <span className="label-dot" style={{ background: color }} aria-hidden="true" />;
 }
 
-/** Compact color dot + name chips; `max` folds the rest into "+n". */
+/** The label color as a CSS variable; chips tint their background, border and text from it. */
+export const labelStyle = (color: string) => ({ "--label": color }) as CSSProperties;
+
+/** Colored chips: a dot plus the name on a tint of the label's color; `max` folds the rest into "+n". */
 export function LabelChips({ labels, max = 3, className }: { labels?: readonly string[]; max?: number; className?: string }) {
   const color = useLabelColors();
   if (!labels?.length) return null;
   const rest = labels.length - max;
   return <span className={clsx("label-chips", className)} aria-label={`Labels: ${labels.join(", ")}`}>
-    {labels.slice(0, max).map(label => <span key={label} className="label-chip" aria-hidden="true"><LabelDot color={color(label)} /><span>{label}</span></span>)}
+    {labels.slice(0, max).map(label => <span key={label} className="label-chip" style={labelStyle(color(label))} aria-hidden="true"><LabelDot color={color(label)} /><span>{label}</span></span>)}
     {rest > 0 && <span className="label-chip label-chip-more" aria-hidden="true">+{rest}</span>}
   </span>;
 }
+
+/** Labels offered as one-press toggles above the label list: the kinds of work most issues are. */
+export const QUICK_LABELS = ["Bug", "Feature", "Improvement"] as const;
 
 type Row = { kind: "label"; name: string; color: string; group?: string; section: string } | { kind: "create"; name: string; section: string };
 
@@ -76,6 +82,7 @@ export function LabelList({ selected, onToggle, suggestions = [], canCreate = tr
   const matches: Row[] = filterCommands(all.map(row => ({ ...row, label: row.name, keywords: row.group })), trimmed).map(row => ({ kind: "label" as const, ...row, section: trimmed ? "" : row.section }));
   if (canCreate && trimmed && trimmed.length <= MAX_LABEL_LENGTH && !known.has(trimmed.toLowerCase()) && !chosen.has(trimmed.toLowerCase())) matches.push({ kind: "create", name: trimmed, section: "" });
   const current = Math.min(active, Math.max(0, matches.length - 1));
+  const quick = trimmed ? [] : QUICK_LABELS.map(name => available.find(label => label.name.toLowerCase() === name.toLowerCase())).filter(label => label !== undefined);
   const choose = (row: Row | undefined) => {
     if (!row) return;
     onToggle(row.name);
@@ -99,6 +106,14 @@ export function LabelList({ selected, onToggle, suggestions = [], canCreate = tr
         }} />
       {shortcut && <kbd className="shortcut-key">{shortcut}</kbd>}
     </div>
+    {quick.length > 0 && <div className="label-quick" role="group" aria-label="Type">
+      {quick.map(label => {
+        const on = chosen.has(label.name.toLowerCase());
+        return <button key={label.name} type="button" tabIndex={-1} className="label-quick-chip" style={labelStyle(label.color)} aria-pressed={on} onMouseDown={event => event.preventDefault()} onClick={() => onToggle(label.name)}>
+          <LabelDot color={label.color} /><span>{label.name}</span>{on && <Check size={11} strokeWidth={2.5} aria-hidden="true" />}
+        </button>;
+      })}
+    </div>}
     <div ref={list} role="listbox" id={id} aria-multiselectable="true" aria-label="Labels" className="label-list-options">
       {matches.map((row, index) => <LabelOption key={`${row.kind}:${row.name}`} id={`${id}-${index}`} row={row} heading={row.section && row.section !== matches[index - 1]?.section ? row.section : undefined}
         checked={row.kind === "label" && chosen.has(row.name.toLowerCase())} highlighted={index === current} onHover={() => setActive(index)} onChoose={() => choose(row)} />)}
@@ -131,7 +146,7 @@ export function LabelPicker({ value, onChange, suggestions, disabled, trigger, c
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null), menu = useRef<HTMLDivElement>(null), focus = useRef<HTMLInputElement>(null);
   const close = (restore = true) => { setOpen(false); if (restore) button.current?.focus({ preventScroll: true }); };
-  useAnchoredPopover(open, button, menu, focus, { width: 260, maxHeight: 360, onDismiss: restore => close(restore) });
+  useAnchoredPopover(open, button, menu, focus, { width: 280, maxHeight: 360, onDismiss: restore => close(restore) });
   const toggle = (name: string) => {
     const lower = name.toLowerCase();
     onChange(value.some(label => label.toLowerCase() === lower) ? value.filter(label => label.toLowerCase() !== lower) : [...value, name]);
@@ -143,5 +158,30 @@ export function LabelPicker({ value, onChange, suggestions, disabled, trigger, c
     {open && <div ref={menu} popover="manual" className="issue-select-popover label-picker-popover" onKeyDown={event => { if (event.key === "Tab") setOpen(false); }}>
       <LabelList selected={value} onToggle={toggle} suggestions={suggestions} onEscape={() => close()} shortcut="L" autoFocus={false} inputRef={focus} />
     </div>}
+  </div>;
+}
+
+
+/**
+ * The label list in a popover anchored to an element that is already on screen (a card's label chips or the card).
+ * Toggles apply at once; Escape, Tab or a press outside closes it.
+ */
+export function LabelPopover({ anchor, value, onChange, suggestions, onClose }: {
+  anchor: RefObject<HTMLElement | null>;
+  value: readonly string[];
+  onChange: (labels: string[]) => void;
+  suggestions?: readonly string[];
+  onClose: (restoreFocus: boolean) => void;
+}) {
+  const menu = useRef<HTMLDivElement>(null), focus = useRef<HTMLInputElement>(null);
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; });
+  useAnchoredPopover(true, anchor, menu, focus, { width: 280, maxHeight: 380, onDismiss: restore => closeRef.current(restore) });
+  const toggle = (name: string) => {
+    const lower = name.toLowerCase();
+    onChange(value.some(label => label.toLowerCase() === lower) ? value.filter(label => label.toLowerCase() !== lower) : [...value, name]);
+  };
+  return <div ref={menu} popover="manual" className="issue-select-popover label-picker-popover" onKeyDown={event => { if (event.key === "Tab") { event.preventDefault(); onClose(true); } }}>
+    <LabelList selected={value} onToggle={toggle} suggestions={suggestions} onEscape={() => onClose(true)} shortcut="L" autoFocus={false} inputRef={focus} />
   </div>;
 }

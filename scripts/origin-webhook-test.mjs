@@ -16,8 +16,8 @@ const { values } = parseArgs({ options: { url: { type: "string" }, event: { type
 const secret = process.env.ORIGIN_ISSUE_WEBHOOK_SECRET ?? "";
 const fail = message => { console.error(message); process.exit(1); };
 
-if (!values.url) fail("Usage: ORIGIN_ISSUE_WEBHOOK_SECRET='…' node scripts/origin-webhook-test.mjs --url <url> [--event issue.created|issue.updated]");
-if (values.event !== "issue.created" && values.event !== "issue.updated") fail("--event is issue.created or issue.updated");
+if (!values.url) fail("Usage: ORIGIN_ISSUE_WEBHOOK_SECRET='…' node scripts/origin-webhook-test.mjs --url <url> [--event issue.created|issue.updated|issue.delegated]");
+if (!["issue.created", "issue.updated", "issue.delegated"].includes(values.event)) fail("--event is issue.created, issue.updated or issue.delegated");
 if (secret.length < ISSUE_WEBHOOK_MIN_SECRET) fail(`Set ORIGIN_ISSUE_WEBHOOK_SECRET to at least ${ISSUE_WEBHOOK_MIN_SECRET} characters`);
 
 const payload = sampleIssueWebhookPayload(values.event, process.env.ORIGIN_PUBLIC_URL);

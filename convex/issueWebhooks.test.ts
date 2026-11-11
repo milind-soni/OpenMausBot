@@ -69,7 +69,7 @@ describe("issue webhooks are queued by issue writes", () => {
       project: { id: f.projectId, name: "Web", repo: "acme/web" },
       issue: {
         id: taskId, key: expect.stringMatching(/^ORI-[0-9A-Z]{4}$/), title: "Import CSV", description: "", labels: ["Needs spec"],
-        url: `https://origin.test/${team!.slug}/issue/${payload.issue.key}`, status: "Draft", completed: false,
+        url: `https://origin.test/${team!.slug}/issue/${payload.issue.key}`, status: "Backlog", completed: false,
         assignee: { email: f.member.email, name: "Member" }, acceptanceCriteria: [],
       },
       changes: null,
@@ -87,7 +87,7 @@ describe("issue webhooks are queued by issue writes", () => {
     await f.t.mutation(api.tasks.updateTask, { sessionToken: f.sessionToken, projectId: f.projectId, taskId, done: true });
     const updates = (await f.payloads()).slice(1);
     expect(updates.map(p => [p.type, p.changes, p.issue.status, p.issue.completed])).toEqual([
-      ["issue.updated", { status: { from: "Draft", to: "Todo" } }, "Todo", false],
+      ["issue.updated", { status: { from: "Backlog", to: "Todo" } }, "Todo", false],
       ["issue.updated", { completed: { from: false, to: true } }, "Todo", true],
     ]);
     expect(updates[0]!.issue.title).toBe("Typo fixed");
@@ -102,7 +102,7 @@ describe("issue webhooks are queued by issue writes", () => {
     await f.t.mutation(api.mcp.moveIssue, { token, issueId: created.id, completed: true });
     const [first, ...rest] = await f.payloads();
     expect(first!.issue).toMatchObject({ description: "Spec", labels: [], acceptanceCriteria: [{ text: "Works", checked: false }], assignee: { email: "owner@hooks.test" } });
-    expect(rest.map(p => p.changes)).toEqual([{ status: { from: "Draft", to: "In progress" } }, { completed: { from: false, to: true } }]);
+    expect(rest.map(p => p.changes)).toEqual([{ status: { from: "Backlog", to: "In progress" } }, { completed: { from: false, to: true } }]);
   });
 
   test("a merged pull request that completes the issue sends one update with both changes", async () => {

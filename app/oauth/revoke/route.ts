@@ -1,5 +1,5 @@
 import { api } from "@/convex/_generated/api";
-import { revokeMcpToken, oauthHeaders } from "@/lib/mcp-oauth";
+import { revokeMcpToken, oauthHeaders, requestClientId } from "@/lib/mcp-oauth";
 import { getConvexClient } from "@/lib/workspace-session";
 import { TooManyRequests } from "@/lib/server-store";
 import { readBoundedText } from "@/lib/http-body";
@@ -11,10 +11,11 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const params = new URLSearchParams(await readBoundedText(request, 20000));
-    await limitOAuthEndpoint(request, "mcp-revoke", params.get("client_id") || "", 60);
+    const clientId = requestClientId(params, request.headers.get("authorization"));
+    await limitOAuthEndpoint(request, "mcp-revoke", clientId, 60);
     const value = params.get("token") || "";
     if (value.startsWith(PAT_PREFIX)) { if (isPatFormat(value)) await getConvexClient().mutation(api.mcp.revokeOwnToken, { token: value }); }
-    else await revokeMcpToken(value, params.get("client_id") || "");
+    else await revokeMcpToken(value, clientId);
     return new Response(null, { status: 200, headers: oauthHeaders });
   } catch (error) {
     if (error instanceof TooManyRequests) return Response.json({ error: "temporarily_unavailable" }, { status: 429, headers: { ...oauthHeaders, "Retry-After": "60" } });

@@ -322,9 +322,9 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
         <div className="sidebar-topbar">
           <ProfileMenu user={user} sessionToken={sessionToken} onLogout={onLogout} sound={notifications.sound} onToggleSound={notifications.toggleSound} workspaces={workspaces} onCreateWorkspace={() => { setMobileOpen(false); setCreateWorkspaceOpen(true); }} onOpenSettings={() => setMobileOpen(false)} onCollapse={() => { setSidebarCollapsed(!sidebarCollapsed); setSidebarHover(false); }} />
           <button className="icon-button" type="button" onClick={() => setSearchOpen(true)} aria-label="Search" title="Search (/) · Commands (⌘K)" aria-keyshortcuts="/ f">
-            <Search size={17} />
+            <Search size={16} />
           </button>
-          <button className="icon-button sidebar-new-issue" title="Create issue (C)" aria-label="Create issue" aria-keyshortcuts="C" disabled={!canCreateIssue} onClick={() => setIssueOpen(true)}><SquarePen size={17} /></button>
+          <button className="icon-button sidebar-new-issue" title="Create issue (C)" aria-label="Create issue" aria-keyshortcuts="C" disabled={!canCreateIssue} onClick={() => setIssueOpen(true)}><SquarePen size={16} /></button>
         </div>
         <div className="sidebar-content">
           <span className="nav-glider" aria-hidden="true"><span className="nav-glider-avatar"><UserAvatar user={user} size="small" /></span></span>
@@ -338,6 +338,7 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
             <span>Inbox</span>
             {(notifications.summary?.unread || 0) > 0 && <small className="nav-unread" aria-label={`${notifications.summary!.unread}${notifications.summary!.more ? "+" : ""} unread notifications`}>{notifications.summary!.unread}{notifications.summary!.more ? "+" : ""}</small>}
           </button>
+          <span className="sidebar-label">Workspace</span>
           <button aria-current={mainView === "chat" ? "page" : undefined} className={clsx("nav-item", mainView === "chat" && "active")} type="button" onClick={() => openView("chat")}>
             <MessageCircle size={16} />
             <span>Chat</span>
@@ -392,7 +393,7 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
       </aside>
       {!sidebarCollapsed && <SidebarResizeHandle width={sidebarLayout.width} onResize={width => setSidebarLayout(current => ({ ...current, width }))} onCollapse={width => { setSidebarLayout({ width, collapsed: true }); setSidebarHover(false); }} />}
       <main ref={workspaceRef} inert={mobileOpen || undefined} className={clsx("workspace", mainView === "draw" && "draw-workspace")}>
-        {sidebarCollapsed && <button className="icon-button sidebar-restore" aria-label="Keep sidebar open" title="Keep sidebar open" aria-controls="workspace-sidebar" aria-expanded="false" onClick={() => { setSidebarCollapsed(false); setSidebarHover(false); }}><PanelLeftOpen size={18} /></button>}
+        {sidebarCollapsed && <button className="icon-button sidebar-restore" aria-label="Keep sidebar open" title="Keep sidebar open" aria-controls="workspace-sidebar" aria-expanded="false" onClick={() => { setSidebarCollapsed(false); setSidebarHover(false); }}><PanelLeftOpen size={16} /></button>}
         {shellNotice && <div className="notice danger">{shellNotice}<button className="icon-button" aria-label="Dismiss" onClick={() => setShellNotice("")}><X size={14} /></button></div>}
         <ErrorBoundary resetKey={`${mainView}:${activeProjectId}:${issueRoute?.taskId ?? issueRoute?.key ?? ""}`} fallback={<EmptyBlock icon={CircleAlert} title="This view could not load" body="It may have been deleted or your access changed." />}>
         {mainView === "issue" && issueRoute ? (
@@ -510,12 +511,12 @@ function ProfileMenu({
         <div role="group" aria-labelledby="account-menu-workspaces">
           {workspaces.map(item => <button role="menuitemradio" aria-checked={item._id === workspace._id} tabIndex={-1} key={item._id} onClick={() => choose(() => { if (item._id !== workspace._id) router.push(`/${item.slug}`); })}><span className="workspace-initial" aria-hidden="true">{item.name.slice(0, 1).toUpperCase()}</span><span>{item.name}</span>{item._id === workspace._id && <Check size={14} className="menu-check" />}</button>)}
         </div>
-        <button role="menuitem" tabIndex={-1} onClick={() => choose(onCreateWorkspace)}><Plus size={15} /><span>Create workspace</span></button>
+        <button role="menuitem" tabIndex={-1} onClick={() => choose(onCreateWorkspace)}><Plus size={14} /><span>Create workspace</span></button>
         <hr />
-        <button role="menuitem" tabIndex={-1} onClick={() => choose(() => { onOpenSettings(); setOpen(true); })}><Settings2 size={15} /><span>Settings</span></button>
-        <button role="menuitem" tabIndex={-1} className="menu-desktop-only" onClick={() => choose(onCollapse)}><PanelLeftClose size={15} /><span>Collapse sidebar</span></button>
+        <button role="menuitem" tabIndex={-1} onClick={() => choose(() => { onOpenSettings(); setOpen(true); })}><Settings2 size={14} /><span>Settings</span></button>
+        <button role="menuitem" tabIndex={-1} className="menu-desktop-only" onClick={() => choose(onCollapse)}><PanelLeftClose size={14} /><span>Collapse sidebar</span></button>
         <hr />
-        <button role="menuitem" tabIndex={-1} onClick={() => choose(onLogout)}><LogOut size={15} /><span>Sign out</span></button>
+        <button role="menuitem" tabIndex={-1} onClick={() => choose(onLogout)}><LogOut size={14} /><span>Sign out</span></button>
       </div>}
     </div>
   );

@@ -16,7 +16,7 @@ describe("command menu", () => {
   });
   it("searches the shortcut reference by label, group or key", () => {
     expect(filterShortcuts("status").map(entry => entry.label)).toEqual(["Change status"]);
-    expect(filterShortcuts("views").map(entry => entry.label)).toEqual(["Board layout", "List layout"]);
+    expect(filterShortcuts("views").map(entry => entry.label)).toEqual(["All issues", "Active issues", "Backlog", "Filter issues", "Display options", "Toggle list and board", "Board layout", "List layout"]);
     expect(filterShortcuts("").length).toBeGreaterThan(10);
   });
   it("offers due dates in local time", () => {

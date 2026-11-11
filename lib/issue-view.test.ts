@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_VIEW, NO_LABEL, UNASSIGNED, activeFilterCount, groupIssues, matchesFilters, readIssueView, sortIssues, toggleFilter, type ViewTask } from "./issue-view";
+import { DEFAULT_VIEW, NO_LABEL, inIssueTab, UNASSIGNED, activeFilterCount, groupIssues, matchesFilters, readIssueView, sortIssues, toggleFilter, type ViewTask } from "./issue-view";
 
 const task = (id: string, extra: Partial<ViewTask & { status: string }> = {}): ViewTask & { status: string } => ({ _id: id, title: id, priority: "medium", createdAt: 1, updatedAt: 1, order: 0, status: "todo", ...extra });
 const tasks = [
@@ -57,6 +57,25 @@ describe("stored view state", () => {
     expect(readIssueView(null)).toEqual(DEFAULT_VIEW);
     expect(readIssueView(null, "list").layout).toBe("list");
     const view = readIssueView({ layout: "list", grouping: "nope", ordering: "priority", properties: ["id", "bogus"], filters: { labels: ["Bug", 3], priorities: ["urgent", "high"] } });
-    expect(view).toMatchObject({ layout: "list", grouping: "status", ordering: "priority", properties: ["id"], filters: { labels: ["bug"], priorities: ["high"] } });
+    expect(view).toMatchObject({ layout: "list", grouping: "status", ordering: "priority", properties: ["id", "estimate"], filters: { labels: ["bug"], priorities: ["high"] } });
+  });
+});
+
+describe("view tabs", () => {
+  const open = { done: false }, done = { done: true };
+  it("Active is open issues outside the Backlog column", () => {
+    expect([inIssueTab(open, false, "active"), inIssueTab(open, true, "active"), inIssueTab(done, false, "active")]).toEqual([true, false, false]);
+  });
+  it("Backlog is open issues in the draft column", () => {
+    expect([inIssueTab(open, true, "backlog"), inIssueTab(open, false, "backlog"), inIssueTab(done, true, "backlog")]).toEqual([true, false, false]);
+  });
+  it("All issues includes completed ones unless Display hides them", () => {
+    expect([inIssueTab(open, true, "all"), inIssueTab(done, false, "all"), inIssueTab(done, false, "all", false)]).toEqual([true, true, false]);
+  });
+  it("opens on Active and keeps a stored tab", () => {
+    expect(readIssueView(null).tab).toBe("active");
+    expect(readIssueView({ tab: "backlog" }).tab).toBe("backlog");
+    expect(readIssueView({ tab: "completed" }).tab).toBe("active");
+    expect(readIssueView({ showCompleted: false }).showCompleted).toBe(false);
   });
 });

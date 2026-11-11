@@ -14,6 +14,8 @@
   --surface-5: #2a2b30;
   --hover: rgba(255, 255, 255, 0.04);
   --active: rgba(255, 255, 255, 0.07);
+  /* The chosen item of a set (open tab, active segment): a step above hover, with a hairline border. */
+  --selected: rgba(255, 255, 255, 0.07);
   --scrim: rgba(0, 0, 0, 0.6);
 
   /* Borders. */
@@ -44,8 +46,11 @@
   --green-soft: rgba(92, 197, 143, 0.12);
   --blue-soft: rgba(90, 174, 252, 0.12);
 
-  /* Type: one family (Inter); code uses the platform monospace. */
-  --font-sans: var(--font-inter), "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Type: Inter Variable for UI, Inter Display (the same file at opsz 32) for
+     headings; code uses the platform monospace. */
+  --font-sans: var(--font-inter), "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-inter), "Inter Display", "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --display-opsz: "opsz" 32;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
   --text-xs: 11px;
   --text-sm: 12px;
@@ -57,8 +62,9 @@
   --leading-tight: 1.25;
   --leading: 1.5;
   --weight-regular: 400;
-  --weight-medium: 500;
-  --weight-semibold: 600;
+  --weight-medium: 510;
+  --weight-semibold: 590;
+  --weight-bold: 600;
 
   /* Spacing: 4px scale. */
   --space-1: 4px;
@@ -94,6 +100,9 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
   --ease-move: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Hover, press and selection: a short, linear-ish ease with no overshoot. */
+  --ease-standard: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --duration-instant: 80ms;
   --duration-fast: 120ms;
   --duration: 180ms;
   --duration-slow: 280ms;

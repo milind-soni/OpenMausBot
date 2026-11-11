@@ -43,14 +43,16 @@ test('O-031 O-033 O-034 O-036 O-038 board CRUD and real drag synchronizes two co
   await expect(review.locator('.task-card')).toContainText('Browser-created task');
   await expect(lane(observer, 'Review lane').locator('.task-card')).toContainText('Browser-created task');
   await writer.waitForTimeout(500);
+  // A click opens the issue page; Back returns to the board.
   await card.click();
-  dialog = writer.getByRole('dialog');
-  await dialog.getByLabel('Issue title', { exact: true }).fill('Edited browser task');
-  await dialog.getByLabel('Issue description', { exact: true }).fill('Persisted from browser');
-  await dialog.getByLabel('Issue description', { exact: true }).blur();
+  const issuePage = writer.locator('[data-issue-page]');
+  await expect(issuePage).toBeVisible();
+  await issuePage.getByLabel('Issue title', { exact: true }).fill('Edited browser task');
+  await issuePage.getByLabel('Issue description', { exact: true }).fill('Persisted from browser');
+  await issuePage.getByLabel('Issue description', { exact: true }).blur();
   await expect.poll(async () => (await f.member.api.q('tasks:board', f.project)).tasks[0]?.title).toBe('Edited browser task');
-  await writer.keyboard.press('Escape');
-  await expect(dialog).toHaveCount(0);
+  await writer.goBack();
+  await expect(issuePage).toHaveCount(0);
   await writer.getByRole('button', { name: 'Review lane column options' }).click();
   await writer.getByRole('menuitem', { name: 'Rename' }).click();
   await writer.getByRole('textbox', { name: 'Column name', exact: true }).fill('Reviewed');
@@ -218,4 +220,116 @@ test('O-076 O-078 O-083 two contexts join and leave a fake-media call', async ({
   await b.getByRole('button', { name: 'Leave call', exact: true }).click();
   await a.getByRole('button', { name: 'Leave call', exact: true }).click();
   await expect.poll(async () => (await local(f.admin, `/api/local-voice/participants?teamId=${f.teamId}`)).participants.length).toBe(0);
+});
+
+test('O-120 Backlog lane, Code tab aliases, card label picker, label filter and estimates', async ({ clients, f }) => {
+  const [backlog, todo] = f.board.columns;
+  expect(backlog).toMatchObject({ title: 'Backlog', isDraft: true });
+  const bug = await f.member.api.m('tasks:createTask', { ...f.project, columnId: todo._id, title: 'Label me as a bug', priority: 'medium' });
+  await f.member.api.m('tasks:createTask', { ...f.project, columnId: todo._id, title: 'Unlabelled neighbour', priority: 'low' });
+  await f.member.api.m('issueRelations:labels', { taskId: bug, labels: ['Feature'] });
+  const page = await clients.login(f.member);
+  // Active (the default view) leaves the Backlog column out; the Backlog tab shows it.
+  const backlogLane = page.locator('[data-testid="board-column"][data-column-title="Backlog"]');
+  await expect(page.getByRole('tab', { name: 'Active' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('[data-testid="board-column"][data-column-title="Todo"]')).toBeVisible();
+  await expect(backlogLane).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Backlog' }).click();
+  await expect(backlogLane).toBeVisible();
+  await page.getByRole('tab', { name: 'Active' }).click();
+  const card = page.locator('.task-card').filter({ hasText: 'Label me as a bug' });
+  // The card's labels open the picker; Bug is a one-press toggle.
+  await card.getByRole('button', { name: /^Labels: Feature/ }).click();
+  await page.locator('.label-picker-popover').getByRole('button', { name: 'Bug' }).click();
+  await page.keyboard.press('Escape');
+  await expect(card.locator('.label-chip')).toHaveText(['Feature', 'Bug']);
+  await expect.poll(async () => (await f.member.api.q('tasks:details', { ...f.project, taskId: bug })).task.labels).toEqual(['Feature', 'Bug']);
+  // Filter by label.
+  await page.getByRole('button', { name: 'Filter' }).click();
+  await page.getByRole('menuitem', { name: /^Labels/ }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Bug' }).click();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.task-card')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Remove labels filter' }).click();
+  await expect(page.locator('.task-card')).toHaveCount(2);
+  // Estimate from the card menu, shown on the card and summed in the lane.
+  await card.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: /^Estimate/ }).click();
+  await page.getByRole('menuitemradio', { name: '3 points' }).click();
+  await expect(card.getByRole('button', { name: 'Estimate: 3 points' })).toBeVisible();
+  await expect(page.locator('[data-column-title="Todo"] .lane-estimate')).toHaveText('3');
+  // Old links to the Repo and Pull requests tabs open Code.
+  for (const old of ['repo', 'pulls']) {
+    await page.goto(f.url(`tab=${old}`));
+    await expect(page.getByRole('tab', { name: 'Code' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page).toHaveURL(/tab=code/);
+    await expect(page.getByRole('heading', { name: /^(No repository connected|Creating repository)$/ })).toBeVisible();
+  }
+});
+
+test('O-122 view tabs, Display, filter and layout keys, completed issues', async ({ clients, f }) => {
+  const [backlog, todo] = f.board.columns;
+  const make = (column, title) => f.member.api.m('tasks:createTask', { ...f.project, columnId: column._id, title, priority: 'medium' });
+  await make(backlog, 'Parked idea');
+  await make(todo, 'Open work');
+  const finished = await make(todo, 'Finished work');
+  await f.member.api.m('tasks:updateTask', { ...f.project, taskId: finished, done: true });
+  const page = await clients.login(f.member);
+  const titles = () => page.locator('.task-card .task-top strong');
+  // Active: open issues outside the Backlog.
+  await expect(titles()).toHaveText(['Open work']);
+  // Backlog (3): the draft column only.
+  await page.keyboard.press('3');
+  await expect(page.getByRole('tab', { name: 'Backlog' })).toHaveAttribute('aria-selected', 'true');
+  await expect(titles()).toHaveText(['Parked idea']);
+  // All issues (1): everything, the completed issue after the open ones in its column.
+  await page.keyboard.press('1');
+  await expect(titles()).toHaveText(['Parked idea', 'Open work', 'Finished work']);
+  await expect(page.locator('.task-card.done')).toContainText('Finished work');
+  // Shift+V opens Display; hiding completed issues applies to All issues.
+  await page.keyboard.press('Shift+V');
+  const display = page.getByRole('dialog', { name: 'Display options' });
+  await expect(display).toBeVisible();
+  await display.getByRole('switch', { name: 'Show completed issues' }).uncheck();
+  await expect(titles()).toHaveText(['Parked idea', 'Open work']);
+  await display.getByRole('switch', { name: 'Show completed issues' }).check();
+  await page.keyboard.press('Escape');
+  await expect(display).toHaveCount(0);
+  // Ctrl+B toggles list and board.
+  await page.keyboard.press('Control+b');
+  await expect(page.locator('.issue-table')).toBeVisible();
+  await page.keyboard.press('Control+b');
+  await expect(page.locator('.kanban-scroll')).toBeVisible();
+  // F opens the filter menu (the workspace search stays on /).
+  await page.keyboard.press('f');
+  await expect(page.getByRole('menu', { name: 'Filter issues' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Search' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  // Completed issues sit behind a quiet button beside the tabs, newest first, with Reopen.
+  await page.getByRole('button', { name: 'Completed issues', exact: true }).click();
+  await expect(page.locator('.archive-row')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Reopen Finished work' }).click();
+  await expect.poll(async () => (await f.member.api.q('tasks:board', f.project)).tasks.find(task => task._id === finished)?.done).toBe(false);
+  await page.getByRole('tab', { name: 'Active' }).click();
+  await expect(titles()).toHaveText(['Open work', 'Finished work']);
+});
+
+test('O-121 two call peers connect and receive each other\'s audio and video', async ({ clients, f }) => {
+  const wrap = () => { const Native = window.RTCPeerConnection; window.__peers = []; window.RTCPeerConnection = class extends Native { constructor(...args) { super(...args); window.__peers.push(this); } }; };
+  const open = async person => {
+    const page = await clients.login(person, `/${f.workspace.slug}?view=voice`);
+    await page.addInitScript(wrap);
+    await page.reload();
+    await expect(page.locator('.workspace-app')).toBeVisible();
+    await page.getByRole('button', { name: 'Join call', exact: true }).click();
+    return page;
+  };
+  const a = await open(f.admin), b = await open(f.member);
+  for (const page of [a, b]) await page.waitForFunction(async () => {
+    const peer = window.__peers.find(item => item.connectionState === 'connected');
+    if (!peer) return false;
+    const rows = [...(await peer.getStats()).values()];
+    return ['audio', 'video'].every(kind => rows.some(row => row.type === 'inbound-rtp' && row.kind === kind && row.packetsReceived > 0));
+  }, null, { timeout: 40000, polling: 500 });
 });

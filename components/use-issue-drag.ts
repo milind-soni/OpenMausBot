@@ -10,8 +10,8 @@ export type IssueDrag = { taskId: string; mode: "pointer" | "keyboard"; origin: 
 const LONG_PRESS_MS = 350;
 const TOUCH_SLOP = 8;
 const MOUSE_THRESHOLD = 5;
-const SETTLE_MS = 240;
-const FLIP_MS = 320;
+const SETTLE_MS = 180;
+const FLIP_MS = 180;
 const EASE = "cubic-bezier(.2, .8, .2, 1)";
 const MAX_SCROLL_STEP = 18;
 

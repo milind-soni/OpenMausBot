@@ -2,15 +2,17 @@ import { githubConnectionInfo, githubConnectionToken } from "./githubConnection"
 import { GitHubHttpError, githubRequest, lockGitHubJob, readGitHubJob, saveGitHubJob, workspaceGitHubToken } from "./github-workspace";
 import { integrationBridge } from "./integration-bridge";
 import { parseGitHubRepo } from "./githubLocal";
+import { githubBody, remoteIssue, type IssuePatch } from "./github-issue-sync";
 
 type Context = {
   credentialAllowed: boolean;
   legacyOwner: boolean;
   project: { _id: string; teamId?: string; name: string; status?: string; description?: string; repoUrl?: string; githubRepoId?: number; githubWorkspaceAccess?: boolean };
   connection: { teamId: string; login: string; connectedBy: string; autoCreate: boolean } | null;
-  task: { _id: string; title: string; description?: string; done: boolean; githubIssueNumber?: number; githubIssueUrl?: string } | null;
+  task: { _id: string; title: string; description?: string; done: boolean; draft?: boolean; labels?: string[]; githubIssueNumber?: number; githubIssueUrl?: string } | null;
 };
-type GitHubIssue = { number: number; html_url: string; state: "open" | "closed"; updated_at: string; body?: string; pull_request?: unknown };
+type GitHubIssue = { number: number; html_url: string; state: "open" | "closed"; updated_at: string; title?: string; body?: string | null; labels?: (string | { name?: string | null })[]; node_id?: string; pull_request?: unknown };
+type SyncPlan = { action: "none" | "create" | "sync" | "push"; number?: number; patch?: IssuePatch };
 type Target = { projectId: string; taskId: string; repoUrl: string; number: number; connection: Context["connection"] };
 
 async function createOnGitHub<T>(key: string, path: string, token: string, body: unknown): Promise<T> {
@@ -96,10 +98,11 @@ export async function createGitHubTask(projectId: string, taskId: string) {
   const { task, repo, token, connection, project } = await contextWithToken(projectId, taskId);
   if (project.status && project.status !== "active") throw new Error("Reactivate the project before creating GitHub issues");
   if (!task || !repo) throw new Error("Connect a GitHub repository first");
+  if (task.draft && !task.githubIssueNumber) throw new Error("Draft issues stay in Origin. Move this issue out of Backlog before publishing it.");
   const repoUrl = `https://github.com/${repo.owner}/${repo.repo}`;
   if (task.githubIssueNumber) return { ok: true, issueNumber: task.githubIssueNumber, issueUrl: task.githubIssueUrl, message: `Already linked to GitHub #${task.githubIssueNumber}` };
   if (!token) throw new Error(connection && !project.githubWorkspaceAccess
-    ? "GitHub is connected. A workspace admin must enable this repository in the project's Repo tab."
+    ? "GitHub is connected. A workspace admin must enable this repository in the project's Code tab."
     : "A workspace admin needs to reconnect GitHub in Settings > Integrations");
   const key = `issue:${taskId}:${repoUrl.toLowerCase()}`;
   if (!await lockGitHubJob(key)) throw new Error("This issue is already being created. Wait a moment before retrying.");
@@ -118,10 +121,12 @@ export async function createGitHubTask(projectId: string, taskId: string) {
     }
     if (!issue) {
       await saveGitHubJob(key, "working", { started: true });
-      issue = await createOnGitHub<GitHubIssue>(key, `/repos/${repo.owner}/${repo.repo}/issues`, token, { title: task.title, body: `${task.description || ""}\n\n${marker}`.trim() });
+      issue = await createOnGitHub<GitHubIssue>(key, `/repos/${repo.owner}/${repo.repo}/issues`, token, { title: task.title, body: githubBody(taskId, task.description), ...(task.labels?.length ? { labels: task.labels } : {}) });
       await saveGitHubJob(key, "working", { issue });
     }
     await link(projectId, taskId, repoUrl, issue);
+    // What GitHub stored is what both sides now agree on, so the issues webhook for our own create is not an edit.
+    await integrationBridge("githubIssuePushed", { taskId, remote: remoteIssue(issue) });
     await saveGitHubJob(key, "done", { issue });
     return { ok: true, issueNumber: issue.number, issueUrl: issue.html_url, message: `Created GitHub issue #${issue.number}` };
   } catch (error) {
@@ -131,11 +136,92 @@ export async function createGitHubTask(projectId: string, taskId: string) {
   }
 }
 
-async function syncTarget(target: Target) {
+/**
+ * Reads one linked GitHub issue and reconciles it with its Origin issue both ways: GitHub's state and content changes
+ * land in Origin (integrations.linkIssue, then githubIssueSync.reconcile), then Origin's changes are PATCHed to GitHub.
+ */
+async function syncTarget(target: Pick<Target, "projectId" | "taskId" | "number">) {
   const { token, repo } = await contextWithToken(target.projectId, target.taskId);
   if (!repo || !token) throw new Error("Repository sync needs an authorized GitHub connection");
-  const issue = await githubRequest<GitHubIssue>(`/repos/${repo.owner}/${repo.repo}/issues/${target.number}`, token);
-  if (!issue.pull_request) await link(target.projectId, target.taskId, `https://github.com/${repo.owner}/${repo.repo}`, issue);
+  const path = `/repos/${repo.owner}/${repo.repo}/issues/${target.number}`;
+  const issue = await githubRequest<GitHubIssue>(path, token);
+  if (issue.pull_request) return;
+  await link(target.projectId, target.taskId, `https://github.com/${repo.owner}/${repo.repo}`, issue);
+  const plan = await integrationBridge<SyncPlan>("githubIssueReconcile", { taskId: target.taskId, remote: remoteIssue(issue) });
+  if (plan.action !== "push" || !plan.patch) return;
+  const updated = await githubRequest<GitHubIssue>(path, token, { method: "PATCH", body: JSON.stringify(plan.patch) });
+  await integrationBridge("githubIssuePushed", { taskId: target.taskId, remote: remoteIssue(updated) });
+}
+
+/** Mirrors one Origin issue to GitHub: creates its GitHub issue once it is outside Backlog, else pushes what changed. */
+export async function pushGitHubTask(projectId: string, taskId: string): Promise<"none" | "created" | "synced"> {
+  let created = false;
+  for (let step = 0; step < 2; step++) {
+    const plan = await integrationBridge<SyncPlan>("githubIssueReconcile", { taskId });
+    if (plan.action === "create" && !created) { await createGitHubTask(projectId, taskId); created = true; continue; }
+    if (plan.action !== "sync" || !plan.number) break;
+    await syncTarget({ projectId, taskId, number: plan.number });
+    return "synced";
+  }
+  return created ? "created" : "none";
+}
+
+/**
+ * The GitHub side of deleting an Origin issue: closes its GitHub issue as not planned. GitHub's REST API cannot delete
+ * issues; with ORIGIN_GITHUB_DELETE_ISSUES=true the worker deletes it with GraphQL `deleteIssue` instead (the token
+ * needs admin rights on the repository) and falls back to closing when GitHub refuses.
+ */
+export async function closeDeletedIssue(projectId: string, deleted: { repoUrl: string; number: number }): Promise<"closed" | "deleted" | "gone" | "skipped"> {
+  const { token, repo } = await contextWithToken(projectId);
+  if (!repo || !token) throw new Error("Closing the GitHub issue needs an authorized GitHub connection");
+  if (`https://github.com/${repo.owner}/${repo.repo}`.toLowerCase() !== deleted.repoUrl.toLowerCase()) return "skipped";
+  const path = `/repos/${repo.owner}/${repo.repo}/issues/${deleted.number}`;
+  let issue: GitHubIssue;
+  try { issue = await githubRequest<GitHubIssue>(path, token); }
+  catch (error) { if (error instanceof GitHubHttpError && [404, 410].includes(error.status)) return "gone"; throw error; }
+  if (issue.pull_request) return "skipped";
+  if (process.env.ORIGIN_GITHUB_DELETE_ISSUES === "true" && issue.node_id) {
+    const result = await githubRequest<{ errors?: unknown[] }>("/graphql", token, {
+      method: "POST", body: JSON.stringify({ query: "mutation($id:ID!){deleteIssue(input:{issueId:$id}){clientMutationId}}", variables: { id: issue.node_id } }),
+    }).catch(() => ({ errors: ["refused"] }));
+    if (!result.errors?.length) return "deleted";
+  }
+  if (issue.state !== "closed") await githubRequest(path, token, { method: "PATCH", body: JSON.stringify({ state: "closed", state_reason: "not_planned" }) });
+  return "closed";
+}
+
+type Deleted = { repoUrl: string; number: number };
+type OutboxRow = { taskId: string; projectId: string; revision: number; deleted?: Deleted };
+const OUTBOX_LOCK = "issue-outbox-lock";
+const OUTBOX_BUDGET_MS = 40000;
+
+/** Drains the GitHub issue outbox (convex/githubIssueSync.ts) in leased batches, until it is empty or out of time. */
+export async function syncGitHubOutbox() {
+  if (!await lockGitHubJob(OUTBOX_LOCK)) return { busy: true, processed: 0 };
+  const started = Date.now();
+  let processed = 0;
+  try {
+    while (Date.now() - started < OUTBOX_BUDGET_MS) {
+      const rows = await integrationBridge<OutboxRow[]>("githubOutboxClaim", { limit: 10 });
+      if (!rows.length) break;
+      for (const row of rows) {
+        let { revision, deleted } = row;
+        // An issue edited (or deleted) while it was being pushed goes again, at most three times per claim.
+        for (let round = 0; round < 3; round++) {
+          let error: string | undefined;
+          try {
+            if (deleted) await closeDeletedIssue(row.projectId, deleted);
+            else await pushGitHubTask(row.projectId, row.taskId);
+          } catch (cause) { error = cause instanceof Error ? cause.message : "GitHub sync failed"; }
+          const next = await integrationBridge<{ again: boolean; revision: number; deleted?: Deleted }>("githubOutboxFinish", { taskId: row.taskId, revision, ...(error === undefined ? {} : { error }) });
+          processed++;
+          if (!next.again) break;
+          revision = next.revision; deleted = next.deleted;
+        }
+      }
+    }
+  } finally { await saveGitHubJob(OUTBOX_LOCK, "done"); }
+  return { busy: false, processed };
 }
 
 export async function syncGitHubEvent(repoUrl: string, number: number) {

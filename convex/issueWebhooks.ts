@@ -79,7 +79,7 @@ export const target = internalQuery({
  * twice (after 30 s and 5 min). Logs name the event and status only, never the secret.
  */
 export const deliver = internalAction({
-  args: { teamId: v.id("teams"), event: v.union(v.literal("issue.created"), v.literal("issue.updated")), deliveryId: v.string(), body: v.string(), attempt: v.optional(v.number()) },
+  args: { teamId: v.id("teams"), event: v.union(v.literal("issue.created"), v.literal("issue.updated"), v.literal("issue.delegated")), deliveryId: v.string(), body: v.string(), attempt: v.optional(v.number()) },
   returns: v.null(),
   handler: async (ctx, a) => {
     const row = await ctx.runQuery(internal.issueWebhooks.target, { teamId: a.teamId });

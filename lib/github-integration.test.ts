@@ -57,6 +57,8 @@ async function fixture() {
       case "linkIssue": return t.mutation(internal.integrations.linkIssue, input as never);
       case "webhookTargets": return JSON.parse(await t.query(internal.integrations.webhookTargets, input as never));
       case "targets": return JSON.parse(await t.query(internal.integrations.targets, input as never));
+      case "githubIssueReconcile": return t.mutation(internal.githubIssueSync.reconcile, input as never);
+      case "githubIssuePushed": return t.mutation(internal.githubIssueSync.pushed, input as never);
       case "githubDelivery": return t.mutation(internal.taskPRs.delivery, input as never);
       default:
         if (operation.startsWith("store.")) return signedBridge(t, operation, args);

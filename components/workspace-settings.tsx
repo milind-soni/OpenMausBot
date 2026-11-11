@@ -50,9 +50,9 @@ export function WorkspaceSettings({ sessionToken, profile, security, sound, onTo
       <nav ref={navRef} className="settings-nav" aria-label="Settings sections">
         {(["account", "workspace"] as const).map(group => <div className="settings-nav-group" key={group} role="group" aria-labelledby={`settings-group-${group}`}>
           <span id={`settings-group-${group}`}>{group === "account" ? "Account" : workspace.name}</span>
-          {sections.filter(section => section.group === group).map(({ id, label, icon: Icon }) => <button key={id} type="button" data-section={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} onClick={() => open(id)}><Icon size={15} /><span>{label}</span><ChevronRight size={15} className="settings-nav-chevron" /></button>)}
+          {sections.filter(section => section.group === group).map(({ id, label, icon: Icon }) => <button key={id} type="button" data-section={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} onClick={() => open(id)}><Icon size={16} /><span>{label}</span><ChevronRight size={15} className="settings-nav-chevron" /></button>)}
         </div>)}
-        <button type="button" className="settings-logout" onClick={onLogout}><LogOut size={15} /><span>Sign out</span></button>
+        <button type="button" className="settings-logout" onClick={onLogout}><LogOut size={16} /><span>Sign out</span></button>
       </nav>
       <div className="settings-body" ref={body}>
         <header className="settings-section-head">
@@ -129,7 +129,7 @@ function IssueWebhookSettings({ sessionToken }: { sessionToken: string }) {
   };
   return <form className="settings-group" onSubmit={event => { event.preventDefault(); if (!busy) void attempt(() => save({ sessionToken, teamId: workspace._id, url: shownUrl, ...(secret ? { secret } : {}) }), "Webhook saved"); }}>
     <h4>Issue webhook</h4>
-    <p className="settings-note">Origin sends <code>issue.created</code> and <code>issue.updated</code> (status or completion changes) as JSON, signed in <code>X-Origin-Signature</code> with HMAC-SHA256 of the body.{config.globalDefault && !config.url ? " Until you set one, the server’s default webhook is used." : ""}</p>
+    <p className="settings-note">Origin sends <code>issue.created</code>, <code>issue.updated</code> (status or completion changes) and <code>issue.delegated</code> (an agent put on or taken off an issue) as JSON, signed in <code>X-Origin-Signature</code> with HMAC-SHA256 of the body.{config.globalDefault && !config.url ? " Until you set one, the server’s default webhook is used." : ""}</p>
     <label>URL<input type="url" inputMode="url" autoComplete="off" spellCheck={false} placeholder="https://" maxLength={2000} value={shownUrl} onChange={event => setUrl(event.target.value)} required /></label>
     <label>Signing secret<input type="password" autoComplete="new-password" spellCheck={false} minLength={32} maxLength={512} placeholder={config.url ? "Saved. Enter a new one to replace it" : "At least 32 characters"} value={secret} onChange={event => setSecret(event.target.value)} required={!config.url} /></label>
     <FormStatus notice={notice} />

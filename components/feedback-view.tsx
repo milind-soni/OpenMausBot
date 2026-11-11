@@ -1,7 +1,7 @@
 "use client";
 import { errorText } from "@/lib/error-text";
 import { formatRelative } from "@/lib/format";
-import { isDraftColumn } from "@/lib/origin-columns";
+import { isDraftColumn, presentColumns } from "@/lib/origin-columns";
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
@@ -94,7 +94,7 @@ function ConvertFeedback({ sessionToken, projectId, entry, onClose, onCreated }:
   const workspace = useWorkspace(); const convert = useMutation(api.feedback.convert);
   const board = useQuery(api.tasks.board, { sessionToken, projectId }); const members = useQuery(api.members.people, { sessionToken, projectId }); const me = useQuery(api.auth.me, { sessionToken });
   const [column, setColumn] = useState(""); const [priority, setPriority] = useState<"low" | "medium" | "high">(entry.kind === "bug" ? "high" : "medium"); const [assignee, setAssignee] = useState(""); const [dueDate, setDueDate] = useState(""); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
-  const columns = board?.columns.filter(c => !c.isDone && !/^done$/i.test(c.title)) || [];
+  const columns = presentColumns(board?.columns.filter(c => !c.isDone && !/^done$/i.test(c.title)) || []);
   const defaultColumn = (columns.find(c => !isDraftColumn(c)) ?? columns[0])?._id || "";
   return <Dialog title="New issue" onClose={onClose}><form className="stack-form library-form" onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.currentTarget.requestSubmit(); } }} onSubmit={async e => { e.preventDefault(); if (busy || !columns.length) return; setBusy(true); setError(""); try { onCreated(await convert({ sessionToken, teamId: workspace._id, entryId: entry._id, columnId: (column || defaultColumn) as Id<"columns">, assignedToEmail: assignee, dueDate, priority })); } catch (error) { setError(errorText(error, "Could not create issue")); } finally { setBusy(false); } }}>
     <p className="library-form-subject">{entry.kind === "bug" ? <Bug size={14} /> : <Lightbulb size={14} />}<span>{entry.title}</span></p>

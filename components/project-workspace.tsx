@@ -1,113 +1,36 @@
 "use client";
 import { errorText } from "@/lib/error-text";
 import { useMutation, useQuery } from "convex/react";
-import { CircleCheck, CircleDot, ExternalLink, GitBranch, GitCommitHorizontal, GitMerge, GitPullRequest, GitPullRequestClosed, ImageUp, Loader2, Power, Settings, Settings2 } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Code2, ImageUp, KeyRound, Layers, Loader2, MessagesSquare, Power, Settings, Shapes, type LucideIcon } from "lucide-react";
+import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
-import { localApi } from "@/lib/client-api";
-import { formatRelative } from "@/lib/format";
 import { normalizeProjectEmoji } from "@/lib/project-emoji";
 import { BoardTab } from "./project-issues";
 import { AssetsPanel, FeedbackView, IssueComposer, ProjectMembers, TaskModal, VaultPanel } from "./lazy-views";
-import { RepositorySettings } from "./repository-settings";
-import { ProjectPullRequests } from "./project-pull-requests";
+import { ProjectCode } from "./project-code";
+import { TAB_ALIASES, TAB_KEYS, tabFromQuery, type CodeSection, type TabKey } from "@/lib/project-tabs";
+export type { TabKey } from "@/lib/project-tabs";
 import { ProjectIcon, ProjectIconPicker } from "./project-icon";
-import { ProjectEmpty } from "./project-empty";
 import { DelayedSkeleton } from "./delayed-skeleton";
-import { ContentSkeleton } from "./content-skeleton";
 import { ConfirmButton } from "./confirm-button";
 import { useWorkspace } from "./workspace-context";
 import type { AuthUser } from "./origin-app";
 
-export type TabKey = "issues" | "pulls" | "assets" | "vault" | "repo" | "feedback" | "settings";
 type ProjectIconType = "default" | "emoji" | "icon" | "image";
-type GitHubSnapshot = {
-  repo: string;
-  tokenConfigured: boolean;
-  commits: Array<{ sha: string; message: string; author: string; url: string; committedAt: number }>;
-  commitsError: string;
-  issues: Array<{ number: number; title: string; state: "open" | "closed"; url: string; author?: string; updatedAt: number }>;
-  pullRequests: Array<{ number: number; title: string; state: "open" | "closed" | "merged"; url: string; author?: string; branch?: string; updatedAt: number }>;
-  hosted: "origin-local";
-};
 type ProjectWithUi = Doc<"projects"> & { memberRole: string; iconUrl?: string | null; openIssueCount?: number };
 type AvatarUser = { username?: string; name: string; email: string; avatarUrl?: string | null };
 
-export const tabs: Array<{ key: Exclude<TabKey, "settings">; label: string }> = [
-  { key: "issues", label: "Issues" },
-  { key: "pulls", label: "Pull requests" },
-  { key: "assets", label: "Assets" },
-  { key: "vault", label: "Vault" },
-  { key: "repo", label: "Repo" },
-  { key: "feedback", label: "Feedback" },
+export const tabs: Array<{ key: Exclude<TabKey, "settings">; label: string; icon: LucideIcon }> = [
+  { key: "issues", label: "Issues", icon: Layers },
+  { key: "code", label: "Code", icon: Code2 },
+  { key: "assets", label: "Assets", icon: Shapes },
+  { key: "vault", label: "Vault", icon: KeyRound },
+  { key: "feedback", label: "Feedback", icon: MessagesSquare },
 ];
-const tabKeys: TabKey[] = [...tabs.map(item => item.key), "settings"];
+const tabKeys: readonly TabKey[] = TAB_KEYS;
 
-/** The tab named by ?tab=, accepting the older "board" and "team" names. */
-function tabFromLocation(): TabKey {
-  const value = new URLSearchParams(window.location.search).get("tab");
-  if (value === "board") return "issues";
-  if (value === "team") return "settings";
-  return tabKeys.includes(value as TabKey) ? value as TabKey : "issues";
-}
-function shortSha(sha: string) {
-  return sha.startsWith("manual-") ? "manual" : sha.slice(0, 7);
-}
-function parseGitHubRepo(repoUrl?: string) {
-  if (!repoUrl) return null;
-  const value = repoUrl.trim();
-  const shorthand = value.match(/^([\w.-]+)\/([\w.-]+)$/);
-  if (shorthand) return { owner: shorthand[1], repo: shorthand[2].replace(/\.git$/i, "") };
-  const match = value.match(/github\.com[:/]([^/]+)\/([^/#?]+?)(?:\.git)?(?:[/?#]|$)/i);
-  if (!match) return null;
-  return { owner: match[1], repo: match[2].replace(/\.git$/i, "") };
-}
-function githubRepoHref(repoUrl?: string) {
-  const parsed = parseGitHubRepo(repoUrl);
-  return parsed ? `https://github.com/${parsed.owner}/${parsed.repo}` : null;
-}
-
-// Last result per project and repository, shown at once when the Repo tab opens again while it refreshes.
-const snapshotCache = new Map<string, { snapshot: GitHubSnapshot | null; error: string }>();
-
-function useGitHubSnapshot(projectId: Id<"projects">, repoUrl: string | undefined, sessionToken: string, revision = 0) {
-  const cacheKey = `${projectId}:${repoUrl || ""}`;
-  const [snapshot, setSnapshot] = useState<GitHubSnapshot | null>(() => snapshotCache.get(cacheKey)?.snapshot ?? null);
-  const [error, setError] = useState(() => snapshotCache.get(cacheKey)?.error ?? "");
-  const [loading, setLoading] = useState(false);
-  useEffect(() => {
-    if (!repoUrl) {
-      setSnapshot(null);
-      setError("");
-      return;
-    }
-    let alive = true;
-    setLoading(true);
-    localApi<GitHubSnapshot>(`/api/github/repo?projectId=${projectId}`, sessionToken)
-      .then((result) => {
-        snapshotCache.set(cacheKey, { snapshot: result, error: "" });
-        if (!alive) return;
-        setSnapshot(result);
-        setError("");
-      })
-      .catch((issue) => {
-        const message = errorText(issue, "GitHub sync failed");
-        snapshotCache.set(cacheKey, { snapshot: null, error: message });
-        if (alive) {
-          setSnapshot(null);
-          setError(message);
-        }
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [cacheKey, projectId, repoUrl, sessionToken, revision]);
-  return { snapshot, error, loading, settled: Boolean(snapshot || error) };
-}
+const tabFromLocation = () => tabFromQuery(new URLSearchParams(window.location.search).get("tab"));
 
 /**
  * Keeps the queries of tabs that were visited (or hovered) subscribed, so switching back to them renders their data
@@ -118,10 +41,10 @@ function TabWarmers({ projectId, sessionToken, teamId, warm }: { projectId: Id<"
   const scope = { projectId, sessionToken };
   useQuery(api.tasks.board, warm.has("issues") ? scope : "skip");
   useQuery(api.members.people, warm.has("issues") || warm.has("settings") ? scope : "skip");
-  useQuery(api.taskPRs.projectPullRequests, warm.has("pulls") ? scope : "skip");
+  useQuery(api.taskPRs.projectPullRequests, warm.has("code") ? scope : "skip");
   useQuery(api.design.list, warm.has("assets") ? scope : "skip");
   useQuery(api.credentials.list, warm.has("vault") ? scope : "skip");
-  useQuery(api.commits.list, warm.has("repo") ? scope : "skip");
+  useQuery(api.commits.list, warm.has("code") ? scope : "skip");
   const portals = useQuery(api.feedback.portals, warm.has("feedback") ? { sessionToken, teamId } : "skip");
   const portal = portals?.find(item => item.projectId === projectId);
   useQuery(api.feedback.list, warm.has("feedback") && portal ? { sessionToken, teamId, portalId: portal._id } : "skip");
@@ -130,11 +53,13 @@ function TabWarmers({ projectId, sessionToken, teamId, warm }: { projectId: Id<"
 
 export function ProjectWorkspace({ projectId, sessionToken, user, initialTaskId, onOpenReference }: { projectId: Id<"projects">; sessionToken: string; user: AuthUser; viewers: Array<AvatarUser & { userId: string }>; initialTaskId?: Id<"tasks">; onOpenReference: (projectId: Id<"projects">, taskId?: Id<"tasks">) => void }) {
   const workspace = useWorkspace();
-  const [tab, setTab] = useState<TabKey>(() => typeof window === "undefined" ? "issues" : tabFromLocation());
+  const [initial] = useState(() => typeof window === "undefined" ? { tab: "issues" as TabKey } : tabFromLocation());
+  const [tab, setTab] = useState<TabKey>(initial.tab);
+  const [codeSection, setCodeSection] = useState<CodeSection | undefined>(initial.section);
   const [warm, setWarm] = useState<ReadonlySet<TabKey>>(() => new Set<TabKey>(["issues", tab]));
   const [issueOpen, setIssueOpen] = useState(false);
   const [pendingTask, setPendingTask] = useState(initialTaskId);
-  // An issue opened over a tab other than Issues (Feedback, Pull requests).
+  // An issue opened over a tab other than Issues (Feedback, Code).
   const [peekTask, setPeekTask] = useState<Id<"tasks"> | null>(null);
   const project = useQuery(api.projects.get, { projectId, sessionToken });
 
@@ -145,17 +70,26 @@ export function ProjectWorkspace({ projectId, sessionToken, user, initialTaskId,
       const shown = new URLSearchParams(window.location.search).get("project");
       if (shown && shown !== projectId) return;
       const next = tabFromLocation();
-      warmTab(next);
-      setTab(next);
+      warmTab(next.tab);
+      setTab(next.tab);
+      setCodeSection(next.section);
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, [projectId, warmTab]);
 
+  // An old Repo or Pull requests link opened Code: show the current name in the address bar.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const value = url.searchParams.get("tab");
+    if (value && TAB_ALIASES[value] && value !== tab) { url.searchParams.set("tab", tab); window.history.replaceState(window.history.state, "", url); }
+  }, [tab]);
+
   const openTab = (key: TabKey) => {
     if (key === tab) return;
     warmTab(key);
     setTab(key);
+    setCodeSection(undefined);
     setPendingTask(undefined);
     const url = new URL(window.location.href);
     url.searchParams.set("tab", key);
@@ -174,10 +108,9 @@ export function ProjectWorkspace({ projectId, sessionToken, user, initialTaskId,
       {project.status !== "active" && <ProjectStateBanner project={project} sessionToken={sessionToken} />}
       <div key={tab} className="project-panel" data-tab={tab} role="tabpanel" id="project-panel" aria-labelledby={`project-tab-${tab}`}>
         {tab === "issues" && <BoardTab key={projectId} project={project} projectId={projectId} sessionToken={sessionToken} userEmail={user.email} canEdit={canEdit} onCreateIssue={() => setIssueOpen(true)} initialTaskId={pendingTask} onOpenReference={onOpenReference} />}
-        {tab === "pulls" && <ProjectPullRequests project={project} sessionToken={sessionToken} onOpenIssue={setPeekTask} />}
+        {tab === "code" && <ProjectCode project={project} sessionToken={sessionToken} initialSection={codeSection} onOpenIssue={setPeekTask} />}
         {tab === "assets" && <AssetsPanel projectId={projectId} sessionToken={sessionToken} canEdit={canEdit} />}
         {tab === "vault" && <VaultPanel projectId={projectId} sessionToken={sessionToken} canEdit={canEdit} />}
-        {tab === "repo" && <RepoTab project={project} sessionToken={sessionToken} />}
         {tab === "feedback" && <FeedbackView key={projectId} projectId={projectId} projectName={project.name} sessionToken={sessionToken} canEdit={canEdit} onOpenTask={(_, taskId) => setPeekTask(taskId)} />}
         {tab === "settings" && <SettingsTab project={project} sessionToken={sessionToken} />}
       </div>
@@ -193,21 +126,10 @@ export function ProjectWorkspace({ projectId, sessionToken, user, initialTaskId,
  */
 function ProjectHeader({ project, tab, onSelect, onIntent }: { project: ProjectWithUi; tab: TabKey; onSelect: (key: TabKey) => void; onIntent: (key: TabKey) => void }) {
   const scroller = useRef<HTMLDivElement>(null);
-  const indicator = useRef<HTMLSpanElement>(null);
   const [edges, setEdges] = useState({ start: false, end: false });
   // Roving tab stop: the tab that holds focus while arrowing, otherwise the open tab.
   const [focusKey, setFocusKey] = useState<TabKey | null>(null);
 
-  const place = useCallback((animate: boolean) => {
-    const list = scroller.current, bar = indicator.current;
-    if (!list || !bar) return;
-    const active = list.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
-    if (!active) { bar.dataset.visible = "false"; return; }
-    bar.dataset.animate = animate && bar.dataset.visible === "true" ? "true" : "false";
-    bar.style.width = `${active.offsetWidth - 16}px`;
-    bar.style.transform = `translateX(${active.offsetLeft + 8}px)`;
-    bar.dataset.visible = "true";
-  }, []);
   const measureEdges = useCallback(() => {
     const list = scroller.current;
     if (!list) return;
@@ -215,9 +137,8 @@ function ProjectHeader({ project, tab, onSelect, onIntent }: { project: ProjectW
     setEdges(current => current.start === start && current.end === end ? current : { start, end });
   }, []);
 
-  // Slide the indicator to the active tab and scroll it into view on narrow screens.
+  // Scroll the open tab into view on narrow screens.
   useLayoutEffect(() => {
-    place(true);
     const list = scroller.current;
     const active = list?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
     if (list && active) {
@@ -227,17 +148,15 @@ function ProjectHeader({ project, tab, onSelect, onIntent }: { project: ProjectW
       if (list.scrollLeft > left) list.scrollTo({ left, behavior: reduce ? "auto" : "smooth" });
       else if (list.scrollLeft < right) list.scrollTo({ left: right, behavior: reduce ? "auto" : "smooth" });
     }
-  }, [tab, place]);
+  }, [tab]);
   useEffect(() => {
     const list = scroller.current;
     if (!list) return;
-    const sync = () => { place(false); measureEdges(); };
-    const observer = new ResizeObserver(sync);
+    const observer = new ResizeObserver(measureEdges);
     observer.observe(list);
-    void document.fonts?.ready.then(sync);
     list.addEventListener("scroll", measureEdges, { passive: true });
     return () => { observer.disconnect(); list.removeEventListener("scroll", measureEdges); };
-  }, [place, measureEdges]);
+  }, [measureEdges]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const index = tabKeys.indexOf((event.target as HTMLElement).dataset.tab as TabKey);
@@ -267,10 +186,9 @@ function ProjectHeader({ project, tab, onSelect, onIntent }: { project: ProjectW
     <div className="project-identity"><ProjectIcon project={project} /><h1>{project.name}</h1></div>
     <div className="project-tabs" role="tablist" aria-label="Project" onKeyDown={onKeyDown} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusKey(null); }}>
       <div ref={scroller} className="project-tab-scroll" data-fade-start={edges.start || undefined} data-fade-end={edges.end || undefined}>
-        {tabs.map(item => <button key={item.key} type="button" className="project-tab" {...tabProps(item.key)}><span>{item.label}</span></button>)}
-        <span ref={indicator} className="project-tab-indicator" aria-hidden="true" />
+        {tabs.map(({ key, label, icon: Icon }) => <button key={key} type="button" className="project-tab" {...tabProps(key)}><Icon size={16} strokeWidth={1.75} aria-hidden="true" /><span>{label}</span></button>)}
       </div>
-      <button type="button" className="project-settings-tab" aria-label="Settings" title="Settings" {...tabProps("settings")}><Settings size={16} /></button>
+      <button type="button" className="project-settings-tab" aria-label="Settings" title="Settings" {...tabProps("settings")}><Settings size={16} strokeWidth={1.75} /></button>
     </div>
   </header>;
 }
@@ -402,70 +320,4 @@ function SettingsTab({ project, sessionToken }: { project: ProjectWithUi; sessio
       {statusError && <p className="notice danger" role="alert">{statusError}</p>}
     </section>
   </div>;
-}
-
-function RepoTab({ project, sessionToken }: { project: Doc<"projects"> & { memberRole: string }; sessionToken: string }) {
-  const savedCommits = useQuery(api.commits.list, { projectId: project._id, sessionToken });
-  const [revision, setRevision] = useState(0);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  // Where the three columns stack (narrow windows, phones), one shows at a time.
-  const [shown, setShown] = useState<"commits" | "issues" | "pulls">("commits");
-  const github = useGitHubSnapshot(project._id, project.repoUrl, sessionToken, revision);
-  const admin = ["owner", "admin"].includes(project.memberRole);
-  const commits = github.snapshot?.commits ?? savedCommits;
-  const repoName = githubRepoHref(project.repoUrl)?.replace("https://github.com/", "") || project.repoUrl;
-  const waiting = github.loading && !github.settled;
-  const settings = settingsOpen && <RepositorySettings project={project} sessionToken={sessionToken} onClose={() => setSettingsOpen(false)} onSaved={() => setRevision(value => value + 1)} />;
-  if (!project.repoUrl) {
-    const creating = project.githubRepoState === "pending";
-    return <section className="repo-dashboard">
-      <ProjectEmpty icon={creating ? Loader2 : GitBranch} spin={creating} title={creating ? "Creating repository" : "No repository"}>
-        {project.githubRepoError && <p className="notice danger" role="alert">{project.githubRepoError}</p>}
-        {admin && !creating && <button className="primary-button compact" onClick={() => setSettingsOpen(true)}><GitBranch size={14} />Connect repository</button>}
-      </ProjectEmpty>
-      {settings}
-    </section>;
-  }
-  return (
-    <section className="repo-dashboard">
-      <div className="repo-address-row">
-        <a href={githubRepoHref(project.repoUrl) || project.repoUrl} target="_blank" rel="noreferrer"><GitBranch size={16} /><span>{repoName}</span><ExternalLink size={13} /></a>
-        {github.loading && github.settled && <Loader2 className="spin repo-refreshing" size={14} aria-label="Refreshing" />}
-        {admin && <button className="ghost-button compact" onClick={() => setSettingsOpen(true)}><Settings2 size={14} />Configure</button>}
-      </div>
-      {github.error && <div className="notice danger" role="alert">{github.error}</div>}
-      {github.snapshot?.commitsError && <div className="notice">{github.snapshot.commitsError}</div>}
-      {!github.error && <div className="segmented-control repo-switch" role="group" aria-label="Show">{([["commits", "Commits", commits?.length], ["issues", "Issues", github.snapshot?.issues.length], ["pulls", "Pull requests", github.snapshot?.pullRequests.length]] as const).map(([key, label, count]) => <button key={key} type="button" className={shown === key ? "active" : ""} aria-pressed={shown === key} onClick={() => setShown(key)}>{label}{count ? <span>{count}</span> : null}</button>)}</div>}
-      <div className="repository-columns" data-columns={github.error ? 1 : 3} data-shown={github.error ? "commits" : shown}>
-        <RepoColumn name="commits" icon={<GitCommitHorizontal size={15} />} title="Commits" count={commits?.length} loading={commits === undefined} empty="No commits">
-          {commits?.map(commit => <a className="repository-item" key={commit.sha} href={commit.url || githubRepoHref(project.repoUrl) || undefined} target="_blank" rel="noreferrer">
-            <strong>{commit.message.split("\n")[0]}</strong>
-            <span className="repository-meta"><code>{shortSha(commit.sha)}</code><span>{commit.author}</span><time dateTime={new Date(commit.committedAt).toISOString()}>{formatRelative(commit.committedAt)}</time></span>
-          </a>)}
-        </RepoColumn>
-        {!github.error && <RepoColumn name="issues" icon={<CircleDot size={15} />} title="Issues" count={github.snapshot?.issues.length} loading={waiting} empty="No issues">
-          {github.snapshot?.issues.map(issue => <a className="repository-item with-state" key={issue.number} href={issue.url} target="_blank" rel="noreferrer">
-            <span className={`repository-state ${issue.state}`} aria-label={issue.state}>{issue.state === "open" ? <CircleDot size={14} /> : <CircleCheck size={14} />}</span>
-            <strong>{issue.title}</strong>
-            <span className="repository-meta"><span>#{issue.number}</span>{issue.author && <span>{issue.author}</span>}<time dateTime={new Date(issue.updatedAt).toISOString()}>{formatRelative(issue.updatedAt)}</time></span>
-          </a>)}
-        </RepoColumn>}
-        {!github.error && <RepoColumn name="pulls" icon={<GitPullRequest size={15} />} title="Pull requests" count={github.snapshot?.pullRequests.length} loading={waiting} empty="No pull requests">
-          {github.snapshot?.pullRequests.map(pr => <a className="repository-item with-state" key={pr.number} href={pr.url} target="_blank" rel="noreferrer">
-            <span className={`repository-state ${pr.state}`} aria-label={pr.state}>{pr.state === "merged" ? <GitMerge size={14} /> : pr.state === "closed" ? <GitPullRequestClosed size={14} /> : <GitPullRequest size={14} />}</span>
-            <strong>{pr.title}</strong>
-            <span className="repository-meta"><span>#{pr.number}</span>{pr.branch && <code>{pr.branch}</code>}<time dateTime={new Date(pr.updatedAt).toISOString()}>{formatRelative(pr.updatedAt)}</time></span>
-          </a>)}
-        </RepoColumn>}
-      </div>
-      {settings}
-    </section>
-  );
-}
-
-function RepoColumn({ name, icon, title, count, loading, empty, children }: { name: string; icon: ReactNode; title: string; count?: number; loading: boolean; empty: string; children: ReactNode }) {
-  return <section className="repository-column" data-column={name}>
-    <header>{icon}<h3>{title}</h3>{!loading && count ? <span>{count}</span> : null}</header>
-    {loading ? <ContentSkeleton rows={4} label={`Loading ${title.toLowerCase()}`} /> : !count ? <p className="repository-empty">{empty}</p> : <div className="repository-items">{children}</div>}
-  </section>;
 }

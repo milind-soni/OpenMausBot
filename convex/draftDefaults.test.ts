@@ -104,7 +104,7 @@ describe("Draft defaults at the task and workflow boundary", () => {
     await f.t.run(ctx => ctx.db.patch(f.columns[0]._id, { title: "Idea", isDraft: undefined }));
     const taskId = await f.create("Existing legacy idea", f.columns[0]._id);
     await f.ensure();
-    expect((await f.board()).columns[0]).toMatchObject({ _id: f.columns[0]._id, title: "Draft", isDraft: true });
+    expect((await f.board()).columns[0]).toMatchObject({ _id: f.columns[0]._id, title: "Backlog", isDraft: true });
     expect((await f.t.run(ctx => ctx.db.get(taskId)))?.columnId).toBe(f.columns[0]._id);
   });
 

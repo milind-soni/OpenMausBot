@@ -24,7 +24,7 @@ vi.mock("./server-store", () => ({ store: work, limitAction: vi.fn(), limitReach
 vi.mock("./githubLocal", () => ({ githubProject: async () => ({ project: { _id: "fixture", memberRole: "admin", repoUrl: "https://github.com/example/repo" }, user: { _id: "fixture" } }), parseGitHubRepo: () => ({ owner: "example", repo: "repo" }), githubHeaders: work }));
 vi.mock("./github-workspace", () => ({ lockGitHubJob: work, saveGitHubJob: work }));
 vi.mock("./githubConnection", () => ({ saveGitHubConnection: work, githubConnectionInfo: work }));
-vi.mock("./github-sync", () => ({ createGitHubTask: work, createProjectRepository: work, syncGitHubPage: work }));
+vi.mock("./github-sync", () => ({ createGitHubTask: work, createProjectRepository: work, syncGitHubPage: work, syncGitHubOutbox: work }));
 vi.mock("./github-prs", () => ({ createTaskPR: work, syncPRPage: work }));
 vi.mock("./mcp-oauth", () => ({ validateMcpAuthorization: work, validateMcpClient: work, issueMcpCode: work, authorizationError: work, OAuthError: Error }));
 vi.mock("./invite-mail", () => ({ sendInviteMail: work }));

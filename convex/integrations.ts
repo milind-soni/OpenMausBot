@@ -89,7 +89,7 @@ export const context = internalQuery({
     const teamOwner = team ? await ctx.db.get(team.ownerUserId) : null;
     const legacyOwner = p.ownerEmail === DEFAULT_OWNER_EMAIL && teamOwner?.email === DEFAULT_OWNER_EMAIL && teamOwner.status === "active";
     return JSON.stringify({ credentialAllowed, legacyOwner, project: { _id: p._id, teamId: p.teamId, name: p.name, status: p.status, description: p.description, repoUrl: p.repoUrl, githubRepoId: p.githubRepoId, githubWorkspaceAccess: p.githubWorkspaceAccess, githubRepoVisibility: p.githubRepoVisibility }, connection: await connection(ctx, p),
-      task: task ? { _id: task._id, title: task.title, description: task.description, done: task.done, draft: await inDraft(ctx, task), githubIssueNumber: task.githubIssueNumber, githubIssueUrl: task.githubIssueUrl, githubIssueState: task.githubIssueState, githubIssueReopenRequested: task.githubIssueReopenRequested } : null });
+      task: task ? { _id: task._id, title: task.title, description: task.description, done: task.done, draft: await inDraft(ctx, task), githubIssueNumber: task.githubIssueNumber, githubIssueUrl: task.githubIssueUrl, githubIssueState: task.githubIssueState, githubIssueReopenRequested: task.githubIssueReopenRequested, labels: task.labels ?? [] } : null });
   },
 });
 
@@ -267,12 +267,13 @@ export const retryRepo = mutation({
   },
 });
 
+/** Wakes the web app's integration worker: one project's repository, the GitHub issue outbox (`issues`), or the periodic tick. */
 export const kick = internalAction({
-  args: { projectId: v.optional(v.id("projects")) }, returns: v.null(),
+  args: { projectId: v.optional(v.id("projects")), issues: v.optional(v.boolean()) }, returns: v.null(),
   handler: async (_ctx, a) => {
     const secret = process.env.ORIGIN_INTEGRATION_SECRET; const origin = process.env.ORIGIN_PUBLIC_URL;
     if (!secret || !origin) return null;
-    const body = JSON.stringify({ at: Date.now(), projectId: a.projectId });
+    const body = JSON.stringify({ at: Date.now(), projectId: a.projectId, ...(a.issues ? { issues: true } : {}) });
     const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
     const signature = Array.from(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))), b => b.toString(16).padStart(2, "0")).join("");
     const response = await fetch(`${origin}/api/integrations/tick`, { method: "POST", body, headers: { "x-origin-signature": signature }, signal: AbortSignal.timeout(55000) });

@@ -18,6 +18,7 @@ import { issueKey } from "../lib/github-references";
 import { taskBranch } from "../lib/task-branch";
 import { cleanLabels, projectLabels } from "./lib/labels";
 import { addCriteria } from "../lib/acceptance-criteria";
+import { activityRows, projectAgents, recordActivity, setDelegate } from "./issueActivity";
 
 // Tools for the remote MCP server (app/api/mcp). Every call carries a connector token (OAuth grant or personal
 // access token, both stored as connectorGrants) and runs with the token owner's workspace and project permissions.
@@ -91,7 +92,10 @@ async function resolveIssue(ctx: Ctx, access: Access, ref: string, write = false
 }
 
 function findColumn(columns: Doc<"columns">[], ref: string) {
-  const column = columns.find(c => c._id === ref.trim()) ?? columns.find(c => normalizeColumnTitle(c.title) === normalizeColumnTitle(ref));
+  const wanted = normalizeColumnTitle(ref);
+  // "Draft" and "Backlog" both name the draft column (new boards call it Backlog; older ones and agents say Draft).
+  const column = columns.find(c => c._id === ref.trim()) ?? columns.find(c => normalizeColumnTitle(c.title) === wanted)
+    ?? (wanted === "draft" || wanted === "backlog" ? columns.find(isDraftColumn) : undefined);
   if (!column) throw new ConvexError(`Column not found: ${ref}. Columns: ${columns.map(c => c.title).join(", ")}`);
   return column;
 }
@@ -101,6 +105,7 @@ function issueSummary(slug: string, project: Doc<"projects">, task: Doc<"tasks">
     id: task._id, key: issueKey(task._id), title: task.title, project: project.name, projectId: project._id,
     column: column?.title ?? null, status: task.done ? "completed" : "open", priority: task.priority,
     assignee: task.assignedToEmail ? { name: task.assignedToName || task.assignedToEmail, email: task.assignedToEmail } : null,
+    ...(task.delegateGrantId ? { delegate: { id: task.delegateGrantId, name: task.delegateName ?? "Agent" } } : {}),
     dueDate: task.dueDate ?? null, ...(task.labels?.length ? { labels: task.labels } : {}),
     acceptanceCriteria: task.acceptanceCriteria ?? [],
     ...(task.githubIssueUrl ? { github: task.githubIssueUrl } : {}),
@@ -253,11 +258,14 @@ export const inbox = query({
     const access = await authorize(ctx, a.token);
     const slug = await workspaceSlug(ctx, access.grant.teamId);
     const projects = await visibleProjects(ctx, access);
-    const assigned = [];
+    const assigned = [], delegated: ReturnType<typeof issueSummary>[] = [];
     for (const { project } of projects) {
       const { visible, columnFor } = await boardColumns(ctx, project._id);
       const tasks = await ctx.db.query("tasks").withIndex("by_projectId_and_done_and_assignedToEmail", q => q.eq("projectId", project._id).eq("done", false).eq("assignedToEmail", access.user.email)).take(200);
       for (const task of tasks) assigned.push(issueSummary(slug, project, task, visible.find(c => c._id === columnFor(task))));
+      for (const task of await ctx.db.query("tasks").withIndex("by_project_and_done", q => q.eq("projectId", project._id).eq("done", false)).take(2000)) {
+        if (task.delegateGrantId === access.grant._id) delegated.push(issueSummary(slug, project, task, visible.find(c => c._id === columnFor(task))));
+      }
     }
     assigned.sort((x, y) => (x.dueDate ?? "9999").localeCompare(y.dueDate ?? "9999") || y.updatedAt.localeCompare(x.updatedAt));
     const allowed = new Map(projects.map(p => [p.project._id as string, p.project]));
@@ -271,7 +279,7 @@ export const inbox = query({
       notifications.push({ kind: row.kind, issueId: task._id, issue: task.title, project: allowed.get(row.projectId)!.name, from: actor?.name ?? null, ...(row.preview ? { preview: row.preview } : {}), createdAt: new Date(row.createdAt).toISOString() });
       if (notifications.length === 30) break;
     }
-    return json({ assigned: assigned.slice(0, 100), unread: notifications });
+    return json({ assigned: assigned.slice(0, 100), delegated: delegated.slice(0, 100), unread: notifications });
   }),
 });
 
@@ -349,6 +357,11 @@ export const moveIssue = mutation({
     const current = (await ctx.db.get(task._id))!;
     const done = a.completed ?? (a.column ? false : current.done);
     if (done !== current.done) await updateTaskRecord(ctx, { projectId: project._id, taskId: task._id, done }, access.user._id);
+    const after = (await ctx.db.get(task._id))!;
+    if (task.delegateGrantId === access.grant._id && (after.columnId !== task.columnId || after.done !== task.done)) {
+      const title = async (id: Id<"columns">) => (await ctx.db.get(id))?.title;
+      await recordActivity(ctx, after, { user: access.user, agent: access.grant }, "status", { from: task.done ? "Completed" : await title(task.columnId), to: after.done ? "Completed" : await title(after.columnId) });
+    }
     return issueResult(ctx, access, task._id);
   }),
 });
@@ -361,6 +374,7 @@ export const addComment = mutation({
     // Resolve @mentions the same way the comment box does: a project member's @username (or @name) in the text.
     const mentions = (await projectPeople(ctx, project)).filter(p => containsMention(a.body, mentionToken(p))).slice(0, 20).map(p => ({ userId: p.userId, token: mentionToken(p) }));
     const commentId = await addCommentRecord(ctx, { projectId: project._id, taskId: task._id, body: a.body, mentions }, access.user, project);
+    if (task.delegateGrantId === access.grant._id) await recordActivity(ctx, task, { user: access.user, agent: access.grant }, "commented", { body: a.body.slice(0, 280) });
     return json({ id: commentId, issueId: task._id, mentioned: mentions.map(m => m.token) });
   }),
 });
@@ -587,5 +601,57 @@ export const revokeOwnToken = mutation({
     const grant = await ctx.db.query("connectorGrants").withIndex("by_tokenHash", q => q.eq("tokenHash", tokenHash)).unique();
     if (grant && !grant.revoked && !grant.hostId && !grant.runId) await ctx.db.patch(grant._id, { revoked: true });
     return null;
+  }),
+});
+
+// Agents and delegation (convex/issueActivity.ts): the human assignee stays; an agent can be delegated to work the issue.
+// Nothing here starts work. The standing rule in MCP_INSTRUCTIONS applies: refine with the owner, build after they confirm.
+
+export const agents = query({
+  args: { ...token, project: v.string() }, returns: v.string(),
+  handler: (ctx, a) => guard(async () => {
+    const access = await authorize(ctx, a.token);
+    const { project } = await resolveProject(ctx, access, a.project);
+    const agents = (await projectAgents(ctx, project)).map(({ grant, owner }) => ({ id: grant._id, name: grant.name, owner: owner.name || owner.email, you: grant._id === access.grant._id }));
+    return json({ agents, you: { id: access.grant._id, name: access.grant.name, takesIssues: Boolean(access.grant.delegatable) } });
+  }),
+});
+
+export const delegateIssue = mutation({
+  args: { ...token, issueId: v.string(), agent: v.string() }, returns: v.string(),
+  handler: (ctx, a) => guard(async () => {
+    const access = await writer(ctx, a.token);
+    const { task, project } = await resolveIssue(ctx, access, a.issueId, true);
+    const value = fold(a.agent);
+    let grantId: Id<"connectorGrants"> | null = null;
+    if (!UNASSIGNED.has(value)) {
+      const agents = await projectAgents(ctx, project);
+      const match = value === "me" ? agents.find(x => x.grant._id === access.grant._id) : agents.find(x => x.grant._id === a.agent.trim()) ?? agents.find(x => fold(x.grant.name) === value);
+      if (!match) throw new ConvexError(value === "me" ? "This connection doesn't take issues. Its owner turns that on under Settings > Agents." : `No agent matches "${a.agent}". Use list_agents.`);
+      grantId = match.grant._id;
+    }
+    await setDelegate(ctx, task, grantId, { user: access.user, agent: access.grant });
+    return issueResult(ctx, access, task._id);
+  }),
+});
+
+const agentReport = v.union(v.literal("acknowledged"), v.literal("progress"), v.literal("question"), v.literal("blocked"), v.literal("done"));
+export const addAgentActivity = mutation({
+  args: { ...token, issueId: v.string(), kind: agentReport, body: v.optional(v.string()) }, returns: v.string(),
+  handler: (ctx, a) => guard(async () => {
+    const access = await writer(ctx, a.token);
+    const { task } = await resolveIssue(ctx, access, a.issueId, true);
+    await recordActivity(ctx, task, { user: access.user, agent: access.grant }, a.kind, { body: a.body });
+    return json({ issueId: task._id, recorded: a.kind });
+  }),
+});
+
+export const issueActivity = query({
+  args: { ...token, issueId: v.string() }, returns: v.string(),
+  handler: (ctx, a) => guard(async () => {
+    const access = await authorize(ctx, a.token);
+    const { task } = await resolveIssue(ctx, access, a.issueId);
+    const rows = await ctx.db.query("issueActivity").withIndex("by_taskId_and_createdAt", q => q.eq("taskId", task._id)).order("desc").take(100);
+    return json({ issueId: task._id, delegate: task.delegateGrantId ? { id: task.delegateGrantId, name: task.delegateName ?? "Agent" } : null, activity: activityRows(rows.reverse()).map(row => ({ ...row, createdAt: new Date(row.createdAt).toISOString() })) });
   }),
 });

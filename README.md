@@ -70,7 +70,7 @@ claude mcp add --transport http origin https://<your-origin>/api/mcp --header "A
 ```
 
 - **Tested with:** Claude Code 2.1 (token), Codex 0.166, OpenCode 1.19 and omp 18.14 (token and OAuth). ChatGPT developer mode uses OAuth and needs a public HTTPS address.
-- **Tools:** `get_workspace`, `list_projects`, `list_issues`, `get_issue`, `get_inbox`, `list_members`, `list_assets`, `get_asset`, `vault_list`, `vault_get`, `list_repos`, `list_pull_requests`, and with write access `create_issue`, `update_issue`, `move_issue`, `add_comment`, `add_acceptance_criteria`, `update_acceptance_criteria`. Settings → Agents lists the same set (`lib/mcp-tools.ts`).
+- **Tools:** `get_workspace`, `list_projects`, `list_issues`, `get_issue`, `get_inbox`, `list_members`, `list_assets`, `get_asset`, `vault_list`, `vault_get`, `list_repos`, `list_pull_requests`, `list_agents`, `list_issue_activity`, and with write access `create_issue`, `update_issue`, `move_issue`, `add_comment`, `add_acceptance_criteria`, `update_acceptance_criteria`, `delegate_issue`, `add_agent_activity`. Settings → Agents lists the same set (`lib/mcp-tools.ts`).
 - **Issues and specs:** issues carry `acceptanceCriteria` (`[{ text, checked }]`), shown as a checklist under the description. A bare note created in Draft gets the **Needs spec** label; it comes off once the issue has a description and at least one criterion.
 - **Vault:** `vault_list` and `vault_get` only reach items a member allowed agents to use. The Vault is end-to-end encrypted, so `vault_get` needs the Vault passphrase; it is used for that call only. Without it, or with a wrong one, the call fails and returns no value.
 

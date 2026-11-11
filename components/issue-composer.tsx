@@ -6,7 +6,7 @@ import { useMutation, useQuery } from "convex/react";
 import { ChevronRight, Circle, Loader2, Tag } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { isDraftColumn } from "@/lib/origin-columns";
+import { isDraftColumn, presentColumns } from "@/lib/origin-columns";
 import { Dialog } from "./dialog";
 import { announceCreatedIssue } from "./issue-shared";
 import { IssueFields } from "./issue-fields";
@@ -75,7 +75,7 @@ export function IssueComposer({
   const me = useQuery(api.auth.me, { sessionToken });
   const create = useMutation(api.tasks.createTask);
   const ensureColumns = useMutation(api.tasks.ensureDefaultColumns);
-  const columns = board?.columns.filter((c) => !(c.isDone ?? c.title.toLowerCase() === "done")) || [];
+  const columns = presentColumns(board?.columns.filter((c) => !(c.isDone ?? c.title.toLowerCase() === "done")) || []);
   const selectedColumn = columns.find((c) => c._id === draft.columnId) || columns.find(column => !isDraftColumn(column)) || columns[0];
 
   useEffect(() => {

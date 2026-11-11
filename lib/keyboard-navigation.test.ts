@@ -41,6 +41,7 @@ describe("shortcut reference and issue keys", () => {
   it("maps S, P, L, A, I and Shift+D to the focused issue", () => {
     expect(["s", "P", "l", "a", "i"].map(c => issueActionShortcut(k(c), issue))).toEqual(["status", "priority", "labels", "assignee", "assign-me"]);
     expect(issueActionShortcut(k("D", { shiftKey: true }), issue)).toBe("due-date");
+    expect(issueActionShortcut(k("E", { shiftKey: true }), issue)).toBe("estimate");
     expect(issueActionShortcut(k("S", { shiftKey: true }), issue)).toBeNull();
   });
   it("needs a focused, editable issue and stays out of text fields and menus", () => {
@@ -55,6 +56,16 @@ describe("shortcut reference and issue keys", () => {
     expect(issueShortcut(k("l"), view)).toBe("list");
     expect(issueShortcut(k("l"), { ...view, issueFocused: true })).toBeNull();
     expect(issueShortcut(k("b"), { ...view, issueFocused: true })).toBe("board");
+  });
+  it("maps F, Shift+V, Mod+B and 1 / 2 / 3 in the issues view", () => {
+    const view = { editing: false, overlayOpen: false, canEdit: true };
+    expect(issueShortcut(k("f"), view)).toBe("filter");
+    expect(issueShortcut(k("/"), view)).toBe("search");
+    expect(issueShortcut(k("V", { shiftKey: true }), view)).toBe("display");
+    expect(issueShortcut(k("b", { ctrlKey: true }), view)).toBe("toggle-layout");
+    expect(issueShortcut(k("b", { metaKey: true }), view)).toBe("toggle-layout");
+    expect(issueShortcut(k("b", { ctrlKey: true }), { ...view, editing: true })).toBeNull();
+    expect(["1", "2", "3"].map(c => issueShortcut(k(c), view))).toEqual(["tab:all", "tab:active", "tab:backlog"]);
   });
 });
 
