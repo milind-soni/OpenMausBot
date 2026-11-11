@@ -47,4 +47,25 @@ describe("spend notices when an existing receipt cannot be updated", () => {
     expect(takeSpendAlert(dataDir, state({ month: "2026-10", spentUsd: 105, percent: 105, exceeded: true }))).toBe("cap");
     expect(takeSpendAlert(dataDir, nextMonth)).toBeNull();
   });
+
+  it("persists the pending cap receipt after storage recovers without another notice", () => {
+    expect(takeSpendAlert(dataDir, state())).toBe("warn");
+    vi.mocked(writeFileSync).mockImplementation(() => { throw Object.assign(new Error("disk full"), { code: "ENOSPC" }); });
+    const capped = state({ spentUsd: 105, percent: 105, exceeded: true });
+    expect(takeSpendAlert(dataDir, capped)).toBe("cap");
+    vi.mocked(writeFileSync).mockRestore();
+    expect(takeSpendAlert(dataDir, capped)).toBeNull();
+    expect(JSON.parse(readFileSync(join(dataDir, "usage", "alerts.json"), "utf8"))).toMatchObject({ cap: true });
+    resetSpendAlertsForTests();
+    expect(takeSpendAlert(dataDir, capped)).toBeNull();
+  });
+
+  it("retries an unsaved receipt even if the next budget check no longer needs an alert", () => {
+    vi.mocked(writeFileSync).mockImplementation(() => { throw new Error("temporarily unavailable"); });
+    expect(takeSpendAlert(dataDir, state())).toBe("warn");
+    vi.mocked(writeFileSync).mockRestore();
+    expect(takeSpendAlert(dataDir, null)).toBeNull();
+    resetSpendAlertsForTests();
+    expect(takeSpendAlert(dataDir, state())).toBeNull();
+  });
 });
