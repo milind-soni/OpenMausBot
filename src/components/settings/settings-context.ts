@@ -52,10 +52,42 @@ function useKnownPlaceCount(): number {
   return count;
 }
 
-/** The other places on the window's rail, in rail order. */
-export function useOtherPlaces(): RailPlace[] {
+export interface OtherPlace {
+  key: string;
+  name: string;
+  kind: RailPlace["kind"];
+  color: string | null;
+  open: () => void;
+}
+
+/** The person's other places, in rail order: from the rail where this page has it, else from this computer's list of
+ * environments (the window's own rail keeps its list to itself). */
+export function useOtherPlaces(): OtherPlace[] {
   const { places } = usePlaces();
-  return places.filter((place) => !place.active);
+  const [listed, setListed] = useState<OtherPlace[]>([]);
+  const environments = typeof window === "undefined" || window.ogb?.remoteClient?.active ? undefined : window.ogb?.environments;
+  useEffect(() => {
+    if (!environments || places.length > 0) return;
+    let alive = true;
+    void environments.state().then((state) => {
+      if (!alive || !state) return;
+      setListed(state.environments.filter((entry) => entry.id !== state.activeId).map((entry) => ({
+        key: entry.id,
+        name: entry.kind === "local" && !entry.dataDir ? t("rail.thisComputer") : entry.name,
+        kind: entry.kind === "remote" ? "cloud" as const : "computer" as const,
+        color: entry.color ?? null,
+        open: () => void environments.switch(entry.id),
+      })));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [environments, places.length]);
+  const open = typeof window === "undefined" ? undefined : window.ogb?.workspaces?.open;
+  if (places.length > 0) {
+    return places.filter((place) => !place.active).map((place) => ({
+      key: place.id, name: place.name, kind: place.kind, color: place.color ?? null, open: () => void open?.(place.id),
+    }));
+  }
+  return listed;
 }
 
 export const versionLine = (): string => t("settings.overview.version", { version: appVersion() });

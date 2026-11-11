@@ -41,13 +41,12 @@ function PairWithCloud() {
 function OtherPlaces() {
   const { ctx } = useSettingsShell();
   const others = useOtherPlaces();
-  const open = window.ogb?.workspaces?.open;
-  if (!ctx.desktop || others.length === 0 || !open) return null;
+  if (!ctx.desktop || others.length === 0) return null;
   return (
     <SettingsGroup label={t("settings.otherPlaces")} block="other-places">
       <SettingsRows icons>
         {others.map((place) => (
-          <SettingsLinkRow key={place.id} title={place.name} badge={<PlaceMark place={place} size={20} />} external onClick={() => void open(place.id)} data={{ "data-other-place": place.id }} />
+          <SettingsLinkRow key={place.key} title={place.name} badge={<PlaceMark place={place} size={20} />} external onClick={place.open} data={{ "data-other-place": place.key }} />
         ))}
       </SettingsRows>
     </SettingsGroup>
