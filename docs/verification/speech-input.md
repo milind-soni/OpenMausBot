@@ -19,6 +19,12 @@ For a local Whisper server, use its actual API root, for example
 `http://localhost:8000/v1`, and the model name that server accepts. The server
 must already be running; this provider does not download or embed a speech model.
 On a remote workspace, localhost refers to the workspace server's computer.
+On a Cloud home, plain http goes only to the Cloud machine itself (localhost,
+127.0.0.1, ::1), with or without a key, and no address may be link-local
+(169.254.0.0/16, fe80::/10) or a cloud metadata address (fd00:ec2::254 and the
+like). A name is checked again each time a connection resolves it
+(`server/stt-egress.ts`), so a name that later points at the metadata service is
+refused too. Desktops and self-hosted servers keep any address.
 Recordings go only to the selected transcription service; there is no automatic
 fallback to a different service after a failure. Transcription and spoken-reply
 providers are independent.
@@ -46,7 +52,7 @@ sanitized error, and uploads are bounded to 12 MiB and failed requests are not r
 Run the isolated checks:
 
 ```sh
-node node_modules/vitest/vitest.mjs run server/stt-config.test.ts server/stt.e2e.test.ts server/routes/tts.test.ts src/components/SpeechInputSettings.test.ts src/lib/speech.test.ts src/lib/recorded-speech.test.ts src/lib/use-composer-dictation.fish.test.ts
+node node_modules/vitest/vitest.mjs run server/stt-config.test.ts server/stt-egress.test.ts server/stt.e2e.test.ts server/routes/tts.test.ts src/components/SpeechInputSettings.test.ts src/lib/speech.test.ts src/lib/recorded-speech.test.ts src/lib/use-composer-dictation.fish.test.ts
 node --test electron/workspace-credentials-save.node-test.mjs electron/credential-patch.node-test.mjs
 ```
 

@@ -1,5 +1,6 @@
 import type { AppConfig } from "./config.ts";
 import { sttStatus, usableSttKey } from "./stt-config.ts";
+import { SttAddressRefused, sttCloudRefusal, sttHttp, sttRefusalIn } from "./stt-egress.ts";
 import * as fish from "./tts/fish.ts";
 
 class SttHttpError extends Error {
@@ -10,12 +11,18 @@ class SttHttpError extends Error {
   }
 }
 
-async function sttFetch<T>(cfg: AppConfig, path: string, init: RequestInit, signal?: AbortSignal): Promise<T> {
+async function sttFetch<T>(cfg: AppConfig, path: string, init: RequestInit | ((http: { FormData: typeof FormData }) => RequestInit), signal?: AbortSignal): Promise<T> {
+  const root = sttStatus(cfg).baseUrl;
+  const refused = sttCloudRefusal(root);
+  if (refused) throw new SttAddressRefused(refused);
+  const http = await sttHttp();
   const key = usableSttKey(cfg.stt);
-  const res = await fetch(`${sttStatus(cfg).baseUrl}${path}`, {
-    ...init,
+  const request = typeof init === "function" ? init(http) : init;
+  const res = await http.fetch(`${root}${path}`, {
+    ...request,
+    ...(http.dispatcher ? { dispatcher: http.dispatcher } : {}),
     redirect: "error",
-    headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), ...init.headers },
+    headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), ...request.headers },
     signal: AbortSignal.any([AbortSignal.timeout(60_000), ...(signal ? [signal] : [])]),
   });
   if (!res.ok) throw new SttHttpError(res.status);
@@ -35,17 +42,21 @@ export async function transcribe(cfg: AppConfig, audio: Uint8Array, mime: string
   const status = sttStatus(cfg);
   if (status.provider === "auto" || status.provider === "fish") return fish.transcribe(audio, mime, cfg.tts!.fishKey!, signal);
   try {
-    const form = new FormData();
-    form.set("file", new Blob([audio.slice()], { type: mime }), "speech.wav");
-    form.set("model", status.model);
-    form.set("response_format", "json");
-    const result = await sttFetch<{ text?: unknown }>(cfg, "/audio/transcriptions", { method: "POST", body: form }, signal);
+    const result = await sttFetch<{ text?: unknown }>(cfg, "/audio/transcriptions", ({ FormData }) => {
+      const form = new FormData();
+      form.set("file", new Blob([audio.slice()], { type: mime }), "speech.wav");
+      form.set("model", status.model);
+      form.set("response_format", "json");
+      return { method: "POST", body: form };
+    }, signal);
     if (typeof result.text !== "string") throw new Error("invalid transcription");
     return result.text.trim();
   } catch (error) { throw sttRequestError(error); }
 }
 
 function sttRequestError(error: unknown): Error {
+  const refused = sttRefusalIn(error);
+  if (refused) return new Error(refused.message);
   if (error instanceof SttHttpError) {
     if (error.status === 401 || error.status === 403) return new Error("The speech input server rejected access. Check its API key in Speech input settings.");
     if (error.status === 429) return new Error("The speech input server is rate limited or out of quota. Try again later.");

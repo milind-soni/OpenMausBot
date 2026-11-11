@@ -35,7 +35,7 @@ export function sttSavePatch(current: SttConfig | undefined, patch: SttConfig): 
   return target !== sttKeyTarget(current) || asked.key !== undefined ? { ...asked, key: "", keyFor: "nowhere" } : asked;
 }
 
-const LOOPBACK_HOST = /^(localhost|127(\.\d{1,3}){3}|\[::1\])$/i;
+export const LOOPBACK_HOST = /^(localhost|127(\.\d{1,3}){3}|\[::1\])$/i;
 
 /** Security: a key travels only over https, or plain http to this computer. */
 export function sttKeySendable(config: SttConfig | undefined): boolean {
