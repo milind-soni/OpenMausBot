@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { link, rename } from "node:fs/promises";
+import { createReadStream, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { link, lstat, rename, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -8,9 +8,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { removeTempDir } from "./testing/cleanup.ts";
 
 vi.mock("node:fs/promises", { spy: true });
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return { ...actual, createReadStream: vi.fn(actual.createReadStream) };
+});
 vi.resetModules();
 const { moveFilesRoute } = await import("./cloud-send-files.ts");
 const realFs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+const realSyncFs = await vi.importActual<typeof import("node:fs")>("node:fs");
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
 
 describe("publishing bot files during a move", () => {
@@ -21,7 +26,10 @@ describe("publishing bot files during a move", () => {
   });
   afterEach(async () => {
     vi.mocked(link).mockRestore();
+    vi.mocked(lstat).mockRestore();
     vi.mocked(rename).mockRestore();
+    vi.mocked(stat).mockRestore();
+    vi.mocked(createReadStream).mockRestore();
     await removeTempDir(data);
   });
 
@@ -64,9 +72,15 @@ describe("publishing bot files during a move", () => {
     expect(await send(path, "")).toEqual({ status: 409, body: { conflict: true } });
   });
 
-  it("checks a queued replacement against the version published before it", async () => {
+  it.each([["current.txt", false], ["CURRENT.txt", false], ["CURRENT.txt", true]] as const)("checks a queued replacement through %s with unavailable identity %s", async (secondName, unavailableIdentity) => {
     const path = "workspaces/b1/current.txt";
     writeFileSync(join(data, path), "original");
+    const alias = join(data, "workspaces/b1/CURRENT.txt");
+    const actual = join(data, path);
+    vi.mocked(lstat).mockImplementation((file, ...options) => realFs.lstat(file === alias ? actual : file, ...options));
+    vi.mocked(createReadStream).mockImplementation((file, options) => realSyncFs.createReadStream(file === alias ? actual : file, options));
+    vi.mocked(stat).mockImplementation((file, options) => unavailableIdentity && options?.bigint
+      ? Promise.reject(new Error("directory identity unavailable")) : realFs.stat(file, options));
     let reached!: () => void;
     let release!: () => void;
     const waiting = new Promise<void>((resolve) => { reached = resolve; });
@@ -78,11 +92,11 @@ describe("publishing bot files during a move", () => {
         reached();
         await allowed;
       }
-      return realFs.rename(source, target);
+      return realFs.rename(source, target === alias ? actual : target);
     });
     const first = send(path, "updated", "original");
     await waiting;
-    const second = send(path, "", "original");
+    const second = send(`workspaces/b1/${secondName}`, "", "original");
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([second, new Promise<void>((resolve) => { timer = setTimeout(resolve, 1000); })]);
@@ -101,5 +115,15 @@ describe("publishing bot files during a move", () => {
     await expect(send(path, "")).rejects.toThrow("temporary publication failure");
     expect(await send(path, "")).toEqual({ status: 201, body: { stored: true } });
     expect(readFileSync(join(data, path))).toHaveLength(0);
+  });
+
+  it("removes the placed link when replacement fails after staging succeeds", async () => {
+    const path = "workspaces/b1/current.txt";
+    writeFileSync(join(data, path), "original");
+    vi.mocked(rename).mockRejectedValueOnce(new Error("temporary replacement failure"));
+    await expect(send(path, "", "original")).rejects.toThrow("temporary replacement failure");
+    expect(readdirSync(join(data, "tmp/move-files"))).toEqual([]);
+    expect(readFileSync(join(data, path), "utf8")).toBe("original");
+    expect(await send(path, "", "original")).toEqual({ status: 201, body: { stored: true } });
   });
 });

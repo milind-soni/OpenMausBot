@@ -21,7 +21,7 @@ describe("overlapping empty bot file uploads", () => {
 
   it("keeps a verified empty upload available while another empty file finishes", async () => {
     const firstPath = "workspaces/b1/first.txt";
-    const secondPath = "workspaces/b1/second.txt";
+    const secondPath = "workspaces/b1/another/second.txt";
     const digest = createHash("sha256").update("").digest("hex");
     let reached!: () => void;
     let release!: () => void;

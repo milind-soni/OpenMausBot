@@ -89,14 +89,17 @@ const staging = (dataDir: string) => join(dataDir, "tmp", "move-files");
 const partialPath = (dataDir: string, sha256: string, size: number) => join(staging(dataDir), `${sha256}-${size}.partial`);
 const publications = new Map<string, Promise<void>>();
 
-/** Keeps this receiver's target check and publication together, releasing waiters on failure too. */
 async function publishInOrder<T>(target: string, publish: () => Promise<T>): Promise<T> {
-  const previous = publications.get(target) ?? Promise.resolve();
+  const directory = await stat(dirname(target), { bigint: true }).catch(() => null);
+  // Directory identity covers case and Unicode aliases without guessing a volume's path rules.
+  // Filesystems without a usable identity share a conservative fallback queue.
+  const key = directory && directory.ino !== 0n ? `${directory.dev}:${directory.ino}` : "unidentified-directory";
+  const previous = publications.get(key) ?? Promise.resolve();
   const result = previous.then(publish);
   const settled = result.then(() => {}, () => {});
-  publications.set(target, settled);
+  publications.set(key, settled);
   try { return await result; }
-  finally { if (publications.get(target) === settled) publications.delete(target); }
+  finally { if (publications.get(key) === settled) publications.delete(key); }
 }
 
 /** Partial files a move left more than a day ago. */
@@ -191,11 +194,11 @@ async function takePartAt(deps: MoveFilesDeps, req: IncomingMessage, query: z.in
   const received = held + bytes.length;
   if (received < size) return { status: 200, body: { received } };
   if (await sha256Of(partial) !== sha256) { await unlink(partial).catch(() => {}); return { status: 422, body: { error: "the file arrived different from what was sent" } }; }
+  if (!(await realFolders(deps.dataDir, path))) return { status: 409, body: { conflict: true } };
   const target = join(deps.dataDir, path);
   return publishInOrder(target, () => publishPart(deps.dataDir, target, partial, query));
 }
 
-/** Publishes a verified part after all earlier publications to this target have finished. */
 async function publishPart(dataDir: string, target: string, partial: string, { path, mode, expect, sha256 }: z.infer<typeof putSchema>): Promise<{ status: number; body: Record<string, unknown> }> {
   if (!(await realFolders(dataDir, path))) return { status: 409, body: { conflict: true } };
   const there = await lstat(target).catch(() => null);
@@ -204,7 +207,8 @@ async function publishPart(dataDir: string, target: string, partial: string, { p
   if (mode === "replace" && there && expect && await sha256Of(target) === expect) {
     const placed = join(staging(dataDir), `${randomUUID()}.placing`);
     await link(partial, placed);
-    await rename(placed, target);
+    try { await rename(placed, target); }
+    finally { await unlink(placed).catch(() => {}); }
     await unlink(partial).catch(() => {});
     return { status: 201, body: { stored: true } };
   }
