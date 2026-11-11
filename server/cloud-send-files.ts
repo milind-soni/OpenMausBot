@@ -154,11 +154,20 @@ async function readPart(dataDir: string, { path, offset, length }: z.infer<typeo
 /** One part of a file: 200 `{ received }` until the last, then 201 `{ stored }`, or 409 `{ conflict }` when the path holds a
  * file the move may not replace; 409 `{ received }` when the part does not start where My Cloud's copy ends. */
 async function takePart(deps: MoveFilesDeps, req: IncomingMessage, query: z.infer<typeof putSchema>): Promise<{ status: number; body: Record<string, unknown> }> {
-  const { path, size, sha256, offset, mode, expect } = query;
+  const { path, size, sha256 } = query;
   const botId = /^(?:workspaces|task-workspaces)\/([\w-]{1,128})\//u.exec(path)?.[1];
   if (!movedFilePath(path) || !botId) return { status: 400, body: { error: "not a bot file a move carries" } };
   if (!deps.bots().some((bot) => bot.id === botId)) return { status: 409, body: { error: "This file's bot is not on My Cloud yet." } };
-  const partial = partialPath(deps.dataDir, sha256, size);
+  if (size === 0) {
+    const partial = join(staging(deps.dataDir), `${randomUUID()}.partial`);
+    try { return await takePartAt(deps, req, query, partial); }
+    finally { await unlink(partial).catch(() => {}); }
+  }
+  return takePartAt(deps, req, query, partialPath(deps.dataDir, sha256, size));
+}
+
+async function takePartAt(deps: MoveFilesDeps, req: IncomingMessage, query: z.infer<typeof putSchema>, partial: string): Promise<{ status: number; body: Record<string, unknown> }> {
+  const { path, size, sha256, offset, mode, expect } = query;
   await mkdir(staging(deps.dataDir), { recursive: true, mode: 0o700 });
   const held = (await stat(partial).catch(() => null))?.size ?? 0;
   if (offset !== held) { await rawBody(req, 0); return { status: 409, body: { received: held } }; }
