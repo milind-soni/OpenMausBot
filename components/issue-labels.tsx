@@ -146,7 +146,7 @@ export function LabelPicker({ value, onChange, suggestions, disabled, trigger, c
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null), menu = useRef<HTMLDivElement>(null), focus = useRef<HTMLInputElement>(null);
   const close = (restore = true) => { setOpen(false); if (restore) button.current?.focus({ preventScroll: true }); };
-  useAnchoredPopover(open, button, menu, focus, { width: 260, maxHeight: 360, onDismiss: restore => close(restore) });
+  useAnchoredPopover(open, button, menu, focus, { width: 280, maxHeight: 360, onDismiss: restore => close(restore) });
   const toggle = (name: string) => {
     const lower = name.toLowerCase();
     onChange(value.some(label => label.toLowerCase() === lower) ? value.filter(label => label.toLowerCase() !== lower) : [...value, name]);
@@ -176,7 +176,7 @@ export function LabelPopover({ anchor, value, onChange, suggestions, onClose }: 
   const menu = useRef<HTMLDivElement>(null), focus = useRef<HTMLInputElement>(null);
   const closeRef = useRef(onClose);
   useEffect(() => { closeRef.current = onClose; });
-  useAnchoredPopover(true, anchor, menu, focus, { width: 260, maxHeight: 380, onDismiss: restore => closeRef.current(restore) });
+  useAnchoredPopover(true, anchor, menu, focus, { width: 280, maxHeight: 380, onDismiss: restore => closeRef.current(restore) });
   const toggle = (name: string) => {
     const lower = name.toLowerCase();
     onChange(value.some(label => label.toLowerCase() === lower) ? value.filter(label => label.toLowerCase() !== lower) : [...value, name]);

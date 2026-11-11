@@ -219,3 +219,61 @@ test('O-076 O-078 O-083 two contexts join and leave a fake-media call', async ({
   await a.getByRole('button', { name: 'Leave call', exact: true }).click();
   await expect.poll(async () => (await local(f.admin, `/api/local-voice/participants?teamId=${f.teamId}`)).participants.length).toBe(0);
 });
+
+test('O-120 Backlog lane, Code tab aliases, card label picker, label filter and estimates', async ({ clients, f }) => {
+  const [backlog, todo] = f.board.columns;
+  expect(backlog).toMatchObject({ title: 'Backlog', isDraft: true });
+  const bug = await f.member.api.m('tasks:createTask', { ...f.project, columnId: todo._id, title: 'Label me as a bug', priority: 'medium' });
+  await f.member.api.m('tasks:createTask', { ...f.project, columnId: todo._id, title: 'Unlabelled neighbour', priority: 'low' });
+  await f.member.api.m('issueRelations:labels', { taskId: bug, labels: ['Feature'] });
+  const page = await clients.login(f.member);
+  await expect(page.locator('[data-testid="board-column"][data-column-title="Backlog"]')).toBeVisible();
+  const card = page.locator('.task-card').filter({ hasText: 'Label me as a bug' });
+  // The card's labels open the picker; Bug is a one-press toggle.
+  await card.getByRole('button', { name: /^Labels: Feature/ }).click();
+  await page.locator('.label-picker-popover').getByRole('button', { name: 'Bug' }).click();
+  await page.keyboard.press('Escape');
+  await expect(card.locator('.label-chip')).toHaveText(['Feature', 'Bug']);
+  await expect.poll(async () => (await f.member.api.q('tasks:details', { ...f.project, taskId: bug })).task.labels).toEqual(['Feature', 'Bug']);
+  // Filter by label.
+  await page.getByRole('button', { name: 'Filter' }).click();
+  await page.getByRole('menuitem', { name: /^Labels/ }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Bug' }).click();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.task-card')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Remove labels filter' }).click();
+  await expect(page.locator('.task-card')).toHaveCount(2);
+  // Estimate from the card menu, shown on the card and summed in the lane.
+  await card.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: /^Estimate/ }).click();
+  await page.getByRole('menuitemradio', { name: '3 points' }).click();
+  await expect(card.getByRole('button', { name: 'Estimate: 3 points' })).toBeVisible();
+  await expect(page.locator('[data-column-title="Todo"] .lane-estimate')).toHaveText('3');
+  // Old links to the Repo and Pull requests tabs open Code.
+  for (const old of ['repo', 'pulls']) {
+    await page.goto(f.url(`tab=${old}`));
+    await expect(page.getByRole('tab', { name: 'Code' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page).toHaveURL(/tab=code/);
+    await expect(page.getByRole('heading', { name: /^(No repository connected|Creating repository)$/ })).toBeVisible();
+  }
+});
+
+test('O-121 two call peers connect and receive each other\'s audio and video', async ({ clients, f }) => {
+  const wrap = () => { const Native = window.RTCPeerConnection; window.__peers = []; window.RTCPeerConnection = class extends Native { constructor(...args) { super(...args); window.__peers.push(this); } }; };
+  const open = async person => {
+    const page = await clients.login(person, `/${f.workspace.slug}?view=voice`);
+    await page.addInitScript(wrap);
+    await page.reload();
+    await expect(page.locator('.workspace-app')).toBeVisible();
+    await page.getByRole('button', { name: 'Join call', exact: true }).click();
+    return page;
+  };
+  const a = await open(f.admin), b = await open(f.member);
+  for (const page of [a, b]) await page.waitForFunction(async () => {
+    const peer = window.__peers.find(item => item.connectionState === 'connected');
+    if (!peer) return false;
+    const rows = [...(await peer.getStats()).values()];
+    return ['audio', 'video'].every(kind => rows.some(row => row.type === 'inbound-rtp' && row.kind === kind && row.packetsReceived > 0));
+  }, null, { timeout: 40000, polling: 500 });
+});

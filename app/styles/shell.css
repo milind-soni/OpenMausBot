@@ -27,7 +27,7 @@
 .persistent-tool.draw-tool, .persistent-tool.voice-tool { height: 100%; min-height: 0; }
 
 /* Shared view header: a 52px bar across the top of the main panel. */
-.view-header { position: sticky; top: 0; z-index: 10; display: flex; flex: none; align-items: center; gap: var(--space-3); height: 52px; margin: 0 calc(var(--space-6) * -1); padding: 0 var(--space-4) 0 var(--space-6); border-bottom: 1px solid var(--border-1); background: var(--surface-1); }
+.view-header { position: sticky; top: 0; z-index: 10; display: flex; flex: none; align-items: center; gap: var(--space-3); height: 48px; margin: 0 calc(var(--space-6) * -1); padding: 0 var(--space-4) 0 var(--space-6); border-bottom: 1px solid var(--border-1); background: var(--surface-1); }
 .view-header h1 { margin: 0; font-size: var(--text-md); font-weight: var(--weight-semibold); }
 
 /* Sidebar. */

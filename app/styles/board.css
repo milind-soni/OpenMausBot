@@ -162,7 +162,8 @@
 
 /* Chips: light, and buttons where the card can be edited in place. */
 .task-chip, .priority { position: relative; display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 6px; border: 1px solid var(--border-2); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--text-sm); font-weight: var(--weight-medium); font-variant-numeric: tabular-nums; text-transform: capitalize; white-space: nowrap; }
-.task-chip.icon-only { justify-content: center; width: 22px; padding: 0; }
+.task-chip.icon-only { justify-content: center; width: 22px; padding: 0; border-color: transparent; }
+button.task-chip.icon-only:hover { border-color: var(--border-3); }
 button.task-chip { cursor: pointer; transition: background var(--duration-instant) var(--ease-standard), border-color var(--duration-instant) var(--ease-standard), color var(--duration-instant) var(--ease-standard); }
 .estimate-chip { color: var(--text-2); }
 .estimate-chip > .estimate-icon, .lane-estimate > .estimate-icon { flex: none; color: var(--text-3); }
@@ -342,6 +343,9 @@ button.task-assignee.with-name:hover { box-shadow: none; border-color: var(--bor
   .board-header .board-filter-control:has(.board-search-chip) { order: 1; flex: 1 0 100%; }
   .board-search-chip { max-width: 100%; height: 32px; }
   .project-create-issue > span { display: none; }
+  /* Filter and Display fold to their icons so the toolbar stays one row at 390px. */
+  .board-header .view-control-trigger > span { display: none; }
+  .board-header .view-control-trigger { width: 36px; min-height: 36px; padding: 0; justify-content: center; }
   .empty-lane:has(> .lane-jump) > .lane-empty-text { display: none; }
   .empty-lane > .lane-jump { display: inline-flex; min-height: 44px; color: var(--text-2); }
   /* Every control keeps its size; nothing in the row shrinks under its neighbour at 360px. */
