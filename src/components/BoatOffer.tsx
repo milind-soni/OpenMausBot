@@ -51,13 +51,17 @@ export function BoatOfferCard({ onDone }: { onDone: (action: BoatOfferAction) =>
 export function BoatOfferPanel() {
   const titleId = useId();
   if (!boatOfferRuns(Date.now()) || brandStatus().source === "file") return null;
-  return <section data-boat-offer aria-labelledby={titleId} className="rounded-lg bg-ink/[0.04] p-3">
-    <h3 id={titleId} className="flex items-center gap-1.5 text-[13px] font-semibold leading-[18px] text-ink">
-      <Gift size={14} aria-hidden="true" className="shrink-0 text-ink-secondary" />{t("boatOffer.title")}
-    </h3>
-    <BoatOfferWords />
-    <div className="mt-3 flex flex-wrap items-start gap-2">
-      <LinkButton url={BOAT_OFFER.url} label={t("boatOffer.get")} onOpened={() => reportBoatOffer("get_boat", "settings")} />
+  // A plain row in the key's own card: title, its line, and Get Boat; no tinted box of its own.
+  return <section data-boat-offer aria-labelledby={titleId} className="flex flex-col gap-2 pt-1">
+    <div className="flex items-center gap-6">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <h3 id={titleId} className="text-[14px] leading-5 text-ink">{t("boatOffer.title")}</h3>
+        <p className="text-[13px] leading-[18px] text-ink-secondary">{t("boatOffer.body")}</p>
+        <p data-boat-offer-yourself className="mt-1 text-[12px] leading-4 text-ink-secondary">{t("boatOffer.yourself")}</p>
+      </div>
+      <LinkButton url={BOAT_OFFER.url} label={t("boatOffer.get")} className="ui-button ui-button-md shrink-0 rounded-full" onOpened={() => reportBoatOffer("get_boat", "settings")} />
+    </div>
+    <div className="flex items-center justify-end">
       <ClaimButton onOpened={() => reportBoatOffer("claim", "settings")} />
     </div>
   </section>;

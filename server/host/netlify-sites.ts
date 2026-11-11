@@ -29,13 +29,16 @@ export interface NetlifySite {
   manageUrl?: string;
   publishedAt: number;
   access: "public" | "netlify-team" | "unknown";
+  /** The record of an app on the plan's included hosting: `siteId` is its app key as the record says it, and `url` may
+   * be empty. Whose app it is and where it answers come from the relay, never from the record. */
+  hosting?: "included";
 }
 
 const text = (max: number) => z.string().max(max).optional().catch(undefined);
 const recordSchema = z.object({
   siteId: z.string().regex(/^[\w-]{1,80}$/),
   url: z.string().max(2_000),
-  name: text(200), adminUrl: text(2_000), title: text(200), createdAt: text(40), publishedAt: text(40), access: text(20),
+  name: text(200), adminUrl: text(2_000), title: text(200), createdAt: text(40), publishedAt: text(40), access: text(20), hosting: text(20),
 });
 
 /** Must match skills/publish-to-netlify/deploy.mjs `apiBase`: only a loopback stand-in may replace Netlify's address,
@@ -68,13 +71,13 @@ export function parseSiteRecord(raw: string, file: string, modifiedAt: number, e
   try { value = JSON.parse(raw); } catch { return null; }
   const parsed = recordSchema.safeParse(value);
   if (!parsed.success) return null;
-  const record = parsed.data, standIn = standInOrigin(env);
-  const url = webAddress(record.url, standIn);
-  if (!url) return null;
-  const manageUrl = webAddress(record.adminUrl, standIn, NETLIFY_ADMIN_HOST);
+  const record = parsed.data, standIn = standInOrigin(env), included = record.hosting === "included";
+  const url = webAddress(record.url, standIn) ?? (included ? "" : null);
+  if (url === null) return null;
+  const manageUrl = included ? null : webAddress(record.adminUrl, standIn, NETLIFY_ADMIN_HOST);
   return {
-    siteId: record.siteId, file, url, ...(manageUrl ? { manageUrl } : {}),
-    title: oneLine(record.title) || oneLine(record.name) || new URL(url).host,
+    siteId: record.siteId, file, url, ...(manageUrl ? { manageUrl } : {}), ...(included ? { hosting: "included" as const } : {}),
+    title: oneLine(record.title) || oneLine(record.name) || (url ? new URL(url).host : ""),
     publishedAt: time(record.publishedAt) ?? time(record.createdAt) ?? modifiedAt,
     access: record.access === "public" ? "public" : record.access === "private" ? "netlify-team" : "unknown",
   };
@@ -99,7 +102,7 @@ export async function findNetlifySites(roots: readonly string[], options: { home
     for (const entry of entries) {
       if (entry.name === SITE_FILE && entry.isFile()) {
         const site = await readSite(join(next.folder, entry.name), options.env);
-        if (site && !sites.some((other) => other.siteId === site.siteId)) sites.push(site);
+        if (site && (site.hosting || !sites.some((other) => !other.hosting && other.siteId === site.siteId))) sites.push(site);
       } else if (entry.isDirectory() && next.depth < SCAN_LIMITS.depth && !entry.name.startsWith(".") && !SKIPPED_FOLDERS.has(entry.name)) {
         queue.push({ folder: join(next.folder, entry.name), depth: next.depth + 1 });
       }
@@ -108,7 +111,7 @@ export async function findNetlifySites(roots: readonly string[], options: { home
   return sites.slice(0, SCAN_LIMITS.sites);
 }
 
-async function readSite(file: string, env: NodeJS.ProcessEnv): Promise<NetlifySite | null> {
+export async function readSite(file: string, env: NodeJS.ProcessEnv): Promise<NetlifySite | null> {
   try {
     const info = await lstat(file);
     if (!info.isFile() || info.size > SCAN_LIMITS.recordBytes) return null;

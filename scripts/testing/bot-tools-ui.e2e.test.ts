@@ -118,7 +118,7 @@ describe("bot setup and tools in the real renderer", () => {
     expect(await evaluate("Boolean(document.querySelector('[data-simple-mcp]'))")).toBe(false);
     const settingsPage = () => evaluate("document.querySelector('[data-settings-page][aria-current=\"page\"]')?.getAttribute('data-settings-page') ?? null");
     const searchValue = () => evaluate("document.querySelector('[data-settings-search]')?.value ?? null");
-    // The panel's Usage row shows what this bot has spent and opens Settings on Usage & billing.
+    // The panel's Usage row shows what this bot has spent and opens Settings on Spending, in Advanced mode.
     const openPanelUsage = async () => {
       await openPanel();
       // Back out of any page to the panel's tabs, then to Details.
@@ -134,10 +134,12 @@ describe("bot setup and tools in the real renderer", () => {
         .filter(([, entry]) => entry.role === "button" && entry.name.startsWith("Usage") && entry.name.includes("$0.01"));
       expect(cost).toHaveLength(1);
       await ui("click", "--ref", `@${cost[0][0]}`);
-      await expect.poll(settingsPage, { timeout: 10_000 }).toBe("billing");
+      await expect.poll(settingsPage, { timeout: 10_000 }).toBe("usage");
     };
     // The bot panel's close button has the same name, so press the one in the Settings dialog.
     const closeSettings = async () => {
+      // Spending is an Advanced page, so opening it turned Advanced mode on; Simple's chat head comes back with it off.
+      await evaluate("document.querySelector('[data-settings-advanced-switch][aria-checked=\"true\"]')?.click(); true");
       await evaluate("document.querySelector('[data-settings-search]').closest('[role=dialog]').querySelector('button[aria-label=\"Close settings\"]').click(); true");
       await expect.poll(() => evaluate("Boolean(document.querySelector('[data-settings-search]'))"), { timeout: 10_000 }).toBe(false);
     };

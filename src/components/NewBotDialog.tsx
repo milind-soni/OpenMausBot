@@ -31,8 +31,7 @@ import { RoutineEditor } from "./RoutinesPage";
 import { Layer, useIsTopLayer } from "./Layer";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { SharePresetDialog } from "./SharePresetDialog";
-import { SettingRow } from "./SettingsPrimitives";
-import { NewBotDefaultsRow } from "./AppSettingsRows";
+import { SettingRow, SettingsLinkRow } from "./SettingsPrimitives";
 import { Select } from "./Select";
 
 const SECTIONS = ["Identity", "Soul", "Skills", "Memory", "Routines", "Access", "Model", "Permissions", "Voice & alerts"] as const;
@@ -369,7 +368,12 @@ export function DefaultBotSettings({ simple = false }: { simple?: boolean }) {
     {open && <NewBotDialog defaultsMode onClose={() => setOpen(false)} />}
     {sharing && <SharePresetDialog onClose={() => setSharing(false)} />}
   </>;
-  if (simple) return <><NewBotDefaultsRow onEdit={() => setOpen(true)} onShare={() => setSharing(true)} />{dialogs}</>;
+  // One control per row: the defaults open their editor; sharing them as a preset is a row of its own.
+  if (simple) return <>
+    <SettingsLinkRow title={t("newBot.defaults")} subtitle={t("settings.newBot.defaultsLine")} onClick={() => setOpen(true)} data={{ "data-new-bot-defaults": "" }} />
+    <SettingRow title={t("newBot.sharePresetRow")}><button type="button" className="ui-button" data-new-bot-share="" onClick={() => setSharing(true)}>{t("newBot.shareAction")}</button></SettingRow>
+    {dialogs}
+  </>;
 
   const content = <>
     <div className="flex shrink-0 gap-2">

@@ -1,19 +1,20 @@
 ---
 name: publish-to-netlify
-description: "Put a site or web app online at a public link on the person's own Netlify account, and update the same link later. Use when the person asks to deploy, host or publish a site or app for people outside, or when it needs functions, a database or a backend; a simple page or report uses publish_page instead."
+description: "Put a site or web app online at a public link, on the hosting the Cloud plan includes or on the person's own Netlify account, and update the same link later. Use when the person asks to deploy, host or publish a site or app for people outside, or when it needs functions, a database or a backend; a simple page or report uses publish_page instead."
 ---
 
 # Publish to Netlify
 
-You build the site in your working folder and publish it to the person's own Netlify account. They get a link that
-stays the same when you change the site. The account, its limits and its bill are theirs.
+You build the site in your working folder and publish it: on the hosting the person's Cloud plan includes when there
+is one, otherwise on their own Netlify account (that account, its limits and its bill are theirs). They get a link
+that stays the same when you change the site.
 
 ## Pick the right home
 
 | The person wants | Use |
 |---|---|
 | A page, report or dashboard to look at or share (static files, up to 5 MB and 200 files) | `show_html`, and `publish_page` for a link. Nothing to set up. |
-| A site or app for people outside, a bigger site, or a link to keep changing over time | Netlify, with `deploy.mjs` (below). |
+| A site or app for people outside, a bigger site, or a link to keep changing over time | `publish_app` when you have that tool, else Netlify with `deploy.mjs` (both below). |
 | Forms that save, sign-up lists, an API, a database, a backend | Netlify with its command line (see "Functions, a database, a backend"). |
 
 Publish only when the person asks. If they only asked you to build something, show it first and offer the link.
@@ -27,6 +28,43 @@ Publish only when the person asks. If they only asked you to build something, sh
 - If the content looks personal or internal (names with contact details, customer lists, money, health, staff or
   unreleased plans), ask before publishing, and say exactly what would become public.
 - Publish only the output folder, never your whole working folder.
+
+## Where the project lives
+
+Keep each site or app in your shared bot folder, one folder per app: `<sharedBotFolder>/sites/<short-name>/`
+(`sharedBotFolder` is in your file locations; `sites/bakery-orders`, say). Build it there, not in this
+conversation's folder: every conversation with you reaches the shared folder, so a later one can change the same app
+and keep its link, while a project in one conversation's folder is out of reach of the others.
+
+- Before you create a project, look for it: list `<sharedBotFolder>/sites/`, and search `sharedBotFolder` and your
+  current folder for `.netlify-site.json` (`check_app_hosting` with no path lists what it finds). If the app is
+  there, work in that folder and publish from it again; never start a second copy.
+- Name that folder whatever folder you are in: `--project` and `--dir` for `deploy.mjs`, `project` and `path` for
+  `publish_app` (a relative `path` such as `sites/bakery-orders` is read in the shared folder first).
+- On a team, an app a person wants for themselves alone, asked for in their private chat with you, stays in this
+  conversation's folder instead: the shared folder is the whole team's.
+
+## Included hosting first
+
+If you have the `publish_app` and `check_app_hosting` tools, this Cloud's plan includes hosting: use it first. There is no token card and the
+person needs no Netlify account. It takes static files only: up to 25 MB and 500 files an app, 8 MB a file.
+
+1. Call `check_app_hosting` and say how many of the plan's apps are in use ("3 of 10").
+2. Publishing is public at once, so the person sees what goes out first: show it with `show_html` when it fits a chat
+   page, otherwise say what you built and what it does. Publish only when they say yes.
+3. Call `publish_app` with `path` (the output folder), a `title`, and `project` when the output is inside a project
+   folder. Pass the same ones every time, in any conversation: the same link is updated. It writes
+   `.netlify-site.json` there too.
+   `"live": true`: reply with the link (`url`), what you published in a line or two, and that the link is public.
+   `"pending": true`: it is still being processed; call `check_app_hosting` with the same folder once, a minute later.
+4. Delete an app as "Delete a published site" says, with `action: "delete"` and the same folder.
+
+Use the person's own Netlify account, as the rest of this guide says, when:
+
+- you have no `publish_app` tool, or the project already has a site on their account (keep its link);
+- `publish_app` answers that the plan's apps or this month's publishes are used up, or that the plan includes none:
+  say so plainly, with the numbers it gave, and offer their own account;
+- the app needs what included hosting doesn't do: functions, a database, a server, redirects, or more than its sizes.
 
 ## The token, once
 
