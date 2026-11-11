@@ -10,6 +10,7 @@ import {
   usageCsv,
   USAGE_GROUPINGS,
   type UsageGroupBy,
+  type UsageRow,
 } from "../usage-ledger.ts";
 import { DETAIL_MAX, ERROR_MAX } from "../usage-trace/detail.ts";
 import type { ToolReceipt, TraceRecorder } from "../usage-trace/recorder.ts";
@@ -26,6 +27,8 @@ export interface UsageRouteDeps {
   liveBot: TraceServiceDeps["liveBot"];
   /** Which threads this viewer may read today; a trace shows only those. */
   canSee(auth: RequestAuth): (threadId: string) => boolean;
+  /** A row as this viewer may read it (host/private-records.ts). */
+  rowFor(auth: RequestAuth): (row: UsageRow) => UsageRow;
 }
 
 const TRACE = /^\/api\/usage\/traces\/([^/]{1,600})$/;
@@ -63,7 +66,7 @@ export function createUsageRoutes(deps: UsageRouteDeps): RouteHandler {
     const range = parseUsageRange(url.searchParams.get("from"), url.searchParams.get("to"));
     if (!range) return json(res, 400, { error: "from and to must be YYYY-MM-DD, from no later than to, at most a year apart" });
     await flushUsageLedger(deps.dataDir);
-    const rows = readUsage(deps.dataDir, range);
+    const rows = readUsage(deps.dataDir, range).map(deps.rowFor(auth));
     const prices = deps.prices();
     if (path === "/api/usage.csv") {
       const stamp = (date: Date) => date.toISOString().slice(0, 10);

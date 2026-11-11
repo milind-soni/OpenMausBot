@@ -39,6 +39,8 @@ describe("a cloud computer starts only when the bot uses it", () => {
    * hours are used up. */
   const refuse = { creates: false };
   const requests: Request[] = [];
+  /** Files the bots wrote on their computers, by path. */
+  const written = new Map<string, string>();
   /** Boat ids in Boat's own alphabet, one per computer created. */
   const boxId = (n: number) => `bx_${"23456789abcdefgh"[n]}3456789`;
 
@@ -134,6 +136,15 @@ describe("a cloud computer starts only when the bot uses it", () => {
         // Every request is counted, a stray own-key one included.
         const path = url.pathname.replace(/^\/relay\/api\/box\/v1/, "");
         requests.push({ method: req.method ?? "GET", path });
+        // The computer's own transfer links: no key, the file's path in the link.
+        const linked = /^\/sandbox\/(get|put)\/([^/]+)$/.exec(url.pathname);
+        if (linked) {
+          if (req.headers.authorization) return send(400, { ok: false, message: "a transfer link takes no key" });
+          const file = Buffer.from(linked[2]!, "base64url").toString("utf8");
+          if (linked[1] === "put") { written.set(file, raw); res.writeHead(200); return res.end(); }
+          res.writeHead(200, { "content-type": "application/octet-stream", "content-length": String(FRAME.length) });
+          return res.end(FRAME);
+        }
         if (req.headers.authorization !== `Bearer ${INCLUDED}` || !url.pathname.startsWith("/relay/api/box/v1")) {
           return send(401, { ok: false, code: "unauthorized", message: "Unauthorized" });
         }
@@ -166,6 +177,11 @@ describe("a cloud computer starts only when the bot uses it", () => {
         }
         if (verb === "desktop" && req.method === "POST") return send(200, { desktopUrl: `https://desktop.invalid/${row.id}` });
         if (verb === "commands" && req.method === "POST") return send(200, { exitCode: 0, stdout: "captured", stderr: "" });
+        if ((verb === "files/download-url" || verb === "files/upload-url") && req.method === "POST") {
+          const get = verb === "files/download-url";
+          return send(200, { ok: true, url: `http://${req.headers.host}/sandbox/${get ? "get" : "put"}/${Buffer.from(body.path).toString("base64url")}`,
+            method: get ? "GET" : "PUT", path: body.path, expiresAt: new Date(Date.now() + 300_000).toISOString() });
+        }
         if (verb === "artifacts" && req.method === "GET") {
           res.writeHead(200, { "content-type": "image/jpeg", "content-length": String(FRAME.length) });
           return res.end(FRAME);
@@ -219,7 +235,7 @@ describe("a cloud computer starts only when the bot uses it", () => {
       if (child!.exitCode !== null) throw new Error(`the server exited:\n${output}`);
       try { return (await fetch(`${base}/api/health`)).ok; } catch { return false; }
     }, Boolean, 30_000);
-    // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Team incidents
+    // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Problems to look at
     // turn of its own on Claude: its dump would stand in for the turn under test. Stepped down, each dump is the test's own.
     const seeded = (await apiOk("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff);
     await apiOk("PATCH", `/api/bots/${seeded.id}`, { chiefOfStaff: false });
@@ -364,6 +380,51 @@ describe("a cloud computer starts only when the bot uses it", () => {
     await apiOk("DELETE", `/api/bots/${bot.id}`);
   }, 30_000);
 
+  it("work handed to a bot on Auto runs on that bot's own cloud computer; a consult, and a bot with none, get no computer", async () => {
+    const auto = async (name: string) => {
+      const bot = await cloudBot(name);
+      const own = await startTurn(bot.id, "Open the cloud desktop");
+      expect((await computerCall(own, "tools/call", { name: "screenshot", arguments: {} })).body.result.isError).toBeFalsy();
+      await finish(bot.id);
+      await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: null });
+      return bot;
+    };
+    const writer = await auto("Writer");
+    const asked = await auto("Asked");
+    const fresh = await cloudBot("Fresh", { computer: null });
+    const sender = await cloudBot("Sender", { computer: null });
+    const before = { creates: creates(), resumes: resumes() };
+    const agents = (await startTurn(sender.id, "Hand the desktop check over")).mcpConfig.mcpServers.agents;
+    const token = (agents.env.OMB_GATE_UPSTREAM ? JSON.parse(agents.env.OMB_GATE_UPSTREAM).env : agents.env).OMB_COMMS_TOKEN;
+    const handed = async (botId: string, call: Record<string, unknown>) => {
+      rmSync(dumpFile, { force: true });
+      const response = await fetch(`${base}/api/internal/coordinate-bots`, {
+        method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ botIds: [botId], ...call }),
+      });
+      expect(response.status, await response.clone().text()).toBe(200);
+      const sent = await dump();
+      expect(sent.cwd).toContain(botId);
+      return sent;
+    };
+    const work = await handed(writer.id, { message: "Check the weather site on your desktop" });
+    expect(work.mcpConfig.mcpServers.computer?.args).toEqual([expect.stringMatching(/harness-mcp-proxy\.(?:ts|js)$/), "computer"]);
+    expect(work.systemPrompt).toContain("assigned cloud computer");
+    const consult = await handed(asked.id, { message: "Which weather site do you use?", consult: true });
+    expect(consult.mcpConfig.mcpServers.computer).toBeUndefined();
+    const none = await handed(fresh.id, { message: "Check the weather site on your desktop" });
+    expect(none.mcpConfig.mcpServers.computer).toBeUndefined();
+    writeFileSync(finishFile, "finish");
+    for (const bot of [writer, asked, fresh, sender]) await idle(bot.id);
+    // Mounting is lazy: nothing was created or woken without a computer call.
+    expect({ creates: creates(), resumes: resumes() }).toEqual(before);
+    // A finished hand-off can still be settling its dispatch for a moment after the bot reads idle; the delete waits for it.
+    for (const bot of [writer, asked, fresh, sender]) {
+      const deleted = await until(() => api("DELETE", `/api/bots/${bot.id}`), (response) => response.status !== 409);
+      expect(deleted.status).toBeLessThan(400);
+    }
+  }, 90_000);
+
   it("a room member whose cloud computer can't start says why in the room, once, under its own name", async () => {
     refuse.creates = true;
     try {
@@ -413,5 +474,35 @@ describe("a cloud computer starts only when the bot uses it", () => {
     } finally {
       refuse.creates = false;
     }
+  }, 60_000);
+
+  it("copies files between the cloud computer and the folder the turn works in, in a chat and in a room", async () => {
+    const bot = await cloudBot("Copier");
+    const sent = await startTurn(bot.id, "Bring the results back");
+    const call = (turn: any, name: string, args: unknown) => computerCall(turn, "tools/call", { name, arguments: args });
+    const brought = await call(sent, "copy_from_computer", { path: "/home/user/out/frame.jpg", to: "results/frame.jpg" });
+    expect(brought.body.result, JSON.stringify(brought.body)).toEqual({ content: [{ type: "text", text: JSON.stringify({ path: join("results", "frame.jpg"), bytes: FRAME.length }) }] });
+    expect(readFileSync(join(sent.cwd, "results", "frame.jpg"))).toEqual(FRAME);
+    writeFileSync(join(sent.cwd, "query.sql"), "select 1;");
+    expect((await call(sent, "copy_to_computer", { from: "query.sql", path: "/tmp/query.sql" })).body.result.isError).toBeFalsy();
+    expect(written.get("/tmp/query.sql")).toBe("select 1;");
+    expect((await call(sent, "copy_from_computer", { path: "/tmp/x", to: "../escaped" })).body.result.isError).toBe(true);
+    expect(requests.filter(request => /files\/(download|upload)-url$|^\/sandbox\//.test(request.path)).map(request => `${request.method} ${request.path.split("/").slice(0, 3).join("/")}`))
+      .toEqual([`POST /boxes/${rows.at(-1)!.id}`, "GET /sandbox/get", `POST /boxes/${rows.at(-1)!.id}`, "PUT /sandbox/put"]);
+    expect(JSON.stringify([brought.body])).not.toContain("/sandbox/");
+    await finish(bot.id);
+
+    const { group } = await apiOk("POST", "/api/groups", { name: "Copy room", memberIds: [bot.id] });
+    await apiOk("PATCH", `/api/groups/${group.id}/setup`, { action: "skip" });
+    rmSync(dumpFile, { force: true });
+    rmSync(finishFile, { force: true });
+    await apiOk("POST", `/api/groups/${group.id}/messages`, { text: "Bring it here too" });
+    const roomTurn = await dump();
+    expect(roomTurn.cwd).not.toBe(sent.cwd);
+    expect((await call(roomTurn, "copy_from_computer", { path: "/tmp/frame.jpg" })).body.result.isError).toBeFalsy();
+    expect(readFileSync(join(roomTurn.cwd, "frame.jpg"))).toEqual(FRAME);
+    await finish(bot.id);
+    await apiOk("DELETE", `/api/groups/${group.id}`);
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
   }, 60_000);
 });

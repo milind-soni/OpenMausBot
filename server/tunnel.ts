@@ -25,6 +25,7 @@ import {
   createManagedCompanionTunnel,
   managedCompanionTunnelAccess,
   resolveCloudflaredBinary,
+  stagedCloudflaredPath,
   type ManagedTunnelAccess,
   type ManagedTunnelState,
 } from "../electron/managed-companion-tunnel.mjs";
@@ -132,6 +133,8 @@ export function createTunnelAccount(options: {
   fetchImpl?: typeof fetch;
   machineName?: string;
   recovery?: TunnelRecovery;
+  /** `login --relay`: sign in without reserving a public address; phones reach this machine through MausBot Relay. */
+  relayOnly?: boolean;
   log?: (line: string) => void;
   clock?: {
     setTimer: (callback: () => void, milliseconds: number) => unknown;
@@ -148,9 +151,10 @@ export function createTunnelAccount(options: {
     client,
     readCredentials: () => credentials.read(),
     updateCredentials: (derive, afterPersist) => credentials.update(derive, afterPersist),
-    identity: { name: options.machineName ?? hostname(), platform: platformName(), appVersion: options.version },
+    identity: { name: options.machineName ?? hostname(), platform: platformName(), appVersion: options.version, kind: "server" },
     newClientInstanceId: () => randomUUID(),
     ...(options.log ? { log: options.log } : {}),
+    ...(options.relayOnly ? { onDemand: true, managedEndpointNeeded: async () => false, relay: { capable: () => true, legacyDevices: async () => 0 } } : {}),
     ...(recovery
       ? {
           autoRecover: true,
@@ -183,7 +187,7 @@ export async function fleetAccess(options: { credential: string; version?: strin
   if (!controlPlane) throw new Error("OMB_CONTROL_PLANE_URL is set but is not an https address");
   const client = createControlPlaneClient({ baseURL: controlPlane, fetchImpl: options.fetchImpl });
   try {
-    const { endpoint, connectorToken } = await client.ensureEndpoint(options.credential, { appVersion: options.version });
+    const { endpoint, connectorToken } = await client.ensureEndpoint(options.credential, { appVersion: options.version, kind: "server" });
     return { endpoint: endpoint.url, token: connectorToken };
   } catch (error) {
     if (error instanceof ControlPlaneError && error.status === 401) {
@@ -220,19 +224,25 @@ export async function ensureCloudflared(options: {
 }): Promise<string> {
   const env = options.env ?? process.env;
   const found = cloudflaredPath(options.dataDir, env);
-  if (found) return found;
-  options.log(`downloading cloudflared once (pinned version and digest, about 40 MB) into ${options.dataDir}`);
+  const staged = stagedCloudflaredPath({ appPath: options.dataDir });
+  const refreshStaged = !env.OMB_CLOUDFLARED_PATH?.trim() && found === staged;
+  if (found && !refreshStaged) return found;
+  options.log(
+    refreshStaged
+      ? `checking staged cloudflared (pinned version and digest) in ${options.dataDir}`
+      : `downloading cloudflared once (pinned version and digest, about 40 MB) into ${options.dataDir}`,
+  );
   await new Promise<void>((done, fail) => {
     const child = spawn(process.execPath, [prepareEntry(options.here), "--current", "--root", options.dataDir], {
       env,
       stdio: ["ignore", "inherit", "inherit"],
     });
-    child.on("error", fail);
-    child.on("exit", (code) => (code === 0 ? done() : fail(new Error(`the cloudflared download failed (exit ${code ?? "signal"})`))));
+    child.on("error", (error) => fail(new Error(`could not prepare cloudflared: ${error.message}`)));
+    child.on("exit", (code) => (code === 0 ? done() : fail(new Error(`the cloudflared ${refreshStaged ? "refresh" : "download"} failed (exit ${code ?? "signal"})`))));
   });
-  const staged = cloudflaredPath(options.dataDir, env);
-  if (!staged) throw new Error("cloudflared was downloaded but is not where it should be; remove the data dir's dist-native folder and try again");
-  return staged;
+  const prepared = refreshStaged ? (existsSync(staged) ? staged : null) : cloudflaredPath(options.dataDir, env);
+  if (!prepared) throw new Error("cloudflared was prepared but is not where it should be; remove the data dir's dist-native folder and try again");
+  return prepared;
 }
 
 export function createTunnelOrigin(): CompanionOriginEndpoint {

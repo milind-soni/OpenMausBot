@@ -92,6 +92,11 @@ describe("the pin", () => {
     expect(targetsFor("darwin", {})).toEqual([{ platform: "darwin", arch: "arm64" }, { platform: "darwin", arch: "x64" }]);
     expect(targetsFor("darwin", { OPENMAUSBOT_CUA_ARCHES: "arm64", OPENMAUSBOT_CUA_ARCHES_PARTIAL: "1" })).toEqual([{ platform: "darwin", arch: "arm64" }]);
     expect(targetsFor("linux", {})).toEqual([{ platform: "linux", arch: "x64" }]);
+    // The Docker build stages the image's CPU, which need not be the build host's (linux/arm64 under buildx).
+    expect(targetsFor("linux", { OMB_DUCKDB_ARCH: "arm64" })).toEqual([{ platform: "linux", arch: "arm64" }]);
+    expect(targetsFor("linux", { OMB_DUCKDB_ARCH: "x64" })).toEqual([{ platform: "linux", arch: "x64" }]);
+    expect(() => targetsFor("linux", { OMB_DUCKDB_ARCH: "amd64" })).toThrow(/OMB_DUCKDB_ARCH/);
+    expect(targetsFor("win32", { OMB_DUCKDB_ARCH: "arm64" })).toEqual([{ platform: "win32", arch: "x64" }]);
     expect(targetsFor("win32", {})).toEqual([{ platform: "win32", arch: "x64" }]);
   });
 });

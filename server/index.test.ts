@@ -1,5 +1,5 @@
 // The config pins one deliberately unknown driver, so the suite is deterministic with or without agent CLIs installed.
-import { HIGHLEVEL_TOOLS } from "./highlevel/tools.js";
+import { EMAIL_TOOLS } from "./email/tools.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
@@ -34,14 +34,15 @@ import {
   phoneSecretAAD,
   type PhoneSecretContext,
 } from "./phone-secret.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
 const FAKE_CLAUDE_CLI = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
 const FAKE_MCP_SERVER = join(SERVER_DIR, "testing", "fake-mcp-server.ts");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
+const PORT = workerPort(18800, 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
-const WEBHOOK_PORT = 39000 + Math.floor(Math.random() * 10_000);
+const WEBHOOK_PORT = workerPort(39000, 10_000);
 const WEBHOOK_BASE = `http://127.0.0.1:${WEBHOOK_PORT}`;
 const TEST_CAPABILITY_KEY = "index-fixture-internal-capability";
 
@@ -169,6 +170,8 @@ let setupAnswersDump: string;
 let fakeDockerFixture: string;
 let fakeVpsFixture: string;
 let fakeDockerLog: string;
+let fakeSshLog: string;
+let fakeSshUnavailable: string;
 let stderr = "";
 let connectorAccounts: Array<{ id: string; alias?: string; status: string; toolkit: { slug: string } }> = [];
 let connectorAccountsGate: DeferredGate | null = null;
@@ -338,6 +341,16 @@ const claudePrompts = (file = fakeClaudePrompts): string[] =>
   existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
 const COMPUTER_FREE_NOTE = "OpenMausBot computer update: the computer this conversation waited for is free again. Continue the task that parked waiting for it.";
 
+/** The running turn's first screen call, which is what takes a cloud computer; the answer waits while another turn has it. */
+const reachForComputer = async () => {
+  const dump = await readJsonFileWhenReady<{ mcpConfig: { mcpServers: { computer: { env: Record<string, string> } } } }>(fakeClaudeDump);
+  const env = dump.mcpConfig.mcpServers.computer.env;
+  return fetch(`${env.OMB_HARNESS_URL}/api/internal/computer/mcp`, {
+    method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${env.OMB_MCP_TOKEN_COMPUTER}` },
+    body: JSON.stringify({ method: "tools/call", params: { name: "screenshot", arguments: {} } }),
+  }).catch(() => undefined);
+};
+
 const readJsonFileWhenReady = async <T = unknown>(file: string, timeout = 5_000): Promise<T> => {
   let parsed: unknown;
   await expect.poll(() => {
@@ -402,6 +415,8 @@ beforeAll(async () => {
   fakeDockerFixture = join(home, ".openmausbot", "fake-unmanaged-container");
   fakeVpsFixture = join(home, ".openmausbot", "fake-vps-container.json");
   fakeDockerLog = join(home, ".openmausbot", "fake-docker-calls.log");
+  fakeSshLog = join(home, ".openmausbot", "fake-ssh-calls.log");
+  fakeSshUnavailable = join(home, ".openmausbot", "fake-ssh-unavailable");
   mkdirSync(fakeDockerDir, { recursive: true });
   writeFileSync(fakeDockerProgram, [
     'import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";',
@@ -450,6 +465,22 @@ beforeAll(async () => {
       { mode: 0o755 },
     );
     chmodSync(join(fakeDockerDir, "docker"), 0o755);
+    const fakeSshProgram = join(fakeDockerDir, "ssh-empty.mjs");
+    writeFileSync(fakeSshProgram, [
+      'import { appendFileSync, existsSync } from "node:fs";',
+      'const args = process.argv.slice(2);',
+      `appendFileSync(${JSON.stringify(fakeSshLog)}, JSON.stringify(args) + "\\n");`,
+      `if (existsSync(${JSON.stringify(fakeSshUnavailable)})) { console.error("fixture SSH is unavailable"); process.exit(255); }`,
+      'if (args[0] === "-F") args.splice(0, 2);',
+      'if (args.length === 4 && args.slice(0, 3).join(" ") === "-O check --") process.exit(255);',
+      'if (args.length === 8 && args.slice(0, 6).join(" ") === "-o BatchMode=yes -o PermitLocalCommand=no -T --" && args[7] === "true") process.exit(0);',
+      'console.error("unexpected fixture SSH command"); process.exit(127);',
+    ].join("\n"));
+    writeFileSync(
+      join(fakeDockerDir, "ssh"),
+      `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeSshProgram)} "$@"\n`,
+      { mode: 0o755 },
+    );
   }
   // a fleet of exactly one unknown driver: no CLI probes, no network
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
@@ -1707,7 +1738,9 @@ describe("harness HTTP API", () => {
 
     try {
       const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("competing server did not exit")), 5_000);
+        // On Windows without wmic the lease reads the other server's start time through Windows PowerShell, whose first
+        // start on a CI runner takes several seconds.
+        const timer = setTimeout(() => reject(new Error("competing server did not exit")), process.platform === "win32" ? 30_000 : 5_000);
         timer.unref?.();
         contender.once("close", (code, signal) => {
           clearTimeout(timer);
@@ -1721,7 +1754,7 @@ describe("harness HTTP API", () => {
     } finally {
       await waitForExit(contender, { signal: "SIGTERM", graceMs: 1_000 });
     }
-  });
+  }, 45_000);
 
   it("serves packaged UI assets and preserves API 404s", async () => {
     const root = await fetch(`${BASE}/`);
@@ -2439,6 +2472,14 @@ describe("harness HTTP API", () => {
       expect(renamed.status).toBe(200);
       expect(renamed.body.task.title).toBe("Release plan");
 
+      const archived = await api("PATCH", `/api/groups/${room.id}/tasks/${newThread}`, { archivedAt: 1234 });
+      expect(archived.status).toBe(200);
+      expect(archived.body.task.archivedAt).toBe(1234);
+      expect((await api("PATCH", `/api/groups/${room.id}/tasks/${newThread}`, { archivedAt: "soon" })).status).toBe(400);
+      const unarchived = await api("PATCH", `/api/groups/${room.id}/tasks/${newThread}`, { archivedAt: null });
+      expect(unarchived.status).toBe(200);
+      expect(unarchived.body.task).not.toHaveProperty("archivedAt");
+
       const switched = await api("POST", `/api/groups/${room.id}/tasks/${originalThread}`);
       expect(switched.status).toBe(200);
       expect(switched.body.group.threadId).toBe(originalThread);
@@ -2587,17 +2628,17 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("scopes Chief room management to its own department, its peers list and explicit room fields", async () => {
+  it("scopes Chief room management to its own department and explicit room fields", async () => {
     const section = `Chief rooms ${Date.now()}`;
     const bots = await Promise.all(["Chief", "Peer", "Second", "Excluded", "Foreign"].map(async (name, index) => {
       const created = await api("POST", "/api/bots", { name, section: index === 4 ? `${section} foreign` : section });
       expect(created.status).toBe(201);
       return created.body.bot as { id: string; threadId: string };
     }));
-    const [chief, peer, second, excluded, foreign] = bots;
+    const [chief, peer, second, , foreign] = bots;
     const roomIds: string[] = [];
     try {
-      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask", peers: [peer.id, second.id] })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask" })).status).toBe(200);
       const token = await mintTestCapability(BASE, chief.id, chief.threadId);
       const create = (body: unknown) => chiefRoomRequest(BASE, token, "create-room", body);
       const managed = await create({ name: "Managed room", memberIds: [peer.id, peer.id], bulletin: "A short brief." });
@@ -2613,10 +2654,19 @@ describe("harness HTTP API", () => {
       expect((await manage({ action: "set_bulletin", bulletin: "Updated brief ✓" })).status).toBe(200);
       const readRoom = async () => (await api("GET", "/api/bots?messages=20")).body.groups.find((group: { id: string }) => group.id === roomId);
       expect(await readRoom()).toMatchObject({ name: "Renamed room", bulletin: "Updated brief ✓", section, memberIds: [chief.id, peer.id], defaultResponder: { kind: "member", botId: chief.id }, messages: [] });
-      for (const memberId of [foreign.id, excluded.id, "missing-bot"]) {
-        expect((await create({ name: "Forbidden room", memberIds: [memberId] })).status).toBe(403);
-        expect((await manage({ action: "add_members", memberIds: [memberId] })).status).toBe(403);
-      }
+      const opened = await manage({ action: "new_thread", name: "Launch plan" });
+      expect(opened.status).toBe(201);
+      expect(opened.body).toMatchObject({ ok: true, title: "Launch plan" });
+      expect(opened.body.message).toContain(String(opened.body.threadId));
+      expect(await readRoom()).toMatchObject({
+        threadId: opened.body.threadId,
+        tasks: expect.arrayContaining([expect.objectContaining({ threadId: opened.body.threadId, title: "Launch plan" })]),
+      });
+      expect((await manage({ action: "new_thread", name: "x".repeat(101) })).status).toBe(400);
+      expect((await manage({ action: "new_thread", name: "x".repeat(81) })).status).toBe(400);
+      expect((await manage({ action: "new_thread", name: "Line one\nLine two" })).status).toBe(400);
+      expect((await create({ name: "Forbidden room", memberIds: ["missing-bot"] })).status).toBe(403);
+      expect((await manage({ action: "add_members", memberIds: ["missing-bot"] })).status).toBe(403);
       expect((await create({ name: "Foreign section", memberIds: [peer.id], section: `${section} foreign` })).status).toBe(403);
       expect((await manage({ action: "set_section", section: `${section} foreign` })).status).toBe(403);
       expect((await manage({ action: "set_section" })).status).toBe(400);
@@ -2627,25 +2677,24 @@ describe("harness HTTP API", () => {
       for (const body of [{ action: "set_members", memberIds: [] }, { action: "set_bulletin" }, { action: "set_bulletin", bulletin: "x".repeat(12_001) }, { action: "rename", name: "changed", cwd: "/tmp" }]) {
         expect((await manage(body)).status).toBe(400);
       }
-      for (const [memberIds, roomSection] of [[[foreign.id], `${section} foreign`], [[chief.id, foreign.id], section], [[peer.id], section]] as const) {
+      for (const [memberIds, roomSection] of [[[foreign.id], `${section} foreign`], [[peer.id], section]] as const) {
         const otherRoom = (await api("POST", "/api/groups", { name: "Unmanaged room", memberIds, section: roomSection })).body.group;
         roomIds.push(otherRoom.id);
         expect((await manage({ roomId: otherRoom.id, action: "rename", name: "Forbidden" })).status).toBe(403);
+        expect((await manage({ roomId: otherRoom.id, action: "new_thread" })).status).toBe(403);
       }
       expect(await readRoom()).toMatchObject({ name: "Renamed room", bulletin: "Updated brief ✓", memberIds: [chief.id, peer.id] });
       expect((await api("PATCH", `/api/bots/${second.id}`, { hidden: true })).status).toBe(200);
       expect((await create({ name: "Archived member", memberIds: [second.id] })).status).toBe(403);
       expect((await manage({ action: "add_members", memberIds: [second.id] })).status).toBe(403);
-      expect((await api("PATCH", `/api/bots/${chief.id}`, { approvePeerComms: true })).status).toBe(200);
-      expect((await manage({ action: "rename", name: "No review" })).body.error).toMatch(/peer approval is required/);
-      expect((await create({ name: "No review", memberIds: [peer.id] })).status).toBe(403);
-      expect((await api("PATCH", `/api/bots/${chief.id}`, { approvePeerComms: false })).status).toBe(200);
       for (let count = 1; count < 4; count += 1) {
         const created = await create({ name: `Bounded room ${count}`, memberIds: [peer.id] });
         expect(created.status).toBe(201);
         roomIds.push(String(created.body.id));
       }
       expect((await create({ name: "Fifth room", memberIds: [peer.id] })).status).toBe(429);
+      for (let count = 2; count <= 4; count += 1) expect((await manage({ action: "new_thread" })).status).toBe(201);
+      expect((await manage({ action: "new_thread", name: "Fifth thread" })).status).toBe(429);
       expect((await api("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === foreign.id).section).toBe(`${section} foreign`);
       expect((await api("PATCH", `/api/bots/${chief.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).status).toBe(200);
       const busyToken = await mintTestCapability(BASE, chief.id, chief.threadId);
@@ -2692,7 +2741,7 @@ describe("harness HTTP API", () => {
         await mintTestCapability(BASE, chief.id, chief.threadId);
         const expired = await held.finish();
         expect(expired.status).toBe(401);
-        expect(expired.body.error).toMatch(/expired/);
+        expect(expired.body.error).toMatch(/turn has already ended/);
         held.close();
         held = undefined;
         token = await mintTestCapability(BASE, chief.id, chief.threadId, { kind: "connectors" });
@@ -2743,7 +2792,7 @@ describe("harness HTTP API", () => {
 
       const rejected = await held.finish();
       expect(rejected.status).toBe(401);
-      expect(rejected.body.error).toMatch(/expired/i);
+      expect(rejected.body.error).toMatch(/turn has already ended/i);
       const state = (await api("GET", "/api/bots?messages=0")).body;
       expect(state.bots.some((bot: { name: string }) => bot.name === lateName)).toBe(false);
     } finally {
@@ -2783,6 +2832,61 @@ describe("harness HTTP API", () => {
       const state = (await api("GET", "/api/bots?messages=0")).body;
       expect(state.bots.find((bot: { id?: string }) => bot.id === createdId)?.cwd).toBe(folder);
     } finally {
+      if (createdId) await api("DELETE", `/api/bots/${createdId}`);
+      await api("DELETE", `/api/bots/${chief.id}`);
+    }
+  });
+
+  it("takes a created operator's role description up to 4000 characters, and says what to do with a longer one", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    let createdId: string | undefined;
+    try {
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask" })).status).toBe(200);
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      const create = async (name: string, instructions: string) => {
+        const response = await fetch(`${BASE}/api/internal/create-bot`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ fromBotId: chief.id, fromThreadId: chief.threadId, name, role: "Analyst", instructions }),
+        });
+        return { status: response.status, body: await response.json() as { id?: string; error?: string } };
+      };
+      const role = `You own the weekly numbers.\n${"Check every figure against its source and say where it came from. ".repeat(80)}`.slice(0, 3999) + ".";
+      const made = await create(`Analyst ${chief.id}`, role);
+      expect(made.status, JSON.stringify(made.body)).toBe(201);
+      createdId = made.body.id;
+      const state = (await api("GET", "/api/bots?messages=0")).body;
+      expect(state.bots.find((bot: { id?: string }) => bot.id === createdId)?.soul).toBe(role);
+      const longer = await create(`Longer analyst ${chief.id}`, `${role}x`);
+      expect(longer).toEqual({ status: 400, body: { error: "instructions must be at most 4000 characters; these are 4001. Shorten them to what this bot does and how it works, or create it with propose_team_setup, where soul takes up to 24000 bytes." } });
+    } finally {
+      if (createdId) await api("DELETE", `/api/bots/${createdId}`);
+      await api("DELETE", `/api/bots/${chief.id}`);
+    }
+  });
+
+  it("tells the Chief, and the bot in its own chat, when a bot it adds takes the person's own name", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    const profile = (await api("GET", "/api/config")).body.profile as { name?: string } | undefined;
+    let createdId: string | undefined;
+    try {
+      expect((await api("PUT", "/api/config", { profile: { name: "Dana Reyes" } })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask" })).status).toBe(200);
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      const response = await fetch(`${BASE}/api/internal/create-bot`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ fromBotId: chief.id, fromThreadId: chief.threadId, name: "dana reyes", role: "Ops", instructions: "Work." }),
+      });
+      const body = await response.json() as { id?: string; warning?: string };
+      expect(response.status, JSON.stringify(body)).toBe(201);
+      createdId = body.id;
+      expect(body.warning).toBe('Dana Reyes is also a person here, so "@dana reyes" reaches Dana Reyes, not this bot. Rename the bot to keep them apart.');
+      const made = ((await api("GET", "/api/bots?messages=20")).body.bots as Array<{ id: string; messages: Array<{ tool?: { name?: string } }> }>)
+        .find((bot) => bot.id === createdId)!;
+      expect(made.messages.filter((message) => message.tool?.name?.startsWith("notice: Dana Reyes is also a person here"))).toHaveLength(1);
+    } finally {
+      await api("PUT", "/api/config", { profile: { name: profile?.name ?? "" } });
       if (createdId) await api("DELETE", `/api/bots/${createdId}`);
       await api("DELETE", `/api/bots/${chief.id}`);
     }
@@ -3052,6 +3156,15 @@ describe("harness HTTP API", () => {
       await api("DELETE", `/api/bots/${bot.id}`);
       await api("DELETE", `/api/bots/${foreign.id}`);
     }
+  });
+
+  it("takes a bot PATCH from an older computer that still sends a peers list or a peer-approval switch, and keeps neither", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const patched = await api("PATCH", `/api/bots/${bot.id}`, { name: "From an older computer", peers: ["nobody"], approvePeerComms: true });
+    expect(patched.status).toBe(200);
+    expect(patched.body.bot.name).toBe("From an older computer");
+    expect(patched.body.bot).not.toHaveProperty("peers");
+    expect(patched.body.bot).not.toHaveProperty("approvePeerComms");
   });
 
   it("creates, patches, and deletes a bot", async () => {
@@ -3464,9 +3577,12 @@ describe("harness HTTP API", () => {
       await promptedOnTeamComputer(1, botIds[0]);
       expect((await readJsonFileWhenReady<ComputerDump>(fakeClaudeDump)).mcpConfig.mcpServers.computer?.args)
         .toEqual([expect.stringMatching(/harness-mcp-proxy\.(?:ts|js)$/), "computer"]);
+      await reachForComputer();
       const firstThread = (await api("GET", "/api/bots?messages=0")).body.bots.find((b: { id: string }) => b.id === botIds[0]).threadId;
       const sibling = (await api("POST", `/api/bots/${botIds[0]}/tasks`, { title: "Waiting sibling" })).body.task;
+      rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${botIds[0]}/messages`, { text: "wait then cancel", threadId: sibling.threadId })).status).toBe(202);
+      void reachForComputer();
       await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${sibling.threadId}/messages`)).body),
         { timeout: 5_000 }).toMatch(/Waiting for its turn on this computer/);
       expect((await api("POST", `/api/bots/${botIds[0]}/interrupt`, { threadId: sibling.threadId })).status).toBe(200);
@@ -3488,7 +3604,7 @@ describe("harness HTTP API", () => {
         outcome: "stopped",
       });
       expect(siblingEvents.find((event) => event.type === "turn.wait_ended").waitedMs).toBeGreaterThanOrEqual(0);
-      expect(claudePrompts().length - promptBaseline).toBe(1);
+      expect(claudePrompts().length - promptBaseline, "the sibling ran from the start").toBe(2);
       expect((await api("POST", `/api/bots/${botIds[0]}/tasks/${firstThread}`, {})).status).toBe(200);
       for (const action of ["sleep", "provision"]) {
         expect((await api("POST", `/api/team-computers/${requestId}/${action}`, { acknowledgeCost: true })).status).toBe(409);
@@ -3496,15 +3612,16 @@ describe("harness HTTP API", () => {
       expect((await api("PATCH", `/api/team-computers/${requestId}`, { section: null, acknowledgeSharedAccess: true })).status).toBe(409);
       expect((await api("PATCH", `/api/bots/${botIds[0]}`, { computer: "off" })).status).toBe(409);
 
+      rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/groups/${roomId}/messages`, { text: "use the occupied shared desktop" })).status).toBe(202);
+      void reachForComputer();
       await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=30")).body.groups.find(
         (group: { id: string }) => group.id === roomId,
       )), { timeout: 5_000 }).toMatch(/Waiting for its turn on this computer/);
-      expect(claudePrompts().length - promptBaseline).toBe(1);
+      expect(claudePrompts().length - promptBaseline, "the room's speaker ran from the start too").toBe(3);
       expect((await api("POST", `/api/bots/${botIds[0]}/interrupt`, {})).status).toBe(200);
       await idle(botIds[0]);
 
-      await promptedOnTeamComputer(2, botIds[1]);
       await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=30")).body.groups.find(
         (group: { id: string }) => group.id === roomId,
       )), { timeout: 5_000 }).toMatch(/Computer free — continuing after waiting /);
@@ -3529,11 +3646,11 @@ describe("harness HTTP API", () => {
       managedBoatCreatedIds.clear();
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${botIds[0]}/messages`, { text: "do not create a replacement" })).status).toBe(202);
+      void reachForComputer();
       await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=30")).body.bots.find(
         (bot: { id: string }) => bot.id === botIds[0],
       )), { timeout: 5_000 }).toMatch(/team's cloud computer is missing/);
       await idle(botIds[0]);
-      expect(existsSync(fakeClaudeDump)).toBe(false);
       expect(boatRouteCalls.filter(call => call.method === "POST" && call.path === "/sandboxes")).toHaveLength(createCount);
     } finally {
       if (roomId) await api("POST", `/api/groups/${roomId}/interrupt`, {}).catch(() => undefined);
@@ -3561,7 +3678,7 @@ describe("harness HTTP API", () => {
     const waiterThreads: string[] = [];
     try {
       expect((await api("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
-      // Four live threads on one bot: at the default cap of 3 the fourth would park in the send queue instead.
+      // Four live threads on one bot: on a small machine's default of 3 the fourth would park in the send queue instead.
       expect((await api("PUT", "/api/config", { threads: { maxConcurrentPerBot: 6 } })).status).toBe(200);
       const bot = (await api("POST", "/api/bots", { name: "Queue probe", section,
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
@@ -3581,13 +3698,17 @@ describe("harness HTTP API", () => {
         (((await api("GET", `/api/threads/${threadId}/events`)).body.entries as Array<{ kind: string; data: any }>)
           .filter(entry => entry.kind === "runtime").map(entry => entry.data));
 
+      rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${botId}/messages`, { text: "hold the queue desktop" })).status).toBe(202);
       await expect.poll(promptsOnBox, { timeout: 5_000 }).toBe(1);
+      await reachForComputer();
 
       for (const [index, title] of ["First waiter", "Second waiter", "Third waiter"].entries()) {
         const task = (await api("POST", `/api/bots/${botId}/tasks`, { title })).body.task;
         waiterThreads.push(task.threadId);
+        rmSync(fakeClaudeDump, { force: true });
         expect((await api("POST", `/api/bots/${botId}/messages`, { text: `arrival ${index + 1} of the queue`, threadId: task.threadId })).status).toBe(202);
+        void reachForComputer();
         await expect.poll(async () => JSON.stringify(await threadMessages(task.threadId)), { timeout: 5_000 })
           .toMatch(new RegExp(`${index + 1}(st|nd|rd) in queue`));
         expect((await threadMessages(task.threadId)).some(message => (message.tool?.name ?? "").includes("recent waits here"))).toBe(false);
@@ -3595,16 +3716,17 @@ describe("harness HTTP API", () => {
           .toMatchObject({ position: index + 1 });
       }
 
+      expect(promptsOnBox(), "every waiter ran from the start").toBe(4);
       expect((await api("POST", `/api/bots/${botId}/interrupt`, { threadId: holderThread })).status).toBe(200);
-      await expect.poll(promptsOnBox, { timeout: 10_000 }).toBe(2);
-      expect(claudePrompts().at(-1)).toContain("arrival 1 of the queue");
       await expect.poll(async () => JSON.stringify(await threadMessages(waiterThreads[0]!)), { timeout: 5_000 })
         .toMatch(/Computer free — continuing after waiting /);
-      expect(promptsOnBox()).toBe(2);
+      expect(JSON.stringify(await threadMessages(waiterThreads[1]!))).not.toMatch(/Computer free/);
 
       const fourth = (await api("POST", `/api/bots/${botId}/tasks`, { title: "Fourth waiter" })).body.task;
       waiterThreads.push(fourth.threadId);
+      rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${botId}/messages`, { text: "arrival 4 wants an estimate", threadId: fourth.threadId })).status).toBe(202);
+      void reachForComputer();
       await expect.poll(async () => JSON.stringify(await threadMessages(fourth.threadId)), { timeout: 5_000 }).toMatch(/3rd in queue/);
       await expect.poll(async () => JSON.stringify(await threadMessages(fourth.threadId)), { timeout: 5_000 }).toMatch(/recent waits here have taken /);
       for (const threadId of waiterThreads.slice(0, 3)) {
@@ -3613,8 +3735,8 @@ describe("harness HTTP API", () => {
       }
 
       expect((await api("POST", `/api/bots/${botId}/interrupt`, { threadId: waiterThreads[0] })).status).toBe(200);
-      await expect.poll(promptsOnBox, { timeout: 10_000 }).toBe(3);
-      expect(claudePrompts().at(-1)).toContain("arrival 2 of the queue");
+      await expect.poll(async () => JSON.stringify(await threadMessages(waiterThreads[1]!)), { timeout: 10_000 })
+        .toMatch(/Computer free — continuing after waiting /);
     } finally {
       if (holderThread) await api("POST", `/api/bots/${botId}/interrupt`, { threadId: holderThread }).catch(() => undefined);
       for (const threadId of waiterThreads) await api("POST", `/api/bots/${botId}/interrupt`, { threadId }).catch(() => undefined);
@@ -3664,9 +3786,11 @@ describe("harness HTTP API", () => {
         OMB_STATIC_DIR: isolatedStatic,
         OMB_BOAT_API: `http://127.0.0.1:${boatStubPort}`,
         FAKE_CLAUDE_MODE: "hang",
+        FAKE_CLAUDE_USES_CLOUD_COMPUTER: "1",
         FAKE_CLAUDE_PROMPTS: join(isolatedHome, "desktop-prompts.jsonl"),
         // seconds, not minutes: the point of this test is the computer cap firing
         OMB_COMPUTER_WAIT_MAX_MS: "2000",
+        OMB_COMPUTER_CALL_WAIT_MS: "500",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -3736,7 +3860,7 @@ describe("harness HTTP API", () => {
       expect(settledMessages.filter((message: any) => message.tool?.ok === false && /Computer still busy|Parked/.test(message.tool.name))).toHaveLength(0);
 
       expect((await isolatedApi("POST", `/api/bots/${botId}/interrupt`, { threadId: holderThreadId })).status).toBe(200);
-      await expect.poll(promptsOnParkBox, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+      await expect.poll(promptsOnParkBox, { timeout: 10_000 }).toBeGreaterThanOrEqual(3);
 
       const roomBot = (await isolatedApi("POST", "/api/bots", {
         name: "Park room speaker", section,
@@ -3763,19 +3887,23 @@ describe("harness HTTP API", () => {
       }, { timeout: 5_000 }).toMatchObject([{ data: { outcome: "parked" } }]);
 
       expect((await isolatedApi("POST", `/api/bots/${botId}/interrupt`, { threadId: sibling.threadId })).status).toBe(200);
-      await expect.poll(promptsOnParkBox, { timeout: 10_000 }).toBeGreaterThanOrEqual(3);
+      await expect.poll(promptsOnParkBox, { timeout: 10_000 }).toBeGreaterThanOrEqual(5);
       await expect.poll(roomRows, { timeout: 5_000 }).toEqual([[roomBot.id, null, "running", 2, null]]);
       expect(claudePrompts(join(isolatedHome, "desktop-prompts.jsonl")).at(-1)).toContain("Continue the task that parked waiting for it");
 
-      // Every turn that reaches the hanging Box prompt counts once, so a stale resume would show as a fifth prompt.
+      // Every turn counts once as it starts, and a resume once more: a stale resume would show as one prompt too many.
       expect((await isolatedApi("POST", `/api/bots/${botId}/messages`, { text: "wait past the ceiling a second time", threadId: siblingThreadId })).status).toBe(202);
       await expect.poll(async () => JSON.stringify((await isolatedApi("GET", `/api/threads/${siblingThreadId}/messages`)).body),
         { timeout: 8_000 }).toMatch(/wait past the ceiling a second time[\s\S]*Parked — it continues automatically when the computer is free/);
+      // Parked once its engine has gone: until then a message would go into the turn that is being stopped.
+      await expect.poll(async () => (await isolatedApi("GET", "/api/bots?messages=0")).body.bots
+        .find((entry: any) => entry.id === botId)?.tasks.find((task: any) => task.threadId === siblingThreadId)?.activity,
+      { timeout: 8_000 }).toBe("parked.computer");
       expect((await isolatedApi("POST", `/api/bots/${botId}/messages`, { text: "newer work replaces the parked wait", threadId: siblingThreadId })).status).toBe(202);
       expect((await isolatedApi("POST", `/api/groups/${roomId}/interrupt`, {})).status).toBe(200);
-      await expect.poll(promptsOnParkBox, { timeout: 10_000 }).toBeGreaterThanOrEqual(4);
+      await expect.poll(promptsOnParkBox, { timeout: 10_000 }).toBeGreaterThanOrEqual(7);
       await new Promise((resolve) => setTimeout(resolve, 3_000));
-      expect(promptsOnParkBox()).toBe(4);
+      expect(promptsOnParkBox()).toBe(7);
       expect(roomRows()).toEqual([[roomBot.id, null, "cancelled", 2, null]]);
       await expect.poll(async () => {
         const task = (await isolatedApi("GET", "/api/bots?messages=0")).body.bots
@@ -3798,9 +3926,10 @@ describe("harness HTTP API", () => {
       await expect.poll(roomRows, { timeout: 5_000 }).toEqual([[roomBot.id, null, "cancelled", 2, null], [roomBot.id, null, "queued", 1, COMPUTER_FREE_NOTE]]);
       expect((await isolatedApi("POST", `/api/groups/${roomId}/interrupt`, {})).status).toBe(200);
       await expect.poll(roomRows, { timeout: 5_000 }).toEqual([[roomBot.id, null, "cancelled", 2, null], [roomBot.id, null, "cancelled", 1, COMPUTER_FREE_NOTE]]);
+      const beforeFreed = promptsOnParkBox();
       expect((await isolatedApi("POST", `/api/bots/${botId}/interrupt`, { threadId: siblingThreadId })).status).toBe(200);
       await new Promise((resolve) => setTimeout(resolve, 3_000));
-      expect(promptsOnParkBox()).toBe(4);
+      expect(promptsOnParkBox(), `nothing stopped resumes once the computer frees: ${claudePrompts(join(isolatedHome, "desktop-prompts.jsonl")).slice(beforeFreed).join("\n").slice(-1_500)}`).toBe(beforeFreed);
       expect((await isolatedApi("GET", "/api/bots?messages=0")).body.bots
         .find((entry: any) => entry.id === botId)?.tasks.find((task: any) => task.threadId === stoppedThreadId)?.busy).toBe(false);
 
@@ -3851,7 +3980,7 @@ describe("harness HTTP API", () => {
         holder: {
           driver: "claudeAgent",
           displayName: "Fixture holder",
-          environment: { FAKE_CLAUDE_MODE: "hang", FAKE_CLAUDE_PROMPTS: join(isolatedHome, "desktop-prompts.jsonl") },
+          environment: { FAKE_CLAUDE_MODE: "hang", FAKE_CLAUDE_USES_CLOUD_COMPUTER: "1", FAKE_CLAUDE_PROMPTS: join(isolatedHome, "desktop-prompts.jsonl") },
           config: { cli: FAKE_CLAUDE_CLI },
         },
         lead: {
@@ -3869,9 +3998,8 @@ describe("harness HTTP API", () => {
           displayName: "Fixture worker",
           environment: {
             FAKE_CLAUDE_PROMPTS: join(isolatedHome, "desktop-prompts.jsonl"),
-            FAKE_CLAUDE_MODE: "happy",
-            FAKE_CLAUDE_REPLIES: JSON.stringify(["The parked computer work is complete."]),
-            FAKE_CLAUDE_REPLY_STATE: join(isolatedHome, "worker-replies.txt"),
+            FAKE_CLAUDE_USES_CLOUD_COMPUTER: "1",
+            FAKE_CLAUDE_MODE: "hang",
           },
           config: { cli: FAKE_CLAUDE_CLI },
         },
@@ -3890,6 +4018,7 @@ describe("harness HTTP API", () => {
         OMB_STATIC_DIR: isolatedStatic,
         OMB_BOAT_API: `http://127.0.0.1:${boatStubPort}`,
         OMB_COMPUTER_WAIT_MAX_MS: "2000",
+        OMB_COMPUTER_CALL_WAIT_MS: "500",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -3982,7 +4111,7 @@ describe("harness HTTP API", () => {
 
       expect((await isolatedApi("POST", `/api/bots/${holderBotId}/interrupt`, { threadId: holderThreadId })).status).toBe(200);
       await new Promise((resolve) => setTimeout(resolve, 3_000));
-      expect(promptsOnGoalBox()).toBe(1);
+      expect(promptsOnGoalBox(), "the holder, and the worker's one start: its parked step never runs again").toBe(2);
       expect(goalRows()).toHaveLength(3);
       expect((await goalCard()).working).toBe(false);
     } finally {
@@ -4721,6 +4850,13 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("words a new bot's refused department access by key, keeping its English", async () => {
+    expect(await api("POST", "/api/bots", { settings: { managedSections: ["Nowhere"] } })).toEqual({ status: 400,
+      body: { error: "Only a Chief may manage existing additional departments", errorKey: "serverError.department.chiefOnlyExtra" } });
+    expect(await api("POST", "/api/bots", { settings: { chiefOfStaff: true, managedSections: [""] } })).toEqual({ status: 400,
+      body: { error: "Confirm additional department access (acknowledgePeerScope)", errorKey: "serverError.department.confirmExtra" } });
+  });
+
   it("rejects a sidebar section Chief collision without changing any bot", async () => {
     const incumbent = (await api("POST", "/api/bots")).body.bot;
     const incoming = (await api("POST", "/api/bots")).body.bot;
@@ -4738,6 +4874,7 @@ describe("harness HTTP API", () => {
         status: 409,
         body: {
           error: "A department can have only one Chief of Staff. Choose one Chief or use a department without one.",
+          errorKey: "serverError.department.oneChief",
         },
       });
 
@@ -5416,7 +5553,7 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("refuses paired model changes while the bot is working", async () => {
+  it("refuses paired model changes while the bot is working but saves a reasoning level", async () => {
     const instances = (await api("GET", "/api/instances")).body.instances;
     const claude = instances.find((instance: { instanceId: string }) => instance.instanceId === "claude");
     const selection = { instanceId: claude.instanceId, model: claude.models.default };
@@ -5433,16 +5570,23 @@ describe("harness HTTP API", () => {
         return current?.busy;
       }).toBe(true);
 
-      const blocked = await api("PATCH", `/api/bots/${bot.id}/model`, {
-        ...selection,
-        effort: "high",
-      });
+      const otherModel = claude.models.options.find((option: { id: string }) => option.id !== selection.model).id;
+      const blocked = await api("PATCH", `/api/bots/${bot.id}/model`, { ...selection, model: otherModel });
       expect(blocked.status).toBe(409);
       expect(blocked.body.error).toMatch(/working.*stop it before changing models/i);
       const unchanged = (await api("GET", "/api/bots?messages=0")).body.bots.find(
         (candidate: { id: string }) => candidate.id === bot.id,
       );
       expect(unchanged.modelSelection).toEqual(selection);
+
+      // The reasoning level is read when each turn starts, so it can change while the bot works.
+      const effort = await api("PATCH", `/api/bots/${bot.id}/model`, { ...selection, effort: "high" });
+      expect(effort.status).toBe(200);
+      const saved = (await api("GET", "/api/bots?messages=0")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      );
+      expect(saved.modelSelection).toEqual({ ...selection, effort: "high" });
+      expect(saved.busy).toBe(true);
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`, {});
       await expect.poll(async () => {
@@ -5980,7 +6124,6 @@ describe("harness HTTP API", () => {
       title: "Project Lead",
       autoApprove: true,
       alwaysAllow: ["Bash:git"],
-      approvePeerComms: true,
       chiefOfStaff: true,
       composio: true,
       computer: "off",
@@ -6008,7 +6151,6 @@ describe("harness HTTP API", () => {
             autoApprove: true,
                   alwaysAllow: ["Bash"],
             chiefOfStaff: true,
-            approvePeerComms: false,
             composio: true,
             computer: "local",
             cloudBackend: "vps",
@@ -6028,7 +6170,6 @@ describe("harness HTTP API", () => {
     expect(impostor.autoApprove).toBeUndefined();
     expect(impostor.alwaysAllow).toBeUndefined();
     expect(impostor.chiefOfStaff).toBeUndefined();
-    expect(impostor.approvePeerComms).toBeUndefined();
     expect(impostor.composio).toBe(false);
     expect(impostor.computer).toBeUndefined();
     expect(impostor.cloudBackend).toBeUndefined();
@@ -6042,7 +6183,6 @@ describe("harness HTTP API", () => {
       threadId: trusted.threadId,
       autoApprove: true,
       alwaysAllow: ["Bash:git"],
-      approvePeerComms: true,
       chiefOfStaff: true,
       composio: true,
       computer: "off",
@@ -6625,8 +6765,9 @@ describe("harness HTTP API", () => {
       expect(first.status).toBe(201);
       const firstCard = (await first.json()) as { messageId: string };
 
-      // A second connection holds the database write lock, so the fresh card's append fails mid-request.
-      const lockDb = new DatabaseSync(join(home, ".openmausbot", "messages.db"));
+      // A second connection holds the database write lock, so the fresh card's append fails mid-request. It waits for
+      // a write the harness may still be finishing from the first card instead of failing at once.
+      const lockDb = new DatabaseSync(join(home, ".openmausbot", "messages.db"), { timeout: 5_000 });
       lockDb.exec("BEGIN IMMEDIATE");
       try {
         const failed = await request("needed for the second task");
@@ -8467,8 +8608,9 @@ describe("harness HTTP API", () => {
     expect(after).toEqual({ status: 200, body: { servers: [] } });
   });
 
-  it("lets a bot file an MCP server only as a disabled row", async () => {
+  it("lets a bot below Full access file a command server or a URL on the person's network only as a disabled row", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask" })).status).toBe(200);
     const token = await mintTestCapability(BASE, bot.id, bot.threadId);
     const secret = "bot-filed-secret-that-must-never-render";
     const headerSecret = "bot-header-secret-that-must-never-render";
@@ -8477,16 +8619,13 @@ describe("harness HTTP API", () => {
     const fileServer = (body: unknown) => fetch(`${BASE}/api/internal/mcp-servers`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ action: "add", ...(body as object) }),
     });
     try {
       const filed = await fileServer({ name: "botnotes", command: "npx", args: ["-y", "notes-mcp"], env: { NOTES_TOKEN: secret } });
-      const filedBody = await filed.json();
+      const filedBody = await filed.json() as { text: string };
       expect(filed.status).toBe(201);
-      expect(filedBody).toEqual({
-        name: "botnotes", enabled: false, transport: "command", target: "npx",
-        envKeys: ["NOTES_TOKEN"], headerKeys: [],
-      });
+      expect(filedBody.text).toMatch(/^Saved MCP server botnotes switched off\./);
       expect(JSON.stringify(filedBody)).not.toContain(secret);
       const disk = JSON.parse(readFileSync(configFile, "utf8"));
       expect(disk.mcpServers.botnotes).toEqual({
@@ -8494,9 +8633,8 @@ describe("harness HTTP API", () => {
       });
 
       const switched = await fileServer({ name: "botother", command: "npx", enabled: true });
-      expect(switched.status).toBe(400);
-      expect(await switched.json()).toMatchObject({ error: expect.stringMatching(/on\/off switch/) });
-      expect(JSON.parse(readFileSync(configFile, "utf8")).mcpServers.botother).toBeUndefined();
+      expect(switched.status).toBe(201);
+      expect(JSON.parse(readFileSync(configFile, "utf8")).mcpServers.botother).toMatchObject({ command: "npx", enabled: false });
       expect(JSON.parse(readFileSync(configFile, "utf8")).mcpServers.botnotes.env.NOTES_TOKEN).toBe(secret);
 
       const again = await fileServer({ name: "botnotes", command: "other-command" });
@@ -8505,23 +8643,20 @@ describe("harness HTTP API", () => {
 
       const remote = await fileServer({
         name: "botdocs",
-        url: "https://docs.example/mcp",
+        url: "https://docs.internal/mcp",
         type: "sse",
         headers: { Authorization: headerSecret },
         oauth: { clientId: "corp-app", clientSecret: oauthSecret },
       });
-      const remoteBody = await remote.json();
+      const remoteBody = await remote.json() as { text: string };
       expect(remote.status).toBe(201);
-      expect(remoteBody).toEqual({
-        name: "botdocs", enabled: false, transport: "sse", target: "https://docs.example/mcp",
-        envKeys: [], headerKeys: ["Authorization"],
-      });
+      expect(remoteBody.text).toMatch(/^Saved MCP server botdocs switched off\./);
       const remoteText = JSON.stringify(remoteBody);
       expect(remoteText).not.toContain(headerSecret);
       expect(remoteText).not.toContain(oauthSecret);
       const savedRemote = JSON.parse(readFileSync(configFile, "utf8")).mcpServers.botdocs;
       expect(savedRemote).toEqual({
-        type: "sse", url: "https://docs.example/mcp", headers: { Authorization: headerSecret },
+        type: "sse", url: "https://docs.internal/mcp", headers: { Authorization: headerSecret },
         oauth: { clientId: "corp-app", clientSecret: oauthSecret }, enabled: false,
       });
 
@@ -8535,6 +8670,7 @@ describe("harness HTTP API", () => {
       expect(JSON.stringify(listed.body)).not.toContain(oauthSecret);
     } finally {
       await api("DELETE", "/api/mcp/servers/botnotes").catch(() => undefined);
+      await api("DELETE", "/api/mcp/servers/botother").catch(() => undefined);
       await api("DELETE", "/api/mcp/servers/botdocs").catch(() => undefined);
       await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
     }
@@ -8643,6 +8779,84 @@ describe("harness HTTP API", () => {
     } finally {
       await api("DELETE", "/api/mcp/servers/hf").catch(() => undefined);
       await fake.close();
+      await oauth.close();
+    }
+  });
+
+  async function signInThroughBrowser(name: string) {
+    const started = await api("POST", `/api/mcp/servers/${name}/sign-in`);
+    expect(started.status).toBe(200);
+    await fetch(started.body.auth.authorizationUrl, { redirect: "follow" });
+    let auth = started.body.auth;
+    for (let i = 0; i < 50 && auth.phase === "waiting"; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      auth = (await api("GET", `/api/mcp/servers/${name}/sign-in/${auth.flowId}`)).body.auth;
+    }
+    expect(auth.phase).toBe("succeeded");
+  }
+  /** Where mcp.agentcard.sh serves its RFC 9728 document: on its own origin, which is how sign-in finds it when initialize is not refused. */
+  const protectedResourceOf = (oauth: { issuer: string }) =>
+    ({ "/.well-known/oauth-protected-resource/mcp": (origin: string) => ({ resource: `${origin}/mcp`, authorization_servers: [oauth.issuer] }) });
+  const serverListing = async (name: string) => ((await api("GET", "/api/mcp/servers")).body.servers as Array<{ name: string }>).find((server) => server.name === name);
+
+  it("asks for a sign-in when a server lists its tools to anyone and refuses to run one", async () => {
+    const oauth = await startFakeOAuth();
+    const fake = await startFakeHttpMcp({ guard: "tools/call", acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge, wellKnown: protectedResourceOf(oauth), tools: [{ name: "buy", description: "Buy something" }] });
+    try {
+      expect((await api("POST", "/api/mcp/servers", { name: "shop", url: fake.url })).status).toBe(201);
+      const first = await api("POST", "/api/mcp/servers/shop/test");
+      expect(first.body).toEqual({ ok: false, auth: "required", error: "This server needs you to sign in." });
+      expect(await serverListing("shop")).toMatchObject({ auth: "needs-sign-in", enabled: false });
+      expect(fake.refusedCalls).toHaveLength(1);
+      expect(fake.calls).toEqual([]);
+
+      await signInThroughBrowser("shop");
+      const tested = await api("POST", "/api/mcp/servers/shop/test");
+      expect(tested.body).toEqual({ ok: true, tools: [{ name: "buy", description: "Buy something" }] });
+      expect(fake.refusedCalls).toHaveLength(1);
+      expect(fake.seenHeaders.at(-1)?.authorization).toMatch(/^Bearer /);
+
+      expect((await api("PATCH", "/api/mcp/servers/shop", { enabled: true })).status).toBe(200);
+      expect(await serverListing("shop")).toMatchObject({ auth: "signed-in", enabled: true });
+    } finally {
+      await api("DELETE", "/api/mcp/servers/shop").catch(() => undefined);
+      await fake.close();
+      await oauth.close();
+    }
+  });
+
+  it("keeps a sign-in whose refresh failed on the network, and drops one whose token the server refuses", async () => {
+    const oauth = await startFakeOAuth({ refreshStatus: 503 });
+    const flaky = await startFakeHttpMcp({ guard: "tools/call", acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge, wellKnown: protectedResourceOf(oauth), tools: [{ name: "buy" }] });
+    const refusing = await startFakeHttpMcp({ guard: "every-request", acceptBearer: () => false, wwwAuthenticate: oauth.challenge });
+    const oauthFile = join(home, ".openmausbot", "mcp-oauth.json");
+    const tokensOf = (name: string) => JSON.parse(readFileSync(oauthFile, "utf8")).servers[name]?.tokens;
+    const expire = (name: string) => {
+      const saved = JSON.parse(readFileSync(oauthFile, "utf8"));
+      saved.servers[name].tokens.expiresAt = Date.now() - 1_000;
+      writeFileSync(oauthFile, JSON.stringify(saved));
+    };
+    try {
+      expect((await api("POST", "/api/mcp/servers", { name: "flaky", url: flaky.url })).status).toBe(201);
+      expect((await api("POST", "/api/mcp/servers", { name: "refusing", url: refusing.url })).status).toBe(201);
+      await signInThroughBrowser("flaky");
+      await signInThroughBrowser("refusing");
+      expect(tokensOf("flaky").refresh).toEqual(expect.any(String));
+      expire("flaky");
+
+      expect((await api("POST", "/api/mcp/servers/flaky/test")).body).toMatchObject({ ok: false, auth: "required" });
+      expect(oauth.counts.refresh).toBeGreaterThan(0);
+      expect(await serverListing("flaky")).toMatchObject({ auth: "signed-in" });
+      expect(tokensOf("flaky").refresh).toEqual(expect.any(String));
+
+      expect((await api("POST", "/api/mcp/servers/refusing/test")).body).toMatchObject({ ok: false, auth: "required" });
+      expect(await serverListing("refusing")).toMatchObject({ auth: "needs-sign-in" });
+      expect(tokensOf("refusing")).toBeUndefined();
+    } finally {
+      await api("DELETE", "/api/mcp/servers/flaky").catch(() => undefined);
+      await api("DELETE", "/api/mcp/servers/refusing").catch(() => undefined);
+      await flaky.close();
+      await refusing.close();
       await oauth.close();
     }
   });
@@ -9183,6 +9397,26 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("mounts the USB phone server on every turn, whatever its words: they pick only the phone skill's instructions", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Phone words" })).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).status).toBe(200);
+      for (const [text, instructed] of [["hello", false], ["open the Uber app on my Android", true], ["thanks", false]] as const) {
+        rmSync(fakeClaudeDump, { force: true });
+        expect((await api("POST", `/api/bots/${bot.id}/messages`, { text })).status).toBe(202);
+        const seen = await readJsonFileWhenReady<{ systemPrompt: string; mcpConfig: { mcpServers: Record<string, unknown> } }>(fakeClaudeDump, 15_000);
+        expect(seen.mcpConfig.mcpServers.phone, text).toBeDefined();
+        expect(seen.systemPrompt.includes('<openmaus-skill id="phone-harness"'), text).toBe(instructed);
+        expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
+        await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots
+          .find((candidate: { id: string }) => candidate.id === bot.id)?.busy, { timeout: 5_000 }).toBe(false);
+      }
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("re-enters setup mode for a configured bot when the user sends /setup, and rewrites the turn text", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Kiwi", description: "Files bugs." })).body.bot;
     try {
@@ -9343,7 +9577,7 @@ describe("harness HTTP API", () => {
         expect(bot.messages[0].setupOffer).toBeUndefined();
         expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).status).toBe(200);
         expect(await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).toEqual({
-          status: 409, body: { error: "This bot already has instructions. To change its job, type /setup and what you'd like it to do." },
+          status: 409, body: { error: "This bot already has instructions. To change its job, type /setup and what you'd like it to do.", errorKey: "serverError.setup.hasInstructions" },
         });
       } finally {
         await api("DELETE", `/api/bots/${bot.id}`);
@@ -9356,7 +9590,7 @@ describe("harness HTTP API", () => {
         // A plain chat model with its tools off cannot propose a profile.
         expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "plainApi", model: "fixture-plain-model" } })).status).toBe(200);
         expect(await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).toEqual({
-          status: 409, body: { error: "This bot's AI can't set it up by itself. Tell the bot what you'd like it to do instead." },
+          status: 409, body: { error: "This bot's AI can't set it up by itself. Tell the bot what you'd like it to do instead.", errorKey: "serverError.setup.noTools" },
         });
         expect(await messages(bot.threadId)).toHaveLength(1);
       } finally {
@@ -9504,7 +9738,7 @@ describe("harness HTTP API", () => {
   it("keeps skill authoring on by default and persists an explicit opt-out", async () => {
     const before = await api("GET", "/api/config");
     expect(before.status).toBe(200);
-    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true });
+    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true, savedSteps: true, savedStepsHere: process.platform === "darwin" });
     const untouched = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(untouched.features?.skillAuthoring).toBeUndefined();
     expect(untouched.features?.skillReview).toBeUndefined();
@@ -9514,7 +9748,7 @@ describe("harness HTTP API", () => {
       features: { skillAuthoring: false },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true });
+    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true, savedSteps: true, savedStepsHere: process.platform === "darwin" });
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     // Earlier browser coverage may have persisted its own toggle: opting out must preserve sibling settings.
@@ -9522,7 +9756,7 @@ describe("harness HTTP API", () => {
 
     const tools = await api("PATCH", "/api/config", { features: { showToolCalls: true } });
     expect(tools.status).toBe(200);
-    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true });
+    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true, savedSteps: true, savedStepsHere: process.platform === "darwin" });
 
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
@@ -9850,10 +10084,10 @@ describe("harness HTTP API", () => {
   });
 
   it.skipIf(process.platform === "win32").each([
-    { mode: "size", sizes: [25 * 1024 * 1024 + 1], message: "Uploads are limited to 25 MiB per file.", status: 200 },
+    { mode: "size", sizes: [FILE_MAX_BYTES + 1], message: "Uploads are limited to 100 MiB per file.", status: 200 },
     { mode: "batch", sizes: Array(5).fill(21 * 1024 * 1024) as number[], message: "Uploads are limited to 100 MiB per batch.", status: 200 },
     { mode: "changed", sizes: [1024], message: expect.stringContaining("changed while staging"), status: 200 },
-    { mode: "stop", sizes: [1024], message: "the internal turn capability has expired", status: 401 },
+    { mode: "stop", sizes: [1024], message: expect.stringContaining("turn has already ended"), status: 401 },
     { mode: "disk", sizes: [1024], message: expect.stringMatching(/ENOTDIR|EEXIST/), status: 500 },
   ])("returns the correct browser upload result for $mode", async ({ mode, sizes, message, status }) => {
     const bot = (await api("POST", "/api/bots")).body.bot;
@@ -9989,6 +10223,13 @@ describe("harness HTTP API", () => {
   it.each(["direct", "room"] as const)("loads the browser tools up front only when the browser is the conversation's place in %s turns", async (target) => {
     const bots: string[] = [];
     const rooms: string[] = [];
+    const send = async (path: string) => {
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", path, { text: "Check the website." })).status).toBe(202);
+      const dump = await readJsonFileWhenReady(fakeClaudeDump) as { mcpConfig: { mcpServers: { browser?: { alwaysLoad?: boolean } } } };
+      expect(dump.mcpConfig.mcpServers.browser).toBeDefined();
+      return dump.mcpConfig.mcpServers.browser!;
+    };
     const mounted = async (computer: "browser" | undefined) => {
       const bot = (await api("POST", "/api/bots")).body.bot;
       bots.push(bot.id);
@@ -9997,23 +10238,30 @@ describe("harness HTTP API", () => {
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
         ...(computer ? { computer } : {}),
       })).status).toBe(200);
-      let path = `/api/bots/${bot.id}/messages`;
+      let path = `/api/bots/${bot.id}/messages`, stop = `/api/bots/${bot.id}/interrupt`;
       if (target === "room") {
         const room = (await api("POST", "/api/groups", { name: `Browser preload ${bots.length}`, memberIds: [bot.id] })).body.group;
         rooms.push(room.id);
         expect((await api("PATCH", `/api/groups/${room.id}/setup`, { action: "skip" })).status).toBe(200);
         path = `/api/groups/${room.id}/messages`;
+        stop = `/api/groups/${room.id}/interrupt`;
       }
-      rmSync(fakeClaudeDump, { force: true });
-      expect((await api("POST", path, { text: "Check the website." })).status).toBe(202);
-      const dump = await readJsonFileWhenReady(fakeClaudeDump) as { mcpConfig: { mcpServers: { browser?: { alwaysLoad?: boolean } } } };
-      expect(dump.mcpConfig.mcpServers.browser).toBeDefined();
-      return dump.mcpConfig.mcpServers.browser!;
+      return { bot, path, stop, browser: await send(path) };
     };
     try {
       expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
-      expect((await mounted(undefined)).alwaysLoad).toBeUndefined();
-      expect((await mounted("browser")).alwaysLoad).toBe(true);
+      const auto = await mounted(undefined);
+      expect(auto.browser.alwaysLoad).toBeUndefined();
+      expect((await mounted("browser")).browser.alwaysLoad).toBe(true);
+      // The first turn pinned the browser on its own; the next is handed it the same way, so its cached prompt carries over.
+      expect((await api("POST", auto.stop, {})).status).toBe(200);
+      await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots
+        .find((candidate: { id: string }) => candidate.id === auto.bot.id)?.busy, { timeout: 5_000 }).toBe(false);
+      if (target === "direct") {
+        const task = (await api("GET", "/api/bots?messages=0")).body.bots.find((candidate: { id: string }) => candidate.id === auto.bot.id).tasks[0];
+        expect(task).toMatchObject({ surface: "browser", surfaceAuto: true });
+      }
+      expect((await send(auto.path)).alwaysLoad).toBeUndefined();
     } finally {
       for (const id of rooms) await api("POST", `/api/groups/${id}/interrupt`, {}).catch(() => undefined);
       for (const id of bots) await api("POST", `/api/bots/${id}/interrupt`, {}).catch(() => undefined);
@@ -10606,6 +10854,7 @@ describe("harness HTTP API", () => {
       const deleted = await api("DELETE", `/api/bots/${bot.id}`);
 
       expect(deleted).toMatchObject({ status: 200, body: { ok: true } });
+      expect(deleted.body).not.toHaveProperty("notice");
       expect(readFileSync(fakeDockerLog, "utf8").split("\n")).toContain(
         `-H ssh://fixture-vps rm -f ${containerId}`,
       );
@@ -10618,6 +10867,43 @@ describe("harness HTTP API", () => {
       rmSync(fakeDockerLog, { force: true });
       await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
       await api("PUT", "/api/config", { vps: { sshAlias: "" } }).catch(() => undefined);
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("saves a first VPS alias offline and reports its computer left behind on SSH failure", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const containerName = managedVpsNameForFixture(bot.id);
+    try {
+      writeFileSync(fakeSshUnavailable, "");
+      rmSync(fakeSshLog, { force: true });
+      rmSync(fakeDockerLog, { force: true });
+
+      const saved = await api("PUT", "/api/config", { vps: { sshAlias: "fixture-vps" } });
+      expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+      expect(existsSync(fakeSshLog)).toBe(false);
+      writeFileSync(fakeVpsFixture, JSON.stringify({ id: "a".repeat(64), name: containerName }));
+
+      const deleted = await api("DELETE", `/api/bots/${bot.id}`);
+      expect(deleted).toMatchObject({ status: 200, body: { ok: true } });
+      expect(deleted.body.notice).toContain("fixture-vps could not be reached");
+      expect(deleted.body.notice).toContain(`docker -H ssh://fixture-vps rm -f ${containerName}`);
+      expect(existsSync(fakeVpsFixture)).toBe(true);
+      expect(existsSync(fakeDockerLog)).toBe(false);
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.some(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      )).toBe(false);
+
+      const cleared = await api("PUT", "/api/config", { vps: { sshAlias: "" } });
+      expect(cleared.status).toBe(503);
+      expect(cleared.body.error).toContain("fixture SSH is unavailable");
+      expect(cleared.body.error).toContain("Keep the current SSH config alias");
+      expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("fixture-vps");
+    } finally {
+      rmSync(fakeSshUnavailable, { force: true });
+      rmSync(fakeVpsFixture, { force: true });
+      rmSync(fakeDockerLog, { force: true });
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+      expect((await api("PUT", "/api/config", { vps: { sshAlias: "" } })).status).toBe(200);
     }
   });
 
@@ -11611,6 +11897,75 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("turns a bot's own skill on, off or deletes it at once, with a receipt the person can undo", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { skillAuthoring: true });
+      const post = (body: Record<string, unknown>) => fetch(`${BASE}/api/internal/skills/stage`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, ...body }),
+      });
+      const latestCard = async (action: string) => {
+        const messages = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id).messages;
+        return messages.filter((message: any) => message.card?.skillRequest?.name === "switch-me" && message.card.skillRequest.action === action).at(-1).card;
+      };
+      const skill = async () => (await api("GET", `/api/bots/${bot.id}/skills`)).body.skills.find((entry: { name: string }) => entry.name === "switch-me");
+      const skillText = async () => (await api("GET", `/api/bots/${bot.id}/skills/switch-me`)).body.text;
+      const undo = (requestId: string) => api("POST", `/api/threads/${bot.threadId}/undo`, { requestId });
+      const skillMd = "---\nname: switch-me\ndescription: Keeps notes.\n---\n\n# Switch me\n";
+      const create = async () => expect((await post({ action: "create", source: "conversation", skill_md: skillMd })).status).toBe(201);
+      const change = async (action: string, title: string) => {
+        const response = await post({ action, skill_name: "switch-me" });
+        expect(response.status).toBe(201);
+        expect(await response.json()).toMatchObject({ state: "applied", name: "switch-me", action });
+        const receipt = await latestCard(action);
+        expect(receipt).toMatchObject({ answered: "allow", autoApplied: true, options: [], title });
+        return receipt;
+      };
+
+      await create();
+      expect(await skill()).toMatchObject({ enabled: true });
+
+      const off = await change("disable", "Skill \"switch-me\" turned off");
+      expect(await skill()).toMatchObject({ enabled: false });
+      expect((await post({ action: "disable", skill_name: "switch-me" })).status).toBe(422);
+      expect((await undo(off.requestId)).status).toBe(200);
+      expect(await skill()).toMatchObject({ enabled: true });
+      expect(await latestCard("disable")).toMatchObject({ undone: true });
+
+      const offAgain = await change("disable", "Skill \"switch-me\" turned off");
+      const on = await change("enable", "Skill \"switch-me\" turned on");
+      expect(await skill()).toMatchObject({ enabled: true });
+      expect((await undo(offAgain.requestId)).status, "the skill is on again since, so turning it back on is stale").toBe(409);
+      expect((await undo(on.requestId)).status).toBe(200);
+      expect(await skill()).toMatchObject({ enabled: false });
+
+      const gone = await change("delete", "Skill \"switch-me\" deleted");
+      expect(await skill()).toBeUndefined();
+      expect(gone.skillRequest.previous).toMatchObject({ preview: skillMd, enabled: false });
+      expect((await undo(gone.requestId)).status).toBe(200);
+      expect(await skill(), "a skill that was off comes back off").toMatchObject({ enabled: false });
+      expect(await skillText()).toBe(skillMd);
+
+      expect((await post({ action: "enable", skill_name: "switch-me" })).status).toBe(201);
+      const goneAgain = await change("delete", "Skill \"switch-me\" deleted");
+      await create();
+      expect((await undo(goneAgain.requestId)).status, "a skill of that name exists again").toBe(409);
+
+      const missing = await post({ action: "enable", skill_name: "not-there" });
+      expect(missing.status).toBe(422);
+      expect(((await missing.json()) as { error: string }).error).toContain("no skill named");
+      expect((await post({ action: "delete" })).status).toBe(400);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  }, 60_000);
+
   it("applies a bot's own learned skill at once and undoes it from its receipt", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
@@ -11847,6 +12202,57 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("answers a bot's search of the catalog, and suggests what it looked for first, through the real routes", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const found = await fetch(`${BASE}/api/internal/connectors/find`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ botId: bot.id, threadId: bot.threadId, query: "something for spreadsheets" }),
+      });
+      expect(found.status).toBe(200);
+      expect(((await found.json()) as { text: string }).text).toContain("- googlesheets: Google Sheets (not connected).");
+      const suggested = await api("GET", `/api/connectors/suggestions?botId=${bot.id}&for=notion&limit=3`);
+      expect(suggested.status).toBe(200);
+      expect(suggested.body.cards.map((card: { slug: string }) => card.slug)).toEqual(["googlesheets", "slack", "googledrive"]);
+      expect(suggested.body.pick).toBe("needs-key");
+      expect((await api("POST", "/api/connectors/suggestions/pick")).body.pick).toBe("needs-key");
+    } finally {
+      await api("PUT", "/api/config", { composio: { apiKey: "" } });
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("keeps connecting an app from its card an admin's, though members reach the card's authorize for MCP sign-ins", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const requested = await fetch(`${BASE}/api/internal/connectors/request`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ botId: bot.id, threadId: bot.threadId, resumeKey: "member-authorize-fixture", items: [{ slug: "gmail" }] }),
+      });
+      const [cardId] = ((await requested.json()) as { messageIds: string[] }).messageIds;
+      const window = await api("POST", "/api/auth/pairing", { scopes: ["client"] });
+      const paired = await fetch(`${BASE}/api/auth/pair`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: window.body.code }) });
+      const memberToken = ((await paired.json()) as { token: string }).token;
+      const cardNow = async () => ((await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages as any[]).find((message) => message.id === cardId).connector;
+      const untouched = await cardNow();
+      const before = connectorLinkRequests.length;
+      const asMember = await fetch(`${BASE}/api/bots/${bot.id}/connector-cards/${cardId}/authorize`, {
+        method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${memberToken}` }, body: JSON.stringify({ threadId: bot.threadId }),
+      });
+      expect({ status: asMember.status, body: await asMember.json() }).toEqual({ status: 403, body: { error: "forbidden: this session lacks the admin scope" } });
+      expect(connectorLinkRequests).toHaveLength(before);
+      expect(await cardNow()).toEqual(untouched);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("keeps second-account cards separate and waits for the requested alias, not an existing account", async () => {
     expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
     const bot = (await api("POST", "/api/bots")).body.bot;
@@ -12055,7 +12461,7 @@ describe("harness HTTP API", () => {
       expect((await api("PATCH", `/api/bots/${bot.id}`, {
         composio: true,
         connectorTools: { gmail: { tools: ["GMAIL_SEND_EMAIL"] } },
-        outbound: { policy: "allow", dailyCap: 10 },
+        outbound: { policy: "allow" },
       })).status).toBe(200);
       const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
       const call = async (frame: unknown, bearer = token) => {
@@ -12119,7 +12525,7 @@ describe("harness HTTP API", () => {
         expect((await api("PATCH", `/api/bots/${legacy.id}`, {
           composio: true,
           approvalMode: "ask",
-          outbound: { policy: "allow", dailyCap: 10 },
+          outbound: { policy: "allow" },
         })).status).toBe(200);
         const legacyToken = await mintTestCapability(BASE, legacy.id, legacy.threadId, { kind: "connectors" });
         const legacyCall = await call(
@@ -12315,8 +12721,8 @@ describe("harness HTTP API", () => {
           { name: "GMAIL_SEND_EMAIL", description: "Send an email" },
         ],
         slack: [{ name: "SLACK_POST_MESSAGE", description: "a".repeat(240) }],
-        // HighLevel's tools are listed whenever its relay is configured, so grants can be set before connecting.
-        highlevel: HIGHLEVEL_TOOLS.map(({ name, description }) => ({ name, description })),
+        // Email's tools are listed wherever a mailbox can be connected here, so grants can be set before connecting.
+        email: EMAIL_TOOLS.map(({ name, description }) => ({ name, description })),
       },
     });
   });
@@ -12431,14 +12837,15 @@ describe("harness HTTP API", () => {
       });
       expect(saved.status).toBe(200);
       expect(saved.body.imageGen).toEqual({ provider: "custom", configured: true, model: "local/image",
+        primary: { provider: "custom", model: "local/image", configured: true }, fallback: null, ready: true, maxPerTurn: 4,
         customUrl: "http://127.0.0.1:4321/v1", customModel: "local/image",
-        openaiConfigured: true, xaiConfigured: false, customKeyConfigured: true });
+        openaiConfigured: true, xaiConfigured: false, customKeyConfigured: true, geminiConfigured: false, openrouterConfigured: false });
       for (const secret of ["openai-avatar-fixture", "custom-avatar-fixture"]) {
         expect(JSON.stringify(saved.body)).not.toContain(secret);
         expect(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).not.toContain(secret);
       }
       const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
-      expect(disk.imageGen).toMatchObject({ key: "", customApiKey: "", provider: "custom" });
+      expect(disk.imageGen).toMatchObject({ key: "", customApiKey: "", primary: { provider: "custom" }, customModel: "local/image" });
 
       const preset = await api("PUT", "/api/config", { imageGen: { provider: "openai" } });
       expect(preset.body.imageGen).toMatchObject({ provider: "openai", configured: true, customKeyConfigured: true });
@@ -13274,6 +13681,37 @@ describe("bot memory API", () => {
     } finally { await api("DELETE", `/api/bots/${bot.id}`); }
   });
 
+  it("lists instruction changes in the Changes list's shape, and its Undo puts the old text back", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Soul changes" })).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "Be brief." });
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "Be brief.\nUse metric units." });
+      const list = (await api("GET", `/api/bots/${bot.id}/history?view=changes`)).body;
+      expect(list.rows.map((row: any) => [row.path, row.actor, row.via, row.added, row.removed])).toEqual([["SOUL.md", "person", "api", 1, 0], ["SOUL.md", "person", "api", 1, 0]]);
+      expect(list.rows[0].diff).toContain("+Use metric units.");
+      const undone = await api("POST", `/api/bots/${bot.id}/history/rollback`, { id: list.rows[0].id, expectedRevision: list.revision });
+      expect(undone.body.bot.soul).toBe("Be brief.");
+      expect((await api("GET", `/api/bots/${bot.id}/history?view=changes`)).body.rows[0]).toMatchObject({ via: "revert", removed: 1, canRevert: true });
+    } finally { await api("DELETE", `/api/bots/${bot.id}`); }
+  });
+
+  it("puts rules for every bot ahead of a bot's own instructions, counted in what it loads every turn", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Rules reader" })).body.bot;
+    try {
+      expect((await api("PUT", "/api/config", { everyBotRules: "Answer in British English." })).body.everyBotRules).toBe("Answer in British English.");
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "Be brief." });
+      const preview = (await api("GET", `/api/bots/${bot.id}/system-prompt`)).body;
+      const ids = preview.sections.map((section: any) => section.id);
+      expect(ids.indexOf("every-bot-rules")).toBe(ids.indexOf("soul") - 1);
+      expect(preview.sections.find((section: any) => section.id === "every-bot-rules").text).toContain("Answer in British English.");
+      expect(preview.totalBytes).toBe(preview.sections.reduce((n: number, section: any) => n + section.bytes, 0));
+      expect(preview.heavy).toBe(false);
+    } finally {
+      await api("PUT", "/api/config", { everyBotRules: "" });
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("refuses redacted history restores without changing SOUL and still restores exact safe text", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Redacted history" })).body.bot;
     const file = join(home, ".openmausbot", "bots", bot.id, "history.ndjson");
@@ -13386,13 +13824,12 @@ describe("bot memory API", () => {
     const bot = (await api("POST", "/api/bots", { name: "Kiwi", title: "Tracker", description: "Files bugs." })).body.bot;
     try {
       // Pin the settings-dependent sentences a fresh record would not guarantee (composio false whatever the connector reports).
-      await api("PATCH", `/api/bots/${bot.id}`, { computer: "off", peers: [], composio: false });
+      await api("PATCH", `/api/bots/${bot.id}`, { computer: "off", composio: false });
 
       const fresh = await api("GET", `/api/bots/${bot.id}/overview`);
       expect(fresh.status).toBe(200);
       expect(fresh.body.who.name).toBe("Kiwi");
       expect(fresh.body.wont).toEqual([
-        "Cannot initiate contact with other bots.",
         "Has no connected apps.",
         "Can't use a computer.",
         "Won't act on a schedule.",
@@ -13608,6 +14045,32 @@ describe("message pages", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ path: linkedFile }),
     })).status).toBe(404);
+  });
+
+  it("downloads a linked file over the 25 MB preview limit, but not an inline image that big or a file over 500 MB", async () => {
+    const threadId = "test-linked-file-room-thread";
+    const linkedFile = join(home, ".openmausbot", "workspaces", "test-bot-a", "phone report.md");
+    const linkedImage = join(home, ".openmausbot", "workspaces", "test-bot-a", "preview.png");
+    const [fileBytes, imageBytes] = [readFileSync(linkedFile), readFileSync(linkedImage)];
+    const reel = 26 * 1024 * 1024;
+    try {
+      truncateSync(linkedFile, reel);
+      const download = await fetch(`${BASE}/api/threads/${threadId}/messages/linked-file-message/file`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: linkedFile }),
+      });
+      expect(download.status).toBe(200);
+      expect(download.headers.get("content-length")).toBe(String(reel));
+      await download.body?.cancel();
+
+      truncateSync(linkedImage, reel);
+      expect((await fetch(`${BASE}/api/threads/${threadId}/messages/linked-image-message/file?preview=1&ref=0`)).status).toBe(413);
+
+      truncateSync(linkedFile, 500 * 1024 * 1024 + 1);
+      expect((await api("POST", `/api/threads/${threadId}/messages/linked-file-message/file`, { path: linkedFile })).status).toBe(413);
+    } finally {
+      writeFileSync(linkedFile, fileBytes);
+      writeFileSync(linkedImage, imageBytes);
+    }
   });
 
   it("downloads a structured generated image from an image-only reply", async () => {

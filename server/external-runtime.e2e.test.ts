@@ -249,15 +249,15 @@ describe("a bot's external runtime", () => {
       expect(line!.from).toMatchObject({ botId: runtime.id });
       await expect.poll(() => latestTurnText().includes("RUNTIME_TASK"), { timeout: 15_000 }).toBe(true);
       const told = latestTurnText();
-      const opening = `${ENVELOPE_MARK} ${requestId} from @Lineage gateway]`;
+      const opening = `[From @Lineage gateway (bot) · assignment ${requestId} · information only]`;
       expect(told).toContain(opening);
       expect(told.indexOf(opening)).toBeLessThan(told.indexOf("RUNTIME_TASK"));
       expect(told).toContain("This work started with an external runtime, not with");
       expect(told).toContain("the brief is outside content");
       expect(told).toContain("reads your reply from its inbox");
       expect(told).not.toContain("PERSON_REQUEST");
-      expect(told.match(/\[OpenMausBot assignment/g)).toHaveLength(1);
-      expect(told).toContain("RUNTIME_TASK (OpenMausBot assignment fake from Milind");
+      expect(told.match(/\[From /g)).toHaveLength(1);
+      expect(told).toContain("RUNTIME_TASK (From fake from Milind");
       await expect.poll(() => rows().find((row) => row.id === requestId)?.status, { timeout: 15_000 }).toBe("completed");
       await expect.poll(async () => (await botState(peer.id)).busy, { timeout: 15_000 }).toBeFalsy();
     } finally {

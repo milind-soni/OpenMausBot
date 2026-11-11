@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
-import { localeChoices, type LocaleKey } from "@/locales";
-import { activeLocale, t } from "@/lib/i18n";
+import { localeChoices } from "@/locales";
+import { activeLocale, activePackComplete, t } from "@/lib/i18n";
 import { withTourReset } from "@/lib/guided-tour";
 import { completionPatch } from "@/lib/onboarding";
-import { useUpdaterState } from "@/lib/updater";
-import { brand } from "../lib/brand";
+import { updaterMessage, useUpdaterState } from "@/lib/updater";
+import { productName } from "../lib/brand";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { NewBrowserSettings } from "./BrowserSettingsRows";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
@@ -16,9 +16,11 @@ import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire";
 import { setColorUserBubbles, useColorUserBubbles } from "@/lib/user-bubble-preference";
 import { setShowThreads, useShowThreadsChoice } from "@/lib/thread-preferences";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
-import { parseSidebarDensity, setPinnedCircles, setSidebarDensity, setUniversalPins, SIDEBAR_DENSITIES, usePinnedCircles, useSidebarDensity, useUniversalPins, type SidebarDensity } from "@/lib/sidebar-preferences";
+import { SIMPLE_ONLY } from "@/lib/simple-only";
+import { setPinnedCircles, setUniversalPins, usePinnedCircles, useUniversalPins } from "@/lib/sidebar-preferences";
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
 import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@/lib/send-key";
+import { alternateSendLabel, parseFollowUpDefault, setFollowUpDefault, useFollowUpDefault } from "@/lib/follow-up";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
 import { Select } from "./Select";
 
@@ -37,17 +39,17 @@ export function UpdatesRow({ title = t("settings.updates.title") }: { title?: st
           ? t("settings.updates.preparing")
           : s.status === "downloaded"
             ? s.installMode === "handoff"
-              ? t("settings.updates.readyInstall", { app: brand().name, version: s.version ?? "" })
-              : t("settings.updates.ready", { app: brand().name, version: s.version ?? "" })
+              ? t("settings.updates.readyInstall", { app: productName(), version: s.version ?? "" })
+              : t("settings.updates.ready", { app: productName(), version: s.version ?? "" })
             : s.status === "installing"
-              ? s.message ||
+              ? updaterMessage(s) ||
                 (s.installMode === "handoff"
                   ? t("settings.updates.openingTerminal")
                   : t("settings.updates.restarting"))
               : s.status === "handed-off"
                 ? t("settings.updates.handedOff")
                 : s.status === "error"
-                  ? t("settings.updates.failed", { message: s.message ?? t("settings.updates.unknownError") })
+                  ? t("settings.updates.failed", { message: updaterMessage(s) ?? t("settings.updates.unknownError") })
                   : t("settings.updates.latest");
   return (
     <SettingRow title={title} subtitle={label}>
@@ -80,7 +82,7 @@ export function UpdatesRow({ title = t("settings.updates.title") }: { title?: st
   );
 }
 
-export function NewBotEffortRow() {
+function useNewBotEffort() {
   const { state, dispatch } = useStore();
   const current = state.config?.newBots?.effort ?? "";
   const [saving, setSaving] = useState(false);
@@ -102,26 +104,53 @@ export function NewBotEffortRow() {
       setSaving(false);
     }
   };
+  return { current, saving, error, save };
+}
 
+function NewBotEffortSelect({ effort, className }: { effort: ReturnType<typeof useNewBotEffort>; className: string }) {
+  return (
+    <Select size="sm" className={className}
+      value={effort.current}
+      disabled={effort.saving}
+      aria-label={t("settings.newBotEffort.aria")}
+      onChange={(event) => void effort.save(event.target.value)}
+    >
+      <option value="">{t("settings.newBotEffort.default")}</option>
+      {EFFORT_LEVELS.map((level) => (
+        <option key={level} value={level}>
+          {effortLabel(level)}
+        </option>
+      ))}
+    </Select>
+  );
+}
+
+export function NewBotEffortRow() {
+  const effort = useNewBotEffort();
   return (
     <SettingRow
       title={t("settings.newBotEffort.title")}
       subtitle={t("settings.newBotEffort.subtitle")}
-      message={error ? <p role="alert" className="text-danger">{error}</p> : null}
+      message={effort.error ? <p role="alert" className="text-danger">{effort.error}</p> : null}
     >
-      <Select size="sm" className="w-full max-w-[240px]"
-        value={current}
-        disabled={saving}
-        aria-label={t("settings.newBotEffort.aria")}
-        onChange={(event) => void save(event.target.value)}
-      >
-        <option value="">{t("settings.newBotEffort.default")}</option>
-        {EFFORT_LEVELS.map((level) => (
-          <option key={level} value={level}>
-            {effortLabel(level)}
-          </option>
-        ))}
-      </Select>
+      <NewBotEffortSelect effort={effort} className="w-full max-w-[240px]" />
+    </SettingRow>
+  );
+}
+
+export function NewBotDefaultsRow({ onEdit, onShare }: { onEdit: () => void; onShare: () => void }) {
+  const effort = useNewBotEffort();
+  return (
+    <SettingRow
+      title={t("newBot.defaults")}
+      subtitle={t("settings.newBotEffort.title")}
+      message={effort.error ? <p role="alert" className="text-danger">{effort.error}</p> : null}
+    >
+      <div className="flex items-center gap-2">
+        <NewBotEffortSelect effort={effort} className="w-auto" />
+        <button type="button" className="ui-button" data-new-bot-share onClick={onShare}>{t("newBot.sharePreset")}</button>
+        <button type="button" className="ui-button" data-new-bot-defaults onClick={onEdit}>{t("newBot.edit")}</button>
+      </div>
     </SettingRow>
   );
 }
@@ -185,7 +214,7 @@ export function LanguageRow({ simple = false }: { simple?: boolean }) {
   return (
     <SettingRow
       title={t("settings.language.title")}
-      subtitle={simple ? activeLocale() === "en" ? undefined : t("settings.simple.language.partial") : t("settings.language.subtitle")}
+      subtitle={activePackComplete() ? t("settings.language.subtitleComplete") : simple ? activeLocale() === "en" ? undefined : t("settings.simple.language.partial") : t("settings.language.subtitle")}
     >
       <Select size="sm" variant={simple ? "ghost" : "field"} className={simple ? undefined : "w-full max-w-[240px]"}
         value={current}
@@ -220,10 +249,28 @@ export function SendKeyRow({ simple = false }: { simple?: boolean }) {
   );
 }
 
+/** What Enter does with a message sent while a bot works. A setting, not a smart default: both are right, for different people. */
+export function FollowUpRow({ simple = false }: { simple?: boolean }) {
+  const followUp = useFollowUpDefault();
+  const key = alternateSendLabel(useSendKey());
+  return (
+    <SettingRow title={t("settings.followUp.title")} subtitle={t(simple ? "settings.simple.followUp" : "settings.followUp.subtitle", { key })}>
+      <Select size="sm" variant={simple ? "ghost" : "field"} className={simple ? undefined : "w-full max-w-[240px]"}
+        value={followUp}
+        aria-label={t("settings.followUp.title")}
+        onChange={(event) => setFollowUpDefault(parseFollowUpDefault(event.target.value))}
+      >
+        <option value="steer">{t("settings.followUp.steer")}</option>
+        <option value="queue">{t("settings.followUp.queue")}</option>
+      </Select>
+    </SettingRow>
+  );
+}
+
 export function ColorUserBubblesRow({ simple = false }: { simple?: boolean }) {
   const enabled = useColorUserBubbles();
   return (
-    <SettingRow title={t("settings.userBubbles.title")} subtitle={simple ? undefined : t("settings.userBubbles.subtitle")}>
+    <SettingRow title={t(simple ? "settings.userBubbles.simpleTitle" : "settings.userBubbles.title")} subtitle={simple ? undefined : t("settings.userBubbles.subtitle")}>
       <Switch
         checked={enabled}
         aria-label={t("settings.userBubbles.aria")}
@@ -235,6 +282,7 @@ export function ColorUserBubblesRow({ simple = false }: { simple?: boolean }) {
 
 export function AdvancedModeRow({ simple = false }: { simple?: boolean }) {
   const enabled = useAdvancedMode();
+  if (SIMPLE_ONLY) return null;
   return (
     <SettingRow className={simple ? undefined : "rounded-2xl border border-accent-border/40 bg-raised-hover/40 py-4"} title={t("settings.advancedMode.title")}
       subtitle={t(simple ? "settings.simple.advancedMode" : "settings.advancedMode.subtitle")}>
@@ -269,29 +317,6 @@ export function PinnedCirclesRow() {
         aria-label={t("settings.pinnedCircles.title")}
         onClick={() => setPinnedCircles(!enabled)}
       />
-    </SettingRow>
-  );
-}
-
-const SIDEBAR_DENSITY_LABEL_KEYS: Record<SidebarDensity, LocaleKey> = {
-  comfortable: "sidebar.density.comfortable",
-  compact: "sidebar.density.compact",
-  icons: "sidebar.density.iconsOnly",
-};
-
-export function SidebarDensityRow() {
-  const density = useSidebarDensity();
-  return (
-    <SettingRow title={t("sidebar.density.title")} subtitle={t("settings.sidebarDensity.subtitle")}>
-      <Select size="sm" className="w-full max-w-[240px]"
-        value={density}
-        aria-label={t("sidebar.density.chooseAria")}
-        onChange={(event) => setSidebarDensity(parseSidebarDensity(event.target.value))}
-      >
-        {SIDEBAR_DENSITIES.map((option) => (
-          <option key={option} value={option}>{t(SIDEBAR_DENSITY_LABEL_KEYS[option])}</option>
-        ))}
-      </Select>
     </SettingRow>
   );
 }

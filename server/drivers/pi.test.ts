@@ -538,6 +538,21 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(first.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nfirst");
     const second = await send("second", first.cursor);
     expect(second.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nsecond");
+    // Each turn condensed the session once; the chat marks each one.
+    const mine = recorder.events.filter((e) => e.threadId === threadId);
+    expect(mine.filter((e) => e.type === "context.compacted")).toHaveLength(2);
+    // Text streamed before the compaction is saved ahead of the marker, not joined to later text.
+    const before = mine.findIndex((e) => e.type === "item.completed" && (e as { text?: string }).text === "before");
+    expect(before).toBeGreaterThan(-1);
+    expect(before).toBeLessThan(mine.findIndex((e) => e.type === "context.compacted"));
+  });
+
+  it("adds no condensed marker when pi's compaction fails or is skipped", async () => {
+    await create("compaction", { FAKE_PI_COMPACTION_FAILS_ONLY: "1" });
+    const threadId = "t-pi-compaction-fails-" + randomUUID();
+    const { turnId } = await instance.adapter.sendTurn({ threadId, text: "first", system: "Standing rules." });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    expect(recorder.events.filter((e) => e.type === "context.compacted" && e.threadId === threadId)).toHaveLength(0);
   });
 
   it("keeps pi alive through post-run compaction recovery and re-establishes the full prompt", async () => {
@@ -860,6 +875,28 @@ describe("PiDriver turns (fake CLI)", () => {
 
     const servers = mcpRow!.mcpConfig!.mcpServers!;
     expect(servers.composio).toMatchObject({ command: "node", args: ["connector-proxy.js"], env: { COMPOSIO_KEY: "ck" } });
+  });
+
+  it("reports pi's priced cost and cached tokens summed over the whole run", async () => {
+    await create("priced");
+    await instance.adapter.sendTurn({ threadId: "t-priced", text: "run it", model: "synthetic/hf:moonshotai/Kimi-K3" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+
+    expect(done).toMatchObject({ ok: true });
+    // input counts every prompt token, cached ones included, as the other drivers do.
+    expect((done as { usage: unknown }).usage).toEqual({ input: 257, output: 3, cachedInput: 220 });
+    expect((done as { cost: number }).cost).toBeCloseTo(0.0025, 10);
+  });
+
+  it("books a model call's cost when the turn is stopped while its tool runs", async () => {
+    await create("priced-stop");
+    await instance.adapter.sendTurn({ threadId: "t-priced-stop", text: "run it", model: "synthetic/hf:moonshotai/Kimi-K3" });
+    await recorder.until((e) => e.type === "item.started");
+    await instance.adapter.interruptTurn("t-priced-stop");
+    const done = await recorder.until((e) => e.type === "turn.completed");
+
+    expect(done).toMatchObject({ ok: true, stopReason: "cancelled", usage: { input: 125, output: 1, cachedInput: 100 } });
+    expect((done as { cost: number }).cost).toBeCloseTo(0.0021, 10);
   });
 
   it("rides the toolUse auto-continue and only settles on the final end_turn", async () => {

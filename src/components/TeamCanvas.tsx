@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ArrowRight, BookOpen, Brain, Crown, MessageCircle, Minus, Monitor, MoreHorizontal, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { api, openBot, useStore, type Bot } from "@/state/store";
+import { teamBotName, useTeamPeople } from "@/state/team-people";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -41,12 +42,13 @@ function BotCard({ bot, selected, moving, connected, tagged = false, sent, onCom
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const status = teamMapStatus(bot);
+  const name = teamBotName(bot, useTeamPeople());
   const instance = state.instances.find((item) => item.instanceId === bot.modelSelection.instanceId);
   const model = instance?.models.options.find((item) => item.id === bot.modelSelection.model)?.label ?? bot.modelSelection.model;
   return <article className={cn("relative h-[126px] w-[236px] shrink-0 rounded-xl border bg-card shadow-sm transition-colors",
     selected ? "border-accent/60 ring-1 ring-accent/15" : connected ? "border-accent/40" : "border-hairline/50 hover:border-ink-secondary/40", tagged && "border-accent ring-4 ring-accent/25", moving && "opacity-35")}>
     {sent !== undefined && <span key={sent} data-sent-highlight aria-hidden className="pointer-events-none absolute -inset-px animate-sent-border rounded-xl border-2 border-accent" />}
-    <button data-bot-id={bot.id} aria-label={t("canvas.editBot", { name: bot.name })}
+    <button data-bot-id={bot.id} aria-label={t("canvas.editBot", { name })}
       onClick={() => openBotSettings(dispatch, "identity", { botId: bot.id })}
       title={onArrange ? t("canvas.reorderHint") : undefined}
       onKeyDown={(event) => {
@@ -57,7 +59,7 @@ function BotCard({ bot, selected, moving, connected, tagged = false, sent, onCom
       className="flex h-[82px] w-full cursor-grab items-center gap-3 rounded-t-xl px-4 text-left active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-accent">
       <BotAvatar bot={bot} size={38} motion="none" motionKey={0} animated={false} />
       <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5"><span className="truncate text-[14px] font-semibold">{bot.name}</span>
+        <span className="flex items-center gap-1.5"><span className="truncate text-[14px] font-semibold">{name}</span>
           {bot.chiefOfStaff && <Crown size={12} className="shrink-0 text-warning" aria-label={t("chat.chiefOfStaff")} />}</span>
         <span className="mt-1 block truncate text-[11px] text-ink-secondary">{bot.title || (bot.chiefOfStaff ? t("chat.chiefOfStaff") : t("canvas.bot"))}</span>
       </span>

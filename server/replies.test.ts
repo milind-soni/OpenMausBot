@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { WIDGET_SAMPLES } from "../shared/widget-samples.ts";
 import { parseWidgetInput, widgetActions, widgetToText, type WidgetAction, type WidgetRoot } from "../shared/widget.ts";
+import { cardRecords, SETUP_RECORDS_SOURCE } from "./records-block.ts";
 import { promptWithReply, replyExcerpt, replyTargetIn, transcriptText, type ReplyTarget } from "./replies.ts";
 import type { Message } from "./store.ts";
 
@@ -20,6 +21,33 @@ describe("a card the server built", () => {
     const reply = message({ id: "m2", role: "user", text: "Thanks", replyToId: "m1" });
     expect(transcriptText(reply, new Map([["m1", card]]))).toContain("[answering a card shown in this chat]\n[Records from a card shown");
     expect(promptWithReply("👍", { ...card, reactedWith: "👍" })).toContain("[Records from a card shown to the person in this chat");
+  });
+});
+
+describe("the app's own add-a-key suggestion", () => {
+  it("replays as a card the bot did not write, never as the bot's own words, and so does a reply or reaction to it", () => {
+    const text = "Want me to sort your email for free? Add a key.";
+    const card = message({ text, setupSuggestion: { kind: "helperKey" } });
+    const records = cardRecords(text, SETUP_RECORDS_SOURCE);
+    expect(records).not.toContain("mail, calendar");
+    expect(transcriptText(card, new Map())).toBe(records);
+    const reply = message({ id: "m2", role: "user", text: "what is this?", replyToId: "m1" });
+    expect(transcriptText(reply, new Map([["m1", card]]))).toBe(`[answering a card shown in this chat]\n${records}\nwhat is this?`);
+    expect(promptWithReply("👍", { ...card, reactedWith: "👍" })).toContain(records);
+    const replied = promptWithReply("what is this?", card);
+    expect(replied).toContain(records);
+    expect(replied).toContain("a card shown to the person in this chat, which you did not write");
+    expect(replied).not.toContain("from Assistant");
+  });
+
+  it("keeps the person's reaction, and stays a card the bot did not write when it is a widget", () => {
+    const text = "Want me to sort your email for free? Add a key.";
+    const card = message({ kind: "widget", text, setupSuggestion: { kind: "helperKey" } });
+    const reacted = message({ id: "m2", role: "user", text: "👍", replyToId: "m1", reaction: "👍" });
+    expect(transcriptText(reacted, new Map([["m1", card]]))).toBe(`[reacted 👍 to a card shown in this chat]\n${cardRecords(text, SETUP_RECORDS_SOURCE)}`);
+    const typed = promptWithReply("what is this?", card);
+    expect(typed).toContain("a card shown to the person in this chat, which you did not write");
+    expect(typed).not.toContain("a widget you showed");
   });
 });
 

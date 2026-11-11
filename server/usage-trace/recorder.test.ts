@@ -6,6 +6,7 @@ import { monitorEventLoopDelay } from "node:perf_hooks";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RuntimeEvent } from "../../shared/runtime-events.ts";
 import { json, readBody } from "../harness/http.ts";
+import { hostTimeout } from "../testing/host-timeout.ts";
 import { createTraceRecorder } from "./recorder.ts";
 import { daysBetween, flushSpans, readSpans } from "./spans.ts";
 
@@ -203,15 +204,24 @@ describe("trace recorder", () => {
       if (index % 50 === 0) await new Promise((resolve) => setImmediate(resolve));
     }
     const end = performance.now();
+    const endCpu = process.threadCpuUsage();
     observe(completed("busy", "t1", 20_100));
     expect(recorder.settle("busy")).toMatchObject({ tools: 2_000 });
     const settleMs = performance.now() - end;
+    const settleCpu = process.threadCpuUsage(endCpu);
+    const settleCpuMs = (settleCpu.user + settleCpu.system) / 1_000;
     await flushSpans(dir);
     delay.disable();
     console.log(`trace recorder: 2,000 tool calls; ${(busyMs * 1000 / 4_002).toFixed(1)} µs per event (${busyMs.toFixed(1)} ms in all), ` +
-      `turn end + booking ${settleMs.toFixed(1)} ms, event-loop delay p99 ${(delay.percentile(99) / 1e6).toFixed(1)} ms`);
+      `turn end + booking ${settleMs.toFixed(1)} ms (${settleCpuMs.toFixed(1)} ms on this thread's CPU), ` +
+      `event-loop delay p99 ${(delay.percentile(99) / 1e6).toFixed(1)} ms`);
     expect(busyMs / 4_002).toBeLessThan(0.1);
-    expect(settleMs).toBeLessThan(50);
+    // The work is held to 50 ms of this thread's CPU, which counts the booking and its garbage collection
+    // but not time the OS gives another process: a CI shard runs several files at once (OMB_VITEST_WORKERS)
+    // and their CPU is shared. The wall clock still catches a blocking wait, at the doubled bound every
+    // timeout has where the CPU is shared or slower (server/testing/host-timeout.ts).
+    expect(settleCpuMs).toBeLessThan(50);
+    expect(settleMs).toBeLessThan(hostTimeout(50));
     const spans = (await readSpans(dir, daysBetween(T0, T0 + 30_000), new Set(["busy:t1"]))).get("busy:t1")!;
     expect(spans.filter((span) => span.kind === "tool")).toHaveLength(2_000);
   });

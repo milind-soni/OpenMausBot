@@ -1,5 +1,5 @@
 import type { Bot, TaskUsage } from "@/state/store";
-import { t } from "./i18n";
+import { activeLocale, intlLocale, t } from "./i18n";
 
 export const EMPTY_USAGE: TaskUsage = { input: 0, output: 0, costUsd: null, turns: 0 };
 type TokenUsage = Pick<TaskUsage, "input" | "output"> & Partial<TaskUsage>;
@@ -48,11 +48,13 @@ const formatTenths = (value: number) => {
   return fraction === 0 ? `${value / 10}` : `${(value - fraction) / 10}.${fraction}`;
 };
 
+export const usdText = (usd: number, digits: number): string => activeLocale() === "en"
+  ? `$${usd.toFixed(digits)}`
+  : new Intl.NumberFormat(intlLocale(), { style: "currency", currency: "USD", minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: false }).format(usd);
+
 export function formatUsd(usd: number): string {
   if (!hasFiniteCost(usd)) return "";
-  if (usd === 0) return "$0";
-  if (usd < 0.01) return `$${usd.toFixed(3)}`;
-  return `$${usd.toFixed(2)}`;
+  return usdText(usd, usd === 0 ? 0 : usd < 0.01 ? 3 : 2);
 }
 
 /** Clamped to `input`: some providers report cache reads outside their input figure. */

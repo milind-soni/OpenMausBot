@@ -38,7 +38,7 @@ everything did, so a test can start from what such a send left on My Cloud.
 context summaries, a 610-message room and a conversation both sides added to
 pass the path check; MCP servers with their keys and header tokens, an MCP
 sign-in of its own (left here by the first pass, carried by the final one and
-let go of here), an AI key, HighLevel by its token and the connected-apps
+let go of here), an AI key and the connected-apps
 account (a fake broker) arrive, with equal credential fingerprints; the move's
 session counts as someone using My Cloud; a moved conversation may use a lent
 Mac and feeds its bot's memory on My Cloud; and a move run again changes
@@ -87,9 +87,59 @@ My Cloud's welcome (`src/components/cloud-welcome/CloudWelcome.test.ts`): while
 the move runs, or once it has gone, **Bring your stuff** is done by itself, so
 the welcome goes straight on to the AI with nothing to press; back on that step
 it says so in one line, with a fresh start only behind **More**. Before anything
-has come, it offers a fresh start. The line on either page
-(`src/components/CloudSendStrip.test.ts`) shows only the move: on its way, Try
-again after a day of failing, and on My Cloud's page once what arrived.
+has come, it offers a fresh start. The move never shows as a strip over the page
+(`src/components/CloudSendStrip.test.ts`): it lives in the account area at the
+bottom of the sidebar (`src/components/AccountMove.test.ts`). On its way, the
+account line says "Moving to My Cloud…" and so does one row in the account
+menu, with the progress in its tooltip; after a day of failing the line says "My
+Cloud move needs you" and ends with Try again, the avatar gets a red dot, and the
+menu's top row says "Try My Cloud move again", the size of every other row, with
+the reason in its tooltip. Both run the one retry, and both wait with a spinner
+while it runs. On My Cloud's page the menu says once what arrived, with the phone
+to pair and Got it.
+
+## A big workspace on a slow Cloud
+
+```sh
+node --test electron/cloud-send-big.node-test.mjs electron/one-home-check.node-test.mjs
+pnpm exec vitest run server/cloud-send-big.test.ts server/cloud-send-lease.test.ts
+```
+
+`electron/cloud-send-big.node-test.mjs` runs the real check (`createCloudSend`'s
+`check`) against a fake Cloud that takes, on a clock, the time a Fly Starter
+machine takes for each request's work, and cuts off a request that takes longer
+than its caller waits, as fetch does: 100 bots, 3,000 conversations (five of
+12,000 rows), 6,000 attachments and 2,000 bot files. The whole manifest in one
+answer, as the check asked for it before, takes about 19 minutes there; the
+check asks My Cloud's manifest without attachments and files, its files a bot at
+a time, and the chats 200 conversations to a request, and finishes with no
+request cut off. A Cloud that stops answering for minutes is waited for; one
+that stops for longer fails the check as unanswered with what it got done kept,
+and the next check asks only about the conversations not found whole yet.
+`electron/one-home-check.node-test.mjs` covers the move around it: such a check
+goes on in five minutes, not an hour, the line says how far the check is or that
+My Cloud is slow until when, and two computers moving into one Cloud take turns
+at the heavy part, the second saying which computer it waits for.
+`server/cloud-send-big.test.ts` builds 100 bots with 2,000 conversations in a
+real store and shows the server's answers read messages.db directly and never
+parse a conversation through the store.
+
+## Moving some bots
+
+```sh
+pnpm exec vitest run server/move-chosen-bots.e2e.test.ts server/cloud-send-scope.test.ts server/bot-moves.test.ts
+node --test electron/bot-move-main.node-test.mjs electron/one-home-check.node-test.mjs
+```
+
+The same two servers, started from the page's own channels. The chosen bot
+arrives with its chats, memory and routine, and what was on here is on there.
+The other bot answers here and nothing freezes; the chosen one refuses a turn
+here and stays as an archived bot that points to My Cloud. A room with a bot left
+behind stays here without the one that went. More bots can go later, and Move
+everything after that carries the rest without archiving on My Cloud the bots
+already there. The unit tests cover any number of bots in one move, a bot still
+answering holding the move, a failed check letting every bot go on here, and My
+Cloud ending bringing the bots back.
 
 ## The real utility port
 

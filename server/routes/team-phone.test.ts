@@ -58,7 +58,8 @@ describe("Open on your phone, on a Team Cloud", () => {
   });
 
   it("makes nothing for an ended session or one with no scope its role gives", async () => {
-    expect((await call(TEAM, asSession(session()), TEAM_PHONE_PAIRING_PATH, { live: false })).answer?.status).toBe(401);
+    expect((await call(TEAM, asSession(session()), TEAM_PHONE_PAIRING_PATH, { live: false })).answer).toEqual({ status: 401,
+      body: { error: "Your session ended. Sign in again before creating a pairing code.", errorKey: "serverError.team.sessionEnded" } });
     const odd = await call(TEAM, asSession(session({ teamRole: "member", scopes: ["admin"] })));
     expect(odd.answer?.status).toBe(403);
     expect(odd.opened).toEqual([]);
@@ -94,7 +95,7 @@ describe("the phones beside the code, on a Team Cloud", () => {
 
   it("removes a member's own phone or, for an admin, anyone's; never another member's", async () => {
     const refused = await call(TEAM, ada, `${TEAM_PHONES_PATH}/ph-cleo`, { method: "DELETE" });
-    expect(refused.answer?.status).toBe(404);
+    expect(refused.answer).toEqual({ status: 404, body: { error: "no such phone", errorKey: "serverError.team.noSuchPhone" } });
     expect(refused.revoked).toEqual([]);
     const own = await call(TEAM, ada, `${TEAM_PHONES_PATH}/ph-ada`, { method: "DELETE" });
     expect(own.answer).toEqual({ status: 200, body: { ok: true } });

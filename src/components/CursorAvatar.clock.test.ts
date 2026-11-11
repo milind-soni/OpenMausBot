@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { MausAvatar, type MausAvatarHandle, type MausAvatarProps } from "./Avatar";
 import { EFFECTS, EXPRESSIONS, POOLS } from "./CursorAvatar";
 import { mascotClock } from "./mascot-clock";
+import { UNREAD_NOTICE_MS, useUnreadNotice } from "./unread-notice";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -67,13 +68,22 @@ const toPath = (ring: Array<[number, number]>) => "M" + ring.map((p) => p[0].toF
 
 describe("CursorAvatar on the shared clock", () => {
   it("draws every animated mascot from one animation frame", () => {
-    render(Array.from({ length: 12 }, () => ({ state: "working" as const, size: 36 })));
+    render(Array.from({ length: 12 }, () => ({ state: "working" as const, size: 96 })));
     run(100);
     frameRequests = 0;
     run(1000);
     expect(frameRequests).toBeGreaterThan(30);
     expect(frameRequests).toBeLessThanOrEqual(70);
     expect(mascotClock().pending()).toBe(12);
+  });
+
+  it("draws a sidebar full of working mascots 20 times a second", () => {
+    render(Array.from({ length: 12 }, (_, i) => ({ state: "working" as const, size: [24, 28, 42, 56][i % 4] })));
+    run(100);
+    frameRequests = 0;
+    run(1000);
+    expect(frameRequests).toBeGreaterThanOrEqual(18);
+    expect(frameRequests).toBeLessThanOrEqual(21);
   });
 
   it("paints a still mascot with its state's face and then asks for nothing", () => {
@@ -123,6 +133,24 @@ describe("CursorAvatar on the shared clock", () => {
     expect(writes).toHaveBeenCalled();
   });
 
+  it("lets an unread mascot play its notice, then draws nothing while the news waits", () => {
+    function Row({ unread }: { unread: boolean }) {
+      return createElement(MausAvatar, { color: "green", state: unread ? "notifying" : "idle", size: 42, animated: useUnreadNotice(unread) });
+    }
+    act(() => root.render(createElement(Row, { unread: false })));
+    run(200);
+    act(() => root.render(createElement(Row, { unread: true })));
+    frameRequests = 0;
+    run(2000);
+    expect(frameRequests).toBeGreaterThan(20);
+    run(UNREAD_NOTICE_MS);
+    run(100);
+    frameRequests = 0;
+    run(30_000);
+    expect(frameRequests).toBe(0);
+    expect(mascotClock().pending()).toBe(0);
+  });
+
   it("stops drawing a mascot that leaves the screen", () => {
     render([{ state: "working", size: 36 }]);
     run(200);
@@ -132,7 +160,7 @@ describe("CursorAvatar on the shared clock", () => {
     expect(frameRequests).toBe(0);
     act(() => observed.callback!([{ target: host.querySelector("svg")!, isIntersecting: true }]));
     run(500);
-    expect(frameRequests).toBeGreaterThan(10);
+    expect(frameRequests).toBeGreaterThan(5);
   });
 
   it("holds still under reduced motion: no body motion, blinks or spins", () => {

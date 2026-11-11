@@ -6,10 +6,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { RemoteMcpSpec } from "../contracts.ts";
 import { RemoteMcpClient } from "../mcp-http.ts";
-import { probeMcpServer } from "../mcp-probe.ts";
+import { probeMcpServer, SIGN_IN_CHECK_TOOL } from "../mcp-probe.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { BOX_BROKER_PORT, type BoxBroker } from "./box.ts";
-import { brokerRemoteMcp, forgetBrokeredMcp, mcpGrantName } from "./broker-mcp.ts";
+import { brokerRemoteMcp, forgetBrokeredMcp, mcpGrantName, mcpReconnectLine, retryBrokeredMcp } from "./broker-mcp.ts";
 import { openCredentialBroker, type CredentialBroker } from "./broker.ts";
 
 const custom = {
@@ -55,6 +55,25 @@ describe("remote MCP servers through the broker", () => {
     expect(credentials.stats().tokens).toBe(2);
   });
 
+  withBroker("gives a conversation a new token after a URL server failed as its engine started, so the engine reconnects", async () => {
+    const b = await broker();
+    const url = (servers: Record<string, unknown>) => (servers.notion as { url: string }).url;
+    const first = url(brokerRemoteMcp(custom, { botId: "b1", threadId: "t1" }, b));
+    brokerRemoteMcp(custom, { botId: "b1", threadId: "t2" }, b);
+    expect(retryBrokeredMcp({ botId: "b1", threadId: "t1" }, ["files"]), "a command server is checked elsewhere").toEqual([]);
+    expect(retryBrokeredMcp({ botId: "b1", threadId: "t9" }, ["notion"]), "a conversation with nothing brokered").toEqual([]);
+    expect(url(brokerRemoteMcp(custom, { botId: "b1", threadId: "t1" }, b)), "nothing failed here: same token, same warm engine").toBe(first);
+    expect(retryBrokeredMcp({ botId: "b1", threadId: "t1" }, ["notion", "files"])).toEqual(["notion"]);
+    const next = url(brokerRemoteMcp(custom, { botId: "b1", threadId: "t1" }, b));
+    expect(next, "a new token, so the engine's server list changes and it starts again").not.toBe(first);
+    expect(url(brokerRemoteMcp(custom, { botId: "b1", threadId: "t1" }, b)), "then kept again").toBe(next);
+  });
+
+  it("says which servers didn't connect, and that they connect again on the next message", () => {
+    expect(mcpReconnectLine(["notion"])).toBe("The MCP server notion didn't connect, so its tools weren't available this time. It connects again on your next message.");
+    expect(mcpReconnectLine(["notion", "hq", "mail"])).toBe("The MCP servers notion, hq, and mail didn't connect, so their tools weren't available this time. They connect again on your next message.");
+  });
+
   withBroker("takes a gateway's two service-token headers to it, while the engine's server list holds neither", async () => {
     const id = "id-5c1d.access", secret = "secret-0f9e8d7c6b5a";
     const gateway = await startFakeHttpMcp({ tools: [{ name: "lookup_order" }], requireHeaders: { "CF-Access-Client-Id": id, "CF-Access-Client-Secret": secret } });
@@ -82,7 +101,7 @@ describe("remote MCP servers through the broker", () => {
       await client.initialize("engine", signal);
       expect(await client.request("tools/call", { name: "lookup_order", arguments: { id: "1042" } }, signal)).toEqual({ content: [{ type: "text", text: "remote execution recorded" }] });
       await client.close();
-      expect(gateway.calls).toEqual([{ name: "lookup_order", arguments: { id: "1042" } }]);
+      expect(gateway.calls).toEqual([{ name: SIGN_IN_CHECK_TOOL, arguments: {} }, { name: "lookup_order", arguments: { id: "1042" } }]);
       expect(gateway.seenHeaders.filter((headers) => headers["cf-access-client-id"] === id && headers["cf-access-client-secret"] === secret).length).toBeGreaterThanOrEqual(3);
     } finally {
       await new Promise((resolve) => bridge.close(resolve));

@@ -1,4 +1,5 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { loadLocale } from "@/lib/i18n";
 
 export const LANGUAGE_KEY = "omb-language";
 
@@ -44,6 +45,14 @@ export function languageChoice(): string | null {
 
 export function effectiveLanguage(choice: string | null, serverDefault: string | undefined): string {
   return choice ?? serverDefault ?? "";
+}
+
+export function localeTag(language: string, system: string | undefined = globalThis.navigator?.language): string | undefined {
+  return language || system;
+}
+
+export function startupLocaleTag(system: string | undefined = globalThis.navigator?.language): string | undefined {
+  return localeTag(effectiveLanguage(languageChoice(), undefined), system);
 }
 
 function notify() {
@@ -98,4 +107,21 @@ export function setLanguageChoice(language: string): void {
 
 export function useLanguageChoice(): string | null {
   return useSyncExternalStore(subscribe, languageChoice, () => null);
+}
+
+/** The person's own language, loaded before a page first draws, so they never see another one first. */
+export function loadPageLanguage(): Promise<string> {
+  return loadLocale(effectiveLanguage(languageChoice(), undefined) || globalThis.navigator?.language);
+}
+
+/** Shows `language` (the system's when empty) once its pack has loaded, and draws the caller again then. `windowPage`:
+ * the window's own page, whose language the desktop app's menus, tray and dialogs follow while nothing is picked. */
+export function usePageLanguage(language: string, windowPage = false): void {
+  const [, setShown] = useState(0);
+  useEffect(() => {
+    void loadLocale(language || globalThis.navigator?.language).then((shown) => {
+      if (windowPage) desktop()?.shown?.(shown);
+      setShown((count) => count + 1);
+    });
+  }, [language, windowPage]);
 }

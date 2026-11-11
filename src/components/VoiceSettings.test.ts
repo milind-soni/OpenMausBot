@@ -27,6 +27,7 @@ const bot = (id: string): Bot => ({
 let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
+  fixture.config = { tts: { configured: true, provider: "elevenlabs", voice: "" } };
   document.documentElement.dataset.reducedMotion = "true";
   host = document.createElement("div");
   document.body.append(host);
@@ -82,13 +83,88 @@ describe("VoiceSettings", () => {
     expect(onPatch).not.toHaveBeenCalled();
   });
 
-  it("lays the voice services out as three online ones above the two on this computer", async () => {
+  it("lays the seven voice services out four to a row, OpenAI beside the other online services", async () => {
     fixture.api.mockResolvedValue({ voices: [] });
     await render(bot("pepper"), vi.fn());
     const radios = [...host.querySelectorAll<HTMLElement>('[role="radiogroup"] [role="radio"]')];
-    expect(radios.map((radio) => radio.textContent)).toEqual(["ElevenLabs", "Fish Audio", "Grok (xAI)", "Built-in Mac voices", "Chatterbox (local)"]);
+    expect(radios.map((radio) => radio.textContent)).toEqual(["ElevenLabs", "Fish Audio", "OpenAI", "Grok (xAI)", "Gemini", "Built-in Mac voices", "Chatterbox (local)"]);
     expect(radios.map((radio) => radio.className.match(/col-span-\d/)?.[0])).toEqual([
-      "col-span-2", "col-span-2", "col-span-2", "col-span-3", "col-span-3",
+      "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1",
     ]);
   });
+});
+
+
+describe("OpenAI voice settings", () => {
+  const openaiRadio = () => [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((radio) => radio.textContent === "OpenAI")!;
+  it("selects marin only after the person chooses OpenAI, without enabling readout", async () => {
+    fixture.api.mockResolvedValue({ tts: { provider: "openai", configured: true }, voices: [] });
+    const onPatch = vi.fn();
+    await render({ ...bot("pepper"), voice: "elevenlabs-voice" }, onPatch);
+    expect(onPatch).not.toHaveBeenCalled();
+    await act(async () => openaiRadio().click());
+    expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ tts: { provider: "openai" } }) });
+    expect(onPatch).toHaveBeenCalledExactlyOnceWith({ voice: "marin" });
+  });
+  it("preserves an already selected OpenAI voice", async () => {
+    fixture.api.mockResolvedValue({ voices: [] });
+    const onPatch = vi.fn();
+    await render({ ...bot("pepper"), voice: "cedar" }, onPatch);
+    await act(async () => openaiRadio().click());
+    expect(onPatch).not.toHaveBeenCalled();
+  });
+  it("does not assign a voice to another bot if it changes while saving the provider", async () => {
+    let resolve!: (v: unknown) => void;
+    fixture.api.mockImplementation((path) => path === "/api/config" ? new Promise((done) => { resolve = done; }) : Promise.resolve({ voices: [] }));
+    const onPatch = vi.fn();
+    await render(bot("pepper"), onPatch);
+    await act(async () => openaiRadio().click());
+    await render(bot("salt"), onPatch);
+    await act(async () => resolve({ tts: { provider: "openai" } }));
+    expect(onPatch).not.toHaveBeenCalled();
+  });
+  it("links a missing key to the existing API key settings and discloses billing and AI voices", async () => {
+    fixture.config = { tts: { provider: "openai", configured: false } };
+    fixture.api.mockResolvedValue({ voices: [] });
+    await render(bot("pepper"), vi.fn());
+    expect(host.textContent).toContain("AI-generated");
+    expect(host.textContent).toContain("billed by OpenAI");
+    expect(host.textContent).toContain("Live call settings are separate");
+    expect(host.textContent).toContain("Add an OpenAI API key");
+    expect(host.querySelector('input[type="password"]')).toBeNull();
+    expect(fixture.api).not.toHaveBeenCalled();
+  });
+});
+
+
+it("sets the default voice even when the provider broadcast arrives before the save response", async () => {
+  let resolve!: (v: unknown) => void;
+  fixture.api.mockImplementation((path) => path === "/api/config" ? new Promise((done) => { resolve = done; }) : Promise.resolve({ voices: [] }));
+  const onPatch = vi.fn();
+  const pepper = bot("pepper");
+  await render(pepper, onPatch);
+  const radio = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((item) => item.textContent === "OpenAI")!;
+  await act(async () => radio.click());
+  fixture.config = { tts: { provider: "openai", configured: true } };
+  await render(pepper, onPatch);
+  await act(async () => resolve({ tts: { provider: "openai", configured: true } }));
+  expect(onPatch).toHaveBeenCalledExactlyOnceWith({ voice: "marin" });
+});
+
+it("keeps a voice selected before the pending provider save completes, even before bot props update", async () => {
+  let resolve!: (v: unknown) => void;
+  fixture.api.mockImplementation((path) => path === "/api/config"
+    ? new Promise((done) => { resolve = done; })
+    : Promise.resolve({ voices: [{ id: "cedar", label: "Cedar" }, { id: "marin", label: "Marin" }] }));
+  const onPatch = vi.fn();
+  const pepper = bot("pepper");
+  await render(pepper, onPatch);
+  const radio = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((item) => item.textContent === "OpenAI")!;
+  await act(async () => radio.click());
+  fixture.config = { tts: { provider: "openai", configured: true } };
+  await render(pepper, onPatch);
+  const picker = host.querySelector<HTMLSelectElement>('select[data-voice-picker]')!;
+  await act(async () => { picker.value = "cedar"; picker.dispatchEvent(new Event("change", { bubbles: true })); });
+  await act(async () => resolve({ tts: { provider: "openai", configured: true } }));
+  expect(onPatch).toHaveBeenCalledExactlyOnceWith({ voice: "cedar" });
 });

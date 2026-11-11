@@ -59,7 +59,7 @@ function linuxDescriptor(userData: string, { session = "x11" }: { session?: "x11
     generation: "01234567-89ab-cdef-0123-456789abcdef",
     driver: {
       path: binary,
-      version: "0.19.3",
+      version: "0.41.3",
       source: "environment",
       manifestSchema: "1",
       fileIdentity,
@@ -67,7 +67,7 @@ function linuxDescriptor(userData: string, { session = "x11" }: { session?: "x11
     daemon: {
       socketPath: socket,
       pid: process.pid,
-      contractVersion: "0.6.0",
+      contractVersion: "0.8.0",
       toolsListSchemaVersion: "1",
       capabilityVersion: "1",
       mcpProtocolVersion: "2025-06-18",
@@ -97,9 +97,16 @@ describe("local computer descriptor contract", () => {
     };
     const gated = gatedLocalComputer(connection, { url: "http://127.0.0.1:1234/control", token: "fixture-token" });
     expect(gated).toMatchObject({ command: process.execPath, args: ["--experimental-strip-types", SPAWNED_PROXIES.localComputer], platform: "linux", scope: "local-computer", generation: connection.generation });
-    expect(gated.env).toEqual({ ...connection.env, ELECTRON_RUN_AS_NODE: "1", OMB_CUA_COMMAND: connection.command, OMB_CUA_ARGS: JSON.stringify(connection.args), OMB_CUA_PLATFORM: "linux", OMB_CONTROL_URL: "http://127.0.0.1:1234/control", OMB_CONTROL_TOKEN: "fixture-token" });
+    expect(gated.env).toEqual({ ...connection.env, ELECTRON_RUN_AS_NODE: "1", OMB_CUA_COMMAND: connection.command, OMB_CUA_ARGS: JSON.stringify(connection.args), OMB_CUA_PLATFORM: "linux", OMB_CONTROL_URL: "http://127.0.0.1:1234/control", OMB_CONTROL_TOKEN: "fixture-token", OMB_COMPUTER_JOURNAL: "0" });
     expect(gated.args.join(" ")).not.toContain("fixture-token");
     expect(connection.env).not.toHaveProperty("OMB_CONTROL_TOKEN");
+  });
+  it("records computer calls for saved steps only when the mount asks", () => {
+    const connection = { command: "/trusted/cua-driver", args: ["mcp"], env: { OMB_COMPUTER_JOURNAL: "1" }, platform: "darwin" as const, scope: "local-computer" as const };
+    const control = { url: "http://127.0.0.1:1234/control", token: "fixture-token" };
+    expect(gatedLocalComputer({ ...connection, env: {} }, control, true).env.OMB_COMPUTER_JOURNAL).toBe("1");
+    expect(gatedLocalComputer({ ...connection, env: {} }, control).env.OMB_COMPUTER_JOURNAL).toBe("0");
+    expect(gatedLocalComputer(connection, control, false).env.OMB_COMPUTER_JOURNAL).toBe("0");
   });
   it("owns the helper's Node mode even when the daemon environment disagrees", () => {
     const gated = gatedLocalComputer({ command: "/trusted/cua-driver", args: ["mcp"], env: { ELECTRON_RUN_AS_NODE: "0" }, platform: "darwin", scope: "local-computer" }, { url: "http://127.0.0.1:1234/control", token: "fixture-token" });
@@ -178,6 +185,23 @@ describe("local computer descriptor", () => {
       generation: descriptor.generation,
       scope: "local-computer",
     });
+  });
+
+  it("accepts the Omarchy descriptor, and Omarchy's package-owned driver only there and only in the bundled minor line", () => {
+    const userData = privateUserData("linux-hyprland-user-data");
+    const gnome = linuxDescriptor(userData, { session: "wayland" });
+    const omarchy = { ...gnome, mode: "linux-wayland-hyprland-supervised", compositor: "hyprland" };
+    const systemDriver = (version: string) => ({ ...omarchy, driver: { ...omarchy.driver, source: "system-package", version } });
+    expect(decodeLinuxDescriptor(omarchy)).toMatchObject({ command: omarchy.driver.path, platform: "linux" });
+    expect(decodeLinuxDescriptor(systemDriver("0.41.3"))).not.toBeNull();
+    expect(decodeLinuxDescriptor(systemDriver("0.41.7"))).not.toBeNull();
+    for (const version of ["0.41.2", "0.42.0", "1.41.3", "0.41.3-1"]) expect(decodeLinuxDescriptor(systemDriver(version)), version).toBeNull();
+    expect(decodeLinuxDescriptor({ ...omarchy, driver: { ...omarchy.driver, version: "0.41.7" } })).toBeNull();
+    expect(decodeLinuxDescriptor({ ...gnome, driver: { ...gnome.driver, source: "system-package" } })).toBeNull();
+    expect(decodeLinuxDescriptor({ ...omarchy, compositor: "gnome-mutter" })).toBeNull();
+    expect(decodeLinuxDescriptor({ ...gnome, compositor: "hyprland" })).toBeNull();
+    const { CUA_DRIVER_RS_ENABLE_WAYLAND: _missing, ...withoutWayland } = omarchy.mcp.env;
+    expect(decodeLinuxDescriptor({ ...omarchy, mcp: { ...omarchy.mcp, env: withoutWayland } })).toBeNull();
   });
 
   it("accepts the exact GNOME Wayland descriptor without weakening the X11 contract", () => {

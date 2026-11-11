@@ -8,15 +8,22 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { fromMarkdown } from "mdast-util-from-markdown";
 
 import { windowsPathDestinations } from "../shared/markdown-windows-paths.ts";
+import { linkPlainPaths } from "../shared/markdown-plain-paths.ts";
+import { PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
 import { inSecretFolder, SECRET_FILE_REFUSAL } from "./secret-folder.ts";
+import { userErrorThrown } from "./user-errors.ts";
 
-export const MESSAGE_FILE_MAX_BYTES = 25 * 1024 * 1024;
+export const MESSAGE_FILE_MAX_BYTES = PREVIEW_MAX_BYTES;
+/** Saving a linked file streams it to the person, so it may be larger than anything read into memory or previewed. */
+export const MESSAGE_FILE_DOWNLOAD_MAX_BYTES = 500 * 1024 * 1024;
 
 export interface OpenedMessageFile {
   handle: FileHandle;
   bytes: number;
   name: string;
   mime: string;
+  /** The canonical host path that was opened. */
+  path: string;
 }
 
 export function messageFileRoots(options: {
@@ -35,6 +42,20 @@ export function messageFileRoots(options: {
 
 function statusError(status: number, message: string, code?: string): Error & { status: number; code?: string } {
   return Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
+}
+
+/** Rounded up so a file just over the limit never reads as the limit itself. */
+function megabytes(bytes: number, round: (value: number) => number = Math.round): string {
+  return `${round(bytes / (1024 * 102.4)) / 10} MB`;
+}
+
+function fileTooLarge(bytes: number, limit: number, path: string): Error {
+  const error = userErrorThrown("serverError.file.tooLarge", {
+    size: megabytes(bytes, Math.ceil),
+    limit: megabytes(limit),
+    name: basename(path),
+  });
+  return Object.assign(error, { status: 413, code: "file_too_large" });
 }
 
 const outsideWorkspace = () =>
@@ -148,12 +169,15 @@ function walkMarkdown(node: MarkdownNode, visit: (node: MarkdownNode) => void): 
   }
 }
 
-function renderedMarkdownTargets(markdown: string): string[] {
+/** `plainPaths`: also the paths written as plain text, which the app renders as links too. */
+function renderedMarkdownTargets(markdown: string, plainPaths = false): string[] {
   const definitions = new Map<string, string>();
   const links: string[] = [];
   const references: string[] = [];
 
-  walkMarkdown(fromMarkdown(markdown, { mdastExtensions: [windowsPathDestinations] }), (node) => {
+  const tree = fromMarkdown(markdown, { mdastExtensions: [windowsPathDestinations] });
+  if (plainPaths) linkPlainPaths(tree, markdown);
+  walkMarkdown(tree, (node) => {
     if (node.type === "definition" && node.identifier && node.url) {
       if (!definitions.has(node.identifier)) definitions.set(node.identifier, node.url);
     } else if ((node.type === "link" || node.type === "image") && node.url) {
@@ -205,7 +229,7 @@ export function messageReferencesFile(text: string, requested: string): boolean 
     return false;
   }
 
-  for (const target of renderedMarkdownTargets(text)) {
+  for (const target of renderedMarkdownTargets(text, true)) {
     try {
       if (referencedPathIdentity(target, false) === wanted) return true;
     } catch {
@@ -348,7 +372,11 @@ export function mimeFor(path: string): string {
 }
 
 /** Canonicalised before and after opening, and the handle compared with the post-open path, to reject symlink escapes and directory swaps. */
-export async function openMessageFile(href: string, roots: readonly string[]): Promise<OpenedMessageFile> {
+export async function openMessageFile(
+  href: string,
+  roots: readonly string[],
+  maxBytes = MESSAGE_FILE_MAX_BYTES,
+): Promise<OpenedMessageFile> {
   const requested = referencedPath(href);
   const canonicalRoots = (await Promise.all(roots.map(async (root) => {
     try {
@@ -386,9 +414,7 @@ export async function openMessageFile(href: string, roots: readonly string[]): P
       const opened = await handle.stat();
       if (opened.isDirectory()) throw statusError(400, "the link points to a folder, not a file", "directory");
       if (!opened.isFile()) throw statusError(400, "the link does not point to a regular file");
-      if (opened.size > MESSAGE_FILE_MAX_BYTES) {
-        throw statusError(413, `file exceeds ${MESSAGE_FILE_MAX_BYTES} bytes`);
-      }
+      if (opened.size > maxBytes) throw fileTooLarge(opened.size, maxBytes, canonicalBefore);
 
       const canonicalAfter = await realpath(candidate);
       if (!containedBy(root, canonicalAfter)) throw outsideWorkspace();
@@ -403,6 +429,7 @@ export async function openMessageFile(href: string, roots: readonly string[]): P
         bytes: opened.size,
         name: basename(canonicalAfter),
         mime: mimeFor(canonicalAfter),
+        path: canonicalAfter,
       };
     } catch (error) {
       await handle?.close().catch(() => undefined);
@@ -422,6 +449,7 @@ const SAVED_SINCE_SLACK_MS = 2_000;
 export async function openFileSavedSince(
   href: string,
   options: { since: number; refuse: readonly string[] },
+  maxBytes = MESSAGE_FILE_MAX_BYTES,
 ): Promise<OpenedMessageFile> {
   const requested = referencedPath(href, false, false);
   if (!isAbsolute(requested) || requested.startsWith("\\\\") || requested.startsWith("//")) throw outsideWorkspace();
@@ -437,7 +465,7 @@ export async function openFileSavedSince(
   if (hidden || refused.some((root) => containedBy(root, canonical))) {
     throw statusError(403, "files in hidden folders or in the app's own data can't be attached", "outside_workspace");
   }
-  const file = await openMessageFile(canonical, [dirname(canonical)]);
+  const file = await openMessageFile(canonical, [dirname(canonical)], maxBytes);
   const opened = await file.handle.stat().catch(async (error: unknown) => {
     await file.handle.close().catch(() => undefined);
     throw error;
@@ -472,12 +500,13 @@ export async function openMessageFolderEntry(
   href: string,
   entry: string,
   roots: readonly string[],
+  maxBytes = MESSAGE_FILE_MAX_BYTES,
 ): Promise<OpenedMessageFile> {
   const folder = await readMessageFolder(href, roots);
   if (!folder.entries.some((listed) => listed.name === entry)) {
     throw statusError(404, "the linked file is unavailable");
   }
-  return openMessageFile(pathToFileURL(join(folder.path, entry)).href, roots);
+  return openMessageFile(pathToFileURL(join(folder.path, entry)).href, roots, maxBytes);
 }
 
 async function readMessageFolder(

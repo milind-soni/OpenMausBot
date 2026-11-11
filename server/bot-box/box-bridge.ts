@@ -1,22 +1,28 @@
-// Runs inside a bot box when the image has no socat: listens on loopback ports and forwards each connection to a unix
-// socket bound into the box, then runs the engine with the box's stdio and exits with its status.
-//   node box-bridge.js --bridge=3128=/run/omb/egress.sock --bridge=8799=/run/omb/harness.sock -- claude -p ...
+// Runs inside a bot box when the image has no socat, or when the box has a relay: listens on loopback ports and forwards
+// each connection to a unix socket bound into the box, dials the relay socket, then runs the engine with the box's stdio
+// and exits with its status.
+//   node box-bridge.js --bridge=3128=/run/omb/egress.sock --bridge=8799=/run/omb/harness.sock [--relay=/run/omb/relay.sock] -- claude -p ...
 import { spawn } from "node:child_process";
 import { connect, createServer, type Server } from "node:net";
 
+import { dialRelay } from "./relay.ts";
+
 export interface BridgeSpec { port: number; socket: string }
 
-export function parseBridgeArgs(argv: readonly string[]): { bridges: BridgeSpec[]; command: string[] } {
+export function parseBridgeArgs(argv: readonly string[]): { bridges: BridgeSpec[]; relay?: string; command: string[] } {
   const bridges: BridgeSpec[] = [];
+  let relay: string | undefined;
   let index = 0;
   for (; index < argv.length; index++) {
     const arg = argv[index]!;
     if (arg === "--") { index++; break; }
+    const relayMatch = /^--relay=(.+)$/.exec(arg);
+    if (relayMatch) { relay = relayMatch[1]!; continue; }
     const match = /^--bridge=(\d{1,5})=(.+)$/.exec(arg);
     if (!match) throw new Error(`box-bridge: unexpected argument ${arg}`);
     bridges.push({ port: Number(match[1]), socket: match[2]! });
   }
-  return { bridges, command: argv.slice(index) };
+  return { bridges, ...(relay ? { relay } : {}), command: argv.slice(index) };
 }
 
 /** Listens on 127.0.0.1:port and pipes each connection to the socket; resolves once listening. */
@@ -36,10 +42,11 @@ export function openBridge(spec: BridgeSpec): Promise<Server> {
 }
 
 export async function runBridged(argv: readonly string[]): Promise<number> {
-  const { bridges, command } = parseBridgeArgs(argv);
+  const { bridges, relay, command } = parseBridgeArgs(argv);
   if (!command.length) throw new Error("box-bridge: no command after --");
   const servers = await Promise.all(bridges.map(openBridge));
   for (const server of servers) server.unref();
+  if (relay) dialRelay(relay);
   const child = spawn(command[0]!, command.slice(1), { stdio: "inherit" });
   for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) process.on(signal, () => { try { child.kill(signal); } catch {} });
   return new Promise((resolve) => {

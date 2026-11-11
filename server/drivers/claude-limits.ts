@@ -1,5 +1,8 @@
+import type { ServerText } from "../../shared/server-text.ts";
+import { chatNotice, type ChatNoticeKey } from "../chat-notices.ts";
+import { redactSecretsInText } from "../redact.ts";
 import { hostTimeZone } from "../turn-clock.ts";
-import { engineFailureMessage, type EngineFailureKind } from "./engine-errors.ts";
+import { engineFailure, type EngineFailureKind } from "./engine-errors.ts";
 import { USAGE_LIMIT } from "./retry.ts";
 
 export interface ClaudeLimit {
@@ -40,11 +43,11 @@ export function claudeUsageLimit(
   return refused || frame.api_error === "usage_limit_reached" || USAGE_LIMIT.test(text);
 }
 
-const CLAUDE_LIMIT_NAMES: Record<string, string> = {
-  five_hour: "5-hour limit",
-  seven_day: "weekly limit",
-  seven_day_opus: "weekly Opus limit",
-  seven_day_sonnet: "weekly Sonnet limit",
+const CLAUDE_LIMIT_NAMES: Record<string, ChatNoticeKey> = {
+  five_hour: "chat.notice.part.fiveHourLimit",
+  seven_day: "chat.notice.part.weeklyLimit",
+  seven_day_opus: "chat.notice.part.weeklyOpusLimit",
+  seven_day_sonnet: "chat.notice.part.weeklySonnetLimit",
 };
 
 /** A weekly window for one model family (seven_day_opus, seven_day_sonnet…), not the overage windows. */
@@ -66,23 +69,40 @@ export function claudeLimitFacts(limit: ClaudeLimit | null | undefined): { limit
 }
 
 export function claudeLimitMessage(limit: ClaudeLimit | null, said?: string, now = Date.now(), timeZone = hostTimeZone()): string {
-  if (limit?.credits) {
-    return "Claude refused this turn because this model runs on extra usage for your account, and those credits are used up. " +
-      "Your plan's own usage is not affected: switch this bot to a model your plan includes, or add extra usage in your Claude account.";
-  }
-  const name = limit?.window && Object.hasOwn(CLAUDE_LIMIT_NAMES, limit.window) ? CLAUDE_LIMIT_NAMES[limit.window] : "usage limit";
-  const meanwhile = modelWindow(limit?.window) ? "choose another model for this bot" : "switch this bot to another AI or Claude account";
+  return claudeLimitError(limit, said, now, timeZone).message;
+}
+
+/** `limit` and `meanwhile` name `chat.notice.part.*` keys, and `resetsAt` is a moment in `timeZone`: the client words both. */
+export function claudeLimitError(limit: ClaudeLimit | null, said?: string, now = Date.now(), timeZone = hostTimeZone()): { message: string; text?: ServerText } {
+  const coded = (key: ChatNoticeKey, params?: Record<string, string | number>, shown = params) =>
+    ({ message: chatNotice(key, shown), text: { key, ...(params ? { params } : {}) } });
+  if (limit?.credits) return coded("chat.notice.claudeExtraUsage");
+  const name = limit?.window && Object.hasOwn(CLAUDE_LIMIT_NAMES, limit.window) ? CLAUDE_LIMIT_NAMES[limit.window]! : "chat.notice.part.usageLimit";
+  const meanwhile: ChatNoticeKey = modelWindow(limit?.window) ? "chat.notice.part.chooseModel" : "chat.notice.part.switchAccount";
+  const parts = { limit: name, meanwhile }, words = { limit: chatNotice(name), meanwhile: chatNotice(meanwhile) };
   if (limit?.resetsAt && limit.resetsAt * 1000 > now) {
+    const at = limit.resetsAt * 1000;
     let resets: string;
     try {
-      resets = `${new Date(limit.resetsAt * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone })} (${timeZone})`;
+      resets = `${new Date(at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone })} (${timeZone})`;
     } catch {
-      resets = `${new Date(limit.resetsAt * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+      resets = `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+      return { message: chatNotice("chat.notice.claudeLimitResets", { ...words, resets }) };
     }
-    return `This Claude account has reached its ${name}, which resets ${resets}. Until then, ${meanwhile}.`;
+    return coded("chat.notice.claudeLimitResets", { ...parts, resetsAt: at, timeZone, resets }, { ...words, resets });
   }
-  const words = said?.trim().replace(/[.\s]+$/, "");
-  return `This Claude account has reached its ${name}${words ? ` (Claude says: "${words}")` : ""}. For now, ${meanwhile}.`;
+  const quoted = said && redactSecretsInText(said.trim().replace(/[.\s]+$/, ""));
+  return quoted ? coded("chat.notice.claudeLimitSaid", { ...parts, said: quoted }, { ...words, said: quoted }) : coded("chat.notice.claudeLimit", parts, words);
+}
+
+/** The API refusing a model newer than the installed CLI, relayed as an api-error frame ("Claude
+ * Code 2.1.268 does not support this model; version 2.1.280 or newer is required…"); it names no model. */
+export function claudeVersionTooOld(
+  frame: { error?: unknown; is_api_error_message?: unknown },
+  text: string,
+): boolean {
+  if (frame.is_api_error_message !== true && typeof frame.error !== "string") return false;
+  return /\bClaude Code v?\d+(?:\.\d+)+ does not support this model\b/i.test(text);
 }
 
 /** Claude Code 2.1.295's api-error kinds (the assistant frame's `error`) that say the cause outright. */
@@ -99,8 +119,12 @@ const CLAUDE_ERROR_KINDS: Record<string, EngineFailureKind> = {
  * text with `api_error_status`. Each is one plain row, never a reply: a kind or status OMB words is named, anything
  * else keeps Claude's own words. */
 export function claudeApiErrorMessage(frame: { error?: unknown; api_error_status?: unknown }, text: string): string {
+  return claudeApiError(frame, text).message;
+}
+
+export function claudeApiError(frame: { error?: unknown; api_error_status?: unknown }, text: string): { message: string; text?: ServerText } {
   const said = text.trim();
   const kind = typeof frame.error === "string" && Object.hasOwn(CLAUDE_ERROR_KINDS, frame.error) ? CLAUDE_ERROR_KINDS[frame.error] : null;
   const status = typeof frame.api_error_status === "number" ? frame.api_error_status : undefined;
-  return engineFailureMessage("Claude", said, { kind, status }) ?? said;
+  return engineFailure("Claude", said, { kind, status }) ?? { message: said };
 }

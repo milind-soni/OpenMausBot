@@ -46,7 +46,7 @@ describe("the widget tools in the catalog", () => {
     expect(show.description).toContain("Ask only what you cannot find or sensibly default, one question per widget;");
     expect(show.description).toContain("if they type something else instead, that is their answer");
     expect(show.description).not.toMatch(/without being asked/);
-    expect(show.description).toMatch(/Never ask for passwords here\. Not available in rooms\.$/);
+    expect(show.description).toMatch(/Never ask for passwords here\. In rooms it is view-only: ask in text there\.$/);
     expect(show.description).toContain("To replace a widget in place (a progress bar moving, a status changing), call this again with the widget_id it returned (was update_widget); one the person already answered cannot be replaced, so show a new one.");
     for (const name of ["attach_file", "show_widget"]) expect(tools.get(name), name).not.toHaveProperty("annotations");
   });
@@ -110,9 +110,9 @@ describe("show_widget", () => {
   });
 
   it("hands the harness's refusal to the model as an error", async () => {
-    const room = harness({ ok: false, status: 409, body: { error: "Widgets are not available in rooms yet. Answer in text." } });
-    expect(await callTool("show_widget", { widget: WIDGET_SAMPLES.pullRequests }, room.context))
-      .toEqual({ text: "Widgets are not available in rooms yet. Answer in text.", isError: true });
+    const answered = harness({ ok: false, status: 409, body: { error: "The person already answered that widget. Show a new one." } });
+    expect(await callTool("show_widget", { widget: WIDGET_SAMPLES.pullRequests }, answered.context))
+      .toEqual({ text: "The person already answered that widget. Show a new one.", isError: true });
     const silent = harness({ ok: false, status: 500, body: {} });
     expect(await callTool("show_widget", { widget: WIDGET_SAMPLES.pullRequests }, silent.context)).toEqual({ text: "Could not show that widget.", isError: true });
   });
@@ -156,7 +156,7 @@ describe("the chat-app tools", () => {
     expect(tools.get("show_html")!.description).toMatch(/^Show a small self-contained web page in this chat, where the person watches it appear and can point at a part to change: /);
     expect(tools.get("show_html")!.description).toContain("or `jsx`, one React component file with a default export");
     // Its last sentence points a dashboard at the bundled data-dashboards skill.
-    expect(tools.get("show_html")!.description).toMatch(/At most 256 KB\. To replace a page you showed, in place, call this again with the app_id it returned and new html, jsx or path \(was update_html\); it reloads, so anything the person did in it is lost\. Never put secrets in it\. Not available in rooms\. For a data dashboard, follow the data-dashboards skill\.$/);
+    expect(tools.get("show_html")!.description).toMatch(/At most 256 KB\. To replace a page you showed, in place, call this again with the app_id it returned and new html, jsx or path \(was update_html\); it reloads, so anything the person did in it is lost\. Never put secrets in it\. In rooms everyone sees it, view-only: send and setContext do nothing\. For a data dashboard, follow the data-dashboards skill\.$/);
     expect(tools.get("show_html")!.inputSchema).not.toHaveProperty("required");
     expect(Object.keys((tools.get("show_html")!.inputSchema as unknown as { properties: object }).properties)).toEqual(expect.arrayContaining(["html", "jsx", "path", "title", "app_id"]));
     expect(Buffer.byteLength(JSON.stringify(tools.get("show_html")))).toBeLessThan(12 * 1024);
@@ -174,6 +174,23 @@ describe("the chat-app tools", () => {
     expect(result).toEqual({ text: "Shown as app m9. To change it, call show_html again with app_id \"m9\"." });
   });
 
+  it("passes frameless on to the page, for a new page and an update", async () => {
+    const { apiResponse, context } = harness({ ok: true, status: 201, body: { messageId: "m9" } });
+    await callTool("show_html", { html: "<p>hi</p>", title: "Hi", frameless: true }, context);
+    expect(apiResponse).toHaveBeenLastCalledWith("/api/internal/options-card", {
+      method: "POST", body: JSON.stringify({ tool: "show_html", html: "<p>hi</p>", title: "Hi", frameless: true }),
+    });
+    await callTool("show_html", { app_id: "m9", html: "<p>hi</p>", frameless: false }, context);
+    expect(JSON.parse(apiResponse.mock.lastCall![1]!.body as string)).toMatchObject({ app_id: "m9", frameless: false });
+  });
+
+  it("passes on the sentence naming the files a folder page left out", async () => {
+    const leftOut = "Left out land.foo (pages can't carry .foo files) and .env (hidden).";
+    const { context } = harness({ ok: true, status: 201, body: { messageId: "m9", leftOut } });
+    expect(await callTool("show_html", { path: "trails", title: "Trails" }, context)).toEqual({ text: `Shown as app m9. To change it, call show_html again with app_id "m9". ${leftOut}` });
+    expect(await callTool("show_html", { app_id: "m9", path: "trails" }, context)).toEqual({ text: `Updated app m9. ${leftOut}` });
+  });
+
   it("says when something in the page was masked as a secret", async () => {
     const { context } = harness({ ok: true, status: 201, body: { messageId: "m9", masked: true } });
     expect((await callTool("show_html", { html: "<p>hi</p>", title: "Hi" }, context)).text).toContain("masked before it was stored");
@@ -185,8 +202,9 @@ describe("the chat-app tools", () => {
     expect(await callTool("show_html", { html: "x".repeat(262_145), title: "Hi" }, context)).toMatchObject({ isError: true });
     expect(await callTool("update_html", { html: "<p>x</p>" }, context)).toEqual({ text: "app_id: is required, the id show_html returned.", isError: true });
     expect(apiResponse).not.toHaveBeenCalled();
-    const room = harness({ ok: false, status: 409, body: { error: "Pages are not available in rooms yet. Answer in text." } });
-    expect(await callTool("show_html", { html: "<p>x</p>", title: "x" }, room.context)).toEqual({ text: "Pages are not available in rooms yet. Answer in text.", isError: true });
+    const fromMcp = harness({ ok: false, status: 409, body: { error: "That app came from an MCP server, not from show_html; it cannot be replaced. Show a new page instead." } });
+    expect(await callTool("show_html", { html: "<p>x</p>", title: "x" }, fromMcp.context))
+      .toEqual({ text: "That app came from an MCP server, not from show_html; it cannot be replaced. Show a new page instead.", isError: true });
     const silent = harness({ ok: false, status: 500, body: {} });
     expect(await callTool("update_html", { app_id: "m1", html: "<p>x</p>" }, silent.context)).toEqual({ text: "Could not update that page.", isError: true });
   });

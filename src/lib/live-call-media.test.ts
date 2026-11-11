@@ -112,6 +112,15 @@ describe("live call media", () => {
     expect(currentCall()).toBeNull();
   });
 
+  it("shows a refusal as the server words it, releases the microphone and offers no retry", async () => {
+    const sentence = "Live calls here go through Azure OpenAI, so only an admin or the owner of this server can start one. Ask an admin if you need a call.";
+    request.mockRejectedValueOnce(new ApiError(sentence, 403, { error: sentence }));
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    expect(liveMedia()).toMatchObject({ phase: "failed", notice: sentence, needsKey: false, action: null });
+    expect(track.stopped).toBe(true);
+    expect(currentCall()).toBeNull();
+  });
+
   it("says who is on the line when another call runs", async () => {
     const other = { ...call, callId: "c0", client: "ios", status: "live" } as const;
     request.mockRejectedValueOnce(new ApiError("A Live call is already running.", 409, { activeCall: other }));
@@ -438,7 +447,7 @@ describe("live call media", () => {
     await startLiveCall({ botId: "b1", threadId: "t1" });
     expect(liveMedia()).toMatchObject({
       phase: "failed",
-      notice: "Live calls need a microphone, and this window can't use one. Open OpenMausBot at a secure https address to make the call.",
+      notice: "Live calls need a microphone, and this window can't use one. Open MausBot at a secure https address to make the call.",
       action: null,
     });
     expect(currentCall()).toBeNull();
@@ -757,7 +766,7 @@ describe("a blocked microphone", () => {
       pageMicrophone,
     });
     await startLiveCall({ botId: "b1", threadId: "t1" });
-    expect(liveMedia()).toMatchObject({ phase: "failed", notice: "Live calls need a microphone, and this window can't use one. Open OpenMausBot at a secure https address to make the call.", action: null });
+    expect(liveMedia()).toMatchObject({ phase: "failed", notice: "Live calls need a microphone, and this window can't use one. Open MausBot at a secure https address to make the call.", action: null });
     expect(liveMedia().notice).not.toMatch(/browser/i);
     expect(pageMicrophone).not.toHaveBeenCalled();
   });

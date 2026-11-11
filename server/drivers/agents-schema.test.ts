@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
+import { dropBlankArguments } from "./agents-blank-arguments.ts";
 import { callTool, type ToolCallContext } from "./agents-call.ts";
 import { availableTools, catalogProfileFromEnv, fullInputSchema } from "./agents-catalog.ts";
 import type { Json } from "./agents-client.ts";
@@ -11,7 +12,7 @@ const record = (value: unknown): value is Json => value !== null && typeof value
 /** Every switch on: each tool the catalog can list, in the form tools/list sends it. */
 const LISTED = availableTools(catalogProfileFromEnv({
   OMB_BOT_ID: WATCHER_OPTIONS_CARD_BOT_ID, OMB_CHIEF_OF_STAFF: "1", OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1",
-  OMB_VOICE_NOTES: "1", OMB_X_RESEARCH: "1", OMB_ESCALATIONS: "1", OMB_TEAM_PEOPLE: "1", OMB_MAUSBOT: "1",
+  OMB_VOICE_NOTES: "1", OMB_X_RESEARCH: "1", OMB_RESEARCH: "1", OMB_TEAM_PEOPLE: "1", OMB_MAUSBOT: "1",
 }));
 
 /** Each keyword the advertised node lacks, with where it sat in the full one. */
@@ -116,7 +117,12 @@ describe("the advertised agents tool schemas", () => {
 });
 
 describe("every agents call is held to its full schema", () => {
-  const cases = LISTED.flatMap((tool) => bounds(fullInputSchema(tool.name)).map((bound) => [`${tool.name} ${bound.path.join(".")} ${bound.keyword}`, tool.name, bound] as const));
+  const all = LISTED.flatMap((tool) => bounds(fullInputSchema(tool.name)).map((bound) => [`${tool.name} ${bound.path.join(".")} ${bound.keyword}`, tool.name, bound] as const));
+  const blankLeftOut = ([, tool, bound]: (typeof all)[number]) => {
+    const args = argumentsBreaking(bound);
+    return JSON.stringify(dropBlankArguments(tool, args)) !== JSON.stringify(args);
+  };
+  const cases = all.filter((one) => !blankLeftOut(one));
 
   it("covers every bound of every listed tool", () => {
     expect(cases.length).toBeGreaterThan(80);
@@ -129,6 +135,14 @@ describe("every agents call is held to its full schema", () => {
     expect(result.text).toContain(`${tool} was not run:`);
     expect(result.text).toContain(bound.path.filter((part) => part !== "[]" && part !== "{}").at(-1) ?? "arguments");
     expect(calls).toEqual([]);
+  });
+
+  it("reads a blank model effort as left out, not as a value out of bounds", () => {
+    expect(all.filter(blankLeftOut).map(([label]) => label)).toEqual(["start_thread model_selection.effort minLength"]);
+    const args = { title: "t", message: "m", model_selection: { instanceId: "codex", model: "gpt", effort: "" } };
+    expect(dropBlankArguments("start_thread", args)).toEqual({ title: "t", message: "m", model_selection: { instanceId: "codex", model: "gpt" } });
+    expect(outOfBounds("start_thread", fullInputSchema("start_thread"), dropBlankArguments("start_thread", args))).toBeUndefined();
+    expect(outOfBounds("start_thread", fullInputSchema("start_thread"), args)).toContain("effort");
   });
 
   it("reads a null as a field left out, and names every problem up to four", () => {

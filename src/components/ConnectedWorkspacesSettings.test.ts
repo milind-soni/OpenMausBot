@@ -69,7 +69,7 @@ it("lists local environments with their folders above the servers, marking a mis
   expect(html.indexOf("Environments on this computer")).toBeLessThan(html.indexOf("Your servers"));
   expect(html).toContain("/home/me/.openmausbot-work");
   expect(html.match(/>missing</g)).toHaveLength(1);
-  expect(html).toContain("https://bots.example.test");
+  expect(html).toContain("bots.example.test · HTTPS");
 });
 
 it("hides local environments and the create form in a dev build", async () => {
@@ -98,7 +98,7 @@ it("creates an environment with the chosen folder — and without one when the f
   envFormFields()[0]!.props.onChange!({ target: { value: "Work" } });
   forms()[0]!.props.onSubmit!({ preventDefault: () => {} });
   await flush();
-  expect(render().html).toContain("Couldn't create the environment.");
+  expect(render().html).toContain("Couldn't create the environment. Check the data folder, then try again.");
 });
 
 it('"Choose…" fills the folder field from the native picker', async () => {
@@ -150,7 +150,7 @@ it("confirms before switching to a local environment, and a failed switch says o
   rowButton("Switch to Old")!.props.onClick!();
   await flush();
   expect(environments.switch).toHaveBeenCalledWith("env-2");
-  expect(render().html).toContain("Couldn't switch.");
+  expect(render().html).toContain("Couldn't switch environments. Try again.");
 });
 
 it("a failed forget keeps the panel honest: one generic error, no crash", async () => {
@@ -161,7 +161,7 @@ it("a failed forget keeps the panel honest: one generic error, no crash", async 
   textButton("Forget")!.props.onClick!();
   await flush();
   expect(environments.forget).toHaveBeenCalledWith("env-1");
-  expect(render().html).toContain("Couldn't forget the environment.");
+  expect(render().html).toContain("Couldn't forget the environment. Try again.");
   expect(render().html).not.toContain("purge");
 });
 
@@ -180,10 +180,27 @@ it("a Cloud of the person's own has no lending control here, since this computer
   vi.mocked((globalThis.window as unknown as { ogb: { environments: { state: ReturnType<typeof vi.fn> } } }).ogb.environments.state)
     .mockResolvedValue({ localOrigin: "http://127.0.0.1:1", remote: false, activeId: "local", environments: [VPS, cloud, other] });
   await mount();
-  const labels = render().nodes.filter(node => node.type === "button").map(node => node.props["aria-label"] ?? Children.toArray(node.props.children).join(""));
-  expect(labels).toContain("Computer access for VPS");
-  expect(labels.filter(label => /Computer access for (My Cloud|Client A)|use this/.test(label))).toEqual([]);
+  const { html } = render();
+  expect(html).toContain('aria-label="Computer access for VPS"');
+  expect(html).not.toMatch(/Computer access for (My Cloud|Client A)|use this/);
   expect(render().html).not.toContain("data-cloud-lending-link");
+});
+
+it("a server of the person's own has Share this computer with the maintainer flag off: the switch asks main, and its computer access opens", async () => {
+  const sharing = { state: vi.fn(), revoke: vi.fn(), servers: vi.fn().mockResolvedValue([{ id: "vps", enabled: false, connected: false, paused: false }]), allow: vi.fn().mockResolvedValue({ enabled: true }) };
+  stub({ computerSharing: sharing });
+  await mount();
+  render(); for (const effect of f.effects) effect(); await flush();
+  const { html, nodes: tree } = render();
+  expect(html).toContain('data-server-share="vps"');
+  expect(html).toContain("Share this computer");
+  expect(html, "the switch stands in for the maintainer's button").not.toContain('aria-label="Computer access for VPS"');
+  const list = tree.find(node => (node.props as { onShare?: unknown }).onShare) as unknown as { props: { onShare: (id: string, on: boolean) => void } };
+  list.props.onShare("vps", true); await flush();
+  expect(sharing.allow).toHaveBeenCalledWith("vps");
+  expect(render().html).toContain("Computer access · VPS");
+  list.props.onShare("vps", false); await flush();
+  expect(sharing.revoke).toHaveBeenCalledWith("vps");
 });
 
 it("shows local environment controls in Simplified Chinese", async () => {

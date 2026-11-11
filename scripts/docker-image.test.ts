@@ -14,7 +14,7 @@ const dockerfile = readFileSync(new URL("../Dockerfile", import.meta.url), "utf8
 const workflow = parse(readFileSync(new URL("../.github/workflows/docker.yml", import.meta.url), "utf8"));
 
 interface Step { op: string; args: string }
-interface Stage { name: string; from: string; steps: Step[] }
+interface Stage { name: string; from: string; platform?: string; steps: Step[] }
 
 function stages(text: string): Stage[] {
   const all: Stage[] = [];
@@ -26,8 +26,8 @@ function stages(text: string): Stage[] {
     const [, op, args] = /^\s*(\S+)\s*([\s\S]*)$/.exec(pending)!;
     pending = "";
     if (op.toUpperCase() === "FROM") {
-      const [, from, name] = /^(\S+)(?:\s+AS\s+(\S+))?$/i.exec(args.trim())!;
-      all.push({ name: name ?? `#${all.length}`, from, steps: [] });
+      const [, platform, from, name] = /^(?:--platform=(\S+)\s+)?(\S+)(?:\s+AS\s+(\S+))?$/i.exec(args.trim())!;
+      all.push({ name: name ?? `#${all.length}`, from, platform, steps: [] });
     } else all.at(-1)?.steps.push({ op: op.toUpperCase(), args: args.trim() });
   }
   return all;
@@ -40,7 +40,7 @@ function chain(target: string): Step[] {
   if (!stage) throw new Error(`the Dockerfile has no ${target} stage`);
   return [...(all.some(s => s.name === stage.from) ? chain(stage.from) : []), ...stage.steps];
 }
-const shipped = () => all.filter(s => s.name !== "build" && s.name !== "edge").flatMap(s => s.steps);
+const shipped = () => all.filter(s => s.name !== "build" && s.name !== "edge" && s.name !== "tunnel").flatMap(s => s.steps);
 const npmInstall = (step: Step) => step.op === "RUN" && /\bnpm install\b/.test(step.args);
 const browserRun = () => chain("runtime").find(step => step.op === "RUN" && step.args.includes("agent-browser install"))!;
 const grokRun = (steps: Step[]) => steps.findIndex(step => step.op === "RUN" && step.args.includes("https://x.ai/cli/install.sh"));
@@ -65,7 +65,7 @@ describe("container images", () => {
     for (const target of ["server", "cloud-home"]) {
       const steps = chain(target);
       const heavy = steps.flatMap((step, i) => (npmInstall(step) ? [i] : []));
-      const app = steps.flatMap((step, i) => (step.op === "COPY" && !step.args.includes("--from=edge") ? [i] : []));
+      const app = steps.flatMap((step, i) => (step.op === "COPY" && !/--from=(?:edge|tunnel) /.test(step.args) ? [i] : []));
       // agent-browser + Chrome, then (Cloud home only) pnpm in the tools layer, then the engines, then the app files
       // (and the Cloud home's Caddyfile)
       expect(heavy, target).toHaveLength(target === "cloud-home" ? 3 : 2);
@@ -106,8 +106,14 @@ describe("container images", () => {
     // pinned, so beneath the engines: an engine release does not re-pull it
     expect(home.findIndex(step => step.args.startsWith("--from=edge "))).toBeLessThan(home.findLastIndex(npmInstall));
     expect(home.filter(step => step.op === "RUN" && /\b(cp|mv)\b[^&]*caddy/.test(step.args))).toEqual([]);
+    // The tunnel's connector: the release scripts/prepare-cloudflared.mjs pins and checks, once, beneath the engines.
+    expect(all.find(s => s.name === "tunnel")!.steps.find(step => step.op === "RUN")!.args).toMatch(/^node \/stage\/prepare-cloudflared\.mjs --current --root \/stage /);
+    expect(home.filter(step => step.args.includes("/usr/local/bin/cloudflared") && step.op === "COPY")).toEqual([
+      { op: "COPY", args: "--from=tunnel /cloudflared /usr/local/bin/cloudflared" },
+    ]);
+    expect(home.findIndex(step => step.args.startsWith("--from=tunnel "))).toBeLessThan(home.findLastIndex(npmInstall));
     expect(home.filter(step => step.args.includes("--from=build")).map(step => step.args)).toEqual([
-      "/src/dist-native/duckdb/linux-x64 ./duckdb", "/src/dist-server ./dist-server", "/src/dist ./dist", "/src/skills ./skills",
+      "/src/dist-native/duckdb/target ./duckdb", "/src/dist-server ./dist-server", "/src/dist ./dist", "/src/skills ./skills",
     ].map(path => `--from=build ${path}`));
     expect(chain("server").filter(step => step.args.includes("--from=build")).every(step => step.args.startsWith("--from=build --chown=maus:maus "))).toBe(true);
   });
@@ -136,7 +142,7 @@ describe("container images", () => {
     const cache = new RegExp(/cache = re\.compile\(r"(.*)"\)/.exec(scan)![1]);
     const removed = shipped().flatMap(step => [...step.args.matchAll(/\brm -rf ([^;&|]+)/g)].flatMap(match => match[1].trim().split(/\s+/)));
     const throwaway = [...new Set(removed.filter(path => path.startsWith("/tmp/")))].sort();
-    expect(throwaway).toEqual(["/tmp/grok-install", "/tmp/node-compile-cache", "/tmp/npm-cache", "/tmp/omb-build-home"]);
+    expect(throwaway).toEqual(["/tmp/grok-install", "/tmp/node-compile-cache", "/tmp/npm-cache", "/tmp/omb-build-home", "/tmp/uv-install"]);
     for (const path of throwaway) expect(cache.test(`${path.slice(1)}/leftover`), path).toBe(true);
     expect(scan).toContain('grok = files["usr/local/bin/grok"]');
   });
@@ -211,6 +217,48 @@ describe("container images", () => {
     expect(script.left).toEqual(script.names);
   });
 
+  it("builds the server image for linux/arm64 too: the DuckDB tree and the browser follow the image's CPU", () => {
+    // The JavaScript build runs once on the build host; only the native tree is per CPU, staged after it.
+    const build = all.find(s => s.name === "build")!;
+    expect(build.platform).toBe("$BUILDPLATFORM");
+    const declared = build.steps.findIndex(step => step.op === "ARG" && step.args === "TARGETARCH");
+    expect(declared).toBeGreaterThan(build.steps.findIndex(step => step.op === "RUN" && step.args.startsWith("pnpm build:server")));
+    const stage = build.steps.find(step => step.op === "RUN" && step.args.includes("prepare-duckdb.mjs"))!;
+    expect(build.steps.indexOf(stage)).toBeGreaterThan(declared);
+    if (process.platform !== "win32") {
+      for (const [targetArch, arch] of [["amd64", "x64"], ["arm64", "arm64"], ["", "x64"]]) {
+        const root = mkdtempSync(join(tmpdir(), "omb-duckdb-arch-"));
+        temporaryDirectories.push(root);
+        mkdirSync(join(root, "scripts"));
+        // A stand-in for the staging script: it stages the CPU it is told to, and records which.
+        writeFileSync(join(root, "scripts/prepare-duckdb.mjs"), 'import { mkdirSync, writeFileSync } from "node:fs"; const d = `dist-native/duckdb/linux-${process.env.OMB_DUCKDB_ARCH}`; mkdirSync(d, { recursive: true }); writeFileSync(`${d}/arch`, process.env.OMB_DUCKDB_ARCH);');
+        const result = spawnSync("sh", ["-c", stage.args], { cwd: root, env: { PATH: process.env.PATH, TARGETARCH: targetArch }, encoding: "utf8" });
+        expect(result.status, `${targetArch}: ${result.stderr}`).toBe(0);
+        expect(readdirSync(join(root, "dist-native/duckdb")), targetArch).toEqual(["target"]);
+        expect(readFileSync(join(root, "dist-native/duckdb/target/arch"), "utf8"), targetArch).toBe(arch);
+      }
+    }
+    // Chrome for Testing has no Linux ARM64 build: an arm64 image takes Debian's Chromium at the same path.
+    const runtime = chain("runtime");
+    expect(runtime.slice(0, runtime.indexOf(browserRun()))).toContainEqual({ op: "ARG", args: "TARGETARCH" });
+    expect(browserRun().args).toMatch(/if \[ "\$TARGETARCH" = arm64 \]; then .*apt-get install -y --no-install-recommends chromium .*ln -s \/usr\/lib\/chromium\/chromium \/opt\/openmausbot-browser\/chrome; +else .*agent-browser install .*; +fi/);
+    // Published for both CPUs; the Cloud home (Fly, amd64) stays as it is.
+    const steps = workflow.jobs.publish.steps as { id?: string; uses?: string; with?: Record<string, string> }[];
+    const server = steps.findIndex(step => step.uses?.startsWith("docker/build-push-action@") && step.id !== "home");
+    const qemu = steps.findIndex(step => step.uses?.startsWith("docker/setup-qemu-action@"));
+    expect(qemu).toBeGreaterThan(-1);
+    expect(qemu).toBeLessThan(server);
+    expect(steps[server].with!.platforms).toBe("linux/amd64,linux/arm64");
+    expect(steps.find(step => step.id === "home")!.with).not.toHaveProperty("platforms");
+    // and an arm64 runner proves the arm64 image boots, serves and browses before anything is published
+    const arm = workflow.jobs["arm64-smoke"];
+    expect(arm["runs-on"]).toBe("ubuntu-24.04-arm");
+    expect(workflow.jobs.publish.needs).toEqual(expect.arrayContaining(["build-and-smoke", "arm64-smoke"]));
+    const armRun = (arm.steps as { run?: string }[]).map(step => step.run ?? "").join("\n");
+    expect(armRun).toContain("/api/health");
+    expect(armRun).toContain("agent-browser --session ci-browser open");
+  });
+
   it("builds Cloud home from the same Dockerfile in CI, with its own layer cache", () => {
     const smoke = workflow.jobs["build-and-smoke"].steps.map((step: { run?: string }) => step.run ?? "").join("\n");
     expect(smoke).toContain("docker build --target cloud-home --build-arg CLOUD_HOME_ENGINES= -t omb-cloud-home:ci .");
@@ -224,6 +272,8 @@ describe("container images", () => {
     expect(home.with!["cache-to"]).toBe("type=gha,scope=cloud-home,mode=max");
     // Both builds key the browser layer on the same Chrome, so they share it.
     for (const build of [server, home]) expect(build.with!["build-args"]).toContain("CHROME_CACHE_TAG=${{ steps.keys.outputs.chrome }}");
+    // and the arm64 one on Debian's newest Chromium, so a security update rebuilds it
+    for (const build of [server, home]) expect(build.with!["build-args"]).toContain("CHROMIUM_CACHE_TAG=${{ steps.keys.outputs.chromium }}");
     expect(home.with!["build-args"]).toContain("CLOUD_HOME_ENGINES=${{ steps.keys.outputs.engines }}");
     expect(home.with!["build-args"]).toContain("ENGINES_CACHE_TAG=${{ steps.keys.outputs.engines_tag }}");
   });
@@ -235,6 +285,8 @@ describe("container images", () => {
     expect(declared).toBeGreaterThan(runtime.findIndex(step => step.op === "RUN" && step.args.startsWith("apt-get update")));
     expect(declared).toBeLessThan(runtime.indexOf(browserRun()));
     expect(browserRun().args).toContain("${CHROME_CACHE_TAG");
+    expect(runtime.findIndex(step => step.op === "ARG" && step.args.startsWith("CHROMIUM_CACHE_TAG="))).toBeLessThan(runtime.indexOf(browserRun()));
+    expect(browserRun().args).toContain("${CHROMIUM_CACHE_TAG");
     const home = all.find(s => s.name === "cloud-home")!.steps;
     expect(home).toContainEqual({ op: "ARG", args: 'CLOUD_HOME_ENGINES="@anthropic-ai/claude-code @openai/codex"' });
     // the engines' install, not the tools layer's pinned pnpm beneath it
@@ -250,7 +302,7 @@ describe("container images", () => {
       const root = mkdtempSync(join(tmpdir(), "omb-docker-keys-"));
       temporaryDirectories.push(root);
       const fake = (name: string, body: string) => writeFileSync(join(root, name), `#!/bin/sh\n${ok ? body : "exit 1"}\n`, { mode: 0o755 });
-      fake("curl", `echo '{"channels":{"Stable":{"version":"154.0.8037.92","downloads":{}}}}'`);
+      fake("curl", `case "$*" in *madison*) printf ' chromium | 150.0.7871.100-1~deb12u1 | bookworm          | arm64\\n chromium | 156.0.8078.73-1~deb12u1  | bookworm-security | arm64\\n';; *) echo '{"channels":{"Stable":{"version":"154.0.8037.92","downloads":{}}}}';; esac`);
       fake("npm", `case "$2" in @anthropic-ai/claude-code@latest) echo 2.1.291;; @openai/codex@latest) echo 0.160.1;; *) exit 1;; esac`);
       const output = join(root, "output");
       writeFileSync(output, "");
@@ -262,11 +314,12 @@ describe("container images", () => {
     };
     expect(resolve(true)).toEqual({
       chrome: "154.0.8037.92",
+      chromium: "156.0.8078.73-1~deb12u1",
       engines: "@anthropic-ai/claude-code@2.1.291 @openai/codex@0.160.1",
       engines_tag: "",
     });
     const today = `date-${new Date().toISOString().slice(0, 10)}`;
-    expect(resolve(false)).toEqual({ chrome: today, engines: "@anthropic-ai/claude-code @openai/codex", engines_tag: today });
+    expect(resolve(false)).toEqual({ chrome: today, chromium: today, engines: "@anthropic-ai/claude-code @openai/codex", engines_tag: today });
   });
 
   // An init collects browser processes whose parents exit, and Chrome gets the
@@ -276,6 +329,28 @@ describe("container images", () => {
       const service = parse(readFileSync(new URL(file, import.meta.url), "utf8")).services.omb;
       expect(service.init, file).toBe(true);
       expect(service.shm_size, file).toBe("512m");
+    }
+  });
+
+  // Caddy in the server's network (network_mode: service:omb) stayed in the old, dead one whenever the server's
+  // container restarted alone, and HTTPS was refused while both looked healthy. It reaches the server over sockets in
+  // a volume both mount instead, and the Caddyfile names the paths the server listens on.
+  it("runs Caddy in its own container, reaching the server's sockets, never in the server's network", () => {
+    for (const [file, caddyfile] of [["../compose.yaml", "../deploy/local/Caddyfile"], ["../deploy/docker-compose.yml", "../deploy/Caddyfile"]]) {
+      const { services, volumes } = parse(readFileSync(new URL(file, import.meta.url), "utf8"));
+      expect(services.caddy.network_mode, file).toBeUndefined();
+      // `OMB_PHONE_RELAY=1` in .env reaches the server, never Caddy.
+      expect(Object.keys(services.omb.environment), file).toContain("OMB_PHONE_RELAY");
+      expect(Object.keys(services.caddy.environment ?? {}), file).not.toContain("OMB_PHONE_RELAY");
+      expect(services.omb.ports, file).toBeUndefined();
+      expect(services.caddy.ports.length, file).toBeGreaterThan(0);
+      expect(services.omb.volumes, file).toContain("edge:/run/openmausbot");
+      expect(services.caddy.volumes, file).toContain("edge:/run/openmausbot");
+      expect(volumes.edge.driver_opts.type, file).toBe("tmpfs");
+      const { OMB_TUNNEL_SOCKET: api, OMB_WEBHOOK_SOCKET: hooks } = services.omb.environment;
+      expect([api, hooks], file).toEqual(["/run/openmausbot/http.sock", "/run/openmausbot/hooks.sock"]);
+      const proxied = [...readFileSync(new URL(caddyfile, import.meta.url), "utf8").matchAll(/reverse_proxy (\S+)/g)].map((m) => m[1]);
+      expect(proxied, caddyfile).toEqual([`unix/${hooks}`, `unix/${api}`]);
     }
   });
 });

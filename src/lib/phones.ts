@@ -84,7 +84,8 @@ export function usePhones(): { phase: "loading" | "ready"; phones: PublicPhone[]
   const disposed = useRef(false);
 
   const refresh = useCallback(() => {
-    void api<{ phones: PublicPhone[] }>("/api/phones")
+    // A poll: never someone using a Cloud home, and never sent from a hidden page (src/state/api.ts `background`).
+    void api<{ phones: PublicPhone[] }>("/api/phones", { background: true })
       .then((response) => {
         if (!disposed.current) setState({ phase: "ready", phones: response.phones ?? [] });
       })

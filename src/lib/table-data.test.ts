@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseTableFile, tableCsv, tableDelimiter, tableRowOrder } from "./table-data";
+import { isTableAmount, parseTableFile, tableCsv, tableDelimiter, tableRowOrder } from "./table-data";
 
 describe("table data", () => {
   it("parses quoted CSV, embedded newlines, escaped quotes, BOM, CRLF and leading zeroes", () => {
@@ -32,6 +32,10 @@ describe("table data", () => {
     expect(exported.rows[1999]).toEqual(["1999", '\'=HYPERLINK("bad")']);
     expect(exported.rows[0]).toEqual(["0", "A,B"]);
   });
+  it("exports negative and signed numbers as numbers while still escaping formulas", () => {
+    const exported = parseTableFile(tableCsv(["Amount"], [["-12.50"], ["+3"], ["-1e3"], ["-1+1"], ["@SUM(A1)"], ["+A1"]]), ",");
+    expect(exported.rows).toEqual([["-12.50"], ["+3"], ["-1e3"], ["'-1+1"], ["'@SUM(A1)"], ["'+A1"]]);
+  });
   it("sorts long integer IDs without losing precision", () => {
     expect(tableRowOrder([["9007199254740993"], ["9007199254740992"], ["-9007199254740993"]], "", { column: 0, descending: false })).toEqual([2, 1, 0]);
   });
@@ -40,5 +44,12 @@ describe("table data", () => {
     expect(tableDelimiter("report.tsv")).toBe("\t");
     expect(tableDelimiter("report.csv.exe")).toBeNull();
     expect(tableDelimiter("report.xlsx")).toBeNull();
+  });
+});
+
+describe("isTableAmount", () => {
+  it("reads prices, grouped thousands and percentages as amounts, and words or dates as not", () => {
+    for (const amount of ["612", "$612", "-$1,234.50", "€9", "12%", "1234", "0.5"]) expect(isTableAmount(amount), amount).toBe(true);
+    for (const text of ["TAP Air Portugal", "Thu 18:40", "2026-11-08", "$", "1,23", "12 %%"]) expect(isTableAmount(text), text).toBe(false);
   });
 });

@@ -60,13 +60,14 @@ function profiles(): Record<string, Record<string, string>> {
   for (const name of ["skills+shared+voice", "skills+shared+voice+non-chief"]) {
     all[`${name}+cloud-home`] = { ...all[name]!, OMB_CLOUD_HOME: "1" };
   }
-  all["skills+shared+voice+escalations"] = { ...all["skills+shared+voice"]!, OMB_ESCALATIONS: "1" };
-  all["skills+shared+voice+escalations+x"] = { ...all["skills+shared+voice+escalations"]!, OMB_X_RESEARCH: "1" };
-  all["skills+shared+voice+escalations+x+team"] = { ...all["skills+shared+voice+escalations+x"]!, OMB_TEAM_PEOPLE: "1" };
-  all["default+legacy-switches"] = { ...all.default!, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1" };
+  all["skills+shared+voice+x"] = { ...all["skills+shared+voice"]!, OMB_X_RESEARCH: "1", OMB_RESEARCH: "1" };
+  all["skills+shared+voice+x+team"] = { ...all["skills+shared+voice+x"]!, OMB_TEAM_PEOPLE: "1" };
+  all["skills+shared+voice+x+team+images"] = { ...all["skills+shared+voice+x+team"]!, OMB_IMAGE_GENERATION: "1" };
+  all["default+legacy-switches"] = { ...all.default!, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1", OMB_ACTIVE_WAITS: "0" };
   for (const name of ["default", "skills+shared+voice"]) all[`${name}+mausbot`] = { ...all[name]!, OMB_MAUSBOT: "1" };
-  all["default+handoff"] = { ...all.default!, OMB_COMPUTER_SELECTION: "0" };
+  all["default+no-computer-pick"] = { ...all.default!, OMB_COMPUTER_SELECTION: "0" };
   for (const name of ["default", "non-chief"]) all[`${name}+room`] = { ...all[name]!, OMB_COMPUTER_SELECTION: "0", OMB_ROOM: "1" };
+  all["default+images"] = { ...all.default!, OMB_IMAGE_GENERATION: "1" };
   return all;
 }
 
@@ -74,40 +75,41 @@ const PROFILES = profiles();
 /** Refused by the server to every bot that is not a Chief of Staff. */
 const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
 /** The profile that mounts the most: its bridged list is checked in whole. */
-const FULL = "skills+shared+voice+escalations+x+team";
+const FULL = "skills+shared+voice+x+team+images";
 
 /** Bytes of each bridged list when its budget was last set. A list may not
  * exceed this by more than 2%, and may not undercut it by more than 2%
  * either: lock a saving in by lowering the number. A Chief's list is longer
  * than another bot's only by the Chief-only names in find_tool's description. */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 16064,
-  "voice": 16845,
-  "shared": 16104,
-  "shared+voice": 16885,
-  "skills": 16091,
-  "skills+voice": 16872,
-  "skills+shared": 16131,
-  "skills+shared+voice": 16912,
-  "non-chief": 15947,
-  "voice+non-chief": 16728,
-  "shared+non-chief": 15987,
-  "shared+voice+non-chief": 16768,
-  "skills+non-chief": 15974,
-  "skills+voice+non-chief": 16755,
-  "skills+shared+non-chief": 16014,
-  "skills+shared+voice+non-chief": 16795,
-  "skills+shared+voice+cloud-home": 16910,
-  "skills+shared+voice+non-chief+cloud-home": 16793,
-  "skills+shared+voice+escalations": 16930,
-  "skills+shared+voice+escalations+x": 16991,
-  "skills+shared+voice+escalations+x+team": 17007,
-  "default+legacy-switches": 16064,
-  "default+mausbot": 16116,
-  "skills+shared+voice+mausbot": 16964,
-  "default+handoff": 14852,
-  "default+room": 14828,
-  "non-chief+room": 14711,
+  "default": 17486,
+  "voice": 18361,
+  "shared": 17526,
+  "shared+voice": 18401,
+  "skills": 17513,
+  "skills+voice": 18388,
+  "skills+shared": 17553,
+  "skills+shared+voice": 18428,
+  "non-chief": 17369,
+  "voice+non-chief": 18150,
+  "shared+non-chief": 17409,
+  "shared+voice+non-chief": 18190,
+  "skills+non-chief": 17396,
+  "skills+voice+non-chief": 18177,
+  "skills+shared+non-chief": 17436,
+  "skills+shared+voice+non-chief": 18217,
+  "skills+shared+voice+cloud-home": 18444,
+  "skills+shared+voice+non-chief+cloud-home": 18233,
+  "skills+shared+voice+x": 18507,
+  "skills+shared+voice+x+team": 18507,
+  "default+legacy-switches": 17486,
+  "default+mausbot": 17538,
+  "skills+shared+voice+mausbot": 18480,
+  "default+no-computer-pick": 16274,
+  "default+room": 16544,
+  "non-chief+room": 16427,
+  "skills+shared+voice+x+team+images": 18429,
+  "default+images": 17502,
 };
 
 type RpcAnswer = { id: number; result?: { tools?: unknown[]; content?: Array<{ text: string }>; isError?: boolean }; error?: { code: number; message: string } };
@@ -276,7 +278,7 @@ describe("agents proxy tools/list golden with the tool bridge on", () => {
   it("keeps the same hot tools whatever the role and features, except the ones a profile does not have", () => {
     const hotOf = (name: string) => toolsOf(wires[name]!).slice(0, -2).map((tool) => tool.name);
     const base = hotOf("default");
-    expect(base).toEqual(["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "request_credential", "request_sign_in", "fill_login", "memory_update"]);
+    expect(base).toEqual(["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "request_credential", "request_sign_in", "fill_login", "message_person", "memory_update"]);
     for (const name of Object.keys(PROFILES)) {
       const selects = PROFILES[name]!.OMB_COMPUTER_SELECTION === "1";
       expect(hotOf(name).filter((tool) => tool !== "send_voice_note"), name).toEqual(selects ? base : base.filter((tool) => tool !== "select_computer"));

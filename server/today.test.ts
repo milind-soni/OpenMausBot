@@ -181,7 +181,7 @@ describe("needs you", () => {
     w.fail(w.atlas.threadId, at(9), "Invalid API key · Please run /login", { setup: true });
     w.fail(lou.threadId, at(8), "401 Unauthorized: OAuth token has expired");
     w.fail(kai.threadId, at(8, 30), TRIAL_CREDIT_REFUSED.paused);
-    w.fail(w.pepper.threadId, at(9, 30), "You've hit your usage limit. Try again at 3pm.");
+    w.fail(w.pepper.threadId, at(9, 30), "You've hit your usage limit. Try again at 3pm.", { text: { key: "chat.notice.usageLimit", params: { provider: "Codex", detail: "" } } });
     w.fail(rex.threadId, at(10), TRIAL_CREDIT_REFUSED.used_up);
     w.fail(rex.threadId, at(10, 5), "This month's cloud desktop hours are used up.", { place: { state: "cc-no-hours", params: { bot: "Rex" }, source: "works-on" } });
     w.fail(zed.threadId, at(10, 6), "Cloud computers can't start right now.", { place: { state: "cc-unavailable", params: { bot: "Zed" }, source: "works-on" } });
@@ -218,6 +218,7 @@ describe("needs you", () => {
     expect(needsYou.find((item) => item.kind === "signed-out" && item.instanceId === "grok")).toMatchObject({ botIds: [w.zed.id] });
     expect(needsYou.find((item) => item.kind === "signed-out" && item.instanceId === "claude")).toMatchObject({ botIds: [w.lou.id, w.atlas.id], threadId: w.atlas.threadId });
     expect(needsYou.find((item) => item.kind === "question" && item.threadId === w.zedTask.threadId)).toMatchObject({ botId: w.zed.id });
+    expect(needsYou.find((item) => item.kind === "usage-limit")).toMatchObject({ textCode: "chat.notice.usageLimit", textParams: { provider: "Codex", detail: "" } });
   });
 
   it("drops a failure once the bot finished a turn after it, an engine signed back in, or the app worked again", () => {
@@ -231,6 +232,15 @@ describe("needs you", () => {
       ["question", "Which draft should go out?"],
       ["question", "Which list should I send the newsletter to?"],
     ]);
+  });
+
+  it.each(["Send the draft", ""])("codes approval titles without changing the English for %j", (title) => {
+    const w = world();
+    w.say(w.atlas.threadId, { role: "bot", kind: "options", at: at(12), card: { title, subtitle: "", options: ["Allow", "Deny"], requestType: "permission", requestId: "permission" } });
+    const items = todayReport(w.sources(), { ...ADMIN, asks: () => true }, MIDNIGHT, NOW).needsYou;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject(title ? { text: `Approve: ${title}`, textCode: "chat.notice.approve", textParams: { what: title } } : { text: "Approve:" });
+    if (!title) expect(items[0]).not.toHaveProperty("textCode");
   });
 
   it("keeps a question nobody answered after its turn ends, until the person answers it, within the week", () => {
@@ -247,6 +257,19 @@ describe("needs you", () => {
 
     w.store.patchMessage(mia.threadId, asked.id, { card: { ...card, answered: "answer", answeredText: "$10", dismissed: false } });
     expect(todayReport(w.sources(), ADMIN, MIDNIGHT, NOW).needsYou).toEqual([]);
+  });
+
+  it("lists a harness question card by its question, and leaves out one a bot is deciding or decided", () => {
+    const w = world();
+    const mia = w.store.createBot({ name: "Mia" });
+    const asked = w.say(mia.threadId, { role: "bot", kind: "options", at: at(12, 3),
+      card: { title: "Your bot has a question", subtitle: "CSV or Excel?", options: [], requestType: "question", requestId: "needs-input-a1-1" } });
+    w.say(w.atlas.threadId, { role: "bot", kind: "options", at: at(12, 4), card: { title: "Your bot has a question", subtitle: "Which region?", options: [],
+      requestType: "question", requestId: "needs-input-a2-1", answered: "answer", answeredBy: { kind: "bot", name: "Luchs" } } });
+    w.parked.push({ id: "a2", botId: w.atlas.id, threadId: w.atlas.threadId, question: "Which region?", decide: {}, createdAt: at(12, 4) });
+    expect(todayReport(w.sources(), ADMIN, MIDNIGHT, NOW).needsYou).toEqual([
+      { kind: "question", id: asked.id, at: at(12, 3), botId: mia.id, threadId: mia.threadId, text: "CSV or Excel?" },
+    ]);
   });
 
   it("drops a question the person closed, and lists a request asked again only where it was asked last", () => {

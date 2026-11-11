@@ -4,7 +4,11 @@ import { useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { scrollParent, scrollWithin } from "@/lib/scroll-within";
 import { t } from "@/lib/i18n";
-import { LmStudioServer, OtherOpenAiCompatServers } from "../OpenAiCompatServers";
+import { BoatOfferPanel } from "../BoatOffer";
+import { LiveProviderSettings } from "../LiveProviderSettings";
+import { VoiceEveryReplySetting } from "../VoiceEveryReplySetting";
+import { BuiltInReplyWait, LmStudioServer, OtherOpenAiCompatServers } from "../OpenAiCompatServers";
+import { OllamaServer } from "../OllamaServer";
 import { KEY_CATALOG, KEY_SECTIONS, keyMatches, savedState, type KeyEntry, type KeyId, type KeySectionId } from "./key-catalog";
 import { finishKeyFocus, useKeyFocus, type KeyFocusRequest } from "./key-focus";
 import { AnthropicEveryClaudeBot, OpenAiCompatUrl, OpenCodeProviderKeys, VpsConnection } from "./KeyPanels";
@@ -13,15 +17,18 @@ import { KEY_ROW, KeyRow, MaskedKey, RowHeading, type KeyStatus } from "./KeyRow
 const CARD = "rounded-xl bg-card in-data-[settings-look=simple]:rounded-[12px] in-data-[settings-look=simple]:border-[0.5px] in-data-[settings-look=simple]:border-(--settings-edge) in-data-[settings-look=simple]:bg-menu";
 const HIGHLIGHT_MS = 1600;
 
-const PANELS: Partial<Record<KeyId, () => ReactNode>> = {
+const PANELS: Partial<Record<KeyId, (visible: boolean) => ReactNode>> = {
   opencodeProviders: () => <OpenCodeProviderKeys />,
+  ollama: (visible) => <OllamaServer visible={visible} />,
   lmStudio: () => <LmStudioServer heading={false} />,
   vps: () => <VpsConnection />,
 };
 
 const EXTRAS: Partial<Record<KeyId, () => ReactNode>> = {
   anthropic: () => <AnthropicEveryClaudeBot />,
-  openaiCompat: () => <><OpenAiCompatUrl /><OtherOpenAiCompatServers /></>,
+  openaiCompat: () => <><OpenAiCompatUrl /><BuiltInReplyWait /><OtherOpenAiCompatServers /></>,
+  box: () => <BoatOfferPanel />,
+  liveKey: () => <LiveProviderSettings />,
 };
 
 function connected(entry: KeyEntry, config: ConfigStatus | null | undefined): boolean {
@@ -30,7 +37,7 @@ function connected(entry: KeyEntry, config: ConfigStatus | null | undefined): bo
   return saved.configured || saved.included === true;
 }
 
-function PanelRow({ entry }: { entry: KeyEntry }) {
+function PanelRow({ entry, visible }: { entry: KeyEntry; visible: boolean }) {
   const { state } = useStore();
   const titleId = useId();
   const saved = savedState(entry, state.config);
@@ -38,7 +45,7 @@ function PanelRow({ entry }: { entry: KeyEntry }) {
   return (
     <div data-key-row={entry.id} role="group" aria-labelledby={titleId} className={KEY_ROW}>
       <RowHeading entry={entry} status={status} titleId={titleId} />
-      <div className="flex flex-col gap-2 pl-8">{PANELS[entry.id]?.()}</div>
+      <div className="flex flex-col gap-2 pl-8">{PANELS[entry.id]?.(visible)}</div>
     </div>
   );
 }
@@ -67,9 +74,9 @@ function ElsewhereRow({ entry }: { entry: KeyEntry }) {
   );
 }
 
-export function KeyCatalogRow({ entry }: { entry: KeyEntry }) {
+export function KeyCatalogRow({ entry, visible }: { entry: KeyEntry; visible: boolean }) {
   if (entry.kind === "uses" && entry.uses) return <KeyRow id={entry.uses} row={entry.id} />;
-  if (entry.kind === "panel") return <PanelRow entry={entry} />;
+  if (entry.kind === "panel") return <PanelRow entry={entry} visible={visible} />;
   if (entry.kind === "elsewhere") return <ElsewhereRow entry={entry} />;
   return <KeyRow id={entry.id}>{EXTRAS[entry.id]?.()}</KeyRow>;
 }
@@ -97,7 +104,8 @@ function KeySection({ id, rows, open, onToggle }: { id: KeySectionId; rows: KeyE
         <ChevronRight size={14} aria-hidden="true" className={cn("shrink-0 text-ink-secondary transition-transform motion-reduce:transition-none", open && "rotate-90")} />
       </button>
       <div id={bodyId} hidden={!open} className="flex flex-col gap-0.5 border-t border-hairline/40 px-1 py-1.5 in-data-[settings-look=simple]:border-t-[0.5px] in-data-[settings-look=simple]:border-(--settings-edge)">
-        {rows.map((entry) => <KeyCatalogRow key={entry.id} entry={entry} />)}
+        {rows.map((entry) => <KeyCatalogRow key={entry.id} entry={entry} visible={open} />)}
+        {id === "voice" && <VoiceEveryReplySetting />}
       </div>
     </section>
   );
@@ -141,7 +149,9 @@ export function KeysPage() {
     return () => window.cancelAnimationFrame(frame);
   }, [focus]);
 
-  const rows = KEY_CATALOG.filter((entry) => keyMatches(entry, q));
+  // With Azure chosen, Live calls do not use the OpenAI key that row points at.
+  const azureLive = state.config?.live?.provider === "azure";
+  const rows = KEY_CATALOG.filter((entry) => keyMatches(entry, q) && !(azureLive && entry.id === "liveCalls"));
   const sections = KEY_SECTIONS.flatMap((section) => {
     const own = rows.filter((entry) => entry.section === section.id);
     return own.length > 0 ? [{ id: section.id, rows: own }] : [];

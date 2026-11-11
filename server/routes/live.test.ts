@@ -139,6 +139,17 @@ describe("live routes", () => {
     expect((await request(d, "PATCH", "/api/live/settings", { voice: "Marin!" })).status).toBe(400);
     expect(d.saved).toEqual([{ idleMinutes: 10, readTypedReplies: false }]);
   });
+  it("saves an Azure provider, endpoint and deployment, refusing a host the key must not reach", async () => {
+    const d = deps();
+    const azure = { provider: "azure", azureEndpoint: "https://my-res.openai.azure.com", azureDeployment: "live-prod" };
+    expect(await request(d, "PATCH", "/api/live/settings", azure)).toMatchObject({ status: 200, body: { live: azure } });
+    expect(await request(d, "PATCH", "/api/live/settings", { azureEndpoint: "https://evil.example" })).toMatchObject({ status: 400, body: { error: expect.stringContaining("Azure OpenAI resource") } });
+    expect(await request(d, "PATCH", "/api/live/settings", { azureEndpoint: "http://my-res.openai.azure.com" })).toMatchObject({ status: 400 });
+    expect(await request(d, "PATCH", "/api/live/settings", { azureDeployment: "a b" })).toMatchObject({ status: 400, body: { error: expect.stringContaining("deployment name") } });
+    expect((await request(d, "PATCH", "/api/live/settings", { provider: "aws" })).status).toBe(400);
+    expect((await request(d, "PATCH", "/api/live/settings", { azureEndpoint: "", azureDeployment: "" })).status).toBe(200);
+    expect(d.saved).toEqual([azure, { azureEndpoint: "", azureDeployment: "" }]);
+  });
   it("saves nothing for an empty patch", async () => {
     const d = deps();
     expect(await request(d, "PATCH", "/api/live/settings", {})).toEqual({ status: 400, body: { error: "nothing to save" } });
@@ -154,6 +165,11 @@ describe("live routes", () => {
     expect(await request(deps(), "GET", "/api/live/session")).toEqual({ status: 404, body: { from: "inline routes" } });
     expect(await request(deps(), "PUT", "/api/live/settings", {})).toEqual({ status: 404, body: { from: "inline routes" } });
     expect(await request(deps(), "GET", "/api/bots")).toEqual({ status: 404, body: { from: "inline routes" } });
+  });
+  it("answers a call the Azure limit refuses with its words as a 403, and no setup prompt", async () => {
+    const sentence = "Only an admin can start one.";
+    const d = deps({ calls: { ...deps().calls, start: vi.fn(async () => { throw new LiveSessionError(sentence, 403); }) } });
+    expect(await request(d, "POST", "/api/live/session", { botId: "bot1", sdp: "v=0", client: "web" })).toEqual({ status: 403, body: { error: sentence } });
   });
   it("is for admins only", () => {
     expect(requiredScope("POST", "/api/live/session")).toBe("admin");

@@ -10,7 +10,8 @@ import { join } from "node:path";
 import type { Surface } from "../shared/wire.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
-import { parseMemberClaim, teamRoleScopes, type CloudTeam } from "./cloud-team.ts";
+import { parseMemberClaim, teamMemberEmail, teamRoleScopes, type CloudTeam } from "./cloud-team.ts";
+import { isLoopbackHost } from "./request-auth.ts";
 import { formatPairingCode, type SessionRegistry } from "./sessions.ts";
 
 /** Any of these switches the server into Cloud home mode; then all are required. */
@@ -42,6 +43,10 @@ export interface CloudHomeConfig {
   machineId: string;
   adminOrigin: string;
   publicOrigin: string;
+  /** The addresses this home answered at before a move to another provider (OMB_CLOUD_LEGACY_ORIGINS), each an exact https
+   * origin. The old address forwards here with Host rewritten to `publicOrigin`'s name, so a page or client still on it
+   * sends that address as its Origin, which counts as this home's own. Empty for a home that never moved. */
+  legacyOrigins: string[];
   bootstrapSecret: string;
   warnings: string[];
 }
@@ -66,6 +71,18 @@ function exactHttpsOrigin(raw: string | undefined, name: string): string {
   return url.origin;
 }
 
+export const MAX_LEGACY_ORIGINS = 8;
+
+/** OMB_CLOUD_LEGACY_ORIGINS, comma-separated: exact https origins only, never a loopback name (a loopback Origin means this
+ * machine), at most MAX_LEGACY_ORIGINS; this home's own address among them is dropped. */
+function legacyOrigins(raw: string | undefined, publicOrigin: string): string[] {
+  const entries = (raw ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
+  if (entries.length > MAX_LEGACY_ORIGINS) invalid(`OMB_CLOUD_LEGACY_ORIGINS names more than ${MAX_LEGACY_ORIGINS} origins`);
+  const origins = entries.map((entry) => exactHttpsOrigin(entry, "every OMB_CLOUD_LEGACY_ORIGINS entry"));
+  if (origins.some((origin) => isLoopbackHost(new URL(origin).host))) invalid("OMB_CLOUD_LEGACY_ORIGINS must not name a loopback address");
+  return [...new Set(origins)].filter((origin) => origin !== publicOrigin);
+}
+
 /** Null on any machine that is not a Cloud home; throws, so the server refuses to start, on a partial or invalid one. */
 export function cloudHomeConfiguration(env: NodeJS.ProcessEnv = process.env): CloudHomeConfig | null {
   if (!cloudHomeConfigured(env)) return null;
@@ -78,12 +95,13 @@ export function cloudHomeConfiguration(env: NodeJS.ProcessEnv = process.env): Cl
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/.test(machineId)) invalid("OMB_CLOUD_MACHINE_ID must be the Admin's machine id (letters, digits, dashes)");
   const adminOrigin = exactHttpsOrigin(env.OMB_CLOUD_ADMIN_URL, "OMB_CLOUD_ADMIN_URL");
   const publicOrigin = exactHttpsOrigin(env.OMB_PUBLIC_URL, "OMB_PUBLIC_URL");
+  const legacy = legacyOrigins(env.OMB_CLOUD_LEGACY_ORIGINS, publicOrigin);
   const bootstrapSecret = env.OMB_CLOUD_BOOTSTRAP_SECRET ?? "";
   if (!/^[A-Za-z0-9_-]{43,128}$/.test(bootstrapSecret)) invalid("OMB_CLOUD_BOOTSTRAP_SECRET must be at least 256 bits of base64url");
   const warnings: string[] = [];
   const ignored = CLOUD_IGNORED_KEYS.filter((key) => env[key] !== undefined);
   if (ignored.length) warnings.push(`ignoring ${ignored.join(", ")}: Cloud Pro includes no AI; people sign in with their own Claude or ChatGPT account, or an API key`);
-  return { role, team, machineId, adminOrigin, publicOrigin, bootstrapSecret, warnings };
+  return { role, team, machineId, adminOrigin, publicOrigin, legacyOrigins: legacy, bootstrapSecret, warnings };
 }
 
 const TEAM_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
@@ -162,17 +180,22 @@ export function createCloudRequestVerifier(options: { secret: string; now?: () =
 }
 
 export interface CloudPairingResult {
-  status: 200 | 400 | 401 | 429 | 503;
+  status: 200 | 400 | 401 | 403 | 429 | 503;
   body: Record<string, unknown>;
 }
 
-type PairingSessions = Pick<SessionRegistry, "openPairing" | "attemptAllowed" | "noteFailure" | "clearFailures">;
+type PairingSessions = Pick<SessionRegistry, "openPairing" | "revokeMember" | "attemptAllowed" | "noteFailure" | "clearFailures">;
 
 export function createCloudPairing(options: {
   secret: string;
   sessions: PairingSessions;
   /** The team this machine serves: then every pairing body must carry the Admin's `member` claim. */
   team?: CloudTeam | null;
+  /** The team's rule turned remote access off: a User's browser sign-in is refused (an Owner's and an Admin's stay: the
+   * rule is theirs to change, and their admin pages open in a browser). */
+  memberBrowserOff?: () => boolean;
+  /** The claim's `member.invitedBy` (additive): who invited this member, for their welcome (team-welcome.ts). */
+  invited?: (member: string, by: string) => void;
   now?: () => number;
 }) {
   const { sessions } = options;
@@ -195,6 +218,7 @@ export function createCloudPairing(options: {
       const claim = options.team ? parseMemberClaim(parsed as Record<string, unknown>, options.team) : null;
       if (claim && !claim.ok) return { status: 400, body: { error: claim.error } };
       const member = claim?.ok ? claim.member : null;
+      const invitedBy = member ? teamMemberEmail((parsed as { member?: { invitedBy?: unknown } }).member?.invitedBy) : null;
       // oxlint-disable-next-line no-control-regex
       if (label !== undefined && (typeof label !== "string" || label.length > 80 || /[\x00-\x1f\x7f]/.test(label))) return { status: 400, body: { error: "invalid_label" } };
       if (ttlSeconds !== undefined && (!Number.isSafeInteger(ttlSeconds) || (ttlSeconds as number) < 1)) return { status: 400, body: { error: "invalid_ttl" } };
@@ -204,7 +228,12 @@ export function createCloudPairing(options: {
       if ((browser || owner !== undefined) && (typeof owner !== "string" || owner.length > 254 || !OWNER_EMAIL.test(owner))) {
         return { status: 400, body: { error: "invalid_owner" } };
       }
+      if (browser && member?.role === "member" && options.memberBrowserOff?.()) return { status: 403, body: { error: "remote_access_off" } };
       const ttl = Math.min((ttlSeconds as number | undefined) ?? CLOUD_PAIRING_DEFAULT_TTL_S, browser ? CLOUD_BROWSER_SIGN_IN_MAX_TTL_S : CLOUD_PAIRING_MAX_TTL_S);
+      if (member) sessions.revokeMember(member.email, member.role);
+      if (member && invitedBy && invitedBy !== member.email) {
+        try { options.invited?.(member.email, invitedBy); } catch { /* the welcome names nobody; the pairing goes on */ }
+      }
       const opened = sessions.openPairing({
         scopes: member ? teamRoleScopes(member.role) : ["admin", "client"],
         label: typeof label === "string" && label.trim() ? label.trim() : "MausBot Cloud",

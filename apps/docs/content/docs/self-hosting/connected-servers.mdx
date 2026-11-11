@@ -1,0 +1,146 @@
+---
+title: What a connected server shares
+description: For a security reviewer. Exactly what MausBot can do on a server you connect to it, and what that server sends to MausBot.
+icon: ShieldCheck
+---
+
+<Callout title="Connected mode is not on sale yet">
+  A standalone server, the default, has no connector and nothing on this page applies to it. This page describes the connector's code as it is in the [public repository](https://github.com/milind-soni/OpenMausBot/tree/main/connector), so you can check every line against it. No released connector or server contains this mode yet. Items marked **planned** do not exist yet.
+</Callout>
+
+A connected server is a MausBot server you installed and run yourself, which MausBot's control plane (the Admin) may start, stop, update and back up for you, and whose health it watches. The part that does this on your server is the **connector**. On a server you run it works in **customer-run mode**, and that mode is what this page describes.
+
+The whole list of what the Admin may run, ask and learn in this mode is one file: [`connector/src/customer-run.ts`](https://github.com/milind-soni/OpenMausBot/blob/main/connector/src/customer-run.ts). The connector enforces it on your server. It does not depend on the Admin behaving.
+
+## The connector
+
+- One container, `mausbot-connector`, from `ghcr.io/milind-soni/mausbot-connector`, pinned by digest.
+- It only calls out: one HTTPS request to enrol, then one WebSocket to the Admin. It opens no port.
+- It makes its own Ed25519 key at enrolment. The private key stays on your server. It pins the Admin's signing keys.
+- It runs with every Linux capability dropped, a read-only file system and no new privileges.
+- It is given Docker's socket, which is root on the server in the hands of any program. What the connector does with it is fixed in its code: it starts and stops the two containers of your install, runs one fixed read inside your server's container (below), runs short helper containers that copy your data folder to and from a Docker volume on the same server, and replaces itself when you tell it to. It never makes a second MausBot and never changes your `.env` or your Compose file.
+- The mode is chosen on your server when it enrols, kept in the connector's own state, and told to the Admin. The Admin cannot change it.
+
+## It connects the server you installed
+
+The connector attaches to the MausBot the [server installer](/docs/self-hosting/deploy-vps) made in `/opt/openmausbot`: the same containers, the same `data` folder, the same settings. Nothing is reinstalled and no data moves. Two limits:
+
+- It attaches only to that layout: Docker Compose, the published image, the data in a folder beside the Compose file. A server built from source, or run without Docker, cannot be connected yet.
+- A connector started the other way (the mode MausBot uses on servers it operates itself) refuses to enrol on a machine where your MausBot already runs, so there are never two.
+
+## What MausBot can do: seven jobs
+
+Every job is signed by the Admin for your server alone and is refused 15 minutes after it was signed. A job of any other kind, or with any other argument, is refused on your server and the refusal is written to your log. There is no shell, no command the Admin chooses, and no reading of a file by its path.
+
+| Job | What it does on your server |
+|---|---|
+| `start`, `stop`, `restart` | Starts or stops your server's containers, with your settings. A `start` that names an image or a setting is refused |
+| `update` | Hands one image, MausBot's server image pinned by digest, to your server's own updater: `update.sh` in `/opt/openmausbot`, the command you run by hand. It copies the data aside, starts the new version, checks it, and puts the old version and the copy back when the check fails |
+| `status` | Reads the server's state, the two versions and the list of backups |
+| `backup` | Copies the data folder to a Docker volume on your server. MausBot's three newest are kept; a backup you made is never removed to make room |
+| `host-health` | Reads the server's size, load and checks (below) |
+
+Three things to know:
+
+- **Not on the list, so refused:** `export-disk` (uploads an archive of the data to MausBot) and `import-disk` (replaces the data with an archive from elsewhere). They exist in the connector for servers MausBot operates itself.
+- **`update` only moves forward.** An image whose version is older than the one your server runs, or that names no version, is refused: once by the connector, and again by the updater's runner on your server, outside any container. MausBot cannot roll your server back to an earlier release. A second floor, the first release with the hardened profile, is **planned**: no release has that profile yet.
+- **`update` needs your updater.** It works only when `update.sh` is in `/opt/openmausbot` and the connector's installer has set up the small systemd unit that runs it. Without either, the job is refused and nothing changes. A server installer that puts `update.sh` there is not released yet: **planned**.
+
+## What only you can do: two more jobs
+
+Two jobs exist on your server and are refused when MausBot sends them. Root on the server runs them:
+
+| Job | Why MausBot may not |
+|---|---|
+| `self-update` | It replaces the connector, and so every rule on this page. A connector from before this mode does not know the mode, so MausBot asking for one would undo it. You choose the connector; even then, one older than the one running, or one that names no version, is refused |
+| `restore` | It puts older data back over what is there, after a safety copy |
+
+```sh
+docker exec mausbot-connector mausbot-connector job self-update '{"image":"ghcr.io/milind-soni/mausbot-connector@sha256:…"}'
+docker exec mausbot-connector mausbot-connector job restore '{"backupId":"20261028-104512-3fa9"}'
+```
+
+Connector images are pinned by digest and come from MausBot's registry, but they are not signed yet. Checking a signature before a connector is replaced is **planned**. Going back to an older server version is also yours alone: `./update.sh --rollback` or `./update.sh --version` on the server.
+
+Until your team's Owner accepts the server in MausBot, it answers only `status` and `host-health`.
+
+## What else MausBot can ask: four requests
+
+On the same connection the Admin can send HTTP requests. In customer-run mode none of them reaches your server: the connector answers these four itself, and refuses every other path, every other method, and any request that carries a body.
+
+| Request | Answer |
+|---|---|
+| `GET /v1/health` | The server's state, and whether it answers |
+| `GET /v1/version` | The server's version and the connector's |
+| `GET /v1/seats` | How many people can sign in: a number |
+| `GET /v1/update` | Whether an update is running, and the images before and after the last one |
+
+There is no pairing: the Admin cannot open a sign-in on your server, as a member or as anyone. A pairing request, and a request for the team summary, are refused and logged like any other.
+
+## Signing in does not go through MausBot
+
+People sign in to your server with your server's own sign-in: a pairing code you make on the server, or a code emailed to an address on your sign-in list. Neither passes through the connector or the Admin.
+
+- **Pairing codes** work with MausBot unreachable.
+- **Emailed codes** are sent through MausBot's account service unless you set your own mail server (`OMB_SIGNIN_SMTP_URL`). With your own mail server they also work with MausBot unreachable.
+- Sessions already open keep working either way.
+
+## Your log, your rules, your switch
+
+- **The audit log.** Every job, each of its steps, its result, every request and every refusal is one line in `/var/log/mausbot/audit.jsonl` on your server, owned by root. Each line carries the hash of the line before it, so a removed or changed line shows. A job that would change something is refused when the log cannot be written. A failed job's full reason is here; only its code leaves the server.
+
+  ```sh
+  docker exec mausbot-connector mausbot-connector audit --tail 50
+  docker exec mausbot-connector mausbot-connector audit --verify
+  ```
+
+- **Pause.** One command makes the connector refuse every job and every request from MausBot, and log each one. The server keeps running, people keep signing in, and the heartbeat below still goes out, saying that you paused. A switch in Settings is **planned**.
+
+  ```sh
+  docker exec mausbot-connector mausbot-connector pause
+  docker exec mausbot-connector mausbot-connector resume
+  ```
+
+- **Your policy.** `/etc/mausbot/policy.json`, which only root on your server can write, narrows the seven jobs further and can hold updates. The connector reads it before every job and never writes it.
+
+  ```json
+  { "jobs": ["status", "host-health", "update", "backup"], "updates": "hold" }
+  ```
+
+- **Cutting MausBot off.** `docker stop mausbot-connector` ends the connection and the heartbeat. Your server, its sign-in and its bots are not affected.
+
+## What the connector sends
+
+| When | What |
+|---|---|
+| Once, at enrolment | The one-time code, the connector's public key, the mode, and the server's facts: operating system, kernel, architecture, CPU count, memory, free disk, Docker version, whether AppArmor and user namespaces are on |
+| Every 30 seconds | Those facts, plus total disk, available memory, load, uptime, clock difference and each server check as an id and a pass or fail; the server's state, image and version, and whether its bots' sandbox is on or off; the connector's version and image; the mode; whether you paused; the seat count |
+| After each job | The result: the server's state, image and version, or the id and time of a backup. A failure is a fixed code and a fixed sentence |
+
+The seat count is the number of people who can sign in: the addresses on your sign-in list, plus any other address that has signed in, plus you when you signed in with a pairing code and no admin address is on the list. It is a number. No address, name or role is sent.
+
+To build this the connector reads four things from your server, on the server's own loopback: that it answers, whether its bots' sandbox is on or off (not its checks), its version, and its seat count. It keeps those fields and drops the rest of each answer. It reads no chat, file, key, name or address, and it sends no line of any log.
+
+## What your server itself still sends
+
+Your server is a standalone MausBot, and a standalone MausBot talks to MausBot in a few cases of its own. Connecting it does not add to them and does not remove them:
+
+- **Emailed sign-in codes**, unless you use your own mail server: the address being signed in goes to MausBot's account service.
+- **A report to the developers**, only when a person writes a message that tags `@devs`: it carries that message, the bot's name and recent log lines, with secrets removed. While such a report is open, the server asks for its status once an hour.
+- **An update check**, only when a person opens it in the app: it asks GitHub for the latest release.
+- **In the browser:** [usage analytics](/docs/security/analytics), which each person can turn off.
+
+It does not send what a server MausBot operates sends: no health report to the Admin, no team summary with members' addresses, no registration with MausBot's connected-apps broker, no traffic through MausBot's AI, voice or research hosts.
+
+Traffic to the AI providers, engines and apps you set up is between your server and them, and is not on this page.
+
+## Planned
+
+- A released server installer that puts `update.sh` in place, so `update` works without a manual step.
+- Backups to storage of yours outside the server (a bucket). Today a backup is a Docker volume on the same server.
+- A pause switch in Settings.
+- Signed connector images, checked on your server before a connector is replaced.
+- A floor under `update` at the first release with the hardened profile.
+- Seats and plan features delivered to the server as a signed document. Today the seat count is only reported.
+- Connecting a server built from source or run without Docker.
+- A published list of the network addresses a connected server needs.

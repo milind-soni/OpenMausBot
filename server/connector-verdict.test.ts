@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { ConnectorToolGrant } from "../shared/wire.ts";
 import {
+  APP_SANDBOX_REFUSAL,
+  appSandboxAllowed,
+  appSandboxRule,
   COMPOSIO_MULTI_EXECUTE_TOOL,
   connectorCallFromFrame,
   connectorRefusalText,
@@ -68,6 +71,41 @@ describe("connectorCallFromFrame", () => {
     expect(connectorCallFromFrame({ jsonrpc: "2.0", id: 3, method: "tools/call", params: {} }).kind)
       .toBe("unrecognized");
     expect(connectorCallFromFrame({ jsonrpc: "2.0", id: 4, method: "tools/call" }).kind).toBe("unrecognized");
+  });
+});
+
+describe("appSandboxRule", () => {
+  const granted = {};
+  it("opens only a direct call to the apps' sandbox, and only while the turn runs at Full access", () => {
+    let full = true;
+    const level = () => full;
+    for (const name of ["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMOTE_BASH_TOOL"]) {
+      const rule = appSandboxRule(toolsCall(name, { code: "print(1)" }), level);
+      expect(rule.direct).toBe(true);
+      expect(rule.open(granted)).toBe(true);
+      expect(rule.refusal).toBe(APP_SANDBOX_REFUSAL);
+    }
+    const direct = appSandboxRule(toolsCall("COMPOSIO_REMOTE_WORKBENCH", {}), level);
+    full = false;
+    expect(direct.open(granted), "asked again at dispatch: the level dropped meanwhile").toBe(false);
+    full = true;
+    const wrapped = appSandboxRule(multiExecute({ tools: [{ tool_slug: "COMPOSIO_REMOTE_WORKBENCH", arguments: {} }] }), level);
+    expect(wrapped.direct).toBe(false);
+    expect(wrapped.open(granted)).toBe(false);
+    expect(wrapped.refusal).not.toBe(APP_SANDBOX_REFUSAL);
+    expect(appSandboxRule(toolsCall("COMPOSIO_SEARCH_TOOLS", {}), level).open(granted)).toBe(false);
+    expect(appSandboxRule({ method: "tools/list" }, level).open(granted)).toBe(false);
+    expect(appSandboxRule(null, level).open(granted)).toBe(false);
+  });
+
+  it("stays shut at Full access for a bot whose scopes limit its apps, and says the read-only setting is why", () => {
+    const rule = appSandboxRule(toolsCall("COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print(1)" }), () => true);
+    expect(rule.open({ connectorScopes: { apps: { gmail: "read" } } })).toBe(false);
+    expect(rule.open({ connectorScopes: { apps: { gmail: "write" } } }), "an app left off is a limit too").toBe(false);
+    expect(rule.open({ connectorScopes: { apps: {} } })).toBe(false);
+    expect(appSandboxAllowed({ connectorScopes: { apps: { gmail: "read" } } })).toBe(false);
+    expect(appSandboxAllowed({})).toBe(true);
+    expect(rule.refusal).toContain("read only");
   });
 });
 
@@ -179,6 +217,16 @@ describe("refusal text", () => {
     expect(text).toContain("Ask the person");
     expect(text).not.toContain("SLACK_POST_MESSAGE");
     expect(text).not.toContain("GMAIL");
+  });
+
+  it("tells a bot whose batch wraps the apps' sandbox that it runs only at Full access, by a direct call", () => {
+    const text = connectorRefusalText(evaluateConnectorTools(["COMPOSIO_REMOTE_WORKBENCH"], { gmail: { tools: "*" } }).denials);
+    expect(text).toBe(APP_SANDBOX_REFUSAL);
+    expect(text).toContain("Full access");
+    expect(connectorRefusalText([
+      { tool: "COMPOSIO_REMOTE_WORKBENCH", service: "composio", onGrantedService: false },
+      { tool: "NOTION_CREATE_PAGE", service: "notion", onGrantedService: false },
+    ])).not.toContain("sandbox");
   });
 
   it("names every refused tool in a batch", () => {

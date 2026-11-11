@@ -325,7 +325,7 @@ test("a saved company sign-in that can never be read is removed, and signing in 
   ]) {
     await electron43Store(file).write(grant());
     const f = fixture(t, { store: electron43Store(file, undefined, decrypt) });
-    assert.deepEqual(await f.client.start(), { status: "signed-out", message: "This computer's company sign-in couldn't be read, so it was removed. Sign in again." });
+    assert.deepEqual(await f.client.start(), { status: "signed-out", message: "This computer's company sign-in couldn't be read, so it was removed. Sign in again.", messageCodes: ["removed"] });
     await assert.rejects(fs.stat(file), { code: "ENOENT" });
     assert.equal((await f.client.begin({ portalOrigin: origin })).status, "connecting");
   }
@@ -556,4 +556,14 @@ test("reports when the saved enrollment has been read", async t => {
   await settle(); assert.equal(restored, false);
   await f.client.start(); await settle();
   assert.equal(restored, true); assert.equal(f.policies[0].remoteAccess, false, "the saved policy applied before the Admin answered");
+});
+
+test("the saved policy counts as known only once it has been read", async t => {
+  const f = fixture(t, { saved: null });
+  assert.equal(f.client.policyKnown(), false);
+  await f.client.start();
+  assert.equal(f.client.policyKnown(), true);
+  const unreadable = fixture(t, { store: { read: async () => { throw new Error("locked"); }, write: async () => {}, remove: async () => {}, clear: async () => {} } });
+  await unreadable.client.start();
+  assert.equal(unreadable.client.policyKnown(), false, "a store that can't be read says nothing about the policy");
 });

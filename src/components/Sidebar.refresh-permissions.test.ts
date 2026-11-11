@@ -36,7 +36,7 @@ const dispatch = vi.fn();
 let host: HTMLDivElement;
 let root: Root;
 const render = (candidate: Bot) => flushSync(() => root.render(createElement(BotThreadList, {
-  ...botRowProps(initialState, dispatch, candidate, { density: "comfortable", quiet: false, query: "", onMenu: vi.fn() }),
+  ...botRowProps(initialState, dispatch, candidate, { density: "comfortable", query: "", onMenu: vi.fn() }),
   selected: true,
 })));
 const refresh = (threadId: string) => flushSync(() => rows.get(threadId)!.onRefreshPermissions!({ threadId } as never));

@@ -15,10 +15,34 @@ function tagMatches(rest: string, name: string): boolean {
     && !isMentionNameContinuation(rest.slice(name.length));
 }
 
+/** The length of the person's tag at the start of `rest`, if one is there. A tie is the person's: "@Bob" means the
+ * teammate Bob, not a bot of that name; only a longer bot name ("@Bob Bot") wins. */
 export function personTagAt(rest: string, personNames: readonly string[], botNames: readonly string[]): number | undefined {
   const bot = Math.max(0, ...botNames.filter((name) => name.trim() && tagMatches(rest, name)).map((name) => name.length));
-  const person = Math.max(0, ...personNames.filter((name) => tagMatches(rest, name)).map((name) => name.length));
-  return person > bot ? person : undefined;
+  const person = Math.max(0, ...personNames.filter((name) => name.trim() && tagMatches(rest, name)).map((name) => name.length));
+  return person > 0 && person >= bot ? person : undefined;
+}
+
+/** `text` with each tag a person takes blanked, offsets kept: the writer's own and every teammate's, a tie with a bot's
+ * name included. The tags left are the bots'. */
+export function withoutPersonTags(text: string, personNames: readonly string[], botNames: readonly string[]): string {
+  let out = text;
+  let at = -1;
+  while ((at = text.indexOf("@", at + 1)) !== -1) {
+    if (!isMentionBoundary(text, at)) continue;
+    const length = personTagAt(text.slice(at + 1), personNames, botNames);
+    if (length === undefined) continue;
+    out = `${out.slice(0, at)}${" ".repeat(length + 1)}${out.slice(at + length + 1)}`;
+    at += length;
+  }
+  return out;
+}
+
+/** The person whose tag a bot named `name` would share, so "@name" reaches them and never the bot; null when none. */
+export function personNameClash(name: string, people: ReadonlyArray<{ name: string; tags: readonly string[] }>): string | null {
+  const folded = name.trim().replace(/^@+/, "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (!folded) return null;
+  return people.find((person) => person.tags.some((tag) => tag.toLowerCase() === folded))?.name ?? null;
 }
 
 export interface PersonTagOptions {
@@ -101,7 +125,7 @@ export function mentionablePeople(people: ReadonlyArray<{ key: string; name: str
 }
 
 /** The teammates a text tags, in prose only (never inside code), each once with the line or paragraph that tags them.
- * A bot's name of the same length or longer wins, as for the person's own tag. */
+ * Only a longer bot name wins; a tie is the teammate's, as for the person's own tag. */
 export function teammateMentions(text: string, people: readonly MentionablePerson[], botNames: readonly string[] = []): Array<{ key: string; excerpt: string }> {
   const prose = proseOnly(text);
   const found = new Map<string, string>();

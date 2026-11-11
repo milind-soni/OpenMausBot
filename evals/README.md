@@ -51,6 +51,18 @@ Turn a real coordination thread into a synthetic fixture, then replay it through
 
 The redaction step rewrites ids, names, and free text into stable synthetic placeholders and runs a leak scan before writing anything, so a real thread becomes reviewable, committable data. Commit both the redacted scenario and the regenerated baseline under `evals/golden/baselines/`; replay asserts the stable tool traces and outcomes — turn order, tool-call names, dispatch targets, handoff-tree shape — against that baseline.
 
+## Tool choice — does a real model reach the right tool?
+
+`evals/tool-choice` holds requests that went wrong in real use, in the words people used, each with the tools that would have
+been right. It runs a real model against the tool list as shipped, one thread per case on one bot, and prints which tool each
+case reached, whether it looked it up first, and what the turn cost. Use it before changing the tool list: the agents tool
+bridge, a shorter description, a removed built-in.
+
+    OMB_EVAL_LIVE=1 OMB_EVAL_LIVE_INSTANCE='{"instanceId":"claude","driver":"claudeAgent","model":"claude-sonnet-5","config":{"cli":"/path/to/claude"},"environmentFrom":["HOME","USER"]}' \
+      node --experimental-strip-types evals/tool-choice/run-tool-choice.ts --only trigger-on-new-mail,what-did-we-decide
+
+Each case is one real turn on your account, so name the cases you need. It is closed unless `OMB_EVAL_LIVE=1`, never runs in CI, and its data folder is temporary. Add `OMB_AGENTS_TOOL_BRIDGE=1 OMB_EVAL_LIVE_PASS_ENV=OMB_AGENTS_TOOL_BRIDGE` to try the bridge. Only the scoring has an offline test.
+
 ## Tier 3 — opt-in live-model smoke
 
 Live-model runs never execute by default: `pnpm eval --live` prints one skip line and exits 0 unless the gate is open.

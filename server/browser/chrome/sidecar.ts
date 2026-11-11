@@ -5,6 +5,7 @@ import { execFile } from "node:child_process";
 
 import { inRunningBrowser } from "../../browser-engine.ts";
 import { browserRuntimeEnv } from "../../browser-runtime.ts";
+import { spawnBotWork } from "../../oom-score.ts";
 import { connectCdp, type Cdp, type CdpEvent } from "../../browser-sites.ts";
 import { NO_PASSKEY_COMMANDS } from "../cdp/passkeys.ts";
 import type { ChromeIdentity } from "./identity.ts";
@@ -12,6 +13,9 @@ import type { ChromeIdentity } from "./identity.ts";
 /** The pages and workers the browser session attaches to itself; frames and dedicated workers come through their page. */
 const BROWSER_TARGETS = [{ type: "page" }, { type: "service_worker" }, { type: "shared_worker" }, { exclude: true }];
 const PAUSED_ON_START = { autoAttach: true, waitForDebuggerOnStart: true, flatten: true };
+/** How long a browser's start waits for its open tabs to take the identity: a tab that never answers must not keep the browser
+ * from starting. */
+export const IDENTITY_LANDS_MS = 3_000;
 
 export interface IdentitySidecar {
   /** Resolves when the browser closes the connection: it exited, or was replaced. */
@@ -31,10 +35,13 @@ export async function startIdentitySidecar(url: string, identity: SidecarIdentit
   let onClosed!: () => void;
   const closed = new Promise<void>((resolve) => { onClosed = resolve; });
   let cdp: Cdp | null = null;
+  const applying = new Set<Promise<void>>();
   const configure = (message: CdpEvent) => {
     if (message.method !== "Target.attachedToTarget" || !cdp) return;
     const { sessionId, targetInfo } = (message.params ?? {}) as { sessionId?: string; targetInfo?: { type?: string } };
-    if (typeof sessionId === "string") void applyIdentity(cdp, sessionId, targetInfo?.type ?? "", identity, options);
+    if (typeof sessionId !== "string") return;
+    const applied = applyIdentity(cdp, sessionId, targetInfo?.type ?? "", identity, options).finally(() => { applying.delete(applied); });
+    applying.add(applied);
   };
   cdp = await connect(url, 15_000, { event: configure, closed: () => onClosed() });
   try {
@@ -43,7 +50,17 @@ export async function startIdentitySidecar(url: string, identity: SidecarIdentit
     cdp.close();
     throw error;
   }
+  await identityLanded(applying);
   return { closed, close: () => cdp?.close() };
+}
+
+/** A tab already open isn't paused, so it can navigate before its override lands. Chrome 156 then gives that page and its frames
+ * empty high-entropy client hints, because the launcher's --user-agent leaves the override their only source. */
+async function identityLanded(applying: ReadonlySet<Promise<void>>): Promise<void> {
+  if (!applying.size) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([Promise.allSettled(applying), new Promise((resolve) => { timer = setTimeout(resolve, IDENTITY_LANDS_MS); })]);
+  clearTimeout(timer);
 }
 
 /** A paused worker answers its overrides only once it runs, so a worker is sent them and released at once. */
@@ -110,7 +127,7 @@ async function runningBrowserCdpUrl(session: string, spec: LaunchSpec): Promise<
   let answer = await inRunningBrowser(spec.command, env, ["get", "cdp-url"]);
   if (!answer) {
     await new Promise<void>((resolve, reject) => {
-      execFile(spec.command, ["open", "--json", "--no-webmcp"], { env, timeout: 60_000, windowsHide: true }, (error) => error ? reject(error) : resolve());
+      spawnBotWork(() => execFile(spec.command, ["open", "--json", "--no-webmcp"], { env, timeout: 60_000, windowsHide: true }, (error) => error ? reject(error) : resolve()));
     });
     answer = await inRunningBrowser(spec.command, env, ["get", "cdp-url"]);
   }

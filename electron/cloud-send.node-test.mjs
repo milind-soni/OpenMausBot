@@ -8,6 +8,7 @@ import vm from "node:vm";
 import { BOT_PARTS, differenceSignature, itemKey, parseSendSummary, pendingRows, planSend } from "./cloud-send-parts.mjs";
 import { botPatch, CloudSendError, createCloudSend, parseSendState, sendNotice, unanswered } from "./cloud-send.mjs";
 import { installCloudSend, openOwnerSession } from "./cloud-send-main.mjs";
+import { installTeamMove } from "./team-move-main.mjs";
 
 const LOCAL = "http://127.0.0.1:4100";
 const CLOUD = "https://omb-u-1.fly.dev";
@@ -70,14 +71,16 @@ test("a server's answer is kept only in the shape main relies on", () => {
   assert.equal(parseSendSummary(null), null);
 });
 
-test("a bot's fields reach My Cloud without Custom approval and without naming bots My Cloud lacks", () => {
-  const ember = { id: "ember", soul: "Be brief.", approvalMode: "custom", alwaysAllow: ["Bash(ls)"], peers: ["juno", "kit"], modelSelection: { instanceId: "claude", model: "m", extra: 1 }, cwd: "/Users/amit/work" };
-  const body = botPatch(ember, ["soul", "access", "team", "model"], new Set(["juno"]));
-  assert.deepEqual(body, { soul: "Be brief.", alwaysAllow: ["Bash(ls)"], peers: ["juno"], modelSelection: { instanceId: "claude", model: "m" }, requireAvailableModel: true });
+test("a bot's fields reach My Cloud without Custom approval", () => {
+  const ember = { id: "ember", soul: "Be brief.", approvalMode: "custom", alwaysAllow: ["Bash(ls)"], section: "Ops", modelSelection: { instanceId: "claude", model: "m", extra: 1 }, cwd: "/Users/amit/work" };
+  const body = botPatch(ember, ["soul", "access", "team", "model"]);
+  assert.deepEqual(body, { soul: "Be brief.", alwaysAllow: ["Bash(ls)"], section: "Ops", modelSelection: { instanceId: "claude", model: "m" }, requireAvailableModel: true });
   assert.ok(!Object.values(BOT_PARTS).flat().includes("cwd"), "a working folder is this computer's");
-  assert.deepEqual(parseSendState({ auto: false, clouds: { "javascript:alert(1)": {}, [CLOUD]: { off: { a: "you", b: "nonsense" }, created: { "bot:x": true, "login:y": true }, creating: { "bot:z": true, "skill:q": true }, release: [{ id: "mcp:a", digest: "d" }, { id: 3 }] } } }),
+  assert.deepEqual(parseSendState({ auto: false, clouds: { "javascript:alert(1)": {}, [CLOUD]: { off: { a: "you", b: "nonsense" }, created: { "bot:x": true, "login:y": true }, creating: { "bot:z": true, "skill:q": true }, release: [{ id: "mcp:a", digest: "d" }, { id: 3 }],
+    verified: { "t-1": { newest: "m9", rows: 9, there: 9 }, "t-2": { newest: 3 }, "bad id": { newest: "m", rows: 1, there: 1 } }, stamped: { "t-1": true, "t-2": "yes" } } } }),
     { v: 1, clouds: { [CLOUD]: { sent: {}, off: { a: "you" }, dismissed: "", last: null, whole: null, arrived: { bots: 0, updatedBots: 0, skills: 0, logins: 0, settings: 0, onePassword: false, chats: { conversations: 0, messages: 0 } },
-      chats: {}, created: { "bot:x": true }, creating: { "bot:z": true }, release: [{ id: "mcp:a", digest: "d" }], files: {}, on: {} } } }, "nothing is kept of the switch that once sent by itself");
+      chats: {}, created: { "bot:x": true }, creating: { "bot:z": true }, release: [{ id: "mcp:a", digest: "d" }], files: {}, on: {}, verified: { "t-1": { newest: "m9", rows: 9, there: 9 } }, stamped: { "t-1": true } } } },
+    "nothing is kept of the switch that once sent by itself");
 });
 
 function fakeSides({ cloudItems = [], localItems = [], refuse = {} } = {}) {
@@ -113,6 +116,41 @@ function fakeSides({ cloudItems = [], localItems = [], refuse = {} } = {}) {
     },
   };
 }
+
+test("a saved secret goes under its own id, kept to the bots My Cloud has; the value goes only over the owner session", async () => {
+  const secret = { key: itemKey.secret("s1"), kind: "secret", label: "Stripe secret key", id: "s1", parts: { saved: "a" } };
+  const calls = [];
+  const reply = (status, body) => ({ status, ok: status < 400, body });
+  const session = { close: async () => { calls.push({ logout: true }); }, call: async (method, route, body) => {
+    calls.push({ method, route, ...(body === undefined ? {} : { body }) });
+    if (route === "/api/cloud-send") return reply(200, { ...summary([bot("ember", { soul: "s" })]), vault: 1 });
+    return reply(200, {});
+  } };
+  const json = (value) => new Response(JSON.stringify(value), { status: 200 });
+  const asked = [];
+  const send = createCloudSend({
+    local: async (route) => route === "/api/cloud-send" ? json(summary([bot("ember", { soul: "s" }), secret])) : new Response("{}", { status: 404 }),
+    cloud: { origin: () => CLOUD, asleep: () => false, read: async () => json({ ...summary([bot("ember", { soul: "s" })]), vault: 1 }), open: async () => session },
+    handoff: async (what) => { asked.push(what); return what.kind === "secret" ? { secret: { id: "s1", name: "Stripe secret key", value: "sk_fake-sent", bots: ["ember", "ghost"], source: "card", refOnly: true } } : {}; },
+    store: { read: () => null, write() {} },
+  });
+  const { result } = await send.send({ keys: [secret.key] });
+  assert.deepEqual(asked, [{ kind: "secret", id: "s1" }]);
+  const saved = calls.find((call) => call.route === "/api/vault/secrets");
+  assert.deepEqual(saved?.body, { id: "s1", name: "Stripe secret key", value: "sk_fake-sent", bots: ["ember"], source: "card", refOnly: true });
+  assert.equal(result.secrets, 1);
+  assert.deepEqual(result.notes, [{ kind: "narrowed", login: "Stripe secret key" }]);
+});
+
+test("a Cloud that can't keep a secret by its id is sent none, so nothing waits forever or goes twice", async () => {
+  const secret = { key: itemKey.secret("s1"), kind: "secret", label: "Stripe", id: "s1", parts: { saved: "a" } };
+  const sides = fakeSides({ localItems: [bot("ember", { soul: "s" }), secret], cloudItems: [bot("ember", { soul: "s" })] });
+  const send = createCloudSend(sides.deps);
+  const seen = await send.compare();
+  assert.equal(seen.rows.some((row) => row.kind === "secret"), false);
+  await send.send({});
+  assert.equal(sides.calls.includes("POST /api/vault/secrets"), false);
+});
 
 test("a send adds a bot with its own id over one session, says what My Cloud refused, and always signs out", async () => {
   const sides = fakeSides({ localItems: [bot("ember", { soul: "s" })], refuse: { "/api/bots": { status: 409, error: "this workspace is limited to 50 bots" } } });
@@ -172,6 +210,21 @@ test("either page asks only for the move's line, its Try again and closing it; n
   }
 });
 
+test("cloud-send:teams returns empty teams outside My Cloud without throwing", async () => {
+  const handlers = new Map();
+  installTeamMove({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    cloudPage: (event) => event.page ?? null,
+    home: () => ({ origin: CLOUD, grant: async () => ({ origin: CLOUD, code: "C" }) }),
+    account: () => ({ state: () => ({ status: "connected", teams: [{ id: "team-acme", name: "Acme Corp", machine: { origin: CLOUD, status: "ready" } }] }) }),
+    file: () => "/nonexistent/cloud-send.json",
+    journalFile: () => "/nonexistent/team-move.json",
+  });
+  assert.deepEqual(await handlers.get("cloud-send:teams")({ page: "local" }), { teams: [] }, "local page gets empty teams");
+  assert.deepEqual(await handlers.get("cloud-send:teams")({ page: null }), { teams: [] }, "no page context gets empty teams");
+  assert.deepEqual(await handlers.get("cloud-send:teams")({ page: "cloud" }), { teams: [{ id: "team-acme", name: "Acme Corp", ready: true }] }, "My Cloud page gets actual teams");
+});
+
 function preload({ remote = false, activation = false } = {}) {
   let bridge; const invoked = [];
   vm.runInNewContext(readFileSync(new URL("./preload.cjs", import.meta.url), "utf8"), {
@@ -185,7 +238,7 @@ function preload({ remote = false, activation = false } = {}) {
 }
 
 test("the bridge: either page gets only the move's line and the switch that keeps this computer's bots here; its Try again, moving a bot into a team, and turning that switch go only from the person's click on My Cloud's page", async () => {
-  const keys = ["notice", "dismiss", "moveRetry", "teams", "moveToTeam", "teamRetry", "openTeam", "keepHere", "setKeepHere", "onNotice"];
+  const keys = ["notice", "dismiss", "moveRetry", "teams", "moveToTeam", "moveToTeamCoded", "teamRetry", "openTeam", "teamBring", "teamBringMove", "teamBringStatus", "botMoveState", "botChoices", "moveBots", "moveEverything", "botMoveRetry", "openMyCloud", "keepHere", "setKeepHere", "onNotice"];
   const local = preload();
   assert.equal(local.bridge.cloudSend, undefined);
   assert.equal(local.bridge.cloudLogins, undefined);
@@ -196,8 +249,12 @@ test("the bridge: either page gets only the move's line and the switch that keep
   assert.deepEqual(JSON.parse(JSON.stringify(Object.keys(page.bridge.cloudSendPage))), keys);
   await assert.rejects(page.bridge.cloudSendPage.moveRetry(), /Try again/);
   await assert.rejects(page.bridge.cloudSendPage.moveToTeam("scout", "team-acme", "Scout"), /Choose Move/);
+  await assert.rejects(page.bridge.cloudSendPage.moveToTeamCoded("scout", "team-acme", "Scout"), /Choose Move/);
   await assert.rejects(page.bridge.cloudSendPage.teamRetry(), /Try again/);
+  await assert.rejects(page.bridge.cloudSendPage.teamBringMove("scout"), /Choose Move/);
   await assert.rejects(page.bridge.cloudSendPage.setKeepHere(true), /Turn the switch/);
+  await assert.rejects(page.bridge.cloudSendPage.moveBots(["scout"]), /Choose which bots/);
+  await assert.rejects(page.bridge.cloudSendPage.moveEverything(), /Choose which bots/);
   await page.bridge.cloudSendPage.keepHere();
   assert.deepEqual(page.invoked.filter(([channel]) => channel.startsWith("cloud-send") || channel === "one-home:keep-set"), []);
   assert.deepEqual(page.invoked, [["one-home:keep"]], "reading the switch needs no click");
@@ -205,12 +262,13 @@ test("the bridge: either page gets only the move's line and the switch that keep
   await clicked.bridge.cloudSendPage.moveRetry();
   await clicked.bridge.cloudSendPage.dismiss({ toString: () => "one-home" });
   await clicked.bridge.cloudSendPage.moveToTeam({ toString: () => "scout" }, "team-acme", "Scout");
+  await clicked.bridge.cloudSendPage.moveToTeamCoded("scout", { toString: () => "team-acme" }, "Scout");
   await clicked.bridge.cloudSendPage.teamRetry();
   await clicked.bridge.cloudSendPage.teams();
   await clicked.bridge.cloudSendPage.openTeam("team-acme");
   await clicked.bridge.cloudSendPage.setKeepHere("yes");
   assert.deepEqual(JSON.parse(JSON.stringify(clicked.invoked.filter(([channel]) => channel.startsWith("cloud-send") || channel.startsWith("one-home")))), [["cloud-send:move-retry"], ["cloud-send:dismiss", "one-home"],
-    ["cloud-send:team-move", "scout", "team-acme", "Scout"], ["cloud-send:team-retry"], ["cloud-send:teams"], ["cloud-send:team-open", "team-acme"], ["one-home:keep-set", false]]);
+    ["cloud-send:team-move", "scout", "team-acme", "Scout"], ["cloud-send:team-move-coded", "scout", "team-acme", "Scout"], ["cloud-send:team-retry"], ["cloud-send:teams"], ["cloud-send:team-open", "team-acme"], ["one-home:keep-set", false]]);
   await local.bridge.cloudSendPage.setKeepHere(true);
   assert.deepEqual(local.invoked, [["one-home:keep-set", true]], "this computer's own page needs no click check: main checks the sender");
 });
@@ -277,6 +335,27 @@ test("a send that stops as a whole is that send's outcome, so the strip and Sett
   assert.equal(last.error, "Too many connection links. Wait a few minutes and try again.");
   const told = sendNotice(send.snapshot()).last;
   assert.deepEqual({ failed: told.failed, error: told.error, reason: told.reason, seen: told.seen }, { failed: 0, error: "Too many connection links. Wait a few minutes and try again.", reason: "my-cloud", seen: false });
+});
+
+test("a 403 My Cloud names by a serverError key goes on with its English and key; an older server's bare 403 keeps the generic sentence", async () => {
+  const refusedWith = async (body) => {
+    const sides = fakeSides({ localItems: [bot("ember", { soul: "s" })] });
+    const open = sides.deps.cloud.open;
+    sides.deps.cloud.open = async () => {
+      const session = await open();
+      return { ...session, call: async (method, route) => (route.startsWith("/api/cloud-send") ? { status: 403, ok: false, body } : session.call(method, route)) };
+    };
+    return createCloudSend(sides.deps).send({ reason: "move" }).then(() => assert.fail("the send went"), (error) => error);
+  };
+  const english = "Moving a computer's bots, chats and logins goes to My Cloud only. Nothing personal comes into Acme.";
+  const named = await refusedWith({ error: english, errorKey: "serverError.team.personalMove", errorParams: { team: "Acme", bad: { x: 1 } } });
+  assert.ok(named instanceof CloudSendError);
+  assert.deepEqual({ message: named.message, errorKey: named.errorKey, errorParams: named.errorParams }, { message: english, errorKey: "serverError.team.personalMove", errorParams: { team: "Acme" } });
+  const generic = "My Cloud did not let this app make the change. Open My Cloud in this app once, then try again.";
+  for (const body of [{ error: "Forbidden" }, { error: "Forbidden", errorKey: "cloudHome.connect" }, { errorKey: "serverError.team.personalMove" }, null]) {
+    const older = await refusedWith(body);
+    assert.deepEqual({ message: older.message, errorKey: older.errorKey }, { message: generic, errorKey: undefined }, JSON.stringify(body));
+  }
 });
 
 test("My Cloud's notice says what did not go, by kind, with each reason: logins only counted, never a site", async () => {

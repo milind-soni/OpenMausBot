@@ -3,9 +3,9 @@
 import { Check } from "lucide-react";
 import { SKINS, applySkin, resolveSkin, type SkinId } from "@/lib/skins";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
-import { setDressUp, useDressUp } from "@/lib/halloween-dress";
-import type { HalloweenBodyId } from "../../shared/halloween-bodies";
+import { t, tFromServer } from "@/lib/i18n";
+import { setDressUp, useDressUp } from "@/lib/festival-dress";
+import { FESTIVALS, isFestival, type CostumeColor, type FestivalId } from "../../shared/bot-body";
 import { MausAvatar } from "./Avatar";
 import { Switch } from "./SettingsPrimitives";
 import { useSkinChoice } from "./ThemeRow";
@@ -53,21 +53,19 @@ function Miniature({ skin }: { skin: SkinId }) {
   );
 }
 
-const DRESS_UP_PREVIEW: ReadonlyArray<[HalloweenBodyId, "orange" | "purple" | "teal" | "red"]> = [
-  ["pumpkin", "orange"],
-  ["ghost", "purple"],
-  ["witch", "teal"],
-  ["bat", "red"],
-];
+const DRESS_UP_PREVIEW: Record<FestivalId, readonly CostumeColor[]> = {
+  halloween: ["orange", "purple", "teal", "red"],
+  diwali: ["red", "orange", "pink", "coral"],
+};
 
-export function DressUpRow() {
+export function DressUpRow({ festival }: { festival: FestivalId }) {
   const dressed = useDressUp();
   const title = t("settings.skin.dressUp.title");
   return (
     <div data-dress-up className="mt-4 flex items-center gap-4 rounded-xl border border-accent-border/40 bg-accent/[0.06] p-3">
       <div className="flex shrink-0 -space-x-1.5" aria-hidden="true">
-        {DRESS_UP_PREVIEW.map(([body, color]) => (
-          <MausAvatar key={body} color={color} bodyId={body} size={30} animated={false} trackPointer={false} />
+        {DRESS_UP_PREVIEW[festival].map((color) => (
+          <MausAvatar key={color} color={color} bodyId={FESTIVALS[festival].costumes[color]} size={30} animated={false} trackPointer={false} />
         ))}
       </div>
       <div className="min-w-0 flex-1">
@@ -107,7 +105,7 @@ export function SkinPicker() {
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium text-ink">{skin.name}</div>
                   <div className="mt-0.5 text-[11px] leading-snug text-ink-secondary">
-                    {skin.tagline}
+                    {tFromServer(`skins.tagline.${skin.id}`, skin.tagline)}
                   </div>
                 </div>
                 {selected && <Check size={13} className="mt-0.5 shrink-0 text-accent-text" />}
@@ -116,7 +114,7 @@ export function SkinPicker() {
           );
         })}
       </div>
-      {active === "halloween" && <DressUpRow />}
+      {isFestival(active) && <DressUpRow festival={active} />}
     </>
   );
 }

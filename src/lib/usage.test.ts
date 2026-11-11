@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { setLocale } from "@/lib/i18n";
 
 import { botUsage, cachedInput, cachedUsageNote, headlineTokens, tokensColumnLabel, contextChip, contextDetail, contextShare, costCaption, formatTaskTokens, formatTokens, formatUsd, uncachedInput, lastTurnDetail, sumUsage, usageChip, usageDetail } from "./usage";
 
@@ -47,6 +48,23 @@ describe("usage formatting", () => {
     expect(formatUsd(0)).toBe("$0");
     expect(formatUsd(0.004)).toBe("$0.004");
     expect(formatUsd(0.31)).toBe("$0.31");
+    expect(formatUsd(1234.5)).toBe("$1234.50");
+    setLocale("pt-br");
+    expect([formatUsd(0.02), formatUsd(0.004), formatUsd(0)]).toEqual(["US$\u00a00,02", "US$\u00a00,004", "US$\u00a00"]);
+    setLocale("en");
+  });
+
+  describe("in English, the cost keeps its own rounding and symbol whatever the region", () => {
+    afterEach(() => { vi.unstubAllGlobals(); setLocale("en"); });
+    const english = () => [0.015, 0.005, 1234.5, 0.0009, 0, -0.5].map(formatUsd);
+    it("matches toFixed exactly, before and after an en-GB region", () => {
+      expect(english()).toEqual(["$0.01", "$0.005", "$1234.50", "$0.001", "$0", "$-0.500"]);
+      vi.stubGlobal("navigator", { language: "en-GB" });
+      setLocale("en");
+      expect(english()).toEqual(["$0.01", "$0.005", "$1234.50", "$0.001", "$0", "$-0.500"]);
+      setLocale("pt-br");
+      expect(formatUsd(1234.5)).toBe("US$\u00a01234,50");
+    });
   });
 
   it("does not throw on missing usage fields from older bots.json", () => {
@@ -153,8 +171,8 @@ describe("usage formatting", () => {
     expect(contextShare({ ...base, context: { tokens: 142_000, window: 272_000 } })).toMatchObject({ percent: 52, tone: "warning" });
     expect(contextShare({ ...base, context: { tokens: 230_000, window: 272_000 } })).toMatchObject({ percent: 85, tone: "danger" });
     expect(contextShare({ ...base, context: { tokens: 40_000, window: 200_000 } })).toMatchObject({ percent: 20, tone: "quiet" });
-    expect(contextChip({ ...base, context: { tokens: 142_000, window: 272_000 } })).toBe("ctx 52%");
-    expect(contextChip({ ...base, context: { tokens: 142_000 } })).toBe("ctx 142k");
+    expect(contextChip({ ...base, context: { tokens: 142_000, window: 272_000 } })).toBe("52% context used");
+    expect(contextChip({ ...base, context: { tokens: 142_000 } })).toBe("142k context used");
     expect(contextDetail({ ...base, context: { tokens: 142_000, window: 272_000 } })).toBe("Context 142k (52% of 272k)");
     expect(contextDetail({ ...base, context: { tokens: 142_000 } })).toBe("Context 142k");
   });

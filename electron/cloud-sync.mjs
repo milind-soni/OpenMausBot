@@ -58,7 +58,7 @@ const sleep = (ms, signal) => new Promise((resolve) => {
 export function createCloudFilesService({
   settingsFile, stateFile, documentsDir, localDataDir, homeDir = os.homedir(), platform = process.platform, hostname = os.hostname(),
   cloudOrigin, fetch: fetchImpl, trashItem, markDownloaded, openDashboard = async () => {},
-  createClient = createSyncClient, watch = watchFolder, freeBytes, now = Date.now, onChange = () => {}, power = createCloudPowerGate(),
+  t, createClient = createSyncClient, watch = watchFolder, freeBytes, now = Date.now, onChange = () => {}, power = createCloudPowerGate(),
   lending = null, planDisk = () => null,
 }) {
   let settings = readSettings(settingsFile);
@@ -221,7 +221,7 @@ export function createCloudFilesService({
           // lending is paused they wait on My Cloud, as they do while this computer is away.
           const lentFolder = current.lentId && !lent?.paused ? lent?.folders.find((entry) => entry.id === current.lentId) : null;
           const waiting = summary.folders.find((entry) => entry.id === current.id)?.staged ?? 0;
-          const landed = lentFolder && waiting > 0 ? await applyStaged({ client: cloud, folderId: current.id, folder: lentFolder, protectedPaths: lent.protectedPaths,
+          const landed = lentFolder && waiting > 0 ? await applyStaged({ t, client: cloud, folderId: current.id, folder: lentFolder, protectedPaths: lent.protectedPaths,
             now, trashItem, markDownloaded, platform, stopper: passStopper }) : null;
           if (landed?.kept.length) update(folder.key, { kept: [...landed.kept, ...(current.kept ?? [])].slice(0, KEPT_MAX) });
           const result = await shareFolder({ client: cloud, state, folder: { id: current.id }, local: current.pcPath, now, approveDeletes, report });

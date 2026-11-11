@@ -1,7 +1,9 @@
-import type { RuntimeEvent } from "./contracts.ts";
+import { processAlive } from "./browser-processes.ts";
+import type { ProviderAdapter, RuntimeEvent } from "./contracts.ts";
 
-// A turn whose thread emits nothing for stallMs is wedged; waiting on a person or a computer is not a stall.
-// Drivers report a tool only when it starts and when it ends, so a turn with a tool running may stay silent for toolStallMs.
+// A turn whose thread emits nothing for stallMs is wedged; waiting on a person or a computer is not a stall unless the
+// turn's engine is known to have no process left. Drivers report a tool only when it starts and when it ends, so a turn
+// with a tool running may stay silent for toolStallMs.
 export interface WatchedTurn {
   threadId: string;
   botId: string;
@@ -18,19 +20,37 @@ export function stallLimitMs(raw: string | undefined, fallback: number): number 
   return Number.isFinite(ms) && ms > 0 ? ms : fallback;
 }
 
+/** The engine is known to run no process for the thread's turn: its driver tracks one and has none, or the one it names has
+ * exited. A driver that tracks no process proves nothing, so this is false for it. */
+export function engineProcessGone(adapter: Pick<ProviderAdapter, "enginePid"> | null | undefined, threadId: string, alive = processAlive): boolean {
+  if (!adapter?.enginePid) return false;
+  const pid = adapter.enginePid(threadId);
+  return pid === undefined || !alive(pid);
+}
+
+const SUSPENDED_SWEEPS = 3;
+
 const parked = (turn: WatchedTurn): boolean => turn.waitingOnHuman || turn.waitingOnComputer;
 
 export interface TurnWatchdogOptions {
   stallMs: number;
   toolStallMs: number;
+  /** The silence that stops a parked turn whose engine is known to be gone: longer than any wait the harness bounds itself. */
+  parkedStallMs: number;
   checkMs: number;
-  /** silentMs: the silence that stopped the turn, stallMs or toolStallMs. */
+  /** The turn's engine is known to have no process left for it; absent or false, a parked turn waits on. */
+  engineGone?: (turn: WatchedTurn) => boolean;
+  /** silentMs: the silence that stopped the turn, stallMs, toolStallMs or parkedStallMs. */
   onStall: (turn: WatchedTurn, silentMs: number) => void;
+  /** The conversations shown working that nothing holds but a watched turn (no dispatch, engine or settling turn): one no
+   * watched turn holds either is freed once it has stayed so for stallMs. */
+  unheld?: { threads(): Iterable<{ threadId: string; botId: string }>; free(threadId: string, botId: string): void };
   now?: () => number;
 }
 
 export class TurnWatchdog {
   private turns = new Map<string, WatchedTurn>();
+  private unheldSince = new Map<string, number>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private opts: TurnWatchdogOptions;
 
@@ -45,7 +65,15 @@ export class TurnWatchdog {
 
   start(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => this.sweep(), this.opts.checkMs);
+    // Real time, not now(): a sleeping computer suspends the process while the wall clock runs on, so the timer fires
+    // that much late, and that time was not the turns' silence.
+    let lastTickAt = Date.now();
+    this.timer = setInterval(() => {
+      const at = Date.now();
+      const gap = at - lastTickAt;
+      lastTickAt = at;
+      this.sweep(gap > SUSPENDED_SWEEPS * this.opts.checkMs ? gap : 0);
+    }, this.opts.checkMs);
     this.timer.unref?.();
   }
 
@@ -53,6 +81,7 @@ export class TurnWatchdog {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.turns.clear();
+    this.unheldSince.clear();
   }
 
   watch(threadId: string, botId: string): void {
@@ -110,14 +139,39 @@ export class TurnWatchdog {
     return false;
   }
 
-  sweep(): void {
+  /**
+   * sleptMs: the real time since the last sweep when the process was suspended; it is forgiven, not counted as silence.
+   * It may include up to one checkMs of awake time, so a stall after a sleep is caught up to one checkMs late, the
+   * same lag a sweep already has; never early.
+   */
+  sweep(sleptMs = 0): void {
     const at = this.now();
     for (const turn of this.turns.values()) {
-      if (parked(turn)) continue;
-      const silentMs = turn.runningTools.size > 0 ? Math.max(this.opts.stallMs, this.opts.toolStallMs) : this.opts.stallMs;
-      if (at - turn.lastEventAt < silentMs) continue;
+      if (sleptMs) turn.lastEventAt = Math.min(at, turn.lastEventAt + sleptMs);
+      const silentMs = this.silenceLimit(turn);
+      if (silentMs === null || at - turn.lastEventAt < silentMs) continue;
       this.turns.delete(turn.threadId);
       this.opts.onStall(turn, silentMs);
     }
+    this.freeUnheld(at);
+  }
+
+  /** null: the turn may wait on, parked while its engine is not known to be gone. */
+  private silenceLimit(turn: WatchedTurn): number | null {
+    if (parked(turn)) return this.opts.engineGone?.(turn) ? this.opts.parkedStallMs : null;
+    return turn.runningTools.size > 0 ? Math.max(this.opts.stallMs, this.opts.toolStallMs) : this.opts.stallMs;
+  }
+
+  private freeUnheld(at: number): void {
+    const unheld = this.opts.unheld;
+    if (!unheld) return;
+    const still = new Map<string, number>();
+    for (const { threadId, botId } of unheld.threads()) {
+      if (this.turns.has(threadId)) continue;
+      const since = this.unheldSince.get(threadId) ?? at;
+      if (at - since < this.opts.stallMs) still.set(threadId, since);
+      else unheld.free(threadId, botId);
+    }
+    this.unheldSince = still;
   }
 }

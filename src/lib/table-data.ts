@@ -35,6 +35,10 @@ const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "bas
 const NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
 export function isTableNumber(text: string): boolean { return NUMBER.test(text.trim()); }
 
+const AMOUNT = /^[+-]?[$€£¥₹]?\d{1,3}(?:,?\d{3})*(?:\.\d+)?%?$/;
+/** A cell that reads as a quantity (a plain number, a price, a percentage), so its column lines up on the right. */
+export function isTableAmount(text: string): boolean { return isTableNumber(text) || AMOUNT.test(text.trim()); }
+
 export function tableRowOrder(rows: readonly (readonly string[])[], query: string, sort: TableSort): number[] {
   const needle = query.trim().toLocaleLowerCase();
   const order = rows.flatMap((row, index) => !needle || row.some((cell) => cell.toLocaleLowerCase().includes(needle)) ? [index] : []);
@@ -52,6 +56,9 @@ export function tableRowOrder(rows: readonly (readonly string[])[], query: strin
   return order;
 }
 
+/** A cell a spreadsheet would read as a formula; a plain number such as -12.50 is a number, not a formula. */
+const FORMULA = /^(?![+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$)[=+\-@\t\r]/i;
+
 export function tableCsv(headers: readonly string[], rows: readonly (readonly string[])[]): string {
-  return Papa.unparse([headers, ...rows], { newline: "\r\n", escapeFormulae: true });
+  return Papa.unparse([headers, ...rows], { newline: "\r\n", escapeFormulae: FORMULA });
 }

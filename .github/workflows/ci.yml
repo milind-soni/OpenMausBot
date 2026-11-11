@@ -1,3 +1,11 @@
+# Boat (https://docs.boat.dev/ci): while the repository variable BOAT_CI is "on", a run from this repository's own
+# branches (a push to main, a pull request, a merge group) that the repository owner both authored and started does its
+# Linux work on one 16 vCPU Boat VM, one Boat start per run: the static job runs on boat-xlarge and, after its checks,
+# runs the Linux vitest shards, behavior evals and the Linux packaged server smoke side by side
+# (scripts/ci-linux-lanes.mjs) instead of as GitHub-hosted jobs. Boat runs a public repository's job only for the users
+# on its allow-list (`boat ci public`) and fails any other at once, so every other run, a fork's, the nightly and manual
+# runs (the release lane among them), and every run while BOAT_CI is anything else run on GitHub's runners exactly as
+# before. `boat ci` and the dashboard's CI on Boat VMs tab list the Boat jobs (docs/ci.md).
 name: CI
 
 on:
@@ -41,14 +49,26 @@ jobs:
   # platform, and every smoke reports on its own. One final `CI` check
   # aggregates the required jobs (see docs/ci.md for ruleset migration).
   static:
-    name: typecheck + lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    name: >-
+      ${{ vars.BOAT_CI == 'on' && contains(fromJSON('["push", "pull_request", "merge_group"]'), github.event_name)
+      && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.user.login == github.repository_owner)
+      && 'preflight + Linux tests (Boat)' || 'preflight' }}
+    runs-on: >-
+      ${{ vars.BOAT_CI == 'on' && contains(fromJSON('["push", "pull_request", "merge_group"]'), github.event_name)
+      && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.user.login == github.repository_owner)
+      && 'boat-xlarge' || 'ubuntu-latest' }}
+    timeout-minutes: ${{ vars.BOAT_CI == 'on' && 45 || 15 }}
     permissions:
       contents: read
       # ci-scope reads whether the commit before a push got its own green run,
       # and whether the pushed commit already passed the merge queue
       actions: read
+      # and a pull request's labels as they are when the run starts
+      pull-requests: read
     outputs:
       jobs: ${{ steps.scope.outputs.jobs }}
       vitest_os: ${{ steps.scope.outputs.vitest_os }}
@@ -59,7 +79,10 @@ jobs:
         with:
           # Full history lets PR selection use the merge base, including deletes
           # and both sides of renames, without GitHub's changed-file page limit.
+          # Its trees are enough for that; git fetches an old file's contents
+          # when one is read. The whole history took 2m41s to reach a Boat VM.
           fetch-depth: 0
+          filter: blob:none
           persist-credentials: false
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -70,21 +93,88 @@ jobs:
         id: scope
         env:
           GH_TOKEN: ${{ github.token }}
+          OMB_CI_LINUX_IN_STATIC: ${{ runner.environment == 'self-hosted' }}
         run: node scripts/ci-scope.mjs
       - run: pnpm install --frozen-lockfile
       - name: Verify CI selection and documentation references
-        run: pnpm exec vitest run scripts/ci-scope.test.ts scripts/ci-workflow.test.ts scripts/testing/verification-docs.test.ts
+        run: pnpm exec vitest run scripts/ci-scope.test.ts scripts/ci-linux-lanes.test.ts scripts/ci-workflow.test.ts scripts/testing/verification-docs.test.ts
       - name: Validate locale catalogs
         run: pnpm i18n:check
+      - name: Validate the model manifest
+        # Installs download this file from main within hours of a change, so a bad edit must not land.
+        env:
+          MANIFEST_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: node scripts/check-model-manifest.mjs --against "$MANIFEST_BASE"
+      - run: pnpm check:contrast
       - run: pnpm lint
-      # A pull request that changes only docs, tests under scripts/ or the
-      # control plane cannot change what these three check.
-      - if: steps.scope.outputs.build == 'true'
-        run: pnpm typecheck
-      - if: steps.scope.outputs.build == 'true'
-        run: pnpm check:electron
+      - name: Validate the announcements file
+        # Installs download it from main within the hour (docs/announcements.md), so a bad edit must not land.
+        env:
+          ANNOUNCEMENTS_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: node scripts/check-announcements.mjs --against "$ANNOUNCEMENTS_BASE"
+      - name: Source guards
+        # The tests that only read the source: seconds here, and they stay in the shards. On Nov 3-4 2026 one of them was
+        # red on main for 11 hours, and each PR heard about it after about 70 minutes, once its shards had found a runner.
+        run: pnpm exec vitest run src/locales/ scripts/testing/file-size-ratchet.test.ts scripts/testing/index-route-ratchet.test.ts scripts/testing/tighten-ratchets.test.ts scripts/testing/comment-history.test.ts scripts/testing/lazy-server-modules.test.ts scripts/testing/duration-sequencer.test.ts scripts/testing/host-e2e.test.ts scripts/testing/ci-retry-list.test.ts src/lib/copy-text.guard.test.ts src/components/Select.guard.test.ts --reporter=default --reporter=github-actions
+      # The rest runs only on a Boat VM, where ci-scope moved the Linux jobs' work into this job.
+      - name: Remove what Boat installs and GitHub's runners lack
+        if: steps.scope.outputs.linux_lanes
+        # The server starts an engine it finds on PATH: Boat's Hermes then downloads its own Python, Node and tools
+        # into each test's home, about nine seconds for every test that adds a bot. A Team Cloud runs its turns in a
+        # bubblewrap box wherever bwrap works: here, once the step below drops the capability bwrap refuses to start
+        # with, and never on a GitHub runner.
+        run: sudo rm -f /usr/bin/bwrap /usr/local/bin/{agent,claude,codex,cua-driver,cursor-agent,hermes,hermes-acp,hermes-agent,kimi,openclaw,opencode,pi,prime-agent,vibe,vibe-acp}
+      - name: Prepare Electron test runtime
+        if: steps.scope.outputs.linux_lanes
+        run: node --input-type=commonjs -e "require('electron')"
+      - name: Linux tests (vitest shards, behavior evals, packaged server), side by side
+        if: steps.scope.outputs.linux_lanes
+        env:
+          OMB_CI_LINUX_LANES: ${{ steps.scope.outputs.linux_lanes }}
+          # Boat's image sets en_US.UTF-8, whose collation is Intl's default; GitHub's runners use C.UTF-8 and UTC.
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
+          TZ: UTC
+        # Boat's runner gives every process cap_dac_read_search as an ambient capability, so a test can still read a
+        # file it set to mode 000, and Boat's desktop sets DISPLAY. GitHub's runners have neither.
+        shell: setpriv --inh-caps=-all --ambient-caps=-all -- env -u DISPLAY -u XAUTHORITY bash --noprofile --norc -eo pipefail {0}
+        run: node scripts/ci-linux-lanes.mjs
+      - name: Report flaky tests that needed a retry
+        if: ${{ !cancelled() && steps.scope.outputs.linux_lanes }}
+        env:
+          OMB_VITEST_RETRY_LOG: ${{ runner.temp }}/vitest-retries.jsonl
+        run: node scripts/testing/ci-retry-summary.mjs
+      - name: Upload eval run reports on failure
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure() && steps.scope.outputs.linux_lanes
+        with:
+          name: behavior-evals-reports-${{ github.sha }}-${{ github.run_attempt }}
+          path: evals/reports/runs/
+          if-no-files-found: warn
+          retention-days: 7
+
+  build:
+    needs: static
+    if: contains(needs.static.outputs.jobs, '"build"')
+    # The slow checks, about three minutes, beside the shards rather than ahead
+    # of them. A pull request that changes only docs, tests under scripts/ or
+    # the control plane cannot change what they check.
+    name: typecheck + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm check:electron
       - name: production UI build
-        if: steps.scope.outputs.build == 'true'
         run: pnpm exec vite build
 
   vitest:
@@ -92,12 +182,14 @@ jobs:
     # A failing preflight still fails the required gates; nothing is waived.
     needs: static
     if: contains(needs.static.outputs.jobs, '"vitest"')
-    # scripts/ci-scope.mjs picks the platforms and their shards: PRs run Linux
-    # and Windows (the account runs only five macOS jobs at a time), main
-    # pushes and merge groups Linux, and the full lane (nightly, manual runs,
-    # the release lane) all three. A pull request that
+    # scripts/ci-scope.mjs picks the platforms and their shards: PRs run Linux,
+    # and Windows only when their change can break Windows or they carry the
+    # windows label (the account runs only five macOS jobs at a time), main
+    # pushes and merge groups Linux and Windows, and the full lane (nightly,
+    # manual runs, the release lane) all three. A pull request that
     # cannot affect a platform's results leaves it out, and one that changes
-    # only translations runs the locale tests alone. Linux runs every file;
+    # only translations runs the locale tests alone. On a Boat VM the static
+    # job runs the Linux entries itself. Linux runs every file;
     # Windows and macOS run every file but the e2e files that test only OMB's
     # own logic (OMB_VITEST_E2E=host, scripts/testing/host-e2e.ts). The split
     # is deterministic, so a failure names the same shard on every run, and
@@ -108,10 +200,11 @@ jobs:
       matrix: ${{ fromJSON(needs.static.outputs.vitest_matrix) }}
     runs-on: ${{ matrix.os }}
     # scripts/testing/duration-sequencer.ts splits each platform's files by
-    # their recorded seconds on that platform, about 13 minutes a shard. The
-    # cap catches a hang, not normal suite growth; Windows runners are about
-    # 1.45x slower and vary more.
-    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 20 || 30 }}
+    # their recorded seconds on that platform, about 6 minutes a Linux shard
+    # (four files at once); a Windows shard runs two files at once. The cap
+    # catches a hang, not normal suite growth; Windows runners are about 1.45x
+    # slower and vary more.
+    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 25 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
@@ -135,6 +228,7 @@ jobs:
           OMB_VITEST_RETRY_LOG: ${{ runner.temp }}/vitest-retries.jsonl
           OMB_VITEST_E2E: ${{ matrix.e2e }}
           OMB_VITEST_SUBSET: ${{ matrix.files }}
+          OMB_VITEST_WORKERS: ${{ matrix.workers }}
         run: pnpm exec vitest run ${{ matrix.files }} --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=default --reporter=github-actions
       - name: Report flaky tests that needed a retry
         # Known flakes (scripts/testing/ci-retry-list.json) get two retries in
@@ -227,7 +321,7 @@ jobs:
     if: contains(needs.static.outputs.jobs, '"windows-cua"')
     name: Windows CUA host smoke
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
@@ -239,6 +333,9 @@ jobs:
       - name: Smoke the staged Windows CUA host (no computer actions)
         timeout-minutes: 5
         run: pnpm build:cua:win && pnpm smoke:cua-win
+      - name: Lend this PC's apps and screen as the installed app does (reads only, no input)
+        timeout-minutes: 5
+        run: pnpm smoke:cua-win-lend
 
   electron-smokes:
     needs: static
@@ -281,7 +378,7 @@ jobs:
   gate:
     # One aggregation, not three queued runners doing the same check.
     name: CI
-    needs: [static, vitest, behavior-evals, packaged-server, windows-cua, electron-smokes]
+    needs: [static, build, vitest, behavior-evals, packaged-server, windows-cua, electron-smokes]
     # Still report failed/skipped dependencies, but don't keep a superseded
     # workflow alive just to schedule its summary jobs.
     if: ${{ !cancelled() }}
@@ -381,6 +478,37 @@ jobs:
       - run: pnpm control-plane:test
       - run: pnpm control-plane:dry-run
 
+  relay:
+    needs: static
+    if: contains(needs.static.outputs.jobs, '"relay"')
+    # relay/ is its own pnpm root with its own lockfile, so this installs only the relay's dependencies. The nightly run
+    # fuzzes the pre-auth path for ten minutes, a pull request for twenty seconds.
+    name: relay typecheck + tests + fuzz + audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+        with:
+          package_json_file: relay/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: relay/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Audit the production dependencies
+        run: pnpm audit --prod --audit-level high
+      - run: pnpm check
+      - run: pnpm test
+        env:
+          RELAY_FUZZ_MS: ${{ github.event_name == 'schedule' && '600000' || '20000' }}
+
   deploy-composio-broker:
     # Only deploys on push to upstream main. PRs run the control-plane tests
     # but do not deploy: the wiring is exercised end-to-end only by a merged
@@ -462,7 +590,7 @@ jobs:
         env:
           OMB_UI_E2E: "1"
           OMB_UI_EVIDENCE_DIR: .omb-scratch/verify-evidence
-        run: pnpm exec vitest run scripts/testing/control-omb-ui.e2e.test.ts scripts/testing/bot-tools-ui.e2e.test.ts scripts/testing/thinking-timer-ui.e2e.test.ts scripts/testing/team-share-ui.e2e.test.ts scripts/testing/org-library-ui.e2e.test.ts scripts/testing/presets-ui.e2e.test.ts scripts/testing/browser-evidence.e2e.test.ts scripts/testing/browser-fill.e2e.test.ts scripts/testing/rich-table-composer-ui.e2e.test.ts scripts/testing/computer-panel-focus-ui.e2e.test.ts scripts/testing/mobile-code-blocks-ui.e2e.test.ts
+        run: pnpm exec vitest run scripts/testing/control-omb-ui.e2e.test.ts scripts/testing/bot-tools-ui.e2e.test.ts scripts/testing/thinking-timer-ui.e2e.test.ts scripts/testing/team-share-ui.e2e.test.ts scripts/testing/org-library-ui.e2e.test.ts scripts/testing/presets-ui.e2e.test.ts scripts/testing/browser-evidence.e2e.test.ts scripts/testing/browser-fill.e2e.test.ts scripts/testing/rich-table-composer-ui.e2e.test.ts scripts/testing/computer-panel-focus-ui.e2e.test.ts scripts/testing/mobile-code-blocks-ui.e2e.test.ts scripts/testing/inline-page-height-ui.e2e.test.ts scripts/testing/room-pages-ui.e2e.test.ts
       - name: Upload the renderer screenshot
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -473,6 +601,8 @@ jobs:
             .omb-scratch/verify-evidence/thinking-timer-anchored.png
             .omb-scratch/verify-evidence/share-team-dialog.png
             .omb-scratch/verify-evidence/mobile-code-blocks/
+            .omb-scratch/verify-evidence/inline-page-height/
+            .omb-scratch/verify-evidence/room-pages-*.png
           if-no-files-found: warn
           retention-days: 7
 
@@ -533,7 +663,7 @@ jobs:
       - name: Install package validation and native smoke tools
         run: >-
           sudo apt-get update && sudo apt-get install -y
-          at-spi2-core dbus-x11 desktop-file-utils libxi6 libxkbcommon0 squashfs-tools x11-utils xdotool xvfb
+          at-spi2-core dbus-x11 desktop-file-utils libxi6 libxkbcommon0 openbox squashfs-tools x11-utils xdotool xvfb
       - run: pnpm install --frozen-lockfile
       - name: Stage the pinned CUA runtime
         run: pnpm build:cua:linux
@@ -589,10 +719,10 @@ jobs:
     if: contains(needs.static.outputs.jobs, '"browser-driver"')
     # Advisory, outside the CI gate until it has run green for a while: the
     # omb-cdp S4 conformance suites and the new browser's checklist and viewer
-    # suites on the runner's own Google Chrome (PRs run Linux and Windows, the
-    # full lane all three; pushes to main and merge groups leave it out), then
-    # on Linux inside the server image's runtime as a non-root
-    # user. Every S4 suite also fails when its trace holds Runtime.enable or
+    # suites on the runner's own Google Chrome (PRs run Linux, and Windows
+    # where the vitest shards do; the full lane all three; pushes to main and
+    # merge groups leave it out), then on Linux inside the server image's
+    # runtime as a non-root user. Every S4 suite also fails when its trace holds Runtime.enable or
     # another forbidden CDP method (docs/ci.md).
     name: browser driver S4 (${{ matrix.os }})
     strategy:

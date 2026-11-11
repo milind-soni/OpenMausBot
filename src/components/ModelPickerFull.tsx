@@ -1,6 +1,7 @@
 import { Check, KeyRound, Plus, Search } from "lucide-react";
 import type { InstanceInfo } from "@/state/store";
-import { isClaudeAccount, SIGN_IN_FAMILY_LABEL, signInFamily, splitEngineRail, type SignInFamily } from "@/lib/engine-rail";
+import { engineDisplayName, isClaudeAccount, SIGN_IN_FAMILY_LABEL, signInFamily, splitEngineRail, type SignInFamily } from "@/lib/engine-rail";
+import { modelOptionLabel } from "@/lib/model-label";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { InstanceProviderMark } from "./ProviderIcons";
@@ -27,18 +28,24 @@ export function ModelRow({ option, current, defaultId, botModel = false, onPick 
   botModel?: boolean;
   onPick: () => void;
 }) {
-  const meta = [option.provider, option.id === defaultId ? t("model.effort.default") : undefined].filter(Boolean).join(" · ");
+  const needsUpdate = option.needsCliUpdate !== undefined;
+  const blocked = option.orgBlocked === true || needsUpdate;
+  const reason = needsUpdate ? t("chat.claudeUpdate.offer") : t("model.orgBlocked");
+  const meta = needsUpdate ? t("engines.updateClaude") : blocked ? reason : [option.provider, option.id === defaultId ? t("model.effort.default") : undefined].filter(Boolean).join(" · ");
   return (
     <button
       type="button"
       data-menu-row
       data-current-model={current || undefined}
+      data-org-blocked={blocked || undefined}
+      disabled={blocked}
       aria-pressed={current}
-      title={option.provider ? t("model.provider", { name: option.provider }) : undefined}
+      aria-label={blocked ? `${option.label} · ${reason}` : undefined}
+      title={blocked ? reason : option.provider ? t("model.provider", { name: option.provider }) : undefined}
       onClick={onPick}
       className={MENU_ROW}
     >
-      <span className="min-w-0 flex-1 truncate">{option.label}</span>
+      <span className="min-w-0 flex-1 truncate">{modelOptionLabel(option)}</span>
       {botModel && <span data-bot-model className="shrink-0 text-[12px] leading-4 text-ink-tertiary">{t("model.botModelTag")}</span>}
       {meta && <span className={MENU_META}>{meta}</span>}
       {option.loaded && (
@@ -47,7 +54,7 @@ export function ModelRow({ option, current, defaultId, botModel = false, onPick 
           {t("model.loadedNow")}
         </span>
       )}
-      {current && <Check size={14} className="shrink-0 text-accent" aria-hidden="true" />}
+      {current && <Check size={14} className="shrink-0 text-ink" aria-hidden="true" />}
     </button>
   );
 }
@@ -66,7 +73,7 @@ export function FollowBotModelRow({ name, model, follows, onPick }: { name: stri
         <span className="shrink-0 font-medium">{t("model.useBotModel", { name })}</span>
         <span className="truncate text-[12px] leading-4 text-ink-tertiary">{model}</span>
       </span>
-      {follows && <Check size={14} className="shrink-0 text-accent" aria-hidden="true" />}
+      {follows && <Check size={14} className="shrink-0 text-ink" aria-hidden="true" />}
     </button>
   );
 }
@@ -111,7 +118,7 @@ export function railProviders(instances: InstanceInfo[], selectedInstance: Insta
     return {
       instance,
       target: family ? opensOn[family] ?? instance : instance,
-      label: family ? SIGN_IN_FAMILY_LABEL[family] : instance.displayName,
+      label: family ? SIGN_IN_FAMILY_LABEL[family] : engineDisplayName(instance),
       selected: family ? signInFamily(selectedInstance) === family : instance.instanceId === selectedInstance?.instanceId,
     };
   };
@@ -197,7 +204,7 @@ export function ClaudeAccountSelect({ accounts, selectedId, onSelect }: {
           if (account) onSelect(account);
         }}
       >
-        {accounts.map((account) => <option key={account.instanceId} value={account.instanceId}>{account.displayName}</option>)}
+        {accounts.map((account) => <option key={account.instanceId} value={account.instanceId}>{engineDisplayName(account)}</option>)}
       </Select>
     </label>
   );

@@ -1,3 +1,4 @@
+import { noticeLine } from "./chat-notices.ts";
 // What a person's bots finished in a window, what only the person can fix,
 // and the time it saved, computed on each read from the transcript rows and
 // routine runs the server already keeps.
@@ -6,6 +7,7 @@ import type { TurnDigest } from "../shared/digest.ts";
 import { isClientCancellation } from "../shared/client-cancel.ts";
 import { failedTurnCause } from "../shared/failed-turn.ts";
 import type { PlaceRow, PlaceState } from "../shared/place-view.ts";
+import type { ServerTextParams } from "../shared/server-text.ts";
 import type { RoutineRunReport, RoutineRunStatus, RoutineRunTrigger } from "../shared/routines.ts";
 import { classifyToolCall, isReportRoutine, minutesSaved, OUTCOME_CATEGORIES, toolApps, type OutcomeCategory, type OutcomeCounts } from "../shared/today-outcomes.ts";
 import { NEEDS_YOU_WINDOW_MS, TODAY_MAX_LINES, TODAY_MAX_WINDOW_MS, type NeedsYouItem, type TodayLine, type TodayReport, type TodayStarter } from "../shared/today.ts";
@@ -46,8 +48,9 @@ export interface TodaySources {
   groups: ReadonlyArray<{ id: string; threadId: string; tasks?: ReadonlyArray<{ threadId: string }> }>;
   routines: { listRoutines(): ReadonlyArray<{ botId: string; groupId?: string }>; listRuns(from?: number): readonly RunRecord[] } | null;
   engines: ReadonlyArray<{ instanceId: string; snapshot?: { state: string; authenticated?: boolean } }>;
-  /** Work parked on a question for the person (a NEEDS INPUT line rather than a card). */
-  parked: ReadonlyArray<{ id: string; botId: string; threadId: string; question?: string; createdAt: number }>;
+  /** Work parked on a question for the person (a NEEDS INPUT line rather than a card); one its requester decides
+   * (`decide`) waits on no person. */
+  parked: ReadonlyArray<{ id: string; botId: string; threadId: string; question?: string; decide?: unknown; createdAt: number }>;
 }
 
 /** Place failures a person fixes by changing a setting or plan; the rest pass or retry by themselves. */
@@ -94,6 +97,13 @@ const parse = <T,>(text: string | null): T | null => {
   try { return JSON.parse(text) as T; } catch { return null; }
 };
 
+function causeCode(row: Pick<AttentionRow, "nameCode" | "nameParams">): { textCode?: string; textParams?: ServerTextParams } {
+  if (!row.nameCode?.startsWith("chat.notice.")) return {};
+  const params = parse<unknown>(row.nameParams);
+  const flat = params && typeof params === "object" && !Array.isArray(params) && Object.values(params).every((value) => typeof value === "string" || typeof value === "number");
+  return { textCode: row.nameCode, ...(flat ? { textParams: params as ServerTextParams } : {}) };
+}
+
 function plainTitle(text: string): string {
   const line = text.replace(/^[\s#>]+/gm, "").replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();
   return line.length > TITLE_CHARS ? `${line.slice(0, TITLE_CHARS - 1).trimEnd()}…` : line;
@@ -113,12 +123,14 @@ function runEnd(run: RunRecord, now: number): number | null {
   return run.status === "cancelled" ? null : now;
 }
 
-function approvalText(card: QuestionCard & { tool?: string }): string {
-  return plainTitle(`Approve: ${card.subtitle || card.tool || card.title || ""}`);
+function approvalText(card: QuestionCard & { tool?: string }) {
+  const text = plainTitle(`Approve: ${card.subtitle || card.tool || card.title || ""}`);
+  return text === "Approve:" ? { text } : noticeLine("chat.notice.approve", { what: text.slice("Approve: ".length) });
 }
 
+/** A question card the harness made carries the question as its subtitle, under a generic title. */
 function questionText(card: QuestionCard): string {
-  return plainTitle(card.questionRequest?.questions?.[0]?.question || card.title || card.subtitle || "");
+  return plainTitle(card.questionRequest?.questions?.[0]?.question || (card.requestType === "question" && card.subtitle) || card.title || card.subtitle || "");
 }
 
 export function todayReport(sources: TodaySources, viewer: TodayViewer, requestedSince: number, now = Date.now()): TodayReport {
@@ -275,7 +287,7 @@ function needsYou(sources: TodaySources, viewer: TodayViewer, owners: Map<string
       const earlier = card.requestId ? askedIn.get(card.requestId) : undefined;
       if (earlier && earlier !== `question:${row.threadId}`) items.delete(earlier);
       if (card.requestId) askedIn.set(card.requestId, `question:${row.threadId}`);
-      keep(`question:${row.threadId}`, { kind: "question", id: row.id, at: row.at, botId, threadId: row.threadId, text: approval ? approvalText(card) : questionText(card) });
+      keep(`question:${row.threadId}`, { kind: "question", id: row.id, at: row.at, botId, threadId: row.threadId, ...(approval ? approvalText(card) : { text: questionText(card) }) });
       continue;
     }
     if (!viewer.admin || row.kind !== "activity" || !row.name) continue;
@@ -301,7 +313,7 @@ function needsYou(sources: TodaySources, viewer: TodayViewer, owners: Map<string
     } else {
       const reason = classifyError({ text: cause }).reason;
       if ((row.setup || reason === "auth") && instanceId) keep(`signed-out:${instanceId}`, { kind: "signed-out", id: row.id, at: row.at, instanceId, botIds: [botId], threadId: row.threadId });
-      else if (reason === "quota") keep(`usage-limit:${instanceId ?? botId}`, { kind: "usage-limit", id: row.id, at: row.at, ...(instanceId ? { instanceId } : {}), botIds: [botId], threadId: row.threadId, text: plainTitle(cause) });
+      else if (reason === "quota") keep(`usage-limit:${instanceId ?? botId}`, { kind: "usage-limit", id: row.id, at: row.at, ...(instanceId ? { instanceId } : {}), botIds: [botId], threadId: row.threadId, text: plainTitle(cause), ...causeCode(row) });
     }
   }
 
@@ -324,7 +336,7 @@ function needsYou(sources: TodaySources, viewer: TodayViewer, owners: Map<string
   }
 
   for (const work of sources.parked) {
-    if (!work.question || items.has(`question:${work.threadId}`) || !seen(work.threadId) || (viewer.asks && !viewer.asks(work.botId, work.threadId))) continue;
+    if (!work.question || work.decide || items.has(`question:${work.threadId}`) || !seen(work.threadId) || (viewer.asks && !viewer.asks(work.botId, work.threadId))) continue;
     keep(`question:${work.threadId}`, { kind: "question", id: work.id, at: work.createdAt, botId: work.botId, threadId: work.threadId, text: plainTitle(work.question) });
   }
 

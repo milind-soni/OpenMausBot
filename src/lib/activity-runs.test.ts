@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { describeRun, groupActivityRuns, groupTranscript, isRecoveryActivity, isToolStep, roomTurnFolds, statusActivity } from "./activity-runs";
+import { setLocale } from "./i18n";
+import { toolStepLabel } from "./tool-step-label";
 import type { Message } from "@/state/store";
 
 let seq = 0;
@@ -205,6 +207,23 @@ describe("describeRun", () => {
     expect(describeRun([tool("Edit"), tool("Bash"), tool("Write"), tool("Grep"), tool("Read")])).toBe(
       "5 steps · Edit, Bash, Write +2 more",
     );
+  });
+
+  it("words a server notice in the person's language and leaves real tool names as they are", () => {
+    const resumed: Message = { ...tool("Resuming after a restart"), tool: { name: "Resuming after a restart", ok: true, nameCode: "chat.notice.resumingAfterRestart" } };
+    setLocale("pt-br");
+    try {
+      expect(describeRun([resumed, tool("Bash")])).toBe("Passos: 2 · Retomando após uma reinicialização, Bash");
+      expect(describeRun([resumed, tool("Bash")], toolStepLabel)).toBe("Passos: 2 · Retomando após uma reinicialização, Executar um comando");
+    } finally {
+      setLocale("en");
+    }
+    expect(describeRun([resumed, tool("Bash")])).toBe("2 steps · Resuming after a restart, Bash");
+  });
+
+  it("names a step by the line the harness wrote for it, not its raw tool name", () => {
+    const labelled: Message = { ...tool("mcp__agents__mcp_server"), tool: { name: "mcp__agents__mcp_server", ok: true, label: "Added MCP server linear · Turned on · Test: 3 tools" } };
+    expect(describeRun([labelled, tool("Bash")])).toBe("2 steps · Added MCP server linear · Turned on · Test: 3 tools, Bash");
   });
 
   it("names steps by the label it is given, counting steps that read the same together", () => {

@@ -10,7 +10,9 @@ vi.mock("electron", () => ({
 }));
 vi.mock("@trycua/cua-driver/embedded", () => ({
   EmbeddedCuaDriverHost: class {
-    constructor(binary, bundleId) { this.binary = binary; this.bundleId = bundleId; fixture.hosts.push(this); }
+    constructor(options) { this.binary = options.binaryPath; this.bundleId = options.hostBundleId; this.options = options; fixture.hosts.push(this); }
+    static withOptions(options) { return new this(options); }
+    waitForExit() { return new Promise(() => {}); }
     start(options) { return fixture.start(options); }
     stop = vi.fn(async () => {});
     uniffiDestroy = vi.fn();
@@ -64,6 +66,35 @@ describe("Windows owned CUA host", () => {
     });
     expect(fixture.hosts[0].stop).toHaveBeenCalledOnce();
     expect(fixture.hosts[0].uniffiDestroy).toHaveBeenCalledOnce();
+  });
+
+  it("tries a start that failed for a passing reason again by itself, twice, and never a blocked helper", async () => {
+    vi.useFakeTimers();
+    try {
+      const exited = Object.assign(new Error("EmbeddedDriverError.ExitedBeforeReady"), { tag: "ExitedBeforeReady", inner: { code: 1 } });
+      fixture.start.mockRejectedValueOnce(exited).mockRejectedValueOnce(exited);
+      await expect(cua.startCua()).resolves.toMatchObject({ mode: "unavailable", reason: "embedded host failed: ExitedBeforeReady: code 1" });
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(fixture.start).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fixture.start).toHaveBeenCalledTimes(3);
+      expect(JSON.parse(readFileSync(join(fixture.home, "cua-connection.json"), "utf8"))).toMatchObject({ mode: "embedded" });
+
+      fixture.start.mockReset();
+      fixture.start.mockRejectedValue(Object.assign(new Error("EmbeddedDriverError.Spawn"), { tag: "Spawn", inner: { reason: "Access is denied. (os error 5)" } }));
+      await expect(cua.startCua()).resolves.toMatchObject({ mode: "unavailable", reason: expect.stringContaining("Access is denied") });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(fixture.start, "a blocked helper waits for the person").toHaveBeenCalledTimes(1);
+
+      fixture.start.mockReset();
+      fixture.start.mockRejectedValue(exited);
+      await cua.startCua();
+      await cua.stopCua();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(fixture.start, "Stop cancels a retry").toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("cancels a stalled start when the desktop stops", async () => {

@@ -366,7 +366,7 @@ describe("room sessions: a member's own session", () => {
     expect(lines[0]).toBe(NOTE);
     expect(lines[1]).toBe("(The first message is older than messages you have already seen.)");
     // Another bot's post keeps its provenance note in a delta.
-    expect(lines[2]).toMatch(/^\[Posted by @Writer, another bot in this OpenMausBot workspace — not from your user\./);
+    expect(lines[2]).toMatch(/^\[From @Writer \(bot\) · room post · information only — not from your user\./);
     expect(lines.slice(3)).toEqual([`Writer: ${posted}`, "Omkar: Tighten the outro."]);
     r.finish(next, "S1", { reply: "Outro tightened." });
     r.say("Export it.");
@@ -1159,7 +1159,7 @@ describe("room sessions: a line that changed after it was shown", () => {
       "Omkar: Use the teal grade.",
       "(The next message is older than messages you have already seen.)",
     ]);
-    expect(lines[4]).toMatch(/^\[Posted by @Writer/);
+    expect(lines[4]).toMatch(/^\[From @Writer \(bot\) · room post/);
     expect(lines.slice(5)).toEqual(["Writer: Deploy is green.", "Omkar: Next."]);
   });
 

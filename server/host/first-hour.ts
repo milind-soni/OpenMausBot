@@ -15,6 +15,7 @@ import { createAgentCard } from "../chat-widgets.ts";
 import { connectorCardText } from "../connector-card-text.ts";
 import type { DraftReply } from "../read-and-draft.ts";
 import { localDate, validZone } from "./check-plan.ts";
+import { FIRST_HOUR_OFFER_KEY } from "../../shared/person-wait.ts";
 import { firstHourWords, type FirstHourWords } from "./first-hour-words.ts";
 import { anyValue, minutesSaved, type ValueLedger, type ValueTally } from "./value-ledger.ts";
 
@@ -197,6 +198,12 @@ export function createFirstHour(deps: FirstHourDeps) {
   };
   const said = (threadId: string, from: number): boolean =>
     deps.store.messagesFor(threadId).some((message) => message.role === "user" && message.kind === "text" && message.at >= from);
+  /** The person's newest message on the shown branch has no answer from a bot turn yet (text or a rich reply such as a
+   * widget): a server line now would read as that answer. Server-written lines (no turnId) are not answers. */
+  const personUnanswered = (threadId: string): boolean =>
+    deps.store.activePath(threadId).findLast((message) =>
+      message.role === "user" ? message.kind === "text" : Boolean(message.turnId) && message.kind !== "activity" && message.kind !== "digest" && message.kind !== "compaction",
+    )?.role === "user";
   const answered = (threadId: string, from: number): boolean =>
     deps.store.messagesFor(threadId).some((message) => message.role === "bot" && message.kind === "text" && message.at >= from);
   const soon = (step: () => Promise<void>): void => { setTimeout(() => void step(), SOON_MS).unref?.(); };
@@ -242,12 +249,12 @@ export function createFirstHour(deps: FirstHourDeps) {
       }
       const cards = await Promise.all(missing.map(async (slug) => ({ slug, ...(await deps.apps.card(slug).catch(() => ({ label: APP_NAME[slug], description: "" }))) })));
       if (!state || state.offeredAt || deps.threadBusy(place.bot.id, place.threadId)) return;
-      const key = `first-hour-${randomUUID()}`;
+      const key = `${FIRST_HOUR_OFFER_KEY}${randomUUID()}`;
       say(place.bot, place.threadId, words().connect);
       for (const card of cards) {
         deps.store.appendMessage(place.threadId, {
-          role: "bot", kind: "connector", text: connectorCardText(card.label),
-          connector: { slug: card.slug, label: card.label, description: card.description || connectorCardText(card.label), status: "required", resumeKey: key },
+          role: "bot", kind: "connector", text: connectorCardText(card.label, undefined, deps.language()),
+          connector: { slug: card.slug, label: card.label, description: card.description || connectorCardText(card.label, undefined, deps.language()), status: "required", resumeKey: key },
         });
       }
       mark({ offeredAt: now(), offerKey: key });
@@ -377,7 +384,7 @@ export function createFirstHour(deps: FirstHourDeps) {
     const at = now(), zone = deps.timeZone();
     if (at - state.startedAt < RECAP_AFTER_MS || localDate(at, zone) === localDate(state.startedAt, zone) || localMinutes(at, zone) < clockMinutes(MORNING)) return;
     const place = home();
-    if (!place || deps.threadBusy(place.bot.id, place.threadId)) return;
+    if (!place || deps.threadBusy(place.bot.id, place.threadId) || personUnanswered(place.threadId)) return;
     const counts = tally();
     if (!anyValue(counts)) {
       mark({ recapAt: at, recapQuiet: true });
@@ -395,7 +402,7 @@ export function createFirstHour(deps: FirstHourDeps) {
     const apps = LOOK_APPS.filter((app) => connected?.[app] === true);
     if (!apps.length || !state || state.firstAppAt) return;
     const place = home();
-    const askedByTask = place ? deps.store.messagesFor(place.threadId).some((message) => message.connector && message.connector.resumeKey !== state?.offerKey && apps.includes(message.connector.slug as LookApp)) : false;
+    const askedByTask = place ? deps.store.messagesFor(place.threadId).some((message) => message.connector && message.connector.source !== "mcp" && message.connector.resumeKey !== state?.offerKey && apps.includes(message.connector.slug as LookApp)) : false;
     appsIn(apps, !askedByTask);
   }
 

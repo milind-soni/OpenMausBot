@@ -68,3 +68,9 @@ export function mcpServersForBot(all: McpServerSummary[], own: string[] | null |
   if (own == null) return enabled;
   return enabled.filter((server) => own.includes(server.name));
 }
+
+/** The explicit list after flipping `name`. An absent list means every enabled server, so the first flip starts from those. */
+export function mcpSwitch(servers: McpServerSummary[], own: string[] | null | undefined, name: string): string[] {
+  const current = own == null ? servers.filter((server) => server.enabled).map((server) => server.name) : own;
+  return current.includes(name) ? current.filter((item) => item !== name) : [...current, name];
+}

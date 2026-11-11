@@ -110,7 +110,7 @@ describe("snooze expiry wake-up", () => {
     };
     const render = () => {
       fixture.index = 0; fixture.effects = [];
-      return renderToStaticMarkup(createElement(BotThreadList, { ...botRowProps(initialState, vi.fn(), bot, { density: "comfortable", quiet: false, query: "", onMenu: vi.fn() }), selected: true }));
+      return renderToStaticMarkup(createElement(BotThreadList, { ...botRowProps(initialState, vi.fn(), bot, { density: "comfortable", query: "", onMenu: vi.fn() }), selected: true }));
     };
     const hidden = render();
     expect(hidden).toContain("Current chat");

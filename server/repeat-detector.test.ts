@@ -21,6 +21,7 @@ describe("toolItemKey", () => {
     expect(toolItemKey("Bash", undefined)).toBeNull();
     expect(toolItemKey("Bash", '{"command":"ls"}')).toBeNull();
     expect(toolItemKey(undefined, undefined)).toBeNull();
+    expect(toolItemKey("MCP: tool", undefined)).toBeNull();
   });
 
   it("tells apart calls an adapter titles alike by their input", () => {

@@ -45,6 +45,10 @@ it("My Cloud keeps an attachment a sent row names under its own name, once, and 
   expect((await post(Buffer.from("something else"))).status, "one already here is the same upload").toBe(200);
   expect((await fx.onCloud("POST", "/api/cloud-send/chats/attachments", { names: [name] })).body).toEqual({ missing: [] });
   expect(Buffer.from(await (await fetch(`${fx.cloudBase}/api/attachments/${name}`, { headers: { ...fx.edge, authorization: `Bearer ${fx.owner}` } })).arrayBuffer())).toEqual(DOT);
+  // Read back as the move reads this computer's copy: streamed, with the length it declares.
+  const kept = await fetch(`${fx.cloudBase}/api/cloud-send/chats/attachment/${name}`, { headers: { ...fx.edge, authorization: `Bearer ${fx.owner}` } });
+  expect(kept.headers.get("content-length")).toBe(String(DOT.byteLength));
+  expect(Buffer.from(await kept.arrayBuffer())).toEqual(DOT);
   expect((await fetch(`${fx.cloudBase}/api/cloud-send/chats/attachment/..%2Fescape.png`, { method: "POST", body: DOT, headers: { ...fx.edge, authorization: `Bearer ${fx.owner}` } })).status).toBe(404);
 });
 

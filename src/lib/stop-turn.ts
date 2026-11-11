@@ -5,12 +5,15 @@
 import { useSyncExternalStore } from "react";
 
 import type { RuntimeEvent } from "../../shared/runtime-events";
+import { isCancelledTranscriptRow } from "../../shared/client-cancel";
+import type { Message } from "@/state/store";
 
 export const STOP_REPEAT_MS = 1_000;
 
 const liveTurns = new Map<string, string>();
 const turnStarts = new Map<string, number>();
 const lastStops = new Map<string, number>();
+const stopsHere = new Map<string, number>();
 const watchers = new Set<() => void>();
 const notify = () => { for (const watch of Array.from(watchers)) watch(); };
 const subscribe = (watch: () => void) => {
@@ -50,6 +53,7 @@ export function useLiveTurn(threadId: string): string | undefined {
 export function forgetStops(): void {
   forgetLiveTurns();
   lastStops.clear();
+  stopsHere.clear();
   turnStarts.clear();
 }
 
@@ -69,6 +73,10 @@ export function sendStop(api: Api, action: StopAction, showError: (error: unknow
   }).then((result) => {
     // That turn was over: this client missed its end. Name none next time, so the next press reaches what runs.
     const over = (result as { outcome?: unknown } | null)?.outcome === "already-stopped";
+    if (!over && action.threadId) {
+      stopsHere.set(action.threadId, now);
+      notify();
+    }
     if (over && action.threadId && liveTurns.get(action.threadId) === turnId) {
       liveTurns.delete(action.threadId);
       notify();
@@ -79,4 +87,18 @@ export function sendStop(api: Api, action: StopAction, showError: (error: unknow
     showError(error);
     action.onError?.();
   });
+}
+
+/** When this client's Stop last reached a turn in the thread. */
+export function useStoppedAt(threadId: string): number | undefined {
+  return useSyncExternalStore(subscribe, () => stopsHere.get(threadId), () => undefined);
+}
+
+/** A Stop from here ended the turn on the newest message, and nothing came after it: not an answer, not the server's
+ * own stopped row. */
+export function stopNoticeDue(messages: readonly Message[], stoppedAt: number | undefined, busy: boolean): boolean {
+  if (busy || stoppedAt === undefined) return false;
+  const asked = messages.findLastIndex((message) => message.role === "user");
+  if (asked < 0 || messages[asked]!.at > stoppedAt) return false;
+  return !messages.slice(asked + 1).some((message) => message.kind === "text" || isCancelledTranscriptRow(message));
 }

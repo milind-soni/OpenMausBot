@@ -7,12 +7,13 @@ export type LiveCardKind = "approval" | "review" | "question";
 
 /** "approval": a provider or peer ask the voice may decide with a strict yes/no.
  * "review": a harness-native proposal (skill, routine, profile, default
- * model, team setup, a quota-switch offer) that must be reviewed on screen.
+ * model, team setup, an MCP server change, a quota-switch offer) that must be
+ * reviewed on screen.
  * "question": a provider question. An expired proposal is settled: nothing
  * can answer it any more. */
 export function liveCardKind(card: OptionCardData | undefined): LiveCardKind | null {
   if (!card?.requestId || card.answered || card.dismissed || card.expired) return null;
-  if (card.skillRequest || card.routineRequest || card.profileRequest || card.modelRequest || card.teamSetupRequest || card.quotaSwitch) {
+  if (card.skillRequest || card.routineRequest || card.profileRequest || card.modelRequest || card.teamSetupRequest || card.mcpRequest || card.quotaSwitch || card.lendingLift) {
     return "review";
   }
   return card.tool ? "approval" : "question";
@@ -118,8 +119,7 @@ export function spokenSignInPrompt(site: string): string {
 export function spokenQuestionPrompt(card: OptionCardData): string {
   const detail = brief(card.subtitle || card.title);
   const choices = card.options.length ? ` The options are ${card.options.join(", ")}.` : "";
-  // brief() drops the detail's own closing mark, so the "?" is never doubled
-  return `Ask the user, in your own words: ${detail}?${choices} Then delegate their answer.`;
+  return `Ask the user, in your own words: ${detail}${detail.endsWith("？") ? "" : "?"}${choices} Then delegate their answer.`;
 }
 
 export const LIVE_COPY = {
@@ -140,5 +140,6 @@ export const LIVE_COPY = {
       lastStep ? `; last step: ${lastStep}, ${duration(lastStepAgoMs)} ago` : ""}).`,
   signedOut: "The call has ended because the sign-in that started it has ended. Sign in again to start a new call.",
   unpaired: "The call has ended because the phone that started it was unpaired from this computer.",
+  goodbye: "The user asked to end the call. Say a short goodbye in one sentence and nothing else; the call ends right after.",
   permissionRequest: (prompt: string) => `You need the user's permission. Say it in your own words: ${prompt} Ask for a clear yes or no, then delegate their answer.`,
 };

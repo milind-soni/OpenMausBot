@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { cloudSetupOf, myCloudOrigin, readyCloudOrigin, rememberedCloudHome } from "./cloud-home.mjs";
+import nativeText from "./native-text.cjs";
 import { createHomeWindow, createReadyClock, FRESH_MS, HOME_SCREEN_PATH, NAME_RETRY_MS, NAME_WAIT_MS, nameNotFound, RETRY_MS } from "./home-window.mjs";
 
 const CLOUD = "https://omb-u-new1.fly.dev";
@@ -21,7 +22,7 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), { status
  * at CLOUD whose name resolves only while `dns.found`, the window's Electron session (its resolver and host cache), the
  * file that keeps when My Cloud became ready, and a manual clock.
  */
-function world({ journal = null, state = settingUp(), found = true, url = `${LOCAL}/`, kept = null } = {}) {
+function world({ journal = null, state = settingUp(), found = true, url = `${LOCAL}/`, kept = null, t } = {}) {
   const w = {
     journal, state, url, clock: NOW, now: () => w.clock,
     dns: { found }, server: { up: true, signedIn: true },
@@ -83,6 +84,7 @@ function world({ journal = null, state = settingUp(), found = true, url = `${LOC
     now: w.now,
     timers,
     log: () => {},
+    ...(t ? { t } : {}),
   });
   /** The Admin's next word reaches main (its onState), as the app hands it to the window. */
   w.says = async (next) => { w.state = next; await w.home.changed(); };
@@ -158,11 +160,23 @@ test("a payment the Admin is still confirming shows the setup screen too, at its
 });
 
 test("nothing to open (no Cloud, or not signed in): asking says so, as before, and the window stays where it is", async () => {
-  for (const state of [{ status: "connected", account: ACCOUNT }, { status: "signed-out" }, ready({ status: "stopped" })]) {
+  for (const state of [{ status: "connected", account: ACCOUNT }, { status: "signed-out" }]) {
     const w = world({ state });
     await assert.rejects(w.home.openCloud(), /not ready/);
     assert.deepEqual([w.went, w.fetched, w.home.asking()], [[], [], false], JSON.stringify(state));
   }
+  // A Cloud the Admin says isn't running is something to say, on this computer's screen: never looked up, never dialled.
+  const w = world({ state: ready({ status: "stopped" }) });
+  await w.home.openCloud();
+  assert.deepEqual([w.home.view(), w.went, w.fetched, w.home.asking()], [{ screen: "plan", machine: "stopped" }, [[SCREEN, null]], [], true]);
+});
+
+test("nothing to open is said in the app's language, and in English exactly as before", async () => {
+  const signedOut = { status: "signed-out" };
+  await assert.rejects(world({ state: signedOut }).home.openCloud(), { message: "My Cloud is not ready to connect yet." });
+  const { t } = nativeText.createNativeText({ saved: "pt-br" });
+  await assert.rejects(world({ state: signedOut, t }).home.openCloud(), { message: t("native.cloud.notReady") });
+  assert.equal(t("native.cloud.notReady"), "Ainda não é possível se conectar ao Cloud.");
 });
 
 test("going somewhere else from the setup screen lets My Cloud go: the Server menu's choice stands when it becomes ready", async () => {

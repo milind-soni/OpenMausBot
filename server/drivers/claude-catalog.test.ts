@@ -16,10 +16,11 @@ afterEach(() => {
 describe("readClaudeModelCatalog", () => {
   it("returns the official models when settings are missing", () => {
     expect(readClaudeModelCatalog({ HOME: join(tmpdir(), "omb-claude-missing-home") })).toEqual(STATIC_CLAUDE_MODELS);
-    expect(STATIC_CLAUDE_MODELS.options.slice(0, 2)).toEqual([
+    expect(STATIC_CLAUDE_MODELS.options).toEqual(expect.arrayContaining([
+      { id: "claude-fable-5-2", label: "Claude Fable 5.2", contextWindow: 1_000_000 },
       { id: "claude-fable-5-1", label: "Claude Fable 5.1" },
       { id: "claude-fable-5", label: "Claude Fable 5" },
-    ]);
+    ]));
     const ids = STATIC_CLAUDE_MODELS.options.map((option) => option.id);
     expect(STATIC_CLAUDE_MODELS.options[ids.indexOf("claude-opus-5-5")]).toEqual({
       id: "claude-opus-5-5",
@@ -174,7 +175,7 @@ describe("ClaudeDriver catalog", () => {
       writeStartupModelCache(instanceId, {
         default: "claude-sonnet-5",
         options: [{ id: "claude-haiku-4-5", label: "Claude Haiku 4.5" }],
-      });
+      }, { build: "an earlier release" });
     }
     const instance = await ClaudeDriver.create({
       instanceId,
@@ -194,6 +195,31 @@ describe("ClaudeDriver catalog", () => {
       await instance.dispose();
       rmSync(join(DATA_DIR, "bots.json"), { force: true });
       rmSync(startupModelCachePath(instanceId)!, { force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("marks a model the installed CLI is too old for, and only then", async () => {
+    const fable = "claude-fable-5-2";
+    for (const [installed, marked] of [["2.1.320", true], ["2.1.321", false]] as const) {
+      const home = mkdtempSync(join(tmpdir(), "omb-claude-cli-"));
+      scratchDirs.push(home);
+      const cli = join(home, "fake-claude");
+      writeFileSync(cli, `#!/bin/sh\necho "${installed} (Claude Code)"\n`, { mode: 0o755 });
+      const instance = await ClaudeDriver.create({
+        instanceId: `claude-gate-${installed}`,
+        displayName: "Claude",
+        environment: { HOME: home },
+        enabled: true,
+        config: { ...ClaudeDriver.defaultConfig(), cli },
+      });
+      try {
+        await instance.snapshot();
+        const option = instance.models.options.find((candidate) => candidate.id === fable);
+        expect(option?.needsCliUpdate).toBe(marked ? "2.1.321" : undefined);
+        expect(instance.models.default).toBe("claude-sonnet-5");
+      } finally {
+        await instance.dispose();
+      }
     }
   });
 

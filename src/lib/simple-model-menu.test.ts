@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { InstanceInfo, ModelSelection } from "@/state/store";
+import { favoriteKey, favoriteModels, forgetFavoriteModelsForTest, toggleFavoriteModel } from "./favorite-models";
 import { modelName, simpleModelMenu, SIMPLE_SEARCH_AFTER } from "./simple-model-menu";
 
 vi.hoisted(() => {
@@ -50,6 +51,66 @@ const rows = (built: Menu, index = 0) => {
   return body.kind === "models" ? body.rows.map((row) => row.label) : [];
 };
 const body = (built: Menu, index = 0) => built.groups[index]!.body;
+
+describe("a starred model", () => {
+  const stored = new Map<string, string>();
+  beforeEach(() => {
+    stored.clear();
+    forgetFavoriteModelsForTest();
+    vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value) });
+  });
+
+  it("comes first among its provider's suggestions, and counts against them", () => {
+    toggleFavoriteModel("claude", "haiku-5");
+    expect(rows(menu([claude()]))).toEqual(["Haiku 5", "Fable 5.1", "Fable 5", "Opus 5.5"]);
+  });
+
+  it("stays out of another provider, and goes back when unstarred", () => {
+    toggleFavoriteModel("codex", "haiku-5");
+    expect(rows(menu([claude()]))).toEqual(["Fable 5.1", "Fable 5", "Opus 5.5", "Opus 5"]);
+    toggleFavoriteModel("claude", "haiku-5");
+    toggleFavoriteModel("claude", "haiku-5");
+    expect(rows(menu([claude()]))).toEqual(["Fable 5.1", "Fable 5", "Opus 5.5", "Opus 5"]);
+  });
+
+  it("survives a reload, and a saved list that makes no sense counts as none", () => {
+    toggleFavoriteModel("claude", "haiku-5");
+    forgetFavoriteModelsForTest();
+    expect(favoriteModels().has(favoriteKey("claude", "haiku-5"))).toBe(true);
+    stored.set("omb-favorite-models", "{not json");
+    forgetFavoriteModelsForTest();
+    expect(favoriteModels().size).toBe(0);
+    stored.set("omb-favorite-models", JSON.stringify({ a: 1 }));
+    forgetFavoriteModelsForTest();
+    expect(favoriteModels().size).toBe(0);
+  });
+});
+
+describe("Ollama in the Simple model menu", () => {
+  const ollama = engine("openaiCompat", "openai-compat", "Ollama", "api", [
+    { id: "llama3.2:latest", label: "llama3.2:latest", custom: true, local: { bytes: 2_019_393_189, parameters: "3.2B", quantization: "Q4_K_M", tools: true } },
+    { id: "gemma2:2b", label: "gemma2:2b", custom: true, local: { bytes: 912_000_000, parameters: "2.6B", tools: false } },
+  ], { serverKind: "ollama" });
+
+  it("is headed Ollama, with no API key, and says what each pulled model is", () => {
+    const built = menu([ollama], { selection: { instanceId: "openaiCompat", model: "" } });
+    expect(built.groups.map((group) => group.label)).toEqual(["Ollama"]);
+    const body = built.groups[0]!.body;
+    expect(body.kind === "models" && body.rows.map((row) => [row.label, row.detail])).toEqual([
+      ["llama3.2:latest", "3.2B · Q4_K_M · 2 GB"],
+      ["gemma2:2b", "2.6B · 912 MB · No tools"],
+    ]);
+  });
+
+  it("says what the selected model is too", () => {
+    const built = menu([ollama], { selection: { instanceId: "openaiCompat", model: "gemma2:2b" } });
+    expect(built.current).toMatchObject({ label: "gemma2:2b", meta: "2.6B · 912 MB · No tools", title: "Ollama · gemma2:2b · 2.6B · 912 MB · No tools" });
+  });
+
+  it("keeps the API key heading for another OpenAI-compatible server", () => {
+    expect(menu([openaiKey]).groups.map((group) => group.label)).toEqual(["OpenAI · API key"]);
+  });
+});
 
 describe("the Simple model menu", () => {
   it("puts the current model on top, then the rest of its provider under a heading, in short names", () => {
@@ -183,6 +244,23 @@ describe("the Simple model menu", () => {
     expect(modelName(cursor, "gone-model")).toBe("gone-model");
   });
 
+  it("names the picked Antigravity thinking level on the current model, as its row in the list does (#4160)", () => {
+    const variants = [{ id: "low", label: "Low" }, { id: "medium", label: "Medium" }];
+    const gemini = engine("antigravity", "antigravityAgent", "Google Gemini", "subscription", [
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", variants },
+    ], { capabilities: { modelVariants: true } });
+    const picked = menu([gemini], { selection: { instanceId: "antigravity", model: "gemini-3.8-flash", variant: "medium" } });
+    expect(picked.current).toMatchObject({ label: "Gemini 3.8 Flash · Medium" });
+    expect(picked.current?.title).toBe("Google Gemini · Gemini 3.8 Flash · Medium");
+    const pickedLow = menu([gemini], { selection: { instanceId: "antigravity", model: "gemini-3.8-flash", variant: "low" } });
+    expect(pickedLow.current).toMatchObject({ label: "Gemini 3.8 Flash · Low" });
+    expect(rows(picked)).toEqual(["Gemini 3.8 Flash · Low"]);
+    expect(modelName(gemini, "gemini-3.8-flash")).toBe("Gemini 3.8 Flash");
+    expect(modelName(gemini, "gemini-3.8-flash", "gone")).toBe("Gemini 3.8 Flash");
+    expect(modelName({ ...gemini, driverKind: "opencodeGo" }, "gemini-3.8-flash", "medium")).toBe("Gemini 3.8 Flash");
+    expect(modelName(gemini, "gemini-3.8-flash", "low")).toBe("Gemini 3.8 Flash · Low");
+  });
+
   it("is busy while the menu reads its providers or one provider's models", () => {
     expect(menu([claude()]).busy).toBe(false);
     expect(menu([claude()], { loading: true }).busy).toBe(true);
@@ -221,5 +299,57 @@ describe("the Simple model menu", () => {
       .toEqual([["Sonnet 5", true]]);
     expect(found.results).toBe(1);
     expect(menu([claude(), codex, many], { query: "zzz" })).toMatchObject({ groups: [], results: 0 });
+  });
+});
+
+describe("a model that needs a newer CLI", () => {
+  const gated = claudeModels.map((option) => option.id === "opus-5-5" ? { ...option, needsCliUpdate: "2.1.321" } : option);
+  const pick = (model: string) => ({ instanceId: "claude", model });
+  const menuOn = (model: string) => simpleModelMenu({
+    instances: [claude({}, gated)], listed: [claude({}, gated)], selection: pick(model),
+    bot: { name: "Scout", selection: pick(model) }, query: "", expanded: new Set(["claude"]), probing: new Set(), loading: false,
+  });
+
+  it("stays listed but cannot be picked", () => {
+    const body = menuOn("sonnet-5").groups[0]!.body;
+    if (body.kind !== "models") throw new Error("expected the models");
+    expect(body.rows.filter((row) => row.blocked).map((row) => row.option.id)).toEqual(["opus-5-5"]);
+  });
+
+  it("offers the update on the current row instead of failing the turn", () => {
+    expect(menuOn("opus-5-5").current).toMatchObject({ warning: true, blocked: true, meta: "Update Claude" });
+  });
+});
+
+describe("a model the organization turned off", () => {
+  const blockedModels = claudeModels.map((option) => option.id === "opus-5-5" ? { ...option, orgBlocked: true as const } : option);
+  const pick = (model: string) => ({ instanceId: "claude", model });
+  const menuOn = (model: string) => simpleModelMenu({
+    instances: [claude({}, blockedModels)], listed: [claude({}, blockedModels)], selection: pick(model),
+    bot: { name: "Scout", selection: pick(model) }, query: "", expanded: new Set(["claude"]), probing: new Set(), loading: false,
+  });
+
+  it("stays listed, marked, among the others", () => {
+    const body = menuOn("sonnet-5").groups[0]!.body;
+    if (body.kind !== "models") throw new Error("expected the models");
+    expect(body.rows.filter((row) => row.blocked).map((row) => row.option.id)).toEqual(["opus-5-5"]);
+    expect(body.rows.length).toBeGreaterThan(1);
+  });
+
+  it("says so on the current row, with nothing to set up", () => {
+    expect(menuOn("opus-5-5").current).toMatchObject({ warning: true, blocked: true, meta: "Turned off by your organization" });
+    expect(menuOn("sonnet-5").current?.blocked).toBeUndefined();
+  });
+});
+
+describe("custom Claude endpoint", () => {
+  // The driver marks every endpoint catalog option `custom`; the picker keeps exactly those.
+  const endpoint = claude({ access: "custom" }, [
+    { id: "deepseek-chat", label: "deepseek-chat", custom: true },
+    { id: "deepseek-reasoner", label: "deepseek-reasoner", custom: true },
+  ]);
+
+  it("lists the endpoint's own models and none of Claude's", () => {
+    expect(rows(menu([endpoint]), 0)).toEqual(["deepseek-chat", "deepseek-reasoner"]);
   });
 });

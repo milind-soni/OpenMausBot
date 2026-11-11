@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createMoveFreeze, ENDED_REFUSAL, HOME_SCREEN, MOVED_REFUSAL, RAIL_PAGE } from "./move-freeze.ts";
+import { createMoveFreeze, ENDED_REFUSAL, HOME_SCREEN, MOVED_REFUSAL, movedRefusal, phoneMovedRefusal, RAIL_PAGE, switchAutomationsOff, type MoveAutomations } from "./move-freeze.ts";
 import type { MoveWait } from "./move-waits.ts";
 import { createMoveFreezeRoutes } from "./routes/move-freeze.ts";
 import { PASS } from "./routes/table.ts";
+import { WaitManager, type WaitNotice } from "./waits.ts";
 
 const dirs: string[] = [];
 const dataDir = () => { const dir = mkdtempSync(join(tmpdir(), "omb-move-freeze-")); dirs.push(dir); return dir; };
@@ -54,7 +55,8 @@ describe("this computer's copy, frozen at the move", () => {
       expect(freeze.refuses(method!, path!), `${method} ${path}`).toBe(MOVED_REFUSAL);
     }
     for (const [method, path] of [["GET", "/api/bots"], ["DELETE", "/api/move/freeze"], ["DELETE", "/api/cloud-send/kind"], ["POST", "/api/cloud-send/chats/verify"],
-      ["POST", "/api/auth/logout"], ["POST", "/api/workspace-backup/export"], ["POST", "/api/cloud/pairing"], ["POST", "/api/sync/upload"]]) {
+      ["POST", "/api/auth/logout"], ["POST", "/api/workspace-backup/export"], ["POST", "/api/cloud/pairing"], ["POST", "/api/sync/upload"],
+      ["POST", "/api/desktop/shared-computer-control"]]) {
       expect(freeze.refuses(method!, path!), `${method} ${path}`).toBeNull();
     }
   });
@@ -82,13 +84,53 @@ describe("this computer's copy, frozen at the move", () => {
     expect(freeze.unfreeze()).toBe(false);
     expect(freeze.frozen()).toBe(true);
     expect(freeze.refuses("POST", "/api/bots/b1/messages")).toBe(ENDED_REFUSAL);
+    expect(freeze.refuses("POST", "/api/desktop/shared-computer-control"), "an ended Cloud runs no bots, so no screen lease").toBe(ENDED_REFUSAL);
+  });
+});
+
+describe("switching this computer's automations off for a move", () => {
+  it("cancels every wait, one already over but not yet posted too, so none posts, notifies or follows up once the freeze lifts", async () => {
+    const present = new Set<string>();
+    let chatBusy = true, clock = Date.UTC(2026, 9, 27, 9, 0);
+    const posts: WaitNotice[] = [], followUps: string[] = [], cards: string[][] = [];
+    const waits = new WaitManager({
+      file: join(dataDir(), "waits.json"), now: () => clock, probes: { stamp: async (path) => (present.has(path) ? { size: 1, mtimeMs: 1 } : null) },
+      sourceAlive: () => true, botBusy: () => false,
+      post: (_wait, notice) => { if (chatBusy) return false; posts.push(notice); return true; },
+      followUp: (wait) => { followUps.push(wait.label); },
+      showCard: (wait) => `card-${wait.id}`,
+      settleCard: (wait, how) => { cards.push([wait.label, how]); },
+    });
+    const made = async (botId: string, label: string, path: string) => {
+      const result = await waits.create({ botId, threadId: `t-${botId}`, label, condition: { kind: "file_exists", path }, followUp: "Tell them." });
+      if (result.state !== "created") throw new Error(result.state);
+      return result.wait.id;
+    };
+    const report = await made("b1", "the report", "/report"), build = await made("b2", "the build", "/build");
+    present.add("/build");
+    clock += 5_000;
+    await waits.tick();
+    expect(waits.all().map((wait) => [wait.label, wait.ending?.status])).toEqual([["the report", undefined], ["the build", "fired"]]);
+
+    const automations: MoveAutomations = { routines: () => null, calls: () => null, webhooks: () => null, appEvents: () => null, waits: () => waits };
+    expect(await switchAutomationsOff(automations, new Set(["routine:r1"])), "only what is named").toEqual([]);
+    expect(waits.all()).toHaveLength(2);
+    expect(await switchAutomationsOff(automations)).toEqual([`wait:${report}`, `wait:${build}`]);
+    expect(cards).toEqual([["the report", "cancelled"], ["the build", "cancelled"]]);
+    expect(waits.all()).toEqual([]);
+
+    chatBusy = false;
+    present.add("/report");
+    clock += 5_000;
+    await waits.tick();
+    expect([posts, followUps]).toEqual([[], []]);
   });
 });
 
 describe("/api/move/freeze", () => {
-  const ask = async (route: ReturnType<typeof createMoveFreezeRoutes>, method: string, path = "/api/move/freeze", body: unknown = {}, kind = "loopback") => {
+  const ask = async (route: ReturnType<typeof createMoveFreezeRoutes>, method: string, path = "/api/move/freeze", body: unknown = {}, kind = "loopback", companionDevice?: string) => {
     let answered: { status: number; body: any } | undefined;
-    const out = await route({ path, method, url: new URL(`http://127.0.0.1${path}`), req: {} as never, res: {} as never, auth: { kind, scopes: ["admin"] } as never,
+    const out = await route({ path, method, url: new URL(`http://127.0.0.1${path}`), req: {} as never, res: {} as never, auth: { kind, scopes: ["admin"], ...(companionDevice ? { companionDevice } : {}) } as never,
       json: (_res: unknown, status: number, value: unknown) => { answered = { status, body: value }; }, readBody: async () => body } as never);
     return out === PASS ? "pass" : answered!;
   };
@@ -111,6 +153,37 @@ describe("/api/move/freeze", () => {
     expect(await ask(route, "POST"), "freezing again is a no-op, however busy").toEqual({ status: 200, body: { frozen: true } });
     expect(await ask(route, "DELETE")).toEqual({ status: 200, body: { frozen: false } });
     expect(await ask(route, "POST", "/api/bots/b1/messages")).toBe("pass");
+  });
+
+  it("a move to a server of the person's own names it: every refusal says where the bots live now, across a restart too", async () => {
+    const dir = dataDir();
+    const route = createMoveFreezeRoutes({ freeze: createMoveFreeze({ dataDir: dir }), busy: () => null, restart() {} });
+    expect(await ask(route, "POST", undefined, { cloud: "https://garage.example.test", place: "Garage server" })).toEqual({ status: 200, body: { frozen: true } });
+    expect(await ask(route, "GET")).toEqual({ status: 200, body: { frozen: true, cloud: "https://garage.example.test", place: "Garage server" } });
+    expect(await ask(route, "POST", "/api/bots/b1/messages")).toEqual({ status: 409, body: { error: "This bot lives on Garage server now.", code: "moved" } });
+    const relaunched = createMoveFreeze({ dataDir: dir });
+    expect([relaunched.place(), relaunched.refusal()]).toEqual(["Garage server", movedRefusal("Garage server")]);
+    expect(relaunched.unfreeze()).toBe(true);
+    expect([relaunched.place(), movedRefusal(null)]).toEqual([null, MOVED_REFUSAL]);
+    expect(await ask(route, "POST", undefined, { cloud: "https://garage.example.test", place: "x".repeat(121) }), "a name past 120 characters").toMatchObject({ status: 400 });
+  });
+
+  it("a phone still paired with this computer hears where its bots went, on every route, reads and its event stream too", async () => {
+    const dir = dataDir();
+    const freeze = createMoveFreeze({ dataDir: dir });
+    const route = createMoveFreezeRoutes({ freeze, busy: () => null, restart() {}, platform: "darwin" });
+    expect(await ask(route, "GET", "/api/bots", {}, "loopback", "phone-1"), "not frozen: the phone uses this computer as ever").toBe("pass");
+    freeze.freeze("https://omb-t-1.fly.dev");
+    const moved = { status: 410, body: { error: "This computer's bots moved to My Cloud. Open This Mac in the app on this computer to use it from your phone, or open My Cloud.", code: "home_moved" } };
+    for (const [method, path] of [["GET", "/api/bots"], ["GET", "/api/events"], ["POST", "/api/bots/b1/messages"], ["GET", "/api/move/freeze"]]) {
+      expect(await ask(route, method!, path, {}, "loopback", "phone-1"), `${method} ${path}`).toEqual(moved);
+    }
+    expect(await ask(route, "GET", "/api/health", {}, "loopback", "phone-1"), "this computer is up, so the phone reads the reason instead of trying again").toBe("pass");
+    expect(await ask(route, "GET", "/api/bots"), "this computer's own app still reads its frozen copy").toBe("pass");
+    expect(phoneMovedRefusal(null, "win32")).toMatch(/Open This PC in the app/);
+    const garage = createMoveFreezeRoutes({ freeze: createMoveFreeze({ dataDir: dataDir() }), busy: () => null, restart() {}, platform: "darwin" });
+    await ask(garage, "POST", undefined, { cloud: "https://garage.example.test", place: "Garage server" });
+    expect(await ask(garage, "GET", "/api/bots", {}, "loopback", "phone-1")).toEqual({ status: 410, body: { error: "This computer's bots moved to Garage server. Open Garage server from your phone instead.", code: "home_moved", place: "Garage server" } });
   });
 
   it("is only for OpenMausBot on this computer, never a paired device", async () => {

@@ -10,12 +10,15 @@ import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotic
 import { AppCopyNotice } from "./EngineAppCopy";
 import { forgetAppCopySwitches } from "@/state/engine-install";
 import { AccountsCard, AddAccount, accountGroupOf, accountsReady, type AccountGroup } from "./EngineAccounts";
+import { ClaudeEndpoints, CodexEndpoints } from "./ClaudeEndpoints";
+import { ClaudeBedrockEndpoints } from "./ClaudeBedrock";
 import { DEVICE_SIGN_IN_COPY, deviceSignInProvider } from "./DeviceSignIn";
 import { AntigravityFreeSpace } from "./AntigravityFreeSpace";
 import { CacheKeepWarmSettings } from "./CacheKeepWarmSettings";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
 import { SettingsDisclosureRow, SettingsGroup, SettingsRows } from "./SettingsPrimitives";
+import { OllamaModels, ollamaShortStatus } from "./OllamaStatusLine";
 import { InstanceProviderMark } from "./ProviderIcons";
 
 interface ProbeResult {
@@ -213,6 +216,17 @@ function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
       .finally(() => setSwitching(false));
   };
 
+  /** Out of every model list until Unhide; the CLI and its sign-in stay as they are. Refused while something uses it. */
+  const hide = () => {
+    if (switching || updating) return;
+    setSwitching(true);
+    setError(null);
+    api(`/api/instances/${encodeURIComponent(instance.instanceId)}`, { method: "PATCH", body: JSON.stringify({ hidden: true }) })
+      .then(() => Promise.resolve(refreshInstances()).catch(() => {}))
+      .catch((e) => setError(e.message))
+      .finally(() => setSwitching(false));
+  };
+
   const updateClaude = () => {
     if (switching || updating) return;
     setUpdating(true);
@@ -270,6 +284,16 @@ function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
             </button>
           )}
           <button
+            type="button"
+            data-hide-engine={instance.instanceId}
+            onClick={hide}
+            disabled={switching || updating}
+            title={t("engines.hideHint")}
+            className="shrink-0 text-[12px] text-ink-secondary hover:text-ink disabled:opacity-50"
+          >
+            {t("engines.hide")}
+          </button>
+          <button
             onClick={() => setOpen((v) => !v)}
             disabled={updating}
             aria-expanded={open}
@@ -300,36 +324,51 @@ function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
   );
 }
 
-function RemoveAntigravityAccount({ instance }: { instance: InstanceInfo }) {
+/** Remove drops an added account; Sign out forgets a signed-in account's Google sign-in, the first one too. */
+function AntigravityAccountAction({ instance, action }: { instance: InstanceInfo; action: "remove" | "signOut" }) {
   const { state, dispatch, refreshInstances } = useStore();
   const [confirming, setConfirming] = useState(false);
-  const [removing, setRemoving] = useState(false);
+  const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const usedBy = state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId).length;
-  const remove = async () => {
+  const remove = action === "remove";
+  const usedBy = remove ? state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId).length : 0;
+  const label = t(remove ? "accounts.remove" : "accounts.signOut");
+  const run = async () => {
     setConfirming(false);
-    setRemoving(true);
+    setRunning(true);
     setError(null);
     try {
-      const { instances } = await api(`/api/instances/${encodeURIComponent(instance.instanceId)}`, { method: "DELETE" });
+      const path = `/api/instances/${encodeURIComponent(instance.instanceId)}${remove ? "" : "/auth/sign-out"}`;
+      const { instances } = await api(path, { method: remove ? "DELETE" : "POST" });
       if (Array.isArray(instances)) dispatch({ type: "instances", instances });
       else await refreshInstances();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setRemoving(false);
+      setRunning(false);
     }
   };
   return <>
     <div className="flex flex-wrap items-center gap-2">
-      <button type="button" disabled={removing || usedBy > 0} onClick={() => setConfirming(true)} className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-50">
-        {removing ? <Loader2 size={13} className="animate-spin" /> : t("accounts.remove")}
+      <button type="button" disabled={running || usedBy > 0} onClick={() => setConfirming(true)} className={cn("rounded-lg px-2.5 py-1.5 text-[12px] font-medium disabled:cursor-not-allowed disabled:opacity-50", remove ? "text-danger hover:bg-danger/10" : "text-ink-secondary hover:bg-raised hover:text-ink")}>
+        {running ? <Loader2 size={13} className="animate-spin" /> : label}
       </button>
       {usedBy > 0 && <p className="text-[11px] text-ink-secondary">{t("accounts.inUse", { count: String(usedBy) })}</p>}
     </div>
     {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
-    <ConfirmDialog open={confirming} title={t("accounts.removeTitle", { name: instance.displayName })} body={t("accounts.removeBodyAntigravity")}
-      confirmLabel={t("accounts.remove")} tone="neutral" pending={removing} onCancel={() => { if (!removing) setConfirming(false); }} onConfirm={() => void remove()} />
+    <ConfirmDialog open={confirming} title={t(remove ? "accounts.removeTitle" : "accounts.signOutTitle", { name: instance.displayName })}
+      body={t(remove ? "accounts.removeBodyAntigravity" : "accounts.signOutBody")}
+      confirmLabel={label} tone="neutral" pending={running} onCancel={() => { if (!running) setConfirming(false); }} onConfirm={() => void run()} />
+  </>;
+}
+
+function AntigravityAddAccount({ source }: { source: InstanceInfo }) {
+  const { state } = useStore();
+  const [addedId, setAddedId] = useState<string | null>(null);
+  const added = addedId ? state.instances.find((instance) => instance.instanceId === addedId && instance.snapshot.authenticated !== true) : undefined;
+  return <>
+    <AddAccount label={t("engineSetup.antigravity.addAccount")} endpoint="/api/instances/antigravity-accounts" extra={{ sourceInstanceId: source.instanceId }} onAdded={setAddedId} />
+    {added && <div data-antigravity-added={added.instanceId}><EngineSetup instance={added} unframed /></div>}
   </>;
 }
 
@@ -350,8 +389,9 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
   return (
     <EngineCard instance={instance} bare={bare}>
       {policyNote}
-      {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} unframed />}
+      {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} description={instance.codexEndpoint ? t("agentEndpoints.codexHint") : undefined} unframed />}
       {engineReady(instance) && <ApiKeyEngineManage instance={instance} className="mt-3" />}
+      {engineReady(instance) && instance.serverKind === "ollama" && <OllamaModels instance={instance} className="mt-3" />}
       {/* The setup panel that first said so is gone once the engine is Ready. */}
       {engineReady(instance) && <AppCopyNotice instance={instance} className="mt-3" />}
       {instance.snapshot.update && <EngineUpdateNotice update={instance.snapshot.update} instance={instance} className="mt-3" quiet />}
@@ -367,8 +407,9 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
       {instance.driverKind === "antigravityAgent" && (
         <div className="mt-3 space-y-3">
           {instance.snapshot.authenticated && <p className="break-words text-[12px] text-ink-secondary">{instance.snapshot.account?.email ?? t("engineSetup.antigravity.emailUnavailable")}</p>}
-          <AddAccount label={t("engineSetup.antigravity.addAccount")} endpoint="/api/instances/antigravity-accounts" extra={{ sourceInstanceId: instance.instanceId }} onAdded={() => {}} />
-          {instance.instanceId.startsWith("antigravity-") && <RemoveAntigravityAccount instance={instance} />}
+          <AntigravityAddAccount source={instance} />
+          {instance.snapshot.authenticated === true && instance.authentication?.signOut === true && <AntigravityAccountAction instance={instance} action="signOut" />}
+          {instance.instanceId.startsWith("antigravity-") && <AntigravityAccountAction instance={instance} action="remove" />}
         </div>
       )}
       <EngineAdvanced instance={instance} />
@@ -378,6 +419,7 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
 
 function simpleStatus(instance: InstanceInfo, ready: boolean): string {
   if (ready) return instance.snapshot.authenticated === true && instance.snapshot.account?.email ? instance.snapshot.account.email : t("onboarding.engines.ready");
+  if (instance.snapshot.ollama) return ollamaShortStatus(instance.snapshot.ollama);
   return instance.snapshot.state === "available" && instance.snapshot.authenticated === false ? t("model.signInRequired") : t("onboarding.engines.needsSetup");
 }
 
@@ -433,11 +475,54 @@ function SimpleEngines({ rows, isReady, renderEngine, more }: {
   );
 }
 
+/** Providers someone hid: listed apart, folded, each one click from coming back. */
+export function HiddenEngines() {
+  const { state, refreshInstances } = useStore();
+  const [hidden, setHidden] = useState<Array<{ instanceId: string; displayName: string }>>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    // An older server has no such route: nothing is hidden there.
+    api<{ instances?: Array<{ instanceId: string; displayName: string }> } | undefined>("/api/instances/hidden")
+      .then((result) => { if (alive) setHidden(Array.isArray(result?.instances) ? result.instances : []); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [state.instances]);
+  if (hidden.length === 0) return null;
+  const unhide = (instanceId: string) => {
+    setBusy(instanceId);
+    setError(null);
+    api(`/api/instances/${encodeURIComponent(instanceId)}`, { method: "PATCH", body: JSON.stringify({ hidden: false }) })
+      .then(() => Promise.resolve(refreshInstances()).catch(() => {}))
+      .catch((e) => setError(e.message))
+      .finally(() => setBusy(null));
+  };
+  return (
+    <details data-hidden-engines className="px-4">
+      <summary className="cursor-pointer text-[13px] font-medium text-ink-secondary hover:text-ink">{t("engines.hiddenTitle", { count: String(hidden.length) })}</summary>
+      <p className="mt-2 text-[12px] text-ink-secondary">{t("engines.hiddenHint")}</p>
+      <div className="mt-2 flex flex-col gap-1.5">
+        {hidden.map((entry) => (
+          <div key={entry.instanceId} className="flex items-center justify-between gap-3 rounded-lg border border-hairline/40 bg-inset px-3 py-2">
+            <span className="min-w-0 truncate text-[13px] text-ink">{entry.displayName}</span>
+            <button type="button" data-unhide-engine={entry.instanceId} disabled={busy !== null} onClick={() => unhide(entry.instanceId)}
+              className="shrink-0 text-[12px] font-medium text-accent hover:underline disabled:opacity-50">
+              {busy === entry.instanceId ? t("engines.unhiding") : t("engines.unhide")}
+            </button>
+          </div>
+        ))}
+      </div>
+      {error && <div role="alert" className="mt-1 text-[12px] text-danger">{error}</div>}
+    </details>
+  );
+}
+
 export function EnginesSettings({ simple = false, more }: { simple?: boolean; more?: { id: string; open: boolean; onToggle: () => void } }) {
   const { state } = useStore();
   // Leaving Settings ends the "now uses the copy OpenMausBot installed" lines.
   useEffect(() => forgetAppCopySwitches, []);
-  const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i));
+  const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i) || i.claudeEndpoint !== undefined || i.claudeBedrock !== undefined || i.codexEndpoint !== undefined);
   // A provider's accounts share one card, which takes the place of its first account.
   const groups = new Map<AccountGroup, InstanceInfo[]>();
   for (const instance of listed) {
@@ -449,15 +534,25 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
     return group && groups.get(group)?.[0] === instance ? group : null;
   };
   const rows = listed.filter((instance) => !accountGroupOf(instance) || groupOf(instance));
+  // A hidden ordinary Claude instance takes its card, and the endpoint section inside it, away. A hosted
+  // workspace lists every engine read-only and refuses instance changes, so there the section has no Add.
+  const hostedWorkspace = rows.length > 0 && rows.every((instance) => instance.readOnly);
+  const orphanCodexEndpoints = !groups.has("chatgpt") && !hostedWorkspace;
+  const orphanEndpoints = !groups.has("claude") && !hostedWorkspace;
   const isReady = (instance: InstanceInfo) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); };
   const renderEngine = (instance: InstanceInfo, bare = false) => {
     const group = groupOf(instance);
     return group
-      ? <AccountsCard group={group} accounts={groups.get(group)!} advanced={<EngineAdvanced instance={instance} />} bare={bare} />
+      ? <AccountsCard group={group} accounts={groups.get(group)!} bare={bare}
+        advanced={<>{group === "claude" ? <><ClaudeEndpoints /><ClaudeBedrockEndpoints /></> : <CodexEndpoints />}<EngineAdvanced instance={instance} /></>} />
       : <EngineRow instance={instance} bare={bare} />;
   };
 
-  if (simple && more) return <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} more={more} />;
+  if (simple && more) return <>
+    <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} more={more} />
+    {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /><ClaudeBedrockEndpoints /></div>}
+    {orphanCodexEndpoints && <div className="px-4"><CodexEndpoints /></div>}
+  </>;
 
   return (
     <div className="flex min-w-0 flex-col gap-6 pb-2">
@@ -469,6 +564,9 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
         <RefreshEngines />
       </div>
       <EngineSections instances={rows} isReady={isReady} renderEngine={renderEngine} />
+      {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /><ClaudeBedrockEndpoints /></div>}
+      {orphanCodexEndpoints && <div className="px-4"><CodexEndpoints /></div>}
+      <HiddenEngines />
       <CacheKeepWarmSettings />
     </div>
   );

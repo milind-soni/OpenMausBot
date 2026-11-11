@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 export const NOTIFICATION_SOUNDS_KEY = "omb-notification-sounds";
 export const NOTIFICATION_FEED_KEY = "omb-notification-feed";
 export const FINISHED_NOTIFICATIONS_KEY = "omb-finished-notifications";
+export const NOTIFICATION_TRAY_PINNED_KEY = "omb-notification-tray-pinned";
 
 let sessionChoice: boolean | undefined;
 let feedSessionChoice: boolean | undefined;
@@ -117,4 +118,22 @@ export function setFinishedNotifications(enabled: boolean): void {
 
 export function useFinishedNotifications(): boolean {
   return useSyncExternalStore(subscribe, finishedNotificationsEnabled, () => true);
+}
+
+/** Per device: the notification tray stays open while the person switches chats. */
+export function notificationTrayPinned(): boolean {
+  try {
+    return storage()?.getItem(NOTIFICATION_TRAY_PINNED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setNotificationTrayPinned(pinned: boolean): void {
+  try {
+    if (pinned) storage()?.setItem(NOTIFICATION_TRAY_PINNED_KEY, "1");
+    else storage()?.removeItem(NOTIFICATION_TRAY_PINNED_KEY);
+  } catch {
+    // Storage can be full or blocked; the pin still holds for this session.
+  }
 }

@@ -6,6 +6,8 @@ export type CloudUnreachableCause = "host" | "no_answer";
 export interface CloudMachine {
   status: CloudMachineStatus;
   origin?: string;
+  /** The addresses it answered at before it moved to another provider, when the Admin says: never its `origin`. */
+  formerOrigins?: string[];
   /** While setting up, when the Admin says: the step it is at, and whether it is slow. */
   setup?: { step: CloudSetupStep; slow?: true };
   /** A failed setup's next automatic try, when the Admin says. */
@@ -68,6 +70,17 @@ export interface CloudUsage {
   tier: string; resetsAt: number; trialEndsAt?: number; meters: CloudUsageMeter[];
   upgrades: { tier: "starter" | "personal" | "pro" | "max"; amount: number }[];
 }
+/** Why the Cloud is short on room over the last day: tasks that waited for memory and the minutes they waited in all, tasks
+ * stopped for it; or its disk, in GB of the most its plan grows it to. */
+export type CloudRoomCause = { kind: "memory"; waits: number; waitMinutes: number; stopped: number } | { kind: "disk"; usedGb: number; capGb: number };
+/** The session's `cloud.room`: the Cloud this account pays for is short on room. `plan`: the next plan up that fixes it, its
+ * price (US cents a month before tax) and its memory (MB) and disk cap (GB) against this plan's; `tip`: on the top plan, a
+ * tip instead. `id` names the offer for Not now. */
+export interface CloudRoom {
+  id: string; cause: CloudRoomCause;
+  plan?: { tier: "starter" | "personal" | "pro" | "max"; amount: number; memoryMb: number; fromMemoryMb: number; diskGb: number; fromDiskGb: number };
+  tip?: true;
+}
 /** What a plan includes, as the Admin's catalog says. */
 export interface CloudPlanAllowances {
   cpus: number; memoryMb: number;
@@ -83,6 +96,8 @@ export interface CloudPlanAllowances {
   swapMb?: number;
   /** How many days its daily backups are kept, when the Admin says. */
   snapshotDays?: number;
+  /** A team plan's most people, its owner included. */
+  seats?: number;
 }
 /** One plan OpenMausBot Cloud sells: its monthly price before tax in US cents,
  * and its free trial's days when it comes with one. */
@@ -114,20 +129,24 @@ export declare const CLOUD_UNREACHABLE_CAUSES: readonly CloudUnreachableCause[];
 export declare const INSTALLATION_ID: RegExp;
 export declare function parseCloudPower(input: unknown): import("./cloud-power.mjs").CloudPower | null;
 export declare function parseCloudSummary(input: unknown): CloudMachine | null;
+export declare function parseFormerOrigins(input: unknown, origin: string | null): string[];
 export type CloudTeamRole = "owner" | "admin" | "member";
 /** A team this account is in, from the verified session: its Cloud as the Admin describes it, null while it has none. */
 export interface CloudTeam { id: string; name: string; role: CloudTeamRole; machine: CloudMachine | null }
 export declare const CLOUD_TEAM_ROLES: readonly CloudTeamRole[];
-/** owner → Super admin, admin → Admin, member → User. */
-export declare function teamRoleLabel(role: string | null | undefined): "Super admin" | "Admin" | "User";
+/** owner → Super admin, admin → Admin, member → User, in `t`'s language (English by default). */
+export declare function teamRoleLabel(role: string | null | undefined, t?: (key: string, params?: Record<string, unknown>) => string): string;
 export declare function parseCloudTeams(input: unknown): CloudTeam[];
-export declare function cloudUnreachableText(state: unknown, origin?: string | null): string | null;
+export declare function parseCloudLanding(input: unknown, teams: readonly CloudTeam[]): { teamId: string } | null;
+export declare function cloudUnreachableCause(state: unknown, origin?: string | null): "host" | "no_answer" | null;
+export declare function cloudUnreachableText(state: unknown, origin?: string | null, t?: (key: string, params?: Record<string, string | number>) => string): string | null;
 export declare function parseCloudPurchase(input: unknown): CloudPurchase | null;
 export declare const CLOUD_TRIAL_STATES: readonly CloudTrialState[];
 export declare function parseCloudTrial(input: unknown): CloudTrial | null;
 export declare function parseCloudCredit(input: unknown): CloudCredit | null;
 export declare const CLOUD_USAGE_KINDS: readonly CloudUsageKind[];
 export declare function parseCloudUsage(input: unknown): CloudUsage | null;
+export declare function parseCloudRoom(input: unknown): CloudRoom | null;
 export declare function parseCloudOffer(input: unknown): CloudOffer | null;
 export declare function parsePublicOffer(config: unknown): CloudOffer | null;
 export declare function withoutTrial(offer: CloudOffer | null): CloudOffer | null;

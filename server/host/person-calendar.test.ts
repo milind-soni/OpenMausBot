@@ -29,8 +29,8 @@ describe("a member's calendar", () => {
   it("reads through the member's own access only, and answers busy times", async () => {
     const used: string[] = [];
     const calendar = createPersonCalendar({
-      access: (person) => person === "p_marco" ? { url: "https://broker.test", token: "marco" } : null,
-      connected: async (access) => access.token === "marco",
+      access: (person) => person === "p_ben" ? { url: "https://broker.test", token: "ben" } : null,
+      connected: async (access) => access.token === "ben",
       relay: async (payload, _session, _signal, access) => {
         used.push(access.token);
         const frame = payload as { id?: unknown; method: string; params?: { arguments?: { tools?: Array<{ tool_slug: string }> } } };
@@ -39,8 +39,8 @@ describe("a member's calendar", () => {
         return { status: 200, bytes: answer(frame.id, slug === "GOOGLECALENDAR_EVENTS_LIST" ? { items } : { items: [{ id: "primary", primary: true, accessRole: "owner" }] }, slug) };
       },
     });
-    expect(await calendar.busy("p_marco", 0, Date.UTC(2026, 11, 1))).toEqual([{ start: Date.UTC(2026, 9, 29, 14), end: Date.UTC(2026, 9, 29, 15) }]);
-    expect(new Set(used)).toEqual(new Set(["marco"]));
-    expect(await calendar.busy("p_philipp", 0, Date.UTC(2026, 11, 1))).toBeNull();
+    expect(await calendar.busy("p_ben", 0, Date.UTC(2026, 11, 1))).toEqual([{ start: Date.UTC(2026, 9, 29, 14), end: Date.UTC(2026, 9, 29, 15) }]);
+    expect(new Set(used)).toEqual(new Set(["ben"]));
+    expect(await calendar.busy("p_cleo", 0, Date.UTC(2026, 11, 1))).toBeNull();
   });
 });

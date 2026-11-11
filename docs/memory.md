@@ -163,7 +163,13 @@ off. It keeps the notes in shape without the bot having to decide to:
   the person's name, where they live, their company, diet, allergies and
   health needs, how they like replies — always stay; a line about diet,
   allergies or health is never even offered for moving (a fixed rule, not the
-  model's choice), and a line judged core is not asked about again. At most 20 lines move in one pass; each file's change
+  model's choice), and a line judged core is not asked about again. It also
+  files a work log that is finished or stale (a status line about one task,
+  pull request, release or errand that is done, or that was noted more than
+  two weeks ago and has not changed) under its project's topic or
+  `work-log`. A rule the person gave (a line opening with "always", "never",
+  "don't", "from now on", "every time" or "whenever") is never offered for
+  moving. At most 20 lines move in one pass; each file's change
   is a journal row (*filed into topics*) that can be undone.
 - **About me.** A lasting fact about the person, taken from their own words,
   is added to **Settings → General → About me**, which every bot reads, as a
@@ -183,6 +189,12 @@ off. It keeps the notes in shape without the bot having to decide to:
   pass in core memory, and none in a core file of fewer than five. Topic files
   may reconcile one pair even with two entries; writes recheck for concurrent edits. The archive is written before
   the file it came from, so undoing the newest change never loses a line.
+- **A heavy bot.** When the person's own text a bot loads every turn (memory,
+  its instructions, About me, rules for every bot, a department's shared
+  context) passes 24 KB, and at least 8 KB of it is memory, the bot's
+  settings show one line, *This bot loads a lot every turn.*, with **Tidy
+  memory**, which runs this tidy-up. With Memory or its upkeep off the line
+  never shows.
 
 "Exactly the same fact" is narrow on purpose: spacing, a bullet and a final
 full stop are ignored, nothing else — `Balance is -10` and `Balance is 10`,
@@ -298,6 +310,18 @@ written. A note never ends up as a date with no words. The words are kept in
 `profile-learned.json` so no bot learns a fact that mentions them again, until
 the person asks a bot to remember it once more. The bot confirms in one plain
 line and names no files.
+
+A standing preference for all of the person's bots ("reminders go to my task
+app") is `memory_update` with `action: "prefer"` and the preference as one line
+of at most 300 characters. It goes once into the About me of the person whose
+own words began the work, as a learned line, and every bot reads it there, so
+no bot has to be told it and nothing fans out to each bot
+(`server/host/person-preference.ts`). On a Team Cloud that is the person the
+turn acts for: their own chat, a group chat line of theirs, or work handed on
+from it, and nobody's once another person's words joined. Elsewhere it is the
+one person, when their own message began the work. A routine, a webhook, an
+outside app or a bot's own work saves no one's preference. A Chief of Staff
+saves such a preference itself instead of sending it to each bot.
 
 ## Editing
 
@@ -423,6 +447,12 @@ free form, or one you rewrite by hand, works the same.
 
 All of them need the owner (admin) session, like the other bot-settings routes.
 
+On a Team Cloud each person also reaches what a bot remembers about them, their own layer of its memory
+(`workspaces/<bot>--member-<person>`, see [team-cloud.md](team-cloud.md)), from any session:
+`GET /api/bots/:id/memory/mine` is its overview, and `GET`, `PUT` and `DELETE /api/bots/:id/memory/mine/file` read,
+save and remove one of its files as above. Nobody reaches another person's layer. The bot panel's **What it
+remembers** shows these notes on a team.
+
 ## Shared team memory integrity
 
 Team memory ownership uses persistent keys. Renaming a team preserves its notes
@@ -444,3 +474,13 @@ Every panel edit, delete or acceptance carries the revision it was based on.
 Stale writes return 409; writes without a revision return 428. Reloading after a
 conflict retains the unsaved draft for comparison. Pending replacement cards
 also refuse approval if the accepted fact changed since the proposal.
+
+### Checks before a dream saves a fact
+
+A dream must quote the person's statements, one per cited conversation, and
+each quote must really be something they said. Every number, path and URL in
+the entry has to come from those quotes. These checks don't depend on the
+language of the chat. Unsupported entries are skipped. An outdated note stays
+unchanged when its replacement fails the check. Entries that look like secrets
+are rejected with the existing secret detector. These checks also apply before
+a dream adds a fact to About me. They do not merge notes into summaries.

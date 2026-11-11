@@ -2,13 +2,14 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
 import { codexHome } from "./drivers/codex-identity.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
 
-export type PlanDriver = "claude" | "codex" | "grok";
+export type PlanDriver = "claude" | "codex" | "grok" | "opencode";
 
 export interface PlanWindow {
   available: boolean;
@@ -17,11 +18,21 @@ export interface PlanWindow {
   resetsAt: string | null;
 }
 
+/** Money in the provider's minor units: 4631 with exponent 2 is 46.31. */
+export interface PlanSpend {
+  usedMinor: number;
+  limitMinor: number;
+  currency: string;
+  exponent: number;
+}
+
 export interface PlanExtra {
   label: string;
   remainingPercent: number;
   usedPercent: number;
   resetsAt: string | null;
+  /** The amounts behind the percent, on a budget in money. */
+  spend?: PlanSpend;
 }
 
 export interface PlanModelUsage {
@@ -61,6 +72,8 @@ export interface PlanAccount {
   driver: PlanDriver;
   environment: Record<string, string | undefined>;
   configDir?: string;
+  /** No usage reading: a ChatGPT plan signed in through OpenMausBot has no CLI login on disk, and a Claude Code login is never read, since Anthropic's credential policy covers that token for Claude Code alone (a refused turn still fails over). */
+  noUsage?: true;
 }
 
 export interface PlanCredential {
@@ -105,12 +118,16 @@ const KEYCHAIN_TIMEOUT_MS = 5_000;
 const KEYCHAIN_MAX_BUFFER = 1_000_000;
 const CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials";
 const CLAUDE_MODEL_FAMILIES = ["opus", "sonnet", "haiku"];
+const MONTHLY_SPEND = "Monthly spend";
+const EXTRA_USAGE = "Extra Usage";
 
 const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const GROK_CREDITS_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
 const GROK_BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing";
 const GROK_SETTINGS_URL = "https://cli-chat-proxy.grok.com/v1/settings";
+// OpenCode Go's own allowance: the rolling window, the weekly one and the month's, as the CLI reads them.
+const OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage";
 
 const FIVE_HOUR_MIN_SECONDS = 3 * 3600;
 const FIVE_HOUR_MAX_SECONDS = 8 * 3600;
@@ -123,12 +140,14 @@ const DRIVER_OF: Record<string, PlanDriver> = {
   claudeAgent: "claude",
   codex: "codex",
   grokAgent: "grok",
+  opencodeGo: "opencode",
 };
 
 const PRODUCT_NAME: Record<PlanDriver, string> = {
   claude: "Claude",
   codex: "Codex",
   grok: "Grok",
+  opencode: "OpenCode",
 };
 
 export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAccount[] {
@@ -144,6 +163,8 @@ export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAcc
       driver,
       environment: { ...entry.environment },
       ...(configDir ? { configDir } : {}),
+      // Reading ~/.codex/auth.json for a ChatGPT-plan provider would report (and hold it on) another account's limit.
+      ...(config?.authMode === "chatgpt-plan" || driver === "claude" ? { noUsage: true as const } : {}),
     });
   }
   return accounts;
@@ -155,7 +176,7 @@ export function parseClaudeUsage(body: unknown): PlanWindows {
   const models: PlanModelUsage[] = [];
   if (root) {
     for (const [key, value] of Object.entries(root)) {
-      if (key === "five_hour" || key === "seven_day") continue;
+      if (key === "five_hour" || key === "seven_day" || key === "spend" || key === "extra_usage") continue;
       if (!/^[a-z][a-z0-9_]{0,40}$/i.test(key)) continue;
       const window = readClaudeWindow(value);
       if (!window) continue;
@@ -165,10 +186,14 @@ export function parseClaudeUsage(body: unknown): PlanWindows {
     }
   }
   sortModelWindows(models);
+  const fiveHour = (root && readClaudeWindow(root.five_hour)) ?? closedWindow();
+  const weekly = (root && readClaudeWindow(root.seven_day)) ?? closedWindow();
+  const budget = root && readClaudeBudget(root, fiveHour.available || weekly.available);
+  if (budget) extra.unshift(budget);
   return {
     plan: planLabel(root?.subscription_type ?? root?.plan ?? root?.plan_type),
-    fiveHour: (root && readClaudeWindow(root.five_hour)) ?? closedWindow(),
-    weekly: (root && readClaudeWindow(root.seven_day)) ?? closedWindow(),
+    fiveHour,
+    weekly,
     extra,
     models,
   };
@@ -215,6 +240,26 @@ export function parseGrokUsage(credits: unknown, billing?: unknown, settings?: u
   return { plan: grokPlan(settings), fiveHour, weekly, extra, models };
 }
 
+/** OpenCode Go answers with a meter per window: the running one, the week's and the month's. */
+export function parseOpenCodeUsage(body: unknown): PlanWindows {
+  const usage = asRecord(asRecord(body)?.usage);
+  const [rolling, weekly, monthly] = [usage?.rolling, usage?.weekly, usage?.monthly].map(openCodeMeter);
+  return {
+    plan: rolling || weekly || monthly ? "Go" : null,
+    fiveHour: rolling ?? closedWindow(),
+    weekly: weekly ?? closedWindow(),
+    extra: monthly ? [extraLine("Monthly", monthly)] : [], models: [],
+  };
+}
+
+/** One meter of Go's allowance: `percent` is what it has used, and `resetsAt` comes as an ISO stamp. */
+function openCodeMeter(value: unknown): PlanWindow | null {
+  const record = asRecord(value);
+  const used = finiteNumber(record?.percent);
+  if (used == null) return null;
+  return openWindow(used, isoOrNull(record?.resetsAt));
+}
+
 export function fileCredentialReader(source: CredentialSource): CredentialReader {
   const env = source.env ?? process.env;
   const now = source.now ?? Date.now;
@@ -224,6 +269,7 @@ export function fileCredentialReader(source: CredentialSource): CredentialReader
       const at = now();
       if (account.driver === "claude") return readClaudeCredential(account, merged, source, at);
       if (account.driver === "codex") return readCodexCredential(merged, source.readText, at);
+      if (account.driver === "opencode") return readOpenCodeCredential(merged, source.readText, at);
       return readGrokCredential(merged, source.readText, at);
     },
   };
@@ -247,7 +293,7 @@ export function defaultCredentialReader(env: NodeJS.ProcessEnv = process.env): C
 
 export async function fetchPlanUsage(accounts: PlanAccount[], deps: PlanUsageDeps): Promise<PlanUsageReport> {
   const now = deps.now?.() ?? Date.now();
-  const providers = await Promise.all(accounts.map((account) => fetchProvider(account, deps)));
+  const providers = (await Promise.all(accounts.filter((account) => !account.noUsage).map((account) => fetchProvider(account, deps)))).filter((row) => row !== null);
   return { fetchedAt: new Date(now).toISOString(), providers };
 }
 
@@ -397,6 +443,67 @@ function readClaudeWindow(value: unknown): PlanWindow | null {
   const utilization = finiteNumber(record.utilization);
   if (utilization == null) return null;
   return openWindow(utilization, isoOrNull(record.resets_at ?? record.resetsAt));
+}
+
+const naturalNumber = (value: unknown): number | null => Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : null;
+
+/** A currency code as the provider sent it, when Intl can name it: Intl.NumberFormat throws on anything else. */
+function currencyCode(value: unknown): string | null {
+  if (typeof value !== "string" || !/^[A-Za-z]{3}$/.test(value.trim())) return null;
+  return value.trim().toUpperCase();
+}
+
+function budgetLine(label: string, spend: PlanSpend): PlanExtra | null {
+  if (spend.limitMinor <= 0) return null;
+  return { ...extraLine(label, openWindow((spend.usedMinor / spend.limitMinor) * 100, null)), spend };
+}
+
+function readSpendBudget(value: unknown): PlanExtra | null {
+  const spend = asRecord(value);
+  if (spend?.enabled !== true) return null;
+  const used = asRecord(spend.used), limit = asRecord(spend.limit);
+  const currency = currencyCode(used?.currency);
+  const exponent = naturalNumber(used?.exponent), usedMinor = naturalNumber(used?.amount_minor), limitMinor = naturalNumber(limit?.amount_minor);
+  if (!currency || currency !== currencyCode(limit?.currency) || exponent === null || exponent !== limit?.exponent || usedMinor === null || limitMinor === null) return null;
+  return budgetLine(MONTHLY_SPEND, { usedMinor, limitMinor, currency, exponent });
+}
+
+/** Claude Code 2.1.312 documents `used_credits` and `monthly_limit` as minor units of `currency` ("cents for USD") and has
+ * no field saying how many digits those are, so the currency says. `is_enabled` false: this budget cannot cover a send. */
+function readExtraUsage(value: unknown, label: string): PlanExtra | null {
+  const extra = asRecord(value);
+  if (extra?.is_enabled !== true) return null;
+  const currency = currencyCode(extra.currency);
+  const usedMinor = naturalNumber(extra.used_credits), limitMinor = naturalNumber(extra.monthly_limit);
+  if (currency && usedMinor !== null && limitMinor !== null) {
+    const exponent = naturalNumber(extra.decimal_places) ?? currencyDigits(currency);
+    const line = exponent === null ? null : budgetLine(label, { usedMinor, limitMinor, currency, exponent });
+    if (line) return line;
+  }
+  const used = finiteNumber(extra.utilization);
+  return used === null ? null : extraLine(label, openWindow(used, null));
+}
+
+function currencyDigits(currency: string): number | null {
+  try {
+    return new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions().maximumFractionDigits ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether Claude's paid extra usage is on and not used up, on a plan with rolling windows: sends then go on past a
+ * full window and are paid from it. */
+export function claudeHasExtraUsageRoom(row: Pick<PlanProviderRow, "driver" | "fiveHour" | "weekly" | "extra">): boolean {
+  if (row.driver !== "claude" || !(row.fiveHour.available || row.weekly.available)) return false;
+  const budget = row.extra[0];
+  return !!budget && (budget.label === EXTRA_USAGE || budget.label === MONTHLY_SPEND) && budget.usedPercent < 100;
+}
+
+/** A plan with no rolling windows lives on its monthly budget (Claude Enterprise); on others that budget is the extra usage
+ * bought on top of them. */
+function readClaudeBudget(root: Record<string, unknown>, hasWindows: boolean): PlanExtra | null {
+  return readSpendBudget(root.spend) ?? readExtraUsage(root.extra_usage, hasWindows ? EXTRA_USAGE : MONTHLY_SPEND);
 }
 
 function claudeExtraLabel(key: string): string {
@@ -602,7 +709,7 @@ function planUsageCacheKey(accounts: PlanAccount[]): string {
       .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
       .map(([name, value]) => `${name}=${value}`)
       .join("\n");
-    return [account.id, account.driver, account.name, account.configDir ?? "", environment].join("\u0000");
+    return [account.id, account.driver, account.name, account.configDir ?? "", environment, account.noUsage ? "no-usage" : "usage"].join("\u0000");
   }).join("\n");
 }
 
@@ -755,6 +862,33 @@ function readGrokCredential(
   return sawExpired ? expiredCredential() : missingCredential();
 }
 
+/** The key saved in Settings, or the login `opencode auth login` keeps. `auth.json` is where OpenCode v1 wrote one; v2 keeps credentials in its own database, so this path covers installs migrated from v1 (the saved key covers v2). */
+function readOpenCodeCredential(env: NodeJS.ProcessEnv, readText: (path: string) => string | null, now: number): PlanCredential {
+  const key = secretString(env.OPENCODE_API_KEY);
+  if (key) return { token: key, accountId: null, expired: false };
+  const raw = env.OPENCODE_AUTH_CONTENT?.trim() || openCodeAuthText(env, readText);
+  const stored = asRecord(parseJson(raw));
+  // A Go login lives under "opencode-go", a Zen one under "opencode"; the CLI lists Go first too.
+  const entry = [stored?.["opencode-go"], stored?.opencode].map((value) => asRecord(value))
+    .find((record) => secretString(record?.access) ?? secretString(record?.key));
+  const token = secretString(entry?.access) ?? secretString(entry?.key);
+  if (!token) return missingCredential();
+  const expiry = timeMs(entry?.expires ?? entry?.expires_at ?? entry?.expiresAt);
+  if (expiry != null && expiry <= now) return expiredCredential();
+  return { token, accountId: null, expired: false };
+}
+
+/** The CLI is xdg-flavoured on every platform, so the xdg data folder comes first. */
+function openCodeAuthText(env: NodeJS.ProcessEnv, readText: (path: string) => string | null): string | null {
+  const home = env.HOME || env.USERPROFILE || homedir();
+  const roots = [
+    env.XDG_DATA_HOME || join(home, ".local", "share"),
+    process.platform === "darwin" ? join(home, "Library", "Application Support") : "",
+    process.platform === "win32" ? env.LOCALAPPDATA || join(home, "AppData", "Local") : "",
+  ].filter(Boolean);
+  for (const root of roots) { const text = readText(join(root, "opencode", "auth.json")); if (text) return text; }
+  return null;
+}
 function errorRow(account: PlanAccount, error: string): PlanProviderRow {
   return {
     id: account.id,
@@ -785,17 +919,18 @@ function okRow(account: PlanAccount, windows: PlanWindows): PlanProviderRow {
   };
 }
 
-async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow> {
+async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow | null> { // null: OpenCode, in every fleet, with no key of its own
   let credential: PlanCredential;
   try {
     credential = await deps.credentials.read(account);
   } catch {
-    return errorRow(account, signInAgain(account.driver));
+    return account.driver === "opencode" ? null : errorRow(account, signInAgain(account.driver));
   }
-  if (credential.expired || !credential.token) return errorRow(account, signInAgain(account.driver));
+  if (credential.expired || !credential.token) return account.driver === "opencode" && !credential.expired ? null : errorRow(account, signInAgain(account.driver));
   try {
     if (account.driver === "claude") return await fetchClaude(account, credential.token, deps);
     if (account.driver === "codex") return await fetchCodex(account, credential.token, credential.accountId, deps);
+    if (account.driver === "opencode") return await fetchOpenCode(account, credential.token, deps);
     return await fetchGrok(account, credential.token, deps);
   } catch {
     return errorRow(account, couldNotReach(account.driver));
@@ -896,4 +1031,16 @@ async function fetchGrok(account: PlanAccount, token: string, deps: PlanUsageDep
   }
   const windows = parseGrokUsage(creditsBody, billingBody ?? undefined, settings.ok ? settings.body : undefined);
   return okRow(account, windows);
+}
+
+/** Go's allowance, read with the account's own key or login. A key without a Go subscription answers 403. */
+async function fetchOpenCode(account: PlanAccount, token: string, deps: PlanUsageDeps): Promise<PlanProviderRow> {
+  const result = await fetchJson(deps.fetch, OPENCODE_GO_USAGE_URL, { Authorization: `Bearer ${token}`, Accept: "application/json" }, deps.timeoutMs ?? PROVIDER_TIMEOUT_MS);
+  // 403 is Go's own answer for a key without a Go subscription: the account works and has no allowance to report.
+  if (result.status === 403) return okRow(account, { plan: null, fiveHour: closedWindow(), weekly: closedWindow(), extra: [], models: [] });
+  if (authRejected(result.status)) return errorRow(account, "OpenCode refused the saved credentials");
+  if (!result.ok || result.body === null || typeof result.body !== "object") return errorRow(account, result.status === 0 || result.status >= 500 ? couldNotReach("opencode") : unexpectedUsage("opencode"));
+  const windows = parseOpenCodeUsage(result.body);
+  // A 200 with no meter at all is not an allowance: it is an answer this row cannot read.
+  return windows.plan ? okRow(account, windows) : errorRow(account, unexpectedUsage("opencode"));
 }

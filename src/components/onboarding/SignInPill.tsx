@@ -8,10 +8,13 @@ import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { plainSignIn } from "@/lib/onboarding";
 import { engineSignedIn } from "@/lib/product-events";
-import { api, useStore, type InstanceInfo } from "@/state/store";
+import { api, ApiError, useStore, type InstanceInfo } from "@/state/store";
 import { deviceSignInLink, isDeviceSignInCode } from "../../../shared/device-sign-in";
 
 const POLL_MS = 2_000;
+const POLL_MAX_MS = 30_000;
+const POLL_STALLS = 3;
+const POLL_TIMEOUT_MS = 10_000;
 export const PILL = "ui-button ui-button-pill ui-button-lg ui-button-primary w-[288px] max-w-full";
 
 type Slot =
@@ -37,17 +40,18 @@ export function useSignInPill(instance: InstanceInfo | undefined) {
   const [error, setError] = useState<string | null>(null);
   const id = instance?.instanceId ?? "";
   const method = instance?.authentication?.method;
+  const provider = deviceSignInProvider(instance?.driverKind ?? "");
   const base = `/api/instances/${encodeURIComponent(id)}`;
   const live = useRef(true);
   useEffect(() => () => { live.current = false; }, []);
 
   const done = useCallback(async () => {
-    engineSignedIn(method === "paste-code" ? "claude" : deviceSignInProvider(instance?.driverKind ?? ""),
+    engineSignedIn(method === "paste-code" ? "claude" : provider,
       method === "browser-pkce" ? "browser" : method === "paste-code" ? "code" : "device_code");
     try { await refreshInstances(); } catch {}
     try { await refreshModels(id); } catch {}
     if (live.current) setSlot({ kind: "start" });
-  }, [id, instance?.driverKind, method, refreshInstances, refreshModels]);
+  }, [id, provider, method, refreshInstances, refreshModels]);
 
   const fail = (cause: unknown) => {
     if (!live.current) return;
@@ -81,7 +85,6 @@ export function useSignInPill(instance: InstanceInfo | undefined) {
         if (link) await openExternalLink(link).catch(() => {});
         setSlot({ kind: "waiting", flowId: auth.flowId, link });
       } else {
-        const provider = deviceSignInProvider(instance?.driverKind ?? "");
         const code = isDeviceSignInCode(provider, auth.userCode) ? auth.userCode! : "";
         const link = deviceSignInLink(provider, auth.authorizationUrl, auth.userCode);
         if (link) await openExternalLink(link).catch(() => {});
@@ -107,19 +110,44 @@ export function useSignInPill(instance: InstanceInfo | undefined) {
   useEffect(() => {
     if (!polling) return;
     const controller = new AbortController();
-    const timer = window.setInterval(() => {
-      void api(`${base}/auth/status?flowId=${encodeURIComponent(polling)}`, { signal: controller.signal })
+    let timer: number | undefined;
+    let stalls = 0;
+    let cancelled = false;
+    const schedule = () => {
+      if (cancelled) return;
+      timer = window.setTimeout(check, Math.min(POLL_MS * 2 ** stalls, POLL_MAX_MS));
+    };
+    const check = () => {
+      void api(`${base}/auth/status?flowId=${encodeURIComponent(polling)}`, { signal: controller.signal, timeoutMs: POLL_TIMEOUT_MS })
         .then(({ auth }: { auth: DeviceSignInStatus }) => {
-          if (auth.phase === "succeeded") void done();
-          else if (auth.phase !== "waiting") fail(new Error(auth.message ?? t("engineSetup.device.failed")));
+          if (cancelled) return;
+          if (auth.phase === "succeeded") return void done();
+          if (auth.phase !== "waiting") return fail(new Error(auth.message ?? t("engineSetup.device.failed")));
+          stalls = 0;
+          if (isDeviceSignInCode(provider, auth.userCode)) {
+            const code = auth.userCode;
+            setSlot((current) => current.kind === "code" && current.flowId === polling && current.code !== code
+              ? { ...current, code, link: deviceSignInLink(provider, auth.authorizationUrl, code) } : current);
+          }
+          schedule();
         })
-        .catch(() => {});
-    }, POLL_MS);
+        .catch((cause) => {
+          if (cancelled || controller.signal.aborted) return;
+          // The server named a real problem (a flow that is gone, a dead session): show its words at once. A
+          // request that never came back or a dropped connection only counts as a miss and slows the poll down.
+          if (cause instanceof ApiError && cause.status < 500) return fail(cause);
+          stalls += 1;
+          if (stalls >= POLL_STALLS) fail(new Error(t("engineSetup.device.unreachable")));
+          else schedule();
+        });
+    };
+    schedule();
     return () => {
-      window.clearInterval(timer);
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
       controller.abort();
     };
-  }, [polling, base, done]);
+  }, [polling, base, done, provider]);
 
   return { slot, error, install, start, submit };
 }

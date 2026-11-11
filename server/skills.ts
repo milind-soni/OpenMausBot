@@ -1,4 +1,4 @@
-// Per-bot Agent Skills: imports keep SKILL.md only and land disabled; learned skills may add reviewed references/<topic>.md files.
+// Per-bot Agent Skills: imports keep their whole folder and land disabled; learned skills may add reviewed references/<topic>.md files.
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -16,7 +16,6 @@ import {
   rmSync,
   symlinkSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { z } from "zod";
@@ -24,8 +23,11 @@ import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { redactSecretsInText } from "./redact.ts";
+import {
+  githubSkillOriginSchema, prepareSkillFolder, skillFolderDigest, skillFolderRecordSchema, writeSkillFolder, type GitHubSkillOrigin, type SkillFolderFile,
+} from "./skill-folder.ts";
 import { LEARN_SOURCE_PREFIX } from "./skill-learn.ts";
-import { libraryDescriptionsAt, librarySkillFilePath, listLibrarySkills, type LibrarySkillListing } from "./skill-library.ts";
+import { libraryDescriptionsAt, librarySkillFilePath, librarySkillsForBot, librarySkillsToOffer, type LibrarySkillListing } from "./skill-library.ts";
 import { readManagedLinks, writeManagedLinks } from "./skill-link-registry.ts";
 import {
   directoryEntryState, entryExistsWithoutFollowing, formatKb, isSkillReferencePath, learnedSkillDirectoryMatches, publishReviewedRevision,
@@ -33,7 +35,6 @@ import {
 } from "./skill-storage.ts";
 import { workspaceDir } from "./workspace.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
-import { parseSkillCommand } from "../shared/skill-command.ts";
 
 export {
   DESCRIPTION_MAX,
@@ -62,6 +63,10 @@ interface SkillManifestEntry {
   warnings: string[];
   skippedFiles: string[];
   referencesSha256?: string;
+  /** An import's files beside SKILL.md, and skillFolderDigest over them. */
+  files?: string[];
+  filesSha256?: string;
+  github?: GitHubSkillOrigin;
   /** Replay guard for a crash between promotion and card settlement. Never exposed to agents. */
   appliedStageId?: string;
   storageRevision?: string;
@@ -92,6 +97,8 @@ const skillManifestEntrySchema = z.object({
   warnings: z.array(z.string()),
   skippedFiles: z.array(z.string()),
   referencesSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  ...skillFolderRecordSchema,
+  github: githubSkillOriginSchema.optional(),
   appliedStageId: z.string().optional(),
   storageRevision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   package: z.object({
@@ -440,6 +447,11 @@ export function syncSkillLinks(
   }
 }
 
+/** Where syncSkillLinks links each of this bot's enabled skills. */
+export function ownSkillLinks(botId: string): Map<string, string> {
+  return new Map(Object.entries(readManifest(botId)).flatMap(([name, entry]) => entry.enabled ? [[name, skillTarget(workspaceDir(botId), name, entry)] as const] : []));
+}
+
 export interface SkillListing {
   name: string;
   description: string;
@@ -452,6 +464,8 @@ export interface SkillListing {
   compatibility?: string;
   warnings: string[];
   skippedFiles: string[];
+  files?: string[];
+  github?: GitHubSkillOrigin;
 }
 
 function skillContentMatches(botId: string, name: string, entry: SkillManifestEntry): boolean {
@@ -461,6 +475,7 @@ function skillContentMatches(botId: string, name: string, entry: SkillManifestEn
     const file = join(directory, "SKILL.md");
     if (!lstatSync(file).isFile()) return false;
     if (createHash("sha256").update(readFileSync(file)).digest("hex") !== entry.sha256) return false;
+    if (entry.filesSha256 && skillFolderDigest(directory, entry.files ?? []) !== entry.filesSha256) return false;
     if (!entry.referencesSha256) return true;
     const references = readReferenceFiles(directory);
     return references !== null && skillReferencesSha256(references) === entry.referencesSha256;
@@ -479,7 +494,7 @@ function skillListing(botId: string, name: string, entry: SkillManifestEntry): S
     editable: entry.source.startsWith(LEARN_SOURCE_PREFIX) && Boolean(appliedStageId),
     warnings: intact
       ? visible.warnings
-      : [...visible.warnings, "stored SKILL.md changed after review — enablement is blocked"],
+      : [...visible.warnings, "stored skill files changed after review — enablement is blocked"],
   };
 }
 
@@ -522,14 +537,13 @@ export function readSkillFile(botId: string, name: string): string | null {
   }
 }
 
-export function installSkill(
-  botId: string,
-  source: string,
-  files: Array<{ path: string; content: string }>,
-): SkillListing | { error: string } {
-  const prepared = preparedSkillFiles(files);
-  if ("error" in prepared) return prepared;
-  return installPreparedSkill(botId, source, prepared, { enabled: false });
+/** The whole folder comes in, within the limits; what is left out is reported in `skippedFiles`. */
+export function installSkill(botId: string, source: string, files: readonly SkillFolderFile[], github?: GitHubSkillOrigin): SkillListing | { error: string } {
+  const folder = prepareSkillFolder(files);
+  if ("error" in folder) return folder;
+  const { skillMd: content, parsed, warnings, skipped } = folder;
+  const prepared = { files: [{ path: "SKILL.md", content }], parsed, warnings, skippedFiles: skipped.map((file) => file.path), folder: folder.files };
+  return installPreparedSkill(botId, source, prepared, { enabled: false, github });
 }
 
 /** Arrives enabled (the Admin is the review); `source` comes from the caller, never from the package. */
@@ -540,7 +554,7 @@ export function installOrgSkill(
   stamp: SkillPackageStamp,
 ): SkillListing | { error: string } {
   if (!source.startsWith("org:")) return { error: "organization skills need an org: source" };
-  const prepared = preparedSkillFiles([{ path: "SKILL.md", content: skillMd }]);
+  const prepared = preparedSkillFiles(skillMd);
   if ("error" in prepared) return prepared;
   if (prepared.parsed.name !== stamp.key) return { error: `the skill is named "${prepared.parsed.name}", not "${stamp.key}"` };
   return installPreparedSkill(botId, source, prepared, { enabled: true, package: { ...stamp } });
@@ -558,7 +572,7 @@ export function setSkillEnabled(botId: string, name: string, enabled: boolean): 
   const entry = manifest[name];
   if (!entry) return { error: `no imported skill named "${name}"` };
   if (enabled && !skillContentMatches(botId, name, entry)) {
-    return { error: "stored SKILL.md changed after review — remove and import or learn it again" };
+    return { error: "stored skill files changed after review — remove and import or learn it again" };
   }
   entry.enabled = enabled;
   writeManifest(botId, manifest);
@@ -726,34 +740,15 @@ interface PreparedSkillFiles {
   parsed: ParsedSkill;
   warnings: string[];
   skippedFiles: string[];
+  /** An import's files beside SKILL.md: kept whole and checked by one hash, not by the learned layout. */
+  folder?: Array<{ path: string; content: Buffer; executable: boolean }>;
 }
 
-function preparedSkillFiles(
-  files: Array<{ path: string; content: string }>,
-): PreparedSkillFiles | { error: string } {
-  const skillMd = files.find((file) => file.path === "SKILL.md" || file.path.endsWith("/SKILL.md"));
-  if (!skillMd) return { error: "no SKILL.md found at that location" };
-  if (Buffer.byteLength(skillMd.content, "utf8") > SKILL_FILE_MAX_BYTES) {
-    return { error: `SKILL.md is larger than ${SKILL_FILE_MAX_BYTES / 1024}KB` };
-  }
-  const parsed = parseSkillMd(skillMd.content);
+function preparedSkillFiles(skillMd: string): PreparedSkillFiles | { error: string } {
+  if (Buffer.byteLength(skillMd, "utf8") > SKILL_FILE_MAX_BYTES) return { error: `SKILL.md is larger than ${SKILL_FILE_MAX_BYTES / 1024}KB` };
+  const parsed = parseSkillMd(skillMd);
   if ("error" in parsed) return parsed;
-  const prefix = skillMd.path.slice(0, skillMd.path.length - "SKILL.md".length);
-  const skippedFiles = [
-    ...new Set(
-      files
-        .filter((file) => file !== skillMd)
-        .map((file) => {
-          const relative = file.path.startsWith(prefix) ? file.path.slice(prefix.length) : file.path;
-          return relative || file.path;
-        }),
-    ),
-  ];
-  const warnings = [
-    ...scanSkillText(skillMd.content),
-    ...skippedFiles.map((path) => `skipped supporting file "${path}" — v1 imports only SKILL.md`),
-  ];
-  return { files: [{ path: "SKILL.md", content: skillMd.content }], parsed, warnings, skippedFiles };
+  return { files: [{ path: "SKILL.md", content: skillMd }], parsed, warnings: scanSkillText(skillMd), skippedFiles: [] };
 }
 
 export function preparedLearnedSkill(
@@ -765,7 +760,7 @@ export function preparedLearnedSkill(
   }
   const limitError = referenceLimitError(files);
   if (limitError) return { error: limitError };
-  const prepared = preparedSkillFiles([skillMds[0]!]);
+  const prepared = preparedSkillFiles(skillMds[0]!.content);
   if ("error" in prepared) return prepared;
   const references = files
     .filter((file) => file.path !== "SKILL.md")
@@ -808,8 +803,8 @@ function installedLearnedSkillMatches(
 function commitNewSkillFiles(
   botId: string,
   name: string,
-  files: Array<{ path: string; content: string }>,
-  commitManifest: () => void,
+  files: ReadonlyArray<{ path: string; content: string | Buffer; executable?: boolean }>,
+  commitManifest: (filesSha256: string | null) => void,
 ): void {
   const root = ensureSkillsRoot(botId);
   if (!root) throw new Error("the workspace skills path must be a real directory, not a symlink or file");
@@ -818,18 +813,14 @@ function commitNewSkillFiles(
   if (entryExistsWithoutFollowing(target)) throw new Error(`skill path already exists: ${name}`);
   let published = false;
   try {
-    mkdirSync(staged, { mode: 0o700 });
-    for (const file of files) {
-      const path = join(staged, file.path);
-      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-      writeFileSync(path, file.content, { mode: 0o600 });
-    }
+    writeSkillFolder(staged, files[0]!.content, files.slice(1));
+    const filesSha256 = skillFolderDigest(staged, files.slice(1).map((file) => file.path), { remember: false });
     if (directoryEntryState(root) !== "directory" || entryExistsWithoutFollowing(target)) {
       throw new Error("the workspace skills path changed during installation");
     }
     renameSync(staged, target);
     published = true;
-    commitManifest();
+    commitManifest(filesSha256);
   } catch (error) {
     if (published) rmSync(target, { recursive: true, force: true });
     else rmSync(staged, { recursive: true, force: true });
@@ -841,7 +832,7 @@ function installPreparedSkill(
   botId: string,
   source: string,
   prepared: PreparedSkillFiles,
-  options: { enabled: boolean; appliedStageId?: string; package?: SkillPackageStamp },
+  options: { enabled: boolean; appliedStageId?: string; package?: SkillPackageStamp; github?: GitHubSkillOrigin },
 ): SkillListing | { error: string } {
   const name = prepared.parsed.name;
   const manifest = readManifest(botId);
@@ -876,6 +867,7 @@ function installPreparedSkill(
     ...(referencesSha256 ? { referencesSha256 } : {}),
     appliedStageId: options.appliedStageId,
     ...(options.package ? { package: options.package } : {}),
+    ...(options.github ? { github: options.github } : {}),
   };
   const root = ensureSkillsRoot(botId);
   if (!root) return { error: "the workspace skills path must be a real directory, not a symlink or file" };
@@ -898,7 +890,9 @@ function installPreparedSkill(
     }
   }
   try {
-    commitNewSkillFiles(botId, name, prepared.files, () => {
+    commitNewSkillFiles(botId, name, prepared.folder ? [...prepared.files, ...prepared.folder] : prepared.files, (filesSha256) => {
+      if (!filesSha256) throw new Error("the stored skill could not be read back");
+      if (prepared.folder?.length) Object.assign(entry, { files: prepared.folder.map((file) => file.path), filesSha256 });
       manifest[name] = entry;
       writeManifest(botId, manifest);
     });
@@ -1299,31 +1293,21 @@ export function skillsSystemPrompt(botId: string, assignedLibrary?: readonly str
 }
 
 export function enabledSkillFile(botId: string, name: string, assignedLibrary?: readonly string[]): string | null {
-  const skill = resolveBotSkills(botId, assignedLibrary).find((entry) => entry.name === name && entry.enabled);
-  if (!skill) return null;
-  const entry = readManifest(botId)[name];
-  return entry ? join(skillTarget(workspaceDir(botId), name, entry), "SKILL.md") : librarySkillFilePath(name);
+  return enabledSkillFiles(botId, [name], assignedLibrary).get(name) ?? null;
 }
 
-export function expandSkillCommandTurnText(botId: string, text: string, assignedLibrary?: readonly string[]): string {
-  if (!text.trimStart().startsWith("/")) return text;
-  const names = resolveBotSkills(botId, assignedLibrary).filter((skill) => skill.enabled).map((skill) => skill.name);
-  const command = parseSkillCommand(text, names);
-  if (!command) return text;
-  const file = enabledSkillFile(botId, command.name, assignedLibrary);
-  if (!file) return text;
-  const lead = `The user ran your ${command.name} skill with /${command.name}. Read ${JSON.stringify(file)} with your file tools and follow it for this turn.`;
-  return command.request
-    ? `${lead} Where the skill says {input}, use the request.\n\nRequest: ${command.request}`
-    : `${lead} There is no further request, so run it as the skill describes.`;
+/** SKILL.md of each named skill that is on for the bot. */
+export function enabledSkillFiles(botId: string, names: readonly string[], assignedLibrary?: readonly string[]): Map<string, string> {
+  if (!names.length) return new Map();
+  const on = new Set(resolveBotSkills(botId, assignedLibrary).filter((skill) => skill.enabled).map((skill) => skill.name)), manifest = readManifest(botId);
+  return new Map(names.filter((name) => on.has(name)).map((name) => [name, manifest[name] ? join(skillTarget(workspaceDir(botId), name, manifest[name]), "SKILL.md") : librarySkillFilePath(name)] as const));
 }
 
 export function resolveBotSkills(botId: string, assignedLibrary: readonly string[] | undefined): SkillListing[] {
   const own = listSkills(botId);
   if (assignedLibrary === undefined) return own; // the library is off: no every-bot skills either
   const ownNames = new Set(own.map((skill) => skill.name));
-  const assigned = new Set(assignedLibrary);
-  return [...own, ...listLibrarySkills().filter((skill) => (skill.everyBot || assigned.has(skill.name)) && !ownNames.has(skill.name))];
+  return [...own, ...librarySkillsForBot(botId, new Set(assignedLibrary), ownNames)];
 }
 
 export interface BotSkillWithOrigin extends SkillListing {
@@ -1341,7 +1325,7 @@ export function listBotSkillsWithOrigin(
     ...skill,
     origin: ownNames.has(skill.name) ? ("private" as const) : ("library" as const),
   }));
-  const library = listLibrarySkills().filter((entry) => !ownNames.has(entry.name) && !entry.everyBot && !assigned.has(entry.name));
+  const library = librarySkillsToOffer(botId, assigned, ownNames);
   return { skills, library };
 }
 
@@ -1355,6 +1339,9 @@ export interface MigratableSkillCopy {
   license?: string;
   compatibility?: string;
   package?: SkillPackageStamp;
+  files?: string[];
+  filesSha256?: string;
+  github?: GitHubSkillOrigin;
   intact: boolean;
 }
 
@@ -1370,6 +1357,8 @@ export function listMigratableSkills(botId: string): MigratableSkillCopy[] {
       ...(entry.license ? { license: entry.license } : {}),
       ...(entry.compatibility ? { compatibility: entry.compatibility } : {}),
       ...(entry.package ? { package: { ...entry.package } } : {}),
+      ...(entry.filesSha256 ? { files: [...entry.files ?? []], filesSha256: entry.filesSha256 } : {}),
+      ...(entry.github ? { github: { ...entry.github } } : {}),
       intact: skillContentMatches(botId, name, entry),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));

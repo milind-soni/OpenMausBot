@@ -424,7 +424,7 @@ lines.on("close", () => process.exit(0));
     expect(fake.live.size, "the owner's turn left its connection to Chrome open").toBe(1);
     const refused = await theirCall("agent_browser_get_title");
     expect(refused.isError).toBe(true);
-    expect(said(refused)).toBe(SOMEONE_ELSE);
+    expect(said(refused)).toContain(SOMEONE_ELSE);
     // Its claim on the browser dropped that connection, and nothing new reached Chrome.
     await until(() => fake.live.size === 0, "the held connection to drop");
     expect(fake.seen).toHaveLength(1);
@@ -557,7 +557,7 @@ describe.skipIf(!full)("My Chrome on My Cloud, with the real agent-browser and a
     }, bot.id, theirs);
     const refused = await theirCall("agent_browser_open", { url: `${pageUrl}?theirs` });
     expect(refused.isError).toBe(true);
-    expect(said(refused)).toBe(SOMEONE_ELSE);
+    expect(said(refused)).toContain(SOMEONE_ELSE);
     expect(await openPages()).not.toContain(`${pageUrl}?theirs`);
 
     await endTurn(c, bot.id, theirs);

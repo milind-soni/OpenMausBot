@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { arrivedCounts, CHECK_PASSES, COPY_RETRY_MS, createOneHome, FAILING_LINE_MS, FROZEN_RETRY_MS, KEPT_MS, missingOf, QUIET_MS, switchOn } from "./one-home.mjs";
+import { arrivedCounts, CHECK_PASSES, COPY_RETRY_MS, createOneHome, FAILING_LINE_MS, FROZEN_RETRY_MAX_MS, FROZEN_RETRY_MS, INCOMPLETE, KEPT_MS, missingOf, QUIET_MS, switchOn } from "./one-home.mjs";
 import { oneHomeCloud } from "./one-home-main.mjs";
+import nativeText from "./native-text.cjs";
 
 const CLOUD = "https://omb-t-1.fly.dev";
 const reply = (status, body = {}) => ({ ok: status < 400, status, body });
@@ -42,9 +43,10 @@ function world({ cloud = {}, switches = { "routine:r1": true, "routine:r2": fals
             const failure = moves.shift();
             if (failure) throw failure;
           },
-          async check() { w.checked++; return { ok: checks.shift() ?? true }; },
+          // A check answers `true`/`false`, or a whole report (cloud-send.mjs `check`).
+          async check() { w.checked++; const next = checks.shift(); return next && typeof next === "object" ? next : { ok: next ?? true }; },
           switches: () => switches,
-          snapshot: () => ({ running: w.running ?? null, whole: { result: { notes: [{ kind: "held", connection: "OpenRouter" }] } } }),
+          snapshot: () => ({ running: w.running ?? null, whole: { result: { notes: w.notes ?? [{ kind: "held", connection: "OpenRouter" }], failed: w.failed ?? [] } } }),
         },
         local: {
           async freeze() {
@@ -96,7 +98,7 @@ function world({ cloud = {}, switches = { "routine:r1": true, "routine:r2": fals
   return w;
 }
 
-test("a new buyer's move runs every phase and ends with home on My Cloud, this computer lent and its phone link off", async () => {
+test("a new buyer's move runs every phase and ends with home on My Cloud, this computer lent and its phone link left on", async () => {
   const w = world();
   await w.home.kick();
   assert.equal(w.journal.phase, "done");
@@ -106,7 +108,7 @@ test("a new buyer's move runs every phase and ends with home on My Cloud, this c
   assert.deepEqual(w.switchedOn().sort(), ["/api/calendar-calls/c1", "/api/routines/r1", "/api/webhooks/w1"], "only what was on here, and nothing off");
   assert.deepEqual(w.cloudCalls.find(([, route]) => route === "/api/cloud-send/arrived")?.[2], { v: 1, computer: "MacBook Air", webhooks: ["w1"] });
   assert.deepEqual(w.lent, [["/Users/p/code/shop"]], "lent once, with each bot's own project folder");
-  assert.equal(w.phone.stopped, 1);
+  assert.equal(w.phone.stopped, 0, "a phone paired here hears from the frozen copy where its bots went, and reaches a workspace of this computer's own once one is open");
   assert.deepEqual(w.opened, ["cloud"]);
   assert.equal(w.home.away(), true);
   assert.deepEqual(w.home.view(), { phase: "done", at: w.journal.doneAt, counts: { bots: 2, skills: 0, logins: 1, onePassword: false, chats: 1, routines: 1 }, phone: true, held: ["OpenRouter"] });
@@ -114,7 +116,7 @@ test("a new buyer's move runs every phase and ends with home on My Cloud, this c
 
   await w.relaunch().kick();
   assert.equal(w.lent.length, 1, "a relaunch lends nothing again");
-  assert.equal(w.phone.stopped, 1);
+  assert.equal(w.phone.stopped, 0);
   assert.equal(w.server.unfreezes, 0);
 });
 
@@ -191,6 +193,113 @@ test("a check's log line names the rooms and conversations it found missing by i
   assert.equal(missingOf({}), "something");
 });
 
+test("a check that still finds things missing after three passes says so at once, naming what did not go and why", async () => {
+  const w = world({ checks: [false, false, false] });
+  w.failed = [{ key: "skill:b1:tidy", kind: "skill", label: "tidy", error: "OpenMausBot on this computer did not answer. Try again in a moment." },
+    { key: "app-event:e1", kind: "app-event", label: "Reply to email", error: "This app automation stays on the computer it came from.", final: true }];
+  await w.home.kick();
+  assert.equal(w.journal.failure.code, "incomplete");
+  assert.ok(w.now() - w.journal.failingSince < FAILING_LINE_MS, "not a day later");
+  assert.deepEqual(w.home.view(), { phase: "copy", failing: { error: INCOMPLETE, items: [
+    { label: "tidy", error: "OpenMausBot on this computer did not answer. Try again in a moment." },
+    { label: "Reply to email", error: "This app automation stays on the computer it came from." }] } });
+});
+
+test("a move done while a connector stayed on this computer names it on the done line, with what it needs", async () => {
+  const w = world();
+  w.notes = [{ kind: "stayed", connection: "fetch", needs: "uvx" }, { kind: "stayed", connection: "easy" }, { kind: "held", connection: "OpenRouter" }];
+  await w.home.kick();
+  assert.equal(w.journal.phase, "done");
+  assert.deepEqual(w.home.view().stayed, [{ name: "fetch", needs: "uvx" }, { name: "easy" }]);
+  assert.deepEqual(w.home.view().held, ["OpenRouter"]);
+  w.notes = [];
+  assert.deepEqual(w.home.view().stayed, [{ name: "fetch", needs: "uvx" }, { name: "easy" }], "kept with the move, not read again");
+});
+
+/** A check that finds the same things missing on every pass: one attachment and one bot's memory note that sending again
+ * never carries (a file gone from this computer, a note My Cloud can't keep). */
+const stuckReport = (extra = {}) => ({ ok: false, gaps: { items: [], memory: [{ bot: "b1", path: "memory/notes.md" }], conversations: [] },
+  chats: [{ threadId: "t1", missing: 2, unstamped: 0, path: "equal" }], attachments: ["a1.mp3"], secrets: { equal: [], differs: [], missing: [] },
+  names: { b1: "Scout" }, owners: { t1: "b1" }, ...extra });
+
+test("what sending again never carries stays on this computer once two tries ended the same way, and the rest moves", async () => {
+  // Seen on a customer's PC (0.1.140): the check found the same things missing on every pass, so the move failed 94 times
+  // in a week, freezing the computer each hour, and the line only said "Some of this computer's things did not reach My Cloud".
+  const w = world({ checks: [stuckReport(), stuckReport(), stuckReport(), stuckReport(), stuckReport(), stuckReport()] });
+  await w.home.kick();
+  assert.equal(w.journal.phase, "copy", "the first try that ends this way still goes again: My Cloud may have been busy");
+  assert.equal(w.journal.failure.code, "incomplete");
+  assert.equal(w.journal.gaps, "1 memory, 1 chats (2 rows), 1 attachments");
+  assert.equal(w.home.view().failing.error, INCOMPLETE, "the line says what happens next, not only that it failed");
+  assert.equal(w.server.frozen, false);
+
+  w.advance(FROZEN_RETRY_MS);
+  await w.tick();
+  assert.equal(w.journal.phase, "done", "the next try ending the same way moves the rest");
+  assert.equal(w.server.frozen, true);
+  assert.deepEqual(w.journal.left, [
+    { label: "Scout", error: "One of its memory notes didn't reach My Cloud." },
+    { label: "Scout", error: "Part of one chat didn't reach My Cloud." },
+    { label: "An attachment", error: "It didn't reach My Cloud." },
+  ]);
+  assert.deepEqual(w.home.view().left, w.journal.left, "the done line says what stayed here");
+  for (const key of ["gapKey", "gaps", "stuck", "frozenTries", "failure"]) assert.equal(w.journal[key], undefined, `${key} is cleared once done`);
+});
+
+test("a move keeps trying while sending again carries something, or something new goes missing", async () => {
+  // Pass by pass the gaps shrink: sending again is working, so this is no reason to leave anything behind.
+  const shrinking = world({ checks: [stuckReport(), stuckReport({ attachments: [] }), stuckReport({ attachments: [] }),
+    stuckReport(), stuckReport({ attachments: [] }), stuckReport({ attachments: [] })] });
+  shrinking.journal = { v: 1, phase: "copy", cloud: { origin: CLOUD, account: "acct-1", machine: CLOUD }, failure: { phase: "check", code: "incomplete", count: 3, since: 1, at: 1 } };
+  await shrinking.relaunch().kick();
+  assert.equal(shrinking.journal.phase, "copy");
+  assert.equal(shrinking.journal.failure.code, "incomplete");
+
+  // The try before found other things missing than this one: both go again.
+  const other = world({ checks: [stuckReport(), stuckReport(), stuckReport()] });
+  other.journal = { v: 1, phase: "copy", cloud: { origin: CLOUD, account: "acct-1", machine: CLOUD }, failure: { phase: "check", code: "incomplete", count: 1, since: 1, at: 1 }, gapKey: "not-these" };
+  await other.relaunch().kick();
+  assert.equal(other.journal.phase, "copy");
+  assert.notEqual(other.journal.gapKey, "not-these");
+
+  // A journal an older app wrote, failing this way with no gaps kept: the first try that ends the same way moves the rest.
+  const older = world({ checks: [stuckReport(), stuckReport(), stuckReport()] });
+  older.journal = { v: 1, phase: "copy", cloud: { origin: CLOUD, account: "acct-1", machine: CLOUD }, failure: { phase: "check", code: "incomplete", count: 94, since: 1, at: 1 }, tries: 94 };
+  await older.relaunch().kick();
+  assert.equal(older.journal.phase, "done");
+  assert.equal(older.journal.left.length, 3);
+});
+
+test("a move that keeps failing frozen waits twice as long each time, up to half a day, so this computer is not stopped every hour", async () => {
+  const w = world({ moves: Array.from({ length: 12 }, (_, at) => (at % 2 ? new Error("My Cloud could not add the chats.") : undefined)) });
+  const waits = [];
+  for (let attempt = 0; attempt < 6; attempt++) {
+    await w.tick();
+    waits.push((w.journal.retryAt - w.now()) / FROZEN_RETRY_MS);
+    w.advance(w.journal.retryAt - w.now());
+  }
+  assert.deepEqual(waits, [1, 2, 4, 8, 12, 12]);
+  assert.equal(FROZEN_RETRY_MAX_MS, 12 * FROZEN_RETRY_MS);
+  assert.equal(w.server.freezes, 6, "one freeze a try, never more");
+  await w.home.retry();
+  assert.equal(w.server.freezes, 7, "Try again still goes at once");
+
+  const unnamed = world({ checks: [false, false, false, false, false, false] });
+  unnamed.journal = { v: 1, phase: "copy", cloud: { origin: CLOUD, account: "acct-1", machine: CLOUD }, failure: { phase: "check", code: "incomplete", count: 2, since: 1, at: 1 } };
+  await unnamed.relaunch().kick();
+  assert.equal(unnamed.journal.phase, "copy", "a check that can't say what it misses never leaves anything behind");
+});
+
+test("a move done without what My Cloud refused for good names it on the done line", async () => {
+  const w = world();
+  w.failed = [{ key: "app-event:e1", kind: "app-event", label: "Reply to email", error: "This app automation stays on the computer it came from.", final: true }];
+  await w.home.kick();
+  assert.equal(w.journal.phase, "done");
+  assert.deepEqual(w.home.view().left, [{ label: "Reply to email", error: "This app automation stays on the computer it came from." }]);
+  w.failed = [];
+  assert.deepEqual(w.home.view().left, [{ label: "Reply to email", error: "This app automation stays on the computer it came from." }], "kept with the move, not read again");
+});
+
 test("a check that still fails after three passes lifts the freeze and tries again in an hour; a day of it shows Try again", async () => {
   const w = world({ checks: [false, false, false] });
   await w.home.kick();
@@ -223,6 +332,19 @@ test("a check that still fails after three passes lifts the freeze and tries aga
   failing.journal.retryAt = failing.now() + FROZEN_RETRY_MS;
   await failing.home.retry();
   assert.ok(failing.passes.length > 25, "Try again goes now, not at the next hourly try");
+});
+
+test("a refusal My Cloud named by a serverError key reaches the failing line with that key beside its English", async () => {
+  const named = () => Object.assign(new Error("Nothing personal comes into Acme."), { errorKey: "serverError.team.personalMove", errorParams: { team: "Acme" } });
+  const w = world({ moves: Array.from({ length: 40 }, named) });
+  await w.home.kick();
+  for (let hour = 0; hour < 25; hour++) { w.advance(FROZEN_RETRY_MS); await w.tick(); }
+  assert.deepEqual(w.home.view().failing, { error: "Nothing personal comes into Acme.", errorKey: "serverError.team.personalMove", errorParams: { team: "Acme" } });
+
+  const other = world({ moves: Array.from({ length: 40 }, () => Object.assign(new Error("No."), { errorKey: "cloudHome.connect" })) });
+  await other.home.kick();
+  for (let hour = 0; hour < 25; hour++) { other.advance(FROZEN_RETRY_MS); await other.tick(); }
+  assert.deepEqual(other.home.view().failing, { error: "No." }, "no key but a serverError one is kept");
 });
 
 test("a frozen pass the Admin refused for too many connections lifts the freeze and goes again in minutes, never an hour", async () => {
@@ -371,7 +493,7 @@ test("a newer app tops up once from the frozen copy, which is deleted 30 days af
 test("one home reads the Admin's word: a ready Cloud the account may move to, and a held one that ended", () => {
   const state = (machine, extra = {}) => ({ status: "connected", account: { id: "acct-1" }, entitlement: { status: "active" }, machine, ...extra });
   assert.equal(oneHomeCloud({ status: "signed-out" }), null);
-  assert.deepEqual(oneHomeCloud(state({ status: "ready", origin: CLOUD, moves: true })), { origin: CLOUD, account: "acct-1", machine: CLOUD, ready: true, moves: true, ended: false, paid: true });
+  assert.deepEqual(oneHomeCloud(state({ status: "ready", origin: CLOUD, moves: true })), { origin: CLOUD, account: "acct-1", machine: CLOUD, ready: true, moves: true, ended: false, paid: true, verified: true });
   assert.equal(oneHomeCloud(state({ status: "ready", origin: CLOUD })).moves, false, "no move unless the Admin lets this account move");
   assert.equal(oneHomeCloud(state({ status: "stopped", hold: { until: 5 } })).ended, true);
   assert.equal(oneHomeCloud(state({ status: "stopped" })).ended, false, "stopped alone is not ended");
@@ -379,7 +501,7 @@ test("one home reads the Admin's word: a ready Cloud the account may move to, an
   assert.equal(oneHomeCloud({ ...state({ status: "ready", origin: CLOUD, moves: true }), status: "unavailable" }).ready, false);
   const team = [{ id: "team-acme", name: "Acme", role: "owner", machine: { status: "ready", origin: "https://omb-t-2.fly.dev", moves: true } }];
   assert.deepEqual(oneHomeCloud(state(undefined, { entitlement: { plan: "pro", tier: "team", status: "active" }, teams: team })),
-    { origin: null, account: "acct-1", machine: null, ready: false, moves: false, ended: false, paid: false }, "a Team plan has no My Cloud: nothing moves, and nothing here counts as paid for");
+    { origin: null, account: "acct-1", machine: null, ready: false, moves: false, ended: false, paid: false, verified: true }, "a Team plan has no My Cloud: nothing moves, and nothing here counts as paid for");
 });
 
 test("automations switch on through their own routes, and the done line counts only what both sides hold", () => {
@@ -419,4 +541,12 @@ test("a move left off while My Cloud was away goes on as soon as it is back; a s
   await s.tick();
   assert.equal(s.journal.phase, "done");
   assert.equal(s.server.unfreezes, 0, "never lifted after the switch");
+});
+
+test("turning the switch back while the bots are on their way home is refused in the app's language", () => {
+  const journal = { v: 1, phase: "keeping", offThere: true, cloud: { origin: "https://omb-u-1.fly.dev", account: "acct-1" } };
+  const home = (t) => createOneHome({ journal: { read: () => journal, write: () => {} }, cloud: () => null, send: {}, local: {}, session: async () => ({}), keep: { read: () => null, write: () => {} }, ...(t ? { t } : {}) });
+  assert.throws(() => home().keep(false), { message: "This computer's bots are on their way back. Try again once they're here." });
+  const { t } = nativeText.createNativeText({ saved: "pt-br" });
+  assert.throws(() => home(t).keep(false), { message: "Os bots deste computador estão voltando. Tente novamente quando eles chegarem." });
 });

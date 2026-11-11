@@ -2,7 +2,8 @@ import { Children, createElement, isValidElement, type ReactElement, type ReactN
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigStatus } from "@/state/store";
-import { DecisionModelSettings, deciderFailureText } from "./DecisionModelSettings";
+import { setLocale } from "@/lib/i18n";
+import { DecisionModelSettings, deciderFailureText, helpersStatusLine } from "./DecisionModelSettings";
 import { Switch } from "./SettingsPrimitives";
 
 const fixture = vi.hoisted(() => ({
@@ -79,7 +80,7 @@ beforeEach(() => {
   vi.stubGlobal("window", {});
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { setLocale("en"); vi.unstubAllGlobals(); });
 
 describe("DecisionModelSettings", () => {
   it("explains itself, then the switch, the key, and what it decides", () => {
@@ -94,6 +95,11 @@ describe("DecisionModelSettings", () => {
     expect(view.master.props.checked).toBe(false);
     expect(view.master.props.disabled).toBe(true);
     expect(view.html).toContain("Save a key below to turn this on.");
+  });
+
+  it("uses an invariable status for missing decisions and extraction in pt-BR", () => {
+    setLocale("pt-br");
+    expect(helpersStatusLine(null)).toBe("Decisões: sem configuração · Extração: sem configuração");
   });
 
   it("offers both providers, with Jev selected for an existing install and no model picker", () => {
@@ -233,7 +239,7 @@ describe("DecisionModelSettings", () => {
   it("maps every failure to a fixed sentence", () => {
     expect(deciderFailureText({ reason: "rejected" }, false, "jev")).toBe("Jev rejected this key. Check it at typesafe.ai.");
     expect(deciderFailureText({ reason: "overloaded" })).toBe("Jev is overloaded right now. Try again shortly.");
-    expect(deciderFailureText({ reason: "http_error", status: 500 })).toBe("Jev returned an unexpected error (HTTP 500).");
+    expect(deciderFailureText({ reason: "http_error", status: 500 })).toBe("Jev sent back an error (500). Try again in a moment.");
     expect(deciderFailureText({ reason: "something-new" })).toBe("The test did not finish. Try again.");
   });
 
@@ -440,15 +446,15 @@ describe("DecisionModelSettings", () => {
       const text = (result: { reason: string; status?: number }) => deciderFailureText(result, false, "openrouter");
       expect(text({ reason: "rejected", status: 401 })).toBe("OpenRouter rejected this key. Check it at openrouter.ai/keys.");
       expect(text({ reason: "http_error", status: 402 })).toBe("Your OpenRouter account is out of credits. Add some at openrouter.ai/credits.");
-      expect(text({ reason: "http_error", status: 500 })).toBe("OpenRouter returned an unexpected error (HTTP 500).");
+      expect(text({ reason: "http_error", status: 500 })).toBe("OpenRouter sent back an error (500). Try again in a moment.");
       expect(text({ reason: "rate_limited" })).toBe("OpenRouter is limiting requests right now. Try again in a moment.");
       expect(text({ reason: "overloaded" })).toBe("The model is overloaded right now. Try again shortly.");
-      expect(text({ reason: "malformed" })).toBe("The model sent an answer OpenMausBot could not read. Try another model.");
+      expect(text({ reason: "malformed" })).toBe("The model sent an answer MausBot could not read. Try another model.");
       expect(text({ reason: "unreachable" })).toBe("Could not reach OpenRouter. Check your connection.");
       expect(text({ reason: "timeout" })).toBe("OpenRouter did not answer in time. Try again.");
       expect(text({ reason: "no_key" })).toBe("Paste a key or save one first.");
       expect(text({ reason: "something-new" })).toBe("The test did not finish. Try again.");
-      expect(deciderFailureText({ reason: "http_error", status: 402 })).toBe("Jev returned an unexpected error (HTTP 402).");
+      expect(deciderFailureText({ reason: "http_error", status: 402 })).toBe("Jev sent back an error (402). Try again in a moment.");
     });
   });
 });

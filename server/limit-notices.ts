@@ -35,6 +35,16 @@ export function limitNoticeText(facts: LimitNoticeFacts, timeZone?: string): str
     : `${what}, so ${facts.bot} waits: no other AI you have set up can take over.`;
 }
 
+/** "Claude is signed out on the Cloud. Sign in again in Settings → AI to keep using it.", and who carries on meanwhile
+ * when a backup the person chose does. */
+export function signedOutNoticeText(facts: { engine: string; bot: string; backup?: string; where: string; stuck?: readonly string[] }): string {
+  if (facts.backup) return `${facts.engine} is signed out ${facts.where}, so ${facts.bot} is using ${facts.backup} meanwhile. Sign in again in Settings → AI to keep using ${facts.engine}.`;
+  const stuck = facts.stuck ?? [];
+  const shown = stuck.length > 3 ? `${stuck.slice(0, 3).join(", ")} and ${stuck.length - 3} more`
+    : stuck.length > 1 ? `${stuck.slice(0, -1).join(", ")} and ${stuck.at(-1)}` : stuck[0];
+  return `${facts.engine} is signed out ${facts.where}. Sign in again in Settings → AI to keep using it.${stuck.length ? ` Until then ${shown} can't run: ${stuck.length === 1 ? "it has" : "they have"} no backup.` : ""}`;
+}
+
 export class LimitNotices {
   private readonly file: string;
   private readonly now: () => number;
@@ -64,11 +74,31 @@ export class LimitNotices {
     return !(known && known > now);
   }
 
+  /** True when `everyMs` has passed since this was last said for `botId`, and then the clock restarts: a refusal in between
+   * does not push the next telling back. A mark further out than `everyMs` was not left by this schedule, so it counts as told long ago. */
+  due(botId: string, engine: string, everyMs: number): boolean {
+    const key = `${botId}\u0000${engine}`, now = this.now();
+    const next = this.told[key];
+    if (next !== undefined && next > now && next - now <= everyMs) return false;
+    this.told = Object.fromEntries(Object.entries(this.told).filter(([, end]) => end > now));
+    this.told[key] = now + everyMs;
+    this.save();
+    return true;
+  }
+
   /** The engine works again for this bot: its next limit is a new stretch. */
   ended(botId: string, engine: string): void {
     const key = `${botId}\u0000${engine}`;
     if (!(key in this.told)) return;
     delete this.told[key];
+    this.save();
+  }
+
+  /** The engine works again for every bot (it is signed in again): each bot's next refusal is a new stretch. */
+  endedEverywhere(engine: string): void {
+    const kept = Object.fromEntries(Object.entries(this.told).filter(([key]) => !key.endsWith(`\u0000${engine}`)));
+    if (Object.keys(kept).length === Object.keys(this.told).length) return;
+    this.told = kept;
     this.save();
   }
 

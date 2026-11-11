@@ -9,16 +9,17 @@ import {
   type ExecFileOptions,
   type SpawnOptions,
 } from "node:child_process";
-import { closeSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import type { Readable, Writable } from "node:stream";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { botBox, type WrappedSpawn } from "./bot-box/box.ts";
 import type { BoxRequest } from "./bot-box/plan.ts";
+import { homeProgramsDistrusted, serverMayRunFrom, serverPath } from "./bot-box/program-trust.ts";
 import { engineMemory } from "./engine-memory.ts";
 import { engineHomes } from "./engine-homes/engine-homes.ts";
 import type { HomedSpawn } from "./engine-homes/layout.ts";
 import { resolveCliSpawn, type ResolvedSpawn } from "./env-path.ts";
-import { OOM_SCORE, spawnWithOomScore } from "./oom-score.ts";
+import { spawnBotWork } from "./oom-score.ts";
 
 export function resolveCli(cli: string, args: string[] = [], env?: NodeJS.ProcessEnv): ResolvedSpawn {
   return resolveCliSpawn(cli, args, env);
@@ -153,6 +154,19 @@ function rememberEngineSession(child: ChildProcess): void {
   });
 }
 
+const liveSpawns = new Set<readonly string[]>();
+
+/** The command line of every process spawnCli started that has not exited yet. */
+export function liveCliCommands(): Iterable<readonly string[]> {
+  return liveSpawns;
+}
+
+function rememberLiveSpawn(child: ChildProcess, line: readonly string[]): void {
+  if (!child.pid) return;
+  liveSpawns.add(line);
+  child.once("exit", () => liveSpawns.delete(line));
+}
+
 /** `bot`: an engine running bots' turns, whose own servers that bot's browser may open on a server host.
  * `openmausbot`: everything else (logins, probes, the browser engine itself). */
 export type CliOwner = "bot" | "openmausbot";
@@ -160,9 +174,12 @@ export type CliOwner = "bot" | "openmausbot";
 /** The bot box (server/bot-box): a `bot` spawn runs in it where it is on; `box` asks for one for another owner, with more
  * paths or the host's network, and `false` keeps a spawn out of it. */
 export interface BoxSpawnOptions {
-  box?: boolean | Pick<BoxRequest, "rw" | "ro" | "net" | "botId" | "allowEnv">;
+  box?: boolean | Pick<BoxRequest, "rw" | "ro" | "net" | "botId" | "botThreads" | "allowEnv" | "relay" | "configured">;
   /** On a Team Cloud, runs in its conversation's engine home though it is not a bot's engine (a keep-warm ping). */
   engineHome?: boolean;
+  /** A bot's own work that is not its engine (its browser, a helper engine): memory runs out on it first, as on a `bot`
+   * spawn (oom-score.ts), with no box and no engine tracking. */
+  botWork?: boolean;
 }
 export type CliSpawnOptions = SpawnOptions & BoxSpawnOptions;
 
@@ -172,6 +189,30 @@ export function boxedSpawn(resolved: ResolvedSpawn, opts: CliSpawnOptions, owner
   const request = typeof opts.box === "object" ? opts.box : {};
   const home = homed ? { home: homed.home, shared: homed.shared } : {};
   return botBox.wrap({ command: resolved.command, args: resolved.args, cwd: typeof opts.cwd === "string" ? opts.cwd : undefined, env: opts.env ?? process.env, ...request, ...home });
+}
+
+/** What a process several conversations share must be boxed with to serve `cwd` (null with the box off): all of the bot's
+ * conversation folders for a conversation folder (task-workspaces/<bot>/<thread>, BoxRequest.botThreads), else `cwd`. */
+export function sharedBoxScope(cwd: string): string | null {
+  if (!botBox.enabled()) return null;
+  const parent = dirname(resolve(cwd));
+  return basename(dirname(parent)) === "task-workspaces" ? parent : resolve(cwd);
+}
+
+/** Security (bot-box/program-trust.ts): a spawn outside the box neither starts a program from a folder a boxed bot can
+ * write nor looks one up there. */
+export function outsideBoxOptions<T extends { env?: NodeJS.ProcessEnv; cwd?: string | URL }>(command: string, opts: T): T {
+  if (!homeProgramsDistrusted()) return opts;
+  if (/[/\\]/.test(command)) {
+    const path = resolve(typeof opts.cwd === "string" ? opts.cwd : process.cwd(), command);
+    let real = path;
+    try { real = realpathSync(path); } catch {}
+    if (!serverMayRunFrom(path) || !serverMayRunFrom(real)) {
+      throw Object.assign(new Error(`${command} is in a folder the bots can write, so the server does not run it outside the bot box.`), { code: "EACCES" });
+    }
+  }
+  const env = opts.env ?? process.env;
+  return { ...opts, env: { ...env, PATH: serverPath(env.PATH) } };
 }
 
 export function spawnCli(
@@ -185,7 +226,7 @@ export function spawnCli(
   const homed = owner === "bot" || opts.engineHome ? engineHomes.forSpawn(opts.env ?? process.env) : null;
   const options: CliSpawnOptions = homed ? { ...opts, env: homed.env } : opts;
   const boxed = boxedSpawn(resolved, options, owner, homed);
-  const { box: _box, engineHome: _engineHome, ...spawnOpts } = options;
+  const { box: _box, engineHome: _engineHome, botWork, ...spawnOpts } = boxed ? options : outsideBoxOptions(resolved.command, options);
   // The box's extra descriptors (its seccomp filter) follow stdio; only a plain three-entry stdio can take them.
   const stdio = boxed?.extraFds.length && Array.isArray(spawnOpts.stdio) && spawnOpts.stdio.length === 3 ? [...spawnOpts.stdio, ...boxed.extraFds] : spawnOpts.stdio;
   const start = () => spawn(boxed?.command ?? resolved.command, boxed?.args ?? resolved.args, {
@@ -196,10 +237,11 @@ export function spawnCli(
   }) as ChildProcessByStdio<Writable, Readable, Readable>;
   let child: ChildProcessByStdio<Writable, Readable, Readable>;
   try {
-    child = owner === "bot" ? spawnWithOomScore(OOM_SCORE.engine, start) : start();
+    child = owner === "bot" || botWork ? spawnBotWork(start) : start();
   } finally {
     for (const fd of boxed?.extraFds ?? []) try { closeSync(fd); } catch {}
   }
+  rememberLiveSpawn(child, [resolved.command, ...resolved.args]);
   // The broker token minted for this process dies with it.
   if (boxed?.token) child.once("exit", boxed.release);
   if (process.platform !== "win32") cliGroups.add(child);
@@ -221,6 +263,44 @@ export function spawnCli(
   return child;
 }
 
+/** execCli's answer for a spawn that runs in the bot box where it is on (`box`), as a bot's own would: an engine's
+ * status or catalog read that loads the engine's settings, extensions or MCP servers from a HOME a bot can write. */
+export function execCliBoxed(
+  cli: string,
+  args: string[],
+  opts: { env: NodeJS.ProcessEnv | Record<string, string | undefined>; cwd?: string; timeout: number; maxBuffer?: number; box: NonNullable<BoxSpawnOptions["box"]> },
+  cb: (err: (Error & { code?: number | string | null; killed?: boolean }) | null, stdout: string, stderr: string) => void,
+): void {
+  const limit = opts.maxBuffer ?? 1024 * 1024;
+  let child: ChildProcessByStdio<Writable, Readable, Readable>;
+  try {
+    child = spawnCli(cli, args, { env: opts.env as NodeJS.ProcessEnv, cwd: opts.cwd, stdio: ["pipe", "pipe", "pipe"], box: opts.box });
+  } catch (error) {
+    queueMicrotask(() => cb(error instanceof Error ? error : new Error(String(error)), "", ""));
+    return;
+  }
+  child.stdin.end();
+  let stdout = "", stderr = "", done = false, timedOut = false;
+  const finish = (err: (Error & { code?: number | string | null; killed?: boolean }) | null) => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    cb(err, stdout, stderr);
+  };
+  child.stdout.on("data", (chunk: Buffer) => { if (stdout.length < limit) stdout += chunk.toString("utf8").slice(0, limit - stdout.length); });
+  child.stderr.on("data", (chunk: Buffer) => { if (stderr.length < limit) stderr += chunk.toString("utf8").slice(0, limit - stderr.length); });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void killCliTree(child, 0);
+  }, opts.timeout);
+  timer.unref?.();
+  child.once("error", (error) => finish(error));
+  child.once("close", (code) => {
+    if (timedOut) finish(cutOffError(cli, opts.timeout));
+    else finish(code === 0 ? null : Object.assign(new Error(`${cli} exited with code ${code}`), { code }));
+  });
+}
+
 const EXEC_KILL_GRACE_MS = 2_000;
 
 export function execCli(
@@ -232,24 +312,39 @@ export function execCli(
   const resolved = resolveCli(cli, args);
   try {
     assertSafeCliArgv(resolved);
+    opts = outsideBoxOptions(resolved.command, opts);
   } catch (error) {
     queueMicrotask(() => cb(error instanceof Error ? error : new Error(String(error)), "", ""));
     return;
   }
   let escalate: NodeJS.Timeout | undefined;
+  let deadline: NodeJS.Timeout | undefined;
+  let timedOut = false;
   const child = execFile(resolved.command, resolved.args, { ...opts, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) => {
     clearTimeout(escalate);
-    cb(err, stdout, stderr);
+    clearTimeout(deadline);
+    cb(err ?? (timedOut ? cutOffError(cli, opts.timeout) : null), stdout, stderr);
   });
   // Node (24) calls back only once the child exits, and a CLI wrapper that traps SIGTERM outlives the timeout's signal.
   // Only the child is stopped: execFile starts no process group, so a grandchild that ignores SIGTERM can outlive it.
+  // When its timeout fires after the child exited but before Node saw the exit, Node (24) drops the output and still
+  // reports success; this timer is queued just after Node's, so it marks that run as timed out.
   if (opts.timeout) {
     escalate = setTimeout(() => void killCliTree(child, 0), opts.timeout + EXEC_KILL_GRACE_MS);
     escalate.unref?.();
+    deadline = setTimeout(() => {
+      timedOut = true;
+    }, opts.timeout);
+    deadline.unref?.();
   }
 }
 
-/** Concurrent probes on a busy machine can outlast the timeout, so a CLI that answered before keeps its last version. */
+function cutOffError(cli: string, timeout: number | undefined): Error {
+  return Object.assign(new Error(`${cli} timed out after ${timeout} ms`), { killed: true, code: null, signal: null });
+}
+
+export const CLI_VERSION_TIMEOUT_MS = 30_000;
+
 export function cliVersionReader(cli: string): (err: Error | null, stdout: string) => { version: string } | { reason: string } {
   let last: string | null = null;
   return (err, stdout) => {
@@ -257,8 +352,18 @@ export function cliVersionReader(cli: string): (err: Error | null, stdout: strin
     if (version) return { version: (last = version) };
     const failure = err as (NodeJS.ErrnoException & { killed?: boolean }) | null;
     const timedOut = failure?.killed === true && typeof failure.code !== "string";
-    if (timedOut && last) return { version: last };
-    return { reason: timedOut ? `\`${cli}\` took longer than 8 seconds to answer --version. The machine may be busy; check again.` : `\`${cli}\` CLI not found` };
+    if (failure?.code === "ENOENT") {
+      last = null;
+      return { reason: `\`${cli}\` CLI not found` };
+    }
+    if (failure?.code === "EACCES" || failure?.code === "EPERM") {
+      last = null;
+      return { reason: `\`${cli}\` could not run --version. Check its file permissions.` };
+    }
+    if (last && (timedOut || !err || typeof failure?.code === "number")) return { version: last };
+    return { reason: timedOut
+      ? `\`${cli}\` took longer than ${CLI_VERSION_TIMEOUT_MS / 1000} seconds to answer --version. The machine may be busy; check again.`
+      : !err ? `\`${cli}\` returned no version. Check again.` : `\`${cli}\` could not report its version. Check that it starts in a terminal, then check again.` };
   };
 }
 
@@ -375,6 +480,10 @@ async function stopCliTree(child: ChildProcess, pid: number, timeoutMs: number):
         child.kill();
       } catch {
       }
+      // taskkill /T also fails when one process in the tree could not be stopped; that one may still hold the pipes the CLI
+      // inherited, so "close" never comes. The CLI itself exiting is what counts.
+      if (exited()) done(true);
+      else child.once("exit", closed);
     });
   });
 }

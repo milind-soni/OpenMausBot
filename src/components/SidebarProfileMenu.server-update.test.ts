@@ -56,7 +56,7 @@ it("names the server by its address until the app says its saved name", async ()
 
 it("keeps today's row in a browser on that server and in the app on this computer", async () => {
   const today = {
-    label: "Version 0.1.127 available — release notes",
+    label: "Version 0.1.127 available (release notes)",
     subtitle: "Update with: npm install -g openmausbot@latest, then restart the app",
     attention: true,
   };

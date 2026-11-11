@@ -1,0 +1,20 @@
+# TLS for one relay node. Caddy is the only peer the relay trusts for X-Forwarded-For, and with no trusted_proxies here
+# Caddy replaces whatever X-Forwarded-For a client sends with the client's own address. No `log` directive: access logs
+# stay off.
+{
+	admin off
+	servers {
+		protocols h1
+		timeouts {
+			read_header 10s
+			idle 2m
+		}
+	}
+}
+
+{$RELAY_DOMAIN} {
+	header -Server
+	reverse_proxy 127.0.0.1:8080 {
+		stream_close_delay 5m
+	}
+}

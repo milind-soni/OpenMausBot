@@ -28,9 +28,10 @@ export function contextText(m: Pick<Message, "text" | "attachments" | "peerPost"
   return spoken.length ? [m.text?.trim(), ...spoken].filter(Boolean).join("\n\n") : m.text ?? "";
 }
 
-/** A Live call's row (kind "call") is a record for people, never context. */
-export function isContextMessage(m: Pick<Message, "kind" | "text" | "digest" | "roomRequest" | "attachments" | "peerPost" | "webhookPost">): boolean {
-  return Boolean(((m.kind === "text" || m.kind === "widget" || m.kind === "app") && contextText(m)) || (m.kind === "digest" && m.digest) || m.kind === "compaction" || m.roomRequest?.phase === "result");
+/** A Live call's row (kind "call") and an engine's own compaction marker (kind "compaction", engineCompaction) are
+ * records for people, never context. */
+export function isContextMessage(m: Pick<Message, "kind" | "text" | "digest" | "engineCompaction" | "roomRequest" | "attachments" | "peerPost" | "webhookPost">): boolean {
+  return Boolean(((m.kind === "text" || m.kind === "widget" || m.kind === "app") && contextText(m)) || (m.kind === "digest" && m.digest) || (m.kind === "compaction" && !m.engineCompaction) || m.roomRequest?.phase === "result");
 }
 
 export interface HandedState {
@@ -118,8 +119,11 @@ export function renderUnseen(unseen: readonly UnseenMessage[]): { block: string;
   };
 }
 
+/** Ends the unseen block, so the turn's own message never reads as one more line of it. */
+export const UNSEEN_END = "[End of those messages. Now reply to the user's latest message:]";
+
 export function withUnseenMessages(block: string, text: string): string {
-  return block ? `${block}\n\n${text}` : text;
+  return block ? `${block}\n\n${UNSEEN_END}\n\n${text}` : text;
 }
 
 export function recordHanded(state: HandedState, order: readonly string[], received: Iterable<string>): HandedState {
@@ -221,6 +225,18 @@ export class Handoffs {
 
   forget(threadId: string): void {
     this.pending.delete(threadId);
+  }
+
+  /** For a turn answered without its engine: nothing it would have handed counts as received. The returned call hands
+   * it on after all, bound to `turnId`, when the engine does run the turn, unless a newer turn has taken the thread. */
+  withhold(threadId: string): (turnId: string) => void {
+    const pending = this.pending.get(threadId);
+    this.pending.delete(threadId);
+    return (turnId) => {
+      if (!pending || this.pending.has(threadId)) return;
+      pending.turnId ??= turnId;
+      this.pending.set(threadId, pending);
+    };
   }
 
   /** Just before sendTurn: an adapter may emit the whole turn before it resolves. */

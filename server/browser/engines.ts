@@ -47,6 +47,7 @@ export interface ChromeEngineOptions {
   platform?: NodeJS.Platform;
   egressPort(key: string): Promise<number>;
   idleMs(): number;
+  held?(session: string): boolean;
   egressNotice(key: string): string | null;
   log?: (line: string) => void;
 }
@@ -96,6 +97,7 @@ export class ChromeEngine {
       backend: () => backend,
       maxRunning,
       idleMs: options.idleMs,
+      held: options.held,
       egressNotice: options.egressNotice,
       ...(options.log ? { log: options.log } : {}),
     });
@@ -246,6 +248,10 @@ export class RuntimeRouter {
 
   heldBy(session: string): string | null {
     return this.#chrome.service.heldBy(session) ?? this.#old.heldBy(session);
+  }
+
+  working(session: string): boolean {
+    return this.#chrome.service.working(session) || this.#old.working(session);
   }
 
   interrupted(session: string): boolean {

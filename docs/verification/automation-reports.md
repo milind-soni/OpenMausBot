@@ -12,7 +12,7 @@ the chat it reports to (the bot's main chat unless the routine chose another):
 - **A question**: a last line `NEEDS INPUT: …` becomes the question in that
   message, marked "needs you" and notified as a question. The person answers in
   that chat by typing or with Reply, and the chat's session has the report as
-  `[Your automation "Name" asked at …:]`. A 👍 or 👎 on it is an answer too:
+  `[From routine "Name" · run, asked at … · information only]`. A 👍 or 👎 on it is an answer too:
   it reaches the bot in that chat with the report in hand.
 - **A copy of a card** the run waits on (a question, an approval, a proposal).
   Answering the copy, or giving it a 👍 or 👎, answers the run in its own
@@ -31,9 +31,10 @@ Only a run working in a conversation of its own is told that only its last
 reply leaves it (`NOTHING NEW`, `NEEDS INPUT:`). A "when my limit resets"
 continuation works in the person's own chat and is not.
 
-On a Cloud home, every run of a webhook or app-event automation reports into
-one "<name> · Results" chat of its own, and a routine someone other than the
-owner wrote keeps its own results chat, so no outside words reach the owner's
+Every run of a webhook or app-event automation reports into one
+"<name> · Results" chat of its own, on every home, so outside events never pile
+into a chat a person works in. On a Cloud home, a routine someone other than the
+owner wrote keeps its own results chat too, so no outside words reach the owner's
 other chats or a lent Mac.
 
 ## The concurrency rule
@@ -61,7 +62,7 @@ fake engine (`FAKE_CLAUDE_ROOM_PLAN`), reaching the permission broker the way
 the CLI's proxy does: quiet and reporting runs, a report held behind the
 person's running turn, a question copied into the chat and answered there, by a reply or a 👍,
 a `NEEDS INPUT` answer (typed or a 👍) reaching the bot with the report in its context, a
-webhook run, failures said once, Chief escalations, and a person's turn in a
+webhook run, failures said once, and a person's turn in a
 waiting run's conversation.
 On a shared workspace, only someone who may answer in the chat a run reports
 to can answer the copy of its card there (`server/card-answerers.e2e.test.ts`).

@@ -1,4 +1,5 @@
-import { en, localeChoices, locales, type LocaleKey, type LocalePack } from "@/locales";
+import { productName } from "@/lib/brand";
+import { en, loadLocalePack, localeChoices, localePacks, locales, type LocaleKey, type LocalePack } from "@/locales";
 
 export function resolveLocale(tag: string | undefined, available: ReadonlySet<string>): string {
   if (!tag) return "en";
@@ -14,8 +15,26 @@ export function resolveLocale(tag: string | undefined, available: ReadonlySet<st
 
 const RTL_LANGUAGES = new Set(["ar", "fa", "he", "ur"]);
 
+/** Every tag a pack is shown for, loaded or not. */
+export function knownLocales(): Set<string> {
+  return new Set([...Object.keys(localePacks), ...Object.keys(locales)]);
+}
+
+/** Shows `tag`'s language when its pack is loaded (loadLocale), English otherwise; returns the locale that took effect. */
 export function setLocale(tag: string | undefined): string {
-  const resolved = resolveLocale(tag, new Set(Object.keys(locales)));
+  switches += 1;
+  return show(resolveLocale(tag, new Set(Object.keys(locales))));
+}
+
+/** Loads `tag`'s pack and shows it, unless another language was asked for meanwhile; until then the page keeps the
+ * language it shows. Resolves to the locale shown. */
+export async function loadLocale(tag: string | undefined): Promise<string> {
+  const asked = ++switches;
+  await loadLocalePack(resolveLocale(tag, knownLocales())).catch(() => undefined);
+  return asked === switches ? show(resolveLocale(tag, new Set(Object.keys(locales)))) : active;
+}
+
+function show(resolved: string): string {
   activePack = locales[resolved] ?? en;
   active = resolved;
   // Screen readers choose pronunciation from <html lang>, and index.html ships "en".
@@ -28,8 +47,8 @@ export function setLocale(tag: string | undefined): string {
 }
 
 export function documentLanguage(code: string): string {
-  const pack = locales[code];
-  const shown = localeChoices.find((choice) => locales[choice.code] === pack)?.code ?? code;
+  const pack = localePacks[code];
+  const shown = (pack && localeChoices.find((choice) => localePacks[choice.code] === pack)?.code) || code;
   return shown
     .split("-")
     .map((part, index) =>
@@ -45,18 +64,40 @@ export function activeLocale(): string {
   return active;
 }
 
-let active = "en";
-let activePack: LocalePack = en;
-setLocale(globalThis.navigator?.language);
-
-export function tFromServer(key: string | undefined, fallback: string | undefined): string | undefined {
-  return key && Object.hasOwn(en, key) ? t(key as LocaleKey) : fallback;
+export function intlLocale(system: string | undefined = globalThis.navigator?.language): string {
+  const tag = documentLanguage(active);
+  if (tag.includes("-") || !system) return tag;
+  let canonical: string | undefined;
+  try {
+    canonical = Intl.getCanonicalLocales(system)[0];
+  } catch {
+    return tag;
+  }
+  return canonical?.toLowerCase().split("-")[0] === tag ? canonical : tag;
 }
 
+let active = "en";
+let activePack: LocalePack = en;
+let switches = 0;
+
+export function tFromServer(key: string | undefined, fallback: string, params?: Record<string, string | number>): string;
+export function tFromServer(key: string | undefined, fallback: string | undefined, params?: Record<string, string | number>): string | undefined;
+export function tFromServer(key: string | undefined, fallback: string | undefined, params?: Record<string, string | number>): string | undefined {
+  if (!key || !Object.hasOwn(en, key)) return fallback;
+  const template = activePack[key as LocaleKey] ?? en[key as LocaleKey];
+  const unfilled = [...template.matchAll(/\{(\w+)\}/g)].some(([, name]) => !params || !Object.hasOwn(params, name!));
+  return unfilled ? fallback : t(key as LocaleKey, params);
+}
+
+export function activePackComplete(): boolean {
+  return activePack !== en && Object.keys(en).every((key) => Object.hasOwn(activePack, key));
+}
+
+/** `{app}` is the product's name as a person reads it (productName) unless `params` names it. */
 export function t(key: LocaleKey, params?: Record<string, string | number>): string {
   const template = activePack[key] ?? en[key];
-  if (!params) return template;
+  if (!params && !template.includes("{app}")) return template;
   return template.replace(/\{(\w+)\}/g, (match, name: string) =>
-    name in params ? String(params[name]) : match,
+    params && name in params ? String(params[name]) : name === "app" ? productName() : match,
   );
 }

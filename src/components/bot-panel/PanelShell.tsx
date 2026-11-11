@@ -21,10 +21,9 @@ function initialTarget(section: BotSettingsSection | null, link: PanelLink | nul
   return section ? linkTarget(section, link) : { tab: "details" };
 }
 
-export function BotPanel({ bot, derived, headerClassName, linkedSection, onClose }: {
+export function BotPanel({ bot, derived, linkedSection, onClose }: {
   bot: Bot;
   derived: ReturnType<typeof useBotSettingsDerived>;
-  headerClassName?: string;
   linkedSection: BotSettingsSection | null;
   onClose: () => void;
 }) {
@@ -97,7 +96,7 @@ export function BotPanel({ bot, derived, headerClassName, linkedSection, onClose
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" onKeyDown={onKeyDown}>
-      <div {...dragProps} className={cn("flex h-[50px] shrink-0 items-start justify-end gap-2.5 px-[13px] pt-[13px]", headerClassName)}>
+      <div {...dragProps} className="flex h-[50px] shrink-0 items-start justify-end gap-2.5 px-[13px] pt-[13px]">
         <ChatShareMenu bot={bot} className={roundButtonCls} />
         <button
           type="button"
@@ -136,8 +135,9 @@ export function BotPanel({ bot, derived, headerClassName, linkedSection, onClose
             <div
               role="tablist"
               aria-label={t("botSettings.simple.tabs")}
-              className="sticky top-0 z-[1] -mx-4 mt-[15px] flex justify-center gap-0.5 bg-app px-4 pb-2.5 pt-1 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-3 after:bg-linear-to-b after:from-app after:to-transparent"
+              className="sticky top-0 z-[1] -mx-4 mt-[15px] flex justify-center bg-app px-4 pb-2.5 pt-1 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-3 after:bg-linear-to-b after:from-app after:to-transparent"
             >
+              <div className="flex min-w-0 gap-0.5 rounded-full bg-ink/[0.05] p-[3px]">
               {PANEL_TABS.map((id) => (
                 <button
                   key={id}
@@ -147,13 +147,14 @@ export function BotPanel({ bot, derived, headerClassName, linkedSection, onClose
                   data-panel-tab={id}
                   onClick={() => openTab(id)}
                   className={cn(
-                    "h-[26px] min-w-0 shrink truncate rounded-full px-2 text-[13px] leading-[18px] transition-colors",
-                    tab === id ? "bg-ink/[0.07] text-ink" : "text-ink-secondary hover:text-ink",
+                    "h-[26px] min-w-0 shrink truncate rounded-full px-3 text-[13px] leading-[18px] transition-colors",
+                    tab === id ? "bg-ink/[0.1] font-medium text-ink" : "text-ink-secondary hover:text-ink",
                   )}
                 >
                   {t(TAB_LABEL[id])}
                 </button>
               ))}
+              </div>
             </div>
             <div role="tabpanel">
               {tab === "details" && <DetailsTab bot={bot} derived={derived} onOpen={openPage} />}

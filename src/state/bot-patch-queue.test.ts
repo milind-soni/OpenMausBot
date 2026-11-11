@@ -53,6 +53,7 @@ describe("bot patch queue", () => {
       { approvalMode: "ask" },
       expect.any(AbortSignal),
       expect.objectContaining({ approvalMode: "auto" }),
+      false,
     );
 
     await queue.flush("bot-1");
@@ -67,6 +68,7 @@ describe("bot patch queue", () => {
       { modelSelection: { instanceId: "codex", model: "gpt-5.6-sol" } },
       expect.any(AbortSignal),
       expect.objectContaining({ id: "bot-1" }),
+      false,
     );
 
     await queue.flush("bot-1");
@@ -81,6 +83,7 @@ describe("bot patch queue", () => {
       { connectorTools: { gmail: { tools: ["GMAIL_SEND_EMAIL"] } } },
       expect.any(AbortSignal),
       expect.objectContaining({ id: "bot-1" }),
+      false,
     );
   });
 
@@ -161,7 +164,6 @@ describe("bot patch queue", () => {
           connectorTools: patch.connectorTools ?? undefined,
           connectorScopes: patch.connectorScopes ?? undefined,
           phoneApps: patch.phoneApps ?? undefined,
-          peers: patch.peers ?? undefined,
         });
       },
       reconcile: async () => bot(),
@@ -335,6 +337,25 @@ describe("bot patch queue", () => {
 
     expect(sent).toEqual([{ modelSelection, threadId: "shown" }]);
     for (const overlay of overlays) expect(overlay).not.toHaveProperty("threadId");
+  });
+
+  it("shows a pending main-thread choice as mainThreadId and keeps the choice itself on the wire only", async () => {
+    const sent: BotUpdatePatch[] = [];
+    const queue = createBotPatchQueue({
+      send: async (_botId, patch) => {
+        sent.push(patch);
+        return bot();
+      },
+      reconcile: async () => bot(),
+      onAuthoritative: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    queue.enqueue("bot-1", { mainThreadChoice: "thread-2" }, bot());
+    expect(queue.overlayFor("bot-1")).toEqual({ mainThreadId: "thread-2" });
+    await vi.advanceTimersByTimeAsync(400);
+    await queue.flush("bot-1");
+    expect(sent).toEqual([{ mainThreadChoice: "thread-2" }]);
   });
 
   it("carries acknowledgeLocalAuto to the wire but never into a state overlay", async () => {

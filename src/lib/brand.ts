@@ -15,11 +15,18 @@ export interface BrandStatus {
 }
 
 export const DEFAULT_BRAND: Brand = { name: "OpenMausBot" };
+/** The product's name wherever a person reads it. OpenMausBot names only the open-source project and its repository. */
+export const PRODUCT_NAME = "MausBot";
 
 let current: BrandStatus = { brand: DEFAULT_BRAND, source: "default", file: "" };
 
 export function brand(): Brand {
   return current.brand;
+}
+
+/** The name a person reads: a white-label brand file's own name, else MausBot. `brand().name` stays the project's name. */
+export function productName(): string {
+  return current.source === "file" ? current.brand.name : PRODUCT_NAME;
 }
 
 export function brandStatus(): BrandStatus {
@@ -85,7 +92,7 @@ function applyIcon(favicon: string | undefined): void {
 export function applyBrand(status: BrandStatus): void {
   current = status;
   if (typeof document === "undefined") return;
-  document.title = status.brand.name;
+  document.title = productName();
   applyIcon(status.brand.favicon);
   const root = document.documentElement;
   for (const name of ["--color-accent", "--color-accent-border", "--color-focus", "--color-accent-text", "--color-accent-ink"]) {

@@ -6,14 +6,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { LOCKOUT } from "./sessions.ts";
+import { PAIRING_LOCKOUT } from "./sessions.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
-const WEBHOOK_PORT = 39000 + Math.floor(Math.random() * 10_000);
+const PORT = workerPort(18800, 10_000);
+const WEBHOOK_PORT = workerPort(39000, 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const REMOTE_HOST = "mini.tail1234.ts.net:8799";
 const PUBLIC_URL = "https://mini.tail1234.ts.net";
@@ -187,8 +188,12 @@ describe("before pairing", () => {
     expect(descriptor.body.capabilities).toEqual({
       remoteSessions: true,
       selfUpdate: "operator",
+      // How it was installed, so a client's update note offers the command that fits.
+      install: expect.any(String),
       emailSignIn: false,
       jobs: true,
+      // A server nobody else signs in to can be its owner's bots' home: it takes their move once they pair.
+      move: 1,
     });
     const refused = await call("/api/bots", { headers: remote("10.0.0.1") });
     expect(refused.status).toBe(403);
@@ -559,14 +564,14 @@ describe("pairing", () => {
   });
 
   it("locks a source out after repeated bad codes and says how long", async () => {
-    for (let i = 0; i < LOCKOUT.failures; i++) {
+    for (let i = 0; i < PAIRING_LOCKOUT.failures; i++) {
       const r = await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.99"), body: JSON.stringify({ code: `BAD${i}-BADB-ADBA` }) });
       expect(r.status).toBe(401);
     }
     const opened = await pairingCode();
     const locked = await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.99"), body: JSON.stringify({ code: opened.code }) });
     expect(locked.status).toBe(429);
-    expect(locked.body.error).toMatch(/from your address; try again in \d+s/);
+    expect(locked.body.error).toMatch(/^Too many wrong codes\. Try again at \d{2}:\d{2} UTC\.$/);
     expect((await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.100"), body: JSON.stringify({ code: opened.code }) })).status).toBe(200);
     expect(stderr).toMatch(/pairing refused from 10\.0\.0\.99/);
   });

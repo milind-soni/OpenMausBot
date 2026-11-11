@@ -28,9 +28,11 @@ import { useBotSettingsDerived } from "./bot-settings/useBotSettingsDerived";
 import { BotEditorContext } from "./bot-settings/BotEditorContext";
 import { inputCls } from "./bot-settings/field";
 import { RoutineEditor } from "./RoutinesPage";
+import { Layer, useIsTopLayer } from "./Layer";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { SharePresetDialog } from "./SharePresetDialog";
 import { SettingRow } from "./SettingsPrimitives";
+import { NewBotDefaultsRow } from "./AppSettingsRows";
 import { Select } from "./Select";
 
 const SECTIONS = ["Identity", "Soul", "Skills", "Memory", "Routines", "Access", "Model", "Permissions", "Voice & alerts"] as const;
@@ -43,11 +45,18 @@ const SECTION_KEYS: Record<Section, LocaleKey> = {
 
 /** The bot editor over the New bot defaults: saving them (`defaultsMode`), or a ready-made bot from Templates to review
  * before it is created. */
-export function NewBotDialog({ defaultsMode = false, onClose, onCreated, readyBotId }: {
+export function NewBotDialog(props: NewBotDialogProps) {
+  return <Layer modal><NewBotEditor {...props} /></Layer>;
+}
+
+interface NewBotDialogProps {
   defaultsMode?: boolean; onClose: () => void; onCreated?: (bot: Bot) => void | Promise<void>;
   /** A ready-made bot from the Templates gallery, filled in over the person's New bot defaults. */
   readyBotId?: string;
-}) {
+}
+
+function NewBotEditor({ defaultsMode = false, onClose, onCreated, readyBotId }: NewBotDialogProps) {
+  const isTop = useIsTopLayer();
   const parent = useStore();
   const [, render] = useState(0);
   const [draft, setDraft] = useState(() => new BotCreationDraft(EMPTY_BOT_DEFAULTS, () => render(value => value + 1)));
@@ -93,6 +102,7 @@ export function NewBotDialog({ defaultsMode = false, onClose, onCreated, readyBo
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialog.current?.focus();
     const onKey = (event: KeyboardEvent) => {
+      if (!isTop()) return;
       const root = dialog.current;
       if (!root || (event.target instanceof Node && !root.contains(event.target))) return;
       const nested = root.querySelector<HTMLElement>('[role="dialog"], [role="alertdialog"]');
@@ -108,7 +118,7 @@ export function NewBotDialog({ defaultsMode = false, onClose, onCreated, readyBo
     };
     window.addEventListener("keydown", onKey);
     return () => { window.removeEventListener("keydown", onKey); if (previous?.isConnected) previous.focus(); };
-  }, []);
+  }, [isTop]);
   const save = async () => {
     if (!ready || savingRef.current || parent.state.botCreationPending) return;
     if (!defaultsMode && draft.bot.approvalMode === "auto" && draft.bot.computer === "local" && !draft.consent.acknowledgeLocalAuto) { setWarning("local"); return; }
@@ -119,9 +129,9 @@ export function NewBotDialog({ defaultsMode = false, onClose, onCreated, readyBo
     try {
       if (defaultsMode) await api("/api/config", { method: "PATCH", body: JSON.stringify({ newBotDefaults: await preparedBotTemplate(draft) }) });
       else {
-        const { bot, warnings } = await createConfiguredBot(draft, undefined, undefined, undefined, visibility?.ok ? visibility.visibility : undefined,
+        const { bot, warnings, paused } = await createConfiguredBot(draft, undefined, undefined, undefined, visibility?.ok ? visibility.visibility : undefined,
           team ? reportsToFor(chosenOwner, draft.bot.section, parent.state.bots, team) ?? undefined : undefined);
-        announceNewBot(parent.dispatch, bot, warnings, { showThreads, source: draft.preset ? "preset" : draft.role ? "template" : "blank", role: draft.role });
+        announceNewBot(parent.dispatch, bot, warnings, { showThreads, source: draft.preset ? "preset" : draft.role ? "template" : "blank", role: draft.role, paused });
         try { await onCreated?.(bot); }
         catch (cause) { parent.dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }); }
       }
@@ -237,11 +247,11 @@ function DraftSection({ active, draft, defaultsMode, owner }: { active: Section;
         <option value="">{t("teamSettings.general")}</option>{[...new Set([...(state.sections ?? []), ...state.bots.map(bot => bot.section ?? "")])].filter(Boolean).map(name => <option key={name}>{name}</option>)}
       </Select>
     </label>
-    {owner && team && <label className="block text-[13px] text-ink-secondary" data-new-bot-reports-to>{t("newBot.reportsTo")}
+    {owner && team && <label className="block text-[13px] text-ink-secondary" data-new-bot-reports-to>{t("lookedAfter.newBot")}
       <Select size="lg" className="mt-1.5 w-full" value={owner.value ?? ""} onChange={event => owner.choose(event.target.value)}>
         {team.people.map(person => <option key={person.email} value={person.email}>{person.you ? t("owner.you", { name: person.name }) : person.name}</option>)}
       </Select>
-      <span className="mt-1 block text-[12px]">{t("owner.pickHint")}</span>
+      <span className="mt-1 block text-[12px]">{t("lookedAfter.pickHint")}</span>
     </label>}
   </div>;
   if (active === "Soul") return <SoulSection bot={bot} patch={derived.patch} />;
@@ -352,21 +362,22 @@ function DraftRoutines({ draft }: { draft: BotCreationDraft }) {
   </div>;
 }
 
-export function DefaultBotSettings() {
+export function DefaultBotSettings({ simple = false }: { simple?: boolean }) {
   const [open, setOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
-
-    const content = <>
-      <div className="flex shrink-0 gap-2">
-        <button type="button" onClick={() => setSharing(true)} className="cursor-pointer rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink">{t("newBot.sharePreset")}</button>
-        <button type="button" onClick={() => setOpen(true)} className="cursor-pointer rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover">{t("newBot.edit")}</button>
-      </div>
-      {open && <NewBotDialog defaultsMode onClose={() => setOpen(false)} />}
-      {sharing && <SharePresetDialog onClose={() => setSharing(false)} />}
-    </>
-
-  return <>
-    <SettingRow title={t("newBot.defaults")} children={content} />
-
+  const dialogs = <>
+    {open && <NewBotDialog defaultsMode onClose={() => setOpen(false)} />}
+    {sharing && <SharePresetDialog onClose={() => setSharing(false)} />}
   </>;
+  if (simple) return <><NewBotDefaultsRow onEdit={() => setOpen(true)} onShare={() => setSharing(true)} />{dialogs}</>;
+
+  const content = <>
+    <div className="flex shrink-0 gap-2">
+      <button type="button" onClick={() => setSharing(true)} className="cursor-pointer rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink">{t("newBot.sharePreset")}</button>
+      <button type="button" onClick={() => setOpen(true)} className="cursor-pointer rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover">{t("newBot.edit")}</button>
+    </div>
+    {dialogs}
+  </>;
+
+  return <SettingRow title={t("newBot.defaults")} children={content} />;
 }

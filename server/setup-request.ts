@@ -12,6 +12,7 @@ import type { RequestAuth } from "./request-auth.ts";
 import { parseSetupCommand } from "./setup-mode.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
 import { extractTurnImages } from "./turn-images.ts";
+import { userError, type UserError } from "./user-errors.ts";
 
 export type SetupRequestStore = Pick<Store, "bots" | "bot" | "taskByThread" | "messagesFor" | "patchMessage" | "appendMessage" | "patchTask">;
 
@@ -35,11 +36,7 @@ export type SetupAsk =
   | { ok: true; message: Message }
   | { ok: true; already: true }
   | { ok: true; picked: true }
-  | { ok: false; status: 404 | 409; error: string };
-
-const HAS_INSTRUCTIONS = "This bot already has instructions. To change its job, type /setup and what you'd like it to do.";
-const STARTED = "This chat has already started. Type /setup and what you'd like this bot to do.";
-const SOMEONE_ELSE = "Someone else is setting this bot up.";
+  | ({ ok: false; status: 404 | 409 } & UserError);
 
 /** Who presses, recorded only where several people share the place, and only for a signed-in person whose lines carry
  * them as their sender (`sender`, as the send route stores it): anyone else could never take their own mark. */
@@ -54,12 +51,12 @@ export function askForSetup(store: SetupRequestStore, botId: string, threadId: s
   picked = false): SetupAsk {
   const bot = store.bot(botId);
   const task = bot ? store.taskByThread(botId, threadId) : null;
-  if (!bot || !task) return { ok: false, status: 404, error: "There is no such conversation." };
+  if (!bot || !task) return { ok: false, status: 404, ...userError("serverError.setup.missingConversation") };
   if (task.setupRequest) {
-    return task.setupRequest.by && task.setupRequest.by !== by ? { ok: false, status: 409, error: SOMEONE_ELSE } : { ok: true, already: true };
+    return task.setupRequest.by && task.setupRequest.by !== by ? { ok: false, status: 409, ...userError("serverError.setup.someoneElse") } : { ok: true, already: true };
   }
   const offer = openSetupOffer(store, botId, threadId);
-  if (!offer) return { ok: false, status: 409, error: blankBot(bot) ? STARTED : HAS_INSTRUCTIONS };
+  if (!offer) return { ok: false, status: 409, ...userError(blankBot(bot) ? "serverError.setup.started" : "serverError.setup.hasInstructions") };
   if (picked) {
     store.patchTask(botId, threadId, { setupRequest: { at: Date.now(), ...(by ? { by } : {}) } });
     return { ok: true, picked: true };

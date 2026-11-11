@@ -5,7 +5,8 @@
 // Replying to a line answers it: the answer goes back to the bot that asked, which carries on, or to the teammate's own
 // inbox. A question that a fact the person shares with the team answers, their assistant may answer (representative.ts).
 // Security: a line carries only what was addressed to the person, and links its conversation only when they may read
-// it. The state is ids, names and short excerpts, in person-inbox.json. Off a team nothing here exists.
+// it. The state is ids, names and short excerpts, in person-inbox.json. Off a team nothing here exists: place-inbox.ts is
+// the inbox there.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
@@ -20,6 +21,7 @@ import { audienceMember, type Audience } from "../audience.ts";
 import { isRestricted } from "../bot-visibility.ts";
 import type { CloudTeam } from "../cloud-team.ts";
 import { peerStatus, peerStatusWords } from "../peer-roster.ts";
+import { conversationLanguage, serverLine } from "../server-lines.ts";
 import type { BotRecord, Message, Store, StoreChange } from "../store.ts";
 import type { Representative, SharedFacts } from "./representative.ts";
 import { clip, oneLine } from "./text-clip.ts";
@@ -88,6 +90,8 @@ export interface Delivery {
 }
 
 export interface PersonInboxDeps {
+  /** Security invariant: an inbox is a person's own chat with their Chief at its own level, so what a confined conversation says never lands there. */
+  confined?(threadId: string): boolean;
   team: CloudTeam | null;
   dataDir: string;
   store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "createTask" | "patchTask" | "patchGroup" | "appendMessage" | "patchMessage" | "messagesFor" | "groupByThread" | "onChange">;
@@ -113,6 +117,8 @@ export interface PersonInboxDeps {
   ensureOwnBot?(email: string): void;
   /** What waits on this inbox's person may have changed: its bot goes out to them again. */
   changed?(threadId: string): void;
+  /** A line reached a person's inbox. */
+  delivered?(item: Item, delivery: Delivery): void;
   now?: () => number;
 }
 
@@ -122,6 +128,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   const file = join(deps.dataDir, PERSON_INBOX_FILE);
   let homes: Record<string, { botId: string; threadId: string }> = {};
   let items: Item[] = [];
+  let stopped = false;
   if (team) {
     try {
       const parsed = fileSchema.safeParse(JSON.parse(readFileSync(file, "utf8")));
@@ -160,9 +167,8 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     let threadId = standing?.threadId;
     if (standing?.brief) store.patchTask(bot.id, standing.threadId, { title: INBOX_TITLE });
     else if (!standing) {
-      const created = store.createTask(bot.id, INBOX_TITLE, false);
+      const created = store.createTask(bot.id, INBOX_TITLE, false, undefined, undefined, undefined, undefined, undefined, (task) => deps.starters.set(task.threadId, person));
       if (!created) return null;
-      deps.starters.set(created.threadId, person);
       threadId = created.threadId;
     }
     homes[person] = { botId: bot.id, threadId: threadId! };
@@ -209,10 +215,11 @@ export function createPersonInbox(deps: PersonInboxDeps) {
 
   const line = (item: Item) => store.messagesFor(item.threadId).find((message) => message.id === item.id);
 
-  /** The card that asked, in the conversation it was asked in; undefined once that conversation is gone. */
-  const asking = (item: Item) => item.requestId && item.origin
+  /** The card that asked, in the conversation it was asked in; undefined once that conversation is gone. An ask that
+   * came from no conversation (someone asking for access to a bot) is its own card. */
+  const asking = (item: Item) => !item.requestId ? undefined : item.origin
     ? store.messagesFor(item.origin.threadId).findLast((message) => message.card?.requestId === item.requestId && !message.inbox)
-    : undefined;
+    : line(item);
   /** An ask waits on its person while its copy here and the card that asked are open, however either is answered or
    * closed. */
   const askWaits = (item: Item, copy = line(item)) => item.kind === "ask" && liveCardKind(copy?.card) !== null && liveCardKind(asking(item)?.card) !== null;
@@ -244,12 +251,13 @@ export function createPersonInbox(deps: PersonInboxDeps) {
 
   /** How many asks in this inbox wait on its person: questions, approvals and work handed on, open here and where they
    * were asked. */
-  function openAsks(threadId: string): number {
+  function waitingAsks(threadId: string): Item[] {
     const asks = items.filter((item) => item.threadId === threadId && item.kind === "ask" && item.requestId);
-    if (!asks.length) return 0;
+    if (!asks.length) return [];
     const copies = new Map(store.messagesFor(threadId).map((message) => [message.id, message]));
-    return asks.filter((item) => askWaits(item, copies.get(item.id))).length;
+    return asks.filter((item) => askWaits(item, copies.get(item.id)));
   }
+  const openAsks = (threadId: string): number => waitingAsks(threadId).length;
 
   function notifyItem(item: Item, title: string, kind: Notification["kind"], body: string): void {
     const bot = store.bot(item.botId);
@@ -295,6 +303,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     };
     items.push(item);
     save();
+    deps.delivered?.(item, delivery);
     mark(at.threadId);
     store.patchTask(at.bot.id, at.threadId, { unread: true });
     if (delivery.representable && deps.representative) void represent(item, delivery, at.bot);
@@ -316,8 +325,12 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     } catch (error) {
       console.warn(`person inbox: the assistant could not answer: ${error instanceof Error ? error.message : String(error)}`);
     }
+    if (stopped || !items.includes(item) || item.answered || item.done || settled(item)
+      || !deps.person(item.person) || personOf(item.threadId) !== item.person || !isHomeOf(item.threadId, item.person)
+      || deps.starters.get(item.threadId) !== item.person) return;
     if (answer && answerItem(item, answer, "assistant").status === 200) {
-      notifyItem(item, `${delivery.title} · your assistant answered`, delivery.notify, `${delivery.text} → ${answer}`);
+      if (stopped || line(item)?.inbox?.answers?.at(-1)?.by !== "assistant") return;
+      notifyItem(item, serverLine(conversationLanguage(item.threadId), "server.notify.assistantAnswered", { title: delivery.title }), delivery.notify, `${delivery.text} → ${answer}`);
     } else notifyItem(item, delivery.title, delivery.notify, delivery.text);
   }
 
@@ -325,7 +338,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   function answerItem(item: Item, text: string, by: "person" | "assistant"): Passed {
     const replier = deps.person(item.person);
     if (!replier) return { status: 410, text: "This inbox's person has left the team." };
-    const label = by === "assistant" ? `${replier.name}'s assistant answered` : `${replier.name} replied`;
+    const label = (threadId: string) => serverLine(conversationLanguage(threadId), by === "assistant" ? "server.teammates.personAssistantAnswered" : "server.teammates.personReplied", { name: replier.name });
     const relay: Relay = { kind: by === "assistant" ? "assistant" : "reply", email: replier.email, name: replier.name };
     let passed: Passed;
     if (item.to === "bot" && item.origin) {
@@ -336,7 +349,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
         return { status: 410, text: `The conversation ${item.from} asked from is gone, so the answer can't reach it.` };
       }
       if (group) {
-        store.appendMessage(threadId, { role: "bot", kind: "text", text: `${label}: ${text}`, relay, from: { botId: asker.id, name: asker.name, color: asker.color } });
+        store.appendMessage(threadId, { role: "bot", kind: "text", text: `${label(threadId)}: ${text}`, relay, from: { botId: asker.id, name: asker.name, color: asker.color } });
         store.patchGroup(group.id, { unread: true });
       } else {
         const quoted = JSON.stringify(oneLine(item.text, 160));
@@ -348,7 +361,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     } else if (item.to === "person" && item.asker) {
       const delivered = deliver(item.asker, {
         kind: "message", from: { name: replier.name, email: replier.email }, to: "person", asker: item.person,
-        ...(item.origin ? { origin: item.origin } : {}), text, title: label, notify: "mention", ...(by === "assistant" ? { assistant: true } : {}),
+        ...(item.origin ? { origin: item.origin } : {}), text, title: label(item.origin?.threadId ?? ""), notify: "mention", ...(by === "assistant" ? { assistant: true } : {}),
       });
       if (!delivered) return { status: 409, text: `${item.from} has no inbox here, so the answer can't reach them.` };
       passed = { status: 200, text: `Passed back to ${item.from}'s inbox; they were notified.` };
@@ -374,6 +387,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     if (!team || notification.forPerson || (!ASK_NOTIFICATIONS.has(notification.kind) && !result)) return notification;
     const person = deps.askedPerson(notification.botId, notification.threadId);
     if (!person || personOf(notification.threadId)) return notification;
+    if (deps.confined?.(notification.threadId)) return { ...notification, forPerson: person };
     const own = audienceMember(deps.audienceOf(notification.threadId)) === person;
     if (own && !how.routine && !deps.handedFrom?.(notification.threadId)) return notification;
     const card = notification.kind === "approval" || notification.kind === "question" ? openCard(notification.botId, notification.threadId) : undefined;
@@ -447,6 +461,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
       return items.filter((item) => item.threadId === threadId && item.to !== undefined && !settled(item));
     },
     openAsks,
+    waitingAsks,
     /** A task's wire when it is a person's inbox: that it is, how many asks wait on them there, and when its list changed. */
     wire(threadId: string): InboxTask {
       if (!personOf(threadId)) return {};
@@ -512,7 +527,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
       items = items.filter((item) => item.person !== person);
       save();
     },
-    stop: unsubscribe,
+    stop: () => { stopped = true; unsubscribe(); },
   };
 }
 

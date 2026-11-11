@@ -48,6 +48,26 @@ function setup(options: { zone: string; start: string; morning?: string; overnig
 }
 
 describe("the morning brief", () => {
+  it.each([
+    ["America/New_York", "2026-10-29T04:00:00.001Z", "2026-10-29T11:50:00Z"],
+    ["America/New_York", "2026-10-29T10:59:59.999Z", "2026-10-29T11:50:00Z"],
+    ["America/New_York", "2026-10-29T11:14:21.643Z", "2026-10-29T11:50:00Z"],
+    ["America/New_York", "2026-10-29T11:35:03.123Z", "2026-10-29T11:50:00Z"],
+    ["America/New_York", "2026-10-29T11:49:59.999Z", "2026-10-29T11:50:00Z"],
+    ["America/New_York", "2026-10-29T11:50:21.643Z", "2026-10-29T11:50:00Z"],
+    ["America/New_York", "2026-10-29T12:19:59.999Z", "2026-10-29T11:50:00Z"],
+    ["America/New_York", "2026-10-29T12:20:00.001Z", "2026-10-30T11:50:00Z"],
+    ["America/New_York", "2026-10-29T22:35:21.643Z", "2026-10-30T11:50:00Z"],
+    ["Europe/Berlin", "2026-10-24T18:35:21.643Z", "2026-10-25T06:50:00Z"],
+    ["America/New_York", "2026-10-31T22:35:21.643Z", "2026-11-01T12:50:00Z"],
+    ["America/New_York", "2026-03-07T23:35:21.643Z", "2026-03-08T11:50:00Z"],
+    ["Asia/Kolkata", "2026-10-29T01:44:21.643Z", "2026-10-29T02:20:00Z"],
+  ])("sets an exact morning wake boundary in %s at %s", async (zone, start, wake) => {
+    const s = setup({ zone, start });
+    await s.brief.active("desktop", zone, "en");
+    expect(s.brief.nextWakeAt()).toBe(Date.parse(wake));
+  });
+
   it("is posted and pushed at 8:00 in the person's own zone, not a minute before, and once a day", async () => {
     // 07:59 in New York is 11:59 UTC in October.
     const s = setup({ zone: "America/New_York", start: "2026-10-22T11:59:00Z" });

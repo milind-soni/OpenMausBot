@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { setLocale } from "./i18n";
-import { goalCoordinatorForComposer, groupComposerHint, openTaskWorking, roomRespondersForComposer } from "./group-routing";
+import { goalCoordinatorForComposer, groupComposerHint, openTaskWorking, roomRespondersForComposer, roomRouteForComposer } from "./group-routing";
 import type { Group, GroupDefaultResponder } from "@/state/store";
 
 describe("openTaskWorking", () => {
@@ -66,6 +66,30 @@ describe("roomRespondersForComposer", () => {
     expect(roomRespondersForComposer("@everyone𐐀 hello", members, mentionsOnly)).toEqual([]);
     expect(roomRespondersForComposer("user@everyone /@everyone", members, mentionsOnly)).toEqual([]);
     expect(roomRespondersForComposer("İ @everyone", members, mentionsOnly)).toEqual(members);
+  });
+});
+
+describe("who answers when two room members share a name", () => {
+  const analyst = { id: "quill-analyst", name: "Quill" };
+  const chief = { id: "quill-chief", name: "Quill", chiefOfStaff: true };
+  const scout = { id: "scout", name: "Scout" };
+  const members = [analyst, chief, scout];
+  const led = { defaultResponder: { kind: "member", botId: "scout" } } as const;
+
+  it("names the bot picked from the @ list, as the room will", () => {
+    expect(roomRouteForComposer("@Quill check this", members, led, [chief.id])).toEqual({ responders: [chief], ambiguous: false });
+    expect(roomRespondersForComposer("@Quill check this", members, led, [analyst.id])).toEqual([analyst]);
+    expect(goalCoordinatorForComposer("@Quill finish this", members, led, [chief.id])?.id).toBe(chief.id);
+  });
+
+  it("names nobody for a typed name with no pick, since the room refuses that line", () => {
+    expect(roomRouteForComposer("@Quill check this", members, led)).toEqual({ responders: [], ambiguous: true });
+  });
+
+  it("keeps a unique name, the lead and @everyone as they were", () => {
+    expect(roomRouteForComposer("@Scout check this", members, led)).toEqual({ responders: [scout], ambiguous: false });
+    expect(roomRouteForComposer("check this", members, led, [chief.id])).toEqual({ responders: [scout], ambiguous: false });
+    expect(roomRouteForComposer("@everyone @Quill check this", members, led)).toEqual({ responders: members, ambiguous: false });
   });
 });
 

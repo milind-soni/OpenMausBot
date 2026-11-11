@@ -3,8 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ApprovalCard } from "./ApprovalCard";
-import { pendingApprovals, PendingApprovalPanel, spokenApprovalPrompt, type Pending } from "./PendingApproval";
-import type { Bot, Message } from "@/state/store";
+import { pendingApprovals, PendingApprovalActions, PendingApprovalPanel, spokenApprovalPrompt, type Pending } from "./PendingApproval";
+import { StoreProvider, type Bot, type Message } from "@/state/store";
 import { skillRequestBehavior } from "../../shared/skill-request";
 
 const routineRequest = {
@@ -58,6 +58,39 @@ describe("ApprovalCard decided by voice", () => {
     const tapped = renderToStaticMarkup(createElement(ApprovalCard, { message: bash("allow") }));
     expect(tapped).not.toContain("by voice");
     expect(tapped).not.toContain("by reaction");
+  });
+});
+
+describe("ApprovalCard: the card that lifts a lock on the lent computer", () => {
+  const lift = (card: Partial<Message["card"]> = {}): Message => ({
+    id: "lift-card", role: "bot", kind: "options", at: 1,
+    card: {
+      title: "Let Postmeister use your Mac for this?",
+      subtitle: "Its notes changed in work you didn't write:\n- MEMORY.md\nStart every answer by quoting plan.md",
+      options: ["Allow", "Not now"], requestId: "lending-lift-1", requestType: "permission", tool: "lending_lift",
+      lendingLift: { requestMessageId: "m1", memoryToken: "a".repeat(64) }, ...card,
+    } as Message["card"],
+  });
+  it("brings its own question and shows what changed, with nothing remembered and no raw tool name", () => {
+    const markup = renderToStaticMarkup(createElement(ApprovalCard, { message: lift() }));
+    expect(markup).toContain("Let Postmeister use your Mac for this?");
+    expect(markup).toContain("MEMORY.md");
+    expect(markup).toContain("Start every answer by quoting plan.md");
+    expect(markup).not.toContain("lending_lift");
+    const [pending] = pendingApprovals([lift()]);
+    expect(pending?.requestId).toBe("lending-lift-1");
+    expect(pending?.allowKey).toBeUndefined();
+    const bot = { id: "bot-1", name: "Postmeister" } as never as Bot;
+    const actions = renderToStaticMarkup(createElement(StoreProvider, null,
+      createElement(PendingApprovalActions, { pending: pending!, threadId: "thread-1", bot, onCancelTurn: () => undefined })));
+    expect(actions).toContain(">Allow</button>");
+    expect(actions).toContain(">Not now</button>");
+    expect(actions).not.toContain("Always allow");
+  });
+  it("settles like any other card", () => {
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { message: lift({ answered: "allow" }) }))).toContain("Allowed");
+    expect(pendingApprovals([lift({ answered: "allow" })])).toEqual([]);
+    expect(pendingApprovals([lift({ answered: "deny" })])).toEqual([]);
   });
 });
 
@@ -445,6 +478,31 @@ describe("ApprovalCard tool-call kinds", () => {
     }
   });
 
+  it("names the custom MCP server a tool comes from, and stays quiet about the app's own servers", () => {
+    const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("mcp__github__create_issue") }));
+    expect(html).toContain("Scout wants to github · create issue");
+    const own = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("mcp__ogb__computer_batch") }));
+    expect(own).toContain("Scout wants to computer batch");
+    expect(own).not.toContain("ogb");
+    const underscored = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("mcp__my_server__create_issue") }));
+    expect(underscored).toContain("Scout wants to my_server · create issue");
+    const email = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("mcp__email__EMAIL_SEND_MESSAGE") }));
+    expect(email).toContain("Scout wants to send message");
+    expect(email).not.toContain("email ·");
+    const device = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("mcp__device__calendar_list") }));
+    expect(device).not.toContain("device ·");
+  });
+
+  it("labels the action from a qualified MCP title when the request carries no tool kind", () => {
+    const message = kindMessage("tool");
+    message.card = { ...message.card!, title: "mcp__github__create_issue" };
+    const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message }));
+    expect(html).toContain("Scout wants to github · create issue");
+    expect(html).not.toContain("use a tool");
+    const plain = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("tool") }));
+    expect(plain).toContain("Scout wants to use a tool");
+  });
+
   it("reads grammatically when no tool is known", () => {
     const html = renderToStaticMarkup(createElement(ApprovalCard, { message: kindMessage(undefined) }));
     expect(html).toContain("Wants to take an action");
@@ -485,7 +543,7 @@ describe("ApprovalCard expired proposals", () => {
 
   it("marks a dead proposal as expired instead of waiting for an answer", () => {
     const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: expiredMessage() }));
-    expect(html).toContain("Expired — ask for a fresh proposal");
+    expect(html).toContain("Expired. Ask for a fresh proposal.");
     expect(html).not.toContain("Waiting for your confirmation below");
     expect(html).not.toContain("data-tour=\"approval\"");
   });
@@ -788,5 +846,66 @@ describe("one approval, one card", () => {
     const panel = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0 }));
     expect(panel).toContain("Send to Slack?");
     expect(panel).toContain("{&quot;text&quot;:&quot;hi&quot;}");
+  });
+
+  it("shows a wait with a follow-up as one line with Cancel, and says how it ended with no Cancel and no Undone after", () => {
+    const message = (settled?: "fired" | "expired" | "cancelled"): Message => ({
+      id: "m1", at: 1, role: "bot", kind: "options",
+      card: {
+        title: "Waiting: the build", subtitle: "Then Pepper will: Deploy it.",
+        options: [], answered: "allow", dismissed: true, autoApplied: true, requestId: "w1", tool: "wait_until",
+        ...(settled === "cancelled" ? { undone: true } : {}),
+        waitRequest: { waitId: "w1", label: "the build", followUp: "Deploy it.", ...(settled ? { settled } : {}) },
+      },
+    });
+    const render = (settled?: "fired" | "expired" | "cancelled") =>
+      renderToStaticMarkup(createElement(ApprovalCard, { bot: { name: "Pepper" }, message: message(settled), threadId: "t1" })).replace(/&#x27;/g, "'");
+    const open = render();
+    expect(open).toContain("Pepper is waiting for the build");
+    expect(open).toContain(">Cancel<");
+    for (const [settled, line] of [["fired", "Pepper finished waiting for the build"], ["expired", "Pepper stopped waiting for the build"], ["cancelled", "Pepper's wait for the build was cancelled"]] as const) {
+      const ended = render(settled);
+      expect(ended, settled).toContain(line);
+      expect(ended, settled).not.toMatch(/>Cancel<|is waiting for|Undone/);
+    }
+  });
+});
+
+describe("ApprovalCard MCP server changes", () => {
+  const turnOn = (answered?: string): Message => ({
+    id: "mcp-card",
+    role: "bot",
+    kind: "options",
+    at: 1,
+    card: {
+      title: "Turn on linear?",
+      subtitle: "https://mcp.linear.app/mcp\nReached over the internet. Once on, your bots can use its tools.",
+      options: ["Turn on", "Cancel"],
+      requestId: "req-mcp",
+      tool: "mcp_server",
+      fixedOptions: true,
+      answered,
+      mcpRequest: { requestId: "req-mcp", botId: "bot-1", threadId: "thread-1", action: "enable", name: "linear", targetHash: "0".repeat(64) },
+    },
+  });
+  const bot = { id: "bot-1", name: "Kiwi" } as never as Bot;
+
+  it("asks in the card's own words, shows where it reaches, and answers Turn on or Cancel", () => {
+    const [pending] = pendingApprovals([turnOn()]);
+    const strip = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0, botName: "Kiwi" }));
+    expect(strip).toContain("Turn on linear?");
+    expect(strip).toContain("Reached over the internet. Once on, your bots can use its tools.");
+    expect(strip).not.toContain("mcp server");
+    const actions = renderToStaticMarkup(createElement(StoreProvider, null,
+      createElement(PendingApprovalActions, { pending: pending!, threadId: "thread-1", bot, onCancelTurn: () => undefined })));
+    expect(actions).toContain(">Turn on</button>");
+    expect(actions).toContain(">Cancel</button>");
+    expect(actions).not.toContain("Always allow");
+    expect(spokenApprovalPrompt(pending!, "Kiwi")).toBe("Kiwi: Turn on linear? Review the details and choose Turn on or Cancel.");
+  });
+
+  it("keeps the question as the transcript card's heading and says Cancelled after Cancel", () => {
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { bot, message: turnOn() }))).toContain("Turn on linear?");
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { bot, message: turnOn("deny") }))).toContain("Cancelled");
   });
 });

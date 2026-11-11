@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { parseServerInput } from "../../electron/server-address.mjs";
 import { t } from "@/lib/i18n";
 import { Laptop, Loader2, Unplug } from "lucide-react";
 import { Select } from "./Select";
@@ -14,21 +15,16 @@ function errorText(error: unknown): string {
   );
 }
 
+/** A whole pairing link with its code: https anywhere, http on a private network. */
 export function isServerPairingLink(input: string): boolean {
   const link = input.trim();
-  if (!/^https:\/\//i.test(link) || /[\s\\]/.test(link)) return false;
-  try {
-    const url = new URL(link);
-    const code = /(?:^|[#&])code=([^&]+)/.exec(url.hash)?.[1];
-    return url.protocol === "https:" && !url.username && !url.password && !url.search
-      && (url.pathname === "/pair" || url.pathname === "/pair/")
-      && Boolean(code && decodeURIComponent(code).trim());
-  } catch {
-    return false;
-  }
+  if (!/^https?:\/\//i.test(link)) return false;
+  const read = parseServerInput(link);
+  return read.ok && (read.code !== null || read.credential !== null);
 }
 
-export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhenUnavailable?: boolean }) {
+/** `legacyOnly`: only an installation already in client mode sees this card, to leave it before the mode ends. */
+export function RemoteComputerSection({ hideWhenUnavailable = false, legacyOnly = false }: { hideWhenUnavailable?: boolean; legacyOnly?: boolean }) {
   const bridge = window.ogb?.remoteClient;
   const environments = window.ogb?.environments;
   const [state, setState] = useState<DesktopRemoteClientState>({ active: bridge?.active === true });
@@ -97,6 +93,7 @@ export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhe
   };
 
   if (!bridge && !environments && hideWhenUnavailable) return null;
+  if (legacyOnly && !state.active) return null;
 
   return (
     <Card
@@ -118,6 +115,9 @@ export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhe
           </div>
           <p className="text-[13px] leading-relaxed text-ink-secondary">
             {t("remote.client.mode")}
+          </p>
+          <p role="status" className="rounded-lg bg-inset px-3 py-2 text-[13px] leading-relaxed text-ink" data-legacy-client-notice="">
+            {t("remote.client.endsDec7")}
           </p>
           <button
             type="button"
@@ -153,9 +153,16 @@ export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhe
               <p className="text-[13px] leading-relaxed text-ink-secondary">
                 {t("remote.client.server.hint")}
               </p>
-              <code className="select-all rounded-lg bg-inset px-3 py-2 text-[12px] text-ink">
-                npx openmausbot pair --client
-              </code>
+              {/* A chat-only link cannot pass the ownership check behind "Make … my home", so full access comes first. */}
+              <div data-pair-access="full" className="flex flex-col gap-1">
+                <p className="text-[12px] font-medium text-ink">{t("remote.client.server.fullTitle")}</p>
+                <code className="select-all rounded-lg bg-inset px-3 py-2 text-[12px] text-ink">npx openmausbot pair</code>
+              </div>
+              <div data-pair-access="client" className="flex flex-col gap-1">
+                <p className="text-[12px] font-medium text-ink">{t("remote.client.server.clientTitle")}</p>
+                <code className="select-all rounded-lg bg-inset px-3 py-2 text-[12px] text-ink">npx openmausbot pair --client</code>
+                <p className="text-[12px] leading-relaxed text-ink-secondary">{t("remote.client.server.clientNote")}</p>
+              </div>
               <label className="flex flex-col gap-1.5 text-[12px] text-ink-secondary">
                 {t("remote.client.server.pairingLink")}
                 <input

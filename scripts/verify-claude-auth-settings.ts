@@ -11,8 +11,10 @@ assert.ok(process.argv[2], "Pass the absolute Claude CLI path");
 const home = mkdtempSync(join(tmpdir(), "omb-claude-auth-fixture-"));
 const account = join(home, ".claude");
 const workspace = join(home, "workspace");
+const botSettings = join(home, "bot", ".claude", "settings.json");
 mkdirSync(account);
 mkdirSync(workspace);
+mkdirSync(join(home, "bot", ".claude"), { recursive: true });
 process.env = {
   HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, ".config"),
   PATH: process.env.PATH, OMB_DATA_DIR: join(home, "omb"),
@@ -51,6 +53,11 @@ writeFileSync(join(account, "settings.json"), JSON.stringify({
   env: { ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`, ...(apiKey ? { ANTHROPIC_API_KEY: "fixture-only-key" } : {}) },
   hooks: { SessionStart: [{ hooks: [{ type: "command", command: `${JSON.stringify(process.execPath)} -e "require('fs').writeFileSync('hook-ran', 'unexpected')"` }] }] },
 }), { mode: 0o600 });
+// The bot's own settings, with a field Claude Code would refuse: it must not take OMB's own settings down with it.
+writeFileSync(botSettings, JSON.stringify({
+  model: 123,
+  hooks: { Stop: [{ hooks: [{ type: "command", command: `${JSON.stringify(process.execPath)} -e "require('fs').writeFileSync('bot-hook-ran', 'ran')"` }] }] },
+}));
 const { ensureDirs } = await import("../server/config.ts");
 ensureDirs();
 const { ClaudeDriver } = await import("../server/drivers/claude.ts");
@@ -59,14 +66,15 @@ const provider = await ClaudeDriver.create({ instanceId: "fixture", displayName:
 const recorder = recordEvents(provider.adapter);
 try {
   for (let i = 0; i < 2; i++) {
-    const { turnId } = await provider.adapter.sendTurn({ threadId: "fixture-thread", text: "Reply briefly. No tools.", cwd: workspace, model: "claude-sonnet-4-6", approvalMode: "ask" });
+    const { turnId } = await provider.adapter.sendTurn({ threadId: "fixture-thread", text: "Reply briefly. No tools.", cwd: workspace, botSettingsFile: botSettings, model: "claude-sonnet-4-6", approvalMode: "ask" });
     const done = await recorder.until(event => event.type === "turn.completed" && event.turnId === turnId, 40_000);
     assert.equal((done as { ok: boolean }).ok, true, JSON.stringify(recorder.events.filter(event => event.type === "runtime.error")));
   }
   assert.ok(requests.length >= 2);
   assert.ok(requests.every(request => request.authenticated));
   assert.equal(existsSync(join(workspace, "hook-ran")), false, "Personal hooks must stay isolated");
-  console.log(JSON.stringify({ ok: true, turns: 2, authentication: apiKey ? "settings env key" : "apiKeyHelper", authenticated: true, settingsIsolated: true, endpoint: "loopback only" }));
+  assert.equal(existsSync(join(workspace, "bot-hook-ran")), true, "The bot's own hooks must run in a folder that has none");
+  console.log(JSON.stringify({ ok: true, turns: 2, authentication: apiKey ? "settings env key" : "apiKeyHelper", authenticated: true, settingsIsolated: true, botHooksRan: true, endpoint: "loopback only" }));
 } finally {
   recorder.stop();
   await provider.dispose();

@@ -142,12 +142,12 @@ describe("the Now card", () => {
   const toggle = () => host.querySelector<HTMLButtonElement>("button[aria-expanded]");
   const card = () => host.querySelector("[role=region]");
   const open = (extra: Record<string, unknown> = {}) =>
-    render({ label: "Working", since: Date.now(), phrases: ["Running scrape.py"], phase: "step", card: createElement("p", null, "steps"), cardLabel: "What Biber is doing", ...extra });
+    render({ label: "Working", since: Date.now(), phrases: ["Running scrape.py"], phase: "step", card: createElement("p", null, "steps"), cardLabel: "What Ledger is doing", ...extra });
 
   it("is one calm line by default; a click unfolds the card under it and another folds it", () => {
     open();
     expect(toggle()?.getAttribute("aria-expanded")).toBe("false");
-    expect(toggle()?.getAttribute("aria-label")).toBe("What Biber is doing");
+    expect(toggle()?.getAttribute("aria-label")).toBe("What Ledger is doing");
     expect(card()).toBeNull();
     act(() => toggle()!.click());
     expect(toggle()?.getAttribute("aria-expanded")).toBe("true");
@@ -184,7 +184,7 @@ describe("the Now card", () => {
     open({ simple: true });
     act(() => toggle()!.click());
     expect(card()).not.toBeNull();
-    render({ visible: false, card: createElement("p", null, "steps"), cardLabel: "What Biber is doing" });
+    render({ visible: false, card: createElement("p", null, "steps"), cardLabel: "What Ledger is doing" });
     act(() => void vi.advanceTimersByTime(300));
     open({ simple: true });
     expect(toggle()?.getAttribute("aria-expanded"), "a new turn starts folded").toBe("false");
@@ -192,11 +192,30 @@ describe("the Now card", () => {
 });
 
 describe("thinking shimmer box", () => {
-  it("pads the sheen past ascenders, descenders and arabic marks without moving the layout", () => {
-    const css = readFileSync("src/styles.css", "utf8");
+  const css = readFileSync("src/styles.css", "utf8");
+
+  it("pads the phrase and its sheen past ascenders, descenders and arabic marks without moving the layout", () => {
     const rule = css.match(/\.thinking-shimmer \{[^}]*\}/)?.[0] ?? "";
-    expect(rule).toContain("background-clip: text");
     expect(rule).toMatch(/padding: 0\.35em 0\.12em/);
     expect(rule).toMatch(/margin: -0\.35em -0\.12em/);
+    const copy = css.match(/\.thinking-sheen > span::before \{[^}]*\}/)?.[0] ?? "";
+    expect(copy).toMatch(/padding: 0\.35em 0\.12em/);
+    expect(copy).toContain("content: attr(data-text) / \"\"");
+  });
+
+  it("moves the sheen by transform alone, in steps, so a turn does not redraw the page every display frame", () => {
+    for (const name of ["sheen-band", "sheen-letters"]) {
+      const frames = css.match(new RegExp(`@keyframes ${name} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? "";
+      const properties = [...frames.matchAll(/([a-z-]+):/g)].map((match) => match[1]);
+      expect(new Set(properties)).toEqual(new Set(["transform", "animation-timing-function"]));
+      expect(frames).toMatch(/steps\(\d+/);
+    }
+  });
+
+  it("keeps the phrase's text to one copy for screen readers, selection and tests", () => {
+    render({ label: "Running a command", since: null });
+    const phrase = host.querySelector(".thinking-shimmer")!;
+    expect(phrase.textContent).toBe("Running a command");
+    expect(phrase.querySelector(".thinking-sheen")?.getAttribute("aria-hidden")).toBe("true");
   });
 });

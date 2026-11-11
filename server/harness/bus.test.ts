@@ -575,7 +575,7 @@ describe("EventBus status-line progress", () => {
     const bus = new EventBus();
     const seen: RuntimeEvent[] = [];
     bus.subscribe((event) => seen.push(event));
-    const command = "cd ~/biber && python3 scrape.py --pages 40";
+    const command = "cd ~/acme && python3 scrape.py --pages 40";
     bus.publish(progress(0, { threadId: "steps", activity: "command", file: undefined, itemId: "toolu_9" }));
     bus.publish(testEvent({ threadId: "steps", type: "item.started", itemType: "tool", itemId: "toolu_9", turnId: "turn-1", title: "Bash",
       summary: command, input: JSON.stringify({ command }) } as Partial<RuntimeEvent>));

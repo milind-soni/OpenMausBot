@@ -59,7 +59,7 @@ const TERMINAL_PATTERNS: Array<{ pattern: RegExp; reason: TerminalReason }> = [
   { pattern: USAGE_LIMIT, reason: "quota" },
   { pattern: /\b402\b|\bquota\b|\bbilling\b|\bsubscription\b/i, reason: "quota" },
   { pattern: /\bmodel not found\b|\bunknown model\b|\bdoes not exist for model\b|\bunsupported model\b/i, reason: "unknown_model" },
-  { pattern: /\b400\b|\b422\b|\binvalid request\b|\bmalformed\b|\bunexpected status\b/i, reason: "invalid_request" },
+  { pattern: /\b400\b|\b422\b|\binvalid request\b|\bmalformed\b/i, reason: "invalid_request" },
   { pattern: /\b404\b|\bno such thread\b|\bthread gone\b/i, reason: "not_found" },
   // A turn the user stopped must never come back as an auto-retry.
   { pattern: /\b(?:interrupted|cancelled by user)\b/i, reason: "interrupted" },
@@ -109,6 +109,15 @@ export function classifyError(err: FailureInput): ErrorClassification {
   return { transient: false, reason: "unknown" };
 }
 
+/** Whether a turn whose CLI exited before its result may be sent again. Only work the provider never did is resent:
+ * a launch that ended before taking the prompt, or a transient failure before any model call answered or any text
+ * streamed. Once a call answered, the subscription has paid for it and the CLI already retried its own API calls. */
+export function mayResendTurn(turn: { endedBeforeTurn: boolean; exitCode: number | null; transient: boolean; streamed: boolean;
+  answered: boolean; attempt: number }): boolean {
+  if (turn.endedBeforeTurn) return true;
+  return turn.exitCode !== 0 && turn.transient && !turn.streamed && !turn.answered && turn.attempt < RETRY_MAX_ATTEMPTS - 1;
+}
+
 export function computeBackoff(attempt: number, random: () => number = Math.random): number {
   const base = BACKOFF_BASE_MS[Math.min(Math.max(attempt, 0), BACKOFF_BASE_MS.length - 1)];
   const jitter = base * 0.25;
@@ -125,13 +134,17 @@ export function interruptibleDelay(ms: number, signal?: AbortSignal): BackoffWai
   let timer: ReturnType<typeof setTimeout> | null = null;
   let onCancel: (() => void) | null = null;
   const promise = new Promise<"elapsed" | "cancelled">((resolve) => {
-    timer = setTimeout(() => resolve("elapsed"), Math.max(1, ms));
-    timer.unref?.();
-    if (signal?.aborted) return resolve("cancelled");
-    onCancel = () => {
-      clearTimeout(timer!);
-      resolve("cancelled");
+    const settle = (result: "elapsed" | "cancelled") => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      if (onCancel) signal?.removeEventListener("abort", onCancel);
+      onCancel = null;
+      resolve(result);
     };
+    onCancel = () => settle("cancelled");
+    if (signal?.aborted) return settle("cancelled");
+    timer = setTimeout(() => settle("elapsed"), Math.max(1, ms));
+    timer.unref?.();
     signal?.addEventListener("abort", onCancel, { once: true });
   });
   return {

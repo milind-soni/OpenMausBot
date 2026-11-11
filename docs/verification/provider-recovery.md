@@ -23,7 +23,11 @@ node --experimental-strip-types scripts/verify-opencode-permissions.ts /absolute
 - Claude must complete **two** turns using the selected account's personal
   `apiKeyHelper`, and again with `settings.json`'s API key. All authenticated
   model requests go to the fake local Anthropic endpoint. An unrelated
-  personal SessionStart hook must not run. OMB retains project settings but
+  personal SessionStart hook must not run. The bot's own settings file, kept
+  outside the turn's folder, must run its Stop hook in that folder, and a field
+  in it Claude Code would refuse must not cost the turn its authentication
+  (Claude Code drops a whole settings file over one such field, and the bot's
+  settings ride in OMB's own `--settings` file). OMB retains project settings but
   projects only account authentication from personal settings. Explicit OMB
   credentials/endpoints take precedence as a pair.
 - OpenCode must actually read a synthetic file **outside** its workspace in

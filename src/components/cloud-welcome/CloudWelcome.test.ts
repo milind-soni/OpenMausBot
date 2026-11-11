@@ -104,7 +104,7 @@ describe("CloudWelcome", () => {
     render();
     await vi.waitFor(() => expect(text()).toContain("What should Studio Cloud start with?"));
     expect(text()).toContain("Welcome to Studio Cloud");
-    expect(text()).toContain("Bots on your computer come here by themselves from the OpenMausBot app.");
+    expect(text()).toContain("Bots on your computer come here by themselves from the MausBot app.");
     expect(host.querySelector('[data-bring-choice="fresh"]')).not.toBeNull();
     expect(host.querySelector("[data-bring-desktop]"), "this is the desktop app already").toBeNull();
     expect(host.querySelector("[data-bring-update]")).toBeNull();
@@ -121,7 +121,7 @@ describe("CloudWelcome", () => {
     fixture.state.bots = [fixture.state.bots[0]];
     window.ogb = { ...window.ogb!, cloudMove: {} } as unknown as typeof window.ogb;
     render();
-    await vi.waitFor(() => expect(host.querySelector("[data-bring-update]")?.textContent).toBe("Update OpenMausBot to bring your bots here by itself."));
+    await vi.waitFor(() => expect(host.querySelector("[data-bring-update]")?.textContent).toBe("Update MausBot to bring your bots here by itself."));
     expect([...host.querySelectorAll("button")].some((node) => node.textContent?.startsWith("Copy"))).toBe(false);
   });
 
@@ -163,7 +163,7 @@ describe("CloudWelcome", () => {
     render();
     await vi.waitFor(() => expect(button("Choose a team")).toBeDefined());
     click("Choose a team");
-    expect(host.querySelector("[data-team-library]")).not.toBeNull();
+    await vi.waitFor(() => expect(host.querySelector("[data-team-library]")).not.toBeNull());
     flushSync(() => fixture.imported!());
     expect(hintsPut().at(-1)).toEqual([SHOWN, welcomeStepHint("bring")]);
     expect(host.querySelector('[data-welcome-step="engine"]')).not.toBeNull();
@@ -284,7 +284,7 @@ describe("CloudWelcome", () => {
     render();
     await vi.waitFor(() => expect(text()).toContain("Welcome to Studio Cloud"));
     const folders = host.querySelector('[data-welcome-files="folders"]')!;
-    expect(folders.textContent).toContain("Bots on Studio Cloud use the files on this computer by themselves while it's awake and OpenMausBot is open. There's nothing to set up.");
+    expect(folders.textContent).toContain("Bots on Studio Cloud use the files on this computer by themselves while it's awake and MausBot is open. There's nothing to set up.");
     expect(folders.querySelector("button")).toBeNull();
   });
 
@@ -300,8 +300,9 @@ describe("CloudWelcome", () => {
     (window.ogb as Record<string, unknown>).cloudPlan = { state: vi.fn() };
     fixture.state.config.team = { id: "t-acme", name: "Acme" };
     render();
-    await vi.waitFor(() => expect(text()).toContain("Welcome to Studio Cloud"));
-    expect(host.querySelector('[data-welcome-files="folders"]')?.textContent).toContain(desktopText);
+    // On a team the welcome is the team's, by its name: never "My Cloud" or the Cloud's address.
+    await vi.waitFor(() => expect(text()).toContain("Welcome to Acme"));
+    expect(host.querySelector('[data-welcome-files="folders"]')?.textContent).toContain(desktopText.replace("Studio Cloud", "Acme"));
   });
 
   it("files and apps open Connected apps, then it is ready and says hi to the Chief of Staff", async () => {

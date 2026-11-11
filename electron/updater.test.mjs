@@ -16,10 +16,10 @@ const CLOUD = "https://home-7f3k2.fly.dev";
 const OTHER = "https://bots.example.test";
 const OWN = "https://omb-c-a.fly.dev";
 
-const fixture = vi.hoisted(() => ({ autoUpdater: null, handlers: new Map() }));
+const fixture = vi.hoisted(() => ({ autoUpdater: null, handlers: new Map(), home: "" }));
 
 vi.mock("electron", () => ({
-  app: { isPackaged: true, getPath: () => "/unused-updater-test-log", getVersion: () => "1.0.0", hide: vi.fn() },
+  app: { isPackaged: true, getPath: () => fixture.home, getVersion: () => "1.0.0", hide: vi.fn() },
   clipboard: { writeText: vi.fn() },
   ipcMain: { handle: (name, handler) => fixture.handlers.set(name, handler) },
 }));
@@ -55,7 +55,7 @@ function mainRule() {
     // ensureCloudAccount's world: a packaged app, and a sign-in client whose state the test sets.
     app: { isPackaged: true, getPath: () => "/unused", getVersion: () => "1.0.0" }, process: { platform: "darwin", env: {} }, cloudTarget,
     path: { join: (...parts) => parts.join("/") }, os: { hostname: () => "mac" }, shell: {}, safeStorage: {},
-    createCloudAccountStore: () => ({}), rememberCloudHome: () => {}, rememberedCloudHome, computerSharing: null, updatesConsent: null,
+    createCloudAccountStore: () => ({}), cloudEncryption: {}, cloudAccountStore: () => ({}), cloudSync: { accountChanged: () => {} }, accounts: { tell: () => {} }, rememberCloudHome: () => {}, rememberedCloudHome, computerSharing: null, updatesConsent: null,
     sendUpdaterState: () => {}, refreshCloudMenus: () => {}, announceCloudReady: () => {}, installCloudPlanIpc: () => {},
     includedX: { onState: async () => {} }, includedPages: { onState: async () => {} }, cloudPower: { changed: () => {}, awaiting: () => false }, cloudLogins: { kick: () => {} },
     createCloudAccountClient: (options) => {
@@ -120,12 +120,14 @@ const settle = async () => {
 };
 
 beforeEach(() => {
+  fixture.home = mkdtempSync(join(tmpdir(), "omb-updater-home-"));
   localOriginModule.setLocalOrigin(LOCAL);
   vi.useFakeTimers();
 });
 afterEach(() => {
   vi.clearAllTimers();
   vi.useRealTimers();
+  rmSync(fixture.home, { recursive: true, force: true });
 });
 
 function bridgeFor(origin, { clicked = false, rule = null } = {}) {

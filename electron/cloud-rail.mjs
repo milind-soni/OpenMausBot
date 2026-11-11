@@ -1,3 +1,4 @@
+import nativeText from "./native-text.cjs";
 // The rail of places at the left of the window (the renderer's PlacesRail, drawn by the window's own chrome rail page,
 // chrome-rail.mjs) and its ＋: main builds the list, says who may read it, and does what a circle or ＋ asks through
 // main's own switch and dialogs.
@@ -5,14 +6,19 @@
 // Security: the list carries names, colours and states, never an address, and goes only to the rail's own page, this
 // app's. No place's page reads it, not even this computer's or a Cloud's: a server the person connected by hand runs a
 // page anyone may have written, and would learn the names of the person's other places. A page learns only that the
-// rail stands beside it. A circle names a saved place by its id; main opens only an id it listed itself.
+// rail stands beside it. A circle names a saved place by its id; main opens or removes only an id it listed itself, and
+// the Cloud it acts on is main's own word for that circle (`cloudId`, which the page never sees).
 import environments from "./environments.cjs";
-import { cleanCloudListName, CLOUD_SWATCHES, cloudSetupProgress, olderRelease, otherOwnClouds, ownCloud, signedInServers, stepProgress, swatchColor } from "./cloud-list.mjs";
+import { CHECKOUT_SOURCES } from "./cloud-account.mjs";
+import { cleanCloudListName, CLOUD_SWATCHES, cloudSetupProgress, cloudState, olderRelease, otherOwnClouds, ownCloud, signedInServers, stepProgress, swatchColor } from "./cloud-list.mjs";
 import { machineSetup } from "./cloud-home.mjs";
 import { listedLook, placeLook, railPaint, SIGNED_IN } from "./place-look.mjs";
+import { withAccounts } from "./rail-accounts.mjs";
 
 export const RAIL_MIN_PLACES = 2;
 const PENDING = "pending:";
+/** A circle for a workspace of this computer's own (a profile, clean-workspace.mjs), by the profile's id. */
+export const PROFILE_PLACE = "profile:";
 
 /** A server or computer of the person's own that signed in with their account, as its circle says it: online while the
  * Admin heard from it in the last few minutes, else offline since when it was last seen; and an older release than the
@@ -27,7 +33,7 @@ const machineProgress = machine => {
 
 /** One saved place as a circle: what it is, its colour (and who may change it from the rail) and how it is doing, from
  * the session's word for it. */
-function circle(entry, { activeId, mine, state }) {
+function circle(entry, { activeId, mine, state, offers, waiting }) {
   const connected = state?.status === "connected" ? state : null;
   const listed = connected?.clouds?.find(cloud => cloud.origin === entry.origin) ?? null;
   const kind = entry.origin === mine || entry.home || entry.cloud ? "cloud" : entry.team ? "team" : "server";
@@ -38,39 +44,59 @@ function circle(entry, { activeId, mine, state }) {
   const color = environments.ENTRY_COLORS.includes(entry.color) ? entry.color : listed ? swatchColor(listed.color) : null;
   const paint = railPaint(placeLook(entry, { clouds: connected?.clouds ?? null, homeOrigin: mine }), color);
   return { id: entry.id, name: entry.name, color, kind, opens: true, ...(paint ? { paint } : {}), ...(entry.id === activeId ? { active: true } : {}),
-    ...(progress !== null ? { progress } : {}), ...(problem ? { attention: true } : {}), ...(listed?.managed === false ? serverState(listed, connected?.latestVersion ?? null) : {}) };
+    ...(progress !== null ? { progress } : {}), ...(problem || waiting(entry.id) ? { attention: true } : {}), ...(listed?.managed === false ? serverState(listed, connected?.latestVersion ?? null) : {}),
+    ...(kind === "cloud" && cloudState(listed) === "ended" ? { ended: true } : {}), ...(listed?.removable && kind === "cloud" ? { removable: true, cloudId: listed.id } : {}), ...(kind === "server" ? { removable: true, forget: true } : {}),
+    ...(kind === "server" && offers(entry) ? { makeHome: true } : {}) };
 }
+
+/** My Cloud's saved place that the verified session's list no longer has (its owner removed it from their list, or the Admin
+ * lists nothing at its address any more): no circle, unless it is home. An Admin without the list leaves it as it was. */
+const unlisted = (entry, { clouds, home, mine }) => Array.isArray(clouds) && (entry.home === true || entry.origin === mine) && entry.origin !== home
+  && !clouds.some(cloud => cloud.origin === entry.origin);
 
 /**
  * The circles, in the Server menu's order: This computer while it is a place (before the move made My Cloud home, `home`
  * null), My Cloud, the person's other Clouds and their teams' Clouds in the session's order, then servers saved by hand.
  * A server of theirs that signed in with their account comes next: one saved here already is that saved place (online
  * or not), one not connected to this app yet shows how to connect it, and one only reachable on its own network has
- * nothing to open. A Cloud of theirs the Admin is still making (no address yet) is there too, not yet to open. Fewer
- * than RAIL_MIN_PLACES places in all, This computer counted while it is one: no rail at all, the window as it was, unless
- * the person has a Cloud of their own: then its one circle is the rail, for the ＋ that buys another.
- * @param {{ saved: { environments: any[], activeId: string }, home?: string | null, mine?: string | null, state?: any }} input
+ * nothing to open. A Cloud of theirs the Admin is still making (no address yet) is there too: it opens its own screen (its
+ * checkout or its setup), never an address. My Cloud's saved place leaves once the session's list doesn't have it (removed
+ * from the list). Fewer than RAIL_MIN_PLACES places in all, This computer counted while it is one: no rail at all, the window
+ * as it was, unless the person has a Cloud of their own: then its one circle is the rail, for the ＋ that buys another.
+ * `offers(entry)`: a server connected by hand whose menu offers Make … my home (own-home-main.mjs). `waiting(id)`: inbox lines
+ * wait in that place, and the window shows another (place-inbox-watch.mjs). `accounts`: the other accounts signed in on this
+ * device, each with its places as they were kept: grouped by account after these (withAccounts). `profiles`: the workspaces
+ * of this computer's own it may open (local-profiles.mjs; `active`: the one on screen, `settling`: it opens once that bot
+ * finishes): first once My Cloud is home, as This computer was, else right after This computer. `computerSettling`: This
+ * computer opens once that bot finishes.
+ * @param {{ saved: { environments: any[], activeId: string }, home?: string | null, mine?: string | null, state?: any, offers?: (entry: any) => boolean, waiting?: (id: string) => boolean, accounts?: any[], profiles?: Array<{ id: string, name?: string | null, color?: string | null, swatch?: string | null, active?: boolean, settling?: string }>, computerSettling?: string | null }} input
  */
-export function railPlaces({ saved, home = null, mine = null, state = null }) {
+export function railPlaces({ saved, home = null, mine = null, state = null, offers = () => false, waiting = () => false, accounts = [], profiles = [], computerSettling = null }) {
   const connected = state?.status === "connected" ? state : null;
   const clouds = Array.isArray(connected?.clouds) ? connected.clouds : [];
   const order = entry => { const at = clouds.findIndex(cloud => cloud.origin === entry.origin); return at === -1 ? clouds.length : at; };
   const rank = entry => (entry.origin === mine || entry.home ? 0 : environments.listedPlace(entry) ? 1 : 2);
-  const remote = saved.environments.filter(entry => entry.kind !== "local" && entry.origin)
+  const remote = saved.environments.filter(entry => entry.kind !== "local" && entry.origin && !(connected && unlisted(entry, { clouds: connected.clouds, home, mine })))
     .map((entry, index) => ({ entry, index }))
     .sort((a, b) => rank(a.entry) - rank(b.entry) || order(a.entry) - order(b.entry) || a.index - b.index)
-    .map(({ entry }) => circle(entry, { activeId: saved.activeId, mine, state: connected }));
+    .map(({ entry }) => circle(entry, { activeId: saved.activeId, mine, state: connected, offers, waiting }));
   const making = otherOwnClouds(clouds).filter(cloud => !cloud.origin && ["checkout", "setting_up"].includes(cloud.status))
-    .map(cloud => ({ id: `${PENDING}${cloud.id}`, name: cloud.name, color: swatchColor(cloud.color), kind: "cloud", opens: false, progress: cloudSetupProgress(cloud) ?? 0,
-      ...(cloud.status === "checkout" ? { waiting: true } : {}) }));
+    .map(cloud => ({ id: `${PENDING}${cloud.id}`, name: cloud.name, color: swatchColor(cloud.color), kind: "cloud", opens: true, progress: cloudSetupProgress(cloud) ?? 0,
+      ...(cloud.status === "checkout" ? { waiting: true } : {}), cloudId: cloud.id }));
   const savedOrigins = new Set(saved.environments.map(entry => entry.origin).filter(Boolean));
   const servers = signedInServers(clouds).filter(cloud => !cloud.origin || !savedOrigins.has(cloud.origin))
     .map(cloud => ({ id: `${SIGNED_IN}${cloud.id}`, name: cloud.name, color: swatchColor(cloud.color), kind: "server", opens: false, paint: railPaint(listedLook(cloud), swatchColor(cloud.color)),
       ...(cloud.origin ? { pairs: true } : { ownNetwork: true }), ...serverState(cloud, connected?.latestVersion ?? null) }));
   const places = [...remote, ...servers, ...making];
   const computer = environments.savedPlace(saved, environments.LOCAL_ID), color = computer.color ?? null;
-  const all = home ? places : [{ id: computer.id, name: computer.name, color, kind: "computer", opens: true, paint: railPaint(placeLook(computer), color),
-    ...(saved.activeId === environments.LOCAL_ID ? { active: true } : {}) }, ...places];
+  const own = profiles.map(profile => ({ id: `${PROFILE_PLACE}${profile.id}`, name: profile.name || computer.name, color: profile.color ?? null, kind: "computer", profile: profile.id,
+    ...(profile.name ? { named: true } : {}), opens: true, paint: { swatch: profile.swatch ?? null }, ...(profile.active ? { active: true } : {}),
+    ...(typeof profile.settling === "string" ? { settling: profile.settling } : {}) }));
+  const profileShown = own.some(place => place.active);
+  const all = home ? [...own, ...places] : [{ id: computer.id, name: computer.name, color, kind: "computer", opens: true, paint: railPaint(placeLook(computer), color),
+    ...(saved.activeId === environments.LOCAL_ID && !profileShown ? { active: true } : {}), ...(waiting(computer.id) ? { attention: true } : {}),
+    ...(typeof computerSettling === "string" ? { settling: computerSettling } : {}) }, ...own, ...places];
+  if (accounts.length) return withAccounts(all, { saved, accounts, email: state?.account?.email ?? null });
   return all.length < (clouds.some(ownCloud) ? 1 : RAIL_MIN_PLACES) ? [] : all;
 }
 
@@ -101,7 +127,7 @@ export function addCloudView(state, offer) {
 /**
  * "“{name}” is ready", once per Cloud this app bought, unless its sheet shows it in the focused window; a click opens it.
  */
-export function createAddedCloudNotice({ Notification, focused, sheetOpen, open, shown = () => {} }) {
+export function createAddedCloudNotice({ Notification, focused, sheetOpen, open, shown = () => {}, t = nativeText.englishText.t }) {
   const announced = new Set();
   return state => {
     const adding = state?.status === "connected" ? state.adding : null;
@@ -109,7 +135,7 @@ export function createAddedCloudNotice({ Notification, focused, sheetOpen, open,
     if (!listed || !["ready", "offline"].includes(listed.status) || !listed.origin || announced.has(adding.cloudId)) return false;
     announced.add(adding.cloudId);
     if ((focused() && sheetOpen()) || !Notification.isSupported()) return false;
-    const note = new Notification({ title: `“${listed.name}” is ready`, body: "Click to open it." });
+    const note = new Notification({ title: t("native.cloud.ready.quotedTitle", { name: listed.name }), body: t("native.cloud.ready.open") });
     note.on("click", () => open(adding.cloudId));
     note.show();
     shown();
@@ -118,6 +144,8 @@ export function createAddedCloudNotice({ Notification, focused, sheetOpen, open,
 }
 
 const plain = value => (typeof value === "string" ? value : "");
+/** A circle as the rail's page sees it: never the Cloud's id or which account main switches to, which only main acts on. */
+const seen = ({ cloudId: _cloudId, account: _account, ...place }) => place;
 const CHOICES = Object.freeze(["cloud", "link", "address"]);
 
 /**
@@ -125,9 +153,13 @@ const CHOICES = Object.freeze(["cloud", "link", "address"]);
  * page (`lists`) reads the list and opens or adds a place; ＋'s buying sheet also runs on a page `trusted` vouches for
  * (the rail's, or this computer's own). Any other page learns only whether the rail stands beside it (`beside`).
  * `places()` is railPlaces' list now; `open(id)` main's own switch; `add` the ＋ sheet's fixed actions; `account()` the
- * MausBot Cloud sign-in; `targets()` the pages told when something changed.
+ * MausBot Cloud sign-in; `targets()` the pages told when something changed; `makeHome(id)` starts the move to a server
+ * of the person's own (own-home-main.mjs `start`). `switchAccount(id)`: that account becomes the one in use (cloud-accounts.mjs).
+ * `openProfile(id)`: the window shows that workspace of this computer's own (local-profiles.mjs `open`). `local`: those
+ * workspaces' ＋, names, colours and removal (local-profiles.mjs), and the end of a switch still waiting when another place opens.
+ * `ask(id, run)`: a circle's click, listed at once, `run` told when a newer one came (place-switch.mjs); `switching()`: the place it opens, or null.
  */
-export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, beside = () => false, places, open, add, account, clipboard, openCloud, targets }) {
+export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, beside = () => false, places, open, add, account, clipboard, openCloud, targets, makeHome = null, forget = null, switchAccount = null, openProfile = null, local = null, ask = (_id, run) => run(() => false), switching = () => null, t = nativeText.englishText.t }) {
   let sheetOpen = false, sent = "";
   const allowed = (channel, handler) => guard((event, ...args) => {
     if (!trusted(event)) throw new Error(`${channel} is only available in this app's window`);
@@ -141,33 +173,92 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
   const view = async () => addCloudView(account()?.state() ?? null, account() ? await account().offer().catch(() => null) : null);
   // ＋'s choices: main's, and a new organization while this account runs a Team plan's organizations (unless the Admin has
   // turned adding them off).
-  const choices = () => { const organizations = account()?.state().organizations; return { ...add.choices(), organization: Boolean(organizations) && organizations.blocked !== "off" }; };
-  ipcMain.handle("workspaces:places", guard((event) => (lists(event) ? { places: places(), add: choices() }
+  const choices = () => { const organizations = account()?.state().organizations; return { ...add.choices(), organization: Boolean(organizations) && organizations.blocked !== "off", local: local?.creatable() === true }; };
+  ipcMain.handle("workspaces:places", guard((event) => (lists(event) ? { places: places().map(seen), add: choices(), ...(switching() ? { switching: switching() } : {}) }
     : { places: [], add: { cloud: false, link: false, address: false, organization: false }, ...(beside() ? { beside: true } : {}) })));
+  // A Cloud the Admin is still making has no saved place: its own screen opens, by main's word for which Cloud it is.
+  const opening = (place, stale) => {
+    if (place.id.startsWith(PENDING)) { local?.cancel(); return openCloud(place.cloudId); }
+    if (!place.profile) { local?.cancel(); return open(place.id, stale); }
+    if (!openProfile) throw new Error(t("native.places.noLongerHere"));
+    return openProfile(place.profile, stale);
+  };
+  // A place of another account: that account becomes the one in use first, and nothing moves if it can't. By then the place is
+  // listed as that account's own; an account with no place of its own is simply where the window goes.
+  const switchingTo = async (place, stale) => {
+    const said = await switchAccount(place.account);
+    if (said.outcome !== "switched") return { outcome: said.outcome, ...(said.email ? { email: said.email } : {}) };
+    const arrived = places().find(entry => entry.id === place.id && entry.opens && !entry.account);
+    if (arrived) await opening(arrived, stale);
+    return { outcome: "switched" };
+  };
   listed("workspaces:open", (_event, id) => {
     const place = places().find(entry => entry.id === plain(id) && entry.opens);
-    if (!place) throw new Error("That place isn't here any more.");
-    return open(place.id);
+    if (!place) throw new Error(t("native.places.noLongerHere"));
+    return ask(place.id, stale => (place.account ? switchingTo(place, stale) : opening(place, stale)));
   });
-  listed("workspaces:add", (_event, choice) => {
-    if (!CHOICES.includes(choice) || !add.choices()[choice]) throw new Error("That isn't something to add here.");
-    return add.run(choice);
+  // Remove from list, from a circle's menu (the page asked the person first): only a Cloud or a server saved by hand that
+  // main listed as removable. A server is forgotten here; a Cloud is taken off the person's list at the Admin.
+  listed("workspaces:remove", async (_event, id) => {
+    const place = places().find(entry => entry.id === plain(id) && entry.removable && (entry.cloudId || entry.forget));
+    if (!place) throw new Error(t("native.places.noLongerHere"));
+    if (place.forget) return { outcome: forget ? ((await forget(place.id)) === false ? "failed" : "removed") : "unsupported" };
+    const client = account();
+    return { outcome: client?.hideCloud ? (await client.hideCloud(place.cloudId)).outcome : "unsupported" };
+  });
+  // Make … my home, from a circle's menu: only a server main listed with it, by main's own word for it.
+  listed("workspaces:make-home", (_event, id) => {
+    const place = places().find(entry => entry.id === plain(id) && entry.makeHome);
+    if (!place || !makeHome) throw new Error(t("native.home.notAvailable"));
+    return makeHome(place.id);
+  });
+  // A workspace of this computer's own: a new one from ＋ (on the rail's page, or this computer's own from the Server menu),
+  // and a name, a colour or its removal from its circle's menu, only for one main listed.
+  handle("workspaces:local-new", (_event, name, color) => {
+    if (!local?.creatable()) throw new Error(t("native.places.cannotAdd"));
+    const made = local.create({ name: plain(name), color: plain(color) || null });
+    if (made.outcome === "made" && openProfile) void Promise.resolve().then(() => openProfile(made.id)).catch(() => {});
+    return made;
+  });
+  const profileListed = id => {
+    const place = places().find(entry => entry.id === plain(id) && entry.profile && !entry.account);
+    if (!place || !local) throw new Error(t("native.places.noLongerHere"));
+    return place.profile;
+  };
+  listed("workspaces:local-edit", (_event, id, changes) => {
+    const profile = profileListed(id);
+    if (changes && typeof changes.name === "string") return local.rename(profile, changes.name);
+    if (changes && Object.hasOwn(changes, "color")) return local.recolor(profile, changes.color === null ? null : plain(changes.color));
+    throw new Error(t("native.places.noLongerHere"));
+  });
+  listed("workspaces:local-remove", (_event, id) => local.remove(profileListed(id)));
+  // The Connect sheet's address (a link, or an address with the code typed apart): main finds the server there first,
+  // then connects only to what it found. The sheet runs on the rail's page and in Settings → Servers on this computer's
+  // own page, so both channels take a page main vouches for, not only the rail's.
+  handle("workspaces:add", (_event, choice, link, code) => {
+    if (!CHOICES.includes(choice) || !add.choices()[choice]) throw new Error(t("native.places.cannotAdd"));
+    const pasted = choice === "link" ? plain(link).trim().slice(0, 4096) : "";
+    return pasted ? add.run(choice, pasted, typeof code === "string" ? code.trim().slice(0, 256) : null) : add.run(choice);
+  });
+  handle("workspaces:probe", (_event, address, code) => {
+    if (!add.choices().link || !add.probe) throw new Error(t("native.places.cannotAdd"));
+    return add.probe(plain(address).trim().slice(0, 4096), plain(code).trim().slice(0, 256));
   });
   handle("cloud-add:state", () => view());
-  handle("cloud-add:start", async (_event, tier, name, color) => {
+  handle("cloud-add:start", async (_event, tier, name, color, source) => {
     const client = account();
-    if (!client) throw new Error("Sign in to MausBot Cloud first.");
+    if (!client) throw new Error(t("native.cloud.addSignIn"));
     const plans = (await client.offer().catch(() => null))?.plans ?? [];
     const cleanName = cleanCloudListName(plain(name)), swatch = CLOUD_SWATCHES.includes(color) ? color : null;
-    if (!plans.some(plan => plan.tier === plain(tier)) || !cleanName) throw new Error("Choose a plan and a name to continue.");
-    const result = await client.addCloud({ tier: plain(tier), interval: "month", name: cleanName, color: swatch });
+    if (!plans.some(plan => plan.tier === plain(tier)) || !cleanName) throw new Error(t("native.cloud.addPlanAndName"));
+    const result = await client.addCloud({ tier: plain(tier), interval: "month", name: cleanName, color: swatch, ...(CHECKOUT_SOURCES.includes(source) ? { source } : {}) });
     return result.outcome === "blocked" ? { outcome: "blocked", blocked: result.blocked } : { outcome: result.outcome };
   });
   handle("cloud-add:organization", async (_event, name, color) => {
     const client = account();
-    if (!client) throw new Error("Sign in to MausBot Cloud first.");
+    if (!client) throw new Error(t("native.cloud.addSignIn"));
     const cleanName = cleanCloudListName(plain(name)), swatch = CLOUD_SWATCHES.includes(color) ? color : null;
-    if (!cleanName) throw new Error("Give the organization a name to continue.");
+    if (!cleanName) throw new Error(t("native.cloud.addOrganizationName"));
     const result = await client.addOrganization({ name: cleanName, color: swatch });
     return result.outcome === "blocked" ? { outcome: "blocked", blocked: result.blocked } : { outcome: result.outcome };
   });
@@ -179,7 +270,7 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
   });
   handle("cloud-add:open", async () => {
     const adding = account()?.state().adding;
-    if (!adding?.cloudId) throw new Error("There is no new Cloud to open.");
+    if (!adding?.cloudId) throw new Error(t("native.cloud.noNewCloud"));
     await openCloud(adding.cloudId);
     account()?.addDone();
   });
@@ -191,9 +282,10 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
   });
   return {
     sheetOpen: () => sheetOpen,
-    /** The places or the sign-in changed: the page that shows the rail reads it again (a signal only, never the list). */
+    /** The places, the sign-in or the rail beside the page changed: the rail's page and the page beside it read them
+     * again (a signal only, never the list). */
     changed() {
-      const key = JSON.stringify([places(), choices(), account()?.state().adding ?? null, account()?.state().addCloud ?? null]);
+      const key = JSON.stringify([places(), choices(), account()?.state().adding ?? null, account()?.state().addCloud ?? null, beside(), switching()]);
       if (key === sent) return;
       sent = key;
       for (const target of targets()) if (target && !target.isDestroyed()) target.send("workspaces:changed");

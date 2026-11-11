@@ -64,7 +64,8 @@ describe("Preset bots in the real renderer", () => {
     await expect.poll(snapshot, { timeout: 10_000 }).toContain('button "You"');
     await click("You");
     await click("Settings");
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Share as preset…");
+    // New bot defaults sit on the AI page.
+    await expect.poll(() => evaluate("(() => { document.querySelector('[data-settings-page=\"ai\"]')?.click(); return Boolean(document.querySelector('[data-new-bot-share]')); })()"), { timeout: 10_000 }).toBe(true);
     await click("Share as preset…");
     await expect.poll(snapshot, { timeout: 20_000 }).toContain("What's in the file");
     let dialog = await snapshot();
@@ -89,7 +90,7 @@ describe("Preset bots in the real renderer", () => {
     const preview = await snapshot();
     expect(preview).toContain("Preset bots: 1 · appear in New bot");
     expect(preview).not.toContain("Team members");
-    expect(preview).toContain("Preset bots — added to New bot");
+    expect(preview).toContain("Preset bots (added to New bot)");
     await ui("screenshot", "--out", evidence("import-preview"));
     await click("Add presets");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Preset bots added to New bot: 1");

@@ -46,5 +46,5 @@ it("with the menu off screen, the dialog opens instead and says where the menu i
   expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_howto" });
   expect(track).toHaveBeenCalledWith("cloud_howto", { result: "no_button" });
   f.state = { cloudHowTo: false };
-  expect(render()).toContain("Next time, Add a Cloud is in the menu at the top of the sidebar.");
+  expect(render()).toContain("Next time, Add a Cloud is in the menu on the left of the app.");
 });

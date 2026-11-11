@@ -100,7 +100,7 @@ describe("importing a shared team", () => {
       "Shared instructions", "49 per seat", "Morgan leads", "1 group chat", "1 playbook(s)", "Routines: 2 · paused",
       "Connections to finish: 1 · keys and passwords are never included", "CRM · https://mcp.example.com/crm",
       "Starter notes: 2", "Preset bots: 1 · appear in New bot",
-      "Included skills — added switched off", "pricing-policy, research-brief", "Offered skills — not added to any bot", "objection-handling",
+      "Included skills (added switched off)", "pricing-policy, research-brief", "Offered skills (not added to any bot)", "objection-handling",
       "Skills arrive switched off and routines paused.",
     ]) expect(words).toContain(line);
     expect(renderToStaticMarkup(createElement(TeamImportDetails, { pending, importedNames: ["Morgan", "Scout", "Quill"] })))

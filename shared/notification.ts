@@ -13,9 +13,13 @@ export type NotifyKind =
   /** A bot asked the person to sign in to a website themselves
    * (request_sign_in): it waits on their hands, at the place it works. */
   | "sign-in"
-  /** A delegated room request settled and the coordinator auto-resumed with
-   * the results; both are internal, so without this the parent conversation
-   * sits silent until the resume's first token. */
+  /** A bot asked the person for a password or key on a secure card (request_credential): its work rests on them until
+   * they save it or say no. */
+  | "secret"
+  /** A delegated request settled and the coordinator auto-resumed the person's
+   * own conversation with the results; both are internal, so without this it
+   * sits silent until the resume's first token. A teammate's own step in a
+   * longer chain sends none: nothing there waits on the person. */
   | "delegation-settled"
   /** A bot's settled room reply tagged the person (`@you` or their profile name). Rooms only. On a Team Cloud also
    * a teammate tagged by name, or a message a bot passed on to them, with `forPerson`. */
@@ -26,6 +30,8 @@ export type NotifyKind =
   /** The main agent's brief has something new that needs the person, or a
    * meeting prep or reminder it posted with no AI turn. Personal installs only. */
   | "brief"
+  /** A wait a bot set up (wait_until) fired: what it was waiting for happened. */
+  | "wait"
   /** Something OpenMausBot changed on its own that the person hears about
    * once: a tool turned off for the bots it doesn't start for. */
   | "notice";

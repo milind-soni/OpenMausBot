@@ -180,6 +180,20 @@ describe("channel tasks", () => {
     expect(reloaded.patchGroup(dm.id, { turnTimeoutMinutes: null })?.turnTimeoutMinutes).toBeUndefined();
   });
 
+  it("archives a channel thread, keeps it on reload, and unarchives it", async () => {
+    const { store, Store } = await freshStore();
+    const bot = store.createBot();
+    const channel = store.createGroup("Product", [bot.id]);
+    const original = channel.threadId;
+    const sibling = store.createGroupTask(channel.id)!;
+    expect(store.patchGroupTask(channel.id, sibling.threadId, { archivedAt: 1234 })?.archivedAt).toBe(1234);
+    expect(store.groupTaskByThread(channel.id, original)?.archivedAt).toBeUndefined();
+
+    const reloaded = new Store(() => ({ instanceId: "claude", model: "m" }));
+    expect(reloaded.groupTaskByThread(channel.id, sibling.threadId)?.archivedAt).toBe(1234);
+    expect(reloaded.patchGroupTask(channel.id, sibling.threadId, { archivedAt: null })).not.toHaveProperty("archivedAt");
+  });
+
   it("adopts a legacy channel thread without losing its folder or pin", async () => {
     const { store, Store } = await freshStore();
     const bot = store.createBot();

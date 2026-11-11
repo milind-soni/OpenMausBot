@@ -4,6 +4,7 @@ import type { LiveStatus } from "@/state/turn-status";
 import type { StepQuiet } from "../../shared/turn-progress";
 import { t } from "./i18n";
 import { toolActivityPhrases, turnNowPhrases } from "./live-activity";
+import { withWhose } from "./tool-step-label";
 
 export type NowStepState = "done" | "failed" | "now";
 
@@ -36,6 +37,10 @@ const DONE_PLAIN: Partial<Record<string, LocaleKey>> = {
 type StepTool = NonNullable<Message["tool"]>;
 
 export function stepLabel(tool: StepTool, state: NowStepState): string {
+  return withWhose(stepWords(tool, state), tool);
+}
+
+function stepWords(tool: StepTool, state: NowStepState): string {
   const now = toolActivityPhrases(tool);
   if (state === "now") return now.phrases[0]!;
   const named = tool.step && DONE_NAMED[tool.step.activity];

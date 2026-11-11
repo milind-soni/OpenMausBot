@@ -5,6 +5,7 @@ import { currentTeamPeople, departmentOwner, type TeamPeople } from "@/state/tea
 import { openBot } from "@/state/thread-navigation";
 import type { BotSource } from "./analytics-allowlist";
 import { BotCreationDraft } from "./bot-creation-draft";
+import { isBotLimitRefusal, showCreatedPaused } from "./bot-limit";
 import { createConfiguredBot } from "./create-configured-bot";
 import { t } from "./i18n";
 import { botCreated } from "./product-events";
@@ -36,21 +37,22 @@ export function reportsToFor(chosen: string | null, section: string | undefined,
 }
 
 /** A bot just made joins the sidebar and, unless the caller keeps its own place, its chat opens: on a team's Cloud the
- * creator's own conversation, never the main chat every member reads. */
+ * creator's own conversation, never the main chat every member reads. One that starts paused offers to swap it in. */
 export function announceNewBot(dispatch: (action: Action) => void, bot: Bot, warnings: readonly string[],
-  { preserveSelection = false, showThreads, source, role }: { preserveSelection?: boolean; showThreads: boolean; source: BotSource; role?: string }) {
+  { preserveSelection = false, showThreads, source, role, paused }: { preserveSelection?: boolean; showThreads: boolean; source: BotSource; role?: string; paused?: boolean }) {
   botCreated(source, role);
   dispatch({ type: "botAdded", bot, preserveSelection });
   if (!preserveSelection && teamChats()) openBot(dispatch, bot, showThreads);
   if (warnings.length) dispatch({ type: "error", message: warnings.join("\n") });
+  if (paused) showCreatedPaused(bot.id);
 }
 
 /** A paired device may not read the host's New bot defaults: the host applies them to an empty request. Auto on this
  * computer needs the person's own OK, so a bot whose defaults ask for it starts on Ask. */
 async function createNewBot(section: string | undefined, bots: readonly Bot[], team: TeamPeople | null, request: typeof api) {
   if (typeof window !== "undefined" && window.ogb?.remoteClient?.active) {
-    const { bot } = await request<{ bot: Bot }>("/api/bots", { method: "POST", body: JSON.stringify(section === undefined ? {} : { section }) });
-    return { bot, warnings: [] as string[], startsOnAsk: false };
+    const { bot, paused } = await request<{ bot: Bot; paused?: true }>("/api/bots", { method: "POST", body: JSON.stringify(section === undefined ? {} : { section }) });
+    return { bot, warnings: [] as string[], startsOnAsk: false, ...(paused ? { paused } : {}) };
   }
   const template = startingTemplate(await request<BotDefaultsAnswer>("/api/bot-defaults"), true);
   template.profile.name = freeName(template.profile.name!, bots);
@@ -69,16 +71,18 @@ async function createNewBot(section: string | undefined, bots: readonly Bot[], t
 /** New bot: a bot made at once from the New bot defaults, with its chat open and ready for the first message. */
 export async function makeNewBot(action: Extract<Action, { type: "newBot" }>, bots: readonly Bot[], dispatch: (action: Action) => void,
   showThreads: boolean, request: typeof api = api): Promise<void> {
+  if (currentTeamPeople()?.admin === false) return;
   let made: Awaited<ReturnType<typeof createNewBot>>;
   try {
     made = await createNewBot(action.section, bots, currentTeamPeople(), request);
   } catch (cause) {
+    if (isBotLimitRefusal(cause)) return;
     const message = t("newBot.failed", { error: cause instanceof Error ? cause.message : String(cause) });
     if (action.onError) action.onError(message);
     else dispatch({ type: "error", message });
     return;
   }
-  announceNewBot(dispatch, made.bot, made.warnings, { preserveSelection: action.preserveSelection, showThreads, source: "blank" });
+  announceNewBot(dispatch, made.bot, made.warnings, { preserveSelection: action.preserveSelection, showThreads, source: "blank", paused: made.paused });
   if (made.startsOnAsk) dispatch({ type: "notice", notice: { kind: "note", botName: null, text: t("newBot.startsOnAsk", { name: made.bot.name }) } });
   action.onCreated?.(made.bot);
 }

@@ -12,13 +12,18 @@ export function describeSharedOperation(grant, operation) {
   switch (operation?.action) {
     case "list_files":
     case "read_file":
-    case "write_file": {
+    case "write_file":
+    case "edit_file":
+    case "append_file":
+    case "delete_file": {
       const folder = grant?.folders?.find?.(entry => entry.id === operation.folder_id);
       const where = typeof operation.path === "string" && operation.path ? `/${operation.path}` : "";
       return clean(`${folder?.name ?? "unknown folder"}${where}`, 300);
     }
     case "run_command": return clean(operation.command, 300);
     case "computer_call": return clean(operation.tool_name, 100);
+    case "mcp_tools": return clean(operation.server?.name, 100);
+    case "mcp_call": return clean(`${operation.server?.name ?? ""} ${operation.tool_name ?? ""}`, 300);
     default: return "";
   }
 }

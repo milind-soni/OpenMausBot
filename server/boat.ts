@@ -26,7 +26,7 @@ import {
   type BoatCreateRequest,
 } from "./boat-create-idempotency.ts";
 import {
-  boatDeletionSnapshot,
+  BOAT_DELETING, BOAT_DELETION_FINISHED, boatDeletionSnapshot,
   getBoatDeletion,
   hasPendingBoatDeletionForBot,
   markBoatDeletionAccepted,
@@ -136,7 +136,7 @@ function snapshotBoatConfig(cfg: AppConfig): AppConfig {
 }
 
 /** An own token goes to Boat; Cloud Pro's included token only to its relay. */
-function boatFetch(cfg: AppConfig, path: string, opts: RequestInit = {}) {
+export function boatFetch(cfg: AppConfig, path: string, opts: RequestInit = {}) {
   const account = boatAccount(cfg);
   return fetch(`${account?.api ?? boatProviderApi()}${relayPath(account, path)}`, {
     ...opts,
@@ -361,7 +361,7 @@ export async function runCommand(cfg: AppConfig, boxId: string, command: string,
     ok: res.ok && body?.exitCode === 0,
     exitCode: body?.exitCode ?? null,
     stdout: body?.stdout ?? "",
-    stderr: body?.stderr ?? "",
+    stderr: body?.stderr ?? "", ...(body?.timedOut === true ? { timedOut: true as const } : {}),
   };
 }
 
@@ -718,11 +718,11 @@ function inventoryFailure(inventory: ManagedBoatInventory): Error & { status: nu
 function deletionFenceError(): Error & { status: number } {
   return Object.assign(
     new Error("this cloud computer is being deleted — wait for it to finish, or retry Delete if it needs attention"),
-    { status: 409 },
+    { status: 409, code: BOAT_DELETING },
   );
 }
 
-function assertBoatNotDeleting(boxId: string): void {
+export function assertBoatNotDeleting(boxId: string): void {
   if (getBoatDeletion(boxId)) throw deletionFenceError();
 }
 
@@ -1055,7 +1055,7 @@ async function finishPriorDeletionBeforeProvision(cfg: AppConfig, botId: string)
   }
   throw Object.assign(
     new Error("the previous cloud computer deletion finished — retry to create a new computer"),
-    { status: 409 },
+    { status: 409, code: BOAT_DELETION_FINISHED },
   );
 }
 

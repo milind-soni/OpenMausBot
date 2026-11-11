@@ -4,7 +4,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
 
 vi.stubGlobal("window", {});
-const fixture = vi.hoisted(() => ({ config: null as unknown, menuOpen: false, computerMcp: true }));
+const fixture = vi.hoisted(() => ({ config: null as unknown, menuOpen: false, computerMcp: true, localReason: undefined as string | undefined }));
 // Static markup never runs the click that opens the menu; this renders it open.
 vi.mock("./MenuMotion", async (importOriginal) => ({
   ...await importOriginal<typeof import("./MenuMotion")>(),
@@ -36,13 +36,15 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
     capabilities: {
       dictation: { available: false },
       host: { packaged: true, platform: "darwin" },
-      localComputer: { available: true, support: "supported", enabled: true, status: "enabled" },
+      localComputer: fixture.localReason
+        ? { available: false, support: "unsupported", enabled: false, status: "unavailable", reasonCode: fixture.localReason }
+        : { available: true, support: "supported", enabled: true, status: "enabled" },
     },
     ready: true,
   }),
 }));
 
-const { PlaceChip, usePlaceAvailability } = await import("./PlaceChip");
+const { PlaceChip, usePlaceAvailability, usePlaceMenuItem } = await import("./PlaceChip");
 afterAll(() => vi.unstubAllGlobals());
 
 const bot = {
@@ -105,10 +107,62 @@ describe("the menu's first row", () => {
     expect(html).toContain('aria-label="Where this conversation works: Private desktop"');
   });
 
+  it("keeps Auto checked for the place Auto picked, which is no pin of the person's", () => {
+    const { html, rows: menu } = rows({ bot: { ...bot, computer: undefined }, task: { surface: "browser", surfaceAuto: true } });
+    expect(menu[0]).toEqual({ checked: true, text: "Auto Picks the right place for each task" });
+    expect(menu.filter((row) => row.checked)).toHaveLength(1);
+    expect(html).toContain('aria-label="Where this conversation works: Browser"');
+    expect(html).toContain("Browser — From this bot&#x27;s Works on setting");
+    expect(html).not.toContain("text-accent hover:text-accent");
+  });
+
   it("keeps following the bot's setting when the bot works on a specific place", () => {
     const { html, rows: menu } = rows({ bot: { ...bot, computer: "local" } });
     expect(menu[0]).toEqual({ checked: true, text: "Follow this bot's setting Currently This computer" });
     expect(html).not.toContain("Picks the right place for each task");
+  });
+});
+
+describe("the phone's place menu", () => {
+  it("keeps Auto checked for the place Auto picked, and still lets the person pin that place", () => {
+    const onPin = vi.fn();
+    let item: ReturnType<typeof usePlaceMenuItem> | undefined;
+    function Probe() {
+      item = usePlaceMenuItem({ bot: { ...bot, computer: undefined }, task: { surface: "browser", surfaceAuto: true }, onPin });
+      return null;
+    }
+    renderToStaticMarkup(createElement(Probe));
+    const menu = item!.submenu!;
+    expect(menu.filter((row) => row.active).map((row) => row.key)).toEqual(["place:follow"]);
+    menu.find((row) => row.key === "place:browser")!.onSelect();
+    expect(onPin).toHaveBeenCalledWith("browser");
+  });
+});
+
+describe("another server's page", () => {
+  afterEach(() => { fixture.menuOpen = false; fixture.localReason = undefined; });
+  const labels = (items: { label: unknown }[]) => items.map((item) => item.label);
+
+  it("leaves This computer out of the chip menu and the phone submenu", () => {
+    fixture.localReason = "remote-server";
+    fixture.menuOpen = true;
+    const html = renderToStaticMarkup(createElement(PlaceChip, { bot: { ...bot, computer: undefined }, live: false, onPin: () => {} }));
+    const rows = html.split('role="menuitemradio"').slice(1);
+    expect(rows).toHaveLength(4);
+    expect(rows.some((row) => row.includes("This computer"))).toBe(false);
+
+    let submenu: { label: unknown }[] = [];
+    function Probe() { submenu = usePlaceMenuItem({ bot, onPin: () => {} }).submenu ?? []; return null; }
+    renderToStaticMarkup(createElement(Probe));
+    expect(labels(submenu)).not.toContain("This computer");
+    expect(submenu).toHaveLength(4);
+  });
+
+  it("still lists This computer on a desktop", () => {
+    let submenu: { label: unknown }[] = [];
+    function Probe() { submenu = usePlaceMenuItem({ bot, onPin: () => {} }).submenu ?? []; return null; }
+    renderToStaticMarkup(createElement(Probe));
+    expect(labels(submenu)).toContain("This computer");
   });
 });
 

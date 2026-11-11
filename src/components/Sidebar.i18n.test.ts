@@ -26,7 +26,7 @@ const bot = (overrides: Partial<Bot> = {}): Bot => ({
   ...overrides,
 }) as Bot;
 
-const rowProps = (value: Bot) => botRowProps(initialState, () => {}, value, { density: "comfortable", quiet: false, query: "", onMenu: () => {} });
+const rowProps = (value: Bot) => botRowProps(initialState, () => {}, value, { density: "comfortable", query: "", onMenu: () => {} });
 
 function renderRow(value: Bot): string {
   return renderToStaticMarkup(createElement(BotListItem, rowProps(value)));
@@ -104,6 +104,15 @@ describe("room delete confirmation copy", () => {
     expect(markup).toContain("Delete Launch plan?");
     expect(markup.indexOf(">Cancel</button>")).toBeLessThan(markup.indexOf(">Delete group chat</button>"));
     expect(markup).toContain("bg-danger");
+  });
+
+  it("offers a gentler way beside the destructive one when there is one, after Cancel", () => {
+    const markup = renderToStaticMarkup(createElement(ConfirmDialogCard, {
+      open: true, title: "Delete Chief?", body: "Its chats hold your setup.", confirmLabel: "Delete", tone: "danger",
+      onCancel: vi.fn(), onConfirm: vi.fn(), alternative: { label: "Archive instead", onClick: vi.fn() },
+    }));
+    expect(markup.indexOf(">Cancel</button>")).toBeLessThan(markup.indexOf(">Archive instead</button>"));
+    expect(markup.indexOf(">Archive instead</button>")).toBeLessThan(markup.indexOf(">Delete</button>"));
   });
 
   it("keeps the room's name intact in other languages", () => {

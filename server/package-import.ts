@@ -19,15 +19,16 @@ import type { BotVisibility, ModelSelection } from "../shared/wire.ts";
 export const NO_BOTS_MESSAGE = "This package has no bots. Add it from your organization's shelf, or update OpenMausBot.";
 export const NO_PRESETS_MESSAGE = "This file has no bots or preset bots to add. Its skills can be added from your organization's shelf.";
 
-export type PackageImportErrorCode = "no_bots" | "invalid_package";
+export type PackageImportErrorCode = "no_bots" | "invalid_package" | "too_many_bots";
 
 export class PackageImportError extends Error {
-  readonly status = 400;
+  readonly status: number;
   readonly code: PackageImportErrorCode;
-  constructor(code: PackageImportErrorCode, message: string) {
+  constructor(code: PackageImportErrorCode, message: string, status = 400) {
     super(message);
     this.name = "PackageImportError";
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -62,6 +63,8 @@ export interface PackageImportDeps {
   images: { save(bytes: Uint8Array, mime: string): string };
   broadcast?: (event: { kind: "bot"; bot: BotRecord } | { kind: "group"; group: GroupRecord }) => void;
   defaultSelection: () => ModelSelection;
+  /** The most bots this workspace holds, every plan alike. */
+  maxBots?: number;
   presets?: PresetRegistry;
 }
 
@@ -223,6 +226,9 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
   const members = pkg
     ? pkg.agents.map((agent) => ({ member: memberFromAgent(agent), agent }))
     : (source as { manifest: ParsedTeamManifest }).manifest.team.members.map((member) => ({ member, agent: undefined }));
+  if (deps.maxBots !== undefined && store.bots.length + members.length > deps.maxBots) {
+    throw new PackageImportError("too_many_bots", `This adds ${members.length} bots, and this workspace is limited to ${deps.maxBots} bots.`, 409);
+  }
 
   const importedBots: BotRecord[] = [];
   const createdGroups: GroupRecord[] = [];

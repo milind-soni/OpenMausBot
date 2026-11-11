@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir, uptime as osUptime } from "node:os";
@@ -9,6 +9,7 @@ import test from "node:test";
 import {
   acquireDataDirLease,
   acquireDataDirLeaseForProcess,
+  clearRecordsFromEarlierRunOfThisContainer,
   clearRecordsFromOtherMachines,
 } from "./data-dir-lease.mjs";
 
@@ -58,16 +59,6 @@ async function exitedPid() {
     child.once("close", resolve);
   });
   return pid;
-}
-
-function wmicAvailable() {
-  if (process.platform !== "win32") return false;
-  try {
-    execFileSync("wmic", ["/?"], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 test.afterEach(() => {
@@ -461,6 +452,31 @@ test("a lease another container on this host left is never judged by this contai
   assert.equal(lease.release(), true);
 });
 
+// A container Docker restarts after its server was killed outright (out of memory, kill -9) keeps its hostname, and gets a
+// new pid namespace: its launcher clears what the earlier run left, and only that.
+test("a container's launcher clears the lease its own earlier run left, never another container's", (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.ns === null || current.boot === null) return t.skip("no pid namespace or boot identity on this platform");
+  const leasePath = path.join(dataDir, LEASE_NAME);
+  const plant = (overrides) => writeFileSync(leasePath, `${JSON.stringify({ ...current, ...overrides })}\n`, { mode: 0o600 });
+  plant({ host: `${current.host}-another-container`, ns: anotherPidNamespace(current), pid: process.pid, token: randomUUID() });
+  assert.deepEqual(clearRecordsFromEarlierRunOfThisContainer(dataDir), []);
+  assert.throws(() => acquireDataDirLease(dataDir), /already owned by a process on another machine/i);
+
+  plant({ ns: anotherPidNamespace(current), pid: process.pid, token: randomUUID() });
+  assert.throws(() => acquireDataDirLease(dataDir), /already owned by a process on another machine/i);
+  assert.deepEqual(clearRecordsFromEarlierRunOfThisContainer(dataDir), [{ path: leasePath, host: current.host, pid: process.pid }]);
+  const lease = acquireDataDirLease(dataDir);
+  try {
+    // This run's own lease is live, and stays.
+    assert.deepEqual(clearRecordsFromEarlierRunOfThisContainer(dataDir), []);
+    assert.throws(() => acquireDataDirLease(dataDir), /already using this data directory/i);
+  } finally {
+    lease.release();
+  }
+});
+
 test("a pid this container reused for another process is not the lease's owner", (t) => {
   const { dataDir } = temporaryDirectory();
   const current = recordWrittenByThisProcess(dataDir);
@@ -662,8 +678,8 @@ test("boot identity does not weaken exclusion: only one of many live racers wins
 });
 
 test("a live but unrelated Windows pid reused within the same boot is treated as stale", async (t) => {
-  if (process.platform !== "win32") return t.skip("Windows-only: wmic process-identity check");
-  if (!wmicAvailable()) return t.skip("wmic is not available; the Windows process-identity check cannot be exercised");
+  // With or without wmic: Windows 11 no longer installs it, and the check must still tell a reused pid apart.
+  if (process.platform !== "win32") return t.skip("Windows-only: process-identity check");
   const { dataDir } = temporaryDirectory();
   const sibling = spawn(process.execPath, ["--eval", "setInterval(()=>{}, 1_000);"], { stdio: "ignore" });
   const siblingPid = sibling.pid;

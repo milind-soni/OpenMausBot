@@ -4,12 +4,12 @@ import { MausAvatar } from "@/components/Avatar";
 import { engineReady } from "@/components/EngineLibrary";
 import { staggerIndex } from "@/components/onboarding/beats/shared";
 import { withViewTransition } from "@/components/onboarding/view-transition";
-import { brand } from "@/lib/brand";
+import { productName } from "@/lib/brand";
 import { cloudIntentDue, cloudIntentShown, jobRoutine, reopenCloudIntent, useCloudIntent } from "@/lib/cloud-intent";
 import { cn } from "@/lib/cn";
 import { CLOUD_INTENT_GIVEN, CLOUD_SETUP_HIDDEN, cloudSetupItems, cloudSetupStage, cloudWelcomeStage, type CloudSetupItem, type CloudSetupStep } from "@/lib/cloud-setup";
 import { endWelcomeHere, returnToWelcome, saveWelcomeHints, useCloudWelcome, withEarlyHints } from "@/lib/cloud-welcome";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 import type { MausMotion } from "@/lib/mascot";
 import { hintSeen, type WelcomeViewer } from "@/lib/onboarding";
 import type { LocaleKey } from "@/locales";
@@ -33,17 +33,17 @@ function storeCollapsed(collapsed: boolean) {
   try { globalThis.localStorage?.setItem(COLLAPSED_KEY, collapsed ? "1" : "0"); } catch {}
 }
 
-const CARD = "fixed bottom-4 left-4 z-40 max-h-[calc(100dvh-32px)] w-[300px] max-w-[calc(100vw-32px)] origin-bottom-left overflow-y-auto rounded-2xl border border-hairline/50 bg-menu text-ink shadow-[0_18px_48px_-16px_rgba(0,0,0,0.55),0_4px_12px_-6px_rgba(0,0,0,0.3)]";
+const CARD = "fixed bottom-4 left-[calc(var(--rail-beside,0px)_+_1rem)] z-40 max-h-[calc(100dvh-32px)] w-[300px] max-w-[calc(100vw_-_var(--rail-beside,0px)_-_32px)] origin-bottom-left overflow-y-auto rounded-2xl border border-hairline/50 bg-menu text-ink shadow-[0_18px_48px_-16px_rgba(0,0,0,0.55),0_4px_12px_-6px_rgba(0,0,0,0.3)]";
 const PRIMARY = "ui-button ui-button-primary shrink-0 gap-1.5 text-[13px] transition-transform duration-150 ease-out active:scale-[0.97] motion-reduce:transition-none";
 
 function nextRunLabel(at: number | null, now = Date.now()): string | null {
   if (!at) return null;
   const when = new Date(at), today = new Date(now);
   const days = Math.round((new Date(when).setHours(0, 0, 0, 0) - new Date(today).setHours(0, 0, 0, 0)) / 86_400_000);
-  const time = when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const time = when.toLocaleTimeString(intlLocale(), { hour: "numeric", minute: "2-digit" });
   if (days === 0) return t("cloudSetup.ready.today", { time });
   if (days === 1) return t("cloudSetup.ready.tomorrow", { time });
-  return t("cloudSetup.ready.on", { day: when.toLocaleDateString([], { weekday: "long" }), time });
+  return t("cloudSetup.ready.on", { day: when.toLocaleDateString(intlLocale(), { weekday: "long" }), time });
 }
 
 function CloudReady({ routine, onDone }: { routine?: Routine; onDone: () => void }) {
@@ -76,7 +76,7 @@ function CloudReady({ routine, onDone }: { routine?: Routine; onDone: () => void
   const next = routine ? nextRunLabel(routine.nextRunAt) : null;
   return <aside aria-labelledby="cloud-ready-title" data-cloud-setup-ready className={cn(CARD, "flex flex-col items-center p-5 pt-6 text-center", leaving ? "animate-pop-out" : "animate-spot-in")}>
     <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-[radial-gradient(60%_100%_at_50%_0%,color-mix(in_oklab,var(--color-success)_16%,transparent),transparent)]" />
-    <MausAvatar color="green" state="celebrate" motion={motion.kind} motionKey={motion.key} size={56} label={brand().name} />
+    <MausAvatar color="green" state="celebrate" motion={motion.kind} motionKey={motion.key} size={56} label={productName()} />
     <div role="status" className="relative">
       <h2 id="cloud-ready-title" className="mt-3 text-[15px] font-semibold">{t("cloudSetup.ready.title")}</h2>
       {routine

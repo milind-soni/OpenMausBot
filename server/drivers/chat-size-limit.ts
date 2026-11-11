@@ -8,7 +8,14 @@ import { object } from "./openai-chat-protocol.ts";
 const TOO_LARGE = /\b(?:request entity|payload|request) too large\b/i;
 
 export function refusesRequestSize(status: number, body: string): boolean {
-  return status === 413 || TOO_LARGE.test(body);
+  if (status === 413 || TOO_LARGE.test(body)) return true;
+  if (status !== 400) return false;
+  try {
+    const error = object(object(JSON.parse(body))?.error);
+    return error?.code === "context_length_exceeded" || error?.type === "context_length_exceeded";
+  } catch {
+    return false;
+  }
 }
 
 export class RequestTooLargeError extends Error {

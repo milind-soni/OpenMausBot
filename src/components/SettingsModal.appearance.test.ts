@@ -14,8 +14,6 @@ const fixture = vi.hoisted(() => ({
   setShowThreads: vi.fn(),
   showRunCard: true,
   setShowRunCard: vi.fn(),
-  sidebarDensity: "comfortable" as "comfortable" | "compact" | "icons",
-  setSidebarDensity: vi.fn(),
   toolsLayout: "rows" as "rows" | "toolbar",
   setSidebarToolsLayout: vi.fn(),
   notificationSounds: true,
@@ -30,6 +28,8 @@ const fixture = vi.hoisted(() => ({
   api: vi.fn(),
   dispatch: vi.fn(),
   switches: [] as ComponentProps<typeof Switch>[],
+  rail: null as { available: boolean; hidden: boolean } | null,
+  railHidden: [] as boolean[],
 }));
 // The Cloud account card reads the host platform (what a saved sign-in still locked asks for).
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: { host: { platform: "darwin" } } }) }));
@@ -50,8 +50,6 @@ vi.mock("@/lib/run-card-preferences", () => ({
 }));
 vi.mock("@/lib/sidebar-preferences", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/sidebar-preferences")>(),
-  useSidebarDensity: () => fixture.sidebarDensity,
-  setSidebarDensity: fixture.setSidebarDensity,
   useSidebarToolsLayout: () => fixture.toolsLayout,
   setSidebarToolsLayout: fixture.setSidebarToolsLayout,
 }));
@@ -78,6 +76,7 @@ vi.mock("@/lib/interface-mode", () => ({
 }));
 vi.mock("@/lib/analytics", () => ({ analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn() }));
 vi.mock("./PeopleSection", () => ({ PeopleSection: () => null }));
+vi.mock("@/lib/chrome-rail", () => ({ useChromeRail: () => fixture.rail, setChromeRailHidden: (hidden: boolean) => fixture.railHidden.push(hidden) }));
 vi.mock("./SettingsPrimitives", async (importOriginal) => {
   const original = await importOriginal<typeof import("./SettingsPrimitives")>();
   return {
@@ -94,7 +93,6 @@ beforeEach(() => {
   fixture.section = "appearance";
   fixture.showThreads = true;
   fixture.showRunCard = true;
-  fixture.sidebarDensity = "comfortable";
   fixture.toolsLayout = "rows";
   fixture.notificationSounds = true;
   fixture.sendKey = "enter";
@@ -102,6 +100,8 @@ beforeEach(() => {
   // these pin the Advanced rail; Simple has its own suite (SettingsModal.simple.test.ts)
   fixture.advancedMode = true;
   fixture.switches = [];
+  fixture.rail = null;
+  fixture.railHidden = [];
   vi.stubGlobal("window", {});
   vi.stubGlobal("document", { documentElement: { dataset: {} } });
   setLocale("en");
@@ -168,7 +168,20 @@ describe("Settings → Appearance", () => {
     expect(html).toContain("all conversation history and running work");
     expect(html).toContain("channels are unchanged");
     expect(html).toContain("Turn this back on");
-    expect(html).not.toContain("Maximum turn length");
+    expect(html).not.toContain("Stop after no progress for");
+  });
+
+  it("keeps the switch for the window's rail of places with the sidebar's rows, where this window has one", () => {
+    expect(render()).not.toContain("Show your computers");
+    fixture.rail = { available: true, hidden: true };
+    const html = render();
+    const at = html.indexOf('aria-label="Show your computers"');
+    expect(at).toBeGreaterThan(html.indexOf('aria-label="Choose tools layout"'));
+    expect(at).toBeLessThan(html.indexOf('aria-label="Show threads"'));
+    const toggle = fixture.switches.find((props) => props["aria-label"] === "Show your computers")!;
+    expect(toggle.checked).toBe(false);
+    toggle.onClick!({} as never);
+    expect(fixture.railHidden).toEqual([false]);
   });
 
   it.each([true, false])("only updates the local preference when the switch is %s", (enabled) => {
@@ -195,33 +208,20 @@ describe("Settings → Appearance", () => {
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["comfortable", "Comfortable"],
-    ["compact", "Compact"],
-    ["icons", "Avatars only"],
-  ] as const)("shows the saved sidebar density (%s) in Appearance", (density, label) => {
-    fixture.sidebarDensity = density;
+  it("has no choice of sidebar density: the sidebar's edge is dragged instead", () => {
     const html = render();
-    expect(html).toContain('aria-label="Choose sidebar density"');
-    expect(html).toContain("Sidebar density");
-    expect(html).toContain("collapsing the sidebar from its header");
-    expect(html).toContain(`<option value="${density}" selected="">${label}</option>`);
-    for (const option of ["Comfortable", "Compact", "Avatars only"]) expect(html).toContain(`>${option}</option>`);
-    expect(fixture.setSidebarDensity).not.toHaveBeenCalled();
-    expect(fixture.api).not.toHaveBeenCalled();
-    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(html).not.toContain("Sidebar density");
+    expect(html).not.toContain(">Compact</option>");
+    expect(html).not.toContain(">Avatars only</option>");
   });
 
-  it("offers the tools layout row right under the density row", () => {
+  it("offers the tools layout row", () => {
     const html = render();
     expect(html).toContain('aria-label="Choose tools layout"');
     expect(html).toContain("Tools layout");
-    expect(html).toContain("Icons density always shows icons");
+    expect(html).toContain("As a column of avatars, the sidebar always shows icons.");
     expect(html).toContain('<option value="rows" selected="">Rows</option>');
     expect(html).toContain('<option value="toolbar">Toolbar</option>');
-    expect(html.indexOf('aria-label="Choose sidebar density"')).toBeLessThan(
-      html.indexOf('aria-label="Choose tools layout"'),
-    );
     expect(fixture.setSidebarToolsLayout).not.toHaveBeenCalled();
   });
 
@@ -306,6 +306,19 @@ describe("Settings → Appearance", () => {
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
+  it("renders, and search finds, every display setting Simple has no row for, in Advanced", () => {
+    const appearance = render();
+    for (const label of ["Interface font", "Chat width", "Choose tools layout", "Show threads", "Pinned bots as circles", "Universal pins",
+      "Show the run card"]) expect(appearance, label).toContain(`aria-label="${label}"`);
+    fixture.section = "general";
+    expect(render()).toContain(">Pinned panels<");
+    const section = (id: string) => SECTIONS.find((entry) => entry.id === id)!;
+    for (const query of ["font", "chat width", "toolbar", "show threads", "circles", "universal", "run card"]) {
+      expect(sectionMatches(section("appearance"), query), query).toBe(true);
+    }
+    expect(sectionMatches(section("general"), "web panel")).toBe(true);
+  });
+
   it("finds chat width and message colors in Appearance", () => {
     const appearance = SECTIONS.find((section) => section.id === "appearance")!;
     for (const query of ["width", "wide", "full width", "bubble", "color"]) {
@@ -338,13 +351,13 @@ describe("Settings → Appearance", () => {
     fixture.section = "general";
     const html = render();
     expect(html).toContain("Profile");
-    expect(html).toContain("Maximum turn length");
+    expect(html).toContain("Stop after no progress for");
     expect(html).toContain("Maximum running threads per bot");
     expect(html).toContain("Automatic recovery");
     expect(html).toContain('aria-label="App language"');
     expect(html).toContain("Diagnostics");
     expect(html).not.toContain('aria-label="Show threads"');
-    expect(html).not.toContain('aria-label="Choose sidebar density"');
+    expect(html).not.toContain('aria-label="Choose tools layout"');
     expect(html).not.toContain('aria-label="Show tool calls in chat"');
     expect(html).not.toContain("Midnight");
   });
@@ -353,7 +366,7 @@ describe("Settings → Appearance", () => {
     vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
     const html = render();
     expect(html).toContain('<option value="appearance" selected="">Appearance</option>');
-    expect(html).toContain('<option value="companion">Remote access</option>');
+    expect(html).toContain('<option value="companion">This server</option>');
     expect(html).not.toContain('<option value="general">');
     expect(html).not.toContain('<option value="connections">');
     expect(html).not.toContain('<option value="engines">');
@@ -361,7 +374,7 @@ describe("Settings → Appearance", () => {
     expect(html).toContain("Midnight");
     expect(html).toContain('aria-label="Show threads"');
     expect(html).toContain('aria-label="Notification sounds"');
-    expect(html).toContain('aria-label="Choose sidebar density"');
+    expect(html).toContain('aria-label="Choose tools layout"');
     expect(html).not.toContain('aria-label="Show tool calls in chat"');
   });
 
@@ -413,10 +426,9 @@ describe("Settings → Appearance", () => {
     vi.stubGlobal("window", { ogb: { environments: {} } });
     const local = render();
     expect(local).toContain('<option value="desktopWorkspaces" selected="">Servers</option>');
-    expect(local).toContain("Server address or pairing link");
-    expect(local).toContain("Name (optional)");
     expect(local).toContain("Your servers");
-    expect(local).toContain("npx openmausbot pair --label");
+    expect(local).toContain("Loading servers…");
+    expect(local, "connecting is the same sheet as ＋, not a form of its own").not.toContain("Name (optional)");
     fixture.section = "general";
     vi.stubGlobal("window", { ogb: { workspaces: {} } });
     expect(render()).not.toContain('<option value="desktopWorkspaces"');

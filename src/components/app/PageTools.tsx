@@ -1,17 +1,22 @@
 // A bot's page in the chat, artifact-style: its version stepper, Point, Share, Open in new tab and Full screen.
-import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import { createContext, useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, Crosshair, Globe, Loader2, Maximize2, Share2, Trash2, X } from "lucide-react";
+import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, Crosshair, Download, Globe, Loader2, Maximize2, Pin, PinOff, Share2, Trash2, X } from "lucide-react";
 import { useStore } from "@/state/store";
 import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
+import { useAdvancedMode } from "@/lib/interface-mode";
+import { serverErrorText } from "@/lib/server-error";
 import { addPointedChip } from "@/lib/pointed-chips";
+import { latestWebPanels, setWebPanels, useWebPanels } from "@/lib/web-panel-preferences";
+import { findPinnedPage, MAX_WEB_PANELS, togglePinnedPage, type PinnedChatPage } from "@/lib/web-panels";
 import type { AppDocument, AppPayload } from "../../../shared/app";
 import { pointMessage, readPointEvent } from "../../../shared/app-frame/point";
 import type { PublishedPageCard } from "../../../shared/published-page";
-import { publishAppPage, unpublishPage } from "./app-api";
+import { canonicalDownloadFilename } from "../AttachmentPreview";
+import { appDownloadPath, publishAppPage, unpublishPage } from "./app-api";
 import { AppFrame, type AppFrameHandle } from "./AppFrame";
 import { ASK_CHIP, ASK_CHIP_IDLE, ASK_CHIP_PICKED, ASK_PRIMARY_BUTTON } from "../AskCard";
 
@@ -75,6 +80,52 @@ export function usePageShare(threadId: string, messageId: string, published: Pub
   return { share, url: live?.url, again, unpublished: published?.state === "unpublished", run, unpublish };
 }
 
+/** On a phone the OS share sheet (Save to Files, Share); elsewhere a download, which Electron turns into its save dialog. */
+async function saveToDevice(file: File): Promise<void> {
+  if (window.matchMedia?.("(pointer: coarse)").matches && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file] });
+    } catch (error) {
+      if ((error as { name?: unknown } | null)?.name !== "AbortError") throw error;
+    }
+    return;
+  }
+  // Security: octet-stream, so a browser that ignores download never renders the bot's HTML as the app's own page.
+  const url = URL.createObjectURL(new Blob([file], { type: "application/octet-stream" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.name;
+  document.body.append(link);
+  try {
+    link.click();
+  } finally {
+    link.remove();
+    // Chromium may consume the Blob after the click task.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
+
+/** The page's version as one .html file on this device. */
+export function usePageSave(threadId: string, messageId: string, title: string) {
+  const [busy, setBusy] = useState(false);
+  const [reason, setReason] = useState("");
+  const run = async (rev: number) => {
+    setBusy(true);
+    setReason("");
+    try {
+      const response = await fetch(appDownloadPath(threadId, messageId, rev));
+      if (!response.ok) throw new Error(serverErrorText(await response.json().catch(() => null), t("chat.preview.saveFailed")));
+      const name = canonicalDownloadFilename({ contentDisposition: response.headers.get("content-disposition"), fallback: `${title}.html` });
+      await saveToDevice(new File([await response.blob()], name, { type: "text/html" }));
+    } catch (error) {
+      setReason(error instanceof Error && error.message ? error.message : t("chat.preview.saveFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return { busy, reason, run };
+}
+
 /** Point mode on whichever frame shows the page. Security: a pick counts only from that frame's own window and only
  * while the person has Point on, so a page cannot fill the composer by itself. */
 export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefined; threadId: string; appId: string; rev: number; title: string; picked(): void }) {
@@ -117,16 +168,33 @@ export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefin
   return { pointing, toggle: () => set(!on.current), stop: () => { if (on.current) set(false); } };
 }
 
+/** Pin to sidebar: the page joins the sidebar's pinned panels, which show in Advanced mode, so the button does too. */
+export function usePagePin(page: PinnedChatPage, title: string) {
+  const advanced = useAdvancedMode();
+  const panels = useWebPanels();
+  const pinned = Boolean(findPinnedPage(panels, page));
+  return { show: advanced, pinned, full: !pinned && panels.length >= MAX_WEB_PANELS, toggle: () => {
+    // Base the edit on the stored list, not this render's: another window may have pinned or unpinned since.
+    const latest = latestWebPanels();
+    if (Boolean(findPinnedPage(latest, page)) === pinned) setWebPanels(togglePinnedPage(latest, page, title));
+  } };
+}
+
 export interface PageToolsProps {
   version: ReturnType<typeof usePageVersion>;
   point: ReturnType<typeof usePagePoint>;
   share: ReturnType<typeof usePageShare>;
+  save: ReturnType<typeof usePageSave>;
   ready: boolean;
-  fullScreen: { open: boolean; toggle(): void };
+  /** pane: the page opens in the chat's page pane, beside a usable message box, instead of covering the window. */
+  fullScreen: { open: boolean; toggle(): void; pane?: boolean };
+  /** Shown in a room: view-only, so no Point and no Share. */
+  room?: boolean;
+  pin?: ReturnType<typeof usePagePin>;
 }
 
 /** The card's toolbar: ‹ v2 › and Updated on the left; Point, Share, Open in new tab and Full screen on the right. */
-export function PageToolbar({ version, point, share, ready, fullScreen, className }: PageToolsProps & { className?: string }) {
+export function PageToolbar({ version, point, share, save, ready, fullScreen, room, pin, className }: PageToolsProps & { className?: string }) {
   const label = version.latest ? t("chat.preview.version", { n: version.rev + 1 }) : t("chat.preview.versionOf", { n: version.rev + 1, count: version.last + 1 });
   const busy = share.share.kind === "busy";
   return (
@@ -140,31 +208,44 @@ export function PageToolbar({ version, point, share, ready, fullScreen, classNam
         {!version.latest && <button type="button" className="ms-1 rounded px-1 text-accent-text hover:underline" onClick={() => version.show(null)}>{t("chat.preview.latest")}</button>}
         {version.flash && <span role="status" data-page-updated className="ms-1 rounded-full bg-accent/15 px-2 py-px font-medium text-accent-text">{t("chat.preview.updated")}</span>}
       </div>
-      <div className="ms-auto flex items-center gap-1">
-        <button type="button" aria-pressed={point.pointing} onClick={point.toggle} disabled={!ready} title={t("chat.preview.pointHint")}
-          className={cn(ASK_CHIP, point.pointing ? ASK_CHIP_PICKED : ASK_CHIP_IDLE)}>
-          <Crosshair size={14} />{t("chat.preview.point")}
-        </button>
-        <button type="button" onClick={() => void share.run(version.rev)} disabled={busy} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
-          {busy ? <Loader2 size={14} className="animate-spin" /> : <Share2 size={14} />}{t("chat.preview.share")}
+      <div className="ms-auto flex flex-wrap items-center gap-1">
+        {!room && <>
+          <button type="button" aria-pressed={point.pointing} onClick={point.toggle} disabled={!ready} title={t("chat.preview.pointHint")}
+            className={cn(ASK_CHIP, point.pointing ? ASK_CHIP_PICKED : ASK_CHIP_IDLE)}>
+            <Crosshair size={14} />{t("chat.preview.point")}
+          </button>
+          <button type="button" onClick={() => void share.run(version.rev)} disabled={busy} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Share2 size={14} />}{t("chat.preview.share")}
+          </button>
+          {pin?.show && (
+            <button type="button" data-page-pin aria-pressed={pin.pinned} onClick={pin.toggle} disabled={pin.full}
+              title={pin.full ? t("chat.preview.pinFull", { max: MAX_WEB_PANELS }) : t(pin.pinned ? "chat.preview.unpinHint" : "chat.preview.pinHint")}
+              className={cn(ASK_CHIP, pin.pinned ? ASK_CHIP_PICKED : ASK_CHIP_IDLE)}>
+              {pin.pinned ? <PinOff size={14} /> : <Pin size={14} />}{t(pin.pinned ? "chat.preview.unpin" : "chat.preview.pin")}
+            </button>
+          )}
+        </>}
+        <button type="button" className={TOOL} disabled={save.busy} onClick={() => void save.run(version.rev)}
+          aria-label={t("chat.preview.save")} title={t("chat.preview.save")}>
+          {save.busy ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
         </button>
         <button type="button" className={TOOL} disabled={!share.url} onClick={() => share.url && void openExternalLink(share.url)}
           aria-label={t("chat.preview.openTab")} title={share.url ? t("chat.preview.openTab") : t("chat.preview.openTabNeedsLink")}>
           <ArrowUpRight size={15} />
         </button>
         <button type="button" className={TOOL} onClick={fullScreen.toggle} aria-pressed={fullScreen.open}
-          aria-label={fullScreen.open ? t("chat.preview.exitFullScreen") : t("chat.preview.fullScreen")}
-          title={fullScreen.open ? t("chat.preview.exitFullScreen") : t("chat.preview.fullScreen")}>
+          aria-label={fullScreenLabel(fullScreen)} title={fullScreenLabel(fullScreen)}>
           {fullScreen.open ? <X size={16} /> : <Maximize2 size={14} />}
         </button>
       </div>
+      {!room && pin?.show && pin.full && <p data-page-pin-full className="basis-full text-end text-xs text-ink-secondary">{t("chat.preview.pinFull", { max: MAX_WEB_PANELS })}</p>}
     </div>
   );
 }
 
 /** Under the toolbar: the public link with Copy, Update link and Unpublish once shared, or why sharing failed; the Point
  * hint. */
-export function PageNotes({ version, point, share, className }: Pick<PageToolsProps, "version" | "point" | "share"> & { className?: string }) {
+export function PageNotes({ version, point, share, save, room, className }: Pick<PageToolsProps, "version" | "point" | "share" | "save" | "room"> & { className?: string }) {
   const { dispatch } = useStore();
   const { state: copied, copy } = useCopyFeedback(share.url ?? "");
   const state = share.share;
@@ -179,9 +260,11 @@ export function PageNotes({ version, point, share, className }: Pick<PageToolsPr
         <button type="button" onClick={copy} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
           {copied === "copied" ? <Check size={14} /> : <Copy size={14} />}{t(copied === "copied" ? "chat.page.copied" : "chat.page.copyLink")}
         </button>
-        <button type="button" onClick={() => void share.run(version.rev)} disabled={state.kind === "busy"} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
-          {t("chat.preview.republish")}
-        </button>
+        {!room && (
+          <button type="button" onClick={() => void share.run(version.rev)} disabled={state.kind === "busy"} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
+            {t("chat.preview.republish")}
+          </button>
+        )}
         <button type="button" onClick={() => void share.unpublish()} disabled={state.kind === "unpublishing"} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
           {state.kind === "unpublishing" ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}{t("chat.page.unpublish")}
         </button>
@@ -200,11 +283,27 @@ export function PageNotes({ version, point, share, className }: Pick<PageToolsPr
       </div>,
     );
   }
+  if (save.reason) rows.push(<p key="save" role="alert" dir="auto" className="px-1 text-[13px] text-danger">{save.reason}</p>);
   if (point.pointing) rows.push(<div key="hint" role="status" className="rounded-2xl bg-accent/10 px-3 py-2 text-[13px] text-ink">{t("chat.preview.pointHint")}</div>);
   return rows.length ? <div className={cn("flex flex-col gap-2", className)}>{rows}</div> : null;
 }
 
 /** The page over the whole chat. Esc stops Point first, then closes. */
+function fullScreenLabel({ open, pane }: PageToolsProps["fullScreen"]): string {
+  if (pane) return open ? t("chat.preview.closePage") : t("chat.preview.openPage");
+  return open ? t("chat.preview.exitFullScreen") : t("chat.preview.fullScreen");
+}
+
+/** The chat's page pane: the messages area, above the transcript and below the message box. null outside a bot chat. */
+export const PagePaneContext = createContext<HTMLElement | null>(null);
+
+/** How tall the compact card in the chat is when a page opens in the pane. */
+export const PAGE_PREVIEW_HEIGHT = 220;
+
+function typing(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && (target.isContentEditable || target.matches("input, textarea, select"));
+}
+
 export function PageFullScreen(props: PageToolsProps & {
   title: string;
   doc: AppDocument;
@@ -212,33 +311,39 @@ export function PageFullScreen(props: PageToolsProps & {
   threadId: string;
   handle: MutableRefObject<AppFrameHandle | null>;
   close(): void;
+  /** Open in this pane, leaving the message box usable, rather than over the whole window. */
+  pane?: HTMLElement | null;
 }) {
-  const { point, close } = props;
+  const { point, close, pane } = props;
   const closer = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      // Beside the message box, Esc while typing belongs to the box (it clears a reply), not to the page.
+      if (pane && typing(event.target)) return;
       event.preventDefault();
       if (point.pointing) point.stop();
       else close();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [point, close]);
+  }, [point, close, pane]);
   useEffect(() => { closer.current?.querySelector<HTMLButtonElement>("[aria-pressed=true]")?.focus(); }, []);
   return createPortal(
-    <div role="dialog" aria-modal="true" aria-label={props.title} data-page-fullscreen={props.doc.messageId}
-      className="fixed inset-0 z-50 flex flex-col bg-panel">
+    <div {...(pane ? { role: "region", "data-page-pane": props.doc.messageId } : { role: "dialog", "aria-modal": true })}
+      aria-label={props.title} data-page-fullscreen={props.doc.messageId}
+      className={cn(pane ? "absolute inset-x-0 top-0 z-[1] bottom-[var(--page-pane-bottom,0px)] pt-[var(--glass-top,0px)]" : "fixed inset-0 z-50",
+        "flex flex-col bg-panel")}>
       <div ref={closer} className="flex flex-col gap-2 border-b border-hairline/40 px-4 pb-3 pt-3">
         <div className="truncate text-[15px] font-semibold text-ink" title={props.title}><bdi dir="auto">{props.title}</bdi></div>
         <PageToolbar {...props} />
-        <PageNotes version={props.version} point={point} share={props.share} />
+        <PageNotes version={props.version} point={point} share={props.share} save={props.save} room={props.room} />
       </div>
       <div className={cn("relative min-h-0 flex-1 bg-app", point.pointing && "ring-2 ring-inset ring-accent/60")}>
         <AppFrame doc={props.doc} botId={props.botId} threadId={props.threadId} title={props.title} height={600} handle={props.handle}
           onHeight={() => {}} onProblem={() => {}} onTeardownRequested={close} fill />
       </div>
     </div>,
-    document.body,
+    pane ?? document.body,
   );
 }

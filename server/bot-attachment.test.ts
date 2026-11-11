@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const DATA_ROOT = mkdtempSync(join(tmpdir(), "omb-bot-attachment-"));
 process.env.OMB_DATA_DIR = join(DATA_ROOT, "data");
 const { attachForTurn, deliveredCopy, guestWorkspaceToHost, saveBotAttachment } = await import("./bot-attachment.ts");
-const { ATTACHMENTS_DIR } = await import("./attachments.ts");
+const { ATTACHMENTS_DIR, FILE_MAX_BYTES, PREVIEW_MAX_BYTES } = await import("./attachments.ts");
 
 const WORK = join(DATA_ROOT, "work");
 const VM_HOME = join(DATA_ROOT, "vm-home");
@@ -69,6 +69,8 @@ describe("saveBotAttachment", () => {
     expect(saved.attachment.path.startsWith(ATTACHMENTS_DIR)).toBe(true);
     expect(readFileSync(saved.attachment.path)).toEqual(bytes);
     if (saved.attachment.kind === "file") expect(saved.attachment.name.toLowerCase()).toBe(name.toLowerCase());
+    // The desktop app shows the original in its folder, not the copy.
+    expect(saved.attachment).toMatchObject({ source: realpathSync.native(join(WORK, name)) });
   });
 
   it("reads a file from the VM guest workspace through its host mount", async () => {
@@ -79,8 +81,23 @@ describe("saveBotAttachment", () => {
       roots: [WORK],
       guest: { root: "/home/cua/workspace", host: VM_HOME },
     });
-    expect(saved.attachment).toMatchObject({ kind: "file", mime: "application/pdf", name: "決算書.pdf" });
+    expect(saved.attachment).toMatchObject({ kind: "file", mime: "application/pdf", name: "決算書.pdf",
+      source: realpathSync.native(join(VM_HOME, "reports", "nekoneko.pdf")) });
     expect(readFileSync(saved.attachment.path, "utf8")).toBe("%PDF-1.4 fake");
+  });
+
+  it("attaches a VM video over the preview size, up to the same limit a person's upload has", async () => {
+    // A bot on a VM has no link to fall back on: attaching is the only way its video reaches the chat.
+    const guest = { root: "/home/cua/workspace", host: VM_HOME };
+    const reel = join(VM_HOME, "reports", "reel.mp4");
+    writeFileSync(reel, "x");
+    truncateSync(reel, PREVIEW_MAX_BYTES + 1);
+    const saved = await saveBotAttachment({ path: "/home/cua/workspace/reports/reel.mp4", roots: [WORK], guest });
+    expect(saved).toMatchObject({ bytes: PREVIEW_MAX_BYTES + 1, attachment: { kind: "file", mime: "video/mp4", name: "reel.mp4" } });
+    truncateSync(reel, FILE_MAX_BYTES + 1);
+    await expect(saveBotAttachment({ path: "/home/cua/workspace/reports/reel.mp4", roots: [WORK], guest }))
+      .rejects.toMatchObject({ status: 413, code: "file_too_large", errorParams: { limit: "100 MB", name: "reel.mp4" } });
+    rmSync(reel);
   });
 
   it("does not let a guest path or a name reach outside its folder", async () => {
@@ -124,7 +141,7 @@ describe("saveBotAttachment for a file a turn saved outside its folders", () => 
     // Bots on macOS write the URL unencoded; Windows needs a real file URL.
     const href = process.platform === "win32" ? pathToFileURL(source).href : `file://${source}`;
     const saved = await saveBotAttachment({ path: href, roots: [WORK], savedThisTurn: { since, refuse } });
-    expect(saved.attachment).toMatchObject({ kind: "image", mime: "image/jpeg", name: "00_غلاف.jpg" });
+    expect(saved.attachment).toMatchObject({ kind: "image", mime: "image/jpeg", name: "00_غلاف.jpg", source: realpathSync.native(source) });
     expect(saved.attachment.path.startsWith(ATTACHMENTS_DIR)).toBe(true);
     expect(readFileSync(saved.attachment.path, "utf8")).toBe("jpeg-bytes");
     expect(readFileSync(source, "utf8")).toBe("jpeg-bytes");
@@ -185,7 +202,7 @@ describe("saveBotAttachment for a file a turn saved outside its folders", () => 
     await expect(saveBotAttachment({ path: join(DESIGNS, "bundle.zip"), ...turn })).rejects.toMatchObject({ status: 415 });
     const big = join(DESIGNS, "big.mp4");
     writeFileSync(big, "x");
-    truncateSync(big, 25 * 1024 * 1024 + 1);
+    truncateSync(big, FILE_MAX_BYTES + 1);
     await expect(saveBotAttachment({ path: big, ...turn })).rejects.toMatchObject({ status: 413 });
     await expect(saveBotAttachment({ path: "nope.pdf", ...turn })).rejects.toMatchObject({ status: 404 });
     await expect(saveBotAttachment({ path: join(DESIGNS, "nope.pdf"), ...turn })).rejects.toMatchObject({ status: 404 });

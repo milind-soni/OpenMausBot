@@ -1,13 +1,15 @@
 // Reads the 8-bit, non-interlaced PNGs our fixtures keep: truecolour with or
 // without alpha. Enough to paint a captured desktop into a synthetic
 // framebuffer without pulling in an image library.
-import { inflateSync } from "node:zlib";
+import { deflateSync, inflateSync } from "node:zlib";
 
 export interface DecodedPng {
   width: number;
   height: number;
   /** RGB at (x, y); alpha is dropped. */
   pixel: (x: number, y: number) => [number, number, number];
+  /** How opaque (x, y) is, 0 to 255: 255 for a picture without alpha. */
+  alpha: (x: number, y: number) => number;
 }
 
 export function decodePng(file: Buffer): DecodedPng {
@@ -59,5 +61,30 @@ export function decodePng(file: Buffer): DecodedPng {
       const at = y * stride + x * channels;
       return [pixels[at], pixels[at + 1], pixels[at + 2]];
     },
+    alpha: (x, y) => (channels === 4 ? pixels[y * stride + x * channels + 3]! : 255),
   };
+}
+
+const CRC = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+const crc32 = (bytes: Buffer) => { let c = 0xffffffff; for (const byte of bytes) c = CRC[(c ^ byte) & 0xff]! ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+const chunk = (type: string, data: Buffer) => {
+  const out = Buffer.alloc(12 + data.length);
+  out.writeUInt32BE(data.length, 0); out.write(type, 4, "latin1"); data.copy(out, 8);
+  out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
+  return out;
+};
+
+/** An 8-bit truecolour PNG of `width` x `height`, each pixel from `pixel`. */
+export function encodePng(width: number, height: number, pixel: (x: number, y: number) => [number, number, number]): Buffer {
+  const rows = Buffer.alloc(height * (width * 3 + 1));
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) rows.set(pixel(x, y), y * (width * 3 + 1) + 1 + x * 3);
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4); header.set([8, 2, 0, 0, 0], 8);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", header), chunk("IDAT", deflateSync(rows, { level: 9 })), chunk("IEND", Buffer.alloc(0))]);
+}
+
+/** A part of a picture, each of its pixels drawn `zoom` times as wide and tall, so its edges can be seen pixel by pixel. */
+export function zoomedCrop(file: Buffer, crop: { x: number; y: number; width: number; height: number }, zoom: number): Buffer {
+  const picture = decodePng(file);
+  return encodePng(crop.width * zoom, crop.height * zoom, (x, y) => picture.pixel(crop.x + Math.floor(x / zoom), crop.y + Math.floor(y / zoom)));
 }

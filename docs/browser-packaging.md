@@ -39,8 +39,9 @@ real Chrome whenever this machine has one, chosen once per machine
 2. Otherwise **Chrome for Testing** 153.0.8010.47, downloaded once into
    `tools/chrome/` in the data directory at first launch, checked against its
    pinned size and SHA-256 before it is unpacked, and moved into place in one
-   rename. Only platforms with a pin download (Apple silicon Macs today;
-   `scripts/pin-chrome-for-testing.ts` measures more). A browser call made
+   rename. Only platforms with a pin download (Apple silicon Macs and Linux
+   servers on x64 or arm64 today; `scripts/pin-chrome-for-testing.ts` measures
+   more). A browser call made
    during the download waits up to 45 seconds, then says how far it got.
 3. A Linux desktop without Google Chrome, and a platform without a pin, keep
    the bundled headless shell. That stays the machine's choice; it never
@@ -48,7 +49,10 @@ real Chrome whenever this machine has one, chosen once per machine
 
 Servers and the Docker image name their browser with
 `AGENT_BROWSER_EXECUTABLE_PATH` (the image's Chrome for Testing), or use the
-Chrome for Testing `agent-browser install` put in place. `OMB_CHROME_PATH`
+Chrome for Testing `agent-browser install` put in place. A Linux server where
+agent-browser already finds a browser (Chrome, Chromium or Brave on `PATH`, or a
+complete Puppeteer or Playwright Chromium in their caches) keeps it; with none,
+it downloads its own as in step 2. `OMB_CHROME_PATH`
 names one explicitly. An `OMB_AGENT_BROWSER_PATH` engine keeps its own choice
 unless a Chrome is named too.
 
@@ -110,8 +114,8 @@ connects nowhere.
 |---|---|---|---|
 | Public internet | yes | yes | yes |
 | OpenMausBot's own ports (loopback and this machine's addresses) | no | no | no |
-| Other ports on this computer | yes, by `localhost` or an address, not by a public name | only servers a bot's own processes opened (Linux), or allowed below | only servers a bot's own processes opened |
-| Local network: 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7 | yes, unless `browserEngine.egress.localNetwork` is `false` | only what `browserEngine.egress.allow` lists | no |
+| Other ports on this computer | yes, by `localhost` or an address, not by a public name | only servers a bot's own processes opened (Linux), or allowed below; with "Open sites on this server" on, yes, by `localhost`, an address or a name that points at this server's own addresses, not a public name that points at loopback | only servers a bot's own processes opened |
+| Local network: 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7 | yes, unless `browserEngine.egress.localNetwork` is `false` | only what `browserEngine.egress.allow` lists, or all of it with "Open sites on this server" on | no |
 | Link-local and cloud metadata (169.254/16, fe80::/10, `fd00:ec2::254`, 100.100.100.200) | no | no | no |
 | 0/8, 198.18/15, multicast | no | no | no |
 
@@ -134,9 +138,18 @@ A self-hosted server opens more with `config.json`:
 ```
 
 Each entry is an address or CIDR range with an optional `:port` (IPv6 in
-brackets for a port: `[fd12::1]:443`). OpenMausBot's own ports, metadata and
-link-local addresses stay closed whatever it lists, and MausBot Cloud ignores
-it. Every refused connection shows up in the bot's next browser result:
+brackets for a port: `[fd12::1]:443`). `localhost` resolves to both loopback
+addresses, so `127.0.0.1:9000` also allows `[::1]:9000` and the other way
+round, on that port only. OpenMausBot's own ports, metadata and
+link-local addresses stay closed whatever it lists, and MausBot Cloud and shared
+company workspaces ignore it.
+
+Settings > Computer > "Open sites on this server" (`browserEngine.egress.localNetwork: true`, off by default and
+shown only to the server's owner or an admin; not on a shared company workspace, whose network is the operator's) opens this server's own sites and its local network without listing
+them. OpenMausBot's own ports, metadata and link-local addresses stay closed, also through a private address such as
+a Docker host's gateway, and a public name that resolves to loopback is still refused. It applies to new connections;
+a page already open keeps the ones it has until it closes them. Refused connections show up in the bot's next browser result:
+the first three by name and the rest as a count (up to 20 per result, each destination and reason once):
 `The page tried to reach "127.0.0.1:8799" (blocked: OpenMausBot's own service)`.
 
 `agent_browser_read` reads the page open in the browser. Given an address,

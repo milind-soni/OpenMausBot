@@ -11,6 +11,7 @@ mkdirSync(join(root, "omb", "native"), { recursive: true });
 console.log(`Evidence: ${root}`);
 const { CodexDriver } = await import("../server/drivers/codex.ts");
 const { recordEvents } = await import("../server/testing/events.ts");
+const { flushNativeLogs } = await import("../server/drivers/native.ts");
 const captures = [];
 const server = createServer(async (req, res) => {
   if (req.method !== "POST") {
@@ -70,6 +71,7 @@ requires_openai_auth=false
       const done = await recorder.until(event => event.type === "turn.completed" && event.turnId === turnId, 30000);
       assert.equal(done.ok, true, JSON.stringify(recorder.events.filter(event => event.turnId === turnId)));
       cursor = recorder.events.find(event => event.turnId === turnId && event.type === "session.started").sessionId;
+      flushNativeLogs();
       const log = readFileSync(join(root, "omb", "native", `${threadId}.ndjson`), "utf8").trim().split("\n").map(JSON.parse);
       const start = log.find(row => row.dir === "out" && ["thread/start", "thread/resume"].includes(row.msg.method));
       const resolved = log.find(row => row.dir === "in" && row.msg.id === start.msg.id).msg.result.sandbox;

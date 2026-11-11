@@ -1,10 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join, posix, win32 } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { addHeldSecretScrubber, HELD_SECRET_MASK } from "../shared/redact.ts";
 import { BROWSER_VIEWPORT } from "./browser-page-size.ts";
 import { BROWSER_CALL_DEFAULTS, BROWSER_HOVER_TOOL, BROWSER_RESTART_TOOL, BROWSER_UPLOAD_TOOL, BrowserRuntime, TransportError, browserRuntimeEnv, formatBrowserTiming, type BrowserSpawnSpec, type BrowserTiming } from "./browser-runtime.ts";
+import { launchSettingsKey } from "./browser-launch-key.ts";
 import { HARNESS_CALL_BUDGET_MS, HARNESS_PROXY_TIMEOUT_MS } from "./harness-budget.ts";
 import { RelayPorts } from "./browser-relay.ts";
 import { BrowserSteps, type StepCall, type StepContext } from "./browser-steps.ts";
@@ -228,6 +229,7 @@ lines.on('line', line => {
   else if (m.params.name === 'agent_browser_snapshot' && process.env.HANG_VERIFICATION === '1') return;
   else if (m.params.name === 'agent_browser_snapshot' && process.env.EMPTY_VERIFICATION === '1') result = { content:[] };
   else if (m.params.name === 'agent_browser_snapshot' && process.env.FAIL_VERIFICATION === '1') result = { isError:true, content:[{type:'text',text:'Snapshot unavailable'}] };
+  else if (m.params.name === 'agent_browser_snapshot' && process.env.SNAPSHOT_ORIGIN) result = { content:[{type:'text',text:'(empty page)'}], structuredContent:{ response:{ success:true, data:{ origin:process.env.SNAPSHOT_ORIGIN, refs:{}, snapshot:'(empty page)' }, error:null } } };
   // LEAK: a page that shows a filled password back, in every kind of result.
   else if (process.env.LEAK && m.params.name !== 'agent_browser_get_url') result = { content:[{type:'text',text:'page says ' + process.env.LEAK},{type:'image',data:'AAAA',mimeType:'image/png'}], structuredContent:{ value: process.env.LEAK } };
   else if (m.params.name === 'agent_browser_eval' && process.env.FAIL_EVAL === '1') result = { isError:true, content:[{type:'text',text:'Evaluation failed'}] };
@@ -255,6 +257,12 @@ function daemonSpec(): { spec: BrowserSpawnSpec; busy: string; calls: () => stri
 }
 
 describe("server-owned browser MCP runtime", () => {
+  it.runIf(process.platform === "linux")("starts a bot's browser engine first in line when memory runs out, before the server", async () => {
+    const value = runtime();
+    const listed = await value.agentRpc("scored", spec(), "tools/list", {}) as { pid: number };
+    expect(readFileSync(`/proc/${listed.pid}/oom_score_adj`, "utf8").trim()).toBe("1000");
+  });
+
   it("never lets agent_browser_read fetch an address itself, around the browser and its egress gate", async () => {
     const value = runtime();
     const daemon = spec();
@@ -351,6 +359,36 @@ describe("server-owned browser MCP runtime", () => {
     expect(result.content[1].text).toContain("sign-in");
     expect(result.content[1].text).toContain("Its refs are current");
     expect(JSON.parse(result.content[2].text)).toEqual({ name: "agent_browser_snapshot", arguments: { compact: true } });
+  });
+  it("rejects a successful website navigation whose verification observes about:blank, without retrying", async () => {
+    const daemon = daemonSpec();
+    daemon.spec.env.SNAPSHOT_ORIGIN = "about:blank";
+    try {
+      const result = await runtime().agentRpc("lost-page", daemon.spec, "tools/call", {
+        name: "agent_browser_open", arguments: { url: "https://example.com" },
+      }) as { isError?: boolean; content: Array<{ text: string }> };
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0].text).name).toBe("agent_browser_open");
+      expect(result.content[1].text).toContain("verification failed");
+      expect(result.content[1].text).not.toContain("Its refs are current");
+      expect(result.content[2].text).toBe("(empty page)");
+      expect(daemon.calls()).toEqual(["agent_browser_open", "agent_browser_snapshot"]);
+    } finally { daemon.cleanup(); }
+  });
+  it.each([
+    [{ url: "about:blank" }, "about:blank"],
+    [{}, "about:blank"],
+    [{ url: "https://example.com" }, "https://example.com/"],
+    [{ url: "https://example.com" }, "https://signin.example.net/login"],
+  ])("allows an intentional blank page, empty website or redirect: %j -> %s", async (args, origin) => {
+    const daemon = spec();
+    daemon.env.SNAPSHOT_ORIGIN = origin;
+    const result = await runtime().agentRpc("allowed-page", daemon, "tools/call", {
+      name: "agent_browser_open", arguments: args,
+    }) as { isError?: boolean; content: Array<{ text: string }> };
+    expect(result.isError).not.toBe(true);
+    expect(result.content[1].text).toContain("Its refs are current");
+    expect(result.content[2].text).toBe("(empty page)");
   });
   it("says what an action changed on the page, read with eval so the model's refs stay valid", async () => {
     const result = await runtime().agentRpc("act", spec(), "tools/call", {
@@ -1010,6 +1048,100 @@ describe("server-owned browser MCP runtime", () => {
     } finally {
       try { process.kill(first.browserPid, "SIGKILL"); } catch {}
     }
+  });
+});
+
+describe("browser launch settings", () => {
+  const basePath = process.env.PATH ?? "/usr/bin:/bin";
+  const joined = (...entries: string[]) => entries.join(delimiter);
+  const fnm = (id: string) => `/Users/person/.local/state/fnm_multishells/${id}/bin`;
+
+  it("keeps the running browser when only fnm's per-shell PATH link changes", async () => {
+    const value = runtime();
+    const first = spec();
+    first.env.PATH = joined(fnm("4101_1793469937867"), basePath);
+    const started = await value.agentRpc("fnm", first, "tools/list", {}) as { pid: number };
+    const replaced: BrowserSpawnSpec = { ...first, env: { ...first.env, PATH: joined(fnm("4102_1793470001123"), basePath) } };
+    expect((await value.agentRpc("fnm", replaced, "tools/list", {}) as { pid: number }).pid).toBe(started.pid);
+    // A re-probed PATH keeps the link it captured before and appends the one it read now.
+    const accumulated: BrowserSpawnSpec = { ...first, env: { ...first.env, PATH: joined(fnm("4101_1793469937867"), fnm("4103_1793470009999"), basePath) } };
+    expect((await value.agentRpc("fnm", accumulated, "tools/list", {}) as { pid: number }).pid).toBe(started.pid);
+  });
+
+  it("still refuses a call whose launch settings really changed", async () => {
+    const value = runtime();
+    const first = spec();
+    first.env.PATH = basePath;
+    await value.agentRpc("changed", first, "tools/list", {});
+    const changes: Array<[string, BrowserSpawnSpec]> = [
+      ["command", { ...first, command: `${process.execPath}-other` }],
+      ["args", { ...first, args: [...first.args, "--headed"] }],
+      ["executable", { ...first, env: { ...first.env, AGENT_BROWSER_EXECUTABLE_PATH: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" } }],
+      ["profile", { ...first, env: { ...first.env, AGENT_BROWSER_PROFILE: "/tmp/omb-profile-b" } }],
+      ["restore", { ...first, env: { ...first.env, AGENT_BROWSER_RESTORE: "omb-other" } }],
+      ["proxy", { ...first, env: { ...first.env, AGENT_BROWSER_PROXY: "socks5://127.0.0.1:64123" } }],
+      ["headless", { ...first, env: { ...first.env, AGENT_BROWSER_HEADLESS: "0" } }],
+      ["a PATH directory", { ...first, env: { ...first.env, PATH: joined("/opt/homebrew/bin", basePath) } }],
+    ];
+    for (const [name, changed] of changes) {
+      await expect(value.agentRpc("changed", changed, "tools/list", {}), name).rejects.toThrow(/launch settings changed/);
+    }
+  });
+
+  it("keys the Node version fnm selects in both PATH forms", () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-fnm-"));
+    try {
+      const state = join(root, "state", "fnm_multishells");
+      const install = (version: string) => {
+        const dir = join(root, "node-versions", version, "installation");
+        mkdirSync(join(dir, "bin"), { recursive: true });
+        return dir;
+      };
+      const link = (id: string, target: string) => {
+        mkdirSync(state, { recursive: true });
+        const path = join(state, id);
+        symlinkSync(target, path, process.platform === "win32" ? "junction" : undefined);
+        return path;
+      };
+      const older = install("v20.18.0");
+      const newer = install("v22.12.0");
+      const firstLink = link("4101_1793469937867", older);
+      const secondLink = link("4102_1793470001123", older);
+      const upgradeLink = link("4103_1793470009999", newer);
+      // Unix puts the link's bin on PATH, Windows the link itself.
+      const forms = [(path: string) => join(path, "bin"), (path: string) => path];
+      for (const onPath of forms) {
+        const key = (...entries: string[]) => launchSettingsKey({ command: "chrome", args: [], env: { PATH: entries.join(delimiter) } });
+        expect(key(onPath(firstLink), "/usr/bin")).toBe(key(onPath(secondLink), "/usr/bin"));
+        expect(key(onPath(firstLink), "/usr/bin")).not.toBe(key(onPath(upgradeLink), "/usr/bin"));
+      }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("leaves ordinary PATH entries exactly as they were", () => {
+    const key = (path: string) => launchSettingsKey({ command: "chrome", args: [], env: { PATH: path } });
+    const path = joined("/usr/bin", "/bin");
+    expect(key(path)).toBe(JSON.stringify(["chrome", [], [["PATH", path]]]));
+    expect(key(path)).not.toBe(key(joined("/usr/bin", "/usr/bin", "/bin")));
+    expect(key(path)).not.toBe(key(joined("/bin", "/usr/bin")));
+  });
+
+  it("treats an fnm link that is already gone as one stable entry", () => {
+    // Literal paths so the case reads the same on every host: the link cannot resolve either way.
+    const forms: Array<[NodeJS.Platform, (id: string) => string]> = [
+      ["darwin", (id) => `/nowhere/fnm_multishells/${id}/bin`],
+      ["win32", (id) => `/nowhere/fnm_multishells/${id}`],
+    ];
+    for (const [platform, entry] of forms) {
+      const separator = (platform === "win32" ? win32 : posix).delimiter;
+      const key = (id: string) => launchSettingsKey({ command: "chrome", args: [], env: { PATH: [entry(id), "/usr/bin"].join(separator) } }, platform);
+      expect(key("1_1"), platform).toBe(key("2_2"));
+    }
+  });
+
+  it("does not fold a directory below the link into the link's target", () => {
+    const key = (id: string) => launchSettingsKey({ command: "chrome", args: [], env: { PATH: joined(`/nowhere/fnm_multishells/${id}/bin/extra`, "/usr/bin") } });
+    expect(key("1_1")).not.toBe(key("2_2"));
   });
 });
 

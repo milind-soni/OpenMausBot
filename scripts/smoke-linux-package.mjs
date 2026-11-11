@@ -76,14 +76,14 @@ appendFileSync(marker, JSON.stringify({
 }) + "\\n");
 const after = (flag) => { const index = args.indexOf(flag); return index === -1 ? null : args[index + 1]; };
 if (args.includes("--version")) {
-  process.stdout.write("cua-driver 0.19.3\\n");
+  process.stdout.write("cua-driver 0.41.3\\n");
   process.exit(0);
 }
 if (args[0] === "manifest") {
   const binary = realpathSync(process.argv[1]);
   process.stdout.write(JSON.stringify({
     schema_version: "1",
-    binary_version: "0.19.3",
+    binary_version: "0.41.3",
     binary_path: binary,
     mcp_invocation: { command: binary, args: ["mcp"] },
   }) + "\\n");
@@ -91,7 +91,7 @@ if (args[0] === "manifest") {
 }
 if (args[0] === "doctor" && args.includes("--json")) {
   process.stdout.write(JSON.stringify({ ok: true, probes: [
-    { label: "binary", status: "ok", message: "cua-driver 0.19.3" },
+    { label: "binary", status: "ok", message: "cua-driver 0.41.3" },
     { label: "display server", status: "ok", message: wayland
       ? "Wayland+XWayland (WAYLAND_DISPLAY=wayland-smoke, DISPLAY=:99)"
       : "X11 (DISPLAY=:99)" },
@@ -111,8 +111,8 @@ const count = existsSync(state) ? Number(readFileSync(state, "utf8")) + 1 : 1;
 writeFileSync(state, String(count));
 writeFileSync(pidFile, String(process.pid), { mode: 0o600 });
 const metadata = {
-  driver_version: "0.19.3",
-  contract_version: "0.6.0",
+  driver_version: "0.41.3",
+  contract_version: "0.8.0",
   tools_list_schema_version: "1",
   capability_version: "1",
   mcp_protocol_version: "2025-06-18",
@@ -125,10 +125,10 @@ const toolManifest = { schema_version: "1", capability_version: "1", tools };
 const healthReport = {
   schema_version: "1",
   platform: "linux",
-  driver_version: "0.19.3",
+  driver_version: "0.41.3",
   overall: "ok",
   checks: [
-    { name: "binary_version", status: "pass", message: "cua-driver 0.19.3" },
+    { name: "binary_version", status: "pass", message: "cua-driver 0.41.3" },
     { name: "platform_supported", status: "pass", message: "Ubuntu 24.04" },
     { name: "session_active", status: "pass", message: "MCP session is active." },
     { name: "ax_capability", status: "pass", message: "AT-SPI fixture is reachable." },
@@ -286,7 +286,7 @@ try {
   if (health?.app !== "openmausbot" || health.static !== true) {
     throw new Error(`unexpected embedded health response: ${JSON.stringify(health)}`);
   }
-  if (!String(title).includes("OpenMausBot")) throw new Error(`unexpected renderer title: ${title}`);
+  if (!/\bMausBot\b/.test(String(title))) throw new Error(`unexpected renderer title: ${title}`);
   if (capabilities.host.platform !== "linux") throw new Error("renderer did not report Linux");
   if (capabilities.host.session !== (wayland ? "wayland" : "x11")) {
     throw new Error(`renderer did not report the ${wayland ? "Wayland" : "X11"} contract`);
@@ -295,7 +295,7 @@ try {
   if (!capabilities.screenPreview.available || capabilities.screenPreview.interaction !== expectedPreview) {
     throw new Error(`${wayland ? "Wayland" : "X11"} screen preview capability was not available`);
   }
-  if (capabilities.dictation.available) throw new Error("dictation must be unavailable on Linux");
+  if (!capabilities.dictation.available || capabilities.dictation.engine !== "fish-audio") throw new Error("dictation must listen through Fish Audio on Linux");
   if (sessionBlocked) {
     if (
       initialCapabilities.localComputer.available ||
@@ -360,7 +360,7 @@ try {
     }
     if (
       cuaRuntime?.driverSource !== "bundled" ||
-      cuaRuntime.driverVersion !== "0.19.3" ||
+      cuaRuntime.driverVersion !== "0.41.3" ||
       (appImage
         ? cuaRuntime.appImagePrivateStage !== true || cuaRuntime.exactBundledPath !== false
         : cuaRuntime.exactBundledPath !== true ||

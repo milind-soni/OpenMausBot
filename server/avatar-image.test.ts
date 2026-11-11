@@ -119,7 +119,11 @@ describe("avatar image generation", () => {
   it("reports the legacy OpenAI default and only the selected provider's readiness", () => {
     expect(avatarImageStatus({})).toEqual({
       provider: "openai", configured: false, model: "gpt-image-2", customUrl: "", customModel: "",
-      openaiConfigured: false, xaiConfigured: false, customKeyConfigured: false,
+      primary: { provider: "openai", model: "gpt-image-2", configured: false }, fallback: null, ready: false, maxPerTurn: 4,
+      openaiConfigured: false, xaiConfigured: false, customKeyConfigured: false, geminiConfigured: false, openrouterConfigured: false,
+    });
+    expect(avatarImageStatus({ imageGen: { key: "k", primary: { provider: "gemini" }, fallback: { provider: "openai" } } })).toMatchObject({
+      primary: { provider: "gemini", configured: false }, fallback: { provider: "openai", configured: true }, ready: true,
     });
     expect(avatarImageStatus(OPENAI).configured).toBe(true);
     expect(avatarImageStatus({ xai: { key: "xai-secret" } }).configured).toBe(false);
@@ -193,7 +197,7 @@ describe("avatar image generation", () => {
     }), { status }));
     const cfg = { ...ALL_KEYS, imageGen: { ...ALL_KEYS.imageGen, provider: "custom" as const } };
     await expect(generateAvatarImage(cfg, BOT, "", fetchMock)).rejects.toMatchObject({
-      message: `Custom image generation failed (HTTP ${status})`, status: status === 401 ? 401 : 502,
+      message: `Custom image generation failed (HTTP ${status}, model gateway/model)`, status: status === 401 ? 401 : 502,
     });
   });
 
@@ -262,7 +266,7 @@ describe("avatar image generation", () => {
     });
 
     await expect(generateAvatarImage(OPENAI, BOT, "", hanging, 10)).rejects.toMatchObject({
-      message: "Avatar generation timed out",
+      message: "Image generation timed out",
       status: 502,
     });
   });
@@ -272,7 +276,7 @@ describe("avatar image generation", () => {
       init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
     }));
     await expect(generateAvatarImage(OPENAI, BOT, "", fetchMock, 10)).rejects.toMatchObject({
-      message: "Avatar generation timed out", status: 502,
+      message: "Image generation timed out", status: 502,
     });
   });
 
@@ -280,7 +284,7 @@ describe("avatar image generation", () => {
     const body = new ReadableStream<Uint8Array>({ start(controller) { controller.error(new Error("private gateway secret")); } });
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(body));
     await expect(generateAvatarImage(OPENAI, BOT, "", fetchMock)).rejects.toMatchObject({
-      message: "Could not read the generated avatar response", status: 502,
+      message: "Could not read the generated image response", status: 502,
     });
   });
 });

@@ -45,6 +45,7 @@ Use only mapped, tested commands:
 
 - [The headless command line](headless-cli.md)
 - [Chat turns](chat-turns.md)
+- [OpenAI reply readout](openai-readout.md)
 - [Conversation context compaction](context-compaction.md)
 - [Work summaries and engine hooks](digests.md)
 - [OpenAI-compatible structured tools](openai-tools.md)
@@ -55,17 +56,21 @@ Use only mapped, tested commands:
 - [MausBot, everyone's helper](mausbot.md)
 - [Profile proposal and credential-card lifecycle](proposal-cards.md)
 - [Full Access without duplicate approvals](full-access.md)
+- [Gmail draft creation, send approval and revision](gmail-drafts.md)
 - [Exact command allowlist UI and saved rules](command-allowlist.md)
 - [The safety floor: a never-list no grant can allow](safety-floor.md)
-- [Peer approval denial, expiry, and cancellation](peer-approvals.md)
 - [Waiting for an occupied desktop](computer-wait.md)
 - [Chat UI, driven headlessly](chat-ui.md)
 - [Computer panel focus hand-off](computer-panel-focus.md)
 - [Taking control of a bot's computer](take-control.md)
+- [Saved steps: repeating a computer task without AI](saved-steps.md)
 - [Native dictation retention and send-to-stop](dictation.md)
 - [Proactive routines and the brief](proactive-routines.md)
+- [Waits: tell me when, with no AI while waiting](waits.md)
 - [A new Cloud's first hour](first-hour.md)
 - [Chat widgets](widgets.md)
+- [Pages and apps in a room](room-pages.md)
+- [The Inbox on every plan](inbox.md)
 - [Reactions](reactions.md)
 - [Chat widgets: prompts to try with a real bot](widget-prompts.md)
 - [Phone web app installation and safe areas](phone-web-app.md)
@@ -94,6 +99,7 @@ Use only mapped, tested commands:
 - [Hosted workspace sign-in and revocation](hosted-workspaces.md)
 - [Shared-workspace trust: loopback, card answerers, decision log](shared-workspace-trust.md)
 - [Shared-workspace governance: bot visibility and admin activity](shared-workspace-governance.md)
+- [Who can see, chat with and change each team bot](team-bot-access.md)
 - [Usage ledger](usage-ledger.md)
 - [Bounded built-in tool results](tool-results.md)
 - [Memory: recall, upkeep and the tidy-up](memory-layer.md)
@@ -122,6 +128,11 @@ The [move to My Cloud fixture](cloud-send.md) runs this computer's server and a
 Cloud home with the desktop's own wiring between them, and runs and checks the
 one-time move as main does.
 
+The [server of the person's own as home fixture](own-home.md) runs this
+computer's server and servers of the person's own with main's wiring for
+**Make <server> my home**: the move, routines that run once, this computer then
+lent to that server by itself, and none of it for a server shared with others.
+
 The [MCP sign-in fixture](mcp-sign-in.md) checks remote sign-in, callback URL
 paste-back, MCP tools and logout cancellation through the real settings panel
 and a synthetic OAuth provider in a disposable workspace.
@@ -129,6 +140,11 @@ and a synthetic OAuth provider in a disposable workspace.
 The [Whop fixture](whop.md) checks its one-click setup, cancellation, denied
 consent, discovery failures, reconnect and disconnect using that same registry
 and a synthetic provider, without accessing a real Whop account.
+
+The [bot contact cards fixture](bot-contact-cards.md) checks the AgentMail,
+AgentPhone, Vapi and Telnyx cards: a pasted key that is refused, replaced and
+deleted on Disconnect, kept in a header and out of every listing, against a
+loopback stand-in for Vapi.
 
 The [Postiz fixture](postiz.md) checks the Apps page's Postiz card in the Social
 category: Postiz Cloud's sign-in and an API key for a person's own Postiz, the
@@ -159,8 +175,8 @@ The [personal Cloud account smoke](cloud-account.md) checks optional browser
 sign-in, server-verified Pro status and sign-out in a disposable Electron profile.
 
 The [rail of Clouds](cloud-rail.md) checks the session's list of Clouds, which
-pages may read the rail, opening a place by its id, and buying another Cloud,
-with a loopback Admin and the real app in a disposable preview.
+pages may read the rail, opening a place by its id, hiding the rail, and buying
+another Cloud, with a loopback Admin and the real app in a disposable preview.
 
 The [embedded server recovery smoke](desktop-server-recovery.md) crashes real
 Electron-owned fixture servers, verifies bounded recovery and private access,
@@ -226,12 +242,13 @@ roles and device revocation through the real HTTP API with a stubbed email
 service. It does not drive the People settings UI through `control-omb`.
 
 The [sidebar fixture](sidebar.md) checks archive and delete confirmations, their
-default focus, keyboard wrapping and focus return against two disposable bots.
+default focus, keyboard wrapping and focus return against two disposable bots;
+its departments recipe drags bots to reorder them and into new departments.
 
 The [sidebar attention geometry fixture](sidebar-attention.md) measures the
-Active Threads popover's width and inset at each expanded sidebar density in a
-headless Electron window, including the compact-density case where the menu
-used to cross the window's left edge and lose its title.
+Active Threads popover's width and inset in the open sidebar and its column of
+avatars in a headless Electron window, so the menu never crosses the window's
+left edge and loses its title.
 
 The [avatar provider fixture](avatar-providers.md) checks image-provider settings,
 keyless local generation, saved-key handling, and safe errors with a local fake API.
@@ -286,6 +303,11 @@ responsive layouts, theme contrast, and status refreshes without losing drafts.
 The [Claude account recipe](claude-account.md) checks sign-out, cancellation and
 retry against an offline Claude CLI confined to a disposable home.
 
+The [Claude custom endpoints](claude-endpoint.md) checks a per-bot DeepSeek/GLM
+endpoint in Settings and its turn against the fake Claude CLI: its own
+directory, its model and routing, the token kept out of the engine list, and
+edits that keep the saved token.
+
 The [provider recovery recipe](provider-recovery.md) verifies real Grok image
 transport and Claude authentication against loopback APIs, plus scoped thread
 approvals and provider safety errors in an isolated desktop UI.
@@ -311,6 +333,10 @@ The [Group and Goal Local VM recipe](group-local-vm.md) checks per-speaker
 desktop routing, cancellation, and computer authority cleanup.
 
 ## Evidence
+
+The [Gemini speech fixture](gemini-speech.md) checks write-only credentials,
+voice selection and WAV synthesis against an offline provider in an isolated
+server, with manual steps for real Google access and playback.
 
 The [persistence responsiveness benchmark](persistence-performance.md) measures
 synthetic message/log bursts and history scans, with isolated chat, visibility

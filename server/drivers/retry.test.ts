@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BACKOFF_BASE_MS, RETRY_MAX_ATTEMPTS, classifyError, computeBackoff } from "./retry.ts";
+import { BACKOFF_BASE_MS, RETRY_MAX_ATTEMPTS, classifyError, computeBackoff, mayResendTurn } from "./retry.ts";
 
 describe("classifyError", () => {
   it("does not retry a provider safety block even inside a 503 or rate-limit error", () => {
@@ -35,6 +35,29 @@ describe("classifyError", () => {
       transient: true,
       reason: "overloaded",
     });
+  });
+
+  it.each([
+    [429, "rate_limited"],
+    [500, "server_error"],
+    [502, "server_error"],
+    [503, "server_error"],
+    [504, "server_error"],
+  ])("retries unexpected status %s from both streamed errors and CLI exits", (status, reason) => {
+    const text = `unexpected status ${status}`;
+    expect(classifyError(new Error(text))).toEqual({ transient: true, reason });
+    expect(classifyError({ text })).toEqual({ transient: true, reason });
+    expect(classifyError({ exitCode: 1, stderr: text })).toEqual({ transient: true, reason });
+  });
+
+  it.each([
+    [400, "invalid_request"],
+    [401, "auth"],
+    [403, "auth"],
+    [404, "not_found"],
+    [422, "invalid_request"],
+  ])("keeps unexpected status %s terminal", (status, reason) => {
+    expect(classifyError({ text: `unexpected status ${status}` })).toEqual({ transient: false, reason });
   });
 
   it("calls Codex's failed workspace routing discovery transient, but not a refused sign-in", () => {
@@ -90,6 +113,26 @@ describe("classifyError", () => {
   it("classifies unrecognizable input as terminal", () => {
     expect(classifyError(null)).toEqual({ transient: false, reason: "unknown" });
     expect(classifyError(new Error(""))).toEqual({ transient: false, reason: "unknown" });
+  });
+});
+
+describe("mayResendTurn", () => {
+  const failed = { endedBeforeTurn: false, exitCode: 5, transient: true, streamed: false, answered: false, attempt: 0 };
+
+  it("resends a launch that never took the prompt, and a transient failure before anything answered", () => {
+    expect(mayResendTurn({ ...failed, endedBeforeTurn: true, answered: true, transient: false })).toBe(true);
+    expect(mayResendTurn(failed)).toBe(true);
+  });
+
+  it("never resends once a model call answered or text streamed", () => {
+    expect(mayResendTurn({ ...failed, answered: true })).toBe(false);
+    expect(mayResendTurn({ ...failed, streamed: true })).toBe(false);
+  });
+
+  it("never resends a clean exit, a terminal failure, or past the attempt cap", () => {
+    expect(mayResendTurn({ ...failed, exitCode: 0 })).toBe(false);
+    expect(mayResendTurn({ ...failed, transient: false })).toBe(false);
+    expect(mayResendTurn({ ...failed, attempt: RETRY_MAX_ATTEMPTS - 1 })).toBe(false);
   });
 });
 

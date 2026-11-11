@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
+import { botFolder } from "./bot-folder.ts";
+import { flushProfileHistory, readHistory } from "./profile-versions.ts";
 import { hasTeamAuthority } from "./peer-roster.ts";
 import type { BotRecord, OptionCardData } from "./store.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
@@ -110,26 +112,24 @@ describe("reviewed Chief team setup", () => {
     expect(h.peer.chiefOfStaff).toBe(true);
     expect((await h.resolve(replace.requestId))?.duplicate).toBe(true);
   });
-  it.each(["conflict", "scope", "busy", "peer", "revision"])("cancels promotion after a %s change without partial mutation", async change => {
+  it.each(["conflict", "scope", "busy", "revision"])("cancels promotion after a %s change without partial mutation", async change => {
     const h = harness(); h.peer.section = "Engineering";
     const card = h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }]);
     if (change === "conflict") h.bot("New Chief", { section: "Engineering", chiefOfStaff: true });
     if (change === "scope") h.chief.managedSections = [];
     if (change === "busy") h.peer.busy = true;
-    if (change === "peer") h.chief.peers = [];
     if (change === "revision") h.peer.chiefOfStaff = true;
     const before = structuredClone(h.store.bots);
     expect((await h.resolve(card.requestId))?.result.state).toBe("cancelled");
     expect(h.store.bots).toEqual(before);
     expect(h.apply).not.toHaveBeenCalled();
   });
-  it("rejects malformed leadership and promotion outside team or peer scope", () => {
+  it("rejects malformed leadership and promotion outside the team", () => {
     const h = harness();
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: "true" } }])).toThrow();
     h.peer.section = "Private";
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }])).toThrow(/authorized/);
-    h.peer.section = "Engineering"; h.chief.peers = [];
-    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }])).toThrow(/peer scope/);
+    h.peer.section = "Engineering";
     h.chief.chiefOfStaff = false;
     expect(() => h.propose([{ action: "update", botId: h.chief.id, fields: { chiefOfStaff: true } }])).toThrow(/Only an active Chief/);
     expect(h.messages).toHaveLength(0);
@@ -266,11 +266,9 @@ describe("reviewed Chief team setup", () => {
     expect((await h.resolve(card.requestId))?.result).toMatchObject({ state: "cancelled", error: "@Ada changed. This setup was cancelled; review a new proposal." });
     expect(h.apply).not.toHaveBeenCalled();
   });
-  it("preserves existing elevated permissions and peer allowlists", () => {
+  it("preserves existing elevated permissions", () => {
     const h = harness(); h.peer.approvalMode = "full";
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { modelSelection: { instanceId: "codex", model: "gpt-fixture" } } }])).toThrow(/incompatible/);
-    h.chief.peers = [];
-    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { title: "X" } }])).toThrow(/peer scope/);
   });
   it("routes separately confirmed deletion through lifecycle guards once and never permits self-deletion", async () => {
     const h = harness();
@@ -302,6 +300,15 @@ describe("reviewed Chief team setup", () => {
     expect(await h.resolve(card.requestId)).toMatchObject({ result: { state: "cancelled" }, duplicate: true });
     expect(h.apply).not.toHaveBeenCalled();
   });
+  it("puts a setup's change to a bot's instructions in that bot's history, where its Changes list can undo it", async () => {
+    const h = harness();
+    mkdirSync(botFolder(h.peer.id), { recursive: true });
+    const request = h.propose([{ action: "update", botId: h.peer.id, fields: { soul: "Verify sources." } }]);
+    expect((await h.resolve(request.requestId))?.result.state).toBe("applied");
+    await flushProfileHistory(h.peer.id);
+    expect(readHistory(h.peer.id).find((row) => row.field === "soul")).toMatchObject({ actor: "bot", via: "team-setup", before: "", after: "Verify sources.", canRestore: true });
+  });
+
   it("renders a soul-only update as a SOUL.md line diff, not a JSON blob", () => {
     const h = harness(); h.peer.soul = "Verify sources.\nCheck citations.";
     const card = h.propose([{ action: "update", botId: h.peer.id, fields: { soul: "Verify sources.\nCheck citations and dates." } }]);
@@ -607,5 +614,33 @@ describe("MausBot's Chief-level team setup", () => {
     const maus = h.bot("Maus", { defaultBot: {} });
     expect(() => h.service.proposeDeletion({ botId: h.chief.id, threadId: h.chief.threadId, targetBotId: maus.id, reason: "remove" }))
       .toThrow(/Maus can't be deleted or archived/);
+  });
+});
+
+describe("a Chief making bots, whatever the plan", () => {
+  const SELECTION = { instanceId: "claude", model: "sonnet" };
+  const specialist = (key: string) => ({ action: "create", key, fields: { name: key, title: "Specialist", soul: "Work.", modelSelection: SELECTION, section: "Work" } });
+  /** Clive and Ada are two; `others` more makes the count. */
+  const full = (others: number) => {
+    const app = harness();
+    for (let i = 0; i < others; i++) app.bot(`Other${i}`);
+    return app;
+  };
+
+  it("proposes a sixth bot and more: making them is never refused for the plan", () => {
+    const app = full(10);
+    expect(app.propose([specialist("Scout"), specialist("Writer")]).requestId).toBeTruthy();
+  });
+
+  it("applies a whole setup past five bots", async () => {
+    const app = full(4);
+    app.autoApply.mockReturnValue({ source: "profile" } as never);
+    await app.submit([specialist("Scout"), specialist("Writer")]);
+    expect(app.apply).toHaveBeenCalledTimes(1);
+  });
+
+  it("still holds the workspace's own ceiling", () => {
+    const app = full(97);
+    expect(() => app.propose([specialist("Scout"), specialist("Writer")])).toThrow(expect.objectContaining({ status: 409, message: "This setup exceeds the workspace bot limit" }));
   });
 });

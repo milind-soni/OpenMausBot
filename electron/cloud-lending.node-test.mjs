@@ -6,11 +6,21 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { cloudLendingVerdict, createComputerSharing } from "./computer-sharing.mjs";
+import nativeText from "./native-text.cjs";
 import { PERSON_AWAY_SECONDS, personActiveText } from "./lent-screen-presence.mjs";
 
 const ORIGIN = "https://omb-u-fixture.fly.dev";
 const binding = { accountId: "acct_1", origin: ORIGIN };
 const env = { id: "my-cloud", name: "My Cloud", origin: ORIGIN };
+
+test("an empty Cloud grant follows the current native language without changing its English", async t => {
+  const text = nativeText.createNativeText({ saved: "en" });
+  const { sharing } = await lendingFixture(t, { t: text.t });
+  for (const language of ["en", "pt-br"]) {
+    text.set(language);
+    await assert.rejects(sharing.saveCloud(env, { folders: [], screen: false }), { message: text.t("native.lend.chooseCapability") });
+  }
+});
 
 test("the Cloud verdict: same account and machine run, anything else ends or pauses", () => {
   const connected = { status: "connected", accountId: "acct_1", origin: ORIGIN };
@@ -35,7 +45,7 @@ async function scratch(t) {
   return dir;
 }
 
-function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = false, timeouts = false } = {}) {
+function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = false, timeouts = false, long = false } = {}) {
   const json = (value, status = 200) => ({ ok: status < 400, status, body: (async function* () { yield Buffer.from(JSON.stringify(value)); })() });
   const state = { paired: true, environmentId: randomUUID(), sessionId: randomUUID(), connects: [], disconnects: 0, disconnectBodies: [], results: [], queue: [], waiting: null };
   const nextJob = () => new Promise(resolve => { state.waiting = resolve; });
@@ -46,7 +56,7 @@ function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = f
   state.fetch = async (url, init) => {
     const route = new URL(url).pathname;
     if (route === "/api/auth/session") return state.paired ? json({ kind: "session", id: state.sessionId, scopes, ...(cloudHome ? { cloudHome: true } : {}) }) : json({ error: "unauthorized" }, 401);
-    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, ...(details ? { lendingDetails: true } : {}), ...(timeouts ? { commandTimeouts: true } : {}) } });
+    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, ...(details ? { lendingDetails: true } : {}), ...(timeouts ? { commandTimeouts: true } : {}), ...(long ? { longCommands: true } : {}) } });
     const body = init?.body ? JSON.parse(init.body) : {};
     if (route === "/api/shared-computers/connect") { state.connects.push(body); return json({ ok: true }); }
     if (route.endsWith("/poll")) {
@@ -90,6 +100,7 @@ async function lendingFixture(t, options = {}) {
   const sharing = createComputerSharing({
     file: path.join(dir, "profile", "computer-sharing.json"), fetch: home.fetch, environments: () => [options.env ?? env],
     ...(options.reconnect ? { reconnect: options.reconnect } : {}), ...(options.now ? { now: options.now } : {}), ...(options.ownClouds ? { ownClouds: options.ownClouds } : {}),
+    ...(options.t ? { t: options.t } : {}),
     // The maintainer flag is off, as for every Cloud Pro user.
     enabled: async () => { maintainerChecks++; return false; },
     cloud: asked => (typeof cloud === "function" ? cloud(asked) : cloud), home: path.join(dir, "home"),
@@ -140,8 +151,8 @@ test("the terminal is lent only when asked for with exactly true: the bots can t
   await connected(sharing, 2, home);
   assert.equal(home.connects.at(-1).terminal, true);
   home.push({ action: "run_command", command: "echo fixture-terminal" });
-  // On Windows a command starts two PowerShells, which on a fresh CI runner can take longer than the default wait.
-  await until(() => home.results.length === 1, "the command result", 30_000);
+  // On Windows a command starts two PowerShells, whose first start on a fresh CI runner has taken over 30 seconds.
+  await until(() => home.results.length === 1, "the command result", 120_000);
   assert.notEqual(home.results[0].isError, true);
   assert.match(home.results[0].content[0].text, /fixture-terminal/);
   assert.deepEqual(sharing.activity(env.id).map(entry => [entry.action, entry.ok]), [["run_command", true]]);
@@ -289,7 +300,7 @@ test("while the person uses this computer, background screen calls run and one t
   // Listing the tools never touches the screen, so it takes no screen lock.
   assert.notEqual((await run({ action: "computer_tools" })).isError, true);
   assert.deepEqual(leases, []);
-  assert.notEqual((await run({ action: "computer_call", tool_name: "click", arguments: { pid: 42, window_id: 7, element_index: 3 } })).isError, true);
+  assert.notEqual((await run({ action: "computer_call", tool_name: "click", arguments: { pid: 42, window_id: 7, element_token: "s1-e3" } })).isError, true);
   for (const args of [{ x: 5, y: 5 }, { pid: 42, window_id: 7, x: 5, y: 5, delivery_mode: "foreground" }]) {
     const refused = await run({ action: "computer_call", tool_name: "click", arguments: args });
     assert.equal(refused.isError, true);
@@ -349,7 +360,7 @@ test("Pause is instant: the Cloud is told, running work is cancelled, nothing mo
   home.push({ action: "computer_call", tool_name: "click", arguments: {} });
   await delay(300);
   assert.equal((await readFile(driver.calls, "utf8")).trim(), "drag");
-  assert.deepEqual(summaries.at(-1), { lending: [], clouds: ["My Cloud"], using: [], paused: true, busy: null });
+  assert.deepEqual(summaries.at(-1), { lending: [], clouds: ["My Cloud"], waiting: [], using: [], paused: true, terminal: false, terminalSwitch: true, busy: null, screen: null });
   assert.equal(sharing.cloudState(env).problem, "paused");
 });
 
@@ -453,4 +464,13 @@ test("another Cloud of the person's own is lent at its own address, apart from M
   listed = false;
   sharing.cloudChanged();
   assert.deepEqual([sharing.cloudState(other).enabled, sharing.cloudState(other).problem], [false, "machine-changed"]);
+});
+
+test("says it runs commands up to 900 seconds only to a Cloud that takes it, since an older Cloud refuses fields it does not know", async t => {
+  for (const long of [true, false]) {
+    const { folderPath, home, sharing } = await lendingFixture(t, { home: { timeouts: true, long } });
+    await sharing.saveCloud(env, { folders: [{ id: randomUUID(), path: folderPath, write: false }], screen: false });
+    await connected(sharing, 1, home);
+    assert.equal(home.connects[0].longCommands, long ? true : undefined);
+  }
 });
