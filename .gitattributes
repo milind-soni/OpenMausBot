@@ -54,3 +54,8 @@ relay/test/vectors/** text eol=lf
 # a CRLF checkout on Windows fails every match for a reason that has nothing to do with the edge.
 deploy/fly/Caddyfile* text eol=lf
 deploy/fly/*.caddy text eol=lf
+
+# Bundled skills ship to Linux Clouds as they are, and server/skill-publish-to-netlify.test.ts imports a skill's helper
+# through vitest: Vite's transform (vitest 4.1.11) fails with "Invalid or unexpected token" on a file that starts
+# with a shebang and has CRLF line endings, which is what a Windows checkout made of it.
+skills/** text eol=lf
