@@ -148,6 +148,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   cloudAddOpened.current ||= Boolean(state.cloudAdd);
   const [localVmWorkspaceBotId, setLocalVmWorkspaceBotId] = useState<string | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const closeDrawer = useCallback(() => { setDrawerOpen(false); menuButtonRef.current?.focus(); }, []);
   const previousViewRef = useRef(state.activeView);
   const calendarOriginRef = useRef<"chat" | "team-map" | "web-panel">("chat");
   const loading = loadingLine({ connected: state.connected, hydrated: state.hydrated === true, developer: import.meta.env.DEV });
@@ -368,10 +369,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {!calendarFocus && <Sidebar
         collapseToIcons={collapseSidebar}
         open={drawerOpen}
-        onClose={() => {
-          setDrawerOpen(false);
-          menuButtonRef.current?.focus();
-        }}
+        onClose={closeDrawer}
       />}
       {state.activeView === "team-map" ? (
         <TeamMapPage />

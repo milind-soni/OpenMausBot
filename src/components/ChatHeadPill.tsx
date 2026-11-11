@@ -4,7 +4,7 @@ import type { ComponentProps } from "react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { useStore, type Bot } from "@/state/store";
+import type { Bot } from "@/state/store"; import { useStoreSelector } from "@/state/store-select";
 import { awayFromMainThread } from "@/state/thread-navigation";
 import { BotAvatar } from "./Avatar";
 import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
@@ -38,9 +38,8 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
   privacy: ChatHeadPrivacy;
   onToggle: () => void;
 }) {
-  const { state } = useStore();
-  const open = state.settingsOpen;
-  const elsewhere = sidebarBotActivityTasks(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId).length;
+  const open = useStoreSelector((state) => state.settingsOpen), pendingQueued = useStoreSelector((state) => state.pendingQueued);
+  const elsewhere = sidebarBotActivityTasks(bot, pendingQueued).filter((task) => task.threadId !== bot.threadId).length;
   const privacyLabel = privacyLabelOf(privacy);
   const PrivacyIcon = privacy ? PRIVACY_ICONS[privacy.kind] : Users;
   const title = bot.tasks?.find((task) => task.threadId === bot.threadId)?.title;
