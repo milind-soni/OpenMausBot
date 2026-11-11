@@ -393,11 +393,15 @@ root, but in your checkout: its Compose files and `.env` decide what `docker
 compose up` starts. So whoever owns that folder can change what root runs
 when the app asks for an update. `--install` accepts a folder owned by root or
 by someone in the `docker` group (who can run anything as root through Docker
-already), and anyone else only with `--trust-folder-owner`; the folder may not
-be writable by its group or by others, nor any folder above it by anyone but
-root and that owner (a world-writable one with its sticky bit, such as `/tmp`,
-is fine). The runner checks all this again at every run, and runs nothing when
-it no longer holds (the app shows the `--install` command). On an update the
+already), and anyone else only with `--trust-folder-owner`. The folder, and
+every folder above it, may be changed by root and that owner only: not by
+everyone (unless it has its sticky bit, as `/tmp` does), and not by a group
+other than root's or the owner's own private group (the one Ubuntu and Fedora
+give each user, which their default umask makes new folders writable by). The
+runner checks all this again at every run, and runs nothing when it no longer
+holds; the refusal names the folder, its owner, group and mode, and the app
+shows it with the `--install` command. A fresh server installed with the
+installer passes as it is. On an update the
 app asked for, `update.sh` writes nothing through a link there (`.update`,
 `.env`, the Compose files and its temporary files), nor into a `.update` that
 belongs to anyone but you or the folder's owner; your own run of
@@ -426,7 +430,8 @@ requests can cause:
   made, and the last one your own run of `./update.sh` made, which an update
   from the app never removes. While the next copy is made and checked, that is
   about three times the data plus the new copy; `update.sh` refuses to start
-  when the disk has no room for it.
+  when the disk has no room for it, and the app then says so, with the commands
+  to list and remove old copies (below).
 - Updates that stop the server at most once every four minutes. A run with
   nothing to do stops nothing and does not count, and for five minutes the
   same answer is given without asking GitHub or the registry again (when the

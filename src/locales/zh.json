@@ -7691,5 +7691,6 @@
   "serverUpdate.reason.notRetried": "更新到 v{version} 之前在此服务器上没有成功，所以应用不会再试。要手动尝试，请在服务器上运行：{command}",
   "serverUpdate.reason.stale": "服务器上的 update.sh 比按钮使用的副本更新。请在服务器上运行：{command}",
   "serverUpdate.reason.unreleased": "此服务器运行的是 main 的构建版本，应用不会更新它。稳定版比该构建新时，它就会切换到稳定版；请在服务器上运行：{command}",
-  "serverUpdate.reason.unsafe": "安装文件夹或其上层文件夹可以被 root 以外的人修改，所以按钮不会执行任何操作。请修正后在服务器上运行：{command}"
+  "serverUpdate.reason.unsafe": "按钮不会执行任何操作，因为 root 以外的人可以更改它执行的内容：{folder}。请修正后在服务器上运行：{command}",
+  "serverUpdate.reason.noRoom": "服务器需要先有空闲磁盘空间来存放数据副本。要查看之前的更新保留的副本，请在服务器上运行：{list}。要删除一个：{remove}"
 }

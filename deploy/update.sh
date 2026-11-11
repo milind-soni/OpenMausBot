@@ -26,6 +26,8 @@
 #   3    another update is running here
 #   4    nothing was changed: refused, could not download, the folder cannot be written, or a question was not answered
 #   5    nothing was changed: the version asked for is older than the one running, or either version cannot be told
+#   6    nothing was changed: not enough free disk for a copy of the data (only on a run update-runner.sh started;
+#        anyone else gets 4)
 #   130  interrupted (Ctrl-C) before the new version started: nothing was changed, and the server was started again
 set -uo pipefail
 # An SSH session that drops sends SIGHUP, and a `| tee` that dies with it would send SIGPIPE: neither may stop an
@@ -844,7 +846,9 @@ fi
 BACKUP_MADE=yes
 if ! make_backup_volume "$J_backup" "$J_previous_id" || ! room_for_copy "$J_data" "$J_backup" "$J_previous_id"; then
   abandon
-  refuse "There is not enough free disk for a copy of the data: it needs about ${NEEDED_MB:-?} MB and ${FREE_MB:-?} MB are free. Free some space, then run this again. Nothing was changed."
+  say "There is not enough free disk for a copy of the data: it needs about ${NEEDED_MB:-?} MB and ${FREE_MB:-?} MB are free. Free some space, then run this again. Nothing was changed."
+  if [ "$BY_RUNNER" = 1 ]; then exit 6; fi
+  exit 4
 fi
 
 J_engine=unknown

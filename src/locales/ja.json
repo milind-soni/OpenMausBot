@@ -7803,5 +7803,6 @@
   "serverUpdate.reason.notRetried": "v{version} への更新はこのサーバーで以前うまくいかなかったため、アプリからは再試行しません。手動で試すには、サーバーで実行してください：{command}",
   "serverUpdate.reason.stale": "サーバーの update.sh が、ボタンが使うコピーより新しくなっています。サーバーで実行してください：{command}",
   "serverUpdate.reason.unreleased": "このサーバーは main のビルドで動いており、アプリからは更新しません。安定版がこのビルドより新しくなれば移行します。サーバーで実行してください：{command}",
-  "serverUpdate.reason.unsafe": "インストール先のフォルダー、またはその上のフォルダーを root 以外が変更できるため、ボタンは何も実行しません。修正してから、サーバーで実行してください：{command}"
+  "serverUpdate.reason.unsafe": "root 以外の人がボタンの実行内容を変更できるため、ボタンは何も実行しません：{folder}。修正してから、サーバーで実行してください：{command}",
+  "serverUpdate.reason.noRoom": "サーバーには、まずデータのコピー用の空きディスク容量が必要です。以前の更新で残したコピーを見るには、サーバーで実行してください：{list}。削除するには：{remove}"
 }

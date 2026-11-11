@@ -3,7 +3,7 @@
 // requester is treated as hostile throughout: anything running as the server's user can leave the request.
 import { spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 /** A checkout's deploy/ folder running `running`, with root's folder as `--install` leaves it. */
-function install(options: { stable?: Image; running?: Image; updater?: "real" | "recorder"; earlierCopy?: boolean; runnerCopy?: boolean } = {}) {
+function install(options: { stable?: Image; running?: Image; updater?: "real" | "recorder"; earlierCopy?: boolean; runnerCopy?: boolean; freeKb?: number } = {}) {
   const running = options.running ?? OLD;
   const stable = options.stable ?? NEW;
   const root = mkdtempSync(join(tmpdir(), "omb-update-runner-"));
@@ -54,7 +54,19 @@ function install(options: { stable?: Image; running?: Image; updater?: "real" | 
     else copyFileSync(join(DEPLOY, "update.sh"), join(where, "update.sh"));
   }
   writeFileSync(join(bin, "docker"), `#!/bin/sh\nexec "${process.execPath}" "${FAKE}" "$@"\n`);
-  chmodSync(join(bin, "docker"), 0o755);
+  // The user's groups, a folder's group and the group list, as the test says: never the machine's own (a CI user may be in
+  // the docker group, a Mac's temporary folders belong to group wheel).
+  writeFileSync(join(bin, "id"), '#!/bin/sh\ncase "$1" in -nG) echo "${FAKE_GROUPS:-staff}" ;; *) exec /usr/bin/id "$@" ;; esac\n');
+  writeFileSync(join(bin, "getent"), '#!/bin/sh\n[ -n "${FAKE_GETENT:-}" ] || exit 2\necho "$FAKE_GETENT"\n');
+  writeFileSync(join(bin, "stat"), `#!/bin/sh
+case "$*" in
+  *" %g "*) echo "\${FAKE_GID:-1000}"; exit 0 ;;
+  *"%U:%G"* | *"%Su:%Sg"*) for last; do :; done; echo "$(/usr/bin/stat -L -c %U "$last" 2>/dev/null || /usr/bin/stat -L -f %Su "$last"):\${FAKE_GROUP:-staff}"; exit 0 ;;
+  *" %G "* | *" %Sg "*) echo "\${FAKE_GROUP:-staff}"; exit 0 ;;
+esac
+exec /usr/bin/stat "$@"
+`);
+  for (const name of ["docker", "id", "getent", "stat"]) chmodSync(join(bin, name), 0o755);
   const images = [running, stable, NEW, NEXT, OLDER].filter((image, at, all) => all.findIndex((other) => other.id === image.id) === at).map((image) => ({ ...image, local: image === running || image.local }));
   const labels: Record<string, string[]> = {};
   if (options.earlierCopy) {
@@ -69,6 +81,7 @@ function install(options: { stable?: Image; running?: Image; updater?: "real" | 
   }
   writeFileSync(join(fake, "state.json"), JSON.stringify({
     serial: 1, composeReadsPin: true, defaultImage: `${REPO}:latest`, dataVolume: "deploy_data", images, volumeLabels: labels,
+    ...(options.freeKb === undefined ? {} : { freeKb: options.freeKb }),
     containers: { omb: { id: "omb-1", image: running.id, status: "running", restarts: 0, started: "start-1" }, caddy: { id: "caddy-1", status: "running" } },
   }));
   const setStable = (image: Image) => writeFileSync(join(root, "stable.json"), JSON.stringify({ channel: "stable", version: image.version, image: image.refs.find((ref) => ref.includes("@sha256:")) }));
@@ -313,25 +326,49 @@ describe.skipIf(!posix)("deploy/update-runner.sh", () => {
     expect(asked.fakeState().containers.omb.image).toBe(OLD.id);
   });
 
-  it("runs nothing when the install's folder, or one above it, can be changed by others", () => {
+  it("runs nothing when the install's folder, or one above it, can be changed by others, and names that folder", () => {
     const box = install({ updater: "recorder" });
+    const me = userInfo().username;
+    const unsafe = (env: Record<string, string> = {}) => {
+      box.ask(env);
+      const last = readFileSync(join(box.state, "status", "last"), "utf8");
+      return last.includes("result=unsafe") ? /^detail=(.*)$/m.exec(last)?.[1] ?? "" : null;
+    };
     chmodSync(box.deploy, 0o775);
-    box.ask();
-    expect(box.last()?.result).toBe("unsafe");
+    // Group-writable by a shared group: refused, and the folder named with its owner, group and mode.
+    expect(unsafe()).toBe(`${box.deploy} ${me}:staff 775`);
+    // By the owner's own private group (umask 002 on Ubuntu and Fedora), or by root's group: fine.
+    expect(unsafe({ FAKE_GROUP: me, FAKE_GETENT: `${me}:x:1000:` })).toBeNull();
+    expect(unsafe({ FAKE_GID: "0" })).toBeNull();
+    // A group of the owner's name with someone else in it is not private.
+    expect(unsafe({ FAKE_GROUP: me, FAKE_GETENT: `${me}:x:1000:${me},bob` })).toBe(`${box.deploy} ${me}:${me} 775`);
+    // World-writable never, whatever the group.
+    chmodSync(box.deploy, 0o777);
+    expect(unsafe({ FAKE_GROUP: me, FAKE_GETENT: `${me}:x:1000:` })).toBe(`${box.deploy} ${me}:${me} 777`);
     chmodSync(box.deploy, 0o755);
+    // A folder above it, open to all without the sticky bit: that folder is the one named.
     chmodSync(box.root, 0o777);
-    box.ask();
-    expect(box.last()?.result).toBe("unsafe");
+    expect(unsafe()).toBe(`${box.root} ${me}:staff 777`);
+    chmodSync(box.root, 0o1777);
+    expect(unsafe()).toBeNull();
     chmodSync(box.root, 0o700);
-    // An untrusted owner is checked at every run too, not only at --install.
+    // An untrusted owner is checked at every run too, not only at --install; one in the docker group is fine.
     rmSync(join(box.state, "trust"));
-    box.ask();
-    expect(box.last()?.result).toBe("unsafe");
-    expect(box.argv()).toEqual([]);
+    expect(unsafe()).toBe(`${box.deploy} ${me}:staff 755`);
+    expect(unsafe({ FAKE_GROUPS: "staff docker" })).toBeNull();
+    const ran = box.argv().length;
     writeFileSync(join(box.state, "trust"), `dir=${box.deploy}\n`);
-    box.ask();
-    expect(box.argv()).toHaveLength(1);
+    expect(unsafe()).toBeNull();
+    expect(box.argv()).toHaveLength(ran + 1);
   });
+
+  it("says when there is no room for a copy of the data, apart from other refusals", () => {
+    const box = install({ freeKb: 1024 });
+    box.ask();
+    expect(box.last()?.result).toBe("no-room");
+    expect(box.fakeState().containers.omb.image).toBe(OLD.id);
+  });
+
 
   it("checks a remembered answer again when the server knows of a newer version, asking only GitHub", () => {
     const box = install({ stable: OLD });
@@ -448,7 +485,7 @@ describe.skipIf(!posix)("deploy/update-runner.sh", () => {
     chmodSync(box.deploy, 0o777);
     const writable = spawnSync("sh", [RUNNER, "--install", "--dir", box.deploy, "--no-restart"], { encoding: "utf8", env: { ...env, FAKE_GROUPS: "staff docker" }, timeout: 30_000 });
     expect(writable.status).toBe(1);
-    expect(writable.stderr).toContain("can be changed by someone other than root and its owner");
+    expect(writable.stderr).toContain(`${box.deploy} (${userInfo().username}:staff 777) can be changed by someone other than root and the owner of ${box.deploy}`);
     chmodSync(box.deploy, 0o755);
     const done = spawnSync("sh", [RUNNER, "--install", "--dir", box.deploy, "--no-restart"], { encoding: "utf8", env: { ...env, FAKE_GROUPS: "staff docker" }, timeout: 30_000 });
     expect(done.status, done.stdout + done.stderr).toBe(0);

@@ -5632,5 +5632,6 @@
   "serverUpdate.reason.notRetried": "v{version} sürümüne güncelleme bu sunucuda daha önce işe yaramadı, bu yüzden uygulama yeniden denemeyecek. Elle denemek için sunucuda şunu çalıştırın: {command}",
   "serverUpdate.reason.stale": "Sunucudaki update.sh, düğmenin kullandığı kopyadan daha yeni. Sunucuda şunu çalıştırın: {command}",
   "serverUpdate.reason.unreleased": "Bu sunucu main dalının bir derlemesini çalıştırıyor; uygulama bunu güncellemez. Kararlı sürüm bu derlemeden yeni olduğunda ona geçer; sunucuda şunu çalıştırın: {command}",
-  "serverUpdate.reason.unsafe": "Kurulum klasörünü ya da üstündeki bir klasörü root dışında biri değiştirebiliyor, bu yüzden düğme hiçbir şey çalıştırmıyor. Bunu düzeltin, ardından sunucuda şunu çalıştırın: {command}"
+  "serverUpdate.reason.unsafe": "Düğme hiçbir şey çalıştırmıyor, çünkü root dışında biri çalıştırdığı şeyi değiştirebilir: {folder}. Bunu düzeltin, ardından sunucuda şunu çalıştırın: {command}",
+  "serverUpdate.reason.noRoom": "Sunucunun önce verilerinin bir kopyası için boş disk alanına ihtiyacı var. Önceki güncellemelerin sakladığı kopyaları görmek için sunucuda şunu çalıştırın: {list}. Birini silmek için: {remove}"
 }

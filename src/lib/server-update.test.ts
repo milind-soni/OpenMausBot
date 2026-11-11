@@ -184,8 +184,11 @@ describe("the Update server row", () => {
     expect(view({ status: button({ setup: "cd /srv/deploy && sudo ./update-runner.sh --install", run: { outcome: "not-changed", reason: "stale", from: "0.1.150", at: 1 } }) }).note).toBe(
       "The server wasn't changed. The server's update.sh is newer than the copy the button uses. On the server, run: cd /srv/deploy && sudo ./update-runner.sh --install",
     );
-    expect(view({ status: button({ run: { outcome: "not-changed", reason: "unsafe", from: "0.1.150", at: 1 } }) }).note).toBe(
-      "The server wasn't changed. The install's folder, or a folder above it, can be changed by someone other than root, so the button runs nothing. Fix that, then on the server run: cd /opt/openmausbot && sudo ./update-runner.sh --install",
+    expect(view({ status: button({ run: { outcome: "not-changed", reason: "unsafe", detail: "/opt root:staff 775", from: "0.1.150", at: 1 } }) }).note).toBe(
+      "The server wasn't changed. The button runs nothing, because someone other than root could change what it runs: /opt (root:staff, 775). Fix that, then on the server run: cd /opt/openmausbot && sudo ./update-runner.sh --install",
+    );
+    expect(view({ status: button({ run: { outcome: "not-changed", reason: "no-room", from: "0.1.150", at: 1 } }) }).note).toBe(
+      "The server wasn't changed. The server needs free disk space for a copy of its data first. To see the copies earlier updates kept, on the server run: docker volume ls --filter label=com.mausbot.role=update-backup. To remove one: docker volume rm <name>",
     );
     expect(view({ status: button({ run: { outcome: "not-started", from: "0.1.150", at: 1 } }) }).note).toBe(
       "The server didn't start the update. On the server, run: systemctl status openmausbot-update.path",

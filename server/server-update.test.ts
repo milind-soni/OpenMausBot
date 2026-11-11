@@ -56,6 +56,9 @@ describe("what the host's runner wrote", () => {
     expect(parseRun("run=4\nstate=done\nresult=rolled-back\nat=1700000000\n")).toEqual({ run: 4, state: "done", result: "rolled-back", at: 1_700_000_000_000 });
     expect(parseRun("run=5\nstate=done\nresult=not-retried\nat=1\nversion=0.1.151\n")).toEqual({ run: 5, state: "done", result: "not-retried", at: 1000, version: "0.1.151" });
     expect(parseRun("run=5\nstate=done\nresult=stale\nat=1\nversion=x;y\n")).toEqual({ run: 5, state: "done", result: "stale", at: 1000 });
+    expect(parseRun("run=6\nstate=done\nresult=unsafe\nat=1\ndetail=/opt root:staff 775\n")).toEqual({ run: 6, state: "done", result: "unsafe", at: 1000, detail: "/opt root:staff 775" });
+    expect(parseRun("run=6\nstate=done\nresult=unsafe\nat=1\ndetail=/opt $(x) 775\n")).toEqual({ run: 6, state: "done", result: "unsafe", at: 1000 });
+    expect(parseRun("run=7\nstate=done\nresult=no-room\nat=1\n")).toMatchObject({ result: "no-room" });
     for (const bad of ["run=x\nstate=done\nresult=updated\nat=1", "run=1\nstate=done\nresult=whatever\nat=1", "run=1\nstate=done\nat=1", "run=1\nstate=odd\nat=1"]) expect(parseRun(bad), bad).toBeNull();
   });
 

@@ -78,6 +78,20 @@ install_until_https() { # evidence-file [the install command, when not the usual
   through_caddy "the install"
 }
 
+# The folders above the install, as the Update server button checks them (update-runner.sh): a fresh Ubuntu server has
+# / and /opt root's and closed to others. A CI image may not; it is set as a server has it, never the check weakened.
+prepare_like_a_server() {
+  stat -c '%U:%G %a %n' / /opt /srv 2>/dev/null || true
+  for folder in / /opt /srv; do
+    [ -d "$folder" ] || continue
+    if [ "$(stat -c %u "$folder")" != 0 ] || [ $((8#$(stat -c %a "$folder") & 8#022)) != 0 ]; then
+      echo "CI host: $folder is $(stat -c '%U:%G %a' "$folder"); made root's and closed to others, as on a server"
+      sudo chown root:root "$folder" && sudo chmod go-w "$folder"
+    fi
+  done
+}
+prepare_like_a_server
+
 step "the checks alone, with a name that points nowhere: one thing to fix, nothing changed"
 status=0
 containers_before=$(sudo docker ps -aq | sort)

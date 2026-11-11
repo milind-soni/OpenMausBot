@@ -6891,5 +6891,6 @@
   "serverUpdate.reason.notRetried": "Aktualizacja do v{version} nie udała się już na tym serwerze, więc aplikacja nie spróbuje ponownie. Aby spróbować ręcznie, uruchom na serwerze: {command}",
   "serverUpdate.reason.stale": "update.sh na serwerze jest nowszy niż kopia, której używa przycisk. Na serwerze uruchom: {command}",
   "serverUpdate.reason.unreleased": "Ten serwer działa na buildzie main, którego aplikacja nie aktualizuje. Przejdzie na wersję stabilną, gdy będzie ona nowsza niż build; na serwerze uruchom: {command}",
-  "serverUpdate.reason.unsafe": "Folder instalacji albo folder nad nim może zmienić ktoś inny niż root, więc przycisk niczego nie uruchamia. Popraw to, a potem na serwerze uruchom: {command}"
+  "serverUpdate.reason.unsafe": "Przycisk niczego nie uruchamia, bo ktoś inny niż root mógłby zmienić to, co uruchamia: {folder}. Popraw to, a potem na serwerze uruchom: {command}",
+  "serverUpdate.reason.noRoom": "Serwer potrzebuje najpierw wolnego miejsca na dysku na kopię swoich danych. Aby zobaczyć kopie zachowane przez wcześniejsze aktualizacje, uruchom na serwerze: {list}. Aby usunąć jedną: {remove}"
 }

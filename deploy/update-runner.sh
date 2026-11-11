@@ -130,25 +130,46 @@ mode_of() { # the permission bits, sticky included, as a number
   m=$(stat -L -c %a "$1" 2>/dev/null) || m=$(stat -L -f %p "$1" 2>/dev/null | sed 's/.*\(....\)$/\1/')
   printf '%d' "0$m"
 }
+stat_of() { stat -L -c "$1" "$3" 2>/dev/null || stat -L -f "$2" "$3" 2>/dev/null; }
+# "user:group mode" of a folder, as the refusal names it.
+folder_line() { printf '%s %o' "$(stat_of '%U:%G' '%Su:%Sg' "$1")" "$(mode_of "$1")"; }
+# A group whose only member is the folder's owner, of the owner's own name: the private group Ubuntu and Fedora give each
+# user, which their umask 002 makes every new folder writable by.
+private_group() {
+  user=$(stat_of %U %Su "$1")
+  [ -n "$user" ] && [ "$user" = "$(stat_of %G %Sg "$1")" ] || return 1
+  members=$(getent group "$user" 2>/dev/null | cut -d: -f4)
+  [ -z "$members" ] || [ "$members" = "$user" ]
+}
+# True when someone besides root and the folder's owner may change it: writable by all without the sticky bit, or by a
+# group other than root's or the owner's private one.
+open_to_others() {
+  mode=$(mode_of "$1")
+  [ $((mode & 512)) = 0 ] || return 1
+  [ $((mode & 2)) = 0 ] || return 0
+  [ $((mode & 16)) != 0 ] || return 1
+  [ "$(stat_of %g %g "$1")" != 0 ] || return 1
+  ! private_group "$1"
+}
 # SECURITY: in a checkout the folder's owner can change what root runs here (its Compose files and .env decide what
-# `docker compose up` starts), and so can whoever may rename the folder or one above it. Says `owner` when the owner is
-# neither root, nor in the docker group, nor trusted at --install; `writable` when the folder is group- or world-writable,
-# or a folder above it can be changed by anyone but root and that owner (a world-writable one with its sticky bit is fine).
+# `docker compose up` starts), and so can whoever may change the folder or rename one above it. Prints the problem and the
+# folder it is in, as "owner|writable PATH user:group mode": `owner` when the owner is neither root, nor in the docker
+# group, nor trusted at --install; `writable` when the folder, or one above it, is open to others (open_to_others), or a
+# folder above it belongs to anyone but root and that owner.
 folder_problem() {
   owner=$(owner_of "$DIR")
   if [ "$owner" != 0 ]; then
-    name=$(stat -L -c %U "$DIR" 2>/dev/null || stat -L -f %Su "$DIR" 2>/dev/null)
+    name=$(stat_of %U %Su "$DIR")
     case " $(id -nG "$name" 2>/dev/null) " in
       *" docker "*) ;;
-      *) [ "$TRUST_OWNER" = yes ] || { [ "$MODE" = run ] && [ "$(state_value trust dir)" = "$DIR" ]; } || { echo owner; return 0; } ;;
+      *) [ "$TRUST_OWNER" = yes ] || { [ "$MODE" = run ] && [ "$(state_value trust dir)" = "$DIR" ]; } || { echo "owner $DIR $(folder_line "$DIR")"; return 0; } ;;
     esac
   fi
-  [ $(($(mode_of "$DIR") & 18)) = 0 ] || { echo writable; return 0; }
+  if open_to_others "$DIR"; then echo "writable $DIR $(folder_line "$DIR")"; return 0; fi
   parent=$(dirname "$DIR")
   while :; do
-    mode=$(mode_of "$parent")
     up=$(owner_of "$parent")
-    if { [ "$up" != 0 ] && [ "$up" != "$owner" ]; } || { [ $((mode & 18)) != 0 ] && [ $((mode & 512)) = 0 ]; }; then echo writable; return 0; fi
+    if { [ "$up" != 0 ] && [ "$up" != "$owner" ]; } || open_to_others "$parent"; then echo "writable $parent $(folder_line "$parent")"; return 0; fi
     [ "$parent" = / ] && return 0
     parent=$(dirname "$parent")
   done
@@ -163,6 +184,7 @@ result_of() {
     3) echo busy ;;
     4) echo refused ;;
     5) echo older ;;
+    6) echo no-room ;;
     *) echo failed ;;
   esac
 }
@@ -185,9 +207,11 @@ run_requested() {
   if [ "$since" -lt "$QUIET_S" ]; then sleep $((QUIET_S - since)); fi
   now=$(date +%s)
   version=""
-  done_with() { write_status last "run=$run" state=done "result=$1" "at=$(date +%s)" "ran=$ran" ${version:+"version=$version"}; }
+  detail=""
+  done_with() { write_status last "run=$run" state=done "result=$1" "at=$(date +%s)" "ran=$ran" ${version:+"version=$version"} ${detail:+"detail=$detail"}; }
   if held; then done_with held; return; fi
-  if [ -n "$(folder_problem)" ]; then done_with unsafe; return; fi
+  problem=$(folder_problem)
+  if [ -n "$problem" ]; then detail=${problem#* }; done_with unsafe; return; fi
   image=$(server_image)
   if [ "$(released)" != yes ]; then done_with unreleased; return; fi
   if [ ! -f "$UPDATER" ] || [ ! -f "$DIR/update.sh" ] || [ -L "$DIR/update.sh" ]; then done_with no-updater; return; fi
@@ -273,9 +297,11 @@ data_owner() {
 # SECURITY: in a checkout the folder's owner can change what root runs here (its Compose files and .env decide what
 # `docker compose up` starts). Fine when that owner is root or may run Docker already; anyone else, only when asked.
 check_owner() {
-  case "$(folder_problem)" in
-    owner) fail "$DIR belongs to $(stat -L -c %U "$DIR" 2>/dev/null || stat -L -f %Su "$DIR" 2>/dev/null), who cannot run Docker. Whoever owns it can change what root runs when the app asks for an update (its Compose files and .env decide what docker compose up starts). Move it to a folder root owns, or run this again with --trust-folder-owner if that is what you want." ;;
-    writable) fail "$DIR, or a folder above it, can be changed by someone other than root and its owner, who could then change what root runs when the app asks for an update. Make them writable by their owner only (chmod go-w), then run this again." ;;
+  problem=$(folder_problem)
+  where=${problem#* }
+  case "$problem" in
+    owner*) fail "${where% * *} (${where#* }) belongs to someone who cannot run Docker. Whoever owns it can change what root runs when the app asks for an update (its Compose files and .env decide what docker compose up starts). Move it to a folder root owns, or run this again with --trust-folder-owner if that is what you want." ;;
+    writable*) fail "${where% * *} (${where#* }) can be changed by someone other than root and the owner of $DIR, who could then change what root runs when the app asks for an update. Make it writable by its owner only (chmod go-w ${where% * *}), then run this again." ;;
   esac
 }
 

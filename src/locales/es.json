@@ -6132,5 +6132,6 @@
   "serverUpdate.reason.notRetried": "La actualización a la v{version} ya falló en este servidor, así que la app no la volverá a intentar. Para intentarlo a mano, ejecuta en el servidor: {command}",
   "serverUpdate.reason.stale": "El update.sh del servidor es más nuevo que la copia que usa el botón. En el servidor, ejecuta: {command}",
   "serverUpdate.reason.unreleased": "Este servidor usa una compilación de main, que la app no actualiza. Pasa a la versión estable cuando esta sea más nueva que la compilación; en el servidor, ejecuta: {command}",
-  "serverUpdate.reason.unsafe": "La carpeta de la instalación, o una superior, la puede cambiar alguien que no es root, así que el botón no ejecuta nada. Corrígelo y luego, en el servidor, ejecuta: {command}"
+  "serverUpdate.reason.unsafe": "El botón no ejecuta nada, porque alguien que no es root podría cambiar lo que ejecuta: {folder}. Corrígelo y luego, en el servidor, ejecuta: {command}",
+  "serverUpdate.reason.noRoom": "El servidor necesita primero espacio libre en disco para una copia de sus datos. Para ver las copias que guardaron actualizaciones anteriores, ejecuta en el servidor: {list}. Para quitar una: {remove}"
 }

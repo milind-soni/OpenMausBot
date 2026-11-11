@@ -29,13 +29,13 @@ const RUNNING_FOR_MS = 2 * 60 * 60_000;
 const SHOWN_FOR_MS = 60 * 60_000;
 const PENDING_FILE = "server-update.json";
 
-const REASONS: readonly ServerUpdateReason[] = ["busy", "refused", "older", "held", "too-soon", "no-updater", "failed", "not-retried", "stale", "unreleased", "unsafe"];
+const REASONS: readonly ServerUpdateReason[] = ["busy", "refused", "older", "held", "too-soon", "no-updater", "failed", "not-retried", "stale", "unreleased", "unsafe", "no-room"];
 export type HostResult = "updated" | "rolled-back" | "rollback-failed" | ServerUpdateReason;
 const RESULTS: readonly HostResult[] = ["updated", "rolled-back", "rollback-failed", ...REASONS];
 
 /** `release`: the running image is labelled with a released version (false for a build of main). */
 export interface HostRunner { layout: "installer" | "compose"; dir: string; held: boolean; release: boolean }
-export interface HostRun { run: number; state: "running" | "done"; result?: HostResult; at: number; version?: string }
+export interface HostRun { run: number; state: "running" | "done"; result?: HostResult; at: number; version?: string; detail?: string }
 export interface HostFacts {
   runner: HostRunner | null;
   /** This server can leave a file in the request folder. */
@@ -82,7 +82,11 @@ export function parseRun(text: string | null): HostRun | null {
   if (state !== "running" && state !== "done") return null;
   if (state === "done" && !(result && RESULTS.includes(result))) return null;
   const version = f.get("version");
-  return { run, state, at: at * 1000, ...(state === "done" ? { result } : {}), ...(version && /^\d+\.\d+\.\d+$/.test(version) ? { version } : {}) };
+  const detail = f.get("detail");
+  return {
+    run, state, at: at * 1000, ...(state === "done" ? { result } : {}), ...(version && /^\d+\.\d+\.\d+$/.test(version) ? { version } : {}),
+    ...(detail && /^\/[A-Za-z0-9/._-]{0,200} [A-Za-z0-9._-]{1,64}:[A-Za-z0-9._-]{1,64} [0-7]{3,4}$/.test(detail) ? { detail } : {}),
+  };
 }
 
 export function readHostFacts(dir: string | undefined): HostFacts {
@@ -128,7 +132,7 @@ export function runOf(pending: PendingUpdate | null, last: HostRun | null, versi
       return now - last.at < RUNNING_FOR_MS ? { ...base, outcome: "running" } : { ...base, outcome: "not-changed", reason: "failed" };
     }
     if (now - last.at > SHOWN_FOR_MS) return undefined;
-    return { ...base, to: version, ...(last.version ? { target: last.version } : {}), ...outcomeOf(last.result, pending.from, version) };
+    return { ...base, to: version, ...(last.version ? { target: last.version } : {}), ...(last.detail ? { detail: last.detail } : {}), ...outcomeOf(last.result, pending.from, version) };
   }
   if (now - pending.at < START_WAIT_MS) return { ...base, outcome: "requested" };
   if (now - pending.at > SHOWN_FOR_MS) return undefined;

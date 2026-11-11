@@ -23,9 +23,10 @@ export type ServerUpdateOutcome =
 /** Why an update changed nothing (`not-changed`), as the host's runner said it. */
 /** `not-retried`: the stable version rolled back on this server before, and is not tried again from the app. `stale`: a
  * checkout's update.sh is newer than root's copy the button runs. `unreleased`: the server runs a build of main. `unsafe`:
- * the install's folder, or one above it, can be changed by someone other than root and its owner. */
+ * the install's folder, or one above it, can be changed by someone other than root and its owner. `no-room`: not enough
+ * free disk for a copy of the data. */
 export type ServerUpdateReason =
-  | "busy" | "refused" | "older" | "held" | "too-soon" | "no-updater" | "failed" | "not-retried" | "stale" | "unreleased" | "unsafe";
+  | "busy" | "refused" | "older" | "held" | "too-soon" | "no-updater" | "failed" | "not-retried" | "stale" | "unreleased" | "unsafe" | "no-room";
 
 export interface ServerUpdateRun {
   outcome: ServerUpdateOutcome;
@@ -35,6 +36,8 @@ export interface ServerUpdateRun {
   to?: string;
   /** The version the host's runner tried, when it says. */
   target?: string;
+  /** For `unsafe`: the folder that failed, as "PATH user:group mode". */
+  detail?: string;
   /** When it was asked for (ms since the epoch). */
   at: number;
 }

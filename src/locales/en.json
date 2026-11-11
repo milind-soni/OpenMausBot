@@ -10251,5 +10251,6 @@
   "serverUpdate.reason.notRetried": "The update to v{version} didn't work on this server before, so the app won't try it again. To try it by hand, on the server run: {command}",
   "serverUpdate.reason.stale": "The server's update.sh is newer than the copy the button uses. On the server, run: {command}",
   "serverUpdate.reason.unreleased": "This server runs a build of main, which the app doesn't update. It moves to the stable version once that is newer than the build; on the server run: {command}",
-  "serverUpdate.reason.unsafe": "The install's folder, or a folder above it, can be changed by someone other than root, so the button runs nothing. Fix that, then on the server run: {command}"
+  "serverUpdate.reason.unsafe": "The button runs nothing, because someone other than root could change what it runs: {folder}. Fix that, then on the server run: {command}",
+  "serverUpdate.reason.noRoom": "The server needs free disk space for a copy of its data first. To see the copies earlier updates kept, on the server run: {list}. To remove one: {remove}"
 }

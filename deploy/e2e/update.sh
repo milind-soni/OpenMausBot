@@ -44,6 +44,20 @@ copy() {
 # Every file of the data with its owner, mode and checksum. Read while the server is stopped.
 manifest() { docker run --rm --network none --user 0:0 -v "$1:/d:ro" --entrypoint sh "$REPO:v$FROM" -c 'cd /d && find . -type f -print0 | sort -z | xargs -0 -r stat -c "%u:%g %a %n"; find . -type f -print0 | sort -z | xargs -0 -r sha256sum'; }
 
+# The folders above the install, as the Update server button checks them (update-runner.sh): a fresh Ubuntu server has
+# / and /opt root's and closed to others. A CI image may not; it is set as a server has it, never the check weakened.
+prepare_like_a_server() {
+  stat -c '%U:%G %a %n' / /opt /srv 2>/dev/null || true
+  for folder in / /opt /srv; do
+    [ -d "$folder" ] || continue
+    if [ "$(stat -c %u "$folder")" != 0 ] || [ $((8#$(stat -c %a "$folder") & 8#022)) != 0 ]; then
+      echo "CI host: $folder is $(stat -c '%U:%G %a' "$folder"); made root's and closed to others, as on a server"
+      chown root:root "$folder" && chmod go-w "$folder"
+    fi
+  done
+}
+prepare_like_a_server
+
 step "a $LAYOUT install on $FROM"
 for old in /opt/openmausbot /srv/openmausbot-e2e/deploy; do
   if [ -d "$old" ]; then (cd "$old" && docker compose down -v) >/dev/null 2>&1; fi

@@ -6753,5 +6753,6 @@
   "serverUpdate.reason.notRetried": "L'aggiornamento alla v{version} non ha già funzionato su questo server, quindi l'app non lo riproverà. Per provarlo a mano, sul server esegui: {command}",
   "serverUpdate.reason.stale": "L'update.sh del server è più recente della copia usata dal pulsante. Sul server, esegui: {command}",
   "serverUpdate.reason.unreleased": "Questo server usa una build di main, che l'app non aggiorna. Passa alla versione stabile appena è più recente della build; sul server esegui: {command}",
-  "serverUpdate.reason.unsafe": "La cartella dell'installazione, o una sopra di essa, può essere modificata da qualcuno che non è root, quindi il pulsante non esegue nulla. Correggi, poi sul server esegui: {command}"
+  "serverUpdate.reason.unsafe": "Il pulsante non esegue nulla, perché qualcuno che non è root potrebbe cambiare ciò che esegue: {folder}. Correggi, poi sul server esegui: {command}",
+  "serverUpdate.reason.noRoom": "Il server ha prima bisogno di spazio libero su disco per una copia dei suoi dati. Per vedere le copie tenute dagli aggiornamenti precedenti, sul server esegui: {list}. Per rimuoverne una: {remove}"
 }

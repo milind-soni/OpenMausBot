@@ -99,12 +99,17 @@ const REASON_TEXT: Record<ServerUpdateReason, LocaleKey> = {
   stale: "serverUpdate.reason.stale",
   unreleased: "serverUpdate.reason.unreleased",
   unsafe: "serverUpdate.reason.unsafe",
+  "no-room": "serverUpdate.reason.noRoom",
 };
 
 /** The command each reason names, from what the server said. */
-function reasonText(reason: ServerUpdateReason, status: ServerUpdateStatus, target?: string): string {
+function reasonText(reason: ServerUpdateReason, status: ServerUpdateStatus, run?: ServerUpdateStatus["run"]): string {
   const command = reason === "stale" || reason === "unsafe" ? status.setup : status.command;
-  return t(REASON_TEXT[reason], { version: target ?? status.latest ?? "", command: command ?? "" });
+  const [folder, owners, mode] = run?.detail?.split(" ") ?? [];
+  return t(REASON_TEXT[reason], {
+    version: run?.target ?? status.latest ?? "", command: command ?? "", folder: folder ? `${folder} (${owners}, ${mode})` : "",
+    list: "docker volume ls --filter label=com.mausbot.role=update-backup", remove: "docker volume rm <name>",
+  });
 }
 
 const APP_ANSWER_TEXT: Partial<Record<AppUpdateAnswer, LocaleKey>> = {
@@ -124,7 +129,7 @@ function runNote(status: ServerUpdateStatus | null): Pick<ServerUpdateView, "not
       const detail = status!.rollback ? ` ${t("serverUpdate.runOnServer", { command: status!.rollback })}` : "";
       return { note: `${t("serverUpdate.rollbackFailed")}${detail}`, noteTone: "danger" };
     }
-    case "not-changed": return { note: `${t("serverUpdate.notChanged")} ${reasonText(run.reason ?? "failed", status!, run.target)}`, noteTone: "danger" };
+    case "not-changed": return { note: `${t("serverUpdate.notChanged")} ${reasonText(run.reason ?? "failed", status!, run)}`, noteTone: "danger" };
     case "not-started": return { note: `${t("serverUpdate.notStarted")} ${t("serverUpdate.runOnServer", { command: "systemctl status openmausbot-update.path" })}`, noteTone: "danger" };
     default: return {};
   }

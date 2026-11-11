@@ -7472,5 +7472,6 @@
   "serverUpdate.reason.notRetried": "v{version}(으)로의 업데이트가 이 서버에서 이전에 실패해서 앱이 다시 시도하지 않아요. 직접 시도하려면 서버에서 실행하세요: {command}",
   "serverUpdate.reason.stale": "서버의 update.sh가 버튼이 쓰는 사본보다 새로워요. 서버에서 실행하세요: {command}",
   "serverUpdate.reason.unreleased": "이 서버는 main 빌드로 실행 중이라 앱이 업데이트하지 않아요. 안정 버전이 이 빌드보다 새로워지면 그 버전으로 옮겨가요. 서버에서 실행하세요: {command}",
-  "serverUpdate.reason.unsafe": "설치 폴더나 그 위의 폴더를 root가 아닌 사람이 바꿀 수 있어서 버튼이 아무것도 실행하지 않아요. 고친 다음 서버에서 실행하세요: {command}"
+  "serverUpdate.reason.unsafe": "root가 아닌 사람이 버튼이 실행하는 내용을 바꿀 수 있어서 아무것도 실행하지 않아요: {folder}. 고친 다음 서버에서 실행하세요: {command}",
+  "serverUpdate.reason.noRoom": "서버에 먼저 데이터 사본을 둘 빈 디스크 공간이 필요해요. 이전 업데이트가 남긴 사본을 보려면 서버에서 실행하세요: {list}. 하나를 지우려면: {remove}"
 }
