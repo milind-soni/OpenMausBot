@@ -44,7 +44,7 @@ const PAGE_ADA = "adapage0000000000000000", PAGE_TEAM = "teampage000000000000000
 let dataDir = "";
 let messages: Record<string, Array<{ role: string; text?: string; from?: { botId?: string } }>>;
 let pages: PublishedPageRecord[];
-let tokenAsks: Array<{ botId: string; email: string }>;
+let tokenAsks: Array<{ botId: string; email: string; threadId?: string }>;
 const calls: Array<{ url: string; auth: string | undefined; method: string | undefined }> = [];
 let netlifyStatus = 204;
 const workspace = (botId: string) => join(dataDir, "workspaces", botId);
@@ -63,7 +63,7 @@ function apps(over: Partial<PublishedAppsDeps> = {}) {
     ownFolder,
     pages: () => pages,
     unpublishPage: async (pageId) => { pages = pages.filter((one) => one.pageId !== pageId); return { status: 200, text: "Unpublished." }; },
-    netlifyToken: (botId, auth) => { tokenAsks.push({ botId, email: emailOf(auth) }); return TOKEN; },
+    netlifyToken: (botId, auth, threadId) => { tokenAsks.push({ botId, email: emailOf(auth), ...(threadId ? { threadId } : {}) }); return TOKEN; },
     ownChat: (auth, threadId) => audienceOf(threadId) === `member:${KEYS[emailOf(auth)]}`,
     home: "/nowhere/home", env: {}, now: () => Date.now(),
     fetch: (async (url: string | URL | Request, init?: RequestInit) => {
@@ -268,7 +268,7 @@ describe("deleting a published app", () => {
   it("lets a member delete what a bot published in their own private chat, with a token asked for as them", async () => {
     const ada = session(ADA);
     expect((await apps().remove(visibleFor(ada, true), ada, "netlify-mira-id-adas-shop")).status).toBe(200);
-    expect(tokenAsks).toEqual([{ botId: "mira", email: ADA }]);
+    expect(tokenAsks).toEqual([{ botId: "mira", email: ADA, threadId: "ada-chat" }]);
     expect((await apps().remove(visibleFor(ada, true), ada, `page-${PAGE_ADA}`)).status).toBe(200);
     expect(pages.map((one) => one.pageId)).toEqual([PAGE_TEAM, PAGE_BEN]);
   });
@@ -296,7 +296,7 @@ describe("deleting a published app", () => {
   it("lets an admin delete a shared bot's app from a shared conversation, with a token asked for as the admin", async () => {
     const olive = session(OLIVE, true), made = apps();
     expect((await made.remove(visibleFor(olive, true), olive, "netlify-mira-id-team-site")).status).toBe(200);
-    expect(tokenAsks).toEqual([{ botId: "mira", email: OLIVE }]);
+    expect(tokenAsks).toEqual([{ botId: "mira", email: OLIVE, threadId: "main" }]);
     expect(calls).toHaveLength(1);
     expect((await made.remove(visibleFor(olive, true), olive, `page-${PAGE_TEAM}`)).status).toBe(200);
     expect((await made.remove(visibleFor(olive, true), olive, "netlify-mira-id-adas-shop")).status).toBe(404);

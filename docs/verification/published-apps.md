@@ -30,9 +30,10 @@ pnpm exec vitest run server/cloud-team-published-apps.e2e.test.ts
 
 A site whose record is in a conversation's own folder (`task-workspaces/<bot>/<thread>`) is that conversation's; one in
 a folder the bot's conversations share is listed where the bot's own message carries its link, and nowhere when it
-never said it. Another member, an Admin and the Owner get 404 for a member's private project by id. A saved Netlify
-token is not used on a Team Cloud yet (a secret does not record whose it is): Delete answers `no_token` with the
-site's Netlify page.
+never said it. Another member, an Admin and the Owner get 404 for a member's private project by id. Delete answers
+`no_token` with the site's Netlify page until a token is saved; with the team's shared token an Admin deletes the
+shared chat's site and a member their own, on the loopback stand-in. A member's own saved token is used only on that
+member's own click (`savedNetlifyToken`, in `server/host/netlify-sites.test.ts`).
 
 ## The page, the cards and the preview
 
@@ -69,4 +70,4 @@ stand-in (`server/testing/fake-netlify.ts`), which the launcher lets cross only 
 link in a message, read-only.
 
 Not proven here: a real Netlify account, the desktop app's own window (the Electron rules are asserted from source),
-a Team Cloud in the renderer, and a Netlify delete on a Team Cloud (no saved token is used there yet).
+and a Team Cloud in the renderer.

@@ -78,7 +78,7 @@ export function WelcomeBring({ name, desktop, older = false, cloudHasWork, sent 
         </div>
       : <div className="grid gap-3 @lg/step:grid-cols-2">
           <div data-bring-choice="fresh" className={cn(CARD, CARD_PICKED)}>{freshBody}</div>
-          {!desktop && <div data-bring-desktop className={cn(CARD, "border-dashed border-hairline/60 bg-transparent")}>
+          {!desktop && !team && <div data-bring-desktop className={cn(CARD, "border-dashed border-hairline/60 bg-transparent")}>
             <CardIcon icon={Laptop} />
             <span className="text-[15px] font-semibold text-ink">{t("cloudWelcome.bring.desktopTitle")}</span>
             <span className="text-[13px] leading-relaxed text-ink-secondary">{t("cloudWelcome.bring.desktopOnly")}</span>

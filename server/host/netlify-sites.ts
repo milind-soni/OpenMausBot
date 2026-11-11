@@ -9,6 +9,8 @@ import { lstat, readdir, readFile, unlink } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { z } from "zod";
 
+import type { VaultReader, VaultStore } from "../vault-store.ts";
+
 export const SITE_FILE = ".netlify-site.json";
 export const NETLIFY_TOKEN_LABEL = "Netlify personal access token";
 const NETLIFY_API = "https://api.netlify.com/api/v1";
@@ -116,10 +118,13 @@ async function readSite(file: string, env: NodeJS.ProcessEnv): Promise<NetlifySi
   }
 }
 
-/** Security: the saved Netlify token a person's Delete may use for this bot. A saved secret does not yet record whose it
- * is, so on a Team Cloud none is used: one member's token must never act on another person's click. */
-export function savedNetlifyToken(vault: { usableSecret(name: string, botId: string, delivery: "file"): { value: string } | null }, botId: string, team: boolean): string | null {
-  return team ? null : vault.usableSecret(NETLIFY_TOKEN_LABEL, botId, "file")?.value ?? null;
+/** Security: the saved Netlify token a person's Delete may use for this bot: what a turn in the app's conversation
+ * could use (`conversation`), with a member's own secret only when the person deleting is that member. One person's
+ * token never acts on another person's click; the team's shared one is the team's to use. */
+export function savedNetlifyToken(vault: Pick<VaultStore, "usableSecret">, botId: string, conversation: VaultReader | null, person: string | null): string | null {
+  if (!conversation) return null;
+  const reader = conversation.person && conversation.person !== person ? { person: null, team: conversation.team } : conversation;
+  return vault.usableSecret(NETLIFY_TOKEN_LABEL, botId, "file", reader)?.value ?? null;
 }
 
 export type NetlifyDelete = { ok: true } | { ok: false; reason: "token_refused" | "failed"; status: number };

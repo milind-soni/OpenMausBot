@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // @ts-expect-error the skill's helper is plain JavaScript with no types
 import { apiBase, publish } from "../../skills/publish-to-netlify/deploy.mjs";
 import { startFakeNetlify } from "../testing/fake-netlify.ts";
-import { VaultStore } from "../vault-store.ts";
+import { TEAM_READER, VaultStore } from "../vault-store.ts";
 import { deleteNetlifySite, findNetlifySites, forgetSiteRecord, netlifyApiBase, parseSiteRecord, savedNetlifyToken, SCAN_LIMITS, SITE_FILE } from "./netlify-sites.ts";
 
 const dirs: string[] = [];
@@ -115,15 +115,31 @@ describe("finding site records in a bot's folders", () => {
 describe("deleting a site on Netlify", () => {
   const TOKEN = "nfp_published_apps_test_token_0123456789";
 
-  it("uses the token the publish guide's card saved for that bot, and no saved token at all on a Team Cloud", () => {
+  it("uses the token the publish guide's card saved for that bot", () => {
     const vault = new VaultStore({ dataDir: scratch() });
-    expect(savedNetlifyToken(vault, "mira", false)).toBeNull();
+    expect(savedNetlifyToken(vault, "mira", TEAM_READER, null)).toBeNull();
     vault.saveSecret({ name: "Netlify personal access token", value: TOKEN, source: "card", bots: ["mira"] });
     vault.saveSecret({ name: "Some other key", value: "other-value", source: "card", bots: "all" });
-    expect(savedNetlifyToken(vault, "mira", false)).toBe(TOKEN);
-    expect(savedNetlifyToken(vault, "another-bot", false)).toBeNull();
-    expect(savedNetlifyToken(vault, "mira", true)).toBeNull();
+    expect(savedNetlifyToken(vault, "mira", TEAM_READER, null)).toBe(TOKEN);
+    expect(savedNetlifyToken(vault, "another-bot", TEAM_READER, null)).toBeNull();
+    expect(savedNetlifyToken(vault, "mira", null, null)).toBeNull();
     expect(readFileSync(new URL("../../skills/publish-to-netlify/SKILL.md", import.meta.url), "utf8")).toContain("label `Netlify personal access token`");
+  });
+
+  it("uses a member's own token only on that member's own click, and the team's shared one for a shared conversation", () => {
+    const ADA = "p_adaadaadaadaadaadaada1", BEN = "p_benbenbenbenbenbenben1", ADAS = "nfp_adas_own_token_000000000000000000000";
+    const vault = new VaultStore({ dataDir: scratch() });
+    vault.saveSecret({ name: "Netlify personal access token", value: ADAS, source: "card", bots: ["mira"], person: ADA });
+    const adasChat = { person: ADA, team: true }, bensChat = { person: BEN, team: true };
+    expect(savedNetlifyToken(vault, "mira", adasChat, ADA)).toBe(ADAS);
+    for (const [conversation, person] of [[adasChat, BEN], [adasChat, null], [bensChat, BEN], [TEAM_READER, ADA], [TEAM_READER, null], [bensChat, ADA]] as const) {
+      expect(savedNetlifyToken(vault, "mira", conversation, person), JSON.stringify([conversation, person])).toBeNull();
+    }
+    vault.saveSecret({ name: "Netlify personal access token", value: TOKEN, source: "settings", bots: "all" });
+    expect(savedNetlifyToken(vault, "mira", adasChat, ADA)).toBe(ADAS);
+    for (const [conversation, person] of [[adasChat, BEN], [bensChat, BEN], [TEAM_READER, ADA], [TEAM_READER, null]] as const) {
+      expect(savedNetlifyToken(vault, "mira", conversation, person), JSON.stringify([conversation, person])).toBe(TOKEN);
+    }
   });
 
   it("uses the same API address guard as the publish helper", () => {

@@ -2,7 +2,7 @@
 // rule must hold against: two members, an Admin and the Owner. A shared bot's Netlify site is listed for whoever can
 // read the conversation it was published in (the conversation's own folder holds its record, or the bot's own message
 // carries its link), a member's own MausBot's site for that member alone, and nobody's private project for anyone
-// else, by list, by id or by address.
+// else, by list or by id. Delete uses the team's saved Netlify token against a loopback stand-in for Netlify.
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,6 +13,7 @@ import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } 
 import type { PublishedApp } from "../shared/published-apps.ts";
 import { SITE_FILE } from "./host/netlify-sites.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
+import { startFakeNetlify, type FakeNetlify } from "./testing/fake-netlify.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
 const OWNER = { email: "olive@acme.test", role: "owner" as const };
@@ -20,6 +21,7 @@ const ADMIN = { email: "ari@acme.test", role: "admin" as const };
 const ADA = { email: "ada@acme.test", role: "member" as const };
 const BEN = { email: "ben@acme.test", role: "member" as const };
 const GONE = { status: 404, body: { error: "No such published app.", code: "gone" } };
+const TOKEN = "nfp_team_shared_token_0123456789abcdef0123";
 
 type Bot = { id: string; name: string; threadId: string; mainThreadId?: string; defaultBot?: { person?: string }; tasks?: Array<{ threadId: string }> };
 
@@ -28,6 +30,7 @@ let scratch = "", replyFile = "";
 let owner = "", admin = "", ada = "", ben = "";
 let mira: Bot, adaMaus: Bot;
 let adaThread = "", benThread = "", mainThread = "";
+let fake: FakeNetlify, shopId = "", teamSiteId = "";
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 async function until(done: () => Promise<boolean> | boolean, timeoutMs = 60_000): Promise<void> {
@@ -46,11 +49,11 @@ async function turn(token: string, bot: Bot, threadId: string, reply: string): P
   expect((await team.as(token, "POST", `/api/bots/${bot.id}/messages`, { text: "publish it", threadId })).status).toBe(202);
   await until(async () => (await ended()) > before);
 }
-const site = (name: string) => ({ version: 1, siteId: `id-${name}`, name, url: `https://${name}.netlify.app`, adminUrl: `https://app.netlify.com/projects/${name}`, title: `${name} site`,
+const site = (name: string, siteId = `id-${name}`) => ({ version: 1, siteId, name, url: `https://${name}.netlify.app`, adminUrl: `https://app.netlify.com/projects/${name}`, title: `${name} site`,
   createdAt: "2026-11-10T10:00:00.000Z", publishedAt: "2026-11-10T10:05:00.000Z", access: "public" });
-function record(folder: string, name: string): string {
+function record(folder: string, name: string, siteId?: string): string {
   mkdirSync(folder, { recursive: true });
-  writeFileSync(join(folder, SITE_FILE), JSON.stringify(site(name)));
+  writeFileSync(join(folder, SITE_FILE), JSON.stringify(site(name, siteId)));
   return join(folder, SITE_FILE);
 }
 const listOf = async (token: string) => {
@@ -64,8 +67,12 @@ beforeAll(async () => {
   scratch = mkdtempSync(join(tmpdir(), "published-apps-team-"));
   replyFile = join(scratch, "reply.txt");
   writeFileSync(replyFile, "Hello.");
+  fake = await startFakeNetlify(TOKEN);
+  const onNetlify = async () => ((await (await fetch(`${fake.url}/sites`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}` }, body: "{}" })).json()) as { id: string }).id;
+  shopId = await onNetlify();
+  teamSiteId = await onNetlify();
   fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-team-${randomBytes(8).toString("hex")}`,
-    team: { id: "team-acme-apps", name: "Acme", engine: `process.env.FAKE_CLAUDE_REPLY_FILE = ${JSON.stringify(replyFile)};` } });
+    team: { id: "team-acme-apps", name: "Acme", env: { OMB_NETLIFY_API_URL: fake.url }, engine: `process.env.FAKE_CLAUDE_REPLY_FILE = ${JSON.stringify(replyFile)};` } });
   team = fx.team!;
   owner = (await team.pair(OWNER)).token!;
   admin = (await team.pair(ADMIN)).token!;
@@ -87,11 +94,11 @@ beforeAll(async () => {
   const data = join(team.home, ".openmausbot");
   // Ada's shop was published from her conversation's own folder; the bot never wrote its link anywhere.
   expect(existsSync(join(data, "task-workspaces", mira.id, adaThread)), "a conversation's turns work in its own folder").toBe(true);
-  record(join(data, "task-workspaces", mira.id, adaThread, "shop"), "adas-shop");
+  record(join(data, "task-workspaces", mira.id, adaThread, "shop"), "adas-shop", shopId);
   // The rest sit in folders every conversation of the bot shares: the bot's message says whose they are.
   record(join(data, "workspaces", mira.id, "notes"), "adas-notes");
   record(join(data, "workspaces", mira.id, "plan"), "bens-plan");
-  record(join(data, "workspaces", mira.id, "team-site"), "team-site");
+  record(join(data, "workspaces", mira.id, "team-site"), "team-site", teamSiteId);
   record(join(data, "workspaces", mira.id, "unsaid"), "never-mentioned");
   record(join(data, "workspaces", adaMaus.id, "diary"), "adas-diary");
   await sleep(2_100);
@@ -99,6 +106,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await fx?.close();
+  await fake?.stop();
   if (scratch) await removeTempDir(scratch);
 });
 
@@ -127,7 +135,7 @@ it("lists nothing the bot never said in a conversation, for anyone", async () =>
 
 it("answers another member, an Admin and the Owner guessing at a private project as if it did not exist", async () => {
   for (const [who, token] of [["Ben", ben], ["an Admin", admin], ["the Owner", owner]] as const) {
-    for (const id of [`netlify-${mira.id}-id-adas-shop`, `netlify-${mira.id}-id-adas-notes`, `netlify-${adaMaus.id}-id-adas-diary`]) {
+    for (const id of [`netlify-${mira.id}-${shopId}`, `netlify-${mira.id}-id-adas-notes`, `netlify-${adaMaus.id}-id-adas-diary`]) {
       expect(await team.as(token, "POST", "/api/published-apps/delete", { id }), `${who}: ${id}`).toEqual(GONE);
     }
   }
@@ -139,19 +147,8 @@ it("answers another member, an Admin and the Owner guessing at a private project
 
 it("refuses a member who only chats with the shared bot for what it published in the shared chat", async () => {
   expect((await listOf(ben)).find((app) => app.title === "team-site site")?.canDelete).toBe(false);
-  expect(await team.as(ben, "POST", "/api/published-apps/delete", { id: `netlify-${mira.id}-id-team-site` }))
+  expect(await team.as(ben, "POST", "/api/published-apps/delete", { id: `netlify-${mira.id}-${teamSiteId}` }))
     .toEqual({ status: 403, body: { error: "This app isn't yours to delete.", code: "forbidden" } });
-});
-
-it("uses nobody's saved Netlify token on a Team Cloud yet: Delete says so and offers the site's Netlify page", async () => {
-  const saved = await team.as(owner, "POST", "/api/vault/secrets", { name: "Netlify personal access token", value: "nfp_team_token_that_must_not_be_used_000000", bots: "all" });
-  expect(saved.status, JSON.stringify(saved.body)).toBe(201);
-  for (const [token, id, name] of [[ada, `netlify-${mira.id}-id-adas-shop`, "adas-shop"], [admin, `netlify-${mira.id}-id-team-site`, "team-site"], [owner, `netlify-${mira.id}-id-team-site`, "team-site"]] as const) {
-    const answer = await team.as(token, "POST", "/api/published-apps/delete", { id });
-    expect(answer, id).toEqual({ status: 409, body: { error: expect.stringContaining("can't be deleted from here"), code: "no_token", manageUrl: `https://app.netlify.com/projects/${name}` } });
-    expect(JSON.stringify(answer)).not.toContain("nfp_team_token");
-  }
-  expect(await titles(ada)).toEqual(["adas-diary site", "adas-notes site", "adas-shop site", "team-site site"]);
 });
 
 it("checks framing only for an address the asker is shown or a public hosting address, and refuses anything else", async () => {
@@ -160,4 +157,29 @@ it("checks framing only for an address the asker is shown or a public hosting ad
     expect((await framing(ben, url)).status, url).toBe(404);
   }
   expect(await team.as(ben, "GET", "/api/web-panels/framing?url=https%3A%2F%2Fexample.com&origin=https%3A%2F%2Facme.mausbot.cloud")).toMatchObject({ status: 403 });
+});
+
+it("deletes with the team's saved token for whoever may delete, says so plainly without one, and never for someone else's project", async () => {
+  const data = join(team.home, ".openmausbot");
+  const shop = join(data, "task-workspaces", mira.id, adaThread, "shop", SITE_FILE), teamSite = join(data, "workspaces", mira.id, "team-site", SITE_FILE);
+  const withoutToken = await team.as(ada, "POST", "/api/published-apps/delete", { id: `netlify-${mira.id}-${shopId}` });
+  expect(withoutToken).toEqual({ status: 409, body: { error: expect.stringContaining("can't be deleted from here"), code: "no_token", manageUrl: "https://app.netlify.com/projects/adas-shop" } });
+
+  const saved = await team.as(owner, "POST", "/api/vault/secrets", { name: "Netlify personal access token", value: TOKEN, bots: "all" });
+  expect(saved.status, JSON.stringify(saved.body)).toBe(201);
+  expect(await team.as(ben, "POST", "/api/published-apps/delete", { id: `netlify-${mira.id}-${shopId}` })).toEqual(GONE);
+  expect(await team.as(ben, "POST", "/api/published-apps/delete", { id: `netlify-${mira.id}-${teamSiteId}` })).toMatchObject({ status: 403, body: { code: "forbidden" } });
+  expect(fake.requests.filter((request) => request.startsWith("DELETE"))).toEqual([]);
+
+  const byAdmin = await team.as(admin, "POST", "/api/published-apps/delete", { id: `netlify-${mira.id}-${teamSiteId}` });
+  expect(byAdmin).toEqual({ status: 200, body: { ok: true } });
+  const byAda = await team.as(ada, "POST", "/api/published-apps/delete", { id: `netlify-${mira.id}-${shopId}` });
+  expect(byAda).toEqual({ status: 200, body: { ok: true } });
+  expect(fake.requests.filter((request) => request.startsWith("DELETE"))).toEqual([`DELETE /api/v1/sites/${teamSiteId}`, `DELETE /api/v1/sites/${shopId}`]);
+  expect([fake.sites.has(teamSiteId), fake.sites.has(shopId), existsSync(teamSite), existsSync(shop)]).toEqual([false, false, false, false]);
+  expect(fake.refused).toEqual([]);
+  await sleep(2_100);
+  expect(await titles(ada)).toEqual(["adas-diary site", "adas-notes site"]);
+  expect(await titles(owner)).toEqual([]);
+  expect(JSON.stringify([withoutToken, byAdmin, byAda])).not.toContain(TOKEN);
 });

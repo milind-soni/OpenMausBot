@@ -27,8 +27,9 @@ export interface PublishedAppsDeps {
   ownFolder(botId: string, threadId: string): string;
   pages(): readonly PublishedPageRecord[];
   unpublishPage(pageId: string): Promise<{ status: number; text: string }>;
-  /** Security: the Netlify token this person's own action may use for this bot, or null. Never another person's. */
-  netlifyToken(botId: string, auth: RequestAuth): string | null;
+  /** Security: the Netlify token this person's own action may use for this bot's app from this conversation, or null.
+   * Never another person's. */
+  netlifyToken(botId: string, auth: RequestAuth, threadId: string | undefined): string | null;
   /** True when the conversation is this person's own private one (a Team Cloud). */
   ownChat(auth: RequestAuth, threadId: string): boolean;
   home: string;
@@ -52,7 +53,7 @@ interface Entry {
   home?: string;
   /** A page has only its conversations; a site in a bot's folder is the bot's where conversations share one audience. */
   needsThread: boolean;
-  remove(auth: RequestAuth): Promise<PublishedAppDeleteRefusal | null>;
+  remove(auth: RequestAuth, threadId: string | undefined): Promise<PublishedAppDeleteRefusal | null>;
 }
 
 type Shown = { app: PublishedApp; entry: Entry };
@@ -99,8 +100,8 @@ export function createPublishedApps(deps: PublishedAppsDeps) {
       message.role === "bot" && typeof message.text === "string" && (own.has(threadId) ? !message.from?.botId || message.from.botId === bot.id : message.from?.botId === bot.id) && link.test(message.text)));
   }
 
-  async function removeSite(bot: AppBot, site: NetlifySite, auth: RequestAuth): Promise<PublishedAppDeleteRefusal | null> {
-    const token = deps.netlifyToken(bot.id, auth);
+  async function removeSite(bot: AppBot, site: NetlifySite, auth: RequestAuth, threadId: string | undefined): Promise<PublishedAppDeleteRefusal | null> {
+    const token = deps.netlifyToken(bot.id, auth, threadId);
     if (!token) return "no_token";
     const deleted = await deleteNetlifySite(site.siteId, token, { env: deps.env, ...(deps.fetch ? { fetch: deps.fetch } : {}) });
     if (!deleted.ok) return deleted.reason;
@@ -132,7 +133,7 @@ export function createPublishedApps(deps: PublishedAppsDeps) {
         threads: () => (home ? [home] : (posted ??= postedIn(bot, site))),
         ...(home ? { home } : {}),
         needsThread: false,
-        remove: (auth: RequestAuth) => removeSite(bot, site, auth),
+        remove: (auth: RequestAuth, threadId: string | undefined) => removeSite(bot, site, auth, threadId),
       };
     }));
   }
@@ -177,7 +178,7 @@ export function createPublishedApps(deps: PublishedAppsDeps) {
     },
     async remove(visible: VisibleSet, auth: RequestAuth, id: string): Promise<DeleteAnswer> {
       const found = (await shown(visible, auth)).find((one) => one.app.id === id);
-      const refusal = !found ? "gone" : !found.app.canDelete ? "forbidden" : await found.entry.remove(auth);
+      const refusal = !found ? "gone" : !found.app.canDelete ? "forbidden" : await found.entry.remove(auth, found.app.threadId);
       if (!refusal) return { status: 200, body: { ok: true } };
       const { status, error } = REFUSALS[refusal];
       const manageUrl = refusal === "no_token" || refusal === "token_refused" ? found?.app.manageUrl : undefined;

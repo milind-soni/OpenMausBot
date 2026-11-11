@@ -2,7 +2,7 @@
 // own MausBot with its chats and notes, their private chats with every bot (messages, notifications, the files only
 // those chats used, and the files they uploaded and never sent), the routines that live in those chats, their memory
 // layers, their
-// engine home (its transcripts), their "About you", their own connections, their own browsers, and every session and
+// engine home (its transcripts), their "About you", their own connections and saved secrets, their own browsers, and every session and
 // phone of theirs. Nothing of it is handed to an admin. A routine they wrote for a shared place keeps running, as the
 // routine of whoever looks after its bot now (the Admins when nobody does), and admin activity says it was handed over.
 // They come off every bot's sharing and "Looked after by" (what they looked after falls to the Admins), so joining again
@@ -63,6 +63,8 @@ export interface TeamMemberLeftDeps {
   eraseBrowsers(audience: Audience): Promise<boolean>;
   /** Their own connections, keys and MCP sign-ins (team-connections.ts). */
   forgetConnections(person: string): void | Promise<void>;
+  /** The secrets they typed into cards in their own chats (vault-store.ts). */
+  forgetSecrets(person: string): void;
   /** Every routine: `home` is the person whose private chat it lives in (routine-home.ts), `writer` who last wrote it,
    * `files` the attachments/ names it carries. */
   routines(): ReadonlyArray<{ id: string; name: string; botId: string; home: string | null; writer: string | undefined; files: readonly string[] }>;
@@ -150,6 +152,7 @@ export function createTeamMemberLeft(deps: TeamMemberLeftDeps): (email: string) 
     rmSync(join(deps.dataDir, "people", person), { recursive: true, force: true });
     rmSync(audienceHome(deps.dataDir, memberAudience(person)), { recursive: true, force: true });
     await Promise.resolve(deps.forgetConnections(person)).catch((error: unknown) => { console.warn(`[team] a leaving member's connections were not all removed: ${error instanceof Error ? error.message : String(error)}`); });
+    try { deps.forgetSecrets(person); } catch (error) { console.warn(`[team] a leaving member's saved secrets were not removed: ${error instanceof Error ? error.message : String(error)}`); }
     const browsers = await deps.eraseBrowsers(memberAudience(person)).catch(() => false);
     // Counts of shared things only: nothing here says what was theirs alone.
     deps.record({ category: "people", action: "member.left", target: { kind: "person", name: address }, after: { botsHandedBack, routinesHandedOver: written.length } });
