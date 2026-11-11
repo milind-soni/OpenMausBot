@@ -37,6 +37,11 @@ import {
   type PhoneSecretSubmissionRegistry,
 } from "../phone-secret.ts";
 import type { BotLogins } from "../bot-logins.ts";
+import type { VaultStore } from "../vault-store.ts";
+import { loginUsableBy } from "../../shared/logins.ts";
+import { vaultNameKey, type VaultChoice } from "../../shared/vault.ts";
+import { fittingChoices } from "../vault/choices.ts";
+import { linkedSecretNames } from "../vault/providers.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { serverLine } from "../server-lines.ts";
 
@@ -54,7 +59,9 @@ export const phoneSecretEnvelopeSchema = z.object({
 export interface SecretCardsDeps {
   store: Pick<Store, "activePath" | "appendMessage" | "patchMessage" | "messagesFor" | "botByThread" | "groupByThread" | "onChange">;
   cfg: AppConfig;
-  botLogins: Pick<BotLogins, "credentialConfig">;
+  botLogins: Pick<BotLogins, "credentialConfig" | "linkedSecret"> & Partial<Pick<BotLogins, "linkedSecrets">>;
+  /** Where a custom card's value is saved, and found again the next time the same bot asks for it by name. */
+  vaultStore: Pick<VaultStore, "saveSecret" | "usableSecret" | "markUsed" | "listSecrets" | "secret" | "updateSecret" | "grantMcpKeys">;
   phoneSecrets: Pick<PhoneSecretBridge, "provide" | "open">;
   phoneSecretSubmissions: PhoneSecretSubmissionRegistry;
   connectorThread(botId: string, threadId: string): { bot: BotRecord; group: GroupRecord | undefined } | null;
@@ -106,7 +113,7 @@ export function savedSecretText(label: string, saved: SavedSecret | null): strin
 }
 
 function deliveryNote(botName: string, delivery: SecretDelivery, language: string | undefined): string {
-  return serverLine(language, delivery === "file" ? "server.connect.secretFile" : "server.connect.secretRef", { bot: botName });
+  return `${serverLine(language, delivery === "file" ? "server.connect.secretFile" : "server.connect.secretRef", { bot: botName })} ${serverLine(language, "server.connect.secretKept", { bot: botName })}`;
 }
 
 /** Where a file secret goes: the Local VM workspace its card names, else the bot's own folder. */
@@ -154,7 +161,7 @@ function outgoingFields(fields: Record<string, unknown>): EmailOutgoingFields {
   return Object.fromEntries(OUTGOING_FIELDS.flatMap((name) => (server[name] === undefined ? [] : [[name, server[name]]]))) as EmailOutgoingFields;
 }
 
-function customRequest(body: Record<string, unknown>): { label: string; reason: string; placeholder: string; delivery: SecretDelivery } | { error: string } {
+function customRequest(body: Record<string, unknown>): { label: string; reason: string; placeholder: string; delivery: SecretDelivery; replace: boolean } | { error: string } {
   const text = (value: unknown, max: number) => typeof value === "string"
     ? [...value].map((ch) => (ch.charCodeAt(0) < 0x20 || ch === "\u007f" ? " " : ch)).join("").trim().slice(0, max)
     : "";
@@ -165,11 +172,11 @@ function customRequest(body: Record<string, unknown>): { label: string; reason: 
   if (!SECRET_DELIVERIES.includes(body.delivery as SecretDelivery)) {
     return { error: "request_credential needs delivery: ref for OpenMausBot's own tools such as mcp_server, or file for your own commands." };
   }
-  return { label, reason, placeholder: text(body.placeholder, CUSTOM_SECRET_LABEL_MAX), delivery: body.delivery as SecretDelivery };
+  return { label, reason, placeholder: text(body.placeholder, CUSTOM_SECRET_LABEL_MAX), delivery: body.delivery as SecretDelivery, replace: body.replace === true };
 }
 
 export function createSecretCards(deps: SecretCardsDeps) {
-  const { store, cfg, botLogins, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode } = deps;
+  const { store, cfg, botLogins, vaultStore, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode } = deps;
   const vault = new SecretVault();
   addHeldSecretScrubber((text) => vault.scrub(text));
 
@@ -213,21 +220,30 @@ export function createSecretCards(deps: SecretCardsDeps) {
     if (change.type === "thread.deleted" || change.type === "bot.deleted" || change.type === "group.deleted") sweep();
   });
 
-  /** Keeps a custom card's value where its delivery says, and marks when; never touches the card's other fields. */
+  const fileHome = (botId: string, threadId: string, vm: string | undefined): SecretFileHome =>
+    (vm ? vmFileHome(botId, vm) : null) ?? { host: deps.layerFolder(botId, threadId), shown: deps.layerFolder(botId, threadId) };
+
+  /** Saves a custom card's value to the Vault for the asking bot, then hands it over. */
   function storeCustomSecret(message: Message, botId: string, threadId: string, value: string): void {
+    const saved = vaultStore.saveSecret({ name: message.secret!.label, value, source: "card", bots: [botId], refOnly: message.secret!.delivery !== "file" });
+    handOver(message, botId, threadId, value, saved.id);
+  }
+
+  /** Hands a custom card's value over as its delivery says, and marks when; never touches the card's other fields.
+   * `item`: the Vault item the value is kept as. */
+  function handOver(message: Message, botId: string, threadId: string, value: string, item: string): void {
     const secret = message.secret!;
     const owner = { botId, threadId };
     if (secret.delivery === "file") {
-      const home = (secret.vm ? vmFileHome(botId, secret.vm) : null) ?? { host: deps.layerFolder(botId, threadId), shown: deps.layerFolder(botId, threadId) };
-      vault.saveFile(owner, message.id, value, home);
+      vault.saveFile(owner, message.id, value, fileHome(botId, threadId, secret.vm));
     } else {
-      vault.saveRef(owner, message.id, secret.label, value);
+      vault.saveRef(owner, message.id, secret.label, value, item);
     }
     store.patchMessage(threadId, message.id, { secret: { ...secret, savedAt: Date.now() } });
   }
 
-  /** A value typed into a custom card in the app: kept, then the paused turn resumes. */
-  function saveCustomSecret(botId: string, threadId: string, messageId: string, raw: unknown): { status: number; body: Record<string, unknown> } {
+  /** A custom card still waiting for its value, or why it can't take one. */
+  function openCustomCard(botId: string, threadId: string, messageId: string): Message | { status: number; body: Record<string, unknown> } {
     const message = secretMessage(botId, threadId, messageId);
     if (!message?.secret) return { status: 404, body: { ...userError("serverError.secret.missing") } };
     const secret = message.secret;
@@ -239,6 +255,13 @@ export function createSecretCards(deps: SecretCardsDeps) {
     if (secret.superseded) return { status: 409, body: { ...userError("serverError.secret.replaced") } };
     if (secret.stopped) return { status: 409, body: { ...userError("serverError.secret.taskStopped") } };
     if (secret.provided || secret.savedAt !== undefined) return { status: 409, body: { ...userError("serverError.secret.alreadySaved") } };
+    return message;
+  }
+
+  /** A value typed into a custom card in the app: kept, then the paused turn resumes. */
+  function saveCustomSecret(botId: string, threadId: string, messageId: string, raw: unknown): { status: number; body: Record<string, unknown> } {
+    const message = openCustomCard(botId, threadId, messageId);
+    if ("status" in message) return message;
     const value = typeof raw === "string" ? raw.trim() : "";
     if (!value || Buffer.byteLength(value) > SECRET_VALUE_MAX_BYTES) {
       return { status: 400, body: { ...userError("serverError.secret.valueSize", { bytes: SECRET_VALUE_MAX_BYTES }) } };
@@ -247,6 +270,55 @@ export function createSecretCards(deps: SecretCardsDeps) {
       storeCustomSecret(message, botId, threadId, value);
     } catch (error) {
       console.warn(`secret card: could not keep a secret: ${error instanceof Error ? error.message : String(error)}`);
+      return { status: 500, body: { ...userError("serverError.secret.notKeptSafely") } };
+    }
+    if (!resumeSecretCard(botId, threadId, message.id, "provided")) return { status: 409, body: { ...userError("serverError.secret.unavailableLower") } };
+    return { status: 200, body: currentSecretState(botId, threadId, message.id) ?? { provided: true, resumed: false } };
+  }
+
+  /** "Use a saved one" on a custom card: saved secrets and the bot's linked ones whose names could fit, never the one by
+   * this very name the bot may already use (it would have had it with no card, so the bot wants a new value). A secret
+   * given only to OpenMausBot's own tools is never offered for a file. */
+  function savedChoices(botId: string, threadId: string, messageId: string): Array<VaultChoice & { use(): Promise<{ id: string; value: string }> }> {
+    const message = openCustomCard(botId, threadId, messageId);
+    if ("status" in message || message.secret!.delivery === "email") return [];
+    const card = message.secret!;
+    const asked = vaultNameKey(card.label);
+    const fresh = (name: string, usable: boolean) => !(usable && vaultNameKey(name) === asked);
+    const saved = vaultStore.listSecrets().filter((one) => !(card.delivery === "file" && one.refOnly) && fresh(one.name, loginUsableBy(one, botId)))
+      .map((one) => ({ id: one.id, name: one.name, use: async () => {
+        // Picking it is the person letting this bot use it.
+        if (one.bots !== "all" && !one.bots.includes(botId)) vaultStore.updateSecret(one.id, { bots: [...one.bots, botId] });
+        const value = vaultStore.secret(one.id)?.value;
+        if (!value) throw new Error(`${one.name} is no longer in the Vault.`);
+        vaultStore.markUsed(one.id);
+        return { id: one.id, value };
+      } }));
+    const linked = (botLogins.linkedSecrets?.() ?? []).filter((one) => loginUsableBy(one, botId)).flatMap((one) => linkedSecretNames(one)
+      .filter(({ name }) => fresh(name, true)).map(({ name }) => ({ id: `${one.id}#${name}`, name, provider: one.provider, use: async () => {
+        const read = await botLogins.linkedSecret(name, botId);
+        if (!read) throw new Error(`${name} is no longer in the linked password manager.`);
+        return { id: read.id, value: read.value };
+      } })));
+    return fittingChoices(card.label, [...saved, ...linked]);
+  }
+
+  /** The person picked a saved secret on the card: the bot may use it from now on, gets it as the card's delivery says,
+   * and its paused turn resumes. */
+  async function useSavedSecret(botId: string, threadId: string, messageId: string, itemId: unknown): Promise<{ status: number; body: Record<string, unknown> }> {
+    const open = openCustomCard(botId, threadId, messageId);
+    if ("status" in open) return open;
+    const choice = savedChoices(botId, threadId, messageId).find((one) => one.id === itemId);
+    if (!choice) return { status: 404, body: { ...userError("serverError.secret.unavailableLower") } };
+    let used: { id: string; value: string };
+    try { used = await choice.use(); }
+    catch (error) { return { status: 502, body: { error: error instanceof Error ? error.message : String(error) } }; }
+    const message = openCustomCard(botId, threadId, messageId);
+    if ("status" in message) return message;
+    try {
+      handOver(message, botId, threadId, used.value, used.id);
+    } catch (error) {
+      console.warn(`secret card: could not hand over a saved secret: ${error instanceof Error ? error.message : String(error)}`);
       return { status: 500, body: { ...userError("serverError.secret.notKeptSafely") } };
     }
     if (!resumeSecretCard(botId, threadId, message.id, "provided")) return { status: 409, body: { ...userError("serverError.secret.unavailableLower") } };
@@ -301,11 +373,13 @@ export function createSecretCards(deps: SecretCardsDeps) {
     return { status: 200, body: currentSecretState(botId, threadId, messageId) ?? { provided: true, resumed: false } };
   }
 
-  /** mcp_server's fields with every secretRef swapped for its value: only in env, headers and oauth.clientSecret. */
-  function redeemMcpServer<T>(body: T, botId: string, threadId: string) {
-    return vault.redeem(body, { botId, threadId }, (path) =>
+  /** mcp_server's fields with every secretRef swapped for a `vault:<id>` pointer: only in env, headers and
+   * oauth.clientSecret, and `server` may read those items once the change is saved. */
+  function redeemMcpServer<T>(body: T, botId: string, threadId: string, server: string) {
+    const redeemed = vault.redeem(body, { botId, threadId }, (path) =>
       (path.length === 2 && (path[0] === "env" || path[0] === "headers")) || (path.length === 2 && path[0] === "oauth" && path[1] === "clientSecret"),
     "mcp_server's env, headers and oauth.clientSecret");
+    return !redeemed.ok ? redeemed : { ...redeemed, commit: () => { redeemed.commit(); vaultStore.grantMcpKeys(server, redeemed.pointers); } };
   }
 
   function phoneSecretSubmissionKey(threadId: string, messageId: string, requestKey: string): string {
@@ -456,7 +530,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
   }
 
   /** request_credential's card: the id is the whole authority, and a newer request supersedes the pending ones. */
-  function requestCredential(from: BotRecord, fromThreadId: string, body: Record<string, unknown>): { status: number; body: Record<string, unknown> } {
+  async function requestCredential(from: BotRecord, fromThreadId: string, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> {
     const owner = connectorThread(from.id, fromThreadId);
     if (!owner) return { status: 403, body: { error: "source conversation does not belong to sender" } };
     if (body.credentialId === undefined) return requestCustomSecret(from, fromThreadId, Boolean(owner.group), body);
@@ -482,9 +556,9 @@ export function createSecretCards(deps: SecretCardsDeps) {
         target: credentialId,
         label: target.label,
         description: `${reason ? `${target.description} ${reason}` : target.description} ${serverLine(language, "server.connect.secretNeverRead", { bot: from.name })}`,
-        ...(credentialId === "greenferenceApiKey" || credentialId === "geminiTtsKey" ? {
+        ...(credentialId === "greenferenceApiKey" || credentialId === "modelgoApiKey" || credentialId === "geminiTtsKey" ? {
           descriptionParts: {
-            baseCode: credentialId === "greenferenceApiKey" ? "secretCard.greenference.description" as const : "secretCard.geminiTts.description" as const,
+            baseCode: credentialId === "greenferenceApiKey" ? "secretCard.greenference.description" as const : credentialId === "modelgoApiKey" ? "secretCard.modelgo.description" as const : "secretCard.geminiTts.description" as const,
             reason,
             bot: from.name,
           },
@@ -554,19 +628,33 @@ export function createSecretCards(deps: SecretCardsDeps) {
     return { messageId: message.id, label: card.label };
   }
 
-  /** A secret OpenMausBot does not keep: the same bot asking again for one already saved here gets it back, and a newer
-   * card replaces its pending one with the same name. */
-  function requestCustomSecret(from: BotRecord, threadId: string, room: boolean, body: Record<string, unknown>): { status: number; body: Record<string, unknown> } {
+  /** A secret the Vault holds for the bot by this name, saved or from a linked password manager, is handed over at once,
+   * with no card; otherwise a card asks for it, replacing the bot's pending card with the same name. */
+  async function requestCustomSecret(from: BotRecord, threadId: string, room: boolean, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> {
     const asked = customRequest(body);
     if ("error" in asked) return { status: 400, body: asked };
-    const path = store.activePath(threadId);
-    const earlier = [...path].reverse().find((message) => message.kind === "secret" && message.secret && custom(message.secret) &&
-      message.secret.savedAt !== undefined && !message.secret.superseded && message.secret.label.toLowerCase() === asked.label.toLowerCase() &&
-      (!room || message.from?.botId === from.id));
-    const kept = earlier ? vault.savedFor(earlier.id) : null;
-    if (earlier && kept && earlier.secret!.delivery === asked.delivery) return { status: 200, body: { label: asked.label, text: savedSecretText(asked.label, kept) } };
-    const mismatch = earlier && kept ? earlier.secret!.delivery : undefined;
     const vm = asked.delivery === "file" ? deps.turnVm(threadId) : undefined;
+    const saved = asked.replace ? null : vaultStore.usableSecret(asked.label, from.id, asked.delivery);
+    let item: { id: string; name: string; value: string } | null = saved;
+    if (!asked.replace && !item) {
+      try {
+        item = await botLogins.linkedSecret(asked.label, from.id);
+      } catch (error) {
+        return { status: 502, body: { error: `${asked.label} is in a linked password manager, but it could not be read: ${error instanceof Error ? error.message : String(error)}` } };
+      }
+    }
+    if (item) {
+      const owner = { botId: from.id, threadId };
+      try {
+        const handed = asked.delivery === "file" ? { file: vault.mintFile(owner, item.id, item.value, fileHome(from.id, threadId, vm)) } : { ref: vault.mintRef(owner, item.name, item.value, item.id) };
+        if (saved) vaultStore.markUsed(saved.id);
+        return { status: 200, body: { label: asked.label, text: savedSecretText(asked.label, handed) } };
+      } catch (error) {
+        console.warn(`secret card: could not hand over a saved secret: ${error instanceof Error ? error.message : String(error)}`);
+        return { status: 500, body: userError("serverError.secret.notKeptSafely") };
+      }
+    }
+    const path = store.activePath(threadId);
     const language = deps.threadLanguage?.(threadId);
     const message = store.appendMessage(threadId, {
       role: "bot",
@@ -590,11 +678,15 @@ export function createSecretCards(deps: SecretCardsDeps) {
       store.patchMessage(threadId, prior.id, { secret: { ...prior.secret, superseded: true } });
       deps.followCard(threadId, prior.id, message.id);
     }
-    return { status: 201, body: { messageId: message.id, label: asked.label, delivery: asked.delivery, ...(mismatch ? { savedAs: mismatch } : {}) } };
+    const savedAs = asked.delivery === "file" && !asked.replace && vaultStore.usableSecret(asked.label, from.id, "ref") ? { savedAs: "ref" } : {};
+    return { status: 201, body: { messageId: message.id, label: asked.label, delivery: asked.delivery, ...savedAs } };
   }
 
   return {
     phoneSecretSubmissionKey, secretMessage, currentSecretState, resumeSecretCard, provideSecretFromPhone, requestCredential, saveCustomSecret, saveEmailSecret,
-    secretSaved, updateText, redeemMcpServer,
+    secretSaved, updateText, redeemMcpServer, useSavedSecret,
+    /** Names only: what the card shows under "Use a saved one". */
+    savedChoices: (botId: string, threadId: string, messageId: string): VaultChoice[] =>
+      savedChoices(botId, threadId, messageId).map(({ id, name, provider }) => ({ id, name, ...(provider ? { provider } : {}) })),
   };
 }

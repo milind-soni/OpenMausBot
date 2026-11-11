@@ -11,6 +11,7 @@ import { setLocale } from "@/lib/i18n";
 import { GROK_EXPORT_FORMAT, GROK_EXPORT_PROMPT } from "../../shared/grok-import";
 import { ComposerAttachments } from "./ComposerAttachments";
 import { GrokMoveDialog } from "./GrokMoveDialog";
+import { GrokImportSection } from "./ImportSettings";
 
 const MEMORY = "The door sticks in the rain";
 const WHEN = "Weekdays around 9:00 AM Asia/Calcutta (may run up to 15 min early or 15 min late)";
@@ -173,6 +174,38 @@ describe("Move from Grok Bot", () => {
     await act(async () => button("Use these")!.click());
     await tick();
     expect(host.querySelector('[data-grok-move="preview"]')).not.toBeNull();
+  });
+
+  it("inside Settings it opens in place, with no overlay to end up behind the Settings window", async () => {
+    await act(async () => root.render(createElement(GrokMoveDialog, { onClose: vi.fn(), inline: true })));
+    await tick();
+    expect(host.querySelector("[data-grok-move]")).not.toBeNull();
+    expect(host.querySelector("textarea")).not.toBeNull();
+    expect(host.querySelector(".ui-scrim")).toBeNull();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("Settings leaves Escape to its own window while the move is open in place", async () => {
+    const onClose = vi.fn();
+    await act(async () => root.render(createElement(GrokMoveDialog, { onClose, inline: true })));
+    await tick();
+    await act(async () => { host.querySelector("[data-grok-move]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("the Settings row expands the move, and folding it away keeps what's in progress", async () => {
+    await act(async () => root.render(createElement(GrokImportSection)));
+    const row = host.querySelector<HTMLButtonElement>("[data-grok-move-open]")!;
+    expect(row.getAttribute("aria-expanded")).toBe("false");
+    expect(host.querySelector("[data-grok-move]")).toBeNull();
+    await act(async () => { row.click(); });
+    await vi.waitFor(() => expect(host.querySelector("[data-grok-move]")).not.toBeNull());
+    expect(row.getAttribute("aria-expanded")).toBe("true");
+    await paste(EXPORT);
+    await act(async () => { row.click(); });
+    expect(row.getAttribute("aria-expanded")).toBe("false");
+    expect(host.querySelector("[data-grok-move]")!.parentElement!.className).toContain("hidden");
+    expect(host.querySelector("[data-grok-move]")!.getAttribute("data-grok-move")).toBe("preview");
   });
 
   it("scrolls inside the dialog, with its buttons always in view", async () => {

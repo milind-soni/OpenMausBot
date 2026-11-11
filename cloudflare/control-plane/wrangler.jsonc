@@ -57,9 +57,13 @@
     // "on" marks idle tunnels for cleanup; "observe" only logs candidates.
     "OMB_TUNNEL_RECLAIM": "on",
     // Days a tunnel must have been offline (and its installation quiet)
-    // before reclaim (minimum 3). Never-connected tunnels use a fixed two days.
+    // before reclaim (minimum 1). Never-connected tunnels use a fixed two days.
     // A reclaimed installation gets its same hostname back when it returns.
     "OMB_TUNNEL_OFFLINE_RECLAIM_DAYS": "3",
+    // Dry run: a second offline period (days, 1-365) that the scan only
+    // counts. /healthz reports capacity.reclaim.preview.eligible once a full
+    // pass (about 50 minutes per 1,000 tunnels) has run at it. Empty: off.
+    "OMB_TUNNEL_RECLAIM_PREVIEW_DAYS": "",
     // Cleanup rows per five-minute cron run. 20 needs Workers Paid; use 4 on
     // Workers Free (50 subrequests per invocation).
     "OMB_CLEANUP_SWEEP_LIMIT": "20",
@@ -72,12 +76,33 @@
     "RELAY_NODES": "relay1.openmausbot.com,relay2.openmausbot.com",
     "RELAY_NODES_AMERICAS": "",
     "RELAY_TOKEN_KID": "k1",
-    "RELAY_ROLLOUT_PERCENT": "0",
+    "RELAY_ROLLOUT_PERCENT": "100",
     "RELAY_ALLOW_INSTALLATIONS": "",
     "RELAY_DISABLED": "0",
     // The first desktop release that reaches phones through the relay. From it, a desktop with no old phones paired
     // gets 409 relay_capable instead of a new tunnel. Empty: never refused.
-    "RELAY_CAPABLE_MIN_VERSION": ""
+    "RELAY_CAPABLE_MIN_VERSION": "0.1.145",
+    // Giving tunnels back (README "Releasing tunnels"). Each is off as written here; /healthz `tunnelRelease`
+    // shows what each would clear before it is turned on. All of them need migration 0015.
+    // RELAY_TUNNEL_RELEASE_PERCENT (0-100): the share of computers, by the same stable hash as the relay rollout,
+    // whose tunnel is released once every paired phone has used the encrypted connection and no old phone has been
+    // reported for RELAY_TUNNEL_RELEASE_DAYS. Raise it 10, 50, 100.
+    "RELAY_TUNNEL_RELEASE_PERCENT": "100",
+    "RELAY_TUNNEL_RELEASE_DAYS": "1",
+    // The cutoffs, the last step. TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT (0-100, the same stable hash): on that share
+    // of the computers the relay serves, the tunnel is given up whatever phones are paired. An old phone app no
+    // longer connects from outside the home network: the phone is updated and paired again, and the desktop says so
+    // (from the release that reads `tunnel` on 409 relay_capable). Ramp 10, then 100. If the relay itself fails,
+    // RELAY_DISABLED "1" (or a lower RELAY_ROLLOUT_PERCENT) stops the cutoff and desktops get their address back.
+    // TUNNEL_MIN_APP_VERSION (x.y.z): a desktop below it neither gets nor keeps a tunnel and is answered
+    // 426 update_required. The cron removes a tunnel only from a computer seen in the last two days, whose stored
+    // release is therefore current. Empty: no minimum.
+    "TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT": "100",
+    "TUNNEL_MIN_APP_VERSION": "0.1.145",
+    // The first desktop release that reads `tunnel` on 409 relay_capable and keeps asking afterwards (x.y.z). From
+    // it, a relay-served desktop with an old phone is answered relay_capable ("full") at the tunnel limit instead of
+    // 503 endpoint_capacity; earlier releases keep the 503 they show and retry on. Empty: always the 503.
+    "TUNNEL_REASON_MIN_VERSION": "0.1.152"
   },
   "secrets": {
     "required": ["BETTER_AUTH_SECRET", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_TOKEN_MAUSBOT_SI", "RELAY_TOKEN_SIGNING_KEY"]

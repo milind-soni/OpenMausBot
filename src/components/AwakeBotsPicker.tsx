@@ -4,19 +4,32 @@ import { awakeCandidates, showBotLimit } from "@/lib/bot-limit";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { api } from "@/state/api";
-import { useStore } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
 import { BotAvatar } from "./Avatar";
 import { PRIMARY_BUTTON } from "./NoticeCard";
 
+type Candidate = Pick<Bot, "id" | "busy" | "tasks">;
+const lastActive = (bot: Candidate) => Math.max(0, ...(bot.tasks ?? []).map((task) => task.updatedAt ?? task.createdAt ?? 0));
+
+/** The bots offered awake: those awake now, or with `swapIn` chosen in place of the least recently active one not working. */
+export function initialAwake(bots: readonly Candidate[], paused: ReadonlySet<string>, wanted: number, swapIn?: string): Set<string> {
+  const awake = bots.filter((bot) => !paused.has(bot.id) && bot.id !== swapIn);
+  if (!swapIn || !bots.some((bot) => bot.id === swapIn)) return new Set(awake.map((bot) => bot.id));
+  const idleFirst = [...awake].sort((a, b) => Number(Boolean(a.busy)) - Number(Boolean(b.busy)) || lastActive(a) - lastActive(b));
+  const kept = new Set(awake.map((bot) => bot.id));
+  for (const bot of idleFirst) if (kept.size > wanted - 1) kept.delete(bot.id);
+  return new Set([...kept, swapIn]);
+}
+
 /** Which of a Starter Cloud's bots stay awake: the plan's number of them, the rest paused until swapped in or an upgrade. */
-export function AwakeBotsPicker({ limit, onSaved }: { limit: number; onSaved: () => void }) {
+export function AwakeBotsPicker({ limit, onSaved, swapIn }: { limit: number; onSaved: () => void; swapIn?: string }) {
   const { state } = useStore();
   const bots = awakeCandidates(state.bots);
   const paused = new Set(state.config?.pausedBots ?? []);
-  const [chosen, setChosen] = useState<Set<string>>(() => new Set(bots.filter((bot) => !paused.has(bot.id)).map((bot) => bot.id)));
+  const wanted = Math.min(limit, bots.length);
+  const [chosen, setChosen] = useState<Set<string>>(() => initialAwake(bots, paused, wanted, swapIn));
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
-  const wanted = Math.min(limit, bots.length);
   const toggle = (id: string) => setChosen((before) => {
     const next = new Set(before);
     if (next.has(id)) next.delete(id);

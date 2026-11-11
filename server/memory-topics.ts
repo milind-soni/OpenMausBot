@@ -1,6 +1,8 @@
 // A memory/<topic>.md may begin with YAML frontmatter: `title`, `description`, `aliases`.
 import { closeSync, openSync, readSync } from "node:fs";
 
+import { hasCjk } from "./cjk-search.ts";
+
 const HEAD_BYTES = 2_048;
 export const TOPIC_INDEX_MAX_TOPICS = 40;
 export const TOPIC_INDEX_MAX_CHARS = 2_000;
@@ -54,7 +56,7 @@ export function parseTopicHeader(text: string): TopicHeader {
 
 export function topicWords(name: string, header: TopicHeader): string[] {
   const text = [name.replace(/\.md$/i, "").replace(/[-_.]+/g, " "), header.title ?? "", header.description ?? "", ...header.aliases].join(" ");
-  return [...new Set(text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word.length >= 3))];
+  return [...new Set(text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word.length >= (hasCjk(word) ? 2 : 3)))];
 }
 
 export function topicBody(text: string): string {

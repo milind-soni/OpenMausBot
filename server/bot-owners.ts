@@ -35,3 +35,36 @@ export function setCreatedBy(store: Owners, botId: string, email: string): void 
   const bot = store.bot(botId);
   if (bot && !bot.createdBy) store.patchBot(botId, { createdBy: ownerEmail(email) });
 }
+
+/** A member who left a Team Cloud: no bot is shared with them by name or looked after by them any more, so joining again
+ * restores nothing. A bot they looked after is nobody's, whose asks go to the Admins; a Chief that would then be a second
+ * one in its department gives up its crown. `share` writes a bot's sharing (and its visibility with it). The bots they
+ * looked after. */
+export function forgetMember(store: Owners, email: string, share: (bot: BotRecord, access: BotAccess) => void): BotRecord[] {
+  const address = ownerEmail(email);
+  const handedBack: BotRecord[] = [];
+  for (const bot of store.bots) {
+    if (bot.defaultBot?.person) continue;
+    const looked = botOwner(bot) === address;
+    const named = bot.reportsTo === address || bot.createdBy === address;
+    const shared = accessOf(bot);
+    const added = Object.hasOwn(shared.people, address);
+    if (!looked && !named && !added) continue;
+    let current = bot;
+    if (looked || named) {
+      const patch: Partial<BotRecord> = {
+        ...(looked || bot.reportsTo === address ? { reportsTo: undefined } : {}),
+        ...(looked || bot.createdBy === address ? { createdBy: undefined } : {}),
+      };
+      if (bot.chiefOfStaff && chiefConflict(store.bots.map((other) => (other.id === bot.id ? { ...other, ...patch } : other)))) patch.chiefOfStaff = false;
+      current = store.patchBot(bot.id, patch) ?? bot;
+      if (looked) handedBack.push(current);
+    }
+    if (added || (looked && bot.access !== undefined) || (looked && typeof bot.visibility === "object")) {
+      const people = { ...shared.people };
+      delete people[address];
+      share(current, { everyone: shared.everyone, people });
+    }
+  }
+  return handedBack;
+}

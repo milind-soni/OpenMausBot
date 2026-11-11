@@ -11,10 +11,12 @@
 // profile, one folder per profile under one folder beside the data folder, named by its stable id. It is fresh, the same
 // swap opens it, and this computer stays lent to their Cloud while it runs, since that account is the one lending answers to.
 //
-// Security: the move's code knows one server, this computer's own copy. A top-up, a send or a lift pointed at the clean
-// workspace would upload it over the person's Cloud or report a freeze lifted that wasn't, so while the clean workspace runs
-// `realCopy` answers only what the copy's own files can say, and refuses the rest; `holding` brings the copy back first for
-// the two things that must reach it (lifting the freeze, forgetting the copy).
+// Security: the move's code knows one server, this computer's own copy, the one on its own data folder. A move, a top-up, a
+// send or a lift pointed at any other folder's server (the clean workspace, a profile, a named local environment) would
+// carry and freeze that folder instead, upload it over the person's Cloud, or report a freeze lifted that wasn't, so while
+// any other folder runs `realCopy` answers only what the copy's own files can say, and refuses the rest. `holding` brings
+// the copy back first from the clean workspace or a profile for the two things that must reach it (lifting the freeze,
+// forgetting the copy); a named local environment the person chose stays, and those wait until they open the copy again.
 import nodeFs from "node:fs";
 import path from "node:path";
 
@@ -63,8 +65,11 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
   };
   const active = () => stranded() || profile() !== null;
   let held = 0, swapping = false;
-  /** This computer's own copy is the server that answers now: not the clean workspace, and not on its way between them. */
-  const ownCopy = () => !active() && !swapping;
+  /** `dir` is this computer's own data folder, however it is spelled; no folder at all (no server) is not. */
+  const own = (dir) => typeof dir === "string" && dir !== "" && path.resolve(dir) === path.resolve(dataDir());
+  /** This computer's own copy is the server that answers now: its server runs on the data folder, and isn't on its way to
+   * or from another. */
+  const ownCopy = () => !swapping && own(running());
   let queue = Promise.resolve();
   /** One swap at a time: a second would stop the server the first just started. */
   const inTurn = (work) => {
@@ -113,7 +118,7 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
     enter: () => inTurn(async () => {
       if (active()) return true;
       if (!allowed() || held > 0) return false;
-      if (running() !== dataDir()) return true;
+      if (!own(running())) return true;
       try { seed(folder()); } catch (error) { log(`clean workspace: could not set it up (${error?.message ?? error})`); return false; }
       return swapTo(folder());
     }),
@@ -127,6 +132,8 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
       return swapTo(dir);
     }),
     leave,
+    /** Settles once the swaps asked for so far are done. */
+    settled: () => queue,
     /** Runs `work` on this computer's own copy, its server back first, and nothing opens the clean workspace meanwhile. */
     async holding(work) {
       held++;
@@ -135,7 +142,7 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
         return await work();
       } finally { held--; }
     },
-    /** `request` (this computer's server) as the move may use it: while the clean workspace runs, what the frozen copy's own
+    /** `request` (this computer's server) as the move may use it: while any other folder runs, what the frozen copy's own
      * files say, and everything else refused. */
     realCopy(request) {
       return async (route, init) => {

@@ -7,6 +7,8 @@ export interface ManagedComposioCredentials {
 export interface ManagedComposioAccess { url: string; token: string }
 
 export declare const DEFAULT_MANAGED_COMPOSIO_BROKER_URL: string;
+export declare function managedComposioBrokerOff(environment?: Record<string, string | undefined>): boolean;
+export declare function ownComposioKey(credentials: ManagedComposioCredentials | null | undefined, environment?: Record<string, string | undefined>): boolean;
 export declare function managedComposioBrokerUrl(configured: string | undefined, shipped: boolean): string;
 export declare function normalizeManagedComposioBrokerUrl(value: unknown): string;
 export declare function managedComposioAccess(
@@ -30,3 +32,10 @@ export declare function ensureManagedComposioCredentials<T extends ManagedCompos
   existingCredentialTimeoutMs?: number;
   registrationTimeoutMs?: number;
 }): Promise<T>;
+/** The desktop app's check-in: nothing is sent while the person's own Composio project key is saved. */
+export declare function registerManagedComposio<T extends ManagedComposioCredentials>(options: {
+  brokerUrl: string;
+  updateCredentials: (derive: (credentials: T) => Promise<T>) => Promise<unknown>;
+  fetchImpl?: typeof fetch;
+  log?: (line: string) => void;
+}): Promise<unknown>;

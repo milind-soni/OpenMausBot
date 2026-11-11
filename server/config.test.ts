@@ -79,6 +79,14 @@ describe("configuration boundaries", () => {
     expect(reloaded({ profile })).toEqual([]);
     expect(() => parseConfigPatch({ profile: { aboutMe: "x".repeat(24_001) } })).toThrow();
   });
+  it("accepts rules for every bot next to About me, including clearing, without reloading providers", () => {
+    const everyBotRules = "Answer in British English.\nNever book anything without asking.";
+    expect(parseConfigPatch({ everyBotRules })).toEqual({ everyBotRules });
+    expect(parseStoredConfig({ everyBotRules })).toEqual({ everyBotRules });
+    expect(parseConfigPatch({ everyBotRules: "" })).toEqual({ everyBotRules: "" });
+    expect(reloaded({ everyBotRules })).toEqual([]);
+    expect(() => parseConfigPatch({ everyBotRules: "x".repeat(24_001) })).toThrow();
+  });
   it("keeps the profile photo to a stored attachment picture, never an outside address or SVG", () => {
     const avatarUrl = "/api/attachments/5f0c2b1e-8a43-4c1d-9e7a-2b6f1d3c4e5a.webp";
     expect(parseConfigPatch({ profile: { avatarUrl } })).toEqual({ profile: { avatarUrl } });
@@ -231,6 +239,12 @@ describe("configuration boundaries", () => {
       features: { browser: true, computerClaimIdleRelease: true, cloudOverflow: true },
       cloudOverflow: { perSecondCostUsd: 0.0004, idleStopMs: 300_000, allowlistedThreads: ["t1"] },
     };
+    expect(parseStoredConfig(stored)).toEqual({ language: "en", features: { browser: true } });
+    expect(parseConfigPatch(stored)).toEqual({ language: "en", features: { browser: true } });
+  });
+
+  it("loads a config that still switches on chief escalations, and drops the switch", () => {
+    const stored = { language: "en", features: { browser: true, chiefEscalations: true } };
     expect(parseStoredConfig(stored)).toEqual({ language: "en", features: { browser: true } });
     expect(parseConfigPatch(stored)).toEqual({ language: "en", features: { browser: true } });
   });
@@ -897,6 +911,21 @@ describe("default fleet", () => {
     expect(map.groqOwn.environment).toEqual({ GROQ_API_KEY: "groq-own" });
     expect(cfg.instances).not.toHaveProperty("groq");
     expect(instanceConfigs({ instances: { standalone: { driver: "fake" } } })).not.toHaveProperty("groq");
+  });
+
+  it("adds ModelGo to product fleets and sends its workspace key only to ModelGo's own host", () => {
+    const cfg: AppConfig = { modelgo: { key: "modelgo-workspace" }, instances: {
+      codex: { driver: "codex" },
+      modelgoCustomHost: { driver: "modelgo", config: { url: "https://another.example.test/v1" } },
+      modelgoSameHost: { driver: "modelgo", config: { url: "https://api.modelgo.ai/v1/" } },
+      modelgoOwn: { driver: "modelgo", environment: { MODELGO_API_KEY: "modelgo-own" } },
+    } };
+    const map = instanceConfigs(cfg);
+    expect(map.modelgo.environment).toEqual({ MODELGO_API_KEY: "modelgo-workspace" });
+    expect(map.codex.environment).toEqual({});
+    expect(map.modelgoCustomHost.environment).toEqual({});
+    expect(map.modelgoSameHost.environment).toEqual({ MODELGO_API_KEY: "modelgo-workspace" });
+    expect(map.modelgoOwn.environment).toEqual({ MODELGO_API_KEY: "modelgo-own" });
   });
 
   it("preserves an existing compatible account named Groq when adding the built-in provider", () => {
@@ -2421,5 +2450,25 @@ describe("DATA_DIR outside the suite's throwaway home", () => {
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
+  });
+});
+
+describe("a key the desktop app hands the server as an environment variable", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([
+    ["OMB_OPENAI_API_KEY", "openai", "OMB_OPENAI_API_KEY"],
+    ["OMB_ANTHROPIC_API_KEY", "claudeApi", "ANTHROPIC_API_KEY"],
+    ["OMB_OPENROUTER_API_KEY", "openrouter", "OMB_OPENROUTER_API_KEY"],
+    ["MISTRAL_API_KEY", "mistral", "MISTRAL_API_KEY"],
+    ["CEREBRAS_API_KEY", "cerebras", "CEREBRAS_API_KEY"],
+    ["OMB_GROQ_API_KEY", "groq", "GROQ_API_KEY"],
+    ["OMB_GREENFERENCE_API_KEY", "greenference", "GREENFERENCE_API_KEY"],
+    ["OMB_META_API_KEY", "meta", "META_API_KEY"],
+    ["OMB_DEEPSEEK_API_KEY", "deepseek", "DEEPSEEK_API_KEY"],
+    ["OPENAI_COMPAT_API_KEY", "openaiCompat", "OPENAI_COMPAT_API_KEY"],
+  ])("reaches its engine: %s", (variable, instanceId, engineEnv) => {
+    vi.stubEnv(variable, `fixture-${variable}`);
+    expect(instanceConfigs(loadConfig())[instanceId]?.environment?.[engineEnv]).toBe(`fixture-${variable}`);
   });
 });

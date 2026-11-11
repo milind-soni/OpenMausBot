@@ -68,7 +68,7 @@ describe("the / menu in the composer", () => {
 
   it("offers the built-in commands and skills at the start of a message", () => {
     fill("/");
-    expect(labels()).toEqual(["/goal", "/learn", "/setup", "/standup"]);
+    expect(labels()).toEqual(["/goal", "/learn", "/setup", "/burst", "/standup"]);
   });
 
   it("offers only skills after a space later in the message, and puts the pick in place", () => {

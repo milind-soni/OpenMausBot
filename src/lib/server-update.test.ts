@@ -17,10 +17,10 @@ describe("self-hosted update row", () => {
   });
 
   it("names the new version and how this install is updated", () => {
-    const docker = check({ available: true, latest: "0.1.93", command: "docker compose pull omb && docker compose up -d", restart: false });
+    const docker = check({ available: true, latest: "0.1.93", command: "git pull && ./update.sh", restart: false });
     expect(serverUpdateRow("available", docker)).toEqual({
       label: "Version 0.1.93 available (release notes)",
-      subtitle: "Update with: docker compose pull omb && docker compose up -d",
+      subtitle: "Update with: git pull && ./update.sh",
     });
     const npm = check({ install: "npm", available: true, latest: "0.1.93", command: "npm install -g openmausbot@latest", restart: true });
     expect(serverUpdateRow("available", npm).subtitle).toBe("Update with: npm install -g openmausbot@latest, then restart the app");
@@ -73,9 +73,9 @@ describe("the update row for another server the app shows", () => {
       label: "Office Mac can update to 0.1.127",
       subtitle: "Whoever runs that server updates it with: npm install -g openmausbot@latest, then restarts it",
     });
-    const docker = check({ available: true, latest: "0.1.127", command: "docker compose pull omb && docker compose up -d", restart: false });
+    const docker = check({ available: true, latest: "0.1.127", command: "git pull && ./update.sh", restart: false });
     expect(serverUpdateRow("available", docker, "0.1.116", "Office Mac").subtitle).toBe(
-      "Whoever runs that server updates it with: docker compose pull omb && docker compose up -d",
+      "Whoever runs that server updates it with: git pull && ./update.sh",
     );
     expect(serverUpdateRow("up-to-date", check({ current: "0.1.127" }), "0.1.127", "Office Mac")).toEqual({
       label: "Office Mac is up to date",

@@ -647,6 +647,7 @@ describe("agents-proxy MCP surface", () => {
       "list_threads",
       "close_thread",
       "start_thread",
+      "burst",
       "list_models",
       "vm_exec",
       "attach_file",
@@ -710,7 +711,7 @@ describe("agents-proxy MCP surface", () => {
     expect(credential.description).toContain("on a secure card in the app or a QR-paired phone, never in chat");
     expect(credential.description).toContain("onePasswordToken: a 1Password service account token");
     expect(credential.description).toContain("You never see the value");
-    expect(Object.keys(credential.inputSchema.properties)).toEqual(["credential_id", "address", "label", "reason", "placeholder", "delivery"]);
+    expect(Object.keys(credential.inputSchema.properties)).toEqual(["credential_id", "address", "label", "reason", "placeholder", "delivery", "replace"]);
     expect(credential.inputSchema.properties.address.description).toMatch(/^credential_id email only/);
     expect(credential.inputSchema.required).toBeUndefined();
   });
@@ -1210,7 +1211,10 @@ describe("agents-proxy MCP surface", () => {
       reason: "To create test charges.",
       placeholder: "sk_test_…",
       delivery: "file",
+      replace: false,
     });
+    await callTool("request_credential", { label: "Stripe secret key", reason: "The saved key was refused.", delivery: "ref", replace: true });
+    expect(lastCredentialBody).toMatchObject({ label: "Stripe secret key", delivery: "ref", replace: true });
   });
 
   it("rejects credential ids outside the fixed allowlist locally", async () => {

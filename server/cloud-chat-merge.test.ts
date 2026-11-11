@@ -61,6 +61,13 @@ describe("one conversation both have", () => {
     expect(mergeThread(thread(desktop), thread(after, first.leaf))).toMatchObject({ added: [], relinked: [], leaf: first.leaf });
   });
 
+  it("carries a Start fresh divider across, so the next turn on the other computer stops at it too", () => {
+    const desktop = [...shared, line("d1", 10, "m2"), line("fresh", 11, "d1", "bot", { kind: "compaction", compaction: { summary: "", firstKeptId: "", foldedThroughId: "d1", tokensBefore: 0, by: "person", fresh: true } }), line("d2", 12, "fresh", "bot")];
+    const merged = mergeThread(thread(desktop), thread(shared));
+    expect(merged.added.map((row) => row.id)).toEqual(["d1", "fresh", "d2"]);
+    expect(merged.added.find((row) => row.id === "d2")?.parentId).toBe("fresh");
+  });
+
   it("keeps an edit branch this computer made as a branch, and its context summary stays behind with its children re-linked", () => {
     const desktop = [...shared, line("d1", 10, "m2"), line("summary", 11, "d1", "bot", { kind: "compaction" }), line("d2", 12, "summary", "bot"),
       line("edit", 13, "m2")];

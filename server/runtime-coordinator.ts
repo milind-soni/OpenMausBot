@@ -18,7 +18,7 @@ const ANCESTOR = "Cannot assign work back to an ancestor; results return automat
 const ALREADY_COMPLETED = "This agent already completed your assignment. Do not send acknowledgements or approvals as new work. Finish with your decision; results return automatically. Only use rework=true for concrete additional work.";
 const ROOM_ANCESTOR = "A room request cannot return to an ancestor room; results are returned automatically";
 const DEPTH = "Room handoff depth limit reached";
-const BUDGET = "Room handoff budget exhausted";
+const budgetRefusal = (limit: number): string => `This request reached its limit of ${limit} hand-offs since any work last came back, so this one was not sent. The limit belongs to the request: nobody can reset it, the person included, so don't ask them to, and don't send it another way. If work is still out, end your turn: each result that comes back renews the limit and resumes you. If nothing is out, finish with what you have and say what is left undone.`;
 const NO_TURN = "The requesting turn has no root (no turn)";
 /** A stop with no other cause is the person's own. */
 const STOPPED_BY_USER = "Stopped by user";
@@ -34,6 +34,10 @@ const NEEDS_INPUT = /^needs input:/i;
 
 /** Per-turn stalls belong to the host's watchdog: this only keeps the runtime's window out of its way. */
 const TURN_STALL_MS = 24 * 60 * 60_000;
+
+/** Handed-off work parked on the person: a reminder after a day, closed after three. */
+const PARKED_REMIND_MS = 24 * 60 * 60_000;
+const PARKED_LIMIT_MS = 72 * 60 * 60_000;
 
 const REQUESTS_PER_ROOT = 64;
 const EXECUTIONS_PER_ROOT = 96;
@@ -88,7 +92,7 @@ export function view(a: Assignment, parent?: Assignment): HandoffView {
   const node: HandoffView = {
     id: a.id, rootId: a.rootId, threadId: a.assignee.destination.threadId, botId: a.assignee.botId, key: a.assignee.botId,
     text: a.brief, createdAt: a.createdAt, status, result: a.result, reported: a.reportedAt !== undefined, executions: a.executions,
-    lastProgressAt: a.lastActivityAt, approvalGranted: a.approved ?? false, kind: kindOf(groupId, parent), restarts: a.restarts,
+    lastProgressAt: a.lastActivityAt, kind: kindOf(groupId, parent), restarts: a.restarts,
     mode: a.mode, reply: a.reply,
   };
   if (a.outcome !== undefined) node.outcome = a.outcome;
@@ -104,6 +108,7 @@ export function view(a: Assignment, parent?: Assignment): HandoffView {
   if (a.parentId !== undefined) node.parentId = a.parentId;
   if (groupId !== undefined) node.groupId = groupId;
   if (a.batchKey !== undefined) node.requestBatchKey = a.batchKey;
+  if (a.statusOnly) node.statusOnly = true;
   if (a.startedAt !== undefined) node.startedAt = a.startedAt;
   const origin = legacyOrigin(a.origin);
   if (origin) node.origin = origin;
@@ -160,7 +165,7 @@ export class RuntimeCoordinator implements Coordinator {
     this.store = options.wrote ? announcingWrites(store, options.wrote) : store;
     this.runtime = new Runtime(this.store, this.runner(), {
       clock: { now: () => this.now(), monotonic: () => performance.now() },
-      limits: { depth: 4, requests: REQUESTS_PER_ROOT, executions: EXECUTIONS_PER_ROOT, turnStallMs: TURN_STALL_MS, ...options.runtimeLimits },
+      limits: { depth: 4, requests: REQUESTS_PER_ROOT, executions: EXECUTIONS_PER_ROOT, turnStallMs: TURN_STALL_MS, inputWaitMs: PARKED_LIMIT_MS, inputRemindMs: PARKED_REMIND_MS, ...options.runtimeLimits },
       ...(options.log ? { log: options.log } : {}),
     });
   }
@@ -228,7 +233,7 @@ export class RuntimeCoordinator implements Coordinator {
   enqueue(source: RoomAddress, generation: string, parentId: string | undefined, target: RoomAddress, text: string,
     options: HandoffOptions = {}): { node: HandoffView; duplicate: boolean } {
     this.ready();
-    const { approvalGranted = false, rework = false, requestBatchKey, thread } = options;
+    const { rework = false, requestBatchKey, fanOut, thread } = options;
     const mode = options.mode ?? "work";
     const parent = parentId ? this.store.get(parentId) : this.store.get(generation);
     if (!parent) throw new Error(parentId ? NOT_RUNNING : NO_TURN);
@@ -269,11 +274,11 @@ export class RuntimeCoordinator implements Coordinator {
       ...(options.doneWhen ? { doneWhen: options.doneWhen } : {}),
       levels: { own: level.level, ...(level.chief !== undefined ? { chief: level.chief } : {}) },
       ...(level.driverKind !== undefined ? { driverKind: level.driverKind } : {}),
-      approved: approvalGranted,
       ...(target.groupId && requestBatchKey ? { batchKey: requestBatchKey } : {}),
+      ...(fanOut ? { fanOut } : {}),
     });
     if (!result.ok) {
-      if (result.outcome === "budget") throw new Error(BUDGET);
+      if (result.outcome === "budget") throw new Error(budgetRefusal(this.runtime.limits.requests));
       throw new Error(RUNTIME_DEPTH.test(result.reason) ? DEPTH : result.reason);
     }
     return { node: view(result.assignment, parent), duplicate: result.duplicate };
@@ -568,6 +573,7 @@ export class RuntimeCoordinator implements Coordinator {
       },
       run: (a, input, signal) => this.run(a, input, signal),
       park: (a, question, restored) => host.park(this.project(a), question, restored),
+      remind: (a, closesAt) => host.remind?.(this.project(a), closesAt),
       report: (a, parent) => host.report(view(a, parent), parent && this.project(parent)),
       changed: rows => {
         const groups = new Set<string>();
@@ -619,8 +625,9 @@ export class RuntimeCoordinator implements Coordinator {
     if (signal.aborted) return { kind: "failed", outcome: "stopped", text: result.text };
     if (result.cap) return { kind: "continue", text: result.text, note: result.cap.note, ...(result.cap.handoffPath ? { handoffPath: result.cap.handoffPath } : {}), ...evidence(result) };
     if (result.cards) return { kind: "needs_input", question: result.cards.question, cards: result.cards.ids, ...evidence(result) };
-    if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence(result) };
     const question = root ? undefined : needsInputQuestion(result.text);
+    if (!root && a.origin.kind === "person" && result.approvalAsk && !result.stalled && question === undefined) return { kind: "needs_input", question: result.approvalAsk, ...evidence(result) };
+    if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence(result) };
     if (question === undefined) return { kind: "completed", text: result.text, ...(await this.statusOnly(a, parent, input.turn, result, signal) ? { statusOnly: true } : {}), ...evidence(result) };
     const named = withDefault(question);
     const decide = requesterDecides(a) && !result.privateQuestion && !personOnly(named.question) ? { decide: named.default ? { default: named.default } : {} } : {};

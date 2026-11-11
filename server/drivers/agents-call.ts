@@ -15,10 +15,12 @@ import type { HarnessClient, Json } from "./agents-client.ts";
 import { memorySearchText } from "./memory-search-text.ts";
 import { boundedAgentResult } from "./agents-result.ts";
 import { outOfBounds } from "./agents-schema.ts";
+import { dropBlankArguments } from "./agents-blank-arguments.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
 import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.ts";
 import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
+import { callBurstTool } from "./agents-burst-tool.ts";
 import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
 import { callImageTool, IMAGE_TOOL_NAMES } from "./agents-image-tools.ts";
 import { callMeetingTool, MEETING_TOOL_NAMES } from "./agents-meeting-tools.ts";
@@ -206,27 +208,6 @@ function recallWhen(at: unknown, dateOnly: boolean): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   const day = `${said.getFullYear()}-${pad(said.getMonth() + 1)}-${pad(said.getDate())}`;
   return dateOnly ? day : `${day} ${pad(said.getHours())}:${pad(said.getMinutes())}`;
-}
-
-/** The top-level arguments a model may fill with `""` (or spaces) when it means to leave them out, per tool. Only these:
- * elsewhere a blank can be the value itself, such as a cleared room bulletin or a bot's private folder. */
-const BLANK_MEANS_LEFT_OUT: Readonly<Record<string, readonly string[]>> = {
-  coordinate_bots: ["group_id", "reason", "thread", "title", "reply", "done_when", "answers"],
-  session_search: ["thread_id", "message_id", "query", "since", "until", "scope"],
-  show_html: ["html", "jsx", "path"],
-  // A blank text or old_text is a mistake the schema names, not "not given".
-  memory_update: ["until"],
-};
-
-function dropBlankArguments(name: string, input: Json): Json {
-  const keys = Object.hasOwn(BLANK_MEANS_LEFT_OUT, name) ? BLANK_MEANS_LEFT_OUT[name] : undefined;
-  if (!keys || !input || typeof input !== "object" || Array.isArray(input)) return input;
-  const out: Json = { ...input };
-  for (const key of keys) {
-    const value = out[key];
-    if (typeof value === "string" && !value.trim()) delete out[key];
-  }
-  return out;
 }
 
 export async function callTool(called: string, input: Json, context: ToolCallContext): Promise<ToolCallResult> {
@@ -474,7 +455,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const r = await api("/api/internal/threads", { method: "POST", body: JSON.stringify(body) });
     if (r.error && r.state !== "failed") return { text: `Couldn't open that thread: ${String(r.error)}`, isError: true };
     if (r.reportBack === true) {
-      return { text: `Opened thread #${String(r.title ?? title)} on yourself [thread id: ${String(r.threadId ?? "")}]. It starts when this turn ends, and its result comes back to this conversation and resumes you automatically (assignment id: ${String(r.requestId ?? "unknown")}). Mention it to the person as #${String(r.title ?? title)} and finish your turn; do not check or wait for it in this turn.` };
+      return { text: `Opened thread #${String(r.title ?? title)} on yourself [thread id: ${String(r.threadId ?? "")}]. It starts when this turn ends, and its result comes back to this conversation and resumes you automatically (assignment id: ${String(r.requestId ?? "unknown")}). Mention it to the person as #${String(r.title ?? title)} and finish your turn; do not check or wait for it in this turn. To steer it or send it a follow-up, while it runs or after, use coordinate_bots with bot_ids ["${BOT_ID}"] and thread "${String(r.threadId ?? "")}".` };
     }
     const receipt = r.self !== true && Array.isArray(r.receipts) && jsonRecord(r.receipts[0]) ? r.receipts[0] : undefined;
     const threadTitle = String(r.title ?? receipt?.title ?? title);
@@ -503,6 +484,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       text: `${opened}${timing}${approval} Its result will be delivered to this conversation automatically (assignment id: ${assignmentId || "unknown"}). Acknowledge it, mention it to the person as #${threadTitle}, and finish your turn; do not check or wait for it in this turn.`,
     };
   }
+  if (name === "burst") return callBurstTool(args, api);
   if (name === "list_models") {
     const search = typeof args.search === "string" ? args.search.trim() : "";
     const r = await api(`/api/internal/models${search ? `?search=${encodeURIComponent(search)}` : ""}`);
@@ -650,9 +632,10 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (name === "fill_login") {
     const username = typeof args.username === "string" ? args.username.trim().slice(0, 512) : "";
+    const email = typeof args.email === "string" ? args.email.trim().slice(0, 320) : "";
     const r = await api("/api/internal/fill-login", {
       method: "POST",
-      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, ...(username ? { username } : {}), ...(args.submit === false ? { submit: false } : {}) }),
+      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, ...(username ? { username } : {}), ...(email ? { email } : {}), ...(args.submit === false ? { submit: false } : {}) }),
     });
     return { text: typeof r.text === "string" && r.text ? r.text : "fill_login did not answer. Call request_sign_in instead.", ...(r.ok === true ? {} : { isError: true }) };
   }
@@ -977,18 +960,16 @@ async function requestEmailCard(args: Json, context: ToolCallContext): Promise<T
   return { text: "A secure card for the mailbox is ready in OpenMausBot, on the computer and on a freshly QR-paired phone. End this turn now and say in one line that you are waiting for it; OpenMausBot resumes you when the person connects it or declines." };
 }
 
-/** A secret OpenMausBot does not keep: the person agrees to one use, and the bot gets a secretRef or a file path back. */
+/** Any other secret: from the Vault at once, or from a card the person answers; the bot gets a secretRef or a file path back. */
 async function requestCustomSecret(args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const r = await context.client.apiResponse("/api/internal/request-credential", {
     method: "POST",
-    body: JSON.stringify({ fromBotId: context.botId, fromThreadId: context.threadId, label: args.label, reason: args.reason, placeholder: args.placeholder, delivery: args.delivery }),
+    body: JSON.stringify({ fromBotId: context.botId, fromThreadId: context.threadId, label: args.label, reason: args.reason, placeholder: args.placeholder, delivery: args.delivery, replace: args.replace === true }),
   });
   const label = typeof r.body.label === "string" ? r.body.label : "the secret";
   if (!r.ok) return { text: String(r.body.error ?? `request_credential failed (HTTP ${r.status}).`), isError: true };
   if (typeof r.body.text === "string") return { text: `${r.body.text} Continue the task.` };
-  const asked = r.body.savedAs === "ref"
-    ? ` ${label} was saved earlier for OpenMausBot's tools only, not as a file for your commands (not a file request), so this card asks for it again.`
-    : r.body.savedAs === "file" ? ` ${label} was saved earlier as a file for your commands, not as a secretRef, so this card asks for it again.` : "";
+  const asked = r.body.savedAs === "ref" ? ` ${label} was saved earlier for OpenMausBot's tools only, not as a file for your commands (not a file request), so this card asks for it again.` : "";
   return {
     text: `A secure card for ${label} is now in this conversation, in the app and on a QR-paired phone, and the person was notified. If they can't find it, tell them it is in this conversation, and the notification opens it.${asked} End this turn now and say in one line that you are waiting for it; OpenMausBot resumes you when the person saves or declines, and tells you how to use it. Never ask for it in chat.`,
   };

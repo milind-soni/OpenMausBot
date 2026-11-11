@@ -14,7 +14,7 @@ import { Card, CardLabel, LabelAction, panelActionCls, NavRow, RowIcon, rowCls, 
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 
-export const CONVERSATION_ITEMS = ["find", "usage", "activity"];
+export const CONVERSATION_ITEMS = ["find", "start-fresh", "usage", "activity", "inspector"];
 
 /** A ⋯ menu item drawn as a panel row: the same label, icon, value and handler. */
 export function ItemRow({ item }: { item: SidebarMenuItem }) {
@@ -25,6 +25,7 @@ export function ItemRow({ item }: { item: SidebarMenuItem }) {
       type="button"
       data-panel-item={item.key}
       disabled={item.disabled}
+      title={item.title}
       aria-pressed={item.active || undefined}
       onClick={item.onSelect}
       className={cn(rowCls, "w-full rounded-[8px] text-left enabled:hover:bg-ink/[0.04] disabled:cursor-default disabled:opacity-45")}
@@ -34,7 +35,7 @@ export function ItemRow({ item }: { item: SidebarMenuItem }) {
       </span>
       <span className={cn("min-w-0 truncate text-[14px] font-medium", !wrapsValue && "flex-1", item.active ? "text-accent-text" : "text-ink")}>{item.label}</span>
       {item.trailing && <span className={cn("flex items-center", wrapsValue ? "min-w-0 flex-1 justify-end text-right" : "shrink-0")}>{item.trailing}</span>}
-      {item.key !== "find" && <ChevronRight size={15} aria-hidden="true" className="shrink-0 text-ink-tertiary rtl:-scale-x-100" />}
+      {item.key !== "find" && item.key !== "start-fresh" && <ChevronRight size={15} aria-hidden="true" className="shrink-0 text-ink-tertiary rtl:-scale-x-100" />}
     </button>
   );
 }

@@ -396,3 +396,59 @@ describe("routine editor", () => {
     expect(html).not.toContain("What should happen?");
   });
 });
+
+describe("a new routine's audience on a team's Cloud", () => {
+  const quotes = { ...bot, id: "quotes", name: "Quotes", threadId: "mine", mainThreadId: "main", tasks: [
+    { threadId: "main", title: "Shared chat", createdAt: 1, sharedChat: true }, { threadId: "mine", title: "Salary talk", createdAt: 2, private: true },
+  ] } as Bot;
+  const other = { ...bot, id: "other", name: "Other", threadId: "other-main", mainThreadId: "other-main", tasks: [{ threadId: "other-main", title: "Shared chat", createdAt: 1, sharedChat: true }] } as Bot;
+  /** The form as opened with this bot's chat on screen; what it shows, and what Save sends. */
+  function opened(onScreen: Bot, state: Partial<AppState> = {}) {
+    fixture.state = { ...initialState, bots: [onScreen, other], selectedId: onScreen.id, activeView: "chat", config: { box: { configured: false }, team: { id: "t1", name: "Acme" } } as AppState["config"], ...state };
+    fixture.values = [];
+    fixture.api.mockClear();
+    const props = { seed: { kind: "routine" as const, at: Date.now() + 3_600_000, durationMinutes: 30, botIds: [onScreen.id], name: "Salary check", description: "Check the bands" },
+      bots: [onScreen, other], onClose: vi.fn(), onSavedCall: vi.fn() };
+    const tree = () => capture(() => EventEditor(props));
+    const line = () => tree().find(named("RoutineAudience"))!.props as { value: unknown; bot?: Bot; team?: { name: string } };
+    const saved = () => {
+      click(buttons(tree()).get("Save"));
+      return JSON.parse((fixture.api.mock.calls.at(-1) as unknown as [string, { body: string }])[1].body) as { resultsThreadId?: unknown };
+    };
+    return { props, tree, line, saved, html: () => renderToStaticMarkup(createElement(EventEditor, props)) };
+  }
+
+  it("opened from a private chat, it is private: the line says so without opening More options, and Save sends Just me", () => {
+    const form = opened(quotes);
+    expect(form.line()).toMatchObject({ value: "just-me", team: { name: "Acme" } });
+    const html = form.html();
+    expect(html).toContain('data-routine-audience="me"');
+    expect(html).toContain("Private · only you");
+    expect(html, "More options stays closed").not.toContain("Post results to");
+    opened(quotes);
+    expect(opened(quotes).saved().resultsThreadId).toBe("just-me");
+  });
+
+  it("opened from the shared chat, it is shared and says who will see it", () => {
+    const form = opened({ ...quotes, threadId: "main" });
+    expect(form.line().value).toBe("main");
+    expect(form.html()).toContain("Shared · everyone in Acme can see");
+    expect(opened({ ...quotes, threadId: "main" }).saved().resultsThreadId).toBe("main");
+  });
+
+  it("opened where no chat is on screen, or moved to another bot, it is private until the person chooses", () => {
+    expect(opened({ ...quotes, threadId: "main" }, { activeView: "routines" }).saved().resultsThreadId).toBe("just-me");
+    const form = opened({ ...quotes, threadId: "main" });
+    const picker = form.tree().find(named("BotPicker"))!.props as { onChange: (ids: string[]) => void };
+    picker.onChange(["other"]);
+    expect(form.line().value, "the shared chat on screen was Quotes', not Other's").toBe("just-me");
+    expect(form.saved().resultsThreadId).toBe("just-me");
+  });
+
+  it("off a team the form is as it was: no line, and the bot's own results chat", () => {
+    const form = opened(quotes, { config: initialState.config });
+    expect(form.line().team).toBeUndefined();
+    expect(form.html()).not.toContain("data-routine-audience");
+    expect(form.saved().resultsThreadId).toBeNull();
+  });
+});

@@ -116,6 +116,11 @@ export class CloudflareAPIError extends Error {
   }
 }
 
+/** Cloudflare's refusal to delete a tunnel that still has active connections. */
+const TUNNEL_CONNECTED_PROVIDER_CODE = "cf_api_1022";
+/** `deleteTunnel`'s name for it: the tunnel's connector is up. */
+export const TUNNEL_CONNECTED_CODE = "cf_tunnel_connected";
+
 function isNotFound(error: unknown): boolean {
   return error instanceof CloudflareAPIError
     && (error.status === 404 || error.code === "cf_http_404" || error.code === "cf_api_81044");
@@ -485,10 +490,31 @@ export class CloudflareAPI {
     }
   }
 
-  async deleteTunnel(tunnelId: string): Promise<void> {
+  /** `cascade` is what `cloudflared tunnel delete --force` sends; the public
+   * API reference lists no such option, so a caller must not depend on it. */
+  async deleteTunnel(tunnelId: string, { cascade = false }: { cascade?: boolean } = {}): Promise<void> {
     try {
       await this.request(
-        `accounts/${encodeURIComponent(this.config.accountId)}/cfd_tunnel/${encodeURIComponent(tunnelId)}`,
+        `accounts/${encodeURIComponent(this.config.accountId)}/cfd_tunnel/${encodeURIComponent(tunnelId)}${cascade ? "?cascade=true" : ""}`,
+        z.unknown(),
+        { method: "DELETE" },
+      );
+    } catch (error) {
+      if (isNotFound(error)) return;
+      if (error instanceof CloudflareAPIError && error.code === TUNNEL_CONNECTED_PROVIDER_CODE) {
+        throw new CloudflareAPIError(TUNNEL_CONNECTED_CODE, error.status);
+      }
+      throw error;
+    }
+  }
+
+  /** Drops every connector registration of the tunnel, whatever its state
+   * (`DELETE .../cfd_tunnel/{id}/connections`, no `client_id`). A running
+   * cloudflared reconnects within seconds unless the tunnel is gone by then. */
+  async cleanupTunnelConnections(tunnelId: string): Promise<void> {
+    try {
+      await this.request(
+        `accounts/${encodeURIComponent(this.config.accountId)}/cfd_tunnel/${encodeURIComponent(tunnelId)}/connections`,
         z.unknown(),
         { method: "DELETE" },
       );

@@ -119,6 +119,9 @@ To use more than one provider at once, add extra `openai-compat` engines to
 Give each one its own key. An engine without a key uses the key from
 Connections and sends it to that engine's address.
 
+With an OpenAI key or OpenRouter, a model that reasons gets a thinking control
+in the picker: Low, Medium or High. Leave it unset for the model's default.
+
 ### Free OpenRouter models
 
 A new OpenRouter account with no credit can only use free models. Paid models
@@ -238,6 +241,31 @@ list only over HTTPS or to this computer. Check that:
   `127.0.0.1`.
 - The gateway serves the right protocol for the agent and lists models for
   your key.
+
+## Ollama
+
+To add Ollama, open **Settings → AI → API keys → Your own model servers** and find the
+**Ollama** row. MausBot looks for Ollama on this computer by itself. Press
+**Add Ollama** to use what it found, or enter another computer's address and
+press **Check again**.
+
+A chat engine whose address is Ollama shows up as **Ollama**, with Ollama's
+mark, in Settings and the model picker. MausBot treats an address as Ollama
+when it uses Ollama's port (11434), or when an address on this computer or your
+network answers Ollama's own API. An
+address you added before keeps its name, key and model.
+
+- Ollama needs no API key.
+- The picker lists the models you pulled, with their size, parameter count and
+  quantization. Embedding models are left out.
+- A model that can't call tools still chats, but its turns run without tools.
+  The picker marks it **No tools**. Pick a model with tool support, such as
+  `llama3.2` or `qwen3`, for work that needs tools.
+- A model that can think gets a thinking control in the picker: on or off, or
+  the levels Ollama lists for it. Turning it off is usually much faster on a
+  laptop.
+- When Ollama isn't running, can't be reached, or has no models yet, Settings
+  says so and how to fix it. To get a first model, run `ollama pull llama3.2`.
 
 ## Ollama's context window
 

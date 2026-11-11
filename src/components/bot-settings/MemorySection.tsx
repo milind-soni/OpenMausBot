@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
 import {
   MEMORY_INDEX,
+  SOUL_PATH,
   capacityStatus,
   deleteMemoryDoc,
   fetchMemoryDoc,
@@ -71,9 +72,11 @@ function localizedTidySummary(report: Parameters<typeof tidySummary>[0]): string
 }
 
 function localizedJournalSummary(row: MemoryJournalRow, botName: string): string {
-  const who = row.actor === "bot" ? botName : row.actor === "import" ? t("memory.journal.actor.import") : row.actor === "upkeep" ? t("memory.journal.actor.upkeep") : t("memory.journal.actor.you");
+  const who = row.via === "team-setup" ? t("memory.journal.actor.teamSetup") : row.actor === "bot" ? botName
+    : row.actor === "import" ? t("memory.journal.actor.import") : row.actor === "upkeep" ? t("memory.journal.actor.upkeep") : t("memory.journal.actor.you");
   const file = fileLabel(row.path);
-  const topic = row.path === MEMORY_INDEX ? file : row.path.startsWith("memory/log/") ? t("memory.journal.log", { file }) : t("memory.journal.topic", { file });
+  const topic = row.path === MEMORY_INDEX ? file : row.path === SOUL_PATH ? t("memory.journal.instructions")
+    : row.path.startsWith("memory/log/") ? t("memory.journal.log", { file }) : t("memory.journal.topic", { file });
   const lines = (count: number) => t(count === 1 ? "memory.journal.line.one" : "memory.journal.line.many", { count });
   if (row.kind === "created") return t("memory.journal.created", { who, topic, detail: row.added ? t("memory.journal.withLines", { lines: lines(row.added) }) : "" });
   if (row.kind === "deleted") return t("memory.journal.deleted", { who, topic });

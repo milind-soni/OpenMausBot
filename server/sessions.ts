@@ -33,6 +33,8 @@ export const SESSION_TTL_MS = daysMs(process.env.OMB_SESSION_TTL_DAYS, 30);
 /** OMB_SESSION_MAX_DAYS (default 180): renewal never passes this, so a stolen cookie has a bounded life. */
 export const SESSION_MAX_AGE_MS = daysMs(process.env.OMB_SESSION_MAX_DAYS, 180);
 export const SESSION_RENEW_WHEN_LEFT_MS = SESSION_TTL_MS / 2;
+/** A team session the roster check keeps alive was used within this long. */
+const TEAM_ACTIVE_MS = 60 * 60_000;
 
 export function cookieMaxAgeSeconds(session: { expiresAt: number }, now = Date.now()): number {
   return Math.max(1, Math.floor((session.expiresAt - now) / 1000));
@@ -75,6 +77,9 @@ const sessionSchema = z.object({
   /** A team session opened with a code its member made (their phone): when the Admin last vouched for that member. The
    * session ends within the hour of it; each new Admin-signed pairing of the same member, in the same role, moves it. */
   memberCheckedAt: z.number().optional(),
+  /** A team session the Admin's roster check (cloud-team-roster.ts) last found its member in the team, at this role: it ends
+   * within the hour of that, so a browser or app in use stays signed in with no new pairing. */
+  vouchedAt: z.number().optional(),
   /** A browser sign-in (PairingCode `browser`): accepted only as its browser's cookie, never as a bearer token. */
   cookieOnly: z.literal(true).optional(),
   owner: z.string().max(254).optional(),
@@ -499,6 +504,41 @@ export class SessionRegistry {
     }
   }
 
+  /** The team members the roster check asks about: those with a session used within the last hour (never a script's token
+   * or a move-in sign-in, which end as they were made to). At most `max` people, the soonest to end first. */
+  membersToVouch(max: number): string[] {
+    this.prune();
+    const now = this.now(), soonest = new Map<string, number>();
+    for (const session of this.sessions) {
+      if (!this.vouchable(session, now)) continue;
+      soonest.set(session.email!, Math.min(soonest.get(session.email!) ?? Infinity, session.expiresAt));
+    }
+    return [...soonest].sort((a, b) => a[1] - b[1]).slice(0, max).map(([email]) => email);
+  }
+
+  /** A team session the roster check may keep: live, used within the last hour, and not a token or a move-in sign-in. */
+  private vouchable(session: SessionRecord, now: number): boolean {
+    return session.membershipAuthority === "team" && Boolean(session.email) && !session.token && !session.moveIn
+      && session.expiresAt > now && now - session.lastSeenAt <= TEAM_ACTIVE_MS;
+  }
+
+  /** The Admin's roster check found this member in the team at `role` just now. Their sessions at another role end (a role
+   * change the Admin's own pairing didn't reach; never an upgrade). Each of their sessions at that role that was used within
+   * the hour, phones included, ends no later than an hour after its last use: an idle one, left on another computer, still
+   * ends on schedule however much the person uses another device. */
+  vouchMember(email: string, role: TeamRole): void {
+    const address = email.trim().toLowerCase(), now = this.now();
+    this.revokeMember(address, role);
+    let changed = false;
+    for (const session of this.sessions) {
+      if (session.email !== address || session.teamRole !== role || !this.vouchable(session, now)) continue;
+      if (session.memberCheckedAt !== undefined) session.memberCheckedAt = now; else session.vouchedAt = now;
+      const next = Math.min(teamSessionExpiresAt(now, Math.min(now + SESSION_TTL_MS, session.createdAt + SESSION_MAX_AGE_MS)), session.lastSeenAt + TEAM_ACTIVE_MS);
+      if (next > session.expiresAt) { session.expiresAt = next; changed = true; }
+    }
+    if (changed) this.persist();
+  }
+
   issue(input: { label: string; scopes: Scope[]; userId?: string; email?: string }): { token: string; session: PublicSession } {
     return this.issueAccount(input);
   }
@@ -642,7 +682,7 @@ export class SessionRegistry {
     if (!record || record.expiresAt <= now || record.token) return false;
     if (record.expiresAt - now > SESSION_RENEW_WHEN_LEFT_MS) return false;
     const proposed = Math.min(now + SESSION_TTL_MS, record.createdAt + SESSION_MAX_AGE_MS);
-    const next = record.membershipAuthority === "team" ? teamSessionExpiresAt(record.memberCheckedAt ?? record.createdAt, proposed) : proposed;
+    const next = record.membershipAuthority === "team" ? teamSessionExpiresAt(Math.max(record.memberCheckedAt ?? record.createdAt, record.vouchedAt ?? 0), proposed) : proposed;
     if (next <= record.expiresAt) return false;
     record.expiresAt = next;
     record.lastSeenAt = now;
@@ -661,6 +701,18 @@ export class SessionRegistry {
     return this.sessions.map(publicSession);
   }
 
+  /** The stored digest of each live bearer session among `ids`: the phone relay derives a phone's keys from it. */
+  bearerDigests(ids: ReadonlySet<string>): Array<{ id: string; tokenHash: string }> {
+    this.prune();
+    return this.sessions.filter((s) => ids.has(s.id) && !s.cookieOnly && !this.personal(s.scopes)).map((s) => ({ id: s.id, tokenHash: s.tokenHash }));
+  }
+
+  /** The credential digests of the newest open pairing windows a device may redeem (never a browser sign-in's). */
+  pairingDigests(max: number): string[] {
+    this.prune();
+    return this.pairings.filter((p) => !p.browser).sort((a, b) => b.createdAt - a.createdAt).slice(0, max).map((p) => p.credentialHash);
+  }
+
   /** The live sessions a Team Cloud member's own codes opened: their phones. Never an Admin-signed pairing (an app). */
   memberPhones(): PublicSession[] {
     this.prune();
@@ -673,11 +725,35 @@ export class SessionRegistry {
     return this.memberPhones().filter((phone) => this.revoke(phone.id)).length;
   }
 
+  /** The credentials of a person no longer in the team, for a day, by digest only (memory, never stored): their page can say
+   * why it was signed out. */
+  private readonly left = new Map<string, number>();
+  private noteLeft(address: string): void {
+    const now = this.now();
+    for (const [hash, until] of this.left) if (until <= now) this.left.delete(hash);
+    for (const session of this.sessions) {
+      if (session.membershipAuthority === "team" && session.email?.toLowerCase() === address && this.left.size < 5_000) this.left.set(session.tokenHash, now + 86_400_000);
+    }
+  }
+  /** Whether this credential's session ended because its person is no longer in the team. */
+  leftTeam(token: string): boolean {
+    const until = this.left.get(sha256(token));
+    return until !== undefined && until > this.now();
+  }
+
+  /** Remote access turned off on a Team Cloud: every User's browser sign-in signs out. An Owner's and an Admin's stay. */
+  closeMemberBrowsers(): number {
+    this.prune();
+    return this.sessions.filter((session) => session.membershipAuthority === "team" && session.cookieOnly && session.teamRole === "member").map((session) => session.id)
+      .filter((id) => this.revoke(id)).length;
+  }
+
   /** A person who left a Team Cloud: every session of theirs (app windows, phones) ends now, and no open code of theirs
    * can open another. With `keepRole` (the Admin vouched for them at that role), only those at another role end. Returns
    * how many sessions ended. */
   revokeMember(email: string, keepRole?: TeamRole): number {
     const address = email.trim().toLowerCase();
+    if (keepRole === undefined) this.noteLeft(address);
     this.pairings = this.pairings.filter((pairing) => pairing.member?.email.toLowerCase() !== address || pairing.member.role === keepRole);
     const ended = this.sessions.filter((session) => session.membershipAuthority === "team" && session.email?.toLowerCase() === address && (keepRole === undefined || session.teamRole !== keepRole));
     for (const session of ended) this.revoke(session.id);
@@ -701,6 +777,12 @@ export class SessionRegistry {
     const expiresAt = this.now() + STREAM_TICKET_TTL_MS;
     this.tickets.set(sha256(ticket), { sessionId, expiresAt });
     return { ticket, expiresAt };
+  }
+
+  /** Whose a stream ticket is, without spending it. */
+  ticketOwner(ticket: string): string | null {
+    const entry = this.tickets.get(sha256(ticket));
+    return entry && entry.expiresAt > this.now() ? entry.sessionId : null;
   }
 
   redeemStreamTicket(ticket: string): SessionRecord | null {

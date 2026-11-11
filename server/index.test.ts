@@ -2628,17 +2628,17 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("scopes Chief room management to its own department, its peers list and explicit room fields", async () => {
+  it("scopes Chief room management to its own department and explicit room fields", async () => {
     const section = `Chief rooms ${Date.now()}`;
     const bots = await Promise.all(["Chief", "Peer", "Second", "Excluded", "Foreign"].map(async (name, index) => {
       const created = await api("POST", "/api/bots", { name, section: index === 4 ? `${section} foreign` : section });
       expect(created.status).toBe(201);
       return created.body.bot as { id: string; threadId: string };
     }));
-    const [chief, peer, second, excluded, foreign] = bots;
+    const [chief, peer, second, , foreign] = bots;
     const roomIds: string[] = [];
     try {
-      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask", peers: [peer.id, second.id] })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask" })).status).toBe(200);
       const token = await mintTestCapability(BASE, chief.id, chief.threadId);
       const create = (body: unknown) => chiefRoomRequest(BASE, token, "create-room", body);
       const managed = await create({ name: "Managed room", memberIds: [peer.id, peer.id], bulletin: "A short brief." });
@@ -2665,10 +2665,8 @@ describe("harness HTTP API", () => {
       expect((await manage({ action: "new_thread", name: "x".repeat(101) })).status).toBe(400);
       expect((await manage({ action: "new_thread", name: "x".repeat(81) })).status).toBe(400);
       expect((await manage({ action: "new_thread", name: "Line one\nLine two" })).status).toBe(400);
-      for (const memberId of [foreign.id, excluded.id, "missing-bot"]) {
-        expect((await create({ name: "Forbidden room", memberIds: [memberId] })).status).toBe(403);
-        expect((await manage({ action: "add_members", memberIds: [memberId] })).status).toBe(403);
-      }
+      expect((await create({ name: "Forbidden room", memberIds: ["missing-bot"] })).status).toBe(403);
+      expect((await manage({ action: "add_members", memberIds: ["missing-bot"] })).status).toBe(403);
       expect((await create({ name: "Foreign section", memberIds: [peer.id], section: `${section} foreign` })).status).toBe(403);
       expect((await manage({ action: "set_section", section: `${section} foreign` })).status).toBe(403);
       expect((await manage({ action: "set_section" })).status).toBe(400);
@@ -2679,7 +2677,7 @@ describe("harness HTTP API", () => {
       for (const body of [{ action: "set_members", memberIds: [] }, { action: "set_bulletin" }, { action: "set_bulletin", bulletin: "x".repeat(12_001) }, { action: "rename", name: "changed", cwd: "/tmp" }]) {
         expect((await manage(body)).status).toBe(400);
       }
-      for (const [memberIds, roomSection] of [[[foreign.id], `${section} foreign`], [[chief.id, foreign.id], section], [[peer.id], section]] as const) {
+      for (const [memberIds, roomSection] of [[[foreign.id], `${section} foreign`], [[peer.id], section]] as const) {
         const otherRoom = (await api("POST", "/api/groups", { name: "Unmanaged room", memberIds, section: roomSection })).body.group;
         roomIds.push(otherRoom.id);
         expect((await manage({ roomId: otherRoom.id, action: "rename", name: "Forbidden" })).status).toBe(403);
@@ -2689,11 +2687,6 @@ describe("harness HTTP API", () => {
       expect((await api("PATCH", `/api/bots/${second.id}`, { hidden: true })).status).toBe(200);
       expect((await create({ name: "Archived member", memberIds: [second.id] })).status).toBe(403);
       expect((await manage({ action: "add_members", memberIds: [second.id] })).status).toBe(403);
-      expect((await api("PATCH", `/api/bots/${chief.id}`, { approvePeerComms: true })).status).toBe(200);
-      expect((await manage({ action: "rename", name: "No review" })).body.error).toMatch(/peer approval is required/);
-      expect((await manage({ action: "new_thread" })).status).toBe(403);
-      expect((await create({ name: "No review", memberIds: [peer.id] })).status).toBe(403);
-      expect((await api("PATCH", `/api/bots/${chief.id}`, { approvePeerComms: false })).status).toBe(200);
       for (let count = 1; count < 4; count += 1) {
         const created = await create({ name: `Bounded room ${count}`, memberIds: [peer.id] });
         expect(created.status).toBe(201);
@@ -3163,6 +3156,15 @@ describe("harness HTTP API", () => {
       await api("DELETE", `/api/bots/${bot.id}`);
       await api("DELETE", `/api/bots/${foreign.id}`);
     }
+  });
+
+  it("takes a bot PATCH from an older computer that still sends a peers list or a peer-approval switch, and keeps neither", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const patched = await api("PATCH", `/api/bots/${bot.id}`, { name: "From an older computer", peers: ["nobody"], approvePeerComms: true });
+    expect(patched.status).toBe(200);
+    expect(patched.body.bot.name).toBe("From an older computer");
+    expect(patched.body.bot).not.toHaveProperty("peers");
+    expect(patched.body.bot).not.toHaveProperty("approvePeerComms");
   });
 
   it("creates, patches, and deletes a bot", async () => {
@@ -6122,7 +6124,6 @@ describe("harness HTTP API", () => {
       title: "Project Lead",
       autoApprove: true,
       alwaysAllow: ["Bash:git"],
-      approvePeerComms: true,
       chiefOfStaff: true,
       composio: true,
       computer: "off",
@@ -6150,7 +6151,6 @@ describe("harness HTTP API", () => {
             autoApprove: true,
                   alwaysAllow: ["Bash"],
             chiefOfStaff: true,
-            approvePeerComms: false,
             composio: true,
             computer: "local",
             cloudBackend: "vps",
@@ -6170,7 +6170,6 @@ describe("harness HTTP API", () => {
     expect(impostor.autoApprove).toBeUndefined();
     expect(impostor.alwaysAllow).toBeUndefined();
     expect(impostor.chiefOfStaff).toBeUndefined();
-    expect(impostor.approvePeerComms).toBeUndefined();
     expect(impostor.composio).toBe(false);
     expect(impostor.computer).toBeUndefined();
     expect(impostor.cloudBackend).toBeUndefined();
@@ -6184,7 +6183,6 @@ describe("harness HTTP API", () => {
       threadId: trusted.threadId,
       autoApprove: true,
       alwaysAllow: ["Bash:git"],
-      approvePeerComms: true,
       chiefOfStaff: true,
       composio: true,
       computer: "off",
@@ -8610,7 +8608,7 @@ describe("harness HTTP API", () => {
     expect(after).toEqual({ status: 200, body: { servers: [] } });
   });
 
-  it("lets a bot below Full access file an MCP server only as a disabled row", async () => {
+  it("lets a bot below Full access file a command server or a URL on the person's network only as a disabled row", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask" })).status).toBe(200);
     const token = await mintTestCapability(BASE, bot.id, bot.threadId);
@@ -8645,7 +8643,7 @@ describe("harness HTTP API", () => {
 
       const remote = await fileServer({
         name: "botdocs",
-        url: "https://docs.example/mcp",
+        url: "https://docs.internal/mcp",
         type: "sse",
         headers: { Authorization: headerSecret },
         oauth: { clientId: "corp-app", clientSecret: oauthSecret },
@@ -8658,7 +8656,7 @@ describe("harness HTTP API", () => {
       expect(remoteText).not.toContain(oauthSecret);
       const savedRemote = JSON.parse(readFileSync(configFile, "utf8")).mcpServers.botdocs;
       expect(savedRemote).toEqual({
-        type: "sse", url: "https://docs.example/mcp", headers: { Authorization: headerSecret },
+        type: "sse", url: "https://docs.internal/mcp", headers: { Authorization: headerSecret },
         oauth: { clientId: "corp-app", clientSecret: oauthSecret }, enabled: false,
       });
 
@@ -12204,6 +12202,29 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("answers a bot's search of the catalog, and suggests what it looked for first, through the real routes", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const found = await fetch(`${BASE}/api/internal/connectors/find`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ botId: bot.id, threadId: bot.threadId, query: "something for spreadsheets" }),
+      });
+      expect(found.status).toBe(200);
+      expect(((await found.json()) as { text: string }).text).toContain("- googlesheets: Google Sheets (not connected).");
+      const suggested = await api("GET", `/api/connectors/suggestions?botId=${bot.id}&for=notion&limit=3`);
+      expect(suggested.status).toBe(200);
+      expect(suggested.body.cards.map((card: { slug: string }) => card.slug)).toEqual(["googlesheets", "slack", "googledrive"]);
+      expect(suggested.body.pick).toBe("needs-key");
+      expect((await api("POST", "/api/connectors/suggestions/pick")).body.pick).toBe("needs-key");
+    } finally {
+      await api("PUT", "/api/config", { composio: { apiKey: "" } });
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("keeps connecting an app from its card an admin's, though members reach the card's authorize for MCP sign-ins", async () => {
     expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
     const bot = (await api("POST", "/api/bots")).body.bot;
@@ -13660,6 +13681,37 @@ describe("bot memory API", () => {
     } finally { await api("DELETE", `/api/bots/${bot.id}`); }
   });
 
+  it("lists instruction changes in the Changes list's shape, and its Undo puts the old text back", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Soul changes" })).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "Be brief." });
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "Be brief.\nUse metric units." });
+      const list = (await api("GET", `/api/bots/${bot.id}/history?view=changes`)).body;
+      expect(list.rows.map((row: any) => [row.path, row.actor, row.via, row.added, row.removed])).toEqual([["SOUL.md", "person", "api", 1, 0], ["SOUL.md", "person", "api", 1, 0]]);
+      expect(list.rows[0].diff).toContain("+Use metric units.");
+      const undone = await api("POST", `/api/bots/${bot.id}/history/rollback`, { id: list.rows[0].id, expectedRevision: list.revision });
+      expect(undone.body.bot.soul).toBe("Be brief.");
+      expect((await api("GET", `/api/bots/${bot.id}/history?view=changes`)).body.rows[0]).toMatchObject({ via: "revert", removed: 1, canRevert: true });
+    } finally { await api("DELETE", `/api/bots/${bot.id}`); }
+  });
+
+  it("puts rules for every bot ahead of a bot's own instructions, counted in what it loads every turn", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Rules reader" })).body.bot;
+    try {
+      expect((await api("PUT", "/api/config", { everyBotRules: "Answer in British English." })).body.everyBotRules).toBe("Answer in British English.");
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "Be brief." });
+      const preview = (await api("GET", `/api/bots/${bot.id}/system-prompt`)).body;
+      const ids = preview.sections.map((section: any) => section.id);
+      expect(ids.indexOf("every-bot-rules")).toBe(ids.indexOf("soul") - 1);
+      expect(preview.sections.find((section: any) => section.id === "every-bot-rules").text).toContain("Answer in British English.");
+      expect(preview.totalBytes).toBe(preview.sections.reduce((n: number, section: any) => n + section.bytes, 0));
+      expect(preview.heavy).toBe(false);
+    } finally {
+      await api("PUT", "/api/config", { everyBotRules: "" });
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("refuses redacted history restores without changing SOUL and still restores exact safe text", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Redacted history" })).body.bot;
     const file = join(home, ".openmausbot", "bots", bot.id, "history.ndjson");
@@ -13772,13 +13824,12 @@ describe("bot memory API", () => {
     const bot = (await api("POST", "/api/bots", { name: "Kiwi", title: "Tracker", description: "Files bugs." })).body.bot;
     try {
       // Pin the settings-dependent sentences a fresh record would not guarantee (composio false whatever the connector reports).
-      await api("PATCH", `/api/bots/${bot.id}`, { computer: "off", peers: [], composio: false });
+      await api("PATCH", `/api/bots/${bot.id}`, { computer: "off", composio: false });
 
       const fresh = await api("GET", `/api/bots/${bot.id}/overview`);
       expect(fresh.status).toBe(200);
       expect(fresh.body.who.name).toBe("Kiwi");
       expect(fresh.body.wont).toEqual([
-        "Cannot initiate contact with other bots.",
         "Has no connected apps.",
         "Can't use a computer.",
         "Won't act on a schedule.",

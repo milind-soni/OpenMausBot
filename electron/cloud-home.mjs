@@ -27,6 +27,15 @@ export function homeOrigin(value) {
   }
 }
 
+const MAX_FORMER_ORIGINS = 8;
+/** A Cloud's `formerOrigins` beside its `origin` (contract v1, additive; absent from an older Admin): the addresses it
+ * answered at before it moved to another provider. Each a valid home origin, once, never its address now; anything else is
+ * left out, never the Cloud. */
+export function parseFormerOrigins(input, origin) {
+  if (!Array.isArray(input)) return [];
+  return [...new Set(input.slice(0, MAX_FORMER_ORIGINS).map(homeOrigin).filter(former => former && former !== origin))];
+}
+
 export const CLOUD_SETUP_STEPS = Object.freeze(["reserving", "storage", "starting", "checking"]);
 export const CLOUD_UNREACHABLE_CAUSES = Object.freeze(["host", "no_answer"]);
 const GB = 1024 ** 3;
@@ -67,7 +76,8 @@ export function parseCloudSummary(input) {
   const power = parseCloudPower(input.power);
   const homecoming = record(input.hold) ? parseHomecoming(input.hold.homecoming) : null;
   const hold = record(input.hold) && moment(input.hold.until) ? { until: input.hold.until, ...(homecoming ? { homecoming } : {}) } : null;
-  return { status, ...(origin ? { origin } : {}), ...(setup ? { setup } : {}), ...(retryAt ? { retryAt } : {}), ...(disk ? { disk } : {}), ...(unreachable ? { unreachable } : {}), ...(power ? { power } : {}),
+  const formerOrigins = parseFormerOrigins(input.formerOrigins, origin);
+  return { status, ...(origin ? { origin } : {}), ...(formerOrigins.length ? { formerOrigins } : {}), ...(setup ? { setup } : {}), ...(retryAt ? { retryAt } : {}), ...(disk ? { disk } : {}), ...(unreachable ? { unreachable } : {}), ...(power ? { power } : {}),
     ...(input.moves === true ? { moves: true } : {}), ...(hold ? { hold } : {}) };
 }
 
@@ -305,6 +315,13 @@ export function parseCloudTeams(input) {
     teams.push({ id: team.id, name, role: team.role, machine });
   }
   return teams;
+}
+
+/** The session's `landing` (additive): the team an account with no Cloud of its own was invited into, only while the session
+ * lists that team. Null otherwise. */
+export function parseCloudLanding(input, teams) {
+  const teamId = record(input) && typeof input.teamId === "string" ? input.teamId : null;
+  return teamId && teams.some((team) => team.id === teamId) ? { teamId } : null;
 }
 
 export function parsePairingGrant(input, origin, now) {

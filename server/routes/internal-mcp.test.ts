@@ -16,8 +16,9 @@ import * as probeModule from "../mcp-probe.ts";
 import { listMcpServers, parseStoredMcpServer, type StoredMcpServer } from "../mcp-registry.ts";
 import { SecretVault } from "../secret-vault.ts";
 import type { OptionCardData, WireMessage } from "../../shared/wire.ts";
+import type { BotRecord } from "../store.ts";
 import { McpRequestService } from "../host/mcp-requests.ts";
-import { applyMcpChange, createInternalMcpRoutes, showMcpActivity, type InternalMcpDeps } from "./internal-mcp.ts";
+import { applyMcpChange, createInternalMcpRoutes, otherBotsGiven, showMcpActivity, type InternalMcpDeps } from "./internal-mcp.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
 const BOT = "kiwi";
@@ -32,6 +33,8 @@ const PATH_TOKEN = "Zk9QxW2mT7aBcD4eF6gH8jK1";
 const USER_TOKEN = "tok3n9876userinfo";
 const zapier = { type: "http", url: `https://mcp.zapier.com/api/mcp/s/${PATH_TOKEN}/mcp`, headers: { "X-Api-Key": "zap-header-value" }, enabled: true };
 const userinfo = `https://ada:${USER_TOKEN}@mcp.example.com/mcp-server-production/mcp`;
+/** The fixture's DNS: a public name, a name on the person's network, and one that resolves to both. Others fail. */
+const DNS: Record<string, string[]> = { "mcp.linear.app": ["34.117.59.81"], "intranet.example": ["10.0.0.5"], "split.example": ["34.117.59.81", "192.168.1.9"] };
 
 interface Options {
   full?: boolean;
@@ -124,9 +127,14 @@ function fixture(options: Options = {}) {
     },
     ...(options.lender !== undefined ? { lender: () => options.lender ?? null } : {}),
     ...(options.place ? { place: options.place } : {}),
+    lookupHost: async (host) => {
+      const addresses = DNS[host];
+      if (!addresses) throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${host}`), { code: "ENOTFOUND" });
+      return addresses.map((address) => ({ address }));
+    },
   };
   const route = createInternalMcpRoutes(deps);
-  const ref = (value: string) => vault.saveRef(owner, `card-${value}`, "Key", value);
+  const ref = (value: string, item?: string) => vault.saveRef(owner, `card-${value}`, "Key", value, item);
 
   async function call(method: "GET" | "POST", payload: unknown = {}) {
     body = payload;
@@ -239,6 +247,41 @@ describe("internal mcp_server route, Full access", () => {
     expect(body.text).toContain("The new tools arrive on your next turn.");
     expect(decided).toEqual([{ summary: "Added MCP server notes and turned it on", applied: "full-access" }]);
     expect(lines).toEqual(["Added MCP server notes · Turned on · Test: 2 tools"]);
+  });
+
+  it("add of a server other bots get too tells the person which bots, and where to switch it off for one", async () => {
+    probeWith({ ok: true, tools: [{ name: "search_notes" }] });
+    const { post, lines } = fixture({ usedBy: { notes: ["Clive", "Mo"] } });
+    const { status, body } = await post({ action: "add", name: "notes", command: "notes-mcp" });
+    expect(status).toBe(201);
+    expect(body.text).toContain("It is on for your other bots too: Clive and Mo. Tell the person that, and that they can switch it off for one bot in that bot's settings, under Apps it can use.");
+    expect(lines).toEqual(["Added MCP server notes · Turned on · Test: 1 tool · Also on for Clive, Mo: switch it off for one in its settings, under Apps it can use"]);
+  });
+
+  it("add of a server no other bot gets says nothing about other bots", async () => {
+    probeWith({ ok: true, tools: [{ name: "search_notes" }] });
+    const { post, lines } = fixture();
+    const { body } = await post({ action: "add", name: "notes", command: "notes-mcp" });
+    expect(body.text).not.toContain("other bots");
+    expect(lines).toEqual(["Added MCP server notes · Turned on · Test: 1 tool"]);
+  });
+
+  it("enable of a server other bots get too tells the person which bots, and where to switch it off for one", async () => {
+    probeWith({ ok: true, tools: [{ name: "search" }] });
+    const { post, lines } = fixture({ servers: { linear: { ...linear, enabled: false } }, usedBy: { linear: ["Clive"] } });
+    const { status, body } = await post({ action: "enable", name: "linear" });
+    expect(status).toBe(200);
+    expect(body.text).toContain("It is on for your other bots too: Clive.");
+    expect(lines).toEqual(["Turned on MCP server linear · Test: 1 tool · Also on for Clive: switch it off for one in its settings, under Apps it can use"]);
+  });
+
+  it("enable of a server that was already on for everyone, joining only this bot's list, says nothing about other bots", async () => {
+    probeWith({ ok: true, tools: [{ name: "search" }] });
+    const { post, lines } = fixture({ servers: { linear }, mcpServers: [], usedBy: { linear: ["Clive"] } });
+    const { status, body } = await post({ action: "enable", name: "linear" });
+    expect(status).toBe(200);
+    expect(body.text).not.toContain("other bots");
+    expect(lines).toEqual(["Turned on MCP server linear · Test: 1 tool"]);
   });
 
   it("add of an OAuth server returns \"needs sign-in\" and tells the bot to call sign_in", async () => {
@@ -489,6 +532,34 @@ describe("internal mcp_server route, Full access", () => {
     expect(full.cfg.mcpServers?.linear).toEqual(linear);
   });
 
+  it("saves a secretRef kept in the Vault as a vault: pointer, in the file and in text around it, and keeps it across an update", async () => {
+    const { post, stored, ref, cfg } = fixture({ full: true });
+    const item = "11111111-1111-4111-8111-111111111111";
+    const added = await post({ action: "add", name: "notes", command: "npx", args: ["-y", "notes-mcp"], env: { NOTES_TOKEN: ref("sk_fake-one-copy", item), PLAIN: "keep-me" } });
+    expect(added.status).toBe(201);
+    expect((stored("notes") as { env: Record<string, string> }).env).toEqual({ NOTES_TOKEN: `vault:${item}`, PLAIN: "keep-me" });
+    const onDisk = JSON.stringify(cfg.mcpServers);
+    expect(onDisk).toContain(`vault:${item}`);
+    expect(onDisk).not.toContain("sk_fake-one-copy");
+    const other = await post({ action: "add", name: "linear-two", type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: `Bearer ${ref("sk_fake-header", item)}` } });
+    expect(other.status).toBe(201);
+    expect((stored("linear-two") as { headers: Record<string, string> }).headers).toEqual({ Authorization: `Bearer vault:${item}` });
+  });
+
+  it("refuses a vault: value a bot wrote itself, adding or updating, so it can't read a Vault item it was not given", async () => {
+    const { post, cfg } = fixture({ full: true, servers: { notes } });
+    const planted = "vault:11111111-1111-4111-8111-111111111111";
+    for (const payload of [
+      { action: "add", name: "evil", type: "http", url: "https://evil.example/mcp", headers: { Authorization: planted } },
+      { action: "update", name: "notes", env: { NOTES_TOKEN: `x ${planted}` } },
+    ]) {
+      const refused = await post(payload);
+      expect(refused.status).toBe(400);
+      expect(refused.body.error).toContain("secretRef");
+    }
+    expect(JSON.stringify(cfg.mcpServers)).not.toContain(planted);
+  });
+
   it("a secretRef is committed only after the change persists", async () => {
     probeWith({ ok: true, tools: [] });
     const refuse = (name: string) => (name === "blocked" ? "Not approved." : undefined);
@@ -638,21 +709,51 @@ describe("internal mcp_server route, Full access", () => {
 describe("internal mcp_server route, below Full access", () => {
   const PROPOSED = "A card is now visible to the person. End this turn and wait for the decision.";
 
-  it("a non-Full add saves the server off and posts a Turn on card with options Turn on and Cancel", async () => {
-    const probe = probeWith({ ok: true, tools: [] });
-    const { post, stored, lines, chat, card } = fixture({ full: false });
+  it("a non-Full add of a URL server turns it on and tests it, with no card", async () => {
+    const probe = probeWith({ ok: true, tools: [{ name: "list_issues" }] });
+    const { post, stored, lines, chat, decided } = fixture({ full: false });
     const { status, body } = await post({ action: "add", name: "linear", url: "https://mcp.linear.app/mcp?team=acme" });
     expect(status).toBe(201);
-    expect(stored("linear")?.enabled).toBe(false);
+    expect(stored("linear")?.enabled).toBe(true);
+    expect(probe).toHaveBeenCalledOnce();
+    expect(body.text).toContain("Added MCP server linear and turned it on.");
+    expect(body.text).not.toContain(PROPOSED);
+    expect(decided).toEqual([{ summary: "Added MCP server linear and turned it on", applied: "level" }]);
+    expect(lines).toEqual(["Added MCP server linear · Turned on · Test: 1 tool"]);
+    expect(chat).toHaveLength(0);
+  });
+
+  it.each([
+    "http://localhost:3000/mcp", "https://192.168.1.5/mcp", "http://docs.example/mcp", "https://127.0.0.1:8799/mcp",
+    "https://printer.local/mcp", "https://intranet.example/mcp", "https://split.example/mcp", "https://nowhere.example/mcp",
+  ])("a non-Full add of %s, not a public https address, saves it off and posts a Turn on card", async (url) => {
+    const probe = probeWith({ ok: true, tools: [] });
+    const { post, stored, chat, card, decided } = fixture({ full: false });
+    const { status, body } = await post({ action: "add", name: "local", type: "http", url });
+    expect(status).toBe(201);
+    expect(stored("local")?.enabled).toBe(false);
     expect(probe).not.toHaveBeenCalled();
     expect(body.text).toContain(PROPOSED);
-    expect(lines).toEqual(["Added MCP server linear · Switched off"]);
+    expect(decided).toEqual([]);
+    expect(chat).toHaveLength(1);
+    expect(card()).toMatchObject({ title: "Turn on local?", options: ["Turn on", "Cancel"], mcpRequest: { action: "enable", name: "local" } });
+  });
+
+  it("a non-Full add of a command server saves it off and posts a Turn on card, since turning it on runs a program", async () => {
+    const probe = probeWith({ ok: true, tools: [] });
+    const { post, stored, lines, chat, card } = fixture({ full: false });
+    const { status, body } = await post({ action: "add", name: "notes", command: "notes-mcp", args: ["--stdio"] });
+    expect(status).toBe(201);
+    expect(stored("notes")?.enabled).toBe(false);
+    expect(probe).not.toHaveBeenCalled();
+    expect(body.text).toContain(PROPOSED);
+    expect(lines).toEqual(["Added MCP server notes · Switched off"]);
     expect(chat).toHaveLength(1);
     expect(card()).toEqual({
-      title: "Turn on linear?",
-      subtitle: "https://mcp.linear.app/mcp\nReached over the internet. Once on, your bots can use its tools.",
+      title: "Turn on notes?",
+      subtitle: "notes-mcp --stdio\nRuns on this computer.",
       options: ["Turn on", "Cancel"], requestId: expect.any(String), tool: "mcp_server", fixedOptions: true,
-      mcpRequest: { requestId: card()!.requestId, botId: BOT, threadId: THREAD, action: "enable", name: "linear", targetHash: expect.stringMatching(/^[0-9a-f]{64}$/) },
+      mcpRequest: { requestId: card()!.requestId, botId: BOT, threadId: THREAD, action: "enable", name: "notes", targetHash: expect.stringMatching(/^[0-9a-f]{64}$/) },
     });
   });
 
@@ -1048,5 +1149,28 @@ describe("the activity line", () => {
     expect(thread.messages[0]!.tool?.label).toBeUndefined();
     expect(thread.messages).toHaveLength(2);
     expect(thread.messages[1]).not.toHaveProperty("turnId");
+  });
+});
+
+describe("which other bots a server notice names", () => {
+  const bot = (id: string, more: Partial<BotRecord> = {}) => ({ id, name: id.toUpperCase(), ...more }) as BotRecord;
+  const everyone = (_bot: BotRecord) => true;
+
+  it("names the other bots that get the server, not the sender or hidden ones", () => {
+    const sender = bot("a");
+    expect(otherBotsGiven([sender, bot("b"), bot("c", { hidden: true }), bot("d")], sender, (b) => b.id !== "d")).toEqual(["B"]);
+  });
+
+  it("leaves out a bot only admins see when people who are not admins see the sender", () => {
+    const sender = bot("a");
+    const bots = [sender, bot("b"), bot("secret", { visibility: "admins" }), bot("few", { visibility: { people: ["x@example.com"] } })];
+    expect(otherBotsGiven(bots, sender, everyone)).toEqual(["B"]);
+  });
+
+  it("names a restricted bot to a sender whose audience it covers", () => {
+    const sender = bot("a", { visibility: { people: ["x@example.com"] } });
+    const bots = [sender, bot("b"), bot("secret", { visibility: "admins" }), bot("few", { visibility: { people: ["x@example.com", "y@example.com"] } })];
+    expect(otherBotsGiven(bots, sender, everyone)).toEqual(["B", "FEW"]);
+    expect(otherBotsGiven(bots, bot("admin", { visibility: "admins" }), everyone)).toEqual(["A", "B", "SECRET", "FEW"]);
   });
 });

@@ -6,12 +6,38 @@ import type { ProviderSnapshot } from "./contracts.ts";
 
 export const CLOUD_TEAM_ADMIN_PATH = "/api/cloud/team/admin";
 
+/** One of the four words a connection's health is (server/connection-health.ts). */
+export type ConnectionHealthWord = "working" | "needs-sign-in" | "refused" | "unreachable";
+
+/** How the team's connection is doing and where it came from. Every field is absent when unknown: a connection nothing
+ * used, checked or recorded since this was built has none. Times are ISO 8601. */
+export interface ConnectionStatus {
+  /** From real use (tool calls, token refreshes, Test) and a rare background check; for an app, its accounts' own status
+   * when that says it is not working. Absent for a connection each person connects (see `people.states`). */
+  health?: ConnectionHealthWord;
+  /** When `health` was last established. */
+  checkedAt?: string;
+  /** Why it is not working, as a fixed class (connection-health.ts FAILURE_CLASSES): never what a server said. */
+  lastError?: string;
+  /** The last real tool call on it, whatever its outcome. Absent for a connection each person connects. */
+  lastUsedAt?: string;
+  /** The admin who added it, by address and the name they go by on the team (null when they set none). */
+  addedBy?: { email: string; name: string | null };
+  addedAt?: string;
+  /** The team bots that use it (each member's own MausBot is left out). */
+  bots?: string[];
+}
+
+export type PersonConnectionState = "connected" | "needs-sign-in" | "not-connected";
+
 /** The wire shape of `GET /api/cloud/team/admin` (signed by the Admin). */
 export interface TeamAdminSummary {
   v: 1;
-  /** Connected apps (Composio). `available: false`: connected apps are off or unreadable here; `services` is then empty. */
-  apps: { available: boolean; services: { slug: string; status: string; accounts: { id: string; alias: string | null; status: string }[] }[] };
-  mcp: { name: string; transport: "http" | "sse" | "stdio"; host: string | null; enabled: boolean; signedIn: boolean | null; secrets: string[] }[];
+  /** Connected apps (Composio). `available: false`: connected apps are off or unreadable here; `services` is then empty.
+   * An account's `health` is its status word as one of the four (none for a word not known). */
+  apps: { available: boolean; services: ({ slug: string; status: string; accounts: { id: string; alias: string | null; status: string; health?: ConnectionHealthWord }[] } & ConnectionStatus)[] };
+  /** `expiresAt`: when the server's sign-in ends for good, for a sign-in that expires and that nothing can refresh. */
+  mcp: ({ name: string; transport: "http" | "sse" | "stdio"; host: string | null; enabled: boolean; signedIn: boolean | null; secrets: string[]; expiresAt?: string } & ConnectionStatus)[];
   /** The team's own service keys, set or not: treg (X research) and voice (ElevenLabs). `included`: the Cloud's own voice
    * serves the team while no key of its own is set. */
   keys: { id: "treg" | "voice"; configured: boolean; included?: true }[];
@@ -21,8 +47,12 @@ export interface TeamAdminSummary {
   };
   /** The apps (slugs) and MCP servers each person connects for themselves; everything else is the team's. */
   scopes?: { apps: string[]; mcp: string[] };
-  /** Who has connected each of those: addresses only, never a key or token. */
-  people?: { apps: Record<string, string[]>; mcp: Record<string, string[]> };
+  /** Who has connected each of those: addresses only, never a key or token. `states`: each member the Admin paired here,
+   * by address, for each of those only: whether they connected it, never what they did with it. */
+  people?: {
+    apps: Record<string, string[]>; mcp: Record<string, string[]>;
+    states?: { apps: Record<string, Record<string, PersonConnectionState>>; mcp: Record<string, Record<string, PersonConnectionState>> };
+  };
 }
 
 type ListedMcp = { name: string; enabled?: boolean; url?: string; type?: string; command?: string; headerKeys?: string[]; envKeys?: string[]; auth?: string };

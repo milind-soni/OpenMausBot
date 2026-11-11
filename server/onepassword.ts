@@ -3,9 +3,9 @@
 // WebAssembly core it reads from beside itself, so it is never bundled: it is
 // required on first use, and only when a token exists.
 import type { LoginBots, LoginPlace, LoginSummary, OnePasswordStatus, OnePasswordVault } from "../shared/logins.ts";
-import { loginMatchesHost, loginSite, loginUsableBy, normalizeLoginHost } from "../shared/logins.ts";
-import type { FillCandidate } from "./login-fill.ts";
+import { loginSite, normalizeLoginHost } from "../shared/logins.ts";
 import { parseTotpKey } from "./totp.ts";
+import type { LinkedItem, LinkedValue, VaultProvider } from "./vault/providers.ts";
 
 export interface OnePasswordItemFields {
   username: string;
@@ -13,19 +13,20 @@ export interface OnePasswordItemFields {
   totp: string | null;
 }
 
+interface SdkField { id: string; title: string; fieldType: string; value: string }
+export interface OnePasswordItemContent { fields: SdkField[]; notes?: string }
+
 export interface OnePasswordClient {
   vaults(): Promise<Array<{ id: string; title: string }>>;
-  loginItems(vaultId: string): Promise<Array<{ id: string; title: string; urls: string[] }>>;
-  fields(vaultId: string, itemIds: string[]): Promise<Map<string, OnePasswordItemFields>>;
+  items(vaultId: string): Promise<Array<{ id: string; title: string; category: string; urls: string[] }>>;
+  contents(vaultId: string, itemIds: string[]): Promise<Map<string, OnePasswordItemContent>>;
 }
 
-
-interface SdkField { id: string; title: string; fieldType: string; value: string }
 interface SdkClient {
   vaults: { list(): Promise<Array<{ id: string; title: string }>> };
   items: {
     list(vaultId: string): Promise<Array<{ id: string; title: string; category: string; websites?: Array<{ url: string }> }>>;
-    getAll(vaultId: string, itemIds: string[]): Promise<{ individualResponses: Array<{ content?: { id: string; fields: SdkField[] }; error?: unknown }> }>;
+    getAll(vaultId: string, itemIds: string[]): Promise<{ individualResponses: Array<{ content?: { id: string; fields: SdkField[]; notes?: string }; error?: unknown }> }>;
   };
 }
 export interface OnePasswordSdk {
@@ -39,6 +40,27 @@ export function loginFields(fields: readonly SdkField[]): OnePasswordItemFields 
   const password = byId("password") ?? fields.find((field) => field.fieldType === "Concealed" && /pass/iu.test(field.title) && field.value);
   const totp = fields.find((field) => field.fieldType === "Totp" && field.value);
   return { username: username?.value ?? "", password: password?.value ?? "", totp: totp?.value ?? null };
+}
+
+/** The 1Password categories (SDK ItemCategory) whose items are secrets rather than logins. */
+const SECRET_CATEGORIES = new Set(["ApiCredentials", "Password", "SecureNote"]);
+const MAIN_FIELD: Record<string, string> = { ApiCredentials: "credential", Password: "password" };
+const FIELDS_MAX = 20;
+
+/** A secret item's values by field title, with "" for its main one: an API Credential's credential, a Password's
+ * password, a Secure Note's text, or else its first concealed field. */
+export function secretFields(category: string, content: OnePasswordItemContent): Map<string, string> {
+  const values = new Map<string, string>();
+  const usable = content.fields.filter((field) => field.value && (field.fieldType === "Concealed" || field.fieldType === "Text"));
+  const note = category === "SecureNote" ? content.notes : undefined;
+  const main = note ? undefined : usable.find((field) => field.id === MAIN_FIELD[category]) ?? usable.find((field) => field.fieldType === "Concealed");
+  const mainValue = note || main?.value;
+  if (mainValue) values.set("", mainValue);
+  for (const field of usable) {
+    const title = field.title.trim();
+    if (field !== main && title && !values.has(title) && values.size <= FIELDS_MAX) values.set(title, field.value);
+  }
+  return values;
 }
 
 /** The SDK did not load: a fault in this installation, never in the person's token, which was not even checked. */
@@ -59,14 +81,13 @@ export async function sdkOnePasswordClient(sdk: OnePasswordSdk, token: string, v
   const client = await sdk.createClient({ auth: token, integrationName: "OpenMausBot", integrationVersion: version });
   return {
     vaults: async () => (await client.vaults.list()).map((vault) => ({ id: vault.id, title: vault.title })),
-    loginItems: async (vaultId) => (await client.items.list(vaultId))
-      .filter((item) => item.category === "Login" && (item.websites?.length ?? 0) > 0)
-      .map((item) => ({ id: item.id, title: item.title, urls: (item.websites ?? []).map((site) => site.url) })),
-    fields: async (vaultId, itemIds) => {
-      const found = new Map<string, OnePasswordItemFields>();
+    items: async (vaultId) => (await client.items.list(vaultId))
+      .map((item) => ({ id: item.id, title: item.title, category: item.category, urls: (item.websites ?? []).map((site) => site.url) })),
+    contents: async (vaultId, itemIds) => {
+      const found = new Map<string, OnePasswordItemContent>();
       if (!itemIds.length) return found;
       const { individualResponses } = await client.items.getAll(vaultId, itemIds);
-      for (const response of individualResponses) if (response.content) found.set(response.content.id, loginFields(response.content.fields));
+      for (const { content } of individualResponses) if (content) found.set(content.id, { fields: content.fields, ...(content.notes ? { notes: content.notes } : {}) });
       return found;
     },
   };
@@ -81,6 +102,17 @@ interface Entry extends LoginPlace {
   username: string;
   hasTotp: boolean;
 }
+
+interface SecretEntry {
+  id: string;
+  vaultId: string;
+  itemId: string;
+  category: string;
+  name: string;
+  fields: string[];
+}
+
+const isLogin = (item: { category: string; urls: string[] }) => item.category === "Login" && item.urls.length > 0;
 
 const ID_PREFIX = "1password:";
 const MAX_ITEMS = 500;
@@ -115,15 +147,18 @@ export function onePasswordProblem(error: unknown): string {
   return "1Password could not be read. Try again, or connect it again with a new token.";
 }
 
-export class OnePasswordLogins {
+export class OnePasswordLogins implements VaultProvider {
+  readonly id = "1password";
+  readonly label = "1Password";
   private readonly token: () => string | null;
   private readonly connect: (token: string) => Promise<OnePasswordClient>;
   private readonly grants: () => Record<string, LoginBots>;
   private readonly now: () => number;
   private client: { token: string; client: OnePasswordClient } | null = null;
   private entries: Entry[] = [];
+  private secrets: SecretEntry[] = [];
   private vaults: Array<Omit<OnePasswordVault, "bots">> = [];
-  private items = 0;
+  private itemCount = 0;
   private refreshedAt: number | null = null;
   private error: string | undefined;
   private refreshing: Promise<OnePasswordStatus> | null = null;
@@ -142,7 +177,7 @@ export class OnePasswordLogins {
 
   private connected(): OnePasswordStatus {
     const vaults: OnePasswordVault[] = this.vaults.map((vault) => ({ ...vault, bots: this.botsFor(vault.id) }));
-    return { connected: true, vaults, items: this.items, ...(this.error ? { error: this.error } : {}) };
+    return { connected: true, vaults, items: this.itemCount, ...(this.error ? { error: this.error } : {}) };
   }
 
   status(): OnePasswordStatus {
@@ -162,29 +197,38 @@ export class OnePasswordLogins {
 
   refresh(token?: string): Promise<OnePasswordStatus> {
     if (!token && this.refreshing) return this.refreshing;
-    const run = this.read(token).finally(() => { if (this.refreshing === run) this.refreshing = null; });
+    const run = this.load(token).finally(() => { if (this.refreshing === run) this.refreshing = null; });
     if (!token) this.refreshing = run;
     return run;
   }
 
-  private async read(candidate?: string): Promise<OnePasswordStatus> {
+  private async load(candidate?: string): Promise<OnePasswordStatus> {
     const token = candidate ?? this.token();
     if (!token) { this.clear(); return this.status(); }
     try {
       const client = await this.clientFor(token);
       const vaults = await client.vaults();
       const entries: Entry[] = [];
+      const secrets: SecretEntry[] = [];
       const counted: Array<Omit<OnePasswordVault, "bots">> = [];
       for (const vault of vaults) {
         let items = 0;
-        const logins = (await client.loginItems(vault.id)).slice(0, MAX_ITEMS);
-        for (let start = 0; start < logins.length; start += FIELDS_BATCH) {
-          const batch = logins.slice(start, start + FIELDS_BATCH);
-          // The password in this answer is dropped here and read again at fill.
-          const fields = await client.fields(vault.id, batch.map((item) => item.id));
+        const wanted = (await client.items(vault.id)).filter((item) => isLogin(item) || SECRET_CATEGORIES.has(item.category)).slice(0, MAX_ITEMS);
+        for (let start = 0; start < wanted.length; start += FIELDS_BATCH) {
+          const batch = wanted.slice(start, start + FIELDS_BATCH);
+          // Every value in this answer is dropped here and read again when a bot uses it.
+          const contents = await client.contents(vault.id, batch.map((item) => item.id));
           for (const item of batch) {
-            const found = fields.get(item.id);
-            if (!found?.password) continue;
+            const content = contents.get(item.id);
+            if (!content) continue;
+            if (!isLogin(item)) {
+              const fields = secretFields(item.category, content);
+              if (fields.has("")) secrets.push({ id: `${ID_PREFIX}${vault.id}:${item.id}`, vaultId: vault.id, itemId: item.id, category: item.category, name: item.title.trim() || item.category,
+                fields: [...fields.keys()].filter(Boolean) });
+              continue;
+            }
+            const found = loginFields(content.fields);
+            if (!found.password) continue;
             items++;
             for (const [site, hosts] of bySite(new Set(item.urls.flatMap((url) => normalizeLoginHost(url) ?? [])))) {
               entries.push({ id: `${ID_PREFIX}${vault.id}:${item.id}:${site}`, vaultId: vault.id, itemId: item.id, site, hosts, exactHost: false,
@@ -195,8 +239,9 @@ export class OnePasswordLogins {
         counted.push({ id: vault.id, title: vault.title, items });
       }
       this.entries = entries.sort((a, b) => a.site.localeCompare(b.site) || a.username.localeCompare(b.username));
+      this.secrets = secrets.sort((a, b) => a.name.localeCompare(b.name));
       this.vaults = counted.sort((a, b) => a.title.localeCompare(b.title));
-      this.items = counted.reduce((sum, vault) => sum + vault.items, 0);
+      this.itemCount = counted.reduce((sum, vault) => sum + vault.items, 0);
       this.refreshedAt = this.now();
       this.error = undefined;
       return this.connected();
@@ -211,8 +256,9 @@ export class OnePasswordLogins {
   clear(): void {
     this.client = null;
     this.entries = [];
+    this.secrets = [];
     this.vaults = [];
-    this.items = 0;
+    this.itemCount = 0;
     this.refreshedAt = null;
     this.error = undefined;
     this.lastUsed.clear();
@@ -223,45 +269,58 @@ export class OnePasswordLogins {
     if (this.refreshedAt === null || this.now() - this.refreshedAt > STALE_MS) await this.refresh();
   }
 
-  list(): LoginSummary[] {
+  private lastUsedOf(itemId: string): { lastUsedAt?: number } {
+    const at = this.lastUsed.get(itemId);
+    return at === undefined ? {} : { lastUsedAt: at };
+  }
+
+  items(): LinkedItem[] {
     if (!this.token()) return [];
-    return this.entries.map((entry) => ({
-      id: entry.id, site: entry.site, hosts: [...entry.hosts], exactHost: false, username: entry.username, hasTotp: entry.hasTotp, source: "1password",
-      bots: this.botsFor(entry.vaultId), createdAt: 0, ...(this.lastUsed.has(entry.itemId) ? { lastUsedAt: this.lastUsed.get(entry.itemId)! } : {}),
-    }));
+    return [
+      ...this.entries.map((entry): LinkedItem => ({
+        kind: "login", id: entry.id, site: entry.site, hosts: [...entry.hosts], exactHost: false, username: entry.username, hasTotp: entry.hasTotp,
+        source: "1password", bots: this.botsFor(entry.vaultId), createdAt: 0, ...this.lastUsedOf(entry.itemId),
+      })),
+      ...this.secrets.map((entry): LinkedItem => ({
+        kind: "secret", id: entry.id, name: entry.name, fields: [...entry.fields], source: "linked", provider: this.id, bots: this.botsFor(entry.vaultId),
+        readOnly: true, ...this.lastUsedOf(entry.itemId),
+      })),
+    ];
   }
 
-  /** A vault narrowed to other bots is invisible to this one. */
-  private usable(botId: string | readonly string[]): Entry[] {
-    return this.token() ? this.entries.filter((entry) => loginUsableBy({ bots: this.botsFor(entry.vaultId) }, botId)) : [];
+  list(): LoginSummary[] {
+    return this.items().flatMap(({ kind, ...item }) => (kind === "login" ? [item as LoginSummary] : []));
   }
 
-  sitesFor(botId: string | readonly string[]): Array<LoginPlace & { username: string }> {
-    return this.usable(botId).map((entry) => ({ site: entry.site, hosts: [...entry.hosts], exactHost: false, username: entry.username }));
-  }
-
-  candidates(pageHost: string, botId: string | readonly string[]): FillCandidate[] {
+  private async contentOf(vaultId: string, itemId: string): Promise<OnePasswordItemContent | undefined> {
     const token = this.token();
-    if (!token) return [];
-    return this.usable(botId).filter((entry) => loginMatchesHost(entry, pageHost)).map((entry) => ({
-      id: entry.id, site: entry.site, hosts: [...entry.hosts], exactHost: false, username: entry.username, source: "1password" as const,
-      secrets: async () => {
-        let found: OnePasswordItemFields | undefined;
-        try {
-          const client = await this.clientFor(token);
-          found = (await client.fields(entry.vaultId, [entry.itemId])).get(entry.itemId);
-        } catch (error) {
-          this.client = null;
-          throw new Error(onePasswordProblem(error));
-        }
-        if (!found?.password) throw new Error("This login is no longer in 1Password, or has no password there.");
-        return { password: found.password, totp: found.totp ? parseTotpKey(found.totp) : null };
-      },
-    }));
+    if (!token) return undefined;
+    try {
+      const client = await this.clientFor(token);
+      return (await client.contents(vaultId, [itemId])).get(itemId);
+    } catch (error) {
+      this.client = null;
+      throw new Error(onePasswordProblem(error));
+    }
+  }
+
+  async read(itemId: string, field?: string): Promise<LinkedValue> {
+    const login = this.entries.find((entry) => entry.id === itemId);
+    if (login) {
+      const content = await this.contentOf(login.vaultId, login.itemId);
+      if (!content) return {};
+      const found = loginFields(content.fields);
+      return { password: found.password, totp: found.totp ? parseTotpKey(found.totp) : null };
+    }
+    const secret = this.secrets.find((entry) => entry.id === itemId);
+    const content = secret && await this.contentOf(secret.vaultId, secret.itemId);
+    if (!secret || !content) return {};
+    const value = secretFields(secret.category, content).get(field ?? "");
+    return value ? { value } : {};
   }
 
   markUsed(id: string): void {
-    const entry = this.entries.find((candidate) => candidate.id === id);
+    const entry = this.entries.find((candidate) => candidate.id === id) ?? this.secrets.find((candidate) => candidate.id === id);
     if (entry) this.lastUsed.set(entry.itemId, this.now());
   }
 }

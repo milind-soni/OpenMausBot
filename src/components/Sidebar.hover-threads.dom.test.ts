@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { initialState, type Bot } from "@/state/store";
 import { BotListItem, botRowProps } from "./Sidebar";
+import { RecentChatsPopup, useRecentChatsPopup } from "./SidebarRecentChats";
 
 vi.mock("@/lib/interface-mode", async (original) => ({ ...await original<typeof import("@/lib/interface-mode")>(), useAdvancedMode: () => true }));
 vi.mock("@/lib/thread-preferences", async (original) => ({ ...await original<typeof import("@/lib/thread-preferences")>(), useShowThreads: () => true }));
@@ -47,4 +48,28 @@ it("moves keyboard focus into recent chats and closes when focus leaves", async 
   await act(async () => { outside.focus(); });
   expect(document.querySelector('[data-recent-chats-popup="atlas"]')).toBeNull();
   await act(async () => { root.unmount(); });
+});
+
+it("focuses an empty popup and dismisses it after its menu closes", async () => {
+  vi.useFakeTimers();
+  function Fixture() {
+    const { popover, rowRef, popupRef, cancelClose, closeLater, openPopover } = useRecentChatsPopup();
+    return createElement("div", { ref: rowRef },
+      createElement("button", { onClick: () => openPopover(true) }, "Open"),
+      popover && createElement(RecentChatsPopup, { popupRef, botId: "test", position: popover, onEnter: cancelClose, onLeave: closeLater, children: null }));
+  }
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  await act(async () => { root.render(createElement(Fixture)); });
+  await act(async () => { host.querySelector("button")!.click(); });
+  const popup = document.querySelector<HTMLElement>('[data-recent-chats-popup="test"]')!;
+  expect(document.activeElement).toBe(popup);
+  const overlay = document.body.appendChild(document.createElement("div"));
+  overlay.setAttribute("data-thread-overlay", "");
+  await act(async () => { (document.activeElement as HTMLElement).blur(); popup.dispatchEvent(new MouseEvent("mouseout", { bubbles: true })); await vi.advanceTimersByTimeAsync(250); });
+  expect(document.body.contains(popup)).toBe(true);
+  await act(async () => { overlay.remove(); await Promise.resolve(); await vi.advanceTimersByTimeAsync(250); });
+  expect(document.body.contains(popup)).toBe(false);
+  await act(async () => { root.unmount(); });
+  vi.useRealTimers();
 });

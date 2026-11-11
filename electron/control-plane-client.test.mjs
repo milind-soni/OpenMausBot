@@ -274,6 +274,77 @@ describe("control-plane desktop client", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(9);
   });
 
+  it("says a self-hosted server is one only when told to, on registration, its address and its relay token", async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      const path = new URL(url).pathname;
+      if (path === "/v1/installations" ) return jsonResponse({ installation: { id: INSTALL_ID, clientInstanceId: "server-1", name: "vps", platform: "linux" }, credential: INSTALL }, { status: 201 });
+      if (path === "/v1/installations/self/endpoint") return jsonResponse({ endpoint: { url: "https://c-opaque.mausbot.si" }, connectorToken: `eyJ${"x".repeat(80)}` });
+      return jsonResponse({ token: "a.b", hostId: "h", nodes: [], expiresAt: 1, refreshAfter: 1 });
+    });
+    const client = createControlPlaneClient({ baseURL: "https://accounts.openmausbot.com", fetchImpl });
+    const body = () => JSON.parse(fetchImpl.mock.lastCall[1].body);
+    const register = (kind) => client.ensureInstallation({ accountToken: ACCOUNT, currentCredential: "", clientInstanceId: "server-1", name: "vps", platform: "linux", appVersion: "0.1.153", kind });
+    fetchImpl.mockImplementationOnce(async () => jsonResponse({ installations: [] }));
+    await register("server");
+    expect(body()).toEqual({ clientInstanceId: "server-1", name: "vps", platform: "linux", appVersion: "0.1.153", kind: "server" });
+    fetchImpl.mockImplementationOnce(async () => jsonResponse({ installations: [] }));
+    await register(undefined);
+    expect(body()).toEqual({ clientInstanceId: "server-1", name: "vps", platform: "linux", appVersion: "0.1.153" });
+    await client.ensureEndpoint(INSTALL, { appVersion: "0.1.153", kind: "server" });
+    expect(body()).toEqual({ appVersion: "0.1.153", kind: "server" });
+    await client.ensureEndpoint(INSTALL, { appVersion: "0.1.153", kind: "laptop" });
+    expect(body()).toEqual({ appVersion: "0.1.153" });
+    await client.relayToken(INSTALL, { appVersion: "0.1.153", devices: { e2e: 1, legacy: 0 }, kind: "server" });
+    expect(body()).toEqual({ appVersion: "0.1.153", devices: { e2e: 1, legacy: 0 }, kind: "server" });
+    await client.relayToken(INSTALL, { appVersion: "0.1.153", devices: { e2e: 1, legacy: 0 } });
+    expect(body()).toEqual({ appVersion: "0.1.153", devices: { e2e: 1, legacy: 0 } });
+  });
+
+  it("asks once more without its kind when a control plane older than the field refuses it, and only then", async () => {
+    const bodies = [];
+    let answers = [];
+    const fetchImpl = vi.fn(async (_url, init) => {
+      bodies.push(init.body === undefined ? undefined : JSON.parse(init.body));
+      const next = answers.shift() ?? 200;
+      return next === 200
+        ? jsonResponse({ endpoint: { url: "https://c-opaque.mausbot.si" }, connectorToken: `eyJ${"x".repeat(80)}`, token: "a.b" })
+        : jsonResponse({ error: next === 400 ? "invalid_request" : "rate_limited" }, { status: next });
+    });
+    const client = createControlPlaneClient({ baseURL: "https://accounts.openmausbot.com", fetchImpl });
+
+    answers = [400];
+    await client.ensureEndpoint(INSTALL, { appVersion: "0.1.153", kind: "server" });
+    expect(bodies).toEqual([{ appVersion: "0.1.153", kind: "server" }, { appVersion: "0.1.153" }]);
+    bodies.length = 0;
+    answers = [400];
+    await client.relayToken(INSTALL, { appVersion: "0.1.153", devices: { e2e: 1, legacy: 0 }, kind: "server" });
+    expect(bodies).toEqual([{ appVersion: "0.1.153", devices: { e2e: 1, legacy: 0 }, kind: "server" }, { appVersion: "0.1.153", devices: { e2e: 1, legacy: 0 } }]);
+
+    // Once only, only for that refusal, and never for a request that carried no kind.
+    for (const [kind, refusals, calls] of [["server", [400, 400], 2], ["server", [429], 1], [undefined, [400], 1]]) {
+      bodies.length = 0;
+      answers = refusals;
+      await expect(client.ensureEndpoint(INSTALL, { appVersion: "0.1.153", kind })).rejects.toBeInstanceOf(ControlPlaneError);
+      expect(bodies, `${kind} ${refusals}`).toHaveLength(calls);
+    }
+  });
+
+  it("reads why a relay-capable computer goes without a tunnel, and nothing else from the body", async () => {
+    for (const [body, tunnel] of [
+      [{ error: "relay_capable", tunnel: "retired" }, "retired"],
+      [{ error: "relay_capable", tunnel: "full" }, "full"],
+      [{ error: "relay_capable" }, null],
+      [{ error: "relay_capable", tunnel: "<b>anything</b>" }, null],
+      [{ error: "endpoint_capacity", tunnel: "retired" }, null],
+    ]) {
+      const client = createControlPlaneClient({
+        baseURL: "https://accounts.openmausbot.com",
+        fetchImpl: vi.fn(async () => jsonResponse(body, { status: 409 })),
+      });
+      await expect(client.ensureEndpoint(INSTALL, { appVersion: "0.1.152", legacyDevices: 1 })).rejects.toMatchObject({ code: body.error, tunnel });
+    }
+  });
+
   it("maps bounded server error codes and hides arbitrary response text", async () => {
     const client = createControlPlaneClient({
       baseURL: "https://accounts.openmausbot.com",

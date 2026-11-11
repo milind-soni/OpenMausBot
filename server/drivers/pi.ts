@@ -10,7 +10,8 @@ import { join } from "node:path";
 import { PROVIDER_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "../config.ts";
 import { openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { augmentedPath } from "../env-path.ts";
-import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
+import { describeSpawnFailure, execCliBoxed, killCliTree, spawnCli } from "../procs.ts";
+import { instanceEnvNames } from "../bot-box/env.ts";
 import {
   deletePromptSplitReceipt,
   promptHalves,
@@ -257,11 +258,14 @@ function readPiDefaultModel(env: Record<string, string | undefined>): string {
   }
 }
 
+/** Security: Pi loads its extensions from ~/.pi/agent on every start, so while the bot box is on its model list runs in
+ * the box, as a bot's turn does. `allowEnv`: the keys the instance's own settings put in `env`. */
 export async function fetchPiModels(
   cli: string,
   env: Record<string, string | undefined>,
+  allowEnv: readonly string[] = [],
 ): Promise<ModelCatalog> {
-  const child = spawnCli(cli, PI_ARGS, { stdio: ["pipe", "pipe", "pipe"], env });
+  const child = spawnCli(cli, PI_ARGS, { stdio: ["pipe", "pipe", "pipe"], env, box: { allowEnv } });
   return new Promise((resolve) => {
     let done = false;
     const fallbackDefault = readPiDefaultModel(env);
@@ -298,14 +302,10 @@ export async function fetchPiModels(
 export async function updatePiModelCatalog(
   cli: string,
   env: Record<string, string | undefined>,
+  allowEnv: readonly string[] = [],
 ): Promise<boolean> {
   return new Promise((resolve) => {
-    execCli(
-      cli,
-      PI_MODEL_UPDATE_ARGS,
-      { env, timeout: 60_000, maxBuffer: 1024 * 1024 },
-      (error) => resolve(!error),
-    );
+    execCliBoxed(cli, PI_MODEL_UPDATE_ARGS, { env, timeout: 60_000, maxBuffer: 1024 * 1024, box: { allowEnv } }, (error) => resolve(!error));
   });
 }
 
@@ -382,7 +382,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
     const readModels = async () => {
       let base = models, listed = false;
       try {
-        const resolved = await fetchPiModels(config.cli, catalogEnv);
+        const resolved = await fetchPiModels(config.cli, catalogEnv, instanceEnvNames(input.environment, catalogEnv));
         if (resolved.options.length) [base, listed] = [resolved, true];
       } catch {}
       try {
@@ -394,7 +394,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       try { if (!listed) unconfirmedModelCatalog(models); writeStartupModelCache(instanceId, models); } catch {}
     };
     const refreshModels = async () => {
-      await updatePiModelCatalog(config.cli, catalogEnv);
+      await updatePiModelCatalog(config.cli, catalogEnv, instanceEnvNames(input.environment, catalogEnv));
       await readModels();
     };
     const startupModelRefresh = (await openStartupModelCatalog({
@@ -730,11 +730,11 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           case "auto_compaction_end": {
             if (agentEndTimer) clearTimeout(agentEndTimer);
             agentEndTimer = null;
-            // pi compaction (manual or automatic) can absorb the turn that carried the standing prompt.
-            if (sessionReady && sessionFile) {
+            if (sessionReady && sessionFile) { // pi compaction (manual or automatic) can absorb the turn that carried the standing prompt
               compactionObserved = true;
               deletePromptSplitReceipt("pi", JSON.stringify([threadId, sessionFile]));
             }
+            if (evt.type.endsWith("compaction_end") && typeof (evt as { result?: { summary?: unknown } }).result?.summary === "string" && /\S/.test((evt as { result: { summary: string } }).result.summary) && !(evt as { aborted?: boolean }).aborted && !(evt as { errorMessage?: string }).errorMessage) { flushAssistantText(); emit({ ...base(threadId, turnId), type: "context.compacted" }); }
             return;
           }
           case "message_end":

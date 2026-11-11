@@ -15,6 +15,7 @@ const processes = new Map<string, Process>();
 const calls: Array<{ method: string; path: string; query: string; body: any; authorization?: string }> = [];
 let nextProcessId = 41;
 let hold = false;
+let holdStatusAfterFirst = false;
 let syncReply: Record<string, unknown> = { exitCode: 0, stdout: "done", stderr: "" };
 let startReply: { status: number; body: unknown } | undefined;
 let statusReply: { status: number; body: unknown } | undefined;
@@ -42,6 +43,7 @@ beforeAll(async () => {
       if (statusReply) return send(statusReply.status, statusReply.body);
       const process = processes.get(`${box}:${pid}`);
       if (!process) return send(404, { ok: false, code: "not_found", message: "No such process." });
+      if (holdStatusAfterFirst && process.polls > 0) return;
       const running = process.polls++ < process.runningFor;
       return send(200, {
         ok: true, type: "command.status", success: true, processId: Number(pid), status: running ? "running" : process.lost ? "lost" : "exited", running,
@@ -56,9 +58,125 @@ beforeAll(async () => {
   background = await import("./cloud-computer-background.ts");
   journal = await import("./boat-delete-journal.ts");
 });
+
+describe("background status deadlines", () => {
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it("waits out a slow first status read instead of cutting it at the requested wait", async () => {
+    vi.useFakeTimers();
+    const clock = {
+      now: () => Date.now(),
+      sleep: (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
+      timeout: (ms: number) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), ms);
+        return controller.signal;
+      },
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Promise<Response>(resolve => {
+      setTimeout(() => resolve(Response.json({ running: false, exitCode: 0, stdout: "done", stderr: "" })), 1_500);
+    }));
+    const pending = background.backgroundStatus({ box: { token: OWN_KEY } } as AppConfig, BOX,
+      { process_id: background.processIdOn(BOX, 41), wait_seconds: 1 }, new AbortController().signal, clock);
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(json(await pending)).toMatchObject({ status: "finished", exitCode: 0, stdout: "done" });
+  });
+
+  it("does not start another read when a delayed sleep passes the deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const clock = {
+      now: () => Date.now(),
+      sleep: (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms + 1_000)),
+      timeout: (ms: number) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), ms);
+        return controller.signal;
+      },
+    };
+    const fetchStatus = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ running: true, stdout: "partial", stderr: "" }));
+    const pending = background.backgroundStatus({ box: { token: OWN_KEY } } as AppConfig, BOX,
+      { process_id: background.processIdOn(BOX, 41), wait_seconds: 1 }, new AbortController().signal, clock);
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(fetchStatus).toHaveBeenCalledTimes(1);
+    expect(json(await pending)).toMatchObject({ status: "running", observedAt: "2026-01-01T00:00:00.000Z", note: expect.stringContaining("may have changed") });
+  });
+
+  it("propagates cancellation during the final wait", async () => {
+    vi.useFakeTimers();
+    const clock = {
+      now: () => Date.now(),
+      sleep: (ms: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, ms);
+        signal.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+      }),
+      timeout: (ms: number) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), ms);
+        return controller.signal;
+      },
+    };
+    const fetchStatus = vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({ running: true, stdout: "", stderr: "" }));
+    const controller = new AbortController();
+    const pending = background.backgroundStatus({ box: { token: OWN_KEY } } as AppConfig, BOX,
+      { process_id: background.processIdOn(BOX, 41), wait_seconds: 1 }, controller.signal, clock);
+    const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersToNextTimerAsync();
+    expect(fetchStatus).toHaveBeenCalledTimes(2);
+    controller.abort();
+    await rejected;
+    expect(fetchStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["finished", "running", "late", "slow", "timeout", "last_timeout", "not_found", "server_error", "malformed"] as const)("checks a short wait on a controlled clock: %s", async outcome => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const clock = {
+      now: () => Date.now(),
+      sleep: (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
+      timeout: (ms: number) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), ms);
+        return controller.signal;
+      },
+    };
+    const fetchStatus = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (fetchStatus.mock.calls.length === 1) return Response.json({ running: true, stdout: outcome === "server_error" ? "x".repeat(4_001) : "partial", stderr: "" });
+      if (outcome === "slow") return new Promise<Response>(resolve => setTimeout(() => resolve(Response.json({ running: false, exitCode: 3, stdout: "final", stderr: "" })), 400));
+      if (outcome === "not_found" || outcome === "server_error") return Response.json({ message: "unavailable" }, { status: outcome === "not_found" ? 404 : 503 });
+      if (outcome === "malformed") return Response.json({});
+      if (outcome !== "timeout" && !(outcome === "last_timeout" && fetchStatus.mock.calls.length === 3)) return Response.json({ running: outcome === "running" || outcome === "last_timeout" || (outcome === "late" && Date.now() < Date.parse("2026-01-01T00:00:00.700Z")), exitCode: 3, stdout: "final", stderr: "" });
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
+      });
+    });
+    const processId = background.processIdOn(BOX, 41);
+    const pending = background.backgroundStatus({ box: { token: OWN_KEY } } as AppConfig, BOX,
+      { process_id: processId, wait_seconds: 1 }, new AbortController().signal, clock);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fetchStatus).toHaveBeenCalledTimes(outcome === "running" || outcome === "late" || outcome === "last_timeout" ? 3 : 2);
+    const raw = await pending;
+    const result = json(raw);
+    if (outcome === "timeout") {
+      expect(result).toMatchObject({ status: "running", exitCode: null, stdout: "partial", observedAt: "2026-01-01T00:00:00.000Z", note: expect.stringContaining("may have changed") });
+    } else if (outcome === "last_timeout") {
+      expect(result).toMatchObject({ status: "running", exitCode: null, stdout: "final", observedAt: "2026-01-01T00:00:00.500Z", note: expect.stringContaining("may have changed") });
+    } else if (outcome === "not_found" || outcome === "server_error" || outcome === "malformed") {
+      expect(raw.isError).toBe(true);
+      expect(result).toMatchObject({ error: expect.any(String), lastObserved: { processId, status: "running", observedAt: "2026-01-01T00:00:00.000Z", stdout: outcome === "server_error" ? "x".repeat(4_000) : "partial", stderr: "", note: expect.stringContaining("may have changed") } });
+      if (outcome === "server_error") expect(result.lastObserved.outputCut).toContain("Only the end");
+      if (outcome === "not_found") expect(result.error).toContain("no background command");
+      if (outcome === "malformed") expect(result.error).toContain("unreadable answer");
+    } else {
+      expect(result).toMatchObject({ status: outcome === "running" ? "running" : "finished", exitCode: outcome === "running" ? null : 3, stdout: "final" });
+      expect(result.observedAt).toBeUndefined();
+    }
+  });
+});
 afterAll(async () => { vi.unstubAllEnvs(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
 beforeEach(() => {
-  calls.length = 0; processes.clear(); hold = false; startReply = undefined; statusReply = undefined;
+  calls.length = 0; processes.clear(); hold = false; holdStatusAfterFirst = false; startReply = undefined; statusReply = undefined;
   syncReply = { exitCode: 0, stdout: "done", stderr: "" };
 });
 
@@ -91,6 +209,10 @@ describe.each([
     const result = await started.done;
     expect(result.isError).not.toBe(true);
     expect(json(result)).toMatchObject({ processId: expect.stringMatching(new RegExp(background.PROCESS_ID_PATTERN)), status: "running" });
+    expect(json(result).next).toContain("completion will not automatically resume this turn or notify a delegator");
+    expect(json(result).next).toContain("use exec_status with wait_seconds in this turn");
+    expect(json(result).next).toContain("check its exit code and output");
+    expect(json(result).next).toContain("report it as unfinished with the process_id");
     expect([started.gated(), started.checks()]).toEqual([1, 2]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ method: "POST", path: `${root}/${BOX}/commands`, authorization, body: { detached: true } });
@@ -111,12 +233,18 @@ describe.each([
     expect(reads.map(entry => [entry.path, entry.query, entry.authorization])).toEqual(Array(2).fill([`${root}/${BOX}/commands/${processId.split("-")[1]}`, "?tailBytes=12000", authorization]));
   });
 
+  it.each([0, 3])("keeps one background command through terminal exit %i", async (exitCode) => {
+    const processId = await start();
+    Object.assign(processes.get(`${BOX}:${processId.split("-")[1]}`)!, { runningFor: 1, exitCode, stdout: "receipt" });
+    expect(json(await call("exec_status", { process_id: processId }).done)).toMatchObject({ status: "running", exitCode: null });
+    expect(json(await call("exec_status", { process_id: processId, wait_seconds: 1 }).done)).toMatchObject({ status: "finished", exitCode, stdout: "receipt" });
+    expect(calls.filter(entry => entry.method === "POST")).toHaveLength(1);
+  });
+
   it("waits for the command to finish when asked, polling the computer rather than the bot", async () => {
     const processId = await start();
     Object.assign(processes.get(`${BOX}:${processId.split("-")[1]}`)!, { runningFor: 2, stdout: "loaded\n" });
-    const began = Date.now();
     expect(json(await call("exec_status", { process_id: processId, wait_seconds: 30 }).done)).toMatchObject({ status: "finished", exitCode: 0, stdout: "loaded\n" });
-    expect(Date.now() - began).toBeGreaterThanOrEqual(3_500);
     expect(calls.filter(entry => entry.method === "GET")).toHaveLength(3);
   });
 
@@ -124,7 +252,28 @@ describe.each([
     const processId = await start();
     processes.get(`${BOX}:${processId.split("-")[1]}`)!.runningFor = 100;
     expect(json(await call("exec_status", { process_id: processId, wait_seconds: 3 }).done)).toMatchObject({ status: "running", exitCode: null });
+  });
+
+  it("bounds a stalled follow-up status read by the requested wait", async () => {
+    const processId = await start();
+    processes.get(`${BOX}:${processId.split("-")[1]}`)!.stdout = "partial output";
+    holdStatusAfterFirst = true;
+    const result = await call("exec_status", { process_id: processId, wait_seconds: 3 }).done;
+    expect(result.isError).not.toBe(true);
+    expect(json(result)).toMatchObject({ status: "running", stdout: "partial output", observedAt: expect.any(String), note: expect.stringContaining("may have changed") });
     expect(calls.filter(entry => entry.method === "GET")).toHaveLength(2);
+    server.closeAllConnections();
+  });
+
+  it("propagates cancellation during a follow-up status read", async () => {
+    const processId = await start();
+    holdStatusAfterFirst = true;
+    const controller = new AbortController();
+    const pending = background.backgroundStatus(cfg, BOX, { process_id: processId, wait_seconds: 1 }, controller.signal);
+    await expect.poll(() => calls.filter(entry => entry.method === "GET").length).toBe(2);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    server.closeAllConnections();
   });
 
   it("returns only the end of long output, and never half a character", async () => {
