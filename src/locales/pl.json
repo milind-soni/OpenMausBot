@@ -5387,6 +5387,7 @@
   "place.view.ccNoHours.short": "Brak godzin",
   "place.view.ccNoHours.line": "Wykorzystano miesięczny limit godzin pulpitu w chmurze: {hours}. Wracają 1. dnia miesiąca {month}.",
   "place.view.ccNoHours.lineUnknown": "Wykorzystano wszystkie godziny pulpitu w chmurze na ten miesiąc.",
+  "place.view.ccNoHours.lineTrial": "Wykorzystano wszystkie godziny pulpitu w chmurze z bezpłatnego okresu próbnego. Pełny limit zaczyna się od pierwszej płatności.",
   "place.view.ccAtOnce.short": "W użyciu",
   "place.view.ccAtOnce.lineOne": "Twój plan {plan} obejmuje 1 pulpit w chmurze, a korzysta z niego {holders}.",
   "place.view.ccAtOnce.lineMany": "Twój plan {plan} obejmuje pulpity w chmurze: {max}, a korzystają z nich {holders}.",

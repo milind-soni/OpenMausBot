@@ -6035,6 +6035,7 @@
   "place.view.ccNoHours.short": "残り時間なし",
   "place.view.ccNoHours.line": "今月のクラウドデスクトップ利用時間 {hours} 時間を使い切りました。{month} 1 日にリセットされます。",
   "place.view.ccNoHours.lineUnknown": "今月のクラウドデスクトップ利用時間を使い切りました。",
+  "place.view.ccNoHours.lineTrial": "無料トライアルのクラウドデスクトップ利用時間を使い切りました。最初のお支払いから通常の利用枠が始まります。",
   "place.view.ccAtOnce.short": "使用中",
   "place.view.ccAtOnce.lineOne": "{plan} プランにはクラウドデスクトップ 1 台が含まれ、{holders} が使用中です。",
   "place.view.ccAtOnce.lineMany": "{plan} プランにはクラウドデスクトップ {max} 台が含まれ、{holders} が使用中です。",

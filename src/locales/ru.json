@@ -5438,6 +5438,7 @@
   "place.view.ccNoHours.short": "Часы закончились",
   "place.view.ccNoHours.line": "Часы облачного рабочего стола на этот месяц ({hours}) израсходованы. Они вернутся 1 {month}.",
   "place.view.ccNoHours.lineUnknown": "Часы облачного рабочего стола на этот месяц израсходованы.",
+  "place.view.ccNoHours.lineTrial": "Часы облачного рабочего стола бесплатного пробного периода израсходованы. Полный объём начнётся с первого платежа.",
   "place.view.ccAtOnce.short": "Занят",
   "place.view.ccAtOnce.lineOne": "Ваш тариф {plan} включает 1 облачный рабочий стол, и он занят ({holders}).",
   "place.view.ccAtOnce.lineMany": "Ваш тариф {plan} включает {max} облачных рабочих столов, и они заняты ({holders}).",

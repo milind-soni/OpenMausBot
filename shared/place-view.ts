@@ -53,6 +53,8 @@ export interface PlaceParams {
   words?: string;
   reason?: string;
   cause?: string;
+  /** The cloud desktop's limit is a free trial's. */
+  trial?: boolean;
 }
 
 export interface PlaceAction {
@@ -139,6 +141,7 @@ export const PLACE_EN = {
   "place.view.ccNoHours.short": "No hours left",
   "place.view.ccNoHours.line": "This month's {hours} cloud desktop hours are used up. They come back on 1 {month}.",
   "place.view.ccNoHours.lineUnknown": "This month's cloud desktop hours are used up.",
+  "place.view.ccNoHours.lineTrial": "The free trial's cloud desktop hours are used up. The full allowance starts with the first payment.",
   "place.view.ccAtOnce.short": "In use",
   "place.view.ccAtOnce.lineOne": "Your {plan} plan includes 1 cloud desktop, and {holders} has it.",
   "place.view.ccAtOnce.lineMany": "Your {plan} plan includes {max} cloud desktops, and {holders} have them.",
@@ -361,6 +364,7 @@ function lineKey(state: PlaceState, params: PlaceParams, server?: ServerKind): P
     return server === "my-cloud" ? "place.view.auto.lineMyCloud" : server === "linux" || server === "remote" ? "place.view.auto.lineLinux" : "place.view.auto.lineDesktop";
   }
   if (state === "cc-sign-in" && server === "my-cloud") return "place.view.ccSignIn.lineMyCloud";
+  if (state === "cc-no-hours" && params.trial) return "place.view.ccNoHours.lineTrial";
   // A refusal read from a code alone has no numbers or names to give.
   if (state === "cc-no-hours" && (params.hours === undefined || !params.month)) return "place.view.ccNoHours.lineUnknown";
   if (state === "cc-at-once") {
@@ -454,9 +458,13 @@ export function placeRowText(row: PlaceRow, server?: ServerKind): string {
 }
 
 
-const MONTH = "(January|February|March|April|May|June|July|August|September|October|November|December)";
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"] as const;
+const MONTH = `(${MONTHS.join("|")})`;
 const HOURS_USED = new RegExp(`Your (.+?) plan's (\\d+) cloud computer hours for \\w+ are used up\\. They reset on 1 ${MONTH}`);
-const AT_ONCE = /Your (.+?) plan includes (\d+) cloud computers? at once/;
+const TRIAL_HOURS_USED = new RegExp(`Your (.+?) free trial's (\\d+) cloud computer hours are used up\\. Your full allowance starts with your first payment on (\\d{1,2}) (${MONTHS.map((name) => name.slice(0, 3)).join("|")})`);
+const AT_ONCE = /Your (.+?) (plan|free trial) includes (\d+) cloud computers? at once/;
+const TOO_OFTEN = /(?:started|woken) too often\. Try again (in a minute|in an hour|tomorrow)/;
+const WINDOWS = { "in a minute": "minute", "in an hour": "hour", tomorrow: "day" } as const;
 const PASSING_WORDS = [
   /cloud computers are busy right now/i, /temporarily unavailable/i, /can't be checked right now/i, /could not be reached/i,
   /returned an unexpected answer/i, /could not complete that request/i, /started too often/i, /woken too often/i,
@@ -469,22 +477,108 @@ const NO_START_WORDS = [
 ];
 const CLEARING_WORDS = [/is being deleted/i, /previous cloud computer deletion/i, /deletion was not confirmed/i, /deletion is still being reconciled/i];
 
-/** The Admin's own codes come first; until every refusal has one, its English
- * is read. `included`: the plan's computers, not the person's own Boat key,
- * whose provider's words are shown as they are. */
-export function cloudRefusal(failure: { message: string; code?: string; status?: number }, included: boolean): { state: PlaceState; params: PlaceParams } {
+/** Why the Admin turned a start of a plan's cloud desktop away, by its own limits. */
+export const CLOUD_LIMIT_REASONS = ["hours_used", "at_once", "too_many_starts", "usage_unavailable"] as const;
+export type CloudLimitReason = (typeof CLOUD_LIMIT_REASONS)[number];
+
+/** The Admin's refusal of a start, beside its code and sentence: `reason`;
+ * `trial` while the Cloud is on a free trial; the plan's name; the limit and
+ * what is used of it; when it lifts (ISO: for a trial's hours, its first
+ * payment); and, for starts, the window whose limit was reached. */
+export interface CloudLimit {
+  reason: CloudLimitReason;
+  trial?: boolean;
+  plan?: string;
+  limit?: number;
+  used?: number;
+  resetsAt?: string;
+  window?: "minute" | "hour" | "day";
+}
+
+/** A refusal body's limit fields, at its top or in its `error`; undefined
+ * from an Admin that sends no `reason`, or one this app doesn't know. */
+export function cloudLimitFromBody(body: unknown): CloudLimit | undefined {
+  const top = body && typeof body === "object" ? body as Record<string, unknown> : undefined;
+  const nested = top?.error && typeof top.error === "object" ? top.error as Record<string, unknown> : undefined;
+  const fields = typeof top?.reason === "string" ? top : nested;
+  const reason = fields?.reason;
+  if (!fields || !(CLOUD_LIMIT_REASONS as readonly unknown[]).includes(reason)) return undefined;
+  const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+  const limit = count(fields.limit), used = count(fields.used);
+  const plan = typeof fields.plan === "string" && fields.plan.length <= 40 ? fields.plan : undefined;
+  const resetsAt = typeof fields.resetsAt === "string" && !Number.isNaN(Date.parse(fields.resetsAt)) ? fields.resetsAt : undefined;
+  const window = fields.window === "minute" || fields.window === "hour" || fields.window === "day" ? fields.window : undefined;
+  return {
+    reason: reason as CloudLimitReason, ...(fields.trial === true ? { trial: true } : {}), ...(plan ? { plan } : {}),
+    ...(limit !== undefined ? { limit } : {}), ...(used !== undefined ? { used } : {}), ...(resetsAt ? { resetsAt } : {}), ...(window ? { window } : {}),
+  };
+}
+
+type CloudFailure = { message: string; code?: string; status?: number; limit?: CloudLimit };
+type LimitRead = { reason: CloudLimitReason; trial: boolean; plan?: string; max?: number; month?: string; resets?: string; window?: CloudLimit["window"] };
+
+function readLimit(failure: CloudFailure): LimitRead | null {
+  const { limit, code } = failure;
+  const message = failure.message.trim();
+  if (limit) {
+    const at = limit.resetsAt ? new Date(limit.resetsAt) : null;
+    const month = at ? MONTHS[at.getUTCMonth()] : undefined;
+    return {
+      reason: limit.reason, trial: limit.trial === true, ...(limit.plan ? { plan: limit.plan } : {}), ...(limit.limit !== undefined ? { max: limit.limit } : {}),
+      ...(at && month && !limit.trial ? { month } : {}),
+      ...(at && month ? { resets: `${at.getUTCDate()} ${limit.trial ? month.slice(0, 3) : month}` } : {}),
+      ...(limit.window ? { window: limit.window } : {}),
+    };
+  }
+  if ((CLOUD_LIMIT_REASONS as readonly unknown[]).includes(code)) return { reason: code as CloudLimitReason, trial: false };
+  const hours = HOURS_USED.exec(message);
+  if (hours) return { reason: "hours_used", trial: false, plan: hours[1], max: Number(hours[2]), month: hours[3], resets: `1 ${hours[3]}` };
+  const trialHours = TRIAL_HOURS_USED.exec(message);
+  if (trialHours) return { reason: "hours_used", trial: true, plan: trialHours[1], max: Number(trialHours[2]), resets: `${trialHours[3]} ${trialHours[4]}` };
+  const atOnce = AT_ONCE.exec(message);
+  if (atOnce) return { reason: "at_once", trial: atOnce[2] === "free trial", plan: atOnce[1], max: Number(atOnce[3]) };
+  const often = TOO_OFTEN.exec(message);
+  if (often) return { reason: "too_many_starts", trial: false, window: WINDOWS[often[1] as keyof typeof WINDOWS] };
+  if (code === "usage_unavailable") return { reason: "usage_unavailable", trial: false };
+  return null;
+}
+
+/** The Admin's refusal of a start, worded for the bot, so it never says one
+ * limit is another; null for any other failure. */
+export function cloudLimitSentence(failure: CloudFailure): string | null {
+  const limit = readLimit(failure);
+  switch (limit?.reason) {
+    case "hours_used":
+      return limit.trial
+        ? `This Cloud's free trial cloud computer hours are used up; its full allowance starts with its first payment${limit.resets ? ` on ${limit.resets}` : ""}.`
+        : `This Cloud's cloud computer hours for this month are used up${limit.resets ? `; they reset on ${limit.resets}` : ""}.`;
+    case "at_once":
+      return "This Cloud already has as many cloud computers running as its plan allows.";
+    case "too_many_starts":
+      return `Cloud computers were started too often; try again ${limit.window === "minute" ? "in a minute" : limit.window === "day" ? "tomorrow" : limit.window === "hour" ? "in an hour" : "later"}.`;
+    case "usage_unavailable":
+      return "Cloud computer use can't be checked right now.";
+    default:
+      return null;
+  }
+}
+
+/** The Admin's `reason` comes first, then its codes; from an Admin that
+ * sends neither, its English is read. `included`: the plan's computers, not
+ * the person's own Boat key, whose provider's words are shown as they are. */
+export function cloudRefusal(failure: CloudFailure, included: boolean): { state: PlaceState; params: PlaceParams } {
   const message = failure.message.trim();
   const code = failure.code;
-  const hours = HOURS_USED.exec(message);
-  if (code === "hours_used" || hours) {
-    return { state: "cc-no-hours", params: hours ? { plan: hours[1], hours: Number(hours[2]), month: hours[3] } : {} };
+  const limit = readLimit(failure);
+  if (limit?.reason === "hours_used") {
+    if (limit.trial) return { state: "cc-no-hours", params: { trial: true } };
+    return { state: "cc-no-hours", params: limit.plan && limit.max !== undefined && limit.month ? { plan: limit.plan, hours: limit.max, month: limit.month } : {} };
   }
-  const atOnce = AT_ONCE.exec(message);
-  if (code === "at_once" || atOnce) {
-    return { state: "cc-at-once", params: atOnce ? { plan: atOnce[1], max: Number(atOnce[2]) } : {} };
+  if (limit?.reason === "at_once") {
+    return { state: "cc-at-once", params: limit.plan && limit.max !== undefined ? { plan: limit.plan, max: limit.max } : {} };
   }
   if (code === "subscription_inactive") return { state: "cc-ended", params: {} };
-  if (code === "too_many_starts" || code === "rate_limited" || code === "usage_unavailable" || code === "service_unavailable"
+  if (limit || code === "rate_limited" || code === "usage_unavailable" || code === "service_unavailable"
     || code === "upstream_unavailable" || code === "invalid_response" || code === "upstream_error") {
     return { state: "cc-unavailable", params: {} };
   }

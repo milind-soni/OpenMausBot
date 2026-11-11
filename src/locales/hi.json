@@ -2135,6 +2135,7 @@
   "place.view.ccAsleep.line": "{bot} का क्लाउड डेस्कटॉप सो रहा है। {bot} को ज़रूरत होने पर यह कुछ सेकंड में जाग जाता है।",
   "place.view.ccNoHours.line": "इस महीने के {hours} क्लाउड डेस्कटॉप घंटे खत्म हो गए हैं। ये 1 {month} को फिर मिलेंगे।",
   "place.view.ccNoHours.lineUnknown": "इस महीने के क्लाउड डेस्कटॉप घंटे खत्म हो गए हैं।",
+  "place.view.ccNoHours.lineTrial": "मुफ़्त ट्रायल के क्लाउड डेस्कटॉप घंटे खत्म हो गए हैं। पूरा कोटा पहले भुगतान से शुरू होता है।",
   "place.view.ccAtOnce.lineOne": "आपके {plan} प्लान में 1 क्लाउड डेस्कटॉप शामिल है, और वह {holders} के पास है।",
   "place.view.ccAtOnce.lineMany": "आपके {plan} प्लान में {max} क्लाउड डेस्कटॉप शामिल हैं, और वे {holders} के पास हैं।",
   "place.view.ccAtOnce.lineUnknown": "आपके प्लान में शामिल सभी क्लाउड डेस्कटॉप इस्तेमाल में हैं।",

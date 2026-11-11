@@ -6190,6 +6190,7 @@
   "place.view.ccNoHours.short": "Sem horas restantes",
   "place.view.ccNoHours.line": "As {hours} horas de desktop na nuvem deste mês acabaram. Elas voltam em 1º de {month}.",
   "place.view.ccNoHours.lineUnknown": "As horas de desktop na nuvem deste mês acabaram.",
+  "place.view.ccNoHours.lineTrial": "As horas de desktop na nuvem do teste grátis acabaram. A franquia completa começa com o primeiro pagamento.",
   "place.view.ccAtOnce.short": "Em uso",
   "place.view.ccAtOnce.lineOne": "Seu plano {plan} inclui 1 desktop na nuvem, e {holders} está com ele.",
   "place.view.ccAtOnce.lineMany": "Seu plano {plan} inclui {max} desktops na nuvem, todos em uso por {holders}.",

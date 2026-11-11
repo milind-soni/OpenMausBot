@@ -4341,6 +4341,7 @@
   "place.view.ccNoHours.short": "Saat kalmadı",
   "place.view.ccNoHours.line": "Bu ayın {hours} bulut masaüstü saati tükendi. 1 {month} tarihinde yenilenir.",
   "place.view.ccNoHours.lineUnknown": "Bu ayın bulut masaüstü saatleri tükendi.",
+  "place.view.ccNoHours.lineTrial": "Ücretsiz denemenin bulut masaüstü saatleri tükendi. Tam kullanım hakkı ilk ödemeyle başlar.",
   "place.view.ccAtOnce.short": "Kullanımda",
   "place.view.ccAtOnce.lineOne": "{plan} planınız 1 bulut masaüstü içerir ve şu anda {holders} kullanıyor.",
   "place.view.ccAtOnce.lineMany": "{plan} planınız {max} bulut masaüstü içerir ve şu anda {holders} kullanıyor.",

@@ -4966,6 +4966,7 @@
   "place.view.ccNoHours.short": "Sin horas disponibles",
   "place.view.ccNoHours.line": "Se agotaron las {hours} horas de escritorio en la nube de este mes. Vuelven el 1 de {month}.",
   "place.view.ccNoHours.lineUnknown": "Se agotaron las horas de escritorio en la nube de este mes.",
+  "place.view.ccNoHours.lineTrial": "Se agotaron las horas de escritorio en la nube de la prueba gratis. La asignación completa empieza con el primer pago.",
   "place.view.ccAtOnce.short": "En uso",
   "place.view.ccAtOnce.lineOne": "Tu plan {plan} incluye 1 escritorio en la nube, y lo tiene {holders}.",
   "place.view.ccAtOnce.lineMany": "Tu plan {plan} incluye {max} escritorios en la nube, y los tienen {holders}.",
