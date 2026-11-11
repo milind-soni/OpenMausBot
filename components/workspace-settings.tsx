@@ -50,9 +50,9 @@ export function WorkspaceSettings({ sessionToken, profile, security, sound, onTo
       <nav ref={navRef} className="settings-nav" aria-label="Settings sections">
         {(["account", "workspace"] as const).map(group => <div className="settings-nav-group" key={group} role="group" aria-labelledby={`settings-group-${group}`}>
           <span id={`settings-group-${group}`}>{group === "account" ? "Account" : workspace.name}</span>
-          {sections.filter(section => section.group === group).map(({ id, label, icon: Icon }) => <button key={id} type="button" data-section={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} onClick={() => open(id)}><Icon size={15} /><span>{label}</span><ChevronRight size={15} className="settings-nav-chevron" /></button>)}
+          {sections.filter(section => section.group === group).map(({ id, label, icon: Icon }) => <button key={id} type="button" data-section={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} onClick={() => open(id)}><Icon size={16} /><span>{label}</span><ChevronRight size={15} className="settings-nav-chevron" /></button>)}
         </div>)}
-        <button type="button" className="settings-logout" onClick={onLogout}><LogOut size={15} /><span>Sign out</span></button>
+        <button type="button" className="settings-logout" onClick={onLogout}><LogOut size={16} /><span>Sign out</span></button>
       </nav>
       <div className="settings-body" ref={body}>
         <header className="settings-section-head">

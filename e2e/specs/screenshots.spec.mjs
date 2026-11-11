@@ -51,7 +51,7 @@ test('polish screenshots', async ({ clients, f }) => {
   // Board in the Active view (the default): no Backlog column, no completed issues.
   await expect(page.getByRole('tab', { name: 'Active' })).toHaveAttribute('aria-selected', 'true');
   await shot(page, 'board.png');
-  await shot(page.locator('.workspace-app .sidebar'), 'nav-sidebar.png');
+  await shot(page, 'nav-sidebar.png', { clip: { x: 0, y: 0, width: 520, height: 330 } });
   await shot(page.locator('.project-navigation'), 'nav-issues.png');
   await shot(page, 'view-tabs.png', { clip: { x: 240, y: 0, width: 1200, height: 112 } });
 

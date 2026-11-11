@@ -1,5 +1,5 @@
 "use client";
-import { useImperativeHandle, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type Ref, type ReactNode, type RefObject } from "react";
+import { Fragment, useImperativeHandle, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type Ref, type ReactNode, type RefObject } from "react";
 import clsx from "clsx";
 import { ArrowUpDown, Check, ChevronLeft, ChevronRight, CircleDot, Columns3, List, ListFilter, Rows3, Search, SlidersHorizontal, Tag, UserRound, X } from "lucide-react";
 import { DISPLAY_PROPERTIES, GROUPINGS, NO_LABEL, ORDERINGS, PRIORITY_ORDER, UNASSIGNED, activeFilterCount, toggleFilter, type FilterKey, type IssueFilters, type IssueViewState } from "@/lib/issue-view";
@@ -102,7 +102,7 @@ export function FilterChips({ filters, sources, onChange, onAdd }: { filters: Is
           <span className="filter-chip-part filter-chip-op">{values.length > 1 ? (item.key === "labels" ? "include any of" : "is any of") : (item.key === "labels" ? "include" : "is")}</span>
           <span className="filter-chip-part filter-chip-values">{values.length > 2
             ? <>{options.slice(0, 1).map(option => <span key={option.value} className="filter-chip-value">{option.icon}{option.label}</span>)}<span className="filter-chip-more">+{values.length - 1}</span></>
-            : options.map((option, index) => <span key={option.value} className="filter-chip-value">{index > 0 && <span className="filter-chip-comma">, </span>}{option.icon}{option.label}</span>)}</span>
+            : options.map((option, index) => <Fragment key={option.value}>{index > 0 && <span className="filter-chip-comma">,</span>}<span className="filter-chip-value">{option.icon}{option.label}</span></Fragment>)}</span>
           <button type="button" className="filter-chip-remove" aria-label={`Remove ${item.label.toLowerCase()} filter`} onClick={() => onChange({ ...filters, [item.key]: [] })}><X size={12} /></button>
         </span>;
       })}

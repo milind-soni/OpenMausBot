@@ -204,7 +204,7 @@ span.criterion-text { cursor: default; }
 .filter-chip-value { display: inline-flex; align-items: center; gap: 5px; }
 .filter-chip-value > :is(.label-dot, .origin-user-avatar, svg) { flex: none; }
 .filter-chip-value .origin-user-avatar { --avatar-size: 14px; }
-.filter-chip-comma { margin-right: 3px; color: var(--text-3); }
+.filter-chip-comma { margin-right: 6px; color: var(--text-3); }
 .filter-chip-more { margin-left: 5px; color: var(--text-3); }
 .filter-chip-remove { display: grid; place-items: center; width: 26px; padding: 0; border-top: 0; border-right: 0; border-bottom: 0; background: transparent; color: var(--text-3); transition: background var(--duration-instant), color var(--duration-instant); }
 .filter-chip-remove:hover { background: var(--hover); color: var(--text-1); }
