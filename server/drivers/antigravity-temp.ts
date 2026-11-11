@@ -21,7 +21,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { DATA_DIR } from "../config.ts";
-import { retryOnWindowsFileLock } from "./antigravity-runtime.ts";
+import { retryOnWindowsFileLock, transientWindowsFileError } from "./antigravity-runtime.ts";
 
 const UNPACK_PREFIX = "_MEI";
 const CLAIM_PREFIX = ".omb-removing-";
@@ -249,11 +249,21 @@ async function claimAndRemove(directory: string, countBytes: boolean): Promise<n
   try {
     // Retry the whole folder, never inside it: Node's maxRetries repeats at every folder level, so one file it
     // may never delete (EPERM on Windows) is tried (retries+1)^depth times while abandoned siblings keep running.
-    await retryOnWindowsFileLock(() => rm(claimed, { recursive: true, force: true }), { attempts: 4, delayMs: 200 });
+    await retryOnWindowsFileLock(() => rm(claimed, { recursive: true, force: true }), {
+      attempts: 4,
+      delayMs: 200,
+      retryable: retryableRemoveError,
+    });
     return bytes;
   } catch {
     return null;
   }
+}
+
+/** Node's own rm retries also covered running out of file handles; keep that for the whole-folder retry. */
+function retryableRemoveError(error: unknown): boolean {
+  const code = typeof error === "object" && error !== null ? Reflect.get(error, "code") : undefined;
+  return code === "EMFILE" || code === "ENFILE" || transientWindowsFileError(error);
 }
 
 const sweeps = new Map<string, Promise<number>>();

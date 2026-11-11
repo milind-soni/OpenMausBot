@@ -320,6 +320,16 @@ describe("Free up space", () => {
     expect(rmCalls.calls.length).toBe(2);
   });
 
+  it("removes a folder whose first delete ran out of file handles", async () => {
+    const dataDir = tempRoot("emfile-once");
+    const folder = unpackFolder(antigravityTempDir(dataDir, "work"), hexName(0x2222));
+    let failures = 1;
+    rmCalls.fail = () => { if (failures-- > 0) throw Object.assign(new Error("EMFILE: too many open files"), { code: "EMFILE" }); };
+    expect(await sweepAntigravityTemp("work", { dataDir, isAlive: () => false })).toBe(1);
+    expect(existsSync(folder)).toBe(false);
+    expect(rmCalls.calls.length).toBe(2);
+  });
+
   it("reports a lower bound when counting runs out of time", async () => {
     const { options } = fixture();
     const scan = await findAntigravityLeftovers({ ...options, budgetMs: -1 });
