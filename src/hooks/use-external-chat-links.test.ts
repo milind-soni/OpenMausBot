@@ -81,6 +81,20 @@ describe("useExternalChatLinks", () => {
     ]);
   });
 
+  it("opens a thread named in the web address once the bots have loaded, and only once", () => {
+    const replaceState = vi.fn();
+    vi.stubGlobal("window", { location: { pathname: "/", search: "?thread=scout-main&bot=scout", hash: "" }, history: { replaceState } });
+    const dispatch = vi.fn();
+    render(loading, dispatch);
+    expect(fixture.link).toBe("openmausbot://thread/scout-main?bot=scout");
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/");
+    expect(dispatch).not.toHaveBeenCalled();
+
+    render(loaded, dispatch);
+    expect(dispatch).toHaveBeenCalled();
+    expect(fixture.link).toBeNull();
+  });
+
   it("does nothing without the desktop bridge", () => {
     vi.stubGlobal("window", {});
     const dispatch = vi.fn();
