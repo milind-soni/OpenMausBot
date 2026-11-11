@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { shouldFocusChatComposer, workspaceShortcut } from "./keyboard-navigation";
+import { issueActionShortcut, shouldFocusChatComposer, workspaceShortcut } from "./keyboard-navigation";
+import { issueShortcut } from "./project-issues";
 
 const key = (value: string, extra: Partial<KeyboardEvent> = {}) => ({ key: value, metaKey: false, ctrlKey: false, altKey: false, isComposing: false, defaultPrevented: false, repeat: false, ...extra });
 const context = { editing: false, overlayOpen: false, canCreate: true };
@@ -17,9 +18,9 @@ describe("workspace keyboard shortcuts", () => {
       expect(workspaceShortcut(key(c), { ...context, overlayOpen: true })).toBeNull();
     }
   });
-  it("keeps command search but leaves browser shortcuts alone", () => {
-    expect(workspaceShortcut(key("k", { metaKey: true }), { ...context, editing: true })).toBe("search");
-    expect(workspaceShortcut(key("k", { ctrlKey: true }), context)).toBe("search");
+  it("opens the command menu with Cmd/Ctrl+K but leaves browser shortcuts alone", () => {
+    expect(workspaceShortcut(key("k", { metaKey: true }), { ...context, editing: true })).toBe("command-menu");
+    expect(workspaceShortcut(key("k", { ctrlKey: true }), context)).toBe("command-menu");
     expect(workspaceShortcut(key("f", { metaKey: true }), context)).toBeNull();
     expect(workspaceShortcut(key("c", { ctrlKey: true }), context)).toBeNull();
     expect(workspaceShortcut(key("f", { altKey: true }), context)).toBeNull();
@@ -27,6 +28,33 @@ describe("workspace keyboard shortcuts", () => {
   it("ignores compositions, held shortcuts, prevented events and read-only creation", () => {
     for (const extra of [{ isComposing: true }, { repeat: true }, { defaultPrevented: true }]) expect(workspaceShortcut(key("c", extra), context)).toBeNull();
     expect(workspaceShortcut(key("c"), { ...context, canCreate: false })).toBeNull();
+  });
+});
+
+describe("shortcut reference and issue keys", () => {
+  const issue = { editing: false, overlayOpen: false, hasIssue: true, canEdit: true };
+  const k = (value: string, extra: Partial<KeyboardEvent> = {}) => ({ ...key(value, extra), shiftKey: false, ...extra });
+  it("opens the shortcut list with ?", () => {
+    expect(workspaceShortcut(key("?"), context)).toBe("shortcuts");
+    expect(workspaceShortcut(key("?"), { ...context, editing: true })).toBeNull();
+  });
+  it("maps S, P, L, A, I and Shift+D to the focused issue", () => {
+    expect(["s", "P", "l", "a", "i"].map(c => issueActionShortcut(k(c), issue))).toEqual(["status", "priority", "labels", "assignee", "assign-me"]);
+    expect(issueActionShortcut(k("D", { shiftKey: true }), issue)).toBe("due-date");
+    expect(issueActionShortcut(k("S", { shiftKey: true }), issue)).toBeNull();
+  });
+  it("needs a focused, editable issue and stays out of text fields and menus", () => {
+    expect(issueActionShortcut(k("s"), { ...issue, hasIssue: false })).toBeNull();
+    expect(issueActionShortcut(k("s"), { ...issue, canEdit: false })).toBeNull();
+    expect(issueActionShortcut(k("s"), { ...issue, editing: true })).toBeNull();
+    expect(issueActionShortcut(k("s"), { ...issue, overlayOpen: true })).toBeNull();
+    expect(issueActionShortcut(k("s", { metaKey: true }), issue)).toBeNull();
+  });
+  it("gives L to labels while an issue is focused and to the list layout otherwise", () => {
+    const view = { editing: false, overlayOpen: false, canEdit: true };
+    expect(issueShortcut(k("l"), view)).toBe("list");
+    expect(issueShortcut(k("l"), { ...view, issueFocused: true })).toBeNull();
+    expect(issueShortcut(k("b"), { ...view, issueFocused: true })).toBe("board");
   });
 });
 

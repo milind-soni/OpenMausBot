@@ -4,12 +4,17 @@ import { errorText } from "@/lib/error-text";
 import { useMutation, useQuery } from "convex/react";
 import { useRouter } from "next/navigation";
 import { ProjectWorkspace } from "./project-workspace";
-import { ChatView, CreateWorkspaceDialog, InboxView, IssueComposer, MemberProfile, TaskModal, VoiceChatView, WorkspaceSettings, preloadViews } from "./lazy-views";
+import { ChatView, CommandMenu, CreateWorkspaceDialog, InboxView, IssueComposer, IssueRouteView, MemberProfile, ShortcutsDialog, TaskModal, VoiceChatView, WorkspaceSettings, preloadViews } from "./lazy-views";
+import type { CommandIssue, CommandPage } from "./command-menu";
+import { IssueNavigationContext, focusedIssue, type IssueNavigation } from "./issue-navigation";
+import { WorkspaceLabelsContext } from "./issue-labels";
+import { showIssueToast } from "./issue-shared";
+import { issuePath, legacyIssueParams, parseIssuePath, type IssueRoute } from "@/lib/issue-route";
 import { useLocalVoiceParticipants } from "./use-voice-participants";
 import { taskKey } from "../lib/project-issues";
 import clsx from "clsx";
 import { FolderPlus, Check, ChevronDown, ChevronRight, CircleDot, CircleAlert, ImageUp, Inbox, Loader2, LogOut, Menu, MessageCircle, PenTool, Plus, Search, Settings2, PanelLeftClose, PanelLeftOpen, SquarePen, Video, X, type LucideIcon } from "lucide-react";
-import { FormEvent, useEffect, useRef, useState, type CSSProperties } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { MemberProfileContext, useMemberProfile, useWorkspace, type Workspace } from "./workspace-context";
@@ -32,7 +37,7 @@ import { SidebarResizeHandle } from "./sidebar-resize-handle";
 import { useSidebarLayout } from "./use-sidebar-layout";
 import { focusInitialInput, focusQuietly } from "@/lib/initial-focus";
 import { swallowPressClick } from "@/lib/outside-press";
-import { hasOpenKeyboardOverlay, isEditingTarget, workspaceShortcut } from "@/lib/keyboard-navigation";
+import { hasOpenKeyboardOverlay, isEditingTarget, issueActionShortcut, workspaceShortcut } from "@/lib/keyboard-navigation";
 import { rankSearchResults } from "@/lib/search-ranking";
 import { localApi as requestLocalApi } from "@/lib/client-api";
 
@@ -48,7 +53,7 @@ export type AuthUser = {
   status: "active" | "disabled";
 };
 type ToolView = "inbox" | "chat" | "voice" | "draw";
-type MainView = "project" | ToolView;
+type MainView = "project" | "issue" | ToolView;
 const toolViews: readonly string[] = ["inbox", "chat", "voice", "draw"] satisfies ToolView[];
 const toolView = (value: string | null) => value && toolViews.includes(value) ? value as ToolView : null;
 type ProjectWithUi = Doc<"projects"> & { memberRole: string; iconUrl?: string | null; openIssueCount?: number };
@@ -87,7 +92,12 @@ function EmptyBlock({ icon: Icon, title, body }: { icon: LucideIcon; title: stri
 export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { sessionToken: string; user: AuthUser; workspaces: Workspace[]; onLogout: () => void }) {
   const workspace = useWorkspace();
   const [activeProjectId, setActiveProjectId] = useState<Id<"projects"> | null>(null);
-  const [mainView, setMainView] = useState<MainView>("project");
+  // An issue page URL (/{workspace}/issue/ORI-1A2B/<id>) opens straight on the issue.
+  const [issueRoute, setIssueRoute] = useState<IssueRoute | null>(() => typeof window === "undefined" ? null : parseIssuePath(window.location.pathname));
+  const [mainView, setMainView] = useState<MainView>(() => issueRoute ? "issue" : "project");
+  const [command, setCommand] = useState<{ page: CommandPage; issue: CommandIssue | null } | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const returnFocus = useRef<{ projectId: Id<"projects">; taskId: Id<"tasks"> } | null>(null);
   const [visitedTools, setVisitedTools] = useState({ draw: false, voice: false });
   const [sidebarLayout, setSidebarLayout] = useSidebarLayout(user._id);
   const sidebarCollapsed = sidebarLayout.collapsed;
@@ -162,26 +172,56 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
     if (view) setMainView(view);
     const project = params.get("project");
     if (project) setActiveProjectId(project as Id<"projects">);
-    const issue = params.get("issue");
-    if (project && issue) setInitialIssue({ projectId: project as Id<"projects">, taskId: issue as Id<"tasks"> });
+    // Links from before issue pages (?project=…&issue=…) open the page at its own URL.
+    const legacy = legacyIssueParams(window.location.search);
+    if (legacy && !parseIssuePath(window.location.pathname)) {
+      window.history.replaceState(null, "", issuePath(workspace.slug, legacy.taskId));
+      setIssueRoute(parseIssuePath(window.location.pathname));
+      setMainView("issue");
+    }
   }, [workspace.slug]);
 
-  useEffect(() => {
-    const handleKeys = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMobileOpen(false);
-      const action = workspaceShortcut(event, {
-        editing: isEditingTarget(event.target) || isEditingTarget(document.activeElement),
-        overlayOpen: hasOpenKeyboardOverlay(),
-        canCreate: canCreateIssue,
-      });
-      if (!action) return;
+  const assign = useMutation(api.tasks.updateTask);
+  const canEditIssue = (issue: CommandIssue | null) => Boolean(issue && projects?.find(project => project._id === issue.projectId && project.memberRole !== "viewer"));
+  const keyHandler = useRef<(event: KeyboardEvent) => void>(() => undefined);
+  const handleKeys = (event: KeyboardEvent) => {
+    if (event.key === "Escape") setMobileOpen(false);
+    const editing = isEditingTarget(event.target) || isEditingTarget(document.activeElement);
+    const overlayOpen = hasOpenKeyboardOverlay();
+    const action = workspaceShortcut(event, { editing, overlayOpen, canCreate: canCreateIssue });
+    if (action) {
       event.preventDefault();
-      if (action === "search") setSearchOpen(true);
+      if (action === "command-menu") setCommand({ page: "root", issue: focusedIssue() });
+      else if (action === "shortcuts") setShortcutsOpen(true);
+      else if (action === "search") setSearchOpen(true);
       else setIssueOpen(true);
-    };
-    window.addEventListener("keydown", handleKeys);
-    return () => window.removeEventListener("keydown", handleKeys);
-  }, [canCreateIssue]);
+      return;
+    }
+    const issue = focusedIssue();
+    const issueAction = issueActionShortcut(event, { editing, overlayOpen, hasIssue: Boolean(issue), canEdit: canEditIssue(issue) });
+    if (!issueAction || !issue) return;
+    event.preventDefault();
+    if (issueAction === "assign-me") {
+      void assign({ ...issue, sessionToken, assignedToEmail: user.email }).then(() => showIssueToast(`Assigned ${taskKey(issue.taskId)} to you`), error => showIssueToast(errorText(error, "Could not assign issue")));
+      return;
+    }
+    setCommand({ page: issueAction, issue });
+  };
+  useEffect(() => { keyHandler.current = handleKeys; });
+  useEffect(() => {
+    const handle = (event: KeyboardEvent) => keyHandler.current(event);
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, []);
+  const workspaceLabels = useQuery(api.labels.list, { sessionToken, teamId: workspace._id });
+  const ensureLabels = useMutation(api.labels.ensureDefaults);
+  const seeded = useRef(false);
+  // Store Feature, Bug and Improvement once for workspaces created before the label registry.
+  useEffect(() => {
+    if (seeded.current || workspace.role === "viewer" || !workspaceLabels?.labels.some(label => label._id === null)) return;
+    seeded.current = true;
+    void ensureLabels({ sessionToken, teamId: workspace._id }).catch(() => undefined);
+  }, [workspaceLabels, workspace.role, workspace._id, sessionToken, ensureLabels]);
 
   useEffect(() => {
     if (projects === undefined) return;
@@ -201,6 +241,8 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
   useEffect(() => { shown.current = { mainView, activeProjectId }; }, [mainView, activeProjectId]);
   useEffect(() => {
     const onPop = () => {
+      const route = parseIssuePath(window.location.pathname);
+      if (route?.slug === workspace.slug) { setMobileOpen(false); setIssueRoute(route); setMainView("issue"); return; }
       if (window.location.pathname !== `/${workspace.slug}`) return;
       const params = new URLSearchParams(window.location.search);
       setMobileOpen(false);
@@ -227,7 +269,33 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
     setMobileOpen(false);
     if (!already) window.history.pushState(null, "", `/${workspace.slug}?project=${projectId}`);
   };
-  const openIssue = (projectId: Id<"projects">, taskId: Id<"tasks">) => { setLinkedTask(null); openProject(projectId); setInitialIssue({ projectId, taskId }); };
+  /** An issue's full page: its own history entry and URL; Back (or Escape) returns to where it was opened from. */
+  const openIssue = (projectId: Id<"projects">, taskId: Id<"tasks">, options?: { replace?: boolean }) => {
+    setLinkedTask(null); setMobileOpen(false);
+    if (mainView === "project") returnFocus.current = { projectId, taskId };
+    setActiveProjectId(projectId);
+    setIssueRoute({ slug: workspace.slug, key: taskKey(taskId), taskId });
+    setMainView("issue");
+    if (options?.replace) window.history.replaceState({ originIssuePage: taskId }, "", issuePath(workspace.slug, taskId));
+    else if (window.location.pathname !== issuePath(workspace.slug, taskId)) window.history.pushState({ originIssuePage: taskId }, "", issuePath(workspace.slug, taskId));
+  };
+  const closeIssue = (projectId?: Id<"projects">) => {
+    if (window.history.state?.originIssuePage) { window.history.back(); return; }
+    if (projectId) { openProject(projectId); return; }
+    setMainView("project");
+    window.history.pushState(null, "", `/${workspace.slug}`);
+  };
+  const navigation = useMemo<IssueNavigation>(() => ({
+    openIssue: (projectId, taskId, options) => openIssueRef.current(projectId, taskId, options),
+    takeReturnFocus: projectId => {
+      const target = returnFocus.current;
+      if (target?.projectId !== projectId) return null;
+      returnFocus.current = null;
+      return target.taskId;
+    },
+  }), []);
+  const openIssueRef = useRef(openIssue);
+  useEffect(() => { openIssueRef.current = openIssue; });
   const openReference = (projectId: Id<"projects">, taskId?: Id<"tasks">) => { if (taskId) setLinkedTask({ projectId, taskId }); else { setLinkedTask(null); openProject(projectId); } };
   const openView = (view: ToolView) => {
     const already = mainView === view;
@@ -245,15 +313,15 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
   };
 
   return (
-    <MemberProfileContext.Provider value={setMemberEmail}><div style={{ "--sidebar-width": `${sidebarLayout.width}px` } as CSSProperties} className={clsx("app-shell", "workspace-app", mobileOpen && "mobile-nav-open", sidebarCollapsed && "sidebar-collapsed", sidebarCollapsed && !sidebarHover && "sidebar-hidden", sidebarCollapsed && sidebarHover && "sidebar-floating")}>
+    <MemberProfileContext.Provider value={setMemberEmail}><IssueNavigationContext.Provider value={navigation}><WorkspaceLabelsContext.Provider value={workspaceLabels}><div style={{ "--sidebar-width": `${sidebarLayout.width}px` } as CSSProperties} className={clsx("app-shell", "workspace-app", mobileOpen && "mobile-nav-open", sidebarCollapsed && "sidebar-collapsed", sidebarCollapsed && !sidebarHover && "sidebar-hidden", sidebarCollapsed && sidebarHover && "sidebar-floating")}>
       <MotionLayer />
-      <header className="mobile-topbar" inert={mobileOpen || undefined}><button ref={navButtonRef} className="icon-button" aria-label="Open navigation" aria-expanded={mobileOpen} aria-controls="workspace-sidebar" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><strong className="mobile-project-name">{mainView === "project" ? projects?.find(project => project._id === activeProjectId)?.name ?? (projects?.length === 0 ? workspace.name : null) : { inbox: "Inbox", chat: "Chat", voice: "Call", draw: "Draw" }[mainView]}</strong>{canCreateIssue && mainView !== "project" && <button className="icon-button" aria-label="Create issue" onClick={() => setIssueOpen(true)}><SquarePen size={18} /></button>}</header>
+      <header className="mobile-topbar" inert={mobileOpen || undefined}><button ref={navButtonRef} className="icon-button" aria-label="Open navigation" aria-expanded={mobileOpen} aria-controls="workspace-sidebar" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><strong className="mobile-project-name">{mainView === "project" || mainView === "issue" ? projects?.find(project => project._id === activeProjectId)?.name ?? (projects?.length === 0 ? workspace.name : null) : { inbox: "Inbox", chat: "Chat", voice: "Call", draw: "Draw" }[mainView]}</strong>{canCreateIssue && mainView !== "project" && <button className="icon-button" aria-label="Create issue" onClick={() => setIssueOpen(true)}><SquarePen size={18} /></button>}</header>
       {mobileOpen && <button className="mobile-nav-scrim" aria-label="Close navigation" tabIndex={-1} onClick={() => setMobileOpen(false)} />}
       {sidebarCollapsed ? <div className="sidebar-hover-zone" onMouseEnter={() => setSidebarHover(true)} /> : null}
       <aside ref={sidebarRef} id="workspace-sidebar" className="sidebar" aria-label="Workspace" onMouseLeave={() => { if (sidebarCollapsed) setSidebarHover(false); }}>
         <div className="sidebar-topbar">
           <ProfileMenu user={user} sessionToken={sessionToken} onLogout={onLogout} sound={notifications.sound} onToggleSound={notifications.toggleSound} workspaces={workspaces} onCreateWorkspace={() => { setMobileOpen(false); setCreateWorkspaceOpen(true); }} onOpenSettings={() => setMobileOpen(false)} onCollapse={() => { setSidebarCollapsed(!sidebarCollapsed); setSidebarHover(false); }} />
-          <button className="icon-button" type="button" onClick={() => setSearchOpen(true)} aria-label="Search" title="Search (F or ⌘K)" aria-keyshortcuts="f Meta+K Control+K /">
+          <button className="icon-button" type="button" onClick={() => setSearchOpen(true)} aria-label="Search" title="Search (/) · Commands (⌘K)" aria-keyshortcuts="/ f">
             <Search size={17} />
           </button>
           <button className="icon-button sidebar-new-issue" title="Create issue (C)" aria-label="Create issue" aria-keyshortcuts="C" disabled={!canCreateIssue} onClick={() => setIssueOpen(true)}><SquarePen size={17} /></button>
@@ -300,7 +368,7 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
                   <button
                     key={project._id}
                     data-project-id={project._id}
-                    aria-current={mainView === "project" && activeProjectId === project._id ? "page" : undefined} className={clsx("project-button", dragProject === project._id && "dragging", mainView === "project" && activeProjectId === project._id && "active")}
+                    aria-current={(mainView === "project" || mainView === "issue") && activeProjectId === project._id ? "page" : undefined} className={clsx("project-button", dragProject === project._id && "dragging", (mainView === "project" || mainView === "issue") && activeProjectId === project._id && "active")}
                     type="button"
                     draggable={workspace.role !== "viewer"}
                     onDragStart={event => { setDragProject(project._id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", project._id); }}
@@ -326,12 +394,14 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
       <main ref={workspaceRef} inert={mobileOpen || undefined} className={clsx("workspace", mainView === "draw" && "draw-workspace")}>
         {sidebarCollapsed && <button className="icon-button sidebar-restore" aria-label="Keep sidebar open" title="Keep sidebar open" aria-controls="workspace-sidebar" aria-expanded="false" onClick={() => { setSidebarCollapsed(false); setSidebarHover(false); }}><PanelLeftOpen size={18} /></button>}
         {shellNotice && <div className="notice danger">{shellNotice}<button className="icon-button" aria-label="Dismiss" onClick={() => setShellNotice("")}><X size={14} /></button></div>}
-        <ErrorBoundary resetKey={`${mainView}:${activeProjectId}`} fallback={<EmptyBlock icon={CircleAlert} title="This view could not load" body="It may have been deleted or your access changed." />}>
-        {mainView === "chat" ? (
+        <ErrorBoundary resetKey={`${mainView}:${activeProjectId}:${issueRoute?.taskId ?? issueRoute?.key ?? ""}`} fallback={<EmptyBlock icon={CircleAlert} title="This view could not load" body="It may have been deleted or your access changed." />}>
+        {mainView === "issue" && issueRoute ? (
+          <IssueRouteView route={issueRoute} sessionToken={sessionToken} projects={projects} onResolved={setActiveProjectId} onBack={closeIssue} onOpenProject={openProject} onOpenReference={(projectId, taskId) => { if (taskId) openIssue(projectId, taskId); else openProject(projectId); }} onOpenIssue={openIssue} />
+        ) : mainView === "chat" ? (
           <ChatView sessionToken={sessionToken} user={user} focusMessageId={chatFocus} onOpenReference={openReference} />
         ) : mainView === "draw" || mainView === "voice" ? null
         : mainView === "inbox" ? (
-          <InboxView sessionToken={sessionToken} unread={notifications.summary?.unread || 0} onOpenProject={openProject} onOpenChat={messageId => { setChatFocus(messageId); openView("chat"); }} onOpenTask={(projectId, taskId) => setLinkedTask({ projectId, taskId })} />
+          <InboxView sessionToken={sessionToken} unread={notifications.summary?.unread || 0} onOpenProject={openProject} onOpenChat={messageId => { setChatFocus(messageId); openView("chat"); }} onOpenTask={openIssue} />
         ) : activeProjectId ? (
           <ProjectWorkspace key={activeProjectId} projectId={activeProjectId} sessionToken={sessionToken} user={user} viewers={projectViewers.filter(v => v.projectId === activeProjectId)} initialTaskId={initialIssue?.projectId === activeProjectId ? initialIssue.taskId : undefined} onOpenReference={(projectId, taskId) => { if (taskId) openIssue(projectId, taskId); else openProject(projectId); }} />
         ) : (
@@ -341,10 +411,13 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
         {visitedTools.draw && <div className="persistent-tool draw-tool" hidden={mainView !== "draw"}><DrawView sessionToken={sessionToken} user={user} /></div>}
         {visitedTools.voice && <div className="persistent-tool voice-tool" hidden={mainView !== "voice"}><VoiceChatView sessionToken={sessionToken} user={user} /></div>}
       </main>
-      {issueOpen && <IssueComposer sessionToken={sessionToken} activeProjectId={mainView === "project" ? activeProjectId : null} projects={sidebarProjects || []} onClose={() => setIssueOpen(false)} onCreated={openProject} />}
+      {issueOpen && <IssueComposer sessionToken={sessionToken} activeProjectId={mainView === "project" || mainView === "issue" ? activeProjectId : null} projects={sidebarProjects || []} onClose={() => setIssueOpen(false)} onCreated={openProject} />}
       {createWorkspaceOpen && <CreateWorkspaceDialog sessionToken={sessionToken} onClose={() => setCreateWorkspaceOpen(false)} />}
-      {memberEmail && <MemberProfile key={memberEmail} email={memberEmail} sessionToken={sessionToken} onClose={() => setMemberEmail(null)} onOpenIssue={(projectId, taskId) => { openProject(projectId); setLinkedTask({ projectId, taskId }); }} />}
-      {linkedTask && projects?.find(p => p._id === linkedTask.projectId) && <TaskModal project={projects.find(p => p._id === linkedTask.projectId)!} projectId={linkedTask.projectId} taskId={linkedTask.taskId} sessionToken={sessionToken} canEdit={projects.find(p => p._id === linkedTask.projectId)!.memberRole !== "viewer"} onClose={() => setLinkedTask(null)} onOpenReference={openReference} />}
+      {memberEmail && <MemberProfile key={memberEmail} email={memberEmail} sessionToken={sessionToken} onClose={() => setMemberEmail(null)} onOpenIssue={openIssue} />}
+      {linkedTask && projects?.find(p => p._id === linkedTask.projectId) && <TaskModal project={projects.find(p => p._id === linkedTask.projectId)!} projectId={linkedTask.projectId} taskId={linkedTask.taskId} sessionToken={sessionToken} canEdit={projects.find(p => p._id === linkedTask.projectId)!.memberRole !== "viewer"} onClose={() => setLinkedTask(null)} onOpenReference={openReference} onOpenPage={() => openIssue(linkedTask.projectId, linkedTask.taskId, { replace: true })} />}
+      {command && <CommandMenu key={`${command.page}:${command.issue?.taskId ?? ""}`} sessionToken={sessionToken} issue={command.issue} initialPage={command.page} canEdit={canEditIssue(command.issue)} onClose={() => setCommand(null)}
+        onCreateIssue={canCreateIssue ? () => setIssueOpen(true) : undefined} onSearch={() => setSearchOpen(true)} onShortcuts={() => setShortcutsOpen(true)} onOpenInbox={() => openView("inbox")} onOpenChat={() => openView("chat")} onOpenIssue={openIssue} />}
+      {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       {searchOpen ? (
         <SearchDialog
           activeProjectId={activeProjectId}
@@ -353,10 +426,10 @@ export function OriginWorkspace({ sessionToken, user, workspaces, onLogout }: { 
           onClose={() => setSearchOpen(false)}
           onOpenProject={openProject}
           onOpenChat={messageId => { setChatFocus(messageId); openView("chat"); }}
-          onOpenTask={(projectId, taskId) => { openProject(projectId); setLinkedTask({ projectId, taskId }); }}
+          onOpenTask={openIssue}
         />
       ) : null}
-    </div></MemberProfileContext.Provider>
+    </div></WorkspaceLabelsContext.Provider></IssueNavigationContext.Provider></MemberProfileContext.Provider>
   );
 }
 

@@ -1,14 +1,32 @@
 type KeyEvent = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "isComposing" | "defaultPrevented" | "repeat">;
 type Context = { editing: boolean; overlayOpen: boolean };
 
-export function workspaceShortcut(event: KeyEvent, context: Context & { canCreate: boolean }) {
+export type WorkspaceShortcut = "command-menu" | "search" | "create-issue" | "shortcuts";
+
+/** Linear's global keys: ⌘K / Ctrl+K the command menu (also from a text field), / or F search, C create, ? shortcuts. */
+export function workspaceShortcut(event: KeyEvent, context: Context & { canCreate: boolean }): WorkspaceShortcut | null {
   if (event.defaultPrevented || event.isComposing || event.repeat || context.overlayOpen) return null;
   const key = event.key.toLowerCase();
-  if ((event.metaKey || event.ctrlKey) && !event.altKey && key === "k") return "search";
+  if ((event.metaKey || event.ctrlKey) && !event.altKey && key === "k") return "command-menu";
   if (event.metaKey || event.ctrlKey || event.altKey || context.editing) return null;
+  if (key === "?") return "shortcuts";
   if (key === "f" || key === "/") return "search";
   if (key === "c" && context.canCreate) return "create-issue";
   return null;
+}
+
+export type IssueAction = "status" | "priority" | "labels" | "assignee" | "due-date" | "assign-me";
+
+/**
+ * Single keys that act on the issue in focus (a list row, a board card, or the open issue page), as in Linear:
+ * S status, P priority, L labels, A assignee, I assign to me, Shift+D due date.
+ */
+export function issueActionShortcut(event: KeyEvent & Pick<KeyboardEvent, "shiftKey">, context: Context & { hasIssue: boolean; canEdit: boolean }): IssueAction | null {
+  if (!context.hasIssue || !context.canEdit || context.editing || context.overlayOpen) return null;
+  if (event.defaultPrevented || event.isComposing || event.repeat || event.metaKey || event.ctrlKey || event.altKey) return null;
+  const key = event.key.toLowerCase();
+  if (event.shiftKey) return key === "d" ? "due-date" : null;
+  return ({ s: "status", p: "priority", l: "labels", a: "assignee", i: "assign-me" } as const)[key as "s"] ?? null;
 }
 
 export function shouldFocusChatComposer(event: KeyEvent, context: Context & { canWrite: boolean; controlHasFocus: boolean }) {

@@ -6,7 +6,7 @@ import { displayName, formatDate, formatDateTime } from "@/lib/format";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { ArrowLeft, Bell, Bot, Check, ChevronRight, CircleAlert, Copy, Link, Loader2, LogOut, Plug, Send, Settings2, Shield, Trash2, User, UserPlus, Users } from "lucide-react";
+import { ArrowLeft, Bell, Bot, Check, ChevronRight, CircleAlert, Copy, Link, Loader2, LogOut, Plug, Send, Settings2, Shield, Tag, Trash2, User, UserPlus, Users } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { Dialog } from "./dialog";
@@ -16,15 +16,17 @@ import { AgentSettings } from "./agent-settings";
 import { UserAvatar } from "./user-avatar";
 import { ContentSkeleton } from "./content-skeleton";
 import { NotificationPreferences } from "./notification-preferences";
+import { LabelSettings } from "./label-settings";
 import { ConfirmButton, FormStatus, SettingSwitch, type FormNotice } from "./settings-controls";
 
-type Section = "profile" | "security" | "notifications" | "workspace" | "members" | "integrations" | "agents";
+type Section = "profile" | "security" | "notifications" | "workspace" | "members" | "labels" | "integrations" | "agents";
 const sections: { id: Section; label: string; icon: typeof User; group: "account" | "workspace" }[] = [
   { id: "profile", label: "My profile", icon: User, group: "account" },
   { id: "security", label: "Security", icon: Shield, group: "account" },
   { id: "notifications", label: "Notifications", icon: Bell, group: "account" },
   { id: "workspace", label: "Workspace", icon: Settings2, group: "workspace" },
   { id: "members", label: "Members & invites", icon: Users, group: "workspace" },
+  { id: "labels", label: "Issue labels", icon: Tag, group: "workspace" },
   { id: "integrations", label: "Integrations", icon: Plug, group: "workspace" },
   { id: "agents", label: "Agents", icon: Bot, group: "workspace" },
 ];
@@ -62,6 +64,7 @@ export function WorkspaceSettings({ sessionToken, profile, security, sound, onTo
         {tab === "notifications" && <><div className="settings-group"><SettingSwitch label="Notification sound" checked={sound} onChange={onToggleSound} /></div><NotificationPreferences sessionToken={sessionToken} /></>}
         {tab === "workspace" && <><WorkspaceGeneral sessionToken={sessionToken} /><LeaveWorkspace sessionToken={sessionToken} /><DeleteWorkspace sessionToken={sessionToken} /></>}
         {tab === "members" && <WorkspaceMembers sessionToken={sessionToken} beforeOpenProfile={onClose} />}
+        {tab === "labels" && <LabelSettings sessionToken={sessionToken} />}
         {tab === "integrations" && <IntegrationSettings sessionToken={sessionToken} />}
         {tab === "agents" && <AgentSettings sessionToken={sessionToken} />}
       </div>

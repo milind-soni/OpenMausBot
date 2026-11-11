@@ -44,7 +44,9 @@ export function OriginEntry() {
   const invitation = useQuery(api.workspaces.invitePreview, inviteToken ? { token: inviteToken } : "skip");
   const slug = path.split("/")[1];
   const workspace = workspaces?.find(w => w.slug === slug);
-  const redirecting = !inviteToken && ["", "login", "signup"].includes(slug) && Boolean(workspaces?.length);
+  // `/issue/ORI-1A2B` has no workspace in it: open it in the workspace this browser last used.
+  const issueWithoutWorkspace = slug === "issue" && !workspaces?.some(w => w.slug === "issue");
+  const redirecting = !inviteToken && (["", "login", "signup"].includes(slug) || issueWithoutWorkspace) && Boolean(workspaces?.length);
   useEffect(() => { setToken(localStorage.getItem("origin.sessionToken")); setReady(true); }, []);
   useEffect(() => {
     if (token && user) void ensureLegacy({ sessionToken: token }).catch(error => setNotice(errorText(error, "Could not open your workspace")));
@@ -52,8 +54,8 @@ export function OriginEntry() {
   useEffect(() => {
     if (!token || !user || !workspaces?.length || !redirecting) return;
     const preferred = workspaces.find(w => w.slug === localStorage.getItem("origin.workspace")) || workspaces[0];
-    router.replace(`/${preferred.slug}`);
-  }, [token, user, workspaces, redirecting, router]);
+    router.replace(issueWithoutWorkspace ? `/${preferred.slug}${path}` : `/${preferred.slug}`);
+  }, [token, user, workspaces, redirecting, router, issueWithoutWorkspace, path]);
   const saveSession = async (sessionToken: string, destination?: string | null) => {
     localStorage.setItem("origin.sessionToken", sessionToken);
     // Signing in or up from an invitation link joins right away instead of asking again.
