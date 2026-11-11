@@ -14,8 +14,6 @@ export function withSource(url: string, source: string): string {
   return target.href;
 }
 export const LICENSE_URL = `${APP_REPOSITORY}/blob/main/LICENSE`;
-export const IOS_APP_STORE_URL = "https://apps.apple.com/app/mausbot/id6803387923";
-export const GOOGLE_PLAY_URL = "https://play.google.com/store/apps/details?id=com.openmausbot.companion";
 
 export function appVersion(): string {
   return typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
