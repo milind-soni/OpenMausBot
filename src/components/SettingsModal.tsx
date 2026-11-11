@@ -70,6 +70,7 @@ import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { Select } from "./Select";
 import { SavedStepsRow } from "./SavedStepsRow";
 import { BrowserProfilesRow, ColorUserBubblesRow, AdvancedModeRow, ExperimentalFeaturesRow, LanguageRow, NewBotEffortRow, PinnedCirclesRow, ReplayTourRow, RunCardRow, FollowUpRow, SendKeyRow, ShowThreadsRow, ToolCallsRow, UniversalPinsRow, UpdatesRow } from "./AppSettingsRows";
+import { ServerUpdateRow } from "./ServerUpdateRow";
 import { SIMPLE_ADVANCED_ONLY, SIMPLE_MORE_LIMITS, SimpleAiPage, SimpleBillingPage, SimpleComputerPage, SimpleGeneralPage, SimpleLooksPage, SimpleMorePage, SimpleUpdatesPage, type Disclose, type SimpleDisclosureId } from "./SettingsSimplePages";
 
 // labelKey, not a label: t() reads the active pack when called, so a label resolved at module scope would freeze the
@@ -390,7 +391,7 @@ function SettingsDialog() {
             <PinnedPanelsSettings />
 
             {!remoteActive && <ReplayTourRow />}
-            <UpdatesRow />
+            {window.ogb?.updater ? <UpdatesRow /> : <ServerUpdateRow title={t("settings.updates.title")} />}
             <DiagnosticsRow />
           </>
         );

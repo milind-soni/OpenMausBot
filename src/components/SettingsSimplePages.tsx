@@ -35,7 +35,7 @@ import { ProfileSummaryRow } from "./ProfileSettings";
 import { AwayEmailsSetting } from "./AwayEmailsSetting";
 import { ImportSettings } from "./ImportSettings";
 import { NotificationRows } from "./NotificationSettingsRows";
-import { useServerUpdateItem } from "./SidebarProfileMenu";
+import { ServerUpdateRow } from "./ServerUpdateRow";
 import { AdvancedModeRow, BrowserProfilesRow, ColorUserBubblesRow, FollowUpRow, LanguageRow, ReplayTourRow, SendKeyRow, ToolCallsRow, UpdatesRow } from "./AppSettingsRows";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { McpCallTimeoutSettings } from "./McpCallTimeoutSettings";
@@ -265,25 +265,11 @@ export function SimpleBillingPage({ has, disclose, cloudAccount }: { has: Has; d
 
 const versionTitle = () => `${productName()} ${appVersion()}`;
 
-function ServerUpdatesRow() {
-  const entry = useServerUpdateItem(true);
-  if (!entry) return null;
-  const status = entry.phase === "idle" ? undefined : [entry.label, entry.item.subtitle].filter(Boolean).join(" ");
-  const action = entry.phase === "available" ? t("settings.simple.updates.seeRelease")
-    : entry.phase === "reload" ? t("settings.simple.updates.reload")
-      : entry.phase === "checking" ? t("common.checking") : t("settings.updates.check");
-  return (
-    <SettingRow title={versionTitle()} subtitle={status}>
-      <button type="button" className="ui-button" disabled={entry.item.disabled} onClick={entry.item.onSelect}>{action}</button>
-    </SettingRow>
-  );
-}
-
 export function SimpleUpdatesPage({ remoteActive }: { remoteActive: boolean }) {
   return (
     <SettingsGroup block="updates">
       <SettingsRows>
-        {window.ogb?.updater ? <UpdatesRow title={versionTitle()} /> : <ServerUpdatesRow />}
+        {window.ogb?.updater ? <UpdatesRow title={versionTitle()} /> : <ServerUpdateRow title={versionTitle()} />}
         <UpdatesConsentRow />
         {!remoteActive && <ReplayTourRow />}
         <DiagnosticsRow simple />
