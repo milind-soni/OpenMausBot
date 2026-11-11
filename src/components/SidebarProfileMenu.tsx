@@ -6,7 +6,6 @@ import {
   Check,
   CircleUserRound,
   Cloud,
-  Download,
   FolderOpen,
   Gauge,
   Info,
@@ -304,15 +303,12 @@ export function phoneMenuItems({
   destinations,
   connected,
   onConnect,
-  onGetApp,
 }: {
   destinations: PhoneDestination[];
   connected: boolean;
   onConnect: (destination: PhoneDestination) => void;
-  onGetApp: () => void;
 }): SidebarMenuItem[] {
-  return [
-    ...destinations.map((destination) => ({
+  return destinations.map((destination) => ({
       key: destination.id === "cloud" ? "connect-phone-cloud" : "connect-phone",
       label: t("sidebar.menu.connectPhone"),
       subtitle: destination.team ? t("sidebar.menu.connectPhone.team", { team: destination.team }) : t(destination.subtitleKey),
@@ -323,14 +319,7 @@ export function phoneMenuItems({
           <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-success" />
         ) : undefined,
       onSelect: () => onConnect(destination),
-    } satisfies SidebarMenuItem)),
-    {
-      key: "phone-app",
-      label: t("sidebar.menu.getPhoneApp"),
-      icon: <Download size={18} />,
-      onSelect: onGetApp,
-    },
-  ];
+    } satisfies SidebarMenuItem));
 }
 
 export function toolMenuItems({ activeView, automationsNeedYou, onAutomations, onTeamMap, onFiles, onPublishedApps, archived }: {
@@ -394,13 +383,20 @@ export function placeMenuItems(place: Pick<WorkspacePlace, "bridge" | "current" 
   ];
 }
 
-export function simplePhoneItems({ connected, onGetApp }: { connected: boolean; onGetApp: () => void }): SidebarMenuItem[] {
+export function simplePhoneItems({ destinations, connected, onConnect, onChoose }: {
+  destinations: PhoneDestination[];
+  connected: boolean;
+  onConnect: (destination: PhoneDestination) => void;
+  onChoose: () => void;
+}): SidebarMenuItem[] {
+  const [only, ...others] = destinations;
+  if (!only) return [];
   return [{
-    key: "phone-app",
-    label: t("sidebar.menu.getPhoneApp"),
+    key: "connect-phone",
+    label: t("sidebar.menu.connectPhone"),
     icon: <Smartphone size={18} />,
     trailing: connected ? <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-success" /> : undefined,
-    onSelect: onGetApp,
+    onSelect: others.length ? onChoose : () => onConnect(only),
   }];
 }
 
@@ -598,12 +594,11 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
 
   const items = profileMenuItems({
     phone: simple
-      ? simplePhoneItems({ connected: phone.kind === "connected", onGetApp: () => setPhoneAppOpen(true) })
+      ? simplePhoneItems({ destinations, connected: phone.kind === "connected", onConnect: connectTo, onChoose: () => setPhoneAppOpen(true) })
       : phoneMenuItems({
         destinations,
         connected: phone.kind === "connected",
         onConnect: connectTo,
-        onGetApp: () => setPhoneAppOpen(true),
       }),
     usage: !remote && !teamMember,
     usageSummary: cloudUsage ?? engineUsage,

@@ -139,9 +139,8 @@ sign-in instead of the welcome flow, which describes the person's own computer
 
 ### Use My Cloud on your phone
 
-1. Get the phone app: the menu under your name → **Get the phone app** (App
-   Store for iPhone, APK for Android).
-2. The same menu → **Connect your phone · to your Cloud (always on)**, or
+1. Install MausBot on your phone from the App Store or Google Play.
+2. The menu under your name → **Connect your phone · to your Cloud (always on)**, or
    **Settings → MausBot Cloud → Use My Cloud on your phone**. The Cloud opens in
    the app window at its phone pairing.
 3. **Create pairing code**, and scan the QR code with the phone app.

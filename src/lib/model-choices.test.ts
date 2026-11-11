@@ -60,4 +60,13 @@ describe("OpenCode models typed by hand", () => {
     expect(withTypedModels([opencode], { instanceId: "opencode", model: "venice/retired" }, "")[0]).toBe(opencode);
     expect(withTypedModels([antigravity], { instanceId: "google", model: `typed::${typed}` }, typed)[0]).toBe(antigravity);
   });
+
+  it("never offers or keeps listed an id under a provider OpenCode lists no model of, which it cannot run", () => {
+    // Another engine's id pasted into the search box: OpenCode lists no "chutes" or "deepseek-ai" model here.
+    for (const query of ["chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017", "deepseek-ai/DeepSeek-V4.1-Flash-1017"]) {
+      expect(withTypedModels([opencode], onPickle, query)[0]).toBe(opencode);
+      expect(withTypedModels([opencode], { instanceId: "opencode", model: `typed::${query}` }, "")[0]).toBe(opencode);
+    }
+    expect(added(withTypedModels([opencode], onPickle, "opencode/brand-new"))).toEqual([{ id: "typed::opencode/brand-new", label: "opencode/brand-new · typed by hand" }]);
+  });
 });

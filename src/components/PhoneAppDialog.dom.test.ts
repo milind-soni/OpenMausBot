@@ -3,7 +3,6 @@ import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { ANDROID_APK_URL, IOS_APP_STORE_URL } from "@/lib/app-links";
 import { setLocale } from "@/lib/i18n";
 import { GlassBar } from "./GlassScrollFrame";
 import { PhoneAppDialog, type PhoneAppConnect } from "./PhoneAppDialog";
@@ -42,18 +41,6 @@ it("mounts the full-window backdrop outside the sidebar's glass stacking context
   expect(backdrop().closest("[data-glass-bar]")).toBeNull();
   expect(host.querySelector("[role=dialog]")).toBeNull();
   expect(dialog()!.querySelectorAll("svg")).toHaveLength(0);
-});
-
-it("opens each store link in the browser", () => {
-  const open = vi.spyOn(window, "open").mockReturnValue(null);
-  try {
-    render();
-    flushSync(() => button("App Store").click());
-    flushSync(() => button("Android").click());
-    expect(open.mock.calls.map(([url]) => url)).toEqual([IOS_APP_STORE_URL, ANDROID_APK_URL]);
-  } finally {
-    open.mockRestore();
-  }
 });
 
 it("also escapes a transformed sidebar's fixed-position containing block", () => {
