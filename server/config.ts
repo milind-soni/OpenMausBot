@@ -27,10 +27,8 @@ import { migrateLegacyFeatureFlags } from "./legacy-feature-flags.ts";
 import { settledFileCache, settledFileStamp } from "./settled-file.ts";
 import { isRemoteMcpServer, mcpServerServes, parseStoredMcpServer } from "./mcp-registry.ts"; import { postizKeyHeaders } from "./postiz/connection.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
-import { deciderConfigSchema, type DeciderConfig } from "./decider/config.ts";
-import { liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } from "./live-config.ts";
-import { sttConfigSchema, sttConfigWithEnv } from "./stt-config.ts";
-import type { SttConfig } from "../shared/stt.ts";
+import { deciderConfigSchema, type DeciderConfig } from "./decider/config.ts"; import type { SttConfig } from "../shared/stt.ts";
+import { liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } from "./live-config.ts"; import { sttConfigSchema, sttConfigWithEnv } from "./stt-config.ts";
 import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
 import { roomContextSettings } from "./room-context-settings.ts";
 import { localVmConfigSchema } from "./local-vm-settings.ts";
@@ -383,8 +381,7 @@ const appConfigSchema = z.object({
     model: optionalText,
     fishModel: z.enum(FISH_TTS_MODELS).optional(), everyReply: z.boolean().optional(), // a voice note with every reply unless a bot's voiceNoteEveryReply says otherwise
   }).optional(),
-  stt: sttConfigSchema.optional(),
-  decider: deciderConfigSchema.optional(),
+  stt: sttConfigSchema.optional(), decider: deciderConfigSchema.optional(),
   live: liveConfigSchema.optional(),
   /** Image provider credentials stay separate; choosing a router never reuses a cloud key. */
   imageGen: imageGenConfigSchema.optional(),
@@ -476,8 +473,7 @@ export interface AppConfig extends HelperConfig {
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string; providerKeys?: Record<string, string> };
   tts?: { key?: string; fishKey?: string; geminiKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai"; baseUrl?: string; model?: string; fishModel?: FishTtsModel; everyReply?: boolean };
-  stt?: SttConfig;
-  decider?: DeciderConfig;
+  stt?: SttConfig; decider?: DeciderConfig;
   imageGen?: ImageGenerationConfig;
   live?: LiveConfig;
   profile?: { name?: string; email?: string; aboutMe?: string; avatarUrl?: string }; everyBotRules?: string;
@@ -758,8 +754,7 @@ export function loadConfig(): AppConfig {
   if (process.env.BOX_TOKEN !== undefined) cfg.box.token = process.env.BOX_TOKEN;
   cfg.opencodeGo = { ...cfg.opencodeGo };
   if (process.env.OPENCODE_API_KEY !== undefined) cfg.opencodeGo.apiKey = process.env.OPENCODE_API_KEY;
-  cfg.tts = { ...cfg.tts };
-  cfg.stt = sttConfigWithEnv(cfg.stt);
+  cfg.tts = { ...cfg.tts }; cfg.stt = sttConfigWithEnv(cfg.stt);
   if (process.env.OMB_TTS_KEY !== undefined) cfg.tts.key = process.env.OMB_TTS_KEY;
   const presetVoice = process.env.OMB_TTS_DEFAULT_VOICE?.trim();
   if (presetVoice && !cfg.tts.voice?.trim() && (cfg.tts.provider ?? "elevenlabs") === "elevenlabs") cfg.tts.voice = presetVoice;
@@ -809,8 +804,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.opencodeGo?.apiKey, "OPENCODE_API_KEY"],
     [patch.tts?.key, "OMB_TTS_KEY"],
     [patch.tts?.fishKey, "OMB_FISH_AUDIO_API_KEY"],
-    [patch.tts?.geminiKey, "OMB_GEMINI_API_KEY"],
-    [patch.stt?.key, "OMB_STT_API_KEY"],
+    [patch.tts?.geminiKey, "OMB_GEMINI_API_KEY"], [patch.stt?.key, "OMB_STT_API_KEY"],
     [patch.decider?.key, "OMB_JEV_API_KEY"],
     [patch.decider?.openrouterKey, "OMB_OPENROUTER_DECIDER_KEY"], [patch.decider?.workersAiToken, "OMB_WORKERS_AI_TOKEN"],
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
@@ -927,8 +921,7 @@ export function saveConfig(
     }
     disk[key] = merged;
   }
-  keepImageModels();
-  if (checkedPatch.stt !== undefined) disk.stt = { ...jsonObjectSchema.safeParse(disk.stt).data, ...checkedPatch.stt };
+  keepImageModels(); if (checkedPatch.stt !== undefined) disk.stt = { ...jsonObjectSchema.safeParse(disk.stt).data, ...checkedPatch.stt };
   if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps);
   for (const key of ["language", "computerName", "everyBotRules"] as const) if (checkedPatch[key] !== undefined) disk[key] = checkedPatch[key];
   if (checkedPatch.customDomain !== undefined) disk.customDomain = checkedPatch.customDomain;
