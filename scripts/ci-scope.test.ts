@@ -232,6 +232,7 @@ describe("CI outputs", () => {
       "server/cloud-team-phones.e2e.test.ts",
       "server/cloud-team-pictures.e2e.test.ts",
       "server/cloud-team-presence.e2e.test.ts",
+      "server/cloud-team-privacy-holes.e2e.test.ts",
       "server/cloud-team-private.e2e.test.ts",
       "server/cloud-team-profile.e2e.test.ts",
       "server/cloud-team-requests.e2e.test.ts",

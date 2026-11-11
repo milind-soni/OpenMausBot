@@ -1,5 +1,9 @@
 # Deploy OpenMausBot on a VPS
 
+To keep MausBot and its agents on your current computer and use a VPS only as a
+bot’s remote desktop, see [Bring Your Own VPS](byo-vps.md) and the
+[published setup guide](https://docs.openmausbot.com/docs/computers/byo-vps).
+
 From a blank Linux server to OpenMausBot running on it around the clock, reachable from your laptop, the desktop app and your phone, with your bots working while every laptop is closed. It assumes nothing beyond being able to open a terminal and paste commands. About twenty minutes, most of it waiting.
 
 ## Quick start: one command on your own domain

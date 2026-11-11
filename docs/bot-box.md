@@ -69,6 +69,8 @@ checks it guards.
 
 ## What it does not do yet
 
+- **Local VM (Docker) computer use.** The computer MCP talks to the Local VM over the host's Docker socket. The box does not expose that socket (mounting it would be root-equivalent on the host), so with the bot box on a Local VM turn fails early with a clear message instead of "MCP server exited". Use this computer, a Cloud computer, or turn the box off for Local VM work.
+
 - The engines' subscription logins (`~/.claude`, `~/.codex`) are in the box, because the engine needs them. API keys
   stay in the environment until the credential broker (T0b) replaces them with per-turn tokens.
 - The box runs as the server's own user inside a user namespace; a separate Linux user per bot needs a privileged

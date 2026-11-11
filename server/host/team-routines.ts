@@ -48,7 +48,7 @@ export function createTeamRoutines(deps: TeamRoutinesDeps) {
     const routine = deps.routines()?.listRoutines().find((candidate) => candidate.id === id);
     if (routine?.resultsThreadId && deps.privateTo(routine.resultsThreadId) === left) deps.withWriter(writer, () => deps.routines()!.update(id, { resultsThreadId: null }));
   };
-  const field = (body: unknown, key: "botId" | "resultsThreadId" | "name"): unknown => (body && typeof body === "object" ? (body as Record<string, unknown>)[key] : undefined);
+  const field = (body: unknown, key: "botId" | "resultsThreadId" | "name" | "target"): unknown => (body && typeof body === "object" ? (body as Record<string, unknown>)[key] : undefined);
   return {
     home,
     inTurn,
@@ -75,17 +75,22 @@ export function createTeamRoutines(deps: TeamRoutinesDeps) {
       const own = typeof botId === "string" ? deps.ownBot?.(botId) : null;
       return own && (auth.kind !== "session" || own !== personKey(auth.session)) ? { status: 404, error: "no such bot" } : null;
     },
-    /** "Just me" made concrete: the person's own private chat with the bot, else a new one named for the routine. */
+    /** "Just me" made concrete: the person's own private chat with the bot, else a new one named for the routine.
+     * Security invariant: a new routine for a bot that names no audience is its writer's alone, as a new conversation
+     * is; only the person's own choice (the shared chat, or an older app's null) makes one the team's. */
     justMe<T>(auth: RequestAuth, body: T, routineId?: string): T {
-      if (!deps.team || auth.kind !== "session" || field(body, "resultsThreadId") !== RESULTS_JUST_ME) return body;
-      const person = personKey(auth.session);
+      if (!deps.team || auth.kind !== "session") return body;
+      const person = personKey(auth.session), named = field(body, "botId");
+      const unsaid = !routineId && field(body, "resultsThreadId") === undefined && typeof named === "string" &&
+        (field(body, "target") ?? "bot") === "bot" && deps.ownBot?.(named) !== person;
+      if (field(body, "resultsThreadId") !== RESULTS_JUST_ME && !unsaid) return body;
       const existing = routineId ? deps.routines()?.listRoutines().find((routine) => routine.id === routineId) : undefined;
       const botId = typeof field(body, "botId") === "string" ? field(body, "botId") as string : existing?.botId;
       if (!botId) return body;
       const name = typeof field(body, "name") === "string" ? field(body, "name") as string : existing?.name ?? "Routine";
       const mine = deps.tasks(botId).find((task) => !task.routineRunId && deps.privateTo(task.threadId) === person && !isOwnResultsChat(name, task));
       const threadId = mine?.threadId ?? deps.openChat(botId, name, person);
-      return threadId ? { ...body, resultsThreadId: threadId } : body;
+      return { ...body, resultsThreadId: threadId ?? RESULTS_JUST_ME };
     },
     /** Why a bot's change to a trigger by id is refused in this conversation: one that lives in someone else's private chat. */
     hiddenTrigger(request: { kind: string; proposal?: { routineId?: string } }, threadId: string): string | null {

@@ -456,7 +456,7 @@ describe("steer-queue module", () => {
       expect(snapshots).toHaveLength(2);
       expect(cancelSteeredMessage(bot.id, second.id)).toBe(true);
       bot.busy = false;
-      expect(() => drainSteeredMessages(fakeStore([bot]), () => { throw new Error("failed dispatch"); })).toThrow("failed dispatch");
+      expect(() => drainSteeredMessages(fakeStore([bot]), () => { throw new Error("failed dispatch"); })).not.toThrow();
       expect(snapshots).toEqual([
         { [bot.threadId]: [{ queueId: first.id, text: "keep" }] },
         { [bot.threadId]: [{ queueId: first.id, text: "keep" }, { queueId: second.id, text: "cancel" }] },

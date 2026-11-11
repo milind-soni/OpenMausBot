@@ -3349,7 +3349,6 @@
   "vm.isolation.shared": "Paylaşılan",
   "vm.isolation.perBot": "Bot başına",
   "vm.isolation.max": "Maksimum bot başına masaüstü",
-  "vm.isolation.maxDetail": "Depolama ve ana makine kaynak kullanımını sınırlar; çalışan her masaüstü en fazla 4 GB bellek ve 2 CPU kullanabilir.",
   "vm.isolation.maxAria": "Maksimum bot başına masaüstü",
   "vm.idle.label": "Boşta kalan masaüstlerini şu süreden sonra durdur:",
   "vm.idle.detail": "Paylaşılan ve bot başına masaüstleri için geçerlidir. Sırası devam eden bir masaüstü asla durdurulmaz. Boşta kalma durumunda kapatma, dosyaları ve yüklü uygulamaları korur.",

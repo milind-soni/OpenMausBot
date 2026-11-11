@@ -293,7 +293,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
   const libraryOn = skillsLibraryEnabled(state.config);
   const {
     skills, staged, loading, working, setWorking, error, setError, reviewing, setReviewing, refresh, toggle, enableReviewed,
-    libraryPool, addFromLibrary, setAddFromLibrary, assignmentBusy, putAssignments, addToBot,
+    libraryPool, addFromLibrary, setAddFromLibrary, assignmentBusy, addToBot,
   } = useManagedSkills(bot);
   const [viewing, setViewing] = useState<{ name: string; text: string } | null>(null);
   const [source, setSource] = useState("");
@@ -346,7 +346,8 @@ export function SkillsSection({ bot }: { bot: Bot }) {
       setWorking(skill.name);
       setError("");
       try {
-        await putAssignments(skill.name, true);
+        await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, { method: "DELETE" });
+        await refresh();
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : t("skills.error.unassign"));
       } finally {

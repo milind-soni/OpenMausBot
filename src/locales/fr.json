@@ -1674,7 +1674,6 @@
   "vm.isolation.shared": "Partagé",
   "vm.isolation.perBot": "Par bot",
   "vm.isolation.max": "Nombre maximal de bureaux par bot",
-  "vm.isolation.maxDetail": "Limite le stockage et l’usage des ressources de l’hôte ; chaque bureau en cours peut utiliser jusqu’à 4 Go et 2 processeurs.",
   "vm.isolation.maxAria": "Nombre maximal de bureaux par bot",
   "vm.saving": "Enregistrement…",
   "vm.unmanagedError": "Ce conteneur n’est pas géré par {app} et ne peut pas être supprimé ici.",
