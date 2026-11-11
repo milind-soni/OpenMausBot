@@ -137,7 +137,7 @@ export const send = mutation({
       avatarUrl: viewer.avatarUrl, body, createdAt: Date.now(), attachments, references, mentions, ...(a.replyTo ? { replyTo: a.replyTo } : {}),
     };
     const payload = JSON.stringify(message);
-    await ctx.db.insert("teamChatMessages", { teamId: viewer.teamId, conversation: viewer.conversation, messageId: message.id, created: message.createdAt, payload });
+    await ctx.db.insert("teamChatMessages", { teamId: viewer.teamId, conversation: viewer.conversation, messageId: message.id, created: message.createdAt, payload, webWrittenAt: message.createdAt });
     // Mentions in the workspace channel notify people; the scheduled mutation commits with this message or not at all.
     const userIds = [...new Set([...mentions.map(m => m.userId), ...notify])].filter(id => id !== viewer.user._id).slice(0, 20);
     if (userIds.length && !viewer.conversation) await ctx.scheduler.runAfter(0, internal.notifications.chatMentions, { teamId: viewer.teamId, actorId: viewer.user._id, messageId: message.id, userIds });
@@ -168,7 +168,7 @@ export const edit = mutation({
     }
     if (typeof a.pinned === "boolean") message.pinned = a.pinned;
     const payload = JSON.stringify(message);
-    await ctx.db.patch(row._id, { payload });
+    await ctx.db.patch(row._id, { payload, webWrittenAt: Date.now() });
     return payload;
   },
 });

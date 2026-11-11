@@ -32,6 +32,9 @@ export type Report = { mode: "dry-run" | "apply"; compared: boolean; rows: Repor
 
 export class MigrationError extends Error {}
 
+/** Marker a successful --apply leaves in Convex (localStoreMarkers). */
+export const COMPLETED = "local-store-import:completed";
+
 // ---- Reading the old store ----
 
 /** Opens a temporary copy of a sqlite file (with its WAL), so reading never touches the source. */
@@ -299,6 +302,9 @@ export async function migrate(dir: string, options: { apply: boolean; transport?
   const transport = options.transport;
   if (options.apply && !transport) throw new MigrationError("--apply needs ORIGIN_INTEGRATION_SECRET and a Convex site URL");
   const report: Report = { mode: options.apply ? "apply" : "dry-run", compared: Boolean(transport), rows: [], ignored: store.ignored, notes: store.notes };
+  if (transport && (await inspect(transport, "marker", [{ name: COMPLETED }]))[0] !== "absent") {
+    store.notes.unshift("An earlier --apply already completed. Re-run only while the old frontend is still the only writer: once the new frontend serves traffic, a stale local store could bring back GitHub connections or MCP grants removed since. Chat the new frontend wrote is never changed by the import.");
+  }
   const row = (source: string, kind: string, rows: number, note?: string): ReportRow => { const entry = { source, kind, rows, insert: 0, update: 0, skip: 0, delete: 0, ...(note ? { note } : {}) }; report.rows.push(entry); return entry; };
 
   for (const batch of store.batches) {
@@ -346,6 +352,7 @@ export async function migrate(dir: string, options: { apply: boolean; transport?
   const revocations = row("integrations.mcp_revocations", "revokeConnector", store.revocations.length);
   revocations.update = store.revocations.length;
   if (options.apply) for (const connectorToken of store.revocations) await transport!("migrate.revokeConnector", { connectorToken });
+  if (options.apply) await transport!("migrate.apply", { kind: "marker", items: [{ name: COMPLETED }] });
   return report;
 }
 

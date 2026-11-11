@@ -177,7 +177,7 @@ test("apply imports everything, re-sealed with ORIGIN_SEALING_KEY, and a second 
   expect(byKind(report, "origin.files + files/")).toMatchObject({ insert: 1 });
   const after = await counts();
   expect(after).toMatchObject({
-    teamChatMessages: 4, teamChatFiles: 1, teamDirectConversations: 1, teamChatReads: 2, localStoreMarkers: 3, requestLimits: 1, serverLeases: 1,
+    teamChatMessages: 4, teamChatFiles: 1, teamDirectConversations: 1, teamChatReads: 2, localStoreMarkers: 4, requestLimits: 1, serverLeases: 1,
     githubAppRegistrations: 1, githubWorkspaceConnections: 1, githubJobs: 3, mcpOAuthClients: 1, mcpOAuthGrants: 1, mcpOAuthTokens: 2,
     localStoreArchive: 1 + 1 + 1 + 3 + 1 + 2 + 1 + 1,
   });
@@ -198,9 +198,21 @@ test("apply imports everything, re-sealed with ORIGIN_SEALING_KEY, and a second 
   expect(messages.map(row => row.messageId)).not.toContain(ids.deletedLocally);
   expect(JSON.parse(messages.find(row => row.messageId === ids.edited)!.payload).body).toBe("after the edit");
 
+  // After the cutover the web app writes chat; a re-run must leave its messages and edits alone.
+  await backend.run(async ctx => {
+    const edited = (await ctx.db.query("teamChatMessages").withIndex("by_team_conversation_message", q => q.eq("teamId", team.teamId as never).eq("conversation", "").eq("messageId", ids.edited)).first())!;
+    await ctx.db.patch(edited._id, { payload: JSON.stringify({ id: ids.edited, body: "edited in the web app" }), webWrittenAt: Date.now() });
+    await ctx.db.insert("teamChatMessages", { teamId: team.teamId as never, conversation: "", messageId: "web-only", created: Date.now(), payload: "{}", webWrittenAt: Date.now() });
+  });
+  const afterWeb = await counts();
   const again = await migrate(dir, { apply: true, transport, upload });
+  expect(again.notes[0]).toContain("An earlier --apply already completed");
   for (const row of again.rows.filter(row => !["notifyMentions", "revokeConnector"].includes(row.kind))) expect({ source: row.source, insert: row.insert, update: row.update, delete: row.delete }).toEqual({ source: row.source, insert: 0, update: 0, delete: 0 });
-  expect(await counts()).toEqual(after);
+  expect(await counts()).toEqual(afterWeb);
+  const messagesNow = await backend.run(ctx => ctx.db.query("teamChatMessages").take(20));
+  expect(messagesNow.map(row => row.messageId)).toContain("web-only");
+  expect(JSON.parse(messagesNow.find(row => row.messageId === ids.edited)!.payload).body).toBe("edited in the web app");
+  expect(after.localStoreMarkers).toBe(4);
 });
 
 test("the import refuses an unknown sealed field or a wrong integrations.key instead of copying ciphertext", async () => {

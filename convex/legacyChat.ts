@@ -1,10 +1,11 @@
 import { v } from "convex/values";
 import { internalQuery } from "./_generated/server";
 
-// Workspace chat written by the desktop app lives in teamChatMessages/teamChatFiles/teamDirectConversations/teamChatReads.
-// The web app keeps chat in the Next server's local store, so the server copies a workspace's rows once
-// (lib/localRealtime.ts importConvexChat) through the signed bridge. Project conversations ("project:<id>") have no
-// place in the web app and are not exported.
+// UPGRADE STUB - remove once no frontend from before the Convex chat store (ORIGIN_LOCAL_DATA_DIR) is running.
+// That frontend kept chat in a local sqlite store and copied a workspace's desktop-era rows from teamChatMessages,
+// teamChatFiles, teamDirectConversations and teamChatReads once, through the signed bridge ("legacyChat"). The current
+// web app reads those tables directly (convex/workspaceChat.ts), so only the old frontend still calls this during the
+// cutover. Project conversations ("project:<id>") have no place in the web app and are not exported.
 
 const PAGE = 200;
 const kept = (conversation: string) => conversation === "" || conversation.startsWith("dm:");

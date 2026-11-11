@@ -2,7 +2,11 @@ import { defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export const realtimeTables = {
-  teamChatMessages: defineTable({ teamId: v.id("teams"), conversation: v.string(), messageId: v.string(), created: v.number(), payload: v.string() })
+  teamChatMessages: defineTable({
+    teamId: v.id("teams"), conversation: v.string(), messageId: v.string(), created: v.number(), payload: v.string(),
+    /** Set whenever the web app (convex/workspaceChat.ts) writes the row; the local-store import never changes such rows. */
+    webWrittenAt: v.optional(v.number()),
+  })
     .index("by_team_conversation_created", ["teamId", "conversation", "created"])
     .index("by_team_conversation_message", ["teamId", "conversation", "messageId"]),
   teamChatFiles: defineTable({ teamId: v.id("teams"), conversation: v.string(), fileId: v.string(), author: v.string(), storageId: v.id("_storage"), payload: v.string() })

@@ -64,7 +64,8 @@ async function existing(ctx: Ctx, kind: string, item: Item) {
 
 function status(kind: string, item: Item, row: Record<string, unknown> | null): ImportStatus {
   if (!row) return "absent";
-  if (kind === "chatMessage") return row.payload === item.payload ? "same" : "different";
+  // A message the web app wrote or edited is newer than any local copy.
+  if (kind === "chatMessage") return row.payload === item.payload || row.webWrittenAt !== undefined ? "same" : "different";
   if (kind === "chatRead") return (row.seen as number) >= n(item, "seen") ? "same" : "different";
   return "same";
 }
@@ -89,7 +90,8 @@ export const chatMessageIds = internalQuery({
     const teamId = ctx.db.normalizeId("teams", a.teamId);
     if (!teamId) return { ids: [], isDone: true, continueCursor: "" };
     const page = await ctx.db.query("teamChatMessages").withIndex("by_team_conversation_created", q => q.eq("teamId", teamId).eq("conversation", a.conversation)).paginate({ numItems: 500, cursor: a.cursor });
-    return { ids: page.page.map(row => row.messageId), isDone: page.isDone, continueCursor: page.continueCursor };
+    // Rows the web app wrote are never candidates for deletion.
+    return { ids: page.page.filter(row => row.webWrittenAt === undefined).map(row => row.messageId), isDone: page.isDone, continueCursor: page.continueCursor };
   },
 });
 
@@ -99,8 +101,8 @@ async function applyOne(ctx: MutationCtx, kind: string, item: Item): Promise<"in
   if (kind === "chatMessage") {
     const value = { created: n(item, "created"), payload: s(item, "payload") };
     if (!row) { await ctx.db.insert("teamChatMessages", { teamId: team(ctx, s(item, "teamId")), conversation: s(item, "conversation"), messageId: s(item, "messageId"), ...value }); return "inserted"; }
-    // The local store was the live copy: its edits, reactions and pins win.
-    if (row.payload === value.payload) return "skipped";
+    // The local store was the live copy: its edits, reactions and pins win, unless the web app has written the row since.
+    if (row.payload === value.payload || row.webWrittenAt !== undefined) return "skipped";
     await ctx.db.patch(row._id, value);
     return "updated";
   }
@@ -170,7 +172,7 @@ export const deleteChatMessages = internalMutation({
     let deleted = 0;
     for (const messageId of a.messageIds) {
       const row = await ctx.db.query("teamChatMessages").withIndex("by_team_conversation_message", q => q.eq("teamId", a.teamId).eq("conversation", a.conversation).eq("messageId", messageId)).first();
-      if (row) { await ctx.db.delete(row._id); deleted += 1; }
+      if (row && row.webWrittenAt === undefined) { await ctx.db.delete(row._id); deleted += 1; }
     }
     return deleted;
   },
