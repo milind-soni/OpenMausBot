@@ -640,7 +640,7 @@ function MarkdownLink({ href, children, ...rest }: { href?: string; children?: R
   // SAFETY: react-markdown hands hast data-* attributes through as string props
   const props = rest as Record<string, unknown>;
   const { threads, currentBotId, message, delivered, originals } = useContext(MessageScopeContext);
-  const linkMenu = useThreadLinkMenu(href), openPage = usePageOpener();
+  const linkMenu = useThreadLinkMenu(href), openPage = usePageOpener({ beside: true });
   if (!href) return <span className="break-words">{children}</span>;
   if (isUseMyComputerUrl(href)) return <UseMyComputerLink>{children}</UseMyComputerLink>;
   const address = parseThreadRefUrl(href);

@@ -91,6 +91,17 @@ describe("fill_login outside the bot's own browser", () => {
 });
 
 describe("fill_login in the bot's own browser", () => {
+  it("passes turn cancellation through to the login action before browser input starts", async () => {
+    const engine = vi.fn(async () => ({ url: "https://bank.test/sign-in" }));
+    const { fill } = harness({
+      at: "browser", turnActive: () => false,
+      target: async () => ({ session: "bot-b1", spec: { command: "agent-browser", env: {} }, env: {} }),
+      loginInput: () => ({ engine, insertText: async () => {}, press: async () => {}, click: async () => {} }),
+    });
+    expect(await fill(bot, turn, undefined, undefined)).toEqual({ ok: false, text: "Stopped filling this login because the turn ended." });
+    expect(engine).not.toHaveBeenCalled();
+  });
+
   it("fills there and never asks to move", async () => {
     const { fill, moveToBrowser, target } = harness({ at: "browser" });
     const answer = await fill(bot, turn, undefined, undefined);

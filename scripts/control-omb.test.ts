@@ -33,6 +33,15 @@ describe("the fixture's fake engine knobs", () => {
   });
 });
 
+describe("the fixture's Netlify stand-in", () => {
+  it("lets only a loopback stand-in's API address cross, so a fixture never lists or deletes on Netlify", () => {
+    expect(childEnv({ OMB_NETLIFY_API_URL: " http://127.0.0.1:4010/api/v1 " }).OMB_NETLIFY_API_URL).toBe("http://127.0.0.1:4010/api/v1");
+    for (const url of ["https://api.netlify.com/api/v1", "http://localhost:4010/api/v1", "http://127.0.0.1:4010", "http://127.0.0.1:4010/api/v1@evil.test", "http://192.0.2.1:4010/api/v1", ""]) {
+      expect(childEnv({ OMB_NETLIFY_API_URL: url }), url).not.toHaveProperty("OMB_NETLIFY_API_URL");
+    }
+  });
+});
+
 describe("the fixture's Live call environment", () => {
   it("passes a loopback fake GPT-Live and its key through", () => {
     expect(childEnv({ OMB_OPENAI_LIVE_URL: " http://127.0.0.1:4100 ", OMB_OPENAI_LIVE_KEY: "sk-fake" }))

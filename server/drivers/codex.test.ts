@@ -257,6 +257,53 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(existsSync(dump)).toBe(false);
   });
 
+  it("switches a bot's native skills off by path, and still runs its turn while its switches can't be read", async () => {
+    const dump = join(scratch, "skills-off.json"); process.env.FAKE_CODEX_DUMP = dump;
+    const skill = join(scratch, ".agents", "skills", "pdf", "SKILL.md");
+    mkdirSync(dirname(skill), { recursive: true }); writeFileSync(skill, "---\nname: pdf\ndescription: PDFs.\n---\nSteps.\n");
+    const choices = join(DATA_DIR, "skill-state", "codex-skills-off", "native-skills.json");
+    mkdirSync(dirname(choices), { recursive: true }); writeFileSync(choices, JSON.stringify({ off: ["pdf"] }));
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex") } });
+    await instance.adapter.sendTurn({ threadId: "skills-off", botId: "codex-skills-off", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const skillsConfig = (file: string) => (JSON.parse(readFileSync(file, "utf8")) as { argv: string[] }).argv.find((arg) => arg.startsWith("skills.config=")) ?? "";
+    expect(skillsConfig(dump)).toContain(`{path=${JSON.stringify(skill)},enabled=false}`);
+    expect(skillsConfig(dump)).not.toContain("name=");
+
+    writeFileSync(choices, "{\"off\": [");
+    const damaged = join(scratch, "skills-unreadable.json"); process.env.FAKE_CODEX_DUMP = damaged;
+    recorder.events.length = 0;
+    await instance.adapter.sendTurn({ threadId: "skills-unreadable", botId: "codex-skills-off", text: "hi" });
+    await expect(recorder.until((e) => e.type === "turn.completed")).resolves.toMatchObject({ ok: true });
+    expect(skillsConfig(damaged)).toBe("");
+  });
+
+  it("rebuilds a bot's native skill switches for each relaunch, and keeps going if they turn unreadable", async () => {
+    const skill = join(scratch, ".agents", "skills", "pdf", "SKILL.md");
+    const choices = join(DATA_DIR, "skill-state", "codex-skills-retry", "native-skills.json");
+    mkdirSync(dirname(choices), { recursive: true }); writeFileSync(choices, JSON.stringify({ off: ["pdf"] }));
+    Object.assign(process.env, { FAKE_CODEX_TRANSIENTS: "1", FAKE_CODEX_RETRY_SCALE: "0.001", FAKE_CODEX_STATE: join(scratch, "skills-retry-launches"), FAKE_CODEX_DUMP: join(scratch, "skills-retry.json") });
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex") } });
+    const unsubscribe = instance.adapter.onEvent((event) => {
+      if (event.type !== "turn.retrying") return;
+      mkdirSync(dirname(skill), { recursive: true }); writeFileSync(skill, "---\nname: pdf\ndescription: PDFs.\n---\nSteps.\n");
+    });
+    await instance.adapter.sendTurn({ threadId: "skills-retry", botId: "codex-skills-retry", text: "hi" });
+    await expect(recorder.until((e) => e.type === "turn.completed", 15_000)).resolves.toMatchObject({ ok: true });
+    unsubscribe();
+    expect(readFileSync(join(scratch, "skills-retry-launches"), "utf8")).toBe("2");
+    expect((JSON.parse(readFileSync(join(scratch, "skills-retry.json"), "utf8")) as { argv: string[] }).argv.join(" ")).toContain(JSON.stringify(skill));
+
+    recorder.events.length = 0;
+    process.env.FAKE_CODEX_STATE = join(scratch, "skills-retry-damaged");
+    const damage = instance.adapter.onEvent((event) => { if (event.type === "turn.retrying") writeFileSync(choices, "{"); });
+    await instance.adapter.sendTurn({ threadId: "skills-retry-damaged", botId: "codex-skills-retry", text: "hi" });
+    await expect(recorder.until((e) => e.type === "turn.completed", 15_000)).resolves.toMatchObject({ ok: true });
+    damage();
+    expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(false);
+    expect(readFileSync(join(scratch, "skills-retry-damaged"), "utf8")).toBe("2");
+  }, 30_000);
+
   it("gates raw custom identities before mount renaming and disables ambient MCP servers", async () => {
     const dump = join(scratch, "scope-mcp.json"); process.env.FAKE_CODEX_DUMP = dump;
     mkdirSync(join(scratch, ".codex")); writeFileSync(join(scratch, ".codex/config.toml"), '[mcp_servers.notes]\nurl="https://example.test/ambient"\n');

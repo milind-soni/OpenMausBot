@@ -159,8 +159,8 @@ describe("DeepSeek ACP support", () => {
   });
 
   it("resolves the turn model to the wire pair", () => {
-    expect(deepseekSupport.resolveTurnModel?.("deepseek-official/deepseek-v4-pro", {})).toBe('["deepseek-official","deepseek-v4-pro"]');
-    expect(deepseekSupport.resolveTurnModel?.(undefined, {})).toBeUndefined();
+    expect(deepseekSupport.resolveTurnModel?.("deepseek-official/deepseek-v4-pro", {}, DEEPSEEK_MODELS)).toBe('["deepseek-official","deepseek-v4-pro"]');
+    expect(deepseekSupport.resolveTurnModel?.(undefined, {}, DEEPSEEK_MODELS)).toBeUndefined();
   });
 
   it("falls back to the catalog default when offered, else the session's current model", () => {
