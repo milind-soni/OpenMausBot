@@ -154,7 +154,7 @@ export function createLoginMailCodes(deps: LoginMailCodesDeps) {
         }
       };
       const answer = await deps.connectCard(turn, { botId: bot.id, threadId: turn.threadId, items: ["gmail"], resumeKey: randomUUID() });
-      if (answer.status === 200) { remember(); return { shown: true }; }
+      if (answer.status === 200) { remember(); return answer.body.nothingToSignIn ? { shown: false } : { shown: true }; }
       if (answer.status === 409 && onTeam) {
         if (person) remember();
         return { shown: false, line: answer.body.error };

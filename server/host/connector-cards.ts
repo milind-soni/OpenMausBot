@@ -21,7 +21,7 @@ export interface ConnectorCardsDeps {
   maybeResume(threadId: string, resumeKey: string): void;
 }
 
-export type ConnectorCardAnswer = { status: 200; body: { messageIds: string[]; authConfigNote?: string; connectedNote?: string } } | { status: 400 | 403 | 409; body: { error: string } };
+export type ConnectorCardAnswer = { status: 200; body: { messageIds: string[]; authConfigNote?: string; connectedNote?: string; nothingToSignIn?: boolean } } | { status: 400 | 403 | 409; body: { error: string } };
 
 export function createConnectorCards(deps: ConnectorCardsDeps) {
   async function request(capability: Capability, input: { botId?: unknown; threadId?: unknown; resumeKey?: unknown; items?: unknown; slugs?: unknown }, requireActive: () => void): Promise<ConnectorCardAnswer> {
