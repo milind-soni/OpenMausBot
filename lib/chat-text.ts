@@ -1,5 +1,5 @@
 import { LinkifyIt } from "linkify-it";
-import type { ChatMention, ChatReference } from "./localRealtime";
+import type { ChatMention, ChatReference } from "./chat-types";
 
 export type ChatTextPart =
   | { kind: "text"; text: string }

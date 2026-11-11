@@ -2,7 +2,7 @@ import { createMcpHandler, isLegacyRequest, McpServer, WebStandardStreamableHTTP
 import { ConvexError } from "convex/values";
 import { z } from "zod";
 import { api } from "@/convex/_generated/api";
-import { getConvexClient } from "./localRealtime";
+import { getConvexClient } from "./workspace-session";
 import { originUrl } from "./integration-bridge";
 import { MCP_INSTRUCTIONS, mcpTool, type McpToolName } from "./mcp-tools";
 

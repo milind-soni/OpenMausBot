@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { callJson, callOptions } from "@/lib/call-http";
-import { requireLocalWorkspace } from "@/lib/localRealtime";
+import { requireLocalWorkspace } from "@/lib/workspace-session";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export async function GET(request: Request) {

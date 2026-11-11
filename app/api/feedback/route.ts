@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
-import { limitLocalAction, TooManyRequests } from "@/lib/localRealtime";
+import { limitAction, TooManyRequests } from "@/lib/server-store";
 import { clientAddress } from "@/lib/client-address";
 import { integrationBridge, originUrl } from "@/lib/integration-bridge";
 import { BodyTooLarge, readBoundedText } from "@/lib/http-body";
@@ -16,8 +16,8 @@ export async function POST(request: Request) {
     if (typeof body.slug !== "string" || !/^[a-f0-9]{32}$/.test(body.slug) || typeof body.title !== "string" || typeof body.body !== "string" || !["bug", "idea"].includes(body.kind)) throw new Error("Invalid feedback");
     // Per visitor behind a trusted proxy (ORIGIN_TRUSTED_PROXY), otherwise per feedback form. Never retain raw addresses.
     const address = clientAddress(request);
-    if (address) limitLocalAction(`feedback:${createHash("sha256").update(`${process.env.ORIGIN_INTEGRATION_SECRET}:${address}`).digest("hex")}`, 5, 3600000);
-    else limitLocalAction(`feedback-form:${body.slug}`, 30, 3600000);
+    if (address) await limitAction(`feedback:${createHash("sha256").update(`${process.env.ORIGIN_INTEGRATION_SECRET}:${address}`).digest("hex")}`, 5, 3600000);
+    else await limitAction(`feedback-form:${body.slug}`, 30, 3600000);
     await integrationBridge("feedback", { slug: body.slug, title: body.title, body: body.body, kind: body.kind });
     return NextResponse.json({ ok: true });
   } catch (error) {

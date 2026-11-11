@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { after, NextRequest, NextResponse } from "next/server";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { getConvexClient, limitLocalAction, requireLocalWorkspace, sessionTokenFromRequest } from "@/lib/localRealtime";
+import { getConvexClient, requireLocalWorkspace, sessionTokenFromRequest } from "@/lib/workspace-session";
+import { limitAction } from "@/lib/server-store";
 import { consumeGithubState, createGithubState, exchangeGitHubToken, githubAppConfig, githubAuthorizeUrl, githubRequest, peekGithubState, saveWorkspaceGitHub } from "@/lib/github-workspace";
 import { originUrl } from "@/lib/integration-bridge";
 import { errorText } from "@/lib/error-text";
@@ -13,16 +14,16 @@ export async function POST(request: NextRequest, context: { params: Promise<{ st
   try {
     const user = await requireLocalWorkspace(request);
     if (!["owner", "admin"].includes(user.workspaceRole)) throw new Error("Workspace admin access required");
-    limitLocalAction(`github-connect:${user._id}`, 10, 60000);
-    const app = githubAppConfig(); if (!app) throw new Error("The Origin GitHub App has not been configured yet");
+    await limitAction(`github-connect:${user._id}`, 10, 60000);
+    const app = await githubAppConfig(); if (!app) throw new Error("The Origin GitHub App has not been configured yet");
     const projectId = request.nextUrl.searchParams.get("projectId") || undefined;
     if (projectId) {
       const project = await getConvexClient().query(api.projects.get, { sessionToken: sessionTokenFromRequest(request), projectId: projectId as Id<"projects"> });
       if (project.teamId !== user.teamId) throw new Error("Project not found");
     }
-    const { state, browser, challenge } = createGithubState({ teamId: user.teamId, userId: user._id, slug: user.slug, sessionToken: sessionTokenFromRequest(request), mode: "connect", projectId });
+    const { state, browser, challenge } = await createGithubState({ teamId: user.teamId, userId: user._id, slug: user.slug, sessionToken: sessionTokenFromRequest(request), mode: "connect", projectId });
     // Installation alone does not authorize an existing app to act for this workspace.
-    const url = githubAuthorizeUrl(state, challenge);
+    const url = await githubAuthorizeUrl(state, challenge);
     const response = NextResponse.json({ url });
     response.cookies.set("origin.github", browser, { httpOnly: true, secure: originUrl().startsWith("https:"), sameSite: "lax", path: "/api/github", maxAge: 900 });
     return response;
@@ -35,13 +36,13 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ste
     const state = request.nextUrl.searchParams.get("state") || "";
     const browser = request.cookies.get("origin.github")?.value || "";
     if (step === "install") {
-      const pending = peekGithubState(state, browser);
-      return NextResponse.redirect(githubAuthorizeUrl(state, createHash("sha256").update(pending.verifier).digest("base64url")));
+      const pending = await peekGithubState(state, browser);
+      return NextResponse.redirect(await githubAuthorizeUrl(state, createHash("sha256").update(pending.verifier).digest("base64url")));
     }
     if (step !== "callback") return new Response(null, { status: 404 });
-    const pending = consumeGithubState(state, browser, "connect");
+    const pending = await consumeGithubState(state, browser, "connect");
     workspaceSlug = pending.slug;
-    const app = githubAppConfig(); const code = request.nextUrl.searchParams.get("code");
+    const app = await githubAppConfig(); const code = request.nextUrl.searchParams.get("code");
     if (!app || !code || request.nextUrl.searchParams.has("error")) throw new Error("GitHub connection cancelled");
     const access = await getConvexClient().query(api.workspaces.access, { sessionToken: pending.sessionToken, teamId: pending.teamId as Id<"teams"> });
     if (!["owner", "admin"].includes(access.role)) throw new Error("Workspace admin access required");
@@ -54,7 +55,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ste
       const installation = result.installations.find(item => item.app_slug === app.slug && !item.suspended_at);
       if (!installation) {
         if (pending.installationAttempted) throw new Error("Install the Origin GitHub App on the account or organization that owns your repositories");
-        const next = createGithubState({ teamId: pending.teamId, userId: pending.userId, slug: pending.slug, sessionToken: pending.sessionToken, mode: "connect", installationAttempted: true, projectId: pending.projectId });
+        const next = await createGithubState({ teamId: pending.teamId, userId: pending.userId, slug: pending.slug, sessionToken: pending.sessionToken, mode: "connect", installationAttempted: true, projectId: pending.projectId });
         const response = NextResponse.redirect(`https://github.com/apps/${app.slug}/installations/new?state=${encodeURIComponent(next.state)}`);
         response.cookies.set("origin.github", next.browser, { httpOnly: true, secure: originUrl().startsWith("https:"), sameSite: "lax", path: "/api/github", maxAge: 900 });
         return response;
@@ -63,7 +64,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ste
     const currentAccess = await getConvexClient().query(api.workspaces.access, { sessionToken: pending.sessionToken, teamId: pending.teamId as Id<"teams"> });
     if (!["owner", "admin"].includes(currentAccess.role)) throw new Error("Workspace admin access required");
     await getConvexClient().mutation(api.integrations.configure, { sessionToken: pending.sessionToken, teamId: pending.teamId as Id<"teams">, login: account.login, autoCreate: true });
-    saveWorkspaceGitHub(pending.teamId, account.login, account.id, pending.userId, token);
+    await saveWorkspaceGitHub(pending.teamId, account.login, account.id, pending.userId, token);
     after(async () => {
       try {
         const projects = await getConvexClient().query(api.projects.listForUser, { sessionToken: pending.sessionToken, teamId: pending.teamId as Id<"teams"> });

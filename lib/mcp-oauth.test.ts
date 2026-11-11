@@ -1,12 +1,15 @@
 // @vitest-environment node
 import { createHash, randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
-import { cleanup, exchangeMcpToken, flushMcpRevocations, issueMcpCode, OAuthError, parseScope, redirectMatches, registerMcpClient, resolveMcpToken, revokeMcpToken, UNUSED_CLIENT_TTL, validateMcpAuthorization, validRedirect } from "./mcp-oauth";
-import { integrationDb } from "./githubConnection";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { exchangeMcpToken, issueMcpCode, OAuthError, parseScope, redirectMatches, registerMcpClient, RegistrationLimited, resolveMcpToken, revokeMcpToken, validateMcpAuthorization, validRedirect } from "./mcp-oauth";
 import { clientAddress } from "./client-address";
+import { convexStore, revokedConnectors, seedWorkspace, signedBridge, type Backend } from "../testing/convex-store";
+
+const backend = vi.hoisted(() => ({ current: null as Backend | null }));
+vi.mock("./integration-bridge", async importOriginal => ({
+  ...await importOriginal<typeof import("./integration-bridge")>(),
+  integrationBridge: (operation: string, args: unknown) => signedBridge(backend.current!, operation, args),
+}));
 
 test("redirect URIs: HTTPS or loopback only", () => {
   for (const uri of ["https://chatgpt.com/connector_platform_oauth_redirect", "https://claude.ai/api/mcp/auth_callback", "http://127.0.0.1:33418/callback", "http://localhost:3000/callback", "http://[::1]:9/cb"]) expect(validRedirect(uri)).toBe(true);
@@ -29,106 +32,108 @@ test("scopes default to read and write and always include read", () => {
   expect(() => parseScope("admin")).toThrow();
 });
 
-// Stateful flows against a temporary SQLite store.
-
-const directory = mkdtempSync(path.join(tmpdir(), "origin-mcp-oauth-"));
-process.env.ORIGIN_LOCAL_DATA_DIR = directory;
-process.env.ORIGIN_PUBLIC_URL = "http://origin.test";
-afterAll(() => { integrationDb().close(); rmSync(directory, { recursive: true, force: true }); });
+// Stateful flows against a Convex test backend, through the signed bridge.
 
 describe("OAuth flows", () => {
   const redirect = "http://127.0.0.1:9/callback";
-  const revoked: string[] = [];
-  const flush = () => flushMcpRevocations(async token => { revoked.push(token); });
+  const connectors = ["origin_oauth_replayed", "origin_oauth_pkce", "origin_oauth_expired", "origin_oauth_reused", "origin_oauth_scoped", "origin_oauth_revoked", "origin_oauth_used"];
   beforeEach(async () => {
     vi.useRealTimers();
-    await flush(); revoked.length = 0;
-    integrationDb().exec("DELETE FROM mcp_clients; DELETE FROM mcp_grants; DELETE FROM mcp_codes; DELETE FROM mcp_tokens; DELETE FROM mcp_revocations");
+    vi.stubEnv("ORIGIN_PUBLIC_URL", "http://origin.test");
+    backend.current = convexStore();
+    await seedWorkspace(backend.current, connectors);
   });
-  const register = (name = "Agent", limit?: () => void) => registerMcpClient({ client_name: name, redirect_uris: [redirect], token_endpoint_auth_method: "none" }, limit);
-  function authorize(clientId: string, connectorToken: string, write = true, scope = "origin:read origin:write") {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
+  const register = (name = "Agent", limit = { key: `register:${name}`, maximum: 10 }) => registerMcpClient({ client_name: name, redirect_uris: [redirect], token_endpoint_auth_method: "none" }, limit);
+  async function authorize(clientId: string, connectorToken: string, write = true, scope = "origin:read origin:write") {
     const verifier = randomBytes(32).toString("base64url");
     const params = new URLSearchParams({ client_id: clientId, redirect_uri: redirect, response_type: "code", code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256", scope });
-    const url = new URL(issueMcpCode(validateMcpAuthorization(params), connectorToken, Date.now() + 86400000, write));
+    const url = new URL(await issueMcpCode(await validateMcpAuthorization(params), connectorToken, Date.now() + 86400000, write));
     return { verifier, code: url.searchParams.get("code")! };
   }
   const exchange = (clientId: string, code: string, verifier: string) => exchangeMcpToken(new URLSearchParams({ grant_type: "authorization_code", client_id: clientId, code, code_verifier: verifier, redirect_uri: redirect }));
   const refresh = (clientId: string, token: string, scope?: string) => exchangeMcpToken(new URLSearchParams({ grant_type: "refresh_token", client_id: clientId, refresh_token: token, ...(scope ? { scope } : {}) }));
-  const oauthError = (run: () => unknown) => { try { run(); } catch (error) { return error instanceof OAuthError ? error.code : String(error); } return "no error"; };
+  const oauthError = async (run: () => Promise<unknown>) => { try { await run(); } catch (error) { return error instanceof OAuthError ? error.code : String(error); } return "no error"; };
+  const maintain = async (advanceMs: number) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + advanceMs);
+    await backend.current!.run(async ctx => { await ctx.runMutation((await import("../convex/_generated/api")).internal.mcpOAuth.maintain, {}); });
+    vi.useRealTimers();
+  };
 
-  test("identical registrations reuse the client; only new clients hit the limit", () => {
-    let limited = 0;
-    const first = register("Agent", () => { limited++; });
-    const again = register("Agent", () => { throw new Error("limited"); });
+  test("identical registrations reuse the client; only new clients count against the limit", async () => {
+    const limit = { key: "register-bucket", maximum: 1 };
+    const first = await register("Agent", limit);
+    const again = await register("Agent", limit);
     expect(again.client_id).toBe(first.client_id);
-    expect(limited).toBe(1);
-    expect(() => register("Other", () => { throw new Error("limited"); })).toThrow("limited");
+    await expect(register("Other", limit)).rejects.toBeInstanceOf(RegistrationLimited);
   });
 
-  test("clients without a grant are deleted after a day", () => {
-    const unused = register("Unused").client_id;
-    const used = register("Used").client_id;
-    authorize(used, "origin_oauth_used");
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(Date.now() + UNUSED_CLIENT_TTL + 60000);
-    cleanup();
-    const ids = (integrationDb().prepare("SELECT id FROM mcp_clients").all() as { id: string }[]).map(row => row.id);
+  test("clients without a grant are deleted after a day", async () => {
+    const unused = (await register("Unused")).client_id;
+    const used = (await register("Used")).client_id;
+    await authorize(used, "origin_oauth_used");
+    await maintain(86400000 + 60000);
+    const ids = await backend.current!.run(async ctx => (await ctx.db.query("mcpOAuthClients").take(10)).map(row => row.clientId));
     expect(ids).not.toContain(unused);
   });
 
-  test("code exchange, then a replayed code revokes the tokens issued from it (mirrored to Convex)", async () => {
-    const client = register().client_id;
-    const { code, verifier } = authorize(client, "origin_oauth_replayed");
-    const tokens = exchange(client, code, verifier);
-    expect(resolveMcpToken(tokens.access_token).connectorToken).toBe("origin_oauth_replayed");
-    expect(oauthError(() => exchange(client, code, verifier))).toBe("invalid_grant");
-    expect(() => resolveMcpToken(tokens.access_token)).toThrow();
-    await flush();
-    expect(revoked).toEqual(["origin_oauth_replayed"]);
+  test("code exchange, then a replayed code revokes the tokens issued from it and the Convex grant", async () => {
+    const client = (await register()).client_id;
+    const { code, verifier } = await authorize(client, "origin_oauth_replayed");
+    const tokens = await exchange(client, code, verifier);
+    expect((await resolveMcpToken(tokens.access_token)).connectorToken).toBe("origin_oauth_replayed");
+    expect(await oauthError(() => exchange(client, code, verifier))).toBe("invalid_grant");
+    await expect(resolveMcpToken(tokens.access_token)).rejects.toThrow();
+    expect(await revokedConnectors(backend.current!, connectors)).toEqual(["origin_oauth_replayed"]);
   });
 
   test("a failed PKCE check, an expired code and a reused refresh token all revoke in Convex", async () => {
-    const client = register().client_id;
-    const pkce = authorize(client, "origin_oauth_pkce");
-    expect(oauthError(() => exchange(client, pkce.code, randomBytes(32).toString("base64url")))).toBe("invalid_grant");
+    const client = (await register()).client_id;
+    const pkce = await authorize(client, "origin_oauth_pkce");
+    expect(await oauthError(() => exchange(client, pkce.code, randomBytes(32).toString("base64url")))).toBe("invalid_grant");
 
-    authorize(client, "origin_oauth_expired");
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(Date.now() + 6 * 60000);
-    cleanup();
-    vi.useRealTimers();
+    await authorize(client, "origin_oauth_expired");
+    await maintain(6 * 60000);
 
-    const fresh = authorize(client, "origin_oauth_reused");
-    const tokens = exchange(client, fresh.code, fresh.verifier);
-    refresh(client, tokens.refresh_token);
-    expect(oauthError(() => refresh(client, tokens.refresh_token))).toBe("invalid_grant");
-    await flush();
-    expect(revoked.sort()).toEqual(["origin_oauth_expired", "origin_oauth_pkce", "origin_oauth_reused"]);
+    const fresh = await authorize(client, "origin_oauth_reused");
+    const tokens = await exchange(client, fresh.code, fresh.verifier);
+    await refresh(client, tokens.refresh_token);
+    expect(await oauthError(() => refresh(client, tokens.refresh_token))).toBe("invalid_grant");
+    expect(await revokedConnectors(backend.current!, connectors)).toEqual(["origin_oauth_expired", "origin_oauth_pkce", "origin_oauth_reused"]);
   });
 
-  test("refresh with a narrower scope issues and enforces it", () => {
-    const client = register().client_id;
-    const { code, verifier } = authorize(client, "origin_oauth_scoped");
-    const tokens = exchange(client, code, verifier);
-    expect(resolveMcpToken(tokens.access_token).write).toBe(true);
-    const narrow = refresh(client, tokens.refresh_token, "origin:read");
+  test("refresh with a narrower scope issues and enforces it", async () => {
+    const client = (await register()).client_id;
+    const { code, verifier } = await authorize(client, "origin_oauth_scoped");
+    const tokens = await exchange(client, code, verifier);
+    expect((await resolveMcpToken(tokens.access_token)).write).toBe(true);
+    const narrow = await refresh(client, tokens.refresh_token, "origin:read");
     expect(narrow.scope).toBe("origin:read");
-    expect(resolveMcpToken(narrow.access_token).write).toBe(false);
+    expect((await resolveMcpToken(narrow.access_token)).write).toBe(false);
     // Narrowed tokens cannot widen again.
-    expect(oauthError(() => refresh(client, narrow.refresh_token, "origin:read origin:write"))).toBe("invalid_scope");
-    expect(refresh(client, narrow.refresh_token).scope).toBe("origin:read");
+    expect(await oauthError(() => refresh(client, narrow.refresh_token, "origin:read origin:write"))).toBe("invalid_scope");
+    expect((await refresh(client, narrow.refresh_token)).scope).toBe("origin:read");
   });
 
-  test("revoking a token queues its grant for Convex", async () => {
-    const client = register().client_id;
-    const { code, verifier } = authorize(client, "origin_oauth_revoked");
-    const tokens = exchange(client, code, verifier);
-    expect(revokeMcpToken(tokens.refresh_token, "someone-else")).toBe(false);
-    expect(revokeMcpToken(tokens.refresh_token, client)).toBe(true);
-    expect(() => resolveMcpToken(tokens.access_token)).toThrow();
-    await flushMcpRevocations(async () => { throw new Error("Convex down"); });
-    await flush();
-    expect(revoked).toEqual(["origin_oauth_revoked"]);
+  test("revoking a token revokes its grant and the Convex connector grant at once", async () => {
+    const client = (await register()).client_id;
+    const { code, verifier } = await authorize(client, "origin_oauth_revoked");
+    const tokens = await exchange(client, code, verifier);
+    expect(await revokeMcpToken(tokens.refresh_token, "someone-else")).toBe(false);
+    expect(await revokeMcpToken(tokens.refresh_token, client)).toBe(true);
+    await expect(resolveMcpToken(tokens.access_token)).rejects.toThrow();
+    expect(await revokedConnectors(backend.current!, connectors)).toEqual(["origin_oauth_revoked"]);
+  });
+
+  test("Convex stores only hashes of codes and tokens, and the connector token sealed", async () => {
+    const client = (await register()).client_id;
+    const { code, verifier } = await authorize(client, "origin_oauth_scoped");
+    const tokens = await exchange(client, code, verifier);
+    const dump = await backend.current!.run(async ctx => JSON.stringify([
+      await ctx.db.query("mcpOAuthGrants").take(10), await ctx.db.query("mcpOAuthCodes").take(10), await ctx.db.query("mcpOAuthTokens").take(10),
+    ]));
+    for (const secret of [code, verifier, tokens.access_token, tokens.refresh_token, "origin_oauth_scoped"]) expect(dump).not.toContain(secret);
   });
 });
 

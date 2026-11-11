@@ -7,7 +7,7 @@ import { GITHUB_EVENTS, parseGitHubEvent, verifyGitHubSignature } from "@/lib/gi
 export const runtime = "nodejs";
 export const maxDuration = 60;
 export async function POST(request: Request) {
-  const secret = githubAppConfig()?.webhookSecret;
+  const secret = (await githubAppConfig())?.webhookSecret;
   if (!secret) return new Response("Unavailable", { status: 503 });
   const reader = request.body?.getReader();
   let size = 0; const chunks: Uint8Array[] = [];

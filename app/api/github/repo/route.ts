@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { githubHeaders, githubProject, parseGitHubRepo } from "@/lib/githubLocal";
-import { getConvexClient, limitLocalAction, requireLocalWorkspace, sessionTokenFromRequest } from "@/lib/localRealtime";
+import { getConvexClient, requireLocalWorkspace, sessionTokenFromRequest } from "@/lib/workspace-session";
+import { limitAction } from "@/lib/server-store";
 import { createProjectRepository } from "@/lib/github-sync";
 import { workspaceGitHubInfo } from "@/lib/github-workspace";
 import { api } from "@/convex/_generated/api";
@@ -42,8 +43,8 @@ export async function POST(request: Request) {
     const project = await getConvexClient().query(api.projects.get, { sessionToken: sessionTokenFromRequest(request), projectId });
     if (project.teamId !== user.teamId) return errorResponse(new Error("Project not found"), 404);
     if (project.repoUrl) return NextResponse.json({ state: "ready", repoUrl: project.repoUrl });
-    if (!workspaceGitHubInfo(user.teamId)) return errorResponse(new Error("Connect GitHub to this workspace first"), 409);
-    limitLocalAction(`github-create-repo:${user._id}`, 10, 60000);
+    if (!await workspaceGitHubInfo(user.teamId)) return errorResponse(new Error("Connect GitHub to this workspace first"), 409);
+    await limitAction(`github-create-repo:${user._id}`, 10, 60000);
     const result = await createProjectRepository(projectId, true);
     return NextResponse.json(result, { status: result.state === "error" ? 400 : result.state === "awaiting_connection" ? 409 : result.state === "working" ? 202 : 200 });
   } catch (error) { return errorResponse(error); }
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   try {
     const { project, user, token } = await githubProject(sessionTokenFromRequest(request), new URL(request.url).searchParams.get("projectId") || undefined);
-    limitLocalAction(`github-read:${user._id}`, 60, 60000);
+    await limitAction(`github-read:${user._id}`, 60, 60000);
     const repo = parseGitHubRepo(project.repoUrl);
     if (!repo) throw new Error("Add a valid GitHub repo URL in Settings.");
     const headers = githubHeaders(token);

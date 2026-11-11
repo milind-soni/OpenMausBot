@@ -43,8 +43,8 @@ import type {
   ChatMention,
   ChatReference,
   LocalChatMessage,
-} from "@/lib/localRealtime";
-import { localApi } from "@/lib/client-api";
+} from "@/lib/chat-types";
+import { localApi, uploadLocalFile } from "@/lib/client-api";
 import { useMemberProfile, useWorkspace } from "./workspace-context";
 import { UserAvatar, memberName } from "./user-avatar";
 import { ContentSkeleton } from "./content-skeleton";
@@ -532,13 +532,7 @@ export function ChatThread({
       for (const file of Array.from(files).slice(0, 8 - attachments.length)) {
         if (file.size > 15 * 1024 * 1024)
           throw new Error(`${file.name} exceeds 15 MB`);
-        const form = new FormData();
-        form.set("file", file);
-        const result = await localApi<{ file: ChatAttachment }>(
-          `/api/local-chat/files?${scope}`,
-          sessionToken,
-          { method: "POST", body: form },
-        );
+        const result = { file: await uploadLocalFile(`/api/local-chat/files?${scope}`, sessionToken, file) as ChatAttachment };
         if (/^image\/(png|jpeg|gif|webp)$/.test(file.type)) {
           const url = URL.createObjectURL(file);
           setPreviews(current => ({ ...current, [result.file.id]: url }));

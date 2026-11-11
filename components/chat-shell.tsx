@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import type { DirectConversation } from "@/lib/localRealtime";
+import type { DirectConversation } from "@/lib/chat-types";
 import { localApi } from "@/lib/client-api";
 import { useMemberProfile, useWorkspace } from "./workspace-context";
 import { Dialog } from "./dialog";

@@ -1,20 +1,19 @@
 // @vitest-environment node
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { getFunctionName } from "convex/server";
-import { afterAll, expect, test, vi } from "vitest";
+import { expect, test, vi } from "vitest";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { GET, POST } from "../app/api/mcp/route";
-import { integrationDb } from "./githubConnection";
 import { MCP_TOOLS } from "./mcp-tools";
 
 // The MCP endpoint end to end over the real SDK transports, with Convex replaced by a recorder.
 const calls: { name: string; args: Record<string, unknown> }[] = [];
 const access = vi.hoisted(() => ({ write: true }));
-vi.mock("./localRealtime", async importOriginal => ({
-  ...await importOriginal<typeof import("./localRealtime")>(),
-  limitLocalAction: () => {},
+vi.mock("./server-store", async importOriginal => ({
+  ...await importOriginal<typeof import("./server-store")>(),
+  limitAction: async () => {}, limitReached: async () => false,
+}));
+vi.mock("./workspace-session", async importOriginal => ({
+  ...await importOriginal<typeof import("./workspace-session")>(),
   getConvexClient: () => ({
     query: async (ref: unknown, args: Record<string, unknown>) => {
       const name = getFunctionName(ref as never);
@@ -30,10 +29,7 @@ vi.mock("./localRealtime", async importOriginal => ({
   }),
 }));
 
-const directory = mkdtempSync(path.join(tmpdir(), "origin-mcp-route-"));
-process.env.ORIGIN_LOCAL_DATA_DIR = directory;
 process.env.ORIGIN_PUBLIC_URL = "http://origin.test";
-afterAll(() => { integrationDb().close(); rmSync(directory, { recursive: true, force: true }); });
 
 const token = `origin_pat_${"ab".repeat(32)}`;
 const url = new URL("http://origin.test/api/mcp");
