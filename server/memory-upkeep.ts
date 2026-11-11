@@ -6,7 +6,7 @@ import { DATA_DIR } from "./config.ts";
 import { CaptureBuffer, captureItemLimit, capturePrompt, captureSize, newCandidates, parseCandidates, statedInConversation, worthCapturing, type Candidate, type CaptureBatch, type CaptureTurn } from "./memory-capture.ts";
 import { DREAM_FIRST_LOOKBACK_MS, DREAM_MIN_CONVERSATIONS, dreamPrompt, parseDream, type DreamConversation } from "./memory-dream.ts";
 import { checkDreamFacts } from "./memory-fact-checks.ts";
-import { factIdentity, lineFactIdentity, notebookIdentities } from "./memory-entries.ts";
+import { factIdentity, isExpired, lineFactIdentity, notebookIdentities, parseMemoryEntries } from "./memory-entries.ts";
 import { mergeTopicText } from "./memory-topics.ts";
 import { isForgotten } from "./profile-learned.ts";
 import { applyMoves, MAX_MOVES, organizeCandidates, organizePrompt, parseMoves } from "./memory-organize.ts";
@@ -573,18 +573,21 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     if (!moves.length) return 0;
     return writing(botId, () => {
       const { byTopic } = applyMoves(before, moves);
-      const written = new Set<string>();
+      const sourceLines = before.split("\n");
+      const written = new Set<number>();
       const existing = new Map(listMemoryTopics(botId).map((topic) => [topic.name.toLowerCase(), topic.name]));
-      let count = 0;
       for (const [wanted, group] of byTopic) {
         const name = existing.get(wanted) ?? wanted;
         const path = `memory/${name}`;
         const current = readRaw(botId, path);
         const seen = notebookIdentities(current ?? "");
         const lines = group.lines.filter((line) => !seen.has(lineFactIdentity(line)));
+        const after = lines.length
+          ? mergeTopicText(current, { title: name.replace(/\.md$/, "").replace(/-/g, " "), aliases: group.aliases, lines })
+          : current ?? "";
         if (lines.length) {
           try {
-            writeMemoryTopic(botId, name, mergeTopicText(current, { title: name.replace(/\.md$/, "").replace(/-/g, " "), aliases: group.aliases, lines }));
+            writeMemoryTopic(botId, name, after);
           } catch (error) {
             log(`memory upkeep: could not write ${path}; kept its entries in MEMORY.md: ${(error as Error).message}`);
             continue;
@@ -592,13 +595,24 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
           recordMemoryChange(botId, { path, actor: "upkeep", via: "organize", before: current, after: readRaw(botId, path) });
         }
         existing.set(name.toLowerCase(), name);
-        written.add(wanted);
-        count += group.lines.length;
+        const savedLines = after.split("\n");
+        const savedEntries = parseMemoryEntries(after).filter((entry) => !entry.struck && !isExpired(entry, today));
+        for (const { topic, entry } of moves) {
+          if (topic !== wanted) continue;
+          const details = sourceLines.slice(entry.line + 1, entry.end).join("\n");
+          if (entry.end === entry.line + 1 || savedEntries.some((saved) =>
+            factIdentity(saved.body) === factIdentity(entry.body)
+              && saved.until === entry.until
+              && savedLines.slice(saved.line + 1, saved.end).join("\n") === details)) {
+            written.add(entry.line);
+          }
+        }
       }
       if (!written.size) return 0;
-      const { text } = applyMoves(before, moves.filter((move) => written.has(move.topic)));
+      const { text } = applyMoves(before, moves.filter((move) => written.has(move.entry.line)));
       writeMemoryFile(botId, text);
       recordMemoryChange(botId, { path: "MEMORY.md", actor: "upkeep", via: "organize", before, after: readRaw(botId, "MEMORY.md") });
+      const count = written.size;
       log(`memory upkeep: moved ${count} entr${count === 1 ? "y" : "ies"} from MEMORY.md into topic files for ${deps.bot(botId)?.name ?? botId}`);
       return count;
     });

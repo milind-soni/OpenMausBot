@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { parseMemoryEntries, withoutExpired } from "./memory-entries.ts";
 import { applyMoves } from "./memory-organize.ts";
+import { applyTidy, planTidy } from "./memory-tidy.ts";
 
 const expired = [
   "- 2026-10-01 · Temporary deployment · until 2026-10-31",
@@ -31,6 +32,17 @@ describe("whole memory entry boundaries", () => {
   it("keeps an entry through its final day", () => {
     const text = [...expired, live].join("\n");
     expect(withoutExpired(text, "2026-10-31")).toEqual({ text, hidden: 0 });
+  });
+
+  it("archives every expired continuation before removing the entry during tidy", () => {
+    const text = ["# Memory", ...expired, live, "  Keep this detail.", ""].join("\n");
+    const tidied = applyTidy(text, planTidy(text, "2026-11-01"), "2026-11-01");
+    const kept = ["# Memory", live, "  Keep this detail.", ""].join("\n");
+    expect(tidied.text).toBe(kept);
+    expect(tidied.archived).toEqual([
+      [`${expired[0]} · expired 2026-11-01`, ...expired.slice(1)].join("\n"),
+    ]);
+    expect(withoutExpired(tidied.text, "2026-11-01")).toEqual({ text: kept, hidden: 0 });
   });
 
   it("moves the full source entry into its topic without orphaning details", () => {
