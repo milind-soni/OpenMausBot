@@ -435,14 +435,6 @@ export function GroupView({ group }: { group: Group }) {
       )}
 
       {mobilePreviewOpen && (
-        <MobilePreviewPanel
-          onClose={() => setMobilePreviewOpen(false)}
-          onScreenshot={setPreviewAttachment}
-          className="hidden min-[1180px]:flex"
-        />
-      )}
-
-      {mobilePreviewOpen && (
         <>
           <button
             type="button"
@@ -453,7 +445,7 @@ export function GroupView({ group }: { group: Group }) {
           <MobilePreviewPanel
             onClose={() => setMobilePreviewOpen(false)}
             onScreenshot={setPreviewAttachment}
-            className="absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl min-[1180px]:hidden"
+            className="absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl min-[1180px]:static min-[1180px]:inset-auto min-[1180px]:z-auto min-[1180px]:max-w-none min-[1180px]:shadow-none"
           />
         </>
       )}

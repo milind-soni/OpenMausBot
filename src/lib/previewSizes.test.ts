@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   applyRotation,
+  assignCanvasHeaderLanes,
+  CANVAS_HEADER_LANE_HEIGHT,
+  CANVAS_HEADER_MAX_WIDTH_PX,
   CANVAS_MAX_ZOOM,
   CANVAS_MIN_ZOOM,
   clampCustomDimension,
   clampCustomSize,
   computeCanvasFit,
+  computeCanvasFitForArtboards,
   computeCanvasZoomAt,
   computeFrameScale,
   DEFAULT_CANVAS_SIZE_IDS,
@@ -119,5 +123,39 @@ describe("canvas board math and live-frame cap", () => {
     expect(promotedLive.has(allEight[6])).toBe(true);
     expect(promotedLive.has(allEight[5])).toBe(false);
     expect(promotedLive.has(allEight[4])).toBe(false);
+  });
+
+  it("assigns non-overlapping 2D header lanes when all 8 presets are fitted at 1280x800", () => {
+    const allEight = PREVIEW_SIZE_PRESETS.map((p) => p.id);
+    const layout = layoutCanvasArtboards(allEight);
+    const fit = computeCanvasFitForArtboards(
+      { width: 1280, height: 800 },
+      { width: layout.boardWidth, height: layout.boardHeight, artboards: layout.artboards },
+      48,
+    );
+    const { lanes } = assignCanvasHeaderLanes(layout.artboards, fit.k);
+
+    const boxes = layout.artboards.map((artboard) => {
+      const lane = lanes[artboard.id] ?? 0;
+      const left = fit.x + artboard.left * fit.k;
+      const top = fit.y + 40 * fit.k - (lane + 1) * CANVAS_HEADER_LANE_HEIGHT;
+      return {
+        id: artboard.id,
+        lane,
+        left,
+        right: left + CANVAS_HEADER_MAX_WIDTH_PX,
+        top,
+        bottom: top + 30,
+      };
+    });
+
+    for (let i = 0; i < boxes.length; i += 1) {
+      expect(boxes[i].top).toBeGreaterThanOrEqual(0);
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        const horizOverlap = boxes[i].left < boxes[j].right && boxes[j].left < boxes[i].right;
+        const vertOverlap = boxes[i].top < boxes[j].bottom && boxes[j].top < boxes[i].bottom;
+        expect(horizOverlap && vertOverlap).toBe(false);
+      }
+    }
   });
 });

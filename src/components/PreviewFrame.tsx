@@ -425,8 +425,8 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
 
   if (status === "confirm" && pendingConfirmUrl) {
     return (
-      <div className="mx-auto my-auto flex max-w-[380px] flex-col items-center rounded-2xl border border-hairline/70 bg-surface p-6 text-center shadow-lg">
-        <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-warn/15 text-warn">
+      <div className="mx-auto my-auto flex max-w-[380px] flex-col items-center rounded-2xl border border-hairline/70 bg-panel p-6 text-center shadow-lg">
+        <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-warning/15 text-warning">
           <ShieldAlert className="h-5 w-5" />
         </div>
         <h3 className="text-[15px] font-semibold text-ink">Local or private address</h3>
@@ -439,14 +439,14 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
           <button
             type="button"
             onClick={onCancelLocalUrl}
-            className="h-8 rounded-lg border border-hairline bg-raised px-3 text-[12px] font-medium text-ink transition-colors hover:bg-hover"
+            className="h-8 rounded-lg border border-hairline bg-raised px-3 text-[12px] font-medium text-ink transition-colors hover:bg-raised-hover"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={onConfirmLocalUrl}
-            className="h-8 rounded-lg bg-accent px-3.5 text-[12px] font-medium text-white transition-colors hover:bg-accent-hover"
+            className="h-8 rounded-lg bg-accent px-3.5 text-[12px] font-medium text-white transition-colors hover:brightness-110"
           >
             Load preview
           </button>
@@ -457,7 +457,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
 
   if (!source || status === "empty") {
     return (
-      <div className="mx-auto my-auto flex max-w-[380px] flex-col items-center rounded-2xl border border-hairline/70 bg-surface p-6 text-center shadow-sm">
+      <div className="mx-auto my-auto flex max-w-[380px] flex-col items-center rounded-2xl border border-hairline/70 bg-panel p-6 text-center shadow-sm">
         <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-raised text-ink-secondary">
           <Globe className="h-5 w-5" />
         </div>
@@ -474,7 +474,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
                   key={presetUrl}
                   type="button"
                   onClick={() => onQuickPickUrl(presetUrl)}
-                  className="rounded-lg border border-hairline/60 bg-raised px-2.5 py-1 font-mono text-[11px] text-ink-secondary transition-colors hover:border-hairline hover:bg-hover hover:text-ink"
+                  className="rounded-lg border border-hairline/60 bg-raised px-2.5 py-1 font-mono text-[11px] text-ink-secondary transition-colors hover:border-hairline hover:bg-raised-hover hover:text-ink"
                 >
                   {presetUrl.replace("http://", "")}
                 </button>
@@ -483,7 +483,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
               <button
                 type="button"
                 onClick={onOpenFilePicker}
-                className="inline-flex items-center gap-1 rounded-lg border border-hairline/60 bg-raised px-2.5 py-1 text-[11px] font-medium text-ink-secondary transition-colors hover:border-hairline hover:bg-hover hover:text-ink"
+                className="inline-flex items-center gap-1 rounded-lg border border-hairline/60 bg-raised px-2.5 py-1 text-[11px] font-medium text-ink-secondary transition-colors hover:border-hairline hover:bg-raised-hover hover:text-ink"
               >
                 <FolderOpen className="h-3 w-3" />
                 Pick a project file…
@@ -509,8 +509,8 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
         }}
         className={
           showDeviceBezel
-            ? "relative overflow-hidden rounded-[22px] border-[3px] border-hairline bg-surface shadow-xl"
-            : "relative overflow-hidden rounded-xl border border-hairline bg-surface shadow-lg"
+            ? "relative overflow-hidden rounded-[22px] border-[3px] border-hairline bg-panel shadow-xl"
+            : "relative overflow-hidden rounded-xl border border-hairline bg-panel shadow-lg"
         }
       >
         {/* Top 2px loading bar */}
@@ -525,7 +525,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
           <div
             role="status"
             aria-live="polite"
-            className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2.5 bg-surface/90 p-6 text-center backdrop-blur-[2px]"
+            className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2.5 bg-panel/90 p-6 text-center backdrop-blur-[2px]"
           >
             <RefreshCw className="h-5 w-5 animate-spin text-accent" />
             <span className="text-[12.5px] font-medium text-ink">Loading preview…</span>
@@ -543,7 +543,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
             role="alert"
             className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-panel p-6 text-center"
           >
-            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-warn/15 text-warn">
+            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-warning/15 text-warning">
               <ShieldAlert className="h-5 w-5" />
             </div>
             <h4 className="text-[15px] font-semibold text-ink">
@@ -559,7 +559,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
                   href={source.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3.5 text-[12px] font-medium text-white transition-colors hover:bg-accent-hover"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3.5 text-[12px] font-medium text-white transition-colors hover:brightness-110"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                   Open in new tab
@@ -568,7 +568,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
               <button
                 type="button"
                 onClick={reload}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline bg-raised px-3 text-[12px] font-medium text-ink transition-colors hover:bg-hover"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline bg-raised px-3 text-[12px] font-medium text-ink transition-colors hover:bg-raised-hover"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
                 Retry
@@ -581,7 +581,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
         {status === "error" && (
           <div
             role="alert"
-            className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-surface p-6 text-center"
+            className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-panel p-6 text-center"
           >
             <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-danger/15 text-danger">
               <AlertTriangle className="h-5 w-5" />
@@ -595,7 +595,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
               <button
                 type="button"
                 onClick={reload}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline bg-raised px-3.5 text-[12px] font-medium text-ink transition-colors hover:bg-hover"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline bg-raised px-3.5 text-[12px] font-medium text-ink transition-colors hover:bg-raised-hover"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
                 Try again
@@ -638,14 +638,14 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
               />
             ) : (
               <div className="flex flex-col items-center gap-2 text-ink-secondary">
-                <FileCode2 className="h-7 w-7 text-ink-muted" />
+                <FileCode2 className="h-7 w-7 text-ink-secondary" />
                 <span className="text-[13px] font-medium text-ink">{frameTitle}</span>
-                <span className="font-mono text-[11px] text-ink-muted">
+                <span className="font-mono text-[11px] text-ink-secondary">
                   {width} × {height}
                 </span>
               </div>
             )}
-            <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-hairline bg-surface/95 px-3 py-1 text-[11px] font-medium text-ink-secondary shadow-md">
+            <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-hairline bg-panel/95 px-3 py-1 text-[11px] font-medium text-ink-secondary shadow-md">
               <span className="inline-flex items-center gap-1.5">
                 <Sparkles className="h-3 w-3 text-accent" />
                 Snapshot · hover or click for live view
@@ -663,7 +663,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
                 onScrollSync(scrollSyncSourceId, target.scrollTop / maxScroll);
               }
             }}
-            className="h-full w-full overflow-y-auto bg-surface p-6 text-left text-ink select-text"
+            className="h-full w-full overflow-y-auto bg-panel p-6 text-left text-ink select-text"
           >
             <ChatMarkdown text={markdownContent} />
           </div>
