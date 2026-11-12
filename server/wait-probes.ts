@@ -113,19 +113,29 @@ function decodeEntities(text: string): string {
 }
 
 /** `<script` or `<style` as a whole tag name: an element whose text a page never shows. */
-const HIDDEN_OPEN = /<(script|style)(?!\w)/iy;
+const HIDDEN_OPEN = /<(script|style)(?=[\s/>])/iy;
 const HIDDEN_CLOSE: Record<string, RegExp> = { script: /<\/script[\s/>]/gi, style: /<\/style[\s/>]/gi };
+const TAG_OPEN = /<[a-z!?/]/iy;
 
 /**
- * Where the markup starting with the `<` at `open` ends (just past it), or -1 when that `<` is text: no `>` follows
- * anywhere, so no later `<` starts a tag either. A comment, script or style left open runs to the end, as in a browser.
+ * Where markup ends (just past it), open + 1 for a literal `<`, or -1 when no complete tag follows.
+ * A comment, script or style left open runs to the end, as in a browser.
  */
 function markupEnd(body: string, open: number): number {
   if (body.startsWith("<!--", open)) {
     const close = body.indexOf("-->", open + 2);
     return close === -1 ? body.length : close + 3;
   }
-  const close = body.indexOf(">", open + 1);
+  TAG_OPEN.lastIndex = open;
+  if (!TAG_OPEN.test(body)) return open + 1;
+  let close = -1;
+  let quote: string | null = null;
+  for (let at = open + 1; at < body.length; at += 1) {
+    const char = body[at];
+    if (quote !== null) { if (char === quote) quote = null; }
+    else if (char === '"' || char === "'") quote = char;
+    else if (char === ">") { close = at; break; }
+  }
   if (close === -1) return -1;
   HIDDEN_OPEN.lastIndex = open;
   const hidden = HIDDEN_OPEN.exec(body)?.[1]?.toLowerCase();
@@ -143,15 +153,17 @@ function markupEnd(body: string, open: number): number {
  */
 export function pageText(body: string): string {
   const words: string[] = [];
-  for (let at = 0; at < body.length;) {
-    const open = body.indexOf("<", at);
+  for (let at = 0, search = 0; at < body.length;) {
+    const open = body.indexOf("<", search);
     const end = open === -1 ? -1 : markupEnd(body, open);
     if (end === -1) {
       words.push(body.slice(at));
       break;
     }
+    if (end === open + 1) { search = end; continue; }
     words.push(body.slice(at, open), " ");
     at = end;
+    search = end;
   }
   return decodeEntities(words.join("")).replace(/\s+/g, " ").trim();
 }

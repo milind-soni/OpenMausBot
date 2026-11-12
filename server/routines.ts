@@ -27,7 +27,7 @@ import {
   dispatchRefusal, engineFacts, loadOwnerNotices, nextScheduledRun, recoverRun, requeueOnce, weekRuns, type RoutineAlert, type RoutineFailureFacts, type RoutineOwnerNotice,
 } from "./routine-recovery.ts";
 import { activeMs, askOf, settleAsk, waitingFor, type RoutineRunAsk } from "./routine-waits.ts";
-import { failsLikeLastOutcome, outcomesNewestFirst } from "./routine-outcomes.ts";
+import { failsLikeLastOutcome, offAfterNoStarts, outcomesNewestFirst } from "./routine-outcomes.ts";
 import { EVENT_RETRY_WINDOW_MS, loadEventReceipts, MAX_EVENT_RECEIPTS, type EventRunReceipt } from "./routine-event-receipts.ts";
 import { attachmentPathsOf, attachmentsMalformed, cloneAttachments } from "./routine-attachments.ts";
 import { loadInstalledPackage, loadRequestReceipts, loadRoutine, loadRun } from "./routine-load.ts";
@@ -1366,10 +1366,10 @@ export class RoutineManager {
 
   private failRun(run: RoutineRun, message: string, status: "failed" | "missed" = "failed", alert?: RoutineAlert | null) {
     Object.assign(run, { status, attention: undefined, error: redactSecretsInText(message).slice(0, 500), finishedAt: this.now() } satisfies Partial<RoutineRun>);
-    this.saveLater();
-    this.emitRun(run);
+    const off = offAfterNoStarts(this.routines.find((routine) => routine.id === run.routineId), this.runs, run, this.now());
+    this.saveLater(); this.emitRun(run); if (off) this.emitRoutine(off.routine);
     const repeat = failsLikeLastOutcome(this.runs, run) || (run.checkKey !== undefined && outcomesNewestFirst(this.runs, run.routineId, run.id)[0]?.status === "failed");
-    this.options.onRunFailed?.(cloneRun(run), alert === undefined && repeat ? null : alert);
+    this.options.onRunFailed?.(cloneRun(run), off?.alert ?? (alert === undefined && repeat ? null : alert));
   }
 
   private advancePastOccurrence(routine: Routine, now: number, occurrence: number) {

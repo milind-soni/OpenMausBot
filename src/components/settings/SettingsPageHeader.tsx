@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { productName } from "@/lib/brand";
-import { appVersion } from "@/lib/app-links";
-import type { SettingsPlace } from "./settings-context";
+import { desktopAppVersion } from "@/lib/app-links";
+import { versionLine, type SettingsPlace } from "./settings-context";
 import type { SettingsContext, SettingsPage } from "./settings-index";
 import { AppIcon, PlaceBadge, YouAvatar, pageLabel } from "./SettingsNav";
 
@@ -26,9 +26,8 @@ function everyPlace(ctx: SettingsContext): ReactNode {
 }
 
 export function overviewStatus(place: SettingsPlace): string {
-  const version = t("settings.overview.version", { version: appVersion() });
-  if (place.kind === "computer") return `${version} · ${t("settings.overview.updatesWithApp")}`;
-  return `${place.kind === "server" ? t("settings.place.running") : t("settings.place.alwaysOn")} · ${version}`;
+  if (place.kind === "computer") return `${versionLine(desktopAppVersion())} · ${t("settings.overview.updatesWithApp")}`;
+  return `${place.kind === "server" ? t("settings.place.running") : t("settings.place.alwaysOn")} · ${versionLine()}`;
 }
 
 export function ScopeLine({ page, ctx, place }: { page: SettingsPage; ctx: SettingsContext; place: SettingsPlace }) {

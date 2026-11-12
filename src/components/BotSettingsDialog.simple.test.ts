@@ -150,6 +150,7 @@ const { MascotFaceColorPicker } = await import("./MascotFaceColorPicker");
 const { Switch } = await import("./SettingsPrimitives");
 const { OrgSkillsCard } = await import("./bot-settings/OrgSkillsCard");
 const { PackageProvenance } = await import("./bot-settings/PackageProvenance");
+const { AdvancedSettingsRow } = await import("./bot-panel/AdvancedSettingsRow");
 
 afterAll(() => vi.unstubAllGlobals());
 
@@ -753,6 +754,16 @@ describe("the Bot settings page", () => {
     expect(html).toMatch(/data-panel-row="slack" href="https:\/\/admin\.example\.test\/bots\/scout\/slack" target="_blank" rel="noopener noreferrer"/);
     expect(html).toContain(">Slack<");
     expect(html.indexOf('data-panel-row="slack"')).toBeGreaterThan(html.indexOf('data-panel-row="job"'));
+  });
+
+  it("says Sending on your behalf and app access live in Advanced mode, and opens them there", () => {
+    const html = settingsPage(makeBot()).html;
+    expect(html).toContain('data-panel-row="advanced"');
+    expect(html).toContain("Sending on your behalf and app access are set there.");
+    expect(html.indexOf('data-panel-row="advanced"')).toBeGreaterThan(html.indexOf('data-panel-row="job"'));
+    click(find(capture(() => AdvancedSettingsRow()), "data-panel-row", "advanced"));
+    expect(fixture.setAdvanced).toHaveBeenCalledExactlyOnceWith(true);
+    expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "toggleSettings", open: true, section: "permissions" });
   });
 
   it("shows the first line of the instructions, or how to start, and edits them in place with Done", () => {

@@ -33,12 +33,17 @@ export interface OnePasswordSdk {
   createClient(config: { auth: string; integrationName: string; integrationVersion: string }): Promise<SdkClient>;
 }
 
-export function loginFields(fields: readonly SdkField[]): OnePasswordItemFields {
+function loginFieldsOf(fields: readonly SdkField[]): { username?: SdkField; password?: SdkField; totp?: SdkField } {
   const byId = (id: string) => fields.find((field) => field.id === id && field.value);
   const username = byId("username")
     ?? fields.find((field) => (field.fieldType === "Text" || field.fieldType === "Email") && /user|e-?mail|login/iu.test(field.title) && field.value);
   const password = byId("password") ?? fields.find((field) => field.fieldType === "Concealed" && /pass/iu.test(field.title) && field.value);
   const totp = fields.find((field) => field.fieldType === "Totp" && field.value);
+  return { username, password, totp };
+}
+
+export function loginFields(fields: readonly SdkField[]): OnePasswordItemFields {
+  const { username, password, totp } = loginFieldsOf(fields);
   return { username: username?.value ?? "", password: password?.value ?? "", totp: totp?.value ?? null };
 }
 
@@ -48,12 +53,13 @@ const MAIN_FIELD: Record<string, string> = { ApiCredentials: "credential", Passw
 const FIELDS_MAX = 20;
 
 /** A secret item's values by field title, with "" for its main one: an API Credential's credential, a Password's
- * password, a Secure Note's text, or else its first concealed field. */
+ * password, a Secure Note's text, or else its first concealed field, or else its first field. */
 export function secretFields(category: string, content: OnePasswordItemContent): Map<string, string> {
   const values = new Map<string, string>();
   const usable = content.fields.filter((field) => field.value && (field.fieldType === "Concealed" || field.fieldType === "Text"));
   const note = category === "SecureNote" ? content.notes : undefined;
-  const main = note ? undefined : usable.find((field) => field.id === MAIN_FIELD[category]) ?? usable.find((field) => field.fieldType === "Concealed");
+  const main = note ? undefined
+    : usable.find((field) => field.id === MAIN_FIELD[category]) ?? usable.find((field) => field.fieldType === "Concealed") ?? usable[0];
   const mainValue = note || main?.value;
   if (mainValue) values.set("", mainValue);
   for (const field of usable) {
@@ -61,6 +67,24 @@ export function secretFields(category: string, content: OnePasswordItemContent):
     if (field !== main && title && !values.has(title) && values.size <= FIELDS_MAX) values.set(title, field.value);
   }
   return values;
+}
+
+/** A Login item's own extra fields, such as a client ID and secret, by title, never its username, password or one-time
+ * code; "" is the first concealed one, or else the first, so the item's name alone reads it too. */
+export function loginExtraFields(content: OnePasswordItemContent): Map<string, string> {
+  const { username, password } = loginFieldsOf(content.fields);
+  const extra = content.fields.filter((field) => field !== username && field !== password
+    && field.value && field.title.trim() && (field.fieldType === "Concealed" || field.fieldType === "Text"));
+  const values = new Map<string, string>();
+  const main = extra.find((field) => field.fieldType === "Concealed") ?? extra[0];
+  if (main) values.set("", main.value);
+  for (const field of extra) if (!values.has(field.title.trim()) && values.size <= FIELDS_MAX) values.set(field.title.trim(), field.value);
+  return values;
+}
+
+/** What a bot may read from an item as a secret: a Login's extra fields, or a secret item's fields. */
+function secretValues(category: string, content: OnePasswordItemContent): Map<string, string> {
+  return category === "Login" ? loginExtraFields(content) : secretFields(category, content);
 }
 
 /** The SDK did not load: a fault in this installation, never in the person's token, which was not even checked. */
@@ -245,7 +269,10 @@ export class OnePasswordLogins implements VaultProvider {
       const counted: Array<Omit<OnePasswordVault, "bots">> = [];
       for (const vault of vaults) {
         let items = 0;
-        const wanted = (await client.items(vault.id)).filter((item) => isLogin(item) || SECRET_CATEGORIES.has(item.category)).slice(0, MAX_ITEMS);
+        const listed = await client.items(vault.id);
+        // Website logins and secret items come first, so Logins without a website never push one out of MAX_ITEMS.
+        const wanted = [...listed.filter((item) => isLogin(item) || SECRET_CATEGORIES.has(item.category)),
+          ...listed.filter((item) => item.category === "Login" && !isLogin(item))].slice(0, MAX_ITEMS);
         for (let start = 0; start < wanted.length; start += FIELDS_BATCH) {
           const batch = wanted.slice(start, start + FIELDS_BATCH);
           // Every value in this answer is dropped here and read again when a bot uses it.
@@ -253,12 +280,10 @@ export class OnePasswordLogins implements VaultProvider {
           for (const item of batch) {
             const content = contents.get(item.id);
             if (!content) continue;
-            if (!isLogin(item)) {
-              const fields = secretFields(item.category, content);
-              if (fields.has("")) secrets.push({ id: `${ID_PREFIX}${vault.id}:${item.id}`, vaultId: vault.id, itemId: item.id, category: item.category, name: item.title.trim() || item.category,
-                fields: [...fields.keys()].filter(Boolean) });
-              continue;
-            }
+            const fields = secretValues(item.category, content);
+            if (fields.has("")) secrets.push({ id: `${ID_PREFIX}${vault.id}:${item.id}`, vaultId: vault.id, itemId: item.id, category: item.category, name: item.title.trim() || item.category,
+              fields: [...fields.keys()].filter(Boolean) });
+            if (!isLogin(item)) continue;
             const found = loginFields(content.fields);
             if (!found.password) continue;
             items++;
@@ -347,7 +372,7 @@ export class OnePasswordLogins implements VaultProvider {
     const secret = this.secrets.find((entry) => entry.id === itemId);
     const content = secret && await this.contentOf(secret.vaultId, secret.itemId);
     if (!secret || !content) return {};
-    const value = secretFields(secret.category, content).get(field ?? "");
+    const value = secretValues(secret.category, content).get(field ?? "");
     return value ? { value } : {};
   }
 
