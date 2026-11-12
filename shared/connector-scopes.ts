@@ -26,15 +26,21 @@ export function toolkitOf(slug: string): string {
   return (cut > 0 ? slug.slice(0, cut) : slug).toLowerCase();
 }
 
+/** Toolkits whose actions name a one-word resource before the verb
+ * (HIGHLEVEL_MCP_CONTACTS_GET_CONTACTS lists contacts). Anything else there,
+ * such as a longer resource name, stays a write. */
+const RESOURCE_FIRST_TOOLKITS = ["highlevel_mcp"];
+
 /** A read verb first means the tool reads. Creating a draft writes to the
  * account even though it sends nothing, so it is a write here. */
 export function isReadOnlyAction(slug: string, toolkit?: string): boolean {
   if (slug === "COMPOSIO_PROXY_EXECUTE") return false;
   if (KNOWN_READ_SLUGS.has(slug)) return true;
-  const cut = toolkit ? toolkit.length : slug.indexOf("_");
+  const resourceFirst = RESOURCE_FIRST_TOOLKITS.find((candidate) => (toolkit ?? candidate) === candidate && slug.startsWith(candidate.toUpperCase() + "_"));
+  const cut = resourceFirst ? resourceFirst.length : toolkit ? toolkit.length : slug.indexOf("_");
   const action = cut > 0 ? slug.slice(cut + 1) : "";
-  const first = action.toUpperCase().split(/[^A-Z0-9]+/).find(Boolean);
-  return first !== undefined && READ_VERBS.has(first);
+  const verb = action.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean)[resourceFirst ? 1 : 0];
+  return verb !== undefined && READ_VERBS.has(verb);
 }
 
 /** The stored shape, or null when the value is not one. */
