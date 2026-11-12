@@ -4,7 +4,7 @@ import { setLocale, t } from "@/lib/i18n";
 import type { ConfigStatus } from "@/state/store";
 import { WORKSPACE_CREDENTIAL_ENV } from "../../../server/credential-env.ts";
 import { CREDENTIAL_TARGETS, credentialConfigPatch, desktopCredentialSlot, isConfigCredentialTarget } from "../../../shared/credential-request";
-import { KEY_CATALOG, KEY_SECTIONS, keyEntry, keyForInstance, keyMatches, looksLikeOtherKey, savedState, type KeyId } from "./key-catalog";
+import { KEY_CATALOG, KEY_SECTIONS, keyEntry, keyForInstance, keyHidden, keyMatches, looksLikeOtherKey, savedState, type KeyId } from "./key-catalog";
 
 const NOT_A_PERSONS_KEY: Record<string, string> = {
   OMB_ANTHROPIC_API_URL: "the address the Anthropic key goes to, set by a hosted install",
@@ -118,6 +118,14 @@ describe("searching the keys", () => {
     expect(shown("fish", "fish")).toEqual(expect.arrayContaining(["fishAudio", "liveKey"]));
     expect(shown("azure", "azure")).toContain("liveKey");
     expect(found("fish")).not.toContain("liveKey");
+  });
+
+  it("hides the Live calls row while Live calls use Azure or Fish Audio", () => {
+    expect(keyHidden("liveCalls", { live: { provider: "fish" } } as never)).toBe(true);
+    expect(keyHidden("liveCalls", { live: { provider: "azure" } } as never)).toBe(true);
+    expect(keyHidden("liveCalls", { live: { provider: "openai" } } as never)).toBe(false);
+    expect(keyHidden("liveCalls", null)).toBe(false);
+    expect(keyHidden("liveKey", { live: { provider: "fish" } } as never)).toBe(false);
   });
 });
 

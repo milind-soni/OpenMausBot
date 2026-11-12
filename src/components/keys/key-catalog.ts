@@ -239,6 +239,12 @@ export function savedState(entry: KeyEntry, config: ConfigStatus | null | undefi
 }
 
 /** With `config`, the row is matched as shown: the Live key row by the provider Live calls use. */
+/** With Azure or Fish Audio chosen, Live calls do not use the OpenAI key the Live calls row points at, so that row is hidden. */
+export function keyHidden(id: KeyId, config: ConfigStatus | null | undefined): boolean {
+  const provider = config?.live?.provider;
+  return id === "liveCalls" && (provider === "azure" || provider === "fish");
+}
+
 export function keyMatches(entry: KeyEntry, query: string, config?: ConfigStatus | null): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
