@@ -209,19 +209,30 @@ describe("DeepSeek live catalog", () => {
   const PARSED = {
     default: "deepseek-official/deepseek-v4-flash",
     options: [
-      { id: "deepseek-official/deepseek-v4-flash", label: "deepseek-v4-flash", provider: "DeepSeek" },
+      { id: "deepseek-official/deepseek-v4-flash", label: "deepseek-v4-flash", provider: "DeepSeek", variants: [{ id: "off", label: "Off" }, { id: "high", label: "High" }] },
       { id: "deepseek-official/deepseek-v4-pro", label: "DeepSeek-V4-Pro", provider: "DeepSeek" },
       { id: "anthropic/claude-opus-4.6", label: "Claude Opus 4.6", provider: "Anthropic" },
     ],
   };
 
   describe("parseDeepSeekCatalog", () => {
-    it("flattens provider groups into picker ids with dsh's names as labels", () => {
+    it("flattens provider groups into picker ids with dsh's names as labels, and gives the current model its efforts", () => {
       expect(parseDeepSeekCatalog(SESSION_NEW)).toEqual(PARSED);
     });
-    it("falls back to the first model when the current one is not offered", () => {
-      const session = { ...SESSION_NEW, configOptions: [{ ...SESSION_NEW.configOptions[0], currentValue: '["gone","model"]' }] };
-      expect(parseDeepSeekCatalog(session).default).toBe("deepseek-official/deepseek-v4-flash");
+    it("falls back to the first model when the current one is not offered, and gives no row an effort it was not offered for", () => {
+      const session = { ...SESSION_NEW, configOptions: [{ ...SESSION_NEW.configOptions[0], currentValue: '["gone","model"]' }, SESSION_NEW.configOptions[1]] };
+      const catalog = parseDeepSeekCatalog(session);
+      expect(catalog.default).toBe("deepseek-official/deepseek-v4-flash");
+      expect(catalog.options.some((row) => row.variants)).toBe(false);
+    });
+    it("offers no effort when the current model does not reason", () => {
+      const session = { ...SESSION_NEW, configOptions: [SESSION_NEW.configOptions[0]] };
+      expect(parseDeepSeekCatalog(session).options.some((row) => row.variants)).toBe(false);
+    });
+    it("leaves out the provider-default choice, which has no effort id", () => {
+      const effort = { ...SESSION_NEW.configOptions[1], currentValue: "", options: [{ value: "", name: "Provider default" }, { value: "max", name: "Max" }] };
+      const session = { ...SESSION_NEW, configOptions: [SESSION_NEW.configOptions[0], effort] };
+      expect(parseDeepSeekCatalog(session).options[0]!.variants).toEqual([{ id: "max", label: "Max" }]);
     });
     it("throws when dsh advertises no model option", () => {
       expect(() => parseDeepSeekCatalog({ sessionId: "s", configOptions: [] })).toThrow(/no models/);

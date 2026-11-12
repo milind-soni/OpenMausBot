@@ -31,6 +31,7 @@ import { parse as parseYaml } from "yaml";
 import type { ModelCatalog } from "../../contracts.ts";
 import { harnessHome } from "../../env-path.ts";
 import { resolveCli, spawnCli } from "../../procs.ts";
+import { acpVariantOption } from "./config-options.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
 export const DEEPSEEK_MODELS: ModelCatalog = {
@@ -137,7 +138,9 @@ function offeredWireValues(sessionConfig: unknown, configId: string): { values: 
 
 /** The `model` config option of a session/new answer, as a picker catalog.
  * Groups carry dsh's provider display name, kept as the option's provider
- * badge so a gateway's copy of a model stays distinguishable. */
+ * badge so a gateway's copy of a model stays distinguishable. dsh (0.2.2)
+ * offers `reasoning_effort` only for the session's current model, and only
+ * when that model reasons, so only that row gets the efforts. */
 export function parseDeepSeekCatalog(sessionResult: unknown): ModelCatalog {
   const options = (sessionResult as { configOptions?: unknown[] } | undefined)?.configOptions;
   const option = (Array.isArray(options) ? options : []).find((entry: any) => entry?.id === "model") as
@@ -162,9 +165,10 @@ export function parseDeepSeekCatalog(sessionResult: unknown): ModelCatalog {
   collect(option?.options, undefined);
   if (!out.length) throw new Error("dsh advertised no models");
   const current = typeof option?.currentValue === "string" ? deepseekPickerId(option.currentValue) : null;
+  const efforts = acpVariantOption(sessionResult)?.options;
   return {
     default: current && out.some((row) => row.id === current) ? current : out[0]!.id,
-    options: out,
+    options: efforts?.length ? out.map((row) => (row.id === current ? { ...row, variants: efforts } : row)) : out,
   };
 }
 
