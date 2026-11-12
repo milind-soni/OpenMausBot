@@ -101,4 +101,4 @@ without error. Unknown fields are ignored and migrated.
 
 ## Approval
 
-Status: awaiting user approval (the removal itself was requested by the user on 2026-11-12)
+Status: approved by the user on 2026-11-12

@@ -37,7 +37,7 @@ and plan 5 consumes it.
    - Ship the draft-persistence fix (done).
    - Start the work that needs no plan approval: design explorations (Z), the
      plain-language glossary (Marty), and the engine usage-data spike (SoSo).
-2. **After the plans are approved**, in this order:
+2. **Build, in this order** (all plans approved 2026-11-12):
    1. Remove the cloud computer. This shrinks the surface area before new
       features land.
    2. Build the usage-limit foundation, then the usage rings.
