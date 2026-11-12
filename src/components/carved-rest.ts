@@ -1,10 +1,22 @@
 // When a carved face needs its next frame. A still face asks for none: its body is drawn already, and only a glance,
 // a blink or a wake cue changes anything on screen. One face per bot adds up — a sidebar of 150 resting faces at 20
 // frames a second was most of the renderer's budget.
+import { frameFloorMs } from "./mascot-motion";
 import type { CarvedPose } from "./CarvedAvatar";
 
 /** Below this the drawn pose is where the face wants it, and the last fraction of a unit is not visible. */
 export const REST_EPSILON = 0.004;
+
+/**
+ * A moving face draws at most forty frames a second. Motion still reads as smooth, and the smaller share of a frame
+ * a sidebar of faces keeps asking for is the point of the exercise.
+ */
+export const MOVING_FRAME_MS = 25;
+
+/** The gap this face keeps between frames while it moves: its size's own floor, and never less than forty a second. */
+export function carvedFrameMs(sizePx: number): number {
+  return Math.max(frameFloorMs(sizePx), MOVING_FRAME_MS);
+}
 
 export interface CarvedFrameInput {
   now: number;

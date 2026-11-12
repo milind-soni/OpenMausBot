@@ -11,9 +11,8 @@ import {
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CARVED_BODIES, type CarvedBody, type CarvedBodyId } from "../../shared/carved-bodies";
 import type { CursorAvatarHandle } from "./CursorAvatar";
-import { nextCarvedFrameAt, poseAtRest } from "./carved-rest";
+import { carvedFrameMs, nextCarvedFrameAt, poseAtRest } from "./carved-rest";
 import { mascotClock, usePrefersReducedMotion, type MascotTicket } from "./mascot-clock";
-import { frameFloorMs } from "./mascot-motion";
 import { mascotFaceInk, type MascotFaceColor } from "../../shared/bot-avatar";
 
 /** Where the face looks and how it feels. */
@@ -191,8 +190,12 @@ function CarvedAvatarComponent(
 
   useEffect(() => {
     if (!live || motion === "none") return;
-    if (motion === "blink") cue.current.blinkAt = performance.now();
-    else if (STARTLE.has(motion)) startle();
+    if (motion === "blink") {
+      cue.current.blinkAt = performance.now();
+      // A resting face has no frame pending, so the cue has to ask for one or the blink would wait for the next
+      // scheduled glance and be over by then.
+      ticket.current?.wake();
+    } else if (STARTLE.has(motion)) startle();
   }, [motion, motionKey, live]);
 
   const paint = (p: CarvedPose) => {
@@ -269,8 +272,10 @@ function CarvedAvatarComponent(
       paint(p);
       return nextCarvedFrameAt({
         now,
-        frameMs: frameFloorMs(size),
-        moving: !arrived || since < 1 || now < cue.current.startleUntil || pointer !== null,
+        frameMs: carvedFrameMs(size),
+        // A pointer that rests still over the face is no reason to keep drawing: its pose has arrived, and the next
+        // pointer move wakes the ticket through `onPointerMove`.
+        moving: !arrived || since < 1 || now < cue.current.startleUntil,
         glanceAt: rate > 0 ? glanceAt : Infinity,
         blinkAt,
       });
