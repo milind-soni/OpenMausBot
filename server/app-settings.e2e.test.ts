@@ -141,6 +141,24 @@ it("a Full-access owner turn changing a provider address waits on a Change/Cance
   expect(decisions.map((row: any) => row.decision).sort()).toEqual(["card-shown", "card-shown", "user-approved", "user-denied"]);
 }, 90_000);
 
+it("Stop settles a waiting Change card at once: the card shows as unavailable, a later Change applies nothing, and the next turn can ask again", async () => {
+  await start("CONFIRM-STOP", [step({ action: "set", id: "providers.groq.url", value: XAI_URL }, true)], 60_000);
+  let waiting: any;
+  await expect.poll(async () => (waiting = (await settingCards(bot.threadId)).find((one) => one.card.appSettingRequest.settingId === "providers.groq.url" && !one.card.answered)) !== undefined, { timeout: 20_000 }).toBe(true);
+  await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId });
+  await expect.poll(async () => (await settingCards(bot.threadId)).find((one) => one.id === waiting.id)?.card, { timeout: 10_000 }).toMatchObject({ answered: "unavailable", dismissed: true });
+  expect(await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: waiting.card.requestId, behavior: "allow" }, 200, ownerDevice)).toMatchObject({ outcome: "unavailable" });
+  expect(config().groq?.url).toBeUndefined();
+  await idle();
+
+  // The stopped card no longer holds the bot's one open slot, so the next turn's change gets its own card.
+  await start("CONFIRM-AFTER-STOP", [step({ action: "set", id: "providers.groq.url", value: XAI_URL }, true)], 60_000);
+  let next: any;
+  await expect.poll(async () => (next = (await settingCards(bot.threadId)).find((one) => one.card.appSettingRequest.settingId === "providers.groq.url" && !one.card.answered)) !== undefined, { timeout: 20_000 }).toBe(true);
+  await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: next.card.requestId, behavior: "deny" });
+  expect(results(await finished("CONFIRM-AFTER-STOP"))[0]?.text).toMatch(/^The user cancelled the change to Groq address\./);
+}, 90_000);
+
 it("a key is never taken as a value: set with a value is refused, set without one posts the secure card, and the key appears nowhere", async () => {
   const before = (await messages(bot.threadId)).length;
   await start("SECRET", [

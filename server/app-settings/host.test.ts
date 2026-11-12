@@ -78,7 +78,7 @@ function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; w
     language: () => undefined,
   });
   const turn = { botId: "kiwi", threadId: "t-kiwi", generation: "gen-1" };
-  const set = (id: string, value?: unknown, generation = turn.generation) => host.handle({ action: "set", id, ...(value === undefined ? {} : { value }) }, { ...turn, generation });
+  const set = (id: string, value?: unknown, generation = turn.generation, ended?: AbortSignal) => host.handle({ action: "set", id, ...(value === undefined ? {} : { value }) }, { ...turn, generation }, ended);
   const answer = (requestId: string, behavior: "allow" | "deny", ownerReview = true) => {
     let sent: { status: number; body: unknown } | null = null;
     const res = { writeHead: (status: number) => { sent = { status, body: null }; }, end: (text: string) => { sent = { status: sent?.status ?? 0, body: JSON.parse(text) }; } } as unknown as ServerResponse;
@@ -255,6 +255,23 @@ describe("confirm tier", () => {
     expect(result.body.error).toContain("Nobody answered");
     expect(cards()[0]!.card).toMatchObject({ answered: "unavailable", dismissed: true });
     expect(saved).toEqual([]);
+  });
+});
+
+describe("a stopped turn", () => {
+  it("closes the waiting card at once as unavailable, tells the bot nothing changed, and a later tap changes nothing", async () => {
+    const { set, cards, answer, saved, turn } = fixture();
+    const stop = new AbortController();
+    const pending = set("providers.anthropic.url", "https://proxy.example/v1", turn.generation, stop.signal);
+    await vi.waitFor(() => expect(cards()).toHaveLength(1));
+    stop.abort();
+    const result = await pending;
+    expect(result).toMatchObject({ status: 409, body: { error: expect.stringMatching(/^This turn was stopped, so the "Anthropic address" card was closed and nothing changed\./) } });
+    expect(cards()[0]!.card).toMatchObject({ answered: "unavailable", dismissed: true });
+    expect(answer(String(cards()[0]!.card.requestId), "allow").sent).toMatchObject({ status: 200, body: { outcome: "unavailable" } });
+    expect(saved).toEqual([]);
+    expect((await set("providers.anthropic.url", "https://proxy.example/v1", turn.generation, stop.signal)).status).toBe(409);
+    expect(cards()).toHaveLength(1);
   });
 });
 

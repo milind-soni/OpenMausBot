@@ -43,7 +43,7 @@ export interface Turn {
   generation: string;
 }
 
-type Outcome = { kind: "applied"; text: string } | { kind: "failed"; error: string } | { kind: "denied" } | { kind: "timeout" };
+type Outcome = { kind: "applied"; text: string } | { kind: "failed"; error: string } | { kind: "denied" } | { kind: "timeout" } | { kind: "stopped" };
 interface Held {
   botId: string;
   threadId: string;
@@ -133,7 +133,8 @@ export function createAppSettings(deps: AppSettingsDeps) {
     return reply(200, { text: `${outcome.text} The user can undo it from the card in the conversation.` });
   }
 
-  async function setConfirm(turn: Turn, bot: BotRecord, entry: WritableEntry, value: unknown, before: string) {
+  async function setConfirm(turn: Turn, bot: BotRecord, entry: WritableEntry, value: unknown, before: string, ended?: AbortSignal) {
+    if (ended?.aborted) return refuse(409, `This turn was stopped, so nothing changed. ${NOT_RETRY}`);
     if (openByBot.has(bot.id)) return refuse(409, "A settings change is already waiting on the user. End your turn and wait for the answer.");
     const requestId = randomUUID();
     const after = display(value);
@@ -141,6 +142,7 @@ export function createAppSettings(deps: AppSettingsDeps) {
     const answer = new Promise<Outcome>((resolve) => { settle = resolve; });
     const timer = setTimeout(() => settleHold(requestId, { kind: "timeout" }), holdMs);
     timer.unref?.();
+    ended?.addEventListener("abort", () => settleHold(requestId, { kind: "stopped" }), { once: true });
     held.set(requestId, { botId: bot.id, threadId: turn.threadId, entry, value, before, earlier: entry.current(), settle, timer });
     openByBot.set(bot.id, requestId);
     const message = card(bot, turn.threadId, entry, before, after, requestId, ["Change", "Cancel"], {});
@@ -151,10 +153,11 @@ export function createAppSettings(deps: AppSettingsDeps) {
     held.delete(requestId);
     if (openByBot.get(bot.id) === requestId) openByBot.delete(bot.id);
     waiting(bot, turn.threadId, false);
-    if (outcome.kind === "timeout") {
+    if (outcome.kind === "timeout" || outcome.kind === "stopped") {
       const stale = store.messagesFor(turn.threadId).find((candidate) => candidate.id === message.id);
       if (stale?.card && !stale.card.answered) store.patchMessage(turn.threadId, stale.id, { card: { ...stale.card, answered: "unavailable", dismissed: true } });
-      return refuse(409, `Nobody answered the "${entry.label}" card in time, so nothing changed. ${NOT_RETRY}`);
+      return refuse(409, outcome.kind === "timeout" ? `Nobody answered the "${entry.label}" card in time, so nothing changed. ${NOT_RETRY}`
+        : `This turn was stopped, so the "${entry.label}" card was closed and nothing changed. ${NOT_RETRY}`);
     }
     if (outcome.kind === "denied") return refuse(409, `The user cancelled the change to ${entry.label}. ${NOT_RETRY}`);
     if (outcome.kind === "failed") return refuse(409, `The user allowed it, but the change failed: ${outcome.error}`);
@@ -178,7 +181,7 @@ export function createAppSettings(deps: AppSettingsDeps) {
     entry.settle(outcome);
   }
 
-  async function set(turn: Turn, body: Record<string, unknown>) {
+  async function set(turn: Turn, body: Record<string, unknown>, ended?: AbortSignal) {
     const entry = typeof body.id === "string" ? byId.get(body.id) : undefined;
     if (!entry) return refuse(404, `No setting with id ${JSON.stringify(body.id ?? null)}. Use action find first.`);
     const bot = store.bot(turn.botId);
@@ -199,11 +202,12 @@ export function createAppSettings(deps: AppSettingsDeps) {
     const budget = spendWrite(turn);
     if (budget) return refuse(429, budget);
     const before = entry.read();
-    return entry.tier === "safe" ? setSafe(turn, bot, entry, parsed.data, before) : setConfirm(turn, bot, entry, parsed.data, before);
+    return entry.tier === "safe" ? setSafe(turn, bot, entry, parsed.data, before) : setConfirm(turn, bot, entry, parsed.data, before, ended);
   }
 
   return {
-    async handle(body: Record<string, unknown>, turn: Turn): Promise<{ status: number; body: Record<string, unknown> }> {
+    /** `ended` aborts once the turn is stopped or revoked, or its call is gone: a waiting card then closes at once. */
+    async handle(body: Record<string, unknown>, turn: Turn, ended?: AbortSignal): Promise<{ status: number; body: Record<string, unknown> }> {
       if (body.action === "find") {
         const query = typeof body.query === "string" ? body.query : "";
         const hits = findSettings(entries, query, FIND_LIMIT).map(describe);
@@ -215,7 +219,7 @@ export function createAppSettings(deps: AppSettingsDeps) {
         return reply(200, { text: JSON.stringify({ ...describe(entry), help: entry.help, ...("allowed" in entry ? { allowed: entry.allowed } : {}),
           change: entry.tier === "owner-only" ? `only the owner, in ${entry.where}` : entry.tier === "secret" ? "set with no value opens a secure card" : entry.tier === "confirm" ? "set shows the user a Change/Cancel card and waits" : "set applies at once, with Undo on the card" }) });
       }
-      if (body.action === "set") return set(turn, body);
+      if (body.action === "set") return set(turn, body, ended);
       return refuse(400, "action must be find, get or set.");
     },
 

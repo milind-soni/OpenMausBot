@@ -14297,7 +14297,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (await dispatchRoutes([createInternalMcpRoutes({
         ...mcpServerDeps(internalSender, internalCapability.threadId, internalCapability.generation), readBody: readInternalBody,
-      }), createInternalAppSettingsRoutes({ readBody: readInternalBody, handle: (body) => appSettings.handle(body, internalCapability) })], { req, res, url, path, method, auth, json, readBody })) return;
+      }), createInternalAppSettingsRoutes({ readBody: readInternalBody, handle: (body) => appSettings.handle(body, internalCapability, turnCallSignals.signal(internalCapability, res)) })], { req, res, url, path, method, auth, json, readBody })) return;
       if (await dispatchRoutes([createInternalCredentialRequestRoutes({ readBody: readInternalBody, request: (body) => secretCards.requestCredential(internalSender, internalCapability.threadId, body) })], { req, res, url, path, method, auth, json, readBody })) return;
       if (await dispatchRoutes([createInternalSignInRoutes({
         readBody: readInternalBody,
