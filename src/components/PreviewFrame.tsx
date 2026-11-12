@@ -541,7 +541,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
         {status === "blocked" && (
           <div
             role="alert"
-            className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-surface p-6 text-center"
+            className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-panel p-6 text-center"
           >
             <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-warn/15 text-warn">
               <ShieldAlert className="h-5 w-5" />
@@ -715,7 +715,9 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
             onLoad={() => {
               clearTimers();
               setSlowWarning(false);
-              updateStatus("loaded");
+              // A refused navigation can still emit load after the user opens
+              // recovery. Only Retry should dismiss that recovery state.
+              if (status !== "blocked" && status !== "error") updateStatus("loaded");
             }}
             onError={() => {
               clearTimers();
@@ -728,7 +730,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
         {/* Browsers fire load even for an embedding refusal and hide the response.
             Keep honest recovery available without claiming every opaque frame failed. */}
         {live && !isElectron && source.kind === "url" && status !== "blocked" && status !== "error" && (
-          <div className="absolute inset-x-2 bottom-2 z-20 flex flex-wrap items-center justify-center gap-2 rounded-lg border border-hairline bg-surface/95 px-3 py-2 text-[11px] text-ink shadow" role="status">
+          <div className="absolute inset-x-2 bottom-2 z-20 flex flex-wrap items-center justify-center gap-2 rounded-lg border border-hairline bg-panel px-3 py-2 text-[11px] text-ink shadow" role="status">
             <button type="button" className="underline" onClick={() => updateStatus("blocked")}>Preview blank?</button>
             <span>Some sites don&apos;t allow embedding.</span>
             <a href={source.url} target="_blank" rel="noreferrer" className="font-medium text-accent underline">Open in new tab</a>
