@@ -4375,6 +4375,41 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("resets only the bot's own stuck cloud computer from its Computer panel, never while it is in use", async () => {
+    let botId = "";
+    try {
+      expect((await api("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
+      const bot = (await api("POST", "/api/bots")).body.bot;
+      botId = bot.id;
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud", cloudBackend: "box" })).status).toBe(200);
+      const managedName = managedBoatNameForFixture(bot.id);
+      const orphanName = managedBoatNameForFixture("deleted-orphan-bot");
+      managedBoatRows = [
+        { id: "bx_23456789", name: managedName, state: "starting" },
+        { id: "bx_abcdefgh", name: orphanName, state: "starting" },
+      ];
+
+      expect((await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "take" })).status).toBe(200);
+      const inUse = await api("POST", `/api/bots/${bot.id}/computer/remove`, {});
+      expect(inUse.status).toBe(409);
+      expect(inUse.body.error).toMatch(/in use/i);
+      expect(managedBoatDeleteConfirmations).toEqual([]);
+      expect((await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "release" })).status).toBe(200);
+
+      const reset = await api("POST", `/api/bots/${bot.id}/computer/remove`, {});
+      expect(reset).toMatchObject({ status: 202, body: { ok: true } });
+      expect(managedBoatDeleteConfirmations).toEqual([{ boxId: "bx_23456789", confirmation: "bx_23456789" }]);
+      expect(managedBoatRows.map((row) => row.id)).toEqual(["bx_abcdefgh"]);
+      expect(await api("POST", `/api/bots/${bot.id}/computer/remove`, {})).toMatchObject({ status: 202, body: { ok: true, missing: true } });
+    } finally {
+      managedBoatRows = [];
+      managedBoatDeleteConfirmations.length = 0;
+      if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+      await api("PUT", "/api/config", { box: { token: "" } });
+      boatRouteCalls.length = 0;
+    }
+  });
+
   it("deletes a bot-owned Boat automatically even after the bot changes destination", async () => {
     let botId = "";
     try {
