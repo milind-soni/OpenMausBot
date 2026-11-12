@@ -77,6 +77,28 @@ describe("thread posts", () => {
       expect(calls).toHaveLength(1);
     });
 
+    it("posts concurrent calls with one delivery id once, and frees the id when delivery fails", async () => {
+      const { calls, deps: d } = deps("sender-race");
+      let release!: () => void;
+      const ok = { status: 200, body: { receipts: [{ outcome: "delivered", requestId: "r1" }] } };
+      d.coordinateBots = async (call) => { calls.push(call); await new Promise<void>((done) => { release = done; }); return ok; };
+      const first = postToThread({ toThreadId: "t-1", message: "hi", deliveryId: "race" }, d);
+      const same = await postToThread({ toThreadId: "t-1", message: "hi", deliveryId: "race" }, d);
+      const other = await postToThread({ toThreadId: "t-2", message: "hi", deliveryId: "race" }, d);
+      release();
+      expect((await first).status).toBe(200);
+      expect(same.status).toBe(409);
+      expect(same.body.duplicate).toBeUndefined();
+      expect(other.status).toBe(409);
+      expect(calls).toHaveLength(1);
+
+      d.coordinateBots = async (call) => { calls.push(call); throw new Error("down"); };
+      await expect(postToThread({ toThreadId: "t-1", message: "hi", deliveryId: "fails" }, d)).rejects.toThrow("down");
+      d.coordinateBots = async (call) => { calls.push(call); return ok; };
+      expect((await postToThread({ toThreadId: "t-1", message: "hi", deliveryId: "fails" }, d)).status).toBe(200);
+      expect(calls).toHaveLength(3);
+    });
+
     it("refuses a call made from a room", async () => {
       const { calls, deps: d } = deps("sender-room", ["from-run"]);
       expect((await postToThread({ toThreadId: "t-1", message: "hi" }, d)).status).toBe(409);

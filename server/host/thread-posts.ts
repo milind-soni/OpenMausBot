@@ -75,6 +75,8 @@ const PostBody = z.object({
 });
 /** Thread each delivery went to, by sender and delivery id, so a retry is not posted twice (a no-wake post is also found in its thread). */
 const deliveries = new Map<string, string>();
+/** Same key while its delivery is still under way, so a concurrent retry neither posts twice nor reuses the id elsewhere. */
+const pending = new Map<string, string>();
 
 /** POST /api/internal/post-to-thread: checks the call and sends it through coordinate_bots as a post, so its reach rules hold. */
 export async function postToThread(body: unknown, deps: { senderId: string; fromThreadId: string; waitsOn: (threadId: string) => boolean;
@@ -90,12 +92,19 @@ export async function postToThread(body: unknown, deps: { senderId: string; from
   if (!owner || deps.store.groupByThread(threadId)) return refuse(404, "No open thread with that id: use a thread id list_threads shows. Rooms take post_to_room.");
   if (threadId === deps.fromThreadId) return refuse(409, "That is this conversation: say it in your reply instead.");
   if (deps.waitsOn(threadId)) return refuse(403, "That thread is waiting on this one: end your turn and your reply reaches it.");
-  const key = `${deps.senderId}\u0000${deliveryId}`, sentTo = deliveries.get(key);
-  if (sentTo !== undefined && sentTo !== threadId) return refuse(409, "That delivery_id was already used for another thread: use a new delivery_id.");
+  const key = `${deps.senderId}\u0000${deliveryId}`, sentTo = deliveries.get(key), sending = pending.get(key), usedFor = sentTo ?? sending;
+  if (usedFor !== undefined && usedFor !== threadId) return refuse(409, "That delivery_id was already used for another thread: use a new delivery_id.");
+  if (sending !== undefined) return refuse(409, "A post with this delivery_id is still being delivered: try again shortly with the same delivery_id.");
   if (sentTo !== undefined || findThreadPost(deps.store.messagesFor(threadId), deps.senderId, deliveryId)) {
     return { status: 200, body: { deliveryId, threadId, botName: owner.name, duplicate: true, message: "Already delivered with this delivery_id; not posted again." } };
   }
-  const result = await deps.coordinateBots({ botIds: [owner.id], message, rework: false, thread: threadId, reply: "none", consult: false, post: { deliveryId, wake } });
+  pending.set(key, threadId);
+  let result: Reply;
+  try {
+    result = await deps.coordinateBots({ botIds: [owner.id], message, rework: false, thread: threadId, reply: "none", consult: false, post: { deliveryId, wake } });
+  } finally {
+    pending.delete(key);
+  }
   const receipt = (result.body.receipts as PeerDeliveryReceipt[] | undefined)?.[0];
   if (result.status !== 200 || !receipt || receipt.outcome === "failed") {
     return refuse(result.status === 200 ? 409 : result.status, String(receipt?.detail ?? result.body.error ?? "Not delivered."));
