@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Circle, Loader2, RotateCcw, ShieldCheck, Smartphone, Usb } from "lucide-react";
+import { Loader2, ShieldCheck, Smartphone, Usb } from "lucide-react";
 import { usePageVisible } from "@/lib/page-visible";
 import { t } from "@/lib/i18n";
+import { api, ApiError } from "@/state/api";
+import { ANDROID_KEY_NAMES, AndroidNavButtons, fittedUnitPoint, type UnitPoint } from "./android-device-parts";
+import { PhoneScreenPanel } from "./PhoneScreenPanel";
 import { Select } from "./Select";
 import type { AndroidDeviceInput, AndroidDeviceStatus, AndroidUsbDevice } from "@/types/ogb";
-
-type UnitPoint = { x: number; y: number };
 
 const EMPTY_STATUS: AndroidDeviceStatus = { available: false, devices: [] };
 
@@ -14,14 +15,27 @@ export type AndroidUsbDevicesStatus = AndroidDeviceStatus & {
   scanned: boolean;
 };
 
-export function useAndroidUsbDevices(): AndroidUsbDevicesStatus {
+async function readServerPhones(): Promise<AndroidDeviceStatus> {
+  try {
+    const answer = await api<AndroidDeviceStatus>("/api/usb-phones", { background: true });
+    return Array.isArray(answer.devices) ? answer : EMPTY_STATUS;
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 404) return EMPTY_STATUS;
+    throw cause;
+  }
+}
+
+/** With `serverPhones` the server lists the phones plugged into its own computer; otherwise the desktop app does. */
+export function useAndroidUsbDevices(serverPhones = false): AndroidUsbDevicesStatus {
   const bridge = window.ogb?.androidDevice;
   const [status, setStatus] = useState<AndroidDeviceStatus>(EMPTY_STATUS);
   const [scanned, setScanned] = useState(false);
   const pageVisible = usePageVisible();
 
   useEffect(() => {
-    if (!bridge) {
+    const read = serverPhones ? readServerPhones : bridge && (() => bridge.status());
+    if (!read) {
+      setStatus(EMPTY_STATUS);
       setScanned(true);
       return;
     }
@@ -35,7 +49,7 @@ export function useAndroidUsbDevices(): AndroidUsbDevicesStatus {
       const check = ++issued;
       const superseded = () => check < answered;
       try {
-        const next = await bridge.status();
+        const next = await read();
         if (alive && !superseded()) {
           answered = check;
           setStatus(next);
@@ -60,7 +74,7 @@ export function useAndroidUsbDevices(): AndroidUsbDevicesStatus {
       alive = false;
       window.clearInterval(timer);
     };
-  }, [bridge, pageVisible]);
+  }, [bridge, pageVisible, serverPhones]);
 
   return { ...status, scanned };
 }
@@ -69,8 +83,8 @@ function deviceLabel(device: AndroidUsbDevice) {
   return device.model === "Android device" ? device.serial : device.model;
 }
 
-export function AndroidDevicePanel({ status }: { status: AndroidDeviceStatus }) {
-  const bridge = window.ogb?.androidDevice;
+export function AndroidDevicePanel({ status, serverPhones = false }: { status: AndroidDeviceStatus; serverPhones?: boolean }) {
+  const bridge = serverPhones ? undefined : window.ogb?.androidDevice;
   const pageVisible = usePageVisible();
   const authorized = status.devices.filter((device) => device.state === "device");
   const [serial, setSerial] = useState(authorized[0]?.serial ?? status.devices[0]?.serial ?? "");
@@ -140,39 +154,15 @@ export function AndroidDevicePanel({ status }: { status: AndroidDeviceStatus }) 
   const unitPoint = (
     event: React.PointerEvent<HTMLDivElement>,
     clampToPhone = false,
-  ): UnitPoint | null => {
-    const image = imageRef.current;
-    if (!image || !dimensions.width || !dimensions.height) return null;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const scale = Math.min(bounds.width / dimensions.width, bounds.height / dimensions.height);
-    const fittedWidth = dimensions.width * scale;
-    const fittedHeight = dimensions.height * scale;
-    const left = bounds.left + (bounds.width - fittedWidth) / 2;
-    const top = bounds.top + (bounds.height - fittedHeight) / 2;
-    const x = (event.clientX - left) / fittedWidth;
-    const y = (event.clientY - top) / fittedHeight;
-    if (clampToPhone) {
-      return { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) };
-    }
-    return x >= 0 && x <= 1 && y >= 0 && y <= 1 ? { x, y } : null;
-  };
+  ): UnitPoint | null =>
+    imageRef.current ? fittedUnitPoint(event.currentTarget.getBoundingClientRect(), dimensions, event, clampToPhone) : null;
 
   const keyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    const named: Record<string, string> = {
-      ArrowDown: "down",
-      ArrowLeft: "left",
-      ArrowRight: "right",
-      ArrowUp: "up",
-      Backspace: "delete",
-      Delete: "delete",
-      Enter: "enter",
-      Escape: "back",
-      Tab: "tab",
-    };
-    if (named[event.key]) {
+    const named = ANDROID_KEY_NAMES[event.key];
+    if (named) {
       event.preventDefault();
-      send({ type: "key", key: named[event.key] });
+      send({ type: "key", key: named });
     } else if (/^[A-Za-z0-9 _.,@-]$/.test(event.key)) {
       event.preventDefault();
       send({ type: "text", text: event.key });
@@ -224,7 +214,7 @@ export function AndroidDevicePanel({ status }: { status: AndroidDeviceStatus }) 
               <Smartphone size={16} className="text-success" /> {deviceLabel(selected)}
             </div>
             <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
-              {t("computer.android.usbSubtitle")}
+              {t(serverPhones ? "computer.android.serverSubtitle" : "computer.android.usbSubtitle")}
             </div>
           </div>
           <span className="flex shrink-0 items-center gap-1 text-[11px] text-success">
@@ -252,6 +242,8 @@ export function AndroidDevicePanel({ status }: { status: AndroidDeviceStatus }) 
             ? t("computer.android.unauthorized")
             : t("computer.android.badState", { state: selected.state })}
         </div>
+      ) : serverPhones ? (
+        <PhoneScreenPanel key={selected.serial} serial={selected.serial} name={deviceLabel(selected)} />
       ) : (
         <>
           <div
@@ -311,24 +303,7 @@ export function AndroidDevicePanel({ status }: { status: AndroidDeviceStatus }) 
             )}
           </div>
           <div className="grid grid-cols-3 gap-2">
-            <button
-              onClick={() => send({ type: "key", key: "back" })}
-              className="flex items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[12px] text-ink hover:bg-raised-hover"
-            >
-              <ArrowLeft size={13} /> {t("computer.android.back")}
-            </button>
-            <button
-              onClick={() => send({ type: "key", key: "home" })}
-              className="flex items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[12px] text-ink hover:bg-raised-hover"
-            >
-              <Circle size={12} /> {t("computer.android.home")}
-            </button>
-            <button
-              onClick={() => send({ type: "key", key: "recent" })}
-              className="flex items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[12px] text-ink hover:bg-raised-hover"
-            >
-              <RotateCcw size={13} /> {t("computer.android.recent")}
-            </button>
+            <AndroidNavButtons onKey={(key) => send({ type: "key", key })} />
           </div>
           <div className="text-center text-[11px] leading-relaxed text-ink-secondary">
             {t("computer.android.hint")}
