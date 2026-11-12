@@ -1,7 +1,7 @@
 import { botShowsUnread } from "@/lib/bot-unread";
 import type { AppState, BotAnnouncement, Group } from "./store";
 
-type SendRead = (path: string, threadId: string) => void;
+type SendRead = (path: string, threadId: string, updatedAt: number) => void;
 const sendRead: SendRead = (path, threadId) => {
   void fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) }).catch(() => {});
 };
@@ -21,7 +21,7 @@ export function markVisibleBotThreadsRead(state: AppState, bot: BotAnnouncement,
     const task = bot.tasks?.find((candidate) => candidate.threadId === threadId);
     if (!task?.unread && (bot.tasks || !bot.unread)) continue;
     if (task) task.unread = false;
-    post(`/api/bots/${bot.id}/read`, threadId);
+    post(`/api/bots/${bot.id}/read`, threadId, task?.updatedAt ?? 0);
   }
   bot.unread = bot.tasks ? botShowsUnread(bot) : false;
 }
@@ -35,7 +35,7 @@ export function markVisibleGroupThreadsRead(state: AppState, group: Partial<Grou
     const task = group.tasks?.find((candidate) => candidate.threadId === threadId);
     if (!task?.unread && (group.tasks || !group.unread)) continue;
     if (task) task.unread = false;
-    post(`/api/groups/${group.id}/read`, threadId);
+    post(`/api/groups/${group.id}/read`, threadId, task?.updatedAt ?? 0);
   }
   group.unread = group.tasks ? group.tasks.some((task) => task.unread) : false;
 }

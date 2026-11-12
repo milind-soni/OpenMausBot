@@ -82,7 +82,7 @@ beforeAll(async () => {
   admin = (await team.pair(ADMIN)).token!;
   bob = (await team.pair(BOB)).token!;
   ben = (await team.pair(BEN)).token!;
-  scout = (await team.as(owner, "POST", "/api/bots", { name: "Scout" })).body.bot;
+  scout = (await team.as(owner, "POST", "/api/bots", { name: "Scout", visibility: "everyone" })).body.bot;
   bobThread = (await team.as(bob, "POST", `/api/bots/${scout.id}/tasks`, { title: "Bob's plans" })).body.task.threadId;
   benThread = (await team.as(ben, "POST", `/api/bots/${scout.id}/tasks`, { title: "Ben's notes" })).body.task.threadId;
   const upload = await fetch(`${team.base}/api/attachments`, { method: "POST", headers: { ...fx.edge, authorization: `Bearer ${bob}`, "content-type": "image/png" }, body: PNG });
@@ -103,7 +103,7 @@ beforeAll(async () => {
   expect(shared.status, JSON.stringify(shared.body)).toBe(201);
   standup = shared.body.routine.id;
   // Ledger: only Bob and Ben added, and Bob looks after it.
-  ledger = (await team.as(owner, "POST", "/api/bots", { name: "Ledger" })).body.bot;
+  ledger = (await team.as(owner, "POST", "/api/bots", { name: "Ledger", visibility: "everyone" })).body.bot;
   expect((await team.as(owner, "PUT", `/api/bots/${ledger.id}/access`, { everyone: "none", people: { [BOB.email]: "chat", [BEN.email]: "chat" } })).status).toBe(200);
   expect((await team.as(owner, "PUT", `/api/bots/${ledger.id}/reports-to`, { email: BOB.email })).status).toBe(200);
   const tallied = await team.as(bob, "POST", "/api/routines", { name: "Ledger tally", prompt: "Add up the week", botId: ledger.id, schedule: LATER, resultsThreadId: null });

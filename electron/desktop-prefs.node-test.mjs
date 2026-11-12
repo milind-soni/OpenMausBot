@@ -55,6 +55,21 @@ test("What's new, Boat's credit offer and the Grok Bot move are the notices a pa
   }
 });
 
+test("an announcement card's mark and the last sponsor day are kept beside the fixed notices, the newest few only", () => {
+  let saved = { seen: [POPUP] };
+  const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); } });
+  prefs.markSeen("announcement:phone-app"); prefs.markSeen("announcement:phone-app");
+  prefs.markSeen("announcement-sponsor:2026-11-01"); prefs.markSeen("announcement-sponsor:2026-12-01");
+  assert.deepEqual(prefs.seen(), [POPUP, "announcement:phone-app", "announcement-sponsor:2026-12-01"], "one sponsor day: the latest");
+  for (const id of ["announcement:", "announcement:Bad Id", "announcement:x", `announcement:${"x".repeat(41)}`, "announcement-sponsor:soon", "announcement:../../x"]) prefs.markSeen(id);
+  assert.deepEqual(prefs.seen(), [POPUP, "announcement:phone-app", "announcement-sponsor:2026-12-01"], "nothing outside the two shapes is kept");
+  for (let index = 0; index < 45; index++) prefs.markSeen(`announcement:card-${index}`);
+  const marks = prefs.seen().filter(id => id.startsWith("announcement:"));
+  assert.equal(marks.length, 40); assert.equal(marks.at(-1), "announcement:card-44"); assert.ok(prefs.seen().includes(POPUP));
+  const restarted = createDesktopPrefs({ read: () => saved, write: () => {} });
+  assert.deepEqual(restarted.seen(), prefs.seen(), "survives a restart");
+});
+
 test("a write that fails leaves the last whole record on disk, analytics opt-out included", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "desktop-prefs-"));
   try {

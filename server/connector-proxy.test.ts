@@ -187,6 +187,23 @@ describe("connector MCP bridge", () => {
     );
   });
 
+  it("tells the bot when an app it asked to connect already has an account, so it can ask again with an alias", async () => {
+    const note = "Gmail is already connected (it has an account, or needs no sign-in), so its card shows it connected and no new account was added. "
+      + "To add another Gmail account, call COMPOSIO_MANAGE_CONNECTIONS again with toolkits: [{\"name\": \"gmail\", \"alias\": \"<a short name for the new account>\"}].";
+    const harness = await listen((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ messageIds: ["m1"], connectedNote: note, nothingToSignIn: true }));
+      });
+    });
+    const lines = start({ OMB_HARNESS_URL: harness, OMB_CONNECTOR_TOKEN: "bridge-secret", OMB_BOT_ID: "bot-1", OMB_THREAD_ID: "thread-1" });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "COMPOSIO_MANAGE_CONNECTIONS", arguments: { toolkits: ["gmail"] } } })}\n`);
+    expect((await nextJson(lines)).result.content[0].text).toBe(
+      `OpenMausBot showed the user a card that gmail is already connected; no sign-in started. ${note} Do not end this turn: carry on now.`,
+    );
+  });
+
   it("offers auth_config_id on COMPOSIO_MANAGE_CONNECTIONS, whose Composio schema has none", async () => {
     const manage = {
       name: "COMPOSIO_MANAGE_CONNECTIONS",

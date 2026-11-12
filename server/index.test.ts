@@ -11199,7 +11199,7 @@ describe("harness HTTP API", () => {
       });
       expect(unavailableCloud.status).toBe(409);
       expect(await unavailableCloud.json()).toMatchObject({
-        error: expect.stringMatching(/^Bots here can get their own cloud desktops from Boat, a paid service\. Connect your Boat account in Settings → API keys\./),
+        error: expect.stringMatching(/^Bots here can get their own cloud desktops from Boat, a paid service\. Connect your Boat account in AI › Other services\./),
       });
 
       const proposed = await fetch(`${BASE}/api/internal/trigger-requests`, {
@@ -12301,6 +12301,49 @@ describe("harness HTTP API", () => {
       expect((await poll()).body.connected).toBe(true);
       expect((await api("POST", card(work, "resume"), { threadId: bot.threadId })).status).toBe(409);
       expect((await api("GET", `${card(other, "status")}?threadId=${bot.threadId}`)).body.connected).toBe(false);
+    } finally {
+      connectorAccounts = [];
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("tells the bot an app it asked to connect without an alias already has an account, and how to add another", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    connectorAccounts = [{ id: "ca_personal", alias: "personal", status: "ACTIVE", toolkit: { slug: "gmail" } }];
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const request = async (items: unknown[], resumeKey: string) => {
+        const response = await fetch(`${BASE}/api/internal/connectors/request`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify({ botId: bot.id, threadId: bot.threadId, resumeKey, items }),
+        });
+        return { status: response.status, body: await response.json() as any };
+      };
+      const plain = await request([{ slug: "gmail" }, { slug: "slack" }], "connected-note-plain");
+      expect(plain.status).toBe(200);
+      const stored = (await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages as any[];
+      const gmailCard = stored.find((message) => message.id === plain.body.messageIds[0]);
+      expect(gmailCard.connector.status).toBe("connected");
+      expect(plain.body.connectedNote).toBe(
+        `${gmailCard.connector.label} is already connected (it has an account, or needs no sign-in), so its card shows it connected and no new account was added. `
+        + `To add another ${gmailCard.connector.label} account, call COMPOSIO_MANAGE_CONNECTIONS again with toolkits: [{"name": "gmail", "alias": "<a short name for the new account>"}].`,
+      );
+      expect(plain.body.nothingToSignIn).toBeUndefined();
+      expect(gmailCard.connector.resumed).toBeUndefined();
+      const only = await request([{ slug: "gmail" }], "connected-note-only");
+      expect(only.status).toBe(200);
+      expect(only.body.nothingToSignIn).toBe(true);
+      const onlyCard = ((await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages as any[]).find((message) => message.id === only.body.messageIds[0]);
+      expect(onlyCard.connector).toMatchObject({ status: "connected", resumed: true });
+      const withAlias = await request([{ slug: "gmail", alias: "work" }], "connected-note-alias");
+      expect(withAlias.status).toBe(200);
+      expect(withAlias.body.connectedNote).toBeUndefined();
+      expect(withAlias.body.nothingToSignIn).toBeUndefined();
+      const fresh = await request([{ slug: "notion" }], "connected-note-fresh");
+      expect(fresh.status).toBe(200);
+      expect(fresh.body.connectedNote).toBeUndefined();
     } finally {
       connectorAccounts = [];
       await api("DELETE", `/api/bots/${bot.id}`);

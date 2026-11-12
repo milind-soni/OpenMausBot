@@ -17,7 +17,7 @@ it("lets a Team Cloud member list and read only their own notification feed", as
     const team = fixture.team!;
     const owner = await team.pair({ email: "ada@notifications.test", role: "owner" });
     const member = await team.pair({ email: "bob@notifications.test", role: "member" });
-    const created = await team.as(owner.token!, "POST", "/api/bots", { name: "Scout" });
+    const created = await team.as(owner.token!, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
     expect(created.status).toBe(201);
     const bot = created.body.bot;
     const opened = await team.as(owner.token!, "POST", `/api/bots/${bot.id}/tasks`, { title: "Ada's private chat" });
@@ -60,7 +60,7 @@ it("reads only the opener's notifications in shared conversations and keeps spen
     const team = fixture.team!;
     const owner = await team.pair({ email: "ada@notifications.test", role: "owner" });
     const member = await team.pair({ email: "bob@notifications.test", role: "member" });
-    const created = await team.as(owner.token!, "POST", "/api/bots", { name: "Scout" });
+    const created = await team.as(owner.token!, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
     expect(created.status).toBe(201);
     const bot = created.body.bot;
     const channel = await team.as(owner.token!, "POST", "/api/groups", { name: "Updates", memberIds: [bot.id],

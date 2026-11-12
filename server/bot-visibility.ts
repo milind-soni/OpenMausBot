@@ -22,6 +22,8 @@ export interface ThreadAudiences {
   ownTask?<T extends { threadId: string; unread?: boolean; lastReadMessageId?: string }>(task: T): T;
   /** The person whose private chat a routine lives in (routine-home.ts), else null. */
   routineHome?(routine: RoutineRef): string | null;
+  /** The two people a conversation shared with one person is read by (host/conversation-shares.ts), else null. */
+  readers?(threadId: string): readonly string[] | null;
 }
 
 export type RoutineRef = { botId?: unknown; groupId?: unknown; name?: unknown; sourceThreadId?: unknown; resultsThreadId?: unknown };
@@ -280,7 +282,10 @@ export class VisibleSet {
 
   private audienceShows(threadId: string): boolean {
     const audience = this.audiences?.of(threadId);
-    return audience === undefined || audienceIncludes(audience, { admin: this.viewer.kind === "all", person: this.audiences!.person, seesRoom: (groupId) => this.group(groupId) });
+    if (audience === undefined) return true;
+    const person = this.audiences!.person;
+    return audienceIncludes(audience, { admin: this.viewer.kind === "all", person, seesRoom: (groupId) => this.group(groupId) })
+      || (person !== null && this.audiences!.readers?.(threadId)?.includes(person) === true);
   }
 
   private indexedOwner(threadId: string): ThreadOwner | undefined {

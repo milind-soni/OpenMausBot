@@ -26,6 +26,8 @@ export interface TeamPresenceHostDeps {
   /** A frame every team stream gets, replayed to one that reconnects (`team.people`). */
   broadcast(payload: Record<string, unknown>): void;
   audienceOf(threadId: string): Audience;
+  /** A conversation its person shared with one other person (host/conversation-shares.ts): read by those two. */
+  sharedWithOne?(threadId: string): boolean;
   store(): Pick<Store, "botByThread" | "groupByThread" | "bot">;
   visibleTo(viewer: Viewer): Pick<VisibleSet, "thread">;
   clock?: PresenceClock;
@@ -56,7 +58,7 @@ export function createTeamPresenceHost<Stream extends PresenceStream>(deps: Team
 
   /** More than one person can read it: never a conversation that is someone's own, nor one with someone's own bot. */
   function shared(threadId: string): boolean {
-    if (audienceMember(deps.audienceOf(threadId)) !== null) return false;
+    if (audienceMember(deps.audienceOf(threadId)) !== null && !deps.sharedWithOne?.(threadId)) return false;
     const store = deps.store();
     const group = store.groupByThread(threadId);
     const bots = group ? group.memberIds.map((id) => store.bot(id)) : [store.botByThread(threadId)];
@@ -125,6 +127,10 @@ export function createTeamPresenceHost<Stream extends PresenceStream>(deps: Team
     streams,
     /** What the people list says of someone: whether they are here now. Undefined off a team. */
     of: presence ? (email: string): PersonPresence => ({ here: presence.here(email) }) : undefined,
+    /** Whether this person has the conversation open in a window now. */
+    looking(email: string, threadId: string): boolean {
+      return presence?.viewers(threadId).includes(email) === true;
+    },
     close(): void {
       presence?.close();
       peopleTimer?.cancel();

@@ -2,15 +2,14 @@
 // with the one thing to do when it needs the person; My Cloud and teams are the Admin's. This app never stops a server:
 // Remove only forgets it here and signs this app out.
 import { useEffect, useState } from "react";
-import { Check, Cloud, Copy, Laptop, Plus, Trash2, X } from "lucide-react";
+import { Check, Copy, Laptop, Plus, X } from "lucide-react";
 import { serverTransport } from "../../electron/server-address.mjs";
 import type { ServerInstall, ServerStatus } from "../../electron/server-status.mjs";
-import { cloudColor } from "@/lib/cloud-look";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { OwnServerLink, RailSheet } from "./PlaceAddSheet";
-import { Switch } from "./SettingsPrimitives";
-import { CloudTile } from "./cloud-buy/parts";
+import { SettingsLinkRow, SettingsRows, Switch } from "./SettingsPrimitives";
+import { PlaceBadge } from "./settings/SettingsNav";
 
 type Saved = Awaited<ReturnType<NonNullable<NonNullable<Window["ogb"]>["environments"]>["state"]>>;
 type Entry = Saved["environments"][number];
@@ -96,41 +95,41 @@ export function ServerList({ saved, busy, sharingOffered, ownServers = [], appVe
   const editAddress = (entry: Entry) => setSheet({ address: entry.origin!.replace(/^http:/, "https:"), locked: false, title: t("connect.title") });
   const rows: Entry[] = [{ id: "local", name: t("place.local"), kind: "local" }, ...saved.environments.filter((entry) => entry.kind !== "local")];
   return <>
-    <ul className="divide-y divide-hairline/40">
+    <SettingsRows icons>
       {rows.map((entry) => {
         const active = entry.id === saved.activeId;
         const status = byHand(entry) ? statusOf(entry.id) : undefined;
-        const Icon = entry.id === "local" ? Laptop : Cloud;
         const where = entry.id === "local" ? t("servers.localHint")
           : !byHand(entry) ? (entry.home ? t("servers.managed") : new URL(entry.origin!).host)
           : `${new URL(entry.origin!).host} · ${t(TRANSPORT[serverTransport(entry.origin!)])}`;
         const share = ownServers.find((own) => own.id === entry.id);
         const showUpdate = status?.behind === true && appVersion !== null && !hidden.includes(`${entry.id}:${status.version}`);
-        return <li key={entry.id} data-server-row={entry.id} className="py-3">
-          <div className="flex items-center gap-3">
-            {cloudColor(entry.color) ? <CloudTile color={entry.color} size={20} /> : <Icon size={18} className="shrink-0 text-ink-secondary" />}
+        return <div key={entry.id} data-server-row={entry.id} className="flex flex-col px-4 py-3">
+          <div className="flex min-h-10 items-center gap-3">
+            {/* A place shows the same mark as on the rail, in the nav and on Phone & devices: its 24 px badge. */}
+            {entry.id === "local"
+              ? <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Laptop size={18} strokeWidth={1.75} aria-hidden="true" /></span>
+              : <span className="flex size-8 shrink-0 items-center justify-center"><PlaceBadge place={{ kind: entry.home || entry.cloud ? "cloud" : "server", name: entry.name, color: entry.color ?? null, named: true }} size={24} /></span>}
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-medium text-ink">{entry.name}</div>
-              <div data-server-where className="break-all text-[12px] text-ink-secondary">{where}</div>
+              <div className="flex items-center gap-1.5 truncate text-[14px] leading-5 text-ink">{entry.name}</div>
+              <div data-server-where className="truncate text-[13px] leading-[18px] text-ink-secondary">{where}</div>
               <StatusLine status={status} onTryNow={() => void bridge?.retry?.(entry.id)} onPairAgain={() => pairAgain(entry)} onEdit={() => editAddress(entry)} />
             </div>
-            {active ? <span className="flex shrink-0 items-center gap-1 text-[12px] text-ink-secondary"><Check size={13} />{t("servers.current")}</span> :
-              <button type="button" disabled={busy} aria-label={t("servers.switchTo", { name: entry.name })} onClick={() => onSwitch(entry.id)}
-                className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-50">{t("servers.switch")}</button>}
-            {byHand(entry) && status?.state !== "signedOut" && <button type="button" disabled={busy} onClick={() => pairAgain(entry)}
-              className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-50">{t("servers.pairAgain")}</button>}
-            {entry.id !== "local" && !entry.home && !entry.cloud && !share && sharingOffered && <button type="button" disabled={busy} aria-label={t("servers.computerAccessFor", { name: entry.name })} onClick={() => onComputerAccess(entry.id)} className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control">{t("servers.computerAccess")}</button>}
+            {active ? <span className="shrink-0 text-[13px] leading-5 text-ink-secondary">{t("servers.current")}</span> :
+              <button type="button" disabled={busy} aria-label={t("servers.switchTo", { name: entry.name })} onClick={() => onSwitch(entry.id)} className="ui-button shrink-0">{t("servers.switch")}</button>}
+            {byHand(entry) && status?.state !== "signedOut" && <button type="button" disabled={busy} onClick={() => pairAgain(entry)} className="settings-quiet shrink-0 cursor-pointer">{t("servers.pairAgain")}</button>}
+            {entry.id !== "local" && !entry.home && !entry.cloud && !share && sharingOffered && <button type="button" disabled={busy} aria-label={t("servers.computerAccessFor", { name: entry.name })} onClick={() => onComputerAccess(entry.id)} className="settings-quiet shrink-0 cursor-pointer">{t("servers.computerAccess")}</button>}
             {byHand(entry) && <CopyAddress origin={entry.origin!} name={entry.name} />}
-            {entry.id !== "local" && !entry.home && <button type="button" disabled={busy} aria-label={t("servers.removeName", { name: entry.name })} title={t("servers.removeName", { name: entry.name })}
-              onClick={() => onForget(entry.id)} className="rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"><Trash2 size={14} /></button>}
+            {entry.id !== "local" && !entry.home && <button type="button" disabled={busy} data-danger="" aria-label={t("servers.removeName", { name: entry.name })} title={t("servers.removeName", { name: entry.name })}
+              onClick={() => onForget(entry.id)} className="settings-quiet shrink-0 cursor-pointer">{t("remote.devices.removeShort")}</button>}
           </div>
-          {share && <ShareRow name={entry.name} share={share} busy={busy} onShare={(on) => onShare(entry.id, on)} onOpen={() => onComputerAccess(entry.id)} />}
-          {showUpdate && <UpdateNote name={entry.name} status={status!} appVersion={appVersion!} onHide={() => setHidden((list) => [...list, `${entry.id}:${status!.version}`])} />}
-        </li>;
+          {share && <div className="pl-11"><ShareRow name={entry.name} share={share} busy={busy} onShare={(on) => onShare(entry.id, on)} onOpen={() => onComputerAccess(entry.id)} /></div>}
+          {showUpdate && <div className="pl-11"><UpdateNote name={entry.name} status={status!} appVersion={appVersion!} onHide={() => setHidden((list) => [...list, `${entry.id}:${status!.version}`])} /></div>}
+        </div>;
       })}
-    </ul>
-    <button type="button" data-server-connect disabled={busy} onClick={() => setSheet({ address: "", locked: false, title: t("connect.title") })}
-      className="mt-3 flex w-fit items-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-ink disabled:opacity-50"><Plus size={14} />{t("connect.title")}</button>
+      <SettingsLinkRow title={t("connect.title")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} strokeWidth={1.75} aria-hidden="true" /></span>}
+        onClick={() => { if (!busy) setSheet({ address: "", locked: false, title: t("connect.title") }); }} data={{ "data-server-connect": "" }} />
+    </SettingsRows>
     {sheet && <RailSheet focusKey={sheet.locked ? "pair-again" : "connect"} onClose={() => setSheet(null)}>
       <OwnServerLink onBack={null} onConnected={() => setSheet(null)} start={sheet} />
     </RailSheet>}

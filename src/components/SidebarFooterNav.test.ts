@@ -262,6 +262,8 @@ describe("toolbar tools layout", () => {
     expect(html).toContain('data-tour="tools"');
     expect(html).toMatch(/data-tour="nav-automations" data-sidebar-nav="automations"/);
     expect(html).toMatch(/data-tour="team-tools" data-sidebar-nav="team-map"/);
+    expect(html).toContain('data-sidebar-nav="published-apps"');
+    expect(html.indexOf('data-sidebar-nav="published-apps"')).toBeGreaterThan(html.indexOf('data-sidebar-nav="team-map"'));
     const place = (id: string) => {
       const at = html.indexOf(`data-sidebar-nav="${id}"`);
       const next = html.indexOf("data-sidebar-nav=", at + 1);
@@ -279,9 +281,9 @@ describe("toolbar tools layout", () => {
     expect(render("comfortable", { toolsLayout: "toolbar" }).html).not.toContain('data-testid="routines-attention"');
   });
 
-  it("toolbar applies to Advanced mode's two places; Simple mode keeps them in the bottom bar instead", () => {
+  it("toolbar applies to Advanced mode's three places; Simple mode keeps them in the bottom bar instead", () => {
     fixture.advanced = true;
-    expect(render("comfortable", { toolsLayout: "toolbar" }).html.match(/data-sidebar-nav="/g)).toHaveLength(2);
+    expect(render("comfortable", { toolsLayout: "toolbar" }).html.match(/data-sidebar-nav="/g)).toHaveLength(3);
     fixture.advanced = false;
     expect(render("comfortable", { toolsLayout: "toolbar" }).html).toBe("");
   });

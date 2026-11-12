@@ -11,6 +11,7 @@ import {
   describeSpawnFailure,
   estimatedWindowsCommandLineChars,
   execCli,
+  execCliBoxed,
   killCliTree,
   spawnCli,
   WINDOWS_SAFE_COMMAND_LINE_CHARS,
@@ -75,6 +76,20 @@ describe("spawn ENOENT", () => {
     });
     expect(error.code).toBe("ENOENT");
     expect(describeSpawnFailure(error, process.execPath, missing).setup).toBe(false);
+  });
+});
+
+describe("execCliBoxed output", () => {
+  it("preserves UTF-8 characters across stdout and stderr pipe reads", async () => {
+    const output = "模型é😀".repeat(40_000);
+    const result = await new Promise<{ error: Error | null; stdout: string; stderr: string }>((resolve) => {
+      execCliBoxed(process.execPath, ["-e", "const text = '模型é😀'.repeat(40_000); process.stdout.write(text); process.stderr.write(text);"], {
+        env: process.env, timeout: hostTimeout(5_000), box: { allowEnv: [] },
+      }, (error, stdout, stderr) => resolve({ error, stdout, stderr }));
+    });
+    expect(result.error).toBeNull();
+    expect(result.stdout).toBe(output);
+    expect(result.stderr).toBe(output);
   });
 });
 

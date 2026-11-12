@@ -116,6 +116,8 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   propose_profile: "activity.tool.team.proposeProfile",
   propose_team_memory: "activity.tool.team.proposeTeamMemory",
   propose_team_setup: "activity.tool.team.proposeTeamSetup",
+  check_app_hosting: "activity.tool.team.checkAppHosting",
+  publish_app: "activity.tool.team.publishApp",
   publish_page: "activity.tool.team.publishPage",
   raise_escalation: "activity.tool.team.raiseEscalation",
   report_bug: "activity.tool.team.reportBug",

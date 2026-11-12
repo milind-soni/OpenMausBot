@@ -38,7 +38,7 @@ import { movesThreadToTop, nextOpenThread } from "../shared/wire.ts";
 import { parseConnectorTools } from "./connector-tools.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal, type DefaultBotIntro } from "./default-bot.ts";
-import { appsFromCreator } from "./inherited-apps.ts";
+import { appsFromCreator } from "./inherited-apps.ts"; import { newBotOwner, sharedAsMaker, sharedUnlessRestricted, type NewBotSharingRule } from "./new-bot-sharing.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
 import { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 import { buildTask, threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
@@ -281,6 +281,8 @@ export class Store {
   private driverKindOf: (instanceId: string) => string | undefined;
   private initialLanguage: string | (() => string);
   private personName: () => string | undefined;
+  /** How a new bot is shared; a Team Cloud sets its own rule. */
+  newBotSharing: NewBotSharingRule = sharedUnlessRestricted;
   private listeners = new Set<(change: StoreChange) => void>();
   private registeringInitialSections = true;
   private readonly botsFile = new OwnedFile(BOTS_FILE, { mode: 0o600 }); private readonly groupsFile = new OwnedFile(GROUPS_FILE, { mode: 0o600 });
@@ -1325,8 +1327,7 @@ export class Store {
       color: profile.color ?? rotationColor(this.bots.length), mascotFaceColor: profile.mascotFaceColor ?? undefined,
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
       ...(profile.mascotBody ? { mascotBody: profile.mascotBody } : {}),
-      // Restricted from its first frame: no one else is ever told it exists.
-      ...(profile.visibility && profile.visibility !== "everyone" ? { visibility: structuredClone(profile.visibility) } : {}),
+      ...this.newBotSharing(profile.visibility, newBotOwner(profile)),
       ...(toolScope.scope ? { toolScope: toolScope.scope } : {}),
       unread: false,
       modelSelection: this.newBotSelection(profile.modelSelection),
@@ -1383,8 +1384,7 @@ export class Store {
           title: "", description: "", soul: "", notifications: true, color: rotationColor(nextBots.length), unread: false,
           resumeCursors: {}, createdAt, ...operation.fields, modelSelection,
           autoApprove: false,
-          // A restricted Chief never creates a bot everyone sees.
-          ...(chief.visibility && chief.visibility !== "everyone" ? { visibility: structuredClone(chief.visibility) } : {}),
+          ...sharedAsMaker(chief),
           // A Chief's new specialist reports to the Chief's own person.
           ...(botOwner(chief) ? { createdBy: botOwner(chief)! } : {}),
           tasks: [{ threadId: operation.threadId, title: UNTITLED_THREAD, createdAt, updatedAt: createdAt, resumeCursors: {},
@@ -2284,6 +2284,6 @@ export class Store {
   /** A new place's first bot is its MausBot and its Chief; a Team Cloud's (`defaultBot: false`) is the team's Chief only. */
   seedIfEmpty({ defaultBot = true, intro }: { defaultBot?: boolean; intro?: DefaultBotIntro } = {}) {
     if (!this.needsSeed()) return;
-    if (defaultBot) createDefaultBot(this, { chief: (id) => this.setChiefOfStaff(id), ...(intro ? { intro } : {}) }); else this.setChiefOfStaff(this.createBot().id);
+    if (defaultBot) createDefaultBot(this, { chief: (id) => this.setChiefOfStaff(id), ...(intro ? { intro } : {}) }); else this.setChiefOfStaff(this.createBot({ visibility: "everyone" }).id);
   }
 }
