@@ -99,6 +99,39 @@ describe("phone MCP text input", () => {
     expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"]]);
   });
 
+  const CLEAR = ["am", "broadcast", "-a", "ADB_CLEAR_TEXT", "-p", "com.android.adbkeyboard"];
+
+  it.each([["二手 iPad", "5LqM5omLIGlQYWQ="], ["iPad mini_6", "aVBhZCBtaW5pXzY="]])("clears the field through ADBKeyBoard, then sends the text the same way (%s)", async (text, base64) => {
+    const phone = device(ADB_KEYBOARD);
+    await expect(typePhoneText(phone.shell, text, true)).resolves.toBe("Asked ADBKeyBoard to clear the field and sent the text. Use read_screen to check that the field holds only this text.");
+    expect(phone.commands).toEqual([
+      ["settings", "get", "secure", "default_input_method"],
+      CLEAR,
+      ["am", "broadcast", "-a", "ADB_INPUT_B64", "-p", "com.android.adbkeyboard", "--es", "msg", base64],
+    ]);
+  });
+
+  it.each(["二手 iPad", "iPad"])("asks for ADBKeyBoard and changes nothing when another keyboard cannot clear (%s)", async (text) => {
+    const phone = device(VENDOR_KEYBOARD);
+    await expect(typePhoneText(phone.shell, text, true)).rejects.toThrow("A field can be cleared only when ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard");
+    expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"]]);
+  });
+
+  it("sends no text after a clear that failed", async () => {
+    const commands: string[][] = [];
+    const shell = async (...command: string[]) => {
+      commands.push(command);
+      if (command[0] === "settings") return `${ADB_KEYBOARD}\n`;
+      throw new Error("error: closed");
+    };
+    await expect(typePhoneText(shell, "二手", true)).rejects.toThrow("error: closed");
+    expect(commands).toEqual([["settings", "get", "secure", "default_input_method"], CLEAR]);
+  });
+
+  it("offers clear as a plain boolean beside the text", () => {
+    expect(TOOLS.find((tool) => tool.name === "type_text")?.inputSchema.properties).toMatchObject({ clear: { type: "boolean" } });
+  });
+
   it.each(["", "a".repeat(257), "😀".repeat(257)])("refuses empty or over-long text without touching the phone", async (text) => {
     const phone = device(ADB_KEYBOARD);
     await expect(typePhoneText(phone.shell, text)).rejects.toThrow("Android text must be 1 to 256 characters");
