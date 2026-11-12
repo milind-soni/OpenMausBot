@@ -3,9 +3,11 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 
 export const VPS_SSH_DIR = "ssh";
+/** The person's optional wake script in the data folder's ssh directory, e.g. to resume a host that pauses when idle. */
+export const VPS_WAKE_SCRIPT = "wake";
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
@@ -91,18 +93,34 @@ export function prepareVpsSsh(dataDir: string, pathValue: string, platform: Node
 }
 
 const MASTER_INITIALIZATION_TIMEOUT_MS = 30_000;
+// Long enough to resume a paused cloud box; the script should return once the host takes SSH again.
+const WAKE_TIMEOUT_MS = 120_000;
 const pendingMasters = new Map<string, Promise<void>>();
+
+/** The wake script, when the person has put an executable one there. */
+function vpsWakeScript(ssh: VpsSshSetup): string | null {
+  if (!ssh.configPath) return null;
+  const path = join(dirname(ssh.configPath), VPS_WAKE_SCRIPT);
+  try {
+    const stat = statSync(path);
+    return stat.isFile() && (stat.mode & 0o111) !== 0 ? path : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function ensureVpsSshMaster(ssh: VpsSshSetup, alias: string, timeoutMs = MASTER_INITIALIZATION_TIMEOUT_MS): Promise<void> {
   if (!ssh.configPath) return;
   const key = `${ssh.configPath}:${alias}`;
+  const wake = vpsWakeScript(ssh);
+  const wakeBudget = wake ? WAKE_TIMEOUT_MS : 0;
   let pending = pendingMasters.get(key);
   if (!pending) {
-    const deadline = Date.now() + MASTER_INITIALIZATION_TIMEOUT_MS;
-    const command = (args: string[]) => new Promise<void>((resolve, reject) => {
+    const deadline = Date.now() + MASTER_INITIALIZATION_TIMEOUT_MS + wakeBudget;
+    const command = (args: string[], file = "ssh") => new Promise<void>((resolve, reject) => {
       const remaining = deadline - Date.now();
       if (remaining <= 0) { reject(new Error("VPS SSH initialization timed out")); return; }
-      const child = execFile("ssh", args, {
+      const child = execFile(file, args, {
         env: { ...process.env, PATH: ssh.path },
         timeout: remaining,
         killSignal: "SIGKILL",
@@ -120,7 +138,17 @@ export async function ensureVpsSshMaster(ssh: VpsSshSetup, alias: string, timeou
       catch (error) {
         if ((error as { killed?: boolean }).killed) throw error;
         // ControlMaster auto only shares after authentication. A harmless first command starts the persistent master without replaying Docker work.
-        await command(["-o", "BatchMode=yes", "-o", "PermitLocalCommand=no", "-T", "--", alias, "true"]);
+        const connect = () => command(["-o", "BatchMode=yes", "-o", "PermitLocalCommand=no", "-T", "--", alias, "true"]);
+        try { await connect(); }
+        catch (unreachable) {
+          if (!wake || (unreachable as { killed?: boolean }).killed) throw unreachable;
+          // A host that pauses when idle refuses SSH until resumed: wake it once, then try once more.
+          try { await command([alias], wake); }
+          catch (failure) {
+            throw new Error(`${(unreachable as Error).message}; the wake script failed: ${(failure as Error).message}`);
+          }
+          await connect();
+        }
       }
     })().finally(() => {
       if (pendingMasters.get(key) === pending) pendingMasters.delete(key);
@@ -130,7 +158,7 @@ export async function ensureVpsSshMaster(ssh: VpsSshSetup, alias: string, timeou
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([pending, new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => reject(new Error("VPS SSH initialization timed out")), timeoutMs);
+      timer = setTimeout(() => reject(new Error("VPS SSH initialization timed out")), timeoutMs + wakeBudget);
       timer.unref();
     })]);
   } finally { clearTimeout(timer); }
