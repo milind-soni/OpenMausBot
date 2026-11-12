@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { isLoopbackHostname, rejectUntrustedRequest } from "./server/request-guard";
+import { isLoopbackHostname, isPreviewAssetRead, rejectUntrustedRequest } from "./server/request-guard";
 
 // Loopback by default; `pnpm dev:network` (vite --host 0.0.0.0) or VITE_HOST
 // opts into LAN access for testing on other devices.
@@ -45,7 +45,7 @@ export default defineConfig({
         target: `http://127.0.0.1:${process.env.GBS_PORT || 8899}`,
         changeOrigin: true,
         bypass(req, res) {
-          const refused = rejectUntrustedRequest(req.headers, { allowAnyHost: lanDev });
+          const refused = rejectUntrustedRequest(isPreviewAssetRead(req.method, req.url) ? { host: req.headers.host } : req.headers, { allowAnyHost: lanDev });
           if (!refused) return undefined;
           res!.statusCode = 403;
           res!.setHeader("content-type", "application/json");

@@ -666,6 +666,9 @@ describe("harness HTTP API", () => {
     mkdirSync(join(projectDir, "docs"), { recursive: true });
     writeFileSync(join(projectDir, "index.html"), "<!doctype html><h1>Hello Preview</h1>");
     writeFileSync(join(projectDir, "docs", "guide.md"), "# Guide\nPlain words.");
+    for (const [name, content] of Object.entries({ "style.css": "body { color: red }", "app.js": "console.log('preview')", "module.mjs": "export const value = 1", "font.woff2": "font-data", "photo.png": "image-data", "report.pdf": "%PDF-1.4" })) {
+      writeFileSync(join(projectDir, name), content);
+    }
     writeFileSync(join(projectDir, "logo.svg"), '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
     writeFileSync(join(projectDir, "secret.env"), "API_KEY=top-secret");
     writeFileSync(join(outsideDir, "outside.html"), "<h1>Outside</h1>");
@@ -696,7 +699,36 @@ describe("harness HTTP API", () => {
       );
       expect(htmlRes.status).toBe(200);
       expect(htmlRes.headers.get("content-type")).toContain("text/html");
-      expect(await htmlRes.text()).toContain("Hello Preview");
+      const htmlBody = await htmlRes.text();
+      expect(htmlBody).toContain("Hello Preview");
+      const assetBase = htmlBody.match(/<base href="([^"]+)">/)![1];
+      const opaqueHeaders = { origin: "null", "sec-fetch-site": "cross-site" };
+      for (const [name, mime] of [["style.css", "text/css"], ["app.js", "text/javascript"], ["module.mjs", "text/javascript"], ["font.woff2", "font/woff2"], ["photo.png", "image/png"]]) {
+        const asset = await fetch(`${BASE}${assetBase}${name}`, { headers: opaqueHeaders });
+        expect(asset.status).toBe(200);
+        expect(asset.headers.get("content-type")).toContain(mime);
+        expect(asset.headers.get("x-content-type-options")).toBe("nosniff");
+        expect(asset.headers.get("access-control-allow-origin")).toBe("*");
+        expect((await asset.arrayBuffer()).byteLength).toBeGreaterThan(0);
+      }
+      expect(listedPaths).not.toContain("style.css");
+      const assetSvg = await fetch(`${BASE}${assetBase}logo.svg`, { headers: opaqueHeaders });
+      expect(assetSvg.headers.get("content-security-policy")).toContain("sandbox");
+      expect(assetSvg.headers.get("content-security-policy")).not.toContain("allow-same-origin");
+      const pdf = await fetch(`${BASE}/api/preview/file/${projectId}/report.pdf`);
+      expect(pdf.headers.get("content-type")).toBe("application/pdf");
+      expect(pdf.headers.get("content-security-policy")).not.toContain("sandbox");
+      for (const target of ["secret.env", "%2e%2e%2foutside.html", "escape.html", "escape-dir/outside.html"]) {
+        if (process.platform === "win32" && target.startsWith("escape")) continue;
+        const denied = await fetch(`${BASE}${assetBase}${target}`, { headers: opaqueHeaders });
+        expect([403, 415]).toContain(denied.status);
+      }
+      expect((await fetch(`${BASE}${assetBase.replace(/asset\/[a-f0-9]{64}/, `asset/${"0".repeat(64)}`)}style.css`, { headers: opaqueHeaders })).status).toBe(403);
+      expect((await fetch(`${BASE}${assetBase}style.css`, { method: "POST", headers: opaqueHeaders })).status).toBe(403);
+      for (const target of ["/api/bots", "/api/preview/files", `/api/preview/file/${projectId}/style.css`]) {
+        expect((await fetch(`${BASE}${target}`, { headers: opaqueHeaders })).status).toBe(403);
+      }
+      expect((await fetch(`${BASE}/api/bots/probe/messages`, { method: "POST", headers: { ...opaqueHeaders, "content-type": "application/json" }, body: JSON.stringify({ text: "must never send" }) })).status).toBe(403);
       // Script in a previewed page must not run with the app's origin: an opaque
       // (sandboxed) origin makes its API calls fail the same-origin guard.
       const htmlCsp = htmlRes.headers.get("content-security-policy") ?? "";

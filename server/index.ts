@@ -32,7 +32,7 @@ import {
   resolvePreviewFile,
   type RegisteredProjectLike,
 } from "./previewFiles.ts";
-import { isJsonContentType, isLoopbackHostname, rejectUntrustedRequest } from "./request-guard.ts";
+import { isJsonContentType, isLoopbackHostname, isPreviewAssetRead, rejectUntrustedRequest } from "./request-guard.ts";
 import {
   resolveTaskContext,
   TaskConflictError,
@@ -188,6 +188,9 @@ function previewFileCsp(mimeType: string): string {
     : `sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads; ${frame}`;
 }
 
+// In-memory project capabilities are issued only on trusted document reads.
+// Relative resources carry the capability in their base URL; API URLs do not.
+const previewCapabilities = new Map<string, string>();
 const previewWatchManager = new PreviewWatchManager((payload) => broadcast(payload));
 
 async function allRegisteredProjects(): Promise<RegisteredProjectLike[]> {
@@ -1064,7 +1067,10 @@ const server = createServer(async (req, res) => {
   const method = req.method ?? "GET";
   try {
     if (path.startsWith("/api/")) {
-      const refused = rejectUntrustedRequest(req.headers, { allowAnyHost: !isLoopbackHostname(HOST) });
+      const refused = rejectUntrustedRequest(
+        isPreviewAssetRead(method, req.url) ? { host: req.headers.host } : req.headers,
+        { allowAnyHost: !isLoopbackHostname(HOST) },
+      );
       if (refused) return json(res, 403, { error: refused });
     }
     // ── internal peer-agent comms (localhost + shared token only) ──────
@@ -1683,7 +1689,11 @@ const server = createServer(async (req, res) => {
         files,
       });
     }
-    if (method === "GET" && (path === "/api/preview/file" || path.startsWith("/api/preview/file/"))) {
+    if (method === "GET" && (path === "/api/preview/file" || path.startsWith("/api/preview/file/") || path.startsWith("/api/preview/asset/"))) {
+      const assetMatch = path.match(/^\/api\/preview\/asset\/([a-f0-9]{64})\/([^/]+)\/(.+)$/);
+      if (path.startsWith("/api/preview/asset/") && (!assetMatch || previewCapabilities.get(decodeURIComponent(assetMatch[2])) !== assetMatch[1])) {
+        return json(res, 403, { error: "Invalid preview access" });
+      }
       let projectId = url.searchParams.get("projectId") ?? "";
       let relativePath = url.searchParams.get("path") ?? "";
       if (path.startsWith("/api/preview/file/")) {
@@ -1694,11 +1704,29 @@ const server = createServer(async (req, res) => {
           relativePath = decodeURIComponent(rest.slice(slashIdx + 1));
         }
       }
+      if (assetMatch) {
+        projectId = decodeURIComponent(assetMatch[2]);
+        relativePath = decodeURIComponent(assetMatch[3]);
+      }
       const projects = await allRegisteredProjects();
       const resolved = resolvePreviewFile(projects, projectId, relativePath);
-      const data = readPreviewFileContent(resolved);
+      let data = readPreviewFileContent(resolved);
+      if (resolved.kind === "html") {
+        let capability = previewCapabilities.get(projectId);
+        if (!capability) {
+          capability = randomBytes(32).toString("hex");
+          previewCapabilities.set(projectId, capability);
+        }
+        const directory = resolved.relativePath.split("/").slice(0, -1).map(encodeURIComponent).join("/");
+        const base = `<base href="/api/preview/asset/${capability}/${encodeURIComponent(projectId)}/${directory ? directory + "/" : ""}">`;
+        const html = data.toString("utf8");
+        data = Buffer.from(/<head(?:\s[^>]*)?>/i.test(html)
+          ? html.replace(/<head(?:\s[^>]*)?>/i, (head) => head + base)
+          : base + html);
+      }
       res.writeHead(200, {
         "content-type": resolved.mimeType,
+        ...(assetMatch ? { "access-control-allow-origin": "*", "cross-origin-resource-policy": "cross-origin" } : {}),
         "cache-control": "no-store, max-age=0",
         "x-content-type-options": "nosniff",
         "referrer-policy": "no-referrer",

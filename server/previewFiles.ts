@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 
-export type PreviewFileKind = "html" | "pdf" | "markdown" | "image";
+export type PreviewFileKind = "html" | "pdf" | "markdown" | "image" | "resource";
 
 export interface PreviewFileDescriptor {
   path: string;
@@ -28,6 +28,15 @@ export interface RegisteredProjectLike {
 }
 
 const EXTENSION_MAP: Record<string, { kind: PreviewFileKind; mimeType: string }> = {
+  ".css": { kind: "resource", mimeType: "text/css; charset=utf-8" },
+  ".js": { kind: "resource", mimeType: "text/javascript; charset=utf-8" },
+  ".mjs": { kind: "resource", mimeType: "text/javascript; charset=utf-8" },
+  ".woff": { kind: "resource", mimeType: "font/woff" },
+  ".woff2": { kind: "resource", mimeType: "font/woff2" },
+  ".ttf": { kind: "resource", mimeType: "font/ttf" },
+  ".otf": { kind: "resource", mimeType: "font/otf" },
+  ".ico": { kind: "image", mimeType: "image/x-icon" },
+  ".avif": { kind: "image", mimeType: "image/avif" },
   ".html": { kind: "html", mimeType: "text/html; charset=utf-8" },
   ".htm": { kind: "html", mimeType: "text/html; charset=utf-8" },
   ".pdf": { kind: "pdf", mimeType: "application/pdf" },
@@ -278,7 +287,7 @@ export function listProjectPreviewFiles(
       } else if (stats.isFile()) {
         const typeInfo = classifyPreviewExtension(entry.name);
         const realTypeInfo = classifyPreviewExtension(realEntryPath);
-        if (!typeInfo || !realTypeInfo || stats.size > MAX_PREVIEW_FILE_BYTES) continue;
+        if (!typeInfo || !realTypeInfo || realTypeInfo.kind === "resource" || stats.size > MAX_PREVIEW_FILE_BYTES) continue;
         files.push({
           path: toPosixRelativePath(project.path, fullPath),
           name: basename(fullPath),
