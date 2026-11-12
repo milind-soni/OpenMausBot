@@ -626,11 +626,11 @@ describe("reset_cloud_computer", () => {
         api: async () => ({}),
         apiResponse: async (path, init) => {
           calls.push({ path, method: init?.method, body: JSON.parse(String(init?.body)) });
-          return ok ? { ok: true, status: 200, body: { text: "A card is now in this conversation." } } : { ok: false, status: 403, body: { error: "not yours" } };
+          return ok ? { ok: true, status: 200, body: { text: "Your cloud computer is being reset." } } : { ok: false, status: 403, body: { error: "not yours" } };
         },
       },
     });
-    expect(await callTool("reset_cloud_computer", { why: "Stuck starting." }, reply(true))).toEqual({ text: "A card is now in this conversation." });
+    expect(await callTool("reset_cloud_computer", { why: "Stuck starting." }, reply(true))).toEqual({ text: "Your cloud computer is being reset." });
     expect(await callTool("reset_cloud_computer", { why: "Stuck.", for_bot_id: " bot-b " }, reply(false))).toEqual({ text: "not yours", isError: true });
     expect(calls).toEqual([
       { path: "/api/internal/cloud-computer/reset", method: "POST", body: { why: "Stuck starting." } },

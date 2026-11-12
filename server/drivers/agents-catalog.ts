@@ -277,12 +277,12 @@ const TOOL_DEFINITIONS = [
   {
     name: "reset_cloud_computer",
     description:
-      "Ask the person to reset your cloud computer when it is stuck (starting for a long time, or not responding): a card asks them to Allow, and on Allow it is deleted, with everything saved on it, once you are not working; your next turn makes a fresh one. Use it only for a stuck computer, never to tidy up. After calling it, end your turn: you are not resumed, and the card shows how it went." + CHIEF_PROFILE_TARGET,
+      "Reset your cloud computer when it is stuck: it is deleted with everything on it once your turn ends, and your next turn makes a fresh one. Only for a stuck computer. End your turn after calling it." + CHIEF_PROFILE_TARGET,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        why: { type: "string", description: "One sentence for the card: what is wrong with the computer." },
+        why: { type: "string", description: "One sentence shown in the chat: what is wrong with the computer." },
         for_bot_id: { type: "string", description: "Chief of Staff only: the bot whose cloud computer to reset, from list_bots." },
       },
       required: ["why"],

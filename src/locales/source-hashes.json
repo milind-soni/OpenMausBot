@@ -2662,9 +2662,7 @@
       "server.mcp.card.cleared": "d161202e56397fcf8c80df6a1b6020801a3d1a2e8eda2e8e593e96c88230b43f",
       "server.mcp.card.usedBy": "cd9bc7ed73f73d4299ac83758c2c11c9c94d7a3bb263d9cf19f11303a89fe809",
       "server.mcp.card.usedByNone": "e92c1c2ed4fcbb0ce6cbae06883d6a9a65bbc78eef599ee8419da6be826f502c",
-      "server.cloudReset.title": "14ae704c302b4d1f0cf94b614c6a7b6c892357dd877aa182e2474934f92b8252",
-      "server.cloudReset.what": "2f901af1e4d8be98a234e5392bf9384ed53d65d24a27015d87178c5e5be23b26",
-      "server.cloudReset.resetting": "597df4ff607d90ba995ba3a6406f224813211de4805d085989273e04dd533538",
+      "server.cloudReset.resetting": "d5fe13cf48183df5189b02ae39d5c6e0284f869dd0bf87e965462dded78251af",
       "server.cloudReset.waiting": "9c9d4b3784d64dd5ae8106c9587561ad928a7fc1d2c46830a2b80db5a95d4611",
       "server.cloudReset.done": "27e4089cf08c6d6097f59d79515c7da826cf3e1cff34e03d76cb8f0cbfa161fd",
       "server.cloudReset.pending": "cae5248026f571c7a73a8b7319a8ae7b276ebd6b2ed3615572086f0e9b2ca36d",
@@ -3956,8 +3954,7 @@
       "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
       "computer.reset.button": "196d09c7f7dc0290cc84c7a01347ae3f9a50067925490e7a0b9e262fa2add7f7",
       "computer.reset.confirm": "49ee8910d29a1da38e3b3dd2518685d77c45bd5fbb248f44566c2d7b721765f9",
-      "computer.reset.pending": "cae5248026f571c7a73a8b7319a8ae7b276ebd6b2ed3615572086f0e9b2ca36d",
-      "approval.tool.resetCloudComputer": "c977d1d3b7504d9176231a7d8a521f553f5347292f3ccaa13857d1b1d5214f7f"
+      "computer.reset.pending": "cae5248026f571c7a73a8b7319a8ae7b276ebd6b2ed3615572086f0e9b2ca36d"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -36528,10 +36525,7 @@
       "settings.logins.onePassword.useVaultChoice": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
       "botPanel.advanced.title": "d823803689ad1713989d7cd80dde661392f93c2a6a5690e748ab88ed10c98237",
       "botPanel.advanced.hint": "434ef07a7c8eafd2789a2fc936f8d050b62d7658d6777b0494db07e3c7d6294f",
-      "approval.tool.resetCloudComputer": "c977d1d3b7504d9176231a7d8a521f553f5347292f3ccaa13857d1b1d5214f7f",
-      "server.cloudReset.title": "14ae704c302b4d1f0cf94b614c6a7b6c892357dd877aa182e2474934f92b8252",
-      "server.cloudReset.what": "2f901af1e4d8be98a234e5392bf9384ed53d65d24a27015d87178c5e5be23b26",
-      "server.cloudReset.resetting": "597df4ff607d90ba995ba3a6406f224813211de4805d085989273e04dd533538",
+      "server.cloudReset.resetting": "d5fe13cf48183df5189b02ae39d5c6e0284f869dd0bf87e965462dded78251af",
       "server.cloudReset.waiting": "9c9d4b3784d64dd5ae8106c9587561ad928a7fc1d2c46830a2b80db5a95d4611",
       "server.cloudReset.done": "27e4089cf08c6d6097f59d79515c7da826cf3e1cff34e03d76cb8f0cbfa161fd",
       "server.cloudReset.pending": "cae5248026f571c7a73a8b7319a8ae7b276ebd6b2ed3615572086f0e9b2ca36d",
