@@ -85,7 +85,8 @@ export function createSharedComputerRoutes(deps: {
     if (action === "poll") {
       const power = deps.power();
       if (power?.sleeping()) return answerAsleep(res, json);
-      const job = await deps.computers.poll(id, auth.session.id, secret, power ? AbortSignal.any([responseGone(res), power.sleepSignal()]) : responseGone(res));
+      const job = await deps.computers.poll(id, auth.session.id, secret, power ? AbortSignal.any([responseGone(res), power.sleepSignal()]) : responseGone(res),
+        deps.cloudHomeLender ?? deps.personKey(auth.session));
       if (!job && power?.sleeping()) return answerAsleep(res, json);
       return json(res, 200, { job });
     }

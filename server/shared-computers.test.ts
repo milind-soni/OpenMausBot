@@ -21,6 +21,23 @@ const nothingQueued = async (broker: SharedComputers, id: string) => {
   return poll;
 };
 describe("shared computer authority and lifecycle", () => {
+  it("a computer whose person changed is found under its new key after it connects again", () => {
+    const broker = new SharedComputers(id => id === "owner");
+    const computer = registration(); broker.register(computer, alice, secret);
+    broker.register(computer, { session: alice.session, person: "p_lender" }, secret);
+    expect(broker.list(alice.person)).toEqual([]);
+    expect(broker.list("p_lender").map(entry => entry.id)).toEqual([computer.id]);
+    broker.close();
+  });
+  it("a poll from a session that is now someone else drops the computer so it connects again", async () => {
+    const broker = new SharedComputers(id => id === "owner");
+    const computer = registration(); broker.register(computer, alice, secret);
+    await expect(broker.poll(computer.id, alice.session, secret, undefined, "p_lender")).rejects.toMatchObject({ status: 403 });
+    expect(broker.list(alice.person)).toEqual([]);
+    broker.register(computer, { session: alice.session, person: "p_lender" }, secret);
+    expect(broker.list("p_lender").map(entry => entry.id)).toEqual([computer.id]);
+    broker.close();
+  });
   it("requires both the owning paired session and the connector secret", async () => {
     const broker = new SharedComputers(id => id === "owner");
     const computer = registration(); broker.register(computer, alice, secret);

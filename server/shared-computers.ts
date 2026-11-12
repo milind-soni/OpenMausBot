@@ -171,7 +171,9 @@ export class SharedComputers {
     if (!/^[a-f0-9]{64}$/.test(secret)) throw failure("Invalid computer credential", 400);
     const key = SharedComputers.key(owner.session, registration.id);
     const old = this.computers.get(key);
-    if (old) {
+    // Same session, same person: refresh it. Its person changed (a server that became, or stopped being, one person's own):
+    // it is replaced below, so it is found under the key its session has now.
+    if (old && old.owner.person === owner.person) {
       this.authorize(registration.id, owner.session, secret);
       // Its link was let in for the internet connection and Chrome as lent then: lent or taken back since, the link starts over.
       if ((old.registration.internet === true) !== (registration.internet === true) || (old.registration.chrome === true) !== (registration.chrome === true)) this.links?.drop(key);
@@ -311,8 +313,14 @@ export class SharedComputers {
     }));
   }
   /** The newest poll wins: one whose client dropped never takes the next job, and the reconnecting desktop is not refused. */
-  async poll(id: string, session: string, secret: string, gone?: AbortSignal) {
+  /** `person`: who the polling session is now; when it is no longer who registered, the computer is dropped (403) so the
+   * desktop connects again under its current key. */
+  async poll(id: string, session: string, secret: string, gone?: AbortSignal, person?: string) {
     const entry = this.authorize(id, session, secret);
+    if (person !== undefined && person !== entry.owner.person) {
+      this.disconnect(id, session, secret);
+      throw failure("This computer's access changed. Connect it again.", 403);
+    }
     const mine = ++entry.polls;
     entry.wake?.();
     entry.seen = Date.now();
