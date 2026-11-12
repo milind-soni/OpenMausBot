@@ -182,6 +182,8 @@ export class SharedComputers {
       this.changed();
       return;
     }
+    // Its person changed: the former person's record of it is no longer lent, not merely away.
+    if (old) this.lent?.stopped(old.owner.person, registration.id);
     this.reap();
     // A new id from the same session replaces its entry; no other session can reach, replace or squat this key.
     for (const [stale, entry] of this.computers) {

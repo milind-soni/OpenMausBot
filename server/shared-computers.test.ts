@@ -29,6 +29,17 @@ describe("shared computer authority and lifecycle", () => {
     expect(broker.list("p_lender").map(entry => entry.id)).toEqual([computer.id]);
     broker.close();
   });
+  it("a computer whose person changed is no longer lent to its former person", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-lent-rekey-"));
+    const lent = new LentComputers(join(dir, "lent.json"));
+    const broker = new SharedComputers(id => id === "owner", lent);
+    const computer = registration(); broker.register(computer, alice, secret);
+    broker.register(computer, { session: alice.session, person: "p_lender" }, secret);
+    expect(lent.list(alice.person).map(record => [record.id, record.stoppedAt !== null])).toEqual([[computer.id, true]]);
+    expect(lent.list("p_lender").map(record => [record.id, record.stoppedAt])).toEqual([[computer.id, null]]);
+    broker.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
   it("a poll from a session that is now someone else drops the computer so it connects again", async () => {
     const broker = new SharedComputers(id => id === "owner");
     const computer = registration(); broker.register(computer, alice, secret);
