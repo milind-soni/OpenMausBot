@@ -23,7 +23,8 @@ export type SignInFamily = "claude" | "openai";
 
 export function signInFamily(instance: { driverKind: string; access?: InstanceInfo["access"] } | undefined): SignInFamily | undefined {
   if (!instance || instance.access === "api") return undefined;
-  if (instance.driverKind === "claudeAgent") return "claude";
+  // A custom Anthropic-compatible endpoint or Bedrock is its own provider, not another Claude sign-in.
+  if (instance.driverKind === "claudeAgent") return instance.access === "custom" ? undefined : "claude";
   if (instance.driverKind === "codex") return "openai";
   return undefined;
 }
