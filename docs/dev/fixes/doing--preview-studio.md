@@ -29,13 +29,13 @@ Implements `docs/dev/plans/implementation--preview-studio.md`. Design work start
 ## 2. Foundation
 
 - [?] **Size catalog** — `src/lib/mobileDevicePresets.ts:12` becomes `src/lib/previewSizes.ts`. Groups: phone, tablet, laptop, desktop. Supports rotate and custom sizes.
-- [~] **PreviewFrame** — Uses `<webview>` in the desktop app and a sandboxed `<iframe>` in the browser. Shared load, error, and screenshot handling.
+- [?] **PreviewFrame** — Uses `<webview>` in the desktop app and a sandboxed `<iframe>` in the browser. Shared load, error, and screenshot handling.
 - [?] **File previews** — Show HTML, PDF, images, and Markdown from registered projects through a read-only, project-scoped harness route.
 - [?] **Auto-refresh on file change** — The harness watches the previewed file and pushes a reload event over SSE.
 
 ## 3. Quick preview panel
 
-- [~] **Rebuild on PreviewFrame** — `src/components/MobilePreviewPanel.tsx`. Adds all sizes, rotate, zoom, back/forward/reload, "Open in Preview page", and browser-session support.
+- [?] **Rebuild on PreviewFrame** — `src/components/MobilePreviewPanel.tsx`. Adds all sizes, rotate, zoom, back/forward/reload, "Open in Preview page", and browser-session support.
 
 ## 4. Preview page
 

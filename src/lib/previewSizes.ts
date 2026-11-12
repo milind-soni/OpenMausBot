@@ -2,6 +2,13 @@ export type PreviewSizeGroup = "phone" | "tablet" | "laptop" | "desktop" | "cust
 
 export type PreviewZoomMode = "fit" | "50" | "75" | "100";
 
+export const PREVIEW_ZOOM_OPTIONS: Array<{ value: PreviewZoomMode; label: string }> = [
+  { value: "fit", label: "Fit" },
+  { value: "50", label: "50%" },
+  { value: "75", label: "75%" },
+  { value: "100", label: "100%" },
+];
+
 export interface PreviewSizePreset {
   id: string;
   label: string;

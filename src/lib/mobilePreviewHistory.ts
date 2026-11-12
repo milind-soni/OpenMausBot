@@ -20,3 +20,9 @@ export function addMobilePreviewUrlToHistory(url: string): string[] {
   } catch {}
   return next;
 }
+
+export function clearMobilePreviewUrlHistory(): void {
+  try {
+    localStorage.removeItem(HISTORY_KEY);
+  } catch {}
+}
