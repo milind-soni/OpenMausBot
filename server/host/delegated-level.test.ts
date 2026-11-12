@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import type { BotRecord } from "../store.ts";
@@ -19,11 +19,12 @@ function world(levels: Record<string, ApprovalMode>, nodes: Record<string, Hop>,
     appendMessage: (_threadId: string, message: { tool?: { name: string } }) => { lines.push(message.tool!.name); },
   } as unknown as DelegatedLevelDeps["store"];
   const level = (botId: string, threadId: string) => levels[`${botId}:${threadId}`] ?? levels[botId] ?? "ask";
+  const sourceLevel = vi.fn(level);
   const delegated = createDelegatedLevel({
-    store, node: id => nodes[id], sourceLevel: level, turnLevel: (bot, _peer, threadId) => level(bot.id, threadId),
+    store, node: id => nodes[id], sourceLevel, turnLevel: (bot, _peer, threadId) => level(bot.id, threadId),
     driverKind: () => "claudeAgent", guestDriven: threadId => guest.has(threadId), handsNoLevel: threadId => outside.has(threadId),
   });
-  return { ...delegated, patched, lines, bot: (id: string) => bots[id] as BotRecord };
+  return { ...delegated, patched, lines, sourceLevel, bot: (id: string) => bots[id] as BotRecord };
 }
 
 const chain: Record<string, Hop> = {
@@ -35,6 +36,32 @@ const chain: Record<string, Hop> = {
 };
 
 describe("a Chief's level, every hop down", () => {
+  it("allows a live source reader to resolve a notice returning to the Chief's conversation", () => {
+    const w = world({ "clive:clive-chat": "ask" }, chain);
+    const own = () => w.roomTurn(w.bot("clive"), "clive-chat", chain["to-ada"]);
+    w.sourceLevel.mockImplementation(own);
+    expect(own()).toBe("ask");
+    expect(w.sourceLevel).not.toHaveBeenCalled();
+  });
+
+  it.each(["root", "to-ada"])("keeps the Chief's own level without reading a self-inherited grant from %s", sourceId => {
+    const w = world({ "clive:clive-chat": "auto", "clive:room": "edits" }, chain);
+    const source = chain[sourceId]!;
+    w.apply(w.bot(source.botId), source.threadId, sourceId, w.bot("clive"), "clive-chat");
+    expect(w.roomTurn(w.bot("clive"), "room", source)).toBe("edits");
+    expect(w.levelOf({ botId: "clive", threadId: "clive-chat" }, source)).toEqual({ level: "auto", driverKind: "claudeAgent" });
+    expect(w.sourceLevel).not.toHaveBeenCalled();
+    expect(w.patched).toEqual([]);
+    expect(w.lines).toEqual([]);
+  });
+
+  it("does not read a grant when the immediate sender is the recipient below a Chief", () => {
+    const w = world({ "clive:clive-chat": "full", "ada:ada-work": "ask" }, chain);
+    w.apply(w.bot("ada"), "ada-work", "to-ada", w.bot("ada"), "ada-other");
+    expect(w.sourceLevel).not.toHaveBeenCalled();
+    expect(w.patched).toEqual([]);
+  });
+
   it("switches the thread of a teammate's teammate to the Chief conversation's level, and an ordinary bot passes nothing", () => {
     const w = world({ "clive:clive-chat": "auto", ola: "full" }, chain);
     w.apply(w.bot("clive"), "clive-chat", "root", w.bot("ada"), "ada-work");
