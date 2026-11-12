@@ -328,6 +328,31 @@ describe("bounded scheduled overlap and run health", () => {
     expect(alerts).toEqual([undefined, null, undefined, undefined]);
   });
 
+  it("turns a routine off after three runs in a row on a cloud computer that didn't start, and counts afresh once turned on", async () => {
+    const h = harness(start);
+    const alerts: unknown[] = [];
+    h.options.onRunFailed = (_run, alert) => alerts.push(alert);
+    const routine = h.manager.create({ ...input(), schedule: { type: "interval", everyMinutes: 60, anchorAt: start + 3_600_000 } });
+    const noStart = "Maus's cloud desktop didn't start. Change where this routine runs.";
+    let thread = 0;
+    const attempt = async (error: string) => {
+      h.manager.runNow(routine.id); await h.manager.tick();
+      h.manager.failThread(`thread-${++thread}`, error, { cause: "refused" });
+    };
+    await attempt(noStart);
+    await attempt("Cloud computers are busy right now. Try again in a few minutes.");
+    await attempt(noStart);
+    await attempt(noStart);
+    expect(h.manager.listRoutines()[0]).toMatchObject({ enabled: true });
+    await attempt(noStart);
+    expect(h.manager.listRoutines()[0]).toMatchObject({ enabled: false, nextRunAt: null });
+    expect(alerts.at(-1)).toEqual({ detail: expect.stringContaining("turned off after 3 runs in a row") });
+    h.manager.update(routine.id, { enabled: true });
+    await attempt(noStart);
+    expect(h.manager.listRoutines()[0]).toMatchObject({ enabled: true });
+    expect(alerts.at(-1)).toBeNull();
+  });
+
   it("counts restart recovery only once and sanitizes obsolete or invalid health metadata", async () => {
     const h = harness(start);
     const routine = h.manager.create({ ...input(), enabled: false });
