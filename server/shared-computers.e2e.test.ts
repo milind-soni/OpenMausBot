@@ -201,6 +201,110 @@ it("a second full-access paired device uses the canonical owner in a real agent 
   evidence.push("real second full-access paired-device turn lists and reads the owner's read-only computer; revoking that exact session blocks a subsequent tool action in the still-running turn");
 }, 60_000);
 
+it("setup-request turns retain the submitting session through active use and revocation", async () => {
+  const desktopWindow = await api("POST", "/api/auth/pairing", { label: "Setup owner desktop", scopes: ["admin", "client"] });
+  expect(desktopWindow.status).toBe(200);
+  const desktop = (await api("POST", "/api/auth/pair", { code: desktopWindow.body.code })).body;
+  lendingToken = desktop.token;
+  await connector.save(env, { folders: [folder], terminal: false, computer: true }, await connector.identity(env));
+  await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);
+
+  const openSession = async (label: string, scopes: string[]) => {
+    const opened = await api("POST", "/api/auth/pairing", { label, scopes }, { authorization: `Bearer ${desktop.token}` });
+    expect(opened.status).toBe(200);
+    return (await api("POST", "/api/auth/pair", { code: opened.body.code, label })).body;
+  };
+  const first = await openSession("Setup requester one", ["admin", "client"]);
+  const second = await openSession("Setup requester two", ["admin", "client"]);
+  const restricted = await openSession("Restricted setup requester", ["client"]);
+  const invalidBot = (await api("POST", "/api/bots", { name: "Invalid setup provenance" }, { authorization: `Bearer ${desktop.token}` })).body.bot;
+  const invalid = await api("POST", `/api/bots/${invalidBot.id}/setup-request`, { threadId: invalidBot.threadId, text: "must not dispatch" }, { authorization: "Bearer omb_sess_invalid" });
+  expect(invalid.status).toBe(401);
+  const setupTurn = async (label: string, session: any) => {
+    const setupBot = (await api("POST", "/api/bots", { name: label }, { authorization: `Bearer ${desktop.token}` })).body.bot;
+    const child = await proxyForTurn(async () => {
+      const sent = await api("POST", `/api/bots/${setupBot.id}/setup-request`, { threadId: setupBot.threadId, text: `set up ${label}` }, { authorization: `Bearer ${session.token}` });
+      expect(sent.status).toBe(200);
+    });
+    const client = mcpClient(child);
+    await client.initialize();
+    return { setupBot, child, call: client.call };
+  };
+
+  let firstTurn: Awaited<ReturnType<typeof setupTurn>> | undefined;
+  let secondTurn: Awaited<ReturnType<typeof setupTurn>> | undefined;
+  let restrictedTurn: Awaited<ReturnType<typeof setupTurn>> | undefined;
+  try {
+    firstTurn = await setupTurn("Setup request active revocation", first);
+    const initial = JSON.parse((await firstTurn.call("list_shared_computers")).content[0].text).computers;
+    expect(initial.some((computer: any) => computer.id === storedGrant().id)).toBe(true);
+
+    expect((await api("DELETE", `/api/auth/sessions/${first.session.id}`, undefined, { authorization: `Bearer ${desktop.token}` })).status).toBe(200);
+    const afterRevoke = await firstTurn.call("list_shared_computers");
+    expect(JSON.parse(afterRevoke.content[0].text).computers).toEqual([]);
+    const denied = await firstTurn.call("shared_computer", { computer_id: storedGrant().id, folder_id: folder.id, action: "read_file", path: "brief.txt" });
+    expect(denied.isError).toBe(true);
+    expect(JSON.stringify(denied)).not.toContain("A real local file");
+
+    secondTurn = await setupTurn("Setup request independent session", second);
+    const secondList = JSON.parse((await secondTurn.call("list_shared_computers")).content[0].text).computers;
+    expect(secondList.some((computer: any) => computer.id === storedGrant().id)).toBe(true);
+
+    restrictedTurn = await setupTurn("Setup request restricted session", restricted);
+    const restrictedList = JSON.parse((await restrictedTurn.call("list_shared_computers")).content[0].text).computers;
+    expect(restrictedList).toEqual([]);
+    const restrictedRead = await restrictedTurn.call("shared_computer", { computer_id: storedGrant().id, folder_id: folder.id, action: "read_file", path: "brief.txt" });
+    expect(restrictedRead.isError).toBe(true);
+    expect(JSON.stringify(restrictedRead)).not.toContain("A real local file");
+  } finally {
+    firstTurn?.child.kill(); secondTurn?.child.kill(); restrictedTurn?.child.kill();
+    for (const session of [first, second, restricted]) {
+      await api("DELETE", `/api/auth/sessions/${session.session.id}`, undefined, { authorization: `Bearer ${desktop.token}` });
+    }
+    lendingToken = pairing.token;
+    await connector.save(env, { folders: [folder], terminal: false, computer: false }, await connector.identity(env));
+    await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);
+  }
+  evidence.push("setup-request HTTP route starts real agent MCP turns; active session revocation empties inventory and denies read, a separate live full-access session remains authorized, and restricted setup sessions gain no owner access");
+}, 90_000);
+
+it("a setup-request queued turn is discarded when its original session is revoked", async () => {
+  const dump = join(fixture.info.dataDir, "fake-claude-dump.json");
+  expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: 1 } })).status).toBe(200);
+  const desktopWindow = await api("POST", "/api/auth/pairing", { label: "Setup queue owner", scopes: ["admin", "client"] });
+  expect(desktopWindow.status).toBe(200);
+  const desktop = (await api("POST", "/api/auth/pair", { code: desktopWindow.body.code })).body;
+  const phoneWindow = await api("POST", "/api/auth/pairing", { label: "Setup queue phone", scopes: ["admin", "client"] }, { authorization: `Bearer ${desktop.token}` });
+  expect(phoneWindow.status).toBe(200);
+  const phone = (await api("POST", "/api/auth/pair", { code: phoneWindow.body.code })).body;
+  const setupBot = (await api("POST", "/api/bots", { name: "Queued setup provenance" }, { authorization: `Bearer ${desktop.token}` })).body.bot;
+  const holder = (await api("POST", `/api/bots/${setupBot.id}/tasks`, { title: "Hold a separate thread" }, { authorization: `Bearer ${desktop.token}` })).body.task;
+  const active = await proxyForTurn(async () => {
+    expect((await api("POST", `/api/bots/${setupBot.id}/messages`, { text: "Hold another task until interrupted.", threadId: holder.threadId }, { authorization: `Bearer ${desktop.token}` })).status).toBe(202);
+  });
+  try {
+    rmSync(dump, { force: true });
+    const queued = await api("POST", `/api/bots/${setupBot.id}/setup-request`, { threadId: setupBot.threadId, text: "Set up a queued task" }, { authorization: `Bearer ${phone.token}` });
+    expect(queued.status, JSON.stringify(queued.body)).toBe(200);
+    expect((await api("DELETE", `/api/auth/sessions/${phone.session.id}`, undefined, { authorization: `Bearer ${desktop.token}` })).status).toBe(200);
+
+    const interrupted = await api("POST", `/api/bots/${setupBot.id}/interrupt`, { threadId: holder.threadId }, { authorization: `Bearer ${desktop.token}` });
+    expect(interrupted.status, JSON.stringify(interrupted.body)).toBe(200);
+    await vi.waitFor(async () => {
+      const current = (await api("GET", "/api/bots", undefined, { authorization: `Bearer ${desktop.token}` })).body.bots.find((candidate: any) => candidate.id === setupBot.id);
+      expect(current?.busy).toBe(false);
+    }, { timeout: 15_000 });
+    expect(existsSync(dump)).toBe(false);
+    const messages = (await api("GET", `/api/threads/${setupBot.threadId}/messages?limit=20`, undefined, { authorization: `Bearer ${desktop.token}` })).body.messages;
+    expect(messages.some((message: any) => message.role === "user" && message.text === "Set up a queued task")).toBe(false);
+  } finally {
+    active.kill();
+    await api("POST", `/api/bots/${setupBot.id}/interrupt`, { threadId: holder.threadId }, { authorization: `Bearer ${desktop.token}` });
+    await api("DELETE", `/api/bots/${setupBot.id}`, undefined, { authorization: `Bearer ${desktop.token}` });
+  }
+  evidence.push("a paired setup-request submitted while its agent turn is active is not dispatched after that exact submitting session is revoked");
+}, 60_000);
+
 it("a queued paired-device turn keeps its session: revocation cancels dispatch and an authorized queue can list the lent computer", async () => {
   const dump = join(fixture.info.dataDir, "fake-claude-dump.json");
   const desktopWindow = await api("POST", "/api/auth/pairing", { label: "Queue owner desktop", scopes: ["admin", "client"] });
