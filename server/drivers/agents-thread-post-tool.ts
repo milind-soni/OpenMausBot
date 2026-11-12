@@ -19,7 +19,7 @@ export async function callThreadPostTool(args: Json, context: ToolCallContext): 
   return {
     text: r.duplicate === true
       ? `Already posted in ${where} with delivery_id ${String(r.deliveryId)}; not posted again.`
-      : `Posted in ${where} (delivery_id ${String(r.deliveryId)}). ${r.woke === true ? "A run started there; nothing comes back to you." : "Nothing started: it is read on that thread's next run."}`,
+      : `Posted in ${where} (delivery_id ${String(r.deliveryId)}). ${r.woke === true ? "Wake requested: that thread reads it in its running turn or its next run; nothing comes back to you." : "Nothing started: it is read on that thread's next run."}`,
   };
 }
 
@@ -34,7 +34,7 @@ export const THREAD_POST_TOOL_DEFINITION = {
       thread_id: { type: "string", description: "From list_threads." },
       message: { type: "string", maxLength: 8000, description: "The complete message." },
       wake: { type: "boolean", description: "True: start a run there now." },
-      delivery_id: { type: "string", maxLength: 100, description: "Optional: the same id is posted only once." },
+      delivery_id: { type: "string", maxLength: 100, description: "Optional: the same id is posted only once. Reuse it when retrying this call; without it, a retry posts again." },
     },
     required: ["thread_id", "message"],
   },

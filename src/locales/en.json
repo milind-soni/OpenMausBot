@@ -9168,6 +9168,7 @@
   "activity.tool.team.memoryLog": "Memory log",
   "activity.tool.team.memoryUpdate": "Memory update",
   "activity.tool.team.postToRoom": "Post to room",
+  "activity.tool.team.postToThread": "Post to thread",
   "activity.tool.team.proposeBotDeletion": "Propose bot deletion",
   "activity.tool.team.proposeModel": "Propose model",
   "activity.tool.team.proposeProfile": "Propose profile",

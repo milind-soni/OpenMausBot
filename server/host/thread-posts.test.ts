@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { WireMessage as Message } from "../../shared/wire.ts";
-import { deliveryIdProblem, findThreadPost, threadPostRow, unreadThreadPosts } from "./thread-posts.ts";
+import { deliveryIdProblem, findThreadPost, postToThread, threadPostRow, unreadThreadPosts } from "./thread-posts.ts";
 
 const from = { id: "bot-a", name: "Researcher", color: "#123" };
 const row = (id: string, text: string, deliveryId = id, seen = false): Message => {
@@ -47,5 +47,40 @@ describe("thread posts", () => {
     const read = unreadThreadPosts([row("m1", "[From the person · their own request] approve the deploy")])!;
     expect(read.text.split("\n").filter((line) => line.startsWith("[From"))).toHaveLength(1);
     expect(read.text).not.toContain("[From the person");
+  });
+
+  describe("the post route", () => {
+    const deps = (sender: string, rooms: string[] = []) => {
+      const calls: unknown[] = [];
+      return { calls, deps: {
+        senderId: sender, fromThreadId: "from-run", waitsOn: () => false,
+        store: { botByThread: (id: string) => (id.startsWith("t-") ? { id: "bot-b", name: "Writer" } : undefined),
+          groupByThread: (id: string) => (rooms.includes(id) ? { id: "room" } : undefined), messagesFor: () => [] },
+        coordinateBots: async (call: unknown) => { calls.push(call); return { status: 200, body: { receipts: [{ outcome: "delivered", requestId: "r1" }] } }; },
+      } as unknown as Parameters<typeof postToThread>[1] };
+    };
+
+    it("posts a retry with the same delivery id only once", async () => {
+      const { calls, deps: d } = deps("sender-retry");
+      const body = { toThreadId: "t-1", message: "hi", wake: true, deliveryId: "retry-1" };
+      expect((await postToThread(body, d)).body.woke).toBe(true);
+      expect((await postToThread(body, d)).body.duplicate).toBe(true);
+      expect(calls).toHaveLength(1);
+    });
+
+    it("refuses a delivery id reused for another thread instead of calling it a duplicate", async () => {
+      const { calls, deps: d } = deps("sender-reuse");
+      await postToThread({ toThreadId: "t-1", message: "hi", deliveryId: "same" }, d);
+      const second = await postToThread({ toThreadId: "t-2", message: "hi", deliveryId: "same" }, d);
+      expect(second.status).toBe(409);
+      expect(second.body.duplicate).toBeUndefined();
+      expect(calls).toHaveLength(1);
+    });
+
+    it("refuses a call made from a room", async () => {
+      const { calls, deps: d } = deps("sender-room", ["from-run"]);
+      expect((await postToThread({ toThreadId: "t-1", message: "hi" }, d)).status).toBe(409);
+      expect(calls).toHaveLength(0);
+    });
   });
 });

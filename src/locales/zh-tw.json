@@ -8730,6 +8730,7 @@
   "activity.tool.team.memoryLog": "記憶日誌",
   "activity.tool.team.memoryUpdate": "更新記憶",
   "activity.tool.team.postToRoom": "發布到房間",
+  "activity.tool.team.postToThread": "發布到對話串",
   "activity.tool.team.proposeBotDeletion": "提議刪除機器人",
   "activity.tool.team.proposeModel": "提議模型",
   "activity.tool.team.proposeProfile": "提議個人檔案",

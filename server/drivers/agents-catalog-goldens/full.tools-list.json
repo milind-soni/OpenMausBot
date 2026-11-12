@@ -630,7 +630,7 @@
           "delivery_id": {
             "type": "string",
             "maxLength": 100,
-            "description": "Optional: the same id is posted only once."
+            "description": "Optional: the same id is posted only once. Reuse it when retrying this call; without it, a retry posts again."
           }
         },
         "required": [

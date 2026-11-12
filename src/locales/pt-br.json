@@ -9128,6 +9128,7 @@
   "activity.tool.team.memoryLog": "Registrar na memória",
   "activity.tool.team.memoryUpdate": "Atualizar memória",
   "activity.tool.team.postToRoom": "Postar no grupo",
+  "activity.tool.team.postToThread": "Postar em outra conversa",
   "activity.tool.team.proposeBotDeletion": "Propor excluir um bot",
   "activity.tool.team.proposeModel": "Propor modelo",
   "activity.tool.team.proposeProfile": "Propor perfil",
