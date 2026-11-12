@@ -157,11 +157,18 @@ export async function typePhoneText(shell: Shell, text: string, clear = false): 
   }
   // -p delivers each broadcast to ADBKeyBoard alone, not to any other app listening for the action.
   const toKeyboard = (action: string, ...extras: string[]) => shell("am", "broadcast", "-a", action, "-p", "com.android.adbkeyboard", ...extras);
-  // ADB_CLEAR_TEXT exists from ADBKeyBoard 2.0; a cleared field's text then goes the same way so the two arrive in order.
-  if (clear) await toKeyboard("ADB_CLEAR_TEXT");
+  if (clear) {
+    // ADBKeyBoard 2.0 and 2.1 crash on ADB_CLEAR_TEXT when the app in front has no field taking input.
+    // Android 9 then dumps that app's mServedInputConnectionWrapper as null; a dump without the line is not refused.
+    if (/\bmServedInputConnection(?:Wrapper)?=(\S+)/.exec(await shell("dumpsys", "input_method"))?.[1] === "null") {
+      throw new Error("No text field is taking input, so nothing was cleared or typed. Tap the field first, then call type_text again.");
+    }
+    // A cleared field's text goes through ADBKeyBoard too, so the two arrive in order.
+    await toKeyboard("ADB_CLEAR_TEXT");
+  }
   // ADBKeyBoard reads msg as Base64 UTF-8; Base64 also keeps the text out of the device shell's syntax.
   await toKeyboard("ADB_INPUT_B64", "--es", "msg", Buffer.from(text, "utf8").toString("base64"));
-  // ADBKeyBoard drops a broadcast when no field has focus, and the broadcast reports success either way.
+  // ADBKeyBoard drops the text when no field has focus, and the broadcast reports success either way.
   return clear
     ? "Asked ADBKeyBoard to clear the field and sent the text. Use read_screen to check that the field holds only this text."
     : "Sent the text to ADBKeyBoard. Use read_screen to check that it reached the field.";
