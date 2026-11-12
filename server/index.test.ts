@@ -652,6 +652,8 @@ beforeAll(async () => {
   mkdirSync(privateAttachments, { recursive: true, mode: 0o700 });
   writeFileSync(linkedFile, "# Phone-ready report\n");
   writeFileSync(linkedImage, "png preview bytes");
+  const linkedVideo = join(linkedWorkspace, "clip.mp4");
+  writeFileSync(linkedVideo, "0123456789".repeat(100));
   writeFileSync(generatedImage, "generated image bytes");
   writeFileSync(userAttachment, "%PDF shared from the phone\n", { mode: 0o600 });
   // A picture a bot saved outside the room's folders, and the copy attach_file made of it.
@@ -738,6 +740,11 @@ beforeAll(async () => {
         {
           id: "delivered-image-reply-message", at: 12, parentId: "delivered-image-message", role: "bot", kind: "text",
           text: `Heidi, 51 – Sideboard\n\n![Sideboard](<${pathToFileURL(outsideImage).href}>)\n\nEinschätzung`,
+          from: { botId: "test-bot-a", name: "Test bot A", color: "purple" },
+        },
+        {
+          id: "linked-video-message", at: 13, parentId: "delivered-image-reply-message", role: "bot", kind: "text",
+          text: `[Clip](<${pathToFileURL(linkedVideo).href}>) and [notes](<${pathToFileURL(linkedFile).href}>)`,
           from: { botId: "test-bot-a", name: "Test bot A", color: "purple" },
         },
       ],
@@ -14180,6 +14187,70 @@ describe("message pages", () => {
     expect((await fetch(`${BASE}/api/threads/${threadId}/messages/linked-image-message/file?preview=1`, { headers: asChatOnly })).status).toBe(400);
     expect((await fetch(`${BASE}/api/threads/${threadId}/messages/no-such-message/file?preview=1&ref=0`, { headers: asChatOnly })).status).toBe(404);
     expect((await fetch(`${BASE}/api/threads/${threadId}/messages/linked-image-message/file`, { headers: asChatOnly })).status).toBe(404);
+  });
+
+  it("streams a linked video through a viewer-bound media link with byte ranges", async () => {
+    const threadId = "test-linked-file-room-thread";
+    const route = `/api/threads/${threadId}/messages/linked-video-message/file`;
+    const video = join(home, ".openmausbot", "workspaces", "test-bot-a", "clip.mp4");
+    const bytes = "0123456789".repeat(100);
+    const issued = await fetch(`${BASE}${route}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: pathToFileURL(video).href, media: true }),
+    });
+    expect(issued.status).toBe(200);
+    expect(issued.headers.get("x-openmausbot-media")).toBe("1");
+    expect(issued.headers.get("cache-control")).toBe("private, no-store");
+    const link = (await issued.json()) as { url: string; mime: string; bytes: number };
+    expect(link.mime).toBe("video/mp4");
+    expect(link.bytes).toBe(1000);
+    expect(link.url).toMatch(new RegExp(`^${route}\\?media=[\\w-]{43}$`));
+    // The host path never enters the URL.
+    expect(link.url).not.toContain("clip");
+
+    const whole = await fetch(`${BASE}${link.url}`);
+    expect(whole.status).toBe(200);
+    expect(whole.headers.get("content-type")).toBe("video/mp4");
+    expect(whole.headers.get("accept-ranges")).toBe("bytes");
+    expect(whole.headers.get("content-disposition")).toBe("inline");
+    expect(whole.headers.get("cache-control")).toBe("private, no-store");
+    expect(whole.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(whole.headers.get("cross-origin-resource-policy")).toBe("same-origin");
+    expect(await whole.text()).toBe(bytes);
+
+    const part = await fetch(`${BASE}${link.url}`, { headers: { range: "bytes=10-19" } });
+    expect(part.status).toBe(206);
+    expect(part.headers.get("content-range")).toBe("bytes 10-19/1000");
+    expect(part.headers.get("content-length")).toBe("10");
+    expect(await part.text()).toBe("0123456789");
+    const tail = await fetch(`${BASE}${link.url}`, { headers: { range: "bytes=995-" } });
+    expect(tail.status).toBe(206);
+    expect(await tail.text()).toBe("56789");
+    const past = await fetch(`${BASE}${link.url}`, { headers: { range: "bytes=1000-" } });
+    expect(past.status).toBe(416);
+    expect(past.headers.get("content-range")).toBe("bytes */1000");
+
+    // Bound to this message and this viewer; a made-up id is refused like a missing one.
+    const token = new URL(link.url, BASE).searchParams.get("media")!;
+    expect((await fetch(`${BASE}/api/threads/${threadId}/messages/linked-file-message/file?media=${token}`)).status).toBe(404);
+    expect((await fetch(`${BASE}${route}?media=${"A".repeat(43)}`)).status).toBe(404);
+    const window = await api("POST", "/api/auth/pairing", { scopes: ["client"] });
+    const paired = await fetch(`${BASE}/api/auth/pair`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: window.body.code }),
+    });
+    const otherViewer = { authorization: `Bearer ${((await paired.json()) as any).token as string}` };
+    expect((await fetch(`${BASE}${link.url}`, { headers: otherViewer })).status).toBe(404);
+
+    // Only videos get a link, and only for files this message shares.
+    expect((await api("POST", route, { path: pathToFileURL(join(home, ".openmausbot", "workspaces", "test-bot-a", "phone report.md")).href, media: true })).status).toBe(415);
+    expect((await api("POST", route, { path: pathToFileURL(join(home, ".openmausbot", "workspaces", "test-bot-a", "preview.png")).href, media: true })).status).toBe(403);
+
+    // The file is opened and checked again on every request.
+    try {
+      rmSync(video);
+      expect((await fetch(`${BASE}${link.url}`)).status).toBe(404);
+    } finally {
+      writeFileSync(video, bytes);
+    }
   });
 
   it("shows the copy a bot delivered of an outside picture, and says why one it never delivered is refused", async () => {
