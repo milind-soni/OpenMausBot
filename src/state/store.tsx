@@ -1,3 +1,4 @@
+import type { EngineUsage, UsagePreferences } from "../../server/usage-types";
 // Server-backed store. The React app holds no transports of its own:
 // it dispatches typed commands over HTTP and folds the one SSE event
 // stream from the harness server into local state. The reducer stays
@@ -103,6 +104,7 @@ export interface Bot {
   unread: boolean;
   busy?: boolean;
   modelSelection: ModelSelection;
+  backupModelSelection?: ModelSelection;
   /** Where this bot's computer runs; unset uses this computer in the desktop app. */
   computer?: "local" | "off";
   pinned?: boolean;
@@ -141,6 +143,7 @@ export function messageVersions(bot: Bot, message: Message): Message[] {
 
 /** GET /api/config — configured flags only; secrets are never echoed. */
 export interface ConfigStatus {
+  usageDisplay?: UsagePreferences;
   xai?: { configured: boolean };
   composio: { configured: boolean; apiKeyConfigured?: boolean };
   trello?: { configured: boolean; keyConfigured: boolean };
@@ -176,6 +179,7 @@ export interface InstanceInfo {
 }
 
 export interface AppState {
+  usage: EngineUsage[];
   bots: Bot[];
   groups: Group[];
   instances: InstanceInfo[];
@@ -202,6 +206,7 @@ export interface AppState {
 }
 
 export type Action =
+  | { type: "usage"; engines: EngineUsage[] }
   | { type: "hydrate"; bots: Bot[]; groups: Group[] }
   | { type: "groupPatched"; group: Partial<Group> & { id: string } }
   | { type: "groupDeleted"; groupId: string }
@@ -342,6 +347,8 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     case "instances":
       return { ...state, instances: action.instances };
+    case "usage":
+      return { ...state, usage: action.engines };
     case "configStatus":
       return { ...state, config: action.config };
     case "select": {
@@ -638,6 +645,7 @@ export function reducer(state: AppState, action: Action): AppState {
 const MAX_KEPT_SCREEN_FRAMES = 8;
 
 export const initialState: AppState = {
+  usage: [],
   bots: [],
   groups: [],
   instances: [],
@@ -1028,6 +1036,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       api("/api/config")
         .then((config) => alive && rawDispatch({ type: "configStatus", config }))
         .catch(() => {});
+      api("/api/usage").then(({ engines }) => alive && rawDispatch({ type: "usage", engines })).catch(() => {});
       api("/api/tasks")
         .then(({ tasks, projects }) => alive && rawDispatch({ type: "hydrateTasks", tasks, projects }))
         .catch(() => {});
@@ -1142,10 +1151,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         // a key changed and the fleet hot-reloaded — refresh the picker so
         // newly available providers un-dim immediately
+        case "usage":
+          rawDispatch({ type: "usage", engines: frame.engines });
+          break;
         case "config":
           rawDispatch({
             type: "configStatus",
-            config: { xai: frame.xai, composio: frame.composio, trello: frame.trello, profile: frame.profile,
+            config: { usageDisplay: frame.usageDisplay, xai: frame.xai, composio: frame.composio, trello: frame.trello, profile: frame.profile,
               autoHandoffs: frame.autoHandoffs, autoApprovePermissions: frame.autoApprovePermissions, autoApproveDelaySeconds: frame.autoApproveDelaySeconds },
           });
           api("/api/instances")

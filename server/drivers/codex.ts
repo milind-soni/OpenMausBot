@@ -1,3 +1,7 @@
+import type { ChildProcess } from "node:child_process";
+import { classifyCodexUsage } from "../usage-classifiers.ts";
+import type { UsageLimitFailure } from "../usage-types.ts";
+import { readCodexUsage } from "./codex-usage.ts";
 // Codex driver — upstream CodexDriver skeleton over agentcal's
 // drivers/codex.js runtime: the official `codex` CLI headless over its
 // app-server JSON-RPC protocol (newline-delimited JSON on stdio).
@@ -108,6 +112,26 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       createdAt: new Date().toISOString(),
     });
 
+    const usageChildren = new Set<ChildProcess>();
+    let disposed = false;
+    const reportUsage = (payload: unknown, threadId = "", turnId = "") => {
+      const classified = classifyCodexUsage(payload);
+      if (classified.usage) emit({ ...base(threadId, turnId), type: "usage.updated", usage: classified.usage });
+      return classified.failure;
+    };
+    const refreshUsage = async () => {
+      if (disposed || active.size) return;
+      try {
+        const payload = await readCodexUsage(config.cli, child => {
+          usageChildren.add(child);
+          return () => usageChildren.delete(child);
+        });
+        if (!disposed) reportUsage(payload);
+      } catch {
+        if (!disposed) emit({ ...base("", ""), type: "usage.updated", usage: { source: "reported", status: "unknown" } });
+      }
+    };
+
     const sendTurn = async (turn: SendTurnInput) => {
       const { threadId } = turn;
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
@@ -125,6 +149,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         stdio: ["pipe", "pipe", "pipe"],
       });
 
+      let failure: UsageLimitFailure | undefined;
+      let failureReported = false;
       const state = { settled: false, lastText: "", sawStreamDelta: false };
       const asks = new Map<string, (behavior: string, message?: string) => void>();
       let nextId = 1;
@@ -152,7 +178,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         for (const p of rpcPending.values()) p.reject(new Error("turn settled"));
         rpcPending.clear();
         active.delete(threadId);
-        emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost: null });
+        emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost: null, failure });
         stop(); // the app-server never exits on its own
       };
 
@@ -239,6 +265,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
 
       const handleNotification = (msg: any) => {
         const p = msg.params ?? {};
+        failure = reportUsage(msg, threadId, turnId) ?? failure;
         switch (msg.method) {
           // token-level chat text; the item/completed frame follows with the
           // whole message, so its delta is only a fallback when none streamed
@@ -309,6 +336,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           case "turn/completed": {
             const t = p.turn ?? {};
+            if (t.status === "completed") failure = undefined;
+            else if (failure && !failureReported) {
+              emit({ ...base(threadId, turnId), type: "runtime.error", message: "This AI app’s usage ran out.", failure });
+              failureReported = true;
+            }
             settle(t.status === "completed", t.status === "completed" ? null : (t.error?.message ?? t.status ?? "failed"));
             break;
           }
@@ -317,7 +349,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             // {error:{message}} — surface either (agentcal armor)
             {
               const message = p.message ?? p.error?.message;
-              if (message) emit({ ...base(threadId, turnId), type: "runtime.error", message: String(message).slice(0, 400) });
+              if (message) {
+                emit({ ...base(threadId, turnId), type: "runtime.error", message: String(message).slice(0, 400), failure });
+                if (failure) failureReported = true;
+              }
             }
             break;
         }
@@ -342,7 +377,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             const pend = rpcPending.get(msg.id);
             if (pend) {
               rpcPending.delete(msg.id);
-              msg.error ? pend.reject(new Error(msg.error.message ?? JSON.stringify(msg.error))) : pend.resolve(msg.result);
+              if (msg.error) {
+                failure = reportUsage(msg, threadId, turnId) ?? failure;
+                pend.reject(new Error(msg.error.message ?? JSON.stringify(msg.error)));
+              } else pend.resolve(msg.result);
             }
           } else if (msg.id !== undefined && msg.method) {
             handleServerRequest(msg);
@@ -380,6 +418,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         try {
           await request("initialize", { clientInfo: { name: "gerer-build-studio", version: "1" } });
           send({ jsonrpc: "2.0", method: "initialized", params: {} });
+          // A failed/unsupported read must never prevent a conversation.
+          void request("account/rateLimits/read", {}).then(result => reportUsage({ result }, threadId, turnId)).catch(() => {});
           const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
           let codexThreadId: string | null = null;
           let startedModel: string | null = null;
@@ -440,6 +480,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         provider: DRIVER_KIND,
         capabilities: { sessionModelSwitch: "unsupported", agentsMcp: true },
         sendTurn,
+        refreshUsage,
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),
         respondToRequest: async (threadId, requestId, decision) => {
           const turn = active.get(threadId);
@@ -449,6 +490,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         },
         hasSession: (threadId) => active.has(threadId),
         stopAll: async () => {
+          for (const child of usageChildren) killCliTree(child);
           for (const { stop } of active.values()) stop();
         },
         onEvent: (listener) => {
@@ -457,6 +499,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         },
       },
       dispose: async () => {
+        disposed = true;
+        for (const child of usageChildren) killCliTree(child);
         for (const { stop } of active.values()) stop();
         listeners.clear();
       },

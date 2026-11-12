@@ -31,7 +31,7 @@ export class EventBus {
 
   publish(event: RuntimeEvent) {
     try {
-      appendFileSync(join(EVENTS_DIR, `${event.threadId}.ndjson`), JSON.stringify(event) + "\n");
+      if (event.type !== "usage.updated") appendFileSync(join(EVENTS_DIR, `${event.threadId}.ndjson`), JSON.stringify(event) + "\n");
     } catch {
       /* logging must never take down the stream */
     }

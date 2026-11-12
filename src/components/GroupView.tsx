@@ -1,3 +1,4 @@
+import { UsageRings } from "./UsageRings";
 // A room: several bots + you in one shared thread. Minimal by design — the
 // mauses are the only expressive element. Members sit in the header (their
 // idle/working motion IS the status), the bulletin is one pinned line, and
@@ -226,6 +227,7 @@ export function GroupView({ group }: { group: Group }) {
               </span>
             ))}
           </div>
+          <UsageRings />
           <button
             type="button"
             onClick={() => setActivityOpen((open) => !open)}

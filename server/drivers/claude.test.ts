@@ -188,6 +188,14 @@ posixOnly("ClaudeDriver turns (fake CLI)", () => {
     expect(argv[argv.indexOf("--allowedTools") + 1]).toContain("mcp__composio");
   });
 
+  it("reports a passive usage rejection as a normalized failure without probing", async () => {
+    process.env.FAKE_CLAUDE_MODE = "usage-limit";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "claude-limit", text: "hi" });
+    expect(await recorder.until(e => e.type === "turn.completed")).toMatchObject({ ok: false, failure: { kind: "usage_limit" } });
+    expect(recorder.events).toContainEqual(expect.objectContaining({ type: "usage.updated", usage: { source: "reported", status: "exhausted" } }));
+  });
+
   it("mounts the agents comms proxy as an MCP server and pre-allows its tools", async () => {
     await create();
     const dump = join(scratch, "dump.json");
