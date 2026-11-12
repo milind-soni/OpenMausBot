@@ -21,6 +21,7 @@ import type { ServerTextLine, ServerTextParams } from "./server-text.ts";
 import type { WireTool } from "./wire-tool.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
 import type { ConnectorCardData } from "./connector-card.ts"; import type { McpChangeRequest } from "./mcp-request.ts";
+import type { AppSettingRequest, WindowPrefFrame } from "./app-settings.ts";
 import type { SkillRequestCardData } from "./skill-request.ts"; import type { OutsideWriteCardField } from "./outside-write.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
 import type { AutomationLine, RoutineRunCardData } from "./routine-run.ts";
@@ -703,6 +704,8 @@ export interface OptionCardData extends WaitCardField, ComputerAskField, AccessR
   teamSetupRequest?: TeamSetupRequest;
   /** A bot's MCP server change waiting on the person (Ask, Edits or Auto). */
   mcpRequest?: McpChangeRequest;
+  /** A bot's change to one of the app's own settings: applied with Undo, or waiting on Change/Cancel. */
+  appSettingRequest?: AppSettingRequest;
   /** A durable learned-skill proposal. */
   skillRequest?: SkillRequestCardData;
   /** A provider's structured question set. */
@@ -991,6 +994,7 @@ export type ServerFrame =
   | { kind: "bot.deleted"; botId: string }
   /** The whole fleet in its new order (PUT /api/bots/order); a member is sent only the bots they see. */
   | { kind: "bots.order"; botIds: string[] }
+  | WindowPrefFrame
   | { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }
   /** A job is waiting for the phone whose registry key this is; it polls now. */
   | { kind: "device.job"; phone: string; id: string }

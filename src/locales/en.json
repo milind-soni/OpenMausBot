@@ -279,6 +279,8 @@
   "server.mcp.testFailed": "Test: failed",
   "server.mcp.askedTurnOn": "Asked to turn on MCP server {name}",
   "server.mcp.askedChange": "Asked to change MCP server {name}",
+  "server.appSettings.change": "Change {label}?",
+  "server.appSettings.notSet": "not set",
   "server.mcp.askedRemove": "Asked to remove MCP server {name}",
   "server.mcp.card.turnOn": "Turn on {name}?",
   "server.mcp.card.change": "Change {name}?",

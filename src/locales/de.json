@@ -147,6 +147,8 @@
   "server.mcp.testFailed": "Test: fehlgeschlagen",
   "server.mcp.askedTurnOn": "Einschalten von MCP-Server {name} angefragt",
   "server.mcp.askedChange": "Änderung von MCP-Server {name} angefragt",
+  "server.appSettings.change": "{label} ändern?",
+  "server.appSettings.notSet": "nicht gesetzt",
   "server.mcp.askedRemove": "Entfernen von MCP-Server {name} angefragt",
   "server.mcp.card.turnOn": "{name} einschalten?",
   "server.mcp.card.change": "{name} ändern?",

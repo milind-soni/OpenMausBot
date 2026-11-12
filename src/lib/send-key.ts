@@ -1,12 +1,12 @@
 import { useSyncExternalStore } from "react";
 
+import { SEND_KEYS } from "../../shared/app-settings";
 import { activeLocale } from "./i18n";
 import { isMacPlatform } from "./keyboard-shortcuts";
 
 export const SEND_KEY_KEY = "omb-send-key";
 
-/** The Enter-adds-a-line modes are for input methods that confirm a conversion with Enter (Japanese). */
-export const SEND_KEYS = ["enter", "shift-enter", "mod-enter"] as const;
+export { SEND_KEYS };
 export type SendKey = (typeof SEND_KEYS)[number];
 
 export function defaultSendKey(locale: string = activeLocale()): SendKey {

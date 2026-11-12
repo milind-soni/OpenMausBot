@@ -1,21 +1,8 @@
+import { SKIN_IDS } from "../../shared/app-settings";
 import { paintAuroraField } from "./aurora-field";
 import { hasPriorRun } from "./prior-run";
 
-export const SKIN_IDS = [
-  "midnight",
-  "atelier",
-  "foundry",
-  "lagoon",
-  "graphite",
-  "linen",
-  "dusk",
-  "daylight",
-  "meadow",
-  "pop",
-  "halloween",
-  "diwali",
-  "aurora",
-] as const;
+export { SKIN_IDS };
 export type SkinId = (typeof SKIN_IDS)[number];
 
 export type Skin = {
