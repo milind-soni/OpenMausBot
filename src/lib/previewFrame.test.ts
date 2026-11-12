@@ -11,6 +11,17 @@ function renderFile(fileType: "html" | "pdf" | "image", filePath: string) {
 }
 
 describe("project preview frame isolation", () => {
+  it("always offers honest recovery for browser sites, including silent embedding refusals", () => {
+    const html = renderToStaticMarkup(createElement(PreviewFrame, {
+      source: { kind: "url", url: "https://example.com/denied", raw: "example.com/denied", isLocalOrPrivate: false },
+      width: 800, height: 600,
+    }));
+    expect(html).toContain("Preview blank?");
+    expect(html).toContain("Open in new tab");
+    expect(html).toContain("Retry");
+    expect(html).toContain('href="https://example.com/denied"');
+    expect(html).not.toContain("This site doesn");
+  });
   it("allows the native PDF viewer without loosening HTML or SVG frames", () => {
     const pdf = renderFile("pdf", "report.pdf");
     expect(pdf).toContain("<iframe");

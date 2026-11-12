@@ -338,7 +338,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
     }, SLOW_WARNING_MS);
 
     loadTimerRef.current = setTimeout(() => {
-      updateStatus("error");
+      updateStatus(source.kind === "url" ? "blocked" : "error");
       setErrorMessage(
         "Timed out after 15 seconds. Make sure your local server is running and the address is spelled correctly.",
       );
@@ -547,11 +547,11 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
               <ShieldAlert className="h-5 w-5" />
             </div>
             <h4 className="text-[15px] font-semibold text-ink">
-              This site doesn&apos;t allow embedding
+              This site may not allow embedding
             </h4>
             <p className="mt-1.5 max-w-[320px] text-[12.5px] leading-relaxed text-ink-secondary">
-              <span className="font-mono text-ink">{hostname}</span> blocked loading inside a preview
-              frame (X-Frame-Options or Content-Security-Policy).
+              We couldn't confirm that <span className="font-mono text-ink">{hostname}</span> loaded.
+              Some sites only open in their own tab. You can open it there or try again.
             </p>
             <div className="mt-4 flex items-center gap-2">
               {source.kind === "url" && (
@@ -724,6 +724,16 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
             }}
             className="h-full w-full border-0 bg-white"
           />
+        )}
+        {/* Browsers fire load even for an embedding refusal and hide the response.
+            Keep honest recovery available without claiming every opaque frame failed. */}
+        {live && !isElectron && source.kind === "url" && status !== "blocked" && status !== "error" && (
+          <div className="absolute inset-x-2 bottom-2 z-20 flex flex-wrap items-center justify-center gap-2 rounded-lg border border-hairline bg-surface/95 px-3 py-2 text-[11px] text-ink shadow" role="status">
+            <button type="button" className="underline" onClick={() => updateStatus("blocked")}>Preview blank?</button>
+            <span>Some sites don&apos;t allow embedding.</span>
+            <a href={source.url} target="_blank" rel="noreferrer" className="font-medium text-accent underline">Open in new tab</a>
+            <button type="button" onClick={reload} className="font-medium text-accent underline">Retry</button>
+          </div>
         )}
       </div>
     </div>
