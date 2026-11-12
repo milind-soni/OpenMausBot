@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
-  issueWebhookChanges, issueWebhookPayload, issueWebhookRequest, issueWebhookUrlError, repositorySlug, sampleIssueWebhookPayload, signIssueWebhook,
+  isOpenBotWebhookUrl, issueWebhookChanges, issueWebhookPayload, issueWebhookRequest, issueWebhookUrlError, openBotWebhookRequest, repositorySlug, sampleIssueWebhookPayload, signIssueWebhook,
 } from "./issue-webhook";
 
 const input = {
@@ -87,5 +87,26 @@ describe("issue webhook signature", () => {
     expect(issueWebhookUrlError("ftp://hooks.example")).toContain("http");
     expect(issueWebhookUrlError("https://user:pw@hooks.example")).toContain("credentials");
     expect(issueWebhookUrlError("nope")).toContain("URL");
+  });
+});
+
+describe("OpenBot webhook delivery", () => {
+  test("recognizes only OpenBot routine URLs", () => {
+    expect(isOpenBotWebhookUrl("https://signal.openbot.run/v1/webhooks/abc")).toBe(true);
+    expect(isOpenBotWebhookUrl("http://signal.openbot.run/v1/webhooks/abc")).toBe(false);
+    expect(isOpenBotWebhookUrl("https://hooks.example/v1/webhooks/abc")).toBe(false);
+    expect(isOpenBotWebhookUrl("nope")).toBe(false);
+  });
+
+  test("wraps the Origin payload as data and signs timestamp.delivery.body", async () => {
+    const payload = issueWebhookPayload(input);
+    const secret = "s".repeat(32);
+    const now = Date.UTC(2026, 10, 12, 10);
+    const request = await openBotWebhookRequest("issue.created", "evt_1", JSON.stringify(payload), secret, now);
+    expect(JSON.parse(request.body)).toEqual({ type: "issue.created", occurredAt: payload.occurredAt, data: payload });
+    const timestamp = String(now / 1000);
+    expect(request.headers["X-OpenBot-Timestamp"]).toBe(timestamp);
+    expect(request.headers["X-OpenBot-Delivery-Id"]).toBe("evt_1");
+    expect(request.headers["X-OpenBot-Signature"]).toBe(await signIssueWebhook(`${timestamp}.evt_1.${request.body}`, secret));
   });
 });

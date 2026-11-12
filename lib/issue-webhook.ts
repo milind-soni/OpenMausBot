@@ -100,11 +100,44 @@ export function issueWebhookPayload(input: IssueWebhookInput): IssueWebhookPaylo
   };
 }
 
-/** `sha256=<hex>`: HMAC-SHA256 of the raw body under the secret. */
-export async function signIssueWebhook(body: string, secret: string) {
+async function hmacHex(message: string, secret: string) {
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return `sha256=${hex(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(body))))}`;
+  return hex(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(message))));
+}
+
+/** `sha256=<hex>`: HMAC-SHA256 of the raw body under the secret. */
+export async function signIssueWebhook(body: string, secret: string) {
+  return `sha256=${await hmacHex(body, secret)}`;
+}
+
+/**
+ * OpenBot webhook routines (https://signal.openbot.run/v1/webhooks/<id>) take `{ type, occurredAt, data }` and verify
+ * `X-OpenBot-Signature: sha256=<hex HMAC-SHA256 of "<timestamp>.<delivery id>.<body>">` with a timestamp in seconds.
+ */
+export function isOpenBotWebhookUrl(value: string) {
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" && url.hostname === "signal.openbot.run" && url.pathname.startsWith("/v1/webhooks/");
+  } catch { return false; }
+}
+
+/** The OpenBot body and headers for one delivery of an Origin event body; `data` is the unchanged Origin payload. */
+export async function openBotWebhookRequest(event: IssueWebhookEvent, deliveryId: string, originBody: string, secret: string, now = Date.now()) {
+  const payload = JSON.parse(originBody) as IssueWebhookPayload;
+  const body = JSON.stringify({ type: event, occurredAt: payload.occurredAt, data: payload });
+  const timestamp = String(Math.floor(now / 1000));
+  return {
+    body,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Origin-Event": event,
+      "X-Origin-Delivery": deliveryId,
+      "X-OpenBot-Timestamp": timestamp,
+      "X-OpenBot-Delivery-Id": deliveryId,
+      "X-OpenBot-Signature": `sha256=${await hmacHex(`${timestamp}.${deliveryId}.${body}`, secret)}`,
+    },
+  };
 }
 
 /** The exact body and headers of one delivery. */

@@ -3,7 +3,7 @@ import { internalAction, internalQuery, mutation, query } from "./_generated/ser
 import { internal } from "./_generated/api";
 import { requireTeamAdmin, requireTeamMember } from "./lib/permissions";
 import { seal, sealingConfigured, SEALING_MISSING, unseal } from "./lib/sealing";
-import { ISSUE_WEBHOOK_MIN_SECRET, issueWebhookUrlError, postIssueWebhook, signIssueWebhook } from "../lib/issue-webhook";
+import { ISSUE_WEBHOOK_MIN_SECRET, isOpenBotWebhookUrl, issueWebhookUrlError, openBotWebhookRequest, postIssueWebhook, signIssueWebhook } from "../lib/issue-webhook";
 
 // Outgoing issue webhooks. Issue writes (convex/lib/issueEvents.ts) build the payload in the mutation and schedule
 // `deliver`, which signs and POSTs it, so a slow or failing endpoint never fails the issue change. A workspace's own
@@ -104,15 +104,21 @@ export const deliver = internalAction({
     const attempt = a.attempt ?? 1;
     let outcome: string;
     try {
+      // OpenBot routines need their own envelope and signature; every other receiver gets the GitHub-style request.
+      const request = isOpenBotWebhookUrl(destination.url)
+        ? await openBotWebhookRequest(a.event, a.deliveryId, a.body, destination.secret)
+        : {
+          body: a.body,
+          headers: {
+            "Content-Type": "application/json",
+            "X-Origin-Event": a.event,
+            "X-Origin-Delivery": a.deliveryId,
+            "X-Origin-Signature": await signIssueWebhook(a.body, destination.secret),
+          } as Record<string, string>,
+        };
       const status = await postIssueWebhook(destination.url, {
-        body: a.body,
-        headers: {
-          "Content-Type": "application/json",
-          "X-Origin-Event": a.event,
-          "X-Origin-Delivery": a.deliveryId,
-          "X-Origin-Signature": await signIssueWebhook(a.body, destination.secret),
-          ...(authorization ? { Authorization: `Bearer ${authorization}` } : {}),
-        },
+        body: request.body,
+        headers: { ...request.headers, ...(authorization ? { Authorization: `Bearer ${authorization}` } : {}) },
       });
       if (status >= 200 && status < 300) return null;
       outcome = `HTTP ${status}`;
