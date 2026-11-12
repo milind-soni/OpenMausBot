@@ -969,6 +969,7 @@
   "approval.tool.enableSkill": "ativar uma habilidade aprendida",
   "approval.tool.updateSkill": "atualizar uma habilidade aprendida",
   "approval.tool.updateProfile": "atualizar o próprio perfil",
+  "approval.tool.resetCloudComputer": "redefinir um desktop na nuvem",
   "approval.tool.deleteFile": "excluir um arquivo",
   "approval.tool.think": "pensar",
   "approval.tool.takeAction": "executar uma ação",

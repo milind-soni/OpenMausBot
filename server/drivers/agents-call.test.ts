@@ -579,3 +579,31 @@ describe("blank optional arguments", () => {
     ]);
   });
 });
+
+describe("reset_cloud_computer", () => {
+  it("posts the why, and for a Chief the bot it names, and returns the route's text or refusal", async () => {
+    const calls: Array<{ path: string; method?: string; body: unknown }> = [];
+    const reply = (ok: boolean) => context({
+      client: {
+        api: async () => ({}),
+        apiResponse: async (path, init) => {
+          calls.push({ path, method: init?.method, body: JSON.parse(String(init?.body)) });
+          return ok ? { ok: true, status: 200, body: { text: "A card is now in this conversation." } } : { ok: false, status: 403, body: { error: "not yours" } };
+        },
+      },
+    });
+    expect(await callTool("reset_cloud_computer", { why: "Stuck starting." }, reply(true))).toEqual({ text: "A card is now in this conversation." });
+    expect(await callTool("reset_cloud_computer", { why: "Stuck.", for_bot_id: " bot-b " }, reply(false))).toEqual({ text: "not yours", isError: true });
+    expect(calls).toEqual([
+      { path: "/api/internal/cloud-computer/reset", method: "POST", body: { why: "Stuck starting." } },
+      { path: "/api/internal/cloud-computer/reset", method: "POST", body: { why: "Stuck.", targetBotId: "bot-b" } },
+    ]);
+  });
+
+  it("is mounted only where a cloud computer can be had, and names another bot only for a Chief", () => {
+    const tool = (env: Record<string, string>) => availableTools(catalogProfileFromEnv(env)).find((entry) => entry.name === "reset_cloud_computer");
+    expect(tool({})).toBeUndefined();
+    expect(Object.keys(tool({ OMB_MEETINGS: "1" })?.inputSchema.properties ?? {})).toEqual(["why"]);
+    expect(Object.keys(tool({ OMB_MEETINGS: "1", OMB_CHIEF_OF_STAFF: "1" })?.inputSchema.properties ?? {})).toEqual(["why", "for_bot_id"]);
+  });
+});
