@@ -1,5 +1,5 @@
 import { track } from "@/lib/analytics";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ArrowUp, Clock, Mic, Paperclip, Square, X } from "lucide-react";
 import { useStore, type Attachment, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -11,7 +11,7 @@ import { useProjects } from "@/state/projects";
 import { ProjectSuggestionList } from "./ProjectSuggestionList";
 import { StagedAttachmentsTray } from "./AttachmentViewer";
 import { readFileAsAttachment } from "@/lib/attachments";
-import { draftKey, loadDraft, saveDraft } from "@/lib/composerDrafts";
+import { draftKey, getQueued, loadDraft, saveDraft, setQueued as setQueuedFor, subscribeQueue } from "@/lib/composerDrafts";
 
 /** The active @mention query at the caret: the text between an `@` that
  * starts a word and the caret. null = no mention being typed. */
@@ -233,8 +233,12 @@ export function Composer({
 
   // One message may be queued while the bot works; it auto-sends the moment
   // the turn settles. Enter during a turn queues instead of silently dying.
-  const [queued, setQueued] = useState<{ text: string; attachments: Attachment[] } | null>(initialDraft.queued);
-  useEffect(() => saveDraft(draftId, { text, attachments, queued }), [draftId, text, attachments, queued]);
+  // The queue lives in composerDrafts and is drained by the app shell, so it
+  // still sends if the user switches to another conversation meanwhile.
+  const queueTarget = useMemo(() => (group ? { groupId: group.id } : { botId: bot?.id ?? "" }), [group, bot?.id]);
+  const queued = useSyncExternalStore(subscribeQueue, () => getQueued(draftId));
+  const setQueued = (message: { text: string; attachments: Attachment[] } | null) => setQueuedFor(queueTarget, message);
+  useEffect(() => saveDraft(draftId, { text, attachments }), [draftId, text, attachments]);
   const send = () => {
     const t = text.trim();
     if (!t && attachments.length === 0) return;
@@ -255,16 +259,6 @@ export function Composer({
     setText("");
     setAttachments([]);
   };
-
-  useEffect(() => {
-    if (!busy && queued) {
-      const qAtt = queued.attachments.length > 0 ? queued.attachments : undefined;
-      if (group) dispatch({ type: "sendGroup", groupId: group.id, text: queued.text, attachments: qAtt });
-      else if (bot) dispatch({ type: "send", botId: bot.id, text: queued.text, attachments: qAtt });
-      track("message_sent", { queued: true });
-      setQueued(null);
-    }
-  }, [busy, queued, bot, group, dispatch]);
 
   // native dictation: partials stream into the input while the Swift
   // helper runs; the final transcript stays in the box, ready to edit/send

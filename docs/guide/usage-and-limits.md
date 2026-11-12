@@ -19,3 +19,11 @@ In a narrow window, the rings become one summary. It shows the AI app that needs
 “Set a backup model…” currently opens the bot’s settings. Automatic switching and waiting to continue are being added separately; this display does not enable them. You can choose another AI model in bot settings if you want to continue now.
 
 To hide the rings, open Settings → Models & Providers and turn off “Show usage in the top bar.” You can also hide individual AI apps there. These settings only change the display.
+
+Some AI companies call these allowances "rate limits" or "usage quotas".
+
+## Related guides
+
+- [Backup model](backup-model.md): switch to another AI model when usage runs out.
+- [Schedules](schedules.md): have a bot start or continue work at a set time.
+- [Glossary](glossary.md): the plain words used across Gerer Build Studio.
