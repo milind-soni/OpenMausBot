@@ -6328,6 +6328,7 @@
   "ask.settled.answered": "Hai risposto:",
   "ask.settled.stopped": "Interrotto prima della tua risposta",
   "ask.settled.expired": "Scaduto prima di una risposta",
+  "ask.settled.answeredInChat": "Risposto nella chat",
   "ask.error": "Impossibile inviare la risposta. Riprova.",
   "ask.detail.more": "Mostra tutto",
   "inbox.action.closeQuestion": "Chiudi senza rispondere",

@@ -5163,6 +5163,7 @@
   "ask.settled.answered": "Bạn đã trả lời:",
   "ask.settled.stopped": "Đã dừng trước khi bạn trả lời",
   "ask.settled.expired": "Đã hết hạn trước khi có người trả lời",
+  "ask.settled.answeredInChat": "Đã trả lời trong cuộc trò chuyện",
   "ask.error": "Không gửi được câu trả lời. Hãy thử lại.",
   "ask.detail.more": "Hiện tất cả",
   "inbox.action.closeQuestion": "Đóng mà không trả lời",

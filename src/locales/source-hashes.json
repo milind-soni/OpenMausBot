@@ -3939,7 +3939,8 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "ask.settled.answeredInChat": "29568f953b2b0256ed7bd24dcfe2a2eb896d1f21b8bddcce0599b4d6fb9b66b9"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -10416,7 +10417,8 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "ask.settled.answeredInChat": "29568f953b2b0256ed7bd24dcfe2a2eb896d1f21b8bddcce0599b4d6fb9b66b9"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -14193,7 +14195,8 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "ask.settled.answeredInChat": "29568f953b2b0256ed7bd24dcfe2a2eb896d1f21b8bddcce0599b4d6fb9b66b9"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -17824,7 +17827,8 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "ask.settled.answeredInChat": "29568f953b2b0256ed7bd24dcfe2a2eb896d1f21b8bddcce0599b4d6fb9b66b9"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -25897,7 +25901,8 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "ask.settled.answeredInChat": "29568f953b2b0256ed7bd24dcfe2a2eb896d1f21b8bddcce0599b4d6fb9b66b9"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -36470,7 +36475,8 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "ask.settled.answeredInChat": "29568f953b2b0256ed7bd24dcfe2a2eb896d1f21b8bddcce0599b4d6fb9b66b9"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -44435,7 +44441,8 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "ask.settled.answeredInChat": "29568f953b2b0256ed7bd24dcfe2a2eb896d1f21b8bddcce0599b4d6fb9b66b9"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -54696,7 +54703,8 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "ask.settled.answeredInChat": "29568f953b2b0256ed7bd24dcfe2a2eb896d1f21b8bddcce0599b4d6fb9b66b9"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -58749,7 +58757,8 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "ask.settled.answeredInChat": "29568f953b2b0256ed7bd24dcfe2a2eb896d1f21b8bddcce0599b4d6fb9b66b9"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -64730,7 +64739,8 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "ask.settled.answeredInChat": "29568f953b2b0256ed7bd24dcfe2a2eb896d1f21b8bddcce0599b4d6fb9b66b9"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -70711,7 +70721,8 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "ask.settled.answeredInChat": "29568f953b2b0256ed7bd24dcfe2a2eb896d1f21b8bddcce0599b4d6fb9b66b9"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -77953,7 +77964,8 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "ask.settled.answeredInChat": "29568f953b2b0256ed7bd24dcfe2a2eb896d1f21b8bddcce0599b4d6fb9b66b9"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -85248,7 +85260,8 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "ask.settled.answeredInChat": "29568f953b2b0256ed7bd24dcfe2a2eb896d1f21b8bddcce0599b4d6fb9b66b9"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -92349,7 +92362,8 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "ask.settled.answeredInChat": "29568f953b2b0256ed7bd24dcfe2a2eb896d1f21b8bddcce0599b4d6fb9b66b9"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -100105,7 +100119,8 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "ask.settled.answeredInChat": "29568f953b2b0256ed7bd24dcfe2a2eb896d1f21b8bddcce0599b4d6fb9b66b9"
     }
   }
 }

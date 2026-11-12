@@ -2745,6 +2745,7 @@
   "ask.settled.answered": "आपका जवाब:",
   "ask.settled.stopped": "आपके जवाब देने से पहले रोक दिया गया",
   "ask.settled.expired": "किसी के जवाब देने से पहले समय समाप्त हो गया",
+  "ask.settled.answeredInChat": "चैट में जवाब दिया",
   "ask.error": "आपका जवाब नहीं भेजा जा सका। फिर से कोशिश करें।",
   "ask.detail.more": "सब दिखाएँ",
   "inbox.action.closeQuestion": "बिना जवाब दिए बंद करें",

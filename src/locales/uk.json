@@ -3183,6 +3183,7 @@
   "ask.settled.answered": "Ваша відповідь:",
   "ask.settled.stopped": "Зупинено до вашої відповіді",
   "ask.settled.expired": "Час минув, відповіді не було",
+  "ask.settled.answeredInChat": "Відповідь дано в чаті",
   "ask.error": "Не вдалося надіслати відповідь. Спробуйте ще раз.",
   "ask.detail.more": "Показати все",
   "inbox.action.closeQuestion": "Закрити без відповіді",
