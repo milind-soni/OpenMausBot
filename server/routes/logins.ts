@@ -21,8 +21,9 @@ export interface LoginRouteDeps {
     /** Bots for one item (`<vault id>:<item id>`) ahead of its vault's; null hands it back. False for an item the token does not
      * read, null when 1Password could not be read just now. */
     grantItem(item: string, bots: LoginBots | null): Promise<boolean | null>;
-    /** Every item's own bots at once (what My Cloud keeps of another computer's choices); an item left out goes back to its vault's. */
-    setItemGrants(grants: Record<string, LoginBots>): void;
+    /** Every item's own bots at once (what My Cloud keeps of another computer's choices); an item left out goes back to its vault's,
+     * unless `keep` leaves the items not named as they are. */
+    setItemGrants(grants: Record<string, LoginBots>, keep?: boolean): void;
   };
 }
 
@@ -130,7 +131,7 @@ export function createLoginRoutes(deps: LoginRouteDeps): RouteHandler {
         if (!ITEM_KEY.test(key) || !bots.ok || bots.value === undefined) return json(res, 400, { error: bots.ok ? LOGIN_ERRORS.bots : bots.error });
         grants[key] = bots.value;
       }
-      deps.onePassword.setItemGrants(grants);
+      deps.onePassword.setItemGrants(grants, body.keep === true);
       return json(res, 200, { items: Object.keys(grants).length });
     }
     if (path === ONE_PASSWORD || path.startsWith(`${ONE_PASSWORD}/`)) return json(res, 405, { error: "method not allowed" });

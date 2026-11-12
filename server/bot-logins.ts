@@ -184,7 +184,7 @@ export class BotLogins {
           return true;
         },
         // Kept whole, even for an item not loaded here yet: it then opens no wider than the computer that chose it.
-        setItemGrants: (grants) => this.store.setOnePasswordItemGrants(grants),
+        setItemGrants: (grants, keep) => this.store.setOnePasswordItemGrants(keep ? { ...this.store.onePasswordItemGrants(), ...grants } : grants),
       },
     };
   }

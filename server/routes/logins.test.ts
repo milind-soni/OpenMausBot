@@ -184,6 +184,9 @@ describe("Settings → Logins routes", () => {
     expect((await call("PUT", "/api/logins/1password/items", { items: { "v1/i1": [] } })).status).toBe(400);
     expect((await call("PUT", "/api/logins/1password/items", { items: [] })).status).toBe(400);
     expect(store.onePasswordItemGrants()).toEqual({ "v1:i9": [], "v2:x1": ["quill"] });
+    // keep: only the items named change; every other one stays as it was.
+    expect((await call("PUT", "/api/logins/1password/items", { items: { "v1:i9": ["quill"] }, keep: true })).status).toBe(200);
+    expect(store.onePasswordItemGrants()).toEqual({ "v1:i9": ["quill"], "v2:x1": ["quill"] });
     expect((await call("PUT", "/api/logins/1password/items", { items: {} })).status).toBe(200);
     expect(store.onePasswordItemGrants()).toEqual({});
   });

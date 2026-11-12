@@ -86,11 +86,13 @@ test("a bot's fields reach My Cloud without Custom approval", () => {
 function fakeSides({ cloudItems = [], localItems = [], refuse = {} } = {}) {
   const calls = [];
   const bodies = {};
+  const sent = [];
   const reply = (status, body) => ({ status, ok: status < 400, body });
   const session = {
     call: async (method, route, body) => {
       calls.push(`${method} ${route}`);
       bodies[`${method} ${route}`] = body;
+      sent.push([`${method} ${route}`, body]);
       if (route === "/api/cloud-send" || route === "/api/cloud-send?move=1") return reply(200, summary(cloudItems));
       const refused = refuse[`${method} ${route}`] ?? refuse[route];
       if (refused) return reply(refused.status, { error: refused.error });
@@ -103,6 +105,7 @@ function fakeSides({ cloudItems = [], localItems = [], refuse = {} } = {}) {
   return {
     calls,
     bodies,
+    sent,
     deps: {
       local: async (route) => {
         if (route === "/api/cloud-send" || route === "/api/cloud-send?move=1") return localJson(summary(localItems));
@@ -421,8 +424,23 @@ test("1Password items with bots of their own keep them on My Cloud; a Cloud too 
   vaults.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: { v1: [] } } });
   assert.equal((await createCloudSend(vaults.deps).send()).result.failed.length, 1);
   assert.ok(vaults.calls.includes("DELETE /api/logins/1password"), "a vault choice that did not take closes the token too");
-  // Item choices are in place there before the token is.
+  // This computer's item choices are in place there before the token is, leaving every other item there as it was; the
+  // whole map (handing back what was handed back here) goes only after the token and the vaults took.
+  const puts = sides.sent.filter(([call]) => call === "PUT /api/logins/1password/items").map(([, body]) => body);
+  assert.deepEqual(puts, [{ items: { "v1:i1": "all" }, keep: true }, { items: { "v1:i1": "all" } }]);
   assert.ok(sides.calls.indexOf("PUT /api/logins/1password/items") < sides.calls.indexOf("POST /api/logins/1password"));
+  assert.ok(sides.calls.lastIndexOf("PUT /api/logins/1password/items") > sides.calls.indexOf("PATCH /api/logins/1password/vaults/v1"));
+  // A token My Cloud did not take never hands an item back to a vault whose new choice did not arrive either.
+  const token = fakeSides({ localItems: [onePassword], refuse: { "POST /api/logins/1password": { status: 400, error: "bad token" } } });
+  token.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: { v1: [] }, itemGrants: { "v1:i2": [] } } });
+  assert.equal((await createCloudSend(token.deps).send()).result.failed.length, 1);
+  assert.deepEqual(token.sent.filter(([call]) => call === "PUT /api/logins/1password/items").map(([, body]) => body), [{ items: { "v1:i2": [] }, keep: true }]);
+  assert.ok(!token.calls.includes("PATCH /api/logins/1password/vaults/v1"));
+  // Nor does a vault choice that did not take: the token this send connected is taken off again.
+  const late = fakeSides({ localItems: [onePassword], refuse: { "/api/logins/1password/vaults/v1": { status: 500, error: "boom" } } });
+  late.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: { v1: [] }, itemGrants: {} } });
+  assert.equal((await createCloudSend(late.deps).send()).result.failed.length, 1);
+  assert.deepEqual(late.sent.filter(([call]) => call === "PUT /api/logins/1password/items").map(([, body]) => body), [{ items: {}, keep: true }]);
   const stuck = fakeSides({ localItems: [onePassword], refuse: { "/api/logins/1password/vaults/v1": { status: 500, error: "boom" }, "DELETE /api/logins/1password": { status: 500, error: "down" } } });
   stuck.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: { v1: [] } } });
   const left = (await createCloudSend(stuck.deps).send()).result.failed;
