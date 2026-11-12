@@ -7,16 +7,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BotEditorStore, type Message, type useStore } from "@/state/store";
 import { setAdvancedMode } from "@/lib/interface-mode";
-import { addPointedChip, forgetPointedChips, takePointedChips, usePointedChips } from "@/lib/pointed-chips";
+import { addPointedChip, forgetPointedChips, setPointedNote, takePointedChips, usePointedChips } from "@/lib/pointed-chips";
 import { setWebPanels } from "@/lib/web-panel-preferences";
 import { MAX_WEB_PANELS } from "@/lib/web-panels";
 import type { AppPayload } from "../../../shared/app";
 import type { PublishedPageCard } from "../../../shared/published-page";
 import { botHtmlDocument } from "../../../shared/app-frame/document";
-import { POINT_LIMITS, POINTED_METHOD } from "../../../shared/app-frame/point";
+import { marksMessage, POINT_LIMITS, POINTED_METHOD } from "../../../shared/app-frame/point";
 import { createAppPool, type AppPool } from "./app-pool";
 import { AppMessage, forgetAppRows } from "./AppMessage";
 import { PAGE_HEIGHT } from "./PageTools";
+import { PointedChips } from "./PointedChips";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -128,18 +129,22 @@ describe("a bot's page in the chat", () => {
     await fromFrame(PICK, inlineFrame().contentWindow);
     expect(chips()).toEqual([]);
     await click("Point", card());
-    expect(posted).toHaveBeenLastCalledWith({ jsonrpc: "2.0", method: "mausbot/point", params: { on: true } }, "*");
+    expect(posted).toHaveBeenCalledWith({ jsonrpc: "2.0", method: "mausbot/point", params: { on: true } }, "*");
     expect(card().textContent).toContain("Click the part of the page you want changed.");
     await fromFrame(PICK, window);
     expect(chips()).toEqual([]);
     await fromFrame(PICK, inlineFrame().contentWindow);
     expect(chips()).toEqual([{ appId: "a1", rev: 0, title: "Pricing", tag: "button", role: "button", text: "Choose Pro",
       selector: "main > section:nth-of-type(2) > button", html: "<button>Choose Pro</button>" }]);
-    expect(button("Point", card()).getAttribute("aria-pressed")).toBe("false");
-    await click("Point", card());
+    expect(posted).toHaveBeenCalledWith(marksMessage(["main > section:nth-of-type(2) > button"]), "*");
+    // Point stays on, so the next part is one click away.
+    expect(button("Point", card()).getAttribute("aria-pressed")).toBe("true");
+    await fromFrame({ ...PICK, params: { ...PICK.params, text: "Terms", selector: "footer > a" } }, inlineFrame().contentWindow);
+    expect(chips()).toHaveLength(2);
+    expect(posted).toHaveBeenLastCalledWith(marksMessage(["main > section:nth-of-type(2) > button", "footer > a"]), "*");
     await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
     expect(button("Point", card()).getAttribute("aria-pressed")).toBe("false");
-    expect(posted).toHaveBeenLastCalledWith({ jsonrpc: "2.0", method: "mausbot/point", params: { on: false } }, "*");
+    expect(posted).toHaveBeenCalledWith({ jsonrpc: "2.0", method: "mausbot/point", params: { on: false } }, "*");
   });
 
   it("shares the version on screen; the card the server patches shows the link with Copy, opens it, and unpublishes it", async () => {
@@ -172,7 +177,7 @@ describe("a bot's page in the chat", () => {
     expect(fetchMock.mock.calls.some(([path]) => path.includes("/publish"))).toBe(false);
   });
 
-  it("opens Full screen over the chat, points there too, and closes on Escape or after a pick", async () => {
+  it("opens Full screen over the chat, points there too, and closes on Escape or when Point ends after a pick", async () => {
     await render(row(payload()));
     await click("Full screen", card());
     expect(overlay()?.getAttribute("role")).toBe("dialog");
@@ -191,6 +196,8 @@ describe("a bot's page in the chat", () => {
     await click("Point", overlay()!);
     await fromFrame(PICK, wideFrame().contentWindow);
     expect(chips()).toHaveLength(1);
+    expect(overlay()).not.toBeNull();
+    await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
     expect(overlay()).toBeNull();
   });
 
@@ -240,16 +247,43 @@ describe("a bot's page in the chat", () => {
 describe("pointed chips", () => {
   const chip = (selector: string) => ({ appId: "a1", rev: 0, title: "Pricing", tag: "div", role: "", text: selector, selector, html: "<div></div>" });
 
-  it("keep one chip per part, the newest few, and go with one send or come back when it fails", () => {
+  it("keep one chip per part, refuse a part past the limit, and go with one send or come back when it fails", () => {
     for (const selector of ["a", "b", "a"]) addPointedChip("t1", chip(selector));
     expect(takePointedChips("t2")).toBeNull();
     const taken = takePointedChips("t1")!;
-    expect(taken.pointed.map((element) => element.selector)).toEqual(["b", "a"]);
+    expect(taken.pointed.map((element) => element.selector)).toEqual(["a", "b"]);
     expect(taken.pointed[0]).not.toHaveProperty("title");
     expect(takePointedChips("t1")).toBeNull();
     taken.restore();
     expect(takePointedChips("t1")!.pointed).toHaveLength(2);
-    for (let n = 0; n < POINT_LIMITS.perMessage + 2; n += 1) addPointedChip("t1", chip(`s${n}`));
-    expect(takePointedChips("t1")!.pointed.map((element) => element.selector)).toEqual(["s2", "s3", "s4", "s5", "s6"]);
+    const added = Array.from({ length: POINT_LIMITS.perMessage + 2 }, (_, n) => addPointedChip("t1", chip(`s${n}`)));
+    expect(POINT_LIMITS.perMessage).toBeGreaterThanOrEqual(20);
+    expect(added.filter(Boolean)).toHaveLength(POINT_LIMITS.perMessage);
+    expect(added.slice(-2)).toEqual([false, false]);
+    const kept = takePointedChips("t1")!.pointed.map((element) => element.selector);
+    expect(kept).toHaveLength(POINT_LIMITS.perMessage);
+    expect(kept[0]).toBe("s0");
+  });
+
+  it("carry the person's note on a part, trimmed and clipped, and keep it when the same part is picked again", () => {
+    for (const selector of ["a", "b"]) addPointedChip("t1", chip(selector));
+    act(() => root.render(createElement(PointedChips, { threadId: "t1" })));
+    expect(Array.from(host.querySelectorAll("[data-pointed-chip]"), (each) => each.textContent)).toEqual(["1“a”<div>", "2“b”<div>"]);
+    act(() => button("Write a note on “b”", host).click());
+    const input = host.querySelector<HTMLInputElement>("[data-pointed-note]")!;
+    expect(input.getAttribute("aria-label")).toBe("Note on “b” for the bot (optional)");
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, `  make it bolder ${"x".repeat(POINT_LIMITS.note)}`);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    act(() => { input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+    expect(host.querySelector("[data-pointed-note]")).toBeNull();
+    addPointedChip("t1", { ...chip("b"), rev: 1 });
+    const taken = takePointedChips("t1")!.pointed;
+    expect(taken.map((element) => [element.selector, element.rev])).toEqual([["a", 0], ["b", 1]]);
+    expect(taken[0]).not.toHaveProperty("note");
+    expect(taken[1]!.note!.startsWith("make it bolder x")).toBe(true);
+    expect(Array.from(taken[1]!.note!).length).toBeLessThanOrEqual(POINT_LIMITS.note);
+    setPointedNote("t1", "no-such-chip", "ignored");
   });
 });

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from "vitest";
 
-import { APP_POINT_SOURCE, POINT_ENDED_METHOD, POINT_LIMITS, POINTED_METHOD, pointedLabel, pointMessage, readPointEvent } from "./point.ts";
+import { APP_POINT_SOURCE, marksMessage, POINT_ENDED_METHOD, POINT_LIMITS, POINTED_METHOD, pointedLabel, pointMessage, readPointEvent } from "./point.ts";
 
 const frame = { name: "the page's window" };
 const pick = (params: Record<string, unknown>) => ({ jsonrpc: "2.0", method: POINTED_METHOD, params });
@@ -40,7 +40,14 @@ describe("readPointEvent", () => {
 describe("the page's point script", () => {
   type Listener = (event: { source: unknown; data: unknown }) => void;
   const posted: unknown[] = [];
-  afterEach(() => { posted.length = 0; document.body.innerHTML = ""; document.documentElement.style.cursor = ""; });
+  // Point stays on after a pick, and every boot listens on the one window, so each test turns its scripts off after it.
+  const booted: Array<(data: unknown) => void> = [];
+  afterEach(() => {
+    for (const say of booted.splice(0)) say(pointMessage(false));
+    posted.length = 0;
+    document.body.innerHTML = "";
+    document.documentElement.style.cursor = "";
+  });
 
   function boot() {
     document.body.innerHTML = `<main><section id="plans"><div class="card"><h2>Starter</h2><button>Choose Starter</button></div>
@@ -60,11 +67,12 @@ describe("the page's point script", () => {
     });
     new Function("window", "document", APP_POINT_SOURCE)(fake, document);
     const say = (data: unknown, source: unknown = parent) => { for (const listener of messages) listener({ source, data }); };
+    booted.push(say);
     return { say };
   }
   const click = (element: Element) => element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 
-  it("describes the clicked element to its parent only while point mode is on, then turns itself off", () => {
+  it("describes each clicked element to its parent while point mode is on, and stays on until the parent turns it off", () => {
     const { say } = boot();
     const pro = document.querySelectorAll("button")[0]!;
     click(pro);
@@ -80,9 +88,29 @@ describe("the page's point script", () => {
     pro.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
     expect(posted).toEqual([pick({ tag: "button", role: "button", text: "Choose Starter", selector: "#plans > div:nth-of-type(1) > button", html: "<button>Choose Starter</button>" })]);
+    expect(document.documentElement.style.cursor).toBe("crosshair");
+    click(document.querySelector("a")!);
+    expect(posted).toHaveLength(2);
+    expect(posted.at(-1)).toMatchObject({ params: { tag: "a", text: "Terms" } });
+    say(pointMessage(false));
     expect(document.documentElement.style.cursor).toBe("");
     click(pro);
-    expect(posted).toHaveLength(1);
+    expect(posted).toHaveLength(2);
+  });
+
+  it("outlines the parts waiting in the composer with their numbers, only on the parent's word, and never picks an outline", () => {
+    const { say } = boot();
+    const outlines = () => Array.from(document.querySelectorAll("[data-mausbot-point=mark]"), (mark) => mark.textContent);
+    say(marksMessage(["#plans > div:nth-of-type(1) > button", "#gone", "a:::bad", "footer > a"]), { name: "not the parent" });
+    expect(outlines()).toEqual([]);
+    say(marksMessage(["#plans > div:nth-of-type(1) > button", "#gone", "a:::bad", "footer > a"]));
+    expect(outlines()).toEqual(["1", "4"]);
+    say(pointMessage(true));
+    const mark = document.querySelector("[data-mausbot-point=mark]")!;
+    mark.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(posted).toEqual([]);
+    say(marksMessage([]));
+    expect(outlines()).toEqual([]);
   });
 
   it("keeps a space between a badge and the words after it, so the chip label reads as the page does", () => {

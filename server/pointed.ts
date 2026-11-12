@@ -17,6 +17,7 @@ const part = z.object({
   text: z.string().max(POINT_LIMITS.text * 2),
   selector: z.string().min(1).max(POINT_LIMITS.selector * 2),
   html: z.string().max(POINT_LIMITS.html * 2),
+  note: z.string().max(POINT_LIMITS.note * 2).optional(),
 }).strict();
 const parts = z.array(part).min(1).max(POINT_LIMITS.perMessage);
 
@@ -41,9 +42,12 @@ export function preparePointed(store: Pick<AgentCardStore, "messagesFor">, threa
     const versions = [...new Set(picks.map((pick) => pick.rev + 1))].map((version) => `version ${version}`).join(" and ");
     const lines = picks.map((pick, index) =>
       `${index + 1}. <${pick.tag}>${pick.role ? ` role ${pick.role}` : ""}; text: ${pick.text || "(none)"}; selector: ${pick.selector}; html: ${pick.html}`);
+    // The notes are the person's own words, typed beside each chip, so they sit outside the page's records.
+    const notes = picks.flatMap((pick, index) => (pick.note?.trim() ? [`${index + 1}. ${clean(pick.note, POINT_LIMITS.note)}`] : []));
     blocks.push([
       `Page app_id "${appId}" (now version ${current}); the person was looking at ${versions}.`,
       recordsBlock(`the page "${title}", describing what the person pointed at`, lines),
+      ...(notes.length ? ["The person's notes on those parts, by number:", ...notes] : []),
     ].join("\n"));
   }
   return {
