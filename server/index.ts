@@ -1484,7 +1484,7 @@ const browserCleanup: BrowserCleanupCoordinator = new BrowserCleanupCoordinator(
     return true;
   },
 });
-const phoneSecrets = new PhoneSecretBridge(postDesktopPrivateMessage);
+const phoneSecrets = new PhoneSecretBridge(postDesktopPrivateMessage, undefined, undefined, DESKTOP_MANAGED);
 utilityParentPort?.on("message", (event) => {
   const message = event?.data;
   try {
@@ -12786,6 +12786,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         url: base ? `${base}/pair#code=${code}` : null,
         inviteUrl: invite,
         serverName, ...(phoneRelay ? { relay: phoneRelay.status() } : {}),
+        // False until a desktop app hands this server its phone key; a self-hosted server never gets one.
+        phoneSecrets: phoneSecrets.ready,
         hint: base
           ? null
           : "this server has no public address to put in a link: set OMB_PUBLIC_URL, or open /pair on the address you use and type the code",

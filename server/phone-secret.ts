@@ -319,16 +319,25 @@ export class PhoneSecretBridge {
   private readonly send: SendPrivateMessage;
   private readonly timeoutMs: number;
   private readonly maximumPending: number;
+  private readonly desktopManaged: boolean;
 
   constructor(
     send: SendPrivateMessage,
     // Outlives every provider's validation deadline but stays below the HTTPS proxy and phone deadlines (Cloudflare's boundary).
     timeoutMs = 90_000,
     maximumPending = 8,
+    /** False on a self-hosted server: no desktop app ever hands it a key, so reopening the app cannot help. */
+    desktopManaged = true,
   ) {
     this.send = send;
+    this.desktopManaged = desktopManaged;
     this.timeoutMs = timeoutMs;
     this.maximumPending = maximumPending;
+  }
+
+  /** Whether a phone can seal a secret for this computer: only after the desktop app has handed over its key. */
+  get ready(): boolean {
+    return this.identity !== null;
   }
 
   receive(raw: unknown): boolean {
@@ -375,7 +384,9 @@ export class PhoneSecretBridge {
   private async openWithinLimit(context: PhoneSecretContext): Promise<string> {
     if (!this.identity) {
       throw new PhoneSecretError(
-        "Secure phone entry is not ready on this computer. Reopen OpenMausBot and try again.",
+        this.desktopManaged
+          ? "Secure phone entry is not ready on this computer. Reopen OpenMausBot and try again."
+          : "This server cannot take secrets from a phone. Enter it on the web or on your computer instead.",
         503,
       );
     }

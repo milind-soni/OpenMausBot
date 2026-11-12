@@ -6080,6 +6080,7 @@
   "settings.domain.failed": "The domain could not be updated. Check DNS and HTTPS, then try again.",
   "remote.serverPairing.title": "Pair a phone or another computer",
   "remote.serverPairing.subtitle": "Create a one-time code, then scan it with the {app} app or open the link in a browser. Codes work once and expire after five minutes.",
+  "remote.serverPairing.noPhoneSecrets": "This phone can chat and approve here, but secrets must be entered on the web or computer.",
   "remote.serverPairing.scope.admin": "Full access",
   "remote.serverPairing.scope.client": "Chat and approvals only",
   "remote.serverPairing.create": "Create pairing code",
