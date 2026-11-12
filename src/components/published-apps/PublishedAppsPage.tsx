@@ -31,6 +31,7 @@ export function chatFor(app: PublishedApp, state: Pick<AppState, "bots" | "group
 export function PublishedAppsPage() {
   const { state, dispatch } = useStore();
   const [apps, setApps] = useState<PublishedApp[] | null>(null);
+  const [included, setIncluded] = useState<PublishedAppsList["included"]>();
   const [failed, setFailed] = useState(false);
   const back = useRef<HTMLButtonElement>(null);
   const loading = useRef<AbortController | null>(null);
@@ -44,6 +45,7 @@ export function PublishedAppsPage() {
       if (controller.signal.aborted) return;
       rememberPublishedApps(list.apps);
       setApps(list.apps);
+      setIncluded(list.included);
       setFailed(false);
     } catch {
       if (!controller.signal.aborted) setFailed(true);
@@ -82,6 +84,7 @@ export function PublishedAppsPage() {
       </ToolPageHeader>
       <div className="min-h-0 flex-1 overflow-y-auto" data-published-apps={apps ? apps.length : "loading"}>
         <div className="mx-auto w-full max-w-5xl p-4 sm:p-6">
+          {apps && included && <p data-included-apps={`${included.used}/${included.max}`} className="mb-3 text-[13px] text-ink-secondary">{t("publishedApps.included.used", included)}</p>}
           {failed && !apps ? (
             <section role="alert" className="px-6 py-16 text-center">
               <p className="text-[14px] text-ink-secondary">{t("publishedApps.loadFailed")}</p>

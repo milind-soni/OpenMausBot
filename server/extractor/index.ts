@@ -131,7 +131,7 @@ export function createExtractor(deps: ExtractorDeps): Extractor {
   };
 }
 
-/** Settings' "Decision and extraction" page: which of the person's own keys are on file and who reads, never a key.
+/** Settings' "Routing and extraction" section (AI page): which of the person's own keys are on file and who reads, never a key.
  * The Cloudflare account ID is not a secret, so it is shown back. */
 export function describeHelpers(cfg: AppConfig) {
   const accountId = cfg.decider?.workersAiAccountId?.trim();

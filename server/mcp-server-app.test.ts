@@ -7,9 +7,11 @@ describe("the connected app an MCP server stands for", () => {
   it.each([
     ["any name", "https://gmailmcp.googleapis.com/mcp/v1", "gmail"],
     ["any name", "https://calendarmcp.googleapis.com/mcp/v1", "googlecalendar"],
+    ["Gmail-work", "https://gmailmcp.googleapis.com/mcp/v1", "gmail"],
     ["gmail", "https://mcp.example/gmail", "gmail"],
-    ["Gmail-work", "https://mcp.example/", "gmail"],
+    ["Gmail_MCP", "https://mcp.example/", "gmail"],
     ["google-calendar", "https://mcp.example/", "googlecalendar"],
+    ["googlecalendar-mcp", "https://mcp.example/", "googlecalendar"],
     ["gcal", "not a url", "googlecalendar"],
   ])("knows %s at %s as %s", (name, url, slug) => {
     expect(knownMcpServerApp(name, url)?.slug).toBe(slug);
@@ -19,6 +21,11 @@ describe("the connected app an MCP server stands for", () => {
     ["mail", "https://mail.example/mcp"],
     ["gmailer", "https://mail.example/mcp"],
     ["my-gmail", "https://mail.example/mcp"],
+    ["Gmail-work", "https://mail.example/mcp"],
+    ["gmail-filters", "https://mail.example/mcp"],
+    ["gmail_to_notion", "https://mail.example/mcp"],
+    ["gmail2", "https://mail.example/mcp"],
+    ["gcal2notion", "https://cal.example/mcp"],
     ["calendar", "https://cal.example/mcp"],
     ["drive", "https://drivemcp.googleapis.com/mcp/v1"],
     ["anything", "https://gmailmcp.googleapis.com.example/mcp"],

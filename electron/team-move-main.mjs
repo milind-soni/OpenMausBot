@@ -44,7 +44,7 @@ export function teamMoveConfirmWords(names, t = nativeText.englishText.t) {
   return {
     message: t("teamMove.title", names),
     detail: [
-      t("teamMove.everyone", names),
+      t("teamMove.yours", names),
       t("teamMove.goes", names),
       t("teamMove.private"),
       t("teamMove.staysOnMyCloud", names),

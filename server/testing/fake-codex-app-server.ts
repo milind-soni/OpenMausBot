@@ -23,6 +23,7 @@
 //   FAKE_CODEX_COMMAND  the happy turn's one call, this command (default: "ls -la" and a web search);
 //     FAKE_CODEX_COMMAND_OUTPUT  JSON chunks it prints as item/commandExecution/outputDelta notifications, one every
 //     FAKE_CODEX_COMMAND_OUTPUT_MS (default all at once); FAKE_CODEX_COMMAND_GATE  the turn finishes once this file exists
+//   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (as stream-script.ts)
 //   FAKE_CODEX_PATCH_BYTES  each turn first writes web/index.html by apply_patch, streamed as two
 //     item/fileChange/patchUpdated notifications (codex-cli 0.160.1's schema) of half and all this many bytes
 //   FAKE_CODEX_IGNORE_FEATURES  "1": config/read reports no `-c features.*` override
@@ -421,6 +422,54 @@ const finishTurn = () => {
   }
 };
 
+// The scripted replies every fake plays (FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE); inlined, since tests copy this fake
+// out of the repo.
+let streamTurn = 0;
+const streamScriptFor = (prompt: string): { steps: Array<Record<string, string>>; chars: number; ms: number } | null => {
+  if (!process.env.FAKE_STREAM_SCRIPT) return null;
+  let scripts: Record<string, Array<Record<string, string>>>;
+  try { scripts = JSON.parse(readFileSync(process.env.FAKE_STREAM_SCRIPT, "utf8")); } catch { return null; }
+  // A prompt can carry earlier requests as context: the newest marker in it is the request.
+  const marker = Object.keys(scripts).filter((key) => prompt.includes(key)).sort((a, b) => prompt.lastIndexOf(b) - prompt.lastIndexOf(a) || b.length - a.length)[0];
+  if (!marker) return null;
+  const [chars = 4, ms = 40] = (process.env.FAKE_STREAM_CADENCE ?? "4:40").split(":").map(Number);
+  return { steps: scripts[marker]!, chars: Math.max(1, chars), ms: Math.max(0, ms) };
+};
+const playStreamScript = (script: NonNullable<ReturnType<typeof streamScriptFor>>) => {
+  const turn = ++streamTurn;
+  const live = () => turn === streamTurn;
+  const queue = script.steps.slice();
+  let index = 0;
+  const next = () => {
+    if (!live()) return;
+    const step = queue.shift();
+    if (!step) return void notify("turn/completed", { turn: { status: "completed" } });
+    index += 1;
+    if (step.fail !== undefined) return void notify("turn/completed", { turn: { status: "failed", error: { message: step.fail } } });
+    if (step.tool !== undefined) {
+      notify("item/started", { item: { id: `c${index}`, type: "commandExecution", command: step.tool } });
+      notify("item/completed", { item: { id: `c${index}`, type: "commandExecution", status: "completed", aggregatedOutput: "ok", exitCode: 0 } });
+      return void setTimeout(next, script.ms);
+    }
+    const text = step.say ?? step.think ?? "";
+    const id = `m${index}`;
+    if (step.say !== undefined) notify("item/started", { item: { id, type: "agentMessage", text: "" } });
+    let at = 0;
+    const send = () => {
+      if (!live()) return;
+      if (at < text.length) {
+        const delta = text.slice(at, at += script.chars);
+        notify(step.say !== undefined ? "item/agentMessage/delta" : "item/reasoning/textDelta", { itemId: id, delta });
+        return void setTimeout(send, script.ms);
+      }
+      if (step.say !== undefined) notify("item/completed", { item: { id, type: "agentMessage", text } });
+      setTimeout(next, script.ms);
+    };
+    send();
+  };
+  next();
+};
+
 const playRoomPlanTurn = (msg: any, planPath: string) => {
   const ack = () => out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
   const early = process.env.FAKE_CODEX_COMPLETE_BEFORE_ACK === "1";
@@ -634,6 +683,7 @@ process.stdin.on("data", (chunk) => {
       }
       case "turn/interrupt":
         dump();
+        streamTurn += 1;
         if (process.env.FAKE_CODEX_INTERRUPT_SILENT) break;
         out({ jsonrpc: "2.0", id: msg.id, result: {} });
         notify("turn/completed", { turn: { status: "interrupted" } });
@@ -868,6 +918,11 @@ process.stdin.on("data", (chunk) => {
         }
         if (mode === "early-turn-events") finishTurn();
         out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+        const script = streamScriptFor((msg.params?.input ?? []).filter((item: any) => item?.type === "text").map((item: any) => item.text).join("\n"));
+        if (script) {
+          playStreamScript(script);
+          break;
+        }
         if (mode === "early-turn-events") break;
         if (process.env.FAKE_CODEX_ECHO_INPUT === "1") {
           const prompt = { type: "userMessage", id: "u1", content: msg.params?.input ?? [] };

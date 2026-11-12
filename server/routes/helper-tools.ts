@@ -37,13 +37,13 @@ const IMAGE_TYPES: Record<string, ExtractImage["mime"]> = { ".png": "image/png",
 const TEXT_FILE_BYTES = 1024 * 1024;
 
 export const HELPER_MESSAGES = {
-  decideOff: "Decisions aren't set up on this computer. Ask the person to add a free Cloudflare Workers AI key (or a Jev key) in Settings → Decision and extraction.",
-  extractOff: "Extraction isn't set up on this computer. Ask the person to add a free Cloudflare Workers AI key in Settings → Decision and extraction.",
+  decideOff: "Decisions aren't set up on this computer. Ask the person to add a free Cloudflare Workers AI key (or a Jev key) in Settings › AI › Routing and extraction.",
+  extractOff: "Extraction isn't set up on this computer. Ask the person to add a free Cloudflare Workers AI key in Settings › AI › Routing and extraction.",
   decideShape: "Keep to 8 questions; ids and option keys use letters, digits, _ . or -; a choice has 2 to 20 options, a score 2 to 10 levels; instructions under 1,000 characters and the state under 24 KB.",
 } as const;
 
 const FAILURE: Partial<Record<DeciderFailure, string>> = {
-  rejected: "The helper model refused its key. Ask the person to check it in Settings → Decision and extraction.",
+  rejected: "The helper model refused its key. Ask the person to check it in Settings › AI › Routing and extraction.",
   rate_limited: "The helper model's allowance is used up for now. Try again later, or do this yourself.",
   overloaded: "The helper model is busy. Try again in a minute.",
   timeout: "The helper model took too long. Try a smaller input.",

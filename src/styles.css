@@ -164,9 +164,9 @@
   /* the 0.5px line where two panes meet: the sidebar and the chat */
   --color-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
   /* the window's frame: its top bar and the rail of places, around the
-     app's pane (the sidebar and the chat). The app's own colour a step darker, so it
-     stays in the skin's family: --frame-shade of black. */
-  --color-frame: color-mix(in oklab, var(--color-app), black var(--frame-shade));
+     app's card (the sidebar and the chat). The sidebar's colour in every skin,
+     so the bar, the rail and the sidebar read as one field. */
+  --color-frame: var(--color-panel);
   --color-ink: #f5f5f5;
   --color-ink-secondary: #f5f5f5a8;
   /* quiet text: timestamps, hints, placeholders, calendar hours. It used to
@@ -232,10 +232,6 @@
 
 :root {
   --code-color-scheme: dark;
-  /* how far the frame steps from the app's colour toward black: further on
-     the dark skins, whose colours sit close to black, and a small step on the
-     light ones (2.5%), where the quiet ink must still clear 4.5:1 on it */
-  --frame-shade: 30%;
   /* ink carried by a filled accent / danger surface (see the rule at the
      bottom of this file, which is what makes them take effect) */
   --color-accent-ink: #ffffff;
@@ -333,7 +329,6 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="atelier"] {
   --code-color-scheme: light;
-  --frame-shade: 3%;
   --color-app: #f5f1eb;           /* outermost ground */
   --color-panel: #fbf8f2;         /* sidebar */
   --color-raised: #ffffff;        /* content — raised means lighter here */
@@ -484,7 +479,6 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="lagoon"] {
   --code-color-scheme: light;
-  --frame-shade: 4%;
   /* The tint is the point, so it is carried by the surfaces, not by a button:
      the ground sits 13 points of green-blue above its red channel, roughly
      three times Atelier's cream cast, which is what makes the skin read as
@@ -620,7 +614,6 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="linen"] {
   --code-color-scheme: light;
-  --frame-shade: 3.5%;
   --color-app: #eceff3;
   --color-panel: #f5f6f8;
   --color-raised: #ffffff;
@@ -756,10 +749,8 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="daylight"] {
   --code-color-scheme: light;
-  --frame-shade: 6%;
   --color-app: #fcfcfc;           /* the thread */
   --color-panel: #f5f5f5;         /* sidebar */
-  --color-frame: var(--color-panel);
   --color-raised: #e4e4e4;        /* the sidebar's selected row: 8% ink on the panel */
   --color-raised-hover: #d8d8d8;
   --color-card: #efefef;          /* what a bot says: 6% ink on the page */
@@ -827,7 +818,6 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="meadow"] {
   --code-color-scheme: light;
-  --frame-shade: 6%;
   --color-app: #ffffff;           /* the thread */
   --color-panel: #f6f8f6;         /* sidebar */
   --color-raised: #e9eeea;
@@ -892,7 +882,6 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="pop"] {
   --code-color-scheme: light;
-  --frame-shade: 6%;
   --color-app: #fdf5ea;           /* the page */
   --color-panel: #f6ebdb;         /* sidebar */
   --color-raised: #efe3d1;
@@ -1637,14 +1626,16 @@ body {
 }
 /* On a phone Settings is a sheet: it fills the width, rises from the bottom and rounds only its top corners. */
 @media (max-width: 767.98px) {
+  /* The window's rail of places is a view of its own drawn over this page's left edge: the sheet starts beside it, and
+     below the window's top bar where the window draws one. */
   .glass-popup-frame[data-settings-sheet] {
     align-items: flex-end;
-    padding: 44px 0 0;
+    padding: var(--settings-narrow-top, 12px) 0 0 var(--rail-beside, 0px);
   }
   .glass-popup-frame[data-settings-sheet] > .glass-popup {
     width: 100%;
     height: 100%;
-    border-radius: 24px 24px 0 0;
+    border-radius: 16px 16px 0 0;
   }
 }
 /* Cards and rails sitting on the glass: a second, thinner pane. */
@@ -1696,10 +1687,135 @@ body {
 /* Settings: cards and fields edge in one faint ink line. In Midnight and Daylight the sheet is opaque, in the page
    colour, with no shadow; every other skin keeps its glass. */
 [data-settings-look] {
-  --settings-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  --settings-sheet: var(--color-menu);
+  --settings-edge: color-mix(in srgb, var(--color-ink) 10%, transparent);
+  --switch-on: var(--color-accent);
+  --switch-knob-on: #fff;
+  --switch-outline: color-mix(in srgb, var(--color-ink) 50%, transparent);
 }
 :root[data-skin="midnight"] [data-settings-look] {
-  --settings-edge: color-mix(in srgb, var(--color-ink) 6%, transparent);
+  --settings-edge: color-mix(in srgb, var(--color-ink) 9%, transparent);
+  --switch-outline: color-mix(in srgb, var(--color-ink) 40%, transparent);
+}
+:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] {
+  --settings-sheet: var(--color-app);
+  --switch-on: var(--color-ink);
+  --switch-knob-on: var(--color-app);
+}
+/* One switch in Settings: 32 by 20. Off is a light fill with an outline that keeps 3:1 against the card. */
+[data-settings-look] [data-switch] {
+  width: 32px;
+  height: 20px;
+  background: color-mix(in srgb, var(--color-ink) 22%, transparent);
+  box-shadow: inset 0 0 0 1px var(--switch-outline);
+  filter: none;
+}
+[data-settings-look] [data-switch][aria-checked="true"] {
+  background: var(--switch-on);
+  box-shadow: none;
+}
+[data-settings-look] [data-switch] > span {
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  transition-duration: 150ms;
+}
+[data-settings-look] [data-switch][aria-checked="true"] > span {
+  left: 14px;
+  background: var(--switch-knob-on);
+}
+/* One button family in Settings: 28 tall pills, 13/20 500; secondary on a 5% ink fill. */
+[data-settings-look] .ui-button {
+  height: 28px;
+  min-height: 28px;
+  border-radius: 9999px;
+  border-color: transparent;
+  padding: 0 12px;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+}
+[data-settings-look] .ui-button:not(.ui-button-primary) {
+  background: color-mix(in srgb, var(--color-ink) 5%, transparent);
+  color: var(--color-ink);
+}
+[data-settings-look] .ui-button:not(.ui-button-primary):enabled:is(:hover, :active) {
+  background: color-mix(in srgb, var(--color-ink) 10%, transparent);
+}
+[data-settings-look] .settings-quiet {
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--color-ink-secondary);
+}
+/* A quiet button's text ends on the control edge (card right − 16), like a filled button's edge. */
+[data-settings-look] :is([data-settings-control], [data-settings-actions], [data-settings-form-foot]) > .settings-quiet:last-child { margin-inline-end: -6px; }
+[data-settings-look] .settings-quiet:enabled:hover { color: var(--color-ink); background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
+[data-settings-look] .settings-quiet[data-danger]:enabled:hover { color: var(--color-danger); }
+/* Rows in a card part with a hairline that starts where their text starts: 16 in, 60 in a card whose rows lead with an icon. */
+/* A row wrapped in a `display: contents` element (for a data hook) parts from the one above all the same. */
+[data-settings-rows] > :not([hidden]) ~ :not([hidden], .contents),
+[data-settings-rows] > :not([hidden]) ~ .contents > :first-child {
+  background-image: linear-gradient(var(--settings-edge), var(--settings-edge));
+  background-repeat: no-repeat;
+  background-size: calc(100% - 32px) 0.5px;
+  background-position: 16px 0;
+}
+/* Rows kept together in a `display: contents` wrapper (a group with a data hook) part from each other the same way. */
+[data-settings-rows] > .contents > :not([hidden]) ~ :not([hidden], .contents) {
+  background-image: linear-gradient(var(--settings-edge), var(--settings-edge));
+  background-repeat: no-repeat;
+  background-size: calc(100% - 32px) 0.5px;
+  background-position: 16px 0;
+}
+[data-settings-rows][data-settings-icons] > :not([hidden]) ~ :not([hidden], .contents),
+[data-settings-rows][data-settings-icons] > :not([hidden]) ~ .contents > :first-child,
+[data-settings-rows][data-settings-icons] > .contents > :not([hidden]) ~ :not([hidden], .contents) {
+  background-size: calc(100% - 76px) 0.5px;
+  background-position: 60px 0;
+}
+/* Narrow cards (§6.12): below 480 a select, a segmented control or a wide button (one marked data-settings-drop, such as
+   Pair a phone) drops under its text, 8 below the description and at the text's left edge; a select takes the full
+   width. Switches and small buttons stay on the right. */
+@container rows (max-width: 480px) {
+  [data-settings-control]:has(select, [data-settings-segmented], [data-settings-drop]) {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+  }
+  [data-settings-control] > [data-settings-select] {
+    flex: 1 1 auto;
+    max-width: none;
+    width: 100%;
+  }
+  [data-settings-control] > [data-settings-select] > select {
+    width: 100%;
+    max-width: none;
+  }
+}
+/* Narrow Midnight remaps the app's surfaces for the phone layout; Settings keeps the desktop sheet and card colours. */
+@media (max-width: 767.98px) {
+  :root[data-skin="midnight"] [data-settings-look] {
+    --color-app: #121212;
+    --color-menu: #1f1f1f;
+  }
+}
+/* Descriptions wrap without leaving one word alone on a line. Only the wrap style: `text-wrap: pretty` would also set
+   the wrap mode back to wrap and undo every one-line, ellipsis label (nav items, search results, sub-lines). */
+[data-settings-look] :is(p, span, div) { text-wrap-style: pretty; }
+[data-settings-highlight] {
+  animation: settings-highlight 1.2s ease-out;
+}
+@keyframes settings-highlight {
+  from { background-color: var(--color-menu-active); }
+  to { background-color: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-settings-highlight] { animation: none; }
 }
 :root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .glass-surface {
   background: var(--color-app);
@@ -1741,8 +1857,22 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--color-scrollbar) transparent;
 }
+@property --settings-fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes settings-fade-top {
+  0% { --settings-fade-top: 0px; }
+  6%, 100% { --settings-fade-top: 12px; }
+}
 @supports (animation-timeline: scroll()) {
   .settings-scroll {
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--settings-fade-top), #000 calc(100% - var(--settings-fade)), transparent);
+    animation: settings-fade linear both, settings-fade-top linear both;
+    animation-timeline: scroll(self), scroll(self);
+  }
+  .settings-scroll[data-settings-content] {
     mask-image: linear-gradient(to bottom, #000 calc(100% - var(--settings-fade)), transparent);
     animation: settings-fade linear both;
     animation-timeline: scroll(self);
@@ -1753,13 +1883,10 @@ body {
   box-shadow: 0 24px 64px -16px rgb(28 28 28 / 0.28), 0 2px 8px rgb(28 28 28 / 0.06);
 }
 @media (min-width: 768px) {
-  .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] {
-    padding: 48px 16px;
-  }
   .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] > .glass-popup {
-    width: min(860px, 100%);
-    height: min(700px, 100%);
-    border-radius: 12px;
+    width: min(920px, 100%);
+    height: min(720px, 100%);
+    border-radius: 16px;
   }
 }
 
@@ -1909,6 +2036,11 @@ body {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
+/* Settings: nav items, identity rows, search results and whole-row buttons (link, fold and card rows) take an inset
+   ring, so it is never clipped by the card or drawn into the nav's edge. */
+[data-settings-look] :is([data-settings-page], [data-settings-hit], [data-settings-key-result], [data-settings-rows] > button, [data-settings-rows] > * > button[aria-expanded], [data-settings-fold] > button, [data-settings-rows] > button[data-pair-with-cloud]):focus-visible {
+  outline-offset: -2px;
+}
 /* A menu row shows keyboard focus as its hover fill. */
 [role="menu"] :is(button, [role^="menuitem"]):focus-visible {
   outline: none;
@@ -1939,6 +2071,12 @@ body {
    red does not vanish while the user is fixing it. */
 :is(input, textarea, select):focus-visible:not([aria-invalid="true"]) {
   border-color: var(--color-focus);
+}
+/* Settings: every control shows keyboard focus the same way, as the 2 px focus ring a switch or a button gets (§6.10).
+   A select or a field there edges in a 0.5 px hairline, which a border-colour change can't make visible. */
+[data-settings-look] :is(select, textarea, input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [data-settings-search])):focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 0;
 }
 
 ::selection {
@@ -2980,6 +3118,11 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
 [data-skin="pop"][data-skin-preview] {
   box-shadow: 0 0 0 1.5px var(--color-ink), 2px 2px 0 1.5px var(--color-ink);
 }
+/* In Settings every preview has the same 0.5 px frame (the tile draws it), so Pop's own heavy outline never reads as the
+   chosen tile's ring; its inner card outlines stay. */
+[data-settings-look] [data-skin="pop"][data-skin-preview] {
+  box-shadow: none;
+}
 [data-skin="pop"][data-skin-preview] .bg-card {
   box-shadow: 0 0 0 1px var(--color-ink);
 }
@@ -3306,10 +3449,10 @@ button:disabled.bg-danger {
    scripts/check-skin-contrast.mjs measures these as "<skin> (phone)", so the
    AA pairs hold here exactly as on desktop. */
 @media (max-width: 767.98px) {
-  /* The window's frame keeps the desktop ground at any width: the rail of places is a page 36px wide beside a full
-     page, and both draw the frame's top bar or rail in one colour. */
+  /* The window's frame keeps the desktop sidebar's colour at any width: the rail of places is a page 36px wide beside
+     a full page, and both draw the frame's top bar or rail in one colour. */
   :is([data-skin="midnight"]) {
-    --color-frame: color-mix(in oklab, #121212, black var(--frame-shade));
+    --color-frame: #0e0e0e;
     --color-app: #141414;
     --color-panel: #1c1c1e;
     --color-raised: #2c2c2e;
@@ -3328,7 +3471,7 @@ button:disabled.bg-danger {
     --radius-menu: 22px;
   }
   :is([data-skin="meadow"]) {
-    --color-frame: color-mix(in oklab, #ffffff, black var(--frame-shade));
+    --color-frame: #f6f8f6;
     --color-app: #f6f8f6;
     --color-panel: #fcfdfc;
     --color-card: #ffffff;

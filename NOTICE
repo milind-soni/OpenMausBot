@@ -12,6 +12,14 @@ authentication, and runtime temporary-folder behavior from T3 Code, Copyright
 Selected-text citation matching adapts T3 Code's assistant citation selection,
 Copyright 2026 T3 Tools Inc., used under the MIT License.
 
+Streaming reply rendering (src/state/live-reply.ts), its Markdown block
+splitting (src/lib/markdown-stream-blocks.ts), the transcript's follow and
+per-visit scroll restore (src/lib/transcript-follow.ts), and the server's
+per-message ids for streamed reply text (server/harness/text-items.ts) adapt
+T3 Code's chat timeline, provider text-delta coalescing and ACP assistant
+segments, Copyright 2026 T3 Tools Inc., used under the MIT License
+(third_party/t3-code/LICENSE).
+
 The egress gate for the bots' browser (server/browser/egress/) adapts T3 Code's
 public-only SOCKS5 proxy for HTML previews and the Linux listener-ownership
 scan of its preview port scanner, Copyright 2026 T3 Tools Inc., used under the
