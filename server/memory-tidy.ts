@@ -77,12 +77,15 @@ export function planChanges(plan: TidyPlan): number {
 
 export function applyTidy(text: string, plan: TidyPlan, today: string): { text: string; archived: string[] } {
   const lines = text.split("\n");
-  const drop = new Set<number>([...plan.expired, ...plan.duplicates].map((e) => e.line));
+  const drop = new Set<number>(plan.duplicates.map((e) => e.line));
+  for (const entry of plan.expired) {
+    for (let index = entry.line; index < entry.end; index += 1) drop.add(index);
+  }
   for (const { loser, remainder } of plan.superseded) {
     const struck = `${loser.prefix}~~${loser.body}~~ · superseded ${today}`;
     lines[loser.line] = remainder ? `${struck}\n- ${today} · from tidy-up · ${remainder}` : struck;
   }
-  const archived = plan.expired.map((e) => `${e.raw} · expired ${today}`);
+  const archived = plan.expired.map((e) => [`${e.raw} · expired ${today}`, ...lines.slice(e.line + 1, e.end)].join("\n"));
   return { text: lines.filter((_, index) => !drop.has(index)).join("\n"), archived };
 }
 
