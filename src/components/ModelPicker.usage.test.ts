@@ -87,6 +87,21 @@ describe("the model button's usage bars", () => {
     });
   }
 
+  for (const advanced of [false, true]) {
+    it(`follow the bot's own engine when two engines report usage (${advanced ? "Advanced" : "Simple"})`, () => {
+      fixture.advanced = advanced;
+      const codex: EngineLimit = { ...usage(91), engine: "codex", name: "Codex", driver: "codex", windows: [{ window: "weekly", usedPercent: 91, resetsAt: RESET }] };
+      remember([usage(38), codex]);
+      flushSync(() => root.render(createElement(ModelPicker, { bot: { ...scout, modelSelection: { instanceId: "codex", model: "gpt-5" } }, threadId: scout.threadId })));
+      expect(chip().querySelector("[data-usage-bars]")?.getAttribute("data-usage-bars")).toBe("near");
+      expect(chip().textContent).toContain("Codex: 91% used");
+      expect(chip().textContent).not.toContain("Claude: 38% used");
+      render(true);
+      expect(chip().querySelector("[data-usage-bars]")?.getAttribute("data-usage-bars")).toBe("fine");
+      expect(chip().textContent).toContain("Claude: 38% used");
+    });
+  }
+
   it("draw nothing for an engine that reports no usage", () => {
     remember([{ ...usage(0), usedPercent: null, window: null, resetsAt: null, windows: [] }]);
     render();

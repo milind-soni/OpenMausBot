@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveCallState } from "../shared/wire.ts";
 import {
-  ATTACH_TIMEOUT_MS, CLOSE_TIMEOUT_MS, CONSENT_SETTLE_MS, DELEGATION_SETTLE_MS, GOODBYE_MS, IDLE_CHECK_MS, PROGRESS_INTERVAL_MS,
-  LiveCallBusyError, LiveCallController, LiveCallSignedOutError, type LiveActivity, type LiveCallDeps, type LiveSocket,
+  ATTACH_TIMEOUT_MS, CLOSE_TIMEOUT_MS, CONSENT_SETTLE_MS, DELEGATION_SETTLE_MS, FISH_ATTACH_TIMEOUT_MS, GOODBYE_MS, IDLE_CHECK_MS, PROGRESS_INTERVAL_MS,
+  LIVE_FISH_NEEDS_APP, LiveCallBusyError, LiveCallController, LiveCallSignedOutError, type LiveActivity, type LiveCallDeps, type LiveSocket,
 } from "./live-call-controller.ts";
 import { LIVE_COPY } from "../shared/live-approval.ts";
 import { LIVE_NEEDS_AZURE, LIVE_NEEDS_KEY, LiveSessionError, type LiveEndpoint } from "./live-call.ts";
+import { FishRelays, FISH_AGENT_VOICE } from "./live-fish.ts";
+import type { LiveFishSessionToken } from "../shared/wire.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
 
@@ -50,6 +52,7 @@ function setup(overrides: Partial<LiveCallDeps> = {}) {
     broadcast: (frame) => frames.push(frame.call),
     settings: () => settings,
     azureRefusal: vi.fn(() => null),
+    fishRefusal: vi.fn(() => null),
     createSession: vi.fn(async () => ({ sessionId: "sess_1", sdp: "answer-sdp" })),
     openSocket: (url, key) => { const socket = new FakeSocket(url, key); sockets.push(socket); return socket; },
     attachUrl: (id) => `ws://fake/${id}/attach`,
@@ -185,6 +188,121 @@ describe("LiveCallController lifecycle", () => {
       await expect(second).rejects.not.toBeInstanceOf(LiveCallBusyError);
     });
 
+  });
+
+  describe("with Fish Audio chosen", () => {
+    const FISH: LiveEndpoint = { provider: "fish", apiBase: "https://api.fish.audio/v1/agent", model: "agent_1" };
+    const REFUSED = "only an admin, in these words";
+    const member: RequestAuth = { kind: "loopback", scopes: ["client"], trust: "service" };
+    const TOKEN: LiveFishSessionToken = {
+      transport: "livekit", session_id: "fish_1", expires_at: "2026-11-11T00:00:00Z", max_duration_seconds: 900, livekit_url: "wss://lk.example", token: "jwt",
+    };
+    const fish = (overrides: Partial<LiveCallDeps> = {}) => {
+      const relays = new FishRelays();
+      const endSession = vi.fn(async () => true);
+      let relayToken = "";
+      const t = setup({
+        createSession: vi.fn(async () => {
+          relayToken = relays.open(TOKEN.session_id, endSession).token;
+          return { sessionId: TOKEN.session_id, fish: { type: "fish" as const, session: TOKEN, relayToken } };
+        }),
+        openSocket: (url) => relays.socket(url),
+        attachUrl: (id) => id,
+        ...overrides,
+      });
+      t.settings.endpoint = FISH;
+      t.settings.provider = "fish";
+      const relay = () => relays.find(TOKEN.session_id, relayToken)!;
+      return { ...t, relays, endSession, relay };
+    };
+
+    it("asks who is calling, starts with no SDP, and answers with Fish's session and the relay's token", async () => {
+      const t = fish();
+      const started = await t.controller.start({ auth: owner, ...BOT, client: "web" });
+      expect(t.deps.fishRefusal).toHaveBeenCalledWith(owner);
+      expect(t.deps.azureRefusal).not.toHaveBeenCalled();
+      expect(t.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ endpoint: FISH, sdp: "", voice: FISH_AGENT_VOICE }));
+      expect(started.sdp).toBeUndefined();
+      expect(started.fish).toEqual({ type: "fish", session: TOKEN, relayToken: expect.stringMatching(/^[\w-]{43}$/) });
+      expect(started.call).toMatchObject({ status: "connecting", voice: FISH_AGENT_VOICE });
+    });
+
+    it("refuses with the reason as a 403 before any session is taken, even while Fish is not set up", async () => {
+      const t = fish({ fishRefusal: () => REFUSED });
+      t.settings.endpoint = null;
+      await expect(t.controller.start({ auth: member, ...BOT, client: "web" })).rejects.toMatchObject({ status: 403, message: REFUSED });
+      expect(t.deps.createSession).not.toHaveBeenCalled();
+      expect(t.logs.join("\n")).toContain("[live] call refused bot=bot1 client=web provider=fish");
+    });
+
+    it("sends a phone to the desktop app or a browser", async () => {
+      for (const client of ["ios", "android"] as const) {
+        const t = fish();
+        await expect(t.controller.start({ auth: owner, ...BOT, client })).rejects.toMatchObject({ status: 400, message: LIVE_FISH_NEEDS_APP });
+        expect(t.deps.createSession).not.toHaveBeenCalled();
+      }
+    });
+
+    it("never calls Fish with a key saved for another provider", async () => {
+      const t = fish();
+      t.settings.endpoint = ENDPOINT;
+      await expect(t.controller.start({ auth: owner, ...BOT, client: "web" })).rejects.toMatchObject({ status: 409 });
+      expect(t.deps.createSession).not.toHaveBeenCalled();
+    });
+
+    it("waits longer for the client to join, then gives up and ends Fish's session", async () => {
+      const t = fish();
+      await t.controller.start({ auth: owner, ...BOT, client: "web" });
+      await vi.advanceTimersByTimeAsync(ATTACH_TIMEOUT_MS + 1);
+      expect(t.controller.current()?.status).toBe("connecting");
+      await vi.advanceTimersByTimeAsync(FISH_ATTACH_TIMEOUT_MS - ATTACH_TIMEOUT_MS);
+      expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "sideband-lost", error: "The call could not connect to Fish Audio." });
+      expect(t.endSession).toHaveBeenCalledOnce();
+    });
+
+    it("takes a request heard by the client to the bot and returns the answer to the delegate call", async () => {
+      const t = fish();
+      await t.controller.start({ auth: owner, ...BOT, client: "web" });
+      const callId = t.controller.current()!.callId;
+      t.relay().receive([{ type: "connected" }]);
+      expect(t.controller.current()?.status).toBe("live");
+      t.relay().receive([{ type: "heard", text: "check my mail", startMs: 100, endMs: 900 }, { type: "delegate", id: "call_1", atMs: 950 }]);
+      await vi.advanceTimersByTimeAsync(DELEGATION_SETTLE_MS + 1);
+      expect(t.deps.send).toHaveBeenCalledWith({ auth: owner, botId: "bot1", threadId: "t1", text: "check my mail", callId });
+      t.message({ id: "b1", text: "You have two new emails.", requestMessageId: "m1" });
+      t.patch({ id: "b1", text: "You have two new emails.", requestMessageId: "m1", turnTerminal: true, turnSucceeded: true });
+      await vi.advanceTimersByTimeAsync(0);
+      const { commands } = await t.relay().poll(0);
+      expect(commands).toContainEqual({ type: "append", kind: "commentary", content: "You have two new emails.", delegationId: "call_1" });
+    });
+
+    it("on End tells the client to hang up, ends Fish's session and records the call", async () => {
+      const t = fish();
+      await t.controller.start({ auth: owner, ...BOT, client: "web" });
+      const relay = t.relay();
+      relay.receive([{ type: "connected" }]);
+      const waiting = relay.poll(10_000);
+      await t.controller.end(t.controller.current()!.callId);
+      expect(await waiting).toMatchObject({ commands: [{ type: "close" }] });
+      expect(t.endSession).toHaveBeenCalledOnce();
+      expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "hung-up" });
+      expect(t.relays.find(TOKEN.session_id, "x")).toBeNull();
+    });
+
+    it("ends the call when Fish ends the session", async () => {
+      const t = fish();
+      await t.controller.start({ auth: owner, ...BOT, client: "web" });
+      t.relay().receive([{ type: "connected" }, { type: "ended", reason: "conversation_timeout" }]);
+      expect(t.frames.at(-1)).toMatchObject({ status: "ended" });
+      expect(t.controller.current()).toBeNull();
+    });
+  });
+
+  it("refuses a call through OpenAI or Azure that brings no audio offer, before any session", async () => {
+    const t = setup();
+    await expect(t.controller.start({ auth: owner, ...BOT, client: "web" })).rejects.toMatchObject({ status: 400 });
+    expect(t.deps.createSession).not.toHaveBeenCalled();
+    expect(t.controller.current()).toBeNull();
   });
 
   it("asks nothing of the Azure limit for a call through OpenAI", async () => {

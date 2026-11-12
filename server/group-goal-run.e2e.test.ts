@@ -1008,10 +1008,16 @@ describe("goal-driven channel runs", () => {
     const card = initial.body.messages.find((message: { kind: string }) => message.kind === "goal.run");
     expect(card).toMatchObject({ id: expect.any(String) });
 
-    await expect.poll(async () => {
-      const page = await api("GET", `/api/threads/${started.body.threadId}/messages?around=${card.id}&limit=1`);
-      return page.body.messages[0]?.goalRun;
-    }, { timeout: 15_000 }).toMatchObject({ status: "limit-reached", turnCount: 13, maxTurns: 13 });
+    const goalRun = async () => (await api("GET", `/api/threads/${started.body.threadId}/messages?around=${card.id}&limit=1`)).body.messages[0]?.goalRun;
+    let run = await goalRun();
+    let turn = run?.turnCount, movedAt = Date.now();
+    while (run?.status === "working") {
+      if (run.turnCount !== turn) [turn, movedAt] = [run.turnCount, Date.now()];
+      if (Date.now() - movedAt > hostTimeout(10_000)) throw new Error(`the run stopped at turn ${turn}: ${JSON.stringify(run)}`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      run = await goalRun();
+    }
+    expect(run).toMatchObject({ status: "limit-reached", turnCount: 13, maxTurns: 13 });
   });
 
   it("never treats a failed provider turn as a completed goal", async () => {

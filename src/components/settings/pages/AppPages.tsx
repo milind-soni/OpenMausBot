@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Plus } from "lucide-react";
 import { productName } from "@/lib/brand";
-import { FEEDBACK_URL, HELP_CENTER_URL, openExternalLink } from "@/lib/app-links";
+import { FEEDBACK_URL, HELP_CENTER_URL, desktopAppVersion, openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
 import { AboutDialog } from "../../AboutDialog";
@@ -39,15 +39,16 @@ export function AppPage() {
   const [about, setAbout] = useState(false);
   const desk = ctx.desktop && !ctx.client;
   const computer = useSwitchToComputer();
+  const appVersionLine = versionLine(desktopAppVersion());
   return <>
     {ctx.desktop && (
       <SettingsGroup label={t("settings.updates.title")} block="updates">
         <SettingsRows>
-          {window.ogb?.updater ? <UpdatesRow title={versionLine()} />
+          {window.ogb?.updater ? <UpdatesRow title={appVersionLine} />
             // On the app's own page with no updater (a package or store build), the version is live and says why
             // there is no button; only another place's page names This computer.
-            : ctx.home || ctx.client ? <SettingRow title={versionLine()} subtitle={t("settings.updates.fromPackage")}>{null}</SettingRow>
-              : <InertRow title={versionLine()} reason={t("settings.inert.checkFromHere", { place: computer.name })}
+            : ctx.home || ctx.client ? <SettingRow title={appVersionLine} subtitle={t("settings.updates.fromPackage")}>{null}</SettingRow>
+              : <InertRow title={appVersionLine} reason={t("settings.inert.checkFromHere", { place: computer.name })}
                 control={<button type="button" className="ui-button" tabIndex={-1}>{t("settings.updates.check")}</button>} />}
         </SettingsRows>
       </SettingsGroup>

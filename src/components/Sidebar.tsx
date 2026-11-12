@@ -443,7 +443,7 @@ function RoomContextMenu({
 
 const NO_FOLDERS: BotProject[] = [];
 
-export function BotThreadList({ bot, selected, query, pendingQueued, reveal, locale, generatedTitles, dispatch, activityLabel, hidden = false, onThreadOpened }: BotRowProps & {
+export function BotThreadList({ bot, selected, query, pendingQueued, routineRuns, reveal, locale, generatedTitles, dispatch, activityLabel, hidden = false, onThreadOpened }: BotRowProps & {
   activityLabel?: string;
   onThreadOpened?: () => void;
   hidden?: boolean;
@@ -478,7 +478,7 @@ export function BotThreadList({ bot, selected, query, pendingQueued, reveal, loc
   useSnoozeExpiry(tasks);
   const bulk = useBulkSelect();
   const { own: ownTasks, helpers } = bulk.active ? { own: tasks, helpers: [] } : partitionHelperThreads(tasks, bot.threadId, query, projects);
-  const visibleTasks = orderedThreadList(visibleSidebarThreads(ownTasks, bot.threadId, query, projects, showAll || bulk.active));
+  const visibleTasks = orderedThreadList(visibleSidebarThreads(ownTasks, bot.threadId, query, projects, showAll || bulk.active, routineRuns));
   const visibleProjectIndex = (projectId: string) => visibleTasks.findIndex((task) => task.projectId === projectId);
   const folderRank = (projectId: string) => {
     const index = visibleProjectIndex(projectId);
@@ -645,7 +645,7 @@ export interface BotRowProps {
   deleting: boolean;
   mascotMotion: AppState["mascotMotion"];
   reveal: AppState["revealThread"];
-  pendingQueued: AppState["pendingQueued"];
+  pendingQueued: AppState["pendingQueued"]; routineRuns?: AppState["routineRuns"];
   instances: InstanceInfo[];
   liveCall: AppState["liveCall"];
   locale: string;
@@ -660,7 +660,7 @@ export interface BotRowProps {
   botDragging?: boolean;
 }
 
-export function botRowProps<State extends Pick<AppState, "activeView" | "selectedId" | "revealThread" | "deletingBots" | "mascotMotion" | "pendingQueued" | "instances" | "liveCall" | "config">>(
+export function botRowProps<State extends Pick<AppState, "activeView" | "selectedId" | "revealThread" | "deletingBots" | "mascotMotion" | "pendingQueued" | "routineRuns" | "instances" | "liveCall" | "config">>(
   state: State,
   dispatch: Dispatch<Action>,
   bot: Bot,
@@ -675,7 +675,7 @@ export function botRowProps<State extends Pick<AppState, "activeView" | "selecte
     deleting: state.deletingBots[bot.id] === true,
     mascotMotion: selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null,
     reveal: reveal && (bot.threadId === reveal.threadId || bot.tasks?.some((task) => task.threadId === reveal.threadId)) ? reveal : null,
-    pendingQueued: state.pendingQueued,
+    pendingQueued: state.pendingQueued, routineRuns: state.routineRuns,
     instances: state.instances,
     liveCall: state.liveCall,
     locale: activeLocale(),

@@ -40,6 +40,7 @@ export function createBackgroundCheck<Ref, Outcome>(deps: BackgroundCheckDeps<Re
   let timer: { cancel(): void } | null = null;
   let running: AbortController | null = null;
   let stopped = true;
+  let generation = 0;
 
   /** One check, if one is due and the machine is awake for it. Resolves with what was checked, or null. */
   const tick = async (): Promise<Ref | null> => {
@@ -58,10 +59,10 @@ export function createBackgroundCheck<Ref, Outcome>(deps: BackgroundCheckDeps<Re
       running = null;
     }
   };
-  const schedule = (ms: number) => {
+  const schedule = (ms: number, started: number) => {
     timer = setTimer(() => {
-      if (stopped) return;
-      void tick().finally(() => { if (!stopped) schedule(jitteredWait(CHECK_EVERY_MS, random)); });
+      if (stopped || started !== generation) return;
+      void tick().finally(() => { if (!stopped && started === generation) schedule(jitteredWait(CHECK_EVERY_MS, random), started); });
     }, ms);
   };
 
@@ -69,7 +70,7 @@ export function createBackgroundCheck<Ref, Outcome>(deps: BackgroundCheckDeps<Re
     start(): void {
       if (!stopped) return;
       stopped = false;
-      schedule(FIRST_CHECK_MS + jitteredWait(CHECK_EVERY_MS, random));
+      schedule(FIRST_CHECK_MS + jitteredWait(CHECK_EVERY_MS, random), ++generation);
     },
     stop(): void {
       stopped = true;

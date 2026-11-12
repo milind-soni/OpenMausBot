@@ -59,7 +59,7 @@ Contract version: `1` (`cloudContractVersion` on the wire).
       Start fresh and says that the desktop app brings bots from a computer. On
       a Cloud that already has bots or chats of its own (a chat from a phone,
       say), it says **Your bots are already here**, and **Continue** moves on.
-      A backup file is imported from Settings → Backups, as on any server.
+      A backup file is imported from Settings → Import & export, as on any server.
    2. **Connect your AI**: the engine sign-in's own tiles and sign-in panel
       (below), with **Connected** on one that can run. While the trial's Claude
       credit lasts and nothing of the person's own can run, a line says so
@@ -2424,7 +2424,7 @@ all arrived, and freezes this computer's copy so nothing runs in two places
 (`server/move-freeze.ts`). An older desktop's Copy this computer here gets
 `410` with "Update OpenMausBot to bring your bots here by itself."
 (`server/cloud-move-http.ts`); a backup file still restores from Settings →
-Backups. [docs/verification/cloud-send.md](verification/cloud-send.md) has the
+Import & export. [docs/verification/cloud-send.md](verification/cloud-send.md) has the
 tests.
 
 The move's journal names the Cloud by its address and, once the session lists

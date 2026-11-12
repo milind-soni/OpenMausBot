@@ -660,7 +660,7 @@ computer?** flow above, and its bots stay where they are. Both sides need this
 release: an older server says to update it first.
 
 To move by hand instead, export a backup from this computer in **Settings →
-Backups → Export backup**, then import it on the server in **Settings → Backups
+Import & export → Export backup**, then import it on the server in **Settings → Import & export
 → Import backup**. API keys, engine sign-ins and paired devices stay where they
 are on both sides; routines arrive paused. An older desktop app's **Copy this
 computer here** is answered with "Update OpenMausBot to bring your bots here by

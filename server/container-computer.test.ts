@@ -961,7 +961,8 @@ describe("Cua integration", () => {
     // 0.37.0 waits 800 ms after every foreground key, click or scroll for a window it might open, and glides its agent cursor
     // for about 0.6 s before each pixel action; plain logs feed desktop_error.
     expect(dockerfile).toContain(`CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS=200 NO_COLOR=1 ${CUA_EXECUTABLE} serve`);
-    expect(dockerfile).toContain(`--permission-mode standard --cursor-reduced-motion on'`);
+    // Without the grant every browser_prepare existing_profile is refused (browser_consent_required) and the bot asks the person to authorize it.
+    expect(dockerfile).toContain(`--permission-mode standard --grant existing-profile --cursor-reduced-motion on'`);
     expect(dockerfile).toContain("prepare-openmausbot-workspace.sh");
     expect(dockerfile).toContain('if ! chmod 0700 "$workspace"');
     expect(dockerfile).toContain('test -r "$directory" && test -w "$directory" && test -x "$directory"');
@@ -981,7 +982,7 @@ describe("Cua integration", () => {
     expect(dockerfile).toContain("6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2");
     expect(dockerfile).toContain("/usr/local/share/licenses/noto-cjk/OFL.txt");
     expect(dockerfile).toContain("fc-cache -f");
-    expect(IMAGE_LAYER_VERSION).toBe("8");
+    expect(IMAGE_LAYER_VERSION).toBe("9");
   });
 
   it("starts the driver's Chrome without its own sandbox inside the hardened container", () => {
@@ -1274,7 +1275,23 @@ describe("setupCommands", () => {
     const script = tail[2];
     expect(script.indexOf("find / -xdev"), "files move before /etc/passwd, so an interrupted start resumes")
       .toBeLessThan(script.indexOf("sed -i"));
+    // The workspace is a bind mount, which -xdev from / skips: an older desktop's files there must change owner too.
+    for (const step of [`find ${VM_WORKSPACE_GUEST} -xdev -uid "$old_uid" -exec chown -h "$uid" {} +`, `find ${VM_WORKSPACE_GUEST} -xdev -gid "$old_gid" -exec chgrp -h "$gid" {} +`]) {
+      expect(script).toContain(step);
+      expect(script.indexOf(step)).toBeLessThan(script.indexOf("sed -i"));
+    }
     expect(script).toMatch(/\|\| \{ echo "cua did not take uid \$uid gid \$gid" >&2; exit 1; \}\nfi\nexec /);
+    // chown or chgrp to an unchanged id would still clear set-id bits, so each id moves only behind its own check.
+    const uidGuard = script.indexOf('if [ "$old_uid" != "$uid" ]; then');
+    const gidGuard = script.indexOf('if [ "$old_gid" != "$gid" ]; then');
+    expect(uidGuard).toBeGreaterThan(-1);
+    expect(gidGuard).toBeGreaterThan(uidGuard);
+    const chowns = [...script.matchAll(/-exec chown /gu)].map((match) => match.index);
+    const chgrps = [...script.matchAll(/-exec chgrp /gu)].map((match) => match.index);
+    expect(chowns).toHaveLength(2);
+    expect(chgrps).toHaveLength(2);
+    for (const at of chowns) expect(at > uidGuard && at < gidGuard).toBe(true);
+    for (const at of chgrps) expect(at).toBeGreaterThan(gidGuard);
   });
 
   it("asks rootless Podman to map and privately relabel the durable workspace", () => {

@@ -4,5 +4,5 @@ export const BUILT_IN_INSTANCE_DRIVERS: Readonly<Record<string, string>> = {
   chatgpt: "codex", antigravity: "antigravityAgent", opencodeGo: "opencodeGo", openaiCompat: "openai-compat",
   mistral: "mistral", cerebras: "cerebras", groq: "groq", greenference: "greenference", modelgo: "modelgo", meta: "meta", museCode: "museCode", deepseek: "deepseekAgent", openai: "openai-compat",
   claudeApi: "claudeAgent", xaiApi: "grok", openrouter: "openai-compat", qwen: "qwenAgent", hermes: "hermesAgent",
-  cline: "clineAgent", pi: "piAgent", gemini: "geminiAgent",
+  cline: "clineAgent", pi: "piAgent", omp: "ompAgent", gemini: "geminiAgent",
 };

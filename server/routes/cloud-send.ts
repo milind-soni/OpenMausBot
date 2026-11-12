@@ -32,7 +32,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 
 export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" | "bots" | "skills"> {
   messagesTail(threadId: string, limit: number): { messages: ReadonlyArray<{ role: string; text?: string }>; hasMore: boolean };
-  logins: Pick<VaultStore, "changes" | "get" | "listSecrets" | "secret" | "onePasswordConnectedAt" | "onePasswordGrants" | "onePasswordToken">;
+  logins: Pick<VaultStore, "changes" | "get" | "listSecrets" | "secret" | "onePasswordConnectedAt" | "onePasswordGrants" | "onePasswordItemGrants" | "onePasswordToken">;
   config(): Pick<AppConfig, "profile" | "language">;
   lineLanguage?: LineLanguage;
   chats?: CloudSendChatsDeps;
@@ -72,7 +72,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     secrets: () => deps.logins.listSecrets(TEAM_READER),
     onePassword: () => {
       const connectedAt = deps.logins.onePasswordConnectedAt();
-      return connectedAt === null ? null : { connectedAt, grants: deps.logins.onePasswordGrants() };
+      return connectedAt === null ? null : { connectedAt, grants: deps.logins.onePasswordGrants(), itemGrants: deps.logins.onePasswordItemGrants() };
     },
     settings: () => { const { profile, language } = deps.config(); return { profile, language }; },
     ...(deps.move ? { move: { items: (bots: ReadonlySet<string>, only?: BotRecord) => moveItems(deps.move!, bots, only), botParts: (bot: BotRecord) => moveBotParts(bot, partHash) } } : {}),
