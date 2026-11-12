@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -97,5 +97,102 @@ describe("checking that command servers start", () => {
     expect(health.usable("paul", servers), "an edited server is not judged by the old check").toEqual(servers);
     await health.prepare("paul", ["notes"]);
     expect(starts).toEqual(["notes:paul", "notes:paul"]);
+  });
+
+  it("checks an edited server while its previous check is still pending", async () => {
+    const { deps, servers, told } = fixture({ servers: { notes } });
+    let finishOld!: (value: { ok: false; error: string }) => void;
+    const started: StdioMcpSpec[] = [];
+    const health = createMcpHealth({ ...deps, start: async (_name, server) => {
+      started.push(server);
+      return started.length === 1
+        ? new Promise<{ ok: false; error: string }>((resolve) => { finishOld = resolve; })
+        : { ok: true };
+    } });
+    const old = health.prepare("iris", ["notes"]);
+    servers.notes = { ...notes, args: ["-y", "@x/notes-mcp@2"] };
+    health.changed("notes");
+    const current = health.prepare("iris", ["notes"]);
+    expect(started).toHaveLength(2);
+    await current;
+    finishOld({ ok: false, error: "the old command failed" });
+    await old;
+    await health.settled();
+    expect(health.usable("iris", servers)).toEqual(servers);
+    expect(health.off("iris", ["notes"])).toEqual([]);
+    expect(told).toEqual([]);
+    const restarted = createMcpHealth(deps);
+    expect(restarted.usable("iris", servers)).toEqual(servers);
+    expect(JSON.parse(readFileSync(deps.file, "utf8")).notes.checks["*"].ok).toBe(true);
+  });
+
+  it("restarts a pending check even when the command specification is unchanged", async () => {
+    const { deps, told } = fixture({ servers: { notes } });
+    let finishOld!: (value: { ok: false; error: string }) => void;
+    let calls = 0;
+    const health = createMcpHealth({ ...deps, start: async () => ++calls === 1
+      ? new Promise<{ ok: false; error: string }>((resolve) => { finishOld = resolve; })
+      : { ok: true } });
+    const old = health.prepare("iris", ["notes"]);
+    health.changed("notes");
+    const current = health.prepare("iris", ["notes"]);
+    expect(calls).toBe(2);
+    await current;
+    finishOld({ ok: false, error: "the replaced process failed" });
+    await old;
+    await health.settled();
+    expect(health.usable("iris", { notes })).toEqual({ notes });
+    expect(told).toEqual([]);
+  });
+
+  it("does not stamp a pending result with a script's later file identity", async () => {
+    const { deps, servers, told } = fixture({ servers: {} });
+    const script = join(deps.file, "..", "server.mjs");
+    writeFileSync(script, "old");
+    servers.notes = { command: process.execPath, args: [script], env: {} };
+    let finishOld!: (value: { ok: false; error: string }) => void;
+    let calls = 0;
+    const health = createMcpHealth({ ...deps, start: async () => ++calls === 1
+      ? new Promise<{ ok: false; error: string }>((resolve) => { finishOld = resolve; })
+      : { ok: true } });
+    const old = health.prepare("iris", ["notes"]);
+    writeFileSync(script, "new script content");
+    finishOld({ ok: false, error: "old script failed" });
+    await old;
+    expect(health.off("iris", ["notes"])).toEqual([]);
+    expect(told).toEqual([]);
+    await health.prepare("iris", ["notes"]);
+    expect(calls).toBe(2);
+    expect(health.usable("iris", servers)).toEqual(servers);
+  });
+
+  it("keeps a replacement's failure when the obsolete check later succeeds", async () => {
+    const { deps, servers, told } = fixture({ servers: { notes } });
+    let finishOld!: (value: { ok: true }) => void;
+    let calls = 0;
+    const health = createMcpHealth({ ...deps, start: async () => ++calls === 1
+      ? new Promise<{ ok: true }>((resolve) => { finishOld = resolve; })
+      : { ok: false, error: "replacement cannot start" } });
+    const old = health.prepare("iris", ["notes"]);
+    servers.notes = { ...notes, args: ["replacement"] };
+    await health.prepare("iris", ["notes"]);
+    finishOld({ ok: true });
+    await old;
+    expect(health.usable("iris", servers)).toEqual({});
+    expect(health.off("iris", ["notes"])).toEqual([{ name: "notes", error: "replacement cannot start" }]);
+    expect(told).toHaveLength(1);
+  });
+
+  it("discards a removed server's pending failure without saving or notifying", async () => {
+    const { deps, servers, told } = fixture({ servers: { notes } });
+    let finish!: (value: { ok: false; error: string }) => void;
+    const health = createMcpHealth({ ...deps, start: async () => new Promise<{ ok: false; error: string }>((resolve) => { finish = resolve; }) });
+    const pending = health.prepare("iris", ["notes"]);
+    delete servers.notes;
+    health.changed("notes");
+    finish({ ok: false, error: "removed server failed" });
+    await pending;
+    expect(JSON.parse(readFileSync(deps.file, "utf8"))).toEqual({});
+    expect(told).toEqual([]);
   });
 });
