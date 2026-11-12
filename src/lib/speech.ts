@@ -3,6 +3,10 @@ import type { ConfigStatus } from "@/state/store";
 import { desktopCapabilitiesNow } from "./desktop";
 import { fishSpeech, type SpeechBridge } from "./fish-speech";
 
+/** Quiet after speech that ends the person's turn in a call, through the Mac's helper or Fish Audio alike: long enough
+ * for a short thinking pause mid-sentence. */
+export const CALL_ENDPOINT_MS = 1_700;
+
 /** The speech bridge this computer listens through: the page's own Fish Audio listener, or the desktop app's helper. */
 export function speechBridge(): SpeechBridge | Window["ogb"] {
   return desktopCapabilitiesNow().dictation.engine === "fish-audio" ? fishSpeech : globalThis.window?.ogb;
