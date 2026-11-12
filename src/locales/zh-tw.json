@@ -4371,6 +4371,7 @@
   "accounts.addClaude": "新增其他 Claude 帳號",
   "accounts.addChatgpt": "新增其他 ChatGPT 帳號",
   "accounts.addChatgptWorkspaceNote": "ChatGPT Business 和 Enterprise 組織可能會封鎖在這裡新增帳號（OpenAI 會顯示 3p_delegated_access_policy_denied）。",
+  "accounts.chatgptSharedSetupNote": "使用這些帳號的機器人也會遵循你自己的 Codex 設定：你的指示（AGENTS.md）、config.toml、技能和外掛。",
   "accounts.nameLabel": "帳號名稱",
   "accounts.namePlaceholder": "工作",
   "accounts.addSubmit": "新增並登入",
