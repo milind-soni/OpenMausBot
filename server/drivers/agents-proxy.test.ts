@@ -136,7 +136,7 @@ describe("agents-proxy MCP surface", () => {
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
     expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
-      "list_bots", "ask_bot", "list_tasks", "create_task", "claim_task", "update_task", "delegate_task", "delete_task",
+      "list_schedules", "cancel_schedule", "create_schedule", "list_bots", "ask_bot", "list_tasks", "create_task", "claim_task", "update_task", "delegate_task", "delete_task",
     ]);
   });
 

@@ -1,3 +1,7 @@
+import { ScheduleStore, Scheduler, canManageSchedule, validateSchedule } from "./schedules.ts";
+import type { ScheduleInput, ScheduleDelivery, ResumeContext } from "./schedule-types.ts";
+import { canUseBackup, turnSelection } from "./backup-model.ts";
+import type { UsageLimitFailure } from "./usage-types.ts";
 import { UsageStore } from "./usage.ts";
 import { UsageRefreshGate } from "./usage-refresh.ts";
 import { USAGE_REFRESH_MS } from "./usage-types.ts";
@@ -140,6 +144,14 @@ const removedComputerInstances = new Set([
   ...Object.entries(cfg.instances ?? {}).filter(([, entry]) => isRemovedComputerDriver(entry.driver)).map(([id]) => id),
 ]);
 const store = new Store(() => bootSelection, removedComputerInstances);
+const schedules = new ScheduleStore(DATA_DIR);
+type ActiveTurnContext = { botId: string; message: Message; request: string; originalMessageId: string; attempt: number; selection: ModelSelection; usedBackup: boolean; commsDepth?: number };
+const turnContexts = new Map<string, ActiveTurnContext>();
+const activeSelections = new Map<string, ModelSelection>();
+const stoppedConversations = new Set<string>();
+const scheduler = new Scheduler(schedules, deliverSchedule);
+schedules.onChange = () => { broadcast({ kind: "schedules", ...schedules.snapshot() }); scheduler.arm(); };
+
 const taskStore = new TaskStore(DATA_DIR);
 const trelloLinks = new TrelloLinkStore(DATA_DIR);
 // Match the registry the desktop app (or an isolated test) is already using.
@@ -157,6 +169,7 @@ store.seedIfEmpty();
 
 // ── SSE fan-out to clients ─────────────────────────────────────────────
 const sseClients = new Set<ServerResponse>();
+const notificationClients = new Set<ServerResponse>();
 function broadcast(payload: unknown) {
   const frame = `data: ${JSON.stringify(payload)}\n\n`;
   for (const res of [...sseClients]) {
@@ -173,7 +186,7 @@ function usageSnapshot() {
 }
 async function refreshIdleUsage() {
   await Promise.allSettled(registry.instances().filter(instance => instance.enabled && instance.adapter.refreshUsage).map(instance =>
-    usageRefreshGate.run(instance.instanceId, sseClients.size > 0,
+    usageRefreshGate.run(instance.instanceId, sseClients.size > notificationClients.size,
       !store.bots.some(bot => bot.busy && bot.modelSelection.instanceId === instance.instanceId) &&
       !store.groups.some(group => group.busyBotId && store.bot(group.busyBotId)?.modelSelection.instanceId === instance.instanceId),
       () => instance.adapter.refreshUsage!())));
@@ -291,6 +304,14 @@ bus.subscribe((event: RuntimeEvent) => {
       break;
     case "turn.completed": {
       if (bot) {
+        const context = turnContexts.get(event.threadId);
+        turnContexts.delete(event.threadId);
+        activeSelections.delete(event.threadId);
+        queueMicrotask(() => void (async () => {
+          if (!event.ok && event.failure && context) await handleUsageFailure(bot.id, context, event.failure);
+          else if (event.ok) schedules.cancelResume(event.threadId);
+          await scheduler.wake();
+        })().catch(e => console.error("schedule continuation:", e instanceof Error ? e.message : "failed")));
         store.patchBot(bot.id, { busy: false, unread: true });
         broadcast({ kind: "bot", bot: store.bot(bot.id) });
       }
@@ -416,34 +437,147 @@ function computerPromptHint(integrations: TurnIntegrations): string {
   return "";
 }
 
+function postActivity(threadId: string, text: string) {
+  const message = store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: text } });
+  broadcast({ kind: "message", threadId, message });
+}
+function publishBot(botId: string) { broadcast({ kind: "bot", bot: store.bot(botId) }); }
+async function handleUsageFailure(botId: string, context: ActiveTurnContext, failure: UsageLimitFailure, groupId?: string): Promise<boolean> {
+  const bot = store.bot(botId); if (!bot) return false;
+  const threadId = groupId ? store.group(groupId)?.threadId : bot.threadId;
+  if (!threadId) return false;
+  const stillCurrent = () => !stoppedConversations.has(threadId) && [...store.messagesFor(threadId)].reverse().find(m => m.role === "user" && m.kind === "text")?.id === context.message.id;
+  if (!stillCurrent()) return false;
+  const failedName = registry.get(context.selection.instanceId)?.displayName ?? "This AI app";
+  const behavior = bot.onUsageLimit ?? "stop";
+  const backup = bot.backupModelSelection;
+  if (behavior === "backup" && !context.usedBackup && backup && canUseBackup(context.selection, backup, Boolean(registry.get(backup.instanceId)?.enabled), usageStore.get(backup.instanceId).status)) {
+    const candidate = registry.get(backup.instanceId)!;
+    const health = await candidate.snapshot().catch(() => ({ state: "unavailable" }));
+    const models = await registry.modelCatalog(backup.instanceId);
+    if (!stillCurrent() || (!groupId && store.bot(botId)?.busy)) return false;
+    if (health.state === "available" && models.options.some(m => m.id === backup.model)) {
+      store.patchBot(botId, { usingBackup: true }); publishBot(botId);
+      postActivity(threadId, `Switched to ${backup.label ?? backup.model} because ${failedName}’s usage ran out. Continuing your task…`);
+      if (groupId) await runGroupMemberTurn(groupId, botId, 0, new Set(), groupQueueEpoch.get(groupId) ?? 0, { selection: backup, context });
+      else await startTurn(botId, context.message.text ?? context.request, { userMessage: context.message, forceModel: backup, retry: context, commsDepth: context.commsDepth });
+      return true;
+    }
+  }
+  if (behavior === "stop") { postActivity(threadId, `${failedName}’s usage ran out, so I stopped here. You can choose another AI model in bot settings.`); return false; }
+  // If a backup is missing, unavailable, or also exhausted, wait rather than loop through models.
+  const resume: ResumeContext = { botId, threadId, userMessageId: context.originalMessageId, request: context.request, attempt: context.attempt };
+  const resetsAt = failure.resetsAt ?? usageLimitReset(usageStore.get(context.selection.instanceId).windows);
+  try {
+    const schedule = schedules.upsertResume(groupId ? { groupId } : { botId }, resume, resetsAt);
+    postActivity(threadId, `${failedName}’s usage ran out. I’ll check back at ${new Date(schedule.nextRunAt!).toLocaleString()}. You can cancel this retry or resume now below.`);
+  } catch { postActivity(threadId, "Usage ran out. A retry could not be scheduled. Check Schedules or choose another AI model."); }
+  return false;
+}
+async function deliverSchedule(job: ScheduleDelivery): Promise<boolean> {
+  const bot = job.target.botId ? store.bot(job.target.botId) : undefined;
+  const group = job.target.groupId ? store.group(job.target.groupId) : undefined;
+  if (!bot && !group) { schedules.finish(job.id, "failed", "The bot or room no longer exists."); return true; }
+  if (bot?.busy || group?.busyBotId || (group?.queuedBotIds?.length ?? 0) > 0 || (group && groupQueues.has(group.id))) return false;
+  if (job.resume && (job.resume.threadId !== (bot?.threadId ?? group?.threadId) || !store.bot(job.resume.botId) || (group && !group.memberIds.includes(job.resume.botId)))) {
+    schedules.finish(job.id, "failed", "This retry no longer belongs to this conversation."); return true;
+  }
+  if (job.resume && !job.manual) {
+    const owner = store.bot(job.resume.botId)!;
+    const selection = turnSelection(owner, usageStore.get(owner.modelSelection.instanceId).status);
+    const adapter = registry.get(selection.instanceId)?.adapter;
+    if (adapter?.refreshUsage) await adapter.refreshUsage();
+    if (usageStore.get(selection.instanceId).status === "exhausted") {
+      const reset = usageLimitReset(usageStore.get(selection.instanceId).windows);
+      schedules.finish(job.id, "failed", "Usage is still unavailable. The retry has been moved.");
+      schedules.upsertResume(job.target, job.resume, reset);
+      return true;
+    }
+  }
+  // Recheck after any asynchronous availability read before claiming the delivery.
+  if (!schedules.pending().some(pending => pending.id === job.id)) return false;
+  if (bot?.busy || group?.busyBotId || (group?.queuedBotIds?.length ?? 0) > 0) return false;
+  schedules.claim(job.id);
+  const scheduled = { scheduleId: job.scheduleId, deliveryId: job.id };
+  if (bot) await startTurn(bot.id, job.prompt, { scheduled, resume: job.resume });
+  else if (group) startGroupTurn(group.id, job.prompt, undefined, { scheduled, resume: job.resume });
+  schedules.finish(job.id, "sent");
+  broadcast({ kind: "schedule.started", target: job.target, scheduleId: job.scheduleId, name: bot?.name ?? group?.name, notify: Boolean(bot?.notifications || group?.memberIds.some(id => store.bot(id)?.notifications)) });
+  return true;
+}
+function assertScheduleTarget(input: ScheduleInput, callerId?: string) {
+  const bot = input.target?.botId ? store.bot(input.target.botId) : undefined;
+  const group = input.target?.groupId ? store.group(input.target.groupId) : undefined;
+  if (!bot && !group) throw Object.assign(new Error("Choose an existing bot or room."), { status: 404 });
+  if (callerId && !(bot?.id === callerId || group?.memberIds.includes(callerId))) throw Object.assign(new Error("You can schedule only your own chat or rooms you belong to."), { status: 403 });
+}
+
+async function serveSchedules(req: IncomingMessage, res: ServerResponse, suffix: string, method: string, callerId?: string) {
+  try {
+    const scoped = (target: ScheduleInput["target"]) => target.botId === callerId || Boolean(target.groupId && store.group(target.groupId)?.memberIds.includes(callerId!));
+    if (!suffix && method === "GET") {
+      const snapshot = schedules.snapshot();
+      return json(res, 200, callerId ? { ...snapshot, schedules: snapshot.schedules.filter(s => scoped(s.target)), deliveries: snapshot.deliveries.filter(j => scoped(j.target)), rooms: store.groups.filter(g => g.memberIds.includes(callerId)).map(g => ({ id: g.id, name: g.name })) } : snapshot);
+    }
+    if (!suffix && method === "POST") {
+      const input = await readBody(req) as ScheduleInput; validateSchedule(input); assertScheduleTarget(input, callerId);
+      const schedule = schedules.create(input, callerId ? "bot" : "user", callerId);
+      return json(res, 201, { schedule });
+    }
+    if (suffix === "/pause" && method === "POST" && !callerId) {
+      const body = await readBody(req); if (typeof body.paused !== "boolean") return json(res, 400, { error: "Choose whether schedules should be paused." });
+      schedules.pause(body.paused); void scheduler.wake(); return json(res, 200, schedules.snapshot());
+    }
+    const match = suffix.match(/^\/([\w-]+)(?:\/(run-now))?$/);
+    if (!match) return json(res, 404, { error: "Schedule action not found." });
+    const schedule = schedules.get(match[1]); if (!schedule) return json(res, 404, { error: "Schedule not found." });
+    if (callerId && !canManageSchedule(schedule, callerId, store.groups)) return json(res, 403, { error: "You can cancel only schedules you created in your own conversations." });
+    if (method === "DELETE" && !match[2]) { schedules.remove(schedule.id); return json(res, 200, { ok: true }); }
+    if (method === "PATCH" && !match[2] && !callerId) {
+      const body = await readBody(req); const patch: Partial<ScheduleInput> = {};
+      for (const key of ["target", "prompt", "repeat", "timezone", "enabled", "graceMinutes"] as const) if (body[key] !== undefined) (patch as Record<string, unknown>)[key] = body[key];
+      validateSchedule({ ...schedule, ...patch }); assertScheduleTarget({ ...schedule, ...patch });
+      return json(res, 200, { schedule: schedules.update(schedule.id, patch) });
+    }
+    if (method === "POST" && match[2] === "run-now" && !callerId) { schedules.runNow(schedule.id); void scheduler.wake(); return json(res, 202, { ok: true }); }
+    return json(res, 405, { error: "This schedule action is not available." });
+  } catch (e) { return json(res, (e as { status?: number }).status ?? 400, { error: e instanceof Error ? e.message : "Could not save this schedule." }); }
+}
+
 async function startTurn(
   botId: string,
   text: string,
-  opts?: { commsDepth?: number; userMessage?: Message; attachments?: Attachment[] },
+  opts?: { commsDepth?: number; userMessage?: Message; attachments?: Attachment[]; scheduled?: Message["scheduled"]; forceModel?: ModelSelection; retry?: ActiveTurnContext; resume?: ResumeContext },
 ) {
   const bot = store.bot(botId);
   if (!bot) throw Object.assign(new Error("no such bot"), { status: 404 });
   if (bot.busy) throw Object.assign(new Error("the bot is already working — interrupt it first"), { status: 409 });
+  stoppedConversations.delete(bot.threadId);
   const commsDepth = opts?.commsDepth ?? 0;
 
-  const instance = registry.get(bot.modelSelection.instanceId);
-  if (!instance) {
+  const selection = opts?.forceModel ?? turnSelection(bot, usageStore.get(bot.modelSelection.instanceId).status);
+  const instance = registry.get(selection.instanceId);
+  if (!instance || !instance.enabled) {
     throw Object.assign(
-      new Error(`provider instance "${bot.modelSelection.instanceId}" is unavailable — pick another model in settings`),
+      new Error(`provider instance "${selection.instanceId}" is unavailable — pick another model in settings`),
       { status: 409 },
     );
   }
 
-  const currentCatalog = await registry.modelCatalog(bot.modelSelection.instanceId);
-  if (currentCatalog.status === "ready" && !currentCatalog.options.some((model) => model.id === bot.modelSelection.model)) {
-    throw Object.assign(new Error(`model "${bot.modelSelection.model}" is no longer available — choose a current model`), { status: 409 });
+  const currentCatalog = await registry.modelCatalog(selection.instanceId);
+  if (currentCatalog.status === "ready" && !currentCatalog.options.some((model) => model.id === selection.model)) {
+    throw Object.assign(new Error(`model "${selection.model}" is no longer available — choose a current model`), { status: 409 });
   }
 
+  if (stoppedConversations.has(bot.threadId)) throw Object.assign(new Error("This task was stopped."), { status: 409 });
+  if (bot.busy) throw Object.assign(new Error("The bot is already working."), { status: 409 });
+  if (!opts?.retry && !opts?.resume) schedules.cancelResume(bot.threadId);
+  if (bot.usingBackup && selection.instanceId === bot.modelSelection.instanceId) { store.patchBot(botId, { usingBackup: false }); publishBot(botId); }
   // an edit hands us its already-branched user message; a plain send appends
   let userMessage = opts?.userMessage;
   if (!userMessage) {
     const savedAttachments = saveAttachmentsToWorkspace(bot.threadId, opts?.attachments);
-    userMessage = store.appendMessage(bot.threadId, { role: "user", kind: "text", text, attachments: savedAttachments });
+    userMessage = store.appendMessage(bot.threadId, { role: "user", kind: "text", text, scheduled: opts?.scheduled, attachments: savedAttachments });
     broadcast({ kind: "message", threadId: bot.threadId, message: userMessage });
   }
 
@@ -464,10 +598,10 @@ async function startTurn(
   // cursor-resuming drivers; transcript-replay drivers get it via transcript.
   // The rewind flag is cleared only once dispatch succeeds — clearing it here
   // would cost the next attempt its history if this dispatch fails.
-  const rewound = Boolean(bot.rewound);
-  const resumeCursor = rewound ? undefined : bot.resumeCursors[bot.modelSelection.instanceId];
+  const rewound = Boolean(bot.rewound || opts?.forceModel);
+  const resumeCursor = rewound ? undefined : bot.resumeCursors[selection.instanceId];
   const attPrompt = formatAttachmentContext(userMessage.attachments);
-  const promptBody = [text, attPrompt].filter(Boolean).join("\n\n");
+  const promptBody = [opts?.forceModel ? "A previous attempt may already have completed some actions. Inspect the current results before repeating actions, and continue the saved request below." : "", text, attPrompt].filter(Boolean).join("\n\n");
   const turnText =
     instance.driverKind !== "grok" && !resumeCursor && transcript.length
       ? [
@@ -493,6 +627,12 @@ async function startTurn(
 
   // busy flips immediately so the composer locks; the dispatch itself runs
   // in the background so the HTTP request can finish promptly
+  const context: ActiveTurnContext = { botId, message: userMessage, request: opts?.retry?.request ?? opts?.resume?.request ?? text,
+    originalMessageId: opts?.retry?.originalMessageId ?? opts?.resume?.userMessageId ?? userMessage.id,
+    attempt: opts?.retry?.attempt ?? opts?.resume?.attempt ?? 0, selection,
+    usedBackup: Boolean(opts?.forceModel || selection.instanceId !== bot.modelSelection.instanceId), commsDepth };
+  turnContexts.set(bot.threadId, context);
+  activeSelections.set(bot.threadId, selection);
   store.patchBot(bot.id, { busy: true, unread: false });
   broadcast({ kind: "bot", bot: store.bot(bot.id) });
 
@@ -524,11 +664,12 @@ async function startTurn(
 
       const composioPrompt = await composio.formatConnectedAppsPrompt(cfg);
 
+      if (turnContexts.get(bot.threadId) !== context || stoppedConversations.has(bot.threadId)) return;
       await instance.adapter.sendTurn({
         threadId: bot.threadId,
         text: turnText,
         attachments: userMessage.attachments,
-        model: bot.modelSelection.model,
+        model: selection.model,
         // a rewound thread never resumes the abandoned branch's session
         resumeCursor,
         transcript,
@@ -539,7 +680,7 @@ async function startTurn(
           composioPrompt +
           (computerHint ? ` ${computerHint}` : "") +
           (integrations.agents
-            ? ` You can use the shared task board through list_tasks, create_task, claim_task, update_task, delegate_task, and delete_task. Always use these tools for task changes; never read, edit, or replace tasks.json directly. Claim a suitable unassigned task before starting it, keep its status current, and move completed work to review so the user can verify it. If asked about your current, assigned, or in-progress work, call list_tasks (filter by your own assignee) before answering — do not guess from the filesystem or say none exist without checking.${canMessagePeers ? " You can also work with the user's other bots — list_bots shows who's available, and ask_bot sends one of them a message and returns their reply." : ""}`
+            ? ` You can create_schedule, list_schedules, and cancel_schedule for your own conversation or rooms you belong to. Schedules remain visible to the user and are capped at 20 active schedules per bot. You can use the shared task board through list_tasks, create_task, claim_task, update_task, delegate_task, and delete_task. Always use these tools for task changes; never read, edit, or replace tasks.json directly. Claim a suitable unassigned task before starting it, keep its status current, and move completed work to review so the user can verify it. If asked about your current, assigned, or in-progress work, call list_tasks (filter by your own assignee) before answering — do not guess from the filesystem or say none exist without checking.${canMessagePeers ? " You can also work with the user's other bots — list_bots shows who's available, and ask_bot sends one of them a message and returns their reply." : ""}`
             : "") +
           (tagged.length
             ? ` The user tagged ${tagged
@@ -550,8 +691,9 @@ async function startTurn(
         integrations,
       });
       // dispatched: the rewind is spent, and the old cursors are dead
-      if (rewound) store.patchBot(bot.id, { rewound: false, resumeCursors: {} });
+      if (rewound && turnContexts.get(bot.threadId) === context) store.patchBot(bot.id, { rewound: false, resumeCursors: {} });
     } catch (e) {
+      if (turnContexts.get(bot.threadId) !== context) return;
       const message = e instanceof Error ? e.message : String(e);
       const failure = store.appendMessage(bot.threadId, {
         role: "bot",
@@ -559,7 +701,9 @@ async function startTurn(
         tool: { name: `error: ${message.slice(0, 160)}`, ok: false },
       });
       broadcast({ kind: "message", threadId: bot.threadId, message: failure });
+      turnContexts.delete(bot.threadId); activeSelections.delete(bot.threadId);
       store.patchBot(bot.id, { busy: false });
+      void scheduler.wake();
       broadcast({ kind: "bot", bot: store.bot(bot.id) });
     }
   })();
@@ -635,6 +779,7 @@ async function runGroupMemberTurn(
   // must not run Pixel twice (once chained, once as a direct responder)
   spoken: Set<string> = new Set(),
   epoch = groupQueueEpoch.get(groupId) ?? 0,
+  retry?: { selection: ModelSelection; context: ActiveTurnContext },
 ): Promise<void> {
   const group = store.group(groupId);
   const bot = store.bot(botId);
@@ -644,7 +789,9 @@ async function runGroupMemberTurn(
     return;
   }
   spoken.add(botId);
-  const instance = registry.get(bot.modelSelection.instanceId);
+  const selection = retry?.selection ?? turnSelection(bot, usageStore.get(bot.modelSelection.instanceId).status);
+  if (bot.usingBackup && selection.instanceId === bot.modelSelection.instanceId) { store.patchBot(botId, { usingBackup: false }); publishBot(botId); }
+  const instance = registry.get(selection.instanceId);
   const userName = cfg.profile?.name?.trim() || "User";
   if (!instance) {
     const failure = store.appendMessage(group.threadId, {
@@ -657,8 +804,8 @@ async function runGroupMemberTurn(
     return;
   }
 
-  const groupCatalog = await registry.modelCatalog(bot.modelSelection.instanceId);
-  if (groupCatalog.status === "ready" && !groupCatalog.options.some((model) => model.id === bot.modelSelection.model)) {
+  const groupCatalog = await registry.modelCatalog(selection.instanceId);
+  if (groupCatalog.status === "ready" && !groupCatalog.options.some((model) => model.id === selection.model)) {
     const failure = store.appendMessage(group.threadId, {
       role: "bot", kind: "activity", from: { botId: bot.id, name: bot.name, color: bot.color },
       tool: { name: `error: ${bot.name}'s selected model was retired; choose another model`, ok: false },
@@ -706,6 +853,8 @@ async function runGroupMemberTurn(
   // run the turn and wait for it to settle, folding the reply text so a
   // chained @mention can be routed afterwards
   let replyText = "";
+  let usageFailure: UsageLimitFailure | undefined;
+  activeSelections.set(group.threadId, selection);
   let timedOut = false;
   await new Promise<void>((resolve) => {
     let done = false;
@@ -721,7 +870,7 @@ async function runGroupMemberTurn(
     const unsub = bus.subscribe((e: RuntimeEvent) => {
       if (e.threadId !== group.threadId) return;
       if (e.type === "item.completed" && e.itemType === "assistant_text") replyText += `\n${e.text}`;
-      else if (e.type === "turn.completed") finish();
+      else if (e.type === "turn.completed") { usageFailure = !e.ok ? e.failure : undefined; finish(); }
     });
     const timer = setTimeout(() => {
       timedOut = true;
@@ -732,7 +881,7 @@ async function runGroupMemberTurn(
         });
     }, GROUP_TURN_TIMEOUT_MS);
     instance.adapter
-      .sendTurn({ threadId: group.threadId, text, system, model: bot.modelSelection.model, cwd: projectContext.cwd, integrations })
+      .sendTurn({ threadId: group.threadId, text, system, model: selection.model, cwd: projectContext.cwd, integrations })
       .catch((err) => {
         const failure = store.appendMessage(group.threadId, {
           role: "bot",
@@ -744,6 +893,13 @@ async function runGroupMemberTurn(
         finish();
       });
   });
+  activeSelections.delete(group.threadId);
+  if (!timedOut && !stoppedConversations.has(group.threadId) && usageFailure && latestUserMessage) {
+    const resume = roomResumes.get(group.threadId);
+    const context: ActiveTurnContext = retry?.context ?? { botId, message: latestUserMessage, request: resume?.request ?? latestUserText,
+      originalMessageId: resume?.userMessageId ?? latestUserMessage.id, attempt: resume?.attempt ?? 0, selection, usedBackup: selection.instanceId !== bot.modelSelection.instanceId };
+    if (await handleUsageFailure(botId, { ...context, selection, usedBackup: Boolean(retry) || context.usedBackup }, usageFailure, groupId)) return;
+  }
   if (timedOut) {
     const failure = store.appendMessage(group.threadId, {
       role: "bot",
@@ -772,11 +928,15 @@ async function runGroupMemberTurn(
   }
 }
 
-function startGroupTurn(groupId: string, text: string, attachments?: Attachment[]) {
+const roomResumes = new Map<string, ResumeContext>();
+function startGroupTurn(groupId: string, text: string, attachments?: Attachment[], options?: { scheduled?: Message["scheduled"]; resume?: ResumeContext }) {
   const group = store.group(groupId);
   if (!group) throw Object.assign(new Error("no such group"), { status: 404 });
+  if (!options?.resume) { schedules.cancelResume(group.threadId); roomResumes.delete(group.threadId); }
+  else roomResumes.set(group.threadId, options.resume);
+  stoppedConversations.delete(group.threadId);
   const savedAttachments = saveAttachmentsToWorkspace(group.threadId, attachments);
-  const userMessage = store.appendMessage(group.threadId, { role: "user", kind: "text", text, attachments: savedAttachments });
+  const userMessage = store.appendMessage(group.threadId, { role: "user", kind: "text", text, scheduled: options?.scheduled, attachments: savedAttachments });
   broadcast({ kind: "message", threadId: group.threadId, message: userMessage });
 
   const members = group.memberIds
@@ -785,7 +945,7 @@ function startGroupTurn(groupId: string, text: string, attachments?: Attachment[
   const mentioned = mentionedBots(text, members);
   // Buzz rule: nobody replies unless mentioned — except a one-member room,
   // where the single bot obviously IS the addressee
-  let responders = mentioned.length ? mentioned : members.length === 1 ? members : [];
+  let responders = options?.resume ? members.filter(b => b.id === options.resume!.botId) : mentioned.length ? mentioned : members.length === 1 ? members : [];
   // bot⇄bot channels: chipping in without a tag addresses the last speaker
   if (!responders.length && group.dm) {
     const lastSpeakerId = [...store.messagesFor(group.threadId)]
@@ -811,7 +971,11 @@ function startGroupTurn(groupId: string, text: string, attachments?: Attachment[
       await runGroupMemberTurn(groupId, responder.id, 0, spoken, epoch);
     }
   });
-  groupQueues.set(groupId, next.catch(() => {}));
+  const settled = next.catch(() => {}).finally(() => {
+    if (groupQueues.get(groupId) === settled) { groupQueues.delete(groupId); roomResumes.delete(group.threadId); }
+    void scheduler.wake();
+  });
+  groupQueues.set(groupId, settled);
 }
 
 function configStatus() {
@@ -1061,6 +1225,10 @@ const server = createServer(async (req, res) => {
       }
       const callerId = String(req.headers["x-gbs-bot-id"] ?? "");
       const caller = taskActorForBot(callerId);
+      if (path === "/api/internal/schedules" || path.startsWith("/api/internal/schedules/")) {
+        if (!caller) return json(res, 401, { error: "Unknown calling bot." });
+        return await serveSchedules(req, res, path.slice("/api/internal/schedules".length), method, callerId);
+      }
       if (method === "GET" && path === "/api/internal/tasks") {
         if (!caller) return json(res, 401, { error: "unknown calling agent" });
         return json(res, 200, { tasks: taskStore.list(taskFilters(url)).map((task) => taskView(task, true)) });
@@ -1188,6 +1356,8 @@ const server = createServer(async (req, res) => {
       return json(res, 404, { error: "unknown internal endpoint" });
     }
 
+    if (path === "/api/schedules" || path.startsWith("/api/schedules/")) return await serveSchedules(req, res, path.slice("/api/schedules".length), method);
+
     if (method === "GET" && path === "/api/usage") return json(res, 200, { engines: usageSnapshot() });
 
     // ── events stream ──
@@ -1199,7 +1369,9 @@ const server = createServer(async (req, res) => {
       });
       res.write(`data: ${JSON.stringify({ kind: "hello" })}\n\n`);
       sseClients.add(res);
+      if (url.searchParams.get("notifications") === "1") notificationClients.add(res);
       res.write(`data: ${JSON.stringify({ kind: "usage", engines: usageSnapshot() })}\n\n`);
+      res.write(`data: ${JSON.stringify({ kind: "schedules", ...schedules.snapshot() })}\n\n`);
       void refreshIdleUsage();
       const keepalive = setInterval(() => {
         try {
@@ -1209,6 +1381,7 @@ const server = createServer(async (req, res) => {
       req.on("close", () => {
         clearInterval(keepalive);
         sseClients.delete(res);
+        notificationClients.delete(res);
       });
       return;
     }
@@ -1335,7 +1508,8 @@ const server = createServer(async (req, res) => {
       const group = store.group(m[1]);
       if (!group) return json(res, 404, { error: "no such room" });
       const busy = group.busyBotId ? store.bot(group.busyBotId) : undefined;
-      const instance = busy ? registry.get(busy.modelSelection.instanceId) : undefined;
+      const instance = busy ? registry.get((activeSelections.get(group.threadId) ?? busy.modelSelection).instanceId) : undefined;
+      stoppedConversations.add(group.threadId); schedules.cancelResume(group.threadId);
       groupQueueEpoch.set(group.id, (groupQueueEpoch.get(group.id) ?? 0) + 1);
       store.patchGroup(group.id, { queuedBotIds: [] });
       broadcastGroup(group.id);
@@ -1354,8 +1528,9 @@ const server = createServer(async (req, res) => {
       if (group.busyBotId && group.busyBotId !== bot.id) {
         return json(res, 409, { error: "another agent owns the active room turn" });
       }
-      const instance = registry.get(bot.modelSelection.instanceId);
+      const instance = registry.get((activeSelections.get(group.threadId) ?? bot.modelSelection).instanceId);
       if (!instance) return json(res, 409, { error: "provider unavailable" });
+      stoppedConversations.add(group.threadId); schedules.cancelResume(group.threadId);
       await instance.adapter.interruptTurn(group.threadId).catch(() => {});
       return json(res, 200, { ok: true });
     }
@@ -1404,11 +1579,20 @@ const server = createServer(async (req, res) => {
     if (m && method === "PATCH") {
       const body = await readBody(req);
       const patch: Record<string, unknown> = {};
-      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "computer", "color", "mascotExpression", "pinned", "hidden"] as const) {
+      for (const key of ["name", "title", "description", "notifications", "modelSelection", "backupModelSelection", "onUsageLimit", "unread", "computer", "color", "mascotExpression", "pinned", "hidden"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
       }
       const current = store.bot(m[1]);
       if (!current) return json(res, 404, { error: "no such bot" });
+      if ((patch.modelSelection !== undefined || patch.backupModelSelection !== undefined || patch.onUsageLimit !== undefined) &&
+        (current.busy || store.groups.some(g => g.busyBotId === current.id))) return json(res, 409, { error: "Wait for this bot to finish before changing its AI model." });
+      if (patch.onUsageLimit !== undefined && !["backup", "wait", "stop"].includes(String(patch.onUsageLimit))) return json(res, 400, { error: "Choose what should happen when usage runs out." });
+      for (const key of ["modelSelection", "backupModelSelection"] as const) {
+        const value = patch[key];
+        if (value === null && key === "backupModelSelection") { patch[key] = undefined; continue; }
+        if (value !== undefined && (!value || typeof value !== "object" || typeof (value as ModelSelection).instanceId !== "string" || typeof (value as ModelSelection).model !== "string")) return json(res, 400, { error: "Choose an AI model." });
+      }
+      if (patch.modelSelection !== undefined || patch.backupModelSelection !== undefined) patch.usingBackup = false;
       const nextSelection = patch.modelSelection as ModelSelection | undefined;
       if (
         nextSelection &&
@@ -1429,7 +1613,7 @@ const server = createServer(async (req, res) => {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
       // a running turn dies with its bot
-      await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(bot.threadId).catch(() => {});
+      await registry.get((activeSelections.get(bot.threadId) ?? bot.modelSelection).instanceId)?.adapter.interruptTurn(bot.threadId).catch(() => {});
       store.deleteBot(bot.id);
       deleteThreadLogs(bot.threadId);
       broadcast({ kind: "bot.deleted", botId: bot.id });
@@ -1523,9 +1707,9 @@ const server = createServer(async (req, res) => {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
       const body = await readBody(req);
-      const instance = registry.get(bot.modelSelection.instanceId);
-      if (!instance) return json(res, 409, { error: "provider unavailable" });
       const requestedThreadId = typeof body.threadId === "string" && body.threadId ? body.threadId : bot.threadId;
+      const instance = registry.get((activeSelections.get(requestedThreadId) ?? bot.modelSelection).instanceId);
+      if (!instance) return json(res, 409, { error: "provider unavailable" });
       if (requestedThreadId !== bot.threadId) {
         const group = store.groupByThread(requestedThreadId);
         if (!group || !group.memberIds.includes(bot.id) || groupSpeakers.get(requestedThreadId)?.botId !== bot.id) {
@@ -1557,7 +1741,9 @@ const server = createServer(async (req, res) => {
     if (m && method === "POST") {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      const instance = registry.get(bot.modelSelection.instanceId);
+      const instance = registry.get((activeSelections.get(bot.threadId) ?? bot.modelSelection).instanceId);
+      stoppedConversations.add(bot.threadId); schedules.cancelResume(bot.threadId); turnContexts.delete(bot.threadId);
+      if (!instance?.adapter.hasSession(bot.threadId)) { activeSelections.delete(bot.threadId); store.patchBot(bot.id, { busy: false }); publishBot(bot.id); void scheduler.wake(); }
       await instance?.adapter.interruptTurn(bot.threadId);
       return json(res, 200, { ok: true });
     }
@@ -1786,6 +1972,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
+scheduler.start();
 server.listen(PORT, HOST, () => {
   console.log(`gerer-build-studio server on http://${HOST}:${PORT}`);
 });
@@ -1794,6 +1981,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     stopTrelloPolling();
     clearInterval(usageTimer);
+    scheduler.stop();
     void registry.disposeAll().finally(() => process.exit(0));
   });
 }

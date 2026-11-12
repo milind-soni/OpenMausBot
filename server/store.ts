@@ -56,6 +56,7 @@ export interface Message {
   /** screen messages: a frame of the bot's computer (base64 image) */
   png?: string;
   mime?: string;
+  scheduled?: { scheduleId: string; deliveryId: string };
   at: number;
   /** the message this one follows; null = thread root. Edited messages
    * share a parentId with the version they replace — that's a fork. */
@@ -104,6 +105,9 @@ export interface BotRecord {
   mascotExpression?: MausExpression | null;
   unread: boolean;
   modelSelection: ModelSelection;
+  backupModelSelection?: ModelSelection;
+  onUsageLimit?: "backup" | "wait" | "stop";
+  usingBackup?: boolean;
   /** provider-native continuation per instance (e.g. claude session id) */
   resumeCursors: Record<string, unknown>;
   /** Unset uses this computer when the desktop bridge is available. */
@@ -193,6 +197,7 @@ export class Store {
     let migrated = false;
     for (const b of this.bots) {
       b.busy = false;
+      if (!["backup", "wait", "stop"].includes(b.onUsageLimit ?? "")) { b.onUsageLimit = "stop"; migrated = true; }
       if ((b.computer as string | undefined) === "cloud") {
         delete b.computer;
         migrated = true;
@@ -432,6 +437,7 @@ export class Store {
       color: COLORS[this.bots.length % COLORS.length],
       unread: false,
       modelSelection: this.defaultSelection(),
+      onUsageLimit: "wait",
       resumeCursors: {},
       createdAt: Date.now(),
     };
@@ -489,6 +495,7 @@ export class Store {
         color: preset.color,
         unread: false,
         modelSelection: this.defaultSelection(),
+      onUsageLimit: "wait",
         resumeCursors: {},
         pinned: preset.pinned,
         createdAt: now - i, // newest first, matching createBot's ordering

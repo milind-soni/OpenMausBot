@@ -22,6 +22,12 @@ const TOKEN = process.env.GBS_COMMS_TOKEN ?? "";
 const DEPTH = Number(process.env.GBS_TURN_DEPTH ?? "0") || 0;
 
 const TOOLS = [
+  { name: "list_schedules", description: "List scheduled work in your chat and rooms, including room IDs. All schedules are visible and cancellable by the user.", inputSchema: { type: "object", properties: {} } },
+  { name: "cancel_schedule", description: "Cancel a schedule you created in your own chat or a room you belong to.", inputSchema: { type: "object", properties: { schedule_id: { type: "string" } }, required: ["schedule_id"] } },
+  { name: "create_schedule", description: "Schedule instructions for your own chat or a room you belong to. Up to 20 active schedules per bot. Use an IANA timezone and an ISO timestamp with offset for a one-time run.", inputSchema: { type: "object", properties: {
+    group_id: { type: "string" }, prompt: { type: "string" }, timezone: { type: "string" },
+    repeat: { type: "object", properties: { kind: { type: "string", enum: ["once", "daily", "weekdays", "weekly", "every"] }, at: { type: "string" }, time: { type: "string" }, days: { type: "array", items: { type: "integer", minimum: 0, maximum: 6 } }, hours: { type: "integer", minimum: 1, maximum: 168 } }, required: ["kind"] },
+  }, required: ["prompt", "timezone", "repeat"] } },
   {
     name: "list_bots",
     description:
@@ -213,6 +219,12 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     if (r.error) return { text: `Couldn't reach that bot: ${r.error}`, isError: true };
     return { text: `${r.botName ?? "Bot"} replied:\n${r.text ?? "(no reply)"}` };
   }
+  if (name === "list_schedules") return { text: JSON.stringify(await api("/api/internal/schedules"), null, 2) };
+  if (name === "create_schedule") {
+    const schedule = await api("/api/internal/schedules", { method: "POST", body: JSON.stringify({ target: args.group_id ? { groupId: String(args.group_id) } : { botId: BOT_ID }, prompt: args.prompt, timezone: args.timezone, repeat: args.repeat }) });
+    return { text: JSON.stringify(schedule, null, 2) };
+  }
+  if (name === "cancel_schedule") return { text: JSON.stringify(await api(`/api/internal/schedules/${encodeURIComponent(String(args.schedule_id ?? ""))}`, { method: "DELETE" })) };
   if (name === "list_tasks") {
     const query = new URLSearchParams();
     for (const [source, target] of [
