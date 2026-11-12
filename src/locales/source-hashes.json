@@ -36470,7 +36470,9 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "chat.helperSuggestion.from": "338d86d437daa564bbad98f115c5cf2fef5c34206d9a81c637cd6e8a8b13990e",
+      "chat.helperSuggestion.about": "90a8c616bbb161c27ffad72536c2ba545bbe837e31c70c581a19c0d0d5bb0bbf"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -54696,7 +54698,9 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "chat.helperSuggestion.from": "338d86d437daa564bbad98f115c5cf2fef5c34206d9a81c637cd6e8a8b13990e",
+      "chat.helperSuggestion.about": "90a8c616bbb161c27ffad72536c2ba545bbe837e31c70c581a19c0d0d5bb0bbf"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
