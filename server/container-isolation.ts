@@ -22,6 +22,10 @@ const GUEST_IDS_SCRIPT = [
   "set -eu",
   'uid="$1"; gid="$2"; old_uid="$(id -u cua)"; old_gid="$(id -g cua)"',
   'if [ "$old_uid:$old_gid" != "$uid:$gid" ]; then',
+  // The bind-mounted workspace is another filesystem, so -xdev from / skips it: an older desktop's files there move too.
+  // Best effort: a share that refuses chown must not keep the desktop from starting.
+  '  [ ! -d /home/cua/workspace ] || find /home/cua/workspace -xdev -uid "$old_uid" -exec chown -h "$uid" {} + || echo "some workspace files kept uid $old_uid" >&2',
+  '  [ ! -d /home/cua/workspace ] || find /home/cua/workspace -xdev -gid "$old_gid" -exec chgrp -h "$gid" {} + || echo "some workspace files kept gid $old_gid" >&2',
   '  find / -xdev -uid "$old_uid" -exec chown -h "$uid" {} +',
   '  find / -xdev -gid "$old_gid" -exec chgrp -h "$gid" {} +',
   '  sed -i "s/^cua:x:$old_uid:$old_gid:/cua:x:$uid:$gid:/" /etc/passwd',

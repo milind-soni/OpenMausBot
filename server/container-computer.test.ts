@@ -1274,6 +1274,11 @@ describe("setupCommands", () => {
     const script = tail[2];
     expect(script.indexOf("find / -xdev"), "files move before /etc/passwd, so an interrupted start resumes")
       .toBeLessThan(script.indexOf("sed -i"));
+    // The workspace is a bind mount, which -xdev from / skips: an older desktop's files there must change owner too.
+    for (const step of [`find ${VM_WORKSPACE_GUEST} -xdev -uid "$old_uid" -exec chown -h "$uid" {} +`, `find ${VM_WORKSPACE_GUEST} -xdev -gid "$old_gid" -exec chgrp -h "$gid" {} +`]) {
+      expect(script).toContain(step);
+      expect(script.indexOf(step)).toBeLessThan(script.indexOf("sed -i"));
+    }
     expect(script).toMatch(/\|\| \{ echo "cua did not take uid \$uid gid \$gid" >&2; exit 1; \}\nfi\nexec /);
   });
 

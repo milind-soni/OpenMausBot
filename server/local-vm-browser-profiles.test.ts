@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { VM_WORKSPACE_GUEST, managedImageDockerfile, type LocalVmTarget } from "./container-computer.ts";
-import { rescueFirefoxProfile, rescueInstalledApps } from "./local-vm-profiles.ts";
+import { keepFirefoxProfileBeforeRemove, rescueFirefoxProfile, rescueInstalledApps } from "./local-vm-profiles.ts";
 
 const temporary: string[] = [];
 afterEach(() => {
@@ -182,9 +182,10 @@ describe.skipIf(process.platform === "win32")("rescueFirefoxProfile", () => {
     expect(await rescueFirefoxProfile(runtime, target(workspace))).toBe("rescued");
     expect(readFileSync(join(workspace, ".browser-profiles", "mozilla", "firefox", "abc.default-esr", "cookies.sqlite"), "utf8")).toBe("signed in");
     const [copy] = readFileSync(log, "utf8").trim().split("\n");
-    expect(copy).toMatch(/^cp openmausbot-computer-x:\/home\/cua\/\.mozilla \S+\/\.browser-profiles\/\.mozilla-rescue-[0-9a-f]+$/);
-    expect(copy.startsWith(`cp openmausbot-computer-x:/home/cua/.mozilla ${join(workspace, ".browser-profiles")}/`)).toBe(true);
+    expect(copy).toMatch(/^cp openmausbot-computer-x:\/home\/cua\/\.mozilla \S+\/\.mozilla-rescue-[0-9a-f]+$/);
+    expect(copy.startsWith(`cp openmausbot-computer-x:/home/cua/.mozilla ${workspace}/.mozilla-rescue-`)).toBe(true);
     expect(readdirSync(join(workspace, ".browser-profiles"))).toEqual(["mozilla"]);
+    expect(readdirSync(workspace)).toEqual([".browser-profiles"]);
   });
 
   it("never overwrites a profile already in the workspace, and leaves a desktop whose ~/.mozilla is already a link alone", async () => {
@@ -215,5 +216,50 @@ describe.skipIf(process.platform === "win32")("rescueFirefoxProfile", () => {
     await expect(rescueFirefoxProfile(fakeRuntime(broken, container, { fail: "permission denied" }).runtime, target(workspace)))
       .rejects.toThrow(/permission denied/);
     expect(readdirSync(join(workspace, ".browser-profiles"))).toEqual([]);
+  });
+
+  // A desktop from before cua took the host's ids (uid 1000) leaves these folders owned by that uid; the server cannot
+  // write in them, yet a desktop whose ~/.mozilla and ~/.local already link into the workspace has nothing to copy.
+  it.skipIf(process.getuid?.() === 0)("updates a desktop whose profile folders an older desktop owns when there is nothing to copy", async () => {
+    const dir = scratch();
+    const container = join(dir, "container");
+    mkdirSync(join(container, "home", "cua"), { recursive: true });
+    symlinkSync("/home/cua/workspace/.browser-profiles/mozilla", join(container, "home", "cua", ".mozilla"));
+    symlinkSync("/home/cua/workspace/.desktop-apps/local", join(container, "home", "cua", ".local"));
+    const workspace = join(dir, "workspace");
+    mkdirSync(join(workspace, ".browser-profiles"), { recursive: true });
+    mkdirSync(join(workspace, ".desktop-apps", "local", "share"), { recursive: true });
+    chmodSync(join(workspace, ".browser-profiles"), 0o500);
+    chmodSync(join(workspace, ".desktop-apps"), 0o500);
+    try {
+      const { runtime } = fakeRuntime(dir, container);
+      expect(await rescueFirefoxProfile(runtime, target(workspace))).toBe("none");
+      expect(await rescueInstalledApps(runtime, target(workspace))).toBe("none");
+    } finally {
+      chmodSync(join(workspace, ".browser-profiles"), 0o700);
+      chmodSync(join(workspace, ".desktop-apps"), 0o700);
+    }
+    expect(readdirSync(workspace).sort()).toEqual([".browser-profiles", ".desktop-apps"]);
+  });
+
+  it.skipIf(process.getuid?.() === 0)("names the command that hands an older desktop's folders back when it must write in them", async () => {
+    const dir = scratch();
+    const container = join(dir, "container");
+    mkdirSync(join(container, "home", "cua", ".mozilla", "firefox"), { recursive: true });
+    writeFileSync(join(container, "home", "cua", ".mozilla", "firefox", "profiles.ini"), "old desktop");
+    const workspace = join(dir, "workspace");
+    mkdirSync(join(workspace, ".browser-profiles"), { recursive: true });
+    chmodSync(join(workspace, ".browser-profiles"), 0o500);
+    // The fake runtime is a path; the update itself only ever passes "docker" or "podman" through to the same spawn.
+    const status = { runtime: fakeRuntime(dir, container).runtime as "docker", container: "stopped", managed: true, imageMatches: false } as const;
+    let failure: unknown;
+    try {
+      failure = await keepFirefoxProfileBeforeRemove(target(workspace), status, async () => {}).catch((error: unknown) => error);
+    } finally {
+      chmodSync(join(workspace, ".browser-profiles"), 0o700);
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain(`sudo chown -R ${process.getuid?.()}:${process.getgid?.()} '${workspace}'`);
+    expect(readdirSync(workspace)).toEqual([".browser-profiles"]);
   });
 });
