@@ -6,7 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AppState, Bot, InstanceInfo } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ owned: true, controls: [] as Array<{ action: string; controlLeaseId?: string }> }));
+const fixture = vi.hoisted(() => ({ owned: true, controls: [] as Array<{ action: string; controlLeaseId?: string }>, joins: [] as string[] }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
   useCaptionChrome: () => ({ padClass: undefined }),
@@ -23,6 +23,10 @@ vi.mock("@/state/store", async (importOriginal) => ({
       return body.action === "take" ? { held: true, helpReason: null, owned: fixture.owned } : { held: false, helpReason: null };
     }
     if (path === "/api/bots/scout/computer/join") return { joinUrl: "https://desktop.invalid/scout" };
+    if (path.startsWith("/api/bots/scout/local-computer/join?")) {
+      fixture.joins.push(path);
+      return { joinUrl: "/vps-viewer/relay-1" };
+    }
     return {};
   },
 }));
@@ -47,6 +51,7 @@ let root: Root | null = null;
 
 beforeEach(() => {
   fixture.controls = [];
+  fixture.joins = [];
   viewerClosedRelease("scout");
 });
 afterEach(() => {
@@ -82,4 +87,26 @@ it.each([
     ...(releases ? [{ action: "release", controlLeaseId: lease }] : []),
   ]);
   expect(viewerClosedRelease("scout")).toEqual(closes ? { action: "release", controlLeaseId: lease } : null);
+});
+
+it("a client whose host runs the bot on its Local VM takes and opens that desktop, not the cloud computer", async () => {
+  fixture.owned = true;
+  const open = vi.fn(async () => true);
+  vi.stubGlobal("ogb", { desktopViewer: { open, close: vi.fn(async () => true), onState: () => () => {}, currentState: async () => ({ open: false, contextId: null }) } });
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  flushSync(() => root!.render(createElement(BotEditorStore, { value: {
+    state: { ...initialState, instances: [engine], config: { box: { configured: true } } as AppState["config"] } as AppState,
+    dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {},
+  }, children: createElement(RemoteDesktopPanel, { bot: { ...bot, computer: "vm" } }) })));
+  expect(document.body.textContent).toContain("Private desktop");
+  expect(document.body.textContent).not.toContain("Cloud desktop");
+  const take = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Take control");
+  flushSync(() => take!.click());
+  await vi.waitFor(() => expect(open).toHaveBeenCalled());
+  const lease = fixture.controls[0]!.controlLeaseId!;
+  expect(fixture.controls).toEqual([{ action: "take", controlLeaseId: expect.stringMatching(/^[0-9a-f]{36}$/) }]);
+  expect(fixture.joins).toEqual([`/api/bots/scout/local-computer/join?controlLeaseId=${lease}`]);
+  expect(open).toHaveBeenCalledWith(new URL("/vps-viewer/relay-1", window.location.origin).toString(), expect.any(String), "scout");
 });

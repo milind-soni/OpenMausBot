@@ -54,7 +54,8 @@ export async function openProviderDesktop({ botId, title, request, join, current
   botId: string;
   title: string;
   request: Request;
-  join: (signal: AbortSignal) => Promise<{ joinUrl?: unknown }>;
+  /** Gets the viewer link; a Local VM's join names the lease its take holds. */
+  join: (signal: AbortSignal, controlLeaseId: string) => Promise<{ joinUrl?: unknown }>;
   /** Still the conversation and computer the person asked for. */
   current: () => boolean;
 }): Promise<void> {
@@ -72,7 +73,7 @@ export async function openProviderDesktop({ botId, title, request, join, current
     const mine = take.owned ? lease : null;
     if (mine && window.ogb?.desktopViewer) recordViewerLease(botId, mine);
     if (!current()) throw changed();
-    const { joinUrl } = await join(AbortSignal.timeout(JOIN_TIMEOUT_MS));
+    const { joinUrl } = await join(AbortSignal.timeout(JOIN_TIMEOUT_MS), lease);
     const viewerUrl = typeof joinUrl === "string" && joinUrl ? joinUrl : null;
     if (!current()) throw changed();
     if (!viewerUrl) throw new LocalizedPanelError("computer.err.noDesktopLink");

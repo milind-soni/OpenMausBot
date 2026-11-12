@@ -5,7 +5,7 @@ import { CalendarClock, CalendarDays, Globe, ImageOff, Loader2, Monitor, Plus, X
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { usePageVisible } from "@/lib/page-visible";
-import { isRemoteScreenshotContention, remoteScreenshotSource } from "@/lib/remote-desktop";
+import { isRemoteScreenshotContention, localVmScreenshotSource, remoteScreenshotSource } from "@/lib/remote-desktop";
 import type { Routine } from "@/lib/routines";
 import { dayName, scheduleLabel } from "@/lib/schedule-label";
 import { intlLocale, t } from "@/lib/i18n";
@@ -77,6 +77,8 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   const previewBusy = useRef(bot.busy);
   useEffect(() => { previewBusy.current = bot.busy; }, [bot.busy]);
   const [creatingRoutine, setCreatingRoutine] = useState(false);
+  // The host runs this bot on its Local VM: preview, control and viewer all go to that desktop, not the cloud computer.
+  const localVm = bot.computer === "vm";
   const [view, setView] = useState<"desktop" | "browser">(() => takeComputerPanelBrowserView(bot.id) ? "browser" : "desktop");
   const [signIn, setSignIn] = useState<BrowserSignIn>();
   const help = state.computerControl[bot.id]?.help ?? null;
@@ -103,7 +105,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
     setFrame(null);
     setPreviewPending(true);
     setPreviewUnavailable(false);
-  }, [bot.id]);
+  }, [bot.id, localVm]);
 
   useEffect(() => {
     const viewer = window.ogb?.desktopViewer;
@@ -134,11 +136,12 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
       requestRunning = true;
       retryDelay = null;
       try {
-        const source = remoteScreenshotSource(await api(`/api/bots/${bot.id}/computer/screenshot`, {
+        const shot = await api(`/api/bots/${bot.id}/${localVm ? "local-computer" : "computer"}/screenshot`, {
           method: "POST",
           body: "{}",
           signal: AbortSignal.any([controller.signal, AbortSignal.timeout(90_000)]),
-        }));
+        });
+        const source = localVm ? localVmScreenshotSource(shot) : remoteScreenshotSource(shot);
         if (!controller.signal.aborted && source) {
           setFrame(source);
           setPreviewUnavailable(false);
@@ -171,19 +174,24 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [bot.id, pageVisible, viewerOpen, pending, view]);
+  }, [bot.id, localVm, pageVisible, viewerOpen, pending, view]);
 
   const open = async () => {
     setPending(true);
     setError(null);
     try {
       if (!window.ogb?.desktopViewer) throw new Error(t("remoteDesktop.viewerUnavailable"));
+      // A take with no target holds the desktop the host runs this bot on, its Local VM included, as a phone's does.
+      const target = !localVm && bot.cloudBackend === "vps" ? `vps/${bot.id}` : undefined;
       await openProviderDesktop({
         botId: bot.id, title: t("computer.viewerTitle", { name: bot.name }), current: () => true,
         request: (action, controlLeaseId) => api(`/api/bots/${bot.id}/computer/control`, {
-          method: "POST", body: JSON.stringify({ action, controlLeaseId, ...(bot.cloudBackend === "vps" ? { target: `vps/${bot.id}` } : {}) }),
+          method: "POST", body: JSON.stringify({ action, controlLeaseId, ...(target ? { target } : {}) }),
         }),
-        join: async (signal) => ({ joinUrl: viewerAddress((await api(`/api/bots/${bot.id}/computer/join`, { method: "POST", body: "{}", signal })).joinUrl) }),
+        join: async (signal, controlLeaseId) => {
+          const path = localVm ? `local-computer/join?${new URLSearchParams({ controlLeaseId })}` : "computer/join";
+          return { joinUrl: viewerAddress((await api(`/api/bots/${bot.id}/${path}`, { method: "POST", body: "{}", signal })).joinUrl) };
+        },
       });
     } catch (cause) {
       await api(`/api/bots/${bot.id}/computer/viewer-close`, {
@@ -202,7 +210,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
         <div>
           <div className="text-[14px] font-medium text-ink">{t("remoteDesktop.title", { name: bot.name })}</div>
           <div className="mt-0.5 text-[11px] text-ink-secondary">
-            {t(bot.cloudBackend === "vps" ? "botAccess.cloud.selfHostedVps" : "remoteDesktop.cloudDesktop")}
+            {t(localVm ? "vm.dest.vm" : bot.cloudBackend === "vps" ? "botAccess.cloud.selfHostedVps" : "remoteDesktop.cloudDesktop")}
           </div>
         </div>
         <div className="flex items-center gap-1">
