@@ -98,6 +98,15 @@ describe("webhook_payload_filter in the trigger tool", () => {
     expect(calls[0]!.body).toMatchObject({ action: "create", kind: "webhook", webhook: { name: "Doorbell", payloadFilter: { status: "ring", count: "2" } } });
     await callTool("trigger", { action: "update", trigger_id: "t-1", webhook_payload_filter: {} }, ctx);
     expect(calls[1]!.body).toMatchObject({ action: "update", triggerId: "t-1", changes: { payloadFilter: {} } });
+    await callTool("trigger", { action: "update", trigger_id: "t-1", webhook_payload_filter: null }, ctx);
+    expect(calls[2]!.body).toMatchObject({ action: "update", triggerId: "t-1", changes: { payloadFilter: null } });
+  });
+
+  it("reads a null filter on another kind's update as nothing to change", () => {
+    const update = (kind: "schedule" | "app") => parseTriggerRequest({ fromBotId: "b", fromThreadId: "t", action: "update", triggerId: "r-1", changes: { name: "N", payloadFilter: null } }, () => kind);
+    expect(update("schedule")).toMatchObject({ ok: true, proposal: { changes: { name: "N" } } });
+    expect(update("app")).toMatchObject({ ok: true, operation: { changes: { name: "N" } } });
+    expect(JSON.stringify([update("schedule"), update("app")])).not.toContain("payloadFilter");
   });
 
   it("refuses it on other kinds and refuses a malformed filter before anything is sent", async () => {

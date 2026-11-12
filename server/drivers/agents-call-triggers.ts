@@ -306,7 +306,9 @@ function triggerFields(args: Json): { fields: Json; error?: string } {
     fields.eventTypes = eventTypes.map((value) => String(value).trim()).filter(Boolean);
   }
   const payloadFilter = args.webhook_payload_filter;
-  if (payloadFilter !== undefined && payloadFilter !== null) {
+  if (payloadFilter === null) {
+    fields.payloadFilter = null;
+  } else if (payloadFilter !== undefined) {
     const entries = jsonRecord(payloadFilter) ? Object.entries(payloadFilter) : null;
     if (!entries || entries.some(([field, value]) => !field.trim() || field.length > 200
       || !(typeof value === "string" || typeof value === "number" || typeof value === "boolean") || String(value).length > 200)) {

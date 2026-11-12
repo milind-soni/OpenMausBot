@@ -198,8 +198,11 @@ export function parseTriggerRequest(body: unknown, kindOf: (id: string) => "sche
       ? { ok: true, kind: "schedule", forBotId: request.forBotId, proposal: { action: "create", routine: request.routine } }
       : { ok: true, kind: "webhook", forBotId: request.forBotId, operation: { action: "create", webhook: request.webhook } };
   }
-  const changes = request.action === "update" ? request.changes : undefined;
   const kind = kindOf(request.triggerId);
+  const asked = request.action === "update" ? request.changes : undefined;
+  // A null payload filter clears a webhook's; on another kind it changes nothing.
+  const { payloadFilter, ...rest } = asked ?? {};
+  const changes = asked && kind !== "webhook" && payloadFilter === null ? rest : asked;
   if (kind === "app") {
     const misplaced = changes && Object.keys(changes).find((key) => !APP_FIELDS.has(key));
     if (misplaced) return { ok: false, error: `An app-event trigger has no ${misplaced} to change. Change name, instructions, run_on, filter, event_config or same_conversation; to watch another app, event or account, delete it and create a new one.` };
