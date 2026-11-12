@@ -43,6 +43,7 @@ vi.mock("./SidebarPopoverMenu", async (importOriginal) => ({
 }));
 
 const { ChatMoreMenu, ChatHeaderMenu, ChatShareMenu } = await import("./ChatMoreMenu");
+const { rememberLimits } = await import("@/lib/limit-resets");
 afterAll(() => vi.unstubAllGlobals());
 
 const task = (threadId: string, title: string, at: number, extra: Partial<Task> = {}): Task => ({
@@ -165,6 +166,27 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
     inspector.onSelect();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleInspector" });
     expect(menu.trigger).toContain("text-accent");
+  });
+});
+
+describe("the phone header's ⋯", () => {
+  const modelRow = () => menuOf(createElement(ChatMoreMenu, { bot, phoneHeader: true })).items.find((item) => item.key === "model")!;
+  const trailing = () => renderToStaticMarkup(createElement("div", null, modelRow().trailing));
+  for (const advanced of [false, true]) {
+    it(`shows the model's usage bars on its Model row (${advanced ? "Advanced" : "Simple"})`, () => {
+      fixture.advanced = advanced;
+      rememberLimits({ checkedAt: 1, engines: [
+        { engine: "test", name: "Test", driver: "codex", window: "5-hour", usedPercent: 92, resetsAt: null, blocked: false },
+        { engine: "other", name: "Other", driver: "claude", window: "5-hour", usedPercent: 10, resetsAt: null, blocked: false },
+      ] });
+      expect(trailing()).toContain('data-usage-bars="near"');
+      expect(trailing()).toContain("Test: 92% used");
+    });
+  }
+
+  it("leaves the Model row bare for an engine that reports no usage", () => {
+    rememberLimits({ checkedAt: 1, engines: [{ engine: "other", name: "Other", driver: "claude", window: "5-hour", usedPercent: 10, resetsAt: null, blocked: false }] });
+    expect(trailing()).not.toContain("data-usage-bars");
   });
 });
 

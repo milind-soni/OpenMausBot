@@ -175,6 +175,7 @@ export const VITEST_SUBSETS = {
       "server/cloud-team-mausbot-own-chat.e2e.test.ts",
       "server/connector-stayed.e2e.test.ts",
       "server/email/host.test.ts",
+      "server/email/inline-images.test.ts",
       "server/host/outside-lineage.test.ts",
       "server/memory-move.test.ts",
       "server/outside-lineage.e2e.test.ts",

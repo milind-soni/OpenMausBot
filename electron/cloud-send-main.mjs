@@ -159,8 +159,8 @@ export function installCloudSend({ ipcMain, cloudPage, server, local, home, cook
     /** This computer's server's private port, asked as a send asks it: another move's sends share it. */
     handoff: (what) => handoff.request(server(), what),
     /** The one-time move to My Cloud (cloud-send.mjs): a pass that carries everything, `final` the one after this computer
-     * stops, and the check of what arrived. */
-    move: (options) => send.send({ reason: "move", final: options?.final === true, ...(options?.scope ? { scope: options.scope } : {}) }),
+     * stops, and the check of what arrived. `files: false` leaves the bots' files. */
+    move: (options) => send.send({ reason: "move", final: options?.final === true, ...(options?.scope ? { scope: options.scope } : {}), ...(options?.files === false ? { files: false } : {}) }),
     check: (options) => send.check(options),
     /** Each automation the move carried, and whether it was on here when it went. */
     switches: () => send.switches(),

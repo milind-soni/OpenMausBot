@@ -2,11 +2,13 @@ import { memo, useEffect, useRef, useState, type Dispatch, type ReactNode } from
 import { createPortal } from "react-dom";
 import { Archive, ArchiveRestore, BellOff, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2 } from "lucide-react";
 import type { Action, AppState, BotProject, Task } from "@/state/store";
+import type { RoutineRun } from "@/lib/routines";
 import { cn } from "@/lib/cn";
 import { MENU_SHEET } from "./menu-recipe";
 import { useHeldMenuMotion } from "./MenuMotion";
 import { intlLocale, t } from "@/lib/i18n";
 import { nextRename } from "@/lib/rename";
+import { imeComposing } from "@/lib/send-key";
 import { isTickable, opensRowMenuFromKey } from "@/lib/bulk-select";
 import { threadRefUrl } from "@/lib/thread-refs";
 import { copyText } from "@/lib/copy-text";
@@ -123,17 +125,30 @@ export function HelperThreadGroup<T>({ tasks, renderThread }: { tasks: T[]; rend
   </div>;
 }
 
-export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], showAll = false): T[] {
+/** Default list shows each routine's newest run only; older runs stay under "Show all". */
+export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], showAll = false, routineRuns: readonly Pick<RoutineRun, "routineId" | "threadId" | "createdAt">[] = []): T[] {
   const needle = query.trim().toLowerCase();
   if (needle) {
     return tasks.filter((task) => task.title.toLowerCase().includes(needle) || folders.some((folder) => folder.id === task.projectId && folder.name.toLowerCase().includes(needle)));
   }
   if (showAll) return tasks;
   let open = 0;
+  const runOf = new Map(routineRuns.flatMap((run) => run.threadId ? [[run.threadId, run] as const] : []));
+  // Newest by the run's start, not sidebar order (an older run that finished later sorts first), among runs the list can show.
+  const newestRun = new Map<string, Pick<RoutineRun, "routineId" | "createdAt">>();
+  for (const task of tasks) {
+    const run = runOf.get(task.threadId);
+    if (!run || task.pinned === true || task.openedBy?.burstId || isArchived(task)) continue;
+    if ((task.closedBy || isSnoozed(task)) && !demandsAttention(task, activeId)) continue;
+    const seen = newestRun.get(run.routineId);
+    if (!seen || run.createdAt > seen.createdAt) newestRun.set(run.routineId, run);
+  }
   return orderedThreadList(tasks).filter((task) => {
     if (task.pinned === true) return true;
     if (task.openedBy?.burstId) return task.threadId === activeId || demandsAttention(task, activeId);
     if (isArchived(task)) return task.threadId === activeId;
+    const run = runOf.get(task.threadId);
+    if (run && newestRun.get(run.routineId) !== run) return demandsAttention(task, activeId);
     return task.closedBy || isSnoozed(task)
       ? demandsAttention(task, activeId)
       : open++ < 6 || demandsAttention(task, activeId);
@@ -318,7 +333,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
     <div className={cn("group/thread relative flex min-w-0 items-center rounded-md", selectMode && checked ? "bg-accent/10" : current ? "bg-raised" : "hover:bg-raised/50", panel && cn("items-start rounded-[8px]", current ? "bg-ink/[0.07]" : "hover:bg-ink/[0.04]"))}>
       {renaming ? <input autoFocus value={draft} maxLength={80} aria-label={t("task.renameAria")}
         onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDraft(event.target.value)} onBlur={() => finishRename(true)}
-        onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}
+        onKeyDown={(event) => { if (imeComposing(event.nativeEvent)) { event.stopPropagation(); return; } if (event.key === "Enter") { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}
         dir="auto" className="m-1 min-w-0 flex-1 rounded border border-accent/50 bg-inset px-2 py-1 text-[13px] text-ink outline-none" /> : <button
         type="button" data-sidebar-thread-row={task.threadId} aria-current={current ? "page" : undefined}
         title={[displayTitle, updatedStamp, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, snoozed ? t("task.snoozed") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}

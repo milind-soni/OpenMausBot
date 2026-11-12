@@ -23,16 +23,24 @@ export function SpendingPage() {
   return <div data-settings-block="summary" className="flex flex-col gap-6"><AdminOnly note="settings.adminOnly.usage"><UsageSection /></AdminOnly></div>;
 }
 
+export function ImportExportPage() {
+  return <AdminOnly>
+    <WorkspaceBackupSettings layout={({ importRow, exportRow }) => <>
+      <SettingsGroup label={t("settings.data.bringIn")} block="bring-in">
+        <ImportSettings>{importRow}</ImportSettings>
+      </SettingsGroup>
+      <SettingsGroup label={t("settings.data.takeOut")} block="take-out">
+        <SettingsRows>{exportRow}</SettingsRows>
+        <CompanyBackupSettings />
+      </SettingsGroup>
+      <MoveSection />
+    </>} />
+  </AdminOnly>;
+}
+
 export function DataPage() {
   const { ctx } = useSettingsShell();
   return <>
-    <SettingsGroup label={t("settings.section.backups")} block="backups">
-      <AdminOnly><WorkspaceBackupSettings /><CompanyBackupSettings /></AdminOnly>
-    </SettingsGroup>
-    <SettingsGroup label={t("settings.data.bringIn")} block="bring-in">
-      <AdminOnly><ImportSettings /></AdminOnly>
-    </SettingsGroup>
-    <MoveSection />
     <SettingsGroup label={t("settings.data.storage")} block="storage">
       <SettingsRows><AttachmentStorageSettings /></SettingsRows>
     </SettingsGroup>

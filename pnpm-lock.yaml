@@ -30,6 +30,9 @@ importers:
       '@duckdb/node-api':
         specifier: 1.5.6-r.1
         version: 1.5.6-r.1
+      '@fishaudio/agent-client':
+        specifier: 1.0.0
+        version: 1.0.0(@types/dom-mediacapture-record@1.0.22)
       '@fontsource-variable/geist':
         specifier: ^5.3.0
         version: 5.3.0
@@ -547,6 +550,9 @@ packages:
 
   '@braintree/sanitize-url@7.1.2':
     resolution: {integrity: sha512-jigsZK+sMF/cuiB7sERuo9V7N9jx+dhmHHnQyDSVdpZwVutaBu7WvNYqMDLSgFgfB30n452TP3vjDAvFC973mA==}
+
+  '@bufbuild/protobuf@1.10.1':
+    resolution: {integrity: sha512-wJ8ReQbHxsAfXhrf9ixl0aYbZorRuOWpBNzm8pL8ftmSxQx/wnJD5Eg861NwJU/czy2VXFIebCeZnZrI9rktIQ==}
 
   '@chevrotain/cst-dts-gen@13.2.0':
     resolution: {integrity: sha512-bA9dvWlhAUcHkNwU+8w9yiUxJPlj/Lm3VqS7MD+NbIR/7LmpNLuK/AWNFdCo/T3SK5ND0/UHf3IJvl/Jn/i6yg==}
@@ -1094,6 +1100,14 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@fishaudio/agent-client@1.0.0':
+    resolution: {integrity: sha512-h3vllj5VYItMMb5aS2PkwKXeqj0TCWLuMnRo3CFPowUUmFGtw05f2jNzla9PHSYZc/aHKSZj9LEZBH1CwAGzDA==}
+    engines: {node: '>=18'}
+
+  '@fishaudio/agent-protocol@1.0.0':
+    resolution: {integrity: sha512-ukXXVVUxM+qC+e/A99rNnqBpUSlW85KG2V//ds50SeoPvJevmPggZH69W8X+Fm7SxfiBG1xaEPEVJjSsrlaTiw==}
+    engines: {node: '>=18'}
+
   '@floating-ui/core@1.8.0':
     resolution: {integrity: sha512-0CIZ5itps/8x7BG8dEIhs53BvCUH2PCoogtakwRTut+Arm58sJooJ0AuZhLw2HJYIR5cMLNPBSS728sPho2khQ==}
 
@@ -1527,6 +1541,12 @@ packages:
 
   '@lezer/lr@1.4.11':
     resolution: {integrity: sha512-UwgZcl1R66H2hDzBrA7kWyYmX6s8p5TQ+e/t7CuvgCtBEPxbEPaHYHu+pJBvTvDotEJpuQkJjbXuHiw5Cixxgw==}
+
+  '@livekit/mutex@1.1.1':
+    resolution: {integrity: sha512-EsshAucklmpuUAfkABPxJNhzj9v2sG7JuzFDL4ML1oJQSV14sqrpTYnsaOudMAw9yOaW53NU3QQTlUQoRs4czw==}
+
+  '@livekit/protocol@1.52.1':
+    resolution: {integrity: sha512-X8DxKlNbzk6Lh+v630+mjdFHSotdAFwIyzxSRSUql2DbTxCnlpa7JsvFGc6Na3mXiex2OFh0iiQtWwOBP0rIYA==}
 
   '@malept/cross-spawn-promise@2.0.0':
     resolution: {integrity: sha512-1DpKU0Z5ThltBwjNySMC14g0CkbyhCaz9FkhxqNsZI6uAPJXFS8cMXlBKo26FJ8ZuW6S9GCMcR9IO5k2X5/9Fg==}
@@ -2354,6 +2374,9 @@ packages:
 
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
+
+  '@types/dom-mediacapture-record@1.0.22':
+    resolution: {integrity: sha512-mUMZLK3NvwRLcAAT9qmcK+9p7tpU2FHdDsntR3YI4+GY88XrgG4XiE7u1Q2LAN2/FZOz/tdMDC3GQCR4T8nFuw==}
 
   '@types/estree-jsx@1.0.5':
     resolution: {integrity: sha512-52CcUVNFyfb1A2ALocQw/Dd1BQFNmSdkuC3BkZ6iqhdMfQz7JWOFRuJFloOzjk+6WijU56m9oKXFAXc7o3Towg==}
@@ -3440,6 +3463,10 @@ packages:
   estree-walker@3.0.3:
     resolution: {integrity: sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g==}
 
+  events@3.3.0:
+    resolution: {integrity: sha512-mQw+2fkQbALzQ7V0MY0IqdnXNOeTtP4r0lN9z7AAawCXgqea7bDii20AYrIBrFd/Hx0M2Ocz6S111CaFkUcb0Q==}
+    engines: {node: '>=0.8.x'}
+
   eventsource-parser@3.1.1:
     resolution: {integrity: sha512-EKN1vKAMcZ8MlYMpaNuxN6R9yakzH6uajHcHVTqWJzvu5pWw9DyhbP35HH8MVBQ+dZjAfDxk+A8NiR9KWaXiyQ==}
     engines: {node: '>=18.0.0'}
@@ -4046,6 +4073,11 @@ packages:
   linkify-it@5.0.2:
     resolution: {integrity: sha512-ONTm2jCMAVZjgQa/Fy1kScXsuOoF5NPTsoFBdE1KVIZ2vAh/r9+Bqo+0jINCBYnavTPQZz38QzFTme79ENoN3Q==}
 
+  livekit-client@2.23.0:
+    resolution: {integrity: sha512-j9Kg86nJjBjNFUD+ukp2jwMCGa0k+YD5gU//RzAM+ZY3pbG631QCte7fQjwqWMmtBzhDJL9nKYuOLMv/9IbAxg==}
+    peerDependencies:
+      '@types/dom-mediacapture-record': ^1
+
   lodash-es@4.18.1:
     resolution: {integrity: sha512-J8xewKD/Gk22OZbhpOVSwcs60zhd95ESDwezOFuA3/099925PdHJ7OFHNTGtajL3AlZkykD32HykiMo+BIBI8A==}
 
@@ -4058,6 +4090,10 @@ packages:
 
   lodash@4.18.1:
     resolution: {integrity: sha512-dMInicTPVE8d1e5otfwmmjlxkZoUpiVLwyeTdUsi/Caj/gfzzblBcCE5sRHV/AsjuCmxWrte2TNGSYuCeCq+0Q==}
+
+  loglevel@1.9.2:
+    resolution: {integrity: sha512-HgMmCqIJSAKqo68l0rS2AanEWfkxaZ5wNiEFb5ggm08lDs9Xl2KxBlX3PTcaD2chBM1gXAYf491/M2Rv8Jwayg==}
+    engines: {node: '>= 0.6.0'}
 
   longest-streak@3.1.0:
     resolution: {integrity: sha512-9Ri+o0JYgehTaVBBDoMqIl8GXtbWg711O3srftcHhZ0dqnETqLaoIK0x17fUw9rFSlK/0NlsKe0Ahhyl5pXE2g==}
@@ -4086,6 +4122,10 @@ packages:
     resolution: {integrity: sha512-MTRwMy0ZlL8Ur/vOAiJ9XGHE+kFPC7brq6MxAm0GiGXEBj0qy0jA/pG4N675oSzciO/UCdX8T+5yUQdmDeTLxg==}
     peerDependencies:
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
+
+  machina@7.0.1:
+    resolution: {integrity: sha512-0Xkgs8NeBvO2hW6bjJT8ewLWrMfh1haMPstaghpASWjXkLjRhtDiaJG1Kb7mslaOHxZYxpH7PIjpmirRVYbMMA==}
+    engines: {node: '>=22.22'}
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
@@ -4816,6 +4856,9 @@ packages:
   rw@1.3.3:
     resolution: {integrity: sha512-PdhdWy89SiZogBLaw42zdeqtRJ//zFd2PgQavcICDUgJT5oW10QCRKbJ6bg4r0/UY2M6BWd5tkxuGFRvCkgfHQ==}
 
+  rxjs@7.8.2:
+    resolution: {integrity: sha512-dhKf903U/PQZY6boNNtAGdWbG85WAbjT/1xYoZIC7FAY0yWapOBQVsVrDl58W86//e1VpMNBtRV4MaXfdMySFA==}
+
   safe-buffer@5.1.2:
     resolution: {integrity: sha512-Gd2UZBJDkXlY7GbJxfsE8/nvKkUEU1G38c1siN6QP6a9PT9MmHB8GnpscSmMJSoF8LOIrt8ud/wPtojys4G6+g==}
 
@@ -4838,6 +4881,13 @@ packages:
 
   scroll-into-view-if-needed@3.1.0:
     resolution: {integrity: sha512-49oNpRjWRvnU8NyGVmUaYG4jtTkNonFZI86MmGRDqBphEK2EXT9gdEUoQPZhuBM8yWHxCWbobltqYO5M4XrUvQ==}
+
+  sdp-transform@2.15.0:
+    resolution: {integrity: sha512-KrOH82c/W+GYQ0LHqtr3caRpM3ITglq3ljGUIb8LTki7ByacJZ9z+piSGiwZDsRyhQbYBOBJgr2k6X4BZXi3Kw==}
+    hasBin: true
+
+  sdp@3.2.3:
+    resolution: {integrity: sha512-UYuY3JFaVa7Zc+rxxi8iblwD7mdloGxCzMEQIJPcCLiHKjjqMqLsruMkI+emgnYARkfHk4o7seEETABc4bwokg==}
 
   selderee@0.12.0:
     resolution: {integrity: sha512-b1YMh3+DHZp59DLna3qVwQ5iOla/nrI6mLBNW02XxU77M3046Df6VLkoaJyFz20VsGIG5kkp+FK0kg4K4HnUFw==}
@@ -5131,6 +5181,9 @@ packages:
 
   typebox@1.3.7:
     resolution: {integrity: sha512-meKuifc33Pccx0O6PdIzYMq3Og8zvP4TIi/a+Bw3AEMZMxOD0+RHGQvpglEe6Zdy3wZ8nqn/j95h8LUZLk/6Hg==}
+
+  typed-emitter@2.1.0:
+    resolution: {integrity: sha512-g/KzbYKbH5C2vPkaXGu8DJlHrGKHLsM25Zg9WuC9pMGfuvT+X25tZQWo5fK1BjBm8+UrVE9LDCvaY0CQk+fXDA==}
 
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
@@ -5467,6 +5520,10 @@ packages:
 
   webcrypto-core@1.9.2:
     resolution: {integrity: sha512-gsXecm82UQNlTBURJGuqOWy1Ww08S3kZUcr3aOJS02Pk0xLtkfeUAVC0u0xhgdonFme80edSJUIJyuvL/7250Q==}
+
+  webrtc-adapter@9.0.6:
+    resolution: {integrity: sha512-CHbl2ZQbxx164IgWRgzJno4hWtM4tFbRam1QfI3Yxhs3w/DvqluVxVWeXs3oL5/fbGkSNLKo0Ty5MgUWceNhog==}
+    engines: {node: '>=6.0.0', npm: '>=3.10.0'}
 
   whatwg-mimetype@3.0.0:
     resolution: {integrity: sha512-nt+N2dzIutVRxARx1nghPKGv1xHikU7HKdfafKkLNLindmPU/ch3U31NOCGGA/dmPcmb1VlofO0vnKAcsm0o/Q==}
@@ -5833,6 +5890,8 @@ snapshots:
   '@better-fetch/fetch@1.3.2': {}
 
   '@braintree/sanitize-url@7.1.2': {}
+
+  '@bufbuild/protobuf@1.10.1': {}
 
   '@chevrotain/cst-dts-gen@13.2.0':
     dependencies:
@@ -6280,6 +6339,15 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
+  '@fishaudio/agent-client@1.0.0(@types/dom-mediacapture-record@1.0.22)':
+    dependencies:
+      '@fishaudio/agent-protocol': 1.0.0
+      livekit-client: 2.23.0(@types/dom-mediacapture-record@1.0.22)
+    transitivePeerDependencies:
+      - '@types/dom-mediacapture-record'
+
+  '@fishaudio/agent-protocol@1.0.0': {}
+
   '@floating-ui/core@1.8.0':
     dependencies:
       '@floating-ui/utils': 0.2.12
@@ -6610,6 +6678,12 @@ snapshots:
   '@lezer/lr@1.4.11':
     dependencies:
       '@lezer/common': 1.5.3
+
+  '@livekit/mutex@1.1.1': {}
+
+  '@livekit/protocol@1.52.1':
+    dependencies:
+      '@bufbuild/protobuf': 1.10.1
 
   '@malept/cross-spawn-promise@2.0.0':
     dependencies:
@@ -7290,6 +7364,8 @@ snapshots:
       '@types/ms': 2.1.0
 
   '@types/deep-eql@4.0.2': {}
+
+  '@types/dom-mediacapture-record@1.0.22': {}
 
   '@types/estree-jsx@1.0.5':
     dependencies:
@@ -8439,6 +8515,8 @@ snapshots:
     dependencies:
       '@types/estree': 1.0.9
 
+  events@3.3.0: {}
+
   eventsource-parser@3.1.1: {}
 
   eventsource@3.0.7:
@@ -9091,6 +9169,20 @@ snapshots:
     dependencies:
       uc.micro: 2.1.0
 
+  livekit-client@2.23.0(@types/dom-mediacapture-record@1.0.22):
+    dependencies:
+      '@livekit/mutex': 1.1.1
+      '@livekit/protocol': 1.52.1
+      '@types/dom-mediacapture-record': 1.0.22
+      events: 3.3.0
+      jose: 6.2.10
+      loglevel: 1.9.2
+      machina: 7.0.1
+      sdp-transform: 2.15.0
+      tslib: 2.8.1
+      typed-emitter: 2.1.0
+      webrtc-adapter: 9.0.6
+
   lodash-es@4.18.1: {}
 
   lodash.escaperegexp@4.1.2: {}
@@ -9098,6 +9190,8 @@ snapshots:
   lodash.isequal@4.5.0: {}
 
   lodash@4.18.1: {}
+
+  loglevel@1.9.2: {}
 
   longest-streak@3.1.0: {}
 
@@ -9122,6 +9216,8 @@ snapshots:
   lucide-react@1.33.0(react@19.2.8):
     dependencies:
       react: 19.2.8
+
+  machina@7.0.1: {}
 
   magic-string@0.30.21:
     dependencies:
@@ -10284,6 +10380,11 @@ snapshots:
 
   rw@1.3.3: {}
 
+  rxjs@7.8.2:
+    dependencies:
+      tslib: 2.8.1
+    optional: true
+
   safe-buffer@5.1.2: {}
 
   safe-stable-stringify@2.5.0: {}
@@ -10301,6 +10402,10 @@ snapshots:
   scroll-into-view-if-needed@3.1.0:
     dependencies:
       compute-scroll-into-view: 3.1.1
+
+  sdp-transform@2.15.0: {}
+
+  sdp@3.2.3: {}
 
   selderee@0.12.0:
     dependencies:
@@ -10626,6 +10731,10 @@ snapshots:
     optional: true
 
   typebox@1.3.7: {}
+
+  typed-emitter@2.1.0:
+    optionalDependencies:
+      rxjs: 7.8.2
 
   typescript@5.9.3: {}
 
@@ -11076,6 +11185,10 @@ snapshots:
       '@peculiar/utils': 2.0.3
       asn1js: 3.0.10
       tslib: 2.8.1
+
+  webrtc-adapter@9.0.6:
+    dependencies:
+      sdp: 3.2.3
 
   whatwg-mimetype@3.0.0: {}
 

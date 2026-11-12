@@ -174,6 +174,17 @@ export class BotLogins {
           this.store.setOnePasswordGrant(vaultId, bots);
           return this.onePassword.status();
         },
+        grantItem: async (item, bots) => {
+          // Handing an item back to its vault's choice is kept even while 1Password cannot be read.
+          if (bots !== null) {
+            const read = await this.onePassword.readsItem(item);
+            if (read !== true) return read;
+          }
+          this.store.setOnePasswordItemGrant(item, bots);
+          return true;
+        },
+        // Kept whole, even for an item not loaded here yet: it then opens no wider than the computer that chose it.
+        setItemGrants: (grants, keep) => this.store.setOnePasswordItemGrants(keep ? { ...this.store.onePasswordItemGrants(), ...grants } : grants),
       },
     };
   }

@@ -27,13 +27,12 @@ import { callStarted } from "@/lib/product-events";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { callCapabilityHelp, type CallCapabilityHelp } from "@/lib/call-capability";
 import { onCallStartRequest } from "@/lib/call-start-request";
-import { fishListeningReady, listensHere, speechBridge } from "@/lib/speech";
+import { CALL_ENDPOINT_MS, fishListeningReady, listensHere, speechBridge } from "@/lib/speech";
 import { VoiceSetupDialog } from "./VoiceSetupDialog";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { MENU_SHEET } from "./menu-recipe";
 
 type Phase = "listening" | "sending" | "working" | "speaking";
-const CALL_ENDPOINT_MS = 850;
 
 /** `panel`: the small round button beside the bot in its panel, with no chevron. It leaves the composer's + menu to the
  * composer's own button: two buttons answering it would start two calls. */
@@ -180,7 +179,7 @@ export function CallTargetButton({
     setMenuOpen(false);
     if (next === "live" && liveThreadId !== undefined) {
       onStart("live");
-      void startLiveCall({ botId: targetId, threadId: liveThreadId });
+      void startLiveCall({ botId: targetId, threadId: liveThreadId, provider: state.config?.live?.provider });
       return;
     }
     if (!turnsReady) {

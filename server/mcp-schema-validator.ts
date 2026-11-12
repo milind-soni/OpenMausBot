@@ -89,7 +89,7 @@ export function serverToolValidator(schema: Record<string, unknown>): { validate
  * Code's editor hints. Vendor `x-` extensions too, except the two compileToolSchema checks. */
 const NON_ASSERTIONS = new Set(["example", "discriminator", "externalDocs", "xml", "markdownDescription", "markdownEnumDescriptions", "enumDescriptions"]);
 const CHECKED_EXTENSIONS = new Set(["x-mcp-header", "x-google-enum-descriptions"]);
-const SCHEMA_KEYWORD_MAPS = ["properties", "$defs", "definitions", "dependentSchemas", "patternProperties"];
+const SCHEMA_KEYWORD_MAPS = ["properties", "$defs", "definitions", "dependencies", "dependentSchemas", "patternProperties"];
 
 function localRefsOnly(schema: unknown, depth = 0): boolean {
   if (Array.isArray(schema)) return schema.every((child) => localRefsOnly(child, depth + 1));

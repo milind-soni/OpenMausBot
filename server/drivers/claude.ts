@@ -9,9 +9,9 @@ import { join, dirname, isAbsolute, normalize } from "node:path";
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { writeFileAtomicIfChanged } from "../atomic.ts";
-import { augmentedPath } from "../env-path.ts";
+import { augmentedPath, findCliCandidates } from "../env-path.ts"; import { BASH_MAX_TIMEOUT_MS } from "../system-prompt.ts";
 import { brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
-import { cliVersionProbe } from "../cli-version-probe.ts";
+import { cliToLaunch, cliVersionProbe } from "../cli-version-probe.ts";
 import { claudeAuthStatus } from "./claude-auth-status.ts";
 import { projectMcpServers } from "./claude-project-mcp.ts";
 import { botSettingsFor, withBotSettings } from "./claude-bot-settings.ts";
@@ -60,7 +60,7 @@ import type { KeepWarmContract } from "./claude-keepwarm.ts"; import { claudeFor
 import { BACKGROUND_CALL_TIMEOUT_MS, backgroundCallArgs, spawnBackgroundCall } from "./claude-background.ts"; import { withEndpointFolder } from "./claude-endpoint-folder.ts";
 import { permissionLaunchCwd, shellRequest } from "./permission-command.ts"; import { readToolPaths } from "../own-file-reads.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
-import { extractMcpImages } from "../mcp-tool-images.ts"; import { claudeToolDraft } from "./tool-progress.ts";
+import { extractMcpImages } from "../mcp-tool-images.ts"; import { claudeToolDraft } from "./tool-progress.ts"; import { redactSecretsInText } from "../../shared/redact.ts";
 import {
   ASK_USER_QUESTION_TOOL,
   ASK_USER_TOOL,
@@ -115,7 +115,7 @@ function claudeEnvironment(
   instanceEnvironment: NodeJS.ProcessEnv = {},
   endpoint = false, bedrock = false,
 ): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { BASH_MAX_TIMEOUT_MS: "600000", ...source, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error" };
+  const env: NodeJS.ProcessEnv = { BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS), ...source, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error" };
   if (configDir?.trim()) env.CLAUDE_CONFIG_DIR = resolveClaudeConfigDir(configDir, env);
   else if (env.CLAUDE_CONFIG_DIR) env.CLAUDE_CONFIG_DIR = resolveClaudeConfigDir(undefined, env);
   if (configDir?.trim() || endpoint || bedrock) {
@@ -802,12 +802,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     }))?.pending ?? null;
 
     // Whether `claude --help` lists --autocompact (2.1.129 rejects it despite the floor); a launch refusing it keeps it off for that version (every refusing version is remembered).
-    let [cliHasAutocompact, cliHelpVersion]: [boolean | null, string | null] = [null, null], autocompactRefusedBy = new Set<string>();
+    let [cliHasAutocompact, cliHelpVersion]: [boolean | null, string | null] = [null, null], autocompactRefusedBy = new Set<string>(), cliProbedAt: string | undefined;
     const readCliVersion = cliVersionProbe(config.cli);
-    const ensureCliVersion = async (env: NodeJS.ProcessEnv): Promise<void> => {
-      if (cliVersionChecked) return;
+    const ensureCliVersion = async (env: NodeJS.ProcessEnv): Promise<void> => { // and again once PATH finds another copy (an nvm one ahead of Homebrew's)
+      const at = findCliCandidates(config.cli, env.PATH ?? "")[0], reprobed = cliVersionChecked, seen = cliProbedAt !== undefined;
+      if (reprobed && at === cliProbedAt) { await helpRead?.done; return; } // a help read for this copy may still be running
       const probe = await readCliVersion(env);
-      if ("version" in probe) [cliVersion, cliVersionChecked] = [parseClaudeCliVersion(probe.version), true];
+      if ("version" in probe) [cliVersion, cliVersionChecked, cliProbedAt] = [parseClaudeCliVersion(probe.version), true, at]; else if (reprobed) [cliVersion, cliVersionChecked, cliHasAutocompact, cliHelpVersion, helpRead] = [null, false, null, null, null]; // another copy that could not be checked: none of the old copy's flags (nor a running read of its help), check again next turn
+      if (seen && "version" in probe && (probe.version !== cliHelpVersion || helpRead)) await readCliHelp(probe.version, env); // a running read of another copy's help (a late answer started it) is replaced
     };
     let helpRead: { version: string; done: Promise<void> } | null = null;
     const readCliHelp = (version: string, env: NodeJS.ProcessEnv): Promise<void> => {
@@ -815,11 +817,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const read = {
         version,
         done: new Promise<string | null>((resolve) => {
-          execCli(config.cli, ["--help"], { timeout: 8000, env }, (err, stdout) => resolve(err ? null : stdout));
-        }).then((help) => {
-          cliHasAutocompact = help === null ? null : !autocompactRefusedBy.has(version) && /^\s*--autocompact\b/m.test(help);
-          cliHelpVersion = version;
-          if (helpRead === read) helpRead = null;
+          execCli(cliToLaunch(config.cli, findCliCandidates(config.cli, env.PATH ?? "")[0]), ["--help"], { timeout: 8000, env }, (err, stdout) => resolve(err ? null : stdout)); // on Windows the copy this env finds, not the app PATH's
+        }).then((help) => { // a read another copy's read or a failed re-probe replaced since must not bring back its flags
+          if (helpRead === read) [cliHasAutocompact, cliHelpVersion, helpRead] = [help === null ? null : !autocompactRefusedBy.has(version) && /^\s*--autocompact\b/m.test(help), version, null];
         }),
       };
       helpRead = read;
@@ -843,6 +843,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       sessionId: string | null;
       /** `init` arrived; before it the CLI took nothing, so a resume retry is safe */
       sawInit: boolean;
+      /** why the CLI refused `--resume` with an error result instead of exiting, for the log line */
+      resumeRefusal?: string;
       /** the mode `init` reports: the CLI accepts `--permission-mode auto` for any model but runs
        * "default" silently where auto is unavailable (Haiku 4.5, Sonnet 4.5, an org that disabled it) */
       nativePermissionMode: string | null;
@@ -890,6 +892,22 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       void killCliTree(session.child).then((stopped) => {
         if (stopped) void session.finishClose?.();
       });
+    };
+    /** Forgets a CLI that died mid-turn and removes its files, so the retry starts a clean session. */
+    const discardSession = (threadId: string, session: Session) => {
+      session.elicit.close();
+      if (session.mcpConfigPath) {
+        try {
+          rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
+        } catch {}
+        session.mcpConfigPath = null;
+      }
+      if (session.systemPromptPath) {
+        removePrivateTempDir(session.systemPromptPath);
+        session.systemPromptPath = null;
+      }
+      sessions.delete(threadId);
+      session.turn = null;
     };
     const closeSession = (threadId: string, why: string) => {
       const s = sessions.get(threadId);
@@ -1017,30 +1035,30 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (turn.guestConfined) args.push("--restricted", "--tools", GUEST_CLAUDE_TOOLS.join(","));
       else if (config.tools !== undefined) args.push("--tools", config.tools.join(","));
       const turnEnvironment = environment();
-      await ensureCliVersion(turnEnvironment);
-      if (turn.guestConfined && !claudeCliSupports(cliVersion, "--restricted")) {
+      const launchCli = findCliCandidates(config.cli, turnEnvironment.PATH ?? "")[0]; await ensureCliVersion(turnEnvironment);
+      for (let tries = 0; tries < 2 && cliVersionChecked && cliProbedAt !== launchCli; tries++) await ensureCliVersion(turnEnvironment); // another copy's late check landed while this turn waited
+      const ownCli = cliProbedAt === launchCli, turnCliVersion = ownCli ? cliVersion : null; // still another copy's state: none of its flags, its version counts as unknown
+      if (turn.guestConfined && !claudeCliSupports(turnCliVersion, "--restricted")) {
         throw new Error(withWhy("This Claude Code is too old to run this turn without a shell. Update Claude Code.", turn.confinedWhy));
       }
-      const replaysUserMessages = cliVersion === null || versionAtLeast(cliVersion, CLAUDE_REPLAY_FLOOR);
+      const replaysUserMessages = turnCliVersion === null || versionAtLeast(turnCliVersion, CLAUDE_REPLAY_FLOOR);
       if (replaysUserMessages) args.push("--replay-user-messages");
       const isolated = !inheritsUserConfig(turnEnvironment);
       const disallowed = [...(config.disallowedTools ?? []), ...unusableBuiltIns({ isolated, listsTools: config.tools !== undefined, guest: Boolean(turn.guestConfined) }), ...claudeDisabledNativeSkillRules(botId)];
       if (disallowed.length) args.push("--disallowedTools", disallowed.join(","));
-      if (turn.toolScope !== undefined && (!isolated || turn.mcpFromUserConfig || cliVersion === null || !claudeCliSupports(cliVersion, "--strict-mcp-config"))) {
+      if (turn.toolScope !== undefined && (!isolated || turn.mcpFromUserConfig || turnCliVersion === null || !claudeCliSupports(turnCliVersion, "--strict-mcp-config"))) {
         throw new Error("Claude cannot confirm a restricted MCP configuration for this account. Disable inherited Claude MCP servers and use a current, identifiable Claude CLI before using tool selection.");
       }
       if (isolated) {
         // Without these every turn gets this machine's MCP servers, connectors, skills, hooks and CLAUDE.md (one desktop: 407 tools, ~10k tokens).
-        if (!turn.mcpFromUserConfig && claudeCliSupports(cliVersion, "--strict-mcp-config")) args.push("--strict-mcp-config");
-        if (claudeCliSupports(cliVersion, "--setting-sources")) args.push("--setting-sources", "project");
+        if (!turn.mcpFromUserConfig && claudeCliSupports(turnCliVersion, "--strict-mcp-config")) args.push("--strict-mcp-config");
+        if (claudeCliSupports(turnCliVersion, "--setting-sources")) args.push("--setting-sources", "project");
         if (turn.userSkillsDir) args.push("--add-dir", turn.userSkillsDir);
       }
       const compactWindow = autoCompactWindow(turnEnvironment);
-      const passedAutocompact = Boolean(compactWindow) && cliHasAutocompact === true; if (compactWindow && passedAutocompact) args.push("--autocompact", compactWindow);
+      const passedAutocompact = Boolean(compactWindow) && ownCli && cliHasAutocompact === true; if (compactWindow && passedAutocompact) args.push("--autocompact", compactWindow);
       // --resume keeps the recorded system prompt, so every turn refreshes it.
-      if (cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) {
-        args.push("--system-prompt-snapshot", "off");
-      }
+      if (ownCli && cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) args.push("--system-prompt-snapshot", "off");
       const turnModel = config.managed ? turn.model : await resolveClaudeTurnModel(turn.model, turnEnvironment, config.endpointModels);
       const injected = config.managed || config.endpointModels ? { model: turnModel ?? null, injected: false } : applyClaudeInject({ ...turnEnvironment }, turnModel);
       if (injected.model) args.push("--model", injected.model);
@@ -1132,7 +1150,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       allowed.push("mcp__ogb", ...gateQueryTools(mcpServers));
       // A guest pre-allows only harness tools; anything else (the browser can open file:) asks.
       if (turn.guestConfined) allowed.splice(0, allowed.length, ...allowed.filter((name) => name === "mcp__ogb" || name === "mcp__agents"));
-      const env = withEndpointFolder(environment(config.endpointModels ? undefined : turnModel), config, () => retryState.delete(threadId));
+      const env = withEndpointFolder(environment(config.endpointModels ? undefined : turnModel), config, () => retryState.delete(threadId)); env.PATH = turnEnvironment.PATH; // launch the copy this turn checked, not one a newer PATH finds
       // The MCP config carries credentials and argv is readable via `ps`: a 0600 file, removed at settle.
       let mcpConfigPath: string | null = null;
       if (Object.keys(mcpServers).length) {
@@ -1323,7 +1341,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
       let child: ReturnType<typeof spawnCli>;
       try {
-        child = spawnCli(config.cli, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { ...(broker ? { rw: [broker.socketPath] } : {}), ...(hookTokenPath ? { ro: [dirname(hookTokenPath)] } : {}) } }, "bot");
+        child = spawnCli(cliToLaunch(config.cli, launchCli), args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { ...(broker ? { rw: [broker.socketPath] } : {}), ...(hookTokenPath ? { ro: [dirname(hookTokenPath)] } : {}) } }, "bot");
       } catch (error) {
         cleanupUnownedLaunch();
         throw error;
@@ -1589,6 +1607,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             // After a long idle 2.1.295 answers a --resume it no longer has with an error result ("No
             // conversation found with session ID …") and stays up; end it so its close rebuilds once.
             if (o.is_error === true && sessionId && !session.sawInit && session.turn && !session.turn.settled) {
+              session.resumeRefusal = claudeResultError(o);
               closeSession(threadId, "resume refused");
               break;
             }
@@ -1728,19 +1747,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             session.broker = undefined;
             failedBroker?.pause();
             failedBroker?.close();
-            session.elicit.close();
-            if (session.mcpConfigPath) {
-              try {
-                rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
-              } catch {}
-              session.mcpConfigPath = null;
-            }
-            if (session.systemPromptPath) {
-              removePrivateTempDir(session.systemPromptPath);
-              session.systemPromptPath = null;
-            }
-            sessions.delete(threadId);
-            session.turn = null;
+            discardSession(threadId, session);
             let delayMs = 0;
             if (!endedBeforeTurn) {
               retry.attempt++;
@@ -1801,6 +1808,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             producedOutput: session.turn.sawStreamDelta,
           });
           if (mayReplay(resumeFailure) && !retry.cancelled) {
+            // Without this line a refused --resume looks like an ordinary new session in the logs.
+            console.error(`claude (${instanceId}): could not resume session ${sessionId} for thread ${threadId}, starting a new one: ${redactSecretsInText(session.resumeRefusal ?? message)}`);
             const recovery = recoveryPromptFor({
               recoveryText: turn.recoveryText,
               currentText: turn.text,
@@ -1808,19 +1817,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             });
             session.broker?.close();
             session.broker = undefined;
-            session.elicit.close();
-            if (session.mcpConfigPath) {
-              try {
-                rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
-              } catch {}
-              session.mcpConfigPath = null;
-            }
-            if (session.systemPromptPath) {
-              removePrivateTempDir(session.systemPromptPath);
-              session.systemPromptPath = null;
-            }
-            sessions.delete(threadId);
-            session.turn = null;
+            discardSession(threadId, session);
             retry.rebuilt = recovery.replayed;
             retryState.set(threadId, retry);
             active.set(threadId, { stop: () => { retry.cancelled = true; retryAbort.abort(); }, turnId });
@@ -1913,9 +1910,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const probe = await readCliVersion(env);
       if (!("version" in probe)) return { state: "unavailable", reason: probe.reason };
       const { version } = probe;
-      [cliVersion, cliVersionChecked] = [parseClaudeCliVersion(version), true];
+      [cliVersion, cliVersionChecked, cliProbedAt] = [parseClaudeCliVersion(version), true, findCliCandidates(config.cli, env.PATH ?? "")[0]];
       if (!config.managed && !config.endpointModels) models = withCliVersionGate(models, "claude", cliVersion);
-      if (version !== cliHelpVersion) await readCliHelp(version, env);
+      if (version !== cliHelpVersion || helpRead) await readCliHelp(version, env);
       const update = claudeCliUpdate(version, config.cli);
       const warning = claudeInheritWarning(env);
       if (config.requireApiKey && !input.environment.ANTHROPIC_API_KEY) return { state: "unavailable", version, reason: NO_ANTHROPIC_KEY };

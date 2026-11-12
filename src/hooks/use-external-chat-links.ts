@@ -1,12 +1,17 @@
 import { useEffect, useState } from "react";
 import { openChatLink } from "@/components/ThreadRefs";
 import { useShowThreads } from "@/lib/thread-preferences";
+import { takeThreadLinkFromLocation } from "@/lib/thread-refs";
 import { openThread, type Action, type AppState, type ThreadTarget } from "@/state/store";
 
 export function useExternalChatLinks(state: AppState, dispatch: (action: Action) => void): void {
   const [link, setLink] = useState<string | null>(null);
   const showThreads = useShowThreads();
-  useEffect(() => window.ogb?.onChatLink?.(setLink), []);
+  useEffect(() => {
+    const fromAddress = takeThreadLinkFromLocation();
+    if (fromAddress) setLink(fromAddress);
+    return window.ogb?.onChatLink?.(setLink);
+  }, []);
   useEffect(() => {
     if (!link || !state.hydrated) return;
     setLink(null);

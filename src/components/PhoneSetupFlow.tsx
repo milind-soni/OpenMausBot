@@ -155,7 +155,7 @@ export interface PhoneSetupController {
   cancel: () => void;
   refreshCode: () => void;
   finish: () => void;
-  act: (call: (companion: CompanionBridge) => Promise<CompanionState>) => Promise<void>;
+  act: (call: (companion: CompanionBridge) => Promise<CompanionState>) => Promise<CompanionState | null>;
   accountAct: (call: (remote: AccountBridge) => Promise<CompanionAccountState>) => Promise<void>;
 }
 
@@ -239,7 +239,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
 
   const act = useCallback(async (call: (companion: CompanionBridge) => Promise<CompanionState>) => {
     const companion = companionBridge();
-    if (!companion) return;
+    if (!companion) return null;
     setActionBusy(true);
     setError(null);
     try {
@@ -247,14 +247,14 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
         companionMutationEpoch,
         () => call(companion),
       );
-      if (mounted.current) setState(next);
+      if (mounted.current) setState(next); return next;
     } catch (cause) {
       if (mounted.current) setError(
         normalizePhoneSetupActionError(
           cause,
           t("phone.error.remoteUpdate"),
         ),
-      );
+      ); return null;
     } finally {
       if (mounted.current) setActionBusy(false);
     }
