@@ -84,6 +84,16 @@ afterEach(() => {
 });
 
 describe("the keys page", () => {
+  it("aligns the Qwen settings with its key editor and saved destination", () => {
+    setConfig({ ...fx.config, live: { configured: false, provider: "qwen", qwenRegion: "cn-beijing", qwenWorkspace: "fixture-space", voice: "marin", readTypedReplies: true, idleMinutes: 5 } });
+    page();
+    const liveRow = row("liveKey")!;
+    const keyContent = liveRow.querySelector("[data-key-destination]")!.parentElement!;
+    const settingsContent = liveRow.lastElementChild!;
+    expect(settingsContent.querySelector("[data-qwen-live-settings]")).not.toBeNull();
+    expect(settingsContent.className).toBe(keyContent.className);
+  });
+
   it("updates untouched Qwen fields and the credential destination after a remote settings change", () => {
     const live = { configured: false, provider: "qwen", qwenRegion: "cn-beijing", qwenWorkspace: "old-space", qwenModel: "qwen-audio-3.1-realtime-flash", qwenVoice: "old_custom", voice: "marin", readTypedReplies: true, idleMinutes: 5 };
     setConfig({ ...fx.config, live });
