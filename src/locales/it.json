@@ -208,6 +208,7 @@
   "server.rooms.finishingElsewhere": "{bot} sta finendo un'altra conversazione: risponderà qui appena è libero",
   "server.rooms.finishingElsewhereSpoken": "{bot} sta finendo un'altra conversazione",
   "server.rooms.unavailable": "{bot} non è più disponibile: turno saltato",
+  "server.threads.posted": "{bot} ha pubblicato un messaggio qui",
   "server.stop.nothingRunning": "Qui non era in corso nulla, quindi non c'era niente da interrompere.",
   "server.memory.wait": "In attesa di memoria su questo Cloud. In esecuzione ora: {running}. Prima di questa: {ahead}. Parte da sola appena c'è spazio.",
   "server.memory.still": "Ancora in attesa di memoria. In esecuzione ora: {running}. Prima di questa: {ahead}.",

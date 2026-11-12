@@ -252,6 +252,7 @@
   "server.rooms.finishingElsewhere": "{bot}이(가) 다른 대화를 마무리하는 중이에요. 끝나면 여기서 답할게요",
   "server.rooms.finishingElsewhereSpoken": "{bot}이(가) 다른 대화를 마무리하는 중이에요",
   "server.rooms.unavailable": "{bot}을(를) 더 이상 쓸 수 없어서 이번 차례는 건너뛰었어요",
+  "server.threads.posted": "{bot}이(가) 여기에 메시지를 올렸어요",
   "server.stop.nothingRunning": "여기서 실행 중인 작업이 없어서 중지할 것이 없었어요.",
   "server.memory.wait": "이 Cloud의 메모리를 기다리는 중이에요. 지금 실행 중: {running}. 앞선 작업: {ahead}. 자리가 나면 자동으로 시작돼요.",
   "server.memory.still": "아직 메모리를 기다리는 중이에요. 지금 실행 중: {running}. 앞선 작업: {ahead}.",

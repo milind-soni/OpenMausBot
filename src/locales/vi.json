@@ -198,6 +198,7 @@
   "server.rooms.finishingElsewhere": "{bot} đang hoàn tất một cuộc trò chuyện khác và sẽ trả lời ở đây khi rảnh",
   "server.rooms.finishingElsewhereSpoken": "{bot} đang hoàn tất một cuộc trò chuyện khác",
   "server.rooms.unavailable": "{bot} không còn khả dụng; đã bỏ qua lượt này",
+  "server.threads.posted": "{bot} đã đăng một tin nhắn ở đây",
   "server.stop.nothingRunning": "Ở đây không có gì đang chạy nên không cần dừng gì cả.",
   "server.memory.wait": "Đang chờ bộ nhớ trên Cloud này. Đang chạy: {running}. Phía trước: {ahead}. Sẽ tự bắt đầu khi có chỗ.",
   "server.memory.still": "Vẫn đang chờ bộ nhớ. Đang chạy: {running}. Phía trước: {ahead}.",

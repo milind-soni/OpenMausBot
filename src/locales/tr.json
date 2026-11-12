@@ -198,6 +198,7 @@
   "server.rooms.finishingElsewhere": "{bot} başka bir konuşmayı bitiriyor; boşalınca burada yanıt verecek",
   "server.rooms.finishingElsewhereSpoken": "{bot} başka bir konuşmayı bitiriyor",
   "server.rooms.unavailable": "{bot} artık müsait değil; bu tur atlandı",
+  "server.threads.posted": "{bot} buraya bir mesaj gönderdi",
   "server.stop.nothingRunning": "Burada çalışan bir şey yoktu, bu yüzden durdurulacak bir şey de yoktu.",
   "server.memory.wait": "Bu Cloud'da bellek bekleniyor. Şu anda çalışan: {running}. Bundan önce sırada: {ahead}. Yer açılınca kendiliğinden başlar.",
   "server.memory.still": "Hâlâ bellek bekleniyor. Şu anda çalışan: {running}. Bundan önce sırada: {ahead}.",

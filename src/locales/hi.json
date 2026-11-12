@@ -167,6 +167,7 @@
   "server.rooms.finishingElsewhere": "{bot} एक दूसरी बातचीत पूरी कर रहा है; फ़्री होते ही यहाँ जवाब देगा",
   "server.rooms.finishingElsewhereSpoken": "{bot} एक दूसरी बातचीत पूरी कर रहा है",
   "server.rooms.unavailable": "{bot} अब उपलब्ध नहीं है; यह दौर छोड़ दिया गया",
+  "server.threads.posted": "{bot} ने यहाँ एक संदेश भेजा",
   "server.stop.nothingRunning": "यहाँ कुछ नहीं चल रहा था, इसलिए कुछ रोकने की ज़रूरत नहीं थी।",
   "server.memory.wait": "इस Cloud पर मेमोरी का इंतज़ार है। अभी चल रहे हैं: {running}। इससे आगे: {ahead}। जगह मिलते ही यह अपने आप शुरू होगा।",
   "server.memory.still": "अभी भी मेमोरी का इंतज़ार है। अभी चल रहे हैं: {running}। इससे आगे: {ahead}।",
