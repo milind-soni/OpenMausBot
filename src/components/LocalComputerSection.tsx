@@ -1267,8 +1267,8 @@ export function LocalComputerSection() {
         subtitle={t("vm.isolation.subtitle")}
       >
         <div className="flex justify-end">
-          <Segmented label={t("vm.isolation.title")} value={status?.mode === "per-bot" ? "per-bot" : "shared"}
-            onChange={(mode) => { if (status && !policyPending) void savePolicy(mode, status.max_instances ?? 2); }}
+          <Segmented label={t("vm.isolation.title")} value={status?.mode === "per-bot" ? "per-bot" : "shared"} disabled={!status || policyPending}
+            onChange={(mode) => { if (status) void savePolicy(mode, status.max_instances ?? 2); }}
             options={[{ value: "shared" as const, label: t("vm.isolation.shared") }, { value: "per-bot" as const, label: t("vm.isolation.perBot") }]} />
         </div>
         {perBot && (
