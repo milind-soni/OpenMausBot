@@ -180,6 +180,26 @@ export default function PreviewScreen() {
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [historyOpen]);
 
+  // Escape handling on Preview page: closes dropdown/confirm first, otherwise returns to chat
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (filePickerOpen || shareModalOpen) return;
+      e.preventDefault();
+      if (historyOpen) {
+        setHistoryOpen(false);
+        return;
+      }
+      if (pendingLocalUrl) {
+        setPendingLocalUrl(null);
+        return;
+      }
+      dispatch({ type: "togglePreview", open: false });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [dispatch, filePickerOpen, historyOpen, pendingLocalUrl, shareModalOpen]);
+
   // Single-mode keyboard shortcuts: [ and ] cycle sizes, R rotates
   useEffect(() => {
     if (mode !== "single") return;
@@ -370,10 +390,33 @@ export default function PreviewScreen() {
     ? `${shareOverrideArtboard.width} × ${shareOverrideArtboard.height}`
     : `${singleDims.width} × ${singleDims.height}`;
 
+  const statusPill = activeSource && frameStatus !== "empty" && (
+    <span
+      role="status"
+      aria-live="polite"
+      className="inline-flex items-center gap-1.5 rounded-full border border-hairline bg-inset px-2.5 py-0.5 text-[11px] font-medium text-ink-secondary"
+    >
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          frameStatus === "loaded"
+            ? "bg-success"
+            : frameStatus === "loading"
+              ? "animate-pulse bg-accent"
+              : "bg-danger"
+        }`}
+      />
+      {frameStatus === "loading"
+        ? "Loading preview…"
+        : frameStatus === "loaded"
+          ? "Preview loaded"
+          : "Couldn't open this page"}
+    </span>
+  );
+
   return (
     <main
       aria-label="Preview Studio"
-      className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-surface text-ink"
+      className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-app text-ink"
     >
       {/* Top Bar Row 1: Source Bar & Mode Switch */}
       <header className="flex min-h-[52px] flex-wrap items-center justify-between gap-2 border-b border-hairline/60 bg-raised/80 px-4 py-2">
@@ -383,7 +426,7 @@ export default function PreviewScreen() {
             onClick={() => dispatch({ type: "togglePreview", open: false })}
             aria-label="Back to chat"
             title="Back to chat"
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-hairline/60 bg-inset text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-hairline/60 bg-inset text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
@@ -439,7 +482,7 @@ export default function PreviewScreen() {
               }}
               aria-label="Web address or project file path"
               placeholder="Enter http://localhost:3000 or choose a project file…"
-              className="h-8 w-full rounded-lg border border-hairline/70 bg-inset pl-3 pr-8 font-mono text-[12px] text-ink placeholder:text-ink-muted focus:border-accent/60 focus:outline-none"
+              className="h-8 w-full rounded-lg border border-hairline/70 bg-inset pl-3 pr-8 font-mono text-[12px] text-ink placeholder:text-ink-secondary focus:border-accent/60 focus:outline-none"
             />
             {historyList.length > 0 && (
               <button
@@ -447,16 +490,20 @@ export default function PreviewScreen() {
                 onClick={() => setHistoryOpen((v) => !v)}
                 aria-label="Recent preview addresses"
                 title="Recent addresses"
-                className="absolute right-1.5 flex h-6 w-6 items-center justify-center rounded text-ink-muted transition-colors hover:bg-hover hover:text-ink"
+                className="absolute right-1.5 flex h-6 w-6 items-center justify-center rounded text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
               >
                 <History className="h-3.5 w-3.5" />
               </button>
             )}
 
             {historyOpen && historyList.length > 0 && (
-              <div className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-xl border border-hairline bg-surface shadow-xl">
+              <div
+                role="listbox"
+                aria-label="Recent preview addresses"
+                className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-xl border border-hairline bg-panel shadow-xl"
+              >
                 <div className="flex items-center justify-between border-b border-hairline/40 px-3 py-1.5">
-                  <span className="text-[10px] font-medium uppercase tracking-wider text-ink-muted">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-ink-secondary">
                     Recent addresses
                   </span>
                   <button
@@ -466,7 +513,7 @@ export default function PreviewScreen() {
                       setHistoryList([]);
                       setHistoryOpen(false);
                     }}
-                    className="inline-flex items-center gap-1 text-[10px] text-ink-muted transition-colors hover:text-danger"
+                    className="inline-flex items-center gap-1 text-[10px] text-ink-secondary transition-colors hover:text-danger"
                   >
                     <Trash2 className="h-2.5 w-2.5" />
                     Clear
@@ -481,7 +528,7 @@ export default function PreviewScreen() {
                         setInputUrl(item);
                         handleNavigate(item);
                       }}
-                      className="block w-full truncate px-3 py-1.5 text-left font-mono text-[11.5px] text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+                      className="block w-full truncate px-3 py-1.5 text-left font-mono text-[11.5px] text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
                     >
                       {item}
                     </button>
@@ -496,7 +543,7 @@ export default function PreviewScreen() {
             onClick={() => setFilePickerOpen(true)}
             aria-label="Choose a file from a project"
             title="Choose a file from a project"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-hairline/70 bg-inset text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-hairline/70 bg-inset text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
           >
             <FolderOpen className="h-4 w-4" />
           </button>
@@ -504,7 +551,7 @@ export default function PreviewScreen() {
           <button
             type="button"
             onClick={() => handleNavigate()}
-            className="h-8 shrink-0 rounded-lg bg-accent px-3 text-[12px] font-medium text-white transition-colors hover:bg-accent-hover"
+            className="h-8 shrink-0 rounded-lg bg-accent px-3 text-[12px] font-medium text-white transition-colors hover:brightness-110"
           >
             Open
           </button>
@@ -578,7 +625,7 @@ export default function PreviewScreen() {
               setShareDefaultScope(mode === "canvas" && selectedSizeIds.length > 1 ? "all" : "current");
               setShareModalOpen(true);
             }}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-[12px] font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-45"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-[12px] font-medium text-white transition-colors hover:brightness-110 disabled:opacity-45"
           >
             <Camera className="h-3.5 w-3.5" />
             Share to chat…
@@ -600,7 +647,7 @@ export default function PreviewScreen() {
                       disabled={!historyNav.canGoBack}
                       aria-label="Back"
                       title="Back"
-                      className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-hover hover:text-ink disabled:opacity-35"
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink disabled:opacity-35"
                     >
                       <ChevronLeft className="h-3.5 w-3.5" />
                     </button>
@@ -610,7 +657,7 @@ export default function PreviewScreen() {
                       disabled={!historyNav.canGoForward}
                       aria-label="Forward"
                       title="Forward"
-                      className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-hover hover:text-ink disabled:opacity-35"
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink disabled:opacity-35"
                     >
                       <ChevronRight className="h-3.5 w-3.5" />
                     </button>
@@ -627,7 +674,7 @@ export default function PreviewScreen() {
                   disabled={!activeSource}
                   aria-label="Reload preview"
                   title="Reload preview"
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-hover hover:text-ink disabled:opacity-35"
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink disabled:opacity-35"
                 >
                   <RotateCw
                     className={`h-3.5 w-3.5 ${frameStatus === "loading" ? "animate-spin" : ""}`}
@@ -645,11 +692,11 @@ export default function PreviewScreen() {
                     className={`inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[11.5px] transition-colors ${
                       active
                         ? "border-accent/40 bg-accent/15 font-medium text-ink"
-                        : "border-transparent text-ink-secondary hover:bg-hover hover:text-ink"
+                        : "border-transparent text-ink-secondary hover:bg-raised-hover hover:text-ink"
                     }`}
                   >
                     <span>{item.label}</span>
-                    <span className="font-mono text-[10px] text-ink-muted">
+                    <span className="font-mono text-[10px] text-ink-secondary">
                       {item.width}×{item.height}
                     </span>
                   </button>
@@ -662,11 +709,11 @@ export default function PreviewScreen() {
                 className={`inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[11.5px] transition-colors ${
                   activePreset.id === "custom"
                     ? "border-accent/40 bg-accent/15 font-medium text-ink"
-                    : "border-transparent text-ink-secondary hover:bg-hover hover:text-ink"
+                    : "border-transparent text-ink-secondary hover:bg-raised-hover hover:text-ink"
                 }`}
               >
                 <span>Custom</span>
-                <span className="font-mono text-[10px] text-ink-muted">
+                <span className="font-mono text-[10px] text-ink-secondary">
                   {customSize.width}×{customSize.height}
                 </span>
               </button>
@@ -687,7 +734,7 @@ export default function PreviewScreen() {
                     aria-label="Custom width"
                     className="h-7 w-18 rounded border border-hairline/70 bg-inset px-2 font-mono text-[11px] text-ink"
                   />
-                  <span className="text-[11px] text-ink-muted">×</span>
+                  <span className="text-[11px] text-ink-secondary">×</span>
                   <input
                     type="number"
                     min={240}
@@ -707,6 +754,8 @@ export default function PreviewScreen() {
             </div>
 
             <div className="flex items-center gap-2">
+              {statusPill}
+
               <button
                 type="button"
                 onClick={() => setRotated((v) => !v)}
@@ -764,7 +813,7 @@ export default function PreviewScreen() {
                   >
                     {checked && <Check className="h-3 w-3 text-accent" />}
                     <span>{item.label}</span>
-                    <span className="font-mono text-[10px] text-ink-muted">
+                    <span className="font-mono text-[10px] text-ink-secondary">
                       {item.width}×{item.height}
                     </span>
                   </button>
@@ -773,10 +822,12 @@ export default function PreviewScreen() {
             </div>
 
             <div className="flex items-center gap-1.5">
+              {statusPill}
+
               <button
                 type="button"
                 onClick={() => setSelectedSizeIds([...DEFAULT_CANVAS_SIZE_IDS])}
-                className="h-7 rounded-lg border border-hairline/60 bg-inset px-2.5 text-[11px] text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+                className="h-7 rounded-lg border border-hairline/60 bg-inset px-2.5 text-[11px] text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
               >
                 Default 4
               </button>
@@ -787,14 +838,14 @@ export default function PreviewScreen() {
                     PREVIEW_SIZE_PRESETS.filter((p) => p.group === "phone").map((p) => p.id),
                   )
                 }
-                className="h-7 rounded-lg border border-hairline/60 bg-inset px-2.5 text-[11px] text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+                className="h-7 rounded-lg border border-hairline/60 bg-inset px-2.5 text-[11px] text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
               >
                 All phones
               </button>
               <button
                 type="button"
                 onClick={() => setSelectedSizeIds(PREVIEW_SIZE_PRESETS.map((p) => p.id))}
-                className="h-7 rounded-lg border border-hairline/60 bg-inset px-2.5 text-[11px] text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+                className="h-7 rounded-lg border border-hairline/60 bg-inset px-2.5 text-[11px] text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
               >
                 All sizes
               </button>
@@ -802,7 +853,7 @@ export default function PreviewScreen() {
                 type="button"
                 onClick={reloadAllCanvasFrames}
                 disabled={!activeSource}
-                className="inline-flex h-7 items-center gap-1 rounded-lg border border-hairline/60 bg-inset px-2.5 text-[11px] text-ink-secondary transition-colors hover:bg-hover hover:text-ink disabled:opacity-40"
+                className="inline-flex h-7 items-center gap-1 rounded-lg border border-hairline/60 bg-inset px-2.5 text-[11px] text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink disabled:opacity-40"
               >
                 <RotateCw className="h-3 w-3" />
                 Reload all
@@ -869,6 +920,7 @@ export default function PreviewScreen() {
             setShareDefaultScope("current");
             setShareModalOpen(true);
           }}
+          onStatusChange={setFrameStatus}
           pendingConfirmUrl={pendingLocalUrl}
           onConfirmLocalUrl={() => {
             if (pendingLocalUrl) commitUrl(pendingLocalUrl);

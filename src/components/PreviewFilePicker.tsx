@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FileCode2, FileImage, FileText, FolderOpen, RefreshCw, Search, X } from "lucide-react";
 import type { PreviewFileKind, PreviewFileSource } from "@/lib/mobilePreviewUrl";
 
@@ -23,6 +23,9 @@ export interface PreviewFilePickerProps {
   onSelectFile: (source: PreviewFileSource) => void;
   initialProjectId?: string;
 }
+
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function usePreviewAutoRefreshWatcher(
   clientId: string,
@@ -89,6 +92,54 @@ export function PreviewFilePicker({
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [error, setError] = useState("");
+
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Focus entry, focus trap, Escape dismissal, and focus return on close
+  useEffect(() => {
+    if (!open) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    searchInputRef.current?.focus();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key === "Tab" && dialogRef.current) {
+        const focusables = Array.from(
+          dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement as HTMLElement | null;
+        if (e.shiftKey) {
+          if (!active || active === first || !dialogRef.current.contains(active)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else if (!active || active === last || !dialogRef.current.contains(active)) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      if (previousFocus && typeof previousFocus.focus === "function" && previousFocus.isConnected) {
+        previousFocus.focus();
+      }
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -165,8 +216,9 @@ export function PreviewFilePicker({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[480px] w-full max-w-[460px] flex-col overflow-hidden rounded-2xl border border-hairline bg-surface shadow-2xl"
+        className="flex max-h-[480px] w-full max-w-[460px] flex-col overflow-hidden rounded-2xl border border-hairline bg-panel shadow-2xl"
       >
         <div className="flex items-center justify-between border-b border-hairline/60 px-4 py-3">
           <div className="flex items-center gap-2">
@@ -177,7 +229,7 @@ export function PreviewFilePicker({
             type="button"
             onClick={onClose}
             aria-label="Close file picker"
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
           >
             <X className="h-4 w-4" />
           </button>
@@ -211,13 +263,16 @@ export function PreviewFilePicker({
           </div>
 
           <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-muted" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-secondary" />
             <input
+              ref={searchInputRef}
+              autoFocus
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              aria-label="Filter project files"
               placeholder="Filter HTML, PDF, Markdown, or image files…"
-              className="h-8 w-full rounded-lg border border-hairline/70 bg-inset pl-8 pr-3 text-[12px] text-ink placeholder:text-ink-muted focus:border-accent/60 focus:outline-none"
+              className="h-8 w-full rounded-lg border border-hairline/70 bg-inset pl-8 pr-3 text-[12px] text-ink placeholder:text-ink-secondary focus:border-accent/60 focus:outline-none"
             />
           </div>
         </div>
@@ -258,13 +313,13 @@ export function PreviewFilePicker({
                       });
                       onClose();
                     }}
-                    className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-ink transition-colors hover:bg-hover"
+                    className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-ink transition-colors hover:bg-raised-hover"
                   >
                     <span className="flex min-w-0 items-center gap-2">
                       {fileKindIcon(file.kind)}
                       <span className="truncate font-mono">{file.path}</span>
                     </span>
-                    <span className="shrink-0 rounded bg-inset px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-muted">
+                    <span className="shrink-0 rounded bg-inset px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-secondary">
                       {file.kind}
                     </span>
                   </button>

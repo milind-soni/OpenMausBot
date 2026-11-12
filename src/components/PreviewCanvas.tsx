@@ -20,7 +20,10 @@ import {
   Tablet,
 } from "lucide-react";
 import {
-  computeCanvasFit,
+  assignCanvasHeaderLanes,
+  CANVAS_HEADER_LANE_HEIGHT,
+  CANVAS_HEADER_MAX_WIDTH_PX,
+  computeCanvasFitForArtboards,
   computeCanvasZoomAt,
   layoutCanvasArtboards,
   MAX_LIVE_CANVAS_FRAMES,
@@ -30,7 +33,11 @@ import {
   type PreviewSizeGroup,
 } from "@/lib/previewSizes";
 import type { PreviewSource } from "@/lib/mobilePreviewUrl";
-import { PreviewFrame, type PreviewFrameHandle } from "@/components/PreviewFrame";
+import {
+  PreviewFrame,
+  type PreviewFrameHandle,
+  type PreviewFrameStatus,
+} from "@/components/PreviewFrame";
 
 export interface PreviewCanvasProps {
   source: PreviewSource | null;
@@ -42,6 +49,7 @@ export interface PreviewCanvasProps {
   onToggleRotateArtboard: (sizeId: string) => void;
   onFocusSingleSize: (sizeId: string) => void;
   onShareArtboard: (artboard: CanvasArtboardBox) => void;
+  onStatusChange?: (status: PreviewFrameStatus) => void;
   pendingConfirmUrl?: string | null;
   onConfirmLocalUrl?: () => void;
   onCancelLocalUrl?: () => void;
@@ -55,13 +63,13 @@ export interface PreviewCanvasProps {
 function groupIcon(group: PreviewSizeGroup) {
   switch (group) {
     case "phone":
-      return <Smartphone className="h-3.5 w-3.5 text-ink-secondary" />;
+      return <Smartphone className="h-3.5 w-3.5 shrink-0 text-ink-secondary" />;
     case "tablet":
-      return <Tablet className="h-3.5 w-3.5 text-ink-secondary" />;
+      return <Tablet className="h-3.5 w-3.5 shrink-0 text-ink-secondary" />;
     case "laptop":
-      return <Laptop className="h-3.5 w-3.5 text-ink-secondary" />;
+      return <Laptop className="h-3.5 w-3.5 shrink-0 text-ink-secondary" />;
     default:
-      return <Monitor className="h-3.5 w-3.5 text-ink-secondary" />;
+      return <Monitor className="h-3.5 w-3.5 shrink-0 text-ink-secondary" />;
   }
 }
 
@@ -75,6 +83,7 @@ export function PreviewCanvas({
   onToggleRotateArtboard,
   onFocusSingleSize,
   onShareArtboard,
+  onStatusChange,
   pendingConfirmUrl,
   onConfirmLocalUrl,
   onCancelLocalUrl,
@@ -98,12 +107,14 @@ export function PreviewCanvas({
   );
 
   const [view, setView] = useState<CanvasViewTransform>(
-    () => initialTransform ?? { x: 48, y: 56, k: 0.45 },
+    () => initialTransform ?? { x: 48, y: 120, k: 0.45 },
   );
   const [spaceDown, setSpaceDown] = useState(false);
   const [panning, setPanning] = useState(false);
   const [promotedIds, setPromotedIds] = useState<string[]>([]);
-  const [sharedScroll, setSharedScroll] = useState<{ sourceId: string; ratioY: number } | null>(null);
+  const [sharedScroll, setSharedScroll] = useState<{ sourceId: string; ratioY: number } | null>(
+    null,
+  );
 
   const hasAutoFittedRef = useRef(Boolean(initialTransform));
   const panOriginRef = useRef<{ startX: number; startY: number; viewX: number; viewY: number }>({
@@ -123,8 +134,20 @@ export function PreviewCanvas({
     [artboards, promotedIds],
   );
 
+  const primaryLiveId = useMemo(
+    () => artboards.find((a) => liveIds.has(a.id))?.id ?? artboards[0]?.id ?? null,
+    [artboards, liveIds],
+  );
+
+  const { lanes: headerLanes } = useMemo(
+    () => assignCanvasHeaderLanes(artboards, view.k),
+    [artboards, view.k],
+  );
+
   const promoteArtboard = useCallback((id: string) => {
-    setPromotedIds((prev) => [id, ...prev.filter((item) => item !== id)].slice(0, MAX_LIVE_CANVAS_FRAMES));
+    setPromotedIds((prev) =>
+      [id, ...prev.filter((item) => item !== id)].slice(0, MAX_LIVE_CANVAS_FRAMES),
+    );
   }, []);
 
   const updateView = useCallback(
@@ -144,12 +167,12 @@ export function PreviewCanvas({
     const rect = vp.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
     updateView(
-      computeCanvasFit(
+      computeCanvasFitForArtboards(
         { width: rect.width, height: rect.height },
-        { width: boardWidth, height: boardHeight },
+        { width: boardWidth, height: boardHeight, artboards },
       ),
     );
-  }, [boardHeight, boardWidth, updateView]);
+  }, [artboards, boardHeight, boardWidth, updateView]);
 
   const zoomTo100 = useCallback(() => {
     const vp = viewportRef.current;
@@ -298,6 +321,7 @@ export function PreviewCanvas({
           onCancelLocalUrl={onCancelLocalUrl}
           onQuickPickUrl={onQuickPickUrl}
           onOpenFilePicker={onOpenFilePicker}
+          onStatusChange={onStatusChange}
         />
       </div>
     );
@@ -322,12 +346,12 @@ export function PreviewCanvas({
         panning ? "cursor-grabbing" : spaceDown ? "cursor-grab" : "cursor-default"
       }`}
     >
-      {/* Top-left notice when >6 artboards are open */}
+      {/* Bottom-left notice when >6 artboards are open (avoids overlapping top-left headers) */}
       {snapshotCount > 0 && (
         <div
           role="status"
           aria-live="polite"
-          className="pointer-events-none absolute left-4 top-4 z-20 rounded-xl border border-hairline/70 bg-raised/95 px-3 py-1.5 text-[11.5px] text-ink-secondary shadow-md backdrop-blur-md"
+          className="pointer-events-none absolute bottom-4 left-4 z-20 rounded-xl border border-hairline bg-panel px-3 py-1.5 text-[11.5px] text-ink-secondary shadow-md"
         >
           Showing <span className="font-semibold text-ink">{MAX_LIVE_CANVAS_FRAMES} live frames</span> ·{" "}
           {snapshotCount} {snapshotCount === 1 ? "snapshot" : "snapshots"} (hover or click any snapshot
@@ -343,13 +367,17 @@ export function PreviewCanvas({
           transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.k})`,
           transformOrigin: "0 0",
         }}
-        className="relative will-change-transform"
+        className="relative pointer-events-none will-change-transform"
       >
         {artboards.map((artboard) => {
           const isLive = liveIds.has(artboard.id);
+          const lane = headerLanes[artboard.id] ?? 0;
+          const offsetScreenPx = lane * CANVAS_HEADER_LANE_HEIGHT + 8;
+
           return (
-            <div
+            <section
               key={artboard.id}
+              aria-label={`${artboard.preset.label} (${artboard.width} by ${artboard.height} pixels)`}
               style={{
                 position: "absolute",
                 left: `${artboard.left}px`,
@@ -357,31 +385,52 @@ export function PreviewCanvas({
                 width: `${artboard.width}px`,
                 height: `${artboard.height}px`,
               }}
-              className="group"
+              className="group pointer-events-none"
             >
-              {/* Counter-scaled artboard header */}
+              {/* Subtle vertical tether when header is staggered into an upper lane */}
+              {lane > 0 && (
+                <div
+                  aria-hidden="true"
+                  style={{
+                    position: "absolute",
+                    left: `${Math.min(16, artboard.width / 4)}px`,
+                    top: `${-offsetScreenPx / view.k}px`,
+                    width: `${Math.max(1, 1 / view.k)}px`,
+                    height: `${offsetScreenPx / view.k}px`,
+                  }}
+                  className="pointer-events-none bg-hairline"
+                />
+              )}
+
+              {/* Counter-scaled artboard header in non-overlapping vertical lane */}
               <div
                 style={{
                   position: "absolute",
-                  bottom: "calc(100% + 10px)",
+                  top: `${-offsetScreenPx / view.k}px`,
                   left: 0,
-                  transform: `scale(${1 / view.k})`,
-                  transformOrigin: "0 100%",
+                  maxWidth: `${CANVAS_HEADER_MAX_WIDTH_PX}px`,
+                  transform: `scale(${1 / view.k}) translateY(-100%)`,
+                  transformOrigin: "0 0",
                 }}
-                className="z-10 flex items-center gap-2 whitespace-nowrap rounded-lg border border-hairline/70 bg-raised/95 px-2.5 py-1 text-[12px] text-ink shadow-md backdrop-blur-sm"
+                className="pointer-events-auto z-20 flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-hairline bg-panel px-2 py-1 text-[12px] text-ink shadow-md"
               >
                 {groupIcon(artboard.preset.group)}
-                <span className="font-medium text-ink">{artboard.preset.label}</span>
-                <span className="font-mono text-[11px] text-ink-secondary">
-                  · {artboard.width} × {artboard.height}
+                <span className="max-w-[82px] truncate font-medium text-ink" title={artboard.preset.label}>
+                  {artboard.preset.label}
+                </span>
+                <span className="font-mono text-[10.5px] text-ink-secondary">
+                  {artboard.width}×{artboard.height}
                 </span>
                 {!isLive && (
-                  <span className="rounded bg-inset px-1.5 py-0.5 text-[10px] font-medium text-ink-muted">
-                    Snapshot
+                  <span
+                    className="rounded bg-inset px-1 py-0.5 text-[9.5px] font-medium text-ink-secondary"
+                    title="Snapshot placeholder"
+                  >
+                    Snap
                   </span>
                 )}
 
-                <div className="ml-1 flex items-center gap-0.5 border-l border-hairline/50 pl-1.5">
+                <div className="ml-0.5 flex shrink-0 items-center gap-0.5 border-l border-hairline pl-1">
                   <button
                     type="button"
                     onClick={() => onToggleRotateArtboard(artboard.id)}
@@ -390,7 +439,7 @@ export function PreviewCanvas({
                     className={`flex h-6 w-6 items-center justify-center rounded transition-colors ${
                       artboard.rotated
                         ? "bg-accent/15 text-accent"
-                        : "text-ink-secondary hover:bg-hover hover:text-ink"
+                        : "text-ink-secondary hover:bg-raised-hover hover:text-ink"
                     }`}
                   >
                     <ArrowLeftRight className="h-3 w-3" />
@@ -400,7 +449,7 @@ export function PreviewCanvas({
                     onClick={() => refsMap.current.get(artboard.id)?.reload()}
                     aria-label={`Reload ${artboard.preset.label}`}
                     title="Reload artboard"
-                    className="flex h-6 w-6 items-center justify-center rounded text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+                    className="flex h-6 w-6 items-center justify-center rounded text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
                   >
                     <RotateCw className="h-3 w-3" />
                   </button>
@@ -409,7 +458,7 @@ export function PreviewCanvas({
                     onClick={() => onShareArtboard(artboard)}
                     aria-label={`Share ${artboard.preset.label} to chat`}
                     title="Share this size to chat"
-                    className="flex h-6 w-6 items-center justify-center rounded text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+                    className="flex h-6 w-6 items-center justify-center rounded text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
                   >
                     <Camera className="h-3 w-3" />
                   </button>
@@ -418,7 +467,7 @@ export function PreviewCanvas({
                     onClick={() => onFocusSingleSize(artboard.id)}
                     aria-label={`Focus ${artboard.preset.label} in Single mode`}
                     title="Focus in Single mode"
-                    className="flex h-6 w-6 items-center justify-center rounded text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+                    className="flex h-6 w-6 items-center justify-center rounded text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
                   >
                     <Maximize2 className="h-3 w-3" />
                   </button>
@@ -444,6 +493,7 @@ export function PreviewCanvas({
                   scale={1}
                   live={isLive}
                   onPromoteLive={() => promoteArtboard(artboard.id)}
+                  onStatusChange={artboard.id === primaryLiveId ? onStatusChange : undefined}
                   scrollSyncSourceId={artboard.id}
                   onScrollSync={
                     scrollSync
@@ -459,13 +509,13 @@ export function PreviewCanvas({
                   showDeviceBezel={false}
                 />
               </div>
-            </div>
+            </section>
           );
         })}
       </div>
 
       {/* Bottom-right Canvas HUD */}
-      <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 rounded-xl border border-hairline/70 bg-raised/95 px-2 py-1 shadow-lg backdrop-blur-md">
+      <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 rounded-xl border border-hairline bg-panel px-2 py-1 shadow-lg">
         <button
           type="button"
           onClick={onToggleScrollSync}
@@ -474,7 +524,7 @@ export function PreviewCanvas({
           className={`inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] font-medium transition-colors ${
             scrollSync
               ? "bg-accent/15 text-accent"
-              : "text-ink-secondary hover:bg-hover hover:text-ink"
+              : "text-ink-secondary hover:bg-raised-hover hover:text-ink"
           }`}
         >
           <Link2 className="h-3 w-3" />
@@ -488,7 +538,7 @@ export function PreviewCanvas({
           onClick={() => zoomByCenter(1 / 1.25)}
           aria-label="Zoom out"
           title="Zoom out (-)"
-          className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
         >
           <Minus className="h-3.5 w-3.5" />
         </button>
@@ -500,7 +550,7 @@ export function PreviewCanvas({
           onClick={() => zoomByCenter(1.25)}
           aria-label="Zoom in"
           title="Zoom in (+)"
-          className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
@@ -510,14 +560,14 @@ export function PreviewCanvas({
         <button
           type="button"
           onClick={zoomTo100}
-          className="h-7 rounded-lg px-2 font-mono text-[11px] font-medium text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+          className="h-7 rounded-lg px-2 font-mono text-[11px] font-medium text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
         >
           100%
         </button>
         <button
           type="button"
           onClick={fitAll}
-          className="h-7 rounded-lg px-2 text-[11px] font-medium text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+          className="h-7 rounded-lg px-2 text-[11px] font-medium text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
         >
           Fit all
         </button>

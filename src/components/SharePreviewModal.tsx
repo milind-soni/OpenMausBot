@@ -1,5 +1,5 @@
 import { PAGE_SHARE_NOTICE } from "@/lib/previewSharing";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Camera, RefreshCw, Send, X } from "lucide-react";
 import { useStore } from "@/state/store";
 
@@ -27,6 +27,9 @@ export interface SharePreviewModalProps {
   onSubmit: (request: SharePreviewRequest) => Promise<void>;
 }
 
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export function SharePreviewModal({
   open,
   linkOnly = false,
@@ -47,6 +50,54 @@ export function SharePreviewModal({
   const [note, setNote] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const targetSelectRef = useRef<HTMLSelectElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Focus entry, focus trap, Escape dismissal, and focus return on close
+  useEffect(() => {
+    if (!open) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    targetSelectRef.current?.focus();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key === "Tab" && formRef.current) {
+        const focusables = Array.from(
+          formRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement as HTMLElement | null;
+        if (e.shiftKey) {
+          if (!active || active === first || !formRef.current.contains(active)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else if (!active || active === last || !formRef.current.contains(active)) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      if (previousFocus && typeof previousFocus.focus === "function" && previousFocus.isConnected) {
+        previousFocus.focus();
+      }
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -113,9 +164,10 @@ export function SharePreviewModal({
       onClick={onClose}
     >
       <form
+        ref={formRef}
         onClick={(e) => e.stopPropagation()}
         onSubmit={(e) => void handleSend(e)}
-        className="w-full max-w-[440px] rounded-2xl border border-hairline bg-surface p-5 shadow-2xl"
+        className="w-full max-w-[440px] rounded-2xl border border-hairline bg-panel p-5 shadow-2xl"
       >
         <div className="flex items-center justify-between pb-3">
           <div className="flex items-center gap-2">
@@ -130,44 +182,28 @@ export function SharePreviewModal({
             type="button"
             onClick={onClose}
             aria-label="Close modal"
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         <div className="space-y-4 pt-2">
-          {linkOnly && <p role="status" className="rounded-lg border border-hairline bg-inset p-3 text-[12px] text-ink-secondary">{PAGE_SHARE_NOTICE}</p>}
+          {linkOnly && (
+            <p role="status" className="rounded-lg border border-hairline bg-inset p-3 text-[12px] text-ink-secondary">
+              {PAGE_SHARE_NOTICE}
+            </p>
+          )}
           {/* What to capture */}
-          {!linkOnly && <fieldset>
-            <legend className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">
-              What to capture
-            </legend>
-            <div className="space-y-1.5">
-              <label
-                className={`flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2 text-[12.5px] transition-colors ${
-                  scope === "current"
-                    ? "border-accent/50 bg-accent/10 text-ink"
-                    : "border-hairline/60 bg-inset text-ink-secondary hover:border-hairline"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="share-scope"
-                  checked={scope === "current"}
-                  onChange={() => setScope("current")}
-                  className="accent-accent"
-                />
-                <span>
-                  Current size (<span className="font-medium text-ink">{currentSizeLabel}</span> —{" "}
-                  <span className="font-mono text-[11.5px]">{currentDimensionsLabel}</span>)
-                </span>
-              </label>
-
-              {selectedSizesCount > 1 && (
+          {!linkOnly && (
+            <fieldset>
+              <legend className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">
+                What to capture
+              </legend>
+              <div className="space-y-1.5">
                 <label
                   className={`flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2 text-[12.5px] transition-colors ${
-                    scope === "all"
+                    scope === "current"
                       ? "border-accent/50 bg-accent/10 text-ink"
                       : "border-hairline/60 bg-inset text-ink-secondary hover:border-hairline"
                   }`}
@@ -175,49 +211,73 @@ export function SharePreviewModal({
                   <input
                     type="radio"
                     name="share-scope"
-                    checked={scope === "all"}
-                    onChange={() => setScope("all")}
+                    checked={scope === "current"}
+                    onChange={() => setScope("current")}
                     className="accent-accent"
                   />
                   <span>
-                    All selected sizes (
-                    <span className="font-medium text-ink">{selectedSizesCount} screenshots</span>)
+                    Current size (<span className="font-medium text-ink">{currentSizeLabel}</span> —{" "}
+                    <span className="font-mono text-[11.5px]">{currentDimensionsLabel}</span>)
                   </span>
                 </label>
-              )}
-            </div>
-          </fieldset>}
+
+                {selectedSizesCount > 1 && (
+                  <label
+                    className={`flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2 text-[12.5px] transition-colors ${
+                      scope === "all"
+                        ? "border-accent/50 bg-accent/10 text-ink"
+                        : "border-hairline/60 bg-inset text-ink-secondary hover:border-hairline"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="share-scope"
+                      checked={scope === "all"}
+                      onChange={() => setScope("all")}
+                      className="accent-accent"
+                    />
+                    <span>
+                      All selected sizes (
+                      <span className="font-medium text-ink">{selectedSizesCount} screenshots</span>)
+                    </span>
+                  </label>
+                )}
+              </div>
+            </fieldset>
+          )}
 
           {/* Capture area */}
-          {!linkOnly && <fieldset>
-            <legend className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">
-              Capture area
-            </legend>
-            <div className="grid grid-cols-2 gap-1.5">
-              <button
-                type="button"
-                onClick={() => setArea("visible")}
-                className={`h-8 rounded-lg border text-[12px] font-medium transition-colors ${
-                  area === "visible"
-                    ? "border-accent/50 bg-accent/15 text-ink"
-                    : "border-hairline/60 bg-inset text-ink-secondary hover:text-ink"
-                }`}
-              >
-                Visible area
-              </button>
-              <button
-                type="button"
-                onClick={() => setArea("full")}
-                className={`h-8 rounded-lg border text-[12px] font-medium transition-colors ${
-                  area === "full"
-                    ? "border-accent/50 bg-accent/15 text-ink"
-                    : "border-hairline/60 bg-inset text-ink-secondary hover:text-ink"
-                }`}
-              >
-                Full page
-              </button>
-            </div>
-          </fieldset>}
+          {!linkOnly && (
+            <fieldset>
+              <legend className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">
+                Capture area
+              </legend>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setArea("visible")}
+                  className={`h-8 rounded-lg border text-[12px] font-medium transition-colors ${
+                    area === "visible"
+                      ? "border-accent/50 bg-accent/15 text-ink"
+                      : "border-hairline/60 bg-inset text-ink-secondary hover:text-ink"
+                  }`}
+                >
+                  Visible area
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setArea("full")}
+                  className={`h-8 rounded-lg border text-[12px] font-medium transition-colors ${
+                    area === "full"
+                      ? "border-accent/50 bg-accent/15 text-ink"
+                      : "border-hairline/60 bg-inset text-ink-secondary hover:text-ink"
+                  }`}
+                >
+                  Full page
+                </button>
+              </div>
+            </fieldset>
+          )}
 
           {/* Send to */}
           <div>
@@ -228,6 +288,8 @@ export function SharePreviewModal({
               Send to
             </label>
             <select
+              ref={targetSelectRef}
+              autoFocus
               id="share-preview-target"
               value={selectedTargetKey}
               onChange={(e) => setSelectedTargetKey(e.target.value)}
@@ -268,7 +330,7 @@ export function SharePreviewModal({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Add a note for the bot or room (e.g., 'Check the header spacing on tablet')…"
-              className="w-full resize-none rounded-xl border border-hairline/70 bg-inset p-2.5 text-[12.5px] text-ink placeholder:text-ink-muted focus:border-accent/60 focus:outline-none"
+              className="w-full resize-none rounded-xl border border-hairline/70 bg-inset p-2.5 text-[12.5px] text-ink placeholder:text-ink-secondary focus:border-accent/60 focus:outline-none"
             />
           </div>
 
@@ -283,14 +345,14 @@ export function SharePreviewModal({
           <button
             type="button"
             onClick={onClose}
-            className="h-8 rounded-lg border border-hairline bg-raised px-3.5 text-[12px] font-medium text-ink transition-colors hover:bg-hover"
+            className="h-8 rounded-lg border border-hairline bg-raised px-3.5 text-[12px] font-medium text-ink transition-colors hover:bg-raised-hover"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={!target || sending}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent px-4 text-[12px] font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent px-4 text-[12px] font-medium text-white transition-colors hover:brightness-110 disabled:opacity-50"
           >
             {sending ? (
               <>

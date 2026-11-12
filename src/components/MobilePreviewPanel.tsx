@@ -148,7 +148,7 @@ export function MobilePreviewPanel({
     });
   }, [activeSource, customSize, inputUrl, presetId, rotated, zoom]);
 
-  // Close menus on outside click
+  // Close menus on outside click or Escape
   useEffect(() => {
     if (!historyOpen && !sizeMenuOpen && !screenshotMenuOpen) return;
     const handlePointerDown = (e: MouseEvent) => {
@@ -167,8 +167,20 @@ export function MobilePreviewPanel({
         setScreenshotMenuOpen(false);
       }
     };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      setHistoryOpen(false);
+      setSizeMenuOpen(false);
+      setScreenshotMenuOpen(false);
+    };
     document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
   }, [historyOpen, screenshotMenuOpen, sizeMenuOpen]);
 
   const commitUrl = useCallback((url: string) => {
@@ -275,7 +287,7 @@ export function MobilePreviewPanel({
     <aside
       aria-label="Quick preview panel"
       className={cn(
-        "flex h-full w-[420px] shrink-0 select-none flex-col border-l border-hairline/60 bg-raised/90 xl:w-[460px]",
+        "flex h-full w-[420px] shrink-0 select-none flex-col border-l border-hairline/60 bg-panel xl:w-[460px]",
         className,
       )}
     >
@@ -286,7 +298,7 @@ export function MobilePreviewPanel({
           onClick={() => setFilePickerOpen(true)}
           aria-label="Choose a project file"
           title="Choose a file from a project"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-hairline/60 bg-inset text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-hairline/60 bg-inset text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
         >
           <FolderOpen className="h-3.5 w-3.5" />
         </button>
@@ -307,7 +319,7 @@ export function MobilePreviewPanel({
             }}
             aria-label="Web address or project file"
             placeholder="http://localhost:3000 or project file"
-            className="h-7 w-full rounded-lg border border-hairline/70 bg-inset pl-2.5 pr-7 font-mono text-[12px] text-ink placeholder:text-ink-muted focus:border-accent/60 focus:outline-none"
+            className="h-7 w-full rounded-lg border border-hairline/70 bg-inset pl-2.5 pr-7 font-mono text-[12px] text-ink placeholder:text-ink-secondary focus:border-accent/60 focus:outline-none"
           />
           {historyList.length > 0 && (
             <button
@@ -315,16 +327,20 @@ export function MobilePreviewPanel({
               onClick={() => setHistoryOpen((v) => !v)}
               aria-label="Recent preview addresses"
               title="Recent addresses"
-              className="absolute right-1 flex h-5 w-5 items-center justify-center rounded text-ink-muted transition-colors hover:bg-hover hover:text-ink"
+              className="absolute right-1 flex h-5 w-5 items-center justify-center rounded text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
             >
               <History className="h-3 w-3" />
             </button>
           )}
 
           {historyOpen && historyList.length > 0 && (
-            <div className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-xl border border-hairline bg-surface shadow-xl">
+            <div
+              role="listbox"
+              aria-label="Recent preview addresses"
+              className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-xl border border-hairline bg-panel shadow-xl"
+            >
               <div className="flex items-center justify-between border-b border-hairline/40 px-2.5 py-1.5">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-ink-muted">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-ink-secondary">
                   Recent addresses
                 </span>
                 <button
@@ -334,7 +350,7 @@ export function MobilePreviewPanel({
                     setHistoryList([]);
                     setHistoryOpen(false);
                   }}
-                  className="inline-flex items-center gap-1 text-[10px] text-ink-muted transition-colors hover:text-danger"
+                  className="inline-flex items-center gap-1 text-[10px] text-ink-secondary transition-colors hover:text-danger"
                 >
                   <Trash2 className="h-2.5 w-2.5" />
                   Clear
@@ -349,7 +365,7 @@ export function MobilePreviewPanel({
                       setInputUrl(item);
                       handleNavigate(item);
                     }}
-                    className="block w-full truncate px-2.5 py-1.5 text-left font-mono text-[11px] text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+                    className="block w-full truncate px-2.5 py-1.5 text-left font-mono text-[11px] text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
                   >
                     {item}
                   </button>
@@ -362,7 +378,7 @@ export function MobilePreviewPanel({
         <button
           type="button"
           onClick={() => handleNavigate()}
-          className="h-7 shrink-0 rounded-lg bg-accent px-2.5 text-[11.5px] font-medium text-white transition-colors hover:bg-accent-hover"
+          className="h-7 shrink-0 rounded-lg bg-accent px-2.5 text-[11.5px] font-medium text-white transition-colors hover:brightness-110"
         >
           Open
         </button>
@@ -379,7 +395,7 @@ export function MobilePreviewPanel({
                 disabled={!historyNav.canGoBack}
                 aria-label="Back"
                 title="Back"
-                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-hover hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
               </button>
@@ -389,7 +405,7 @@ export function MobilePreviewPanel({
                 disabled={!historyNav.canGoForward}
                 aria-label="Forward"
                 title="Forward"
-                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-hover hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
               >
                 <ChevronRight className="h-3.5 w-3.5" />
               </button>
@@ -406,7 +422,7 @@ export function MobilePreviewPanel({
             disabled={!activeSource}
             aria-label="Reload preview"
             title="Reload preview"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-hover hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
           >
             <RotateCw className={`h-3.5 w-3.5 ${frameStatus === "loading" ? "animate-spin" : ""}`} />
           </button>
@@ -420,21 +436,21 @@ export function MobilePreviewPanel({
               onClick={() => setSizeMenuOpen((v) => !v)}
               aria-label="Choose preview size"
               aria-expanded={sizeMenuOpen}
-              className="inline-flex h-7 items-center gap-1 rounded-md border border-hairline/60 bg-inset px-2 text-[11px] font-medium text-ink transition-colors hover:border-hairline hover:bg-hover"
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-hairline/60 bg-inset px-2 text-[11px] font-medium text-ink transition-colors hover:border-hairline hover:bg-raised-hover"
             >
               <span className="max-w-[104px] truncate">{preset.label}</span>
-              <span className="font-mono text-[10px] text-ink-muted">
+              <span className="font-mono text-[10px] text-ink-secondary">
                 {effectiveDims.width}×{effectiveDims.height}
               </span>
-              <ChevronDown className="h-3 w-3 text-ink-muted" />
+              <ChevronDown className="h-3 w-3 text-ink-secondary" />
             </button>
 
             {sizeMenuOpen && (
-              <div className="absolute left-0 top-full z-40 mt-1 w-64 overflow-hidden rounded-xl border border-hairline bg-surface p-1.5 shadow-xl">
+              <div className="absolute left-0 top-full z-40 mt-1 w-64 overflow-hidden rounded-xl border border-hairline bg-panel p-1.5 shadow-xl">
                 <div className="max-h-72 overflow-y-auto">
                   {PREVIEW_SIZE_GROUPS.map((group) => (
                     <div key={group.group} className="mb-1.5 last:mb-0">
-                      <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
+                      <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-ink-secondary">
                         {group.label}
                       </div>
                       {group.presets.map((item) => {
@@ -450,11 +466,11 @@ export function MobilePreviewPanel({
                             className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-[11.5px] transition-colors ${
                               active
                                 ? "bg-accent/15 font-medium text-ink"
-                                : "text-ink-secondary hover:bg-hover hover:text-ink"
+                                : "text-ink-secondary hover:bg-raised-hover hover:text-ink"
                             }`}
                           >
                             <span>{item.label}</span>
-                            <span className="font-mono text-[10.5px] text-ink-muted">
+                            <span className="font-mono text-[10.5px] text-ink-secondary">
                               {item.width} × {item.height}
                             </span>
                           </button>
@@ -470,11 +486,11 @@ export function MobilePreviewPanel({
                       className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-[11.5px] transition-colors ${
                         preset.id === "custom"
                           ? "bg-accent/15 font-medium text-ink"
-                          : "text-ink-secondary hover:bg-hover hover:text-ink"
+                          : "text-ink-secondary hover:bg-raised-hover hover:text-ink"
                       }`}
                     >
                       <span>Custom size</span>
-                      <span className="font-mono text-[10.5px] text-ink-muted">
+                      <span className="font-mono text-[10.5px] text-ink-secondary">
                         {customSize.width} × {customSize.height}
                       </span>
                     </button>
@@ -494,7 +510,7 @@ export function MobilePreviewPanel({
                           aria-label="Custom width"
                           className="h-7 w-20 rounded border border-hairline/70 bg-inset px-2 font-mono text-[11px] text-ink"
                         />
-                        <span className="text-[11px] text-ink-muted">×</span>
+                        <span className="text-[11px] text-ink-secondary">×</span>
                         <input
                           type="number"
                           min={240}
@@ -527,7 +543,7 @@ export function MobilePreviewPanel({
             className={`flex h-7 w-7 items-center justify-center rounded-md border transition-colors ${
               rotated
                 ? "border-accent/40 bg-accent/15 text-accent"
-                : "border-transparent text-ink-secondary hover:bg-hover hover:text-ink"
+                : "border-transparent text-ink-secondary hover:bg-raised-hover hover:text-ink"
             } disabled:opacity-35`}
           >
             <ArrowLeftRight className="h-3.5 w-3.5" />
@@ -557,23 +573,23 @@ export function MobilePreviewPanel({
                 disabled={!activeSource || capturing}
                 aria-label={sharesLinkOnly(activeSource, Boolean(window.gbs)) ? "Add preview link to chat" : "Send screenshot to chat"}
                 title={sharesLinkOnly(activeSource, Boolean(window.gbs)) ? PAGE_SHARE_NOTICE : "Send screenshot to chat"}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-hover hover:text-ink disabled:opacity-35"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink disabled:opacity-35"
               >
                 <Camera className="h-3.5 w-3.5" />
               </button>
               {screenshotMenuOpen && (
-                <div className="absolute right-0 top-full z-40 mt-1 w-48 overflow-hidden rounded-xl border border-hairline bg-surface p-1 shadow-xl">
+                <div className="absolute right-0 top-full z-40 mt-1 w-48 overflow-hidden rounded-xl border border-hairline bg-panel p-1 shadow-xl">
                   <button
                     type="button"
                     onClick={() => void handleCaptureScreenshot("visible")}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[11.5px] text-ink transition-colors hover:bg-hover"
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[11.5px] text-ink transition-colors hover:bg-raised-hover"
                   >
                     {sharesLinkOnly(activeSource, Boolean(window.gbs)) ? "Add preview link to chat" : "Send visible area to chat"}
                   </button>
                   <button
                     type="button"
                     onClick={() => void handleCaptureScreenshot("full")}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[11.5px] text-ink transition-colors hover:bg-hover"
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[11.5px] text-ink transition-colors hover:bg-raised-hover"
                   >
                     {sharesLinkOnly(activeSource, Boolean(window.gbs)) ? "Add preview link to chat" : "Send full page to chat"}
                   </button>
@@ -587,7 +603,7 @@ export function MobilePreviewPanel({
             onClick={handleOpenInPreviewPage}
             aria-label="Open in Preview page"
             title="Open in Preview page"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
           >
             <Maximize2 className="h-3.5 w-3.5" />
           </button>
@@ -597,7 +613,7 @@ export function MobilePreviewPanel({
             onClick={onClose}
             aria-label="Close quick preview"
             title="Close preview"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-hover hover:text-ink"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -646,9 +662,9 @@ export function MobilePreviewPanel({
       </div>
 
       {/* Footer status strip */}
-      <div className="flex h-7 items-center justify-between border-t border-hairline/50 bg-raised/70 px-3 text-[11px] text-ink-muted">
+      <div className="flex h-7 items-center justify-between border-t border-hairline/50 bg-raised/70 px-3 text-[11px] text-ink-secondary">
         <div className="flex items-center gap-1.5 truncate">
-          <span className="font-medium text-ink-secondary">{preset.label}</span>
+          <span className="font-medium text-ink">{preset.label}</span>
           <span>·</span>
           <span className="font-mono">
             {effectiveDims.width} × {effectiveDims.height}
@@ -656,6 +672,28 @@ export function MobilePreviewPanel({
           {rotated && <span className="text-accent">(Rotated)</span>}
         </div>
         <div className="flex items-center gap-2">
+          {activeSource && frameStatus !== "empty" && (
+            <span
+              role="status"
+              aria-live="polite"
+              className="inline-flex items-center gap-1 text-[10.5px] font-medium text-ink-secondary"
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  frameStatus === "loaded"
+                    ? "bg-success"
+                    : frameStatus === "loading"
+                      ? "animate-pulse bg-accent"
+                      : "bg-danger"
+                }`}
+              />
+              {frameStatus === "loading"
+                ? "Loading preview…"
+                : frameStatus === "loaded"
+                  ? "Preview loaded"
+                  : "Couldn't open this page"}
+            </span>
+          )}
           {toast ? (
             <span className="font-medium text-accent">{toast}</span>
           ) : (

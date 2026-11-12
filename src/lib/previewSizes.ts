@@ -210,6 +210,8 @@ export const CANVAS_FIT_PADDING = 48;
 export const CANVAS_MIN_ZOOM = 0.1;
 export const CANVAS_MAX_ZOOM = 4;
 export const MAX_LIVE_CANVAS_FRAMES = 6;
+export const CANVAS_HEADER_LANE_HEIGHT = 38;
+export const CANVAS_HEADER_MAX_WIDTH_PX = 256;
 
 export interface CanvasViewTransform {
   x: number;
@@ -330,4 +332,79 @@ export function resolveLiveArtboardIds(
     }
   }
   return live;
+}
+
+/**
+ * Assigns each artboard header bar to a non-overlapping vertical lane (0, 1, 2...)
+ * in screen space so counter-scaled 12px header bars never overlap neighboring
+ * boards when zoomed out (e.g. 8 sizes fitted at 1280px).
+ */
+export function assignCanvasHeaderLanes(
+  artboards: ReadonlyArray<Pick<CanvasArtboardBox, "id" | "left">>,
+  zoomK: number,
+  options?: { headerWidthPx?: number; minGapPx?: number },
+): { lanes: Record<string, number>; laneCount: number } {
+  const k = Number.isFinite(zoomK) && zoomK > 0 ? zoomK : 1;
+  const headerWidthPx = options?.headerWidthPx ?? CANVAS_HEADER_MAX_WIDTH_PX;
+  const minGapPx = options?.minGapPx ?? 12;
+  const laneRight: number[] = [];
+  const lanes: Record<string, number> = {};
+
+  for (const artboard of artboards) {
+    const screenLeft = artboard.left * k;
+    let assignedLane = -1;
+    for (let lane = 0; lane < laneRight.length; lane += 1) {
+      if (screenLeft >= laneRight[lane] + minGapPx) {
+        assignedLane = lane;
+        break;
+      }
+    }
+    if (assignedLane === -1) {
+      assignedLane = laneRight.length;
+      laneRight.push(screenLeft + headerWidthPx);
+    } else {
+      laneRight[assignedLane] = screenLeft + headerWidthPx;
+    }
+    lanes[artboard.id] = assignedLane;
+  }
+
+  return {
+    lanes,
+    laneCount: Math.max(1, laneRight.length),
+  };
+}
+
+export function computeCanvasFitForArtboards(
+  viewport: { width: number; height: number },
+  board: {
+    width: number;
+    height: number;
+    artboards: ReadonlyArray<Pick<CanvasArtboardBox, "id" | "left">>;
+  },
+  padding = CANVAS_FIT_PADDING,
+): CanvasViewTransform {
+  if (board.width <= 0 || board.height <= 0 || viewport.width <= 0 || viewport.height <= 0) {
+    return { x: 0, y: 0, k: 0.5 };
+  }
+  const base = computeCanvasFit(viewport, board, padding);
+  const { laneCount: initialLanes } = assignCanvasHeaderLanes(board.artboards, base.k);
+  const bottomClearance = Math.max(padding, 56);
+  const framesHeight = Math.max(1, board.height - 40);
+  const initialMinTop = Math.max(padding, initialLanes * CANVAS_HEADER_LANE_HEIGHT + 24);
+  const usableW = Math.max(1, viewport.width - padding * 2);
+  const usableFramesH = Math.max(80, viewport.height - initialMinTop - bottomClearance);
+  const k = clampCanvasZoom(Math.min(usableW / board.width, usableFramesH / framesHeight));
+  const { laneCount } = assignCanvasHeaderLanes(board.artboards, k);
+  const minArtboardScreenTop = Math.max(padding, laneCount * CANVAS_HEADER_LANE_HEIGHT + 24);
+  const remainingH = Math.max(
+    0,
+    viewport.height - minArtboardScreenTop - bottomClearance - framesHeight * k,
+  );
+  const artboardScreenTop = minArtboardScreenTop + remainingH / 2;
+
+  return {
+    k,
+    x: Math.max(24, (viewport.width - board.width * k) / 2),
+    y: artboardScreenTop - 40 * k,
+  };
 }
