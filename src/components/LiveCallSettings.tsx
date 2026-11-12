@@ -17,6 +17,8 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
   const live: LiveSettings = state.config?.live ?? { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
   const [saving, setSaving] = useState(false);
   const [changingKey, setChangingKey] = useState(false);
+  const [keySaving, setKeySaving] = useState(false);
+  const [providerSaving, setProviderSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const typedHintId = useId();
   // Stable, so this callback ref runs once when the popover mounts, not on every save.
@@ -70,7 +72,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
         onClose();
       }}
     >
-      <LiveProviderSettings />
+      <LiveProviderSettings locked={keySaving} onSaving={setProviderSaving} />
       {!fish && <>
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t("call.live.voice")}</span>
@@ -128,7 +130,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
         <div className="-mt-2 text-[12px] text-ink-tertiary">{t(live.keySource === "openai" ? "call.live.keyFromApiKeys" : "call.live.needsKey")} <KeysLink id="openai" purpose="liveCalls" /></div>
       )}
       {/* Keyed by provider: a key typed for one provider is never saved for another. */}
-      {changingKey && <LiveKeySetup key={state.config?.live?.provider ?? "openai"} compact onSaved={() => setChangingKey(false)} />}
+      {changingKey && <LiveKeySetup key={state.config?.live?.provider ?? "openai"} compact locked={providerSaving} onSaving={setKeySaving} onSaved={() => setChangingKey(false)} />}
       <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, fish })} {t(copy.cost)}</div>
       {error && <div className="text-[12px] text-danger">{error}</div>}
     </div>

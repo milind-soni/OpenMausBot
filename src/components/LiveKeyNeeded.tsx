@@ -1,4 +1,4 @@
-import { useEffect, useId } from "react";
+import { useEffect, useId, useState } from "react";
 import { KeyRound } from "lucide-react";
 
 import { liveDisclosure, liveKeyCopy } from "@/lib/call-mode";
@@ -23,12 +23,20 @@ export function LiveKeyNeeded() {
       <KeyRound size={16} className="mt-0.5 shrink-0 text-ink-secondary" aria-hidden="true" />
       <h2 id={titleId} className="text-[14px] font-medium leading-[1.4] text-ink">{t(copy.needs)}</h2>
     </div>
-    <LiveProviderSettings />
+    <ProviderAndKey provider={live?.provider ?? "openai"} keyForm={keyForm} />
     {(azure || fish) && <DismissWhenReady ready={live?.configured === true} />}
-    {keyForm && <LiveKeySetup key={state.config?.live?.provider ?? "openai"} compact onSaved={() => {}} />}
     {!azure && !fish && <button type="button" className="ui-button ui-button-primary self-start" onClick={() => { dismissLiveNotice(); dispatch(openKeySettings("openai", "liveCalls")); }}>{t("call.live.openApiKeys")}</button>}
     <p className="text-[12px] leading-[1.45] text-ink-tertiary">{!keyForm && `${liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, fish })} `}{t(copy.cost)}</p>
   </section>;
+}
+
+function ProviderAndKey({ provider, keyForm }: { provider: string; keyForm: boolean }) {
+  const [keySaving, setKeySaving] = useState(false);
+  const [providerSaving, setProviderSaving] = useState(false);
+  return <>
+    <LiveProviderSettings locked={keySaving} onSaving={setProviderSaving} />
+    {keyForm && <LiveKeySetup key={provider} compact locked={providerSaving} onSaving={setKeySaving} onSaved={() => {}} />}
+  </>;
 }
 
 function DismissWhenReady({ ready }: { ready: boolean }) {

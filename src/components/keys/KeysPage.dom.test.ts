@@ -59,6 +59,12 @@ function type(input: HTMLInputElement, value: string) {
   });
 }
 
+async function answered(reply: () => void) {
+  reply();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync(() => {});
+}
+
 function paste(input: HTMLInputElement, text: string) {
   const event = new Event("paste", { bubbles: true, cancelable: true });
   Object.defineProperty(event, "clipboardData", { value: { getData: () => text } });
@@ -158,6 +164,33 @@ describe("the keys page", () => {
     type(search, "zzz");
     expect(rowsShown()).toEqual([]);
     expect(host.querySelector("[data-keys-empty]")!.textContent).toBe("No keys match “zzz”.");
+  });
+
+  it("holds the Live provider while a key save is pending, and the key while a provider change is", async () => {
+    const live = { configured: false, provider: "fish", fishAgentId: "agent_1", voice: "", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    let answer: (value: unknown) => void = () => {};
+    fx.api.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    render(() => createElement(LiveKeyNeeded, { key: "notice" }));
+    const provider = () => host.querySelector<HTMLSelectElement>("select")!;
+    const saveKey = () => host.querySelector<HTMLInputElement>('input[type="password"]')!.closest("form")!.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    type(host.querySelector<HTMLInputElement>('input[type="password"]')!, "fish-key");
+    flushSync(() => saveKey().click());
+    expect(fx.api).toHaveBeenCalledWith("/api/config", expect.objectContaining({ method: "PUT" }));
+    expect(provider().disabled).toBe(true);
+    await answered(() => answer({ ...fx.config, live: { ...live, keySource: "live" } }));
+    expect(provider().disabled).toBe(false);
+
+    setConfig({ ...fx.config, live });
+    flushSync(() => {
+      provider().value = "openai";
+      provider().dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(fx.api).toHaveBeenLastCalledWith("/api/live/settings", expect.objectContaining({ method: "PATCH" }));
+    type(host.querySelector<HTMLInputElement>('input[type="password"]')!, "fish-key");
+    expect(saveKey().disabled).toBe(true);
+    await answered(() => answer({ live }));
+    expect(saveKey().disabled).toBe(false);
   });
 
   it("lands the live-call notice's button on the OpenAI row in Voice and calls, focused and lit", async () => {

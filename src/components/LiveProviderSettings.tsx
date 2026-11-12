@@ -9,7 +9,8 @@ type ProviderPatch = Partial<Pick<LiveSettings, "provider" | "azureEndpoint" | "
 
 const FIELD = "w-full rounded-lg border border-hairline bg-inset px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent/60";
 
-export function LiveProviderSettings() {
+/** `locked` holds the provider while a key save is pending; `onSaving` reports a pending provider change. */
+export function LiveProviderSettings({ locked = false, onSaving }: { locked?: boolean; onSaving?: (saving: boolean) => void } = {}) {
   const { state, dispatch } = useStore();
   const live: LiveSettings = state.config?.live ?? { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
   const provider: LiveProvider = live.provider ?? "openai";
@@ -23,6 +24,7 @@ export function LiveProviderSettings() {
 
   const save = async (patch: ProviderPatch) => {
     setSaving(true);
+    onSaving?.(true);
     setError(null);
     try {
       const body = await api<{ live: LiveSettings }>("/api/live/settings", { method: "PATCH", body: JSON.stringify(patch) });
@@ -31,6 +33,7 @@ export function LiveProviderSettings() {
       setError(saveError instanceof Error ? saveError.message : String(saveError));
     } finally {
       setSaving(false);
+      onSaving?.(false);
     }
   };
 
@@ -41,7 +44,7 @@ export function LiveProviderSettings() {
         <Select
           size="sm"
           value={provider}
-          disabled={saving}
+          disabled={saving || locked}
           onChange={(event) => void save({ provider: event.target.value as LiveProvider })}
         >
           <option value="openai">{t("call.live.provider.openai")}</option>

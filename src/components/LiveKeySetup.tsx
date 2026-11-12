@@ -5,7 +5,16 @@ import { liveDisclosure, liveKeyCopy } from "@/lib/call-mode";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 
-export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void; compact?: boolean }) {
+/**
+ * The server binds a key to the provider set when the key arrives, so the provider select is held while a save is
+ * pending (`onSaving`), and no key is sent while a provider change is (`locked`).
+ */
+export function LiveKeySetup({ onSaved, onSaving, locked = false, compact = false }: {
+  onSaved: () => void;
+  onSaving?: (saving: boolean) => void;
+  locked?: boolean;
+  compact?: boolean;
+}) {
   const { state, dispatch } = useStore();
   const provider = state.config?.live?.provider;
   const azure = provider === "azure";
@@ -21,8 +30,9 @@ export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void
   }, []);
   const save = async () => {
     const value = key.trim();
-    if (!value || saving) return;
+    if (!value || saving || locked) return;
     setSaving(true);
+    onSaving?.(true);
     setError(null);
     try {
       const status: ConfigStatus = window.ogb?.setCredential
@@ -37,6 +47,7 @@ export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void
       if (mounted.current) setError(saveError instanceof Error ? saveError.message : String(saveError));
     } finally {
       if (mounted.current) setSaving(false);
+      onSaving?.(false);
     }
   };
   return (
@@ -66,7 +77,7 @@ export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void
       {error && <div className="text-[12px] text-danger">{error}</div>}
       <button
         type="submit"
-        disabled={!key.trim() || saving}
+        disabled={!key.trim() || saving || locked}
         className="self-start rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
       >
         {saving ? t("call.live.keySaving") : compact ? t("common.save") : t("call.live.keySaveAndCall")}
