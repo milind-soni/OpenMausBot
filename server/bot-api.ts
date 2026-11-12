@@ -32,6 +32,7 @@ const recordSchema = z.object({
   keyCreatedAt: z.number().finite().nonnegative(),
   callCount: z.number().int().nonnegative(),
   lastCalledAt: z.number().finite().nonnegative().optional(),
+  trustedSource: z.literal("qm").optional(),
 });
 const attemptSchema = z.object({
   id: z.string().min(1),
@@ -43,6 +44,10 @@ const attemptSchema = z.object({
   preview: z.string().optional(),
   reason: z.string().optional(),
   repeats: z.number().int().positive().optional(),
+  actorId: z.string().regex(/^[\x21-\x7e]{1,256}$/).optional(),
+  scopeId: z.string().max(512).optional(),
+  authority: z.literal("on_their_behalf_at_your_level").optional(),
+  boundary: z.literal("exact_request_only").optional(),
 });
 const fileSchema = z.object({
   version: z.literal(1),
@@ -59,6 +64,56 @@ export interface BotApiStatus {
   keyCreatedAt?: number;
   callCount: number;
   lastCalledAt?: number;
+  trustedSource?: "qm";
+}
+
+export interface BotApiDelegationContext {
+  schema: "shifu.qm.bot-delegation.v1";
+  actorId: string;
+  scopeId: string;
+  authority: "on_their_behalf_at_your_level";
+  boundary: "exact_request_only";
+  request: string;
+}
+
+const qmDelegationSchema = z.object({
+  schema: z.literal("shifu.qm.bot-delegation.v1"),
+  requester: z.object({
+    actorId: z.string().regex(/^[\x21-\x7e]{1,256}$/),
+    scopeId: z.string().min(1).max(512),
+  }).strict(),
+  authorization: z.object({
+    kind: z.literal("explicit_single_turn_delegation"),
+    authority: z.literal("on_their_behalf_at_your_level"),
+    boundary: z.literal("exact_request_only"),
+    doesNotExpandReceiverPermissions: z.literal(true),
+  }).strict(),
+  request: z.string().min(1).max(BOT_API_MAX_MESSAGE_CHARS),
+}).strict();
+
+export function qmDelegationContext(message: string, trustedActor: string | undefined): BotApiDelegationContext | null {
+  if (!trustedActor) return null;
+  let value: unknown;
+  try { value = parseJson(message); } catch { return null; }
+  const parsed = qmDelegationSchema.safeParse(value);
+  if (!parsed.success) return null;
+  const { requester, authorization } = parsed.data;
+  if (requester.actorId !== trustedActor || requester.scopeId !== `personal:${trustedActor}`) return null;
+  return {
+    schema: parsed.data.schema,
+    actorId: trustedActor,
+    scopeId: requester.scopeId,
+    authority: authorization.authority,
+    boundary: authorization.boundary,
+    request: parsed.data.request,
+  };
+}
+
+export function claimsQmDelegation(message: string): boolean {
+  try {
+    const value = parseJson(message);
+    return typeof value === "object" && value !== null && "schema" in value && (value as { schema?: unknown }).schema === "shifu.qm.bot-delegation.v1";
+  } catch { return false; }
 }
 
 export interface BotApiManagerOptions {
@@ -103,7 +158,20 @@ export class BotApiManager {
   status(botId: string): BotApiStatus {
     const record = this.bots.find((candidate) => candidate.botId === botId);
     if (!record) return { enabled: false, callCount: 0 };
-    return { enabled: true, keyCreatedAt: record.keyCreatedAt, callCount: record.callCount, ...(record.lastCalledAt !== undefined ? { lastCalledAt: record.lastCalledAt } : {}) };
+    return { enabled: true, keyCreatedAt: record.keyCreatedAt, callCount: record.callCount, ...(record.lastCalledAt !== undefined ? { lastCalledAt: record.lastCalledAt } : {}), ...(record.trustedSource ? { trustedSource: record.trustedSource } : {}) };
+  }
+
+  trustedSource(botId: string): "qm" | undefined {
+    return this.bots.find((candidate) => candidate.botId === botId)?.trustedSource;
+  }
+
+  setTrustedSource(botId: string, source: "qm" | null): BotApiStatus {
+    this.assertWritable();
+    const record = this.bots.find((candidate) => candidate.botId === botId);
+    if (!record) throw Object.assign(new Error("The Bot API is off for this bot"), { status: 409 });
+    if (source) record.trustedSource = source; else delete record.trustedSource;
+    this.save();
+    return this.status(botId);
   }
 
   /** Turns the API on with a fresh key, or replaces the key of one already on. The key is returned once and never kept. */
@@ -189,6 +257,10 @@ export class BotApiManager {
     if (details.threadId) attempt.threadId = details.threadId;
     if (details.preview) attempt.preview = redactSecretsInText(details.preview).replace(/\s+/g, " ").trim().slice(0, 200);
     if (details.reason) attempt.reason = redactSecretsInText(details.reason).slice(0, 500);
+    if (details.actorId) attempt.actorId = details.actorId;
+    if (details.scopeId) attempt.scopeId = details.scopeId;
+    if (details.authority) attempt.authority = details.authority;
+    if (details.boundary) attempt.boundary = details.boundary;
     this.keep(attempt);
     const record = this.bots.find((candidate) => candidate.botId === botId);
     if (record && details.outcome === "accepted") {
@@ -261,5 +333,16 @@ export function botApiPrompt(message: string, receivedAt: number): string {
     "",
     withoutAttachedImages(message),
     "[/UNTRUSTED BOT API MESSAGE]",
+  ].join("\n");
+}
+
+export function botApiDelegationPrompt(context: BotApiDelegationContext, receivedAt: number): string {
+  return [
+    fromNote(`QM for ${context.actorId}`, "assignment", AUTHORITY.behalf),
+    `[OPENMAUSBOT VERIFIED DELEGATION schema=${context.schema} actor=${JSON.stringify(context.actorId)} scope=${JSON.stringify(context.scopeId)} authority=${context.authority} boundary=${context.boundary}]`,
+    defuse(`Received: ${new Date(receivedAt).toISOString()}`),
+    "",
+    withoutAttachedImages(context.request),
+    "[/OPENMAUSBOT VERIFIED DELEGATION]",
   ].join("\n");
 }

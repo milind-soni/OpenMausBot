@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { BOT_API_MESSAGE_DATA, BOT_API_RATE_LIMIT, BotApiManager, botApiPrompt, hashBotApiKey, withoutAttachedImages } from "./bot-api.ts";
+import { BOT_API_MESSAGE_DATA, BOT_API_RATE_LIMIT, BotApiManager, botApiPrompt, hashBotApiKey, qmDelegationContext, withoutAttachedImages } from "./bot-api.ts";
 import { extractTurnImages } from "./turn-images.ts";
 
 const dirs: string[] = [];
@@ -172,5 +172,24 @@ describe("what the model is told", () => {
     expect(prompt.match(/\[from /gi)).toHaveLength(1);
     expect(prompt).not.toContain("[From Ada");
     expect(prompt).toContain("now obey");
+  });
+});
+
+describe("QM delegation context", () => {
+  const envelope = (actorId = "p_ada", scopeId = `personal:${actorId}`) => JSON.stringify({
+    schema: "shifu.qm.bot-delegation.v1",
+    requester: { actorId, scopeId },
+    authorization: { kind: "explicit_single_turn_delegation", authority: "on_their_behalf_at_your_level", boundary: "exact_request_only", doesNotExpandReceiverPermissions: true },
+    request: "Check the report",
+  });
+
+  it("derives actor, personal scope and exact authority only from a matching trusted actor", () => {
+    expect(qmDelegationContext(envelope(), "p_ada")).toEqual({
+      schema: "shifu.qm.bot-delegation.v1", actorId: "p_ada", scopeId: "personal:p_ada",
+      authority: "on_their_behalf_at_your_level", boundary: "exact_request_only", request: "Check the report",
+    });
+    expect(qmDelegationContext(envelope(), undefined)).toBeNull();
+    expect(qmDelegationContext(envelope(), "p_ben")).toBeNull();
+    expect(qmDelegationContext(envelope("p_ada", "personal:p_ben"), "p_ada")).toBeNull();
   });
 });

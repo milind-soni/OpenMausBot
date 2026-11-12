@@ -7,7 +7,7 @@ import { z } from "zod";
 import { redactSecretsInText } from "../shared/redact.ts";
 import { BOT_API_UPGRADE, botApiEndpoint, type BotApiReply } from "../shared/bot-api.ts";
 import type { AdminActionRow } from "./admin-activity.ts";
-import { BOT_API_MAX_MESSAGE_CHARS, BOT_API_MAX_PENDING, BotApiManager, botApiPrompt, withoutAttachedImages, type BotApiAttempt, type BotApiStatus } from "./bot-api.ts";
+import { BOT_API_MAX_MESSAGE_CHARS, BOT_API_MAX_PENDING, BotApiManager, botApiDelegationPrompt, botApiPrompt, claimsQmDelegation, qmDelegationContext, withoutAttachedImages, type BotApiAttempt, type BotApiDelegationContext, type BotApiStatus } from "./bot-api.ts";
 import { personKey } from "./person-key.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { PASS, type RouteHandler } from "./routes/table.ts";
@@ -29,14 +29,16 @@ const callSchema = z.object({
   /** Seconds to wait for the reply, for a caller that knows nothing in its path drops a quiet connection. */
   wait: z.number().min(0).max(BOT_API_MAX_WAIT_MS / 1000).optional(),
 });
-const switchSchema = z.object({ enabled: z.boolean() });
+const switchSchema = z.object({ enabled: z.boolean(), trustedSource: z.literal("qm").nullable().optional() }).strict();
 
 type TurnOutcome = { ok: boolean; text: string; cards?: unknown };
 
 export interface BotApiTurnOptions {
   threadId: string;
-  automationSource: "api";
-  unattended: true;
+  automationSource?: "api";
+  unattended?: true;
+  delegation?: BotApiDelegationContext;
+  origin?: { kind: "user"; request: string };
   userMessage: Message;
   onSettled: (outcome: TurnOutcome) => void;
   onDispatchError: (message: string) => void;
@@ -137,25 +139,27 @@ export function createBotApiHost(deps: BotApiHostDeps) {
     return { reply: replyText(after), thread: threadId };
   }
 
-  async function runCall(botId: string, call: z.output<typeof callSchema>, turnStarted: () => void): Promise<{ status: number; body: BotApiReply }> {
+  async function runCall(botId: string, call: z.output<typeof callSchema>, delegation: BotApiDelegationContext | undefined, turnStarted: () => void): Promise<{ status: number; body: BotApiReply }> {
     const store = deps.store;
     let threadId = call.thread;
     if (threadId !== undefined) {
       const task = store.taskByThread(botId, threadId);
       // Only a thread this API opened: the caller never writes into the person's own conversations.
       if (!task || task.botApi !== true) fail(404, "no such thread");
+      if (task.botApiActor !== undefined && task.botApiActor !== delegation?.actorId) fail(403, "delegation_context_invalid", "This thread is bound to another actor");
+      if (task.botApiActor === undefined && delegation !== undefined) fail(403, "delegation_context_invalid", "A raw Bot API thread cannot be upgraded to a trusted delegation");
       if (deps.threadBusy(botId, threadId)) return { status: 409, body: { thread: threadId, status: "working" } };
     }
     if (!deps.canStart(botId, threadId ?? "")) fail(409, BUSY, "The bot already had as many conversations going as it may");
-    const message = withoutAttachedImages(call.message);
+    const message = withoutAttachedImages(delegation?.request ?? call.message);
     let opened = false;
     if (threadId === undefined) {
-      // Asks from the start, with none of the bot's saved allowances: nothing may answer an approval for an outside caller.
-      const task = store.createTask(botId, message.slice(0, 80), false, undefined, undefined, "ask", undefined, undefined, (created) => deps.opened?.(created.threadId));
+      // A raw outside caller stays at Ask; a verified delegation uses only the receiving bot's existing level.
+      const task = store.createTask(botId, message.slice(0, 80), false, undefined, undefined, delegation ? undefined : "ask", undefined, undefined, (created) => deps.opened?.(created.threadId));
       if (!task) fail(404, "no such bot");
       threadId = task.threadId;
       opened = true;
-      store.patchTask(botId, threadId, { botApi: true, outside: true });
+      store.patchTask(botId, threadId, { botApi: true, ...(delegation ? { botApiActor: delegation.actorId } : {}), outside: true });
     }
     const receivedAt = Date.now();
     const userMessage = store.appendMessage(threadId, { role: "user", kind: "text", text: message, via: "api" });
@@ -164,8 +168,8 @@ export function createBotApiHost(deps: BotApiHostDeps) {
     let dispatchError: string | undefined;
     markRunning(botId, threadId, true);
     try {
-      await deps.startTurn(botId, botApiPrompt(message, receivedAt), {
-        threadId, automationSource: "api", unattended: true, userMessage,
+      await deps.startTurn(botId, delegation ? botApiDelegationPrompt(delegation, receivedAt) : botApiPrompt(message, receivedAt), {
+        threadId, ...(delegation ? { delegation, origin: { kind: "user" as const, request: delegation.request.slice(0, 400) } } : { automationSource: "api" as const, unattended: true as const }), userMessage,
         onSettled: (outcome) => { settled = outcome; markRunning(botId, threadId!, false); },
         onDispatchError: (message) => { dispatchError = message; markRunning(botId, threadId!, false); },
       });
@@ -219,15 +223,13 @@ export function createBotApiHost(deps: BotApiHostDeps) {
         json(res, 403, { error: BOT_API_UPGRADE });
         return true;
       }
-      if (!deps.canConfine(botId)) {
-        manager.recordRefused(botId, 403, CANNOT_CONFINE);
-        json(res, 403, { error: CANNOT_CONFINE });
-        return true;
-      }
       if (req.method === "GET") {
         const threadId = url.searchParams.get("thread") ?? "";
         const task = /^[\w-]{1,128}$/.test(threadId) ? deps.store.taskByThread(botId, threadId) : undefined;
         if (!task || task.botApi !== true) { json(res, 404, { error: "no such thread" }); return true; }
+        if (task.botApiActor !== undefined && (manager.trustedSource(botId) !== "qm" || header(req, "x-qm-actor") !== task.botApiActor)) {
+          json(res, 403, { error: "delegation_context_invalid" }); return true;
+        }
         const state = threadState(botId, threadId);
         json(res, "reply" in state ? 200 : 202, state);
         return true;
@@ -247,6 +249,27 @@ export function createBotApiHost(deps: BotApiHostDeps) {
         json(res, status, { error: message });
         return true;
       }
+      const trustedActor = header(req, "x-qm-actor");
+      let delegation: BotApiDelegationContext | undefined;
+      if (trustedActor !== undefined) {
+        if (manager.trustedSource(botId) !== "qm") {
+          manager.record(botId, { outcome: "rejected", statusCode: 403, reason: "Untrusted QM credential", preview: call.message });
+          json(res, 403, { error: "delegation_context_invalid" }); return true;
+        }
+        delegation = qmDelegationContext(call.message, trustedActor) ?? undefined;
+        if (!delegation) {
+          manager.record(botId, { outcome: "rejected", statusCode: 400, reason: "Invalid QM delegation context", preview: call.message });
+          json(res, 400, { error: "delegation_context_invalid" }); return true;
+        }
+      } else if (claimsQmDelegation(call.message)) {
+        manager.record(botId, { outcome: "rejected", statusCode: 400, reason: "Missing trusted QM actor", preview: call.message });
+        json(res, 400, { error: "delegation_context_invalid" }); return true;
+      }
+      if (!delegation && !deps.canConfine(botId)) {
+        manager.recordRefused(botId, 403, CANNOT_CONFINE);
+        json(res, 403, { error: CANNOT_CONFINE });
+        return true;
+      }
       if (!manager.admit(botId)) {
         manager.record(botId, { outcome: "rejected", statusCode: 429, reason: "Rate limit exceeded", preview: call.message });
         json(res, 429, { error: "Too many calls: this key takes 10 a minute" });
@@ -258,8 +281,9 @@ export function createBotApiHost(deps: BotApiHostDeps) {
         return true;
       }
       try {
-        const answer = await runCall(botId, call, release);
-        manager.record(botId, { outcome: "accepted", statusCode: answer.status, threadId: answer.body.thread, preview: call.message,
+        const answer = await runCall(botId, call, delegation, release);
+        manager.record(botId, { outcome: "accepted", statusCode: answer.status, threadId: answer.body.thread, preview: delegation?.request ?? call.message,
+          ...(delegation ? { actorId: delegation.actorId, scopeId: delegation.scopeId, authority: delegation.authority, boundary: delegation.boundary } : {}),
           reason: "reply" in answer.body ? "Replied" : answer.body.status === "needs_approval" ? "Stopped at an approval" : "Still working" });
         json(res, answer.status, answer.body);
       } catch (error) {
@@ -302,8 +326,12 @@ export function createBotApiHost(deps: BotApiHostDeps) {
       if (parsed.data.enabled) {
         // Already on keeps its key: only New key replaces one an app may be using.
         if (!included()) return answer(res, 403, { error: BOT_API_UPGRADE, upgrade: true });
-        if (manager.enabled(botId)) return answer(res, 200, view(botId, auth));
+        if (manager.enabled(botId)) {
+          if (parsed.data.trustedSource !== undefined) manager.setTrustedSource(botId, parsed.data.trustedSource);
+          return answer(res, 200, view(botId, auth));
+        }
         const minted = manager.enable(botId, minter(auth));
+        if (parsed.data.trustedSource !== undefined) manager.setTrustedSource(botId, parsed.data.trustedSource);
         deps.record?.(auth, { category: "bot-api", action: "bot-api.on", target });
         return answer(res, 200, { key: minted.key, ...view(botId, auth) });
       }

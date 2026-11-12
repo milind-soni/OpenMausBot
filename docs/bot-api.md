@@ -80,6 +80,26 @@ here means its instructions and memory, through its replies. A bot whose AI can'
 confined (Claude, Codex and the API-key AIs can) answers `403`. A key goes when the
 teammate who made it leaves.
 
+## Trusted QM delegation
+
+An administrator may designate one enabled Bot API credential as a QM source by sending
+`POST /api/bots/<botId>/bot-api` with `{"enabled":true,"trustedSource":"qm"}` through the
+authenticated app API. Read the same route with `GET` and require
+`{"enabled":true,"trustedSource":"qm"}` before changing QM traffic. Sending
+`{"enabled":true,"trustedSource":null}` removes the designation without replacing the key.
+
+A designated credential may send `x-qm-actor` with a
+`shifu.qm.bot-delegation.v1` message. The receiver requires the header actor to match both
+`requester.actorId` and `requester.scopeId === "personal:" + actor`. Missing or mismatched
+context answers `delegation_context_invalid`; a credential not designated for QM cannot
+create a receiver turn. The first accepted call binds its thread to that actor, and a later
+actor gets `403`.
+
+The Bot API settings response keeps the accepted call's `actorId`, `scopeId`, `authority`
+and `boundary` for read-back. The host, not the message body, supplies those fields to the
+turn. A call without `x-qm-actor` stays on the legacy raw-message path, including on a
+QM-designated key, so the sender can roll back before this compatibility path is removed.
+
 Each call is kept with the bot's API settings and shown on the card (count, last
 call, recent calls) to those who can manage the key. Refused calls roll up into
 one row per burst. Neither ever holds the key.

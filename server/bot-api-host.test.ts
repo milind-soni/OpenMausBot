@@ -18,7 +18,7 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-type Task = { threadId: string; title: string; busy: boolean; botApi?: true; approvalMode?: string };
+type Task = { threadId: string; title: string; busy: boolean; botApi?: true; botApiActor?: string; approvalMode?: string; outside?: true };
 
 /** The slice of the store the host reads and writes, in memory. */
 function fakeStore() {
@@ -100,10 +100,10 @@ async function harness(script: Script, options: { waitMs?: number; full?: boolea
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as { port: number }).port;
   const base = `http://127.0.0.1:${port}`;
-  const call = async (botId: string, key: string, body: unknown, init: { method?: string; query?: string; contentType?: string } = {}) => {
+  const call = async (botId: string, key: string, body: unknown, init: { method?: string; query?: string; contentType?: string; headers?: Record<string, string> } = {}) => {
     const response = await fetch(`${base}/hooks/api/bots/${botId}/messages${init.query ?? ""}`, {
       method: init.method ?? "POST",
-      headers: { authorization: `Bearer ${key}`, "content-type": init.contentType ?? "application/json" },
+      headers: { authorization: `Bearer ${key}`, "content-type": init.contentType ?? "application/json", ...init.headers },
       ...(init.method === "GET" ? {} : { body: typeof body === "string" ? body : JSON.stringify(body) }),
     });
     return { status: response.status, body: await response.json() as Record<string, unknown> };
@@ -124,6 +124,70 @@ async function harness(script: Script, options: { waitMs?: number; full?: boolea
 }
 
 describe("the Bot API door on the webhook receiver", () => {
+  const delegation = (actorId = "p_ada", scopeId = `personal:${actorId}`, request = "Prepare the answer") => ({
+    message: JSON.stringify({
+      schema: "shifu.qm.bot-delegation.v1", requester: { actorId, scopeId },
+      authorization: { kind: "explicit_single_turn_delegation", authority: "on_their_behalf_at_your_level", boundary: "exact_request_only", doesNotExpandReceiverPermissions: true },
+      request,
+    }),
+  });
+
+  it("accepts a valid actor from a designated QM credential and passes host-authored delegation metadata", async () => {
+    const h = await harness(replies("done"));
+    const on = await h.app("POST", "/api/bots/b1/bot-api", { enabled: true, trustedSource: "qm" });
+    expect(on.body.trustedSource).toBe("qm");
+    const result = await h.call("b1", on.body.key, delegation(), { headers: { "x-qm-actor": "p_ada" } });
+    expect(result.status).toBe(200);
+    const [turn] = h.turns;
+    expect(turn!.opts).toMatchObject({
+      delegation: { actorId: "p_ada", scopeId: "personal:p_ada", authority: "on_their_behalf_at_your_level", boundary: "exact_request_only" },
+      origin: { kind: "user", request: "Prepare the answer" },
+    });
+    expect(turn!.opts).not.toHaveProperty("automationSource");
+    expect(turn!.prompt).toContain("[From QM for p_ada · assignment · on their behalf at your level]");
+    expect(h.fake.bots.get("b1")!.tasks[0]).toMatchObject({ botApi: true, botApiActor: "p_ada", outside: true });
+    expect((await h.app("GET", "/api/bots/b1/bot-api")).body.calls[0]).toMatchObject({
+      actorId: "p_ada", scopeId: "personal:p_ada", authority: "on_their_behalf_at_your_level", boundary: "exact_request_only",
+    });
+  });
+
+  it("fails closed for missing header, actor mismatch and personal scope mismatch", async () => {
+    const h = await harness(replies("never"));
+    const on = await h.app("POST", "/api/bots/b1/bot-api", { enabled: true, trustedSource: "qm" });
+    expect(await h.call("b1", on.body.key, delegation())).toMatchObject({ status: 400, body: { error: "delegation_context_invalid" } });
+    expect(await h.call("b1", on.body.key, delegation(), { headers: { "x-qm-actor": "p_ben" } })).toMatchObject({ status: 400, body: { error: "delegation_context_invalid" } });
+    expect(await h.call("b1", on.body.key, delegation("p_ada", "personal:p_ben"), { headers: { "x-qm-actor": "p_ada" } })).toMatchObject({ status: 400, body: { error: "delegation_context_invalid" } });
+    const noSchema = JSON.parse(delegation().message) as Record<string, unknown>;
+    delete noSchema.schema;
+    expect(await h.call("b1", on.body.key, { message: JSON.stringify(noSchema) }, { headers: { "x-qm-actor": "p_ada" } })).toMatchObject({ status: 400, body: { error: "delegation_context_invalid" } });
+    expect(h.turns).toEqual([]);
+  });
+
+  it("binds a delegated thread to its first actor and rejects a later actor with 403", async () => {
+    const h = await harness(replies("done"));
+    const on = await h.app("POST", "/api/bots/b1/bot-api", { enabled: true, trustedSource: "qm" });
+    const first = await h.call("b1", on.body.key, delegation(), { headers: { "x-qm-actor": "p_ada" } });
+    const before = h.turns.length;
+    const changed = await h.call("b1", on.body.key, { ...delegation("p_ben"), thread: first.body.thread }, { headers: { "x-qm-actor": "p_ben" } });
+    expect(changed).toMatchObject({ status: 403, body: { error: "delegation_context_invalid" } });
+    expect(h.turns).toHaveLength(before);
+  });
+
+  it("does not create a receiver turn for a credential that is not designated for QM", async () => {
+    const h = await harness(replies("never"));
+    const on = await h.app("POST", "/api/bots/b1/bot-api", { enabled: true });
+    expect(await h.call("b1", on.body.key, delegation(), { headers: { "x-qm-actor": "p_ada" } })).toMatchObject({ status: 403, body: { error: "delegation_context_invalid" } });
+    expect(h.turns).toEqual([]);
+    expect(h.fake.bots.get("b1")!.tasks).toEqual([]);
+  });
+
+  it("keeps legacy raw messages compatible on a QM-designated credential", async () => {
+    const h = await harness(replies("legacy"));
+    const on = await h.app("POST", "/api/bots/b1/bot-api", { enabled: true, trustedSource: "qm" });
+    expect(await h.call("b1", on.body.key, { message: "old raw message" })).toMatchObject({ status: 200, body: { reply: "legacy" } });
+    expect(h.turns[0]!.opts).toMatchObject({ automationSource: "api", unattended: true });
+  });
+
   it("answers a message with the bot's reply in a thread marked as the API's, and tells the bot where it came from", async () => {
     const h = await harness(replies("Hello from Scout"));
     const on = await h.app("POST", "/api/bots/b1/bot-api", { enabled: true });
