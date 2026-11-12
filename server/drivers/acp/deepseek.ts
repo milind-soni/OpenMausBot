@@ -184,9 +184,12 @@ function catalogTimeoutMs(env: Record<string, string | undefined>): number {
   return Number.isInteger(parsed) && parsed > 0 && parsed <= 2_147_483_647 ? parsed : DEEPSEEK_MODELS_DEFAULT_TIMEOUT_MS;
 }
 
+const VARIANT_DISCOVERY_MODEL_LIMIT = 128;
+
 /** Ask the installed dsh what it offers: initialize, session/new in `cwd`,
- * read each model's thinking choices, session/close. Rejects on any failure so the core keeps
- * the last usable catalog; never resolves to an empty or guessed list. */
+ * read each model's thinking choices (a model dsh won't switch to keeps none), session/close.
+ * Rejects on any other failure so the core keeps the last usable catalog; never resolves to an
+ * empty or guessed list. */
 export function fetchDeepSeekCatalog(
   cli: string,
   env: Record<string, string | undefined>,
@@ -284,16 +287,16 @@ export function fetchDeepSeekCatalog(
             return finish({ error: error instanceof Error ? error : new Error(String(error)) });
           }
           if (!sessionId) return finish({ catalog });
-          const current = offeredWireValues(msg.result, "model").current;
-          pendingModels.push(...catalog.options.filter((model) => deepseekWireValue(model.id) !== current));
+          if (catalog.options.length <= VARIANT_DISCOVERY_MODEL_LIMIT) {
+            const current = offeredWireValues(msg.result, "model").current;
+            pendingModels.push(...catalog.options.filter((model) => deepseekWireValue(model.id) !== current));
+          }
           nextModel();
         } else if (selectId && msg?.id === selectId && selectedModel) {
-          if (offeredWireValues(msg.result, "model").current !== deepseekWireValue(selectedModel.id)) {
-            send("session/close", { sessionId });
-            return finish({ error: new Error(`dsh did not confirm model ${selectedModel.id} during discovery`) });
+          if (offeredWireValues(msg.result, "model").current === deepseekWireValue(selectedModel.id)) {
+            const variants = acpVariantOption(msg.result)?.options;
+            if (variants?.length) selectedModel.variants = variants;
           }
-          const variants = acpVariantOption(msg.result)?.options;
-          if (variants?.length) selectedModel.variants = variants;
           nextModel();
         } else if (closeId && msg?.id === closeId) {
           finish({ catalog: catalog! });

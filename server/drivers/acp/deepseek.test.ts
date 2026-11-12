@@ -319,9 +319,10 @@ process.stdin.on("data", (chunk) => {
     expect(catalog.options[2]).not.toHaveProperty("variants");
   });
 
-  it("rejects a model switch that was not confirmed instead of assigning another model's choices", async () => {
+  it("leaves a model whose switch was not confirmed without choices instead of assigning another model's", async () => {
     const { cli, env } = fakeCli({ FAKE_DSH_MODE: "refuse-model" });
-    await expect(fetchDeepSeekCatalog(cli, env, tmpdir())).rejects.toThrow(/did not confirm model/);
+    const catalog = await fetchDeepSeekCatalog(cli, env, tmpdir());
+    expect(catalog.options[1]).not.toHaveProperty("variants");
   });
 
   it("rejects within the timeout when dsh never answers", async () => {
