@@ -38,6 +38,8 @@ describe("PeerExchangeView", () => {
       onClose: () => {},
     }));
     expect(html).toContain('role="dialog"');
+    expect(html).toContain('tabindex="-1"');
+    expect(html).not.toContain("autofocus");
     expect(html).toContain("Liaison and Helper");
     expect(html).toContain('aria-label="Close"');
     expect(html.indexOf("First request")).toBeLessThan(html.indexOf("Done with the first"));

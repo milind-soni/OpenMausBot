@@ -1,8 +1,9 @@
 // Another bot's long request reads as one line in the chat. It opens in place, and its back-and-forth with this bot opens beside the chat.
-import { createContext, use, useEffect, useMemo, useState } from "react";
+import { createContext, use, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight, MessagesSquare, X } from "lucide-react";
 import { BotAvatar } from "./Avatar";
+import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { formatTime } from "@/lib/clock-time";
 import { normalizeState } from "@/lib/mascot";
 import { peerExchange, type ExchangeLine, type PeerLine } from "@/lib/peer-message";
@@ -78,13 +79,6 @@ export function PeerOpenedActions({ onFold, ...context }: PeerContext & { onFold
 function PeerExchangePanel({ peer, bots, botId, botName, onClose }: PeerContext & { onClose: () => void }) {
   const messages = use(PeerMessagesContext);
   const lines = useMemo(() => peerExchange(messages, botId, peer), [messages, botId, peer.botId, peer.name]);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
   return createPortal(
     <PeerExchangeView lines={lines} peerName={peer.name} peerBot={authorOf(bots, peer)} botName={botName} self={bots.find((b) => b.id === botId)} onClose={onClose} />,
     document.body,
@@ -100,12 +94,15 @@ export function PeerExchangeView({ lines, peerName, peerBot, botName, self, onCl
   onClose: () => void;
 }) {
   const title = t("chat.peer.exchangeTitle", { peer: peerName, bot: botName });
+  // Keeps Tab inside the panel, closes on Escape and gives focus back to "View exchange".
+  const dialogRef = useRef<HTMLElement>(null);
+  useModalDialog(dialogRef, onClose);
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <aside role="dialog" aria-modal="true" aria-label={title} data-testid="peer-exchange" className="flex h-full w-[min(440px,100vw)] flex-col border-l border-hairline/50 bg-panel shadow-2xl shadow-black/50">
+      <aside ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} data-testid="peer-exchange" className="flex h-full w-[min(440px,100vw)] flex-col border-l border-hairline/50 bg-panel shadow-2xl shadow-black/50">
         <header className="flex items-center justify-between gap-3 border-b border-hairline/40 px-4 py-3">
           <h2 className="truncate text-[14px] font-medium text-ink">{title}</h2>
-          <button type="button" autoFocus onClick={onClose} title={t("common.close")} aria-label={t("common.close")} className="rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink">
+          <button type="button" onClick={onClose} title={t("common.close")} aria-label={t("common.close")} className="rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink">
             <X size={16} />
           </button>
         </header>

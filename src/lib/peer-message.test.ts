@@ -124,6 +124,28 @@ describe("peerExchange", () => {
     ]);
   });
 
+  it("files a reply under the request it names, even after another line", () => {
+    const messages = [
+      ask("p1", "Liaison", "L", "First request", 1),
+      { id: "u1", role: "user" as const, kind: "text" as const, text: "person in between", at: 2 },
+      { ...reply("b1", "Done with the first", 3), requestMessageId: "p1" },
+      ask("p2", "Other", "O", "Not this peer", 4),
+      { ...reply("b2", "late answer to Liaison", 5), requestMessageId: "p1" },
+      { ...reply("b3", "answer to Other", 6), requestMessageId: "p2" },
+    ];
+    expect(peerExchange(messages, "me", { botId: "L", name: "Liaison" }).map((line) => line.id)).toEqual(["p1", "b1", "b2"]);
+    expect(peerExchange(messages, "me", { botId: "O", name: "Other" }).map((line) => line.id)).toEqual(["p2", "b3"]);
+  });
+
+  it("leaves out another room member's reply", () => {
+    const messages = [
+      ask("p1", "Liaison", "L", "First request", 1),
+      { ...reply("m1", "member's own reply", 2), from: { botId: "M", name: "Member", color: "blue" as const } },
+      { ...reply("b1", "my answer", 3), from: { botId: "me", name: "Helper", color: "green" as const } },
+    ];
+    expect(peerExchange(messages, "me", { botId: "L", name: "Liaison" }).map((line) => line.id)).toEqual(["p1", "b1"]);
+  });
+
   it("matches room requests from the same peer by name when no id is known", () => {
     const messages = [
       { id: "r1", role: "bot" as const, kind: "text" as const, text: "Room ask", at: 1, from: { name: "Chief" }, roomRequest: { phase: "request" } },

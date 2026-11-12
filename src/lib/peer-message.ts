@@ -67,7 +67,7 @@ export interface ExchangeLine {
   at: number;
 }
 
-type ExchangeMessage = Pick<Message, "id" | "role" | "kind" | "text" | "at" | "peerAsk" | "from" | "roomRequest">;
+type ExchangeMessage = Pick<Message, "id" | "role" | "kind" | "text" | "at" | "peerAsk" | "from" | "roomRequest" | "requestMessageId">;
 
 /** One peer's requests in this thread and the bot's written answers to each, for the side view. */
 export function peerExchange(
@@ -77,14 +77,23 @@ export function peerExchange(
 ): ExchangeLine[] {
   const lines: ExchangeLine[] = [];
   let answering = false;
+  const asked = new Set<string>();
   for (const m of messages) {
     const from = peerLine(m) ?? peerRequest(m, threadBotId);
     if (from) {
       answering = peer.botId && from.botId ? from.botId === peer.botId : from.name === peer.name;
-      if (answering) lines.push({ id: m.id, from: "peer", text: from.body, at: m.at });
+      if (answering) {
+        asked.add(m.id);
+        lines.push({ id: m.id, from: "peer", text: from.body, at: m.at });
+      }
     } else if (m.role === "user") {
       answering = false;
-    } else if (answering && m.role === "bot" && m.kind === "text" && m.text?.trim()) {
+    } else if (
+      m.role === "bot" && m.kind === "text" && m.text?.trim() &&
+      // Another room member's reply is not this bot's answer; a reply names its request when it can.
+      (!m.from || m.from.botId === threadBotId) &&
+      (m.requestMessageId ? asked.has(m.requestMessageId) : answering)
+    ) {
       lines.push({ id: m.id, from: "bot", text: m.text, at: m.at });
     }
   }
