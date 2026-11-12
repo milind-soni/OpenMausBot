@@ -11,6 +11,7 @@ import { useProjects } from "@/state/projects";
 import { ProjectSuggestionList } from "./ProjectSuggestionList";
 import { StagedAttachmentsTray } from "./AttachmentViewer";
 import { readFileAsAttachment } from "@/lib/attachments";
+import { draftKey, loadDraft, saveDraft } from "@/lib/composerDrafts";
 
 /** The active @mention query at the caret: the text between an `@` that
  * starts a word and the caret. null = no mention being typed. */
@@ -56,8 +57,11 @@ export function Composer({
   const busyName = group
     ? (members?.find((b) => b.id === group.busyBotId)?.name ?? "A bot")
     : (bot?.name ?? "The bot");
-  const [text, setText] = useState("");
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  // Drafts are kept per conversation, so switching away and back restores them.
+  const draftId = draftKey({ botId: bot?.id, groupId: group?.id });
+  const [initialDraft] = useState(() => loadDraft(draftId));
+  const [text, setText] = useState(initialDraft.text);
+  const [attachments, setAttachments] = useState<Attachment[]>(initialDraft.attachments);
   const [isDragging, setIsDragging] = useState(false);
   const [recording, setRecording] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
@@ -229,7 +233,8 @@ export function Composer({
 
   // One message may be queued while the bot works; it auto-sends the moment
   // the turn settles. Enter during a turn queues instead of silently dying.
-  const [queued, setQueued] = useState<{ text: string; attachments: Attachment[] } | null>(null);
+  const [queued, setQueued] = useState<{ text: string; attachments: Attachment[] } | null>(initialDraft.queued);
+  useEffect(() => saveDraft(draftId, { text, attachments, queued }), [draftId, text, attachments, queued]);
   const send = () => {
     const t = text.trim();
     if (!t && attachments.length === 0) return;

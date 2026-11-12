@@ -814,9 +814,10 @@ export function ChatView({ bot }: { bot: Bot }) {
         </button>
       )}
 
-      {/* keyed by bot: a draft belongs to the conversation it was typed in,
-          so switching bots starts from an empty composer instead of carrying
-          the previous bot's half-written message over */}
+      {/* keyed by bot: a draft belongs to the conversation it was typed in.
+          Switching bots remounts the composer, which restores that bot's own
+          saved draft (src/lib/composerDrafts.ts) instead of carrying the
+          previous bot's half-written message over */}
       <Composer
         key={bot.id}
         bot={bot}
