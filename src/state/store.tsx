@@ -502,7 +502,7 @@ export type AppSettingsSection = SettingsPageId
   | "desktopWorkspaces" | "organization" | "cloudAccount" | "experimental" | "connections" | "decisionModel" | "imageGeneration"
   | "engines" | "companion" | "remote" | "computer" | "logins" | "botAccess" | "activity" | "backups" | "workspaces"
   | "skills" | "import" | "updates";
-export type SettingsPageId = "overview" | "phone" | "ai" | "bots" | "desktops" | "vault" | "usage" | "data" | "people"
+export type SettingsPageId = "overview" | "phone" | "ai" | "bots" | "desktops" | "vault" | "usage" | "transfer" | "data" | "people"
   | "installations" | "account" | "plan" | "app" | "general" | "appearance";
 
 export type BotSettingsSection =
@@ -2894,11 +2894,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const launched = useRef(false);
   useEffect(() => {
-    if (!state.hydrated || launched.current) return;
+    if (!state.hydrated || !state.config || launched.current) return;
     launched.current = true;
     const bot = state.bots.find((candidate) => candidate.id === state.selectedId);
     if (bot && state.activeView === "chat" && botOpensTo(bot, showThreads) !== bot.threadId) openBot(dispatch, bot, showThreads);
-  }, [state.hydrated, state.bots, state.selectedId, state.activeView, showThreads, dispatch]);
+  }, [state.hydrated, state.config, state.bots, state.selectedId, state.activeView, showThreads, dispatch]);
 
   useEffect(() => {
     let alive = true;

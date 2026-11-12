@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { InstanceInfo } from "@/state/store";
-import { configuredModelInstances, modelsAwaitEngine, splitEngineRail } from "./engine-rail";
+import { configuredModelInstances, isClaudeAccount, modelsAwaitEngine, signInFamily, splitEngineRail } from "./engine-rail";
 
 describe("splitEngineRail", () => {
   it("groups sign-in plans, pasted provider keys and Local engines", () => {
@@ -163,5 +163,16 @@ describe("modelsAwaitEngine", () => {
     expect(modelsAwaitEngine({ snapshot })).toBe(false);
     expect(modelsAwaitEngine({ modelsUnconfirmed: true, snapshot: { ...snapshot, authenticated: false } })).toBe(false);
     expect(modelsAwaitEngine({ modelsUnconfirmed: true, snapshot: { state: "unavailable", reason: "missing" } })).toBe(false);
+  });
+});
+
+describe("signInFamily", () => {
+  it("groups official Claude sign-ins but keeps custom endpoints and Bedrock apart", () => {
+    expect(signInFamily({ driverKind: "claudeAgent" })).toBe("claude");
+    expect(signInFamily({ driverKind: "claudeAgent", access: "subscription" })).toBe("claude");
+    expect(signInFamily({ driverKind: "claudeAgent", access: "custom" })).toBeUndefined();
+    expect(signInFamily({ driverKind: "claudeAgent", access: "api" })).toBeUndefined();
+    expect(isClaudeAccount({ driverKind: "claudeAgent", access: "custom" })).toBe(false);
+    expect(signInFamily({ driverKind: "codex" })).toBe("openai");
   });
 });

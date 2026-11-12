@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { LoginBots } from "../shared/logins.ts";
 import { fillLogin, type FillCandidate } from "./login-fill.ts";
-import { loginFields, ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED, OnePasswordLogins, onePasswordProblem, onePasswordUnavailable, OnePasswordUnavailableError, sdkOnePasswordClient, secretFields } from "./onepassword.ts";
+import { loginExtraFields, loginFields, ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED, OnePasswordLogins, onePasswordProblem, onePasswordUnavailable, OnePasswordUnavailableError, sdkOnePasswordClient, secretFields } from "./onepassword.ts";
 import { FakeLoginPage, LOGIN_FORM } from "./testing/fake-login-page.ts";
 import { fakeOnePasswordSdk } from "./testing/fake-onepassword.ts";
 import { parseTotpKey, totpCode } from "./totp.ts";
@@ -16,6 +16,9 @@ const STRIPE = "sk_test_fake-stripe-key-123";
 const DEPLOY = "fake-deploy-Passw0rd";
 const NOTE = "fake-note-text-456";
 const ACME_SECRET = "fake-acme-client-secret-789";
+const CLIENT_ID = "fake-client-id-abc";
+const CLIENT_SECRET = "fake-client-secret-def";
+const PLAIN_TOKEN = "fake-plain-text-token-ghi";
 
 function setup(options: { token?: string | null; fail?: () => Error | null; now?: () => number; grants?: Record<string, LoginBots> } = {}) {
   const { sdk, calls } = fakeOnePasswordSdk({
@@ -37,6 +40,9 @@ function setup(options: { token?: string | null; fail?: () => Error | null; now?
         { id: "i8", title: "Acme OAuth", category: "SecureNote", urls: [], notes: NOTE,
           fields: [{ id: "s1", title: "client_secret", fieldType: "Concealed", value: ACME_SECRET }] },
         { id: "i9", title: "A card", category: "CreditCard", urls: [], fields: [{ id: "n", title: "number", fieldType: "Concealed", value: "4111" }] },
+        { id: "i10", title: "Partner API", urls: [], username: "svc", password: "fake-partner-pass",
+          fields: [{ id: "c1", title: "Client ID", fieldType: "Text", value: CLIENT_ID }, { id: "c2", title: "Client Secret", fieldType: "Concealed", value: CLIENT_SECRET }] },
+        { id: "i11", title: "Plain token", category: "ApiCredentials", urls: [], fields: [{ id: "t1", title: "token", fieldType: "Text", value: PLAIN_TOKEN }] },
       ] },
     },
   });
@@ -76,7 +82,7 @@ describe("1Password logins", () => {
       { id: "v2", title: "Finance", items: 1, bots: "all" },
       { id: "v1", title: "Shared with OMB", items: 2, bots: "all" },
     ] });
-    expect(calls).toEqual(["createClient OpenMausBot", "vaults.list", "items.list v2", "items.getAll v2 f1", "items.list v1", "items.getAll v1 i1,i2,i4,i5,i6,i7,i8"]);
+    expect(calls).toEqual(["createClient OpenMausBot", "vaults.list", "items.list v2", "items.getAll v2 f1", "items.list v1", "items.getAll v1 i1,i2,i4,i5,i6,i7,i8,i11,i3,i10"]);
     const rows = source.list();
     expect(rows.map((row) => [row.site, row.hosts, row.username, row.hasTotp, row.source, row.bots])).toEqual([
       ["example.com", ["accounts.example.com"], "alice@example.com", true, "1password", "all"],
@@ -222,6 +228,7 @@ describe("1Password secrets", () => {
     expect([...secretFields("Password", { fields: [concealed("password", "password", "p1")] })]).toEqual([["", "p1"]]);
     expect([...secretFields("SecureNote", { fields: [concealed("s1", "client_secret", "c1")], notes: "n1" })]).toEqual([["", "n1"], ["client_secret", "c1"]]);
     expect([...secretFields("SecureNote", { fields: [concealed("s1", "client_secret", "c1")] })]).toEqual([["", "c1"]]);
+    expect([...secretFields("ApiCredentials", { fields: [{ id: "t1", title: "token", fieldType: "Text", value: "t1" }] })]).toEqual([["", "t1"]]);
     expect(secretFields("SecureNote", { fields: [] }).size).toBe(0);
   });
 
@@ -231,11 +238,13 @@ describe("1Password secrets", () => {
     expect(linkedSecrets(source, "pepper").map((secret) => [secret.id, secret.name, secret.fields, secret.provider, secret.readOnly, secret.bots])).toEqual([
       ["1password:v1:i8", "Acme OAuth", ["client_secret"], "1password", true, "all"],
       ["1password:v1:i7", "Deploy", [], "1password", true, "all"],
+      ["1password:v1:i10", "Partner API", ["Client ID", "Client Secret"], "1password", true, "all"],
+      ["1password:v1:i11", "Plain token", [], "1password", true, "all"],
       ["1password:v1:i6", "Stripe secret key", ["username"], "1password", true, "all"],
     ]);
     expect(linkedCandidates(source, "deploy.example.io", "pepper")).toEqual([]);
     const listed = JSON.stringify(source.items());
-    for (const value of [STRIPE, DEPLOY, NOTE, ACME_SECRET, VAULT_PASSWORD]) expect(listed).not.toContain(value);
+    for (const value of [STRIPE, DEPLOY, NOTE, ACME_SECRET, VAULT_PASSWORD, CLIENT_ID, CLIENT_SECRET, PLAIN_TOKEN]) expect(listed).not.toContain(value);
   });
 
   it("finds one by its name or \"<name> <field>\", and reads its value from 1Password only then", async () => {
@@ -251,6 +260,36 @@ describe("1Password secrets", () => {
     expect(await readLinkedSecret(findLinkedSecret([source], "Acme OAuth client secret", "pepper")!)).toBe(ACME_SECRET);
     expect(findLinkedSecret([source], "A card", "pepper")).toBeNull();
     expect(source.items().find((item) => item.id === "1password:v1:i6")?.lastUsedAt).toEqual(expect.any(Number));
+  });
+
+  it("offers a Login item's own extra fields as \"<title> <field>\" secrets, never its username or password", async () => {
+    const { source } = setup();
+    await source.refresh();
+    const read = async (name: string) => readLinkedSecret(findLinkedSecret([source], name, "pepper")!);
+    expect(await read("Partner API Client ID")).toBe(CLIENT_ID);
+    expect(await read("Partner API Client Secret")).toBe(CLIENT_SECRET);
+    expect(await read("Partner API")).toBe(CLIENT_SECRET);
+    expect(await read("Plain token")).toBe(PLAIN_TOKEN);
+    for (const name of ["Partner API username", "Partner API password", "No website", "Example"]) expect(findLinkedSecret([source], name, "pepper")).toBeNull();
+    expect(source.list().map((row) => row.site)).not.toContain("");
+  });
+
+  it("leaves out a Login's fallback username and password (found by type and title) from its extra fields", () => {
+    const field = (id: string, title: string, fieldType: string, value: string) => ({ id, title, fieldType, value });
+    const fields = [field("f1", "E-mail", "Email", "alice@example.com"), field("f2", "Site password", "Concealed", "fake-fallback-pass"),
+      field("f3", "API key", "Concealed", "fake-api-key"), field("f4", "Region", "Text", "eu")];
+    expect(loginFields(fields)).toMatchObject({ username: "alice@example.com", password: "fake-fallback-pass" });
+    expect([...loginExtraFields({ fields })]).toEqual([["", "fake-api-key"], ["API key", "fake-api-key"], ["Region", "eu"]]);
+  });
+
+  it("never lets Logins without a website push a website login out of the item limit", async () => {
+    const noSite = Array.from({ length: 500 }, (_, n) => ({ id: `n${n}`, title: `No site ${n}`, urls: [], username: "x", password: "fake-x-pass" }));
+    const { sdk } = fakeOnePasswordSdk({ token: TOKEN, vaults: { v1: { title: "Big", items: [
+      ...noSite, { id: "w1", title: "Website", urls: ["https://late.example.com"], username: "late", password: "fake-late-pass" },
+    ] } } });
+    const source = new OnePasswordLogins({ token: () => TOKEN, grants: () => ({}), connect: (value) => sdkOnePasswordClient(sdk, value, "9.9.9") });
+    expect((await source.refresh()).items).toBe(1);
+    expect(source.list().map((row) => row.site)).toEqual(["example.com"]);
   });
 
   it("says plainly when a secret left 1Password, and when 1Password can't be read", async () => {

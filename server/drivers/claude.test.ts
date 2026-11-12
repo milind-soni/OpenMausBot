@@ -35,6 +35,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { BASH_MAX_TIMEOUT_MS } from "../system-prompt.ts";
 import { ephemeralWorkspaceTokenPath } from "../workspace-backup-policy.ts";
+import { registerPathDir, resetPathCacheForTests } from "../env-path.ts";
 import * as procs from "../procs.ts";
 import * as localInject from "./local-inject.ts";
 
@@ -1971,6 +1972,200 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     });
   });
 
+  it.skipIf(process.platform === "win32")("re-probes the CLI when PATH starts resolving `claude` to a different, older copy", async () => {
+    // A Mac with Homebrew's 2.1.321 and an nvm 2.1.197: a PATH rescan put the nvm copy first, and every turn
+    // still passed 2.1.321's --system-prompt-snapshot to it ("unknown option") until the next snapshot.
+    const dump = join(scratch, "path-swap.json");
+    const copy = (name: string, version: string, refusesSnapshotFlag = false) => {
+      const dir = join(scratch, name);
+      mkdirSync(dir);
+      const refuse = refusesSnapshotFlag ? `for a in "$@"; do [ "$a" = --system-prompt-snapshot ] && { echo "error: unknown option '$a'" >&2; exit 1; }; done\n` : "";
+      writeFileSync(join(dir, "claude"), `#!/bin/sh\n${refuse}FAKE_CLAUDE_VERSION=${version} exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+      return dir;
+    };
+    const newer = copy("newer", "2.1.321"), older = copy("older", "2.1.197", true);
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, { FAKE_CLAUDE_DUMP: dump }, { cli: "claude" });
+      expect(await instance.snapshot()).toMatchObject({ version: "2.1.321 (Claude Code)" });
+      registerPathDir(older);
+      await instance.adapter.sendTurn({ threadId: "t-path-swap", text: "hi" });
+      expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--system-prompt-snapshot");
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
+  it.skipIf(process.platform === "win32")("passes none of the old copy's flags when the newly found copy's version check fails, and checks it again next turn", async () => {
+    const dump = join(scratch, "path-swap-fail.json"), failedOnce = join(scratch, "older-version-failed"), calls = join(scratch, "older-calls.log");
+    const newer = join(scratch, "newer-f"), older = join(scratch, "older-f");
+    mkdirSync(newer); mkdirSync(older);
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    // The older copy: logs its probes, its first --version fails, and it refuses --system-prompt-snapshot like 2.1.197 does.
+    writeFileSync(join(older, "claude"), `#!/bin/sh\ncase "$1" in --version|--help) echo "$1" >> "${calls}";; esac\n[ "$1" = --version ] && [ ! -e "${failedOnce}" ] && { : > "${failedOnce}"; exit 1; }\nfor a in "$@"; do [ "$a" = --system-prompt-snapshot ] && { echo "error: unknown option '$a'" >&2; exit 1; }; done\nFAKE_CLAUDE_VERSION=2.1.197 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, { FAKE_CLAUDE_DUMP: dump }, { cli: "claude" });
+      expect(await instance.snapshot()).toMatchObject({ version: "2.1.321 (Claude Code)" });
+      registerPathDir(older);
+      for (const threadId of ["t-swap-fail-1", "t-swap-fail-2"]) {
+        await instance.adapter.sendTurn({ threadId, text: "hi" });
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId)).toMatchObject({ ok: true });
+        const { argv } = JSON.parse(readFileSync(dump, "utf8"));
+        expect(argv).not.toContain("--system-prompt-snapshot");
+        if (threadId === "t-swap-fail-1") expect(argv).not.toContain("--autocompact"); // nor any of 2.1.321's help flags
+      }
+      expect(existsSync(failedOnce)).toBe(true);
+      // the failed --version is tried again on the next turn, and that copy's own --help is read once it answers
+      expect(readFileSync(calls, "utf8").trim().split("\n")).toEqual(["--version", "--version", "--help"]);
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
+  it.skipIf(process.platform === "win32")("keeps the new copy's flags when the old copy's late --version answer starts a help read", async () => {
+    // snapshot() asks 2.1.321 for --version, PATH finds 2.1.197 (no --autocompact), and 2.1.321's late answer starts its own --help read;
+    // the next turn re-checks 2.1.197, and that old help read finishing afterwards must not hand 2.1.321's flags to 2.1.197.
+    const refused = join(scratch, "late-version-autocompact.jsonl"), slow = join(scratch, "newer-late-slow"), versionAsked = join(scratch, "newer-late-version"), helpAsked = join(scratch, "newer-late-help");
+    const newer = join(scratch, "newer-late"), older = join(scratch, "older-late");
+    mkdirSync(newer); mkdirSync(older);
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\nif [ -e "${slow}" ]; then case "$1" in --version) : > "${versionAsked}"; sleep 1;; --help) : > "${helpAsked}"; sleep 3;; esac; fi\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(older, "claude"), `#!/bin/sh\nFAKE_CLAUDE_VERSION=2.1.197 FAKE_CLAUDE_AUTOCOMPACT=0 FAKE_CLAUDE_REJECT_AUTOCOMPACT="${refused}" exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, {}, { cli: "claude" });
+      await instance.snapshot();
+      writeFileSync(slow, "");
+      const snapshot = instance.snapshot();
+      await vi.waitFor(() => expect(existsSync(versionAsked)).toBe(true), { timeout: 5000 });
+      registerPathDir(older);
+      const turn = async (threadId: string) => {
+        await instance.adapter.sendTurn({ threadId, text: "hi" });
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId)).toMatchObject({ ok: true });
+      };
+      await turn("t-late-version-1");
+      await vi.waitFor(() => expect(existsSync(helpAsked)).toBe(true), { timeout: 5000 }); // 2.1.321's late answer is in and its help read started
+      await turn("t-late-version-2");
+      await snapshot; // the old copy's help read has finished by now
+      await turn("t-late-version-3");
+      expect(existsSync(refused)).toBe(false);
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
+  it.skipIf(process.platform === "win32")("launches a turn with its own copy's flags when another copy's late version check lands while it waits", async () => {
+    // A turn checks 2.1.197 and waits for its --help; snapshot()'s late --version answer from 2.1.321 lands meanwhile and
+    // writes 2.1.321's version. The turn must not launch 2.1.197 with 2.1.321's --system-prompt-snapshot.
+    const slow = join(scratch, "newer-race-slow"), versionAsked = join(scratch, "newer-race-version"), helpAsked = join(scratch, "older-race-help");
+    const newer = join(scratch, "newer-race"), older = join(scratch, "older-race");
+    mkdirSync(newer); mkdirSync(older);
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\nif [ -e "${slow}" ] && [ "$1" = --version ]; then : > "${versionAsked}"; sleep 1; fi\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    // The older copy's first --help is slow, and it refuses --system-prompt-snapshot like 2.1.197 does.
+    writeFileSync(join(older, "claude"), `#!/bin/sh\nif [ "$1" = --help ] && [ ! -e "${helpAsked}" ]; then : > "${helpAsked}"; sleep 2; fi\nfor a in "$@"; do [ "$a" = --system-prompt-snapshot ] && { echo "error: unknown option '$a'" >&2; exit 1; }; done\nFAKE_CLAUDE_VERSION=2.1.197 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, {}, { cli: "claude" });
+      await instance.snapshot();
+      writeFileSync(slow, "");
+      const snapshot = instance.snapshot();
+      await vi.waitFor(() => expect(existsSync(versionAsked)).toBe(true), { timeout: 5000 });
+      registerPathDir(older);
+      await instance.adapter.sendTurn({ threadId: "t-late-check-race", text: "hi" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-late-check-race")).toMatchObject({ ok: true });
+      expect(existsSync(helpAsked)).toBe(true);
+      await snapshot;
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
+  it.skipIf(process.platform === "win32")("treats the version as unknown when another copy's check still owns the state after both re-checks", async () => {
+    // Each time the turn's own copy (2.1.197) reads its --help, a version check of 2.1.321 lands; after both re-checks the shared
+    // version is still 2.1.321's, so it must not confirm a restricted MCP configuration for the copy this turn launches.
+    const gates = join(scratch, "exhaust-gates"), newer = join(scratch, "exhaust-newer"), older = join(scratch, "exhaust-older");
+    mkdirSync(gates); mkdirSync(newer); mkdirSync(older);
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(older, "claude"), `#!/bin/sh\nif [ "$1" = --help ]; then i=1; while ! mkdir "${gates}/help-$i" 2>/dev/null; do i=$((i+1)); done; : > "${gates}/asked-$i"; while [ ! -e "${gates}/go-$i" ]; do sleep 0.05; done; fi\nFAKE_CLAUDE_VERSION=2.1.197 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, {}, { cli: "claude" });
+      await instance.snapshot();
+      registerPathDir(older);
+      const sent = instance.adapter.sendTurn({ threadId: "t-exhausted-recheck", text: "Must not run", toolScope: { allow: ["native:*"] } });
+      sent.catch(() => {});
+      for (const i of [1, 2, 3]) { // the first check and both re-checks
+        await vi.waitFor(() => expect(existsSync(join(gates, `asked-${i}`))).toBe(true), { timeout: 5000 });
+        resetPathCacheForTests();
+        registerPathDir(newer);
+        await instance.snapshot(); // 2.1.321's check lands while the turn waits for 2.1.197's --help
+        writeFileSync(join(gates, `go-${i}`), "");
+      }
+      await expect(sent).rejects.toThrow(/restricted MCP configuration/);
+      expect(existsSync(join(gates, "asked-4"))).toBe(false);
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
+  it.skipIf(process.platform === "win32")("launches the copy it checked, with that copy's help and flags, when PATH finds another copy while the turn waits for that check", async () => {
+    // After 2.1.197 was checked, PATH finds 2.1.321; the turn checks it and waits for its --version; PATH then finds 2.1.197 (no --autocompact in its help, refuses
+    // --system-prompt-snapshot). The turn must read the help of, and launch, the copy it checked, not the one a fresh PATH resolves.
+    const armed = join(scratch, "probe-path-armed"), asked = join(scratch, "probe-path-asked"), go = join(scratch, "probe-path-go");
+    const olderRan = join(scratch, "probe-path-older-ran"), olderHelp = join(scratch, "probe-path-older-help"), dump = join(scratch, "probe-path-newer.json");
+    const first = join(scratch, "probe-path-first"), newer = join(scratch, "probe-path-newer"), older = join(scratch, "probe-path-older");
+    mkdirSync(first); mkdirSync(newer); mkdirSync(older);
+    // The copy checked before the turn: 2.1.197 whose help leaves --autocompact out, so the turn must read the newly found copy's help.
+    writeFileSync(join(first, "claude"), `#!/bin/sh\nFAKE_CLAUDE_VERSION=2.1.197 FAKE_CLAUDE_AUTOCOMPACT=0 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\nif [ "$1" = --version ] && [ -e "${armed}" ] && [ ! -e "${asked}" ]; then : > "${asked}"; while [ ! -e "${go}" ]; do sleep 0.05; done; fi\nFAKE_CLAUDE_VERSION=2.1.321 FAKE_CLAUDE_DUMP="${dump}" exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(older, "claude"), `#!/bin/sh\ncase "$1" in --version) ;; --help) : > "${olderHelp}";; *) : > "${olderRan}";; esac\nfor a in "$@"; do [ "$a" = --system-prompt-snapshot ] && { echo "error: unknown option '$a'" >&2; exit 1; }; done\nFAKE_CLAUDE_VERSION=2.1.197 FAKE_CLAUDE_AUTOCOMPACT=0 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(first);
+      await create(undefined, {}, { cli: "claude" });
+      expect(await instance.snapshot()).toMatchObject({ version: "2.1.197 (Claude Code)" });
+      registerPathDir(newer);
+      writeFileSync(armed, "");
+      const sent = instance.adapter.sendTurn({ threadId: "t-probe-path", text: "hi" });
+      await vi.waitFor(() => expect(existsSync(asked)).toBe(true), { timeout: 5000 });
+      registerPathDir(older);
+      writeFileSync(go, "");
+      await sent;
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-probe-path")).toMatchObject({ ok: true });
+      expect(existsSync(olderRan)).toBe(false);
+      expect(existsSync(olderHelp)).toBe(false); // the help read was the checked copy's, not the one PATH found later
+      const { argv } = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[] };
+      expect(argv).toContain("--autocompact"); // from 2.1.321's help; 2.1.197's leaves it out
+      expect(argv).toContain("--system-prompt-snapshot");
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
+  it.skipIf(process.platform === "win32")("keeps the new copy's flags when the old copy's slower --help read finishes last", async () => {
+    // snapshot() is still reading 2.1.321's help when PATH finds 2.1.197 (no --autocompact); that old read must not restore 2.1.321's flags.
+    const refused = join(scratch, "stale-help-autocompact.jsonl"), helpStarted = join(scratch, "newer-help-started");
+    const newer = join(scratch, "newer-slow"), older = join(scratch, "older-quick");
+    mkdirSync(newer); mkdirSync(older);
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\n[ "$1" = --help ] && { : > "${helpStarted}"; sleep 2; }\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(older, "claude"), `#!/bin/sh\nFAKE_CLAUDE_VERSION=2.1.197 FAKE_CLAUDE_AUTOCOMPACT=0 FAKE_CLAUDE_REJECT_AUTOCOMPACT="${refused}" exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, {}, { cli: "claude" });
+      const snapshot = instance.snapshot();
+      await vi.waitFor(() => expect(existsSync(helpStarted)).toBe(true), { timeout: 5000 });
+      registerPathDir(older);
+      for (const threadId of ["t-stale-help-1", "t-stale-help-2"]) {
+        await instance.adapter.sendTurn({ threadId, text: "hi" });
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId)).toMatchObject({ ok: true });
+        if (threadId === "t-stale-help-1") await snapshot; // the old copy's help read has finished by now
+      }
+      expect(existsSync(refused)).toBe(false);
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
   it("withholds --autocompact from a CLI above the floor whose --help does not list it", async () => {
     // 2.1.129 clears the 2.1.122 floor yet rejects the flag ("unknown option")
     const dump = join(scratch, "no-autocompact-cli.json");

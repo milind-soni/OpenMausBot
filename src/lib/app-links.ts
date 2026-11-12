@@ -19,6 +19,10 @@ export function appVersion(): string {
   return typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
 }
 
+export function desktopAppVersion(): string {
+  return (typeof window !== "undefined" && window.ogb?.app?.version) || appVersion();
+}
+
 const PLATFORM_NAMES: Record<string, string> = {
   darwin: "macOS",
   win32: "Windows",

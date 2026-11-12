@@ -21,6 +21,8 @@ import {
 
 // Runs just before the code under test claims a folder, so a test can stage another remover in between.
 const beforeRename = vi.hoisted(() => ({ run: null as null | ((from: string) => void) }));
+// Sees every rm the code under test makes; a test can fail one before it runs.
+const rmCalls = vi.hoisted(() => ({ calls: [] as Array<{ path: string; options: unknown }>, fail: null as null | ((path: string) => void) }));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs/promises")>();
   return {
@@ -29,12 +31,19 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       beforeRename.run?.(String(args[0]));
       return fs.rename(...args);
     },
+    rm: async (...args: Parameters<typeof fs.rm>) => {
+      rmCalls.calls.push({ path: String(args[0]), options: args[1] });
+      rmCalls.fail?.(String(args[0]));
+      return fs.rm(...args);
+    },
   };
 });
 
 const scratch: string[] = [];
 afterEach(async () => {
   beforeRename.run = null;
+  rmCalls.fail = null;
+  rmCalls.calls.length = 0;
   while (scratch.length) await removeTempDir(scratch.pop()!);
 });
 
@@ -287,6 +296,38 @@ describe("Free up space", () => {
     expect(await removeAntigravityLeftovers({ dataDir, isAlive: () => false, platform: "linux" }))
       .toEqual({ removed: 0, remaining: 1, freedBytes: 0 });
     expect(existsSync(busy)).toBe(true);
+  });
+
+  it("gives up on a folder it may never delete after a few whole-folder tries, never retrying inside it", async () => {
+    const dataDir = tempRoot("denied");
+    unpackFolder(antigravityTempDir(dataDir, "work"), hexName(0x2222));
+    // What Windows answers for a file inside owned by Administrators. Node's own retries (maxRetries)
+    // repeat at every folder level, so they multiply with depth and flooded the process with requests.
+    rmCalls.fail = () => { throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" }); };
+    expect(await removeAntigravityLeftovers({ dataDir, isAlive: () => false, platform: "linux" }))
+      .toEqual({ removed: 0, remaining: 1, freedBytes: 0 });
+    expect(rmCalls.calls.length).toBe(4);
+    for (const call of rmCalls.calls) expect(call.options).not.toHaveProperty("maxRetries");
+  });
+
+  it("removes a folder whose first delete hit a passing lock", async () => {
+    const dataDir = tempRoot("busy-once");
+    const folder = unpackFolder(antigravityTempDir(dataDir, "work"), hexName(0x2222));
+    let failures = 1;
+    rmCalls.fail = () => { if (failures-- > 0) throw Object.assign(new Error("EBUSY: resource busy"), { code: "EBUSY" }); };
+    expect(await sweepAntigravityTemp("work", { dataDir, isAlive: () => false })).toBe(1);
+    expect(existsSync(folder)).toBe(false);
+    expect(rmCalls.calls.length).toBe(2);
+  });
+
+  it("removes a folder whose first delete ran out of file handles", async () => {
+    const dataDir = tempRoot("emfile-once");
+    const folder = unpackFolder(antigravityTempDir(dataDir, "work"), hexName(0x2222));
+    let failures = 1;
+    rmCalls.fail = () => { if (failures-- > 0) throw Object.assign(new Error("EMFILE: too many open files"), { code: "EMFILE" }); };
+    expect(await sweepAntigravityTemp("work", { dataDir, isAlive: () => false })).toBe(1);
+    expect(existsSync(folder)).toBe(false);
+    expect(rmCalls.calls.length).toBe(2);
   });
 
   it("reports a lower bound when counting runs out of time", async () => {

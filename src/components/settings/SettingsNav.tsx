@@ -18,7 +18,7 @@ import type { SettingsPlace } from "./settings-context";
 import { OWNERS, pageById, type SearchHit, type SettingsContext, type SettingsOwner, type SettingsPage, type SettingsPageId } from "./settings-index";
 import { useUpdaterState } from "@/lib/updater";
 import { keySection, type KeyEntry } from "../keys/key-catalog";
-import { HELP_CENTER_URL, appVersion } from "@/lib/app-links";
+import { HELP_CENTER_URL, desktopAppVersion } from "@/lib/app-links";
 
 export const NAV_ITEM = "relative flex h-8 w-full shrink-0 cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-[13px] leading-5 text-ink transition-colors motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus";
 
@@ -68,8 +68,8 @@ export function usePlaceSubLine(place: SettingsPlace): string {
 export function useAppSubLine(desktop: boolean): string {
   const update = useUpdaterState();
   if (!desktop) return t("settings.scope.browser");
-  if (update?.status === "downloaded") return t("settings.app.updateReadyLine", { version: appVersion() });
-  return t("settings.app.upToDateLine", { version: appVersion() });
+  if (update?.status === "downloaded") return t("settings.app.updateReadyLine", { version: desktopAppVersion() });
+  return t("settings.app.upToDateLine", { version: desktopAppVersion() });
 }
 
 export function ownerLabel(owner: SettingsOwner, place: SettingsPlace, desktop: boolean): string {
@@ -320,13 +320,13 @@ function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place
 }
 
 const PAGE_OWNER: Record<SettingsPageId, SettingsOwner> = {
-  overview: "place", phone: "place", ai: "place", bots: "place", desktops: "place", vault: "place", usage: "place", data: "place",
+  overview: "place", phone: "place", ai: "place", bots: "place", desktops: "place", vault: "place", usage: "place", transfer: "place", data: "place",
   people: "place", installations: "place", account: "account", plan: "account", app: "app", general: "app", appearance: "app",
 };
 
 const PAGE_KEY: Partial<Record<SettingsPageId, Parameters<typeof t>[0]>> = {
   phone: "settings.section.phoneDevices", ai: "settings.group.ai", bots: "settings.page.bots", desktops: "settings.page.desktops",
-  vault: "settings.section.vault", usage: "settings.page.spending", data: "settings.page.data", people: "settings.section.people",
+  vault: "settings.section.vault", usage: "settings.page.spending", transfer: "settings.page.importExport", data: "settings.page.data", people: "settings.section.people",
   installations: "settings.section.workspaces", plan: "settings.page.plan", general: "settings.section.general", appearance: "settings.section.appearance",
 };
 
