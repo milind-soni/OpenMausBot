@@ -2,7 +2,9 @@
 // takes the one shared Local VM from a phone or the desktop, and every bot working on it waits until they hand it back.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { createServer, type Server } from "node:http";
+import { once } from "node:events";
+import { createServer, request as httpRequest, type Server } from "node:http";
+import { createConnection } from "node:net";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -604,4 +606,399 @@ describe("a person's hold on the shared Local VM", () => {
       boatRow = null;
     }
   }, 30_000);
+
+  // One row per place a person's hold can land; `key` is the control key it must land on.
+  it.each([
+    { row: "shared, Auto", mode: "shared", key: "desk" },
+    { row: "shared, cloud, thread on the VM", mode: "shared", computer: "cloud", pin: "vm", inThread: true, key: "desk" },
+    { row: "shared, cloud, no thread", mode: "shared", computer: "cloud", pin: "vm", key: "own" },
+    { row: "shared, Auto, thread on this computer", mode: "shared", pin: "local", inThread: true, key: "own" },
+    { row: "per-bot, Auto", mode: "per-bot", key: "own" },
+    { row: "pool, Auto", mode: "pool", key: "own" },
+    { row: "team cloud computer", mode: "shared", team: true, key: "team" },
+  ] as const)("every path a person takes resolves the same control key: $row", async (row: {
+    mode: "shared" | "per-bot" | "pool"; key: "desk" | "own" | "team"; computer?: string; pin?: string; inThread?: boolean; team?: boolean;
+  }) => {
+    await setMode(row.mode);
+    const section = row.team ? `Team ${randomUUID()}` : undefined;
+    const subject = await newBot("Subject", { ...(row.computer ? { computer: row.computer } : {}), ...(section ? { section } : {}) });
+    const mate = section ? (await newBot("Mate", { section })).id : null;
+    if (section) {
+      const requestId = randomUUID();
+      await ok("POST", "/api/team-computers", { requestId, name: "Team desktop", acknowledgeCost: true });
+      await ok("PATCH", `/api/team-computers/${requestId}`, { section, acknowledgeSharedAccess: true });
+    }
+    const pinned = row.pin ? await newTask(subject.id, row.pin) : undefined;
+    const threadId = row.inThread ? pinned : undefined;
+    const desk = row.key === "desk";
+    const id = lease();
+
+    expect((await control(phone, subject.id, { action: "take", controlLeaseId: id }, threadId)).body.owned).toBe(true);
+    expect(await held(subject.id, threadId)).toBe(true);
+    expect(await held(witness)).toBe(desk);
+    if (mate) expect(await held(mate)).toBe(true);
+
+    const ownVm = createHash("sha256").update(subject.id).digest("hex");
+    if (row.mode === "per-bot") vmState({ containers: ["shared", `bot:${ownVm}`] });
+    const target = row.mode === "per-bot" ? `local/bot-${ownVm}` : row.mode === "pool" ? "local/pool-0" : "local/shared";
+    const [joined, viewed] = [await joinVm(subject.id, id, threadId), await viewer(target, subject.id, id, threadId)];
+    if (desk || row.mode === "per-bot") {
+      expect(joined.status, JSON.stringify(joined.body)).toBe(200);
+      expect(viewed.status, JSON.stringify(viewed.body)).toBe(200);
+    } else {
+      expect([joined.status, viewed.status]).toEqual([409, 409]);
+      expect(joined.body.socketPath).toBeUndefined();
+      const refusal = row.mode === "pool" ? expect.stringContaining("pool mode") : "Take control of this computer first";
+      expect(viewed.body.error).toEqual(refusal);
+    }
+
+    expect((await control(phone, subject.id, { action: "check", controlLeaseId: id }, threadId)).body.owned).toBe(true);
+    expect((await control(phone, subject.id, { action: "release", controlLeaseId: id }, threadId)).body.released).toBe(true);
+    expect(await held(subject.id, threadId)).toBe(false);
+
+    const since = sse.frames.length;
+    await control(api, witness, { action: "take" });
+    await until(() => framesFor(witness, since), frames => frames.length > 0);
+    await sleep(200);
+    expect(framesFor(subject.id, since).length > 0).toBe(row.mode === "shared" && !row.team);
+  }, 30_000);
+
+  it("the panel's release, sent without its conversation, ends the hold it took there", async () => {
+    const a = await newBot("Ada");
+    const elsewhere = await newTask(a.id, "cloud");
+    const id = lease();
+    expect((await control(api, a.id, { action: "take", controlLeaseId: id }, elsewhere)).body.owned).toBe(true);
+    expect((await control(api, a.id, { action: "release", controlLeaseId: id })).body.released).toBe(true);
+    expect(await held(a.id, elsewhere)).toBe(false);
+  });
+
+  it("a closing viewer's release by its open's lease, without a conversation, frees that Boat hold and leaves a phone's hold on the shared desktop", async () => {
+    const a = await newBot("Ada");
+    const onCloud = await newTask(a.id, "cloud");
+    await control(phone, witness, { action: "take", controlLeaseId: lease() });
+    const id = lease();
+    expect((await control(api, a.id, { action: "take", controlLeaseId: id }, onCloud)).body.owned).toBe(true);
+    expect((await control(api, a.id, { action: "release", controlLeaseId: id })).body.released).toBe(true);
+    expect(await held(witness)).toBe(true);
+  });
+
+  it("a leased take through an Auto bot that a phone's hold on the shared desktop refuses, and that take's leased release, leave the phone holding it", async () => {
+    const a = await newBot("Ada");
+    const phoneLease = lease();
+    expect((await control(phone, witness, { action: "take", controlLeaseId: phoneLease })).body.owned).toBe(true);
+    const id = lease();
+    expect((await control(api, a.id, { action: "take", controlLeaseId: id })).body).toMatchObject({ held: true, owned: false });
+    expect((await control(api, a.id, { action: "release", controlLeaseId: id })).body.released).toBe(false);
+    expect((await control(phone, witness, { action: "check", controlLeaseId: phoneLease })).body.owned).toBe(true);
+  });
+
+  it("the bot list tells a cloud bot with a conversation on the shared desktop that a person holds it", async () => {
+    const books = await newBot("Books", { computer: "cloud" });
+    await newTask(books.id, "vm");
+    await control(api, witness, { action: "take" });
+    expect((await ok("GET", "/api/bots?messages=0")).computerControl[books.id]).toMatchObject({ held: true });
+  });
+
+  it("a bot a person's hold on the shared desktop reaches cannot be deleted until the hand-back", async () => {
+    const a = await newBot("Ada");
+    await control(api, witness, { action: "take" });
+    const refused = await api("DELETE", `/api/bots/${a.id}`);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe("Hand back control of this bot's computer before deleting it");
+    expect((await ok("GET", "/api/bots?messages=0")).bots.some((bot: any) => bot.id === a.id)).toBe(true);
+    await control(api, witness, { action: "release" });
+    expect((await api("DELETE", `/api/bots/${a.id}`)).status).toBe(200);
+  }, 30_000);
+
+  it("deleting a bot the shared desktop's hold does not reach leaves that hold", async () => {
+    const cloud = await newBot("Cumulus", { computer: "cloud" });
+    await control(api, witness, { action: "take" });
+    expect((await api("DELETE", `/api/bots/${cloud.id}`)).status).toBe(200);
+    expect(await held(witness)).toBe(true);
+  }, 30_000);
+
+  it("a cloud bot being deleted is kept with its Boat when a person takes the shared desktop its conversation is pinned to, through another bot, while the deletion reads the cloud inventory", async () => {
+    const a = await newBot("Books", { computer: "cloud" });
+    await newTask(a.id, "vm");
+    const scope = createHash("sha256").update(readFileSync(join(home, "data", "environment-id"), "utf8").trim()).digest("hex").slice(0, 12);
+    const name = `ogb-${scope}-${a.id.slice(0, 8).replace(/[^a-z0-9]/g, "")}-${createHash("sha256").update(a.id).digest("hex").slice(0, 6)}`;
+    boatRow = { id: "bx_keptbxat", name, state: "idle" };
+    try {
+      holdBoatList = new Promise(resolve => { releaseBoat = resolve; });
+      boatListHeld = false;
+      const deleting = boatCall = api("DELETE", `/api/bots/${a.id}`);
+      await until(() => boatListHeld, Boolean);
+      await control(api, witness, { action: "take" });
+      holdBoatList = null;
+      releaseBoat();
+      const refused = await deleting;
+      expect(refused.status, JSON.stringify(refused.body)).toBe(409);
+      expect(refused.body.error).toBe("Hand back control of this bot's computer before deleting it");
+      expect((await ok("GET", "/api/bots?messages=0")).bots.some((bot: any) => bot.id === a.id)).toBe(true);
+      expect([boatRow?.id, boatCalls.includes("DELETE /sandboxes/bx_keptbxat")]).toEqual(["bx_keptbxat", false]);
+    } finally {
+      boatRow = null;
+    }
+  }, 30_000);
+
+  it("another device's hold on the shared desktop leaves a cloud bot's Boat turn running until a panel takes that conversation's computer", async () => {
+    const books = await newBot("Books", { computer: "cloud" });
+    await newTask(books.id, "vm");
+    const scope = createHash("sha256").update(readFileSync(join(home, "data", "environment-id"), "utf8").trim()).digest("hex").slice(0, 12);
+    const name = `ogb-${scope}-${books.id.slice(0, 8).replace(/[^a-z0-9]/g, "")}-${createHash("sha256").update(books.id).digest("hex").slice(0, 6)}`;
+    boatRow = { id: "bx_bkwtqrsz", name, state: "idle" };
+    try {
+      const { computer } = await startTurn(books.id, books.threadId);
+      const boatGate = () => gate({ env: { OMB_CONTROL_URL: `${base}/api/internal/computer-control?botId=${books.id}`, OMB_CONTROL_TOKEN: computer.env.OMB_MCP_TOKEN_COMPUTER } });
+      await control(api, witness, { action: "take" });
+      expect((await ok("GET", "/api/bots?messages=0")).computerControl[books.id]).toMatchObject({ held: true });
+      expect(await boatGate()).toEqual({ held: false, helpOpen: false });
+      const id = lease();
+      expect((await control(api, books.id, { action: "take", controlLeaseId: id }, books.threadId)).body).toMatchObject({ held: true, owned: true });
+      expect(await boatGate()).toMatchObject({ held: true, reason: "person" });
+      expect((await control(api, books.id, { action: "release", controlLeaseId: id })).body.released).toBe(true);
+      await finishTurns([books.id, books.threadId]);
+    } finally {
+      boatRow = null;
+    }
+  }, 30_000);
+
+  it("a phone's take of the shared desktop that nothing ever beats lapses a grace later", async () => {
+    const a = await newBot("Ada");
+    expect((await control(phone, a.id, { action: "take", controlLeaseId: lease() })).body.owned).toBe(true);
+    await until(() => held(a.id), value => !value, GRACE_MS * 2);
+  }, 20_000);
+
+  it("an open viewer of the shared desktop keeps the phone's hold past the grace, and its close lets the hold lapse", async () => {
+    const websockify = createServer();
+    websockify.on("upgrade", (req, socket) => {
+      const accept = createHash("sha1").update(`${req.headers["sec-websocket-key"]}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
+      socket.on("error", () => {});
+      socket.on("end", () => socket.end());
+      socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+    });
+    await new Promise<void>(resolve => websockify.listen(0, "127.0.0.1", resolve));
+    vmState({ ...READY, viewerPort: (websockify.address() as { port: number }).port });
+    const client = createConnection({ host: "127.0.0.1", port: Number(new URL(base).port) });
+    try {
+      const a = await newBot("Ada");
+      const id = lease();
+      expect((await control(phone, a.id, { action: "take", controlLeaseId: id })).body.owned).toBe(true);
+      let response = "";
+      client.setEncoding("utf8");
+      client.on("data", chunk => { response += chunk; });
+      client.on("error", () => {});
+      client.write(`GET /api/desktop-viewer/local/shared/websockify${query(undefined, { botId: a.id, controlLeaseId: id })} HTTP/1.1\r\n`
+        + `Host: ${new URL(base).host}\r\nAuthorization: Bearer ${phoneToken}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n`
+        + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n");
+      await until(() => response, text => text.includes("101 Switching Protocols"));
+      await sleep(GRACE_MS * 2);
+      expect(await held(a.id)).toBe(true);
+      const closed = once(client, "close");
+      client.end();
+      await closed;
+      await until(() => held(a.id), value => !value, GRACE_MS * 2);
+    } finally {
+      client.destroy();
+      websockify.closeAllConnections();
+      await new Promise<void>(resolve => websockify.close(() => resolve()));
+    }
+  }, 30_000);
+
+  it("a person's hold on the shared desktop keeps it from its automatic update until the hand-back", async () => {
+    await control(api, witness, { action: "take" });
+    vmState({ ...READY, outdated: ["shared"] });
+    await ok("GET", "/api/local-computer");
+    await sleep(1_500);
+    expect(JSON.parse(readFileSync(stateFile, "utf8")).actions ?? []).toEqual([]);
+    await control(api, witness, { action: "release" });
+    await until(() => JSON.parse(readFileSync(stateFile, "utf8")).actions ?? [], actions => actions.some((entry: { action: string }) => entry.action === "run"));
+  }, 30_000);
+
+  it("a take holds the key of the bot's settings once its body has arrived, not when its headers did", async () => {
+    const a = await newBot("Ada", { computer: "vm" });
+    const body = JSON.stringify({ action: "take" });
+    const sending = httpRequest(`${base}/api/bots/${a.id}/computer/control${query(a.threadId)}`,
+      { method: "POST", headers: { "content-type": "application/json", "content-length": String(body.length) } });
+    const answered = new Promise<number>((resolve, reject) => {
+      sending.on("response", response => { response.resume(); resolve(response.statusCode ?? 0); });
+      sending.on("error", reject);
+    });
+    sending.write(body.slice(0, 4));
+    await sleep(1_000);
+    await ok("PATCH", `/api/bots/${a.id}`, { computer: "cloud" });
+    sending.end(body.slice(4));
+    expect(await answered).toBe(200);
+    expect([await held(witness), await held(a.id)]).toEqual([false, true]);
+  }, 30_000);
+
+  it("a bot's control answers 404 for a conversation of another bot", async () => {
+    const [a, b] = [await newBot("Ada"), await newBot("Bea")];
+    expect((await control(api, a.id, undefined, b.threadId)).status).toBe(404);
+    expect((await control(api, a.id, undefined, a.threadId)).status).toBe(200);
+  });
+
+  it("the Team map does not capture a bot's Boat while its hold sits on the shared desktop", async () => {
+    const a = await newBot("Ada");
+    const scope = createHash("sha256").update(readFileSync(join(home, "data", "environment-id"), "utf8").trim()).digest("hex").slice(0, 12);
+    const name = `ogb-${scope}-${a.id.slice(0, 8).replace(/[^a-z0-9]/g, "")}-${createHash("sha256").update(a.id).digest("hex").slice(0, 6)}`;
+    boatRow = { id: "bx_mapframe", name, state: "idle" };
+    const captures = () => boatCalls.filter(entry => entry === "POST /sandboxes/bx_mapframe/commands").length;
+    try {
+      await control(api, a.id, { action: "take" });
+      await ok("GET", "/api/computers/frames");
+      await sleep(1_500);
+      expect(captures()).toBe(0);
+      await control(api, a.id, { action: "release" });
+      await ok("GET", "/api/computers/frames");
+      await until(captures, count => count > 0);
+    } finally {
+      await control(api, a.id, { action: "release" });
+      boatRow = null;
+    }
+  }, 30_000);
+
+  it("a turn's command on the shared VM is refused while a person holds it, even when the take lands as it starts", async () => {
+    const worker = await newBot("Worker", { computer: "vm" });
+    const { comms } = await startTurn(worker.id, worker.threadId);
+    const exec = async () => (await fetch(`${base}/api/internal/vm-exec`, {
+      method: "POST", headers: { authorization: `Bearer ${comms}`, "content-type": "application/json" }, body: JSON.stringify({ command: "true" }),
+    })).status;
+    expect(await exec()).toBe(200);
+    await control(api, witness, { action: "take" });
+    expect(await exec()).toBe(409);
+    await control(api, witness, { action: "release" });
+    expect(await exec()).toBe(200);
+    rmSync(`${stateFile}.runtime`, { force: true });
+    vmState({ ...READY, holdRuntime: true });
+    const started = exec();
+    await until(() => existsSync(`${stateFile}.runtime`), Boolean);
+    await control(api, witness, { action: "take" });
+    vmState();
+    expect(await started).toBe(409);
+    await finishTurns([worker.id, worker.threadId]);
+  }, 30_000);
+
+  it("a bot's screen on the shared VM is not captured while a person holds it", async () => {
+    const frame = `${stateFile}.frame`;
+    vmState({ ...READY, frames: true });
+    const worker = await newBot("Worker", { computer: "vm" });
+    const { computer } = await startTurn(worker.id, worker.threadId);
+    expect(await gate(computer)).toEqual({ held: false, helpOpen: false });
+    await until(() => existsSync(frame), Boolean, 10_000);
+    await control(api, witness, { action: "take" });
+    await sleep(500);
+    rmSync(frame, { force: true });
+    await sleep(7_000);
+    expect(existsSync(frame)).toBe(false);
+    await control(api, witness, { action: "release" });
+    await until(() => existsSync(frame), Boolean, 10_000);
+    await finishTurns([worker.id, worker.threadId]);
+  }, 45_000);
+
+  it.each([
+    { row: "repinned from the shared VM to the cloud", bot: { computer: "vm" }, pin: undefined, move: { surface: "cloud" }, target: undefined },
+    { row: "repinned from the cloud to the shared VM", bot: {}, pin: "cloud", move: { surface: "vm" }, target: "local/shared" },
+    { row: "moved by Works on from the shared VM to the cloud", bot: { computer: "vm" }, pin: undefined, move: { computer: "cloud" }, target: undefined },
+  ])("Done on a card whose conversation was $row since it asked hands back the computer the person took there", async ({ bot, pin, move, target }) => {
+    const worker = await newBot("Worker", bot);
+    if (pin) await ok("PATCH", `/api/bots/${worker.id}/tasks/${worker.threadId}`, { surface: pin });
+    const card = await askSignIn((await startTurn(worker.id, worker.threadId)).comms, "w.example");
+    await finishTurns([worker.id, worker.threadId]);
+    if ("surface" in move) await ok("PATCH", `/api/bots/${worker.id}/tasks/${worker.threadId}`, move);
+    else await ok("PATCH", `/api/bots/${worker.id}`, move);
+    expect((await control(api, worker.id, { action: "take", ...(target ? { target } : {}) }, worker.threadId)).body.held).toBe(true);
+    await ok("POST", `/api/bots/${worker.id}/sign-in-cards/${card}/done`, { threadId: worker.threadId });
+    expect({ desk: await held(witness), conversation: await held(worker.id, worker.threadId), bot: await held(worker.id) })
+      .toEqual({ desk: false, conversation: false, bot: false });
+  }, 60_000);
+
+  it("a bot moved to the cloud while its turn asks a sign-in hands back, on Done, the computer the person took once the turn ended", async () => {
+    const worker = await newBot("Worker", { computer: "vm" });
+    const turn = await startTurn(worker.id, worker.threadId);
+    await ok("PATCH", `/api/bots/${worker.id}`, { computer: "cloud" });
+    const card = await askSignIn(turn.comms, "w.example");
+    await finishTurns([worker.id, worker.threadId]);
+    expect((await control(api, worker.id, { action: "take" }, worker.threadId)).body.held).toBe(true);
+    await ok("POST", `/api/bots/${worker.id}/sign-in-cards/${card}/done`, { threadId: worker.threadId });
+    expect({ desk: await held(witness), conversation: await held(worker.id, worker.threadId), bot: await held(worker.id) })
+      .toEqual({ desk: false, conversation: false, bot: false });
+  }, 60_000);
+
+  it("a bot moved to the cloud while its turn still works on the shared desktop is told about a hold taken on that conversation", async () => {
+    const worker = await newBot("Worker", { computer: "vm" });
+    await startTurn(worker.id, worker.threadId);
+    await ok("PATCH", `/api/bots/${worker.id}`, { computer: "cloud" });
+    const since = sse.frames.length;
+    await control(api, worker.id, { action: "take" }, worker.threadId);
+    expect(await held(witness)).toBe(true);
+    expect((await ok("GET", "/api/bots?messages=0")).computerControl[worker.id]).toMatchObject({ held: true });
+    await until(() => framesFor(worker.id, since).at(-1)?.held, value => value === true);
+    await control(api, worker.id, { action: "release" }, worker.threadId);
+    await finishTurns([worker.id, worker.threadId]);
+  }, 30_000);
+
+  // A failed VM leaves the server's own preview of the conversation on the VPS; a ready one shows it the VM.
+  it.each([
+    { row: "the shared VM while the server would show the VPS", target: "local/shared", vm: { ...READY, failed: true }, desk: true },
+    { row: "its VPS while the server would show the shared VM", target: "vps", vm: READY, desk: false },
+  ])("a panel's take on an unplaced conversation of an Auto bot with a VPS holds the desktop it names, $row, tells its panel so, and its hand-back with its lease ends it", async ({ target, vm, desk }) => {
+    vmState(vm);
+    const a = await newBot("Ada", { cloudBackend: "vps" });
+    const unplaced = await newTask(a.id);
+    const named = target === "vps" ? `vps/${a.id}` : target;
+    const id = lease();
+    expect((await control(api, a.id, { action: "take", controlLeaseId: id, target: named }, unplaced)).body.owned).toBe(true);
+    expect([await held(witness), await held(a.id, unplaced)]).toEqual([desk, true]);
+    expect((await control(api, a.id, { action: "release", controlLeaseId: id, target: named }, unplaced)).body.released).toBe(true);
+    expect([await held(witness), await held(a.id)]).toEqual([false, false]);
+  }, 30_000);
+
+  it("a panel's hand-back without a lease, naming the shared VM from an unplaced conversation of a bot with a VPS, ends a phone's hold taken through another bot", async () => {
+    const a = await newBot("Ada", { cloudBackend: "vps" });
+    const unplaced = await newTask(a.id);
+    await control(phone, witness, { action: "take", controlLeaseId: lease() });
+    expect(await held(witness)).toBe(true);
+    await control(api, a.id, { action: "release", target: "local/shared" }, unplaced);
+    expect(await held(witness)).toBe(false);
+  }, 30_000);
+
+  it.each([
+    { row: "another bot's VPS holds only the bot's own computer", mode: "shared", target: "vps", status: 200 },
+    { row: "a pool seat not its own holds only the bot's own computer", mode: "pool", target: "local/pool-1", status: 200 },
+    { row: "the shared VM in per-bot mode is refused", mode: "per-bot", target: "local/shared", status: 409 },
+    { row: "the shared VM from a conversation on the cloud is refused", mode: "shared", computer: "cloud", target: "local/shared", status: 409 },
+    { row: "no desktop at all is refused", mode: "shared", target: "shared", status: 400 },
+    { row: "a list holding the shared VM is refused", mode: "shared", target: ["local/shared"], status: 400 },
+  ] as Array<{ row: string; mode: "shared" | "per-bot" | "pool"; computer?: string; target: string | string[]; status: number }>)("a take naming $row", async ({ mode, computer, target, status }) => {
+    await setMode(mode);
+    const [a, b] = [await newBot("Ada", { cloudBackend: "vps", ...(computer ? { computer } : {}) }), await newBot("Bea", { cloudBackend: "vps" })];
+    const answer = await control(api, a.id, { action: "take", controlLeaseId: lease(), target: target === "vps" ? `vps/${b.id}` : target }, a.threadId);
+    expect(answer.status, JSON.stringify(answer.body)).toBe(status);
+    expect([await held(a.id), await held(b.id), await held(witness)]).toEqual([status === 200, false, false]);
+  }, 30_000);
+
+  it("a phone's take of an Auto bot with a VPS, without a conversation, holds the bot's own computer and does not lapse", async () => {
+    const a = await newBot("Ada", { cloudBackend: "vps" });
+    expect((await control(phone, a.id, { action: "take", controlLeaseId: lease() })).body.owned).toBe(true);
+    expect([await held(witness), await held(a.id)]).toEqual([false, true]);
+    await sleep(GRACE_MS + 1_000);
+    expect(await held(a.id)).toBe(true);
+    await control(api, a.id, { action: "release" });
+  }, 30_000);
+
+  it("after a restart, Done on a card in a cloud bot's conversation pinned to the shared desktop hands that desktop back", async () => {
+    const books = await newBot("Books", { computer: "cloud" });
+    const pinned = await newTask(books.id, "vm");
+    const asked = await startTurn(books.id, pinned);
+    const card = await askSignIn(asked.comms, "ledger.example");
+    await finishTurns([books.id, pinned]);
+    sse.close();
+    await waitForExit(child!, { signal: "SIGTERM" });
+    await startServer();
+    sse = await openSse(`${base}/api/events`);
+    await control(api, witness, { action: "take" });
+    await ok("POST", `/api/bots/${books.id}/sign-in-cards/${card}/done`, { threadId: pinned });
+    expect(await held(witness)).toBe(false);
+  }, 60_000);
 });
