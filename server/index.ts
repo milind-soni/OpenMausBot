@@ -13,7 +13,7 @@ import * as composio from "./composio.ts";
 import * as trello from "./trello.ts";
 import { TrelloLinkStore } from "./trelloLinks.ts";
 import { TrelloSync } from "./trelloSync.ts";
-import { ensureDirs, instanceConfigs, loadConfig, saveConfig, isRemovedComputerDriver, DATA_DIR, EVENTS_DIR, NATIVE_DIR } from "./config.ts";
+import { ensureDirs, instanceConfigs, loadConfig, saveConfig, isRemovedComputerDriver, LEGACY_CLOUD_COMPUTER_DRIVER, DATA_DIR, EVENTS_DIR, NATIVE_DIR } from "./config.ts";
 import type { ModelSelection, RuntimeEvent, SendTurnInput } from "./contracts.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
@@ -130,7 +130,7 @@ async function defaultSelection() {
 const bootSelection = await defaultSelection();
 const removedComputerInstances = new Set([
   ...(!cfg.instances?.computer ? ["computer"] : []),
-  ["box", "Agent"].join(""),
+  LEGACY_CLOUD_COMPUTER_DRIVER,
   ...Object.entries(cfg.instances ?? {}).filter(([, entry]) => isRemovedComputerDriver(entry.driver)).map(([id]) => id),
 ]);
 const store = new Store(() => bootSelection, removedComputerInstances);

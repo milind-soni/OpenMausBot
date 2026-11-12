@@ -6,7 +6,7 @@ import { mkdirSync, unlinkSync } from "node:fs";
 import { readJsonFile, writeJsonAtomic } from "./json-file.ts";
 import { join } from "node:path";
 
-import { DATA_DIR } from "./config.ts";
+import { DATA_DIR, LEGACY_CLOUD_COMPUTER_DRIVER } from "./config.ts";
 import { newId, type Attachment, type ModelSelection, type ThreadId } from "./contracts.ts";
 import { DEFAULT_BOTS } from "./default-bots.ts";
 import { pickBotName } from "./names.ts";
@@ -184,7 +184,7 @@ export class Store {
   private threads = new Map<string, ThreadState>();
   private defaultSelection: () => ModelSelection;
 
-  constructor(defaultSelection: () => ModelSelection, removedComputerInstances: ReadonlySet<string> = new Set(["computer", ["box", "Agent"].join("")])) {
+  constructor(defaultSelection: () => ModelSelection, removedComputerInstances: ReadonlySet<string> = new Set(["computer", LEGACY_CLOUD_COMPUTER_DRIVER])) {
     this.defaultSelection = defaultSelection;
     mkdirSync(DATA_DIR, { recursive: true });
     this.bots = readJsonFile<BotRecord[]>(BOTS_FILE, []);

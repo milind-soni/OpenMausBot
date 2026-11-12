@@ -91,10 +91,12 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   writeJsonAtomic(p, disk);
 }
 
-// Legacy identifier is retained only for loading old profiles.
-// Keep its spelling split so removal checks flag only active integrations.
+/** Driver of the removed cloud computer. Kept only so old profiles migrate
+ * cleanly; the only place the legacy name may appear outside tests. */
+export const LEGACY_CLOUD_COMPUTER_DRIVER = "boxAgent";
+
 export function isRemovedComputerDriver(driver: string): boolean {
-  return driver === ["box", "Agent"].join("");
+  return driver === LEGACY_CLOUD_COMPUTER_DRIVER;
 }
 
 export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {

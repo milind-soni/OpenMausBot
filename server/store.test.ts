@@ -5,7 +5,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { DATA_DIR } from "./config.ts";
+import { DATA_DIR, LEGACY_CLOUD_COMPUTER_DRIVER } from "./config.ts";
 import { DEFAULT_BOTS } from "./default-bots.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { Store, type BotRecord } from "./store.ts";
@@ -30,9 +30,9 @@ describe("Store", () => {
     rows.find((b: BotRecord) => b.id === legacy.id).computer = "cloud";
     rows.find((b: BotRecord) => b.id === legacy.id).modelSelection = { instanceId: "computer", model: "sonnet" };
     rows.find((b: BotRecord) => b.id === custom.id).modelSelection = { instanceId: "old-desktop", model: "sonnet" };
-    rows.find((b: BotRecord) => b.id === direct.id).modelSelection = { instanceId: ["box", "Agent"].join(""), model: "sonnet" };
+    rows.find((b: BotRecord) => b.id === direct.id).modelSelection = { instanceId: LEGACY_CLOUD_COMPUTER_DRIVER, model: "sonnet" };
     writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(rows));
-    const removed = new Set(["computer", "old-desktop", ["box", "Agent"].join("")]);
+    const removed = new Set(["computer", "old-desktop", LEGACY_CLOUD_COMPUTER_DRIVER]);
     const reloaded = new Store(selection, removed);
     expect(reloaded.bot(legacy.id)?.computer).toBeUndefined();
     expect(reloaded.bot(local.id)?.computer).toBe("local");

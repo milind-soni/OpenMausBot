@@ -83,7 +83,8 @@ without error. Unknown fields are ignored and migrated.
   - The store migrates `computer: "cloud"` and boxAgent selections.
   - Config loading ignores `box`.
 - `grep -rni "box.ascii\|boxAgent\|GBS_BOX_TOKEN\|computer-proxy" src server electron scripts`
-  returns nothing.
+  matches only `LEGACY_CLOUD_COMPUTER_DRIVER` in `server/config.ts`. That
+  constant is kept on purpose so old profiles migrate.
 - Manual (Dell):
   - Upgrade a profile that had a Box token and a cloud bot. The app opens,
     the bot chats, and the notice appears once.

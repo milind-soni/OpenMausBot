@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { DATA_DIR, instanceConfigs, loadConfig, saveConfig } from "./config.ts";
+import { DATA_DIR, instanceConfigs, LEGACY_CLOUD_COMPUTER_DRIVER, loadConfig, saveConfig } from "./config.ts";
 
 describe("saveConfig instances merge", () => {
   it("defaults idle permission approval on at ten seconds and persists preferences", () => {
@@ -59,7 +59,7 @@ describe("removed cloud computer config", () => {
   });
 
   it("filters old custom instances and provides defaults if only removed instances remain", () => {
-    const driver = ["box", "Agent"].join("");
+    const driver = LEGACY_CLOUD_COMPUTER_DRIVER;
     expect(instanceConfigs({ instances: { old: { driver }, writer: { driver: "claudeAgent" } } })).toEqual({ writer: { driver: "claudeAgent", environment: {} } });
     expect(Object.keys(instanceConfigs({ instances: { old: { driver } } }))).toEqual(["grok", "claude", "codex", "antigravity"]);
     expect(instanceConfigs({})).not.toHaveProperty("computer");
