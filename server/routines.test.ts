@@ -434,6 +434,31 @@ describe("a run left waiting for the person", () => {
     if (change === "rescheduled") expect(h.manager.listRoutines()[0].nextRunAt).toBe(monday + minutes(240));
   });
 
+  it.each(["paused", "deleted"] as const)("stops a run still waiting for the person when its routine is %s, so the bot stops waiting", async (change) => {
+    const h = harness(monday);
+    const routine = h.manager.create(daily);
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    h.setNow(routine.nextRunAt! + minutes(2)); parkOnPerson(h, "thread-1");
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "waiting" });
+
+    h.setNow(routine.nextRunAt! + minutes(30));
+    if (change === "paused") h.manager.update(routine.id, { enabled: false });
+    else h.manager.remove(routine.id);
+    const why = change === "paused" ? "The routine was paused while this run waited for you" : "The routine was deleted while this run waited for you";
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "cancelled", error: why, finishedAt: routine.nextRunAt! + minutes(30), threadId: "thread-1" });
+    expect(h.manager.listRuns()[0].attention).toBeUndefined();
+    await vi.waitFor(() => expect(h.interruptedTurns).toEqual([{ botId: "maus-1", threadId: "thread-1" }]));
+  });
+
+  it("leaves a run that is still working alone when its routine is paused", async () => {
+    const h = harness(monday);
+    const routine = h.manager.create(daily);
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    h.manager.update(routine.id, { enabled: false });
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running" });
+    expect(h.interruptedTurns).toEqual([]);
+  });
+
   it.each(["skip", "queue"] as const)("keeps today's %s overlap behind a run that was answered and is still working", async (overlap) => {
     const h = harness(monday);
     const routine = h.manager.create({ ...daily, ...(overlap === "queue" ? { overlap } : {}) });

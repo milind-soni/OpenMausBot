@@ -26,7 +26,7 @@ import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { STATUS_REPLY_TIMEOUT_MS } from "./runtime/status-reply.ts"; import { createCoordinator, type ComposedTurn, type CoordinateBotsCall, type Coordinator, type HandoffOpener, type HandoffOptions, type HandoffView, type HostTurnResult } from "./coordinator.ts";
 import { queuedBehindPersonText, turnWaitedOnPerson, UnansweredApprovals } from "./waiting-on-person.ts";
-import { createPersonWaits } from "./host/person-waits.ts"; import { askToolName, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { anyCardLive, closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { createMcpChat } from "./host/mcp-chat.ts"; import { isCardOwnerLive, isMcpSignInCard } from "./host/mcp-sign-in-cards.ts";
+import { createPersonWaits } from "./host/person-waits.ts"; import { askToolName, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { anyCardLive, closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { createMcpChat } from "./host/mcp-chat.ts"; import { isCardOwnerLive, isMcpSignInCard } from "./host/mcp-sign-in-cards.ts"; import { settleOpenConnectCards } from "./host/connect-card-settle.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput } from "./guarded-requests.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
@@ -11494,6 +11494,21 @@ function maybeResumeConnectors(threadId: string, resumeKey: string) {
   return true;
 }
 
+const connectCardSettle = {
+  threadsWithCards: threadsWithCardsSince,
+  messagesFor: (threadId: string) => store.messagesFor(threadId),
+  patchMessage: (threadId: string, messageId: string, patch: Partial<Message>) => store.patchMessage(threadId, messageId, patch),
+  resume: maybeResumeConnectors,
+  now: Date.now,
+};
+
+function settleConnectedAccounts(services: Awaited<ReturnType<typeof composio.connectionStatus>>) {
+  for (const [slug, service] of Object.entries(services)) {
+    if (service?.connected) settleOpenConnectCards(connectCardSettle, slug);
+    for (const account of service?.accounts ?? []) if (account.alias && /^active$/i.test(account.status)) settleOpenConnectCards(connectCardSettle, slug, account.alias);
+  }
+}
+
 
 const phoneSecretSubmissions = new PhoneSecretSubmissionRegistry();
 
@@ -15021,6 +15036,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
       }
       const status = await composio.connectionStatus(cfg, services.length ? services : composio.CURATED_SLUGS);
+      // Settings asked about these apps (it polls after Connect): open connect cards for an account that is now connected stop waiting.
+      if (services.length) settleConnectedAccounts(status);
       return json(res, 200, { configured: true, services: status });
     }
     m = path.match(/^\/api\/connectors\/([\w-]+)\/authorize$/);
@@ -15079,7 +15096,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           error: failed ? `Connection ${state?.status ?? "failed"}` : undefined,
         };
         store.patchMessage(threadId, message.id, { connector: next });
-        if (state?.connected) maybeResumeConnectors(threadId, connector.resumeKey);
+        if (state?.connected) {
+          maybeResumeConnectors(threadId, connector.resumeKey);
+          settleOpenConnectCards(connectCardSettle, connector.slug, connector.alias);
+        }
         return json(res, 200, { connected: Boolean(state?.connected), pending: Boolean(state?.pending), status: state?.status });
       }
       if (m[3] === "resume" && method === "POST") {
