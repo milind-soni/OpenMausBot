@@ -363,6 +363,8 @@ export class SharedComputers {
     const job = entry.jobs.get(jobId);
     if (job?.sent !== true) return false;
     // Revoke the queued action before the desktop leases it; release the slot so no later poll can keep it alive.
+    // After this lease the desktop may already have begun a side effect. Revocation withholds its result but cannot undo
+    // or cancel the remote action; the protocol has no cancellation message, and the uncertain action is never replayed.
     if (!job.active()) { this.finish(entry, job, failure("The requesting turn ended")); return false; }
     job.leased = true; clearTimeout(job.delivery);
     return true;
@@ -428,11 +430,13 @@ export class SharedComputers {
     });
   }
   /** A server that just woke holds a bot's look at its computers until one of this person's lent ones is back, or the wait ends. */
-  async settledAfterWake(principal: string | null, active: () => boolean): Promise<void> {
-    if (!principal) return;
+  async settledAfterWake(principal: string | null, active: () => boolean): Promise<string | null> {
+    if (!principal) return null;
     while (this.wakeLeft() > 0 && active() && this.list(principal).length === 0 && (this.lent?.list(principal) ?? []).some(record => record.stoppedAt === null)) {
       await new Promise(resolve => setTimeout(resolve, 250));
     }
+    // Return the principal only while the exact request authority remains live; callers must not reuse a pre-wait principal.
+    return active() ? principal : null;
   }
   /** Names the computer and its kind when it is known, so a bot says "your PC" to a Windows user, never "your Mac". */
   private offline(principal: string, id: string): string {

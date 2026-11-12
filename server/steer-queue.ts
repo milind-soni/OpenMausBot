@@ -33,6 +33,8 @@ interface QueueEntry {
     origin?: WorkOrigin;
     sender?: ResolvedSender;
     trigger?: UsageTrigger;
+    /** Authenticated request provenance; retained durably until this exact session dispatches the turn. */
+    requestSessionId?: string | null;
     queuedAt: number;
     via?: "call";
     callId?: string;
@@ -47,7 +49,7 @@ interface QueueEntry {
   }>;
 }
 
-export type SteerQueueHead = Pick<QueueEntry["items"][number], "trigger" | "sender" | "peerAsk" | "origin" | "mentions">;
+export type SteerQueueHead = Pick<QueueEntry["items"][number], "trigger" | "sender" | "peerAsk" | "origin" | "mentions" | "requestSessionId">;
 
 const queues = new Map<string, QueueEntry>();
 
@@ -109,7 +111,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"]; relay?: Message["relay"]; rowId?: string; first?: boolean; queuedAt?: number; mentions?: string[]; aheadOfOthers?: string } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; requestSessionId?: string | null; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"]; relay?: Message["relay"]; rowId?: string; first?: boolean; queuedAt?: number; mentions?: string[]; aheadOfOthers?: string } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -127,6 +129,7 @@ export function queueSteeredMessage(
     ...(options.origin ? { origin: options.origin } : {}),
     sender: options.sender,
     trigger: options.trigger,
+    ...(options.requestSessionId !== undefined ? { requestSessionId: options.requestSessionId } : {}),
     queuedAt: options.queuedAt ?? Date.now(),
     ...spokenLineFields(options.via, options.callId),
     ...(options.fromApp ? { fromApp: options.fromApp } : {}),
@@ -186,6 +189,7 @@ export function drainSteeredMessages(
     head: SteerQueueHead,
   ) => void | Promise<void>,
   isBlocked?: (botId: string, threadId: string, head: SteerQueueHead) => boolean,
+  isAuthorized?: (botId: string, threadId: string, head: SteerQueueHead) => boolean,
 ): void {
   // deleting only the entry being visited is safe under Map iteration
   for (const [threadId, entry] of queues) {
@@ -203,6 +207,17 @@ export function drainSteeredMessages(
     if (queues.get(threadId) !== entry) continue;
     const group = drainCoalesceHead(entry.items, coalesceIdentity, (item) => item.queuedAt);
     const ids = group.map((item) => item.messageId);
+    const head: SteerQueueHead = { trigger: group[0]!.trigger, sender: group[0]!.sender, peerAsk: group[0]!.peerAsk, origin: group[0]!.origin,
+      ...(group[0]!.requestSessionId !== undefined ? { requestSessionId: group[0]!.requestSessionId } : {}),
+      ...(group.some(item => item.mentions?.length) ? { mentions: group.flatMap(item => item.mentions ?? []) } : {}) };
+    if (isAuthorized && !isAuthorized(entry.botId, threadId, head)) {
+      const rest = entry.items.slice(group.length);
+      settleChatFollowups(ids, "cancelled");
+      if (rest.length > 0) queues.set(threadId, { botId: entry.botId, items: rest });
+      else queues.delete(threadId);
+      changed();
+      continue;
+    }
     settleChatFollowups(ids, "dispatching");
     const rest = entry.items.slice(group.length);
     if (rest.length > 0) queues.set(threadId, { botId: entry.botId, items: rest });
@@ -244,7 +259,7 @@ export function drainSteeredMessages(
         appended.map((message) => message.id),
         // One unattended line makes the turn unattended: a person's words in the group cannot re-attend a bot's own.
         group.some((item) => item.unattended === true),
-        { trigger: group[0].trigger, sender: group[0].sender, peerAsk: group[0].peerAsk, origin: group[0].origin, ...(mentions.length ? { mentions } : {}) },
+        { ...head, ...(mentions.length ? { mentions } : {}) },
       );
     } catch (error) { console.warn("steer-queue: queued dispatch threw", error); running = Promise.reject(error); }
     void Promise.resolve(running).then(
@@ -260,7 +275,8 @@ function coalesceIdentity(item: QueueEntry["items"][number]): string {
   if (item.peerAsk) return `peer:${item.peerAsk.botId}:${item.unattended === true ? "unattended" : "attended"}:${JSON.stringify(item.origin ?? null)}`;
   if (item.unattended === true) return "unattended";
   const person = item.sender ? `person:${item.sender.id ?? item.sender.name}` : "person:local";
-  return item.via === "call" ? `call:${item.callId ?? ""}|${person}` : person;
+  const session = item.requestSessionId === undefined ? "|session:legacy-unproven" : `|session:${item.requestSessionId ?? "none"}`;
+  return item.via === "call" ? `call:${item.callId ?? ""}|${person}${session}` : `${person}${session}`;
 }
 
 export function queuedSteeredMessage(

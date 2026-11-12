@@ -203,6 +203,8 @@ export interface FollowupPayload {
   fromApp?: Message["fromApp"];
   sender?: ResolvedSender;
   trigger?: UsageTrigger;
+  /** Server-authenticated session that submitted this user turn; never accepted from a client payload. */
+  requestSessionId?: string | null;
   origin?: WorkOrigin;
   queuedAt?: number;
   rowId?: string; mentions?: string[];

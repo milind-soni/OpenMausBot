@@ -21,6 +21,39 @@ const nothingQueued = async (broker: SharedComputers, id: string) => {
   return poll;
 };
 describe("shared computer authority and lifecycle", () => {
+  it("revalidates a request principal after the deterministic wake wait", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-wake-revocation-"));
+    vi.useFakeTimers();
+    let requesterLive = true;
+    const lent = new LentComputers(join(dir, "lent.json"));
+    const computer = registration({ computer: true });
+    lent.connected(alice.person, { id: computer.id, name: computer.name, folders: 0, terminal: false, screen: true });
+    const broker = new SharedComputers(() => true, lent);
+    broker.wokeAt = () => Date.now() - 1_000;
+    const waiting = broker.settledAfterWake(alice.person, () => requesterLive);
+    requesterLive = false;
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(waiting).resolves.toBeNull();
+    // The route's post-wait comparison therefore cannot use the cached principal for inventory.
+    expect(broker.list(alice.person)).toEqual([]);
+    broker.close(); rmSync(dir, { recursive: true, force: true });
+  });
+  it("returns the principal after wake when the requesting session remains authorised", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-wake-authorized-"));
+    vi.useFakeTimers();
+    const lent = new LentComputers(join(dir, "lent.json"));
+    const computer = registration();
+    lent.connected(alice.person, { id: computer.id, name: computer.name, folders: 0, terminal: false, screen: false });
+    const broker = new SharedComputers(() => true, lent);
+    const wokeAt = Date.now() - 1_000;
+    broker.wokeAt = () => wokeAt;
+    const waiting = broker.settledAfterWake(alice.person, () => true);
+    broker.register(computer, alice, secret);
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(waiting).resolves.toBe(alice.person);
+    expect(broker.list(alice.person).map(entry => entry.id)).toEqual([computer.id]);
+    broker.close(); rmSync(dir, { recursive: true, force: true });
+  });
   it("a computer whose person changed is found under its new key after it connects again", () => {
     const broker = new SharedComputers(id => id === "owner");
     const computer = registration(); broker.register(computer, alice, secret);
@@ -204,6 +237,7 @@ describe("shared computer authority and lifecycle", () => {
     active = false;
     broker.complete(computer.id, "owner", secret, job!.id, { result: "must not reach the revoked turn" });
     await expect(pending).rejects.toThrow(/turn ended/);
+    expect(() => broker.complete(computer.id, "owner", secret, job!.id, { result: "replayed" })).toThrow(/will not be replayed/);
     broker.close();
   });
   it("expires offline registrations and rejects revoked sessions", async () => {

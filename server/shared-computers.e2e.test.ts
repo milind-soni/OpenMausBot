@@ -201,6 +201,70 @@ it("a second full-access paired device uses the canonical owner in a real agent 
   evidence.push("real second full-access paired-device turn lists and reads the owner's read-only computer; revoking that exact session blocks a subsequent tool action in the still-running turn");
 }, 60_000);
 
+it("a queued paired-device turn keeps its session: revocation cancels dispatch and an authorized queue can list the lent computer", async () => {
+  const dump = join(fixture.info.dataDir, "fake-claude-dump.json");
+  const desktopWindow = await api("POST", "/api/auth/pairing", { label: "Queue owner desktop", scopes: ["admin", "client"] });
+  expect(desktopWindow.status).toBe(200);
+  const desktop = (await api("POST", "/api/auth/pair", { code: desktopWindow.body.code })).body;
+  lendingToken = desktop.token;
+  await connector.save(env, { folders: [folder], terminal: false, computer: true }, await connector.identity(env));
+  await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);
+
+  const queuedTurn = async (label: string, revokeBeforeDrain: boolean) => {
+    const opened = await api("POST", "/api/auth/pairing", { label, scopes: ["admin", "client"] }, { authorization: `Bearer ${desktop.token}` });
+    expect(opened.status).toBe(200);
+    const device = (await api("POST", "/api/auth/pair", { code: opened.body.code, label })).body;
+    const queuedBot = (await api("POST", "/api/bots", { name: `${label} queued-turn fixture` }, { authorization: `Bearer ${desktop.token}` })).body.bot;
+    const activeProxy = await agentProxyFor(queuedBot.id, desktop.token, "Hold this turn until it is interrupted.");
+    try {
+      const queued = await api("POST", `/api/bots/${queuedBot.id}/messages`, { text: `queued request ${label}`, followUp: "queue" }, { authorization: `Bearer ${device.token}` });
+      expect(queued.status).toBe(202);
+      expect(queued.body).toMatchObject({ queued: true, queueId: expect.any(String) });
+      if (revokeBeforeDrain) {
+        expect((await api("DELETE", `/api/auth/sessions/${device.session.id}`, undefined, { authorization: `Bearer ${desktop.token}` })).status).toBe(200);
+      }
+      // The prior turn's provider dump is not evidence that the queued turn started.
+      rmSync(dump, { force: true });
+      expect((await api("POST", `/api/bots/${queuedBot.id}/interrupt`, undefined, { authorization: `Bearer ${desktop.token}` })).status).toBe(200);
+      const current = async () => (await api("GET", "/api/bots", undefined, { authorization: `Bearer ${desktop.token}` })).body.bots.find((candidate: any) => candidate.id === queuedBot.id);
+      if (revokeBeforeDrain) {
+        await vi.waitFor(async () => expect((await current()).busy).toBe(false), { timeout: 15_000 });
+        expect((await current()).messages.some((message: any) => message.text === `queued request ${label}`)).toBe(false);
+        expect(existsSync(dump)).toBe(false);
+        return;
+      }
+      await vi.waitFor(async () => expect(existsSync(dump) && (await current()).busy).toBe(true), { timeout: 15_000 });
+      const agents = JSON.parse(readFileSync(dump, "utf8")).mcpConfig.mcpServers.agents;
+      const queuedProxy = spawn(agents.command, agents.args, { env: { PATH: process.env.PATH, HOME: fixture.info.dataDir, ...agents.env }, stdio: ["pipe", "pipe", "pipe"] });
+      const { initialize, call } = mcpClient(queuedProxy);
+      try {
+        await initialize();
+        const list = JSON.parse((await call("list_shared_computers")).content[0].text).computers;
+        expect(list.some((computer: any) => computer.id === storedGrant().id)).toBe(true);
+        expect(list.find((computer: any) => computer.id === storedGrant().id)).toMatchObject({ computer: true, terminal: false });
+      } finally {
+        queuedProxy.kill();
+        await api("POST", `/api/bots/${queuedBot.id}/interrupt`, undefined, { authorization: `Bearer ${desktop.token}` });
+      }
+    } finally {
+      activeProxy.kill();
+      const current = await api("GET", "/api/bots", undefined, { authorization: `Bearer ${desktop.token}` });
+      const live = current.body.bots.find((candidate: any) => candidate.id === queuedBot.id)?.busy;
+      if (live) await api("POST", `/api/bots/${queuedBot.id}/interrupt`, undefined, { authorization: `Bearer ${desktop.token}` });
+    }
+  };
+
+  try {
+    await queuedTurn("revoked Android", true);
+    await queuedTurn("authorized Android", false);
+  } finally {
+    lendingToken = pairing.token;
+    await connector.save(env, { folders: [folder], terminal: false, computer: false }, await connector.identity(env));
+    await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);
+  }
+  evidence.push("a real paired-device follow-up retains session provenance through queue drain: revocation prevents dispatch; a live full-access pairing dispatches and lists the lent computer through MCP");
+}, 90_000);
+
 it("a big lent file changes by one passage, gains lines at its end, and is deleted only once read", async () => {
   await connector.save(env, { folders: [{ ...folder, write: true }], terminal: false, computer: false }, await connector.identity(env));
   await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);

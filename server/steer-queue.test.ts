@@ -102,6 +102,53 @@ describe("steer-queue module", () => {
     expect(store.messages.filter((message) => message.role === "user")).toHaveLength(1);
   });
 
+  it("preserves each authenticated session, cancels revoked queued work, and never coalesces sessions", () => {
+    const bot = fakeBot("bot-session-provenance", "thread-session-provenance", true);
+    const store = fakeStore([bot]);
+    queueSteeredMessage(bot.id, bot.threadId, "from revoked device", { sender: { name: "Owner", id: "p_owner" }, requestSessionId: "session-revoked" });
+    queueSteeredMessage(bot.id, bot.threadId, "from live device", { sender: { name: "Owner", id: "p_owner" }, requestSessionId: "session-live" });
+    bot.busy = false;
+    const run = vi.fn();
+    const authorized = (_botId: string, _threadId: string, head: { requestSessionId?: string | null }) => head.requestSessionId !== "session-revoked";
+    drainSteeredMessages(store, run, undefined, authorized);
+    expect(run).not.toHaveBeenCalled();
+    expect(store.messages.filter(message => message.role === "user")).toHaveLength(0);
+    expect(_queuedCount(bot.threadId)).toBe(1);
+    drainSteeredMessages(store, run, undefined, authorized);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0]![6]).toMatchObject({ requestSessionId: "session-live" });
+    expect(store.messages.filter(message => message.role === "user").map(message => message.text)).toEqual(["from live device"]);
+  });
+
+  it("retains request-session provenance across durable restore before dispatch", () => {
+    const bot = fakeBot("bot-session-restore", "thread-session-restore", true);
+    const store = fakeStore([bot]);
+    queueSteeredMessage(bot.id, bot.threadId, "recover me", { requestSessionId: "session-restored" });
+    restoreSteeredMessages();
+    bot.busy = false;
+    const run = vi.fn();
+    drainSteeredMessages(store, run);
+    expect(run.mock.calls[0]![6]).toMatchObject({ requestSessionId: "session-restored" });
+  });
+
+  it("fails closed for legacy person turns with no recorded session while retaining explicit sessionless local turns", () => {
+    const bot = fakeBot("bot-legacy-session", "thread-legacy-session", true);
+    const store = fakeStore([bot]);
+    queueSteeredMessage(bot.id, bot.threadId, "legacy authenticated turn", { trigger: { kind: "user" } });
+    queueSteeredMessage(bot.id, bot.threadId, "explicit local turn", { trigger: { kind: "user" }, requestSessionId: null });
+    bot.busy = false;
+    const run = vi.fn();
+    const authorized = (_botId: string, _threadId: string, head: { requestSessionId?: string | null; trigger?: { kind: string } }) =>
+      head.requestSessionId === undefined ? head.trigger?.kind !== "user" && head.trigger?.kind !== "owner" : head.requestSessionId === null;
+    drainSteeredMessages(store, run, undefined, authorized);
+    expect(run).not.toHaveBeenCalled();
+    expect(_queuedCount(bot.threadId)).toBe(1);
+    drainSteeredMessages(store, run, undefined, authorized);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0]![6]).toMatchObject({ requestSessionId: null, trigger: { kind: "user" } });
+    expect(store.messages.filter(message => message.role === "user").map(message => message.text)).toEqual(["explicit local turn"]);
+  });
+
   it.each([undefined, "capacity", "group-turn"] as const)("detects an exact owner's queued correction with reason %s", (reason) => {
     const botId = `correction-${reason ?? "busy"}`;
     const threadId = `${botId}-thread`;

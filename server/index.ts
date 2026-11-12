@@ -7138,7 +7138,7 @@ function drainQueuedSendsNow() {
     new Promise<void>((resolve, reject) => {
       void startTurn(botId, prompt, {
         threadId, userMessage, excludeMessageIds: excludeIds, unattended, onTurnSettled: resolve, allowRoomTurnElsewhere: !head.peerAsk,
-        trigger: queuedTurnTrigger(head), ...(head.origin ? { origin: head.origin } : {}), ...(head.mentions ? { mentions: head.mentions } : {}),
+        trigger: queuedTurnTrigger(head), ...(head.origin ? { origin: head.origin } : {}), ...(head.mentions ? { mentions: head.mentions } : {}), ...(head.requestSessionId ? { requestSessionId: head.requestSessionId } : {}),
       }).catch((err) => {
         const why = err instanceof Error ? err.message : String(err);
         const chief = head.peerAsk?.incident ? store.bot(botId) : null;
@@ -7155,6 +7155,9 @@ function drainQueuedSendsNow() {
     // Provider completion can precede its dispatch promise: keep the queue until that exact handshake releases its claim.
     (botId, threadId, head) => threadBusy(botId, threadId) || botAtThreadCapacity(botId, head.peerAsk ? undefined : threadId, Boolean(head.peerAsk)) || roomTurnHolds(activeGroupTurnForBot(botId), threadId, !head.peerAsk)
       || directRootQueued(threadId) || (!head.peerAsk?.incident && parksBehindCoordination(botId, threadId)),
+    (_botId, _threadId, head) => head.requestSessionId === undefined
+      ? head.trigger?.kind !== "user" && head.trigger?.kind !== "owner"
+      : head.requestSessionId === null || sessions.isLive(head.requestSessionId),
   );
 }
 
@@ -7174,6 +7177,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
       prompt: (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(text, dataContext), replyTo, userNameFor(threadId))),
       sender,
       trigger,
+      requestSessionId: requestSessionId ?? null,
       via,
       callId,
       reaction: replyTo?.reactedWith,
@@ -7264,7 +7268,7 @@ async function acceptDirectSend(
       const typedStop = await stopOnTypedCommand({ botId, threadId, text, trigger, personPresent, fromApp: Boolean(app), busy: currentAtStart.busy === true, row: { replyToId: replyTo?.id, sendId, sender, ...spokenLineFields(via, callId) }, by: { ...(sender?.id ? { person: sender.id } : {}), admin: admin === true } });
       if (typedStop) return typedStop;
       if (currentAtStart.busy) {
-        const personsOwn = personPresent && !app && (trigger.kind === "user" || trigger.kind === "owner"), queuedPrompt = (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(text, dataContext), replyTo, userNameFor(threadId))); if (runOwners.arrival(threadId, sender, personPresent && Boolean(sender?.id)) === "queue") return { ok: true as const, queued: true as const, threadId, queueId: queueSteeredMessage(currentAtStart.id, threadId, text, { replyToId: replyTo?.id, sendId, dataContext, fromApp: app?.fromApp, mentions, prompt: queuedPrompt, sender, trigger, via, callId, first: personPresent && Boolean(sender?.id) }).id };
+        const personsOwn = personPresent && !app && (trigger.kind === "user" || trigger.kind === "owner"), queuedPrompt = (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(text, dataContext), replyTo, userNameFor(threadId))); if (runOwners.arrival(threadId, sender, personPresent && Boolean(sender?.id)) === "queue") return { ok: true as const, queued: true as const, threadId, queueId: queueSteeredMessage(currentAtStart.id, threadId, text, { replyToId: replyTo?.id, sendId, dataContext, fromApp: app?.fromApp, mentions, prompt: queuedPrompt, sender, trigger, requestSessionId: requestSessionId ?? null, via, callId, first: personPresent && Boolean(sender?.id) }).id };
         const instance = runningTurnInstance(currentAtStart, threadId);
         let steered: SteerOutcome = "refused";
         const steerInput = extractTurnImages(text);
@@ -7316,7 +7320,7 @@ async function acceptDirectSend(
           store.setTaskAskedAt(botId, threadId, message.at);
           handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
           signInSettle.answerInChat(botId, threadId);
-          if (personsOwn) personFirst.wait(threadId, { requeue: (note) => void queueSteeredMessage(current.id, threadId, text, { prompt: note ? `${queuedPrompt}\n\n${note}` : queuedPrompt, rowId: message.id, first: true, queuedAt: message.at, replyToId: replyTo?.id, dataContext, sender, trigger, via, callId, mentions, aheadOfOthers: runOwners.askerFirst(threadId) }) });
+          if (personsOwn) personFirst.wait(threadId, { requeue: (note) => void queueSteeredMessage(current.id, threadId, text, { prompt: note ? `${queuedPrompt}\n\n${note}` : queuedPrompt, rowId: message.id, first: true, queuedAt: message.at, replyToId: replyTo?.id, dataContext, sender, trigger, requestSessionId: requestSessionId ?? null, via, callId, mentions, aheadOfOthers: runOwners.askerFirst(threadId) }) });
           return { ok: true as const, steered: true as const, threadId, message };
         }
         if (!current.busy) {
@@ -7329,6 +7333,7 @@ async function acceptDirectSend(
           prompt: queuedPrompt,
           sender,
           trigger,
+          requestSessionId: requestSessionId ?? null,
           via,
           callId,
           first: personsOwn || chose === "restart", aheadOfOthers: runOwners.askerFirst(threadId),
@@ -13198,7 +13203,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       // Off: a 404 like a route that never existed. On: a turn sees only the computers of the person it provably acts for.
       if (method === "GET" && path === "/api/internal/shared-computers" && botLending()) {
-        const principal = sharedComputerPrincipal(internalCapability); await sharedComputers.settledAfterWake(principal, () => internalCapabilityIsActive(internalCapability) && sharedComputerPrincipal(internalCapability) === principal);
+        const principal = sharedComputerPrincipal(internalCapability);
+        const settledPrincipal = await sharedComputers.settledAfterWake(principal, () => internalCapabilityIsActive(internalCapability) && sharedComputerPrincipal(internalCapability) === principal);
+        if (settledPrincipal !== principal || sharedComputerPrincipal(internalCapability) !== principal) return json(res, 403, { error: "The requesting session is no longer authorized" });
         // `say` too: the bot says why instead of asking the person to open OpenMausBot, which can't help while the computer is lent already.
         const why = CLOUD_HOME && !principal && (CLOUD_TEAM || sharedComputers.status(CLOUD_HOME_LENDER).length > 0) ? cloudLendingRefusalNotice(internalCapability) : null;
         return json(res, 200, { computers: sharedComputers.list(principal), ...sharedComputers.away(principal), ...sharedComputers.screenNotLent(principal), ...(why ? { unavailable: cloudLendingRefusalForBot(internalCapability), say: why } : {}) });
