@@ -4280,6 +4280,31 @@ describe("ClaudeDriver resume recovery (fake CLI)", () => {
     expect(text).toBe(REBUILD);
   });
 
+  it("logs why the saved session could not be resumed before starting a new one", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-logged", text: "what now?", resumeCursor: "an-outside-session", recoveryText: REBUILD });
+      await recorder.until((e) => e.type === "turn.completed");
+      const lines = logged.mock.calls.map((call) => String(call[0]));
+      expect(lines.find((line) => line.includes("could not resume session an-outside-session"))).toMatch(/^claude \(claude-test\): could not resume session an-outside-session for thread t-logged, starting a new one: claude exited \d+ before result/u);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("logs the CLI's own reason when it refuses --resume with an error result", async () => {
+    process.env.FAKE_CLAUDE_MODE = "stale-session";
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-logged-stale", text: "what now?", resumeCursor: "an-outside-session", recoveryText: REBUILD });
+      await recorder.until((e) => e.type === "turn.completed");
+      const lines = logged.mock.calls.map((call) => String(call[0]));
+      expect(lines).toContain("claude (claude-test): could not resume session an-outside-session for thread t-logged-stale, starting a new one: No conversation found with session ID: an-outside-session");
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
   it("does not announce a replacement as rebuilt when there was nothing to replay", async () => {
     const dump = join(scratch, "no-replay.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
