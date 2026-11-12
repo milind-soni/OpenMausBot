@@ -11,6 +11,7 @@ import { ComputerPanel } from "@/components/ComputerPanel";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { TaskBoardScreen } from "@/components/TaskBoardScreen";
 import { ProjectsProvider } from "@/state/projects";
+import { useQueuedMessageSender } from "@/lib/useQueuedMessageSender";
 
 // Full-page screens outside the chat loop load on first open, keeping them
 // out of the startup bundle.
@@ -30,6 +31,7 @@ function Shell() {
   const { state, dispatch } = useStore();
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
+  useQueuedMessageSender();
 
   // App-wide shortcuts: ⌘N new bot · ⌘1–9 jump to bot · ⌘⇧[ / ⌘⇧] prev/next.
   // Kept deliberately small; every panel already closes on Esc.
