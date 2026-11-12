@@ -2109,18 +2109,23 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       resetPathCacheForTests();
     }
   });
-  it.skipIf(process.platform === "win32")("launches the copy it checked when PATH finds another copy while the turn waits for that check", async () => {
-    // The turn checks 2.1.321 and waits for its --version; PATH then finds 2.1.197 (refuses --system-prompt-snapshot).
-    // The turn must launch the copy it checked, not the one a fresh PATH resolves at spawn time.
-    const armed = join(scratch, "probe-path-armed"), asked = join(scratch, "probe-path-asked"), go = join(scratch, "probe-path-go"), olderRan = join(scratch, "probe-path-older-ran");
-    const newer = join(scratch, "probe-path-newer"), older = join(scratch, "probe-path-older");
-    mkdirSync(newer); mkdirSync(older);
-    writeFileSync(join(newer, "claude"), `#!/bin/sh\nif [ "$1" = --version ] && [ -e "${armed}" ] && [ ! -e "${asked}" ]; then : > "${asked}"; while [ ! -e "${go}" ]; do sleep 0.05; done; fi\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
-    writeFileSync(join(older, "claude"), `#!/bin/sh\ncase "$1" in --version|--help) ;; *) : > "${olderRan}";; esac\nfor a in "$@"; do [ "$a" = --system-prompt-snapshot ] && { echo "error: unknown option '$a'" >&2; exit 1; }; done\nFAKE_CLAUDE_VERSION=2.1.197 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+  it.skipIf(process.platform === "win32")("launches the copy it checked, with that copy's help and flags, when PATH finds another copy while the turn waits for that check", async () => {
+    // After 2.1.197 was checked, PATH finds 2.1.321; the turn checks it and waits for its --version; PATH then finds 2.1.197 (no --autocompact in its help, refuses
+    // --system-prompt-snapshot). The turn must read the help of, and launch, the copy it checked, not the one a fresh PATH resolves.
+    const armed = join(scratch, "probe-path-armed"), asked = join(scratch, "probe-path-asked"), go = join(scratch, "probe-path-go");
+    const olderRan = join(scratch, "probe-path-older-ran"), olderHelp = join(scratch, "probe-path-older-help"), dump = join(scratch, "probe-path-newer.json");
+    const first = join(scratch, "probe-path-first"), newer = join(scratch, "probe-path-newer"), older = join(scratch, "probe-path-older");
+    mkdirSync(first); mkdirSync(newer); mkdirSync(older);
+    // The copy checked before the turn: 2.1.197 whose help leaves --autocompact out, so the turn must read the newly found copy's help.
+    writeFileSync(join(first, "claude"), `#!/bin/sh\nFAKE_CLAUDE_VERSION=2.1.197 FAKE_CLAUDE_AUTOCOMPACT=0 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\nif [ "$1" = --version ] && [ -e "${armed}" ] && [ ! -e "${asked}" ]; then : > "${asked}"; while [ ! -e "${go}" ]; do sleep 0.05; done; fi\nFAKE_CLAUDE_VERSION=2.1.321 FAKE_CLAUDE_DUMP="${dump}" exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(older, "claude"), `#!/bin/sh\ncase "$1" in --version) ;; --help) : > "${olderHelp}";; *) : > "${olderRan}";; esac\nfor a in "$@"; do [ "$a" = --system-prompt-snapshot ] && { echo "error: unknown option '$a'" >&2; exit 1; }; done\nFAKE_CLAUDE_VERSION=2.1.197 FAKE_CLAUDE_AUTOCOMPACT=0 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
     try {
       resetPathCacheForTests();
-      registerPathDir(newer);
+      registerPathDir(first);
       await create(undefined, {}, { cli: "claude" });
+      expect(await instance.snapshot()).toMatchObject({ version: "2.1.197 (Claude Code)" });
+      registerPathDir(newer);
       writeFileSync(armed, "");
       const sent = instance.adapter.sendTurn({ threadId: "t-probe-path", text: "hi" });
       await vi.waitFor(() => expect(existsSync(asked)).toBe(true), { timeout: 5000 });
@@ -2129,6 +2134,10 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       await sent;
       expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-probe-path")).toMatchObject({ ok: true });
       expect(existsSync(olderRan)).toBe(false);
+      expect(existsSync(olderHelp)).toBe(false); // the help read was the checked copy's, not the one PATH found later
+      const { argv } = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[] };
+      expect(argv).toContain("--autocompact"); // from 2.1.321's help; 2.1.197's leaves it out
+      expect(argv).toContain("--system-prompt-snapshot");
     } finally {
       resetPathCacheForTests();
     }
