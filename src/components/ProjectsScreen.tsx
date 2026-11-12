@@ -312,26 +312,27 @@ export function ProjectsScreen() {
   return (
     <main className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
       <header
-        className="flex h-[64px] shrink-0 items-center justify-between border-b border-hairline/40 px-6"
+        className="flex h-[64px] shrink-0 items-center justify-between gap-3 border-b border-hairline/40 px-6"
         style={{ WebkitAppRegion: "drag" } as CSSProperties}
       >
-        <div className="flex items-center gap-2.5">
-          <FolderKanban size={20} className="text-accent" />
-          <div>
-            <h1 className="text-[16px] font-semibold text-ink">Projects</h1>
-            <p className="text-[12px] text-ink-secondary">Local workspaces for your bots and code.</p>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <FolderKanban size={20} className="shrink-0 text-accent" />
+          <div className="min-w-0">
+            <h1 className="truncate text-[16px] font-semibold text-ink">Projects</h1>
+            <p className="hidden truncate text-[12px] text-ink-secondary sm:block">Local workspaces for your bots and code.</p>
           </div>
         </div>
-        <div className="flex items-center gap-2" style={{ WebkitAppRegion: "no-drag" } as CSSProperties}>
+        <div className="flex shrink-0 items-center gap-2" style={{ WebkitAppRegion: "no-drag" } as CSSProperties}>
           <button
             onClick={() => void refresh(true)}
             disabled={refreshing}
             className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
             title="Refresh projects"
+            aria-label="Refresh projects"
           >
             <RefreshCw size={17} className={cn(refreshing && "animate-spin")} />
           </button>
-          <button onClick={() => setAdding(true)} className="flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-medium text-white hover:brightness-110">
+          <button onClick={() => setAdding(true)} className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg bg-accent px-3.5 py-2 text-[13px] font-medium text-white hover:brightness-110">
             <Plus size={16} /> Add project
           </button>
         </div>

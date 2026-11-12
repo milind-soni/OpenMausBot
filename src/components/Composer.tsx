@@ -31,6 +31,8 @@ export function Composer({
   onEditLast,
   pendingAttachment,
   onPendingAttachmentConsumed,
+  pendingText,
+  onPendingTextConsumed,
 }: {
   bot?: Bot;
   group?: Group;
@@ -41,6 +43,10 @@ export function Composer({
    * once it's been added, so the caller can hand off a new one later. */
   pendingAttachment?: Attachment | null;
   onPendingAttachmentConsumed?: () => void;
+  /** Text to drop into the composer for the user to edit and send (e.g. a
+   * starter suggestion). Cleared via onPendingTextConsumed once staged. */
+  pendingText?: string | null;
+  onPendingTextConsumed?: () => void;
 }) {
   const { state, dispatch } = useStore();
   const { projects } = useProjects();
@@ -181,6 +187,17 @@ export function Composer({
     setAttachments((prev) => [...prev, pendingAttachment]);
     onPendingAttachmentConsumed?.();
   }, [pendingAttachment, onPendingAttachmentConsumed]);
+
+  useEffect(() => {
+    if (!pendingText) return;
+    setText(pendingText);
+    setCaret(pendingText.length);
+    onPendingTextConsumed?.();
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(pendingText.length, pendingText.length);
+    });
+  }, [pendingText, onPendingTextConsumed]);
 
   const handlePaste = (e: React.ClipboardEvent) => {
     const files = e.clipboardData?.files;

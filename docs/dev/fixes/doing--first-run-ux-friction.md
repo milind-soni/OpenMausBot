@@ -1,9 +1,9 @@
 ---
-status: todo
+status: doing
 created: 2026-09-24
-updated: 2026-09-24
+updated: 2026-11-12
 scope: first-run UX audit and onboarding friction
-owner: Z
+owner: Yv
 related:
   - docs/dev/fixes/done--projects-screen.md
   - docs/dev/product-copy--onboarding-auth-sync-updates.md
@@ -18,10 +18,10 @@ Comprehensive UX and motion design audit of a new user's first 5 minutes in Gere
 
 ## 1. High friction & onboarding blockers (P0)
 
-- [ ] **Fix hardcoded macOS platform copy in engine diagnostics** — `src/components/Onboarding.tsx:170`. The text reads *"Bots run on the AI tools already on this Mac"*. When running on Linux (including containerized dev environments) or Windows, this breaks trust and contradicts cross-platform packaging. Use dynamic detection (`window.gbs?.platform` or userAgent fallback) to render "Mac", "PC", or "system".
-- [ ] **Eliminate false-positive warning icons for uninstalled optional engines** — `src/components/Onboarding.tsx:181, 193, 203, 215`. The `warn` prop is unconditionally passed to `<StatusRow>` for Claude Code, Codex, Grok Build, and Antigravity. Any missing optional engine is rendered with an alarming orange warning triangle (`AlertTriangle`) and orange background, signaling a broken system instead of an optional enhancement. Only show warnings for engines that are installed but unauthenticated (`state === "available" && !authenticated`).
-- [ ] **Replace raw agent system prompts in new bot chat empty states** — `src/components/ChatView.tsx:487-493`, `server/default-bots.ts:16-52`. When a user clicks any bot for the first time, `bot.description` is displayed verbatim in the hero card. For default bots, this dumps internal prompt engineering instructions (*"Role: You are the CEO and Lead Project Manager. Personality & Task: Your primary role is to oversee..."*) directly to the user. Replace with human-facing role summaries and actionable starter suggestion chips (e.g. *"Plan a roadmap"*, *"Draft architecture"*).
-- [ ] **Prevent header clipping and wrap on Projects screen at narrow breakpoints** — `src/components/ProjectsScreen.tsx:314-338`. In narrow windows or split viewports, the left header title block lacks `min-w-0` and truncation, while the subtitle (*"Local workspaces for your bots and code."*) competes with action buttons. The `Add project` button lacks `shrink-0` and `whitespace-nowrap`, risking awkward multi-line wrapping in fixed `h-[64px]`. Add `min-w-0` to the title block, hide the subtitle on compact screens (`hidden sm:block`), and add `shrink-0 whitespace-nowrap` to the button.
+- [?] **Fix hardcoded macOS platform copy in engine diagnostics** — `src/components/Onboarding.tsx:170`. The text reads *"Bots run on the AI tools already on this Mac"*. When running on Linux (including containerized dev environments) or Windows, this breaks trust and contradicts cross-platform packaging. Use dynamic detection (`window.gbs?.platform` or userAgent fallback) to render "Mac", "PC", or "system". Implemented: copy now reads "this Mac" / "this PC" / "this computer" from `window.gbs?.platform`.
+- [?] **Eliminate false-positive warning icons for uninstalled optional engines** — `src/components/Onboarding.tsx:181, 193, 203, 215`. The `warn` prop is unconditionally passed to `<StatusRow>` for Claude Code, Codex, Grok Build, and Antigravity. Any missing optional engine is rendered with an alarming orange warning triangle (`AlertTriangle`) and orange background, signaling a broken system instead of an optional enhancement. Only show warnings for engines that are installed but unauthenticated (`state === "available" && !authenticated`). Implemented: missing optional engines show a neutral dash; warnings only for installed-but-signed-out engines, or on Claude Code when no engine is installed. Installed-but-signed-out engines no longer show a green check.
+- [?] **Replace raw agent system prompts in new bot chat empty states** — `src/components/ChatView.tsx:487-493`, `server/default-bots.ts:16-52`. When a user clicks any bot for the first time, `bot.description` is displayed verbatim in the hero card. For default bots, this dumps internal prompt engineering instructions (*"Role: You are the CEO and Lead Project Manager. Personality & Task: Your primary role is to oversee..."*) directly to the user. Replace with human-facing role summaries and actionable starter suggestion chips (e.g. *"Plan a roadmap"*, *"Draft architecture"*). Implemented in `src/lib/botIntro.ts`: persona prompts are reduced to a role line ("Your CEO and Lead Project Manager."), plain descriptions are kept, and role-based starter chips prefill the composer.
+- [?] **Prevent header clipping and wrap on Projects screen at narrow breakpoints** — `src/components/ProjectsScreen.tsx:314-338`. In narrow windows or split viewports, the left header title block lacks `min-w-0` and truncation, while the subtitle (*"Local workspaces for your bots and code."*) competes with action buttons. The `Add project` button lacks `shrink-0` and `whitespace-nowrap`, risking awkward multi-line wrapping in fixed `h-[64px]`. Add `min-w-0` to the title block, hide the subtitle on compact screens (`hidden sm:block`), and add `shrink-0 whitespace-nowrap` to the button. Implemented as specified, plus an `aria-label` on the refresh button.
 
 ---
 

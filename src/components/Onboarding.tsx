@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, AlertTriangle, Loader2, Mic } from "lucide-react";
+import { Check, AlertTriangle, Loader2, Mic, Minus } from "lucide-react";
 import { MausAvatar } from "./Avatar";
 import { setEmailGateDone, track } from "@/lib/analytics";
 
@@ -15,6 +15,10 @@ type InstanceRow = {
 };
 
 const isElectron = navigator.userAgent.includes("Electron");
+
+// The engines live wherever the harness runs; only Electron knows the host OS.
+const hostLabel =
+  window.gbs?.platform === "darwin" ? "this Mac" : window.gbs?.platform === "win32" ? "this PC" : "this computer";
 
 function StatusRow({
   ok,
@@ -34,7 +38,7 @@ function StatusRow({
           ok ? "bg-[#00c97222] text-[#38d591]" : warn ? "bg-[#ff980022] text-[#ff9800]" : "bg-raised text-ink-secondary"
         }`}
       >
-        {ok ? <Check size={14} /> : <AlertTriangle size={13} />}
+        {ok ? <Check size={14} /> : warn ? <AlertTriangle size={13} /> : <Minus size={13} />}
       </span>
       <div className="min-w-0">
         <div className="text-[14px] font-medium text-ink">{title}</div>
@@ -113,6 +117,13 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const codex = byKind("codex");
   const grok = byKind("grokAgent");
   const antigravity = byKind("antigravityAgent");
+  const isAvailable = (row?: InstanceRow) => row?.snapshot.state === "available";
+  // Signed in, or an engine that doesn't report sign-in state.
+  const isReady = (row?: InstanceRow) => isAvailable(row) && row?.snapshot.authenticated !== false;
+  // Warn only when something needs the user's action: an engine is installed but
+  // signed out, or nothing at all is installed (Claude Code is the suggested start).
+  const needsSignIn = (row?: InstanceRow) => isAvailable(row) && row?.snapshot.authenticated === false;
+  const noEngines = !!instances && !instances.some((i) => i.snapshot.state === "available");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-app">
@@ -167,7 +178,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           <div className="flex flex-col">
             <h1 className="text-[18px] font-semibold text-ink">Your engines</h1>
             <p className="mt-1 text-[13.5px] text-ink-secondary">
-              Bots run on the AI tools already on this Mac — here&rsquo;s what we found.
+              Bots run on the AI tools already on {hostLabel} — here&rsquo;s what we found.
             </p>
             <div className="mt-4 flex flex-col gap-2.5">
               {!instances ? (
@@ -177,8 +188,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               ) : (
                 <>
                   <StatusRow
-                    ok={claude?.snapshot.state === "available"}
-                    warn
+                    ok={isReady(claude)}
+                    warn={needsSignIn(claude) || noEngines}
                     title={`Claude Code ${claude?.snapshot.version ? `· ${claude.snapshot.version.split(" ")[0]}` : ""}`}
                     detail={
                       claude?.snapshot.state === "available"
@@ -189,8 +200,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                     }
                   />
                   <StatusRow
-                    ok={codex?.snapshot.state === "available"}
-                    warn
+                    ok={isReady(codex)}
+                    warn={needsSignIn(codex)}
                     title={`Codex ${codex?.snapshot.version ? `· ${codex.snapshot.version.replace("codex-cli ", "")}` : ""}`}
                     detail={
                       codex?.snapshot.state === "available"
@@ -199,8 +210,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                     }
                   />
                   <StatusRow
-                    ok={grok?.snapshot.state === "available"}
-                    warn
+                    ok={isReady(grok)}
+                    warn={needsSignIn(grok)}
                     title={`Grok Build ${grok?.snapshot.version ? `· ${grok.snapshot.version.split(" ")[1]}` : ""}`}
                     detail={
                       grok?.snapshot.state === "available"
@@ -211,8 +222,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                     }
                   />
                   <StatusRow
-                    ok={antigravity?.snapshot.state === "available"}
-                    warn
+                    ok={isReady(antigravity)}
+                    warn={needsSignIn(antigravity)}
                     title={`Antigravity ${antigravity?.snapshot.version ? `· ${antigravity.snapshot.version.split(" ")[0]}` : ""}`}
                     detail={
                       antigravity?.snapshot.state === "available"

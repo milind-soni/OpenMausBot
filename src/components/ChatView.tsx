@@ -28,6 +28,7 @@ import { ModelPicker } from "./ModelPicker";
 import { ReactionBar, ReactionChips } from "./Reactions";
 import { cn } from "@/lib/cn";
 import { ProjectMentionText } from "./ProjectMentionText";
+import { botIntro } from "@/lib/botIntro";
 import { AttachmentList } from "./AttachmentViewer";
 import { MobilePreviewPanel } from "./MobilePreviewPanel";
 import type { Attachment } from "@/state/store";
@@ -470,6 +471,7 @@ const MessagesList = memo(function MessagesList({
   onCancelEdit,
   onSubmitEdit,
   onRegenerate,
+  onStarter,
 }: {
   bot: Bot;
   messages: Message[];
@@ -480,15 +482,29 @@ const MessagesList = memo(function MessagesList({
   onCancelEdit: () => void;
   onSubmitEdit: (id: string, text: string, attachments?: Attachment[]) => void;
   onRegenerate: () => void;
+  onStarter: (text: string) => void;
 }) {
+  const intro = messages.length === 0 && !bot.busy ? botIntro(bot) : null;
   return (
     <>
-      {messages.length === 0 && !bot.busy && (
+      {intro && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
           <MausAvatar color={bot.color} state="idle" size={64} motion="none" motionKey={0} />
           <div className="text-[17px] font-semibold text-ink">{bot.name}</div>
           <div className="max-w-[360px] text-[14px] text-ink-secondary">
-            {bot.description ? <ProjectMentionText text={bot.description} /> : "Send a message to start the conversation."}
+            {intro.summary ? <ProjectMentionText text={intro.summary} /> : "Send a message to start the conversation."}
+          </div>
+          <div className="mt-2 flex max-w-[480px] flex-wrap justify-center gap-2">
+            {intro.starters.map((starter) => (
+              <button
+                key={starter}
+                type="button"
+                onClick={() => onStarter(starter)}
+                className="rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
+              >
+                {starter}
+              </button>
+            ))}
           </div>
         </div>
       )}
@@ -597,6 +613,8 @@ export function ChatView({ bot }: { bot: Bot }) {
     () => localStorage.getItem("chat-mobile-preview-open") === "true",
   );
   const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
+  const [starterText, setStarterText] = useState<string | null>(null);
+  const clearStarterText = useCallback(() => setStarterText(null), []);
   const [tasksOpen, setTasksOpen] = useState(() => localStorage.getItem("chat-tasks-open") === "true");
   const botTasks = useMemo(() => state.tasks.filter((task) => task.assigneeBotId === bot.id), [state.tasks, bot.id]);
 
@@ -755,6 +773,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             onCancelEdit={cancelEdit}
             onSubmitEdit={submitEdit}
             onRegenerate={regenerate}
+            onStarter={setStarterText}
           />
           {provisioning && (
             <div className="flex justify-start">
@@ -804,6 +823,8 @@ export function ChatView({ bot }: { bot: Bot }) {
         onEditLast={lastUserMessage ? () => setEditingId(lastUserMessage.id) : undefined}
         pendingAttachment={previewAttachment}
         onPendingAttachmentConsumed={() => setPreviewAttachment(null)}
+        pendingText={starterText}
+        onPendingTextConsumed={clearStarterText}
       />
       </section>
 
