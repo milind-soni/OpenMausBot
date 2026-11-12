@@ -21,6 +21,7 @@ import {
   PROFILE_PROMPT,
   TRIGGER_PROMPT,
   WIDGET_PROMPT,
+  JUST_DO_IT_PROMPT,
   ROUTINE_EXECUTION_PROMPT,
   WEBHOOK_PROMPT,
   AUTOMATION_REPLY_PROMPT,
@@ -556,11 +557,16 @@ describe("how every bot replies", () => {
   });
 
   it("asks one thing with tap-to-answer choices, keeps forms for real edits, and confirms a routine in plain words", () => {
-    expect(WIDGET_PROMPT).toContain("Ask only what you cannot find or sensibly default yourself, and one thing at a time.");
+    expect(WIDGET_PROMPT).toContain("Unless the person asked you, in this chat or in your instructions, to check with them first, ask only what you cannot find or sensibly default yourself, and one thing at a time.");
     expect(WIDGET_PROMPT).toContain("a Card with a Row of Buttons, one per option, whose onClickAction sends that option in one tap");
     expect(WIDGET_PROMPT).not.toContain("never end a turn with a question in text that a form could ask");
     expect(TRIGGER_PROMPT).toContain("weekdays at 9:00 AM India time\", never a zone id such as Asia/Kolkata");
     expect(TRIGGER_PROMPT).toContain("where its results will appear, what each run covers, and when the first run is");
+  });
+
+  it("at Full access still asks first when the person says to, all at once", () => {
+    expect(JUST_DO_IT_PROMPT).toContain("do not stop to ask the person to confirm a step or choose between options");
+    expect(JUST_DO_IT_PROMPT).toContain("When the person asks you, in this chat or in your instructions, to check with them first, to ask clarifying questions or not to assume, do that instead: ask everything you need in one message and wait for their answers before you start.");
   });
 });
 
