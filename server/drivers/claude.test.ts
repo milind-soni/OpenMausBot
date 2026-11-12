@@ -2081,6 +2081,34 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       resetPathCacheForTests();
     }
   });
+  it.skipIf(process.platform === "win32")("treats the version as unknown when another copy's check still owns the state after both re-checks", async () => {
+    // Each time the turn's own copy (2.1.197) reads its --help, a version check of 2.1.321 lands; after both re-checks the shared
+    // version is still 2.1.321's, so it must not confirm a restricted MCP configuration for the copy this turn launches.
+    const gates = join(scratch, "exhaust-gates"), newer = join(scratch, "exhaust-newer"), older = join(scratch, "exhaust-older");
+    mkdirSync(gates); mkdirSync(newer); mkdirSync(older);
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(older, "claude"), `#!/bin/sh\nif [ "$1" = --help ]; then i=1; while ! mkdir "${gates}/help-$i" 2>/dev/null; do i=$((i+1)); done; : > "${gates}/asked-$i"; while [ ! -e "${gates}/go-$i" ]; do sleep 0.05; done; fi\nFAKE_CLAUDE_VERSION=2.1.197 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, {}, { cli: "claude" });
+      await instance.snapshot();
+      registerPathDir(older);
+      const sent = instance.adapter.sendTurn({ threadId: "t-exhausted-recheck", text: "Must not run", toolScope: { allow: ["native:*"] } });
+      sent.catch(() => {});
+      for (const i of [1, 2, 3]) { // the first check and both re-checks
+        await vi.waitFor(() => expect(existsSync(join(gates, `asked-${i}`))).toBe(true), { timeout: 5000 });
+        resetPathCacheForTests();
+        registerPathDir(newer);
+        await instance.snapshot(); // 2.1.321's check lands while the turn waits for 2.1.197's --help
+        writeFileSync(join(gates, `go-${i}`), "");
+      }
+      await expect(sent).rejects.toThrow(/restricted MCP configuration/);
+      expect(existsSync(join(gates, "asked-4"))).toBe(false);
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
   it.skipIf(process.platform === "win32")("keeps the new copy's flags when the old copy's slower --help read finishes last", async () => {
     // snapshot() is still reading 2.1.321's help when PATH finds 2.1.197 (no --autocompact); that old read must not restore 2.1.321's flags.
     const refused = join(scratch, "stale-help-autocompact.jsonl"), helpStarted = join(scratch, "newer-help-started");
