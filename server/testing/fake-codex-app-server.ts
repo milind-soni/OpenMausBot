@@ -36,6 +36,9 @@
 //   FAKE_CODEX_STARTUP_DELAY_MS  hold the initialize reply this long, like a loaded host
 //   FAKE_CODEX_STARTUP_LOG  append {pid, at, event: "initialize" | "turn/start"} per launch
 //   FAKE_CODEX_START_ERROR  JSON-RPC error rejecting thread/start
+//   FAKE_CODEX_SECTIONS  JSON thread sections threadSection/list reports (default none); "unsupported": threadSection/* and
+//     thread/name/set are refused as by a Codex older than 0.167.1
+//   FAKE_CODEX_THREAD_LABEL  JSON {name, section} the resumed thread carries
 //   FAKE_CODEX_MCP_FAILED  MCP server whose startup fails (`mcpServer/startupStatus/updated`) as thread/start begins
 //   FAKE_CODEX_RESTORED_USAGE  report 100/50/10 tokens used before turn/start, as a resumed thread can
 //   FAKE_CODEX_STEER_ERROR  JSON-RPC error rejecting turn/steer
@@ -648,7 +651,8 @@ process.stdin.on("data", (chunk) => {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
         } else if (mode === "resume" || mode === "review-events" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported" || mode === "async-question" ||
             (mode === "resume-then-missing" && !existsSync(process.env.FAKE_CODEX_STATE ?? ""))) {
-          threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId, ...(process.env.FAKE_CODEX_ROLLOUT ? { path: process.env.FAKE_CODEX_ROLLOUT } : {}) }, sandbox: resolvedSandbox(msg.params ?? {}) } });
+          threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId, ...(process.env.FAKE_CODEX_ROLLOUT ? { path: process.env.FAKE_CODEX_ROLLOUT } : {}),
+            ...(process.env.FAKE_CODEX_THREAD_LABEL ? JSON.parse(process.env.FAKE_CODEX_THREAD_LABEL) : {}) }, sandbox: resolvedSandbox(msg.params ?? {}) } });
         } else {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32600, message: `no rollout found for thread id ${msg.params?.threadId}` } });
         }
@@ -1112,6 +1116,21 @@ process.stdin.on("data", (chunk) => {
         }
         break;
       }
+      case "threadSection/list":
+      case "threadSection/create":
+      case "thread/section/move":
+      case "thread/name/set":
+        dump();
+        if (process.env.FAKE_CODEX_SECTIONS === "unsupported") {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: `unknown variant \`${msg.method}\`` } });
+        } else if (msg.method === "threadSection/list") {
+          out({ jsonrpc: "2.0", id: msg.id, result: { data: JSON.parse(process.env.FAKE_CODEX_SECTIONS ?? "[]"), nextCursor: null } });
+        } else if (msg.method === "threadSection/create") {
+          out({ jsonrpc: "2.0", id: msg.id, result: { section: { id: "section-created", name: msg.params?.name, appearance: null } } });
+        } else {
+          out({ jsonrpc: "2.0", id: msg.id, result: {} });
+        }
+        break;
       default:
         if (msg.id !== undefined) out({ jsonrpc: "2.0", id: msg.id, result: {} });
     }

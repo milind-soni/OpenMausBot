@@ -806,6 +806,56 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(threadStart.params).toMatchObject({ model: "gpt-5.6-sol", modelProvider: "openai", developerInstructions: "You are Testy." });
   });
 
+  describe("files the conversation in Codex's own thread list", () => {
+    const label = { department: "Sales", bot: "Ada", conversation: "Quote for November" };
+    const labelCalls = async (environment: Record<string, string>, resumeCursor?: string) => {
+      const dump = join(scratch, "label.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      await create({ mode: "resume", environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), ...environment } });
+      await instance.adapter.sendTurn({ threadId: "t-label", text: "hello", nativeLabel: label, ...(resumeCursor ? { resumeCursor } : {}) });
+      const completed = await recorder.until((event) => event.type === "turn.completed");
+      expect(completed).toMatchObject({ ok: true });
+      return (JSON.parse(readFileSync(dump, "utf8")).calls as Array<{ method: string; params: Record<string, unknown> }>)
+        .filter((call) => call.method.startsWith("threadSection/") || call.method === "thread/section/move" || call.method === "thread/name/set" || call.method === "turn/start");
+    };
+
+    it("makes the department's section, moves a new thread into it and names it after the bot and conversation", async () => {
+      expect(await labelCalls({})).toEqual([
+        { method: "threadSection/list", params: {} },
+        { method: "threadSection/create", params: { name: "MausBot · Sales" } },
+        { method: "thread/section/move", params: { threadId: "codex-thread-1", sectionId: "section-created" } },
+        { method: "thread/name/set", params: { threadId: "codex-thread-1", name: "Ada · Quote for November" } },
+        expect.objectContaining({ method: "turn/start" }),
+      ]);
+    });
+
+    it("reuses an existing section and leaves a thread already filed alone", async () => {
+      const sections = JSON.stringify([{ id: "section-sales", name: "MausBot · Sales", appearance: null }]);
+      expect((await labelCalls({ FAKE_CODEX_SECTIONS: sections, FAKE_CODEX_THREAD_LABEL: JSON.stringify({ name: "Old title", section: null }) }, "codex-old")).map((call) => call.method === "turn/start" ? "turn/start" : call)).toEqual([
+        { method: "threadSection/list", params: {} },
+        { method: "thread/section/move", params: { threadId: "codex-old", sectionId: "section-sales" } },
+        { method: "thread/name/set", params: { threadId: "codex-old", name: "Ada · Quote for November" } },
+        "turn/start",
+      ]);
+      expect((await labelCalls({ FAKE_CODEX_SECTIONS: sections, FAKE_CODEX_THREAD_LABEL: JSON.stringify({ name: "Ada · Quote for November", section: { id: "section-sales", name: "MausBot · Sales" } }) }, "codex-old"))
+        .map((call) => call.method)).toEqual(["turn/start"]);
+    });
+
+    it("keeps a thread the person pinned or moved where they put it", async () => {
+      expect((await labelCalls({ FAKE_CODEX_THREAD_LABEL: JSON.stringify({ name: "Ada · Quote for November", section: { id: "pinned", name: "Pinned" } }) }, "codex-old"))
+        .map((call) => call.method)).toEqual(["turn/start"]);
+    });
+
+    it("moves a thread on to its bot's new department", async () => {
+      expect((await labelCalls({ FAKE_CODEX_THREAD_LABEL: JSON.stringify({ name: "Ada · Quote for November", section: { id: "ops", name: "MausBot · Ops" } }) }, "codex-old"))
+        .map((call) => call.method)).toEqual(["threadSection/list", "threadSection/create", "thread/section/move", "turn/start"]);
+    });
+
+    it("still runs the turn on a Codex without thread sections", async () => {
+      expect((await labelCalls({ FAKE_CODEX_SECTIONS: "unsupported" })).map((call) => call.method)).toEqual(["threadSection/list", "turn/start"]);
+    });
+  });
+
   it("keeps the developer slot stable and delivers volatile context in-turn", async () => {
     await create({ mode: "resume" });
     // Each turn spawns a fresh app-server whose dump overwrites the file, so every turn writes its own.

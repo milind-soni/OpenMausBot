@@ -55,6 +55,7 @@ import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts"; import { messageItem } from "../harness/text-items.ts";
 import { codexAccountEmail, codexHome } from "./codex-identity.ts";
 import { linkSharedCodexHome } from "./codex-shared-home.ts";
+import { fileCodexThread } from "./codex-thread-label.ts";
 import { additionalPermissionSummary, containsControlCharacter, grantedPermissions, mcpAppApprovalForm, mcpAppApprovalText, mcpElicitationDeclined, plainRecord } from "./codex-app-approval.ts";
 import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, codexProviderMismatch, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexSignInRefused, codexUserError, codexUserFailure, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
 import { codexLoginCheck, codexLoginStatus, storedCodexLogin } from "./codex-login.ts";
@@ -1370,6 +1371,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
         let startedModel: string | null = null;
         let resumedNativeThread = false;
+        let nativeThread: { id: string; name?: string | null; section?: { name?: string } | null } | null = null;
         let rebuiltFromReplay = false;
         let promptText = turn.text;
         if (cursor) {
@@ -1395,6 +1397,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             }
             approvalParams = withResolvedSandbox(approvalParams, resumed);
             codexThreadId = resumed?.thread?.id ?? cursor;
+            nativeThread = { ...resumed?.thread, id: codexThreadId };
             rolloutAt = rolloutMark(resumed?.thread?.path);
             resumedNativeThread = true;
           } catch (error) {
@@ -1434,10 +1437,13 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           approvalParams = withResolvedSandbox(approvalParams, started);
           codexThreadId = started?.thread?.id ?? null;
+          if (codexThreadId) nativeThread = { ...started.thread, id: codexThreadId };
           rolloutAt = rolloutMark(started?.thread?.path);
           startedModel = started?.model ?? null;
         }
         if (!codexThreadId) throw new Error("Codex did not return a native thread id");
+        // threadSection/* and thread/name/set are in codex-cli 0.167.1; a Codex without them refuses them and the turn goes on.
+        if (turn.nativeLabel && nativeThread) await fileCodexThread(request, codexHome(env) ?? "", nativeThread, turn.nativeLabel).catch(() => {});
         const { deliverVolatile, hadVolatile, commitVolatile } = await syncCodexInstructions(
           threadId,
           codexThreadId,
