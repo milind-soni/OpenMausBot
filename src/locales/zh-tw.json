@@ -3885,6 +3885,7 @@
   "keys.vps.descBefore": "Linux VPS 的 SSH 設定別名。{app} 會使用你原本的 SSH 設定與 SSH agent，不會儲存金鑰或密碼。請參閱",
   "keys.vps.descLink": "設定指南",
   "keys.vps.descAfter": "，以了解所需的 SSH 別名格式。",
+  "keys.vps.anyMachine": "任何可透過 SSH 連線、裝有 Docker 的 Linux 電腦都可以，包括你 Tailscale 網路中的電腦：把它的 Tailscale 名稱填為別名的 HostName。",
   "keys.vps.aria": "自架 VPS 的 SSH 設定別名",
   "keys.vps.removeAlias": "移除已儲存的別名",
   "usage.title": "用量",

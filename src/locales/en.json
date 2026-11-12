@@ -4112,6 +4112,7 @@
   "keys.vps.descBefore": "SSH config alias for the Linux VPS. {app} uses your normal SSH config and agent; it does not store keys or passwords. See the ",
   "keys.vps.descLink": "setup guide",
   "keys.vps.descAfter": " for the required SSH alias shape.",
+  "keys.vps.anyMachine": "Any Linux machine with Docker that you reach over SSH works, including a computer on your Tailscale network: use its Tailscale name as the alias's HostName.",
   "keys.vps.aria": "Self-hosted VPS SSH config alias",
   "keys.vps.removeAlias": "Remove the saved alias",
   "usage.title": "Usage",

@@ -3919,6 +3919,7 @@
   "keys.vps.descBefore": "Apelido na configuração SSH para o VPS Linux. O app {app} usa sua configuração e seu agente SSH habituais; não guarda chaves nem senhas. Veja o ",
   "keys.vps.descLink": "guia de configuração",
   "keys.vps.descAfter": " para ver o formato de apelido SSH exigido.",
+  "keys.vps.anyMachine": "Funciona qualquer máquina Linux com Docker que você acesse por SSH, inclusive um computador da sua rede Tailscale: use o nome dele no Tailscale como HostName do alias.",
   "keys.vps.aria": "Apelido na configuração SSH do VPS próprio",
   "keys.vps.removeAlias": "Remover o apelido salvo",
   "usage.title": "Uso",

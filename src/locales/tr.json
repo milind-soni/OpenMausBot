@@ -2716,6 +2716,7 @@
   "keys.vps.descBefore": "Linux VPS için SSH yapılandırma takma adı. {app} normal SSH yapılandırmanızı ve SSH ajanınızı kullanır; anahtarları veya şifreleri saklamaz. Gerekli SSH takma ad biçimi için ",
   "keys.vps.descLink": "kurulum kılavuzuna",
   "keys.vps.descAfter": " bakın.",
+  "keys.vps.anyMachine": "SSH ile ulaştığınız ve Docker çalıştıran her Linux makinesi olur, Tailscale ağınızdaki bir bilgisayar da: takma adın HostName değerine onun Tailscale adını yazın.",
   "keys.vps.aria": "Kendi barındırdığınız VPS SSH yapılandırma takma adı",
   "keys.vps.removeAlias": "Kaydedilen takma adı kaldır",
   "usage.title": "Kullanım",
