@@ -46,5 +46,13 @@ Implements `docs/dev/plans/implementation--preview-studio.md`. Design work start
 
 ## 5. Docs and QA
 
-- [~] **User guide** — `docs/guide/preview.md`.
+- [?] **User guide** — `docs/guide/preview.md`.
 - [ ] **QA matrix** — Dell. Run the plan's verification list in both the desktop app and the browser.
+
+---
+
+## Implementation Notes (Z)
+
+- **Spec compliance:** Built directly from `docs/design/preview-studio.md` and `docs/dev/plans/implementation--preview-studio.md`.
+- **Optional `open_preview` bot tool:** Left `[ ]` per instructions so the core UI, canvas mode, file preview routes, and auto-refresh watcher remain self-contained.
+- **Browser screenshot fallback:** In browser sessions (where Electron's `window.gbs.previewScreenshot` is unavailable) or when capturing Markdown/image previews, `PreviewFrame.captureScreenshot` renders a clean PNG snapshot via an offscreen `<canvas>` so **Send to chat** and **Share to chat…** work in both desktop and browser sessions.
