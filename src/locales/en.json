@@ -4452,6 +4452,8 @@
   "botPanel.library.files": "Files",
   "botPanel.library.scope": "From this conversation",
   "botPanel.thisConversation": "In this conversation",
+  "botPanel.advanced.title": "More in Advanced mode",
+  "botPanel.advanced.hint": "Sending on your behalf and app access are set there.",
   "botPanel.acts.custom": "Custom",
   "botPanel.acts.customHint": "Change this in Advanced mode",
   "botPanel.section.settings": "Settings",

@@ -7616,6 +7616,8 @@
   "botPanel.library.files": "Arquivos",
   "botPanel.library.scope": "Desta conversa",
   "botPanel.thisConversation": "Nesta conversa",
+  "botPanel.advanced.title": "Mais no modo avançado",
+  "botPanel.advanced.hint": "Enviar em seu nome e o acesso a apps ficam lá.",
   "botPanel.acts.custom": "Personalizado",
   "botPanel.acts.customHint": "Mude isto no Modo avançado",
   "botPanel.section.settings": "Configurações",
