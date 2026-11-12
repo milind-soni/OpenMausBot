@@ -1,5 +1,5 @@
 // An ssh_config and an `ssh` shim that add connection sharing and fail-fast timeouts to every VPS command, whatever the user's alias sets; the live-desktop tunnel opts out of sharing.
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -97,7 +97,9 @@ const MASTER_INITIALIZATION_TIMEOUT_MS = 30_000;
 const WAKE_TIMEOUT_MS = 120_000;
 // Kept back from the wake script so the connection retry after it still has time (ssh's ConnectTimeout is 10 s).
 const WAKE_RETRY_RESERVE_MS = 15_000;
-const pendingMasters = new Map<string, Promise<number>>();
+/** When the wake script ran for a pending connection (null when it did not run). */
+type WakeWindow = { start: number; end: number } | null;
+const pendingMasters = new Map<string, Promise<WakeWindow>>();
 
 /** The wake script, when the person has put an executable one there. */
 function vpsWakeScript(ssh: VpsSshSetup): string | null {
@@ -112,8 +114,34 @@ function vpsWakeScript(ssh: VpsSshSetup): string | null {
 }
 
 /**
- * Starts (or reuses) the shared SSH connection to the alias. Resolves with the milliseconds spent running the wake
- * script (0 when it did not run), so callers can keep that time out of their own command deadline.
+ * Runs the wake script with the alias. It gets its own process group, so a timeout also stops anything it started
+ * (a cloud CLI that hangs, for example), not just the script.
+ */
+function runWakeScript(file: string, alias: string, pathValue: string, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (timeoutMs <= 0) { reject(new Error("VPS SSH initialization timed out")); return; }
+    const group = process.platform !== "win32";
+    const child = spawn(file, [alias], { env: { ...process.env, PATH: pathValue }, stdio: ["ignore", "ignore", "pipe"], detached: group });
+    let stderr = "";
+    let timedOut = false;
+    child.stderr?.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-1000); });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { process.kill(group ? -child.pid! : child.pid!, "SIGKILL"); } catch { child.kill("SIGKILL"); }
+    }, timeoutMs);
+    child.once("error", (error) => { clearTimeout(timer); reject(error); });
+    child.once("close", (code, signal) => {
+      clearTimeout(timer);
+      if (timedOut) reject(new Error("VPS SSH initialization timed out"));
+      else if (code === 0) resolve();
+      else reject(new Error(stderr.trim() || `exited with ${code ?? signal}`));
+    });
+  });
+}
+
+/**
+ * Starts (or reuses) the shared SSH connection to the alias. Resolves with the milliseconds this caller spent waiting
+ * on the wake script (0 when it did not run), so callers can keep that time out of their own command deadline.
  */
 export async function ensureVpsSshMaster(
   ssh: VpsSshSetup,
@@ -125,13 +153,14 @@ export async function ensureVpsSshMaster(
   const key = `${ssh.configPath}:${alias}`;
   const wake = vpsWakeScript(ssh);
   const wakeBudget = wake ? wakeTimeoutMs : 0;
+  const waitStarted = Date.now();
   let pending = pendingMasters.get(key);
   if (!pending) {
     const deadline = Date.now() + MASTER_INITIALIZATION_TIMEOUT_MS + wakeBudget;
-    const command = (args: string[], file = "ssh", limitMs = Infinity) => new Promise<void>((resolve, reject) => {
-      const remaining = Math.min(deadline - Date.now(), limitMs);
+    const command = (args: string[]) => new Promise<void>((resolve, reject) => {
+      const remaining = deadline - Date.now();
       if (remaining <= 0) { reject(new Error("VPS SSH initialization timed out")); return; }
-      const child = execFile(file, args, {
+      const child = execFile("ssh", args, {
         env: { ...process.env, PATH: ssh.path },
         timeout: remaining,
         killSignal: "SIGKILL",
@@ -145,24 +174,24 @@ export async function ensureVpsSshMaster(
       child.stdin?.end();
     });
     pending = (async () => {
-      try { await command(["-O", "check", "--", alias]); return 0; }
+      try { await command(["-O", "check", "--", alias]); return null; }
       catch (error) {
         if ((error as { killed?: boolean }).killed) throw error;
         // ControlMaster auto only shares after authentication. A harmless first command starts the persistent master without replaying Docker work.
         const connect = () => command(["-o", "BatchMode=yes", "-o", "PermitLocalCommand=no", "-T", "--", alias, "true"]);
-        try { await connect(); return 0; }
+        try { await connect(); return null; }
         catch (unreachable) {
           if (!wake || (unreachable as { killed?: boolean }).killed) throw unreachable;
           // A host that pauses when idle refuses SSH until resumed: wake it once, then try once more.
           const wakeStarted = Date.now();
           // At most the wake limit, and never the time the retry below needs.
-          try { await command([alias], wake, Math.min(wakeTimeoutMs, deadline - wakeStarted - WAKE_RETRY_RESERVE_MS)); }
+          try { await runWakeScript(wake, alias, ssh.path, Math.min(wakeTimeoutMs, deadline - wakeStarted - WAKE_RETRY_RESERVE_MS)); }
           catch (failure) {
             throw new Error(`${(unreachable as Error).message}; the wake script failed: ${(failure as Error).message}`);
           }
-          const wokeMs = Date.now() - wakeStarted;
+          const wakeEnded = Date.now();
           await connect();
-          return wokeMs;
+          return { start: wakeStarted, end: wakeEnded };
         }
       }
     })().finally(() => {
@@ -172,9 +201,11 @@ export async function ensureVpsSshMaster(
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([pending, new Promise<never>((_resolve, reject) => {
+    const woke = await Promise.race([pending, new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => reject(new Error("VPS SSH initialization timed out")), timeoutMs + wakeBudget);
       timer.unref();
     })]);
+    // A caller that joined a wake already under way only waited for the rest of it.
+    return woke ? Math.max(0, woke.end - Math.max(woke.start, waitStarted)) : 0;
   } finally { clearTimeout(timer); }
 }

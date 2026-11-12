@@ -85,6 +85,27 @@ describe.skipIf(process.platform === "win32")("VPS wake script", () => {
     expect(host.connectAttempts()).toBe(1);
   });
 
+  it("also stops what a timed-out wake script started", async () => {
+    const host = pausedHost();
+    const late = `${host.awake}-late`;
+    host.wakeWith(`PATH=/usr/bin:/bin; (sleep 1; echo late > '${late}') & sleep 5`);
+    await expect(ensureVpsSshMaster(host.ssh, "paused-vps", 30_000, 300)).rejects.toThrow(/the wake script failed: VPS SSH initialization timed out/);
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(existsSync(late)).toBe(false);
+  });
+
+  it("credits a caller that joins a wake under way only with the time it waited", async () => {
+    const host = pausedHost();
+    host.wakeWith(`PATH=/usr/bin:/bin; sleep 0.6; echo up > '${host.awake}'`);
+    const first = ensureVpsSshMaster(host.ssh, "paused-vps");
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const joined = await ensureVpsSshMaster(host.ssh, "paused-vps");
+    const firstWoke = await first;
+    expect(firstWoke).toBeGreaterThanOrEqual(550);
+    expect(joined).toBeLessThan(firstWoke - 250);
+    expect(host.connectAttempts()).toBe(2);
+  });
+
   it("ignores a wake file that is not executable", async () => {
     const host = pausedHost();
     host.wakeWith(`echo "$1" > '${host.awake}'`, 0o600);
