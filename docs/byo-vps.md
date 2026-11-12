@@ -143,8 +143,8 @@ still gets its own managed desktop container on that machine; it does not take o
    **Self-hosted VPS** for the bot.
 
 The same trust rules apply: the bot gets full control of what Docker can reach on that machine, so prefer one
-that holds nothing you would not hand to the agent. Tailscale keeps the machine off the public internet; leave
-its SSH and Docker ports closed to everything outside the tailnet.
+that holds nothing you would not hand to the agent. Tailscale does not close ports that are already open to the
+internet, so firewall the machine: its SSH and Docker ports should accept connections only from the tailnet.
 
 ## Security
 

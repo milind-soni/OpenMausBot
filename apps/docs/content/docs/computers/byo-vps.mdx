@@ -49,7 +49,7 @@ Host home-box
 Check `ssh home-box true` and `docker -H ssh://home-box info`, then enter
 `home-box` in **App Settings → API keys**. The bot gets its own desktop
 container there, not that machine's own screen, and the same Docker trust rules
-apply. Keep its SSH and Docker ports closed outside the tailnet.
+apply. Tailscale does not close ports that are already open, so firewall the machine to accept SSH and Docker only from the tailnet.
 
 ## Select it for a bot
 
