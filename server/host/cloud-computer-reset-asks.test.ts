@@ -8,7 +8,7 @@ type Line = { id: string; role: string; kind: string; card?: Record<string, any>
 const bot = (id: string, name: string) => ({ id, name, color: "blue" }) as unknown as BotRecord;
 const ada = bot("bot-a", "Ada"), chief = bot("chief", "Chief"), bea = bot("bot-b", "Bea");
 
-function setup(options: { refusal?: (from: BotRecord, target: BotRecord) => string | null; reset?: () => Promise<any> } = {}) {
+function setup(options: { refusal?: (from: BotRecord, target: BotRecord) => string | null; reset?: () => Promise<any>; computer?: () => Promise<string | null> } = {}) {
   const lines = new Map<string, Line[]>();
   const store = {
     bot: (id: string) => [ada, chief, bea].find((candidate) => candidate.id === id),
@@ -27,9 +27,11 @@ function setup(options: { refusal?: (from: BotRecord, target: BotRecord) => stri
   };
   const timers: Array<() => void> = [];
   const reset = vi.fn(options.reset ?? (async () => ({ ok: true })));
+  const computer = vi.fn(options.computer ?? (async () => "bx_1"));
   const asks = createCloudComputerResetAsks({
     store: store as never,
     refusal: options.refusal ?? (() => null),
+    computer,
     reset,
     setTimer: (run, ms) => { expect(ms).toBe(RESET_RETRY_MS); timers.push(run); },
     openCards: () => [...lines.entries()].flatMap(([threadId, list]) => list.filter((line) => line.card?.tool === RESET_CLOUD_COMPUTER_TOOL).map((line) => ({ threadId, messageId: line.id }))),
@@ -37,14 +39,14 @@ function setup(options: { refusal?: (from: BotRecord, target: BotRecord) => stri
   const call = async (sender: BotRecord, body: Record<string, unknown>) => {
     const res = { status: 0, body: {} as Record<string, any> };
     await asks.internal({
-      method: "POST", path: "/api/internal/cloud-computer/reset", res: {} as never, sender, threadId: "t1", readBody: async () => body,
+      method: "POST", path: "/api/internal/cloud-computer/reset", res: {} as never, sender, threadId: "t1", readBody: async () => ({ why: "Stuck starting.", ...body }),
       json: ((_res: unknown, status: number, sent: Record<string, unknown>) => { res.status = status; res.body = sent; }) as never,
     });
     return res;
   };
   const card = () => lines.get("t1")?.at(-1)?.card;
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-  return { asks, call, card, reset, timers, flush, lines };
+  return { asks, call, card, reset, computer, timers, flush, lines };
 }
 
 describe("a bot asking for its cloud computer to be reset", () => {
@@ -73,7 +75,7 @@ describe("a bot asking for its cloud computer to be reset", () => {
     await call(ada, {});
     expect(asks.answer(card()!.requestId, "allow")).toBe(true);
     await flush();
-    expect(reset).toHaveBeenCalledWith("bot-a");
+    expect(reset).toHaveBeenCalledWith("bot-a", "bx_1");
     expect(card()).toMatchObject({ answered: "allow" });
     expect(card()?.subtitle).toContain("Reset: a fresh cloud desktop starts with Ada's next message.");
   });
@@ -129,8 +131,42 @@ describe("a bot asking for its cloud computer to be reset", () => {
     expect(asked.body.text).toContain("reset Ada's cloud computer");
     asks.answer(card()!.requestId, "allow");
     await flush();
-    expect(reset).toHaveBeenCalledWith("bot-a");
+    expect(reset).toHaveBeenCalledWith("bot-a", "bx_1");
     expect((await call(chief, { targetBotId: "nobody" })).status).toBe(404);
+  });
+
+  it("needs a reason, and shows no card without one", async () => {
+    const { call, card, computer } = setup();
+    for (const why of [undefined, "", "   "]) {
+      expect(await call(ada, { why })).toMatchObject({ status: 400 });
+    }
+    expect(card()).toBeUndefined();
+    expect(computer).not.toHaveBeenCalled();
+  });
+
+  it("binds Allow to the computer there was when asked, or to none", async () => {
+    const { asks, call, card, reset, flush } = setup({ computer: async () => null });
+    await call(ada, {});
+    asks.answer(card()!.requestId, "allow");
+    await flush();
+    expect(reset).toHaveBeenCalledWith("bot-a", null);
+  });
+
+  it("shows no card when it cannot tell which computer runs now", async () => {
+    const { call, card } = setup({ computer: async () => { throw new Error("Could not reach boat.dev"); } });
+    expect(await call(ada, {})).toMatchObject({ status: 503 });
+    expect(card()).toBeUndefined();
+  });
+
+  it("does not retry when a different computer runs at Allow", async () => {
+    const { asks, call, card, timers, flush } = setup({
+      reset: async () => { throw Object.assign(new Error("a different cloud desktop runs now than when this was asked, so nothing was reset"), { status: 409 }); },
+    });
+    await call(ada, {});
+    asks.answer(card()!.requestId, "allow");
+    await flush();
+    expect(timers).toHaveLength(0);
+    expect(card()?.subtitle).toContain("nothing was reset");
   });
 
   it("keeps one open card per computer", async () => {
@@ -148,7 +184,7 @@ describe("a bot asking for its cloud computer to be reset", () => {
     await first.call(ada, {});
     const fresh = createCloudComputerResetAsks({
       store: { messagesFor: (id: string) => first.lines.get(id) ?? [], patchMessage: (threadId: string, id: string, patch: Partial<Line>) => Object.assign(first.lines.get(threadId)!.find((line) => line.id === id)!, patch) } as never,
-      refusal: () => null, reset: vi.fn(),
+      refusal: () => null, computer: vi.fn(), reset: vi.fn(),
       openCards: () => [{ threadId: "t1", messageId: "m1" }],
     });
     expect(fresh.dismissStale()).toBe(1);
