@@ -6,7 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AppState, Bot, InstanceInfo } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ owned: true, controls: [] as Array<{ action: string; controlLeaseId?: string }>, joins: [] as string[] }));
+const fixture = vi.hoisted(() => ({ owned: true, controls: [] as Array<{ action: string; controlLeaseId?: string }>, joins: [] as string[], viewerCloses: 0 }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
   useCaptionChrome: () => ({ padClass: undefined }),
@@ -23,6 +23,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
       return body.action === "take" ? { held: true, helpReason: null, owned: fixture.owned } : { held: false, helpReason: null };
     }
     if (path === "/api/bots/scout/computer/join") return { joinUrl: "https://desktop.invalid/scout" };
+    if (path === "/api/bots/scout/computer/viewer-close") fixture.viewerCloses += 1;
     if (path.startsWith("/api/bots/scout/local-computer/join?")) {
       fixture.joins.push(path);
       return { joinUrl: "/vps-viewer/relay-1" };
@@ -52,6 +53,7 @@ let root: Root | null = null;
 beforeEach(() => {
   fixture.controls = [];
   fixture.joins = [];
+  fixture.viewerCloses = 0;
   viewerClosedRelease("scout");
 });
 afterEach(() => {
@@ -127,4 +129,6 @@ it("a client whose host's Local VM is already held in another view is told so, a
   await vi.waitFor(() => expect(document.querySelector("[role=alert]")?.textContent).toContain("already controlling this desktop in another view"));
   expect(fixture.joins).toEqual([]);
   expect(open).not.toHaveBeenCalled();
+  // Nothing opened here, so the other view's viewer on this session stays open.
+  expect(fixture.viewerCloses).toBe(0);
 });

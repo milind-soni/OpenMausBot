@@ -179,6 +179,8 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   const open = async () => {
     setPending(true);
     setError(null);
+    // Set when another view holds the Local VM: this attempt opened nothing, so it must not close that view's viewer.
+    let heldElsewhere = false;
     try {
       if (!window.ogb?.desktopViewer) throw new Error(t("remoteDesktop.viewerUnavailable"));
       // A take with no target holds the desktop the host runs this bot on, its Local VM included, as a phone's does.
@@ -192,17 +194,22 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
           // The host binds a Local VM viewer to the lease holding it; a hold another view owns can't be joined from here.
           let path = "computer/join";
           if (localVm) {
-            if (!controlLeaseId) throw new LocalizedPanelError("vm.workspace.alreadyControlled");
+            if (!controlLeaseId) {
+              heldElsewhere = true;
+              throw new LocalizedPanelError("vm.workspace.alreadyControlled");
+            }
             path = `local-computer/join?${new URLSearchParams({ controlLeaseId })}`;
           }
           return { joinUrl: viewerAddress((await api(`/api/bots/${bot.id}/${path}`, { method: "POST", body: "{}", signal })).joinUrl) };
         },
       });
     } catch (cause) {
-      await api(`/api/bots/${bot.id}/computer/viewer-close`, {
-        method: "POST",
-        body: "{}",
-      }).catch(() => {});
+      if (!heldElsewhere) {
+        await api(`/api/bots/${bot.id}/computer/viewer-close`, {
+          method: "POST",
+          body: "{}",
+        }).catch(() => {});
+      }
       setError(panelErrorText(cause instanceof Error ? cause : String(cause)));
     } finally {
       setPending(false);
