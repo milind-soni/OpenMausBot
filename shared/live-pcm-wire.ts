@@ -1,3 +1,4 @@
+export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveEndReason, LiveKeySource } from "./live-call-wire.ts";
 export type LiveProvider = "openai" | "azure" | "qwen";
 /** Qwen is an effective provider; persisted live.provider remains openai or azure for rollback compatibility. */
 export interface LiveSettings extends Omit<import("./live-call-wire.ts").LiveSettings, "provider"> {

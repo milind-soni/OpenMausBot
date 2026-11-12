@@ -319,7 +319,8 @@ import * as tts from "./tts/index.ts";
 import { voiceNoteFailure } from "./tts/errors.ts";
 import { createDecider, deciderReady, describeDecider } from "./decider/index.ts"; import { createExtractor, describeHelpers } from "./extractor/index.ts";
 import { createStopLineRoutes } from "./routes/stop-line.ts"; import { decideRoomResponder } from "./decider/room-routing.ts"; import { roomRoutingInput } from "./host/room-routing-input.ts";
-import { liveAttachUrl, liveHistoryFrom, LiveSessionError, type LiveBot, type LiveHistoryMessage } from "./live-call.ts";
+import { liveAttachUrl } from "./live-call.ts";
+import { createLiveSessionContext } from "./host/live-session-context.ts";
 import { LiveCallController, LiveCallSignedOutError, openLiveSocket } from "./live-call-controller.ts";
 import { liveCallSettings, liveSettingsFor, liveSettingsForClient, saveLiveSettings } from "./live-settings.ts"; import { azureLiveCallRefusal, liveScopeRefusal } from "./live-access.ts";
 import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-record.ts"; import { noteGroupTurn, turnsSince } from "./room-round-turns.ts";
@@ -12448,18 +12449,7 @@ ROUTES.push(createBrowserViewerRoutes({
 const internalToolRoutes = createInternalToolRoutes({ engineLimits: { instances: () => registry.instances(), configs: () => instanceConfigs(cfg), status: (instanceId) => registry.knownSnapshot(instanceId), load: (accounts) => loadPlanUsage({ accounts }), audienceOf: (threadId) => teamHost.audienceOf(threadId), guestDriven: cloudGuestDriven, dataDir: DATA_DIR }, helpers: { decider, extractor }, notifications: { bot: (id) => store.bot(id), team: sharedMembership, broadcast }, xResearch: { credential: () => researchCredential(cfg.treg?.key), botEnabled: (botId) => store.bot(botId)?.xResearch !== false, cloudHome: CLOUD_HOME !== null, researchOff: () => researchAvailability.refused() }, appPublisher }); const waitRoutes = createWaitRoutes({ waits: botWaits, cloudHome: Boolean(CLOUD_HOME), sleeps: Boolean(CLOUD_HOME) && CLOUD_TEAM === null }); ROUTES.push(createXConnectorRoutes({ credential: () => researchCredential(cfg.treg?.key), included: () => xCredential(), unavailable: () => xResearchStatus().unavailable === true }));
 
 // Live clients negotiate WebRTC or PCM audio; the provider key never leaves the harness.
-function liveBotFor(botId: string): LiveBot {
-  const bot = store.bot(botId);
-  if (!bot) throw new LiveSessionError("That bot no longer exists.", 404);
-  return { name: bot.name, title: bot.title, description: bot.description };
-}
-function liveHistoryFor(threadId: string): LiveHistoryMessage[] {
-  return liveHistoryFrom(sinceFreshStart(store.activePath(threadId)));
-}
-/** A signed-out or removed person's call must not keep reaching the bot or spending the key. */
-function liveSignedIn(auth: RequestAuth): boolean {
-  return auth.kind !== "session" || sessions.isLive(auth.session.id);
-}
+const { liveBotFor, liveHistoryFor, liveSignedIn } = createLiveSessionContext({ store, sessions });
 /** On the bot's own engine, which already saw the requests, so nothing new reaches OpenAI. */
 function liveCallTitle(botId: string, threadId: string, excerpt: string): Promise<string | null> | null {
   const bot = store.projectBotForTask(botId, threadId);

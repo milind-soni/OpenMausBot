@@ -1,5 +1,6 @@
 // Live calls' settings in config.json: schema, type and environment overrides, kept out of server/config.ts.
 import { z } from "zod";
+import type { JsonObject } from "./schema.ts";
 import { qwenConfigSchema, qwenSavePatch, type QwenLiveConfig } from "./qwen-live-config.ts";
 
 export const LIVE_KEY_NEEDS_ENDPOINT = "Save the Azure endpoint first: a Live key works only with the endpoint it was saved for.";
@@ -88,6 +89,12 @@ export function liveConfigWithEnv(live: LiveConfig | undefined, env: NodeJS.Proc
   // file stands: saves mirror settings into the environment, so they must not be able to pair a forgotten key.
   if (envKey?.trim() && provider === "azure" && env.OMB_AZURE_OPENAI_LIVE_ENDPOINT?.trim() && next.keyFor === undefined) next.keyFor = liveKeyTarget(next) ?? NOWHERE;
   return next;
+}
+
+export function mergeStoredLiveConfig(current: JsonObject | undefined, merged: JsonObject, patch: LiveConfig | undefined): JsonObject {
+  if (!patch?.qwen) return merged;
+  const saved = z.record(z.string(), z.json()).safeParse(current?.qwen).data;
+  return { ...merged, qwen: { ...saved, ...patch.qwen } };
 }
 
 /** The non-secret Live settings a settings patch mirrors into the environment. */
