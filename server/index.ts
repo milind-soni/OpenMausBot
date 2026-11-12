@@ -74,7 +74,7 @@ import { avatarImageStatus } from "./avatar-image.ts";
 import { imageGenerationReady } from "./image-generation.ts";
 import { createImageToolRoutes } from "./routes/image-tools.ts"; import { createMeetingsHost } from "./host/meetings-host.ts"; import { meetingsUnavailablePrompt } from "./meetings/prompt.ts";
 import { createImageSettingsRoutes } from "./routes/image-settings.ts";
-import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
+import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts"; import { createBotFields } from "./create-bot-fields.ts";
 import { routeDirectTurn } from "./turn-route.ts"; import { QuickModelFallback } from "./quick-model-fallback.ts"; import { COMPUTER_JOURNAL_PATH, createSavedSteps, personRequest, savedStepsEnabled } from "./saved-steps/saved-steps.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, effectiveRoomTurnTimeoutMinutes, parseConversationTurnTimeout, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
@@ -465,7 +465,7 @@ import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-ov
 import { ProfileRequestService } from "./profile-requests.ts";
 import { ModelRequestService } from "./model-requests.ts";
 import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
-import type { TeamSetupRequest } from "../shared/team-setup.ts";
+import { startsWithoutCloudComputer, teamSetupDecisionText as decisionText, type TeamSetupRequest } from "../shared/team-setup.ts";
 import { profileRevision, profileSnapshot } from "./profile-revision.ts";
 import { flushAllProfileHistory, flushProfileHistory, readHistory, recordProfileChange, soulChanges } from "./profile-versions.ts";
 import { TeamMemory, TEAM_MEMORY_KINDS, type TeamMemoryKind } from "./team-memory.ts";
@@ -634,7 +634,7 @@ import { clearInternalTurn, isInternalTurn, markInternalTurn } from "./internal-
 import { createReactionRoutes } from "./routes/reactions.ts";
 import { createReactions, withReactionNotes, type Reactor } from "./reactions.ts";
 import { createPersonReplies } from "./person-replies.ts";
-import { personKey, relayedPersonKey } from "./person-key.ts";
+import { lendingPerson, lendingPersonKey, personKey, relayedPersonKey } from "./person-key.ts";
 import { createOutsideLineage, OUTSIDE_STAYS_HERE } from "./host/outside-lineage.ts"; import { OUTSIDE_REFUSAL, outsideRouteRefused } from "./host/outside-fence.ts"; import { createOutsideWrites } from "./host/outside-writes.ts";
 import { teamAiOwner } from "./host/team-ai-owner.ts"; import { createTeamOwners, type AskViewer } from "./host/team-owners.ts"; import { createTeamMessages } from "./host/team-messages.ts"; import { createTeamAwayHost } from "./host/team-away-host.ts"; import { createPlaceInbox, guestNameIn, placeInboxViewer } from "./host/place-inbox.ts"; import { relayedTurn } from "./host/relayed-turn.ts"; import { createPersonCalendar } from "./host/person-calendar.ts";
 import { createDevsReports } from "./host/devs-reports.ts"; import { bugReportEndpoint, devsReportSender, devsStatusAsker } from "./devs-report-send.ts"; import { captureRecentLog } from "./recent-log.ts"; import { createShareAnswer } from "./host/share-answer.ts";
@@ -897,8 +897,8 @@ function turnOrigin(capability: Pick<InternalCapability, "threadId" | "generatio
 /** Fail closed: only the person whose own message provably started this exact turn generation. Deliberately not the usage ledger's trigger, which defaults to the owner. */
 function sharedComputerPrincipal(capability: Pick<InternalCapability, "botId" | "threadId" | "generation">): string | null {
   if (CLOUD_HOME) return cloudLendingRefusal(capability) === null ? CLOUD_HOME_LENDER : null;
-  return provenRequestPerson(directRequestOwners.get(capability.threadId), capability.generation,
-    (messageId) => linePersonKey(store.messagesFor(capability.threadId).find((message) => message.id === messageId)));
+  return lendingPerson(provenRequestPerson(directRequestOwners.get(capability.threadId), capability.generation,
+    (messageId) => linePersonKey(store.messagesFor(capability.threadId).find((message) => message.id === messageId))), ownHome.ownServer(), () => sessions.list());
 }
 
 /** The only conversations that may feed a bot's memory, daily log, recall or brief; dropped whenever a session is revoked. */
@@ -931,7 +931,7 @@ function foreignTurnRunning(botId: string): boolean {
 /** On a Cloud home only the owner's own devices see the lent Mac, never a guest or a local process. */
 function sessionLendingPrincipal(auth: RequestAuth): string | null {
   if (CLOUD_HOME) return CLOUD_PERSONAL && cloudOwnerSession(auth) ? CLOUD_HOME_LENDER : null;
-  return auth.kind === "session" ? personKey(auth.session) : null;
+  return auth.kind === "session" ? lendingPersonKey(auth.session, ownHome.ownServer()) : null;
 }
 
 const CLOUD_OWNER_PROFILE_FIELDS = ["name", "title", "description", "soul", "notifications"] as const;
@@ -1922,8 +1922,8 @@ const computerParks = new Map<string, string>();
 const parkedSeats = new Map<string, string>();
 const COMPUTER_FREE_NOTE = "OpenMausBot computer update: the computer this conversation waited for is free again. Continue the task that parked waiting for it.";
 const STEP_CAP_NOTE = "Your previous turn stopped at the step limit; continue from where it stopped.";
-const teamSetupDecisionText = (request: TeamSetupRequest): string =>
-  `OpenMausBot team setup decision ${request.requestId}: ${JSON.stringify(request.result)}. Report this exact result and continue the user's already requested work. Do not ask for confirmation again or repeat this setup/deletion. A denied or cancelled operation did not authorize any substitute action. Existing thread models were not changed.`;
+const lacksCloudComputer = (bot: BotRecord | null | undefined): boolean => !!bot && startsWithoutCloudComputer(bot, { cloudOn: boat.boatConfigured(cfg), teamComputer: Boolean(inheritedTeamComputer(bot)) });
+const teamSetupDecisionText = (request: TeamSetupRequest): string => decisionText(request, (id) => lacksCloudComputer(store.bot(id)));
 const connectionUpdateText = (labels: readonly string[]): string =>
   `OpenMausBot connection update: the user securely connected ${labels.join(", ")}. Continue the task that paused for this connection. Do not ask them to connect it again.`;
 
@@ -12090,7 +12090,7 @@ ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: (
 const orgInstallStatuses = () => orgLibrary?.installStatuses() ?? new Map();
 ROUTES.push(createBotPresetRoutes({ presets: presetStore, orgStatuses: orgInstallStatuses })); ROUTES.push(createWorkspaceBannerRoutes({ changed: () => broadcast({ kind: "config", ...configStatus() }) })); ROUTES.push(createStarterAwakeRoutes({ awake: starterAwake }));
 ROUTES.push(createSharedComputerRoutes({ enabled: (auth) => lendingEnabled() || (ownerLends() && ownHome.owner(auth)), computers: sharedComputers, sessionLive: (id) => sessions.isLive(id), environmentId: ENVIRONMENT_ID,
-  cloudHomeLender: CLOUD_HOME ? CLOUD_HOME_LENDER : null, principal: sessionLendingPrincipal, personKey, power: () => cloudPower, links: CLOUD_HOME ? deviceLinks : null, upgrades, asks: computerAsks?.asks ?? null, answerer: cardAnswererFor }));
+  cloudHomeLender: CLOUD_HOME ? CLOUD_HOME_LENDER : null, principal: sessionLendingPrincipal, personKey: (session) => lendingPersonKey(session, ownHome.ownServer()), power: () => cloudPower, links: CLOUD_HOME ? deviceLinks : null, upgrades, asks: computerAsks?.asks ?? null, answerer: cardAnswererFor }));
 // `routines` is assigned at boot, so it is read per request.
 ROUTES.push(createBotMessageRoutes({
   store, registry, handoffs, liveTurn: (threadId) => liveTurns.running(threadId), phoneSecretSubmissions, directTurnDispatchClaims, groupSpeakers,
@@ -14153,10 +14153,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (store.bots.length >= MAX_WORKSPACE_BOTS) {
           return json(res, 409, { error: `this workspace is limited to ${MAX_WORKSPACE_BOTS} bots` });
         }
-        const name = String(body.name ?? "").trim();
-        const role = String(body.role ?? "").trim();
-        const instructions = String(body.instructions ?? "").trim();
-        if (!name || !role || !instructions) {
+        const fields = createBotFields(body, chief, store.bots);
+        if ("error" in fields) return json(res, fields.status, { error: fields.error });
+        const { name, role, instructions, soul } = fields;
+        if (!name || !role || !soul) {
           return json(res, 400, { error: "name, role, and instructions are required" });
         }
         if (name.length > 80) return json(res, 400, { error: "name must be at most 80 characters" });
@@ -14169,7 +14169,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         let selection: ModelSelection;
         if (body.modelSelection === undefined) {
-          selection = await defaultSelection();
+          const copied = fields.modelSelection && checkedModelSelection(fields.modelSelection, undefined, true); selection = copied && copied.ok && !validateModelProposal(copied.selection) ? copied.selection : await defaultSelection();
         } else {
           const checked = checkedModelSelection(body.modelSelection, undefined, true);
           if (!checked.ok) return json(res, checked.status, refusalBody(checked));
@@ -14190,7 +14190,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 429, { error: `You can create at most ${MAX_CREATED_BOTS_PER_TURN} bots in one turn. Use the team you have before adding more.` });
         }
         if (store.bots.length >= MAX_WORKSPACE_BOTS) return json(res, 409, { error: `this workspace is limited to ${MAX_WORKSPACE_BOTS} bots` });
-        const duplicate = store.bots.find(
+        const recheck = body.copyFromBotId === undefined ? fields : createBotFields(body, chief, store.bots); if ("error" in recheck) return json(res, recheck.status, { error: recheck.error }); const duplicate = store.bots.find(
           (candidate) =>
             !candidate.hidden &&
             sectionKey(candidate.section) === sectionKey(chief.section) &&
@@ -14199,7 +14199,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (duplicate) {
           return json(res, 409, { error: `@${duplicate.name} already exists in this section; use list_bots` });
         }
-        const summary = instructions.split("\n").find((line) => line.trim())?.trim() ?? "";
+        const summary = soul.split("\n").find((line) => line.trim())?.trim() ?? "";
         const setup = {
           botId: chief.id,
           threadId: fromThreadId,
@@ -14214,7 +14214,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 name,
                 title: role,
                 description: summary.length > 200 ? `${summary.slice(0, 199).trimEnd()}…` : summary,
-                soul: instructions,
+                soul,
                 modelSelection: selection,
                 ...(cwd !== undefined ? { cwd } : {}),
               },
@@ -14241,7 +14241,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           section: created.section || "General",
           model: created.modelSelection.model,
           modelSelection: created.modelSelection, ...(botNameClash.warning(created.name) ? { warning: botNameClash.warning(created.name) } : {}),
-          ...(paused ? { paused } : {}),
+          ...(paused ? { paused } : {}), ...(lacksCloudComputer(created) ? { noCloudComputerYet: true } : {}),
         });
       }
       if (method === "POST" && (path === "/api/internal/create-room" || path === "/api/internal/manage-room")) {

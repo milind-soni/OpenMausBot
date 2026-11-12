@@ -3487,7 +3487,7 @@
   "settings.logins.onePassword.refresh": "更新",
   "settings.logins.onePassword.disconnect": "接続を解除",
   "settings.logins.onePassword.vaults": "1PasswordのVault",
-  "settings.logins.onePassword.vaultUse": "ログイン情報{count}件 · {who}",
+  "settings.logins.onePassword.vaultUse": "ウェブサイトのログイン情報{count}件 · {who}",
   "settings.logins.onePassword.changeVault": "{vault}を使用できるボットを変更",
   "settings.logins.onePassword.error": "1Password に接続できませんでした。インターネット接続とトークンを確認して、もう一度お試しください。",
   "settings.logins.onePassword.note": "トークンは、{app}が動作しているコンピューター上で暗号化され、再表示されることはありません。1Passwordのログイン情報は上のリストに表示され、同じ方法で入力されます。変更は1Passwordで行ってください。ボットを指定しない限り、Vaultはすべてのボットが使用できます。",
