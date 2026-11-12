@@ -2,6 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { productName } from "@/lib/brand";
 import { FakePhoneSocket, fakePhoneStream } from "@/testing/phone-stream";
 import type { AndroidDeviceStatus, AndroidUsbDevice } from "@/types/ogb";
 import { AndroidDevicePanel, useAndroidUsbDevices, type AndroidUsbDevicesStatus } from "./AndroidDevicePanel";
@@ -148,7 +149,7 @@ describe("AndroidDevicePanel with the server's phones", () => {
     expect(bridge.frame).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain("Watching · the bots keep working");
     expect(document.body.textContent).toContain("First-time USB setup");
-    expect(document.body.textContent).toContain("Connected over USB to the computer that runs OpenMausBot.");
+    expect(document.body.textContent).toContain(`Connected over USB to the computer that runs ${productName()}.`);
     expect(document.body.textContent).not.toContain("stay on this computer");
   });
 
