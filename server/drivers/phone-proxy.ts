@@ -612,14 +612,14 @@ async function handle(message: Json, ensureClaim: () => Promise<ClaimOutcome>) {
   if (method === "tools/call") {
     const name = String(params.name ?? "");
     if (!TOOLS.some((tool) => tool.name === name)) return rpcError(id, -32602, `Unknown tool: ${name}`);
-    const claim = await ensureClaim();
-    if (!claim.ok) return ok(id, textResult(claim.message, true));
-    callsCancelled.set(id, false);
+    if (name === "batch") callsCancelled.set(id, false);
     const stillWanted = async (): Promise<ClaimOutcome> => {
       const stillClaimed = await ensureClaim();
       return callsCancelled.get(id) ? { ok: false, message: "The client cancelled this call." } : stillClaimed;
     };
     try {
+      const claim = await stillWanted();
+      if (!claim.ok) return ok(id, textResult(claim.message, true));
       return ok(id, await callTool(name, (params.arguments ?? {}) as Json, stillWanted));
     } catch (error) {
       return ok(id, textResult(error instanceof Error ? error.message : String(error), true));

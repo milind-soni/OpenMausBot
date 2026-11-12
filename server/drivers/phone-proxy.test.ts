@@ -481,6 +481,27 @@ esac
     expect(adbLog()).toEqual(["devices -l", ...adb]);
   });
 
+  it.each([
+    { name: "batch", args: { steps: [{ action: "tap", x: 540, y: 1200 }] }, result: { content: [{ type: "text", text: "The client cancelled this call." }], isError: true }, adb: [] },
+    { name: "tap", args: { x: 540, y: 1200 }, result: { content: [{ type: "text", text: "Tapped 540,1200" }] }, adb: ["devices -l", "-s FAKE123 shell input tap 540 1200"] },
+  ])("a cancel notice during the phone claim stops a batch from starting, not a single tool: $name", async ({ name, args, result, adb }) => {
+    const harness = createServer((request, response) => {
+      request.resume();
+      setTimeout(() => response.writeHead(200).end("{}"), 300);
+    });
+    await new Promise<void>((resolve) => harness.listen(0, "127.0.0.1", resolve));
+    try {
+      const { port } = harness.address() as AddressInfo;
+      const claimed = startProxy({ OMB_HARNESS_URL: `http://127.0.0.1:${port}`, OMB_PHONE_TOKEN: "tok" });
+      rmSync(join(home, "adb.log"), { force: true });
+      const response = await claimed(name, args, "this call");
+      expect(response.result).toEqual(result);
+      expect(adbLog()).toEqual(adb);
+    } finally {
+      harness.close();
+    }
+  });
+
   it("stops a batch at the next step once the harness refuses the claim", async () => {
     const answers = [200, 409];
     const harness = createServer((request, response) => {
