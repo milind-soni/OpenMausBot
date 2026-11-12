@@ -47,6 +47,8 @@
   "telnyx.notice": "Paste an API key from your Telnyx portal. {app} never shows it again, and Disconnect deletes it. Telnyx reaches its whole API through one tool, so every Telnyx action a bot takes follows Sending on your behalf, including buying numbers billed to your account. Choose which bots get it under Bot access. To have a bot answer texts, add a webhook for that bot in Automations and set it on your Telnyx messaging profile.",
   "agentphone.description": "US and Canadian numbers for your bots, with texts and calls, on your own AgentPhone account.",
   "agentphone.notice": "Sign in with your AgentPhone account. No API key needed. A bot that can use AgentPhone can buy numbers, text and place calls, billed to your account; each of those follows Sending on your behalf, so choose which bots get it under Bot access. To have a bot answer texts and calls, add a webhook for that bot in Automations and set it in AgentPhone.",
+  "bubblav.description": "Your website’s AI support chatbot on BubblaV: reports, unanswered questions, conversations, knowledge and widget settings.",
+  "bubblav.notice": "Sign in with BubblaV and choose one chatbot. No API key needed. With Full access, a bot that can use BubblaV can read that chatbot’s conversations and leads and change or delete its knowledge and settings, so choose which bots get it under Bot access. Choose Read only on BubblaV’s consent page to block every change.",
   "email.title": "Email",
   "email.description": "Read and send mail on any mail host, with your address and password.",
   "email.menu": "Email options",

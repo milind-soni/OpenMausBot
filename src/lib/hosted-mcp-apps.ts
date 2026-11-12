@@ -1,5 +1,6 @@
 import { CreditCard, Mail, PhoneCall, RadioTower, Smartphone, type LucideIcon } from "lucide-react";
 
+import bubblavLogo from "@/assets/bubblav/logo.png";
 import whopLogo from "@/assets/whop/logo.png";
 import type { LocaleKey } from "@/locales";
 import { POSTIZ_SERVER } from "../../shared/postiz";
@@ -83,6 +84,16 @@ export const HOSTED_MCP_APPS = [
     description: "agentphone.description",
     notice: "agentphone.notice",
     keywords: "agentphone phone number sms text call calls",
+  },
+  {
+    id: "bubblav",
+    label: "BubblaV",
+    url: "https://www.bubblav.com/mcp",
+    // BubblaV supplies its logo for this card (src/assets/bubblav/README.md).
+    icon: { image: bubblavLogo },
+    description: "bubblav.description",
+    notice: "bubblav.notice",
+    keywords: "bubblav chatbot chat widget website customer support service knowledge base conversations leads analytics",
   },
 ] as const satisfies readonly HostedMcpApp[];
 
