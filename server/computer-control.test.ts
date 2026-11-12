@@ -99,6 +99,32 @@ describe("computer control", () => {
     expect(control.snapshot("b1")).toMatchObject({ helpReason: "first", help: { messageId: "card-1" } });
   });
 
+  it("a plea whose card no longer waits is neither shown nor listed, and counts again once its card waits again", () => {
+    const waiting = new Set(["card-1", "card-2"]);
+    const control = new ComputerControl(() => {}, Date.now, (ref) => waiting.has(ref.messageId));
+    control.requestHelp("b1", "first", ref("card-1"));
+    control.requestHelp("b1", "second", ref("card-2"));
+    waiting.delete("card-2");
+    expect(control.snapshot("b1")).toMatchObject({ helpReason: "first", help: { messageId: "card-1" } });
+    expect(control.pleas("b1").map((plea) => plea.messageId)).toEqual(["card-1"]);
+    waiting.delete("card-1");
+    expect(control.snapshot("b1")).toEqual({ held: false, helpReason: null, heldSinceMs: null });
+    expect(control.pleas("b1")).toEqual([]);
+    waiting.add("card-2");
+    expect(control.snapshot("b1")).toMatchObject({ helpReason: "second", help: { messageId: "card-2" } });
+  });
+
+  it("lists every open plea on a key, oldest first", () => {
+    const { control } = tracked();
+    control.requestHelp("b1", "first", ref("card-1"));
+    control.requestHelp("b1", "second", ref("card-2"));
+    control.requestHelp("b2", "elsewhere", ref("card-3"));
+    expect(control.pleas("b1").map((plea) => plea.messageId)).toEqual(["card-1", "card-2"]);
+    control.settleHelp("card-1");
+    expect(control.pleas("b1").map((plea) => plea.messageId)).toEqual(["card-2"]);
+    expect(control.pleas("nobody")).toEqual([]);
+  });
+
   it("settles only the card it names, wherever it was raised", () => {
     const { control, changes } = tracked();
     control.requestHelp("b1", "first", ref("card-1"));

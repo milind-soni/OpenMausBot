@@ -30,7 +30,7 @@ const MAX_REASON_CHARS = 280;
 
 interface Entry {
   heldSinceMs: number | null;
-  /** Open pleas, oldest first; the newest is the one shown. */
+  /** Open pleas, oldest first; the newest whose card still waits is the one shown. */
   pleas: Array<{ reason: string; ref: ComputerHelpRef }>;
   /** Opaque workspace lease. It is deliberately absent from every snapshot. */
   controlLeaseId: string | null;
@@ -40,19 +40,28 @@ export class ComputerControl {
   private entries = new Map<string, Entry>();
   private onChange: (botId: string, snapshot: ControlSnapshot) => void;
   private now: () => number;
+  private waits: (ref: ComputerHelpRef) => boolean;
 
   constructor(
     onChange: (botId: string, snapshot: ControlSnapshot) => void = () => {},
     now: () => number = Date.now,
+    /** Whether a plea's sign-in card still waits for the person. A plea whose card stopped, left the active branch or lost its
+     * conversation is kept but neither shown nor counted, and counts again if its card waits again. */
+    waits: (ref: ComputerHelpRef) => boolean = () => true,
   ) {
     this.onChange = onChange;
     this.now = now;
+    this.waits = waits;
+  }
+
+  private waiting(entry: Entry): Entry["pleas"] {
+    return entry.pleas.filter((plea) => this.waits(plea.ref));
   }
 
   snapshot(botId: string): ControlSnapshot {
     const entry = this.entries.get(botId);
     if (!entry) return NO_CONTROL;
-    const plea = entry.pleas.at(-1);
+    const plea = this.waiting(entry).at(-1);
     return {
       held: entry.heldSinceMs !== null,
       helpReason: plea?.reason ?? null,
@@ -104,6 +113,12 @@ export class ComputerControl {
     }
     this.drop(botId, entry);
     return { snapshot: this.changed(botId), released: true };
+  }
+
+  /** Open pleas on this key whose cards still wait, oldest first. */
+  pleas(botId: string): ComputerHelpRef[] {
+    const entry = this.entries.get(botId);
+    return entry ? this.waiting(entry).map((plea) => plea.ref) : [];
   }
 
   /** Never grants anything by itself; the same card asking again replaces its own plea. */
