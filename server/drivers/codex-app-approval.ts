@@ -14,6 +14,22 @@ export const plainRecord = (value: unknown): Record<string, unknown> | null =>
     ? value as Record<string, unknown>
     : null;
 
+/** RequestPermissionProfile uses null for permission families that were not
+ * requested; GrantedPermissionProfile requires those keys to be absent. */
+export function grantedPermissions(raw: unknown): Record<string, unknown> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>).filter(([, value]) => value !== null && value !== undefined),
+  );
+}
+
+export function additionalPermissionSummary(permissions: unknown, reason: unknown): string {
+  const requested = grantedPermissions(permissions);
+  const exact = JSON.stringify(requested);
+  const prefix = typeof reason === "string" && reason.trim() ? `${reason.trim()} — ` : "";
+  return `${prefix}Requested permissions: ${exact}`;
+}
+
 export const containsControlCharacter = (value: string): boolean => {
   for (const character of value) {
     const code = character.charCodeAt(0);

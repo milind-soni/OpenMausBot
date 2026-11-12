@@ -55,7 +55,7 @@ import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts"; import { messageItem } from "../harness/text-items.ts";
 import { codexAccountEmail, codexHome } from "./codex-identity.ts";
 import { linkSharedCodexHome } from "./codex-shared-home.ts";
-import { containsControlCharacter, mcpAppApprovalForm, mcpAppApprovalText, mcpElicitationDeclined, plainRecord } from "./codex-app-approval.ts";
+import { additionalPermissionSummary, containsControlCharacter, grantedPermissions, mcpAppApprovalForm, mcpAppApprovalText, mcpElicitationDeclined, plainRecord } from "./codex-app-approval.ts";
 import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, codexProviderMismatch, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexSignInRefused, codexUserError, codexUserFailure, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
 import { codexLoginCheck, codexLoginStatus, storedCodexLogin } from "./codex-login.ts";
 import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
@@ -116,22 +116,6 @@ interface CodexApprovalParams {
   turn: Record<string, unknown>;
   /** Legacy settings for an older app-server that rejects the named-profile field. */
   fallback?: Omit<CodexApprovalParams, "fallback">;
-}
-
-/** RequestPermissionProfile uses null for permission families that were not
- * requested; GrantedPermissionProfile requires those keys to be absent. */
-function grantedPermissions(raw: unknown): Record<string, unknown> {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-  return Object.fromEntries(
-    Object.entries(raw as Record<string, unknown>).filter(([, value]) => value !== null && value !== undefined),
-  );
-}
-
-function additionalPermissionSummary(permissions: unknown, reason: unknown): string {
-  const requested = grantedPermissions(permissions);
-  const exact = JSON.stringify(requested);
-  const prefix = typeof reason === "string" && reason.trim() ? `${reason.trim()} — ` : "";
-  return `${prefix}Requested permissions: ${exact}`;
 }
 
 /** Thread-config overrides adding `patterns` to the person's shell exclusions. Codex keeps two
