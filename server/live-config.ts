@@ -4,13 +4,14 @@ import { z } from "zod";
 export const LIVE_KEY_NEEDS_ENDPOINT = "Save the Azure endpoint first: a Live key works only with the endpoint it was saved for.";
 const NOWHERE = "nowhere";
 
-/** Live calls: `key` is a key for Live calls only; with `provider` "openai" (the default) a call without one uses `openai.key`, with "azure" it is the Azure resource's key and is required. `keyFor` says where `key` may go (`liveKeyTarget`): the server sets it when the key is saved and never takes it from a request; absent, the key is from before Azure was offered, so OpenAI's. `azureEndpoint` is the resource URL and `azureDeployment` the gpt-live-1 deployment name. `voice` is a GPT-Live voice. */
+/** Live calls: `key` is a key for Live calls only; with `provider` "openai" (the default) a call without one uses `openai.key`, with "azure" it is the Azure resource's key and is required, with "fish" it is a Fish Audio API key and is required. `keyFor` says where `key` may go (`liveKeyTarget`): the server sets it when the key is saved and never takes it from a request; absent, the key is from before Azure was offered, so OpenAI's. `azureEndpoint` is the resource URL and `azureDeployment` the gpt-live-1 deployment name. `fishAgentId` is the published Fish Audio agent a "fish" call starts; its voice is the agent's. `voice` is a GPT-Live voice. */
 export const liveConfigSchema = z.object({
   key: z.string().optional(),
   keyFor: z.string().max(300).optional(),
-  provider: z.enum(["openai", "azure"]).optional(),
+  provider: z.enum(["openai", "azure", "fish"]).optional(),
   azureEndpoint: z.string().trim().max(300).optional(),
   azureDeployment: z.string().trim().max(64).optional(),
+  fishAgentId: z.string().trim().max(128).optional(),
   voice: z.string().trim().max(40).regex(/^[a-z]*$/, "a Live voice is a lowercase built-in voice name").optional(),
   readTypedReplies: z.boolean().optional(),
   idleMinutes: z.number().int().min(1).max(60).optional(),
@@ -19,16 +20,18 @@ export const liveConfigSchema = z.object({
 export interface LiveConfig {
   key?: string;
   keyFor?: string;
-  provider?: "openai" | "azure";
+  provider?: "openai" | "azure" | "fish";
   azureEndpoint?: string;
   azureDeployment?: string;
+  fishAgentId?: string;
   voice?: string;
   readTypedReplies?: boolean;
   idleMinutes?: number;
 }
 
-/** Where a key saved now may go: "openai", or "azure:<host>"; null while Azure is chosen with no endpoint to tie it to. */
+/** Where a key saved now may go: "openai", "fish" (Fish Audio's own API host), or "azure:<host>"; null while Azure is chosen with no endpoint to tie it to. */
 export function liveKeyTarget(live: LiveConfig | undefined): string | null {
+  if (live?.provider === "fish") return "fish";
   if (live?.provider !== "azure") return "openai";
   try {
     const host = new URL(live.azureEndpoint?.trim() ?? "").host.toLowerCase();
@@ -67,12 +70,14 @@ export function liveConfigWithEnv(live: LiveConfig | undefined, env: NodeJS.Proc
     next.key = envKey;
   }
   const provider = env.OMB_LIVE_PROVIDER?.trim().toLowerCase();
-  if (provider === "openai" || provider === "azure") next.provider = provider;
+  if (provider === "openai" || provider === "azure" || provider === "fish") next.provider = provider;
   if (env.OMB_AZURE_OPENAI_LIVE_ENDPOINT !== undefined) next.azureEndpoint = env.OMB_AZURE_OPENAI_LIVE_ENDPOINT.trim();
   if (env.OMB_AZURE_OPENAI_LIVE_DEPLOYMENT !== undefined) next.azureDeployment = env.OMB_AZURE_OPENAI_LIVE_DEPLOYMENT.trim();
+  if (env.OMB_FISH_LIVE_AGENT_ID !== undefined) next.fishAgentId = env.OMB_FISH_LIVE_AGENT_ID.trim();
   // Set together in the environment, the key and the Azure endpoint are the operator's own pairing. A `keyFor` from the
   // file stands: saves mirror settings into the environment, so they must not be able to pair a forgotten key.
   if (envKey?.trim() && provider === "azure" && env.OMB_AZURE_OPENAI_LIVE_ENDPOINT?.trim() && next.keyFor === undefined) next.keyFor = liveKeyTarget(next) ?? NOWHERE;
+  if (envKey?.trim() && provider === "fish" && env.OMB_FISH_LIVE_AGENT_ID?.trim() && next.keyFor === undefined) next.keyFor = "fish";
   return next;
 }
 
@@ -82,5 +87,6 @@ export function liveSettingEnv(live: LiveConfig | undefined): Array<[value: stri
     [live?.provider, "OMB_LIVE_PROVIDER"],
     [live?.azureEndpoint, "OMB_AZURE_OPENAI_LIVE_ENDPOINT"],
     [live?.azureDeployment, "OMB_AZURE_OPENAI_LIVE_DEPLOYMENT"],
+    [live?.fishAgentId, "OMB_FISH_LIVE_AGENT_ID"],
   ];
 }

@@ -6,22 +6,27 @@ import type { LiveProvider, LiveSettings } from "../../shared/wire";
 import { Select } from "./Select";
 import { KEY_FIELD } from "./keys/KeyRow";
 
-type ProviderPatch = Partial<Pick<LiveSettings, "provider" | "azureEndpoint" | "azureDeployment">>;
+type ProviderPatch = Partial<Pick<LiveSettings, "provider" | "azureEndpoint" | "azureDeployment" | "fishAgentId">>;
 
 const FIELD = KEY_FIELD;
 
-export function LiveProviderSettings() {
+/** `locked` holds the provider, Azure endpoint and Fish agent while a key save is pending; `onSaving` reports a pending change to them. */
+export function LiveProviderSettings({ locked = false, onSaving }: { locked?: boolean; onSaving?: (saving: boolean) => void } = {}) {
   const { state, dispatch } = useStore();
   const live: LiveSettings = state.config?.live ?? { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
   const provider: LiveProvider = live.provider ?? "openai";
   const [endpoint, setEndpoint] = useState(live.azureEndpoint ?? "");
   const [deployment, setDeployment] = useState(live.azureDeployment ?? "");
+  const [agentId, setAgentId] = useState(live.fishAgentId ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const azureChanged = endpoint.trim() !== (live.azureEndpoint ?? "") || deployment.trim() !== (live.azureDeployment ?? "");
+  const agentChanged = agentId.trim() !== (live.fishAgentId ?? "");
 
   const save = async (patch: ProviderPatch) => {
+    if (locked) return;
     setSaving(true);
+    onSaving?.(true);
     setError(null);
     try {
       const body = await api<{ live: LiveSettings }>("/api/live/settings", { method: "PATCH", body: JSON.stringify(patch) });
@@ -30,6 +35,7 @@ export function LiveProviderSettings() {
       setError(saveError instanceof Error ? saveError.message : String(saveError));
     } finally {
       setSaving(false);
+      onSaving?.(false);
     }
   };
 
@@ -40,11 +46,12 @@ export function LiveProviderSettings() {
         <Select
           size="sm"
           value={provider}
-          disabled={saving}
+          disabled={saving || locked}
           onChange={(event) => void save({ provider: event.target.value as LiveProvider })}
         >
           <option value="openai">{t("call.live.provider.openai")}</option>
           <option value="azure">{t("call.live.provider.azure")}</option>
+          <option value="fish">{t("call.live.provider.fish")}</option>
         </Select>
       </label>
       {provider === "azure" && (
@@ -84,7 +91,38 @@ export function LiveProviderSettings() {
           {azureChanged && (
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || locked}
+              className="ui-button ui-button-md self-end rounded-full"
+            >
+              {t("common.save")}
+            </button>
+          )}
+        </form>
+      )}
+      {provider === "fish" && (
+        <form
+          className="flex flex-col gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void save({ fishAgentId: agentId.trim() });
+          }}
+        >
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] font-medium leading-[18px] text-ink">{t("call.live.fishAgentId")}</span>
+            <input
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              value={agentId}
+              onChange={(event) => setAgentId(event.target.value)}
+              className={FIELD}
+            />
+          </label>
+          <div className="text-[12px] leading-4 text-ink-secondary">{t("call.live.fishHint")}</div>
+          {agentChanged && (
+            <button
+              type="submit"
+              disabled={saving || locked}
               className="ui-button ui-button-md self-end rounded-full"
             >
               {t("common.save")}

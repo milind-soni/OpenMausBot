@@ -216,11 +216,15 @@ export function keyEntry(id: KeyId): KeyEntry {
   return entry;
 }
 
-/** With Azure OpenAI chosen for Live calls, the row for their key is about the Azure resource: required, and no OpenAI key. */
+/** With Azure OpenAI or Fish Audio chosen for Live calls, the row for their key is about that service: required, and no OpenAI key. */
 export function shownKeyEntry(id: KeyId, config: ConfigStatus | null | undefined): KeyEntry {
   const entry = keyEntry(id);
-  if (id !== "liveKey" || config?.live?.provider !== "azure" || !entry.target) return entry;
+  const provider = config?.live?.provider;
+  if (id !== "liveKey" || (provider !== "azure" && provider !== "fish") || !entry.target) return entry;
   const { shape: _openAiShape, ...target } = entry.target;
+  if (provider === "fish") {
+    return { ...entry, name: "Fish Audio", labelKey: "call.live.fishKeyField", purposeKey: "keys.purpose.liveKeyFish", target: { ...target, placeholder: "…", href: "https://fish.audio/app/api-keys/" } };
+  }
   return { ...entry, name: "Azure OpenAI", labelKey: "call.live.azureKeyField", purposeKey: "keys.purpose.liveKeyAzure", target: { ...target, placeholder: "…", href: "https://portal.azure.com" } };
 }
 
@@ -234,10 +238,18 @@ export function savedState(entry: KeyEntry, config: ConfigStatus | null | undefi
   return entry.target?.saved(config) ?? entry.status?.(config) ?? { configured: false };
 }
 
-export function keyMatches(entry: KeyEntry, query: string): boolean {
+/** With `config`, the row is matched as shown: the Live key row by the provider Live calls use. */
+/** With Azure or Fish Audio chosen, Live calls do not use the OpenAI key the Live calls row points at, so that row is hidden. */
+export function keyHidden(id: KeyId, config: ConfigStatus | null | undefined): boolean {
+  const provider = config?.live?.provider;
+  return id === "liveCalls" && (provider === "azure" || provider === "fish");
+}
+
+export function keyMatches(entry: KeyEntry, query: string, config?: ConfigStatus | null): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  return [t(entry.labelKey), t(entry.purposeKey), t(keySection(entry).titleKey), entry.name, ...entry.words].some((part) => part.toLowerCase().includes(q));
+  const shown = config ? shownKeyEntry(entry.id, config) : entry;
+  return [t(shown.labelKey), t(shown.purposeKey), t(keySection(shown).titleKey), shown.name, ...shown.words].some((part) => part.toLowerCase().includes(q));
 }
 
 export function looksLikeOtherKey(entry: KeyEntry, value: string): KeyEntry | null {

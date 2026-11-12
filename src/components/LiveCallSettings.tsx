@@ -2,7 +2,7 @@ import { useCallback, useId, useState } from "react";
 
 import { LIVE_VOICE_OPTIONS } from "../../shared/live-call";
 import { t } from "@/lib/i18n";
-import { liveDisclosure } from "@/lib/call-mode";
+import { liveDisclosure, liveKeyCopy } from "@/lib/call-mode";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import type { LiveSettings } from "../../shared/wire";
 import { LiveKeySetup } from "./LiveKeySetup";
@@ -17,6 +17,8 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
   const live: LiveSettings = state.config?.live ?? { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
   const [saving, setSaving] = useState(false);
   const [changingKey, setChangingKey] = useState(false);
+  const [keySaving, setKeySaving] = useState(false);
+  const [providerSaving, setProviderSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const typedHintId = useId();
   // Stable, so this callback ref runs once when the popover mounts, not on every save.
@@ -24,6 +26,8 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
     dialog?.querySelector<HTMLElement>("select, input, button")?.focus();
   }, []);
   const azure = live.provider === "azure";
+  const fish = live.provider === "fish";
+  const copy = liveKeyCopy(live.provider);
   const voice = live.voice || "marin";
   const known = LIVE_VOICE_OPTIONS.some((option) => option.id === voice);
 
@@ -68,7 +72,8 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
         onClose();
       }}
     >
-      <LiveProviderSettings />
+      <LiveProviderSettings locked={keySaving} onSaving={setProviderSaving} />
+      {!fish && <>
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t("call.live.voice")}</span>
         <Select
@@ -82,6 +87,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
         </Select>
       </label>
       <div className="-mt-2 text-[12px] text-ink-tertiary">{t("call.live.voiceNext")}</div>
+      </>}
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t("call.live.readTyped")}</span>
         <input
@@ -107,7 +113,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
         </Select>
       </label>
       <div className="flex items-center justify-between gap-2 border-t border-hairline/60 pt-2">
-        <span className="text-ink-secondary">{t(azure ? "call.live.azureKey" : "call.live.key")}</span>
+        <span className="text-ink-secondary">{t(copy.key)}</span>
         <span className="flex gap-2">
           <button type="button" className="text-accent hover:underline" onClick={() => setChangingKey((open) => !open)}>
             {t("call.live.keyChange")}
@@ -119,12 +125,13 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
           )}
         </span>
       </div>
-      {live.keySource !== "live" && azure && <div className="-mt-2 text-[12px] text-ink-tertiary">{t("call.live.azureNeedsKey")}</div>}
-      {live.keySource !== "live" && !azure && (
+      {live.keySource !== "live" && (azure || fish) && <div className="-mt-2 text-[12px] text-ink-tertiary">{t(copy.missing)}</div>}
+      {live.keySource !== "live" && !azure && !fish && (
         <div className="-mt-2 text-[12px] text-ink-tertiary">{t(live.keySource === "openai" ? "call.live.keyFromApiKeys" : "call.live.needsKey")} <KeysLink id="openai" purpose="liveCalls" /></div>
       )}
-      {changingKey && <LiveKeySetup compact onSaved={() => setChangingKey(false)} />}
-      <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure })} {t(azure ? "call.live.azureCost" : "call.live.cost")}</div>
+      {/* Keyed by provider: a key typed for one provider is never saved for another. */}
+      {changingKey && <LiveKeySetup key={state.config?.live?.provider ?? "openai"} compact locked={providerSaving} onSaving={setKeySaving} onSaved={() => setChangingKey(false)} />}
+      <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, fish })} {t(copy.cost)}</div>
       {error && <div className="text-[12px] text-danger">{error}</div>}
     </div>
   );

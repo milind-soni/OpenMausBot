@@ -7,6 +7,7 @@ import { json, readBody } from "../harness/http.ts";
 import { LiveCallBusyError, LiveCallSignedOutError } from "../live-call-controller.ts";
 import { LIVE_NEEDS_KEY, LiveSessionError } from "../live-call.ts";
 import { requiredScope } from "../request-auth.ts";
+import { RELAY_POLL_MS } from "../live-fish.ts";
 import { createLiveRoutes, type LiveRouteDeps } from "./live.ts";
 import { dispatchRoutes } from "./table.ts";
 
@@ -57,6 +58,7 @@ function deps(overrides: Partial<LiveRouteDeps> = {}): LiveRouteDeps & { saved: 
     },
     resolveTarget: (botId, threadId) => (botId === "bot1" && (threadId ?? "t1") === "t1" ? { botId, botName: "Ada", threadId: threadId ?? "t1" } : null),
     settings: () => ({ configured: true, voice: "marin", readTypedReplies: true, idleMinutes: 5 }),
+    fishRelay: () => null,
     saveSettings: vi.fn(async (patch: SettingsPatch): Promise<LiveSettings> => {
       saved.push(patch);
       return { configured: true, voice: "marin", readTypedReplies: true, idleMinutes: 5, ...patch };
@@ -150,6 +152,16 @@ describe("live routes", () => {
     expect((await request(d, "PATCH", "/api/live/settings", { azureEndpoint: "", azureDeployment: "" })).status).toBe(200);
     expect(d.saved).toEqual([azure, { azureEndpoint: "", azureDeployment: "" }]);
   });
+  it("saves a Fish Audio provider and agent id, refusing an id that is not one", async () => {
+    const d = deps();
+    expect(await request(d, "PATCH", "/api/live/settings", { provider: "fish", fishAgentId: " agent_1 " })).toMatchObject({ status: 200, body: { live: { provider: "fish", fishAgentId: "agent_1" } } });
+    for (const fishAgentId of ["../x", "a b", "x".repeat(129), 7]) {
+      expect(await request(d, "PATCH", "/api/live/settings", { fishAgentId }), String(fishAgentId)).toMatchObject({ status: 400 });
+    }
+    expect((await request(d, "PATCH", "/api/live/settings", { fishAgentId: "" })).status).toBe(200);
+    expect(d.saved).toEqual([{ provider: "fish", fishAgentId: "agent_1" }, { fishAgentId: "" }]);
+  });
+
   it("saves nothing for an empty patch", async () => {
     const d = deps();
     expect(await request(d, "PATCH", "/api/live/settings", {})).toEqual({ status: 400, body: { error: "nothing to save" } });
@@ -177,6 +189,7 @@ describe("live routes", () => {
     expect(requiredScope("GET", "/api/live/call")).toBe("admin");
     expect(requiredScope("PATCH", "/api/live/settings")).toBe("admin");
     expect(requiredScope("POST", "/api/live/device-revoked")).toBe("admin");
+    expect(requiredScope("POST", "/api/live/relay")).toBe("admin");
   });
 
   describe("a call from a paired phone", () => {
@@ -211,5 +224,69 @@ describe("live routes", () => {
       expect((await request(d, "POST", "/api/live/device-revoked", undefined, fromPhone("a/b"))).status).toBe(400);
       expect(d.calls.deviceRevoked).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("a Fish Audio call", () => {
+  const TOKEN = { transport: "livekit" as const, session_id: "fish_1", expires_at: "x", max_duration_seconds: 900, livekit_url: "wss://lk.example", token: "jwt" };
+  const fishTransport = { type: "fish" as const, session: TOKEN, relayToken: "r".repeat(43) };
+
+  function relayDeps() {
+    const relay = { receive: vi.fn(), poll: vi.fn(async (_wait: number) => ({ commands: [{ type: "close" as const }], closed: false })) };
+    const fishRelay = vi.fn((sessionId: string, token: string) => (sessionId === "fish_1" && token === fishTransport.relayToken ? relay : null));
+    return { d: deps({ fishRelay }), relay, fishRelay };
+  }
+  const body = (extra: Record<string, unknown> = {}) => ({ sessionId: "fish_1", token: fishTransport.relayToken, ...extra });
+
+  it("starts with no SDP and answers with Fish's session and the relay's token", async () => {
+    const call = deps().calls.current()!;
+    const d = deps({ calls: { ...deps().calls, start: vi.fn(async () => ({ call, fish: fishTransport })) } });
+    const res = await request(d, "POST", "/api/live/session", { botId: "bot1", client: "web" });
+    expect(res).toEqual({ status: 201, body: { call: expect.objectContaining({ callId: "c1" }), transport: fishTransport } });
+    expect(vi.mocked(d.calls.start).mock.calls[0]![0]).not.toHaveProperty("sdp");
+  });
+
+  it("passes the client's reports to the relay and answers with what is queued, without waiting", async () => {
+    const { d, relay } = relayDeps();
+    const events = [{ type: "connected" }, { type: "heard", text: "hi", startMs: 1, endMs: 2 }, { type: "delegate", id: "call_1", atMs: 3 }];
+    expect(await request(d, "POST", "/api/live/relay", body({ events, wait: true }))).toEqual({ status: 200, body: { commands: [{ type: "close" }], closed: false } });
+    expect(relay.receive).toHaveBeenCalledWith(events, undefined);
+    expect(relay.poll).toHaveBeenCalledWith(0);
+  });
+
+  it("holds a poll open only when the client asks to wait and reports nothing", async () => {
+    const { d, relay } = relayDeps();
+    await request(d, "POST", "/api/live/relay", body({ wait: true }));
+    await request(d, "POST", "/api/live/relay", body());
+    expect(relay.poll.mock.calls.map(([wait]) => wait)).toEqual([RELAY_POLL_MS, 0]);
+    expect(relay.receive).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 to a wrong token or session, and gives the relay nothing", async () => {
+    const { d, relay } = relayDeps();
+    expect(await request(d, "POST", "/api/live/relay", body({ token: "guessed" }))).toEqual({ status: 404, body: { error: "That call is not running." } });
+    expect((await request(d, "POST", "/api/live/relay", body({ sessionId: "other" }))).status).toBe(404);
+    expect(relay.receive).not.toHaveBeenCalled();
+    expect(relay.poll).not.toHaveBeenCalled();
+  });
+
+  it("refuses a report that is not one the client makes, before looking for the relay", async () => {
+    const { d, fishRelay } = relayDeps();
+    for (const bad of [
+      body({ events: [{ type: "heard", text: "", startMs: 0, endMs: 1 }] }),
+      body({ events: [{ type: "heard", text: "x".repeat(2_001), startMs: 0, endMs: 1 }] }),
+      body({ events: [{ type: "delegate", id: "a b", atMs: 0 }] }),
+      body({ events: [{ type: "ended", reason: "Bye!" }] }),
+      body({ events: [{ type: "heard", text: "hi", startMs: -1, endMs: 1 }] }),
+      body({ events: [{ type: "session.close" }] }),
+      body({ events: [{ type: "connected", extra: 1 }] }),
+      body({ events: Array.from({ length: 21 }, () => ({ type: "connected" })) }),
+      body({ extra: 1 }),
+      { sessionId: "fish_1" },
+      "{not json",
+    ]) {
+      expect((await request(d, "POST", "/api/live/relay", bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(fishRelay).not.toHaveBeenCalled();
   });
 });
