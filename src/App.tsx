@@ -1,3 +1,4 @@
+import { ScheduleSheet } from "@/components/ScheduleSheet";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
@@ -15,6 +16,7 @@ import { useQueuedMessageSender } from "@/lib/useQueuedMessageSender";
 
 // Full-page screens outside the chat loop load on first open, keeping them
 // out of the startup bundle.
+const SchedulesScreen = lazy(() => import("@/components/SchedulesScreen").then(m => ({ default: m.SchedulesScreen })));
 const SettingsScreen = lazy(() => import("@/components/SettingsScreen").then((m) => ({ default: m.SettingsScreen })));
 const AppsScreen = lazy(() => import("@/components/AppsScreen").then((m) => ({ default: m.AppsScreen })));
 const ProjectsScreen = lazy(() => import("@/components/ProjectsScreen").then((m) => ({ default: m.ProjectsScreen })));
@@ -68,7 +70,8 @@ function Shell() {
       <UpdateBanner />
       <div className="relative flex min-h-0 flex-1">
       <Sidebar />
-      {state.appSettingsOpen ? (
+      {state.scheduleSheet && <ScheduleSheet {...state.scheduleSheet} onClose={() => dispatch({ type: "closeSchedule" })} />}
+      {state.schedulesOpen ? <Suspense fallback={<ScreenFallback />}><SchedulesScreen /></Suspense> : state.appSettingsOpen ? (
         <Suspense fallback={<ScreenFallback />}>
           <SettingsScreen />
         </Suspense>

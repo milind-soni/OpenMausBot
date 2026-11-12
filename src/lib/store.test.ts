@@ -214,3 +214,16 @@ describe("dedicated apps page state", () => {
   });
 });
 
+
+describe("schedule navigation", () => {
+  it("keeps the schedule screen separate from chats and opens a prefilled sheet", () => {
+    const initial = { ...initialState, bots: [bot("b", "t")] };
+    const open = reducer(initial, { type: "toggleSchedules", open: true });
+    expect(open.schedulesOpen).toBe(true); expect(open.taskBoardOpen).toBe(false);
+    const sheet = reducer(open, { type: "openSchedule", target: { botId: "b" }, prompt: "Saved draft" });
+    expect(sheet.scheduleSheet).toMatchObject({ target: { botId: "b" }, prompt: "Saved draft" });
+    const selected = reducer(sheet, { type: "select", id: "b" }); expect(selected.schedulesOpen).toBe(false);
+    const settings = reducer(open, { type: "toggleSettings", open: true, focusBackup: true });
+    expect(settings.schedulesOpen).toBe(false); expect(settings.settingsFocus).toBe("backup");
+  });
+});

@@ -1,3 +1,4 @@
+import { AutoResumeNoticeCard } from "./AutoResumeNoticeCard";
 import { UsageRings } from "./UsageRings";
 import { Component, memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
@@ -289,6 +290,7 @@ function Bubble({
           {user ? (
             <>
               <AttachmentList attachments={message.attachments} />
+              {message.scheduled && <span className="mb-1 block text-[11px] text-ink-secondary">⏰ Scheduled</span>}
               {text && (
                 <div
                   className={cn(collapsible && "max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}
@@ -685,6 +687,7 @@ export function ChatView({ bot }: { bot: Bot }) {
               Stop
             </button>
           )}
+          <button type="button" title="Schedule run…" aria-label="Schedule run…" onClick={() => dispatch({ type: "openSchedule", target: { botId: bot.id } })} className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised">⏰</button>
           <UsageRings />
           <ModelPicker bot={bot} />
           <button
@@ -811,6 +814,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           Switching bots remounts the composer, which restores that bot's own
           saved draft (src/lib/composerDrafts.ts) instead of carrying the
           previous bot's half-written message over */}
+      <AutoResumeNoticeCard threadId={bot.threadId} />
       <Composer
         key={bot.id}
         bot={bot}

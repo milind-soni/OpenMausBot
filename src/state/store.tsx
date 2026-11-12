@@ -1,3 +1,4 @@
+import type { Schedule, ScheduleSnapshot, ScheduleTarget } from "../../server/schedule-types";
 import type { EngineUsage, UsagePreferences } from "../../server/usage-types";
 // Server-backed store. The React app holds no transports of its own:
 // it dispatches typed commands over HTTP and folds the one SSE event
@@ -54,6 +55,7 @@ export interface Message {
   /** screen messages: a frame of the bot's computer (base64) */
   png?: string;
   mime?: string;
+  scheduled?: { scheduleId: string; deliveryId: string };
   at: number;
   /** the message this one follows; null = thread root. Edited messages
    * share a parentId with the version they replace — that's a fork. */
@@ -104,7 +106,9 @@ export interface Bot {
   unread: boolean;
   busy?: boolean;
   modelSelection: ModelSelection;
-  backupModelSelection?: ModelSelection;
+  backupModelSelection?: ModelSelection | null;
+  onUsageLimit?: "backup" | "wait" | "stop";
+  usingBackup?: boolean;
   /** Where this bot's computer runs; unset uses this computer in the desktop app. */
   computer?: "local" | "off";
   pinned?: boolean;
@@ -179,6 +183,9 @@ export interface InstanceInfo {
 }
 
 export interface AppState {
+  schedules: ScheduleSnapshot;
+  schedulesOpen: boolean;
+  scheduleSheet: { target?: ScheduleTarget; schedule?: Schedule; prompt?: string } | null;
   usage: EngineUsage[];
   bots: Bot[];
   groups: Group[];
@@ -187,6 +194,7 @@ export interface AppState {
   /** selected chat — a bot id OR a group id */
   selectedId: string;
   settingsOpen: boolean;
+  settingsFocus?: "backup";
   appsOpen: boolean;
   computerOpen: boolean;
   appSettingsOpen: boolean;
@@ -206,6 +214,10 @@ export interface AppState {
 }
 
 export type Action =
+  | { type: "schedules"; snapshot: ScheduleSnapshot }
+  | { type: "toggleSchedules"; open?: boolean }
+  | { type: "openSchedule"; target?: ScheduleTarget; schedule?: Schedule; prompt?: string }
+  | { type: "closeSchedule" }
   | { type: "usage"; engines: EngineUsage[] }
   | { type: "hydrate"; bots: Bot[]; groups: Group[] }
   | { type: "groupPatched"; group: Partial<Group> & { id: string } }
@@ -240,7 +252,7 @@ export type Action =
   | { type: "interrupt"; botId: string }
   | { type: "connected"; value: boolean }
   | { type: "error"; message: string | null }
-  | { type: "toggleSettings"; open?: boolean }
+  | { type: "toggleSettings"; open?: boolean; focusBackup?: boolean }
   | { type: "toggleApps"; open?: boolean }
   | { type: "togglePlugins"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
@@ -256,7 +268,7 @@ export type Action =
       patch: Partial<
         Pick<
           Bot,
-          "name" | "title" | "description" | "notifications" | "computer" | "color" | "mascotExpression" | "pinned" | "hidden"
+          "name" | "title" | "description" | "notifications" | "onUsageLimit" | "backupModelSelection" | "computer" | "color" | "mascotExpression" | "pinned" | "hidden"
         >
       >;
     };
@@ -349,6 +361,10 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, instances: action.instances };
     case "usage":
       return { ...state, usage: action.engines };
+    case "schedules": return { ...state, schedules: action.snapshot };
+    case "openSchedule": return { ...state, scheduleSheet: { target: action.target, schedule: action.schedule, prompt: action.prompt } };
+    case "closeSchedule": return { ...state, scheduleSheet: null };
+    case "toggleSchedules": return { ...state, schedulesOpen: action.open ?? !state.schedulesOpen, appsOpen: false, projectsOpen: false, taskBoardOpen: false, appSettingsOpen: false, settingsOpen: false, computerOpen: false };
     case "configStatus":
       return { ...state, config: action.config };
     case "select": {
@@ -356,6 +372,7 @@ export function reducer(state: AppState, action: Action): AppState {
         return {
           ...state,
           selectedId: action.id,
+          schedulesOpen: false,
           appsOpen: false,
           projectsOpen: false,
           taskBoardOpen: false,
@@ -364,7 +381,7 @@ export function reducer(state: AppState, action: Action): AppState {
         };
       }
       return updateBot(
-        withMascotMotion({ ...state, selectedId: action.id, appsOpen: false, projectsOpen: false, taskBoardOpen: false, appSettingsOpen: false }, action.id, "switch"),
+        withMascotMotion({ ...state, selectedId: action.id, schedulesOpen: false, appsOpen: false, projectsOpen: false, taskBoardOpen: false, appSettingsOpen: false }, action.id, "switch"),
         action.id,
         (b) => ({ ...b, unread: false }),
       );
@@ -502,11 +519,13 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         settingsOpen: open,
+        settingsFocus: action.focusBackup ? "backup" : undefined,
         computerOpen: open ? false : state.computerOpen,
         appSettingsOpen: open ? false : state.appSettingsOpen,
         appsOpen: open ? false : state.appsOpen,
         projectsOpen: open ? false : state.projectsOpen,
         taskBoardOpen: open ? false : state.taskBoardOpen,
+        schedulesOpen: open ? false : state.schedulesOpen,
       };
     }
     case "toggleApps":
@@ -520,6 +539,7 @@ export function reducer(state: AppState, action: Action): AppState {
         appSettingsOpen: open ? false : state.appSettingsOpen,
         projectsOpen: open ? false : state.projectsOpen,
         taskBoardOpen: open ? false : state.taskBoardOpen,
+        schedulesOpen: open ? false : state.schedulesOpen,
       };
     }
     case "toggleComputer": {
@@ -532,6 +552,7 @@ export function reducer(state: AppState, action: Action): AppState {
         appsOpen: open ? false : state.appsOpen,
         projectsOpen: open ? false : state.projectsOpen,
         taskBoardOpen: open ? false : state.taskBoardOpen,
+        schedulesOpen: open ? false : state.schedulesOpen,
       };
     }
     case "toggleAppSettings": {
@@ -545,6 +566,7 @@ export function reducer(state: AppState, action: Action): AppState {
         appsOpen: open ? false : state.appsOpen,
         projectsOpen: open ? false : state.projectsOpen,
         taskBoardOpen: open ? false : state.taskBoardOpen,
+        schedulesOpen: open ? false : state.schedulesOpen,
       };
     }
     case "toggleProjects": {
@@ -557,6 +579,7 @@ export function reducer(state: AppState, action: Action): AppState {
         appSettingsOpen: open ? false : state.appSettingsOpen,
         appsOpen: open ? false : state.appsOpen,
         taskBoardOpen: open ? false : state.taskBoardOpen,
+        schedulesOpen: open ? false : state.schedulesOpen,
       };
     }
     case "toggleTaskBoard": {
@@ -564,6 +587,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         taskBoardOpen: open,
+        schedulesOpen: open ? false : state.schedulesOpen,
         projectsOpen: open ? false : state.projectsOpen,
         settingsOpen: open ? false : state.settingsOpen,
         computerOpen: open ? false : state.computerOpen,
@@ -645,6 +669,9 @@ export function reducer(state: AppState, action: Action): AppState {
 const MAX_KEPT_SCREEN_FRAMES = 8;
 
 export const initialState: AppState = {
+  schedules: { schedules: [], paused: false, deliveries: [] },
+  schedulesOpen: false,
+  scheduleSheet: null,
   usage: [],
   bots: [],
   groups: [],
@@ -1036,6 +1063,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       api("/api/config")
         .then((config) => alive && rawDispatch({ type: "configStatus", config }))
         .catch(() => {});
+      api("/api/schedules").then(snapshot => alive && rawDispatch({ type: "schedules", snapshot })).catch(() => {});
       api("/api/usage").then(({ engines }) => alive && rawDispatch({ type: "usage", engines })).catch(() => {});
       api("/api/tasks")
         .then(({ tasks, projects }) => alive && rawDispatch({ type: "hydrateTasks", tasks, projects }))
@@ -1151,6 +1179,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         // a key changed and the fleet hot-reloaded — refresh the picker so
         // newly available providers un-dim immediately
+        case "schedules": rawDispatch({ type: "schedules", snapshot: { schedules: frame.schedules, paused: frame.paused, deliveries: frame.deliveries } }); break;
+        case "schedule.started": {
+          const target = frame.target;
+          const bot = stateRef.current.bots.find(b => b.id === target?.botId);
+          const group = stateRef.current.groups.find(g => g.id === target?.groupId);
+          const notify = bot?.notifications || group?.memberIds.some(id => stateRef.current.bots.find(b => b.id === id)?.notifications);
+          if (!window.gbs && notify && "Notification" in window && Notification.permission === "granted") new Notification("Scheduled task started", { body: `${bot?.name ?? group?.name ?? "Your bot"} started its scheduled task.` });
+          break;
+        }
         case "usage":
           rawDispatch({ type: "usage", engines: frame.engines });
           break;

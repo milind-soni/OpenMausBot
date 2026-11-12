@@ -1,3 +1,4 @@
+import { usageView } from "@/lib/usage";
 // Model picker: an instance rail + model list, backed by /api/instances.
 // Routing is by exact instanceId only — an entry is never inferred from a
 // driver kind, and unavailable instances render disabled with the reason.
@@ -13,12 +14,15 @@ function modelLabel(instance: InstanceInfo | undefined, model: string, savedLabe
 
 export function ModelPicker({ bot, className }: { bot: Bot; className?: string }) {
   const { state, dispatch } = useStore();
+  const [backupOpen, setBackupOpen] = useState(false);
+  const [backupError, setBackupError] = useState("");
   const [open, setOpen] = useState(false);
   const [railId, setRailId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  const selection = bot.modelSelection;
+  const working = bot.busy || state.groups.some(g => g.busyBotId === bot.id);
+  const selection = bot.usingBackup && bot.backupModelSelection ? bot.backupModelSelection : bot.modelSelection;
   const active = state.instances.find((i) => i.instanceId === selection.instanceId);
   const railInstance =
     state.instances.find((i) => i.instanceId === (railId ?? selection.instanceId)) ??
@@ -34,18 +38,18 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
   };
 
   useEffect(() => {
-    if (!open) return;
+    if (!open && !backupOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(e.target as Node)) { setOpen(false); setBackupOpen(false); }
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setOpen(false); setBackupOpen(false); } };
     window.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, backupOpen]);
 
   const pick = (instance: InstanceInfo, model: string) => {
     dispatch({ type: "setModel", botId: bot.id, selection: {
@@ -57,7 +61,19 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
 
   return (
     <div ref={rootRef} className={cn("relative", className)}>
+      {bot.usingBackup && bot.backupModelSelection && <div className="mb-1 text-[11px] text-warning">
+        <button type="button" aria-expanded={backupOpen} onClick={() => { setBackupOpen(!backupOpen); setOpen(false); }}>Using backup ▾</button>
+        {backupOpen && <div className="absolute right-0 top-full z-40 mt-1 w-[260px] space-y-2 rounded-xl border border-hairline/40 bg-card p-3 text-ink shadow-xl">
+          <p>Currently using {selection.label ?? selection.model}.</p>
+          <button disabled={working} className="block rounded-lg bg-raised px-3 py-2 disabled:opacity-40" onClick={() => { void api(`/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ modelSelection: bot.backupModelSelection, backupModelSelection: null, onUsageLimit: "wait" }) }).then(({ bot: saved }) => { dispatch({ type: "botPatched", bot: saved }); setBackupOpen(false); }).catch(() => setBackupError("Couldn’t keep this model. Wait for the bot to finish and try again.")); }}>Keep this model</button>
+          <button disabled={working} className="block rounded-lg border border-hairline/50 px-3 py-2 text-ink-secondary hover:text-ink disabled:opacity-40" onClick={() => { void api(`/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ modelSelection: bot.modelSelection }) }).then(({ bot: saved }) => { dispatch({ type: "botPatched", bot: saved }); setBackupOpen(false); }).catch(() => setBackupError("Couldn’t switch back. Wait for the bot to finish and try again.")); }}>Switch back now</button>
+          <p className="text-[11px] text-ink-secondary">The main model will be used for a new request after its usage is reported as available.</p>
+          {usageView(state.usage.find(u => u.instanceId === bot.modelSelection.instanceId)).tone === "unknown" && <p className="text-[11px] text-ink-secondary">The main model’s usage is not known yet. You can choose it manually when you are ready.</p>}
+          {backupError && <p role="alert" className="text-danger">{backupError}</p>}
+        </div>}
+      </div>}
       <button
+        disabled={working}
         onClick={() => {
           setRailId(selection.instanceId);
           setOpen((o) => !o);

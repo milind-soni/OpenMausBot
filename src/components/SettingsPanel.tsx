@@ -1,3 +1,4 @@
+import { BackupSettings } from "./BackupSettings";
 import { ChevronLeft, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { MausAvatar } from "./Avatar";
@@ -159,6 +160,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             <ModelPicker bot={bot} />
           </div>
 
+          <BackupSettings bot={bot} />
           <div className="rounded-xl bg-card p-4">
             <div className="text-[15px] font-medium text-ink">Computer</div>
             <div className="mt-0.5 text-[13px] text-ink-secondary">

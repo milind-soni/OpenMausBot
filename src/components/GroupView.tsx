@@ -1,3 +1,4 @@
+import { AutoResumeNoticeCard } from "./AutoResumeNoticeCard";
 import { UsageRings } from "./UsageRings";
 // A room: several bots + you in one shared thread. Minimal by design — the
 // mauses are the only expressive element. Members sit in the header (their
@@ -87,6 +88,7 @@ const Transcript = memo(function Transcript({
                   title={new Date(m.at).toLocaleString()}
                 >
                   <AttachmentList attachments={m.attachments} />
+                  {m.scheduled && <span className="mb-1 block text-[11px] text-ink-secondary">⏰ Scheduled</span>}
                   {m.text && (user ? <ProjectMentionText text={m.text} /> : <ChatMarkdown text={m.text} />)}
                 </div>
                 {!user && <ReactionBar threadId={group.threadId} message={m} />}
@@ -227,6 +229,7 @@ export function GroupView({ group }: { group: Group }) {
               </span>
             ))}
           </div>
+          <button type="button" title="Schedule run…" aria-label="Schedule run…" onClick={() => dispatch({ type: "openSchedule", target: { groupId: group.id } })} className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised">⏰</button>
           <UsageRings />
           <button
             type="button"
@@ -395,6 +398,7 @@ export function GroupView({ group }: { group: Group }) {
         </button>
       )}
 
+      <AutoResumeNoticeCard threadId={group.threadId} />
       <Composer
         key={group.id}
         group={group}

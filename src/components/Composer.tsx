@@ -1,3 +1,4 @@
+import { ScheduleSheet } from "./ScheduleSheet";
 import { track } from "@/lib/analytics";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ArrowUp, Clock, Mic, Paperclip, Square, X } from "lucide-react";
@@ -60,6 +61,7 @@ export function Composer({
   // Drafts are kept per conversation, so switching away and back restores them.
   const draftId = draftKey({ botId: bot?.id, groupId: group?.id });
   const [initialDraft] = useState(() => loadDraft(draftId));
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [text, setText] = useState(initialDraft.text);
   const [attachments, setAttachments] = useState<Attachment[]>(initialDraft.attachments);
   const [isDragging, setIsDragging] = useState(false);
@@ -507,6 +509,7 @@ export function Composer({
             <Mic size={18} />
           </button>
         )}
+        {hasContent && <button type="button" disabled={!text.trim() || attachments.length > 0} onClick={() => setScheduleOpen(true)} aria-label="Send later…" title={attachments.length ? "Scheduled messages currently support text only" : "Send later…"} className="rounded-full p-2 text-ink-secondary hover:bg-raised disabled:opacity-40"><Clock size={16} /></button>}
         {hasContent && (
           <button
             onClick={send}
@@ -522,6 +525,7 @@ export function Composer({
         )}
         </div>
       </div>
+      {scheduleOpen && <ScheduleSheet target={group ? { groupId: group.id } : { botId: bot!.id }} prompt={text} onClose={() => setScheduleOpen(false)} onSaved={() => { setText(""); saveDraft(draftId, { text: "", attachments: [] }); }} />}
     </div>
   );
 }

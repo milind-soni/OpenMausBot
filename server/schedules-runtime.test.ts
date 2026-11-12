@@ -110,6 +110,21 @@ describe.skipIf(process.platform === "win32")("scheduled runs and recovery over 
     const result = await until(() => api("GET", "/api/bots"), r => r.body.groups.find((g: any) => g.id === group.id)?.messages.some((m: any) => m.from?.botId === id && m.kind === "text"));
     expect(result.body.groups.find((g: any) => g.id === group.id).messages.find((m: any) => m.text === "Room check").scheduled).toBeDefined();
   });
+  it("retries a failed room turn on the backup without creating another room request", async () => {
+    const id = await makeBot("primary", "gpt-new", { backupModelSelection: { instanceId: "backup", model: "grok-4.6" }, onUsageLimit: "backup" });
+    const group = (await api("POST", "/api/groups", { name: "Room recovery", memberIds: [id] })).body.group;
+    await api("POST", `/api/groups/${group.id}/messages`, { text: "Recover this room task" });
+    const result = await until(() => api("GET", "/api/bots"), r => r.body.groups.find((g: any) => g.id === group.id)?.messages.some((m: any) => m.text?.includes("fake acp")));
+    const room = result.body.groups.find((g: any) => g.id === group.id);
+    expect(room.messages.filter((m: any) => m.role === "user" && m.text === "Recover this room task")).toHaveLength(1);
+    expect((await getBot(id)).usingBackup).toBe(true);
+    // "Switch back now" re-saves the unchanged main model: the backup flag clears, the native session is kept.
+    const before = await getBot(id);
+    const switched = await api("PATCH", `/api/bots/${id}`, { modelSelection: before.modelSelection });
+    expect(switched.body.bot.usingBackup).toBe(false);
+    expect(switched.body.bot.modelSelection).toEqual(before.modelSelection);
+    expect(switched.body.bot.backupModelSelection).toEqual({ instanceId: "backup", model: "grok-4.6" });
+  });
   it("guards schedule mutations and scopes bot-created schedules and the 20-schedule cap", async () => {
     const bots = (await api("GET", "/api/bots")).body.bots;
     const dumped = JSON.parse(readFileSync(join(home, "claude-dump.json"), "utf8"));

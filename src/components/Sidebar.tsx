@@ -15,6 +15,7 @@ import {
   PinOff,
   Plus,
   Search,
+  AlarmClock,
   Settings,
   LayoutGrid,
   FolderKanban,
@@ -711,6 +712,9 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
 
       {/* Footer */}
       <div className={cn("px-3 pb-3 pt-2 flex flex-col gap-1", collapsed ? "w-full items-center px-1" : "w-full")}>
+        <button onClick={() => dispatch({ type: "toggleSchedules", open: true })} aria-label="Schedules" title={collapsed ? "Schedules" : undefined} className={cn("flex items-center gap-3 rounded-xl p-2 text-left hover:bg-raised", collapsed ? "justify-center p-2.5" : "w-full px-3 py-2", state.schedulesOpen && "bg-raised")}>
+          <AlarmClock size={20} className={state.schedulesOpen ? "text-accent" : "text-ink-secondary"} />{!collapsed && <><span className="min-w-0 flex-1 text-[14px] text-ink">Schedules</span><span className="rounded-full bg-raised px-2 text-[11px] text-ink-secondary">{state.schedules.paused ? "Paused" : state.schedules.schedules.filter(s => s.enabled).length}</span></>}
+        </button>
         <button
           onClick={() => dispatch({ type: "toggleTaskBoard", open: true })}
           aria-label={`Task Board, ${totalTaskCount} tasks`}

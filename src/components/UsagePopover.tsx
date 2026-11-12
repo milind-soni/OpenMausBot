@@ -20,7 +20,7 @@ export function UsagePopover({ items, now, onClose }: { items: UsageItem[]; now:
     onClose();
     if (bot) {
       dispatch({ type: "select", id: bot.id });
-      dispatch({ type: "toggleSettings", open: true });
+      dispatch({ type: "toggleSettings", open: true, focusBackup: true });
     }
   };
   return <div ref={panel} role="dialog" aria-label={items.length === 1 ? `${items[0].instance.displayName} usage details` : "AI usage details"}
