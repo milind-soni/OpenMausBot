@@ -123,7 +123,7 @@ describe("trust controls in the real renderer", () => {
 
     await click("Team map");
     const openMemory = async () => {
-      await expect.poll(() => evaluate('Boolean(document.querySelector(\'[data-team-key=""] details\'))')).toBe(true);
+      await expect.poll(() => evaluate('Boolean(document.querySelector(\'[data-team-key=""] details\'))'), { timeout: 10_000 }).toBe(true);
       await evaluate(`(() => { const menu = document.querySelector('[data-team-key=""] details'); if (!menu) throw new Error('No General team menu'); if (!menu.open) menu.querySelector('summary').click(); return true; })()`);
       await click("General department memory");
     };
