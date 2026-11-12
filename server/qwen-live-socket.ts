@@ -84,7 +84,8 @@ export class QwenLiveSocket implements LiveSocket {
   private playbackBytes = 0;
   private playbackOutstanding = 0;
   private playbackRunning = false;
-  private lastAudioAt = -Infinity;
+  private nextAudioAt = 0;
+  private lastAudioUntil = 0;
   private playbackTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(input: QwenSocketInput) {
@@ -149,6 +150,7 @@ export class QwenLiveSocket implements LiveSocket {
     if (credit.epoch > this.playbackEpoch) return false;
     if (credit.seq <= this.playbackSeq) return true;
     if (this.playbackBytes + credit.bytes > 24_000) return false;
+    if (!this.playbackRunning || !this.playbackBytes) this.resetAudioClock();
     const consumed = Math.min(this.playbackOutstanding, credit.bytes);
     this.playbackOutstanding -= consumed;
     this.playbackSeq = credit.seq;
@@ -219,6 +221,7 @@ export class QwenLiveSocket implements LiveSocket {
       "output audio budget": "qwen-output-audio-limit",
       "input audio budget": "qwen-input-audio-limit",
       "provider audio budget": "qwen-provider-backpressure",
+      "call duration limit": "qwen-duration-limit",
       "audio playback backpressure": "qwen-playback-backpressure",
       "audio playback failed": "qwen-playback-failed",
       "audio playback stalled": "qwen-playback-stalled",
@@ -272,6 +275,7 @@ export class QwenLiveSocket implements LiveSocket {
       if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(event.delta)) { this.close(1002, "invalid provider audio"); return; }
       const pcm = Buffer.from(event.delta, "base64");
       if (!pcm.length || pcm.length % 2 || this.audioBytes + pcm.length > MAX_QUEUED_AUDIO_BYTES) { this.close(1008, "output audio budget"); return; }
+      if (!this.audioBytes) this.resetAudioClock();
       this.audioQueue.push(pcm); this.audioBytes += pcm.length;
       this.watchPlayback();
       if (!this.audioTimer) this.drainAudio();
@@ -442,7 +446,8 @@ export class QwenLiveSocket implements LiveSocket {
 
   private write(event: Record<string, unknown>): void {
     if (this.readyState === 3) return;
-    if ((this.upstream as LiveSocket & { bufferedAmount?: number }).bufferedAmount! > 64_000 || Date.now() - this.startedAt > 3_600_000) {
+    if (Date.now() - this.startedAt > 3_600_000) { this.close(1000, "call duration limit"); return; }
+    if ((this.upstream as LiveSocket & { bufferedAmount?: number }).bufferedAmount! > 64_000) {
       this.close(1008, "provider audio budget"); return;
     }
     this.upstream.send(JSON.stringify(event));
@@ -457,6 +462,7 @@ export class QwenLiveSocket implements LiveSocket {
     this.watchPlayback();
     this.playbackBytes = 0; this.playbackSeq = 0;
     this.playbackRunning = false;
+    this.resetAudioClock();
     if (this.playbackFlow) this.playbackEpoch += 1;
     this.media?.send(JSON.stringify({ type: "audio.clear", ...(this.playbackFlow ? { epoch: this.playbackEpoch } : {}) }));
   }
@@ -466,28 +472,33 @@ export class QwenLiveSocket implements LiveSocket {
     this.emit({ type: "session.playback.incomplete", request_id: note.requestId, thread_id: note.threadId });
   }
 
+  private resetAudioClock(): void {
+    this.nextAudioAt = Math.max(performance.now(), this.lastAudioUntil);
+  }
+
   private drainAudio(): void {
     if (this.readyState !== 1 || !this.media) return;
-    if (!this.audioQueue.length) { this.flush(); return; }
-    if (this.playbackFlow && (!this.playbackBytes || !this.playbackRunning)) return;
-    const delay = this.playbackFlow ? 20 - (Date.now() - this.lastAudioAt) : 0;
-    if (delay > 0) {
-      this.audioTimer = setTimeout(() => { this.audioTimer = null; this.drainAudio(); }, delay);
-      this.audioTimer.unref?.();
-      return;
+    if (!this.audioQueue.length) { this.resetAudioClock(); this.flush(); return; }
+    if (this.playbackFlow && (!this.playbackBytes || !this.playbackRunning)) { this.resetAudioClock(); return; }
+    const now = performance.now();
+    this.nextAudioAt = Math.max(this.nextAudioAt, now - 80);
+    for (let sent = 0; sent < 5 && this.audioQueue.length && this.nextAudioAt <= now; sent++) {
+      if (this.playbackFlow && (!this.playbackBytes || !this.playbackRunning)) break;
+      if (this.media.bufferedAmount > 48_000) { this.close(1008, "audio playback backpressure"); return; }
+      const first = this.audioQueue[0]!;
+      const chunk = first.subarray(0, this.playbackFlow ? Math.min(960, this.playbackBytes) : 960);
+      if (chunk.length === first.length) this.audioQueue.shift();
+      else this.audioQueue[0] = first.subarray(chunk.length);
+      this.audioBytes -= chunk.length;
+      if (this.playbackFlow) { this.playbackBytes -= chunk.length; this.playbackOutstanding += chunk.length; }
+      this.nextAudioAt += chunk.length / 48;
+      this.lastAudioUntil = now + chunk.length / 48;
+      try { this.media.send(chunk); } catch { this.close(1011, "audio playback failed"); return; }
+      if (this.readyState !== 1) return;
+      if (!this.hasQueuedPlayback()) this.bufferedReadout = null;
+      this.watchPlayback(true);
     }
-    if (this.media.bufferedAmount > 48_000) { this.close(1008, "audio playback backpressure"); return; }
-    const first = this.audioQueue[0]!;
-    const chunk = first.subarray(0, this.playbackFlow ? Math.min(960, this.playbackBytes) : 960);
-    if (chunk.length === first.length) this.audioQueue.shift();
-    else this.audioQueue[0] = first.subarray(chunk.length);
-    this.audioBytes -= chunk.length;
-    if (this.playbackFlow) { this.playbackBytes -= chunk.length; this.playbackOutstanding += chunk.length; }
-    try { this.media.send(chunk); } catch { this.close(1011, "audio playback failed"); return; }
-    if (!this.hasQueuedPlayback()) this.bufferedReadout = null;
-    this.lastAudioAt = Date.now();
-    this.watchPlayback(true);
-    this.audioTimer = setTimeout(() => { this.audioTimer = null; this.drainAudio(); }, 20);
+    this.audioTimer = setTimeout(() => { this.audioTimer = null; this.drainAudio(); }, Math.max(1, Math.ceil(this.nextAudioAt - performance.now())));
     this.audioTimer.unref?.();
   }
 

@@ -1,6 +1,7 @@
 {
   "call.live.qwen.disclosure": "Uma chamada Qwen envia o áudio do microfone por este servidor ao Alibaba Cloud Qwen, junto com o contexto recente da conversa, as respostas do bot e os detalhes das aprovações. A chave separada do Qwen fica neste servidor, nunca no navegador.",
   "call.live.qwen.needsKey": "As chamadas Qwen precisam de uma chave para a região e o espaço de trabalho selecionados. Salve-a aqui ou em Configurações → Chaves de API.",
+  "call.live.qwen.endedDuration": "A chamada do Qwen atingiu o limite de uma hora. Inicie uma nova chamada para continuar.",
   "call.live.qwen.region": "Região da API Qwen",
   "call.live.qwen.region.beijing": "China (Pequim)",
   "call.live.qwen.region.singapore": "Internacional (Singapura)",

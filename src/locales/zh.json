@@ -1,6 +1,7 @@
 {
   "call.live.qwen.disclosure": "千问通话会经此服务器将麦克风音频、近期对话、机器人回复及审批详情发送至阿里云千问。独立的千问密钥仅保存在服务器上，不会返回浏览器。",
   "call.live.qwen.needsKey": "千问实时通话需要所选区域和工作空间的密钥。可在此处或“设置 → API 密钥”中保存。",
+  "call.live.qwen.endedDuration": "千问通话已达到一小时上限。请重新发起通话以继续。",
   "call.live.qwen.region": "千问接口区域",
   "call.live.qwen.region.beijing": "中国（北京）",
   "call.live.qwen.region.singapore": "国际（新加坡）",

@@ -141,6 +141,19 @@ it.each([undefined, "credit-v1"] as const)("does not mark a fully drained result
   expect(vi.getTimerCount()).toBe(0);
 });
 
+it("distinguishes the one-hour limit from provider backpressure", () => {
+  const limited = fixture();
+  vi.setSystemTime(Date.now() + 3_600_001);
+  limited.socket.send(JSON.stringify({ type: "session.commentary.append", thread_id: "fixture", content: "synthetic" }));
+  expect(limited.events).toContainEqual({ type: "error", error: { code: "qwen-duration-limit" } });
+  expect(limited.socket.readyState).toBe(3);
+  const congested = fixture();
+  congested.provider.bufferedAmount = 64_001;
+  congested.socket.send(JSON.stringify({ type: "session.commentary.append", thread_id: "fixture", content: "synthetic" }));
+  expect(congested.events).toContainEqual({ type: "error", error: { code: "qwen-provider-backpressure" } });
+  expect(congested.socket.readyState).toBe(3);
+});
+
 it("reports a fixed redacted reason when an explicit output limit is exceeded", () => {
   const f = fixture();
   f.provider.event({ type: "response.created", response: { id: "abuse" } });

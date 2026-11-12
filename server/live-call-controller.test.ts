@@ -143,6 +143,20 @@ describe("LiveCallController lifecycle", () => {
     expect(f.controller.clientFailure(f.callId, { type: "client.failure", code: "audio-context", contextState: "closed", bufferedBytes: 0, queuedMs: 0, frameAgeMs: 0 })).toBe(false);
     expect(f.logs.some(line => line.includes("source=client-untrusted"))).toBe(false);
   });
+  it("records the Qwen duration limit without reporting a dropped connection", async () => {
+    const f = await setupQwenMedia(owner, true, { recordCall: vi.fn() });
+    vi.setSystemTime(Date.now() + 3_600_001);
+    f.controller.inputMedia(f.callId, Buffer.alloc(640));
+    expect(f.frames.at(-1)).toMatchObject({ status: "ended", endReason: "duration-limit" });
+    expect(f.frames.at(-1)?.error).toBeUndefined();
+    expect(vi.mocked(f.deps.recordCall!).mock.calls.map(([input]) => input.record.endReason)).toEqual(["duration-limit"]);
+    expect(f.logs.find(line => line.includes("call ended"))).toContain("errors=qwen-duration-limit");
+    expect(f.controller.current()).toBeNull();
+    expect(f.media.close).toHaveBeenCalledOnce();
+    expect(f.listeners.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("records a Qwen call that the server shuts down as shutdown, though the adapter closes synchronously", async () => {
     const f = await setupQwenMedia(owner, true, { recordCall: vi.fn() });
     await f.controller.shutdown();

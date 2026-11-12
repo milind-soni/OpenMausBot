@@ -41,8 +41,9 @@ export function createPcmMedia(options: PcmMediaOptions): PcmMediaSession {
   let socket: WebSocket;
   try {
     if (!context.audioWorklet?.addModule) throw new Error();
-    // api() uses origin-relative routes in both browser and remote desktop pages. Keep the identical URL resolution.
-    socket = new WebSocket("/api/live/media");
+    const url = new URL("/api/live/media", location.href);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    socket = new WebSocket(url.href);
   } catch {
     void context.close().catch(() => {});
     throw new Error(t("call.live.qwen.audioUnavailable"));

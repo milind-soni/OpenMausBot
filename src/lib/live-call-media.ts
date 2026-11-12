@@ -156,6 +156,7 @@ export function applyCaption(current: { caption: string; heard: string }, event:
 export function endNotice(reason: LiveEndReason | undefined): { text: string; dropped: boolean } {
   switch (reason) {
     case "idle": return { text: t("call.live.endedIdle"), dropped: false };
+    case "duration-limit": return { text: t("call.live.qwen.endedDuration"), dropped: false };
     case "expired": return { text: t("call.live.endedExpired"), dropped: false };
     case "content": return { text: t("call.live.endedContent"), dropped: false };
     case "deleted": return { text: t("call.live.endedDeleted"), dropped: false };

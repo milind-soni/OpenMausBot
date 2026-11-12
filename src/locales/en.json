@@ -1,6 +1,7 @@
 {
   "call.live.qwen.disclosure": "A Qwen call sends your microphone audio to Alibaba Cloud Qwen through OpenMausBot, along with recent chat context, bot answers and approval details. The separate Qwen key stays with OpenMausBot, never in the browser.",
   "call.live.qwen.needsKey": "Qwen Live calls need a key for the selected region and business space. Save it here or in Settings → API keys.",
+  "call.live.qwen.endedDuration": "The Qwen call reached its one-hour limit. Start a new call to continue.",
   "call.live.qwen.region": "Qwen API region",
   "call.live.qwen.region.beijing": "China (Beijing)",
   "call.live.qwen.region.singapore": "International (Singapore)",

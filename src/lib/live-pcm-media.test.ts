@@ -69,6 +69,7 @@ const start = async (playbackFlow?: "credit-v1") => {
 beforeEach(() => {
   failure = vi.fn(); ready = vi.fn(); event = vi.fn(); closed = vi.fn();
   Socket.instances = []; Context.instances = []; Worklet.instances = [];
+  vi.stubGlobal("location", { href: "https://app.example.test/chat?from=fixture#live" });
   vi.stubGlobal("WebSocket", Socket);
   vi.stubGlobal("AudioContext", Context);
   vi.stubGlobal("AudioWorkletNode", Worklet);
@@ -76,6 +77,21 @@ beforeEach(() => {
 afterEach(() => { session?.close(); session = null; vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("Qwen browser PCM relay", () => {
+  it.each([
+    ["https://app.example.test:8443/chat?secret=fixture#live", "wss://app.example.test:8443/api/live/media"],
+    ["http://127.0.0.1:8799/chat", "ws://127.0.0.1:8799/api/live/media"],
+    ["http://[::1]:8799/", "ws://[::1]:8799/api/live/media"],
+  ])("uses an absolute same-origin WebSocket URL from %s", async (href, expected) => {
+    vi.stubGlobal("location", { href });
+    class AbsoluteSocket extends Socket {
+      constructor(url: string) { new URL(url); super(url); }
+    }
+    vi.stubGlobal("WebSocket", AbsoluteSocket);
+    const { socket } = await start("credit-v1");
+    expect(String(socket.url)).toBe(expected);
+    expect(failure).not.toHaveBeenCalled();
+  });
+
   it("classifies a failed frame-credit port as processor failure after the PCM entered WS", async () => {
     const { socket, worklet } = await start("credit-v1");
     socket.open(); socket.message(JSON.stringify({ type: "media.ready", playbackFlow: "credit-v1", epoch: 0 }));
@@ -594,7 +610,7 @@ describe("Qwen browser PCM relay", () => {
   });
   it("binds on the fixed same-origin route before sending binary capture after media.ready", async () => {
     const { socket, worklet, context } = await start();
-    expect(socket.url).toBe("/api/live/media");
+    expect(socket.url).toBe("wss://app.example.test/api/live/media");
     expect(context.audioWorklet.addModule).toHaveBeenCalledExactlyOnceWith("/qwen-live-worklet.js?v=3");
     expect(socket.binaryType).toBe("arraybuffer");
     worklet.frame();

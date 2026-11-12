@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setLocale } from "./i18n";
 import { currentCall } from "./call";
 import {
   applyCaption, checkLiveSignIn, configureLiveMedia, dismissStartPrompt, endNotice, handleLiveCallKey, hangUpLiveCall, isLiveCallRunning, liveCallShortcut,
@@ -86,6 +87,20 @@ describe("PCM transport closure and server end reasons", () => {
     if (mediaReady) options.onReady();
     return { options, pcm };
   }
+
+  it.each([
+    ["en", "The Qwen call reached its one-hour limit. Start a new call to continue."],
+    ["zh", "千问通话已达到一小时上限。请重新发起通话以继续。"],
+    ["pt-BR", "A chamada do Qwen atingiu o limite de uma hora. Inicie uma nova chamada para continuar."],
+  ] as const)("shows the localized duration limit without a connection error in %s", async (locale, text) => {
+    setLocale(locale);
+    try {
+      await startPcm();
+      onServerCall({ ...call, status: "ended", endReason: "duration-limit" });
+      expect(liveMedia()).toMatchObject({ phase: "ended", notice: text, action: null });
+      expect(track.stopped).toBe(true);
+    } finally { setLocale("en"); }
+  });
 
   it("releases media immediately and uses a subsequent idle end without ending the server call early", async () => {
     const { options, pcm } = await startPcm();

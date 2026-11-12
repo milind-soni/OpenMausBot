@@ -12,7 +12,7 @@ export type LiveCallStatus = "connecting" | "live" | "ending" | "ended";
  * reason shows the call's `error` text, or plain "Call ended.". */
 export type LiveEndReason =
   | "hung-up" | "idle" | "expired" | "content" | "remote-hangup" | "connection-lost"
-  | "sideband-lost" | "deleted" | "shutdown" | "signed-out" | "error";
+  | "sideband-lost" | "deleted" | "shutdown" | "signed-out" | "error" | "duration-limit";
 
 /** The one Live call a harness runs. Never carries the key or any speech. */
 export interface LiveCallState {

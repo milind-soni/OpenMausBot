@@ -551,6 +551,7 @@ export class LiveCallController {
       case "error": {
         const code = String((event.error as { code?: unknown } | undefined)?.code ?? "error");
         this.recordError(call, code);
+        if (call.endpoint.provider === "qwen" && code === "qwen-duration-limit") this.finish(call, "duration-limit");
         if (call.endpoint.provider === "qwen" && code === "qwen-playback-stalled") this.finish(call, "error", "The call ended because audio playback stopped making progress.");
         if (call.endpoint.provider === "qwen" && code === "qwen-provider-voice") this.finish(call, "error", "The selected voice is not supported by the realtime model. Choose another voice in Call settings.");
         return;

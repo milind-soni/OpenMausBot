@@ -50,6 +50,93 @@ it("advertises optional credit-v1 and acknowledges an early opt-in bind only aft
   f.socket.close();
 });
 
+it.each(["credit-v1", null] as const)("does not accumulate small timer delays in %s playback", async flow => {
+  const schedule = globalThis.setTimeout;
+  const delayed = vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void, ms?: number) =>
+    schedule(callback, (ms ?? 0) + (ms !== undefined && ms > 0 && ms <= 20 ? 1 : 0))) as typeof setTimeout);
+  const f = fixture(flow);
+  try {
+    if (flow) f.socket.playbackCredit({ type: "playback.credit", epoch: 0, seq: 1, bytes: 24_000, contextState: "running" });
+    f.audio(19_200);
+    await vi.advanceTimersByTimeAsync(381);
+    expect(f.delivered()).toBe(19_200);
+    expect(f.chunks()).toHaveLength(20);
+  } finally { f.socket.close(); delayed.mockRestore(); }
+});
+
+it("catches up missed frames against the playback clock without sending early", async () => {
+  const schedule = globalThis.setTimeout;
+  let delayedOnce = false;
+  const delayed = vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void, ms?: number) => {
+    const lag = !delayedOnce && ms === 20 ? 45 : 0;
+    if (lag) delayedOnce = true;
+    return schedule(callback, (ms ?? 0) + lag);
+  }) as typeof setTimeout);
+  const f = fixture();
+  try {
+    f.socket.playbackCredit({ type: "playback.credit", epoch: 0, seq: 1, bytes: 24_000, contextState: "running" });
+    f.audio(19_200);
+    await vi.advanceTimersByTimeAsync(64);
+    expect(f.delivered()).toBe(960);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.delivered()).toBe(3_840);
+    await vi.advanceTimersByTimeAsync(14);
+    expect(f.delivered()).toBe(3_840);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.delivered()).toBe(4_800);
+  } finally { f.socket.close(); delayed.mockRestore(); }
+});
+
+it.each([24_000, 1_920])("bounds catch-up after a long scheduler stall with %i bytes of credit", async bytes => {
+  const schedule = globalThis.setTimeout;
+  let delayedOnce = false;
+  const delayed = vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void, ms?: number) => {
+    const lag = !delayedOnce && ms === 20 ? 5_000 : 0;
+    if (lag) delayedOnce = true;
+    return schedule(callback, (ms ?? 0) + lag);
+  }) as typeof setTimeout);
+  const f = fixture();
+  try {
+    f.socket.playbackCredit({ type: "playback.credit", epoch: 0, seq: 1, bytes, contextState: "running" });
+    f.audio(48_000);
+    await vi.advanceTimersByTimeAsync(5_020);
+    expect(f.delivered()).toBe(Math.min(bytes, 960 * 6));
+    await vi.advanceTimersByTimeAsync(19);
+    expect(f.delivered()).toBe(Math.min(bytes, 960 * 6));
+    expect(f.socket.readyState).toBe(1);
+  } finally { f.socket.close(); delayed.mockRestore(); }
+});
+
+it("checks backpressure again between frames in a catch-up burst", async () => {
+  const schedule = globalThis.setTimeout;
+  const delayed = vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void, ms?: number) =>
+    schedule(callback, ms === 20 ? 65 : ms)) as typeof setTimeout);
+  const f = fixture();
+  try {
+    f.socket.playbackCredit({ type: "playback.credit", epoch: 0, seq: 1, bytes: 24_000, contextState: "running" });
+    f.media.send.mockImplementation(data => { if (Buffer.isBuffer(data) && f.delivered() >= 1_920) f.media.bufferedAmount = 48_001; });
+    f.audio(48_000);
+    await vi.advanceTimersByTimeAsync(65);
+    expect(f.delivered()).toBe(1_920);
+    expect(f.events).toContainEqual({ type: "error", error: { code: "qwen-playback-backpressure" } });
+    expect(f.socket.readyState).toBe(3);
+  } finally { f.socket.close(); delayed.mockRestore(); }
+});
+
+it("paces by PCM duration and ignores wall-clock corrections", async () => {
+  const f = fixture();
+  try {
+    f.socket.playbackCredit({ type: "playback.credit", epoch: 0, seq: 1, bytes: 24_000, contextState: "running" });
+    f.audio(480);
+    f.provider.event({ type: "response.audio.delta", response_id: "audio", delta: Buffer.alloc(480).toString("base64") });
+    vi.setSystemTime(Date.now() - 120_000);
+    await vi.advanceTimersByTimeAsync(9);
+    expect(f.delivered()).toBe(480);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.delivered()).toBe(960);
+  } finally { f.socket.close(); }
+});
+
 it("bounds the opted-in downlink by deduplicated credit without accelerating the 20ms PCM cadence", async () => {
   const f = fixture();
   f.audio(48_000);
