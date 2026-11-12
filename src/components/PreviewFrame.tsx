@@ -768,7 +768,9 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
             ref={iframeRef}
             src={frameUrl}
             title={`${frameTitle} (${width} × ${height})`}
-            sandbox="allow-scripts allow-same-origin allow-forms"
+            // Project files are served from the app's own origin, so they never get
+            // allow-same-origin (the server also sends a CSP sandbox for them).
+            sandbox={source?.kind === "file" ? "allow-scripts allow-forms" : "allow-scripts allow-same-origin allow-forms"}
             referrerPolicy="no-referrer"
             onLoad={() => {
               clearTimers();

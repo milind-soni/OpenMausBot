@@ -169,6 +169,19 @@ function broadcast(payload: unknown) {
   }
 }
 
+// Preview files are served from the harness's own origin, and the request
+// guard trusts same-origin callers. A previewed page or SVG that can run
+// script must therefore get an opaque origin (CSP sandbox without
+// allow-same-origin): its API requests then carry Origin "null" and are
+// refused, so a file from an untrusted project can't drive the bots.
+// PDFs run no page script and Chromium won't render them when sandboxed.
+function previewFileCsp(mimeType: string): string {
+  const frame = "frame-ancestors 'self' http://localhost:* http://127.0.0.1:*";
+  return mimeType.startsWith("application/pdf")
+    ? frame
+    : `sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads; ${frame}`;
+}
+
 const previewWatchManager = new PreviewWatchManager((payload) => broadcast(payload));
 
 async function allRegisteredProjects(): Promise<RegisteredProjectLike[]> {
@@ -1655,7 +1668,7 @@ const server = createServer(async (req, res) => {
         "cache-control": "no-store, max-age=0",
         "x-content-type-options": "nosniff",
         "referrer-policy": "no-referrer",
-        "content-security-policy": "frame-ancestors 'self' http://localhost:* http://127.0.0.1:*",
+        "content-security-policy": previewFileCsp(resolved.mimeType),
       });
       return res.end(data);
     }

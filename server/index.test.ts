@@ -673,6 +673,15 @@ describe("harness HTTP API", () => {
       expect(htmlRes.status).toBe(200);
       expect(htmlRes.headers.get("content-type")).toContain("text/html");
       expect(await htmlRes.text()).toContain("Hello Preview");
+      // Script in a previewed page must not run with the app's origin: an opaque
+      // (sandboxed) origin makes its API calls fail the same-origin guard.
+      const htmlCsp = htmlRes.headers.get("content-security-policy") ?? "";
+      expect(htmlCsp).toMatch(/(^|;\s*)sandbox\b/);
+      expect(htmlCsp).not.toContain("allow-same-origin");
+      const svgRes = await fetch(`${BASE}/api/preview/file?projectId=${encodeURIComponent(projectId)}&path=logo.svg`);
+      expect(svgRes.headers.get("content-security-policy") ?? "").toMatch(/(^|;\s*)sandbox\b/);
+      const fromSandboxedPage = await fetch(`${BASE}/api/bots`, { headers: { origin: "null", "sec-fetch-site": "cross-site" } });
+      expect(fromSandboxedPage.status).toBe(403);
 
       const mdRes = await fetch(
         `${BASE}/api/preview/file/${encodeURIComponent(projectId)}/docs/guide.md`,

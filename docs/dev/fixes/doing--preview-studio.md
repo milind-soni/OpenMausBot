@@ -56,3 +56,7 @@ Implements `docs/dev/plans/implementation--preview-studio.md`. Design work start
 - **Spec compliance:** Built directly from `docs/design/preview-studio.md` and `docs/dev/plans/implementation--preview-studio.md`.
 - **Optional `open_preview` bot tool:** Left `[ ]` per instructions so the core UI, canvas mode, file preview routes, and auto-refresh watcher remain self-contained.
 - **Browser screenshot fallback:** In browser sessions (where Electron's `window.gbs.previewScreenshot` is unavailable) or when capturing Markdown/image previews, `PreviewFrame.captureScreenshot` renders a clean PNG snapshot via an offscreen `<canvas>` so **Send to chat** and **Share to chat…** work in both desktop and browser sessions.
+
+## Security review fix (Yv, 2026-11-12)
+
+- [?] **Previewed pages can't use the app's own access** — `server/index.ts` (`previewFileCsp`), `src/components/PreviewFrame.tsx`. Project files are served from the harness origin, and the request guard trusts same-origin callers. Before this fix, script in a previewed HTML or SVG file could have called `/api` and driven the bots. HTML, SVG, and other non-PDF files are now sent with a CSP `sandbox` (no `allow-same-origin`), so they run under an opaque origin. The browser iframe also drops `allow-same-origin` for project files. One trade-off: previewed pages can't use their own localStorage or cookies. Covered in `server/index.test.ts`, including an opaque-origin API call that gets 403.
