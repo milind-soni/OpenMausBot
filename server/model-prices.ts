@@ -1,5 +1,5 @@
 import type { ModelPrice, PriceList, PricedTurn } from "./prices.ts";
-import { TIERED_ID } from "./drivers/codex-tier.ts";
+import { codexTierOf } from "./drivers/codex-tier.ts";
 import { currentPrices } from "./model-manifest/manifest.ts";
 import { billableFor } from "./prices.ts";
 
@@ -32,7 +32,7 @@ export type CostSource = "reported" | "estimated";
 
 export function estimatePriceFor(turn: Pick<PricedTurn, "driverKind" | "model">, operatorPrices: PriceList | null, at: Date = new Date()): ModelPrice | null {
   // A Codex Fast row (`gpt-5.5+priority`) costs what its base model costs; the usage row keeps the full id.
-  const model = turn.driverKind === "codex" ? TIERED_ID.exec(turn.model)?.[1] ?? turn.model : turn.model;
+  const model = turn.driverKind === "codex" ? codexTierOf(turn.model)?.model ?? turn.model : turn.model;
   return operatorPrices?.[`${turn.driverKind}/${turn.model}`] ?? operatorPrices?.[turn.model] ??
     operatorPrices?.[`${turn.driverKind}/${model}`] ?? operatorPrices?.[model] ??
     listPriceFor(model, at) ?? operatorPrices?.default ?? null;

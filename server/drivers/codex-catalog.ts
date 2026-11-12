@@ -8,7 +8,7 @@ import type { ModelCatalog } from "../contracts.ts";
 import { qualifiedModelLabel } from "../contracts.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { codexHome } from "./codex-identity.ts";
-import { TIERED_ID } from "./codex-tier.ts";
+import { MODEL_ID, SEP, TIERED_ID, codexTierOf } from "./codex-tier.ts";
 import { unconfirmedModelCatalog } from "../startup-model-catalog.ts";
 import { codexLocalProviderArgs, mergeLocalInject } from "./local-inject.ts";
 
@@ -32,8 +32,6 @@ export const STATIC_CODEX_MODELS: ModelCatalog = {
 /** Official rows force this provider, so a local `model_provider = "omlx"` cannot swallow GPT-5.6. */
 export const OFFICIAL_CODEX_PROVIDER = "openai";
 
-const SEP = "::";
-const MODEL_ID = /^[\w][\w./:+-]*$/;
 const PROVIDER_ID = /^[a-z][a-z0-9_-]*$/i;
 
 export function encodeCodexSelection(provider: string, model: string): string {
@@ -52,8 +50,8 @@ export function decodeCodexSelection(id: string | null | undefined): {
   }
   // A bare id is official: a new cloud model must not fall through to the user's local provider.
   if (!MODEL_ID.test(id)) return { model: id, modelProvider: null };
-  const tiered = TIERED_ID.exec(id);
-  if (tiered) return { model: tiered[1], modelProvider: OFFICIAL_CODEX_PROVIDER, serviceTier: tiered[2] };
+  const tiered = codexTierOf(id);
+  if (tiered) return { model: tiered.model, modelProvider: OFFICIAL_CODEX_PROVIDER, serviceTier: tiered.tier };
   return { model: id, modelProvider: OFFICIAL_CODEX_PROVIDER };
 }
 
