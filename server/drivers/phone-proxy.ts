@@ -261,25 +261,23 @@ function nodeLines(nodes: UiNode[]) {
   }).join("\n") || "No accessible Android UI text is visible.";
 }
 
-const DIRECTIONS = ["up", "down", "left", "right"];
-const BATCH_HINT = "To do several steps, or to act and then read the screen, in one call, use batch.";
-
 const SINGLE_TOOLS = [
   { name: "status", description: "Check physical USB Android devices and USB-debugging authorization before any Android phone task.", inputSchema: { type: "object", properties: {} } },
   { name: "read_screen", description: "Read visible text, accessibility labels, resource ids, and pixel bounds from the connected Android screen. Use it before choosing what to act on. To act and see the result in one call, put the action and read_screen in one batch.", inputSchema: { type: "object", properties: { serial: { type: "string" } } } },
   { name: "screenshot", description: "Capture the connected Android screen when accessibility text is insufficient. Returns a PNG image.", inputSchema: { type: "object", properties: { serial: { type: "string" } } } },
   { name: "list_apps", description: "List installed launchable Android package names, optionally filtered by a human app name. Prefer open_app first.", inputSchema: { type: "object", properties: { query: { type: "string" }, serial: { type: "string" } } } },
-  { name: "open_app", description: `Open an installed Android app directly by its English name, such as Uber or Skyscanner, or by its package name. Do not scan the app drawer first. ${BATCH_HINT}`, inputSchema: { type: "object", properties: { name: { type: "string" }, serial: { type: "string" } }, required: ["name"] } },
-  { name: "tap_text", description: `Tap visible Android text or an accessibility label. ${BATCH_HINT}`, inputSchema: { type: "object", properties: { text: { type: "string" }, exact: { type: "boolean" }, index: { type: "integer", minimum: 0 }, serial: { type: "string" } }, required: ["text"] } },
-  { name: "tap", description: `Tap Android screen pixel coordinates obtained from read_screen or screenshot. ${BATCH_HINT}`, inputSchema: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, serial: { type: "string" } }, required: ["x", "y"] } },
-  { name: "swipe", description: `Swipe the Android screen in a direction. ${BATCH_HINT}`, inputSchema: { type: "object", properties: { direction: { type: "string", enum: DIRECTIONS }, serial: { type: "string" } }, required: ["direction"] } },
-  { name: "type_text", description: `Type text into the focused Android field. Letters, digits, spaces and _.,@- always work; other text, such as Chinese, emoji or +, needs the ADBKeyBoard keyboard selected on the phone. Never enter passwords or payment details. A one-time code only for a sign-in the person asked for, into the app it was sent for. ${BATCH_HINT}`, inputSchema: { type: "object", properties: { text: { type: "string", maxLength: 256 }, serial: { type: "string" } }, required: ["text"] } },
-  { name: "press", description: `Press an Android navigation or keyboard key. wakeup turns the screen on and sleep turns it off. ${BATCH_HINT}`, inputSchema: { type: "object", properties: { key: { type: "string", enum: Object.keys(KEYCODES) }, serial: { type: "string" } }, required: ["key"] } },
+  { name: "open_app", description: "Open an installed Android app directly by its English name, such as Uber or Skyscanner, or by its package name. Do not scan the app drawer first.", inputSchema: { type: "object", properties: { name: { type: "string" }, serial: { type: "string" } }, required: ["name"] } },
+  { name: "tap_text", description: "Tap visible Android text or an accessibility label.", inputSchema: { type: "object", properties: { text: { type: "string" }, exact: { type: "boolean" }, index: { type: "integer", minimum: 0 }, serial: { type: "string" } }, required: ["text"] } },
+  { name: "tap", description: "Tap Android screen pixel coordinates obtained from read_screen or screenshot.", inputSchema: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, serial: { type: "string" } }, required: ["x", "y"] } },
+  { name: "swipe", description: "Swipe the Android screen in a direction.", inputSchema: { type: "object", properties: { direction: { type: "string", enum: ["up", "down", "left", "right"] }, serial: { type: "string" } }, required: ["direction"] } },
+  { name: "type_text", description: "Type text into the focused Android field. Letters, digits, spaces and _.,@- always work; other text, such as Chinese, emoji or +, needs the ADBKeyBoard keyboard selected on the phone. Never enter passwords or payment details. A one-time code only for a sign-in the person asked for, into the app it was sent for.", inputSchema: { type: "object", properties: { text: { type: "string", maxLength: 256 }, serial: { type: "string" } }, required: ["text"] } },
+  { name: "press", description: "Press an Android navigation or keyboard key. wakeup turns the screen on and sleep turns it off.", inputSchema: { type: "object", properties: { key: { type: "string", enum: Object.keys(KEYCODES) }, serial: { type: "string" } }, required: ["key"] } },
 ] as const;
 
 type StepAction = PhoneStepTool | "wait";
 export type PhoneStep = Json & { action: StepAction };
 type StepRule = { ok: (step: Json) => boolean; needs: string; example?: Json };
+type FieldSchema = { type?: string; enum?: readonly string[]; [keyword: string]: unknown };
 
 const STEP_ACTIONS: readonly StepAction[] = [...PHONE_STEP_TOOLS, "wait"];
 const MAX_STEPS = 10;
@@ -306,59 +304,76 @@ const STEP_EXAMPLES: Record<StepAction, Json> = {
   read_screen: { action: "read_screen" },
   wait: { action: "wait", seconds: 3 },
 };
-const lower = (value: unknown) => String(value).toLowerCase();
-const toNumber = (value: unknown) => (typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value) : Number.NaN);
-const STEP_COERCIONS: Record<string, (value: unknown) => unknown> = {
-  action: lower, key: lower, direction: lower,
-  x: toNumber, y: toNumber, index: toNumber, seconds: toNumber,
-  text: String, name: String,
-  exact: (value) => (value === "true" || value === "false" ? value === "true" : value),
-};
 const inPixels = (value: unknown) => Number.isFinite(value) && Number(value) >= 0 && Number(value) <= 10_000;
 const STEP_RULES: Partial<Record<StepAction, StepRule[]>> = {
   open_app: [{ ok: (step) => String(step.name).trim() !== "", needs: "name, an app's English name or package name" }],
   tap_text: [
     { ok: (step) => String(step.text).trim() !== "", needs: "text that is not blank" },
-    { ok: (step) => step.exact === undefined || typeof step.exact === "boolean", needs: "exact as true or false", example: { action: "tap_text", text: "Search", exact: true } },
     { ok: (step) => step.index === undefined || (Number.isInteger(step.index) && Number(step.index) >= 0), needs: "index as a whole number from 0", example: { action: "tap_text", text: "Search", index: 1 } },
   ],
   tap: [{ ok: (step) => inPixels(step.x) && inPixels(step.y), needs: "x and y from 0 to 10000" }],
-  swipe: [{ ok: (step) => DIRECTIONS.includes(String(step.direction)), needs: `direction as one of ${DIRECTIONS.join(", ")}` }],
   type_text: [{ ok: (step) => [...String(step.text)].length <= 256, needs: "text of at most 256 characters" }],
-  press: [{ ok: (step) => Object.keys(KEYCODES).includes(String(step.key)), needs: `key as one of ${Object.keys(KEYCODES).join(", ")}` }],
   wait: [{ ok: (step) => step.seconds === undefined || Number(step.seconds) >= 0, needs: `seconds as a number from 0 to ${MAX_WAIT_SECONDS}` }],
 };
 
-function stepSchema(action: StepAction): { properties: Record<string, Json>; required?: readonly string[] } {
+function stepSchema(action: StepAction): { properties: Record<string, FieldSchema>; required?: readonly string[] } {
   if (action === "wait") return { properties: { seconds: { type: "number", minimum: 0 } } };
   return SINGLE_TOOLS.find((tool) => tool.name === action)!.inputSchema;
 }
 
 const stepFields = (action: StepAction) => Object.keys(stepSchema(action).properties).filter((field) => field !== "serial");
 const fieldOwners = (field: string) => STEP_ACTIONS.filter((action) => stepFields(action).includes(field));
-const STEP_FIELDS = new Set(["action", ...STEP_ACTIONS.flatMap(stepFields)]);
 
 function stepProperties() {
-  const properties: Record<string, Json> = {
+  const properties: Record<string, FieldSchema> = {
     action: { type: "string", enum: STEP_ACTIONS, description: "What the step does: a phone tool's name, or wait." },
   };
   for (const action of STEP_ACTIONS) {
     for (const field of stepFields(action)) {
-      properties[field] ??= { ...stepSchema(action).properties[field], description: `${fieldOwners(field).join(" and ")}: ${STEP_FIELD_NOTES[field]}.` };
+      const owners = fieldOwners(field).join(" and ");
+      const note = STEP_FIELD_NOTES[field];
+      properties[field] ??= { ...stepSchema(action).properties[field], description: note ? `${owners}: ${note}.` : owners };
     }
   }
   return properties;
 }
 
+const STEP_PROPERTIES = stepProperties();
+
+const lower = (value: unknown) => String(value).toLowerCase();
+const toNumber = (value: unknown) => (typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value) : Number.NaN);
+
+function coerce(field: string, value: unknown): unknown {
+  const { type, enum: choices } = STEP_PROPERTIES[field];
+  if (type === "number" || type === "integer") return toNumber(value);
+  if (type === "boolean") return value === "true" || value === "false" ? value === "true" : value;
+  if (type === "string") return choices ? lower(value) : String(value);
+  return value;
+}
+
+function typeRules(action: StepAction): StepRule[] {
+  return stepFields(action).flatMap((field): StepRule[] => {
+    const { type, enum: choices } = stepSchema(action).properties[field];
+    if (type === "boolean") {
+      return [{ ok: (step) => step[field] === undefined || typeof step[field] === "boolean", needs: `${field} as true or false`, example: { ...STEP_EXAMPLES[action], [field]: true } }];
+    }
+    if (choices) return [{ ok: (step) => step[field] === undefined || choices.includes(String(step[field])), needs: `${field} as one of ${choices.join(", ")}` }];
+    return [];
+  });
+}
+
+const BATCH_HINT = "To do several steps, or to act and then read the screen, in one call, use batch.";
+const takesBatchHint = (name: string) => name !== "read_screen" && (PHONE_STEP_TOOLS as readonly string[]).includes(name);
+
 export const TOOLS = [
-  ...SINGLE_TOOLS,
+  ...SINGLE_TOOLS.map((tool) => (takesBatchHint(tool.name) ? { ...tool, description: `${tool.description} ${BATCH_HINT}` } : tool)),
   {
     name: "batch",
     description: `Run up to ${MAX_STEPS} phone steps in order in one call. A step is one of open_app, tap_text, tap, swipe, type_text, press, read_screen or wait, with that tool's fields: {action, ...fields}. Add read_screen as the last step to see the result; the batch returns the screen only at a read_screen step. A wait step (0 to ${MAX_WAIT_SECONDS} s) gives content time to load. It stops at the first failing step. End a batch where the next screen is uncertain, such as after a step that may open a dialog, and read it before acting further. Example: {"steps":[{"action":"tap_text","text":"Search"},{"action":"type_text","text":"iPad mini"},{"action":"press","key":"enter"},{"action":"wait","seconds":3},{"action":"read_screen"}]}`,
     inputSchema: {
       type: "object",
       properties: {
-        steps: { type: "array", maxItems: MAX_STEPS, items: { type: "object", properties: stepProperties(), required: ["action"] } },
+        steps: { type: "array", maxItems: MAX_STEPS, items: { type: "object", properties: STEP_PROPERTIES, required: ["action"] } },
         serial: { type: "string" },
       },
       required: ["steps"],
@@ -370,7 +385,6 @@ type ToolResult = { content: Array<{ type: "text"; text: string } | { type: "ima
 const textResult = (text: string, isError = false): ToolResult => ({ content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) });
 
 const isStepAction = (value: unknown): value is StepAction => STEP_ACTIONS.includes(value as StepAction);
-const isStepTool = (name: string): name is PhoneStepTool => (PHONE_STEP_TOOLS as readonly string[]).includes(name);
 const refusal = (problem: string) => new Error(`${problem}. No step was performed.`);
 
 function parseJson(value: unknown): unknown {
@@ -395,8 +409,8 @@ function parseStep(raw: unknown, n: number): PhoneStep {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw refusal(`Step ${n} needs to be an object such as ${JSON.stringify(STEP_EXAMPLES.tap_text)}`);
   const step: Json = {};
   for (const [field, value] of Object.entries(raw)) {
-    if (!STEP_FIELDS.has(field) || value === null || value === "") continue;
-    const coerced = STEP_COERCIONS[field](value);
+    if (!Object.hasOwn(STEP_PROPERTIES, field) || value === null || value === "") continue;
+    const coerced = coerce(field, value);
     if (coerced !== "") step[field] = coerced;
   }
   const { action } = step;
@@ -412,7 +426,7 @@ function parseStep(raw: unknown, n: number): PhoneStep {
   if (foreign) throw refusal(`Step ${n} (${action}) does not take ${foreign}, which belongs to ${fieldOwners(foreign).join(" or ")}; write it like ${example}`);
   const missing = (stepSchema(action).required ?? []).filter((field) => step[field] === undefined);
   if (missing.length) throw refusal(`Step ${n} (${action}) needs ${missing.join(" and ")}, e.g. ${example}`);
-  const broken = STEP_RULES[action]?.find((rule) => !rule.ok(step));
+  const broken = [...(STEP_RULES[action] ?? []), ...typeRules(action)].find((rule) => !rule.ok(step));
   if (broken) throw refusal(`Step ${n} (${action}) needs ${broken.needs}, e.g. ${JSON.stringify(broken.example ?? STEP_EXAMPLES[action])}`);
   return { ...step, action };
 }
@@ -455,62 +469,10 @@ async function wait(requested: unknown): Promise<string> {
   return seconds < Number(requested) ? `Waited ${seconds} s (a wait is at most ${MAX_WAIT_SECONDS} s)` : `Waited ${seconds} s`;
 }
 
-async function act(serial: string, args: PhoneStep): Promise<string> {
-  const name = args.action;
-  if (name === "read_screen") return nodeLines(await readNodes(serial));
-  if (name === "open_app") {
-    const appName = String(args.name ?? "").trim();
-    if (!appName) throw new Error("name is required");
-    const target = launchTarget(appName, await launchablePackages(serial));
-    await onDevice(serial, ["shell", "monkey", "-p", target, "-c", "android.intent.category.LAUNCHER", "1"]);
-    return `Opened ${appName} (${target})`;
-  }
-  if (name === "tap_text") {
-    const query = String(args.text ?? "").trim().toLowerCase();
-    if (!query) throw new Error("text is required");
-    const exact = args.exact === true;
-    const hits = (await readNodes(serial)).filter((node) => {
-      const labels = [node.text, node.description].filter(Boolean).map((value) => value.toLowerCase());
-      return labels.some((label) => exact ? label === query : label.includes(query));
-    });
-    const index = Number.isInteger(args.index) ? Number(args.index) : 0;
-    const hit = hits[index];
-    if (!hit) throw new Error(`No visible Android text matches ${JSON.stringify(args.text)}`);
-    const [x1, y1, x2, y2] = hit.bounds;
-    await onDevice(serial, ["shell", "input", "tap", String(Math.round((x1 + x2) / 2)), String(Math.round((y1 + y2) / 2))]);
-    return `Tapped ${JSON.stringify(hit.text || hit.description)}`;
-  }
-  if (name === "tap") {
-    const x = Number(args.x); const y = Number(args.y);
-    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 10000 || y > 10000) throw new Error("Invalid Android coordinates");
-    await onDevice(serial, ["shell", "input", "tap", String(Math.round(x)), String(Math.round(y))]);
-    return `Tapped ${Math.round(x)},${Math.round(y)}`;
-  }
-  if (name === "swipe") {
-    const direction = String(args.direction ?? "");
-    const size = (await onDevice(serial, ["shell", "wm", "size"])).toString("utf8");
-    const match = /(\d+)x(\d+)/.exec(size);
-    if (!match) throw new Error("Could not read Android screen size");
-    const width = Number(match[1]); const height = Number(match[2]);
-    const points: Record<string, [number, number, number, number]> = {
-      up: [width / 2, height * 0.75, width / 2, height * 0.25],
-      down: [width / 2, height * 0.25, width / 2, height * 0.75],
-      left: [width * 0.75, height / 2, width * 0.25, height / 2],
-      right: [width * 0.25, height / 2, width * 0.75, height / 2],
-    };
-    const point = points[direction];
-    if (!point) throw new Error("Invalid swipe direction");
-    await onDevice(serial, ["shell", "input", "swipe", ...point.map((value) => String(Math.round(value))), "260"]);
-    return `Swiped ${direction}`;
-  }
-  if (name === "type_text") return typePhoneText(deviceShell(serial), String(args.text ?? ""));
-  if (name === "press") {
-    const key = String(args.key ?? "").toLowerCase();
-    if (!KEYCODES[key]) throw new Error("Unsupported Android key");
-    await onDevice(serial, ["shell", "input", "keyevent", KEYCODES[key]]);
-    return `Pressed ${key}`;
-  }
-  return wait(args.seconds);
+async function act(serial: string, { action, ...fields }: PhoneStep): Promise<string> {
+  if (action === "wait") return wait(fields.seconds);
+  const [first] = (await callToolOn(serial, action, fields)).content;
+  return first.type === "text" ? first.text : "";
 }
 
 const reason = (problem: unknown) => (problem instanceof Error ? problem.message : String(problem)).replace(/\.$/, "");
@@ -555,7 +517,11 @@ async function callTool(name: string, args: Json, ensureClaim: () => Promise<Cla
     return runSteps(await readySerial(args.serial), steps, ensureClaim);
   }
   const serial = await readySerial(args.serial);
-  if (isStepTool(name)) return textResult(await act(serial, { ...args, action: name }));
+  return callToolOn(serial, name, args);
+}
+
+async function callToolOn(serial: string, name: string, args: Json): Promise<ToolResult> {
+  if (name === "read_screen") return textResult(nodeLines(await readNodes(serial)));
   if (name === "screenshot") {
     const png = await onDevice(serial, ["exec-out", "screencap", "-p"], true);
     if (!png.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))) throw new Error("Android returned an invalid screenshot");
@@ -565,6 +531,58 @@ async function callTool(name: string, args: Json, ensureClaim: () => Promise<Cla
     const packages = await launchablePackages(serial);
     const query = typeof args.query === "string" ? args.query : "";
     return textResult((query ? findPackages(query, packages) : packages).join("\n") || "No matching launchable app found");
+  }
+  if (name === "open_app") {
+    const appName = String(args.name ?? "").trim();
+    if (!appName) throw new Error("name is required");
+    const target = launchTarget(appName, await launchablePackages(serial));
+    await onDevice(serial, ["shell", "monkey", "-p", target, "-c", "android.intent.category.LAUNCHER", "1"]);
+    return textResult(`Opened ${appName} (${target})`);
+  }
+  if (name === "tap_text") {
+    const query = String(args.text ?? "").trim().toLowerCase();
+    if (!query) throw new Error("text is required");
+    const exact = args.exact === true;
+    const hits = (await readNodes(serial)).filter((node) => {
+      const labels = [node.text, node.description].filter(Boolean).map((value) => value.toLowerCase());
+      return labels.some((label) => exact ? label === query : label.includes(query));
+    });
+    const index = Number.isInteger(args.index) ? Number(args.index) : 0;
+    const hit = hits[index];
+    if (!hit) throw new Error(`No visible Android text matches ${JSON.stringify(args.text)}`);
+    const [x1, y1, x2, y2] = hit.bounds;
+    await onDevice(serial, ["shell", "input", "tap", String(Math.round((x1 + x2) / 2)), String(Math.round((y1 + y2) / 2))]);
+    return textResult(`Tapped ${JSON.stringify(hit.text || hit.description)}`);
+  }
+  if (name === "tap") {
+    const x = Number(args.x); const y = Number(args.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 10000 || y > 10000) throw new Error("Invalid Android coordinates");
+    await onDevice(serial, ["shell", "input", "tap", String(Math.round(x)), String(Math.round(y))]);
+    return textResult(`Tapped ${Math.round(x)},${Math.round(y)}`);
+  }
+  if (name === "swipe") {
+    const direction = String(args.direction ?? "");
+    const size = (await onDevice(serial, ["shell", "wm", "size"])).toString("utf8");
+    const match = /(\d+)x(\d+)/.exec(size);
+    if (!match) throw new Error("Could not read Android screen size");
+    const width = Number(match[1]); const height = Number(match[2]);
+    const points: Record<string, [number, number, number, number]> = {
+      up: [width / 2, height * 0.75, width / 2, height * 0.25],
+      down: [width / 2, height * 0.25, width / 2, height * 0.75],
+      left: [width * 0.75, height / 2, width * 0.25, height / 2],
+      right: [width * 0.25, height / 2, width * 0.75, height / 2],
+    };
+    const point = points[direction];
+    if (!point) throw new Error("Invalid swipe direction");
+    await onDevice(serial, ["shell", "input", "swipe", ...point.map((value) => String(Math.round(value))), "260"]);
+    return textResult(`Swiped ${direction}`);
+  }
+  if (name === "type_text") return textResult(await typePhoneText(deviceShell(serial), String(args.text ?? "")));
+  if (name === "press") {
+    const key = String(args.key ?? "").toLowerCase();
+    if (!KEYCODES[key]) throw new Error("Unsupported Android key");
+    await onDevice(serial, ["shell", "input", "keyevent", KEYCODES[key]]);
+    return textResult(`Pressed ${key}`);
   }
   throw new Error(`Unknown phone tool: ${name}`);
 }
