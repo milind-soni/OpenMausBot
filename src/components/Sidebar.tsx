@@ -650,8 +650,7 @@ export interface BotRowProps {
   deleting: boolean;
   mascotMotion: AppState["mascotMotion"];
   reveal: AppState["revealThread"];
-  pendingQueued: AppState["pendingQueued"];
-  routineRuns?: AppState["routineRuns"];
+  pendingQueued: AppState["pendingQueued"]; routineRuns?: AppState["routineRuns"];
   instances: InstanceInfo[];
   liveCall: AppState["liveCall"];
   locale: string;
@@ -681,8 +680,7 @@ export function botRowProps<State extends Pick<AppState, "activeView" | "selecte
     deleting: state.deletingBots[bot.id] === true,
     mascotMotion: selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null,
     reveal: reveal && (bot.threadId === reveal.threadId || bot.tasks?.some((task) => task.threadId === reveal.threadId)) ? reveal : null,
-    pendingQueued: state.pendingQueued,
-    routineRuns: state.routineRuns,
+    pendingQueued: state.pendingQueued, routineRuns: state.routineRuns,
     instances: state.instances,
     liveCall: state.liveCall,
     locale: activeLocale(),
