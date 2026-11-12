@@ -56,6 +56,12 @@ export class OpenRouterError extends Error {
   }
 }
 
+/** The model that answers spoken phone turns: the live tier's default, or
+ * VOICE_LIVE_MODEL in the environment when the owner has picked a different one. */
+export function liveVoiceModel(env: NodeJS.ProcessEnv = process.env): string {
+  return env.VOICE_LIVE_MODEL?.trim() || OPENROUTER_TIERS.live.model;
+}
+
 export function openRouterKey(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const key = env.OMB_OPENROUTER_API_KEY?.trim() || env.OPENROUTER_API_KEY?.trim();
   return key ? key : undefined;
@@ -82,9 +88,13 @@ export async function chatCompletion(
   request: ChatRequest,
   deps: ChatDeps,
 ): Promise<ChatResult> {
-  const { model, reasoning } = OPENROUTER_TIERS[tier];
-  const chain = [model, ...OPENROUTER_TIERS[tier].fallbacks];
-  const effort = request.reasoning ?? reasoning;
+  const { reasoning } = OPENROUTER_TIERS[tier];
+  const model = tier === "live" ? liveVoiceModel() : OPENROUTER_TIERS[tier].model;
+  const chain = [model, ...OPENROUTER_TIERS[tier].fallbacks.filter((fallback) => fallback !== model)];
+  // The curated reasoning preset belongs to the curated model: a VOICE_LIVE_MODEL
+  // override may name a model whose provider refuses reasoning:"none" (xAI answers
+  // HTTP 400 "Reasoning is mandatory"), and a 400 must not burn the fallback chain.
+  const effort = request.reasoning ?? (tier === "live" && model !== OPENROUTER_TIERS.live.model ? undefined : reasoning);
   const body = {
     model,
     messages: request.messages,

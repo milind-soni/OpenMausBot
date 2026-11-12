@@ -1,10 +1,10 @@
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chatCompletion, openRouterKey, OPENROUTER_TIERS } from "./openrouter.ts";
+import { chatCompletion, liveVoiceModel, openRouterKey, OPENROUTER_TIERS } from "./openrouter.ts";
 
 let server: Server;
 let status = 200;
-let modelInBody = "";
+let bodyIn: Record<string, unknown> = {};
 let authInHeaders = "";
 
 beforeAll(async () => {
@@ -12,7 +12,7 @@ beforeAll(async () => {
     let body = "";
     req.on("data", (chunk: Buffer) => { body += chunk; });
     req.on("end", () => {
-      modelInBody = JSON.parse(body || "{}").model ?? "";
+      bodyIn = JSON.parse(body || "{}") as Record<string, unknown>;
       authInHeaders = req.headers.authorization ?? "";
       if (status !== 200) {
         res.writeHead(status, { "content-type": "application/json" });
@@ -82,7 +82,7 @@ describe("OpenRouter tiered routing", () => {
     status = 200;
     const result = await chatCompletion("specialist", { messages: [{ role: "user", content: "diagnose" }] }, deps());
     expect(result.model).toBe(OPENROUTER_TIERS.specialist.model);
-    expect(modelInBody).toBe(OPENROUTER_TIERS.specialist.model);
+    expect(bodyIn.model).toBe(OPENROUTER_TIERS.specialist.model);
     expect(authInHeaders).toBe("Bearer fake-openrouter-key");
   });
 
@@ -102,6 +102,26 @@ describe("OpenRouter tiered routing", () => {
     expect(OPENROUTER_TIERS.background.model).toBe("deepseek/deepseek-v4.1-flash");
     expect(OPENROUTER_TIERS.brain.model).toBe("z-ai/glm-5.3");
     expect(OPENROUTER_TIERS.specialist.fallbacks).toEqual(["minimax/minimax-3.1-flash", "z-ai/glm-5.3"]);
+  });
+
+  it("lets VOICE_LIVE_MODEL replace the spoken-turn model", () => {
+    expect(liveVoiceModel({ VOICE_LIVE_MODEL: "x-ai/grok-4.7" } as NodeJS.ProcessEnv)).toBe("x-ai/grok-4.7");
+    expect(liveVoiceModel({} as NodeJS.ProcessEnv)).toBe(OPENROUTER_TIERS.live.model);
+  });
+
+  it("drops the reasoning preset for a VOICE_LIVE_MODEL override", async () => {
+    process.env.VOICE_LIVE_MODEL = "x-ai/grok-4.7";
+    try {
+      const override = await chatCompletion("live", { messages: [{ role: "user", content: "hi" }] }, deps());
+      expect(override.model).toBe("x-ai/grok-4.7");
+      expect(bodyIn.model).toBe("x-ai/grok-4.7");
+      expect(bodyIn.reasoning).toBeUndefined();
+    } finally {
+      delete process.env.VOICE_LIVE_MODEL;
+    }
+    const curated = await chatCompletion("live", { messages: [{ role: "user", content: "hi" }] }, deps());
+    expect(curated.model).toBe(OPENROUTER_TIERS.live.model);
+    expect(bodyIn.reasoning).toEqual({ effort: "none" });
   });
 
   it("prefers the OMB key name", () => {
