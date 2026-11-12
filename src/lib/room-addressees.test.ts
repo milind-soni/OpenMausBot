@@ -27,6 +27,13 @@ describe("roomAddressees", () => {
     expect(roomAddressees(reply, members, [asked, reply])).toEqual([{ key: "user:You", name: "You" }]);
   });
 
+  it("leaves a tag a same-named teammate takes to the teammate", () => {
+    const message = msg({ from: from(mylo), text: "@Athena can you check? @Athena Bot too" });
+    const bots = [...members, { id: "b-athena-bot", name: "Athena Bot", color: "blue" as const }];
+    expect(roomAddressees(message, bots, [], [{ name: "Athena", person: true }]))
+      .toEqual([{ key: "b-athena-bot", name: "Athena Bot", color: "blue" }]);
+  });
+
   it("ignores mentions inside code and plain text without mentions", () => {
     expect(roomAddressees(msg({ from: from(mylo), text: "run `@Athena` later" }), members, [])).toEqual([]);
     expect(roomAddressees(msg({ from: from(mylo), text: "Sales were up 12%." }), members, [])).toEqual([]);

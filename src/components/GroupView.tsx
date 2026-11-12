@@ -327,7 +327,7 @@ export const Transcript = memo(function Transcript({
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const showToolCalls = showToolCallsEnabled(state.config);
-  const canReact = useCanReact(group.threadId);
+  const canReact = useCanReact(group.threadId); const teammatePeers = useTeammates().peers;
   const memberOf = (id?: string) => members.find((b) => b.id === id); const messages = useLiveTranscript(group.threadId, saved, transcript, members, roomThreadSpeakerId(group, group.threadId));
   const folds = useMemo(() => roomTurnFolds(messages), [messages, locale]);
   const items = useMemo(() => groupActivityRuns(messages.filter(message =>
@@ -490,7 +490,7 @@ export const Transcript = memo(function Transcript({
               (m.kind === "text" && botTextShowsSpeaker(items, i))
               || (!user && m.kind !== "text" && newCluster && !(m.kind === "activity" && m.comm) && !laterTextOwns(items, i, m.from.botId, m.at))
             ) && (
-              <ClusterLabel bot={memberOf(m.from.botId)} name={m.from.name} color={m.from.color} to={m.kind === "text" ? roomAddressees(m, members, transcript) : undefined} />
+              <ClusterLabel bot={memberOf(m.from.botId)} name={m.from.name} color={m.from.color} to={m.kind === "text" ? roomAddressees(m, members, transcript, teammatePeers) : undefined} />
             )}
             {fold && (
               <TurnNarrationRun
