@@ -5,6 +5,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Action, AppState, Bot, InstanceInfo } from "@/state/store";
+import { viewerClosedRelease } from "./computer-takeover";
 
 const fixture = vi.hoisted(() => ({
   held: false,
@@ -13,6 +14,7 @@ const fixture = vi.hoisted(() => ({
   /** True plays a take the server turns down. */
   refuse: false,
   controls: [] as Array<{ action?: string; controlLeaseId?: string }>,
+  controlPaths: [] as string[],
   posts: [] as string[],
   beacons: [] as Array<{ url: string; body: Record<string, unknown>; keepalive: boolean }>,
   live: null as null | { target: string; expanded: boolean; onUnreachable: () => void },
@@ -51,6 +53,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
     const route = path.split("?")[0]!;
     if (init?.method === "POST") fixture.posts.push(route);
     if (route === "/api/bots/scout/computer/control") {
+      fixture.controlPaths.push(path);
       if (init?.method !== "POST") return { held: fixture.held, helpReason: null };
       const body = JSON.parse(String(init.body));
       fixture.controls.push(body);
@@ -153,6 +156,7 @@ beforeEach(() => {
   fixture.owned = true;
   fixture.refuse = false;
   fixture.controls = [];
+  fixture.controlPaths = [];
   fixture.posts = [];
   fixture.beacons = [];
   fixture.live = null;
@@ -191,18 +195,29 @@ describe("taking control of a Local VM", () => {
     expect(liveDesktop()!.dataset.target).toBe(`local/bot-${"a".repeat(64)}`);
     expect(window.ogb!.desktopViewer!.open, "nothing may open in another window").not.toHaveBeenCalled();
     expect(window.open).not.toHaveBeenCalled();
-    expect(fixture.controls).toEqual([{ action: "take", controlLeaseId: expect.stringMatching(/^[0-9a-f]{36}$/) }]);
+    expect(fixture.controls).toEqual([{ action: "take", controlLeaseId: expect.stringMatching(/^[0-9a-f]{36}$/), target: `local/bot-${"a".repeat(64)}` }]);
     expect(document.body.textContent).toContain("You're in control");
     expect(button("Hand control back")).toBeDefined();
   });
 
-  it("hands back at once and returns to watching", async () => {
+  it("hands back the hold it took with its own lease, at once, and returns to watching", async () => {
     await open(makeBot({ computer: "vm" }));
     await press("Take control");
     await press("Hand control back");
-    expect(fixture.controls.at(-1)).toEqual({ action: "release" });
+    expect(fixture.controls.at(-1)).toEqual({ action: "release", controlLeaseId: fixture.controls[0]!.controlLeaseId, target: `local/bot-${"a".repeat(64)}` });
     expect(liveDesktop()).toBeNull();
     expect(button("Take control")).toBeDefined();
+  });
+
+  it("hands back a hold another viewer has without a lease, naming the desktop it shows", async () => {
+    fixture.held = true;
+    fixture.owned = false;
+    heldElsewhere(true);
+    await open(makeBot({ computer: "vm" }));
+    await press("Full screen");
+    await shownLive();
+    await press("Hand control back");
+    expect(fixture.controls.at(-1)).toEqual({ action: "release", target: `local/bot-${"a".repeat(64)}` });
   });
 
   it("Full screen only watches: the bot keeps working until the person takes control from there", async () => {
@@ -336,6 +351,24 @@ describe("taking control of a Local VM", () => {
     expect(releases()).toEqual([]);
   });
 
+  it("asks about and takes the conversation's own computer", async () => {
+    await open(makeBot({ computer: "vm" }));
+    await press("Take control");
+    await press("Hand control back");
+    expect(fixture.controlPaths).toHaveLength(3);
+    expect(new Set(fixture.controlPaths)).toEqual(new Set(["/api/bots/scout/computer/control?threadId=thread"]));
+  });
+
+  it("says another viewer has paused the bots while a hold this panel did not take lasts, and still offers the hand-back", async () => {
+    fixture.held = true;
+    fixture.owned = false;
+    heldElsewhere(true);
+    await open(makeBot({ computer: "vm" }));
+    expect(document.body.textContent).toContain("Another viewer has paused bot control on this desktop");
+    expect(document.body.textContent).not.toContain("You're in control");
+    expect(button("Hand control back")).toBeDefined();
+  });
+
   it("a hand-back from elsewhere ends the live view once it lasts, and a flicker does not", async () => {
     await open(makeBot({ computer: "vm" }));
     await press("Take control");
@@ -370,6 +403,7 @@ describe("taking control of other computers", () => {
     await press("Take control");
     await shownLive();
     expect(liveDesktop()!.dataset.target).toBe("vps/scout");
+    expect(fixture.controls[0]).toMatchObject({ action: "take", target: "vps/scout" });
     expect(window.ogb!.desktopViewer!.open).not.toHaveBeenCalled();
     await press("Hand control back");
     expect(fixture.beacons.some((beacon) => beacon.url.startsWith("/api/bots/scout/computer/viewer-close"))).toBe(true);
@@ -380,6 +414,22 @@ describe("taking control of other computers", () => {
     await press("Take control");
     expect(liveDesktop()).toBeNull();
     expect(fixture.posts).toContain("/api/bots/scout/computer/join");
+    expect(window.ogb!.desktopViewer!.open).toHaveBeenCalledWith("https://desktop.invalid/scout", "Scout's live desktop", "scout");
+  });
+
+  it("closing a cloud computer's viewer window gives back the hold its open took, by that lease", async () => {
+    await open(makeBot({ computer: "cloud" }));
+    await press("Take control");
+    expect(viewerClosedRelease("scout")).toEqual({ action: "release", controlLeaseId: fixture.controls[0]!.controlLeaseId });
+  });
+
+  it("a cloud computer's desktop is taken before it opens even while the bot shows a hold another device has elsewhere", async () => {
+    fixture.held = true;
+    heldElsewhere(true);
+    await open(makeBot({ computer: "cloud" }));
+    await press("Full screen");
+    expect(fixture.controls).toEqual([{ action: "take", controlLeaseId: expect.stringMatching(/^[0-9a-f]{36}$/) }]);
+    expect(fixture.controlPaths.at(-1)).toContain("threadId=thread");
     expect(window.ogb!.desktopViewer!.open).toHaveBeenCalledWith("https://desktop.invalid/scout", "Scout's live desktop", "scout");
   });
 });

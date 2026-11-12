@@ -15,6 +15,7 @@ import { LiveCallHost } from "@/components/LiveCallHost";
 import { ThreadRefsProvider } from "@/components/ThreadRefs";
 import { initAnalytics } from "@/lib/analytics";
 import { parseComputerHelp } from "@/lib/computer-control";
+import { viewerClosedRelease } from "@/components/computer-takeover";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
@@ -300,11 +301,11 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   useEffect(() => {
     return window.ogb?.desktopViewer?.onState((viewer) => {
       if (viewer.open || !viewer.contextId) return;
-      const botId = viewer.contextId;
-      void fetch(`/api/bots/${botId}/computer/control`, {
+      const botId = viewer.contextId, release = viewerClosedRelease(botId);
+      if (release) void fetch(`/api/bots/${botId}/computer/control`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "release" }),
+        body: JSON.stringify(release),
       })
         .then((res) => (res.ok ? res.json() : null))
         .then((snap) => {
