@@ -69,6 +69,7 @@ export interface WebhookManagerOptions {
     runOn: RoutineRunOn;
     deliveryId: string;
     receivedAt: number;
+    sameConversation?: boolean;
   }) => { id: string };
   cancelQueued?: (webhookId: string, message: string) => void;
   pendingRuns?: (webhookId: string) => number;
@@ -117,6 +118,7 @@ const triggerInputSchema = z.object({
   verificationPending: z.boolean().optional(),
   eventTypes: eventTypesSchema,
   maxPendingRuns: maxPendingRunsSchema.nullable().optional(),
+  sameConversation: z.boolean().optional(),
 });
 const triggerPatchSchema = triggerInputSchema.partial();
 const verificationSampleSchema = z.object({
@@ -147,6 +149,7 @@ const storedWebhookSchema = z.object({
   eventTypes: eventTypesSchema,
   // A hand-edited value out of range falls back to the default instead of making the file unreadable.
   maxPendingRuns: maxPendingRunsSchema.optional().catch(undefined),
+  sameConversation: z.boolean().optional().catch(undefined),
   secretHash: z.string().regex(/^[a-f0-9]{64}$/),
   /** The current secret, sealed under WEBHOOK_KEY_FILE beside this file, so the person and the owning bot get the same
    * address back. Never in a public trigger or a workspace backup; absent for a webhook made before it was kept. */
@@ -241,6 +244,7 @@ function cleanInput(input: WebhookTriggerInput): CleanWebhookInput {
   if (groupId && clean.delivery !== "post") fail(400, "a webhook room is only for delivery \"post\" webhooks");
   if (groupId) clean.groupId = groupId;
   if (typeof input.maxPendingRuns === "number") clean.maxPendingRuns = input.maxPendingRuns;
+  if (input.sameConversation) clean.sameConversation = true;
   return clean;
 }
 
@@ -439,13 +443,14 @@ export class WebhookManager {
     this.assertWritable();
     const held = this.webhooks.find((candidate) => candidate.id === record.id);
     const clean = cleanInput({ name: record.name, prompt: record.prompt, botId: record.botId, runOn: record.runOn, delivery: record.delivery,
-      groupId: record.groupId ?? null, enabled: held?.enabled ?? false, eventTypes: record.eventTypes, maxPendingRuns: record.maxPendingRuns ?? null });
+      groupId: record.groupId ?? null, enabled: held?.enabled ?? false, eventTypes: record.eventTypes, maxPendingRuns: record.maxPendingRuns ?? null,
+      sameConversation: record.sameConversation });
     if (this.options.botState(clean.botId) === "missing") fail(409, "Its bot is not on this server yet");
     if (clean.groupId) this.assertRoomMember(clean.botId, clean.groupId);
     const definition = { ...clean, ...(record.resultsThreadId ? { resultsThreadId: record.resultsThreadId } : {}) };
     let trigger: StoredWebhookTrigger;
     if (held) {
-      for (const key of ["delivery", "groupId", "eventTypes", "maxPendingRuns", "resultsThreadId"] as const) delete held[key];
+      for (const key of ["delivery", "groupId", "eventTypes", "maxPendingRuns", "sameConversation", "resultsThreadId"] as const) delete held[key];
       trigger = Object.assign(held, definition, { verificationPending: held.verificationPending, updatedAt: this.now() });
     } else {
       const secret = newSecret();
@@ -475,6 +480,7 @@ export class WebhookManager {
       verificationPending: patch.verificationPending ?? trigger.verificationPending,
       eventTypes: patch.eventTypes ?? trigger.eventTypes,
       maxPendingRuns: patch.maxPendingRuns === undefined ? trigger.maxPendingRuns : patch.maxPendingRuns,
+      sameConversation: patch.sameConversation ?? trigger.sameConversation,
     });
     if (this.options.botState(clean.botId) === "missing") fail(400, "That MAUS no longer exists");
     if (clean.groupId) this.assertRoomMember(clean.botId, clean.groupId);
@@ -482,6 +488,7 @@ export class WebhookManager {
     if (!clean.eventTypes?.length) delete trigger.eventTypes;
     if (!clean.groupId) delete trigger.groupId;
     if (clean.maxPendingRuns === undefined) delete trigger.maxPendingRuns;
+    if (!clean.sameConversation) delete trigger.sameConversation;
     if (patch.enabled === false) {
       this.options.cancelQueued?.(trigger.id, "The webhook was paused before this delivery started");
     }
@@ -773,6 +780,7 @@ export class WebhookManager {
       runOn: trigger.runOn,
       deliveryId,
       receivedAt: now,
+      sameConversation: trigger.sameConversation,
     });
     this.deliveries.push({ key: `${trigger.endpointId}:${deliveryId}`, runId: run.id, at: now });
     if (this.deliveries.length > MAX_DELIVERIES) {

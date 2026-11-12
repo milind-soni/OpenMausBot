@@ -57,8 +57,8 @@ barge-in needs AEC on the capture path — a real follow-up, not a footnote.
 `SFSpeechRecognizer` does not emit `isFinal` just because the speaker becomes
 quiet; it finalizes only after its audio stream ends. Call mode therefore starts
 the native helper with a silence timeout. Once a non-empty transcript stops
-changing for 850ms, the helper stops capture and calls `endAudio()`, which
-produces the final transcript sent to the renderer. Composer dictation omits the
+changing for 1.7 s (`CALL_ENDPOINT_MS`), the helper stops capture and calls
+`endAudio()`, which produces the final transcript sent to the renderer. Composer dictation omits the
 timeout and keeps its press-to-stop behavior. No cloud STT or bundled VAD model
 is involved.
 

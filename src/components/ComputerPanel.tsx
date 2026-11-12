@@ -17,7 +17,7 @@ import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { usePageVisible } from "@/lib/page-visible";
 import { listenLiveFrames } from "@/lib/live-events";
-import { CloudScreenPreview } from "./CloudScreenPreview";
+import { CloudScreenPreview } from "./CloudScreenPreview"; import { ResetCloudComputerButton } from "./ResetCloudComputerButton";
 import { isActiveTurnRefusal, isRemoteScreenshotContention } from "@/lib/remote-desktop";
 import { CloudBackendPicker } from "./CloudBackendPicker";
 import { SimpleVpsChoices } from "./SimpleVpsChoices";
@@ -31,12 +31,11 @@ import { usePanelPage, type PanelPage } from "@/lib/page-open";
 const DataPanel = lazy(() => import("./data/DataPanel").then((module) => ({ default: module.DataPanel })));
 const loadLiveDesktop = () => import("./LiveDesktop").then((module) => ({ default: module.LiveDesktop }));
 const LiveDesktop = lazy(loadLiveDesktop);
-import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } from "@/lib/feature-flags";
+import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, usbPhoneTakeoverEnabled } from "@/lib/feature-flags";
 import { parseComputerHelp, transitionComputerControlLease, type ComputerControlAction } from "@/lib/computer-control";
 import { openProviderDesktop, useComputerTakeover } from "./computer-takeover";
 import { SignInBanner } from "./SignInRequestCard";
-import { FullScreenButton } from "./FullScreenButton";
-import { LocalScreenPreview } from "./LocalScreenPreview";
+import { FullScreenButton } from "./FullScreenButton"; import { LocalScreenPreview } from "./LocalScreenPreview";
 import { LinuxLocalControl } from "./LinuxLocalControl";
 import { MacLocalControl } from "./MacLocalControl"; import { WindowsLocalControl } from "./WindowsLocalControl";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
@@ -253,7 +252,7 @@ export function ComputerPanel({
   const [storedPanelView, setPanelView] = useState<ComputerPanelView>(() => readComputerPanelView(bot.id));
   const requestedDataResult = state.dataResultFocus?.botId === bot.id ? state.dataResultFocus : undefined;
   const [dataRequest, setDataRequest] = useState<{ id: string; requestId: number }>();
-  const androidStatus = useAndroidUsbDevices();
+  const androidStatus = useAndroidUsbDevices(usbPhoneTakeoverEnabled(state.config));
   const androidConnected = androidStatus.devices.length > 0;
   const panelTabs = computerPanelTabs({ advanced, androidConnected });
   const panelView = resolveComputerPanelView(storedPanelView, { advanced, androidConnected });
@@ -1298,7 +1297,7 @@ export function ComputerPanel({
         </div>
       ) : panelView === "android" && androidConnected ? (
         <div {...tabPanelProps("android")} className={cn("flex-1 overflow-y-auto px-4 pt-2", TAB_PANEL_FOCUS)}>
-          <AndroidDevicePanel status={androidStatus} />
+          <AndroidDevicePanel status={androidStatus} serverPhones={usbPhoneTakeoverEnabled(state.config)} />
         </div>
       ) : (
       <div {...tabPanelProps("computer")} className={cn("flex-1 overflow-y-auto px-5 pb-5", TAB_PANEL_FOCUS)}>
@@ -1399,6 +1398,7 @@ export function ComputerPanel({
               </span>
               {currentTeamComputer && placeActionButton(autoView)}
               {bot.computer === "cloud" && (phase === "unconfigured" || phase === "error") && cloudView.action?.id !== "add-boat-key" && placeActionButton(cloudView)}
+              <ResetCloudComputerButton botId={bot.id} botName={bot.name} onReset={() => { setError(null); setRetry((n) => n + 1); }} view={{ computer: bot.computer, cloudBackend, canManage: canManageCloud, busy: profileBot.busy === true, pending: pending !== null, phase, boatState, refusal: cloudRefused?.state }} />
               {phase === "local" && !isLinux && localMisses >= 3 && (
                 <button
                   onClick={() => window.ogb?.permOpenSettings?.("screen")}

@@ -25,9 +25,13 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("./CloudScreenPreview", () => ({ CloudScreenPreview: () => null }));
+const androidPanel = vi.hoisted(() => ({ props: undefined as { status: AndroidDeviceStatus; serverPhones?: boolean } | undefined }));
 vi.mock("./AndroidDevicePanel", async (importOriginal) => ({
   ...await importOriginal<typeof import("./AndroidDevicePanel")>(),
-  AndroidDevicePanel: () => null,
+  AndroidDevicePanel: (props: NonNullable<typeof androidPanel.props>) => {
+    androidPanel.props = props;
+    return null;
+  },
 }));
 vi.mock("./BrowserPanel", () => ({ BrowserPanel: () => null }));
 vi.mock("./CloudBackendPicker", () => ({ CloudBackendPicker: () => null }));
@@ -70,8 +74,9 @@ const makeBot = (patch: Partial<Bot> = {}): Bot => ({
 }) as unknown as Bot;
 
 let root: Root | null = null;
+let features: NonNullable<AppState["config"]>["features"];
 const value = (): Parameters<typeof BotEditorStore>[0]["value"] => ({
-  state: { ...initialState, instances: [engine("claude"), engine("codex")], config: { box: { configured: true } } as AppState["config"] } as AppState,
+  state: { ...initialState, instances: [engine("claude"), engine("codex")], config: { box: { configured: true }, features } as AppState["config"] } as AppState,
   dispatch: vi.fn(),
   flushBotPatches: async () => null,
   refreshInstances: async () => {},
@@ -98,6 +103,15 @@ const close = () => {
 const selectedTab = () => [...document.querySelectorAll<HTMLButtonElement>('[data-testid="computer-tabs"] button')]
   .find((candidate) => candidate.getAttribute("aria-selected") === "true" || candidate.getAttribute("aria-pressed") === "true")?.textContent?.trim();
 
+/** The desktop app's answer to an adb check, and the server's answer to its phone list. */
+function hosts(serverPhones: AndroidDeviceStatus, desktopPhones: AndroidDeviceStatus = { available: true, devices: [] }) {
+  const bridge = { status: vi.fn(async () => desktopPhones), frame: async () => ({ serial: "", dataUrl: "" }), input: async () => {} };
+  const fetch = vi.fn(async (_path: string) => new Response(JSON.stringify(serverPhones), { headers: { "content-type": "application/json" } }));
+  vi.stubGlobal("ogb", { androidDevice: bridge });
+  vi.stubGlobal("fetch", fetch);
+  return { bridge, asked: () => fetch.mock.calls.map(([path]) => path) };
+}
+
 /** An adb check that never answers, leaving discovery unfinished. */
 const pendingCheck = () => new Promise<AndroidDeviceStatus>(() => {});
 /** Points the native bridge at an answer and re-renders, restarting the poll. */
@@ -116,6 +130,8 @@ afterEach(() => {
   close();
   vi.unstubAllGlobals();
   panelViewStore.current = "computer";
+  features = undefined;
+  androidPanel.props = undefined;
 });
 
 describe("Computer panel Android tab", () => {
@@ -190,5 +206,40 @@ describe("Computer panel Android tab", () => {
     });
     expect(panelViewStore.current).toBe("data");
     expect(selectedTab()).toBe("Data");
+  });
+
+  it("shows the server's phones while features.usbPhoneTakeover is on", async () => {
+    features = { skillAuthoring: true, usbPhoneTakeover: true };
+    panelViewStore.current = "android";
+    const { bridge, asked } = hosts({ available: true, devices: [PHONE] });
+    await open(makeBot());
+
+    expect(asked()).toEqual(["/api/usb-phones"]);
+    expect(bridge.status).not.toHaveBeenCalled();
+    expect(selectedTab()).toBe("Android");
+    expect(androidPanel.props).toEqual({ status: { available: true, devices: [PHONE], scanned: true }, serverPhones: true });
+  });
+
+  it("keeps the stored Android view when the server's phone list fails, and leaves it once the server has no phone", async () => {
+    features = { skillAuthoring: true, usbPhoneTakeover: true };
+    panelViewStore.current = "android";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "adb timed out" }), { status: 500 })));
+    await open(makeBot());
+    expect(panelViewStore.current).toBe("android");
+
+    hosts({ available: true, devices: [] });
+    await open(makeBot());
+    expect(panelViewStore.current).toBe("computer");
+  });
+
+  it("shows the desktop app's phones while features.usbPhoneTakeover is off", async () => {
+    features = { skillAuthoring: true, usbPhoneTakeover: false };
+    panelViewStore.current = "android";
+    const { bridge, asked } = hosts({ available: true, devices: [] }, { available: true, devices: [PHONE] });
+    await open(makeBot());
+
+    expect(asked()).toEqual([]);
+    expect(bridge.status).toHaveBeenCalled();
+    expect(androidPanel.props).toEqual({ status: { available: true, devices: [PHONE], scanned: true }, serverPhones: false });
   });
 });

@@ -16,14 +16,13 @@ import { cn } from "@/lib/cn";
 import { BotAvatar } from "./Avatar";
 import { CallTargetButton, type CallButtonPlacement } from "./CallView";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { speechBridge } from "@/lib/speech";
+import { CALL_ENDPOINT_MS, speechBridge } from "@/lib/speech";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 import { titledCard } from "./ApprovalCard";
 
 const YES = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|allow|approve|approved|fine|please do)\b/i;
 const NO = /^(no|nope|don'?t|do not|stop|deny|denied|cancel|never|skip it)\b/i;
-const CALL_ENDPOINT_MS = 850;
 
 type Phase = "listening" | "sending" | "working" | "speaking";
 

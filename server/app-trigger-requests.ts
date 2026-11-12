@@ -46,8 +46,9 @@ const definitionSchema = z.object({
   filter: filterSchema.optional(),
   config: z.record(z.string(), z.unknown()).optional(),
   runOn: z.enum(["maus", "cloud"]).optional(),
+  sameConversation: z.boolean().optional(),
 }).strict();
-const changesSchema = definitionSchema.pick({ name: true, instructions: true, filter: true, config: true, runOn: true }).partial().strict()
+const changesSchema = definitionSchema.pick({ name: true, instructions: true, filter: true, config: true, runOn: true, sameConversation: true }).partial().strict()
   .refine((changes) => Object.keys(changes).length > 0, "The update action needs at least one field in changes");
 const idSchema = z.string().trim().min(1).max(200);
 const targetSchema = z.object({ botId: z.string(), name: z.string() }).optional();
@@ -162,7 +163,8 @@ export class AppTriggerRequestService {
         name: redactSecretsInText(subject.name),
         ...(after && operation.action !== "run_now" ? { appliedUpdatedAt: after.updatedAt } : {}),
         ...(before && (operation.action === "update" || operation.action === "delete")
-          ? { before: { name: before.name, prompt: before.prompt, runOn: before.runOn, enabled: before.enabled, config: before.config, ...(before.filter ? { filter: before.filter } : {}) } }
+          ? { before: { name: before.name, prompt: before.prompt, runOn: before.runOn, enabled: before.enabled, config: before.config, ...(before.filter ? { filter: before.filter } : {}),
+            ...(before.sameConversation ? { sameConversation: true } : {}) } }
           : {}),
       },
     };
@@ -213,7 +215,8 @@ export class AppTriggerRequestService {
           const before = payload.undo?.before;
           if (!mine || mine.updatedAt !== payload.undo?.appliedUpdatedAt) return stale;
           const patch = operation.action === "update"
-            ? before ? { name: before.name, prompt: before.prompt, runOn: before.runOn, enabled: before.enabled, filter: before.filter ?? null, restoreConfig: before.config } : undefined
+            ? before ? { name: before.name, prompt: before.prompt, runOn: before.runOn, enabled: before.enabled, filter: before.filter ?? null, restoreConfig: before.config,
+              sameConversation: before.sameConversation === true } : undefined
             : { enabled: operation.action === "pause" };
           if (!patch || !await triggers.update(triggerId, patch)) return stale;
           break;

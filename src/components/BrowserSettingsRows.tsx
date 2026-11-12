@@ -7,7 +7,7 @@ import { api, useStore, type ConfigStatus } from "@/state/store";
 import { MoreText, SettingRow, Switch } from "./SettingsPrimitives";
 
 /** Saves one config change through PATCH /api/config, one at a time, and shows the server's answer or its error. */
-function useConfigSave() {
+export function useConfigSave() {
   const { dispatch } = useStore();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");

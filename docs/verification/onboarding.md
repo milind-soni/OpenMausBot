@@ -140,7 +140,7 @@ desktop's preload bridge are not exercised here; they are covered by
 ## Bring what you already use (Oct 16 2026)
 
 Skills and MCP servers another AI tool keeps on this computer, brought in with
-one button: in Settings → Import, and offered by MausBot's first messages as a
+one button: in Settings → Import & export, and offered by MausBot's first messages as a
 "Bring in your skills" chip when its look around finds some within two seconds.
 Desktop app only.
 
