@@ -37,7 +37,9 @@ export function ResetCloudComputerButton({ botId, botName, view, onReset }: {
   const [resetting, setResetting] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  if (!cloudComputerResettable(view)) return null;
+  // The note outlives the button: after a reset the panel goes back to checking, which hides the button.
+  const offered = cloudComputerResettable(view);
+  if (!offered && !note) return null;
   const reset = () => {
     if (resetting || !window.confirm(t("computer.reset.confirm", { name: botName }))) return;
     setResetting(true);
@@ -54,7 +56,7 @@ export function ResetCloudComputerButton({ botId, botName, view, onReset }: {
   };
   return (
     <>
-      <button
+      {offered && <button
         type="button"
         onClick={reset}
         disabled={resetting}
@@ -63,7 +65,7 @@ export function ResetCloudComputerButton({ botId, botName, view, onReset }: {
       >
         {resetting ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
         {t("computer.reset.button")}
-      </button>
+      </button>}
       {note && <p role="status" className="text-[12px] text-ink-secondary">{note}</p>}
       {problem && <p role="alert" className="text-[12px] text-danger">{problem}</p>}
     </>
