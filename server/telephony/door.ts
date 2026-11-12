@@ -13,6 +13,25 @@ import { parseForm, TWILIO_SIGNATURE_HEADER, verifyTwilioSignature } from "./sig
 import type { CallStatus, TelephonyStore } from "./store.ts";
 
 export const MAX_CALL_TURNS = 20;
+
+const FAREWELL =
+  /\b(hang\s*up|hangup|good\s*bye|goodbye|bye\s*now|end\s+(?:the\s+)?call|that(?:'s|\s+is)\s+(?:all|it))\b/i;
+const WANTS_TO_STAY = /\b(don'?t|do\s*not|never|won'?t|can'?t)\b/i;
+
+/** True when the caller is ending the conversation: "hang up", "goodbye",
+ * "that's all". Negations ("don't hang up") keep the call going. */
+export function wantsHangup(spoken: string): boolean {
+  const text = spoken.trim();
+  return text.length > 0 && FAREWELL.test(text) && !WANTS_TO_STAY.test(text);
+}
+
+const AGAIN =
+  /\b(say\s+(?:that|it)\s+again|what\s+did\s+you\s+(?:say|just\s+say)|repeat\s+(?:that|yourself|it)|come\s+again|pardon)\b/i;
+
+/** True when the caller missed the last reply and wants it re-spoken. */
+export function wantsRepeat(spoken: string): boolean {
+  return AGAIN.test(spoken.trim());
+}
 const TWIML_TYPE = "text/xml";
 
 export type TelephonyChat = (tier: Extract<OpenRouterTier, "live" | "background">, messages: readonly ChatMessage[], signal?: AbortSignal) => Promise<string>;
@@ -45,7 +64,7 @@ function voiceMessages(store: TelephonyStore, userText: string): ChatMessage[] {
     {
       role: "system",
       content:
-        "You are OpenMausBot, the owner's assistant, talking on a phone call. Reply in plain spoken words: no markdown, bullets, links or emoji, under 60 words. Use the call and message history when it helps." +
+        "You are OpenMausBot, the owner's assistant, talking on a phone call. Reply in plain spoken words: no markdown, bullets, links or emoji, under 60 words. Use the call and message history when it helps. The phone system itself ends the line when the owner says goodbye, so never claim you cannot hang up." +
         (context.length ? `\nRecent calls, messages and remembered facts:\n${context.join("\n")}` : ""),
     },
     { role: "user", content: userText },
@@ -274,10 +293,28 @@ export function createTelephonyDoor(deps: TelephonyDoorDeps): IngressDoor {
       const callIdStr = callId(callSid);
       const turns = deps.store.listCalls().find((call) => call.id === callIdStr)?.turns?.length ?? 0;
       deps.store.appendCallTurn(callIdStr, { who: "caller", text: spoken, at: now() });
+      if (wantsHangup(spoken)) {
+        const goodbye = "Alright. Talk to you soon. Goodbye.";
+        deps.store.appendCallTurn(callIdStr, { who: "bot", text: goodbye, at: now() });
+        deps.store.patchCall(callIdStr, { status: "done" });
+        xml(res, 200, response(`${say(goodbye)}<Hangup />`));
+        return true;
+      }
+      if (wantsRepeat(spoken)) {
+        const lastBot = deps.store
+          .listCalls()
+          .find((call) => call.id === callIdStr)
+          ?.turns?.filter((turn) => turn.who === "bot")
+          .at(-1)?.text;
+        if (lastBot) {
+          xml(res, 200, response(gatherLoop(lastBot)));
+          return true;
+        }
+      }
       if (turns >= MAX_CALL_TURNS) {
         const goodbye = "We have been talking a while, so I will hang up here. Call back any time.";
         deps.store.appendCallTurn(callIdStr, { who: "bot", text: goodbye, at: now() });
-        xml(res, 200, response(say(goodbye)));
+        xml(res, 200, response(`${say(goodbye)}<Hangup />`));
         return true;
       }
       let reply: string;

@@ -177,6 +177,56 @@ describe("the telephony door", () => {
     expect(call!.turns).toHaveLength(2);
   });
 
+  it("hangs up when the caller says goodbye", async () => {
+    const theStore = store();
+    const asked: string[] = [];
+    const door = makeDoor({
+      store: theStore,
+      chat: async (_tier, messages) => {
+        asked.push(messages[messages.length - 1]!.content);
+        return "I would have replied.";
+      },
+    });
+    await knock(door, "/hooks/telephony/voice", { From: "+15187446390", CallSid: "CA-hangup" });
+    const bye = await knock(door, "/hooks/telephony/voice/turn", { From: "+15187446390", CallSid: "CA-hangup", SpeechResult: "okay thanks, that's all, goodbye" });
+    expect(bye.status()).toBe(200);
+    expect(bye.body()).toContain("<Hangup");
+    expect(bye.body()).not.toContain("<Gather");
+    expect(asked).toHaveLength(0);
+    const call = theStore.listCalls().find((c) => c.id === "call_tw_CA-hangup");
+    expect(call!.status).toBe("done");
+    expect(call!.turns!.at(-1)!.who).toBe("bot");
+  });
+
+  it("keeps the call going when the farewell is negated", async () => {
+    const theStore = store();
+    const door = makeDoor({ store: theStore });
+    await knock(door, "/hooks/telephony/voice", { From: "+15187446390", CallSid: "CA-stay" });
+    const stay = await knock(door, "/hooks/telephony/voice/turn", { From: "+15187446390", CallSid: "CA-stay", SpeechResult: "don't hang up yet, one more thing" });
+    expect(stay.status()).toBe(200);
+    expect(stay.body()).toContain("<Gather");
+    expect(stay.body()).not.toContain("<Hangup");
+  });
+
+  it("repeats its last reply without calling the brain", async () => {
+    const theStore = store();
+    const asked: string[] = [];
+    const door = makeDoor({
+      store: theStore,
+      chat: async () => {
+        asked.push("asked");
+        return "The groceries arrive at five.";
+      },
+    });
+    await knock(door, "/hooks/telephony/voice", { From: "+15187446390", CallSid: "CA-repeat" });
+    await knock(door, "/hooks/telephony/voice/turn", { From: "+15187446390", CallSid: "CA-repeat", SpeechResult: "when do the groceries arrive" });
+    const again = await knock(door, "/hooks/telephony/voice/turn", { From: "+15187446390", CallSid: "CA-repeat", SpeechResult: "sorry, what did you say?" });
+    expect(again.status()).toBe(200);
+    expect(again.body()).toContain("The groceries arrive at five.");
+    expect(again.body()).toContain("<Gather");
+    expect(asked).toHaveLength(1);
+  });
+
   it("says goodbye after the turn limit", async () => {
     const theStore = store();
     theStore.appendCall({ id: "call_tw_CA5", direction: "in", from: "+15187446390", to: "+15186608998", at: 1, status: "answered" });
@@ -184,6 +234,7 @@ describe("the telephony door", () => {
     const door = makeDoor({ store: theStore });
     const turn = await knock(door, "/hooks/telephony/voice/turn", { From: "+15187446390", CallSid: "CA5", SpeechResult: "still here" });
     expect(turn.body()).toContain("hang up");
+    expect(turn.body()).toContain("<Hangup");
     expect(turn.body()).not.toContain("<Gather");
   });
 
