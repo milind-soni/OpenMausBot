@@ -258,9 +258,9 @@ export const JUST_DO_IT_PROMPT =
 
 export const CREDENTIAL_PROMPT =
   " If a supported API key is missing for the service actually needed, use request_credential to create a secure credential request; a 1Password service account token, for signing in with logins from a 1Password vault, is one too (credential_id onePasswordToken). Before requesting a computer-provider key, inspect the configured targets with select_computer; an existing self-hosted VPS does not need Boat credentials. Do not request a different provider's key merely because a task mentions cloud. For any other secret (a Stripe or npm token, a webhook signing secret), give request_credential a label, reason and delivery: ref for mcp_server, file for your own commands. mcp_server sets up MCP servers in the chat: suggest one when a task needs a service you can't reach yet, and add, turn on or change one once the person asks or agrees. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.";
-/** Two hours: the turn watchdog's default limit for a turn whose tool runs silently (OMB_TOOL_STALL_MS), so a long command
- * that keeps working is not cut at ten minutes, and one still running at the limit is stopped and named as looking stuck. */
-export const BASH_MAX_TIMEOUT_MS = 2 * 60 * 60_000;
+/** A day: a long command that keeps working is not cut short. The turn watchdog stops one whose processes show neither
+ * output nor CPU use for its tool limit (OMB_TOOL_STALL_MS, two hours) and names it as looking stuck. */
+export const BASH_MAX_TIMEOUT_MS = 24 * 60 * 60_000;
 /** The default cap; a person's own BASH_MAX_TIMEOUT_MS can be lower, so the guidance names this as the most it allows. */
 export const BASH_MAX_TIMEOUT_TEXT = `${BASH_MAX_TIMEOUT_MS}, which is ${BASH_MAX_TIMEOUT_MS / 60_000} minutes, unless a lower limit is set here`;
 const LONG_COMMANDS_TEXT =

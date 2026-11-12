@@ -1,9 +1,11 @@
 import { processAlive } from "./browser-processes.ts";
 import type { ProviderAdapter, RuntimeEvent } from "./contracts.ts";
+import { sampleProcessTree, type ProcessSample } from "./drivers/acp/quiet-status.ts";
 
 // A turn whose thread emits nothing for stallMs is wedged; waiting on a person or a computer is not a stall unless the
 // turn's engine is known to have no process left. Drivers report a tool only when it starts and when it ends, so a turn
-// with a tool running may stay silent for toolStallMs.
+// with a tool running may stay silent for toolStallMs, and one whose shell command's processes keep using CPU is working,
+// not silent, however long the command runs.
 export interface WatchedTurn {
   threadId: string;
   botId: string;
@@ -20,14 +22,20 @@ export interface RunningTool {
   command?: string;
 }
 
-/** The longest-running shell command of a turn stopped at stopAt, with the whole minutes it ran: what the person is told
- * looks stuck. null when no running tool runs a shell command. */
-export function stuckCommand(turn: Partial<Pick<WatchedTurn, "runningTools">>, stopAt: number): { command: string; minutes: number } | null {
+/** The longest-running shell command of a turn, or undefined when no running tool runs one. */
+function oldestCommand(turn: Partial<Pick<WatchedTurn, "runningTools">>): (RunningTool & { command: string }) | undefined {
   let oldest: RunningTool | undefined;
   for (const tool of turn.runningTools?.values() ?? []) {
     if (tool.command && (!oldest || tool.startedAt < oldest.startedAt)) oldest = tool;
   }
-  return oldest?.command ? { command: oldest.command, minutes: Math.max(1, Math.round((stopAt - oldest.startedAt) / 60_000)) } : null;
+  return oldest as (RunningTool & { command: string }) | undefined;
+}
+
+/** The longest-running shell command of a turn stopped at stopAt, with the whole minutes it ran: what the person is told
+ * looks stuck. null when no running tool runs a shell command. */
+export function stuckCommand(turn: Partial<Pick<WatchedTurn, "runningTools">>, stopAt: number): { command: string; minutes: number } | null {
+  const oldest = oldestCommand(turn);
+  return oldest ? { command: oldest.command, minutes: Math.max(1, Math.round((stopAt - oldest.startedAt) / 60_000)) } : null;
 }
 
 /** What the person is told when the watchdog stops a turn silent for silentMs: the shell command still running, with how
@@ -51,6 +59,14 @@ export function engineProcessGone(adapter: Pick<ProviderAdapter, "enginePid"> | 
   return pid === undefined || !alive(pid);
 }
 
+/** The CPU time used by the processes the thread's engine started since `since` (what a tool call started then runs, not
+ * the engine or its tool servers); null when the driver tracks no engine process or the time cannot be read. */
+export async function engineCommandCpuMs(adapter: Pick<ProviderAdapter, "enginePid"> | null | undefined, threadId: string, since: number,
+  sample: (pid: number, since: number) => Promise<ProcessSample> = sampleProcessTree): Promise<number | null> {
+  const pid = adapter?.enginePid?.(threadId);
+  return pid === undefined ? null : (await sample(pid, since)).cpuMs;
+}
+
 const SUSPENDED_SWEEPS = 3;
 
 const parked = (turn: WatchedTurn): boolean => turn.waitingOnHuman || turn.waitingOnComputer;
@@ -63,6 +79,9 @@ export interface TurnWatchdogOptions {
   checkMs: number;
   /** The turn's engine is known to have no process left for it; absent or false, a parked turn waits on. */
   engineGone?: (turn: WatchedTurn) => boolean;
+  /** The CPU time the processes of the turn's shell command started at `since` have used, null when unknown. Read once
+   * per sweep after a turn running one has been silent for stallMs: time gained since the last read counts as an event. */
+  commandCpuMs?: (turn: WatchedTurn, since: number) => Promise<number | null>;
   /** silentMs: the silence that stopped the turn, stallMs, toolStallMs or parkedStallMs. */
   onStall: (turn: WatchedTurn, silentMs: number) => void;
   /** The conversations shown working that nothing holds but a watched turn (no dispatch, engine or settling turn): one no
@@ -74,6 +93,8 @@ export interface TurnWatchdogOptions {
 export class TurnWatchdog {
   private turns = new Map<string, WatchedTurn>();
   private unheldSince = new Map<string, number>();
+  /** Each turn's last read of its shell command's CPU time: the command it was read for (by start) and whether a read is out. */
+  private cpu = new WeakMap<WatchedTurn, { since: number; ms: number | null; reading: boolean }>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private opts: TurnWatchdogOptions;
 
@@ -156,7 +177,7 @@ export class TurnWatchdog {
   }
 
   /** A turn of this bot is answering now: running and not parked on a person or a computer. One that goes silent is
-   * stopped by the sweep, so this never holds anything for longer than toolStallMs without events. */
+   * stopped by the sweep, so this never holds anything for longer than toolStallMs without events or a command's CPU use. */
   answering(botId: string): boolean {
     for (const turn of this.turns.values()) if (turn.botId === botId && !parked(turn)) return true;
     return false;
@@ -172,7 +193,9 @@ export class TurnWatchdog {
     for (const turn of this.turns.values()) {
       if (sleptMs) turn.lastEventAt = Math.min(at, turn.lastEventAt + sleptMs);
       const silentMs = this.silenceLimit(turn);
-      if (silentMs === null || at - turn.lastEventAt < silentMs) continue;
+      if (silentMs === null) continue;
+      if (at - turn.lastEventAt >= this.opts.stallMs) this.readCommandCpu(turn);
+      if (at - turn.lastEventAt < silentMs) continue;
       this.turns.delete(turn.threadId);
       this.opts.onStall(turn, silentMs);
     }
@@ -183,6 +206,23 @@ export class TurnWatchdog {
   private silenceLimit(turn: WatchedTurn): number | null {
     if (parked(turn)) return this.opts.engineGone?.(turn) ? this.opts.parkedStallMs : null;
     return turn.runningTools.size > 0 ? Math.max(this.opts.stallMs, this.opts.toolStallMs) : this.opts.stallMs;
+  }
+
+  /** Reads the CPU time of a silent turn's shell command; one whose time changed since the last read is working (it gained
+   * some, or a process came or went, as a build's compiler runs do), and that counts as an event, so a command that keeps
+   * working is never stopped and one that stops for toolStallMs is. */
+  private readCommandCpu(turn: WatchedTurn): void {
+    const read = this.opts.commandCpuMs, command = parked(turn) ? undefined : oldestCommand(turn);
+    if (!read || !command) return;
+    const last = this.cpu.get(turn);
+    if (last?.reading) return;
+    const since = command.startedAt, previous = last?.since === since ? last.ms : null;
+    this.cpu.set(turn, { since, ms: previous, reading: true });
+    void Promise.resolve().then(() => read(turn, since)).catch(() => null).then((ms) => {
+      // A read that failed keeps the last one to compare with.
+      this.cpu.set(turn, { since, ms: ms ?? previous, reading: false });
+      if (ms !== null && previous !== null && ms !== previous && this.turns.get(turn.threadId) === turn) turn.lastEventAt = Math.max(turn.lastEventAt, this.now());
+    });
   }
 
   private freeUnheld(at: number): void {

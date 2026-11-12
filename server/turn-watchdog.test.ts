@@ -8,7 +8,7 @@ import type { ProviderAdapter, RuntimeEvent } from "./contracts.ts";
 import { EngineMemory } from "./engine-memory.ts";
 import type { Message } from "./store.ts";
 import { TurnStops, stoppedTurnOutcome } from "./turn-outcome.ts";
-import { engineProcessGone, stallLimitMs, stallNotice, stuckCommand, TurnWatchdog, type WatchedTurn } from "./turn-watchdog.ts";
+import { engineCommandCpuMs, engineProcessGone, stallLimitMs, stallNotice, stuckCommand, TurnWatchdog, type TurnWatchdogOptions, type WatchedTurn } from "./turn-watchdog.ts";
 
 const STALL = 10_000;
 const TOOL_STALL = 50_000;
@@ -19,7 +19,7 @@ const toolStarted = (itemId: string): RuntimeEvent => ({ ...base, type: "item.st
 const shellStarted = (itemId: string, summary: string): RuntimeEvent => ({ ...base, type: "item.started", itemType: "tool", itemId, title: "Bash", summary });
 const toolEnded = (itemId: string): RuntimeEvent => ({ ...base, type: "item.completed", itemType: "tool", itemId, ok: true });
 
-function rig() {
+function rig(extra: Partial<TurnWatchdogOptions> = {}) {
   let now = 0;
   const stalls: WatchedTurn[] = [];
   const limits: number[] = [];
@@ -39,6 +39,7 @@ function rig() {
       free: (threadId) => { freed.push(threadId); working.splice(working.findIndex((thread) => thread.threadId === threadId), 1); },
     },
     now: () => now,
+    ...extra,
   });
   return { dog, stalls, limits, adapters, alive, working, freed, tick: (ms: number) => (now += ms) };
 }
@@ -364,6 +365,103 @@ describe("TurnWatchdog", () => {
     tick(1);
     dog.sweep();
     expect(freed).toEqual(["t1"]);
+  });
+});
+
+describe("a shell command that keeps working", () => {
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  /** Sweeps once a turn limit at a time for ms, letting each CPU read land before the next sweep. */
+  async function run(r: ReturnType<typeof rig>, ms: number) {
+    for (let left = ms; left > 0; left -= STALL) {
+      r.tick(Math.min(STALL, left));
+      r.dog.sweep();
+      await settle();
+    }
+  }
+
+  it("is never stopped while its processes keep using CPU, and is once they stop for the tool limit", async () => {
+    let cpuMs = 0, busy = true;
+    const reads: number[] = [];
+    const r = rig({ commandCpuMs: async (_turn, since) => { reads.push(since); if (busy) cpuMs += 1_000; return cpuMs; } });
+    r.dog.watch("t1", "bot1");
+    r.tick(5);
+    r.dog.observe(shellStarted("tool-1", "ffmpeg -i talk.mov talk.mp4"));
+    await run(r, 5 * TOOL_STALL);
+    expect(r.stalls).toHaveLength(0);
+    expect(new Set(reads)).toEqual(new Set([5]));
+    busy = false;
+    await run(r, TOOL_STALL - STALL);
+    expect(r.stalls).toHaveLength(0);
+    await run(r, 2 * STALL);
+    expect(r.stalls).toEqual([expect.objectContaining({ threadId: "t1" })]);
+    expect(r.limits).toEqual([TOOL_STALL]);
+    expect(stallNotice(r.stalls[0]!, TOOL_STALL, 6 * TOOL_STALL + 5).key).toBe("chat.notice.stalledCommand");
+  });
+
+  it("is stopped at the tool limit when its processes use no CPU, or their CPU time cannot be read", async () => {
+    for (const cpuMs of [500, null]) {
+      const r = rig({ commandCpuMs: async () => cpuMs });
+      r.dog.watch("t1", "bot1");
+      r.dog.observe(shellStarted("tool-1", "sleep 100000"));
+      await run(r, TOOL_STALL - 1);
+      expect(r.stalls).toHaveLength(0);
+      await run(r, 2);
+      expect(r.limits).toEqual([TOOL_STALL]);
+    }
+  });
+
+  it("reads nothing until the turn has been silent for the turn limit, nor for a tool that runs no shell command", async () => {
+    let reads = 0;
+    const r = rig({ commandCpuMs: async () => (reads += 1) });
+    r.dog.watch("t1", "bot1");
+    r.dog.observe(toolStarted("tool-1"));
+    await run(r, TOOL_STALL - 1);
+    expect(reads).toBe(0);
+    r.dog.observe(toolEnded("tool-1"));
+    r.dog.observe(shellStarted("tool-2", "make build"));
+    await run(r, STALL - 1);
+    expect(reads).toBe(0);
+    await run(r, 1);
+    expect(reads).toBe(1);
+  });
+
+  it("counts processes coming and going as work, and is not misled by a read that failed", async () => {
+    const seen = [300, null, 200, 400, null, 100];
+    let reads = 0;
+    const r = rig({ commandCpuMs: async () => seen[reads++ % seen.length] ?? null });
+    r.dog.watch("t1", "bot1");
+    r.dog.observe(shellStarted("tool-1", "make -j8"));
+    await run(r, 3 * TOOL_STALL);
+    expect(r.stalls).toHaveLength(0);
+  });
+
+  it("goes on with the next sweep when reading a command's CPU time throws", async () => {
+    const r = rig({ commandCpuMs: () => { throw new Error("thread gone"); } });
+    r.dog.watch("t1", "bot1");
+    r.dog.observe(shellStarted("tool-1", "make build"));
+    await run(r, TOOL_STALL);
+    expect(r.limits).toEqual([TOOL_STALL]);
+  });
+
+  it("never compares one command's CPU time with another's", async () => {
+    const r = rig({ commandCpuMs: async (_turn, since) => (since === 0 ? 100 : 5_000) });
+    r.dog.watch("t1", "bot1");
+    r.dog.observe(shellStarted("tool-1", "make build"));
+    await run(r, TOOL_STALL - STALL);
+    r.dog.observe(shellStarted("tool-2", "make test"));
+    r.dog.observe(toolEnded("tool-1"));
+    await run(r, TOOL_STALL);
+    expect(r.limits).toEqual([TOOL_STALL]);
+  });
+
+  it("reads the CPU time of what the engine started since the command did, and nothing for a driver with no process", async () => {
+    const sample = vi.fn(async () => ({ cpuMs: 1_234, connections: null }));
+    expect(await engineCommandCpuMs(tracked(ENGINE_PID), "t1", 99, sample)).toBe(1_234);
+    expect(sample).toHaveBeenCalledWith(ENGINE_PID, 99);
+    expect(await engineCommandCpuMs(tracked(undefined), "t1", 99, sample)).toBeNull();
+    expect(await engineCommandCpuMs({}, "t1", 99, sample)).toBeNull();
+    expect(await engineCommandCpuMs(undefined, "t1", 99, sample)).toBeNull();
+    expect(sample).toHaveBeenCalledTimes(1);
   });
 });
 
