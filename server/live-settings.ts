@@ -1,14 +1,20 @@
 import type { LiveKeySource, LiveSettings } from "../shared/wire.ts";
 import { saveConfig, syncCredentialEnv, type AppConfig } from "./config.ts";
-import { azureLiveEndpoint, LIVE_NEEDS_AZURE, LIVE_NEEDS_KEY, openAiLiveEndpoint, type LiveEndpoint } from "./live-call.ts";
+import { azureLiveEndpoint, LIVE_NEEDS_AZURE, LIVE_NEEDS_FISH, LIVE_NEEDS_KEY, openAiLiveEndpoint, type LiveEndpoint } from "./live-call.ts";
 import { liveSavePatch, usableLiveKey, type LiveConfig as LiveConfigSection } from "./live-config.ts";
+import { fishLiveEndpoint, usableFishAgent } from "./live-fish.ts";
 
 export const LIVE_IDLE_MINUTES_DEFAULT = 5;
 
-type LiveConfig = Pick<AppConfig, "live" | "openai">;
+type LiveConfig = Pick<AppConfig, "live" | "openai" | "tts">;
 
-/** A saved Live key goes only to the provider and host it was saved for (`usableLiveKey`), and the OpenAI API key only ever to OpenAI. */
+/** A saved Live key goes only to the provider and host it was saved for (`usableLiveKey`), the OpenAI API key only ever to
+ * OpenAI, and the Fish Audio key only to Fish Audio. */
 export function liveCallKey(cfg: LiveConfig): { key: string; source: LiveKeySource } | null {
+  if (cfg.live?.provider === "fish") {
+    const fish = cfg.tts?.fishKey?.trim();
+    return fish ? { key: fish, source: "fishAudio" } : null;
+  }
   const live = usableLiveKey(cfg.live);
   if (live) return { key: live, source: "live" };
   if (cfg.live?.provider === "azure") return null;
@@ -16,17 +22,19 @@ export function liveCallKey(cfg: LiveConfig): { key: string; source: LiveKeySour
   return openai ? { key: openai, source: "openai" } : null;
 }
 
-/** null when Azure is chosen but its endpoint or deployment is missing or not valid. */
+/** null when Azure is chosen but its endpoint or deployment is missing or not valid. On Fish Audio, `model` is "" until the
+ * harness has set up an agent on the account of the Fish Audio key. */
 export function liveCallEndpoint(cfg: LiveConfig, env: NodeJS.ProcessEnv = process.env): LiveEndpoint | null {
-  return cfg.live?.provider === "azure"
-    ? azureLiveEndpoint(cfg.live.azureEndpoint, cfg.live.azureDeployment)
-    : openAiLiveEndpoint(env);
+  if (cfg.live?.provider === "azure") return azureLiveEndpoint(cfg.live.azureEndpoint, cfg.live.azureDeployment);
+  if (cfg.live?.provider === "fish") return fishLiveEndpoint(usableFishAgent(cfg.live, cfg.tts?.fishKey ?? ""), env);
+  return openAiLiveEndpoint(env);
 }
 
 export function liveSetupProblem(cfg: LiveConfig): string | null {
-  const azure = cfg.live?.provider === "azure";
-  if (!liveCallKey(cfg)) return azure ? LIVE_NEEDS_AZURE : LIVE_NEEDS_KEY;
-  return liveCallEndpoint(cfg) ? null : LIVE_NEEDS_AZURE;
+  const provider = cfg.live?.provider;
+  const missing = provider === "azure" ? LIVE_NEEDS_AZURE : provider === "fish" ? LIVE_NEEDS_FISH : LIVE_NEEDS_KEY;
+  if (!liveCallKey(cfg)) return missing;
+  return liveCallEndpoint(cfg) ? null : missing;
 }
 
 /** The environment follows the save, as for PUT /api/config: loadConfig prefers it over the file. */
@@ -49,11 +57,11 @@ export function liveSettingsForClient({ azureEndpoint: _endpoint, azureDeploymen
 export function liveSettingsFor(cfg: AppConfig): LiveSettings {
   const minutes = cfg.live?.idleMinutes;
   const key = liveCallKey(cfg);
-  const azure = cfg.live?.provider === "azure";
+  const provider = cfg.live?.provider;
   return {
     configured: liveSetupProblem(cfg) === null,
     ...(key ? { keySource: key.source } : {}),
-    ...(azure ? { provider: "azure" as const } : {}),
+    ...(provider === "azure" || provider === "fish" ? { provider } : {}),
     ...(cfg.live?.azureEndpoint ? { azureEndpoint: cfg.live.azureEndpoint } : {}),
     ...(cfg.live?.azureDeployment ? { azureDeployment: cfg.live.azureDeployment } : {}),
     voice: cfg.live?.voice ?? "",

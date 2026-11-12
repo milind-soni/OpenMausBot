@@ -180,7 +180,7 @@ export function CallTargetButton({
     setMenuOpen(false);
     if (next === "live" && liveThreadId !== undefined) {
       onStart("live");
-      void startLiveCall({ botId: targetId, threadId: liveThreadId });
+      void startLiveCall({ botId: targetId, threadId: liveThreadId, provider: state.config?.live?.provider });
       return;
     }
     if (!turnsReady) {

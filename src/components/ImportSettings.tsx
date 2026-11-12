@@ -2,7 +2,7 @@
 // and MCP servers another AI tool keeps on this computer.
 import { BookOpen, Check, ChevronDown, Info, Loader2, Plug } from "lucide-react";
 import { useContext, useEffect, useState, type ReactNode } from "react";
-import { SettingRow, SettingsLook, SettingsRows, Switch } from "./SettingsPrimitives";
+import { SettingRow, SettingsLook, SettingsMark, SettingsRows, Switch } from "./SettingsPrimitives";
 
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
@@ -220,8 +220,8 @@ export function GrokImportSection() {
   const [open, setOpen] = useState(false);
   if (useContext(SettingsLook)) {
     return (
-      <div data-import-section="grok" className="flex flex-col">
-        <SettingRow title={t("settings.import.moveTitle")} subtitle={t("settings.import.grokLine")}>
+      <div data-import-section="grok" data-settings-block="grok-move" className="flex flex-col">
+        <SettingRow title={t("settings.import.grokTitle")} subtitle={t("settings.import.grokLine")} leading={<SettingsMark><GrokBotMark size={18} /></SettingsMark>}>
           <button type="button" className="ui-button" data-grok-move-open aria-expanded={open} onClick={() => { setStarted(true); setOpen(!open); }}>{t(open ? "common.close" : "settings.import.moveAction")}</button>
         </SettingRow>
         {started && <div className={open ? "px-4 pb-3" : "hidden"}><GrokMoveDialog inline onClose={() => { setStarted(false); setOpen(false); }} /></div>}
@@ -241,20 +241,22 @@ export function GrokImportSection() {
   );
 }
 
-export function ImportSettings({ client = setupImportApi }: { client?: SetupImportClient }) {
+export function ImportSettings({ client = setupImportApi, children }: { client?: SetupImportClient; children?: ReactNode }) {
   const { state } = useStore();
   if (useContext(SettingsLook)) {
     return (
       <SettingsRows>
-        <AiAppsImport client={client} local={localSetupImport(state.config?.cloudHome === true)} />
         <GrokImportSection />
+        <AiAppsImport client={client} local={localSetupImport(state.config?.cloudHome === true)} />
+        {children}
       </SettingsRows>
     );
   }
   return (
     <div className="flex flex-col gap-4">
-      <AiAppsImport client={client} local={localSetupImport(state.config?.cloudHome === true)} />
       <GrokImportSection />
+      <AiAppsImport client={client} local={localSetupImport(state.config?.cloudHome === true)} />
+      {children}
     </div>
   );
 }
