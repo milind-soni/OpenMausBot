@@ -9604,6 +9604,7 @@
   "activity.tool.team.reportBug": "Relatar um problema",
   "browser.control.held": "O bot {name} está pausado para você",
   "native.lendTray.and": " e ",
+  "native.lendTray.bots": "Bots ({count})",
   "native.lendTray.clouds": "Clouds ({count})",
   "native.lendTray.pausedLine": "Pausado: {clouds} sem acesso a este {device}",
   "native.lendTray.paused": "Pausado",

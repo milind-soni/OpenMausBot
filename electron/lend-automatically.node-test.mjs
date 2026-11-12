@@ -533,7 +533,15 @@ test("the menu-bar item names the bot acting on this Mac, with its colour, and k
 test("a bot's name from a Cloud is shown only as short plain text, and its colour only as a colour word", () => {
   assert.deepEqual(actingBot({ name: " Word\n assistant ", color: "purple" }), { name: "Word assistant", color: "purple" });
   assert.deepEqual(actingBot({ name: "Support", color: "#fff; rm" }), { name: "Support", color: null });
-  for (const by of [null, {}, { name: "" }, { name: 7 }, { name: "x".repeat(65) }, { name: "Bell\u0007" }, { name: "Support\u202Eevil" }, { name: "Zero\u200Bwidth" }]) assert.equal(actingBot(by), null, JSON.stringify(by));
+  assert.equal(actingBot({ name: "x".repeat(80) })?.name, "x".repeat(80), "every name the server allows (80) is shown");
+  for (const by of [null, {}, { name: "" }, { name: 7 }, { name: "x".repeat(81) }, { name: "Bell\u0007" }, { name: "Support\u202Eevil" }, { name: "Zero\u200Bwidth" }]) assert.equal(actingBot(by), null, JSON.stringify(by));
+});
+
+test("three or more names in the menu-bar title count bots as bots and Clouds as Clouds", () => {
+  const bots = names => names.map(name => ({ name, color: null, cloud: "My Cloud" }));
+  assert.equal(indicatorText({ clouds: ["My Cloud"], using: ["My Cloud"], bots: bots(["A", "B", "C"]) }, "Mac").title, "3 bots are using this Mac");
+  assert.equal(indicatorText({ clouds: ["My Cloud", "Client A"], using: ["My Cloud", "Client A"], bots: bots(["A", "B"]) }, "Mac").title, "2 Clouds are using this Mac");
+  assert.equal(indicatorText({ clouds: ["X", "Y", "Z"], using: ["X", "Y", "Z"] }, "Mac").title, "3 Clouds are using this Mac");
 });
 
 test("the menu names each bot using this Mac with its colour dot; See activity is one click from it", () => {

@@ -257,15 +257,16 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
   /** The Clouds whose device link is open now. */
   const linked = new Set();
   const inUse = new Map();
-  /** Each bot that acted here lately, by Cloud and bot name, until ACTING_MS after its last action. */
+  /** Each bot that acted here lately, by Cloud and bot name, until ACTING_MS after its last action ends (`held` while it runs). */
   const acting = new Map();
-  const actedFor = (id, by) => {
+  const actedFor = (id, by, held = false) => {
     const key = `${id}\n${by.name}`;
     clearTimeout(acting.get(key)?.timer);
-    const timer = setTimeout(() => { acting.delete(key); changed(); }, ACTING_MS);
-    timer.unref?.();
+    const timer = held ? null : setTimeout(() => { acting.delete(key); changed(); }, ACTING_MS);
+    timer?.unref?.();
     acting.set(key, { env: id, by, timer });
   };
+  const forgetHeld = (id, by) => { const key = `${id}\n${by.name}`; if (acting.get(key)?.timer === null) acting.delete(key); };
   const forgetActing = id => { for (const [key, entry] of acting) if (id === undefined || entry.env === id) { clearTimeout(entry.timer); acting.delete(key); } };
   const actingOn = env => status.get(env.id)?.connected ? [...acting.values()].filter(entry => entry.env === env.id) : [];
   let closed = false;
@@ -559,7 +560,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
             if (executing) { await call("result", { jobId: job.id, result: sharedComputerError(new Error("This computer is busy with another server")) }); continue; }
             const by = actingBot(job.by);
             executing = { env: env.id, action: job.operation.action };
-            if (by) actedFor(env.id, by);
+            if (by) actedFor(env.id, by, true);
             changed();
             const jobAbort = new AbortController();
             const jobSignal = AbortSignal.any([signal, jobAbort.signal]);
@@ -604,7 +605,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
               if (control) presence.acted(job.operation.tool_name, job.operation.arguments);
               await renewal?.catch(() => {});
               await control?.release().catch(() => {});
-              executing = null; if (by) actedFor(env.id, by); changed();
+              // A stopped or replaced run must not name its bot again after stop() cleared it.
+              executing = null; if (by) { if (!closed && !signal.aborted && running.get(env.id) === live) actedFor(env.id, by); else forgetHeld(env.id, by); } changed();
             }
             activity.record({
               env, action: job.operation.action, detail: describeSharedOperation(grant, job.operation), ok: result?.isError !== true,

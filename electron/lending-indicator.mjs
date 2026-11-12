@@ -6,14 +6,15 @@ import { dotIcons } from "./color-dot.mjs";
 export const deviceWord = (platform = process.platform) => platform === "darwin" ? "Mac" : platform === "win32" ? "PC" : "computer";
 
 const listed = (names, t) => names.length < 3 ? names.join(t("native.lendTray.and")) : `${names.slice(0, -1).join(", ")}${t("native.lendTray.and")}${names.at(-1)}`;
-const short = (names, t) => names.length < 3 ? listed(names, t) : t("native.lendTray.clouds", { count: names.length });
+/** Three or more names shorten to a count of what they are: bots when every name is a bot, else the Clouds. */
+const short = (names, t, { bots = false, clouds = names.length } = {}) => names.length < 3 ? listed(names, t) : t(bots ? "native.lendTray.bots" : "native.lendTray.clouds", { count: bots ? names.length : clouds });
 
 // oxlint-disable-next-line no-control-regex
 const NOT_PRINTABLE = /[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
 /** The bot a Cloud says an action is for: a short plain name and a colour word, or null. Older Clouds send none. */
 export function actingBot(by) {
   const name = typeof by?.name === "string" ? by.name.trim().replace(/\s+/g, " ") : "";
-  if (!name || [...name].length > 64 || NOT_PRINTABLE.test(name)) return null;
+  if (!name || [...name].length > 80 || NOT_PRINTABLE.test(name)) return null;
   return { name, color: typeof by.color === "string" && /^[a-z]{1,16}$/.test(by.color) ? by.color : null };
 }
 
@@ -36,7 +37,7 @@ export function indicatorText({ clouds, using, bots = [], paused, pauseError, sc
     const acting = bots.filter(bot => using.includes(bot.cloud));
     const rest = using.filter(name => !acting.some(bot => bot.cloud === name));
     const byBot = acting.length ? { acting: acting.map(bot => ({ label: t("native.lendTray.botUsing", { bot: bot.name, cloud: bot.cloud, device: named }), color: bot.color })) } : {};
-    return { line: rest.length ? say(rest, listed) : null, title: say([...acting.map(bot => bot.name), ...rest], short), screen: why, ...byBot, ...pending, ...wrong };
+    return { line: rest.length ? say(rest, listed) : null, title: say([...acting.map(bot => bot.name), ...rest], (names, tt) => short(names, tt, { bots: !rest.length, clouds: using.length })), screen: why, ...byBot, ...pending, ...wrong };
   }
   const ready = clouds.filter(name => !waiting.includes(name));
   if (!ready.length) return { line: pending.pending ?? t("native.lendTray.canUse", { clouds: listed(clouds, t), device: named }), title: "", screen: why, ...wrong };
