@@ -155,6 +155,21 @@ describe("safe tier", () => {
     expect(await host.undo({ threadId: turn.threadId, requestId })).toEqual({ claimed: true, state: "already_undone" });
   });
 
+  it("a setting never saved reads as the default the app runs on, so Undo of its first change sets that default back", async () => {
+    const { host, set, cfg, cards, turn, saved } = fixture();
+    delete cfg.rooms; delete cfg.threads; cfg.mcp = {};
+    for (const [id, value] of [["rooms.turnTimeoutMinutes", 45], ["mcp.callTimeoutMinutes", 20], ["threads.maxConcurrentPerBot", 7]] as const) {
+      const before = cards().length;
+      expect((await set(id, value)).status).toBe(200);
+      const card = cards()[before]!.card;
+      expect(card.appSettingRequest.before, id).toMatch(/^\d+$/);
+      expect(await host.undo({ threadId: turn.threadId, requestId: String(card.requestId) }), id).toEqual({ claimed: true, state: "undone" });
+    }
+    expect(saved.slice(-1)).toEqual([{ threads: { maxConcurrentPerBot: Number(cards()[2]!.card.appSettingRequest.before) } }]);
+    expect(saved).toContainEqual({ rooms: { turnTimeoutMinutes: 5 } });
+    expect(saved).toContainEqual({ mcp: { callTimeoutMinutes: 10 } });
+  });
+
   it("reorders and groups bots through the registry, with typed values kept for undo", async () => {
     const { host, set, bots, cards, turn } = fixture();
     expect((await set("bots.order", ["clive", "kiwi"])).status).toBe(200);
