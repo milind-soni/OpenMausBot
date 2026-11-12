@@ -5112,6 +5112,8 @@
   "automations.address.keepOpen": "保持 {app} 開啟，才能接收。",
   "automations.address.unavailable": "這台電腦目前無法接收。",
   "automations.more": "更多",
+  "automations.sameConversationLabel": "保持同一個對話",
+  "automations.sameConversationHelp": "每次執行都會在上一次執行的對話中繼續，機器人能看到之前做過的事。執行會依序進行。",
   "automations.address.showSecret": "顯示密鑰／設定",
   "automations.address.secret": "密鑰：{secret}",
   "automations.address.secretUnknown": "密鑰只會顯示一次。複製網址即可產生新的密鑰。",

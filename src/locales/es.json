@@ -3982,6 +3982,8 @@
   "automations.address.keepOpen": "Mantén {app} abierto para que pueda recibir.",
   "automations.address.unavailable": "Este equipo no puede recibir ahora mismo.",
   "automations.more": "Más",
+  "automations.sameConversationLabel": "Mantener una sola conversación",
+  "automations.sameConversationHelp": "Cada ejecución continúa en la conversación de la anterior, así el bot ve lo que hizo antes. Las ejecuciones van por turnos.",
   "automations.address.showSecret": "Mostrar secreto / ajustes",
   "automations.address.secret": "Secreto: {secret}",
   "automations.address.secretUnknown": "El secreto se muestra una vez. Copia la dirección para crear uno nuevo.",

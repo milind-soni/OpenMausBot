@@ -4926,6 +4926,8 @@
   "automations.address.keepOpen": "受信できるよう、{app}を開いたままにしてください。",
   "automations.address.unavailable": "このコンピューターは現在受信できません。",
   "automations.more": "その他",
+  "automations.sameConversationLabel": "1つの会話を続ける",
+  "automations.sameConversationHelp": "各実行は前回の実行の会話で続くため、ボットは以前に何をしたかを確認できます。実行は順番に行われます。",
   "automations.address.showSecret": "シークレット／設定を表示",
   "automations.address.secret": "シークレット：{secret}",
   "automations.address.secretUnknown": "シークレットは一度しか表示されません。新しく作成するには、アドレスをコピーしてください。",
