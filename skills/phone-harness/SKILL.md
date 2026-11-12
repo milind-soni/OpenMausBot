@@ -16,10 +16,13 @@ with Bash, raw `adb`, `subprocess`, an emulator, network ADB, or Tailscale.
 2. Call `open_app` with the human app name. Do not scan the launcher first.
    Use `list_apps` only when the name is ambiguous or not found, then pass the
    package name.
-3. Call `read_screen` before choosing a target and after every action. Prefer
-   `tap_text`; use `screenshot` and pixel `tap` only when accessibility text
-   cannot identify the target.
-4. Use `swipe`, `type_text`, and `press` for interaction, verifying each step.
+3. Call `read_screen` before choosing a target. After that, to act and see the
+   result, put the action and `read_screen` in one `batch`. Prefer `tap_text`;
+   use `screenshot` and pixel `tap` only when accessibility text cannot
+   identify the target.
+4. Use `swipe`, `type_text`, and `press` for interaction. When you know the
+   next few steps, put them in one `batch`. To wait for content to load, add a
+   `wait` step to the batch, not Bash `sleep`.
 
 The tools operate the user's real phone. Navigate and read only what the task
 needs. Stop before sending, posting, purchasing, booking, deleting, changing
