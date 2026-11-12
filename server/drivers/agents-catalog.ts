@@ -388,6 +388,7 @@ const TOOL_DEFINITIONS = [
         name: { type: "string", description: "Short, unique display name for the specialist." },
         role: { type: "string", description: "The specialist's job title or role." },
         instructions: { type: "string", description: "What this specialist is responsible for and how it should work." },
+        copy_from_bot_id: { type: "string", description: "To duplicate or replace a bot: its id. Copies its soul, role and model; instructions are added after." },
         modelSelection: { type: "object", additionalProperties: false, properties: {
           instanceId: { type: "string" }, model: { type: "string" },
           effort: { type: "string" }, variant: { type: "string" },
@@ -398,7 +399,7 @@ const TOOL_DEFINITIONS = [
           description: "Absolute path of the folder this specialist's tools read and write in (for example /Users/me/Projects/site). It must already exist. Leave it out for the specialist's private workspace.",
         },
       },
-      required: ["name", "role", "instructions"],
+      required: ["name"],
     },
   },
   {

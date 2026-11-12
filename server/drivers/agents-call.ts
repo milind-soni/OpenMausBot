@@ -515,8 +515,9 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const botName = String(args.name ?? "").trim();
     const role = String(args.role ?? "").trim();
     const instructions = String(args.instructions ?? "").trim();
-    if (!botName || !role || !instructions) {
-      return { text: "create_bot needs name, role, and instructions.", isError: true };
+    const copyFrom = typeof args.copy_from_bot_id === "string" ? args.copy_from_bot_id.trim() : "";
+    if (!botName || (!copyFrom && (!role || !instructions))) {
+      return { text: "create_bot needs name, role, and instructions, or name and copy_from_bot_id.", isError: true };
     }
     const r = await api(`/api/internal/create-bot`, {
       method: "POST",
@@ -526,6 +527,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         name: botName,
         role,
         instructions,
+        ...(copyFrom ? { copyFromBotId: copyFrom } : {}),
         ...(args.modelSelection !== undefined ? { modelSelection: args.modelSelection } : {}),
         ...(typeof args.cwd === "string" ? { cwd: args.cwd.trim() } : {}),
       }),

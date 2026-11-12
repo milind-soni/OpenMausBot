@@ -98,6 +98,21 @@ describe("create_bot", () => {
   });
 });
 
+describe("create_bot copy_from_bot_id", () => {
+  it("creates a copy from just a name and the bot to copy", async () => {
+    const calls: Array<{ path: string; body: unknown }> = [];
+    const result = await callTool("create_bot", { name: "Bugfixer 2", copy_from_bot_id: " bot-old " }, context({
+      client: {
+        api: async (path, init) => { calls.push({ path, body: JSON.parse(String(init?.body)) }); return { id: "b2", name: "Bugfixer 2" }; },
+        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+      },
+    }));
+    expect(result.isError).toBeFalsy();
+    expect(calls).toEqual([{ path: "/api/internal/create-bot",
+      body: { fromBotId: "bot-voice", fromThreadId: "thread-voice", name: "Bugfixer 2", role: "", instructions: "", copyFromBotId: "bot-old" } }]);
+  });
+});
+
 describe("team creation with every optional field filled in", () => {
   // Strict tool-calling engines send each optional field, as "" or null, when they mean to leave it out.
   const recording = (calls: Array<{ path: string; body: any }>, answer: Record<string, unknown>) => context({
