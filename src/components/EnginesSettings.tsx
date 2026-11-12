@@ -10,13 +10,15 @@ import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotic
 import { AppCopyNotice } from "./EngineAppCopy";
 import { forgetAppCopySwitches } from "@/state/engine-install";
 import { AccountsCard, AddAccount, accountGroupOf, accountsReady, type AccountGroup } from "./EngineAccounts";
-import { ClaudeEndpoints } from "./ClaudeEndpoints";
+import { ClaudeEndpoints, CodexEndpoints } from "./ClaudeEndpoints";
+import { ClaudeBedrockEndpoints } from "./ClaudeBedrock";
 import { DEVICE_SIGN_IN_COPY, deviceSignInProvider } from "./DeviceSignIn";
 import { AntigravityFreeSpace } from "./AntigravityFreeSpace";
 import { CacheKeepWarmSettings } from "./CacheKeepWarmSettings";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
-import { SettingsDisclosureRow, SettingsGroup, SettingsRows } from "./SettingsPrimitives";
+import { SettingsFoldRow, SettingsGroup, SettingsMark, SettingsRows, StatusDot } from "./SettingsPrimitives";
+import { OllamaModels, ollamaShortStatus } from "./OllamaStatusLine";
 import { InstanceProviderMark } from "./ProviderIcons";
 
 interface ProbeResult {
@@ -387,8 +389,9 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
   return (
     <EngineCard instance={instance} bare={bare}>
       {policyNote}
-      {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} unframed />}
+      {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} description={instance.codexEndpoint ? t("agentEndpoints.codexHint") : undefined} unframed />}
       {engineReady(instance) && <ApiKeyEngineManage instance={instance} className="mt-3" />}
+      {engineReady(instance) && instance.serverKind === "ollama" && <OllamaModels instance={instance} className="mt-3" />}
       {/* The setup panel that first said so is gone once the engine is Ready. */}
       {engineReady(instance) && <AppCopyNotice instance={instance} className="mt-3" />}
       {instance.snapshot.update && <EngineUpdateNotice update={instance.snapshot.update} instance={instance} className="mt-3" quiet />}
@@ -414,9 +417,38 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
   );
 }
 
-function simpleStatus(instance: InstanceInfo, ready: boolean): string {
-  if (ready) return instance.snapshot.authenticated === true && instance.snapshot.account?.email ? instance.snapshot.account.email : t("onboarding.engines.ready");
-  return instance.snapshot.state === "available" && instance.snapshot.authenticated === false ? t("model.signInRequired") : t("onboarding.engines.needsSetup");
+/** "Ready", "Not set up", "Needs attention": the status first, with its 6 px dot. */
+function simpleStatus(instance: InstanceInfo, ready: boolean): { tone: "success" | "warning" | null; text: string } {
+  if (ready) {
+    const email = instance.snapshot.authenticated === true ? instance.snapshot.account?.email : undefined;
+    return { tone: "success", text: email ? `${t("settings.ai.ready")} · ${email}` : t("settings.ai.ready") };
+  }
+  if (instance.snapshot.ollama) return { tone: null, text: ollamaShortStatus(instance.snapshot.ollama) };
+  if (instance.snapshot.state === "available" && instance.snapshot.authenticated === false) return { tone: "warning", text: t("settings.ai.attention") };
+  // What it still needs, in a few plain words: an account sign-in or a key.
+  const needs = instance.authentication !== undefined ? t("settings.ai.needsAccountOrKey") : t("settings.ai.needsKey");
+  return { tone: null, text: `${t("settings.ai.notSetUp")} · ${needs}` };
+}
+
+/** One provider: its mark in the 32 px slot, the status under the name, and one Set up / Manage that opens its fold
+ * inside the same card. */
+function ProviderRow({ instance, ready, open, onToggle, compact, children }: {
+  instance: InstanceInfo; ready: boolean; open: boolean; onToggle: () => void; compact: boolean; children: ReactNode;
+}) {
+  const status = simpleStatus(instance, ready);
+  return <>
+    <div data-simple-engine={instance.instanceId} className={cn("flex items-center gap-3 px-4", compact && !ready && !status.tone ? "min-h-11 py-1.5" : "min-h-16 py-3")}>
+      <SettingsMark><InstanceProviderMark instance={instance} size={18} subtle /></SettingsMark>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-[14px] leading-5 text-ink">{instance.displayName}</span>
+        {!(compact && !ready && !status.tone) && <span className="truncate text-[13px] leading-[18px] text-ink-secondary"><StatusDot tone={status.tone} />{status.text}</span>}
+      </span>
+      <button type="button" aria-expanded={open} className="ui-button ml-3 shrink-0" onClick={onToggle}>
+        {t(open ? "common.close" : ready ? "settings.simple.ai.manage" : "settings.simple.ai.setUp")}
+      </button>
+    </div>
+    {open && <div data-provider-fold={instance.instanceId} className="pb-4 pl-[60px] pr-4 pt-3">{children}</div>}
+  </>;
 }
 
 function SimpleEngines({ rows, isReady, renderEngine, more }: {
@@ -428,46 +460,23 @@ function SimpleEngines({ rows, isReady, renderEngine, more }: {
   const [opened, setOpened] = useState<string | null>(null);
   const featured = rows.filter((instance) => isReady(instance) || instance.authentication !== undefined);
   const others = rows.filter((instance) => !featured.includes(instance));
+  const row = (instance: InstanceInfo, compact: boolean) => {
+    const open = opened === instance.instanceId;
+    return <ProviderRow key={instance.instanceId} instance={instance} ready={isReady(instance)} open={open} compact={compact}
+      onToggle={() => setOpened(open ? null : instance.instanceId)}>{renderEngine(instance, true)}</ProviderRow>;
+  };
   return (
-    <>
-      <SettingsGroup label={t("settings.simple.ai.yours")} actions={<RefreshEngines />}>
-        <SettingsRows>
-          {featured.map((instance) => {
-            const ready = isReady(instance), open = opened === instance.instanceId;
-            return (
-              <div key={instance.instanceId} data-simple-engine={instance.instanceId} className="group">
-                <div className="flex min-h-11 flex-wrap items-center gap-x-5 gap-y-2 px-4 py-2.5">
-                  <span className="flex min-w-[min(100%,15rem)] flex-1 items-center gap-3">
-                    <InstanceProviderMark instance={instance} size={14} subtle />
-                    <span className="flex min-w-0 flex-col gap-0.5">
-                      <span className="truncate text-[14px] leading-5 text-ink">{instance.displayName}</span>
-                      <span className="truncate text-[13px] leading-[18px] text-ink-secondary">{simpleStatus(instance, ready)}</span>
-                    </span>
-                  </span>
-                  <button type="button" aria-expanded={open} className="ui-button ml-auto shrink-0" onClick={() => setOpened(open ? null : instance.instanceId)}>
-                    {t(open ? "common.done" : ready ? "settings.simple.ai.manage" : "settings.simple.ai.setUp")}
-                  </button>
-                </div>
-                {open && <div className="px-4 pb-3">{renderEngine(instance, true)}</div>}
-              </div>
-            );
-          })}
-        </SettingsRows>
-      </SettingsGroup>
-      {others.length > 0 && (
-        <SettingsDisclosureRow
-          title={t("settings.simple.ai.more", { count: String(others.length) })}
-          trailing={<span aria-hidden="true" className="flex items-center -space-x-1">
-            {others.slice(0, 4).map((instance) => (
-              <span key={instance.instanceId} className="flex size-[18px] items-center justify-center rounded-full bg-menu"><InstanceProviderMark instance={instance} size={14} subtle /></span>
-            ))}
-          </span>}
-          {...more}
-        >
-          <EngineSections instances={others} isReady={isReady} renderEngine={(instance) => renderEngine(instance)} />
-        </SettingsDisclosureRow>
-      )}
-    </>
+    <SettingsGroup label={t("settings.ai.providers")} actions={<RefreshEngines />}>
+      <SettingsRows icons>
+        {featured.map((instance) => row(instance, false))}
+        {others.length > 0 && (
+          <SettingsFoldRow id={more.id} title={t("settings.ai.moreProviders")} value={String(others.length)} open={more.open} onToggle={more.onToggle}
+            leading={<span aria-hidden="true" />}>
+            {others.map((instance) => row(instance, true))}
+          </SettingsFoldRow>
+        )}
+      </SettingsRows>
+    </SettingsGroup>
   );
 }
 
@@ -518,7 +527,7 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
   const { state } = useStore();
   // Leaving Settings ends the "now uses the copy OpenMausBot installed" lines.
   useEffect(() => forgetAppCopySwitches, []);
-  const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i) || i.claudeEndpoint !== undefined);
+  const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i) || i.claudeEndpoint !== undefined || i.claudeBedrock !== undefined || i.codexEndpoint !== undefined);
   // A provider's accounts share one card, which takes the place of its first account.
   const groups = new Map<AccountGroup, InstanceInfo[]>();
   for (const instance of listed) {
@@ -533,19 +542,21 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
   // A hidden ordinary Claude instance takes its card, and the endpoint section inside it, away. A hosted
   // workspace lists every engine read-only and refuses instance changes, so there the section has no Add.
   const hostedWorkspace = rows.length > 0 && rows.every((instance) => instance.readOnly);
+  const orphanCodexEndpoints = !groups.has("chatgpt") && !hostedWorkspace;
   const orphanEndpoints = !groups.has("claude") && !hostedWorkspace;
   const isReady = (instance: InstanceInfo) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); };
   const renderEngine = (instance: InstanceInfo, bare = false) => {
     const group = groupOf(instance);
     return group
       ? <AccountsCard group={group} accounts={groups.get(group)!} bare={bare}
-        advanced={<>{group === "claude" && <ClaudeEndpoints />}<EngineAdvanced instance={instance} /></>} />
+        advanced={<>{group === "claude" ? <><ClaudeEndpoints /><ClaudeBedrockEndpoints /></> : <CodexEndpoints />}<EngineAdvanced instance={instance} /></>} />
       : <EngineRow instance={instance} bare={bare} />;
   };
 
   if (simple && more) return <>
     <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} more={more} />
-    {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /></div>}
+    {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /><ClaudeBedrockEndpoints /></div>}
+    {orphanCodexEndpoints && <div className="px-4"><CodexEndpoints /></div>}
   </>;
 
   return (
@@ -558,7 +569,8 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
         <RefreshEngines />
       </div>
       <EngineSections instances={rows} isReady={isReady} renderEngine={renderEngine} />
-      {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /></div>}
+      {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /><ClaudeBedrockEndpoints /></div>}
+      {orphanCodexEndpoints && <div className="px-4"><CodexEndpoints /></div>}
       <HiddenEngines />
       <CacheKeepWarmSettings />
     </div>

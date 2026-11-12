@@ -45,6 +45,20 @@ describe("a folder page's files route", () => {
     expect(files.folder({ threadId: "t1", messageId: "m2", doc: stored.doc })).not.toBe(folder);
   });
 
+  it("gives each viewer a token of their own, which stops answering the moment they may no longer see the page", () => {
+    const { files, folder, get, stored } = setup();
+    let seesIt = true;
+    const ann = files.folder({ threadId: "t1", messageId: "m1", doc: stored.doc }, { key: "session:ann", allowed: () => seesIt });
+    const bob = files.folder({ threadId: "t1", messageId: "m1", doc: stored.doc }, { key: "session:bob", allowed: () => true });
+    expect(new Set([folder, ann, bob]).size).toBe(3);
+    expect(files.folder({ threadId: "t1", messageId: "m1", doc: stored.doc }, { key: "session:ann", allowed: () => seesIt })).toBe(ann);
+    expect(get(`${ann}app.js`).status).toBe(200);
+    seesIt = false;
+    expect(get(`${ann}app.js`)).toMatchObject({ status: 404, body: Buffer.from("Not found.") });
+    expect(get(ann).status).toBe(404);
+    expect(get(`${bob}app.js`).status).toBe(200);
+  });
+
   it("serves the stored files read-only, sandboxed if opened directly, and readable from the frame's opaque origin", () => {
     const { folder, get } = setup();
     const script = get(`${folder}app.js`);

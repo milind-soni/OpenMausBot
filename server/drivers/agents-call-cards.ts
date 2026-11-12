@@ -1,5 +1,5 @@
-// The agents tools that put something in front of the person: the Watcher's options card, the widget tools, the
-// page tools and raise_escalation.
+// The agents tools that put something in front of the person: the Watcher's options card, the widget tools and the
+// page tools.
 import { agentsCallMember } from "../../shared/agents-tool-names.ts";
 import { parseShowHtmlInput, parseUpdateHtmlInput } from "../../shared/app.ts";
 import { parseOptionsCardInput, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
@@ -8,7 +8,7 @@ import { parseWidgetInput, widgetAdvice } from "../../shared/widget.ts";
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 import type { Json } from "./agents-client.ts";
 
-export const CARD_TOOL_NAMES: ReadonlySet<string> = new Set(["create_options_card", "show_widget", "show_html", "raise_escalation"]);
+export const CARD_TOOL_NAMES: ReadonlySet<string> = new Set(["create_options_card", "show_widget", "show_html"]);
 
 const CARD_ROUTE = "/api/internal/options-card";
 
@@ -20,13 +20,15 @@ async function callAppTool(name: "show_html" | "update_html", args: Json, contex
   if (!parsed.ok) return { text: parsed.error, isError: true };
   const page = parsed.value.jsx !== undefined ? { jsx: args.jsx } : parsed.value.path !== undefined ? { path: args.path } : { html: args.html };
   const frameless = parsed.value.frameless !== undefined ? { frameless: parsed.value.frameless } : {};
+  const live = parsed.value.live !== undefined ? { live: parsed.value.live } : {};
   const body = updating
-    ? { tool: name, app_id: args.app_id, ...page, ...(typeof args.title === "string" ? { title: args.title } : {}), ...frameless }
+    ? { tool: name, app_id: args.app_id, ...page, ...(typeof args.title === "string" ? { title: args.title } : {}), ...frameless, ...live }
     : {
         tool: name, ...page, title: args.title,
         ...(typeof args.height === "number" ? { height: args.height } : {}),
         ...(typeof args.fallback_text === "string" ? { fallback_text: args.fallback_text } : {}),
         ...frameless,
+        ...live,
       };
   const answer = await context.client.apiResponse(CARD_ROUTE, { method: "POST", body: JSON.stringify(body) });
   if (!answer.ok) return { text: String(answer.body.error ?? (updating ? "Could not update that page." : "Could not show that page.")), isError: true };
@@ -42,19 +44,6 @@ async function callAppTool(name: "show_html" | "update_html", args: Json, contex
 
 export async function callCardTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const { api, apiResponse } = context.client;
-  if (name === "raise_escalation") {
-    const reason = args.reason === undefined || args.reason === null ? "" : String(args.reason).trim();
-    if (!reason) {
-      return { text: 'raise_escalation takes "reason": one line saying what you need from the person and why your work is parked on it. If the person could simply answer you instead, end your turn on the question rather than raising a flag.', isError: true };
-    }
-    const { ok, status, body } = await apiResponse("/api/internal/escalate", { method: "POST", body: JSON.stringify({ reason: reason.slice(0, 500) }) });
-    if (!ok) {
-      const why = status === 429 ? "This conversation has already raised several escalations in the last hour; the person was told about the first ones. Stop here and wait — do not keep flagging the same gate."
-        : String(body.error ?? `HTTP ${status}`);
-      return { text: why, isError: true };
-    }
-    return { text: `Escalated: ${String(body.message ?? "the Chief of Staff (or the person) was told.")}` };
-  }
   if (name === "create_options_card") {
     if (context.botId !== WATCHER_OPTIONS_CARD_BOT_ID) {
       return { text: "create_options_card is not enabled for this bot.", isError: true };

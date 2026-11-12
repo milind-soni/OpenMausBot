@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { BotLogins } from "../bot-logins.ts";
 import { json, readBody } from "../harness/http.ts";
-import { LoginStore } from "../login-store.ts";
+import { VaultStore } from "../vault-store.ts";
 import { ONE_PASSWORD_REFUSED, OnePasswordLogins, sdkOnePasswordClient } from "../onepassword.ts";
 import { fakeOnePasswordSdk } from "../testing/fake-onepassword.ts";
 import { requiredScope, type RequestAuth } from "../request-auth.ts";
@@ -30,7 +30,7 @@ afterEach(async () => {
 async function serve() {
   const dir = mkdtempSync(join(tmpdir(), "omb-login-routes-"));
   dirs.push(dir);
-  const store = new LoginStore({ dataDir: dir });
+  const store = new VaultStore({ dataDir: dir });
   const { sdk } = fakeOnePasswordSdk({ token: TOKEN, vaults: { v1: { title: "Shared with OMB", items: [
     { id: "i1", title: "Example", urls: ["https://vault.example.com"], username: "vault-user", password: VAULT_PASSWORD },
   ] } } });

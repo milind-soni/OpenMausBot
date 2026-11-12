@@ -133,9 +133,21 @@ function readMarks(dataDir: string): AlertMarks | null {
   }
 }
 
+function writeMarks(dataDir: string, marks: AlertMarks): void {
+  try {
+    mkdirSync(join(dataDir, "usage"), { recursive: true, mode: 0o700 });
+    writeFileSync(join(dataDir, "usage", ALERTS_FILE), JSON.stringify(marks), { mode: 0o600 });
+    unsavedMarks.delete(dataDir);
+  } catch {
+    unsavedMarks.add(dataDir);
+  }
+}
+
 export function takeSpendAlert(dataDir: string, state: SpendState | null): SpendAlert | null {
+  const pending = unsavedMarks.has(dataDir) ? memoryMarks.get(dataDir) : undefined;
+  if (pending) writeMarks(dataDir, pending);
   if (!state || (!state.warn && !state.exceeded)) return null;
-  const saved = readMarks(dataDir) ?? memoryMarks.get(dataDir) ?? null;
+  const saved = memoryMarks.get(dataDir) ?? readMarks(dataDir);
   const marks: AlertMarks = saved && saved.month === state.month && saved.monthlyUsd === state.monthlyUsd
     ? saved
     : { month: state.month, monthlyUsd: state.monthlyUsd };
@@ -143,17 +155,15 @@ export function takeSpendAlert(dataDir: string, state: SpendState | null): Spend
   if (!alert) return null;
   const next: AlertMarks = { ...marks, warn: true, ...(alert === "cap" ? { cap: true as const } : {}) };
   memoryMarks.set(dataDir, next);
-  try {
-    mkdirSync(join(dataDir, "usage"), { recursive: true, mode: 0o700 });
-    writeFileSync(join(dataDir, "usage", ALERTS_FILE), JSON.stringify(next), { mode: 0o600 });
-  } catch {
-  }
+  writeMarks(dataDir, next);
   return alert;
 }
 const memoryMarks = new Map<string, AlertMarks>();
+const unsavedMarks = new Set<string>();
 
 export function resetSpendAlertsForTests(): void {
   memoryMarks.clear();
+  unsavedMarks.clear();
 }
 
 export function spendAlertText(alert: SpendAlert, state: SpendState): { title: string; body: string } {

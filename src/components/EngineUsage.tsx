@@ -4,11 +4,13 @@ import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import {
-  limitLine, limitsCheckedAt, loadLimits, reportsUsage, resetTime, usageBars, usageRows, usageTone, useEngineLimits, USAGE_BARS, windowLabel,
+  limitLine, limitsCheckedAt, loadLimits, releaseLimit, reportsUsage, resetTime, usageBars, usageRows, usageTone, useEngineLimits, USAGE_BARS, windowLabel,
   type EngineLimit, type UsageTone,
 } from "@/lib/limit-resets";
 import type { Routine } from "@/lib/routines";
-import { api, useStore } from "@/state/store";
+import { api, useStore, type Message } from "@/state/store";
+import { failedTurnNotice } from "@/lib/failed-turn";
+import { codexUsageLimitReached } from "../../shared/codex-usage-limit";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { threadUpdatedLabel } from "./SidebarThreadRow";
 
@@ -34,6 +36,36 @@ export function useLimitResetContinue(botId: string | undefined, threadId: strin
         });
     },
   };
+}
+
+/** A usage-limit refusal whose reset time has passed stays in the transcript as evidence, collapsed, not as a current
+ * blocker: the reset passing does not prove today's quota is available again. Null while the refusal is still current. */
+export function usePastLimitNotice(tool: NonNullable<Message["tool"]>, messageAt: number | undefined) {
+  const at = tool.limitResetsAt;
+  const [clock, setClock] = useState(Date.now);
+  useEffect(() => {
+    if (typeof at !== "number" || !Number.isFinite(at)) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      const remaining = at - Date.now();
+      if (remaining <= 0) {
+        setClock(Date.now());
+        return;
+      }
+      timer = setTimeout(arm, Math.min(remaining + 1_000, 2_147_483_647));
+    };
+    arm();
+    return () => { if (timer) clearTimeout(timer); };
+  }, [at]);
+  if (typeof at !== "number" || !Number.isFinite(at) || typeof messageAt !== "number" || messageAt > at || clock < at) return null;
+  const { cause, notice } = failedTurnNotice(tool);
+  if (!codexUsageLimitReached(cause)) return null;
+  return (
+    <details className="my-1 w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-lg border border-hairline/40 bg-raised px-3 py-2 text-[12px] text-ink-secondary">
+      <summary className="cursor-pointer">{t("chat.error.pastUsageLimit")}</summary>
+      <p className="mt-2 break-words">{notice ?? cause}</p>
+    </details>
+  );
 }
 
 function useEngineUsage(engine: string | undefined): EngineLimit | undefined {
@@ -71,6 +103,7 @@ export function UsageGlyph({ limit, className }: { limit: EngineLimit; className
  * clears and a fresh check. */
 export function UsageRows({ limit }: { limit: EngineLimit }) {
   const [checking, setChecking] = useState(false);
+  const { dispatch } = useStore();
   const now = Date.now();
   const checkedAt = limitsCheckedAt();
   return (
@@ -96,11 +129,23 @@ export function UsageRows({ limit }: { limit: EngineLimit }) {
       {limit.blocked && (
         <div className="flex items-start justify-between gap-3 border-t-[0.5px] border-ink/10 pt-2.5 text-[12px] leading-4">
           <p className="min-w-0 text-ink-tertiary">{t("limits.clearsOnReply", { engine: limit.name })}</p>
-          <button type="button" data-usage-check disabled={checking} aria-busy={checking}
-            onClick={() => { setChecking(true); void loadLimits(true).finally(() => setChecking(false)); }}
-            className="shrink-0 font-medium text-ink underline underline-offset-2 hover:text-ink-secondary disabled:cursor-wait disabled:opacity-60">
-            {t("common.checkAgain")}
-          </button>
+          <span className="flex shrink-0 flex-col items-end gap-1.5">
+            <button type="button" data-usage-check disabled={checking} aria-busy={checking}
+              onClick={() => { setChecking(true); void loadLimits(true).finally(() => setChecking(false)); }}
+              className="font-medium text-ink underline underline-offset-2 hover:text-ink-secondary disabled:cursor-wait disabled:opacity-60">
+              {t("common.checkAgain")}
+            </button>
+            {limit.held && <button type="button" data-usage-release disabled={checking} aria-busy={checking}
+              onClick={() => {
+                setChecking(true);
+                void releaseLimit(limit.engine)
+                  .catch((cause) => dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }))
+                  .finally(() => setChecking(false));
+              }}
+              className="font-medium text-ink underline underline-offset-2 hover:text-ink-secondary disabled:cursor-wait disabled:opacity-60">
+              {t("limits.tryAgainNow")}
+            </button>}
+          </span>
         </div>
       )}
     </div>

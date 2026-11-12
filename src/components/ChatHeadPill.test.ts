@@ -20,7 +20,7 @@ it("names the shared chat beside the bot, so the person knows where they are", (
 
 it("says nothing extra off a team, and a private chat keeps its own name", () => {
   expect(pill(bot("main"), null)).not.toContain("Shared chat");
-  expect(pill(bot("own"), { kind: "private" })).toContain("New conversation");
+  expect(pill(bot("own"), { kind: "private" })).toContain("Untitled chat");
   expect(pill(bot("own", "Quarter numbers"), { kind: "private" })).toContain("Quarter numbers");
 });
 

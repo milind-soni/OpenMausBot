@@ -9,7 +9,7 @@ import { qualifiedModelLabel } from "../contracts.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { codexHome } from "./codex-identity.ts";
 import { unconfirmedModelCatalog } from "../startup-model-catalog.ts";
-import { mergeLocalInject } from "./local-inject.ts";
+import { codexLocalProviderArgs, mergeLocalInject } from "./local-inject.ts";
 
 export const STATIC_CODEX_MODELS: ModelCatalog = {
   default: "gpt-5.6-sol",
@@ -50,6 +50,13 @@ export function decodeCodexSelection(id: string | null | undefined): {
   }
   // A bare id is official: a new cloud model must not fall through to the user's local provider.
   return { model: id, modelProvider: MODEL_ID.test(id) ? OFFICIAL_CODEX_PROVIDER : null };
+}
+
+/** Starts Codex on the chosen model's provider. codex-cli 0.167.0 refuses a turn whose thread provider differs from its
+ * current one ("This chat uses custom, but your current provider is magpie"), whatever config.toml's model_provider says. */
+export function codexSelectedProviderArgs(env: Record<string, string | undefined>, modelId: string | null | undefined): string[] {
+  const provider = decodeCodexSelection(modelId).modelProvider;
+  return [...codexLocalProviderArgs(env, modelId), ...(provider ? ["-c", `model_provider=${JSON.stringify(provider)}`] : [])];
 }
 
 interface CodexAppServerModel {

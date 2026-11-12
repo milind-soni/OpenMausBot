@@ -7,13 +7,11 @@ import {
   ROOM_PARTS, roomReleaseValues, ROUTINE_PARTS, routineReleaseValues, scheduleValue, sha256Hex, TEAM_PARTS,
   type AgentPart, type PartPair, type TeamPart,
 } from "./package-parts.ts";
-import type { BotLimit } from "./host/starter-bot-limit.ts";
 import type { PresetRegistry } from "./presets.ts";
 import type { Routine, RoutineInput, RoutineManager } from "./routines.ts";
 import type { SkillListing, SkillPackageStamp } from "./skills.ts";
 import type { BotRecord, GroupRecord, InstalledPackageMetadata, Store } from "./store.ts";
 import { importedMemberProfile, type ParsedTeamManifest, type TeamManifestMember } from "./team-manifest.ts";
-import { BOT_LIMIT_CODE } from "../shared/bot-limit.ts";
 import { takeImportName } from "../shared/import-name.ts";
 import { decodeBase64, type PackageAgent, type PackageDocument, type PackageTrust } from "../shared/package-format.ts";
 import type { BotVisibility, ModelSelection } from "../shared/wire.ts";
@@ -21,7 +19,7 @@ import type { BotVisibility, ModelSelection } from "../shared/wire.ts";
 export const NO_BOTS_MESSAGE = "This package has no bots. Add it from your organization's shelf, or update OpenMausBot.";
 export const NO_PRESETS_MESSAGE = "This file has no bots or preset bots to add. Its skills can be added from your organization's shelf.";
 
-export type PackageImportErrorCode = "no_bots" | "invalid_package" | typeof BOT_LIMIT_CODE;
+export type PackageImportErrorCode = "no_bots" | "invalid_package" | "too_many_bots";
 
 export class PackageImportError extends Error {
   readonly status: number;
@@ -65,8 +63,11 @@ export interface PackageImportDeps {
   images: { save(bytes: Uint8Array, mime: string): string };
   broadcast?: (event: { kind: "bot"; bot: BotRecord } | { kind: "group"; group: GroupRecord }) => void;
   defaultSelection: () => ModelSelection;
-  botLimit?: Pick<BotLimit, "refusal">;
+  /** The most bots this workspace holds, every plan alike. */
+  maxBots?: number;
   presets?: PresetRegistry;
+  /** A Team Cloud: the member adding the package, who looks after its bots. */
+  createdBy?: string;
 }
 
 export interface OrgImportContext {
@@ -227,8 +228,9 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
   const members = pkg
     ? pkg.agents.map((agent) => ({ member: memberFromAgent(agent), agent }))
     : (source as { manifest: ParsedTeamManifest }).manifest.team.members.map((member) => ({ member, agent: undefined }));
-  const overPlan = deps.botLimit?.refusal(members.length);
-  if (overPlan) throw new PackageImportError(overPlan.code, overPlan.error, 409);
+  if (deps.maxBots !== undefined && store.bots.length + members.length > deps.maxBots) {
+    throw new PackageImportError("too_many_bots", `This adds ${members.length} bots, and this workspace is limited to ${deps.maxBots} bots.`, 409);
+  }
 
   const importedBots: BotRecord[] = [];
   const createdGroups: GroupRecord[] = [];
@@ -298,6 +300,7 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
           modelSelection: selection,
           section,
           ...(options.visibility ? { visibility: options.visibility } : {}),
+          ...(deps.createdBy ? { createdBy: deps.createdBy } : {}),
         },
         { seedMessages: false },
       );

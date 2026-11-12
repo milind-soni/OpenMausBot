@@ -5,6 +5,7 @@ import { validateBotCwd } from "../bot-cwd.ts";
 import { fetchBotDirectory, matchDirectoryBots, type MatchedDirectoryBot } from "../bot-directory.ts";
 import { isBotPackage, packageSummary, parsePackageDocument, renderBotPackageMarkdown, type PackageDocument } from "../bot-package.ts";
 import { parseVisibility } from "../bot-visibility.ts";
+import { teamCreator } from "../new-bot-sharing.ts";
 import type { AppConfig } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
 import type { OrgLibrary } from "../org-library.ts";
@@ -26,7 +27,7 @@ import {
 import { readPublishedLibrary, writePublishedLibrary, type DefaultsPreset } from "../presets.ts";
 import { scoutProject, suggestTeam } from "../project-scout.ts";
 import { readPublishedTeam, writePublishedTeam } from "../published-teams.ts";
-import type { RoutineManager } from "../routines.ts";
+import type { Routine, RoutineManager } from "../routines.ts";
 import { readSectionContext } from "../section-context.ts";
 import { sectionKey, type BotRecord, type GroupRecord, type Store } from "../store.ts";
 import { createTeamBackup, importTeamBackup } from "../team-backup.ts";
@@ -58,9 +59,18 @@ export interface TeamRouteDeps {
     | { ok: false; error: string; available: string[] };
   /** On a Team Cloud: false for someone else's private chat, which a team backup never carries. */
   threadShown?(auth: RequestAuth): (threadId: string) => boolean;
+  /** On a Team Cloud: false for someone else's own MausBot, which no export carries. */
+  botShown?(auth: RequestAuth): (botId: string) => boolean;
+  /** On a Team Cloud: false for a routine that lives in someone else's private chat, which no export carries. */
+  routineShown?(auth: RequestAuth): (routine: Routine) => boolean;
 }
 
 export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
+  const routinesFor = (auth: RequestAuth): Routine[] => {
+    const all = deps.routines()!.listRoutines();
+    const shown = deps.routineShown?.(auth);
+    return shown ? all.filter(shown) : all;
+  };
   const {
     store, cfg, broadcast, publicBot, publicGroupState, groupWithThread, defaultSelection, defaultsPresetFor,
     packageImportDeps, starterNotes, checkedExportSkillNames, collectExportSkills, collectTeamSkills,
@@ -71,6 +81,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
     const orgLibrary = deps.orgLibrary();
     if (method === "POST" && path === "/api/teams/export") {
       const body = await readBody(req, 8 * 1024 * 1024);
+      const botShown = deps.botShown?.(auth), exportable = botShown ? store.bots.filter((bot) => botShown(bot.id)) : store.bots;
       const profileName = deps.authorName(auth);
       if (body.format === "package" && body.version === 2 && body.kind === "library") {
         const optional = (value: unknown) => (typeof value === "string" ? value : undefined);
@@ -103,11 +114,11 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
       if (body.format === "package" && body.version === 2) {
         if (typeof body.team !== "string") return json(res, 400, { error: "Choose a team to share." });
         const team = body.team.trim();
-        if (team && !store.sections.includes(team) && !store.bots.some((bot) => sectionKey(bot.section) === team)) {
+        if (team && !store.sections.includes(team) && !exportable.some((bot) => sectionKey(bot.section) === team)) {
           return json(res, 404, { error: "That team no longer exists." });
         }
         const optional = (value: unknown) => (typeof value === "string" ? value : undefined);
-        const teamBots = store.bots.filter((bot) => !bot.hidden && sectionKey(bot.section) === team);
+        const teamBots = exportable.filter((bot) => !bot.hidden && sectionKey(bot.section) === team);
         const skills = collectTeamSkills(teamBots, body.skills);
         if (!skills.ok) return json(res, 400, { error: skills.error, choices: { skills: skills.available } });
         const avatars = body.avatars && typeof body.avatars === "object" && !Array.isArray(body.avatars)
@@ -123,9 +134,9 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
             release: optional(body.release),
             notes: optional(body.notes),
             authorName: profileName,
-            bots: store.bots,
+            bots: exportable,
             groups: store.groups,
-            routines: routines!.listRoutines(),
+            routines: routinesFor(auth),
             brief: readSectionContext(team)?.text,
             published: readPublishedTeam(team),
             skillsByBot: skills.skillsByBot,
@@ -156,14 +167,14 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
           : profileName
             ? `${profileName}'s Team`
             : "My OpenMaus Team";
-      const memberIds = store.bots.filter((bot) => !bot.hidden).map((bot) => bot.id);
-      if ((body.format === "backup" ? store.bots.length : memberIds.length) === 0) return json(res, 400, { error: "Create a bot before exporting your team" });
+      const memberIds = exportable.filter((bot) => !bot.hidden).map((bot) => bot.id);
+      if ((body.format === "backup" ? exportable.length : memberIds.length) === 0) return json(res, 400, { error: "Create a bot before exporting your team" });
       try {
         if (body.format === "backup") {
-          return json(res, 200, createTeamBackup(store, routines!.listRoutines(), name, deps.threadShown?.(auth)));
+          return json(res, 200, createTeamBackup(store, routinesFor(auth), name, deps.threadShown?.(auth)));
         }
         if (body.format === "package") {
-          const selectedBots = store.bots.filter((bot) => !bot.hidden);
+          const selectedBots = exportable.filter((bot) => !bot.hidden);
           const skillNames = checkedExportSkillNames(body.skillIds, selectedBots);
           if (!skillNames.ok) return json(res, 400, { error: skillNames.error });
           const document = createBotPackageExport({
@@ -171,7 +182,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
             authorName: profileName,
             bots: selectedBots,
             groups: store.groups,
-            routines: routines!.listRoutines(),
+            routines: routinesFor(auth),
             skillsByBot: collectExportSkills(selectedBots, skillNames.names),
           });
           return json(res, 200, {
@@ -188,7 +199,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
               name,
               memberIds,
             },
-            store.bots,
+            exportable,
           ),
         );
       } catch (error) {
@@ -257,7 +268,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
       const packageId = typeof body?.packageId === "string" && /^[a-f0-9-]{36}$/.test(body.packageId) ? body.packageId : null;
       if (!packageId) return json(res, 400, { error: "Choose a package from your organization's library." });
       if (!orgLibrary) return json(res, 404, { error: "This package is not in your organization's library.", code: "not_listed" });
-      const outcome = orgLibrary.add(packageId, packageImportDeps(await defaultSelection()));
+      const outcome = orgLibrary.add(packageId, { ...packageImportDeps(await defaultSelection()), ...teamCreator(auth) });
       if (!outcome.ok) return json(res, outcome.status, { error: outcome.error, code: outcome.code });
       if (outcome.value.alreadyAdded) return json(res, 200, outcome.value);
       const imported = outcome.value.result;
@@ -328,7 +339,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
       if (body?.format === "openmaus.backup") {
         if (importMode !== "add") return json(res, 400, { error: "Import backups alongside your existing bots; project mode is only for templates" });
         try {
-          const imported = importTeamBackup(store, routines!, body, await defaultSelection(), { visibility: importVisibility });
+          const imported = importTeamBackup(store, routines!, body, await defaultSelection(), { visibility: importVisibility, ...teamCreator(auth) });
           // A restore writes transcripts without store events: these frames carry the restored pages to other clients.
           const bots = imported.bots.map((bot) => publicBot(bot));
           const groups = imported.groups.map((group) => groupWithThread(group));
@@ -348,7 +359,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
       } catch (error) {
         return json(res, 400, { error: error instanceof Error ? error.message : "Invalid bot package" });
       }
-      const deps = packageImportDeps(await defaultSelection());
+      const deps = { ...packageImportDeps(await defaultSelection()), ...teamCreator(auth) };
       const options = {
         mode: importMode as "add" | "project",
         cwd: projectCwd,

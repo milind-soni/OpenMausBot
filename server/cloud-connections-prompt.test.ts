@@ -12,13 +12,12 @@ const SERVERS = {
   off: { type: "http", url: "https://mcp.off.example/mcp", headers: {}, enabled: false },
 };
 
-function sources(auth: Record<string, McpAuthState> = {}, connected: Record<string, boolean> = {}, highlevel = false): ConnectionPromptSources & { reads: string[][] } {
+function sources(auth: Record<string, McpAuthState> = {}, connected: Record<string, boolean> = {}): ConnectionPromptSources & { reads: string[][] } {
   const reads: string[][] = [];
   return {
     reads,
     mcpServers: () => SERVERS,
     mcpAuth: (name) => auth[name] ?? "none",
-    highlevelConnected: () => highlevel,
     composioConnected: async (slugs) => { reads.push(slugs); return Object.fromEntries(slugs.map((slug) => [slug, connected[slug] === true])); },
   };
 }
@@ -34,17 +33,24 @@ describe("what a bot on My Cloud is told about connections that need the person"
     expect(prompt({ mcpServers: ["dodo", "off"] })).toBe("");
   });
 
+  it("in a turn, a server on the person's computer is named only when it can't be reached now, with the reason lending gives", () => {
+    const prompt = createConnectionPrompt(sources(), ORIGIN);
+    expect(prompt({ mcpServers: ["notes"] }, new Map()), "reached through the lent computer: nothing to say").toBe("");
+    const offline = "notes runs on your Mac (Milind's MacBook), which is offline right now: OpenMausBot on it is closed, or the Mac is asleep or off.";
+    expect(prompt({ mcpServers: ["notes"] }, new Map([["notes", offline]]))).toBe(
+      ` Runs on the person's own computer and can't be reached now: ${offline} If a task needs one, tell the person that in plain words, and do not write your own replacement.`);
+  });
+
   it("says nothing of a server signed in here, or one that needs no sign-in", () => {
     const prompt = createConnectionPrompt(sources({ linear: "signed-in", jira: "signed-in" }), ORIGIN);
     expect(prompt({ mcpServers: ["dodo", "linear", "jira"] })).toBe("");
   });
 
-  it("HighLevel and connected apps assigned to the bot but not connected here, read in the background for the next turn", async () => {
+  it("connected apps assigned to the bot but not connected here, read in the background for the next turn", async () => {
     const source = sources({}, { gmail: false, slack: true });
     const prompt = createConnectionPrompt(source, ORIGIN);
-    const bot = { mcpServers: [], connectorTools: { gmail: { tools: "*" as const }, slack: { tools: "*" as const }, highlevel: { tools: "*" as const } } };
-    expect(prompt(bot)).toBe(" Not connected on My Cloud yet: HighLevel (connect it here: https://omb-u-1.fly.dev/?connect=highlevel)."
-      + " When a task needs one, say in plain words that it needs the person once on My Cloud and give its link; do not try another way.");
+    const bot = { mcpServers: [], connectorTools: { gmail: { tools: "*" as const }, slack: { tools: "*" as const } } };
+    expect(prompt(bot)).toBe("");
     await vi.waitFor(() => expect(source.reads).toEqual([["gmail", "slack"]]));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(prompt(bot)).toContain(" Assigned to this bot but not connected on My Cloud yet: Gmail. When a task needs one, call COMPOSIO_MANAGE_CONNECTIONS for it,"
@@ -66,7 +72,7 @@ describe("what a bot on My Cloud is told about connections that need the person"
   });
 
   it("once its bots moved here, each bot knows what stayed on the computer they came from, and nobody is told before", () => {
-    const quiet = { mcpServers: () => ({}), mcpAuth: () => "none" as const, highlevelConnected: () => false, composioConnected: async () => ({}) };
+    const quiet = { mcpServers: () => ({}), mcpAuth: () => "none" as const, composioConnected: async () => ({}) };
     expect(createConnectionPrompt({ ...quiet, movedFrom: () => null }, ORIGIN)({})).toBe("");
     const line = createConnectionPrompt({ ...quiet, movedFrom: () => "MacBook Air" }, ORIGIN)({});
     expect(line).toContain("You moved to My Cloud from the person's computer MacBook Air");

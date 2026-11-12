@@ -1,30 +1,26 @@
 // Grok Build: the official `grok` CLI over ACP stdio (`grok … agent stdio`) on the grok.com
 // subscription login (~/.grok/auth.json), not the xAI API key. Verified against grok 1.0.0.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
 import { harnessHome, splitCliString } from "../../env-path.ts";
-import type { DeviceSignIn } from "../device-auth.ts";
+import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { bundledEngineCatalog } from "../../model-manifest/bundled.ts";
+import { currentEngineCatalog } from "../../model-manifest/manifest.ts";
+import { ENGINE_MODEL_ID } from "../../model-manifest/schema.ts";
 import type { AcpQuestionRequest } from "./question-requests.ts";
 import { allowsTool, canUseMcpServer, narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
 import { OWN_APPS_SERVER } from "../../../shared/own-apps.ts";
 import { MAX_QUESTIONS, parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById, repeatsQuestionText } from "../../../shared/ask-question.ts";
 
-export const STATIC_GROK_MODELS: ModelCatalog = {
-  default: "grok-4.7",
-  options: [
-    { id: "grok-4.7", label: "Grok 4.7", contextWindow: 500_000 },
-    { id: "grok-4.6", label: "Grok 4.6" },
-    { id: "grok-4.5", label: "Grok 4.5" },
-  ],
-};
+export const STATIC_GROK_MODELS: ModelCatalog = bundledEngineCatalog("grok");
 
-const SLUG = /^[a-z0-9][a-z0-9._-]*$/i;
+const SLUG = ENGINE_MODEL_ID.grok;
 
 /** `$GROK_HOME`, else `~/.grok`: Grok's sign-in, config and catalog. */
 export function grokHome(env: Record<string, string | undefined> = process.env): string {
@@ -33,6 +29,17 @@ export function grokHome(env: Record<string, string | undefined> = process.env):
 
 export function grokSignedIn(env: Record<string, string | undefined>): boolean {
   return existsSync(join(grokHome(env), "auth.json"));
+}
+
+/** The sign-out probe: an auth.json that cannot be read is `unknown`, so sign-out refuses instead of reporting a
+ * removal that never happened. `grokSignedIn` keeps its boolean contract for turn gating. */
+export function grokSignInState(env: Record<string, string | undefined>): DeviceSignInState {
+  try {
+    statSync(join(grokHome(env), "auth.json"));
+    return "signed-in";
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "signed-out" : "unknown";
+  }
 }
 
 function grokLoginFailure(output: string): string {
@@ -47,8 +54,8 @@ function grokLoginFailure(output: string): string {
   return "Grok sign-in did not finish. Check the server's connection, then try again.";
 }
 
-/** `grok login --device-auth` on the grok.com subscription (grok 1.0.25 and 1.0.41). Grok has no
- * status command, so nothing is checked first. */
+/** `grok login --device-auth` / `grok logout` on the grok.com subscription (grok 1.0.25 and 1.0.41). Grok has no
+ * status command, so the stored auth.json is the sign-in check. */
 export const GROK_DEVICE_SIGN_IN: DeviceSignIn = {
   provider: "grok",
   product: "Grok",
@@ -56,9 +63,11 @@ export const GROK_DEVICE_SIGN_IN: DeviceSignIn = {
   homeEnv: "GROK_HOME",
   homeDir: ".grok",
   loginArgs: ["login", "--device-auth"],
+  logoutArgs: ["logout"],
   install: "Install it with xAI's installer (https://x.ai/cli), then try again.",
   failure: grokLoginFailure,
   signedIn: grokSignedIn,
+  signInState: grokSignInState,
 };
 
 function unquote(raw: string): string {
@@ -71,15 +80,16 @@ function unquote(raw: string): string {
 
 /** Local slugs from ~/.grok/config.toml, which `grok -m <slug>` accepts, plus the cloud defaults. */
 export function readGrokModelCatalog(env: Record<string, string | undefined> = process.env): ModelCatalog {
+  const fixed = currentEngineCatalog("grok");
   const path = join(grokHome(env), "config.toml");
   let text = "";
   try {
     text = readFileSync(path, "utf8");
   } catch {
-    return STATIC_GROK_MODELS;
+    return fixed;
   }
 
-  const options = STATIC_GROK_MODELS.options.map((o) => ({ ...o }));
+  const options = fixed.options.map((o) => ({ ...o }));
   const seen = new Set(options.map((o) => o.id));
   let configuredDefault: string | null = null;
   let current: { slug: string; name?: string } | null = null;
@@ -125,7 +135,7 @@ export function readGrokModelCatalog(env: Record<string, string | undefined> = p
   flush();
 
   return {
-    default: configuredDefault && seen.has(configuredDefault) ? configuredDefault : STATIC_GROK_MODELS.default,
+    default: configuredDefault && seen.has(configuredDefault) ? configuredDefault : fixed.default,
     options,
   };
 }
@@ -164,7 +174,7 @@ export function ensureGrokInjectSlug(
     text = "";
   }
 
-  const taken = new Set<string>(STATIC_GROK_MODELS.options.map((option) => option.id));
+  const taken = new Set<string>(currentEngineCatalog("grok").options.map((option) => option.id));
   let current: { slug: string; model?: string; baseUrl?: string } | null = null;
   const flush = () => {
     if (!current) return;
@@ -375,7 +385,7 @@ const support: AcpSupport = {
   displayName: "Grok",
   images: true,
   acceptsUnadvertisedImages: grokAcceptsUnadvertisedImages,
-  models: STATIC_GROK_MODELS,
+  get models() { return currentEngineCatalog("grok"); },
   resolveModels: (env) => mergeLocalInject(readGrokModelCatalog(env), env),
   // Grok's levels vary by model and the CLI validates lazily (a rejected level only logs); grok-4.5 rejects xhigh.
   effortLevels: ["low", "medium", "high"],
@@ -428,7 +438,7 @@ const support: AcpSupport = {
       const available = new Set([
         ...(turn.integrations?.agents ? ["agents"] : []), ...(turn.integrations?.composio ? ["composio"] : []), ...(turn.integrations?.composioOwn ? [OWN_APPS_SERVER] : []),
         ...(turn.integrations?.browser ? ["browser"] : []), ...(turn.integrations?.localComputer ? ["computer"] : []),
-        ...(turn.integrations?.data ? ["data"] : []), ...(turn.integrations?.highlevel ? ["highlevel"] : []), ...(turn.integrations?.email ? ["email"] : []), ...(turn.integrations?.device ? ["device"] : []),
+        ...(turn.integrations?.data ? ["data"] : []), ...(turn.integrations?.email ? ["email"] : []), ...(turn.integrations?.device ? ["device"] : []),
         ...Object.keys(turn.integrations?.custom ?? {}),
       ].filter((name) => canUseMcpServer(turn.toolScope, name)));
       const deadline = Date.now() + 10_000;
@@ -438,7 +448,8 @@ const support: AcpSupport = {
         if (!Array.isArray(catalog?.servers)) throw new Error("Grok could not confirm its MCP catalog. No prompt was sent.");
         for (const server of catalog.servers) {
           if (server?.session?.enabled === false) continue;
-          if (!available.has(server?.name)) throw new Error("Grok has an MCP connection outside the bot's selection. Disable native MCP connections before using tool selection. No prompt was sent.");
+          if (!available.has(server?.name)) throw new Error("Grok has an MCP connection outside the bot's selection. Remove the MCP servers from Grok's own settings, "
+            + "or set Tool selection back to all tools in this bot's settings (Access). No prompt was sent.");
           if (Array.isArray(server?.session?.tools) && server.session.tools.some((tool: { name?: unknown }) => typeof tool.name !== "string" || !allowsTool(turn.toolScope, { kind: "mcp", server: server.name, name: tool.name }))) {
             throw new Error("Grok could not enforce the selected MCP catalog. No prompt was sent.");
           }

@@ -3,7 +3,7 @@
 // ?view=phones|qr&e2e=on|off&relay=connected|off&skin=midnight|daylight&lang=de
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { CompanionSection } from "@/components/CompanionSection";
+import { PhoneDevicesSection } from "@/components/PhoneDevicesSection";
 import { PhoneSetupFlowView, type CompanionState, type PhoneSetupController } from "@/components/PhoneSetupFlow";
 import { phonePairingLink } from "../shared/pairing-link";
 import { loadLocale } from "@/lib/i18n";
@@ -68,7 +68,7 @@ const link = phonePairingLink({ address: "192.168.1.20", port: 8810, token: TOKE
   e2e: state.e2e?.descriptor });
 const controller = {
   state, account: { available: true, status: "ready", email: "ada@example.com" }, phase: "qr", email: "", code: "", codeSent: false,
-  busy: false, accountBusy: false, error: null, accountError: null, pairingLink: link, secondsLeft: 110, address: "192.168.1.20",
+  busy: false, accountBusy: false, error: null, accountError: null, pairingLink: link, address: "192.168.1.20",
   pairingPort: 8810, addressText: "192.168.1.20:8810", hostedReady: false, localFallback: true, tailscaleFallback: false,
   tailscaleAvailable: true, pairingExpired: false, setupTimedOut: false, act: async () => {}, accountAct: async () => {},
 } as unknown as PhoneSetupController;
@@ -78,7 +78,7 @@ createRoot(document.getElementById("root")!).render(
     <StoreContext.Provider value={{ state: initialState, dispatch: () => {} } as never}>
       <div className="min-h-screen bg-app p-8 text-ink">
         <div className={view === "qr" ? "mx-auto max-w-[520px] rounded-2xl border border-hairline/40 bg-card p-6" : "mx-auto max-w-[640px]"}>
-          {view === "qr" ? <PhoneSetupFlowView controller={controller} /> : <CompanionSection profileEmail="ada@example.com" />}
+          {view === "qr" ? <PhoneSetupFlowView controller={controller} /> : <PhoneDevicesSection profileEmail="ada@example.com" />}
         </div>
       </div>
     </StoreContext.Provider>

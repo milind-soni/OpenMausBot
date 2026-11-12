@@ -26,6 +26,20 @@ describe("recall terms and query", () => {
     expect(recallTerms("What is my balance, -10 or 10? Do you remember C++ v2.1!")).toEqual(["balance", "-10", "10", "c++", "v2.1"]);
   });
 
+  it("splits selected CJK punctuation without breaking signs, symbols or versions", () => {
+    expect(recallTerms("「本季度预算审批结果？」、【采购计划】；《项目安排》：（预算，审批。进度！）-10、C++、v2.1")).toEqual([
+      "-10", "c++", "v2.1",
+      "本季", "季度", "度预", "预算", "算审", "审批", "批结", "结果", "采购", "购计", "计划", "项目", "目安", "安排", "进度",
+    ]);
+  });
+
+  it("splits Chinese into bigrams that never straddle a particle or filler word, and keeps the words beside them", () => {
+    expect(recallTerms("我们什么时候去图书馆还书？")).toEqual(["去图", "图书", "书馆", "馆还", "还书"]);
+    expect(recallTerms("iPhone15的电池")).toEqual(["iphone15", "电池"]);
+    expect(recallQuery("滤芯多久换")).not.toBeNull();
+    expect(recallQuery("好的")).toBeNull();
+  });
+
   it("drops greetings, so a hello never recalls a bot's own greeting", () => {
     expect(recallTerms("Hi! Quick intro: I'm Omkar")).toEqual(["intro", "omkar"]);
     expect(recallQuery("hello there, thanks!")).toBeNull();

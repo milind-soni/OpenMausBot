@@ -442,17 +442,18 @@ describe("Settings → AI in Simple mode", () => {
       engine("kimi", "kimiAgent", false),
     ];
     const html = simple();
-    expect(html).toContain(">Your AI</h3>");
+    expect(html).toContain(">Providers</h3>");
     expect(rows(html)).toEqual(["claude", "codex"]);
     expect(html).toMatch(/data-simple-engine="claude"[\s\S]*?>Manage<\/button>/);
     expect(html).toMatch(/data-simple-engine="codex"[\s\S]*?>Set up<\/button>/);
     expect(html).not.toContain("Model providers and accounts");
   });
 
-  it("folds every other provider under More AI providers, with the count", () => {
+  it("folds every other provider under More providers, in the same card, with the count", () => {
     fixture.instances = [engine("claude", "claudeAgent", true), engine("kimi", "kimiAgent", false), engine("mistral", "mistral", false)];
-    expect(simple()).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?More AI providers \(2\)/);
-    expect(simple(true)).toContain('data-engine-card="kimi"');
+    expect(simple()).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?More providers[\s\S]*?>2</);
+    expect(simple()).not.toContain('data-simple-engine="kimi"');
+    expect(simple(true)).toContain('data-simple-engine="kimi"');
   });
 });
 
@@ -478,6 +479,33 @@ describe("Settings → Engines → custom Claude endpoints", () => {
       snapshot: { state: "available", authenticated: true }, models: { default: "model", options: [] },
     }];
     fixture.bots = [];
-    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain("data-claude-endpoints");
+    const html = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(html).toContain("data-claude-endpoints");
+    expect(html).toContain("data-claude-bedrock-endpoints");
+  });
+
+  it("leaves the Bedrock section out of a hosted workspace too", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.instances = [hostedClaude()];
+    fixture.bots = [];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("data-claude-bedrock-endpoints");
+  });
+
+  it("lists a Bedrock engine as its own row alongside a signed-in Claude account", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.instances = [
+      { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", snapshot: { state: "available", authenticated: true }, models: { default: "claude-sonnet-5", options: [] } },
+      {
+        instanceId: "claude-bedrock-1", driverKind: "claudeAgent", displayName: "Claude on Bedrock", access: "custom",
+        snapshot: { state: "available" }, models: { default: "", options: [] },
+        claudeBedrock: { awsProfile: "default", awsRegion: "us-east-1", model: "global.anthropic.claude-sonnet-5-5", models: ["global.anthropic.claude-sonnet-5-5"], opusModel: "", sonnetModel: "", haikuModel: "", smallFastModel: "" },
+      },
+    ];
+    fixture.bots = [];
+    const html = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(html).toContain("data-claude-bedrock-endpoints");
+    expect(html).toContain('data-claude-bedrock="claude-bedrock-1"');
   });
 });

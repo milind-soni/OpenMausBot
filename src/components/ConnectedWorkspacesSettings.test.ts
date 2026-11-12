@@ -11,6 +11,8 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 }));
 const config = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: config.value }, dispatch: () => {} }) }));
+// This computer's environments are an Advanced section.
+vi.mock("@/lib/interface-mode", async original => ({ ...await original<typeof import("@/lib/interface-mode")>(), useAdvancedMode: () => true }));
 import { ConnectedWorkspacesSettings } from "./ConnectedWorkspacesSettings";
 
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; "aria-label"?: string;
@@ -61,15 +63,14 @@ const textButton = (label: string) => render().nodes.filter(n => n.type === "but
 const forms = () => render().nodes.filter(n => n.type === "form");
 const envFormFields = () => nodes(forms()[0]!.props.children).filter(n => n.type === "input");
 
-it("lists local environments with their folders above the servers, marking a missing one", async () => {
+it("lists the servers, then local environments (Advanced) with their folders, marking a missing one", async () => {
   await stubEnvironments(); await mount();
   const { html } = render();
   expect(html).toContain("Environments on this computer");
-  expect(html).toContain("Your servers");
-  expect(html.indexOf("Environments on this computer")).toBeLessThan(html.indexOf("Your servers"));
+  expect(html.indexOf("bots.example.test")).toBeLessThan(html.indexOf("Environments on this computer"));
   expect(html).toContain("/home/me/.openmausbot-work");
-  expect(html.match(/>missing</g)).toHaveLength(1);
-  expect(html).toContain("https://bots.example.test");
+  expect(html.match(/ · missing/g)).toHaveLength(1);
+  expect(html).toContain("bots.example.test · HTTPS");
 });
 
 it("hides local environments and the create form in a dev build", async () => {
@@ -104,6 +105,7 @@ it("creates an environment with the chosen folder — and without one when the f
 it('"Choose…" fills the folder field from the native picker', async () => {
   stubEnvironments({}, { pickDir: vi.fn().mockResolvedValue({ ok: true, path: "/picked/dir" }) });
   await mount();
+  (render().nodes.find(n => (n.props as { id?: string }).id === "new-environment")!.props as unknown as { onToggle: () => void }).onToggle();
   textButton("Choose…")!.props.onClick!();
   await flush();
   expect(render().html).toContain('value="/picked/dir"');
@@ -126,7 +128,7 @@ it("asks what to do with the folder when forgetting a local environment, and del
   expect(environments.forget.mock.calls).toEqual([["env-1"]]);
   rowButton("Forget Old")!.props.onClick!();
   await mount();
-  render().nodes.find(n => n.type === "input" && n.props.type === "checkbox")!.props.onChange!({ target: { checked: true } });
+  render().nodes.find(n => n.props["aria-label"]?.startsWith("Also delete this folder"))!.props.onClick!();
   await mount();
   textButton("Forget")!.props.onClick!();
   await flush();
@@ -180,10 +182,27 @@ it("a Cloud of the person's own has no lending control here, since this computer
   vi.mocked((globalThis.window as unknown as { ogb: { environments: { state: ReturnType<typeof vi.fn> } } }).ogb.environments.state)
     .mockResolvedValue({ localOrigin: "http://127.0.0.1:1", remote: false, activeId: "local", environments: [VPS, cloud, other] });
   await mount();
-  const labels = render().nodes.filter(node => node.type === "button").map(node => node.props["aria-label"] ?? Children.toArray(node.props.children).join(""));
-  expect(labels).toContain("Computer access for VPS");
-  expect(labels.filter(label => /Computer access for (My Cloud|Client A)|use this/.test(label))).toEqual([]);
+  const { html } = render();
+  expect(html).toContain('aria-label="Computer access for VPS"');
+  expect(html).not.toMatch(/Computer access for (My Cloud|Client A)|use this/);
   expect(render().html).not.toContain("data-cloud-lending-link");
+});
+
+it("a server of the person's own has Share this computer with the maintainer flag off: the switch asks main, and its computer access opens", async () => {
+  const sharing = { state: vi.fn(), revoke: vi.fn(), servers: vi.fn().mockResolvedValue([{ id: "vps", enabled: false, connected: false, paused: false }]), allow: vi.fn().mockResolvedValue({ enabled: true }) };
+  stub({ computerSharing: sharing });
+  await mount();
+  render(); for (const effect of f.effects) effect(); await flush();
+  const { html, nodes: tree } = render();
+  expect(html).toContain('data-server-share="vps"');
+  expect(html).toContain("Share this computer");
+  expect(html, "the switch stands in for the maintainer's button").not.toContain('aria-label="Computer access for VPS"');
+  const list = tree.find(node => (node.props as { onShare?: unknown }).onShare) as unknown as { props: { onShare: (id: string, on: boolean) => void } };
+  list.props.onShare("vps", true); await flush();
+  expect(sharing.allow).toHaveBeenCalledWith("vps");
+  expect(render().html).toContain("Computer access · VPS");
+  list.props.onShare("vps", false); await flush();
+  expect(sharing.revoke).toHaveBeenCalledWith("vps");
 });
 
 it("shows local environment controls in Simplified Chinese", async () => {

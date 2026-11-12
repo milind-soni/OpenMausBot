@@ -4,7 +4,7 @@
 import { hostname } from "node:os";
 import { join } from "node:path";
 
-import { answerConnection, connectionFingerprints, highlevelDigest, launchersOnPath, listConnections, releaseConnection, signInDigest } from "./cloud-connections.ts";
+import { answerConnection, connectionFingerprints, launchersOnPath, listConnections, releaseConnection, signInDigest } from "./cloud-connections.ts";
 import { createConnectionPrompt, type ConnectionPromptBot } from "./cloud-connections-prompt.ts";
 import { createStayedNotices, type StayedNoticesDeps } from "./cloud-connections-stayed.ts";
 import { movedFrom } from "./cloud-send-arrived.ts";
@@ -12,7 +12,6 @@ import * as composio from "./composio.ts";
 import { brokerAccess } from "./composio-broker-access.ts";
 import { adoptComposioShare, adoptOwnComposio, composioIdentity, composioShareCode } from "./composio-share.ts";
 import type { AppConfig } from "./config.ts";
-import type { HighLevelService } from "./highlevel/service.ts";
 import type { EmailAccount } from "./email/store.ts";
 import type { ConnectionHandoffAnswer, ConnectionHandoffWhat } from "./login-handoff.ts";
 import type { McpOAuthManager } from "./mcp-oauth.ts";
@@ -30,7 +29,6 @@ export interface CloudConnectionsHostDeps {
   /** This server's own environment id: the computer a server that needs it is marked as running on. */
   environmentId: string;
   mcpOAuth: Pick<McpOAuthManager, "authState" | "signInRecord" | "adopt" | "forget">;
-  highlevel: Pick<HighLevelService, "store" | "connected" | "adopt" | "disconnect">;
   /** The engines (instance ids) ready to run here now. */
   engines(): Promise<string[]>;
   /** A trial's moved keys, unused while its Claude credit lasts. */
@@ -40,7 +38,9 @@ export interface CloudConnectionsHostDeps {
   /** The person's mailboxes: what a move carries, and what takes them on the Cloud they move to. */
   email?: { accounts(): readonly EmailAccount[]; adopt(accounts: unknown[]): { adopted: number; kept: number } };
   /** How the person hears what stayed on their computer; a Cloud home only. */
-  stayedNotices?: Pick<StayedNoticesDeps, "bots" | "say" | "notify" | "language">;
+  stayedNotices?: Pick<StayedNoticesDeps, "bots" | "say" | "notify" | "language" | "lent">;
+  /** The Vault items each MCP server may read its keys from, which go with it when a move carries it. */
+  mcpKeys?(name: string): string[];
 }
 
 const managedService = (): boolean => { try { return brokerAccess() !== null; } catch { return false; } };
@@ -50,16 +50,16 @@ export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
   const computer: McpRunsOn = { environmentId: deps.environmentId, label };
   let commands: string[] | null = null;
   const mcpAuth = (name: string, url: string) => deps.mcpOAuth.authState(name, url);
-  const sources = () => ({ config: deps.config(), mcpSignIn: (name: string, url: string) => deps.mcpOAuth.signInRecord(name, url), highlevel: () => deps.highlevel.store.get(), email: () => deps.email?.accounts() ?? [] });
+  const sources = () => ({ config: deps.config(), mcpSignIn: (name: string, url: string) => deps.mcpOAuth.signInRecord(name, url), email: () => deps.email?.accounts() ?? [], ...(deps.mcpKeys ? { mcpKeys: deps.mcpKeys } : {}) });
   const composioConnected = async (slugs: string[]) =>
     Object.fromEntries(Object.entries(await composio.connectionStatus(deps.config(), slugs)).map(([slug, state]) => [slug, state.connected]));
   const programs = () => (commands ??= launchersOnPath());
   const prompt = deps.cloudHome ? createConnectionPrompt({ mcpServers: () => deps.config().mcpServers, mcpAuth, programs,
-    highlevelConnected: () => deps.highlevel.connected(), composioConnected, movedFrom: () => (deps.dataDir ? movedFrom(deps.dataDir)?.computer ?? null : null) }, deps.cloudHome.publicOrigin) : null;
+    composioConnected, movedFrom: () => (deps.dataDir ? movedFrom(deps.dataDir)?.computer ?? null : null) }, deps.cloudHome.publicOrigin) : null;
   const stayed = deps.cloudHome && deps.dataDir && deps.stayedNotices ? createStayedNotices({ ...deps.stayedNotices, origin: deps.cloudHome.publicOrigin, file: join(deps.dataDir, "connectors-stayed-told.json"), servers: () => deps.config().mcpServers, programs, mailConnected: () => (deps.email?.accounts().length ?? 0) > 0 }) : null;
   const connections = async () => {
     const cfg = deps.config();
-    return listConnections({ config: cfg, mcpAuth, composio: await composioIdentity(cfg).catch(() => null), highlevel: () => deps.highlevel.store.get(), email: () => deps.email?.accounts() ?? [] });
+    return listConnections({ config: cfg, mcpAuth, composio: await composioIdentity(cfg).catch(() => null), email: () => deps.email?.accounts() ?? [] });
   };
 
   return {
@@ -70,7 +70,7 @@ export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
       ...(deps.ownHome ? { ownHome: deps.ownHome } : {}),
       ...(deps.cloudHome?.team ? { personalRefusal: (what: string) => personalConnectionRefusal(deps.cloudHome!.team!, what) } : {}),
       async list() {
-        return { computer, connections: await connections(), engines: await deps.engines().catch((): string[] => []), commands: programs(),
+        return { computer, connections: await connections(), engines: await deps.engines().catch((): string[] => []), commands: programs(), ...(deps.cloudHome?.team ? {} : { vaultKeys: true as const }),
           ...(deps.cloudHome === null && !managedService() ? { managedApps: false as const } : {}) };
       },
       adoptShare: adoptComposioShare,
@@ -83,7 +83,6 @@ export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
         if (parsed.server.url !== record.url) return { ok: false, status: 409, error: "This MCP server has another address here." };
         return { ok: true, outcome: deps.mcpOAuth.adopt(name, parsed.server.url, record, replaces ? (current) => signInDigest(current.tokens) === replaces : undefined) };
       },
-      adoptHighLevel: (connection, replaces) => ({ ok: true, outcome: deps.highlevel.adopt(connection, replaces ? (current) => highlevelDigest(current) === replaces : undefined) }),
       ...(deps.email ? { adoptEmail: deps.email.adopt } : {}),
       holdKeys: (engines) => deps.heldKeys?.hold(engines) ?? false,
     }),
@@ -97,12 +96,12 @@ export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
       }
       if (what.kind === "connection-fingerprints") return { ok: true, secrets: connectionFingerprints(what.nonce, sources()) };
       if (what.kind === "connection-release") {
-        return releaseConnection(what.id, what.digest, { ...sources(), forgetSignIn: (name) => deps.mcpOAuth.forget(name), forgetHighLevel: () => { deps.highlevel.disconnect(); } });
+        return releaseConnection(what.id, what.digest, { ...sources(), forgetSignIn: (name) => deps.mcpOAuth.forget(name) });
       }
       return answerConnection(what.id, sources());
     },
 
-    prompt: (bot: ConnectionPromptBot): string => prompt?.(bot) ?? "",
+    prompt: (bot: ConnectionPromptBot, lent?: ReadonlyMap<string, string>): string => prompt?.(bot, lent) ?? "",
     /** What stayed on the person's computer: said when the move ends, and in the first conversation with each bot. */
     moved: (language?: string): void => stayed?.moved(language),
     personTurn: (bot: Parameters<NonNullable<typeof stayed>["personTurn"]>[0], threadId: string): void => stayed?.personTurn(bot, threadId),

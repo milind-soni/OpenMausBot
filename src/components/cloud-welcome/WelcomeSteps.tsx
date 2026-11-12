@@ -87,17 +87,26 @@ export function WelcomeFiles({ name, headingRef, onFinish }: { name: string; hea
   </section>;
 }
 
-export function WelcomeDone({ name, bot, headingRef, onSayHi, onJob }: {
+export function WelcomeDone({ name, bot, team = false, headingRef, onSayHi, onJob, invite = null }: {
   name: string; bot: Bot | null; headingRef: Ref<HTMLHeadingElement>; onSayHi: () => void; onJob: () => void;
+  /** A Team Cloud: its first bot is named, never called anyone's Chief of Staff. */
+  team?: boolean;
+  /** The team's People page on MausBot Cloud, for its Owner: the last step is bringing people in. */
+  invite?: string | null;
 }) {
   return <section aria-labelledby="cloud-welcome-step" data-welcome-step="done" className="flex flex-col items-start gap-4">
     <span aria-hidden="true" className="check-in flex size-[42px] items-center justify-center rounded-full bg-success">
       <Check size={22} strokeWidth={2.5} />
     </span>
     <StepHeading headingRef={headingRef} title={t("cloudWelcome.done.title", { name })} sub={t("cloudWelcome.done.body")} />
+    {invite && <div data-welcome-invite className="flex w-full max-w-[520px] flex-col items-start gap-2 rounded-2xl border border-hairline/50 bg-card/50 p-4">
+      <p className="text-[14px] font-medium text-ink">{t("cloudWelcome.invite.title", { name })}</p>
+      <p className="text-[13px] leading-relaxed text-ink-secondary">{t("cloudWelcome.invite.body", { name })}</p>
+      <a href={invite} target="_blank" rel="noreferrer" className={SECONDARY}>{t("cloudWelcome.invite.action")}</a>
+    </div>}
     <Footer>
       <button type="button" className={PRIMARY} onClick={onSayHi}>
-        {bot?.chiefOfStaff || !bot ? t("cloudWelcome.done.chief") : t("cloudWelcome.done.bot", { name: bot.name })}
+        {bot && (team || !bot.chiefOfStaff) ? t("cloudWelcome.done.bot", { name: bot.name }) : t("cloudWelcome.done.chief")}
       </button>
       {bot && <button type="button" className={SECONDARY} onClick={onJob}>{t("cloudSetup.job.action")}</button>}
     </Footer>

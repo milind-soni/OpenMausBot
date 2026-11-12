@@ -1,9 +1,12 @@
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { TurnNotStartedError, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener, type SendTurnInput } from "./contracts.ts";
 import {
-  BOT_TURN_GIVES_WAY_MS, BROWSER_BYTES, EngineMemory, memoryStallText, memoryStillWaitingText, memoryStopped, memoryStopText, memoryWaitText, PressureLedger, processGroupBytes, readHostMemory,
+  BOT_TURN_GIVES_WAY_MS, BROWSER_BYTES, CHAT_RUNTIME_KINDS, EngineMemory, memoryStallText, memoryStillWaitingText, memoryStopped, memoryStopText, memoryWaitText, PressureLedger, processGroupBytes, readHostMemory,
   withEngineMemory, type HostMemory,
 } from "./engine-memory.ts";
 import { OOM_SCORE, protectSupervisor, spawnBotWork, spawnWithOomScore } from "./oom-score.ts";
@@ -308,6 +311,19 @@ describe("who goes first when memory holds several", () => {
     await finish(h, "running");
     expect(order[0]).toBe("handoff");
   });
+
+  it("asks who goes first once per waiter, since every waiter orders the queue on each wake", async () => {
+    const h = await full(["person"]);
+    const asked: string[] = [];
+    h.memory.useTurnOrder((threadId) => { asked.push(threadId); return threadId === "person"; });
+    for (const threadId of ["handoff-1", "handoff-2", "person"]) void waiting(h, threadId, []);
+    await settle();
+    asked.length = 0;
+    h.advance(1);
+    const order = (h.memory as unknown as { order(): { threadId: string }[] }).order();
+    expect(order.map((waiter) => waiter.threadId)).toEqual(["person", "handoff-1", "handoff-2"]);
+    expect(asked).toEqual(["handoff-1", "handoff-2", "person"]);
+  });
 });
 
 describe("running short", () => {
@@ -598,14 +614,143 @@ describe("an engine's adapter on a Cloud home", () => {
     expect(seen.slice(2).map((event) => event.type === "runtime.error" ? event.message : event.type)).toEqual([memoryStopText(false), "turn.completed"]);
   });
 
+  it("makes a chat-runtime turn wait for memory, as its MCP servers need it", async () => {
+    const h = host({ available: 300 * MB });
+    h.memory.turnStarted("busy"); h.spawn("busy");
+    const { instance, sent } = fakeInstance("openai-compat");
+    const decorated = withEngineMemory(instance, h.memory);
+    const seen: RuntimeEvent[] = [];
+    decorated.adapter.onEvent((event) => seen.push(event));
+    const turn = decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    await settle();
+    expect(seen).toEqual([expect.objectContaining({ type: "runtime.notice", threadId: "t1", provider: "openai-compat", message: memoryWaitText(1) })]);
+    expect(sent).toEqual([]);
+    await decorated.adapter.interruptTurn("t1");
+    await expect(turn).rejects.toBeInstanceOf(TurnNotStartedError);
+  });
+
+  it("gates every engine built on the chat runtime", () => {
+    const drivers = join(dirname(fileURLToPath(import.meta.url)), "drivers");
+    const kinds = readdirSync(drivers).filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts")).flatMap((file) => {
+      const source = readFileSync(join(drivers, file), "utf8");
+      if (!source.includes("createOpenAIChatRuntime(")) return [];
+      const kind = /driverKind: "([^"]+)"/.exec(source)?.[1] ?? /DRIVER_KIND = "([^"]+)"/.exec(source)?.[1];
+      return kind ? [kind] : [`no kind found in ${file}`];
+    });
+    expect(kinds.length).toBeGreaterThanOrEqual(8);
+    expect(kinds.filter((kind) => !CHAT_RUNTIME_KINDS.has(kind))).toEqual([]);
+  });
+
   it("leaves engines that start no process of their own, and every engine where the gate is off, as they are", () => {
     const h = host();
-    const api = fakeInstance("openai-compat");
+    const api = fakeInstance("some-remote-engine");
     const adapter = api.instance.adapter;
     expect(withEngineMemory(api.instance, h.memory).adapter).toBe(adapter);
     const local = fakeInstance();
     const localAdapter = local.instance.adapter;
     expect(withEngineMemory(local.instance, new EngineMemory({ enabled: false })).adapter).toBe(localAdapter);
+  });
+});
+
+describe("a plan's limit on turns at once", () => {
+  const signal = () => new AbortController().signal;
+  const capped = (most: number | undefined, waitsOnOthers: (threadId: string) => boolean = () => false) => {
+    const h = host();
+    h.memory.useCap({ most: () => most, waitsOnOthers });
+    h.memory.useWaits({ text: (_threadId, wait) => `limit ${wait.limit} ahead ${wait.ahead}`, began: () => {}, changed: () => {} });
+    return h;
+  };
+
+  it("runs the plan's number of turns, whatever memory allows, and the next starts once one ends, saying why it waits", async () => {
+    const h = capped(2);
+    expect(h.memory.limited()).toBe(true);
+    expect(await h.memory.admit("a", signal(), () => {}, "turn")).toBe(true);
+    expect(await h.memory.admit("b", signal(), () => {}, "turn")).toBe(true);
+    const said: string[] = [];
+    let third: boolean | null = null;
+    void h.memory.admit("c", signal(), (text) => said.push(text), "turn").then((admitted) => { third = admitted; });
+    await settle();
+    expect([third, said]).toEqual([null, ["limit 2 ahead 0"]]);
+    h.memory.turnEnded("a");
+    await settle();
+    expect(third).toBe(true);
+  });
+
+  it("lets two woken together take only the places there are", async () => {
+    const h = capped(2);
+    await h.memory.admit("a", signal(), () => {}, "turn");
+    const admitted: string[] = [];
+    for (const threadId of ["b", "c"]) void h.memory.admit(threadId, signal(), () => {}, "turn").then(() => admitted.push(threadId));
+    await settle();
+    expect(admitted).toEqual(["b"]);
+  });
+
+  it("asks who goes first and who holds a place a number of times that grows with the queue, not with its square", async () => {
+    const perWake = async (waiters: number) => {
+      const h = host({ tickMs: 60_000 });
+      let asked = 0;
+      h.memory.useCap({ most: () => 2, waitsOnOthers: () => { asked++; return false; } });
+      h.memory.useTurnOrder(() => { asked++; return false; });
+      await h.memory.admit("a", signal(), () => {}, "turn");
+      await h.memory.admit("b", signal(), () => {}, "turn");
+      const stop = new AbortController();
+      for (let at = 0; at < waiters; at++) void h.memory.admit(`w${at}`, stop.signal, () => {}, "turn");
+      await settle();
+      asked = 0;
+      for (let round = 0; round < 5; round++) {
+        (h.memory as unknown as { wake(): void }).wake();
+        await settle();
+      }
+      const each = asked / 5;
+      stop.abort();
+      await settle();
+      return each;
+    };
+    const [ten, forty] = [await perWake(10), await perWake(40)];
+    expect(forty, "one wake of 40 waiters").toBeLessThanOrEqual(2 * 40 + 10);
+    expect(forty / ten, "four times the waiters, about four times the asking").toBeLessThan(6);
+  });
+
+  it("holds no place for a turn waiting on work it handed out, so that work runs", async () => {
+    const waiting = new Set(["a", "b"]);
+    const h = capped(2, (threadId) => waiting.has(threadId));
+    await h.memory.admit("a", signal(), () => {}, "turn");
+    await h.memory.admit("b", signal(), () => {}, "turn");
+    expect(await h.memory.admit("child", signal(), () => {}, "turn")).toBe(true);
+  });
+
+  it("limits nothing where the plan sets no number", async () => {
+    const h = capped(undefined);
+    expect(h.memory.limited()).toBe(false);
+    for (const threadId of ["a", "b", "c", "d"]) expect(await h.memory.admit(threadId, signal(), () => {}, "turn")).toBe(true);
+  });
+
+  it("makes a turn wait for a place even when its thread's engine is still running", async () => {
+    const h = capped(1);
+    h.memory.turnStarted("t1"); h.spawn("t1"); h.memory.turnEnded("t1");
+    h.memory.turnStarted("busy"); h.spawn("busy");
+    const fake = fakeInstance();
+    const decorated = withEngineMemory(fake.instance, h.memory);
+    const turn = decorated.adapter.sendTurn({ threadId: "t1", text: "again" } as SendTurnInput);
+    await settle();
+    expect(fake.sent).toEqual([]);
+    h.memory.turnEnded("busy");
+    expect(await turn).toEqual({ turnId: "turn-t1" });
+    expect(fake.sent).toEqual(["t1"]);
+  });
+
+  it("gives the place back when a turn is stopped while it waits for memory", async () => {
+    const h = capped(2);
+    h.state.available = 300 * MB;
+    h.memory.turnStarted("busy"); h.spawn("busy");
+    const fake = fakeInstance();
+    const decorated = withEngineMemory(fake.instance, h.memory);
+    const turn = decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    await settle();
+    await decorated.adapter.interruptTurn("t1");
+    await expect(turn).rejects.toBeInstanceOf(TurnNotStartedError);
+    expect(h.memory.busy()).toBe(1);
+    expect(await h.memory.admit("t2", signal(), () => {}, "turn")).toBe(true);
   });
 });
 
@@ -774,5 +919,46 @@ describe("the day's memory pressure, for the Admin", () => {
     ledger.note(start, "killed", 3); ledger.note(start, "stopped");
     expect(ledger.read(start + 60_000, [start])).toEqual({ waits: 2, waitMs: 150_000, stopped: 1, killed: 3, stallMinutes: 1 });
     expect(ledger.read(start + 24 * 60 * 60_000 + 60_000)).toEqual({ waits: 0, waitMs: 0, stopped: 0, killed: 0, stallMinutes: 0 });
+  });
+});
+
+describe("a lane of its own", () => {
+  const free = (bytes: number) => () => ({ totalBytes: 4 * GB, availableBytes: bytes, swapFreeBytes: 0, oomKills: 0, fullStall10: 0 });
+  const lane = new Set(["burst-1", "burst-2"]);
+  const capped = (running: string[], most = 2) => {
+    const memory = new EngineMemory({ enabled: true, read: free(3 * GB), groups: () => new Map(), now: () => 0, signal: () => {}, log: () => {} });
+    memory.useCap({ most: () => most, waitsOnOthers: () => false, laneOwned: (threadId) => lane.has(threadId) });
+    for (const threadId of running) memory.turnStarted(threadId);
+    return memory;
+  };
+
+  it("keeps a burst's threads out of the plan's turn cap, so a person's chat still starts", async () => {
+    const memory = capped(["burst-1", "burst-2"]);
+    await expect(memory.admit("persons-chat", new AbortController().signal, () => {}, "turn")).resolves.toBe(true);
+  });
+
+  it("lets a lane's thread past the cap the lane already counted", async () => {
+    const memory = capped(["persons-chat-1", "persons-chat-2"]);
+    await expect(memory.admit("burst-1", new AbortController().signal, () => {}, "turn")).resolves.toBe(true);
+  });
+
+  it("gives the lane no room under the plan's cap, its own turns counted", () => {
+    expect(capped(["burst-1"]).laneHasRoom()).toBe(true);
+    expect(capped(["burst-1", "persons-chat"]).laneHasRoom()).toBe(false);
+  });
+
+  it("gives the lane no room while the person's own work waits", async () => {
+    const memory = capped(["busy-a", "busy-b"]);
+    memory.useTurnOrder((threadId) => threadId === "persons-chat");
+    const abort = new AbortController();
+    const waiting = memory.admit("persons-chat", abort.signal, () => {}, "turn");
+    await Promise.resolve();
+    expect(memory.laneHasRoom()).toBe(false);
+    abort.abort();
+    await waiting;
+  });
+
+  it("is always open with the gate off", () => {
+    expect(new EngineMemory({ enabled: false }).laneHasRoom()).toBe(true);
   });
 });

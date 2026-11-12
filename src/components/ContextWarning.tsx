@@ -9,7 +9,7 @@ import { api, useStore, type Bot, type Group, type Message } from "@/state/store
 const pill = "flex items-center gap-1.5 rounded-full border border-warning/40 bg-warning/10 px-2.5 py-1 text-[13px] text-ink";
 const action = "rounded-full px-1.5 font-medium text-accent hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline";
 
-function useCompact() {
+export function useContextAction() {
   const { dispatch } = useStore();
   const [pending, setPending] = useState(false);
   const run = (path: string, body: unknown) => {
@@ -41,7 +41,7 @@ export function ThreadContextWarningView({ name, percent, busy, pending, onCompa
 export function ThreadContextWarning({ bot, messages }: { bot: Bot; messages: readonly Message[] }) {
   const usage = bot.tasks?.find((task) => task.threadId === bot.threadId)?.usage;
   const warning = threadContextWarning(usage, messages);
-  const { pending, run } = useCompact();
+  const { pending, run } = useContextAction();
   if (!warning) return null;
   return (
     <ThreadContextWarningView name={bot.name} percent={warning.percent} busy={Boolean(bot.busy)} pending={pending}
@@ -82,7 +82,7 @@ export function RoomContextWarningsView({ warnings, pendingBotId, onCompact }: {
 
 export function RoomContextWarnings({ group, members }: { group: Group; members: readonly Bot[] }) {
   const warnings = roomContextWarnings(group, members);
-  const { pending, run } = useCompact();
+  const { pending, run } = useContextAction();
   const [target, setTarget] = useState<string | null>(null);
   if (!warnings.length) return null;
   return (

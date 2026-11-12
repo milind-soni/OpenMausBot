@@ -1,9 +1,11 @@
 // GET /api/cloud-send/manifest: everything of the person's this server holds that a move carries, by id with a
 // fingerprint per kind, on this computer and on their Cloud alike, so the desktop can check that a move carried it all.
 // Read only, never a secret: credentials are named here and checked by fingerprint (cloud-send-verify.ts).
-import { attachmentNames, type ChatStore } from "./cloud-chat-merge.ts";
+import type { ChatStore } from "./cloud-chat-merge.ts";
 import { listBotFiles, type BotFile } from "./cloud-send-files.ts";
 import { chatHeads, conversationSettings } from "./cloud-send-chats.ts";
+import { activeLeaves, attachmentNamesOf } from "./cloud-send-rows.ts";
+import { roomGoes } from "./cloud-send-scope.ts";
 import { automationSwitches, routineRunIds, type MoveKindsDeps } from "./cloud-send-kinds.ts";
 import { journalIds, memoryFiles, memoryLines, teamsHere } from "./cloud-send-memory.ts";
 import type { CloudSendSummary } from "./cloud-send.ts";
@@ -13,7 +15,7 @@ import { learnedState } from "./profile-learned.ts";
 import type { BotRecord } from "./store.ts";
 import type { TeamMemory } from "./team-memory.ts";
 
-export interface ManifestConversation { threadId: string; bot?: string; room?: string; rows: number; newest: string; settings: Record<string, unknown> }
+export interface ManifestConversation { threadId: string; bot?: string; room?: string; rows: number; newest: string; leaf: string; settings: Record<string, unknown> }
 
 export interface CloudSendManifest {
   v: 1;
@@ -29,12 +31,13 @@ export interface CloudSendManifest {
   forgotten: string[];
   teams: Array<{ section: string; context: string[] | null; memory: string[] }>;
   rooms: Array<{ id: string; name: string; members: string[]; threads: string[] }>;
-  /** "mcp:<name>", "key:<provider>", "composio", "highlevel" or "email". */
+  /** "mcp:<name>", "key:<provider>", "composio" or "email". */
   connections: string[];
   conversations: ManifestConversation[];
-  /** The stored attachments the conversations' rows name. */
-  attachments: string[];
-  files: BotFile[];
+  /** The stored attachments the conversations' rows name; left out when not asked for. */
+  attachments?: string[];
+  /** Left out when not asked for: GET /api/cloud-send/files?bot= lists them a bot at a time. */
+  files?: BotFile[];
   /** Each automation and whether it is on: the switch turns on there what was on here. */
   automations: Array<{ key: string; on: boolean }>;
   /** The routines' finished runs, by id with their routine's. */
@@ -52,6 +55,11 @@ export interface ManifestSources {
   teamMemory?: Pick<TeamMemory, "list">;
   /** A move of this one bot into a team: what it carries only (its summary is already kept to it). */
   bot?: string;
+  /** False: the attachments, or the bot files, are not listed (the desktop's check never reads My Cloud's attachments). */
+  attachments?: boolean;
+  files?: boolean;
+  /** A move of only these bots: their conversations, and the rooms that go with all their bots. */
+  scope?: ReadonlySet<string>;
 }
 
 function memoryOf(botId: string): CloudSendManifest["memory"] {
@@ -63,17 +71,19 @@ export async function cloudSendManifest(sources: ManifestSources): Promise<Cloud
   const { store } = sources;
   const sent = [...new Set(summary.items.filter((item) => item.kind === "bot" && item.id).map((item) => item.id!))];
   const only = sources.bot;
-  const rooms = only === undefined ? store.groups.filter((room) => !room.dm) : [];
+  const chosen = sources.scope;
+  const rooms = only === undefined ? store.groups.filter((room) => !room.dm && (!chosen || roomGoes(room, chosen, (id) => store.bot(id)))) : [];
   const counts = sources.heads();
-  const conversations: ManifestConversation[] = chatHeads(only === undefined ? store.bots : store.bots.filter((bot) => bot.id === only), rooms).map((head) => ({
-    threadId: head.threadId, ...(head.bot ? { bot: head.bot } : { room: head.room }), rows: counts.get(head.threadId)?.rows ?? 0, newest: head.lastId,
+  const leaves = activeLeaves();
+  const conversations: ManifestConversation[] = chatHeads(only !== undefined ? store.bots.filter((bot) => bot.id === only) : chosen ? store.bots.filter((bot) => chosen.has(bot.id)) : store.bots, rooms).map((head) => ({
+    threadId: head.threadId, ...(head.bot ? { bot: head.bot } : { room: head.room }), rows: counts.get(head.threadId)?.rows ?? 0, newest: head.lastId, leaf: leaves.get(head.threadId) ?? head.lastId,
     settings: conversationSettings(store, head),
   }));
-  const attachments = new Set<string>();
-  for (const { threadId } of conversations) for (const row of store.messagesFor(threadId)) for (const name of attachmentNames(row, sources.dataDir)) attachments.add(name);
+  const attachments = sources.attachments === false ? {} : { attachments: [...attachmentNamesOf(new Set(conversations.map((head) => head.threadId)), sources.dataDir)].sort() };
+  const files = sources.files === false ? {} : { files: await listBotFiles(sources.dataDir, sent) };
   if (only !== undefined) {
     return { v: 1, appVersion: summary.appVersion, items: summary.items, memory: [], journal: [], learned: [], forgotten: [], teams: [], rooms: [], connections: [],
-      conversations, attachments: [...attachments].sort(), files: await listBotFiles(sources.dataDir, sent),
+      conversations, ...attachments, ...files,
       automations: sources.kinds ? automationSwitches(sources.kinds, only) : [], runs: sources.kinds ? routineRunIds(sources.kinds, only) : [] };
   }
   return {
@@ -90,8 +100,8 @@ export async function cloudSendManifest(sources: ManifestSources): Promise<Cloud
       threads: room.tasks?.length ? room.tasks.map((task) => task.threadId) : [room.threadId] })),
     connections: (await sources.connections()).map((item) => item.id).sort(),
     conversations,
-    attachments: [...attachments].sort(),
-    files: await listBotFiles(sources.dataDir, sent),
+    ...attachments,
+    ...files,
     automations: sources.kinds ? automationSwitches(sources.kinds) : [],
     runs: sources.kinds ? routineRunIds(sources.kinds) : [],
   };

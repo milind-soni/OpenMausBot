@@ -150,7 +150,7 @@ describe("the keys page", () => {
   it("lands the live-call notice's button on the OpenAI row in Voice and calls, focused and lit", async () => {
     render(() => createElement(LiveKeyNeeded, { key: "notice" }), () => createElement(KeysPage, { key: "page" }));
     expect(expanded("voice")).toBe("false");
-    const button = [...host.querySelectorAll("button")].find((candidate) => candidate.textContent === "Open API keys")!;
+    const button = [...host.querySelectorAll("button")].find((candidate) => candidate.textContent === "Open AI › Other services")!;
     flushSync(() => button.click());
     expect(fx.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "connections" });
     const live = () => row("liveCalls")!.querySelector<HTMLInputElement>("[data-key-input]")!;
@@ -218,6 +218,62 @@ describe("the OpenAI-compatible server row", () => {
     expect(waitFor()).not.toBeNull();
     flushSync(() => setConfig({ ...fx.config, openaiCompat: { url: "" } }));
     expect(waitFor()).toBeNull();
+  });
+});
+
+describe("the Ollama row", () => {
+  const openServers = () => flushSync(() => section("servers").querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+  const button = (text: string) => [...row("ollama")!.querySelectorAll("button")].find((candidate) => candidate.textContent === text)!;
+  const found = (state: string) => vi.waitFor(() => expect(row("ollama")!.querySelector(`[data-ollama-state="${state}"]`)).not.toBeNull());
+  const answer = (state: string, url = "http://127.0.0.1:11434", models: unknown[] = []) => {
+    fx.api.mockImplementation(async (path: string) => path.startsWith("/api/instances/ollama") ? { status: { state, url, models } } : { instances: [] });
+  };
+
+  it("looks only once its section is open, and adds what it found with no key or address to type", async () => {
+    answer("ready", undefined, [{ name: "llama3.2:latest" }]);
+    page();
+    expect(fx.api).not.toHaveBeenCalled();
+    openServers();
+    await found("ready");
+    expect(row("ollama")!.textContent).toContain("Pulled models: 1.");
+    expect(fx.api.mock.calls.map(([path]) => path)).toEqual(["/api/instances/ollama"]);
+    flushSync(() => button("Add Ollama").click());
+    await vi.waitFor(() => expect(fx.api).toHaveBeenCalledTimes(2));
+    expect(fx.api.mock.calls[1]![0]).toBe("/api/instances/openai-compat");
+    expect(JSON.parse(fx.api.mock.calls[1]![1].body)).toEqual({ displayName: "Ollama", url: "http://127.0.0.1:11434/v1", key: "ollama", catalog: "ollama" });
+  });
+
+  it("asks at the address someone enters", async () => {
+    answer("no-models");
+    page();
+    openServers();
+    await found("no-models");
+    expect(row("ollama")!.textContent).toContain("ollama pull llama3.2");
+    answer("ready", "http://gpu-box.local:11434", [{ name: "qwen3:4b" }]);
+    type(row("ollama")!.querySelector<HTMLInputElement>("input")!, "http://gpu-box.local:11434");
+    flushSync(() => button("Check again").click());
+    await found("ready");
+    expect(fx.api.mock.calls.at(-1)![0]).toBe(`/api/instances/ollama?url=${encodeURIComponent("http://gpu-box.local:11434")}`);
+  });
+
+  it("offers nothing to add while Ollama isn't running, only how to start or get it", async () => {
+    answer("not-running");
+    page();
+    openServers();
+    await found("not-running");
+    expect(button("Add Ollama").disabled).toBe(true);
+    expect(row("ollama")!.querySelector<HTMLAnchorElement>('a[href="https://ollama.com/download"]')).not.toBeNull();
+    expect(row("ollama")!.textContent).toContain("ollama serve");
+  });
+
+  it("says when this Ollama is already added, through the built-in server or an added one", async () => {
+    answer("ready", undefined, [{ name: "llama3.2:latest" }]);
+    fx.config = { ...fx.config, openaiCompat: { url: "http://127.0.0.1:11434/v1/" } };
+    page();
+    openServers();
+    await found("ready");
+    expect(row("ollama")!.textContent).toContain("already added");
+    expect(button("Add Ollama").disabled).toBe(true);
   });
 });
 

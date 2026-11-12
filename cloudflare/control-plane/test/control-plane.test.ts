@@ -295,6 +295,11 @@ describe("control-plane migrations and health", () => {
         reclaim: { mode: "on", pending: 0 },
       },
       relayAdoption: { e2eDevices: 0, legacyDevices: 0, installs: 0 },
+      tunnelRelease: {
+        relayProven: { percent: 0, days: 3, eligible: 0 },
+        legacyPhoneCutoff: { percent: 0, eligible: 0 },
+        minAppVersion: { on: false, eligible: 0 },
+      },
     });
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
@@ -354,6 +359,7 @@ describe("control-plane migrations and health", () => {
       dnsRecordLimit: 1000,
       offlineReclaimMs: 21 * 24 * 60 * 60 * 1_000,
       reclaimMode: "observe",
+      reclaimPreviewMs: null,
       tunnelLimit: 1000,
     });
     const withVars = (vars: Record<string, string>) => ({ ...base, ...vars }) as unknown as Env;
@@ -368,7 +374,12 @@ describe("control-plane migrations and health", () => {
       reclaimMode: "observe",
       tunnelLimit: 2500,
     });
-    expect(readConfig(withVars({ OMB_TUNNEL_OFFLINE_RECLAIM_DAYS: "2" })).capacity.offlineReclaimMs).toBe(21 * 24 * 60 * 60 * 1_000);
+    expect(readConfig(withVars({ OMB_TUNNEL_OFFLINE_RECLAIM_DAYS: "0" })).capacity.offlineReclaimMs).toBe(21 * 24 * 60 * 60 * 1_000);
+    expect(readConfig(withVars({ OMB_TUNNEL_OFFLINE_RECLAIM_DAYS: "1" })).capacity.offlineReclaimMs).toBe(24 * 60 * 60 * 1_000);
+    expect(readConfig(withVars({ OMB_TUNNEL_RECLAIM_PREVIEW_DAYS: "1" })).capacity.reclaimPreviewMs).toBe(24 * 60 * 60 * 1_000);
+    for (const invalid of ["", "0", "366", "soon"]) {
+      expect(readConfig(withVars({ OMB_TUNNEL_RECLAIM_PREVIEW_DAYS: invalid })).capacity.reclaimPreviewMs).toBeNull();
+    }
     expect(readConfig(withVars({ OMB_TUNNEL_OFFLINE_RECLAIM_DAYS: "3" })).capacity.offlineReclaimMs).toBe(3 * 24 * 60 * 60 * 1_000);
     expect(readConfig(withVars({ OMB_CLEANUP_SWEEP_LIMIT: "51" })).capacity.cleanupSweepLimit).toBe(20);
     expect(readConfig(withVars({ OMB_TUNNEL_LIMIT: "1e3" })).capacity.tunnelLimit).toBe(1000);
@@ -389,14 +400,17 @@ describe("control-plane migrations and health", () => {
       CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN,
       CLOUDFLARE_ENDPOINT_ACCOUNTS: env.CLOUDFLARE_ENDPOINT_ACCOUNTS,
       CLOUDFLARE_API_TOKEN_MAUSBOT_SI: env.CLOUDFLARE_API_TOKEN_MAUSBOT_SI,
-      HIGHLEVEL_CLIENT_ID: env.HIGHLEVEL_CLIENT_ID,
-      HIGHLEVEL_REDIRECT_URL: env.HIGHLEVEL_REDIRECT_URL,
-      HIGHLEVEL_SCOPES: env.HIGHLEVEL_SCOPES,
       OMB_TUNNEL_LIMIT: env.OMB_TUNNEL_LIMIT,
       OMB_DNS_RECORD_LIMIT: env.OMB_DNS_RECORD_LIMIT,
       OMB_TUNNEL_RECLAIM: env.OMB_TUNNEL_RECLAIM,
       OMB_TUNNEL_OFFLINE_RECLAIM_DAYS: env.OMB_TUNNEL_OFFLINE_RECLAIM_DAYS,
       OMB_CLEANUP_SWEEP_LIMIT: env.OMB_CLEANUP_SWEEP_LIMIT,
+      OMB_TUNNEL_RECLAIM_PREVIEW_DAYS: env.OMB_TUNNEL_RECLAIM_PREVIEW_DAYS,
+      RELAY_TUNNEL_RELEASE_PERCENT: env.RELAY_TUNNEL_RELEASE_PERCENT,
+      RELAY_TUNNEL_RELEASE_DAYS: env.RELAY_TUNNEL_RELEASE_DAYS,
+      TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT: env.TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT,
+      TUNNEL_MIN_APP_VERSION: env.TUNNEL_MIN_APP_VERSION,
+      TUNNEL_REASON_MIN_VERSION: env.TUNNEL_REASON_MIN_VERSION,
       RELAY_NODES: env.RELAY_NODES,
       RELAY_NODES_AMERICAS: env.RELAY_NODES_AMERICAS,
       RELAY_TOKEN_KID: env.RELAY_TOKEN_KID,

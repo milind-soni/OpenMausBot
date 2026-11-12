@@ -23,6 +23,7 @@ import type { CdpPage } from "./cdp/page.ts";
 import { browserRoot, profileDir, profileHash, profileKind, removeProfile, workspaceId } from "./chrome/profile.ts";
 import { BROWSER_CONTROL_REFUSAL, ProfileControl, type TakeResult } from "./control.ts";
 import { executeTool, personUrl, toolFailure, type ToolContext } from "./dispatch.ts";
+import { installedExtensions } from "./extensions.ts";
 import { HealthShown, pageHealthLine } from "./health.ts";
 import type { HoldLimits } from "./hold.ts";
 import { errorResult, shapeResult, textResult, withParts, type ToolResult } from "./shape.ts";
@@ -50,6 +51,8 @@ export interface BrowserServiceOptions {
   /** Browsers running at once on this server. */
   maxRunning: number;
   idleMs(): number;
+  /** A running turn holds this session between browser calls too. */
+  held?(session: string): boolean;
   scrub?: (text: string) => string;
   /** What the egress gate of this profile's browser refused since it was last asked, as one line. */
   egressNotice?: (key: string) => string | null;
@@ -186,7 +189,7 @@ export class BrowserService {
   }
 
   async #start(profile: ProfileState, epoch: number): Promise<Running> {
-    await this.#capacity(profile);
+    await this.#capacity(profile, epoch);
     this.#stillWanted(profile, epoch);
     const opening = this.#open(profile, epoch);
     profile.opening = opening;
@@ -204,6 +207,7 @@ export class BrowserService {
   async #open(profile: ProfileState, epoch: number): Promise<Running> {
     const fresh = profile.fresh;
     profile.fresh = false;
+    rmSync(profile.downloadDir, { recursive: true, force: true });
     mkdirSync(profile.downloadDir, { recursive: true, mode: 0o700 });
     const opened = await this.#options.backend(profile.key).open({ key: profile.key, mode: "headless", fresh, viewport: profile.hub.viewport(), downloadDir: profile.downloadDir });
     const run: Running = { opened, browser: opened.browser, offs: [], closing: false };
@@ -273,6 +277,11 @@ export class BrowserService {
     profile.run = null;
     profile.tabs.clear();
     if (run.closing) return;
+    try {
+      rmSync(profile.downloadDir, { recursive: true, force: true });
+    } catch (error) {
+      this.#options.log?.(`browser ${profile.key}: could not remove downloads: ${error}`);
+    }
     profile.reopened = { kind: "crash", pages: [] };
     profile.control.settle();
     this.#options.log?.(`browser ${profile.key}: Chrome exited unexpectedly; the next call starts it again`);
@@ -281,11 +290,12 @@ export class BrowserService {
 
   /** Graceful: Chrome's own quit, so its next start reopens the tabs and keeps session cookies. */
   async #stop(profile: ProfileState, reopened: Reopened, { erase = false }: { erase?: boolean } = {}): Promise<void> {
-    if (profile.stopping) return profile.stopping;
+    if (profile.stopping && !erase) return profile.stopping;
     profile.epoch++;
+    if (profile.stopping) return this.#barrier(profile, profile.stopping.then(() => this.#erase(profile)));
     const run = profile.run;
     const opening = profile.opening;
-    const stopping = (async () => {
+    return this.#barrier(profile, (async () => {
       profile.control.closing = true;
       profile.control.changed();
       try {
@@ -300,17 +310,28 @@ export class BrowserService {
         if (profile.run === run) profile.run = null;
         profile.tabs.clear();
         if (reopened) profile.reopened = reopened;
-        if (profile.temporary || erase) this.#erase(profile);
-        profile.control.closing = false;
-        profile.control.settle();
+        try {
+          if (erase) this.#erase(profile);
+          else if (profile.temporary) this.#eraseFiles(profile.key);
+          else rmSync(profile.downloadDir, { recursive: true, force: true });
+        } finally {
+          profile.control.closing = false;
+          profile.control.settle();
+        }
       }
-    })().finally(() => { if (profile.stopping === stopping) profile.stopping = null; });
+    })());
+  }
+
+  #barrier(profile: ProfileState, work: Promise<void>): Promise<void> {
+    const stopping = work.finally(() => { if (profile.stopping === stopping) profile.stopping = null; });
     profile.stopping = stopping;
     return stopping;
   }
 
   #erase(profile: ProfileState): void {
+    if (this.#profiles.get(profile.key) !== profile) return;
     this.#eraseFiles(profile.key);
+    this.#profiles.delete(profile.key);
   }
 
   #eraseFiles(key: string): void {
@@ -322,13 +343,15 @@ export class BrowserService {
 
   #unused(profile: ProfileState, idleMs: number): boolean {
     return profile.run !== null && !profile.starting && !profile.stopping && profile.calls === 0
-      && profile.control.owner === null && profile.control.agents === 0 && !this.#lanes.held(profile.key) && Date.now() - profile.lastUsed >= idleMs;
+      && profile.control.owner === null && profile.control.agents === 0 && !this.#lanes.held(profile.key)
+      && !this.#options.held?.(profile.session) && Date.now() - profile.lastUsed >= idleMs;
   }
 
   /** The least recently used unwatched idle browser makes room; with none, the call waits, then is told why it cannot start. */
-  async #capacity(profile: ProfileState): Promise<void> {
+  async #capacity(profile: ProfileState, epoch: number): Promise<void> {
     const until = Date.now() + this.#options.capacityWaitMs;
     for (;;) {
+      this.#stillWanted(profile, epoch);
       const others = this.profiles().filter((other) => other !== profile && (other.run || other.starting));
       if (others.length < this.#options.maxRunning) return;
       const candidate = others.filter((other) => other.hub.size === 0 && this.#unused(other, 0)).sort((a, b) => a.lastUsed - b.lastUsed)[0];
@@ -377,7 +400,6 @@ export class BrowserService {
     const profile = this.#profiles.get(key);
     if (profile) {
       await this.#stop(profile, null, { erase: true });
-      this.#profiles.delete(key);
       this.#holds.drop(profile.session);
     } else {
       this.#eraseFiles(key);
@@ -707,6 +729,7 @@ export class BrowserService {
         profile.hub.tabsChanged();
       },
       download: (id: string): Download | undefined => profile.run?.browser.downloads?.list().find((download) => download.id === id),
+      extensions: () => (["mychrome", "cdp"].includes(profileKind(profile.key)) ? [] : installedExtensions(profileDir(this.#options.dataDir, profile.key))),
     };
   }
 }

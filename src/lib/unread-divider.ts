@@ -12,6 +12,20 @@ export function firstUnreadMessageId(messages: readonly Line[], lastReadMessageI
   return seen < 0 ? null : messages[seen + 1]?.id ?? null;
 }
 
+export type UnreadDivider = { threadId: string; messageId: string | null; lastReadMessageId?: string };
+
+// A short switch page can end below the boundary: keep the cursor so a scrollback page can place it.
+export function unreadDividerFor(threadId: string, messages: readonly Line[], lastReadMessageId: string | undefined, hasMore?: boolean): UnreadDivider | null {
+  const messageId = firstUnreadMessageId(messages, lastReadMessageId);
+  if (messageId) return { threadId, messageId };
+  return hasMore ? { threadId, messageId: null, lastReadMessageId } : null;
+}
+
+export function placeUnreadDivider(divider: UnreadDivider | null, threadId: string, messages: readonly Line[], hasMore: boolean): UnreadDivider | null {
+  if (!divider || divider.threadId !== threadId || divider.messageId) return divider;
+  return unreadDividerFor(threadId, messages, divider.lastReadMessageId, hasMore);
+}
+
 export function threadReadCursor(bot: {
   threadId: string;
   tasks?: ReadonlyArray<{ threadId: string; lastReadMessageId?: string }> | null;

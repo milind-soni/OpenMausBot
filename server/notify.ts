@@ -1,11 +1,13 @@
 import type { Notification, NotifyKind } from "../shared/notification.ts";
 import { personMentionExcerpt } from "../shared/person-mention.ts";
+import { plainPreviewText } from "../shared/plain-preview.ts";
 import { conversationLanguage, serverLine, type ServerLineKey } from "./server-lines.ts";
 
 export type { Notification, NotifyKind } from "../shared/notification.ts";
 
+/** Fenced code stays out of a banner, as before; the rest of the Markdown becomes the readable line a lock screen shows. */
 export function summarize(text: string, max = 140): string {
-  const line = text.replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim();
+  const line = plainPreviewText(text.replace(/```[\s\S]*?```/g, " "));
   return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
 }
 
@@ -66,6 +68,17 @@ export function buildNotification(
   if (extra?.avatarUrl) notification.avatarUrl = extra.avatarUrl;
   if (extra?.group) notification.groupId = extra.group.id;
   return notification;
+}
+
+export function unaskedBotThread(
+  task: { openedBy?: unknown } | undefined,
+  path: readonly { role: string; kind: string; at: number; peerAsk?: { incident?: unknown } }[],
+  assignedAt?: number,
+): boolean {
+  if (!task?.openedBy) return false;
+  const asked = path.findLast((message) => message.role === "user" && message.kind === "text");
+  if (!asked || (assignedAt !== undefined && asked.at < assignedAt)) return true;
+  return Boolean(asked.peerAsk && !asked.peerAsk.incident);
 }
 
 type MentionSource = {

@@ -29,6 +29,9 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   "the team map": ["canvas.", "mapComputer.", "canvasComputers."],
   "Apps": ["apps.", "connectors."],
   "the Settings pages Simple mode shows": ["settings.section.", "settings.group.", "settings.mcpCalls.", "settings.logins."],
+  "Settings's pages, its search and Phone & devices": [
+    "settings.page.", "settings.scope.", "settings.place.", "settings.glance.", "settings.overview.", "settings.search.", "phone.pair.", "phone.reach.",
+  ],
   "the Usage page and its traces": ["trace.", "usage.page."],
 };
 
@@ -56,7 +59,7 @@ const EVERYDAY_KEYS: Record<string, readonly string[]> = {
   ],
   "the Settings pages Simple mode shows": [
     "settings.diagnostics.subtitle", "settings.diagnostics.elsewhere", "settings.import.appsSubtitle", "settings.profiles.temporaryHint",
-    "settings.profiles.myChromeUnavailable", "remote.serverPairing.cloudPersonal", "remote.serverPairing.error",
+    "settings.profiles.myChromeUnavailable", "remote.serverPairing.error",
   ],
 };
 
@@ -81,15 +84,15 @@ const PENDING_WORDS: readonly Word[] = [
 ];
 
 const ALLOWED: Record<string, string> = {
-  "settings.section.desktopWorkspaces": "the Servers page shares its name with the app menu's Server menu; both change with the one-workspace switcher",
   "sidebar.servers": "the switcher's own Servers list, renamed with the one-workspace switcher",
   "sidebar.switchServer": "the switcher's own Servers list, renamed with the one-workspace switcher",
   "sidebar.switchServerError": "points at the app menu's Server menu",
   "sidebar.update.howOther": "a server added from the app menu's Server menu: its update is for whoever runs it, not this app",
   "sidebar.update.howOtherRestart": "a server added from the app menu's Server menu: its update is for whoever runs it, not this app",
-  "cloudPhone.step1": "points at the app menu's Server menu, entry by entry",
   "botAccess.tools.syntax": "the tool names people type, such as mcp:SERVER:NAME",
   "chat.notice.modelServerStoppedAnswering": "the person's model server at a named host, not the app's internal server",
+  "rail.local": "the owner's own name for the ＋ choice that adds a workspace of this computer's own",
+  "rail.localNumbered": "a new workspace's first name, which the person may change, in the owner's word for it",
 };
 
 const prefixes = Object.values(EVERYDAY_PREFIXES).flat();

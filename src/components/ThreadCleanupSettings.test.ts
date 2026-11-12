@@ -20,24 +20,23 @@ describe("ThreadCleanupSettings", () => {
     expect(parseCapMib("0.3")).toBeNull();
   });
 
-  it("keeps both knobs off by default and disables their number entry", () => {
+  const switchOf = (markup: string, id: string) => markup.match(new RegExp(`<button[^>]*id="${id}"[^>]*>`))![0];
+
+  it("keeps both knobs off by default, as switches, with no number to type until one is on", () => {
     fixture.threads = undefined;
     const markup = renderToStaticMarkup(createElement(ThreadCleanupSettings));
-    expect(markup).not.toContain('thread-log-retention-enabled" type="checkbox" class="size-4 accent-accent" checked');
-    expect(markup).not.toContain('thread-log-cap-enabled" type="checkbox" class="size-4 accent-accent" checked');
-    expect(markup).toContain('id="thread-log-retention-days"');
-    expect(markup).toContain('value="30"');
-    expect(markup).toContain('value="50"');
-    expect(markup).toContain('disabled=""');
-    expect(markup).toContain("Off by default.");
-    expect(markup.match(/never threads or transcripts\./g)).toHaveLength(2);
+    expect(switchOf(markup, "thread-log-retention-enabled")).toContain('aria-checked="false"');
+    expect(switchOf(markup, "thread-log-cap-enabled")).toContain('aria-checked="false"');
+    expect(markup).not.toContain('id="thread-log-retention-days"');
+    expect(markup).not.toContain('type="checkbox"');
+    expect(markup.match(/Threads stay\./g)).toHaveLength(2);
   });
 
   it("shows the confirmed server values, cap converted from bytes to MiB", () => {
     fixture.threads = { maxConcurrentPerBot: 3, eventLogRetentionDays: 14, eventLogMaxBytes: 52428800 };
     const markup = renderToStaticMarkup(createElement(ThreadCleanupSettings));
-    expect(markup).toContain('id="thread-log-retention-enabled" type="checkbox" class="size-4 accent-accent" checked=""');
-    expect(markup).toContain('id="thread-log-cap-enabled" type="checkbox" class="size-4 accent-accent" checked=""');
+    expect(switchOf(markup, "thread-log-retention-enabled")).toContain('aria-checked="true"');
+    expect(switchOf(markup, "thread-log-cap-enabled")).toContain('aria-checked="true"');
     expect(markup).toContain('value="14"');
     expect(markup).toContain('value="50"');
   });
@@ -45,16 +44,14 @@ describe("ThreadCleanupSettings", () => {
   it("renders a sub-megabyte cap as a fractional MiB value", () => {
     fixture.threads = { maxConcurrentPerBot: 3, eventLogMaxBytes: 262144 };
     const markup = renderToStaticMarkup(createElement(ThreadCleanupSettings));
-    expect(markup).toContain('id="thread-log-cap-enabled" type="checkbox" class="size-4 accent-accent" checked=""');
+    expect(switchOf(markup, "thread-log-cap-enabled")).toContain('aria-checked="true"');
     expect(markup).toContain('value="0.25"');
   });
 
-  it("wires both number inputs to their help copy", () => {
+  it("names both number inputs", () => {
     fixture.threads = { maxConcurrentPerBot: 3, eventLogRetentionDays: 7, eventLogMaxBytes: 1048576 };
     const markup = renderToStaticMarkup(createElement(ThreadCleanupSettings));
-    expect(markup).toContain('aria-describedby="thread-log-retention-help"');
-    expect(markup).toContain('aria-describedby="thread-log-cap-help"');
-    expect(markup).toContain('id="thread-log-retention-help"');
-    expect(markup).toContain('id="thread-log-cap-help"');
+    expect(markup).toMatch(/id="thread-log-retention-days"[^>]*aria-label="Delete event logs of finished threads after"|aria-label="Delete event logs of finished threads after"[^>]*id="thread-log-retention-days"/);
+    expect(markup).toContain('id="thread-log-cap-mib"');
   });
 });

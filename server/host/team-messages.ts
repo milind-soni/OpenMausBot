@@ -67,7 +67,7 @@ export interface TeamMessagesDeps {
   /** The inbox of a place that is no team's. */
   place?: PlaceInbox | null;
   /** What the inbox needs from the server: whose asks are whose, hand-offs, a bot carrying on, the assistant's reads. */
-  inbox: Pick<PersonInboxDeps, "askedPerson" | "handedFrom" | "continueTurn"> & Partial<Pick<PersonInboxDeps, "notes" | "ensureOwnBot" | "changed">> & {
+  inbox: Pick<PersonInboxDeps, "askedPerson" | "handedFrom" | "continueTurn"> & Partial<Pick<PersonInboxDeps, "notes" | "ensureOwnBot" | "changed" | "delivered">> & {
     representative?: Omit<RepresentativeDeps, "timeZone"> & Partial<Pick<RepresentativeDeps, "timeZone">>;
   };
   now?: () => number;
@@ -419,8 +419,12 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       return waiting ? { returned: false, open: { botId: waiting.botId, threadId: waiting.threadId } } : { returned: false };
     },
     /** A notification about to go out: an ask, a failure or a routine's report routed to a person reaches their inbox. */
-    route(notification: Notification, how: { routine?: boolean } = {}): Notification | null {
+    route(notification: Notification, how: { routine?: boolean; summary?: boolean } = {}): Notification | null {
       return !team && deps.place ? deps.place.route(notification, how) : inbox.route(notification, how);
+    },
+    /** Work handed on finished: on a place that is no team's, a line in the inbox (place-inbox.ts). */
+    handedResult(work: { botId: string; threadId: string; groupId?: string; text: string }, requester: { botId: string; threadId: string }): void {
+      if (!team) deps.place?.handedResult(work, requester);
     },
     stop(): void {
       unsubscribe();

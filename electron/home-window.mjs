@@ -9,10 +9,10 @@
 // shown place's verified origin, nothing else. A team is only ever one the Admin's session lists, paired through the
 // Admin's team pairing (its claims are the Admin's), never an address a page supplied.
 import { cloudHomeConnectUrl, cloudSetupOf, cloudUnreachableCause, cloudUnreachableText, machineSetup, readyCloudOrigin } from "./cloud-home.mjs";
-import { cloudMachine, cloudState, otherOwnClouds, ownCloud } from "./cloud-list.mjs";
+import { cloudMachine, cloudState, myCloudOf, otherOwnClouds, ownCloud } from "./cloud-list.mjs";
 import { asleepAnswer, BACKGROUND_HEADERS, openSleepingCloud, SIGNED_IN_MS } from "./cloud-power.mjs";
 import nativeText from "./native-text.cjs";
-import { awayIn, parseJournal } from "./one-home.mjs";
+import { awayIn, parseJournal, sameCloud } from "./one-home.mjs";
 
 export const HOME_SCREEN_PATH = "/home";
 /** The look at an awake My Cloud before the window moves there: under 3 s, so the offline screen shows within 3 s. */
@@ -65,6 +65,14 @@ const DEFAULT_TIMERS = {
 
 const originOf = (url) => { try { return new URL(url).origin; } catch { return null; } };
 
+/** The Cloud this computer moved to, at the address the verified session gives My Cloud now when My Cloud is that Cloud by
+ * its id or by an address it had before it moved to another provider, for the journal's own account; as kept otherwise. */
+function followedCloud(kept, state) {
+  const mine = myCloudOf(state);
+  if (!mine?.origin || !kept.origin || mine.origin === kept.origin || (kept.account && kept.account !== state.account?.id)) return kept;
+  return sameCloud(mine, kept) ? { ...kept, origin: mine.origin } : kept;
+}
+
 /**
  * Who the window opens. `journal`: one-home.json read back; `frozenCloud`: this computer's freeze marker when there is no
  * journal (its Cloud's origin, or true when it names none); `state`: the MausBot Cloud sign-in's state. An ended My Cloud
@@ -73,9 +81,10 @@ const originOf = (url) => { try { return new URL(url).origin; } catch { return n
  * @returns {{ kind: "computer" } | { kind: "cloud", origin: string } | { kind: "signin", other?: true }}
  */
 export function homeOf({ journal = null, frozenCloud = null, state = null }) {
-  const moved = journal ? (awayIn(journal) ? journal.cloud : null)
+  const kept = journal ? (awayIn(journal) ? journal.cloud : null)
     : frozenCloud ? { origin: typeof frozenCloud === "string" ? frozenCloud : null, account: null } : null;
-  if (!moved) return { kind: "computer" };
+  if (!kept) return { kind: "computer" };
+  const moved = followedCloud(kept, state);
   const connected = state?.status === "connected";
   const signedInNow = state?.account?.id ?? null;
   // This computer moved to another account's Cloud: its frozen copy stays frozen, and this account's own Cloud is what opens.
@@ -238,6 +247,8 @@ export function createHomeWindow(deps) {
     now = Date.now, timers = DEFAULT_TIMERS, hosts = () => null, readyStore = null, ownMove = () => null, log = () => {}, t = nativeText.englishText.t } = deps;
   let home = { kind: "computer" }, screen = null, status = null, opens = 0, retry = null, tries = 0, loaded = null, newer = false, repairing = null;
   let recovering = null;
+  /** The profile (clean-workspace.mjs) the person opened from the rail while My Cloud is home, until they pick a place. */
+  let profileShown = null;
   /** My Cloud asked for before the move made it home (`{ open }`), until its page loads or the person goes elsewhere;
    * `naming`: since when, and how often, a brand-new My Cloud's name was not found. */
   let asked = null, naming = null;
@@ -319,6 +330,8 @@ export function createHomeWindow(deps) {
     try { const at = new URL(win.webContents.getURL()); return at.origin === localOrigin() && at.pathname === HOME_SCREEN_PATH; } catch { return false; }
   };
   const clearRetry = () => { if (retry) timers.clear(retry); retry = null; };
+  /** Whatever was being opened for an earlier click stops; the window still shows what it showed. */
+  function stopOpening() { opens++; recovering = null; clearRetry(); screen = null; status = null; }
 
   function goScreen() {
     tell();
@@ -476,7 +489,7 @@ export function createHomeWindow(deps) {
         const look = await answers(origin);
         if (look === "no") return unreachable(place, token);
         if (look === "asleep" && otherPlace(place)) return offline(token);
-        if (look === "asleep") { power.hold(); asleep = true; say("waking"); }
+        if (look === "asleep") { power.hold(); asleep = true; if (wanted(token)) say("waking"); }
       }
       let session = null;
       const signedIn = asleep
@@ -519,10 +532,26 @@ export function createHomeWindow(deps) {
   async function show({ open = null, place = null } = {}) {
     if (recovering) { if (!open && !place) return; recovering = null; }
     const token = ++opens;
+    if (open || place) profileShown = null;
     const current = await refresh();
     if (!wanted(token)) return;
-    // This computer's own copy is the server again before anything of the person's Cloud opens.
-    if (!current.clean && clean?.active()) { await clean.leave(); if (!wanted(token)) return; }
+    if (current.kind !== "cloud") profileShown = null;
+    // This computer's own copy is the server again before anything of the person's Cloud opens; a profile they opened keeps
+    // running, so going back to it is one click.
+    if (!current.clean && clean?.active() && !clean.profile?.()) { await clean.leave(); if (!wanted(token)) return; }
+    if (profileShown) {
+      opening = null; asked = null; naming = null;
+      clearRenewal();
+      if (await clean.open(profileShown)) {
+        if (!wanted(token)) return;
+        // `away`: a Cloud's page may still be on its way (a click just before this one); this page's load replaces it.
+        const leaving = away || onScreen() || !shows(localOrigin());
+        ensureWindow(); clearRetry(); screen = null; status = null; shown = null; away = false;
+        return showLocal(leaving);
+      }
+      profileShown = null;
+      if (!wanted(token)) return;
+    }
     // Nobody signed in has nothing to open but the clean workspace; the place stays remembered for when they're back.
     const target = current.clean && signedOut() ? { kind: "cloud" } : placeOf({ ask: place, remembered: remembered(), state: state() });
     if (target.kind === "cloud" && target.left) { left(target.left); remember(null); }
@@ -634,6 +663,27 @@ export function createHomeWindow(deps) {
 
   return {
     show,
+    /** Profile `id` from the rail while My Cloud is home: the window shows it, and My Cloud is one click away. False when it
+     * can't open, and the window shows My Cloud as before. */
+    async openProfile(id) {
+      if (!clean?.open || (await refresh()).kind !== "cloud") return false;
+      profileShown = id;
+      await show();
+      return profileShown === id;
+    },
+    /** The profile on screen, opened from the rail, else null. */
+    profile: () => profileShown,
+    /** Whether `ask` ("cloud" for My Cloud, or a team or another Cloud of the person's own as remembered) would open now, by
+     * the session's word and nothing looked up: false for one gone from its list, not running, being set up or without an
+     * address, and for My Cloud while it isn't home or isn't running; null while nobody is signed in. As of the last
+     * refresh(). */
+    opensNow(ask) {
+      if (signedOut()) return null;
+      if (ask === "cloud") return home.kind === "cloud" && !notRunning();
+      const target = placeOf({ ask, remembered: remembered(), state: state() });
+      if (!otherPlace(target) || !target.origin || machineSetup(target.machine)) return false;
+      return !target.machine || !(PLAN_PROBLEMS.has(target.machine.status) || (target.kind === "team" && target.machine.hold));
+    },
     /** The person asked for My Cloud (the Server menu, the welcome, Settings, the ready notice). Before the move made it
      * home it opens as a saved server, and while the Admin sets it up the setup screen shows until it opens by itself. */
     async openCloud(open = null) {
@@ -703,6 +753,7 @@ export function createHomeWindow(deps) {
      * the window off whatever it shows of that account. */
     accountLeaving() {
       opens++;
+      profileShown = null;
       clearRetry(); clearRenewal();
       asked = null; naming = null; shown = null; opening = null; screen = null; status = null;
       away = away || !shows(localOrigin());
@@ -768,7 +819,10 @@ export function createHomeWindow(deps) {
     },
     /** Signs the team on screen in again now, without moving the page (the timer's own step; also for tests). */
     renew: () => renew(),
-    cancel() { opens++; recovering = null; clearRetry(); screen = null; status = null; shown = null; away = false; },
+    cancel() { stopOpening(); shown = null; away = false; },
+    stopOpening,
+    /** The person chose the place on screen again before the one they'd asked for opened: it stays as it is. */
+    stay() { stopOpening(); profileShown = null; },
     close() { opens++; clearRetry(); clearRenewal(); timers.clear(watcher); },
   };
 }

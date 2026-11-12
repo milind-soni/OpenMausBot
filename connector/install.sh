@@ -3,6 +3,11 @@
 # connector and connects it to MausBot with the one-time code MausBot shows. Running it again repairs the install.
 #
 #   curl -fsSL https://cloud.openmausbot.com/install.sh | sudo sh -s -- <code>
+#
+# On a server where you already installed MausBot yourself (deploy/install.sh, in /opt/openmausbot) it connects that
+# MausBot instead of starting another: the connector then runs in customer-run mode, where MausBot may only start,
+# stop, update and back up your server and learns only its versions, health and seat count (connector/src/customer-run.ts).
+#
 #   curl -fsSL https://cloud.openmausbot.com/install.sh | sudo sh -s -- uninstall               (keeps your data)
 #   curl -fsSL https://cloud.openmausbot.com/install.sh | sudo sh -s -- uninstall --delete-data (deletes it too)
 #
@@ -24,6 +29,13 @@ DATA_VOLUME=mausbot-data
 STATE_VOLUME=mausbot-connector
 SNAPSHOT_VOLUME=mausbot-snapshot
 ROLE_LABEL=com.mausbot.role
+INSTALL_DIR="${MAUSBOT_INSTALL_DIR:-/opt/openmausbot}"
+UPDATE_DIR="${MAUSBOT_UPDATE_DIR:-/var/lib/mausbot/update}"
+SBIN_DIR="${MAUSBOT_SBIN_DIR:-/usr/local/sbin}"
+SYSTEMD_DIR="${MAUSBOT_SYSTEMD_DIR:-/etc/systemd/system}"
+UPDATE_RUNNER=mausbot-update-runner
+UPDATE_UNIT=mausbot-update
+MODE=operated
 MIN_DOCKER=24
 MIN_CPUS=2
 MIN_MEMORY_MB=3500
@@ -90,31 +102,40 @@ install_docker() {
   if command -v systemctl >/dev/null 2>&1; then systemctl enable --now docker >/dev/null 2>&1 || true; fi
 }
 
-offer_docker() {
+offer_docker() { # what is wrong, in one sentence
   if [ "${MAUSBOT_INSTALL_DOCKER:-}" = 1 ]; then
     install_docker
     return
   fi
   if tty_available; then
-    printf "Docker isn't installed. Install it now with Docker's official script (get.docker.com)? [Y/n] " >/dev/tty
+    printf "%s Install the current Docker now with Docker's official script (get.docker.com)? [Y/n] " "$1" >/dev/tty
     answer=""
     read -r answer </dev/tty || answer=n
     case "$answer" in
       "" | y | Y | yes | Yes) install_docker; return ;;
     esac
   fi
-  fail "Docker isn't installed. Install it with: curl -fsSL https://get.docker.com | sudo sh  and then run this command again."
+  fail "$1 Install the current Docker with: curl -fsSL https://get.docker.com | sudo sh  and then run this command again (or run it with --install-docker)."
 }
 
-check_docker() {
-  command -v docker >/dev/null 2>&1 || offer_docker
+docker_server() {
   server=$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)
   if [ -z "$server" ]; then
     fail "Docker is installed but not running. Start it with: sudo systemctl enable --now docker  and then run this command again."
   fi
   major=${server%%.*}
   case "$major" in '' | *[!0-9]*) major=0 ;; esac
-  [ "$major" -ge "$MIN_DOCKER" ] || fail "Docker $server is too old; MausBot needs Docker $MIN_DOCKER or newer. Update it with: curl -fsSL https://get.docker.com | sudo sh"
+}
+
+check_docker() {
+  command -v docker >/dev/null 2>&1 || offer_docker "Docker isn't installed."
+  docker_server
+  # Debian 12's own Docker is 20.10: Docker's script replaces it with the current one, keeping its containers and volumes.
+  if [ "$major" -lt "$MIN_DOCKER" ]; then
+    offer_docker "Docker $server is too old; MausBot needs Docker $MIN_DOCKER or newer."
+    docker_server
+    [ "$major" -ge "$MIN_DOCKER" ] || fail "Docker is still $server after the update (Docker's output is above). Fix that, then run this command again."
+  fi
   security=$(docker info --format '{{json .SecurityOptions}}' 2>/dev/null || true)
   case "$security" in
     *rootless*) fail "Docker runs in rootless mode here. MausBot needs the standard Docker service: run curl -fsSL https://get.docker.com | sudo sh" ;;
@@ -124,6 +145,12 @@ check_docker() {
 
 check_apparmor() {
   enabled=$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null || true)
+  # Debian 12's cloud images run AppArmor in the kernel without its tools; installing them needs no restart.
+  if [ "$enabled" = Y ] && ! command -v apparmor_parser >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+    say "Installing AppArmor's tools..."
+    { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq apparmor; } >/dev/null 2>&1 ||
+      fail "AppArmor's tools could not be installed. Run: sudo apt-get install -y apparmor  and then run this command again."
+  fi
   case "$security" in
     *name=apparmor*name=seccomp* | *name=seccomp*name=apparmor*) docker_confines=yes ;;
     *) docker_confines=no ;;
@@ -217,9 +244,66 @@ install_profiles() {
   fi
 }
 
+# A MausBot its owner installed is here: the connector attaches to it and never starts a second one.
+own_server_here() {
+  [ -f "$INSTALL_DIR/compose.yaml" ]
+}
+
+# The server's own updater: update.sh in the install's folder, started by systemd when the connector asks. The
+# connector's container can only leave the request; the update itself runs here, on the server, as its owner's does.
+install_updater() {
+  install -d -m 0700 "$UPDATE_DIR"
+  rm -f "$UPDATE_DIR/runner"
+  if ! command -v systemctl >/dev/null 2>&1 || [ ! -d "$SYSTEMD_DIR" ]; then
+    note "note: this server has no systemd, so MausBot cannot update it for you. Update it yourself with: $INSTALL_DIR/update.sh"
+    return
+  fi
+  install -d -m 0755 "$SBIN_DIR"
+  docker run --rm --network none --entrypoint cat "$CONNECTOR_IMAGE" "/app/host/$UPDATE_RUNNER.sh" >"$SBIN_DIR/$UPDATE_RUNNER.tmp" ||
+    fail "The updater could not be read from the connector's image. Run this command again."
+  chmod 0755 "$SBIN_DIR/$UPDATE_RUNNER.tmp"
+  mv "$SBIN_DIR/$UPDATE_RUNNER.tmp" "$SBIN_DIR/$UPDATE_RUNNER"
+  cat >"$SYSTEMD_DIR/$UPDATE_UNIT.path" <<UNIT
+[Unit]
+Description=Runs MausBot's updater when the MausBot connector asks for an update
+
+[Path]
+PathExists=$UPDATE_DIR/request
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  cat >"$SYSTEMD_DIR/$UPDATE_UNIT.service" <<UNIT
+[Unit]
+Description=MausBot's updater ($INSTALL_DIR/update.sh), for an update the MausBot connector asked for
+
+[Service]
+Type=oneshot
+Environment=MAUSBOT_UPDATE_DIR=$UPDATE_DIR MAUSBOT_INSTALL_DIR=$INSTALL_DIR
+ExecStart=$SBIN_DIR/$UPDATE_RUNNER
+UNIT
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  if systemctl enable --now "$UPDATE_UNIT.path" >/dev/null 2>&1; then
+    echo 1 >"$UPDATE_DIR/runner"
+  else
+    note "note: the updater could not be switched on, so MausBot cannot update this server for you. Update it yourself with: $INSTALL_DIR/update.sh"
+  fi
+  if [ ! -f "$INSTALL_DIR/update.sh" ]; then
+    note "note: there is no update.sh in $INSTALL_DIR yet. Until it is there, MausBot's updates are refused and nothing is changed."
+  fi
+}
+
+remove_updater() {
+  if command -v systemctl >/dev/null 2>&1; then systemctl disable --now "$UPDATE_UNIT.path" >/dev/null 2>&1 || true; fi
+  rm -f "$SYSTEMD_DIR/$UPDATE_UNIT.path" "$SYSTEMD_DIR/$UPDATE_UNIT.service" "$SBIN_DIR/$UPDATE_RUNNER"
+  if command -v systemctl >/dev/null 2>&1; then systemctl daemon-reload >/dev/null 2>&1 || true; fi
+  rm -rf "$UPDATE_DIR"
+}
+
 start_connector() {
   say "Starting the MausBot connector..."
   docker volume create "$STATE_VOLUME" >/dev/null
+  install -d -m 0755 "$ETC_DIR"
   # The audit log: every job MausBot runs here, root's, for you to read (mausbot-connector audit).
   install -d -m 0750 "$AUDIT_DIR"
   docker rm -f "$CONNECTOR" "$CONNECTOR_NEXT" >/dev/null 2>&1 || true
@@ -230,6 +314,9 @@ start_connector() {
     '' | *[!0-9]*) ;;
     *) set -- "$@" -e "MAUSBOT_UPDATE_WAIT_S=$MAUSBOT_UPDATE_WAIT_S" ;;
   esac
+  if [ "$MODE" = customer-run ]; then
+    set -- "$@" -e MAUSBOT_MODE=customer-run -v "$UPDATE_DIR:/var/lib/mausbot/update"
+  fi
   docker run -d --name "$CONNECTOR" --restart unless-stopped --network host \
     --security-opt no-new-privileges=true --cap-drop ALL --read-only --tmpfs /tmp \
     -v /var/run/docker.sock:/var/run/docker.sock -v "$STATE_VOLUME:/state" -v "$ETC_DIR:/etc/mausbot:ro" -v "$AUDIT_DIR:/var/log/mausbot" \
@@ -277,6 +364,7 @@ install_connector() {
   for arg in "$@"; do
     case "$arg" in
       --install-docker) MAUSBOT_INSTALL_DOCKER=1 ;;
+      --customer-run) MODE=customer-run ;;
       -*) fail "Unknown option $arg. Usage: $(command_line '<code>')" ;;
       *) code=$arg ;;
     esac
@@ -286,10 +374,32 @@ install_connector() {
   esac
   need_root "${code:-<code>}"
   need_settings
+  if own_server_here; then
+    MODE=customer-run
+  elif [ "$MODE" = customer-run ]; then
+    fail "MausBot isn't installed in $INSTALL_DIR yet. Install it first with the server's install command, then run this again to connect it."
+  fi
   say "Checking this server..."
   check_os
   check_arch
   check_docker
+  if [ "$MODE" = customer-run ]; then
+    note "MausBot is already installed in $INSTALL_DIR: connecting that server, as it is"
+    check_resources
+    check_network
+    check_clock
+    pull_connector
+    install_updater
+    start_connector
+    connect "$code"
+    say ""
+    say "Connected. Your server shows up in MausBot in a minute, for your team's Owner to accept."
+    say "You run this server: MausBot can start, stop, update and back it up, and sees its versions, health and seat count."
+    say "  What it was asked to do:  sudo docker exec $CONNECTOR mausbot-connector audit"
+    say "  Pause remote management:  sudo docker exec $CONNECTOR mausbot-connector pause"
+    say "Only you can replace the connector or restore a backup: sudo docker exec $CONNECTOR mausbot-connector job <self-update|restore>"
+    return
+  fi
   check_apparmor
   check_userns
   check_resources
@@ -301,7 +411,7 @@ install_connector() {
   check_box
   connect "$code"
   say ""
-  say "Connected. Your server shows up in MausBot in a minute."
+  say "Connected. Your server shows up in MausBot in a minute, for your team's Owner to accept."
 }
 
 # Removal never deletes the data, its safety copy or its backups unless --delete-data is typed.
@@ -315,6 +425,26 @@ uninstall() {
   done
   need_root uninstall
   command -v docker >/dev/null 2>&1 || fail "Docker isn't installed here, so MausBot isn't either."
+  if own_server_here; then
+    say "Disconnecting this server from MausBot..."
+    docker rm -f "$CONNECTOR" "$CONNECTOR_NEXT" >/dev/null 2>&1 || true
+    for container in $(docker ps -aq --filter "label=$ROLE_LABEL=helper" 2>/dev/null); do
+      docker rm -f "$container" >/dev/null 2>&1 || true
+    done
+    remove_updater
+    docker volume rm "$STATE_VOLUME" >/dev/null 2>&1 || true
+    if [ "$delete" = yes ]; then
+      for volume in "$SNAPSHOT_VOLUME" $(docker volume ls -q --filter "label=$ROLE_LABEL=backup" 2>/dev/null); do
+        docker volume rm "$volume" >/dev/null 2>&1 || true
+      done
+      rm -rf "$AUDIT_DIR"
+      say "This server is disconnected. The backups MausBot made and the audit log are deleted."
+    else
+      say "This server is disconnected. The backups MausBot made are kept as Docker volumes, and the audit log in $AUDIT_DIR."
+    fi
+    say "Your MausBot in $INSTALL_DIR and its data were not touched, and it keeps running."
+    return
+  fi
   say "Stopping MausBot on this server..."
   docker rm -f "$CONNECTOR" "$CONNECTOR_NEXT" >/dev/null 2>&1 || true
   docker stop -t 30 "$HOME_CONTAINER" >/dev/null 2>&1 || true
@@ -324,7 +454,7 @@ uninstall() {
   if command -v apparmor_parser >/dev/null 2>&1 && [ -f "$APPARMOR_DIR/$PROFILE" ]; then apparmor_parser -R "$APPARMOR_DIR/$PROFILE" >/dev/null 2>&1 || true; fi
   rm -f "$APPARMOR_DIR/$PROFILE" "$ETC_DIR/$SECCOMP"
   rmdir "$ETC_DIR" 2>/dev/null || true
-  # The connector's own state (its token, the home's settings) is not your data: MausBot hands both out again.
+  # The connector's own state (its key, the home's settings) is not your data: a new code makes a new key.
   docker volume rm "$STATE_VOLUME" >/dev/null 2>&1 || true
   if [ "$delete" = yes ]; then
     for volume in "$DATA_VOLUME" "$SNAPSHOT_VOLUME" $(docker volume ls -q --filter "label=$ROLE_LABEL=backup" 2>/dev/null); do

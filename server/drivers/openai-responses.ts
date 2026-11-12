@@ -114,6 +114,8 @@ export function responsesRequest(input: {
   tools: readonly ChatToolDefinition[];
   replay: (message: OpenAIChatMessage) => ResponseItem[] | undefined;
   summaries: boolean;
+  /** The reasoning level the person picked, as the Chat Completions body would carry it in `reasoning_effort`. */
+  effort?: unknown;
 }): Record<string, unknown> {
   const instructions = input.messages.filter((message) => message.role === "system" && typeof message.content === "string")
     .map((message) => message.content).join("\n\n");
@@ -123,7 +125,9 @@ export function responsesRequest(input: {
     store: false,
     ...(instructions ? { instructions } : {}),
     input: input.messages.flatMap((message) => inputItems(message, input.replay(message))),
-    ...(input.summaries ? { reasoning: { summary: "auto" } } : {}),
+    ...(input.summaries || typeof input.effort === "string" ? { reasoning: {
+      ...(typeof input.effort === "string" ? { effort: input.effort } : {}), ...(input.summaries ? { summary: "auto" } : {}),
+    } } : {}),
     tools: input.tools.map(({ function: { name, description, parameters } }) => ({ type: "function", name, description, parameters, strict: false })),
   };
 }

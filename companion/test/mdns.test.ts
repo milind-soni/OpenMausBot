@@ -5,6 +5,7 @@ import { EventEmitter } from "node:events";
 import type { NetworkInterfaceInfoIPv4 } from "node:os";
 import { describe, expect, it } from "vitest";
 
+import { isPrivateLanAddress } from "../src/direct-routes.ts";
 import { lanAddresses, tailscaleAddress } from "../src/listener.ts";
 import {
   advertisableAddresses,
@@ -365,11 +366,14 @@ describe("MdnsResponder", () => {
 class FakeSocket extends EventEmitter {
   readonly ops: Array<{ op: "pin" | "send"; address: string; port?: number }> = [];
   readonly packets: Buffer[] = [];
+  readonly memberships: Array<string | undefined> = [];
   bind(_port: number, callback?: () => void) {
     callback?.();
   }
   setMulticastTTL(_ttl: number) {}
-  addMembership(_group: string, _membershipInterface?: string) {}
+  addMembership(_group: string, membershipInterface?: string) {
+    this.memberships.push(membershipInterface);
+  }
   setMulticastInterface(multicastInterface: string) {
     this.ops.push({ op: "pin", address: multicastInterface });
   }
@@ -378,7 +382,9 @@ class FakeSocket extends EventEmitter {
     this.packets.push(packet);
     callback?.(null);
   }
+  closed = false;
   close(callback?: () => void) {
+    this.closed = true;
     callback?.();
   }
   address() {
@@ -512,16 +518,72 @@ describe("cache-flush policy on the wire", () => {
   });
 });
 
-describe("lanAddresses", () => {
-  const ipv4 = (address: string, internal = false): NetworkInterfaceInfoIPv4 => ({
-    address,
-    netmask: "255.255.255.0",
-    family: "IPv4",
-    mac: "00:00:00:00:00:00",
-    internal,
-    cidr: `${address}/24`,
+const ipv4 = (address: string, internal = false): NetworkInterfaceInfoIPv4 => ({
+  address,
+  netmask: "255.255.255.0",
+  family: "IPv4",
+  mac: "00:00:00:00:00:00",
+  internal,
+  cidr: `${address}/24`,
+});
+
+describe("advertisableAddresses", () => {
+  // A reported Mac: Wi-Fi plus a mesh VPN, Tailscale and a tun2socks device.
+  const mac = {
+    en0: [ipv4("192.168.1.42")],
+    utun3: [ipv4("10.20.30.40")],
+    utun4: [ipv4("100.102.178.88")],
+    utun5: [ipv4("198.18.0.1")],
+    ipsec0: [ipv4("10.9.0.2")],
+    ppp0: [ipv4("10.8.0.6")],
+    bridge100: [ipv4("192.168.64.1")],
+  };
+
+  it("joins no multicast group on a Mac's VPN tunnels", () => {
+    expect(advertisableAddresses(mac, "darwin")).toEqual(["192.168.1.42", "192.168.64.1"]);
   });
 
+  it("joins the multicast group only on a Mac's LAN interfaces", async () => {
+    const socket = new FakeSocket();
+    const responder = new MdnsResponder({ socketFactory: () => socket });
+    try {
+      expect(await responder.advertise({ ...service, addresses: advertisableAddresses(mac, "darwin") })).toBe(true);
+      expect(socket.memberships).toEqual(["192.168.1.42", "192.168.64.1"]);
+    } finally {
+      await responder.stop();
+    }
+  });
+
+  it("never falls back to the default-route membership on a Mac", async () => {
+    // The LAN address left before its join: the default route may be a utun.
+    for (const [platform, expected, advertised] of [["darwin", [], false], ["linux", [undefined], true]] as const) {
+      const socket = new FakeSocket();
+      const join = socket.addMembership.bind(socket);
+      socket.addMembership = (group, membershipInterface) => {
+        if (membershipInterface) throw new Error("EADDRNOTAVAIL");
+        join(group, membershipInterface);
+      };
+      const responder = new MdnsResponder({ socketFactory: () => socket, platform });
+      try {
+        expect(await responder.advertise({ ...service, addresses: ["192.168.1.42"] })).toBe(advertised);
+        expect(socket.memberships).toEqual(expected);
+        expect(responder.advertising).toBe(advertised);
+        expect(socket.closed).toBe(!advertised);
+      } finally {
+        await responder.stop();
+      }
+    }
+  });
+
+  it("keeps tunnel interfaces on other platforms, with the same private-LAN rule as a Mac", () => {
+    const kept = lanAddresses(mac).filter((address) => isPrivateLanAddress(address));
+    expect(kept).toEqual(expect.arrayContaining(["10.20.30.40", "10.9.0.2", "10.8.0.6"]));
+    expect(advertisableAddresses(mac, "linux")).toEqual(kept);
+    expect(advertisableAddresses(mac, "win32")).toEqual(kept);
+  });
+});
+
+describe("lanAddresses", () => {
   it("ranks en0 first however the interfaces enumerate", () => {
     // deliberately listed worst-first: insertion order must not win
     const addresses = lanAddresses({

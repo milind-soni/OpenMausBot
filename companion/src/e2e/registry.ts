@@ -2,7 +2,6 @@
 // device and the open pairing window, and which device holds which live session over which route.
 import type { Duplex } from "node:stream";
 
-import type { DeviceRegistry } from "../devices.ts";
 import { admission, admissionHash, credentialHash, credentialHashFromHex, keyId, psk } from "./credentials.ts";
 import { descriptorFor, type E2EDescriptor } from "./descriptor.ts";
 import { CLOSE, TRANSPORT_RELAY, type KeyPair, type PskCandidate, type TransportByte } from "./noise.ts";
@@ -23,6 +22,18 @@ export interface RelayIdentity {
   nodes: string[];
 }
 
+/** The paired devices and open pairing windows: the sidecar's DeviceRegistry, or a server's sessions. A server keeps only
+ * a pairing credential's SHA-256 (hex), so a window carries that or its token. */
+export interface E2EDevices {
+  records(): readonly { id: string; tokenHash: string; routes?: "any" | "local" }[];
+  pairingWindows(): readonly ({ token: string } | { tokenHash: string })[];
+  confirm(id: string): void;
+  markE2E(id: string): void;
+}
+
+const windowHash = (window: { token: string } | { tokenHash: string }): Buffer | null =>
+  "token" in window ? credentialHash(window.token) : credentialHashFromHex(window.tokenHash);
+
 interface Live {
   session: E2ESession<Peer>;
   context: E2EContext;
@@ -38,14 +49,17 @@ export const PAIRING_SESSION_MS = 150_000;
 export const MAX_PENDING_HANDSHAKES = 16;
 
 export class E2ERegistry {
-  readonly #devices: DeviceRegistry;
+  readonly #devices: E2EDevices;
   readonly #live = new Set<Live>();
   #key: KeyPair | null = null;
   #relay: RelayIdentity | null = null;
   #pending = 0;
   readonly #admissionListeners = new Set<() => void>();
+  /** Admission hashes kept a moment after their device lost the relay, so what the computer says inside the session
+   * reaches the phone before the relay closes it. */
+  readonly #held = new Map<string, number>();
 
-  constructor(devices: DeviceRegistry) {
+  constructor(devices: E2EDevices) {
     this.#devices = devices;
   }
 
@@ -82,7 +96,8 @@ export class E2ERegistry {
       if (hash) out.push({ id: { kind: "device", id: device.id }, psk: psk(hash, id) });
     }
     for (const window of this.#devices.pairingWindows()) {
-      const hash = credentialHash(window.token);
+      const hash = windowHash(window);
+      if (!hash) continue;
       const admHash = this.#relay ? admissionHash(admission(hash, this.#relay.hostId)) : null;
       out.push({ id: { kind: "pairing", admHash }, psk: psk(hash, id) });
     }
@@ -99,12 +114,35 @@ export class E2ERegistry {
       const hash = credentialHashFromHex(device.tokenHash);
       if (hash) out.push(admissionHash(admission(hash, hostId)));
     }
-    for (const window of this.#devices.pairingWindows()) out.push(admissionHash(admission(credentialHash(window.token), hostId)));
+    for (const window of this.#devices.pairingWindows()) {
+      const hash = windowHash(window);
+      if (hash) out.push(admissionHash(admission(hash, hostId)));
+    }
     for (const live of this.#live) if (live.pairingAdmission) out.push(live.pairingAdmission);
+    out.push(...this.#held.keys());
     return [...new Set(out)].sort();
   }
 
-  /** For one device (null: a phone that is pairing now). A restricted device never learns the relay. */
+  /** Keeps this device admitted at the relay for `ms` whatever its routes now say, then lets the set shrink. */
+  holdAdmission(deviceId: string, ms: number): Promise<void> {
+    const device = this.#devices.records().find((candidate) => candidate.id === deviceId);
+    const hash = device && this.#relay ? credentialHashFromHex(device.tokenHash) : null;
+    if (!hash || !this.#relay) return Promise.resolve();
+    const held = admissionHash(admission(hash, this.#relay.hostId));
+    this.#held.set(held, (this.#held.get(held) ?? 0) + 1);
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const count = (this.#held.get(held) ?? 1) - 1;
+        if (count > 0) this.#held.set(held, count);
+        else this.#held.delete(held);
+        for (const listener of this.#admissionListeners) listener();
+        resolve();
+      }, ms).unref?.();
+    });
+  }
+
+  /** For one device (null: a phone that is pairing now). A restricted device is told so, with the relay identity, which
+   * admits nothing by itself: the relay refuses it until the device is allowed again. */
   descriptor(deviceId: string | null): E2EDescriptor | null {
     if (!this.#key) return null;
     const device = deviceId ? this.#devices.records().find((candidate) => candidate.id === deviceId) : null;
@@ -134,7 +172,10 @@ export class E2ERegistry {
       opened: (peer) => {
         live.context.peer = peer;
         this.#live.add(live);
-        if (peer.kind === "device") return this.#devices.markE2E(peer.id);
+        if (peer.kind === "device") {
+          this.#devices.confirm(peer.id);
+          return this.#devices.markE2E(peer.id);
+        }
         if (transportByte === TRANSPORT_RELAY) live.pairingAdmission = peer.admHash;
         const timer = setTimeout(() => {
           if (live.context.peer.kind === "pairing") live.session.close(CLOSE.rejected);

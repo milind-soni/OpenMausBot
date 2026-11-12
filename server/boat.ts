@@ -8,6 +8,7 @@ import { DATA_DIR, type AppConfig } from "./config.ts";
 import { loadEnvironmentId } from "./environment.ts";
 import { boatCredential, boatProviderApi, type ServiceCredential } from "./included-services.ts";
 import { relayBody, relayPath } from "./boat-relay.ts";
+import { cloudLimitFromBody, type CloudLimit } from "../shared/place-view.ts";
 import {
   blockedUntilBoatFinishes,
   boatDeletionOperation,
@@ -26,7 +27,7 @@ import {
   type BoatCreateRequest,
 } from "./boat-create-idempotency.ts";
 import {
-  boatDeletionSnapshot,
+  BOAT_DELETING, BOAT_DELETION_FINISHED, boatDeletionSnapshot,
   getBoatDeletion,
   hasPendingBoatDeletionForBot,
   markBoatDeletionAccepted,
@@ -361,7 +362,7 @@ export async function runCommand(cfg: AppConfig, boxId: string, command: string,
     ok: res.ok && body?.exitCode === 0,
     exitCode: body?.exitCode ?? null,
     stdout: body?.stdout ?? "",
-    stderr: body?.stderr ?? "",
+    stderr: body?.stderr ?? "", ...(body?.timedOut === true ? { timedOut: true as const } : {}),
   };
 }
 
@@ -718,7 +719,7 @@ function inventoryFailure(inventory: ManagedBoatInventory): Error & { status: nu
 function deletionFenceError(): Error & { status: number } {
   return Object.assign(
     new Error("this cloud computer is being deleted — wait for it to finish, or retry Delete if it needs attention"),
-    { status: 409 },
+    { status: 409, code: BOAT_DELETING },
   );
 }
 
@@ -942,11 +943,9 @@ export function boatErrorMessage(status: number, what: string, body?: any, inclu
   return theirs ? `${what} failed: ${theirs}` : `${what} failed (${status})`;
 }
 
-export function boatRefusal(status: number, what: string, body?: any, included = false): Error & { boatStatus: number; boatCode?: string } {
-  const code = body?.error?.code ?? body?.code;
-  return Object.assign(new Error(boatErrorMessage(status, what, body, included)), {
-    boatStatus: status, ...(typeof code === "string" && /^[a-z0-9_]{1,64}$/.test(code) ? { boatCode: code } : {}),
-  });
+export function boatRefusal(status: number, what: string, body?: any, included = false): Error & { boatStatus: number; boatCode?: string; boatLimit?: CloudLimit } {
+  const code = body?.error?.code ?? body?.code, boatCode = typeof code === "string" && /^[a-z0-9_]{1,64}$/.test(code) ? code : undefined, boatLimit = cloudLimitFromBody(body);
+  return Object.assign(new Error(boatErrorMessage(status, what, body, included)), { boatStatus: status, ...(boatCode ? { boatCode } : {}), ...(boatLimit ? { boatLimit } : {}) });
 }
 
 /** boat.dev trial accounts refuse the eight-hour auto-stop with `trial_auto_stop_required`; retry once at the advertised maximum (documented: two hours). */
@@ -1055,7 +1054,7 @@ async function finishPriorDeletionBeforeProvision(cfg: AppConfig, botId: string)
   }
   throw Object.assign(
     new Error("the previous cloud computer deletion finished — retry to create a new computer"),
-    { status: 409 },
+    { status: 409, code: BOAT_DELETION_FINISHED },
   );
 }
 

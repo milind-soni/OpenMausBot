@@ -59,9 +59,9 @@ const __APP_VERSION__: string;
       message?: string;
       driverPath?: string;
       driverVersion?: string;
-      driverSource?: "bundled" | "environment" | "user-local" | "path";
+      driverSource?: "bundled" | "environment" | "user-local" | "path" | "system-package";
       session?: "x11" | "wayland" | "headless" | "unknown";
-      compositor?: "gnome-mutter";
+      compositor?: "gnome-mutter" | "hyprland";
     };
   };
 
@@ -117,6 +117,7 @@ const __APP_VERSION__: string;
   interface Window {
     ogb?: {
       platform: NodeJS.Platform;
+      softwareRendering?: boolean;
       /** This app's own version, and whether this page is this app's own: false on a server added in the Server menu,
        * whose page carries that server's version. Absent in desktop builds before it. */
       app?: { version: string; ownPage: boolean };
@@ -162,21 +163,26 @@ const __APP_VERSION__: string;
       workspaces?: {
         /** `color`: a saved server's colour name (its owner chose it while setting the Cloud up); `home`: this window's
          * home is this Cloud, so there is nothing to switch to; `localPath`: a local workspace's folder, absent for This
-         * computer's own. */
-        state: () => Promise<{ local: boolean; name: string; origin?: string; color?: string; home?: boolean; role?: string; localPath?: string }>;
+         * computer's own; `profile`: this computer's page is a profile of its own (This Mac), by its id, and
+         * `profileName` its own name when it has one (a workspace added from ＋). */
+        state: () => Promise<{ local: boolean; name: string; origin?: string; color?: string; home?: boolean; role?: string; localPath?: string; profile?: string; profileName?: string }>;
         /** The native server menu; resolves when it closes. `from: "howto"`: the Show me how tip opened it. */
         menu: (options?: { from?: "howto" }) => Promise<void>;
-        /** One plain line for the next page, served once: a team this person is no longer in. */
-        line?: () => Promise<{ kind: "left"; name: string } | null>;
+        /** One plain line for the next page: a team this person is no longer in (served once), or, while it runs, that the
+         * clean workspace or a profile (`profile`) of this computer's own isn't where the Cloud's bots are. */
+        line?: () => Promise<{ kind: "left"; name: string } | { kind: "clean"; saved?: boolean } | { kind: "profile"; name?: string } | null>;
         /** The rail's circles, for this app's page and a hosted Cloud's only (empty elsewhere, and with fewer than two
          * places). Absent on an older app. */
         places?: () => Promise<import("../../electron/cloud-rail.mjs").RailState>;
         /** Opens a circle main listed, by its id, through main's own switch: only from the person's click. */
         /** Nothing for a place of the account in use; for another account's, how its switch went. */
         open?: (id: string) => Promise<import("../../electron/cloud-account.mjs").RailOpenResult | undefined>;
-        /** ＋'s fixed choices: buy a Cloud (this computer's own sheet), a server's pairing link (`link`: the one pasted on the
-         * sheet; without it, the clipboard's), or type its address. Resolves false when the person cancels Connect. */
-        add?: (choice: "cloud" | "link" | "address", link?: string) => Promise<unknown>;
+        /** ＋'s fixed choices: buy a Cloud (this computer's own sheet), connect to a server (`link`: the sheet's link or
+         * address, `code` the pairing code typed apart; without `link`, the clipboard's), or type its address. With `code`
+         * (even empty) it resolves with the outcome; without, false when the person cancels Connect. */
+        add?: (choice: "cloud" | "link" | "address", link?: string, code?: string) => Promise<import("../../electron/server-probe.mjs").ConnectOutcome | boolean | void>;
+        /** Finds the MausBot server at what the Connect sheet holds, without connecting. Absent on an older app. */
+        probe?: (address: string, code?: string) => Promise<import("../../electron/server-probe.mjs").ServerProbe>;
         /** The colour of the place this page is (This computer's too), and whether it can be changed here. Absent on an
          * older app. */
         look?: () => Promise<import("../../electron/place-look.mjs").PlaceLook | null>;
@@ -192,6 +198,16 @@ const __APP_VERSION__: string;
         makeHome?: (id: string) => Promise<{ started: true }>;
         /** Main's word that the places or the sign-in changed: read them again. */
         onChanged?: (callback: () => void) => () => void;
+        /** A workspace of this computer's own (main refuses any page but the rail's and this computer's own): a new one,
+         * which main opens next; a name or colour for one the rail lists; its removal, once the person said yes. Absent on
+         * an older app. */
+        local?: {
+          create(name: string, color: import("../../electron/cloud-list.mjs").CloudSwatch | null): Promise<{ outcome: "made"; id: string } | { outcome: "name" | "taken" | "failed" }>;
+          edit(id: string, changes: { name: string } | { color: import("../../electron/cloud-list.mjs").CloudSwatch | null }): Promise<{ outcome: "saved" | "name" | "taken" | "full" | "gone" }>;
+          remove(id: string): Promise<{ outcome: "removed" | "gone" | "failed" }>;
+        };
+        /** The Server menu's New workspace on this computer: this computer's own page asks its name. */
+        onNewLocal?: (callback: () => void) => () => void;
       };
       /** Buying another Cloud from the rail's ＋, on this app's page or a hosted Cloud's; absent on an older app. */
       cloudAdd?: {
@@ -246,6 +262,12 @@ const __APP_VERSION__: string;
         forget: (id: string, purge?: boolean) => Promise<{ ok: boolean; error?: string } | void>;
         /** `panel` "copy": that server's Copy this computer here panel; otherwise its Computer access. */
         onOpenSettings?: (callback: (computerId?: string | null) => void) => () => void;
+        /** How each server saved by hand is doing (checks start on the first ask). Absent on an older app. */
+        status?: () => Promise<import("../../electron/server-status.mjs").ServerStatus[]>;
+        /** Look again now: one server (Try now, after Pair again), or every one with a passing problem. */
+        retry?: (id?: string) => Promise<void>;
+        /** Main's word that a server's status changed: read status() again. */
+        onStatus?: (callback: () => void) => () => void;
       };
       /** Local main-window only. Hosted renderers cannot grant themselves access. */
       computerSharing?: {
@@ -255,6 +277,13 @@ const __APP_VERSION__: string;
         revoke(id: string): Promise<DesktopComputerSharing>;
         /** This computer's own record of what that server's bots did here, newest first. */
         activity(id: string): Promise<DesktopLendingActivity[]>;
+        /** Each saved server of the person's own (this desktop is its admin) and how lending to it is. */
+        servers?(): Promise<Array<{ id: string; enabled: boolean; connected: boolean; paused: boolean }>>;
+        /** Asks in main's own popup, then lends that server of the person's own the apps on the screen; null on Not now. */
+        allow?(id: string): Promise<DesktopComputerSharing | null>;
+        /** Every Cloud and server of the person's own stops using this computer until resume(), as the icon's menu does. */
+        pause?(): Promise<void>;
+        resume?(): Promise<void>;
       };
       confirm(message: string): Promise<boolean>;
       getCapabilities(): Promise<DesktopCapabilities>;
@@ -413,14 +442,22 @@ const __APP_VERSION__: string;
       /** Points this computer's file manager at a file a bot linked outside
        * its workspace, without opening or reading it. Local app only. */
       revealInFolder?(filePath: string): Promise<"shown" | "missing" | "invalid">;
+      /** Opens a folder (never a file) in Finder or Explorer; "not-folder" means keep the page's own handling. */
+      openFolder?(folderPath: string): Promise<"opened" | "not-folder" | "missing" | "invalid" | "failed">;
       /** Opens this app's logs folder in Explorer or Finder and says where it is. */
       openLogsFolder?(): Promise<{ folder: string; opened: boolean; error?: string }>;
       /** This app's own login item, which opens the window. `available`: false in a build that cannot add one. */
       openAtLogin?: { state(): Promise<{ available: boolean; on: boolean }>; set(on: boolean): Promise<{ available: boolean; on: boolean }> };
+      /** Saved keys this launch could not read (this app's own page only). `reset` asks the person, moves the unreadable
+       * file aside and restarts; it resolves "cancelled" when they say no, "quitting" (doing nothing) when the app began
+       * to quit while they decided, "failed" (after telling them) when the file could not be moved, and "readable"
+       * (doing nothing) when the keys could be read. */
+      credentialStore?: { unreadable(): Promise<boolean>; reset(): Promise<"reset" | "cancelled" | "quitting" | "failed" | "readable"> };
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey" | "geminiImageApiKey",
+        name: "openaiApiKey" | "anthropicApiKey" | "openrouterApiKey" | "mistralApiKey" | "cerebrasApiKey" | "groqApiKey" | "greenferenceApiKey" | "modelgoApiKey" | "metaApiKey" | "deepseekApiKey" | "openaiCompatApiKey" | "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey" | "geminiImageApiKey",
         value: string,
+        options?: { everyClaudeBot?: false },
       ): Promise<ConfigStatus>;
       /** In-app auto-update (packaged app only; dormant in dev). Updates
        * download by themselves. On this computer's page and the person's own
@@ -435,6 +472,11 @@ const __APP_VERSION__: string;
         seen?(): Promise<void>;
         onState(cb: (s: UpdaterState) => void): () => void;
       };
+      /** On a server's page from the Server menu: asks for this app's own update, from the person's click. The page
+       * learns only what was done; the app asks in its own dialog before it restarts. Absent in older desktop builds. */
+      appUpdate?: {
+        request(): Promise<AppUpdateAnswer>;
+      };
     };
   }
 }
@@ -446,11 +488,14 @@ export interface LinuxLocalControlStatus {
   message?: string;
   driverPath?: string;
   driverVersion?: string;
-  driverSource?: "bundled" | "environment" | "user-local" | "path";
+  driverSource?: "bundled" | "environment" | "user-local" | "path" | "system-package";
   session?: "x11" | "wayland" | "headless" | "unknown";
-  compositor?: "gnome-mutter";
+  compositor?: "gnome-mutter" | "hyprland";
   warnings?: Array<{ label: string; status: string; message: string; detail?: string }>;
 }
+
+/** What asking for this app's update from a server's page did (electron/updater.mjs `updateForServerPage`). */
+export type AppUpdateAnswer = "installing" | "later" | "downloading" | "current" | "failed" | "unavailable";
 
 export interface UpdaterState {
   status:
@@ -503,6 +548,9 @@ export interface CompanionAccountState {
   /** The HTTPS address was given back after 30 days with no paired phone
    * seen. Opening the phone page calls prepare(), which brings it back. */
   paused?: boolean;
+  /** The secure address was ended for old phone apps: a phone that has not used the encrypted connection must be
+   * updated and paired again. */
+  tunnelRetired?: boolean;
 }
 
 export type AndroidUsbDevice = {

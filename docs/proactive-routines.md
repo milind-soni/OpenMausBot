@@ -97,7 +97,7 @@ there is no brief at all. Its row says
    answerer (Claude today). On any other engine the watch prepares no meeting,
    says so in the brief, and still does what needs no AI.
 5. **Helper models sort the inbox** (`server/host/inbox-triage.ts`). With a
-   decision model set up (Settings → Decision and extraction: the person's own
+   decision model set up (Settings › AI › Routing and extraction: the person's own
    Cloudflare Workers AI or Jev key, or Cloud's included one), new mail is
    sorted with no AI turn, on every engine: Clairic reads each email (sender,
    the ask, any deadline or amount, whether it waits on a reply, what kind of

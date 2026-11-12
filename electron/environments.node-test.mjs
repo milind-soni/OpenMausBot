@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createRequire } from "node:module";
 
+import { parseServerInput } from "./server-address.mjs";
+
 const require = createRequire(import.meta.url);
 const env = require("./environments.cjs");
 const { createNativeText } = require("./native-text.cjs");
@@ -13,23 +15,10 @@ test("origins are bare http(s) origins, nothing else", () => {
   for (const bad of ["ftp://x", "mini.example", "https://user:pw@host", "", 42, null]) assert.equal(env.normalizeOrigin(bad), null, String(bad));
 });
 
-test("a pairing link keeps its code in the hash; a code anywhere else is refused", () => {
-  assert.deepEqual(env.parsePairingLink("https://mini.example/pair#code=ABCD-EFGH-JKLM"), {
-    origin: "https://mini.example",
-    code: "ABCD-EFGH-JKLM",
-    url: "https://mini.example/pair#code=ABCD-EFGH-JKLM",
-  });
-  assert.deepEqual(env.parsePairingLink("  https://mini.example  "), { origin: "https://mini.example", code: null, url: "https://mini.example" });
-  assert.equal(env.parsePairingLink("https://mini.example/?code=ABCD"), null);
-  assert.equal(env.parsePairingLink("not a link"), null);
-});
-
 test("self-hosted pairing supports custom HTTPS and Cloudflare names without Tailscale", () => {
   for (const origin of ["https://bots.example.com", "https://example.trycloudflare.com", "https://c-example.openmausbot.com"]) {
-    const link = `${origin}/pair#code=ABCD-EFGH-JKLM`;
-    assert.deepEqual(env.parsePairingLink(link), {
-      origin, code: "ABCD-EFGH-JKLM", url: link,
-    });
+    const parsed = parseServerInput(`${origin}/pair#code=ABCD-EFGH-JKLM`);
+    assert.deepEqual([parsed.candidates, parsed.code], [[origin], "ABCD-EFGH-JKLM"]);
     const saved = env.withEnvironment({ environments: [], activeId: "local" }, { origin, name: "My server" }, () => "fixture");
     assert.equal(saved.environments[0].origin, origin);
     assert.ok(!env.serializeEnvironments(saved).includes("ABCD"), "pairing codes must not enter saved server records");
@@ -77,24 +66,6 @@ test("adding the same server twice updates the name instead of duplicating; forg
   state = env.withoutEnvironment(state, "id1");
   assert.deepEqual(state, { environments: [], activeId: "local" });
   assert.equal(env.activeEnvironment(state), null);
-});
-
-test("hosted workspace input accepts addresses and keeps valid codes only in the fragment", () => {
-  for (const address of ["bots.company.com", " https://bots.company.com/ ", "https://bots.company.com:8443"]) {
-    const parsed = env.parseHostedWorkspaceLink(address);
-    assert.ok(parsed);
-    assert.equal(parsed.code, null);
-    assert.equal(parsed.url, parsed.origin);
-  }
-  const parsed = env.parseHostedWorkspaceLink("https://bots.company.com/pair#code=ABCD%2DEFGH%2DJKLM");
-  assert.equal(parsed.code, "ABCD-EFGH-JKLM");
-  assert.ok(parsed.url.includes("#code="));
-  assert.ok(!parsed.origin.includes("ABCD"));
-  assert.ok(env.parseHostedWorkspaceLink("http://127.0.0.1:19999"));
-  for (const bad of ["", null, "ABCD-EFGH-JKLM", "https:example.com", "http://cloud.example.com", "https://a.example/other", "https://a.example/?code=SECRET", "https://a.example/pair#code=%", "https://a.example/pair#code=", "https://a.example/pair#code=%20", "https://user:password@a.example", "https://a.example\\@b.example", "javascript:alert(1)"]) {
-    assert.equal(env.parseHostedWorkspaceLink(bad), null, String(bad));
-  }
-  assert.equal(env.parsePairingLink("https://a.example/pair#code=%"), null);
 });
 
 test("workspace shell exposes only current identity and rejects subframes and unrelated windows", () => {
@@ -486,4 +457,22 @@ test("a Cloud or team joining the list leaves this computer's page the active pl
   assert.equal(clouds.activeId, "local");
   const gone = env.reconcileTeams({ environments: [{ id: "t", kind: "remote", name: "Acme", origin: "https://acme.example.test", team: { id: "team-a", role: "member" } }, saved.environments[0]], activeId: "t" }, [], () => "x", HOME);
   assert.equal(gone.state.activeId, "h", "a place on screen that's gone still falls back to My Cloud");
+});
+
+test("the Server menu lists the workspaces of this computer's own and offers a new one, so they are reached with the rail hidden too", () => {
+  const calls = [];
+  const options = { onSwitch: (id) => calls.push(["switch", id]), onConnect() {}, onForget() {}, onLocal: (id) => calls.push(["local", id]), onNewLocal: () => calls.push(["new"]) };
+  const state = { environments: [{ id: "office", name: "Office", origin: "https://office.example" }], activeId: "local" };
+  const items = env.workspaceMenuTemplate(state, { ...options, locals: [{ id: "work", label: "Work", shown: true }] });
+  assert.deepEqual(items.filter((item) => item.type === "radio").map((item) => [item.id, item.label, item.checked]),
+    [["workspace-local", "This computer", false], ["workspace-local-work", "Work", true], ["workspace-office", "Office", false]], "Work on screen: This computer isn't checked");
+  items.find((item) => item.id === "workspace-local-work").click();
+  items.find((item) => item.id === "workspace-new-local").click();
+  assert.equal(items.find((item) => item.id === "workspace-new-local").label, "New workspace on this computer…");
+  const home = { environments: [{ id: "home", name: "My Cloud", origin: "https://omb-u-1.fly.dev", home: true }], activeId: "local" };
+  const homeItems = env.workspaceMenuTemplate(home, { ...options, homeOrigin: "https://omb-u-1.fly.dev", locals: [{ id: "default", label: "This Mac" }, { id: "work", label: "Work" }] });
+  assert.deepEqual(homeItems.filter((item) => item.type === "radio").map((item) => item.label), ["This Mac", "Work", "My Cloud"]);
+  homeItems.find((item) => item.id === "workspace-local-default").click();
+  assert.deepEqual(calls, [["local", "work"], ["new"], ["local", "default"]]);
+  assert.equal(env.workspaceMenuTemplate(state, { onSwitch() {}, onConnect() {}, onForget() {} }).some((item) => String(item.id).startsWith("workspace-new-local")), false, "only where main offers it");
 });

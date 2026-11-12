@@ -46,13 +46,15 @@ export const handSaved = (entry) => record(entry) && entry.kind === "remote" && 
  * @param {typeof fetch} fetchImpl
  */
 export function serverRequests(place, fetchImpl) {
-  const request = (method, route, init = {}) => fetchImpl(`${place.origin}${route}`, {
-    method, redirect: "error", credentials: "include", cache: "no-store", signal: AbortSignal.timeout(120_000), ...init,
+  const request = (method, route, { timeoutMs = 120_000, ...init } = {}) => fetchImpl(`${place.origin}${route}`, {
+    method, redirect: "error", credentials: "include", cache: "no-store", signal: AbortSignal.timeout(timeoutMs), ...init,
     headers: { accept: "application/json", origin: place.origin, ...init.headers },
   });
   return {
     request,
-    call: async (method, route, body) => answer(await request(method, route, body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) })),
+    /** `timeoutMs`: how long this request may take, sized to the work it asks for. */
+    call: async (method, route, body, options) => answer(await request(method, route, { ...(options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+      ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) })),
     async who() {
       const [session, described] = await Promise.all([request("GET", "/api/auth/session").then(answer), request("GET", "/.well-known/openmausbot/environment").then(answer)]);
       const signedIn = session.ok && session.body?.kind === "session";
@@ -92,7 +94,7 @@ function jsonStore(store) {
  *   sendState: { read(): unknown, write(value: unknown): void },
  *   cloudJournal(): unknown,
  *   lend?(projects: string[], place: any): Promise<unknown>,
- *   phone?: { paired(): boolean, stop(): Promise<void>, start(): Promise<void> },
+ *   phone?: { paired(): boolean, start(): Promise<void> },
  *   openHome?(place: any): void,
  *   lastInput?(): number,
  *   version?: string,
@@ -120,7 +122,7 @@ export function installOwnHome({ localRequest, fetch: fetchImpl, environments, h
     },
   };
   const send = createCloudSend({
-    local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(30_000) }),
+    local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(init?.timeoutMs ?? 30_000) }),
     cloud: {
       origin: () => chosen()?.origin ?? null,
       asleep: () => false,

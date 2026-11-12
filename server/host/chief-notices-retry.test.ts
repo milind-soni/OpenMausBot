@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { TRIAL_CREDIT_REFUSED } from "../../shared/trial-credit.ts";
 import "../server-line-packs.ts";
+import { engineFailureMessage } from "../drivers/engine-errors.ts";
 import { AUTO_RETRY_LEAD, RETRY_BLOCKED } from "../incidents.ts";
 import type { RoutineFailureFacts } from "../routine-recovery.ts";
 import { createChiefNotices, MEMORY_RETRY_MS, MEMORY_RETRY_TEXT, type ChiefNoticeDeps } from "./chief-notices.ts";
@@ -37,7 +38,7 @@ function fixture(over: Partial<ChiefNoticeDeps> = {}) {
   });
   const notices = createChiefNotices({
     store: store as never, notify: () => {}, threadBusy: () => false, botAtThreadCapacity: () => false,
-    groupTurnActive: () => false, startTurn, assignerOf: () => undefined, escalationsEnabled: () => true, schedule: (run) => run(), ...over,
+    groupTurnActive: () => false, startTurn, assignerOf: () => undefined, schedule: (run) => run(), ...over,
   });
   const turnsOf = (botId: string) => startTurn.mock.calls.filter(([id]) => id === botId).map(([, text, opts]) => ({ text, threadId: opts.threadId }));
   return { notices, store, startTurn, turnsOf, chief: bots[0]!, ada: bots[1]! };
@@ -69,6 +70,8 @@ describe("why a Chief's retry of a teammate's thread is refused", () => {
 const CRASH = "claude exited 3 before result: fake-claude: simulated crash before result";
 const DENIED = "One or more tool operations failed or were denied. See the tool results; the final response is not an execution receipt.";
 const RETRIED = "OpenMausBot already retried this run once by itself; the failure above is how that retry ended.";
+/** OpenCode 2.2.5's session/prompt answer for a model it has no SDK package for, as acpRpcError words it. */
+const NO_ROUTE = "Internal error: Unsupported package for chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017: unknown (session/prompt, service: session, provider.no-route)";
 
 describe("OpenMausBot's one automatic retry of a teammate's failed thread", () => {
   it("runs the thread once more before its Chief hears, then tells the Chief how that retry ended, and never retries the retry", () => {
@@ -104,6 +107,8 @@ describe("OpenMausBot's one automatic retry of a teammate's failed thread", () =
     ["a signed-out AI", { detail: "Not logged in · Please run /login" }],
     ["a used-up trial credit", { detail: TRIAL_CREDIT_REFUSED.used_up, facts: { setup: true, trialCredit: "used_up" } }],
     ["a turn cap", { detail: "Stopped after 40 tool calls without a final answer" }],
+    ["a model its engine has no route to", { detail: engineFailureMessage("OpenCode", NO_ROUTE)!, facts: { stopReason: "rpc_error" } }],
+    ["a model its engine has no route to, in the engine's words", { detail: NO_ROUTE, facts: { stopReason: "rpc_error" } }],
   ])("never retries a run ended by %s: the Chief hears at once", (_what, failure) => {
     const f = fixture();
     f.notices.reportIncident({ kind: "failed", bot: f.ada as never, threadId: "ada-job", ...failure });
@@ -248,13 +253,6 @@ describe("a problem in a conversation that runs confined", () => {
     const f = fixture({ confined: (threadId) => threadId === "ada-job" });
     f.notices.reportIncident({ kind: "failed", bot: f.ada as never, threadId: "ada-job", detail: "the turn stopped" });
     expect(f.turnsOf("ada")).toEqual([]);
-  });
-
-  it("leaves an escalation with a person too", () => {
-    const notify = vi.fn();
-    const f = fixture({ confined: (threadId) => threadId === "ada-job", notify });
-    expect(f.notices.reportEscalation({ kind: "needs-input", bot: f.ada as never, threadId: "ada-job", gate: "a card", reason: "waiting", alreadyNotified: false })).toBe("person");
-    expect(f.startTurn).not.toHaveBeenCalled();
   });
 
   it("a conversation that is not confined still reaches its Chief", () => {

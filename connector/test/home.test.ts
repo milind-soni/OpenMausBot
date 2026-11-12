@@ -5,14 +5,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { JobFailure } from "../src/failure.ts";
 import type { HealthRead } from "../src/home-health.ts";
-import { Home, homeSpec, imageVersion } from "../src/home.ts";
+import { Home, homeSpec, imageVersion, launcherOf } from "../src/home.ts";
 import { registerSecret } from "../src/log.ts";
 import { StateStore, type Operation } from "../src/state.ts";
 import type { Transfer } from "../src/transfer.ts";
 import { FakeDocker } from "./fake-docker.ts";
 
 const image = (letter: string) => `ghcr.io/milind-soni/openmausbot-cloud-home@sha256:${letter.repeat(64)}`;
-const A = image("a"), B = image("b"), C = image("c");
+const A = image("a"), B = image("b"), C = image("c"), D = image("d");
 const SECRET = "Bootstrap-secret-0123456789abcdefghijklmnopq";
 const RELAY = "box_omb_relay-token-0123456789abcdefghijklmnop";
 const env = {
@@ -34,8 +34,8 @@ function fixture(options: { free?: number } = {}) {
   const docker = new FakeDocker(state.dir);
   let clock = 1_800_000_000_000;
   docker.now = () => clock;
-  for (const [ref, version] of [[A, "v0.1.130"], [B, "v0.1.131"], [C, "v0.1.132"]] as const) docker.publish(ref, version);
-  const healthy = new Set<string>([A, B, C]);
+  for (const [ref, version] of [[A, "v0.1.130"], [B, "v0.1.131"], [C, "v0.1.132"], [D, "v0.1.145"]] as const) docker.publish(ref, version);
+  const healthy = new Set<string>([A, B, C, D]);
   /** What each image's bot box reports; every check passes unless a test says otherwise. */
   const boxes = new Map<string, { box: string; checks: string | null; failed: string[] }>();
   const steps: string[] = [];
@@ -44,7 +44,12 @@ function fixture(options: { free?: number } = {}) {
   const readHealth: HealthRead = async (target) => {
     const home = docker.container("mausbot-home");
     if (!home || home.status !== "running") return { status: 0, report: null };
-    const homeEnv = Object.fromEntries((home.spec.Env ?? []).map((entry) => [entry.slice(0, entry.indexOf("=")), entry.slice(entry.indexOf("=") + 1)]));
+    // As the launcher does: its environment, and the secrets file when one is mounted.
+    const secrets = home.spec.HostConfig.Mounts?.find((mount) => mount.Target === "/run/mausbot");
+    const homeEnv: Record<string, string> = {
+      ...Object.fromEntries((home.spec.Env ?? []).map((entry) => [entry.slice(0, entry.indexOf("=")), entry.slice(entry.indexOf("=") + 1)])),
+      ...(secrets ? JSON.parse(readFileSync(join(secrets.Source, "secrets.json"), "utf8")) as Record<string, string> : {}),
+    };
     if (target.secret !== homeEnv.OMB_CLOUD_BOOTSTRAP_SECRET) return { status: 401, report: { error: "invalid_signature" } };
     if (target.publicHost !== new URL(homeEnv.OMB_PUBLIC_URL).hostname || target.port !== 8080) return { status: 403, report: null };
     if (!healthy.has(home.spec.Image)) return { status: 0, report: null };
@@ -125,6 +130,76 @@ describe("the home on an own server", () => {
       expect(line).not.toContain(SECRET);
       expect(line).not.toContain(RELAY);
     }
+  });
+
+  it("gives a hardened launcher its secrets in a read-only file, never its environment, and the two capabilities it drops", async () => {
+    const f = fixture();
+    await started(f, D);
+    const spec = f.docker.container("mausbot-home")!.spec;
+    // The host's path as Docker reports the state volume's mount point, with a / like any Linux path.
+    const secretsDir = `${f.state.dir}/home-secrets`;
+    expect(spec).toEqual(homeSpec(D, env, SECCOMP, { secretsDir, dropsCapabilities: true }));
+    expect(JSON.stringify(spec)).not.toContain(SECRET);
+    expect(JSON.stringify(spec)).not.toContain(RELAY);
+    expect(spec.Env).toEqual([
+      "OMB_CLOUD_ROLE=home", `OMB_CLOUD_MACHINE_ID=${env.OMB_CLOUD_MACHINE_ID}`, `OMB_CLOUD_ADMIN_URL=${env.OMB_CLOUD_ADMIN_URL}`, `OMB_PUBLIC_URL=${env.OMB_PUBLIC_URL}`, `OMB_CLOUD_IMAGE=${D}`,
+    ]);
+    expect(spec.HostConfig.Mounts).toEqual([
+      { Type: "volume", Source: "mausbot-data", Target: "/data" },
+      { Type: "bind", Source: secretsDir, Target: "/run/mausbot", ReadOnly: true },
+    ]);
+    expect(spec.HostConfig.CapAdd).toEqual(["CHOWN", "SETUID", "SETGID", "KILL", "SYS_ADMIN", "SETPCAP"]);
+    expect(readdirSync(secretsDir)).toEqual(["secrets.json"]);
+    expect(JSON.parse(readFileSync(join(secretsDir, "secrets.json"), "utf8"))).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: SECRET, OMB_CLOUD_BOAT_TOKEN: RELAY });
+    if (process.platform !== "win32") {
+      expect(statSync(secretsDir).mode & 0o777).toBe(0o700);
+      expect(statSync(join(secretsDir, "secrets.json")).mode & 0o777).toBe(0o600);
+    }
+    // A new secret makes a new container, which reads the new file.
+    const rotated = { ...env, OMB_CLOUD_BOOTSTRAP_SECRET: `${SECRET}-rotated` };
+    await f.home.start("start-2", D, rotated);
+    expect(JSON.parse(readFileSync(join(secretsDir, "secrets.json"), "utf8")).OMB_CLOUD_BOOTSTRAP_SECRET).toBe(`${SECRET}-rotated`);
+    expect((await f.home.report()).health).toMatchObject({ ok: true, image: D });
+  });
+
+  it("publishes HTTPS on IPv4 when the home serves its own domain, and keeps the connector's loopback port", async () => {
+    const f = fixture();
+    const tunnel = "t".repeat(40);
+    await f.home.start("start-1", D, { ...env, OMB_CLOUD_EDGE_TLS: "1" });
+    const spec = f.docker.container("mausbot-home")!.spec;
+    expect(spec.HostConfig.PortBindings).toEqual({ "8080/tcp": [{ HostIp: "127.0.0.1", HostPort: "8080" }], "443/tcp": [{ HostIp: "0.0.0.0", HostPort: "443" }] });
+    expect(spec.ExposedPorts).toEqual({ "8080/tcp": {}, "443/tcp": {} });
+    expect(spec.Env).toContain("OMB_CLOUD_EDGE_TLS=1");
+    // A home reached through a tunnel publishes nothing more, and its token rides the secrets file, not the environment.
+    await f.home.start("start-2", D, { ...env, OMB_CLOUD_TUNNEL_TOKEN: tunnel });
+    const tunnelled = f.docker.container("mausbot-home")!.spec;
+    expect(tunnelled.HostConfig.PortBindings).toEqual({ "8080/tcp": [{ HostIp: "127.0.0.1", HostPort: "8080" }] });
+    expect(JSON.stringify(tunnelled)).not.toContain(tunnel);
+    expect(JSON.parse(readFileSync(join(f.state.dir, "home-secrets", "secrets.json"), "utf8")).OMB_CLOUD_TUNNEL_TOKEN).toBe(tunnel);
+  });
+
+  it("gives an older image exactly what it always had: secrets in its environment, no added capability", async () => {
+    const f = fixture();
+    await started(f);
+    await f.home.update("update-1", D);
+    expect(f.docker.container("mausbot-home")!.spec.HostConfig.CapAdd).toContain("SYS_ADMIN");
+    await f.home.update("update-2", C);
+    const old = f.docker.container("mausbot-home")!.spec;
+    expect(old.Image).toBe(C);
+    expect(old.HostConfig.CapAdd).toEqual(["CHOWN", "SETUID", "SETGID", "KILL"]);
+    expect(old.HostConfig.Mounts).toEqual([{ Type: "volume", Source: "mausbot-data", Target: "/data" }]);
+    expect(old.Env).toContain(`OMB_CLOUD_BOOTSTRAP_SECRET=${SECRET}`);
+    expect(launcherOf(null)).toEqual({ secretsFile: false, dropsCapabilities: false });
+    expect(launcherOf([0, 1, 144])).toEqual({ secretsFile: false, dropsCapabilities: false });
+    expect(launcherOf([0, 1, 145])).toEqual({ secretsFile: true, dropsCapabilities: true });
+    expect(launcherOf([0, 2, 0])).toEqual({ secretsFile: true, dropsCapabilities: true });
+  });
+
+  it("writes the secrets file for a home an older connector started, before anything starts it again", () => {
+    const f = fixture();
+    f.state.write("home-env.json", env);
+    new Home({ docker: f.docker, state: f.state, log: () => {}, readHealth: async () => ({ status: 0, report: null }), seccomp: () => SECCOMP, transfer: { download: async () => ({ bytes: 0 }), upload: async () => ({ bytes: 0, sha256: "" }) }, diskFree: () => 1e12 });
+    expect(JSON.parse(readFileSync(join(f.state.dir, "home-secrets", "secrets.json"), "utf8"))).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: SECRET, OMB_CLOUD_BOAT_TOKEN: RELAY });
   });
 
   it("clears the lease a killed home left before each start, until the image clears it itself, and never while a home runs", async () => {
@@ -243,7 +318,7 @@ describe("the home on an own server", () => {
     f.write("a.txt", "1");
     const { backup } = await f.home.backup("backup-1");
     f.docker.failCopy = true;
-    const admin = { origin: "https://cloud.example.test", token: "t".repeat(40) };
+    const admin = { origin: "https://cloud.example.test", authorization: (jobId: string) => `Box token-for-${jobId}` };
     for (const job of [() => f.home.update("update-1", B), () => f.home.restore("restore-1", backup.id), () => f.home.importDisk("import-1", "https://storage.example.test/d.tgz", admin)]) {
       expect(await failure(job())).toMatchObject({ code: "docker", message: "Copying the data failed (cp: error writing '/to/big.bin': No space left on device); nothing was changed." });
       expect(f.docker.container("mausbot-home")).toMatchObject({ status: "running", spec: { Image: A } });
@@ -257,7 +332,7 @@ describe("the home on an own server", () => {
     const f = fixture();
     await started(f);
     f.docker.calls.splice(0);
-    const missing = image("d");
+    const missing = image("e");
     expect((await failure(f.home.update("update-1", missing))).toJobError()).toMatchObject({ code: "pull_failed" });
     expect(f.docker.calls.filter((call) => call.startsWith("stop") || call.startsWith("rm"))).toEqual([]);
     expect(f.docker.container("mausbot-home")).toMatchObject({ status: "running", spec: { Image: A } });
@@ -350,13 +425,13 @@ describe("the home on an own server", () => {
     expect((await failure(f.home.restore("restore-2", "20260101-000000-0000"))).code).toBe("not_found");
   });
 
-  it("sends a gzip tar of /data to the Admin with the agent token, with the home running again meanwhile, and leaves no archive behind", async () => {
+  it("sends a gzip tar of /data to the Admin with the box's token for that job, with the home running again meanwhile, and leaves no archive behind", async () => {
     const f = fixture();
     await started(f);
     f.write("a.txt", "1");
-    const result = await f.home.exportDisk("export-1", { origin: "https://cloud.example.test", token: "agent-token-0123456789abcdefghijklmnopqrst" });
+    const result = await f.home.exportDisk("export-1", { origin: "https://cloud.example.test", authorization: (jobId) => `Box token-for-${jobId}` });
     expect(result).toEqual({ bytes: f.uploads[0].body.length, sha256: "0".repeat(64) });
-    expect(f.uploads).toEqual([{ url: "https://cloud.example.test/api/cloud/servers/agent/export/export-1", headers: { authorization: "Bearer agent-token-0123456789abcdefghijklmnopqrst" }, body: JSON.stringify([["a.txt", "1"]]) }]);
+    expect(f.uploads).toEqual([{ url: "https://cloud.example.test/api/cloud/box/v1/export/export-1", headers: { authorization: "Box token-for-export-1" }, body: JSON.stringify([["a.txt", "1"]]) }]);
     expect(readdirSync(f.state.dir).filter((name) => name.startsWith("export-"))).toEqual([]);
     expect(f.docker.container("mausbot-home")?.status).toBe("running");
   });
@@ -365,14 +440,14 @@ describe("the home on an own server", () => {
     const f = fixture();
     await started(f);
     f.write("old.txt", "1");
-    const admin = { origin: "https://cloud.example.test", token: "agent-token-0123456789abcdefghijklmnopqrst" };
+    const admin = { origin: "https://cloud.example.test", authorization: (jobId: string) => `Box token-for-${jobId}` };
     const imported = await f.home.importDisk("import-1", "https://storage.example.test/disk.tgz?sig=x", admin);
     expect(imported).toMatchObject({ bytes: expect.any(Number), home: { state: "running" } });
     expect(f.data()).toEqual({ "imported.txt": "from the old home" });
     expect(f.docker.files("mausbot-snapshot")).toEqual({ "old.txt": "1" });
     expect(f.downloads[0]).toEqual({ url: "https://storage.example.test/disk.tgz?sig=x", headers: {} });
-    await f.home.importDisk("import-2", "https://cloud.example.test/api/cloud/servers/agent/import/import-2", admin);
-    expect(f.downloads[1].headers).toEqual({ authorization: `Bearer ${admin.token}` });
+    await f.home.importDisk("import-2", "https://cloud.example.test/api/cloud/box/v1/import/import-2", admin);
+    expect(f.downloads[1].headers).toEqual({ authorization: "Box token-for-import-2" });
     f.setArchive("not an archive");
     const bad = await failure(f.home.importDisk("import-3", "https://storage.example.test/bad.tgz", admin));
     expect(bad.toJobError()).toMatchObject({ code: "transfer_failed" });
@@ -439,7 +514,9 @@ describe("the home on an own server", () => {
     expect(failed.code).toBe("docker");
     expect(JSON.stringify(failed.toJobError())).not.toContain(SECRET);
     f.docker.startFailures.set("mausbot-home", "driver failed programming external connectivity: Bind for 127.0.0.1:8080 failed: port is already allocated");
-    expect((await failure(f.home.restart())).toJobError()).toEqual({ code: "port_in_use", message: "Port 8080 on this server's loopback is used by another program, and MausBot's home needs it." });
+    expect((await failure(f.home.restart())).toJobError()).toEqual({ code: "port_in_use", message: "Port 8080 on this server is used by another program, and MausBot's home needs it." });
+    f.docker.startFailures.set("mausbot-home", "driver failed programming external connectivity: Bind for 0.0.0.0:443 failed: port is already allocated");
+    expect((await failure(f.home.restart())).message).toBe("Port 443 on this server is used by another program, and MausBot's home needs it.");
     f.docker.startFailures.set("mausbot-home", "OCI runtime create failed: apparmor failed to apply profile: write /proc/self/attr/apparmor/exec: no such file or directory");
     expect((await failure(f.home.restart())).code).toBe("box_unavailable");
     expect(existsSync(f.state.path("agent.json"))).toBe(false);

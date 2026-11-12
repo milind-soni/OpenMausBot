@@ -114,6 +114,55 @@ function readRequest(data: Buffer) {
   return { command: data[1], host, port: data.readUInt16BE(end - 2), rest: data.subarray(end) };
 }
 
+/** Connects to the first of `addresses` that answers, trying them the way Node's autoSelectFamily documents: each
+ * address gets its own attempt, attempts start staggered so a family that cannot route does not hold up one that
+ * can, and the first socket to connect wins while the rest are dropped. Rejects with the last attempt's error when
+ * every one of them fails, as one connect would report it.
+ *
+ * By hand, because autoSelectFamily with a custom lookup never falls back: on Node 24, a list that mixes families
+ * where the first cannot route (a host with no IPv6 route is the usual case) leaves the socket stalled until it
+ * times out, with the IPv4 answer never tried. */
+function connectChecked(port: number, addresses: readonly ResolvedAddress[], track: (socket: Socket) => Socket, client: Socket, staggerMs = 250): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    const inFlight = new Set<Socket>();
+    let next = 0;
+    let settled = false;
+    // The gate closing or the browser leaving drops every attempt still dialing, so none waits out the OS timeout.
+    const giveUp = () => {
+      if (settled) return;
+      settled = true;
+      for (const attempt of inFlight) attempt.destroy();
+      reject(new Error("client left"));
+    };
+    client.once("close", giveUp);
+    const settle = () => { settled = true; client.off("close", giveUp); };
+    const startNext = (): void => {
+      if (settled || next >= addresses.length) return;
+      const { address, family } = addresses[next++]!;
+      const attempt = track(connect({ host: address, port, family }));
+      inFlight.add(attempt);
+      attempt.once("connect", () => {
+        if (settled) return void attempt.destroy();
+        settle();
+        for (const other of inFlight) if (other !== attempt) other.destroy();
+        resolve(attempt);
+      });
+      attempt.once("error", (error: NodeJS.ErrnoException) => {
+        inFlight.delete(attempt);
+        if (settled) return;
+        // A quick failure moves straight on to the next address instead of waiting out the stagger.
+        if (next < addresses.length) return startNext();
+        if (inFlight.size === 0) {
+          settle();
+          reject(error);
+        }
+      });
+      if (next < addresses.length) setTimeout(startNext, staggerMs).unref?.();
+    };
+    startNext();
+  });
+}
+
 /** Listens on an ephemeral loopback port until closed; a gate that is not running fails every connection. */
 export function openGate(options: GateOptions): Promise<EgressGate> {
   const resolve = options.resolve ?? resolveTarget;
@@ -181,26 +230,21 @@ export function openGate(options: GateOptions): Promise<EgressGate> {
         }
         if (!addresses.length) return refuse(client, HOST_UNREACHABLE);
         client.pause();
-        // Every checked address, IPv6 and IPv4 alike, so a host is still reached where one family is broken; the
-        // lookup hands back only checked addresses, so a name that now resolves elsewhere changes nothing.
-        const upstream = track(connect({
-          host: target.host,
-          port: target.port,
-          autoSelectFamily: true,
-          lookup: (_host, lookupOptions, callback) => lookupOptions.all
-            ? callback(null, addresses)
-            : callback(null, addresses[0]!.address, addresses[0]!.family),
-        }));
-        let connected = false;
-        upstream.once("connect", () => {
-          connected = true;
-          client.write(reply(SUCCEEDED));
-          for (const chunk of early) upstream.write(chunk);
-          upstream.pipe(client);
-          client.pipe(upstream);
-        });
-        upstream.once("error", () => { if (!connected && !client.destroyed) refuse(client, CONNECTION_REFUSED); });
-        upstream.on("close", () => { if (connected) client.destroy(); });
+        // Every checked address, IPv6 and IPv4 alike, so a host is still reached where one family is broken. The
+        // attempts go to exactly the checked addresses, so a name that now resolves elsewhere changes nothing.
+        let upstream: Socket;
+        try {
+          upstream = await connectChecked(target.port, addresses, track, client);
+        } catch {
+          if (client.destroyed) return;
+          return refuse(client, CONNECTION_REFUSED);
+        }
+        if (client.destroyed) return void upstream.destroy();
+        client.write(reply(SUCCEEDED));
+        for (const chunk of early) upstream.write(chunk);
+        upstream.pipe(client);
+        client.pipe(upstream);
+        upstream.on("close", () => client.destroy());
         client.on("close", () => upstream.destroy());
       })().catch(() => client.destroy());
     };

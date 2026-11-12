@@ -12,6 +12,8 @@ export interface CloudListEntry {
   runsOn: "cloud" | "server";
   status: CloudListStatus;
   origin: string | null;
+  /** The addresses it answered at before it moved to another provider, when the Admin says: never its `origin`. */
+  formerOrigins?: string[];
   /** A Team or Business Cloud: the team behind its People. */
   teamId: string | null;
   /** The account's oldest open Cloud of its own: My Cloud. */
@@ -58,6 +60,9 @@ export declare const CLOUD_ID: RegExp;
 export declare const CLOUD_NAME_LIMIT: number;
 export declare function cleanCloudListName(value: unknown): string | null;
 export declare function ownCloud(cloud: CloudListEntry | null | undefined): boolean;
+/** My Cloud as the verified session names it: its address, its id in the list, and the addresses it had before a move to
+ * another provider. */
+export declare function myCloudOf(state: unknown): { origin: string | null; id: string | null; formerOrigins: string[] } | null;
 export declare function signedInServers(clouds: CloudListEntry[] | null | undefined): CloudListEntry[];
 export declare function releaseVersion(value: unknown): string | null;
 export declare function olderRelease(version: unknown, latest: unknown): boolean;

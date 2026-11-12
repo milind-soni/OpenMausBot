@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
 import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
+import { publishedMessages, replyProblems } from "../harness/text-items.testkit.ts";
+import { caseTokens, LIVE_REPLY_CASES, liveReplyScripts } from "../testing/live-reply-cases.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { encodeInjectId, localHost } from "./local-inject.ts";
 import { buildMcpServers } from "./pi-mcp-servers.ts";
@@ -538,6 +540,21 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(first.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nfirst");
     const second = await send("second", first.cursor);
     expect(second.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nsecond");
+    // Each turn condensed the session once; the chat marks each one.
+    const mine = recorder.events.filter((e) => e.threadId === threadId);
+    expect(mine.filter((e) => e.type === "context.compacted")).toHaveLength(2);
+    // Text streamed before the compaction is saved ahead of the marker, not joined to later text.
+    const before = mine.findIndex((e) => e.type === "item.completed" && (e as { text?: string }).text === "before");
+    expect(before).toBeGreaterThan(-1);
+    expect(before).toBeLessThan(mine.findIndex((e) => e.type === "context.compacted"));
+  });
+
+  it("adds no condensed marker when pi's compaction fails or is skipped", async () => {
+    await create("compaction", { FAKE_PI_COMPACTION_FAILS_ONLY: "1" });
+    const threadId = "t-pi-compaction-fails-" + randomUUID();
+    const { turnId } = await instance.adapter.sendTurn({ threadId, text: "first", system: "Standing rules." });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    expect(recorder.events.filter((e) => e.type === "context.compacted" && e.threadId === threadId)).toHaveLength(0);
   });
 
   it("keeps pi alive through post-run compaction recovery and re-establishes the full prompt", async () => {
@@ -929,7 +946,29 @@ describe("PiDriver turns (fake CLI)", () => {
       .filter((e) => e.type === "item.completed" && (e as { itemType: string }).itemType === "assistant_text")
       .map((e) => (e as { text: string }).text);
     expect(texts).toEqual(["before one", "before two", "after"]);
+    expect(publishedMessages(recorder.events).map(({ streamed, completed }) => ({ streamed, completed }))).toEqual([
+      { streamed: "before one", completed: "before one" },
+      { streamed: "before two", completed: "before two" },
+      { streamed: "after", completed: "after" },
+    ]);
+    expect(new Set(publishedMessages(recorder.events).map((message) => message.itemId)).size).toBe(3);
   });
+
+  it.each(LIVE_REPLY_CASES.filter((entry) => entry.action === undefined || entry.action === "stop").map((entry) => ({ entry, name: entry.name })))(
+    "streams the $name reply with one id per message and nothing doubled, lost or glued", async ({ entry }) => {
+      const scripts = join(mkdtempSync(join(tmpdir(), "omb-pi-live-")), "scripts.json");
+      writeFileSync(scripts, JSON.stringify(liveReplyScripts()));
+      await create(undefined, { FAKE_STREAM_SCRIPT: scripts, FAKE_STREAM_CADENCE: entry.action === "stop" ? "6:5" : "7:0" });
+      const threadId = `t-live-${entry.name}`;
+      const { turnId } = await instance.adapter.sendTurn({ threadId, text: `Please answer ${entry.marker}`, model: "ollama-cloud/glm-5.2" });
+      if (entry.action === "stop") {
+        await recorder.until((e) => e.type === "content.delta" && e.turnId === turnId);
+        await instance.adapter.interruptTurn(threadId);
+      }
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId, 30_000);
+      const events = recorder.events.filter((e) => e.turnId === turnId);
+      expect(replyProblems(events, caseTokens(entry), { stopped: entry.action === "stop" })).toEqual([]);
+    }, 60_000);
 
   it("brokers a permission ask through request.opened → respondToRequest", async () => {
     await create("permission");

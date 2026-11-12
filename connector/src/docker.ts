@@ -27,6 +27,8 @@ export interface ImageInfo {
 export interface ContainerInfo {
   Id: string;
   Name: string;
+  /** The id of the image the container was made from. */
+  Image?: string;
   Created: string;
   Config: { Image: string; Env: string[] | null; Labels: Record<string, string> | null; Cmd: string[] | null; Entrypoint: string[] | null };
   HostConfig: Record<string, unknown>;
@@ -46,10 +48,13 @@ export interface VolumeInfo {
   Name: string;
   Labels: Record<string, string> | null;
   CreatedAt?: string;
+  /** Where the volume's files are on the host (the local driver's `_data` folder). */
+  Mountpoint?: string;
 }
 
+/** A named volume, or (`bind`) a folder on the host by its absolute path. */
 export interface Mount {
-  Type: "volume";
+  Type: "volume" | "bind";
   Source: string;
   Target: string;
   ReadOnly?: boolean;
@@ -107,6 +112,8 @@ export interface Docker {
   /** Waits for the container to exit and returns its exit code. */
   waitContainer(name: string, timeoutMs: number): Promise<number>;
   logs(name: string, tail: number): Promise<string>;
+  /** Runs `command` in the running container `name` as its own user, without a terminal or input; its exit code and output. */
+  exec(name: string, command: string[], timeoutMs: number): Promise<{ code: number; output: string }>;
   volumeInspect(name: string): Promise<VolumeInfo | null>;
   createVolume(name: string, labels: Record<string, string>): Promise<void>;
   removeVolume(name: string): Promise<void>;
@@ -141,6 +148,26 @@ export function negotiateApi(version: Pick<DockerVersion, "ApiVersion" | "MinAPI
   const engineMin = apiParts(version.MinAPIVersion);
   if (engineMin && below(chosen, engineMin)) return null;
   return `${chosen[0]}.${chosen[1]}`;
+}
+
+/**
+ * Why the connector cannot talk to this Docker, with the fix, or null. Checked at start, so an engine that has dropped
+ * the API versions the connector speaks gets one plain line instead of a connector that crashes and restarts forever.
+ */
+export async function dockerApiProblem(docker: Pick<Docker, "version">, socket: string): Promise<string | null> {
+  let version: DockerVersion;
+  try {
+    version = await docker.version();
+  } catch (error) {
+    return `Docker does not answer on ${socket} (${error instanceof Error ? error.message : String(error)}). Start it with: sudo systemctl enable --now docker`;
+  }
+  if (negotiateApi(version)) return null;
+  const speaks = `the connector speaks API ${MIN_API.join(".")} to ${MAX_API.join(".")}`;
+  const engine = apiParts(version.ApiVersion);
+  if (!engine || below(engine, MIN_API)) {
+    return `Docker ${version.Version} is too old: it speaks API ${version.ApiVersion}, and ${speaks}. Update it with: curl -fsSL https://get.docker.com | sudo sh`;
+  }
+  return `Docker ${version.Version} no longer speaks an API this connector knows (it needs ${version.MinAPIVersion} or newer, and ${speaks}). Run the install command again to get the current connector.`;
 }
 
 /** Splits an image reference with a digest into what `POST /images/create` takes. */
@@ -312,6 +339,16 @@ export class SocketDocker implements Docker {
     await this.ready();
     const response = await this.call("GET", `/containers/${encodeURIComponent(name)}/logs?stdout=1&stderr=1&tail=${tail}`);
     return response.status === 200 ? demuxLogs(response.body) : "";
+  }
+
+  async exec(name: string, command: string[], timeoutMs: number): Promise<{ code: number; output: string }> {
+    const created = await this.json<{ Id: string }>("POST", `/containers/${encodeURIComponent(name)}/exec`, { body: { Cmd: command, AttachStdout: true, AttachStderr: true, Tty: false }, ok: [201] });
+    const id = created!.Id;
+    // Without a terminal Docker frames the output like a log stream, and ends the answer when the command exits.
+    const response = await this.call("POST", `/exec/${id}/start`, { body: { Detach: false, Tty: false }, timeoutMs });
+    if (response.status !== 200) throw new DockerError(response.status, `Docker could not run a command in ${name}`);
+    const state = await this.json<{ ExitCode: number | null }>("GET", `/exec/${id}/json`);
+    return { code: state?.ExitCode ?? -1, output: demuxLogs(response.body) };
   }
 
   async volumeInspect(name: string): Promise<VolumeInfo | null> {

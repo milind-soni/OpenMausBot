@@ -9,6 +9,9 @@ import { api, currentTaskBot, openBotThread, useStore, visibleMessages, type Bot
 import { lastLine } from "../sidebar-preview";
 import { isArchived, orderedThreadList, SidebarThreadRow, stampClock, threadRecency, threadRowActions, useRelativeNow } from "../SidebarThreadRow";
 import { filterTasks } from "../TaskPicker";
+import { useConversationSide } from "../TeamSideSwitch";
+import { tasksOfSide } from "@/state/team-side";
+import { CardLabel, panelActionCls } from "./rows";
 
 export const CONVERSATIONS_SHOWN = 3;
 const PANEL_ROW_LOOK = "[&_.font-semibold]:font-medium [&_time]:text-[12px] [&_time]:text-ink-tertiary [&_span.bg-accent]:size-2";
@@ -66,7 +69,9 @@ export function BotConversations({ bot }: { bot: Bot }) {
     return { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive };
   }, [bot.id, dispatch, generatedTitles]);
 
-  const threads = (bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }])
+  const side = useConversationSide(bot);
+  const tasks = bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }];
+  const threads = (side ? tasksOfSide({ ...bot, tasks }, side) : tasks)
     .filter((task) => !task.routineRunId)
     .map((task) => {
       const thread = currentTaskBot(bot, task.threadId);
@@ -119,31 +124,31 @@ export function BotConversations({ bot }: { bot: Bot }) {
   );
 
   return (
-    <section data-panel-card="conversations" aria-label={t("botPanel.conversations.title")} className="mt-3.5">
+    <section data-panel-card="conversations" aria-label={t("botPanel.conversations.title")}>
+      <CardLabel action={listed && (
+        <button
+          type="button"
+          data-conversations-search
+          aria-label={t("botPanel.conversations.search")}
+          title={t("botPanel.conversations.search")}
+          aria-pressed={searching}
+          onClick={() => (searching ? stopSearching() : setSearching(true))}
+          className={cn("-me-1 flex size-6 shrink-0 items-center justify-center rounded-[6px] text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink", searching && "bg-ink/[0.06] text-ink")}
+        >
+          <Search size={14} aria-hidden="true" />
+        </button>
+      )}>{t("botPanel.conversations.title")}</CardLabel>
       <div className={cn("flex items-center gap-2", listed && "mb-2")}>
-        {bot.yourAccess !== "view" && (
+        {bot.yourAccess !== "view" && side !== "team" && (
           <button
             type="button"
             data-conversations-new
             aria-label={t("botPanel.conversations.new")}
             onClick={startNew}
-            className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-full bg-ink/[0.05] px-3.5 text-[14px] font-medium text-ink transition-colors hover:bg-ink/[0.09]"
+            className={cn(panelActionCls, "flex-1")}
           >
             <SquarePen size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
             <span className="truncate">{t("botPanel.conversations.new")}</span>
-          </button>
-        )}
-        {listed && (
-          <button
-            type="button"
-            data-conversations-search
-            aria-label={t("botPanel.conversations.search")}
-            title={t("botPanel.conversations.search")}
-            aria-pressed={searching}
-            onClick={() => (searching ? stopSearching() : setSearching(true))}
-            className={cn("flex size-9 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink", searching && "bg-ink/[0.06] text-ink")}
-          >
-            <Search size={15} aria-hidden="true" />
           </button>
         )}
       </div>
@@ -162,7 +167,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
           }}
           placeholder={t("botPanel.conversations.searchPlaceholder", { name: bot.name })}
           aria-label={t("botPanel.conversations.searchPlaceholder", { name: bot.name })}
-          className="mb-1.5 w-full rounded-[10px] border border-hairline/60 bg-inset px-3 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-focus"
+          className="mb-1.5 w-full rounded-[8px] border border-hairline/60 bg-inset px-3 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-focus"
         />
       )}
       {listed && <div role="list" aria-label={t("botPanel.conversations.title")} className={cn("flex flex-col gap-px", PANEL_ROW_LOOK)}>

@@ -18,7 +18,6 @@ const TOOLKIT_NAMES: Record<string, string> = {
   GOOGLEDRIVE: "Google Drive",
   GOOGLEDOCS: "Google Docs",
   HUBSPOT: "HubSpot",
-  HIGHLEVEL: "HighLevel",
   LINKEDIN: "LinkedIn",
   YOUTUBE: "YouTube",
   TWITTER: "X",
@@ -100,6 +99,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   list_rooms: "activity.tool.team.listRooms",
   list_shared_computers: "activity.tool.team.listSharedComputers",
   list_team_library: "activity.tool.team.listTeamLibrary",
+  list_models: "activity.tool.team.listModels",
   list_team_setup: "activity.tool.team.listTeamSetup",
   list_threads: "activity.tool.team.listThreads",
   list_trigger_events: "activity.tool.team.listTriggerEvents",
@@ -116,6 +116,8 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   propose_profile: "activity.tool.team.proposeProfile",
   propose_team_memory: "activity.tool.team.proposeTeamMemory",
   propose_team_setup: "activity.tool.team.proposeTeamSetup",
+  check_app_hosting: "activity.tool.team.checkAppHosting",
+  publish_app: "activity.tool.team.publishApp",
   publish_page: "activity.tool.team.publishPage",
   raise_escalation: "activity.tool.team.raiseEscalation",
   report_bug: "activity.tool.team.reportBug",
@@ -133,6 +135,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   skill_manage: "activity.tool.team.skillManage",
   skills_list: "activity.tool.team.skillsList",
   start_thread: "activity.tool.team.startThread",
+  burst: "activity.tool.team.burst",
   tool_result_read: "activity.tool.team.toolResultRead",
   unpublish_page: "activity.tool.team.unpublishPage",
   update_html: "activity.tool.team.updateHtml",
@@ -217,7 +220,6 @@ export function describedTool(name: string, input?: unknown): Described {
       const member = (AGENTS_ACTION_TOOLS[action]?.members.length ?? 0) > 1 ? agentsCallMember(action, callArguments(input)) : action;
       return Object.hasOwn(RESEARCH_TOOL_LABELS, member) ? RESEARCH_TOOL_LABELS[member]! : ownAction("Team", member, TEAM_ACTION_KEYS);
     }
-    if (server === "highlevel") return { app: "HighLevel", label: humanize(action.replace(/^HIGHLEVEL_/, "")) };
     if (server === "email") return { app: "Email", appKey: "activity.app.email", label: humanize(action.replace(/^EMAIL_/, "")) };
     if (server === "device") return { app: "Phone", label: humanize(action.replace(/^PHONE_/, "")) };
     if (server.startsWith("claude_ai_")) {

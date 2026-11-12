@@ -2,7 +2,8 @@ import { Children, createElement, isValidElement, type ReactElement, type ReactN
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { StoreProvider, type Bot, type ConfigStatus } from "@/state/store";
+import { api, StoreProvider, type Bot, type ConfigStatus } from "@/state/store";
+import { BotEditorContext } from "./BotEditorContext";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 
 const fixture = vi.hoisted(() => ({
@@ -10,13 +11,15 @@ const fixture = vi.hoisted(() => ({
   mcpError: false,
   servers: null as null | Array<{ name: string; enabled: boolean }>,
   config: null as unknown,
+  instances: [] as unknown[],
+  capabilities: { host: { homeDir: undefined } as { homeDir: undefined; platform?: string }, localComputer: { available: false, reasonCode: "unsupported" } },
   apps: { phase: "loading", apps: [], connectedSlugs: [] } as import("./useBotApps").BotApps,
 }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: { ...original.initialState, config: fixture.config ?? original.initialState.config }, dispatch: fixture.dispatch }) };
+  return { ...original, useStore: () => ({ state: { ...original.initialState, config: fixture.config ?? original.initialState.config, instances: fixture.instances as typeof original.initialState.instances }, dispatch: fixture.dispatch }) };
 });
-// The connected-apps list (Composio accounts plus the native HighLevel connection) is seeded per test.
+// The connected-apps list (Composio accounts plus the native Email connection) is seeded per test.
 vi.mock("./useBotApps", async (importOriginal) => ({
   ...await importOriginal<typeof import("./useBotApps")>(),
   useBotApps: () => fixture.apps,
@@ -28,7 +31,7 @@ vi.mock("@/lib/mcp-servers", async (importOriginal) => ({
 
 // DesktopCapabilities reads window.ogb at module scope, and this suite runs in the node environment.
 vi.mock("../DesktopCapabilities", () => ({
-  useDesktopCapabilities: () => ({ capabilities: { host: { homeDir: undefined }, localComputer: {} } }),
+  useDesktopCapabilities: () => ({ capabilities: fixture.capabilities }),
 }));
 
 const { AccessSection } = await import("./AccessSection");
@@ -40,6 +43,9 @@ beforeEach(() => {
   fixture.mcpError = false;
   fixture.servers = null;
   fixture.config = null;
+  fixture.instances = [];
+  fixture.capabilities.host = { homeDir: undefined };
+  fixture.capabilities.localComputer = { available: false, reasonCode: "unsupported" };
   fixture.apps = { phase: "loading", apps: [], connectedSlugs: [] };
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -208,6 +214,75 @@ describe("AccessSection Works on", () => {
     ]);
   });
 
+  it("offers the place itself in a bot not made yet, which has no Screen panel to open", () => {
+    const derived = makeDerived();
+    const draft = (bot: Bot) => {
+      let tree!: ReturnType<typeof AccessSection>;
+      function Capture() { tree = AccessSection({ bot, derived }); return tree; }
+      const editor = createElement(BotEditorContext.Provider, { value: { request: api, draft: true } }, createElement(Capture));
+      return { html: renderToStaticMarkup(createElement(StoreProvider, null, editor)), tree };
+    };
+    const { html } = draft(makeBot({ name: "" }));
+    expect(html).not.toContain("Open the Screen panel");
+    expect(html).not.toContain("Auto cloud preference");
+    expect(html).toContain("Works on");
+    expect(html).toContain("Cloud desktop");
+    expect(html).toMatch(/aria-pressed="true"[^>]*>.*?Auto/);
+
+    fixture.config = { box: { configured: true } } as Partial<ConfigStatus>;
+    const chosen = draft(makeBot({ computer: "cloud" }));
+    expect(chosen.html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>(?:(?!<\/button>).)*?Cloud desktop/);
+    expect(chosen.html).toContain("Cloud backend");
+
+    const picker = nodes(chosen.tree).find((node) => (node.type as { name?: string }).name === "DraftWorksOn")!;
+    let rendered: ReactNode = null;
+    function Picker() { rendered = (picker.type as (props: unknown) => ReactNode)(picker.props); return rendered; }
+    renderToStaticMarkup(createElement(StoreProvider, null, createElement(Picker)));
+    const grid = nodes(rendered).find((node) => (node.type as { name?: string }).name === "WorksOnGrid")!;
+    const options = grid.props.options as Array<{ mode: string | null; disabled: boolean; view: { line: string } }>;
+    const local = options.find((option) => option.mode === "local")!;
+    expect(local.disabled).toBe(true);
+    expect(renderToStaticMarkup(grid).replaceAll("&#x27;", "'")).toContain(local.view.line);
+
+    const select = grid.props.onSelect as (mode: string | null) => void;
+    select("browser");
+    select(null);
+    expect(vi.mocked(derived.patch).mock.calls).toEqual([[{ computer: "browser", browser: true }], [{ computer: null }]]);
+  });
+
+  it("says on a selectable tile of a bot not made yet what stands in its way, with no name to borrow", () => {
+    fixture.config = { box: { configured: true } } as Partial<ConfigStatus>;
+    fixture.instances = [{ instanceId: "local", capabilities: { computerMcp: true } }];
+    fixture.capabilities.host = { homeDir: undefined, platform: "darwin" };
+    let tree!: ReturnType<typeof AccessSection>;
+    function Capture() { tree = AccessSection({ bot, derived: makeDerived() }); return tree; }
+    const bot = makeBot({ name: "", toolScope: { deny: ["mcp:computer:*"] } } as Partial<Bot>);
+    renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotEditorContext.Provider, { value: { request: api, draft: true } }, createElement(Capture))));
+    const picker = nodes(tree).find((node) => (node.type as { name?: string }).name === "DraftWorksOn")!;
+    let rendered: ReactNode = null;
+    function Picker() { rendered = (picker.type as (props: unknown) => ReactNode)(picker.props); return rendered; }
+    renderToStaticMarkup(createElement(StoreProvider, null, createElement(Picker)));
+    const grid = nodes(rendered).find((node) => (node.type as { name?: string }).name === "WorksOnGrid")!;
+    const options = grid.props.options as Array<{ mode: string | null; disabled: boolean; note?: string }>;
+    const of = (mode: string) => options.find((option) => option.mode === mode)!;
+    expect(of("cloud")).toMatchObject({ disabled: false, note: "What New bot can use doesn't include a desktop." });
+    expect(of("local").disabled).toBe(false);
+    expect(of("local").note).toBeTruthy();
+    const html = renderToStaticMarkup(grid).replaceAll("&#x27;", "'").replaceAll("&amp;", "&");
+    expect(html).toContain(of("cloud").note);
+    expect(html).toContain(of("local").note);
+  });
+
+
+  it("leaves This computer out of a bot not made yet on another server's page, and shows Auto in its place", () => {
+    fixture.capabilities.localComputer = { available: false, reasonCode: "remote-server" };
+    let tree!: ReturnType<typeof AccessSection>;
+    function Capture() { tree = AccessSection({ bot: makeBot({ computer: "local" }), derived: makeDerived() }); return tree; }
+    const html = renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotEditorContext.Provider, { value: { request: api, draft: true } }, createElement(Capture))));
+    expect(html).not.toContain("This computer");
+    expect(html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>(?:(?!<\/button>).)*?Auto/);
+  });
+
   it("hides the Boat or VPS choice on My Cloud, whose cloud computers are the plan's", () => {
     expect(render(makeBot())).toContain("Cloud backend");
     fixture.config = { cloudHome: true } as Partial<ConfigStatus>;
@@ -253,7 +328,7 @@ describe("Research (treg) card", () => {
     expect(html).toMatch(new RegExp(`${SWITCH}[^>]*aria-checked="true"`));
     expect(html).not.toMatch(new RegExp(`${SWITCH}[^>]* disabled=""`));
     expect(html).toContain("through your treg key. Calls are billed to your treg balance.");
-    expect(html).not.toContain("Open API keys");
+    expect(html).not.toContain("Open AI › Other services");
   });
 
   it("is on by default with a Cloud plan, and turns off for one bot with one patch", () => {
@@ -334,21 +409,12 @@ describe("AccessSection Record browser steps", () => {
 describe("AccessSection per-app scopes", () => {
   const app = (slug: string, label: string) => ({ slug, label, blurb: "", card: { logo: null, domain: null, label }, scope: "write" as const });
 
-  it("lists HighLevel by name next to the Composio apps once the server reports it connected", () => {
-    fixture.apps = { phase: "ready", connectedSlugs: ["gmail", "highlevel"], apps: [app("gmail", "Gmail"), app("highlevel", "HighLevel")] };
+  it("lists Email by name next to the Composio apps once the server reports a mailbox connected", () => {
+    fixture.apps = { phase: "ready", connectedSlugs: ["email", "gmail"], apps: [app("email", "Email"), app("gmail", "Gmail")] };
     const html = render(makeBot({ connectorScopes: { apps: { gmail: "write" } } }));
-    expect(html).toContain('aria-label="highlevel access"');
-    expect(html).toMatch(/<span class="min-w-0 text-\[13px\] text-ink">HighLevel</);
+    expect(html).toContain('aria-label="email access"');
+    expect(html).toMatch(/<span class="min-w-0 text-\[13px\] text-ink">Email</);
     expect(html).not.toContain("not connected");
-    // Tool-by-tool grants are Composio's list; HighLevel is scoped by read/write only.
-    expect([...html.matchAll(/truncate font-mono text-\[13px\] text-ink">([^<]*)</g)].map((match) => match[1])).toEqual(["gmail"]);
-  });
-
-  it("leaves HighLevel out while it is not connected", () => {
-    fixture.apps = { phase: "ready", connectedSlugs: ["gmail"], apps: [app("gmail", "Gmail")] };
-    const html = render(makeBot({ connectorScopes: { apps: { gmail: "write" } } }));
-    expect(html).not.toContain("HighLevel");
-    expect(html).not.toContain("highlevel");
   });
 
   it("shows no scope rows until the account list is known", () => {

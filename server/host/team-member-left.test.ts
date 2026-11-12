@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { personKey } from "../person-key.ts";
+import { TEAM_READER, VaultStore } from "../vault-store.ts";
 import { createUploadOwners } from "./member-uploads.ts";
 import { createTeamMemberLeft, type TeamMemberLeftDeps } from "./team-member-left.ts";
 
@@ -23,6 +24,10 @@ function fixture() {
   const deleted: string[] = [];
   const deletedBots: string[] = [];
   const working = new Set<string>();
+  const routines: Array<{ id: string; name: string; botId: string; home: string | null; writer: string | undefined; files: string[] }> = [];
+  const handed: Array<[string, string, string | null]> = [];
+  const rows: unknown[] = [];
+  const vault = new VaultStore({ dataDir });
   const deps: TeamMemberLeftDeps = {
     dataDir,
     store: { get bots() { return bots; }, messagesFor: (threadId) => messages.get(threadId) ?? [] },
@@ -48,12 +53,40 @@ function fixture() {
     deleteAttachment: (file) => deleted.push(file),
     eraseBrowsers: async () => true,
     forgetConnections: () => {},
+    forgetSecrets: (person) => { vault.forgetPerson(person); },
+    routines: () => routines,
+    deleteRoutine: (id) => { routines.splice(routines.findIndex((routine) => routine.id === id), 1); },
+    handRoutine: (id, left, to) => { handed.push([id, left, to]); },
+    forgetOnBots: () => 0,
+    ownerOf: (botId) => (botId === "scout" ? "olive@acme.test" : botId === "ledger" ? BOB : null),
+    record: (row) => { rows.push(row); },
   };
   const file = (n: number) => { writeFileSync(join(attachments, name(n)), "x"); return name(n); };
-  return { dataDir, attachments, messages, bots, deleted, deletedBots, working, deps, file };
+  return { dataDir, attachments, messages, bots, deleted, deletedBots, working, deps, file, routines, handed, rows, vault };
 }
 
 describe("createTeamMemberLeft", () => {
+  it("deletes the routines in their private chats with the files only those used, and hands the shared ones they wrote over", async () => {
+    const fx = fixture();
+    const own = fx.file(1), shared = fx.file(2);
+    fx.routines.push(
+      { id: "kumquat", name: "Kumquat", botId: "scout", home: bob, writer: undefined, files: [own] },
+      { id: "standup", name: "Standup", botId: "scout", home: null, writer: bob, files: [shared] },
+      { id: "tally", name: "Tally", botId: "ledger", home: null, writer: bob, files: [] },
+      { id: "theirs", name: "Theirs", botId: "scout", home: null, writer: "p_someone_else_entirely", files: [] },
+    );
+    const result = await createTeamMemberLeft({ ...fx.deps, openedBy: () => [] })(BOB);
+    expect(fx.routines.map((routine) => routine.id)).toEqual(["standup", "tally", "theirs"]);
+    expect(fx.handed).toEqual([["standup", bob, personKey({ id: "", email: "olive@acme.test" })], ["tally", bob, null]]);
+    expect(fx.rows).toEqual([
+      { category: "bot", action: "routine.handover", target: { kind: "routine", id: "standup", name: "Standup" }, after: { owner: "olive@acme.test" } },
+      { category: "bot", action: "routine.handover", target: { kind: "routine", id: "tally", name: "Tally" }, after: { owner: null } },
+      { category: "people", action: "member.left", target: { kind: "person", name: BOB }, after: { botsHandedBack: 0, routinesHandedOver: 2 } },
+    ]);
+    expect(fx.deleted).toEqual([own]);
+    expect(result).toMatchObject({ routines: 1, routinesHandedOver: 2 });
+  });
+
   it("deletes the departing member's own MausBot with its chats, and counts them", async () => {
     const fx = fixture();
     fx.messages.set("mausbot-main", [{ role: "user", text: "LC-L2-MAIN-9081" }]);
@@ -98,5 +131,19 @@ describe("createTeamMemberLeft", () => {
     expect(fx.deleted).toEqual([unsent]);
     expect(result.files).toBe(1);
     expect(existsSync(join(fx.dataDir, "people", bob))).toBe(false);
+  });
+
+  it("deletes the secrets they typed into cards in their own chats, and nobody else's, and says nothing of them", async () => {
+    const fx = fixture();
+    const ada = personKey({ id: "", email: "ada@acme.test" });
+    const own = (person: string) => fx.vault.saveSecret({ name: "Stripe secret key", value: `sk_test_fake-${person}`, source: "card", bots: ["scout"], person });
+    const theirs = own(bob), hers = own(ada);
+    const team = fx.vault.saveSecret({ name: "Stripe secret key", value: "sk_test_fake-team", source: "settings", bots: "all" });
+    await createTeamMemberLeft(fx.deps)(BOB);
+    expect(fx.vault.secret(theirs.id)).toBeNull();
+    expect(fx.vault.secret(hers.id)).not.toBeNull();
+    expect(fx.vault.listSecrets(TEAM_READER).map((one) => one.id)).toEqual([team.id]);
+    expect(new VaultStore({ dataDir: fx.dataDir }).secret(theirs.id), "and from the disk").toBeNull();
+    expect(JSON.stringify(fx.rows)).not.toContain("Stripe");
   });
 });

@@ -47,13 +47,20 @@ const rpc = (request: unknown, gate: { held: boolean; reason?: "person"; blocked
 };
 
 describe("cloud computer tools", () => {
-  it("lists the same twelve tools for every engine", async () => {
-    const listed = await rpc({ method: "tools/list", params: {} }).done as { tools: Array<{ name: string }> };
+  it("lists the same thirteen tools for every engine", async () => {
+    const listed = await rpc({ method: "tools/list", params: {} }).done as { tools: Array<{ name: string; description: string; inputSchema: { properties: Record<string, { description?: string }> } }> };
     expect(listed.tools.map(tool => tool.name)).toEqual([
-      "screenshot", "get_screen_size", "click", "move", "drag", "type_text", "key_press", "scroll", "open_url", "exec",
+      "screenshot", "get_screen_size", "click", "move", "drag", "type_text", "key_press", "scroll", "open_url", "exec", "exec_status",
       "copy_from_computer", "copy_to_computer",
     ]);
     expect(calls).toEqual([]);
+    const exec = listed.tools.find(tool => tool.name === "exec")!;
+    expect(exec.description).toContain("Completion does not automatically resume this turn or notify a delegator");
+    expect(exec.description).toContain("use exec_status with wait_seconds in this turn");
+    expect(exec.description).toContain("check its exit code and output");
+    expect(exec.description).toContain("report the work as unfinished with the process_id");
+    const status = listed.tools.find(tool => tool.name === "exec_status")!;
+    expect(status.inputSchema.properties.wait_seconds.description).toContain("A running result can arrive before the full interval");
   });
 
   it.each([
@@ -166,6 +173,16 @@ describe("cloud computer tools", () => {
     await expect(rpc({ method: "resources/read" }).done).rejects.toMatchObject({ status: 400 });
   });
 
+  it("answers a call the gate refused with the refusal, even when the turn ended while it waited", async () => {
+    const ended = () => { throw Object.assign(new Error("This bot turn has already ended"), { status: 401 }); };
+    const blockedReason = "The cloud computer could not be started: the cloud computer didn't start in time. This call was not performed.";
+    const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "screenshot", arguments: {} } }, {
+      cfg, boxId: () => null, signal: new AbortController().signal, gate: async () => ({ held: true, blockedReason }), assertActive: ended,
+    });
+    expect(result).toEqual({ isError: true, content: [{ type: "text", text: expect.stringContaining(blockedReason) }] });
+    expect(calls).toHaveLength(0);
+  });
+
   it("aborts an in-flight Boat command without retrying it", async () => {
     holdCommand = true;
     const started = new Promise<void>(resolve => { commandStarted = resolve; });
@@ -186,7 +203,7 @@ describe("cloud computer tools", () => {
       cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, budgetMs: 600, assertActive: () => {},
       gate: async () => { await new Promise(resolve => setTimeout(resolve, 300)); return { held: false }; },
     });
-    expect(result).toEqual({ isError: true, content: [{ type: "text", text: tools.CLOUD_COMPUTER_LATE }] });
+    expect(result).toEqual({ isError: true, content: [{ type: "text", text: (await import("./cloud-computer-background.ts")).EXEC_LATE }] });
     expect(Date.now() - started).toBeGreaterThanOrEqual(550);
     expect(Date.now() - started).toBeLessThan(1_500);
     expect(calls.filter(entry => entry.path.endsWith("/commands"))).toHaveLength(1);

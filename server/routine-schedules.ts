@@ -121,7 +121,7 @@ function parseSchedule(schedule: RoutineScheduleInput, after: number): RoutineSc
   }
   if (schedule?.type === "once") {
     const at = Number(schedule.at);
-    if (!Number.isFinite(at)) throw new Error("Choose a valid date and time");
+    if (!Number.isFinite(at) || Math.abs(at) > MAX_DATE_MS) throw new Error("Choose a valid date and time");
     return { type: "once", at };
   }
   if (schedule?.type === "daily") {

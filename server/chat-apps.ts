@@ -5,20 +5,20 @@ import {
   type AppCan, type AppDocument, type AppPayload,
 } from "../shared/app.ts";
 import { BOT_HTML_NETWORK } from "../shared/app-frame/csp.ts";
-import { botHtmlDocument, mcpAppDocument, publishedBotHtml } from "../shared/app-frame/document.ts";
+import { botHtmlDocument, mcpAppDocument, publishedBotHtml, ROOM_CAN } from "../shared/app-frame/document.ts";
 import { jsxPublishedHtml } from "../shared/app-frame/jsx-page.ts";
-import { AppDocs, type AppDocData, type AppDocPut } from "./app-docs.ts";
-import type { AgentCardResult, AgentCardStore } from "./chat-widgets.ts";
+import { APP_DOCS_SWEEP_GRACE_MS, AppDocs, type AppDocData, type AppDocPut } from "./app-docs.ts";
+import { speakerIn, type AgentCardResult, type AgentCardStore } from "./chat-widgets.ts";
 import { compileJsxPage } from "./jsx-compile.ts";
 import { appDocRefs } from "./message-db.ts";
-import { createPageFiles } from "./page-files.ts";
-import { PageBundleError, readBotPageBundle, skippedNote, type BotFolders, type PageBundle, type PageFile } from "./pages/bundle.ts";
+import { createPageFiles, type PageFilesViewer } from "./page-files.ts";
+import { pageSignature, PageBundleError, readBotPageBundle, readPageBundle, skippedNote, stillReadable, type BotFolders, type PageBundle, type PageFile } from "./pages/bundle.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { Message, StoreChange } from "./store.ts";
 import { userError, type UserError } from "./user-errors.ts";
 import type { PublishedPageCard as PublishedPage } from "../shared/published-page.ts";
+import type { MausColor } from "../shared/wire.ts";
 
-const ROOM_REFUSAL = "Pages are not available in rooms yet. Answer in text.";
 const NO_SUCH_PAGE = "No page with that id in this conversation.";
 const NOT_A_PAGE = "That app came from an MCP server, not from show_html; it cannot be replaced. Show a new page instead.";
 
@@ -102,7 +102,7 @@ const pageFallback = (title: string, page: PageText, given?: string) =>
 export function createAppCard(args: {
   store: AgentCardStore;
   docs: AppDocs;
-  bot: { id: string; name: string };
+  bot: { id: string; name: string; color: MausColor };
   threadId: string;
   input: Record<string, unknown>;
   authored?(messageId: string): void;
@@ -112,7 +112,6 @@ export function createAppCard(args: {
   if (input.tool !== "show_html" && input.tool !== "update_html") {
     return { ok: false, status: 400, error: "tool: must be show_html or update_html." };
   }
-  if (store.groupByThread(threadId)) return { ok: false, status: 409, error: ROOM_REFUSAL };
   const parsed = input.tool === "show_html" ? parseShowHtmlInput(input) : parseUpdateHtmlInput(input);
   if (!parsed.ok) return { ok: false, status: 400, error: parsed.error };
   const existing = "appId" in parsed.value ? appRow(store, threadId, parsed.value.appId) : undefined;
@@ -127,8 +126,8 @@ export function createAppCard(args: {
 }
 
 function placePage(
-  args: { store: AgentCardStore; docs: AppDocs; bot: { id: string }; threadId: string; authored?(messageId: string): void },
-  value: { appId?: string; height?: number; fallbackText?: string; frameless?: boolean },
+  args: { store: AgentCardStore; docs: AppDocs; bot: { id: string; name: string; color: MausColor }; threadId: string; authored?(messageId: string): void },
+  value: { appId?: string; height?: number; fallbackText?: string; frameless?: boolean; live?: boolean },
   made: MadePage,
 ): AgentCardResult {
   const { store, docs, bot, threadId } = args;
@@ -141,18 +140,18 @@ function placePage(
       ...(page.format ? { format: page.format } : {}),
       ...(value.height !== undefined ? { height: value.height } : {}),
       border: value.frameless !== true,
+      ...(value.live && page.folder ? { live: true as const } : {}),
       network: { connect: [...BOT_HTML_NETWORK.connect], resources: [...BOT_HTML_NETWORK.resources] },
       ...(stored.ok ? {} : { blocked: "too-large" as const }),
     };
-    // No `from`: in a direct thread a bot-authored row carrying one is replayed as another bot's line.
-    const message = store.appendMessage(threadId, { role: "bot", kind: "app", text: pageFallback(made.title, page, value.fallbackText), app: payload });
+    const message = store.appendMessage(threadId, { role: "bot", kind: "app", text: pageFallback(made.title, page, value.fallbackText), app: payload, ...speakerIn(store, threadId, bot) });
     args.authored?.(message.id);
     return { ok: true, messageId: message.id, ...(made.masked ? { masked: true as const } : {}), ...(made.leftOut ? { leftOut: made.leftOut } : {}) };
   }
   const existing = appRow(store, threadId, value.appId);
   if (!existing || (existing.from && existing.from.botId !== bot.id)) return { ok: false, status: 404, error: NO_SUCH_PAGE };
   if (existing.app.source !== "html") return { ok: false, status: 409, error: NOT_A_PAGE };
-  const patched = replacePage(store, docs, threadId, existing, made, value.frameless);
+  const patched = replacePage(store, docs, threadId, existing, made, { frameless: value.frameless, live: value.live });
   if (!patched) return { ok: false, status: 404, error: NO_SUCH_PAGE };
   args.authored?.(patched.id);
   return { ok: true, messageId: patched.id, ...(made.masked ? { masked: true as const } : {}), ...(made.leftOut ? { leftOut: made.leftOut } : {}) };
@@ -160,16 +159,22 @@ function placePage(
 
 /** The next version of a row's page; the row is unchanged when the page is the same document. */
 function replacePage(
-  store: Pick<AgentCardStore, "patchMessage">, docs: AppDocs, threadId: string, existing: Message & { app: AppPayload }, made: MadePage, frameless?: boolean,
+  store: Pick<AgentCardStore, "patchMessage">, docs: AppDocs, threadId: string, existing: Message & { app: AppPayload }, made: MadePage,
+  options: { frameless?: boolean; live?: boolean } = {},
 ): Message | null {
   const { page } = made;
   const stored = storePage(docs, page);
-  const border = frameless === undefined ? existing.app.border : !frameless;
+  const border = options.frameless === undefined ? existing.app.border : !options.frameless;
+  // Only a page from a folder can stay live; a page sent as html or jsx stops being live.
+  const live = Boolean(page.folder) && (options.live ?? existing.app.live === true);
+  const liveField = live ? { live: true as const } : {};
   if (stored.ok && stored.doc === existing.app.doc && made.title === existing.app.title) {
-    return border === existing.app.border ? existing : store.patchMessage(threadId, existing.id, { app: { ...existing.app, border } });
+    if (border === existing.app.border && live === (existing.app.live === true)) return existing;
+    const { live: _wasLive, ...same } = existing.app;
+    return store.patchMessage(threadId, existing.id, { app: { ...same, border, ...liveField } });
   }
   // The page reloads: what the old one told the model about itself no longer holds.
-  const { context: _context, blocked: _blocked, format: _format, history: earlier, ...kept } = existing.app;
+  const { context: _context, blocked: _blocked, format: _format, history: earlier, live: _live, ...kept } = existing.app;
   const history = [...(earlier ?? []), ...(existing.app.doc ? [existing.app.doc] : [])].slice(-(APP_PAGE_VERSIONS - 1));
   const payload: AppPayload = {
     ...kept,
@@ -178,6 +183,7 @@ function replacePage(
     rev: (existing.app.rev ?? 0) + 1,
     bytes: pageBytes(page),
     border,
+    ...liveField,
     ...(history.length ? { history } : {}),
     ...(page.format ? { format: page.format } : {}),
     ...(stored.ok ? {} : { blocked: "too-large" as const }),
@@ -202,7 +208,7 @@ export function pageVersion(app: AppPayload, rev?: number): { doc: string; rev: 
 }
 
 export function appDocument(args: {
-  store: Pick<AgentCardStore, "messagesFor">;
+  store: Pick<AgentCardStore, "messagesFor" | "groupByThread">;
   docs: AppDocs;
   threadId: string;
   messageId: string;
@@ -219,14 +225,15 @@ export function appDocument(args: {
   const stored = args.docs.read(version.doc);
   if (!stored || stored.source !== row.app.source) return null;
   const rev = version.rev;
+  const room = Boolean(args.store.groupByThread(args.threadId));
   if (stored.source === "html") {
     const files = stored.data?.folder && args.files
       ? `${args.files.origin}${args.files.folder({ threadId: args.threadId, messageId: row.id, doc: version.doc })}` : undefined;
     return botHtmlDocument({ messageId: row.id, rev, html: stored.html, title: row.app.title,
-      ...(stored.data?.format === "jsx" ? { format: "jsx" as const } : {}), ...(files ? { files } : {}) });
+      ...(stored.data?.format === "jsx" ? { format: "jsx" as const } : {}), ...(files ? { files } : {}), ...(room ? { room } : {}) });
   }
   if (!stored.data?.tool) return null;
-  const access = (args.mcpAccess ?? MCP_READ_ONLY)(row, args.threadId);
+  const access: ReturnType<McpAppAccess> = room ? { can: ROOM_CAN } : (args.mcpAccess ?? MCP_READ_ONLY)(row, args.threadId);
   return mcpAppDocument({
     messageId: row.id, rev, html: stored.html,
     network: { connect: stored.data.network?.connect ?? [], resources: stored.data.network?.resources ?? [] },
@@ -235,6 +242,7 @@ export function appDocument(args: {
     ...(stored.data.toolResult ? { toolResult: stored.data.toolResult } : {}),
     can: access.can,
     ...(access.blocked ? { blocked: access.blocked } : {}),
+    ...(room ? { room } : {}),
   });
 }
 
@@ -267,18 +275,19 @@ export function publishablePage(args: { store: Pick<AgentCardStore, "messagesFor
   return { ok: true, title, files, rev: version.rev, ...(stored.data?.folder ? { folder: stored.data.folder } : {}) };
 }
 
-/** Where publish_page's page shows in its conversation: the inline card of a page already shown from the same file or
- * folder gains the new version and the link, or a new card holds both. null when a card can't hold it (a room, or a
+/** Where publish_page's page shows in its conversation: the inline card of a page the same bot already showed from the
+ * same file or folder gains the new version and the link, or a new card holds both. null when a card can't hold it (a
  * page with nothing to preview); the caller then posts the plain link. */
 export function showPublishedPage(args: {
-  store: AgentCardStore; docs: AppDocs; threadId: string; card: PublishedPage; bundle: PageBundle;
+  store: AgentCardStore; docs: AppDocs; threadId: string; card: PublishedPage; bundle: PageBundle; bot: { id: string; name: string; color: MausColor };
 }): string | null {
   const { store, docs, threadId, card, bundle } = args;
-  if (store.groupByThread(threadId) || card.state !== "live") return null;
+  if (card.state !== "live") return null;
   const made = bundlePage(bundle, card.title);
   if (!made.ok) return null;
+  const speaker = speakerIn(store, threadId, args.bot);
   const shown = store.messagesFor(threadId).filter((message): message is Message & { app: AppPayload } =>
-    message.kind === "app" && isRecord(message.app) && message.app.source === "html" && !message.from)
+    message.kind === "app" && isRecord(message.app) && message.app.source === "html" && message.from?.botId === speaker.from?.botId)
     .reverse().find((message) => message.app.doc && docs.read(message.app.doc)?.data?.folder === bundle.source);
   if (shown) {
     const videos = docs.read(shown.app.doc)?.data?.videos;
@@ -292,7 +301,7 @@ export function showPublishedPage(args: {
     v: 1, source: "html", title: made.title, doc: stored.doc, rev: 0, bytes: pageBytes(made.page), border: true,
     network: { connect: [...BOT_HTML_NETWORK.connect], resources: [...BOT_HTML_NETWORK.resources] },
   };
-  return store.appendMessage(threadId, { role: "bot", kind: "app", text: pageFallback(made.title, made.page), app: payload, publishedPage: card }).id;
+  return store.appendMessage(threadId, { role: "bot", kind: "app", text: pageFallback(made.title, made.page), app: payload, publishedPage: card, ...speaker }).id;
 }
 
 export type AppRouteResult = { ok: true } | { ok: false; status: 400 | 404 | 409 | 429; error: string };
@@ -445,12 +454,13 @@ export function rowRate(limit: number, windowMs: number): { take(key: string, no
 export interface ChatApps {
   readonly docs: AppDocs;
   createAppCard(args: {
-    bot: { id: string; name: string }; threadId: string; input: Record<string, unknown>; authored?(messageId: string): void; folders?: BotFolders;
+    bot: { id: string; name: string; color: MausColor }; threadId: string; input: Record<string, unknown>; authored?(messageId: string): void; folders?: BotFolders;
   }): AgentCardResult | Promise<AgentCardResult>;
-  /** `origin`: the web origin the client reaches this app at, which a folder page's files load from. */
-  appDocument(threadId: string, messageId: string, rev?: number, origin?: string): AppDocument | null;
+  /** `origin`: the web origin the client reaches this app at, which a folder page's files load from. `viewer`: who asked,
+   * whose own token those files load with. */
+  appDocument(threadId: string, messageId: string, rev?: number, origin?: string, viewer?: PageFilesViewer): AppDocument | null;
   publishablePage(threadId: string, messageId: string, rev?: number): PublishablePage;
-  showPublishedPage(args: { threadId: string; card: PublishedPage; bundle: PageBundle }): string | null;
+  showPublishedPage(args: { threadId: string; card: PublishedPage; bundle: PageBundle; bot: { id: string; name: string; color: MausColor } }): string | null;
   /** The folder pages' files route, ahead of the sign-in gate: true when the request was its own. */
   serveFile(req: IncomingMessage, res: ServerResponse, path: string, method: string): boolean;
   setAppContext(args: { threadId: string; messageId: string; content?: unknown; structuredContent?: unknown }): AppRouteResult;
@@ -458,8 +468,18 @@ export interface ChatApps {
   mcpAccess?: McpAppAccess;
   recordMcpAppCall?(args: { bot: { id: string; name: string }; threadId: string; input: Record<string, unknown>; authored?(messageId: string): void }): Promise<AgentCardResult>;
   sweep(): number;
+  /** Re-reads each live page whose folder changed and replaces it in place; how many pages changed. */
+  refreshLive(): Promise<number>;
+  /** Resolves once a live refresh under way is over: a backup waits for it before its snapshot. */
+  settleLive(): Promise<void>;
   close(): void;
 }
+
+/** How often live pages' folders are checked, and how many pages are watched at most (the newest). */
+const LIVE_EVERY_MS = 5_000;
+const LIVE_PAGES_MAX = 50;
+/** How long a failed read or store waits to be tried again. */
+const LIVE_RETRY_MS = 60_000;
 
 export function createChatApps(deps: {
   store: ChatAppsStore;
@@ -467,6 +487,12 @@ export function createChatApps(deps: {
   maxBytes?: number;
   references?(): string[];
   sweeps?: boolean;
+  /** The live pages already in the store, read once: the server picks them up again after a restart. */
+  liveRows?(limit: number): Array<{ threadId: string; messageId: string }>;
+  /** True while the workspace is being backed up or restored: live pages wait, so they don't write mid-snapshot. */
+  paused?(): boolean;
+  /** The folders the page's bot may read in this conversation now; null once the bot is gone. A live page outside them stops being live. */
+  liveRoots?(threadId: string, botId: string | undefined): readonly string[] | null;
 }): ChatApps {
   const docs = new AppDocs(`${deps.dataDir}/app-docs`, deps.maxBytes ? { maxBytes: deps.maxBytes } : {});
   const references = deps.references ?? appDocRefs;
@@ -491,19 +517,107 @@ export function createChatApps(deps: {
   });
   if (deps.sweeps !== false) later(30_000);
   const files = createPageFiles({ docs });
+  const stillShown = (target: { threadId: string; messageId: string; doc: string }) => {
+    const row = appRow(deps.store, target.threadId, target.messageId);
+    return Boolean(row && (row.app.doc === target.doc || row.app.history?.includes(target.doc)));
+  };
+  // Live pages, by row: the page's folder (looked up again only when its document changes), the folder's fingerprint
+  // when it was last read, and when a failed read or store is tried again. The store is listed once, after a restart;
+  // pages made since are watched as they are made.
+  const live = new Map<string, { threadId: string; messageId: string; doc?: string; folder?: string; signature?: string; retryAt?: number }>();
+  let liveListed = false, refreshing: Promise<number> | null = null;
+  const watch = (threadId: string, messageId: string) => {
+    const key = `${threadId}\n${messageId}`;
+    if (live.has(key)) return;
+    live.set(key, { threadId, messageId });
+    // The newest pages are kept: a Map iterates oldest first.
+    for (const old of live.keys()) { if (live.size <= LIVE_PAGES_MAX) break; live.delete(old); }
+  };
+  const watchIfLive = (threadId: string, result: AgentCardResult) => {
+    if (result.ok && appRow(deps.store, threadId, result.messageId)?.app.live) watch(threadId, result.messageId);
+    return result;
+  };
+  const refreshOnce = async (): Promise<number> => {
+    if (deps.paused?.()) return 0;
+    if (!liveListed) {
+      liveListed = true;
+      try { for (const row of [...(deps.liveRows?.(LIVE_PAGES_MAX) ?? [])].reverse()) watch(row.threadId, row.messageId); } catch (error) {
+        console.error("chat apps: could not read live pages", error);
+      }
+    }
+    let changed = 0;
+    for (const [key, entry] of live) {
+      const row = appRow(deps.store, entry.threadId, entry.messageId);
+      if (row?.app.live && row.app.doc && row.app.doc !== entry.doc) {
+        const folder = docs.read(row.app.doc)?.data?.folder;
+        // Another folder: its first look is a change, whatever the old folder's fingerprint was.
+        if (folder !== entry.folder) Object.assign(entry, { signature: undefined, retryAt: undefined });
+        Object.assign(entry, { doc: row.app.doc, folder });
+      }
+      const folder = row?.app.live && row.app.doc ? entry.folder : undefined;
+      if (!row || !folder) { live.delete(key); continue; }
+      if (entry.retryAt !== undefined && Date.now() < entry.retryAt) continue;
+      // The bot is gone or no longer has the folder: the card keeps the page it shows and stops being live.
+      if (deps.liveRoots && !(await stillReadable(folder, deps.liveRoots(entry.threadId, row.from?.botId)))) {
+        const { live: _live, ...kept } = row.app;
+        deps.store.patchMessage(entry.threadId, row.id, { app: kept });
+        live.delete(key);
+        continue;
+      }
+      const retryLater = () => Object.assign(entry, { signature: undefined, retryAt: Date.now() + LIVE_RETRY_MS });
+      try {
+        // null too when the folder is no longer where the page was shown from (swapped for a link elsewhere).
+        const signature = await pageSignature(folder, { videos: true });
+        if (signature === null || signature === entry.signature) continue;
+        // A half-written folder (no index.html yet, over a limit) is read again only on its next change.
+        Object.assign(entry, { signature, retryAt: undefined });
+        const bundle = await readPageBundle(folder, [folder], undefined, { videos: true, exactRoots: true });
+        if (bundle.source !== folder) continue;
+        // The row may have been replaced, renamed or turned off while the folder was read.
+        const now = appRow(deps.store, entry.threadId, entry.messageId);
+        if (!now?.app.live || now.app.doc !== row.app.doc) continue;
+        const made = bundlePage(bundle, now.app.title);
+        if (!made.ok) continue;
+        // A backup or restore began while the folder was read: nothing is written; the folder is read again after it.
+        if (deps.paused?.()) { entry.signature = undefined; break; }
+        // No room for the new version: the card keeps the one it shows, and the folder is tried again later.
+        if (!storePage(docs, made.page).ok) { retryLater(); continue; }
+        const patched = replacePage(deps.store, docs, entry.threadId, now, made);
+        if (patched && patched.app?.rev !== now.app.rev) changed++;
+      } catch (error) {
+        // A folder that can't make a page waits for its next change; one briefly not found or unreadable is tried again later.
+        if (error instanceof PageBundleError && error.status !== 404) continue;
+        retryLater();
+        if (!(error instanceof PageBundleError) && (error as NodeJS.ErrnoException)?.code !== "ENOENT") console.error("chat apps: live page refresh failed", error);
+      }
+    }
+    // The versions a live page replaced are cleared once they are past the sweep's grace.
+    if (changed && deps.sweeps !== false) later(APP_DOCS_SWEEP_GRACE_MS + 1_000);
+    return changed;
+  };
+  const refreshLive = () => (refreshing ??= refreshOnce().finally(() => { refreshing = null; }));
+  const liveTimer = deps.sweeps === false ? null : setInterval(() => { void refreshLive(); }, LIVE_EVERY_MS);
+  liveTimer?.unref?.();
   const apps: ChatApps = {
     docs,
-    createAppCard: (args) => createAppCard({ ...args, store: deps.store, docs }),
-    appDocument: (threadId, messageId, rev, origin) => appDocument({ store: deps.store, docs, threadId, messageId, ...(rev !== undefined ? { rev } : {}),
-      ...(apps.mcpAccess ? { mcpAccess: apps.mcpAccess } : {}), ...(origin ? { files: { origin, folder: files.folder } } : {}) }),
+    createAppCard: (args) => {
+      const result = createAppCard({ ...args, store: deps.store, docs });
+      return result instanceof Promise ? result.then((done) => watchIfLive(args.threadId, done)) : watchIfLive(args.threadId, result);
+    },
+    appDocument: (threadId, messageId, rev, origin, viewer) => appDocument({ store: deps.store, docs, threadId, messageId, ...(rev !== undefined ? { rev } : {}),
+      ...(apps.mcpAccess ? { mcpAccess: apps.mcpAccess } : {}),
+      ...(origin ? { files: { origin, folder: (target) => files.folder(target, { key: viewer?.key ?? "", allowed: () => stillShown(target) && (viewer?.allowed() ?? true) }) } } : {}) }),
     publishablePage: (threadId, messageId, rev) => publishablePage({ store: deps.store, docs, threadId, messageId, ...(rev !== undefined ? { rev } : {}) }),
     showPublishedPage: (args) => showPublishedPage({ ...args, store: deps.store, docs }),
     serveFile: (req, res, path, method) => files.serve(req, res, path, method),
     setAppContext: (args) => setAppContext(deps.store, args),
     withAppContext: (text, threadId) => withAppContext(deps.store, text, threadId),
     sweep,
+    refreshLive,
+    settleLive: async () => { await refreshing?.catch(() => {}); },
     close() {
       unsubscribe?.();
+      if (liveTimer) clearInterval(liveTimer);
       if (pending) clearTimeout(pending);
       pending = null;
     },

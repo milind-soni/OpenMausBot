@@ -32,6 +32,9 @@ export const AREA_CHECKS = {
   // The Windows CUA job starts these the way the installed app does, then lends the PC's screen through them.
   "windows-computer-control": [...SERVER_CHECKS, "windows-cua"],
   "control-plane": ["control-plane"],
+  // The announcements file and its pictures: static validates them (scripts/check-announcements.mjs), and nothing else
+  // reads them but the server's bundled copy, which that check covers.
+  announcements: [],
   // The relay is its own package with its own lockfile; nothing outside relay/ reaches it except the shared vectors,
   // which it keeps a pinned copy of.
   relay: ["relay"],
@@ -51,14 +54,21 @@ export const VITEST_SUBSETS = {
     part: "locale tests",
     files: [
       "src/",
+      "electron/cua-launch.test.mjs",
+      "electron/cua-watch-restart.test.mjs",
+      "electron/cua-windows-isolation.test.mjs",
       "electron/menu.test.mjs",
       "electron/updater.test.mjs",
       "scripts/generate-locale.test.mjs",
       "scripts/testing/bot-tools-ui.e2e.test.ts",
       "scripts/testing/key-readback.e2e.test.ts",
       "scripts/testing/one-workspace-ui.e2e.test.ts",
+      "scripts/testing/rail-profile-ui.e2e.test.ts",
       "scripts/testing/secret-card-descriptions.test.ts",
+      "scripts/testing/team-conversation-share-ui.e2e.test.ts",
       "scripts/testing/team-own-chat.e2e.test.ts",
+      "scripts/testing/team-private-default-ui.e2e.test.ts",
+      "scripts/testing/team-side-switch-ui.e2e.test.ts",
       "server/body-thread-guards.e2e.test.ts",
       "server/client-notifications.e2e.test.ts",
       "server/cloud-connections.e2e.test.ts",
@@ -66,6 +76,7 @@ export const VITEST_SUBSETS = {
       "server/cloud-lending-chrome.e2e.test.ts",
       "server/cloud-lending-memory.e2e.test.ts",
       "server/cloud-lending.e2e.test.ts",
+      "server/cloud-lent-mcp.e2e.test.ts",
       "server/cloud-send-kinds.e2e.test.ts",
       "server/cloud-send-move.e2e.test.ts",
       "server/cloud-send-rooms.e2e.test.ts",
@@ -73,24 +84,39 @@ export const VITEST_SUBSETS = {
       "server/cloud-send-store.e2e.test.ts",
       "server/cloud-send.e2e.test.ts",
       "server/cloud-sync.e2e.test.ts",
+      "server/cloud-team-asker-owns.e2e.test.ts",
+      "server/cloud-team-away.e2e.test.ts",
       "server/cloud-team-browser.e2e.test.ts",
       "server/cloud-team-connections.e2e.test.ts",
+      "server/cloud-team-conversation-share.e2e.test.ts",
       "server/cloud-team-engine-homes.e2e.test.ts",
       "server/cloud-team-gateway-mcp.e2e.test.ts",
       "server/cloud-team-inbox.e2e.test.ts",
+      "server/cloud-team-included-hosting.e2e.test.ts",
+      "server/cloud-team-mausbot-reach.e2e.test.ts",
+      "server/cloud-team-member-secrets.e2e.test.ts",
+      "server/cloud-team-new-chat-private.e2e.test.ts",
       "server/cloud-team-open-reach.e2e.test.ts",
+      "server/cloud-team-own-key-apps.e2e.test.ts",
       "server/cloud-team-owners.e2e.test.ts",
       "server/cloud-team-people.e2e.test.ts",
+      "server/cloud-team-per-person.e2e.test.ts",
       "server/cloud-team-phones.e2e.test.ts",
       "server/cloud-team-pictures.e2e.test.ts",
+      "server/cloud-team-presence.e2e.test.ts",
+      "server/cloud-team-privacy-holes.e2e.test.ts",
+      "server/cloud-team-private-default.e2e.test.ts",
       "server/cloud-team-private.e2e.test.ts",
       "server/cloud-team-profile.e2e.test.ts",
+      "server/cloud-team-published-apps.e2e.test.ts",
       "server/cloud-team-requests.e2e.test.ts",
+      "server/cloud-team-routines.e2e.test.ts",
       "server/cloud-team-setup-request.e2e.test.ts",
       "server/cloud-team.e2e.test.ts",
       "server/host/brief-words.test.ts",
       "server/host/lending-lifts.test.ts",
       "server/lent-folders.e2e.test.ts",
+      "server/move-chosen-bots.e2e.test.ts",
       "server/one-home-keep.e2e.test.ts",
       "server/one-home-outdated.e2e.test.ts",
       "server/one-home-retry.e2e.test.ts",
@@ -101,7 +127,9 @@ export const VITEST_SUBSETS = {
       "server/parked-cards.e2e.test.ts",
       "server/question-cards.e2e.test.ts",
       "server/shared-computers.e2e.test.ts",
+      "server/shared-computers.gate.test.ts",
       "server/team-move.e2e.test.ts",
+      "server/team-welcome.e2e.test.ts",
       "server/use-my-mac.e2e.test.ts",
       "server/workspace-banner.e2e.test.ts",
       "scripts/server-locale-plugin.test.ts",
@@ -142,6 +170,7 @@ export const VITEST_SUBSETS = {
       "server/host/wait-words.test.ts",
       "server/place-inbox.e2e.test.ts",
       "server/bot-api-team.e2e.test.ts",
+      "server/cloud-team-conversation-share.e2e.test.ts",
       "server/cloud-team-first-look.e2e.test.ts",
       "server/cloud-team-mausbot-own-chat.e2e.test.ts",
       "server/connector-stayed.e2e.test.ts",
@@ -173,6 +202,7 @@ export const SRC_OUTSIDE_RENDERER = [
   "src/lib/citations.ts",
   "src/lib/composer-attachments.ts",
   "src/lib/random-uuid.ts",
+  "src/lib/receipts.ts",
 ];
 
 export const DOCS = /^(?:[^/]+\.md|docs\/.+\.md|\.github\/FUNDING\.yml)$/;
@@ -190,6 +220,7 @@ const AREAS = [
   [/^electron\/(?:cua|cua-failure|cua-connection|capabilities|screen-status|shared-cua-connection|shared-computer-access|lent-screen-tools|lent-screen-failures|paced-typing)\.[cm]js$/, "windows-computer-control"],
   [/^(?:electron|build)\/|^(?:electron-builder\.yml|index\.html|rail\.html)$/, "desktop"],
   [/^cloudflare\/control-plane\//, "control-plane"],
+  [/^announcements\//, "announcements"],
   [/^relay\//, "relay"],
 ];
 
@@ -317,8 +348,10 @@ export function laneOf(event) {
 export const VITEST_SHARDS = { "macos-latest": 4, "ubuntu-latest": 8, "windows-latest": 8 };
 
 // Test files at once on each platform's runner (OMB_VITEST_WORKERS, vite.config.ts). A Linux shard mostly waits on real
-// servers and fake engines: its 4 vCPU sat 70% idle one file at a time, and four files take a third of the time.
-export const VITEST_WORKERS = { "macos-latest": 1, "ubuntu-latest": 4, "windows-latest": 1 };
+// servers and fake engines: its 4 vCPU sat 70% idle one file at a time, and four files take a third of the time. A
+// Windows shard one file at a time took 9 to 14 minutes (Nov 10 2026) and set the length of every run that has one;
+// its runner has 4 vCPU too, so it runs two files at once.
+export const VITEST_WORKERS = { "macos-latest": 1, "ubuntu-latest": 4, "windows-latest": 2 };
 
 /** ci.yml's vitest matrix: every shard of every selected platform, and which e2e files that platform runs. */
 export function vitestMatrix(oses) {

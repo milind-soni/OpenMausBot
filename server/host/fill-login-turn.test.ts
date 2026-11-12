@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { BotLogins } from "../bot-logins.ts";
-import { LoginStore } from "../login-store.ts";
+import { VaultStore } from "../vault-store.ts";
 import type { OnePasswordLogins } from "../onepassword.ts";
 
 import type { Surface } from "../../shared/wire.ts";
@@ -91,6 +91,17 @@ describe("fill_login outside the bot's own browser", () => {
 });
 
 describe("fill_login in the bot's own browser", () => {
+  it("passes turn cancellation through to the login action before browser input starts", async () => {
+    const engine = vi.fn(async () => ({ url: "https://bank.test/sign-in" }));
+    const { fill } = harness({
+      at: "browser", turnActive: () => false,
+      target: async () => ({ session: "bot-b1", spec: { command: "agent-browser", env: {} }, env: {} }),
+      loginInput: () => ({ engine, insertText: async () => {}, press: async () => {}, click: async () => {} }),
+    });
+    expect(await fill(bot, turn, undefined, undefined)).toEqual({ ok: false, text: "Stopped filling this login because the turn ended." });
+    expect(engine).not.toHaveBeenCalled();
+  });
+
   it("fills there and never asks to move", async () => {
     const { fill, moveToBrowser, target } = harness({ at: "browser" });
     const answer = await fill(bot, turn, undefined, undefined);
@@ -114,9 +125,9 @@ describe("fill_login in the bot's own browser", () => {
 });
 
 describe("fill_login and a login kept to some bots on a shared browser", () => {
-  const onePassword = { fresh: async () => {}, sitesFor: () => [], candidates: () => [], markUsed: () => {} } as unknown as OnePasswordLogins;
+  const onePassword = { id: "1password", label: "1Password", fresh: async () => {}, items: () => [], read: async () => ({}), markUsed: () => {} } as unknown as OnePasswordLogins;
   const logins = (bots: ReadonlyArray<{ id: string; browserProfile?: string }>) => {
-    const store = new LoginStore({ dataDir: mkdtempSync(join(tmpdir(), "omb-fill-shared-")) });
+    const store = new VaultStore({ dataDir: mkdtempSync(join(tmpdir(), "omb-fill-shared-")) });
     store.create({ ...BANK, password: "never-shown", source: "settings", bots: ["b1"] });
     return new BotLogins(store, onePassword, () => bots);
   };
@@ -135,3 +146,40 @@ describe("fill_login and a login kept to some bots on a shared browser", () => {
   });
 });
 
+
+describe("fill_login and a missing mailbox", () => {
+  function browser(offer: { shown: boolean; line?: string }, outcome = { ok: false, text: "This page asks for a one-time code.", wantsMailbox: true }) {
+    const offerConnect = vi.fn(async () => offer);
+    const find = vi.fn(async () => ({ kind: "skip" as const }));
+    const { fill } = harness({
+      at: "browser", target: async () => ({ session: "s", spec: { command: "x", env: {} }, env: {} }),
+      withSecretInput: async () => outcome, mailCodes: { find, offerConnect },
+    });
+    return { fill, offerConnect };
+  }
+
+  it("shows the connect card and tells the bot to end the turn instead of handing the person a code to copy", async () => {
+    const { fill, offerConnect } = browser({ shown: true });
+    const answer = await fill(bot, turn, undefined, undefined);
+    expect(offerConnect).toHaveBeenCalledOnce();
+    expect(answer.text).toContain("Connect card for Gmail");
+    expect(answer.text).toContain("End this turn now");
+    expect(answer.text).not.toContain("request_sign_in");
+  });
+
+  it("falls back to today's words when no card is shown", async () => {
+    const { fill } = browser({ shown: false });
+    expect((await fill(bot, turn, undefined, undefined)).text).toContain("read it from their connected email or messages");
+  });
+
+  it("passes on the team's line for a person's own Gmail", async () => {
+    const { fill } = browser({ shown: false, line: "Connect your Gmail here: https://x" });
+    expect((await fill(bot, turn, undefined, undefined)).text).toContain("Connect your Gmail here: https://x");
+  });
+
+  it("moves an email-only sign-in to the browser even with no saved login", async () => {
+    const { fill, moveToBrowser } = harness({ logins: { sitesFor: () => [], candidates: async () => [], markUsed: () => {} } });
+    await fill(bot, turn, undefined, undefined, "ada@acme.test");
+    expect(moveToBrowser).toHaveBeenCalledOnce();
+  });
+});

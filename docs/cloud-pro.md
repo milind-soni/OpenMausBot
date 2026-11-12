@@ -139,9 +139,8 @@ sign-in instead of the welcome flow, which describes the person's own computer
 
 ### Use My Cloud on your phone
 
-1. Get the phone app: the menu under your name → **Get the phone app** (App
-   Store for iPhone, APK for Android).
-2. The same menu → **Connect your phone · to your Cloud (always on)**, or
+1. Install MausBot on your phone from the App Store or Google Play.
+2. The menu under your name → **Connect your phone · to your Cloud (always on)**, or
    **Settings → MausBot Cloud → Use My Cloud on your phone**. The Cloud opens in
    the app window at its phone pairing.
 3. **Create pairing code**, and scan the QR code with the phone app.
@@ -587,8 +586,12 @@ Cloud and each other Cloud the verified session lists as theirs
 never a server that only signed in with their account. A server of the person's
 own that they made their bots' home (**Make <server> my home**, docs/self-hosting.md)
 is lent the same way, last, once the move is done and while that server says it
-is theirs alone. Other users (desktop only, self-hosted, hosted team workspaces)
-keep computer sharing exactly as before: off unless a maintainer sets
+is theirs alone. A self-hosted server this desktop paired with as its owner
+(admin scope, no team or Cloud) is asked about once, in a popup, and lent only
+after the person's Allow (`lendOwn`, `electron/server-lending.mjs`); the server
+takes a computer from its admin pairings alone unless `features.sharedComputers`
+is `false` (off) or `true` (every paired session, as before). Other servers and
+hosted team workspaces keep computer sharing off unless a maintainer sets
 `features.sharedComputers` by hand.
 
 ### What each Cloud gets
@@ -653,6 +656,10 @@ to resume, a menu-bar item (the notification area on Windows) shows it
   **Resume**, which lends every Cloud again. Files keeps copying lent folders
   while paused, but bots' changes made on My Cloud wait there until Resume, as
   they do while this computer is away.
+- If saving Pause fails, sharing stops at once and the item says the pause is
+  not saved. **Retry saving pause** saves it without resuming. A Resume that
+  can't be saved keeps sharing paused, and an ask's Turn on answers that it
+  failed.
 - **See activity** opens this computer's own record of what its Clouds did here
   (`electron/lending-activity-window.mjs`): every request, refused ones
   included, and each website opened through its internet connection (**Opened a
@@ -889,8 +896,20 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
   of lending for good, because a resumed session carries everything said in
   it. A conversation a bot opened (a hand-off's work thread, one a bot
   started itself, a Chief's notices) starts with that bot's words, which are
-  no line in it, so it is never the owner's either: not for the Mac, and not
-  for memory capture, the daily log, recall or the brief. A conversation a guest opened (and
+  no line in it, so it is not the owner's for memory capture, the daily log,
+  recall or the brief. For the Mac, work handed on with `coordinate_bots`, whose
+  result comes back to its sender, keeps the Mac only when the turn that handed it on could itself use it at that
+  moment, on the owner's own line in a one-on-one conversation (not a card, a
+  routine or a webhook), recorded by the harness as it was handed on, and only
+  at a level no looser than that turn's conversation. A one-way notice
+  (`reply: "none"`) or a consult never carries it. The thread opened for it then counts
+  as the owner's for the Mac and nothing else: it can't write the bot's memory
+  or reach their phones, and what it writes is still watched. More work or an
+  answer from a turn that can't use the Mac ends that for good. A result
+  reported back by work it handed on does not: as with any turn, that is
+  evidence to check. A thread a bot starts with
+  `start_thread` stays refused, since Stop on the turn that started it doesn't
+  reach it. A conversation a guest opened (and
   named) is never the owner's, whoever writes in it. Whenever a computer is lent but a turn can't use it,
   `list_shared_computers` answers why in `unavailable` and `say` (`cloudLendingRefusalText` in
   `server/cloud-lending.ts`), and a refused `shared_computer` call answers the same, so the bot says the reason instead
@@ -1011,7 +1030,11 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
     reaction or a process on the Cloud), and counted only while it records
     the owner as its answerer; the request goes on by itself once they allow
     it (in a group chat they ask again). **Not now** is
-    not asked again for that line. A webhook's or a routine's run, or a line a
+    not asked again for that line. The moment a bot's memory locks, a card like
+    it also goes to the bot's own main chat, so the owner hears about the lock
+    instead of finding out when something fails: **Allow** there accepts
+    exactly what it showed and starts no turn, and **Not now** holds until the
+    memory changes again. A webhook's or a routine's run, or a line a
     bot handed in, never raises one. The same card lets the owner's own line
     through the work a bot opened a conversation with, for that line alone:
     work a bot hands into it after they allowed it (made or run then) shuts it
@@ -1104,7 +1127,8 @@ and Fly restarts the machine. The one exception: after a restore commits
 (`server/restart.ts`) and the launcher starts only the server again.
 
 The machine's secrets (`OMB_CLOUD_BOOTSTRAP_SECRET` and the relay tokens
-`OMB_CLOUD_BOAT_TOKEN`, `OMB_CLOUD_VOICE_TOKEN`, `OMB_CLOUD_DECIDER_TOKEN`, `OMB_CLOUD_X_TOKEN`)
+`OMB_CLOUD_BOAT_TOKEN`, `OMB_CLOUD_VOICE_TOKEN`, `OMB_CLOUD_DECIDER_TOKEN`, `OMB_CLOUD_X_TOKEN`,
+`OMB_CLOUD_HOSTING_TOKEN`)
 arrive as the launcher's environment, from the Fly app secrets the Admin
 sets. The launcher never puts them in a child's environment, because
 `/proc/<pid>/environ` keeps a process's starting environment for anything
@@ -1154,16 +1178,24 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   signed `POST /api/cloud/plan` `{"v":1,"tier":"starter"}` (`server/host/cloud-plan-tier.ts`), and a
   home it never told has no such limit. What a bot's own turn starts always goes through,
   and a teammate's hand-off never takes that one thread from the person.
-- **How many bots a Starter Cloud makes.** Five beside its MausBot, one number in
-  `server/host/starter-bot-limit.ts`, from the same signed plan. An archived bot or one
-  that moved away takes no room. Making one past it answers `409` with
-  `{"code":"bot_limit","error":"…"}` from `POST /api/bots`, `POST /api/teams/import`,
-  `POST /api/org-library/add` and a Chief's `create_bot` and `propose_team_setup`; a group that
-  doesn't fit is refused whole, before anything is written. The app opens its upgrade popup
-  when a create button is pressed with no room, and on that refusal. A bot is never taken away:
-  a Cloud over the limit (a downgrade, a move) keeps every one and only making a new one stops.
-  A bot arriving with its own id (a move) and a backup restored are never refused. The limit
-  lifts as soon as the Admin tells the home its new plan, with no restart.
+- **How many bots a Starter Cloud makes and keeps awake.** Any number; five of them,
+  beside its MausBot and its Chief of Staff, take turns (`STARTER_AWAKE_LIMIT` in
+  `server/host/starter-awake.ts`), from the same signed plan, and the rest are paused with
+  everything they know kept. An archived bot or one that moved away isn't counted. The awake
+  set is written down (`starter-awake.json`) while every bot still fits, so a bot made past
+  the five starts paused and never pushes out one the person was using: `POST /api/bots`
+  answers it with `"paused": true`, and the app opens **Keep these awake** with the new bot
+  chosen in place of the least recently active one that isn't working (`POST /api/starter/awake`).
+  A Chief's `create_bot` answers with a `paused` line for the person. A restore or a move into a
+  Cloud that never wrote a set down wakes the most recently active. A paused bot's turn answers
+  `409` `{"code":"bot_paused"}`, a hand-off to it is refused, a routine or webhook run for it
+  fails at once with that line (no conversation is made, and it never wakes a sleeping Cloud),
+  and its daily memory upkeep waits. Every bot wakes as soon as the Admin tells the home its new
+  plan, with no restart. An older server refuses a sixth bot with `409` `{"code":"bot_limit"}`;
+  the app still shows its upgrade popup for that. Every plan holds at most 100 bots
+  (`MAX_WORKSPACE_BOTS`), counted on `POST /api/bots`, a package import and a Chief's setup.
+- **How much a Starter Cloud runs at once.** Two turns Cloud-wide, and four hand-offs waiting
+  beyond them; past that a new hand-off is refused (`server/host/starter-caps.ts`).
 - **Who goes first.** The gate only changes the order, never how much it lets in. A
   person's own work goes first: their line, or a turn going on from what they answered.
   Bot work that has waited 5 minutes takes its place by arrival, so it is never starved
@@ -1208,7 +1240,7 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   the root supervisor that restarts them is -1000, never picked. When memory
   runs out the kernel takes a bot's process, never the workspace.
 - **OpenCode reaches OpenMausBot's own tools over HTTP.** The agents,
-  browser, computer, Data and HighLevel servers are endpoints of this server
+  browser, computer, Data, Email and phone servers are endpoints of this server
   (`/api/internal/mcp-http/<name>`, `server/routes/own-mcp-http.ts`) with the
   turn's capability in the Authorization header, instead of a Node proxy
   process each (about 20–30 MB PSS apiece) in every OpenCode session. A server
@@ -1251,6 +1283,21 @@ feeds the pairing lockout, never authorization. Apart from `/api/health`,
 Caddy answers only for the machine's own name (`OMB_PUBLIC_URL`) and refuses
 any other `Host`.
 
+**A home that moved to another provider.** Its old address (say
+`<app>.fly.dev`) is served by a forwarder that proxies to the new one and
+rewrites `Host` to the new name, so the edge's host matcher, and in
+`OMB_CLOUD_EDGE_TLS` mode the certificate it serves for that name, already
+match: the edge is not widened for the old name. What still names the old
+address is the `Origin` of a page or client on it (a browser tab, a device
+paired by code straight to it), which the server's same-origin checks would
+refuse. `OMB_CLOUD_LEGACY_ORIGINS` lists those old origins, and the server
+counts exactly those as its own besides its `Host`'s: for cookie sessions,
+a browser sign-in's changes, WebSockets, the event stream and the viewers.
+`X-Forwarded-Host` is never read. Requests through the forwarder reach the
+edge from the forwarder's address, so in `OMB_CLOUD_EDGE_TLS` mode they share
+one pairing lockout unless the forwarder is named in
+`OMB_CLOUD_TRUSTED_PROXIES`. New pairing links name the new address.
+
 ### On your own server: how people reach it
 
 A home on a server of its owner's (Team on your own server) runs the same
@@ -1262,6 +1309,7 @@ start.
 | --- | --- |
 | `OMB_PUBLIC_URL` | `https://` and the name people use, e.g. `https://mausbot.acme.eu`. Its DNS points at the server. |
 | `OMB_CLOUD_EDGE_TLS` | `1`: the edge gets and renews a Let's Encrypt certificate for that name and serves it on 443. Unset or `0`: the edge serves only `:8080`, for the agent, and something else ends TLS. |
+| `OMB_CLOUD_EDGE_ACME_EMAIL` | With `OMB_CLOUD_EDGE_TLS=1`: a fallback CA for when Let's Encrypt refuses a certificate (its rate limits, say). The address of the account ZeroSSL's ACME endpoint gets: Caddy creates that account by itself from the address, with no sign-up or key to set. Let's Encrypt stays first and keeps its own account, and whichever CA issued the certificate stays on the volume. Unset or empty: Let's Encrypt alone. Anything but one plain address stops the home with a message naming the variable. It has no default; the operator sets it. |
 | `OMB_CLOUD_TRUSTED_PROXIES` | Only when the owner's own proxy stands in front: its addresses or ranges (`10.0.0.5`, `10.0.0.0/24`, `private_ranges`), separated by spaces or commas, at most 32. Unset: none. A `/0` range, a host name or anything else stops the home with a message naming the variable. |
 | `OMB_CLOUD_CLIENT_IP_HEADER` | The header those proxies put the client's address in. Default `X-Forwarded-For`; it needs `OMB_CLOUD_TRUSTED_PROXIES`. |
 | `OMB_CLOUD_TUNNEL_TOKEN` | For a server with no inbound port: the connector token of the home's own Cloudflare tunnel. `OMB_PUBLIC_URL` is then the tunnel's address. Not with `OMB_CLOUD_EDGE_TLS`. |
@@ -1349,6 +1397,7 @@ never echoes a secret.
 | `OMB_CLOUD_ADMIN_URL` | secret | The Cloud origin, exact `https://`, e.g. `https://cloud.openmausbot.com`. |
 | `OMB_CLOUD_BOOTSTRAP_SECRET` | secret | 43 base64url characters (256 bits): the key the Admin signs pairing requests with. |
 | `OMB_PUBLIC_URL` | env | The machine's exact `https://` origin, `https://<app>.fly.dev`. |
+| `OMB_CLOUD_LEGACY_ORIGINS` | env | Optional, only for a home that moved to another provider: the exact `https://` origins it answered at before, comma-separated (at most 8, never a loopback name), e.g. `https://<app>.fly.dev`. |
 
 - The machine must not also carry `OMB_ADMIN_URL`, `OMB_ADMIN_WORKSPACE` or
   `OMB_ADMIN_MEMBERSHIP`: a Cloud home is a personal server with pairing codes
@@ -1386,10 +1435,12 @@ For each service the Admin has configured, it also sets:
 | `OMB_CLOUD_VOICE_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/voice/v1`, the Admin's voice relay. |
 | `OMB_CLOUD_VOICE_TOKEN` | secret | This machine's voice relay token (`omb_voice_…`). |
 | `OMB_TTS_DEFAULT_VOICE` | env | An ElevenLabs voice id, used until the person picks a voice or another speech provider in Settings. |
-| `OMB_CLOUD_DECIDER_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/decider`, the Admin's Jev relay. It is a Jev base URL, used as it is: the decider adds `/v1/systemone`, the relay's only route, so every included decision goes to exactly `<OMB_CLOUD_DECIDER_URL>/v1/systemone`. |
+| `OMB_CLOUD_DECIDER_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/decider`, the Admin's Jev relay. It is a Jev base URL, used as it is: the decider adds `/v1/systemone`, so every included decision goes to exactly `<OMB_CLOUD_DECIDER_URL>/v1/systemone`, and extraction adds `/v1/extract`. |
 | `OMB_CLOUD_DECIDER_TOKEN` | secret | This machine's decision relay token (`omb_decide_…`). It is not a Jev key and works only through the relay. |
 | `OMB_CLOUD_X_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/x`, the Admin's treg relay; the client calls `<OMB_CLOUD_X_URL>/call/<endpoint>` for the X tools' eight endpoints, `/research/search`, `/research/endpoints/<id>` and `/research/call/<id>` for the research tools, and `GET /usage` for the month's calls on the Apps page's X card (`GET /api/x/status`). The home asks `GET /research/search` with no job at start, which spends nothing: a 400 means research is on, an off answer hides the research tools (x_search stays) until an hour later or a restart, and a research call refused as off does the same. A person's own treg key (Settings → API keys) wins over it and goes straight to treg. |
 | `OMB_CLOUD_X_TOKEN` | secret | This machine's X research relay token (`omb_x_…`). Not a treg key; it works only through the relay, within the plan's monthly X research calls. A signed-in desktop gets its own (`omb_xd_…`) from `POST /api/cloud/desktop/services/x` and hands it to its server in memory. |
+| `OMB_CLOUD_HOSTING_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/hosting/v1`, the Admin's app hosting relay, set only where the Admin has included app hosting on and the plan is paid. The server lists the Cloud's apps and the plan's count (`GET /apps`), publishes a bot's folder (`PUT /apps/<key>`, then each file the relay asks for) and deletes (`DELETE /apps/<key>`); `server/host/included-hosting.ts`. Absent: bots publish to the person's own Netlify account, as on a computer. |
+| `OMB_CLOUD_HOSTING_TOKEN` | secret | This machine's app hosting relay token (`omb_host_…`). Not a Netlify token; it works only through the relay, within the plan's apps and monthly publishes. Bots never get it: they call `publish_app`, and the server publishes. |
 
 A service is included only when both its URL and its token are set
 (`server/included-services.ts`). The real Boat, ElevenLabs and Jev keys stay
@@ -1398,8 +1449,10 @@ computers belong to this machine on every request.
 
 - **The person's own key always wins.** An included token is a fallback, used
   only while the person has no key of their own: none saved in Settings
-  (`box.token`, `tts.key`, `decider.key`) and no `BOX_TOKEN`, `OMB_TTS_KEY`
-  or `OMB_JEV_API_KEY` in the environment. Adding a key switches to it at
+  (`box.token`, `tts.key`, `decider.key`, `decider.workersAiToken`) and no
+  `BOX_TOKEN`, `OMB_TTS_KEY`, `OMB_JEV_API_KEY` or `OMB_WORKERS_AI_TOKEN` in
+  the environment (for extraction, only a Workers AI token with its account ID
+  counts: a Jev key does not read). Adding a key switches to it at
   once; removing it falls back to the included service again (for Boat, once
   that key's cloud computers are deleted: removing a Boat key that still has
   computers is refused). The choice is made on every request.
@@ -1408,36 +1461,55 @@ computers belong to this machine on every request.
   `OMB_ELEVENLABS_API` or `decider.baseUrl` when set, for development and
   tests, else Boat's, ElevenLabs' and Jev's own APIs) and an included token
   only to its relay, whatever those settings say.
-- **The decision relay takes two requests, and the app sends it nothing
-  else.** Through the included token the app sends only room routing's
-  request (one question `answer`, a choice with the fixed instructions in
-  `server/decider/room-routing.ts`, and state keys `room`, `humans_in_room`,
-  `bots_in_room`, `new_message` and, when there are recent lines,
-  `recent_messages`) and the Settings key check's fixed request, within the
-  relay's caps (a body of at most 64 KiB, a state of at most 24,000 bytes as
-  JSON). `server/decider/relay.ts` checks each request before it is sent; one
-  that does not fit is not sent, and the room falls back as for any other
-  decision-model failure. Any other decision job, now or added later, uses
-  only the person's own Jev key until the relay accepts it too. The relay
-  speaks Jev's API only: included decisions are Jev's, and with OpenRouter
-  selected in **Settings → Decision model** nothing is included (it needs an
-  OpenRouter key: one saved there, or the one under **Settings → API keys**).
+- **The decision relay takes four decision requests and three extraction
+  requests, and the app sends it nothing else.** Through the included token
+  the app sends only these decision requests, to `/v1/systemone`:
+  - room routing's request: one question `answer`, a choice with the fixed
+    instructions in `server/decider/room-routing.ts`, and state keys `room`,
+    `humans_in_room`, `bots_in_room`, `new_message` and, when there are recent
+    lines, `recent_messages`;
+  - inbox triage's request: one choice with the fixed instructions and
+    options in `server/decider/inbox-triage.ts`, and state keys `email`
+    (`from`, `subject`, `preview`), `details` (each text value at most
+    300 characters) and `dismissed_senders` (at most 20);
+  - a bot's own `decide` call: 1 to 8 questions within `BOT_DECIDE_LIMITS`;
+  - the Settings key check's fixed request.
+
+  Each stays within the relay's caps (a body of at most 64 KiB, a state of at
+  most 24,000 bytes as JSON). `server/decider/relay.ts` checks each request
+  before it is sent, and Cloud's Admin runs the same checks from
+  `server/decider/fixtures/relay-seams.json`. One that does not fit is not
+  sent, and the job falls back as for any other decision-model failure.
+
+  It also takes these extraction requests, to `/v1/extract`: inbox reading (the
+  fixed fields in `server/extractor/contract.ts`, one email's text of at most
+  8,000 characters, no images), a bot's own `extract` call (text, an image or
+  both, within `EXTRACT_LIMITS`) and the extraction key check.
+  `server/extractor/contract.ts` checks each one before it is sent, and the
+  Admin runs the same checks from
+  `server/extractor/fixtures/extract-relay.json`.
+
+  Any decision job added later uses only a key of the person's own (Jev,
+  Workers AI or OpenRouter) until the relay accepts it too. For decisions the
+  relay speaks Jev's API only: included decisions are Jev's. An own Jev or
+  Workers AI key comes before them; an OpenRouter key comes after them,
+  whichever provider is selected in **Settings › AI › Routing and extraction**.
 - **Included decisions are on until switched off.** While the decision model
   runs on the included token, its master switch counts as on unless the person
-  switched it off in **Settings → Decision model**; an explicit off always
-  wins, and switching it back on needs no key. The per-job switches keep their
-  defaults, so rooms set to Auto ask who answers, and new rooms start on Auto,
-  as with a saved key. An own Jev key is on once saved, as anywhere else, and
-  clearing it falls back to the included decisions without switching them
+  switched it off in **Settings › AI › Routing and extraction**; an explicit off
+  always wins, and switching it back on needs no key. The per-job switches keep
+  their defaults, so rooms set to Auto ask who answers, and new rooms start on
+  Auto, as with a saved key. An own Jev key is on once saved, as anywhere else,
+  and clearing it falls back to the included decisions without switching them
   off.
 - **An included token is never the person's key.** It is never written to
   `config.json`, never sent to a client (Settings sees `configured` and
-  `included: true`, and says "Included with your Cloud plan"), and Settings never
-  verifies, rotates or clears it. The decision model's **Test** button, with
-  no key pasted, makes one tiny call through the relay, never to Jev
-  directly. Boat's account-change rules still apply: adding an own Boat key
-  while included cloud computers exist is refused until they are deleted,
-  because the new account cannot reach them.
+  `included: true`, and says "Included with your Cloud plan"), and Settings
+  never verifies, rotates or clears it. The decision model's **Test** button,
+  with no key pasted, makes one tiny decision call and one extraction check
+  through the relay, never to Jev directly. Boat's account-change rules still
+  apply: adding an own Boat key while included cloud computers exist is refused
+  until they are deleted, because the new account cannot reach them.
 - **What holding the tokens does and does not do.** The server receives the
   tokens over the launcher's pipe, never its environment, keeps them in
   memory, and they are on the credential list. So no process the server
@@ -1655,9 +1727,32 @@ wait for the next read, `truncated: true`):
   "firstHour": { "startedAt": 1790000000000, "apps": ["gmail"], "look": "delivered",
     "ms": { "seen": 41000, "firstMessage": 52000, "offered": 61000, "firstApp": 118000, "firstLook": 171000, "briefOn": 172000, "phoneOffered": 172000 } },
   "value": { "sorted": 40, "drafted": 6, "prepped": 4, "routines": 0, "minutes": 110 },
-  "room": { "waits": 3, "waitMs": 360000, "stopped": 1, "killed": 1, "stallMinutes": 2 }
+  "room": { "waits": 3, "waitMs": 360000, "stopped": 1, "killed": 1, "stallMinutes": 2 },
+  "speed": { "windowS": 300, "steal": 1.2, "psi": { "cpu": 3.4, "memory": 0, "io": 0.8 }, "bootMs": 5400, "wakeMs": null,
+    "turnStarts": [12, 3, 1, 0, 0, 0] }
 }
 ```
+
+**`speed`** says how fast the machine is for this home (`server/cloud-speed.ts`),
+read from `/proc` when the report is built, with no timer or sampler of its
+own. `windowS` is how many seconds the CPU figures cover: since the previous
+read at least a minute before (a read sooner, such as the next page of the
+same poll, repeats the last figures), or since the process started. `steal`
+is the percent of all CPU time in that window the hypervisor ran something
+else on this machine's CPUs (`/proc/stat`). `psi` is the percent of the window
+in which some task waited for CPU, memory or disk (the kernel's pressure
+`some` line, the home's own cgroup's in a container, else the machine's).
+Each is `null` where the kernel doesn't expose it, and for a window whose
+counter went down. `bootMs` is this process's start to its server listening;
+`wakeMs`, on a boot that woke the home from a sleep it was stopped for with
+a request waiting, the time from the machine's start (the process's, in a
+container on a long-running server) to that request reaching the server.
+Fly's own start before that, and a resume from a suspend, are not in it.
+`turnStarts` counts people's messages since boot by how long each waited
+from being stored to its engine's turn starting: up to 0.5, 1, 2, 5 and 15
+seconds, and longer. A message sent while its thread runs a turn, a bot's, a
+routine's and a steer are not counted. Older homes don't send `speed`: the
+Admin reads that as unknown, never as zero.
 
 **`room`** is the last day's memory pressure where the home watches it (a Cloud
 home on Linux, `server/engine-memory.ts`), else `null`: how many tasks had to
@@ -1708,9 +1803,8 @@ kinds, random ids, connector slugs, booleans and machine numbers. Connected
 apps are looked up in the background at most every 30 minutes, so a slow
 provider never holds the answer. `connectors.items` lists only apps the
 person set up: connected now, or connected once and since expired or failed.
-An app never connected, HighLevel without a saved connection included, is not
-listed. Cloud computers are not listed: through the
-Admin's Boat relay that would count as using an included service and hold back
+An app never connected is not listed. Cloud computers are not listed: through
+the Admin's Boat relay that would count as using an included service and hold back
 updates; a cloud computer that fails a turn arrives as its place's code
 (`cc-unavailable`, `cc-no-start`, `cc-provider`, …).
 
@@ -1734,7 +1828,10 @@ judge a pending timer by a wall-clock time stored when it was set.
 
 - no turn running (bots, rooms, delegated work), no routine run queued to start
   now or running (one waiting on a person doesn't count: their answer wakes
-  the home), no Live call, no cloud computer on or starting (its idle timer
+  the home), no work one bot handed another still moving on by itself (an
+  assignment queued, running or due to resume its requester, or a report to
+  send; one parked on a person's answer doesn't count), no Live call, no cloud
+  computer on or starting (its idle timer
   lives in this process), no maintenance (backup or restore, Move to Cloud, an
   engine or browser install, a provider sign-in) and no request in progress;
 - nobody used the home for 10 minutes (the Admin may ask for another window).
@@ -1755,8 +1852,10 @@ its own nonces. `200`:
   "nextDueAt": 1792358600000, "sleeping": false, "wokeBy": { "by": "events", "background": true } }
 ```
 
-`busy` holds fixed codes only: `turn`, `run`, `live-call`, `computer`,
-`maintenance`, `recent-activity`, `recent-work`, `just-woke`, `due-soon`.
+`busy` holds fixed codes only: `turn`, `run`, `handoff`, `live-call`,
+`computer`, `maintenance`, `recent-activity`, `recent-work`, `just-woke`,
+`due-soon`. A Team Cloud answers like any other home: its plan decides whether
+the Admin ever asks.
 `nextDueAt` is the earliest enabled routine's next run or queued run's retry,
 or, while a bot waits for something (`wait_until`), 30 minutes on, so its
 checks go on that often: the Admin starts a sleeping home a minute before it
@@ -1768,6 +1867,17 @@ the desktop's version check, `sync`, `lending`, `phone`, `presence`, `session`,
 `pair`, `admin`, `health`, `webhook`, `sign-in`, `api`, `page`) and whether it
 was a background one; `null` otherwise. The Admin counts it for a wake by
 Fly's proxy, to tell which app reaches a sleeping home.
+
+**`POST /api/cloud/machines/woke`** on the Admin (additive, sent by the home,
+signed with its machine secret over `{"v":1,"wokeAt":<ms>}`, as
+`omb-power-woke-v1\n<machine id>\n<timestamp>\n<nonce>\n<hash of the body>`;
+sent at each wake (a resume, or a boot from a sleep it was stopped for), never
+retried; an Admin without it answers `404` and nothing changes). It says the
+home is awake now, so the Admin can move `cloud.power` on at the desktops' next
+session read instead of at its next power read. The lent computers also get a
+grace window: for about 90 s after a wake, a bot's `shared_computer` call and
+`list_shared_computers` wait for a computer lent to this home instead of
+failing at once (`server/shared-computers.ts`).
 
 **`POST /api/cloud/power/sleep`**, signed over its JSON body
 `{"v":1,"idleMinutes":10}`. `409 {"ok":false,"busy":[…]}` while not idle;
@@ -1855,6 +1965,14 @@ token (`Authorization: Bearer omc_…`). Contract version 1 adds:
 Optional, additive fields the app reads when the Admin sends them (an Admin
 without them works as before; a malformed one is dropped, never the machine):
 
+- `cloud.formerOrigins: string[]`, and the same beside each `clouds[].origin`
+  and each `teams[].machine.origin`: the addresses that Cloud answered at
+  before it moved to another provider (`electron/cloud-home.mjs`
+  `parseFormerOrigins`; each a valid `https://` origin, never its `origin`
+  now; anything else is left out). The desktop knows My Cloud again by them
+  and by its id in `clouds[]`, so a computer whose bots moved to it follows it
+  to its new address instead of reading the move as My Cloud ending; see
+  [This computer's bots move to your Cloud](#this-computers-bots-move-to-your-cloud).
 - `cloud.setup: {step, slow}` while `setting_up` (`step` is `reserving`,
   `storage`, `starting` or `checking`): the app shows the same four steps as
   the Cloud page, and says when setup is slow.
@@ -2308,6 +2426,16 @@ all arrived, and freezes this computer's copy so nothing runs in two places
 (`server/cloud-move-http.ts`); a backup file still restores from Settings →
 Backups. [docs/verification/cloud-send.md](verification/cloud-send.md) has the
 tests.
+
+The move's journal names the Cloud by its address and, once the session lists
+it, by its id (the person's own Cloud in `clouds[]` at My Cloud's address).
+When My Cloud moves to another provider, the verified session gives it a new
+`origin` and lists the old one in `formerOrigins`: the same id, or the
+journal's address among those, is the same Cloud, so the journal follows it
+to the new address and the move goes on, or stays done, there. The window
+opens it there, and its saved place moves with it. A Cloud with another id
+whose former addresses don't include the journal's is another Cloud, and
+ends the move as before.
 
 ## Security summary
 

@@ -56,7 +56,7 @@ export interface ProactiveDeps {
   cfg: AppConfig;
   composio: {
     configured(cfg: AppConfig): boolean;
-    connectedServices(cfg: AppConfig): Promise<Record<string, { connected: boolean }>>;
+    connectedServices(cfg: AppConfig): Promise<Record<string, { connected: boolean; accounts?: ReadonlyArray<{ id: string; status: string }> }>>;
     relayMcp(cfg: AppConfig, payload: never, transportSessionId?: string, beforeSend?: () => void, signal?: AbortSignal): Promise<{ status: number; bytes: Uint8Array; transportSessionId?: string }>;
   };
   registry: { get(instanceId: string): { driverKind: string; adapter: ProviderAdapter } | null | undefined };
@@ -97,6 +97,14 @@ export function createProactive(deps: ProactiveDeps) {
       if (!composio.configured(cfg)) return null;
       const services = await composio.connectedServices(cfg);
       return Object.fromEntries(READ_APPS.map((app) => [app, services[app]?.connected === true])) as Record<ReadApp, boolean>;
+    },
+    // Several accounts of one app: read the newest active one, as Composio refuses a read that names none.
+    accounts: async () => {
+      const services = await composio.connectedServices(cfg);
+      return Object.fromEntries(READ_APPS.flatMap((app) => {
+        const active = (services[app]?.accounts ?? []).filter((one) => /^active$/i.test(one.status));
+        return active.length > 1 ? [[app, active[0]!.id]] : [];
+      }));
     },
     relay: (payload, session, signal) => composio.relayMcp(cfg, payload as never, session, undefined, signal),
   });

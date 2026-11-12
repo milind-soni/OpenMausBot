@@ -98,7 +98,43 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("CloudWelcome on a Team Cloud", () => {
+  const OWN = { id: "mine", threadId: "tm", name: "MausBot", defaultBot: { person: "nuno@acme.test" } };
+  const FIRST = { id: "b2", threadId: "t2", name: "Poppy", chiefOfStaff: true };
+  beforeEach(() => { fixture.state.config.team = { id: "team-acme", name: "Acme" }; fixture.state.bots = [OWN, FIRST]; });
+
+  it("an empty team isn't told its bots are already here: the Owner's own MausBot and the first bot are no work", async () => {
+    render();
+    await vi.waitFor(() => expect(host.querySelector('[data-bring-choice="fresh"]')).not.toBeNull());
+    expect(text()).not.toContain("Your bots are already here");
+    expect(host.querySelector("[data-bring-here]")).toBeNull();
+  });
+
+  it("a team with a second bot of its own says so, as before", async () => {
+    fixture.state.bots = [OWN, FIRST, { id: "b3", threadId: "t3", name: "Quotes" }];
+    render();
+    await vi.waitFor(() => expect(host.querySelector("[data-bring-here]")).not.toBeNull());
+  });
+
+  it("the finished list names the first bot, never a Chief of Staff, and is recorded as done the moment it shows", async () => {
+    fixture.state.config.onboarding.hintsSeen = ["cloud-welcome-shown", "cloud-welcome-bring", "cloud-welcome-engine", "cloud-welcome-files"];
+    render();
+    await vi.waitFor(() => expect(text()).toContain("Say hi to Poppy"));
+    expect(text()).not.toContain("Chief of Staff");
+    const saved = fixture.api.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)).onboarding?.hintsSeen ?? []);
+    expect(saved.some((hints: string[]) => hints.includes("cloud-welcome-done"))).toBe(true);
+  });
+});
+
 describe("CloudWelcome", () => {
+  it("on My Cloud the finished list still greets the Chief of Staff and stays until the person ends it", async () => {
+    fixture.state.config.onboarding.hintsSeen = ["cloud-welcome-shown", "cloud-welcome-bring", "cloud-welcome-engine", "cloud-welcome-files"];
+    render();
+    await vi.waitFor(() => expect(text()).toContain("Say hi to your Chief of Staff"));
+    const saved = fixture.api.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)).onboarding?.hintsSeen ?? []);
+    expect(saved.some((hints: string[]) => hints.includes("cloud-welcome-done"))).toBe(false);
+  });
+
   it("opens on bringing this computer's stuff, before any chat: a fresh start, with nothing to copy by hand", async () => {
     fixture.state.bots = [fixture.state.bots[0]];
     render();
@@ -300,8 +336,9 @@ describe("CloudWelcome", () => {
     (window.ogb as Record<string, unknown>).cloudPlan = { state: vi.fn() };
     fixture.state.config.team = { id: "t-acme", name: "Acme" };
     render();
-    await vi.waitFor(() => expect(text()).toContain("Welcome to Studio Cloud"));
-    expect(host.querySelector('[data-welcome-files="folders"]')?.textContent).toContain(desktopText);
+    // On a team the welcome is the team's, by its name: never "My Cloud" or the Cloud's address.
+    await vi.waitFor(() => expect(text()).toContain("Welcome to Acme"));
+    expect(host.querySelector('[data-welcome-files="folders"]')?.textContent).toContain(desktopText.replace("Studio Cloud", "Acme"));
   });
 
   it("files and apps open Connected apps, then it is ready and says hi to the Chief of Staff", async () => {

@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -8,6 +8,7 @@ import { BrowserService } from "../service.ts";
 import type { HoldLimits } from "../hold.ts";
 import { FakeBackend, FakeChrome, type FakeDocument } from "../testing/fake-chrome.ts";
 import { personUrl } from "../dispatch.ts";
+import { profileDir } from "../chrome/profile.ts";
 import { ACK_PACE_MS, SETTLE_MS, type ViewerOutput } from "./core.ts";
 import { fillPage, MIN_WINDOW_WIDTH, requestedSize, UNATTACHED_VIEWPORT, viewportFor } from "./viewport.ts";
 
@@ -53,7 +54,7 @@ async function setup({ pageLimit = null, document = PAGE, holdLimits }: { pageLi
   };
   const chrome = () => backend.chrome;
   const page = () => [...chrome().pages.values()].at(-1)!;
-  return { service, target, call, watch, chrome, page };
+  return { service, target, call, watch, chrome, page, dataDir };
 }
 
 describe("the page fills the panel", () => {
@@ -270,6 +271,50 @@ describe("a viewer's screencast", () => {
     const order = chrome().sent.slice(before).map((sent) => sent.method).filter((method) => ["Page.stopScreencast", "Page.captureScreenshot", "Page.startScreencast"].includes(method));
     expect(order.indexOf("Page.stopScreencast")).toBeLessThan(order.indexOf("Page.captureScreenshot"));
     expect(order.lastIndexOf("Page.startScreencast")).toBeGreaterThan(order.indexOf("Page.captureScreenshot"));
+  });
+});
+
+describe("the Extensions menu", () => {
+  const ID = "nngceckbapebfimnlniiiahkandclblb";
+  const install = (dataDir: string, key: string) => {
+    const dir = join(profileDir(dataDir, key), "Default", "Extensions", ID, "1.0_0");
+    mkdirSync(join(dir, "_locales", "en"), { recursive: true });
+    writeFileSync(join(dir, "manifest.json"), JSON.stringify({ name: "__MSG_extName__", default_locale: "en", options_ui: { page: "options.html" } }));
+    writeFileSync(join(dir, "_locales", "en", "messages.json"), JSON.stringify({ extName: { message: "Vault" } }));
+  };
+  const navigations = (chrome: { sent: Array<{ method: string; params?: unknown }> }) =>
+    chrome.sent.filter((sent) => sent.method === "Page.navigate").map((sent) => (sent.params as { url?: string }).url);
+
+  it("lists the profile's extensions and opens one's own page for the person holding the browser, never for anyone else", async () => {
+    const { watch, chrome, dataDir, target } = await setup();
+    install(dataDir, target.key);
+    const page = `chrome-extension://${ID}/options.html`;
+    const other = await watch({ owner: "phone-session" });
+    const holder = await watch();
+    await holder.viewer.input({ type: "takeControl" });
+    await other.viewer.input({ type: "extensions" });
+    await other.viewer.input({ type: "openExtension", id: ID });
+    expect(other.outputs.some((output) => output.type === "extensions")).toBe(false);
+    await holder.viewer.input({ type: "extensions" });
+    expect(holder.outputs.filter((output) => output.type === "extensions").at(-1)).toEqual({ type: "extensions", extensions: [{ id: ID, name: "Vault", url: page }] });
+    await holder.viewer.input({ type: "openExtension", id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" });
+    await holder.viewer.input({ type: "navigate", url: page });
+    await holder.viewer.input({ type: "navigate", url: "chrome://settings/passwords" });
+    expect(navigations(chrome())).not.toContain(page);
+    await holder.viewer.input({ type: "openExtension", id: ID });
+    expect(navigations(chrome()).at(-1)).toBe(page);
+    expect(navigations(chrome()).some((url) => url?.startsWith("chrome:"))).toBe(false);
+  });
+
+  it("keeps extension and chrome:// pages closed to the bot", async () => {
+    const { call, chrome, dataDir, target } = await setup();
+    install(dataDir, target.key);
+    for (const url of [`chrome-extension://${ID}/options.html`, "chrome://extensions"]) {
+      const result = await call("agent_browser_open", { url });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain("Only http(s), about:blank and data: addresses open here");
+    }
+    expect(navigations(chrome()).some((url) => !url?.startsWith("https:"))).toBe(false);
   });
 });
 

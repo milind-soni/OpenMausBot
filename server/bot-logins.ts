@@ -1,9 +1,15 @@
-import { browserMatesOf, loginPageCheck, loginPlace, loginSite, type LoginPlace } from "../shared/logins.ts";
+import { createHash } from "node:crypto";
+
+import { browserMatesOf, loginPageCheck, loginPlace, loginSite, type LoginBots, type LoginPlace } from "../shared/logins.ts";
+import type { LinkedSecret } from "../shared/vault.ts";
 import type { FillCandidate } from "./login-fill.ts";
 import { receiveLoginHandoff, type ConnectionHandoffAnswer, type ConnectionHandoffWhat, type LoginHandoffResult } from "./login-handoff.ts";
-import type { LoginStore } from "./login-store.ts";
+import type { VaultReader, VaultStore } from "./vault-store.ts";
 import type { OnePasswordLogins } from "./onepassword.ts";
 import type { LoginRouteDeps } from "./routes/logins.ts";
+import { findLinkedSecret, linkedCandidates, linkedSecretNames, linkedSecrets, linkedSites, readLinkedSecret, type VaultProvider } from "./vault/providers.ts";
+
+const linkedItemId = (secretId: string, field: string | undefined) => `linked-${createHash("sha256").update(`${secretId}\0${field ?? ""}`).digest("hex").slice(0, 32)}`;
 
 /** What the bot's browser shows while the person answers a sign-in card. */
 export interface ObservedPage {
@@ -41,17 +47,24 @@ export function cardLoginPlace(cardHost: string, observed: ObservedPage | null, 
   return loginPlace(cardHost, [onSite, ...(elsewhere && confirmedHost === elsewhere ? [elsewhere] : [])]);
 }
 
-/** Saved logins and 1Password items, as each bot may use them. A login kept to some bots is filled only where every bot
- * sharing that browser may use it: a sign-in stays in the browser, so a bot sharing it would be signed in as well. */
+/** Saved logins and secrets, and a linked password manager's, as each bot may use them. A login kept to some bots is
+ * filled only where every bot sharing that browser may use it: a sign-in stays in the browser, so a bot sharing it
+ * would be signed in as well. */
 export class BotLogins {
-  readonly store: LoginStore;
+  readonly store: VaultStore;
   readonly onePassword: OnePasswordLogins;
+  readonly providers: readonly VaultProvider[];
   private readonly bots: () => ReadonlyArray<{ id: string; browserProfile?: string | null }>;
+  private readonly hold: (value: string) => void;
 
-  constructor(store: LoginStore, onePassword: OnePasswordLogins, bots: () => ReadonlyArray<{ id: string; browserProfile?: string | null }> = () => []) {
+  /** `hold` masks a value read from a linked manager wherever text crosses to a bot or a transcript. */
+  constructor(store: VaultStore, onePassword: OnePasswordLogins, bots: () => ReadonlyArray<{ id: string; browserProfile?: string | null }> = () => [],
+    hold: (value: string) => void = () => {}) {
     this.store = store;
     this.onePassword = onePassword;
+    this.providers = [onePassword];
     this.bots = bots;
+    this.hold = hold;
   }
 
   /** The bot and every other bot that signs in through its browser: who a login saved from its sign-in card is kept
@@ -68,25 +81,66 @@ export class BotLogins {
   /** Where each login the bot may use fills, with its username. */
   sitesFor(botId: string): Array<LoginPlace & { username: string }> {
     const bots = this.cardBots(botId);
-    return [...this.store.sitesFor(bots), ...this.onePassword.sitesFor(bots)];
+    return [...this.store.sitesFor(bots), ...this.providers.flatMap((provider) => linkedSites(provider, bots))];
+  }
+
+  /** Reads each linked manager's list again if it is older than the manager allows. */
+  async fresh(): Promise<void> {
+    await Promise.all(this.providers.map((provider) => provider.fresh()));
   }
 
   /** Secrets are read only when one is filled. */
   async candidates(botId: string, pageHost: string): Promise<FillCandidate[]> {
-    await this.onePassword.fresh();
+    await this.fresh();
     const bots = this.cardBots(botId);
     return [
       ...this.store.usableFor(pageHost, bots).map((login): FillCandidate => ({
         id: login.id, site: login.site, hosts: login.hosts, exactHost: login.exactHost, username: login.username, source: login.source,
         secrets: async () => ({ password: login.password, totp: login.totp ?? null }),
       })),
-      ...this.onePassword.candidates(pageHost, bots),
+      ...this.providers.flatMap((provider) => linkedCandidates(provider, pageHost, bots)),
     ];
   }
 
   markUsed(id: string): void {
     this.store.markUsed(id);
-    this.onePassword.markUsed(id);
+    for (const provider of this.providers) provider.markUsed(id);
+  }
+
+  linkedSecrets(): LinkedSecret[] {
+    return this.providers.flatMap((provider) => linkedSecrets(provider));
+  }
+
+  /** The names of the secrets the bot may use in a turn `reader` names, for its prompt: never a value. */
+  secretNamesFor(botId: string, reader: VaultReader): Array<{ name: string; refOnly?: true }> {
+    const linked = this.providers.flatMap((provider) => linkedSecrets(provider, botId).flatMap((secret) => linkedSecretNames(secret).map(({ name }) => ({ name }))));
+    return [...this.store.secretNamesFor(botId, reader), ...linked];
+  }
+
+  /** A secret a linked manager holds for the bot by this name, read from it now; its id is safe as a file name. */
+  async linkedSecret(name: string, botId: string): Promise<{ id: string; name: string; value: string } | null> {
+    await this.fresh();
+    const use = findLinkedSecret(this.providers, name, botId);
+    if (!use) return null;
+    const value = await readLinkedSecret(use);
+    this.hold(value);
+    return { id: linkedItemId(use.secret.id, use.field), name: use.field ? `${use.secret.name} ${use.field}` : use.secret.name, value };
+  }
+
+  /** The linked secret `linkedSecret` gave this id: who may use it, and its value read from the manager when asked. */
+  linkedById(id: string): { bots: LoginBots; read(): Promise<string> } | null {
+    for (const provider of this.providers) {
+      for (const secret of linkedSecrets(provider)) {
+        const name = linkedSecretNames(secret).find(({ field }) => linkedItemId(secret.id, field) === id);
+        if (!name) continue;
+        return { bots: secret.bots, read: async () => {
+          const value = await readLinkedSecret({ provider, secret, ...(name.field ? { field: name.field } : {}) });
+          this.hold(value);
+          return value;
+        } };
+      }
+    }
+    return null;
   }
 
   /** The settings, plus whether a 1Password token is held: what a credential card's "configured" check reads. */

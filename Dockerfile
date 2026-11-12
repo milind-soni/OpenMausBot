@@ -58,8 +58,10 @@ COPY cloudflare/control-plane/package.json ./cloudflare/control-plane/package.js
 COPY scripts/install-git-hooks.mjs ./scripts/install-git-hooks.mjs
 RUN pnpm install --frozen-lockfile
 COPY . .
-# The Cloud home runs these as root, so nobody else may write them.
-RUN pnpm build:server && pnpm exec vite build && chmod -R go-w dist dist-server skills
+# The Cloud home runs these as root, so nobody else may write them. The web app's
+# build needs more heap than Node gives itself on a 4 GB server, where it ran out
+# of memory: a fixed limit, which such a server meets with swap (docs/deploy-vps.md).
+RUN pnpm build:server && NODE_OPTIONS=--max-old-space-size=6144 pnpm exec vite build && chmod -R go-w dist dist-server skills
 # The Data engine's native modules (server/data/engine.ts), staged like the
 # desktop app's extraResources for the image's CPU (amd64 -> x64, arm64), into
 # one tree the runtime stages copy. pnpm installed both CPUs' packages
@@ -197,6 +199,7 @@ RUN export HOME=/tmp/omb-build-home \
  && cloudflared version \
  && OMB_CLOUD_PUBLIC_HOST=validate.fly.dev caddy validate --config /app/cloud/Caddyfile --adapter caddyfile \
  && OMB_CLOUD_PUBLIC_HOST=validate.example.com OMB_CLOUD_EDGE_STORAGE=/tmp/omb-build-home/edge caddy validate --config /app/cloud/Caddyfile.tls --adapter caddyfile \
+ && OMB_CLOUD_PUBLIC_HOST=validate.example.com OMB_CLOUD_EDGE_STORAGE=/tmp/omb-build-home/edge OMB_CLOUD_EDGE_CERT_ISSUERS="$(OMB_CLOUD_EDGE_ACME_EMAIL=validate@example.com node --input-type=module -e 'import { edgeCertIssuers } from "/app/dist-server/cloud-home-start.js"; process.stdout.write(edgeCertIssuers(process.env));')" caddy validate --config /app/cloud/Caddyfile.tls --adapter caddyfile \
  && OMB_CLOUD_PUBLIC_HOST=validate.example.com caddy validate --config /app/cloud/Caddyfile.tunnel --adapter caddyfile \
  && test -f /app/dist-server/cloud-home-start.js \
  && untrusted="$(find /app /usr/local/bin/caddy /usr/local/bin/cloudflared \( ! -user root -o ! -type l -perm /022 \) -print)" \
@@ -224,7 +227,10 @@ COPY --from=build --chown=maus:maus /src/dist-native/duckdb/target ./duckdb
 COPY --from=build --chown=maus:maus /src/dist-server ./dist-server
 COPY --from=build --chown=maus:maus /src/dist ./dist
 COPY --from=build --chown=maus:maus /src/skills ./skills
-ENV HOME=/data
+# `docker compose exec omb openmausbot pair`: the commands the CLI prints start the same way.
+RUN printf '#!/bin/sh\nexec node /app/dist-server/openmausbot.js "$@"\n' > /usr/local/bin/openmausbot && chmod 0755 /usr/local/bin/openmausbot
+ENV HOME=/data \
+    OMB_CLI_PREFIX="docker compose exec omb openmausbot"
 VOLUME ["/data"]
 USER maus
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
