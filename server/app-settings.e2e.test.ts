@@ -163,6 +163,39 @@ it("an owner-only setting is refused with where to change it", async () => {
     text: "Approval modes is changed only by the owner, in a bot's Settings. Tell the user where to find it; do not try another way." })]);
 }, 60_000);
 
+it("a window preference changes only while the app window's stream is open: refused with none, applied once one connects, refused after it closes, applied again on reconnect", async () => {
+  const openWindow = async () => {
+    const closed = new AbortController();
+    const response = await fetch(`${url}/api/events?window=1`, { headers: { origin: url }, signal: closed.signal });
+    const reader = response.body!.getReader();
+    let seen = "";
+    const pump = (async () => { try { for (;;) { const { value, done } = await reader.read(); if (done) return; seen += new TextDecoder().decode(value); } } catch {} })();
+    await expect.poll(() => seen.includes('"kind":"hello"')).toBe(true);
+    return { frames: () => seen, close: async () => { closed.abort(); await pump; } };
+  };
+  await api("PUT", "/api/window-prefs", { values: { "appearance.skin": "daylight" } });
+  await start("WINDOW-NONE", [step({ action: "set", id: "appearance.skin", value: "midnight" }, true)]);
+  expect(results(await finished("WINDOW-NONE"))).toEqual([expect.objectContaining({ isError: true, text: "Open MausBot on this computer first; this setting lives in the app window." })]);
+
+  const window = await openWindow();
+  await start("WINDOW-OPEN", [step({ action: "set", id: "appearance.skin", value: "midnight" })]);
+  expect(results(await finished("WINDOW-OPEN"))).toEqual([expect.objectContaining({ isError: false, text: expect.stringMatching(/^Changed Skin from daylight to midnight\./) })]);
+  expect(window.frames()).toContain('"kind":"window-pref","id":"appearance.skin","value":"midnight"');
+  await window.close();
+
+  await expect.poll(async () => {
+    const key = `WINDOW-CLOSED-${Date.now()}`;
+    await start(key, [step({ action: "set", id: "appearance.skin", value: "dusk" }, true)]);
+    return results(await finished(key))[0]?.text;
+  }, { timeout: 30_000, message: "the closed window's stream is gone" }).toBe("Open MausBot on this computer first; this setting lives in the app window.");
+
+  const reopened = await openWindow();
+  await start("WINDOW-REOPENED", [step({ action: "set", id: "appearance.skin", value: "dusk" })]);
+  expect(results(await finished("WINDOW-REOPENED"))[0]).toMatchObject({ isError: false, text: expect.stringMatching(/^Changed Skin from midnight to dusk\./) });
+  expect(reopened.frames()).toContain('"value":"dusk"');
+  await reopened.close();
+}, 120_000);
+
 it("a webhook's run may read a setting but not change it", async () => {
   const value = config().rooms?.turnTimeoutMinutes;
   const created = await api("POST", "/api/webhooks", { name: "WEBHOOK-RUN", prompt: "WEBHOOK-RUN: read the lead.", botId: bot.id }, 201);

@@ -19,8 +19,13 @@ export function createInternalAppSettingsRoutes(deps: {
 
 /** The window's own preferences (skin, Simple or Advanced, font, chat width, send key, sounds) live in its
  * localStorage. The window reports them here; the server keeps the last report and pushes a change back as a
- * `window-pref` frame. Nothing is reported until a window has, so `set` can tell the bot to open the app first. */
-export function createWindowPrefs(deps: { broadcast(frame: Record<string, unknown>, options: { adminOnly: true }): void; ownerOrAdmin(auth: RequestAuth): boolean }) {
+ * `window-pref` frame, which only an open window can apply. */
+export function createWindowPrefs(deps: {
+  broadcast(frame: Record<string, unknown>, options: { adminOnly: true }): void;
+  ownerOrAdmin(auth: RequestAuth): boolean;
+  /** An owner's app window holds its live event stream open now. */
+  windowOpen(): boolean;
+}) {
   const values = new Map<WindowPrefId, unknown>();
   const routes: RouteHandler = async ({ req, res, path, method, auth, json, readBody }) => {
     if (method !== "PUT" || path !== WINDOW_PREFS_PATH) return PASS;
@@ -36,7 +41,7 @@ export function createWindowPrefs(deps: { broadcast(frame: Record<string, unknow
     routes,
     read: (id: WindowPrefId) => values.get(id),
     write(id: WindowPrefId, value: unknown): string | null {
-      if (!values.size) return "Open MausBot on this computer first: this preference lives in the app window.";
+      if (!deps.windowOpen()) return "Open MausBot on this computer first; this setting lives in the app window.";
       values.set(id, value);
       deps.broadcast({ kind: "window-pref", id, value }, { adminOnly: true });
       return null;

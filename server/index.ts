@@ -4620,6 +4620,8 @@ interface SseClient {
   /** On a Team Cloud, who the stream is for: its config frames carry that person's own profile. */
   person?: SessionRecord;
   screens: boolean;
+  /** The app window's own stream (`?window=1`): only it applies window-pref frames. */
+  window: boolean;
   /** Revoking or expiring this session must end the stream, not just future requests. */
   sessionId?: string;
   backpressured: boolean;
@@ -12352,7 +12354,7 @@ const postiz = createPostiz({ cfg: () => cfg, mcpOAuth, persistMcpServers: persi
   ...(CLOUD_TEAM ? { ownProfile: (auth: RequestAuth, profile: { name?: string; avatarUrl?: string; aboutMe?: string }) => auth.kind === "session" ? (teamHost.saveMemberProfile(auth.session, profile), true) : false, ownHints: (auth: RequestAuth, hints: string[]) => auth.kind === "session" ? (teamWelcome.save(personKey(auth.session), { hints }), true) : false } : {}),
   resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, postiz,
 }); ROUTES.push(createPostizRoutes({ postiz }), configRoutes);
-const windowPrefs = createWindowPrefs({ broadcast, ownerOrAdmin }); const appSettings = createAppSettings({ store, dataDir: DATA_DIR, entries: routeBackedRegistry({ cfg: () => cfg, store, routes: { config: configRoutes, botOrder: botOrderRoutes, sections: sidebarRoutes }, credentials: () => botLogins.credentialConfig(cfg), window: windowPrefs }), turnOwner: (turn) => phones.turnOwner(turn), guestDriven: cloudGuestDriven, requestCredential: (bot, threadId, body) => secretCards.requestCredential(bot, threadId, body), connectorThread, activeGroupTurnForBot, notify, language: threadLanguage }); ROUTES.push(windowPrefs.routes);
+const windowPrefs = createWindowPrefs({ broadcast, ownerOrAdmin, windowOpen: () => [...sseClients].some((client) => client.admin && client.window) }); const appSettings = createAppSettings({ store, dataDir: DATA_DIR, entries: routeBackedRegistry({ cfg: () => cfg, store, routes: { config: configRoutes, botOrder: botOrderRoutes, sections: sidebarRoutes }, credentials: () => botLogins.credentialConfig(cfg), window: windowPrefs }), turnOwner: (turn) => phones.turnOwner(turn), guestDriven: cloudGuestDriven, requestCredential: (bot, threadId, body) => secretCards.requestCredential(bot, threadId, body), connectorThread, activeGroupTurnForBot, notify, language: threadLanguage }); ROUTES.push(windowPrefs.routes);
 ROUTES.push(createInstanceRoutes({
   store, cfg, registry, sessions, providerAuthSessions,
   hostedModels: Boolean(hostedModels),
@@ -14673,7 +14675,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const client: SseClient = {
         res,
         admin: auth.scopes.includes("admin"),
-        screens: url.searchParams.get("screens") !== "off",
+        screens: url.searchParams.get("screens") !== "off", window: url.searchParams.get("window") === "1",
         backpressured: false,
         viewer, ask: teamOwners.viewer(auth),
         seen: viewer.kind === "all" && !visibleNow.filtersThreads ? { bots: new Set(), groups: new Set() } : {
