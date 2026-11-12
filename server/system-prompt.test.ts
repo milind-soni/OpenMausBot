@@ -462,7 +462,7 @@ describe("longCommandsPrompt", () => {
   it("names Bash's limit everywhere and vm_exec's own limit only with a Local VM", () => {
     for (const kind of [null, "local", "vps", "box"] as const) {
       const text = longCommandsPrompt(kind);
-      expect(text).toContain("`timeout` in milliseconds, up to 7200000, which is 120 minutes");
+      expect(text).toContain("`timeout` in milliseconds, up to 7200000, which is 120 minutes, unless a lower limit is set here");
       expect(text).toContain("Never wait inside a command for CI, a deploy or any other job to finish (no sleep loops or repeated polls): check it once");
       expect(text).toContain("tell the person what you made (with links). Only on a turn the person started in their own chat, set wait_until or a one-time trigger to check back and end your turn");
       expect(text).toContain("When the person writes while you work, answer them first.");
