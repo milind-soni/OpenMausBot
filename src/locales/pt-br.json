@@ -9609,6 +9609,7 @@
   "native.lendTray.paused": "Pausado",
   "native.lendTray.usingMany": "{clouds} estão usando este {device}",
   "native.lendTray.usingOne": "{clouds} está usando este {device}",
+  "native.lendTray.botUsing": "{bot} em {cloud} está usando este {device}",
   "native.lendTray.canUse": "{clouds} com acesso a este {device}",
   "native.lendTray.problem": "{cloud} não pode usar este {device}: {why}",
   "native.lendTray.problemNoticeTitle": "{cloud} não pode usar este {device}",

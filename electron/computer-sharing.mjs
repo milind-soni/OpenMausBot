@@ -18,6 +18,7 @@ import { createComputerAsks } from "./computer-asks.mjs";
 import { LINK_ASLEEP, linkPath } from "./device-link-protocol.mjs";
 import { shareableDrive } from "./shared-drives.mjs";
 import nativeText from "./native-text.cjs";
+import { actingBot } from "./lending-indicator.mjs";
 
 const uuid = value => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 const DATA_VOLUME = "/System/Volumes/Data";
@@ -208,6 +209,8 @@ const WHY_NOT_LENT = Object.freeze({ "connect-first": "native.lendTray.whySignIn
 const whyNotLent = problem => WHY_NOT_LENT[problem] ?? "native.lendTray.whyUnreachable";
 /** The link carried bytes this recently: the tray says the computer is in use. */
 const IN_USE_MS = 5_000;
+/** The menu keeps naming the bot that acted here this long after its last action, so it doesn't flicker between steps. */
+const ACTING_MS = 30_000;
 /** A site opened through this computer goes into its activity once per outcome in this long, so a page's many
  * connections are one line. */
 const BROWSE_NOTE_MS = 10 * 60_000;
@@ -254,6 +257,17 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
   /** The Clouds whose device link is open now. */
   const linked = new Set();
   const inUse = new Map();
+  /** Each bot that acted here lately, by Cloud and bot name, until ACTING_MS after its last action. */
+  const acting = new Map();
+  const actedFor = (id, by) => {
+    const key = `${id}\n${by.name}`;
+    clearTimeout(acting.get(key)?.timer);
+    const timer = setTimeout(() => { acting.delete(key); changed(); }, ACTING_MS);
+    timer.unref?.();
+    acting.set(key, { env: id, by, timer });
+  };
+  const forgetActing = id => { for (const [key, entry] of acting) if (id === undefined || entry.env === id) { clearTimeout(entry.timer); acting.delete(key); } };
+  const actingOn = env => status.get(env.id)?.connected ? [...acting.values()].filter(entry => entry.env === env.id) : [];
   let closed = false;
   let maintainerOff = false;
   let executing = null;
@@ -261,7 +275,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
   const summary = () => {
     const browsing = [...inUse.keys()].find(id => linked.has(id));
     const lent = paused ? [] : environments().filter(env => (records[env.id]?.cloud || records[env.id]?.own) && records[env.id]?.enabled === true);
-    const using = lent.filter(env => executing?.env === env.id || (inUse.has(env.id) && linked.has(env.id)));
+    const using = lent.filter(env => executing?.env === env.id || actingOn(env).length || (inUse.has(env.id) && linked.has(env.id)));
+    const bots = using.flatMap(env => actingOn(env).map(({ by }) => ({ ...by, cloud: env.name })));
     const problems = lendingProblems(lent);
     return {
       lending: lent.map(env => env.id),
@@ -271,6 +286,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       waiting: lent.filter(env => !status.get(env.id)?.connected && status.get(env.id)?.problem !== "asleep").map(env => env.name),
       ...(problems.length ? { problems } : {}),
       using: using.map(env => env.name),
+      ...(bots.length ? { bots } : {}),
       paused,
       ...(pauseError ? { pauseError } : {}),
       terminal: terminalAccount !== null && terminalAccount === signedInAccount(),
@@ -470,7 +486,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
   const stop = id => {
     const live = running.get(id);
     if (live) { live.abort.abort(); live.cua?.close(); live.mcp?.close(); running.delete(id); }
-    status.set(id, { connected: false });
+    status.set(id, { connected: false }); forgetActing(id);
   };
   const run = (env, grant) => {
     stop(env.id);
@@ -541,7 +557,9 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
               continue;
             }
             if (executing) { await call("result", { jobId: job.id, result: sharedComputerError(new Error("This computer is busy with another server")) }); continue; }
+            const by = actingBot(job.by);
             executing = { env: env.id, action: job.operation.action };
+            if (by) actedFor(env.id, by);
             changed();
             const jobAbort = new AbortController();
             const jobSignal = AbortSignal.any([signal, jobAbort.signal]);
@@ -586,7 +604,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
               if (control) presence.acted(job.operation.tool_name, job.operation.arguments);
               await renewal?.catch(() => {});
               await control?.release().catch(() => {});
-              executing = null; changed();
+              executing = null; if (by) actedFor(env.id, by); changed();
             }
             activity.record({
               env, action: job.operation.action, detail: describeSharedOperation(grant, job.operation), ok: result?.isError !== true,
@@ -975,6 +993,6 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       }
       void lendAutomatically();
     },
-    close() { closed = true; for (const id of running.keys()) stop(id); syncAsking(); asks.close(); },
+    close() { closed = true; forgetActing(); for (const id of running.keys()) stop(id); syncAsking(); asks.close(); },
   };
 }
