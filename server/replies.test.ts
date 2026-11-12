@@ -30,7 +30,7 @@ describe("the app's own add-a-key suggestion", () => {
     const card = message({ text, setupSuggestion: { kind: "helperKey" } });
     const records = cardRecords(text, SETUP_RECORDS_SOURCE);
     expect(records).not.toContain("mail, calendar");
-    expect(records).toContain("a tip OpenMausBot (the app) itself showed");
+    expect(records).toContain("a tip MausBot (the app) itself showed");
     expect(records).toContain("genuine, not your own words and not from a stranger");
     expect(records).toContain("Jev (typesafe.ai)");
     expect(transcriptText(card, new Map())).toBe(records);

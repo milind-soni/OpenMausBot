@@ -7353,7 +7353,7 @@
   "chat.preview.removePoint": "移除 {label}",
   "chat.preview.pointedAt": "指出了 {parts}",
   "chat.helperSuggestion.text": "要我免費幫你整理郵件嗎？新增一個 Cloudflare Workers AI 金鑰（免費額度）或 Jev 金鑰就行。",
-  "chat.helperSuggestion.from": "來自 OpenMausBot 的提示",
+  "chat.helperSuggestion.from": "來自 {app} 的提示",
   "chat.helperSuggestion.about": "輔助金鑰讓一個小型模型幫你整理郵件，不會用到你的主要 AI。Jev（typesafe.ai）和 Cloudflare Workers AI 都有提供。",
   "chat.helperSuggestion.addKey": "新增金鑰",
   "chat.helperSuggestion.notNow": "暫時不要",
