@@ -32,10 +32,10 @@ function store(): TelephonyStore {
 }
 
 /** A signed Twilio form request, exactly as the door receives it. */
-function request(pathWithQuery: string, params: Record<string, string>, headers: Record<string, string> = {}) {
+function request(pathWithQuery: string, params: Record<string, string>, headers: Record<string, string> = {}, signWith: string = config.authToken) {
   const body = new URLSearchParams(params).toString();
   const url = new URL(`https://bots.example${pathWithQuery}`);
-  const signature = twilioSignature(`${config.publicUrl}${url.pathname}${url.search}`, params, config.authToken);
+  const signature = twilioSignature(`${config.publicUrl}${url.pathname}${url.search}`, params, signWith);
   const req = {
     method: "POST",
     headers: {
@@ -68,8 +68,8 @@ function response() {
   return { res, status: () => code, body: () => text };
 }
 
-async function knock(door: IngressDoor, pathWithQuery: string, params: Record<string, string>, headers: Record<string, string> = {}) {
-  const { req, url } = request(pathWithQuery, params, headers);
+async function knock(door: IngressDoor, pathWithQuery: string, params: Record<string, string>, headers: Record<string, string> = {}, signWith?: string) {
+  const { req, url } = request(pathWithQuery, params, headers, signWith);
   const out = response();
   const handled = await door(req, out.res, url);
   return { handled, ...out };
@@ -86,6 +86,21 @@ function makeDoor(deps: Partial<Parameters<typeof createTelephonyDoor>[0]> = {})
 }
 
 describe("the telephony door", () => {
+  it("accepts a webhook signed with the account auth token while an API key drives REST", async () => {
+    // Inbound calls arrive signed with the account auth token; the API key
+    // secret only authenticates REST calls and their callbacks.
+    const accountToken = "account-auth-token";
+    const door = createTelephonyDoor({
+      config: () => ({ ...config, signTokens: [accountToken, "api-key-secret"] }),
+      store: store(),
+      chat: async () => "hi",
+    });
+    const result = await knock(door, "/hooks/telephony/voice", { From: "+15187446390", CallSid: "CA-token" }, {}, accountToken);
+    expect(result.handled).toBe(true);
+    expect(result.status()).toBe(200);
+    expect(result.body()).toContain("<Gather");
+  });
+
   it("answers only signed Twilio webhooks", async () => {
     const door = makeDoor();
     const badSignature = await knock(door, "/hooks/telephony/sms", { From: "+15187446390", Body: "hi" }, { "x-twilio-signature": "nope" });

@@ -149,12 +149,9 @@ export function createTelephonyDoor(deps: TelephonyDoorDeps): IngressDoor {
     if (!config.publicUrl) return false;
     if (!configured(config)) return false;
     const signedUrl = `${config.publicUrl}${url.pathname}${url.search}`;
-    return verifyTwilioSignature({
-      url: signedUrl,
-      params,
-      header: header(req, TWILIO_SIGNATURE_HEADER),
-      token: config.authToken,
-    });
+    return (config.signTokens ?? [config.authToken]).some((token) =>
+      verifyTwilioSignature({ url: signedUrl, params, header: header(req, TWILIO_SIGNATURE_HEADER), token }),
+    );
   };
 
   const recordCall = (record: { direction: "in" | "out"; from: string; to: string; status: CallStatus; objective?: string }, id: string) => {

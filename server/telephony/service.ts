@@ -12,6 +12,10 @@ export interface TelephonyConfig {
   /** Basic auth user: the account SID with an auth token, or an API key SID with its secret. */
   authUser: string;
   authToken: string;
+  /** Tokens Twilio may have signed a webhook with: inbound calls arrive signed
+   * with the account auth token, while callbacks of calls an API key placed
+   * are signed with that key's secret. The door accepts either. */
+  signTokens?: string[];
   /** The number Twilio assigns the bot (E.164). Empty when unset: calls and SMS refuse. */
   botPhoneNumber: string;
   /** The one number the door treats as the owner (E.164). Empty: nobody is the owner. */
@@ -48,6 +52,7 @@ export function loadTelephonyConfig(env: NodeJS.ProcessEnv = process.env): Telep
     accountSid,
     authUser: apiKeySid && apiKeySecret ? apiKeySid : accountSid,
     authToken: apiKeySid && apiKeySecret ? apiKeySecret : authToken,
+    signTokens: [...new Set([authToken, apiKeySecret].filter((token) => token))],
     botPhoneNumber: vars.TWILIO_PHONE_NUMBER?.trim() ?? "",
     ownerPhoneNumber: vars.USER_AUTHORIZED_PHONE_NUMBER?.trim() ?? "",
     publicUrl: withoutSlash(vars.TELEPHONY_PUBLIC_URL || vars.OMB_PUBLIC_URL || vars.OMB_WEBHOOK_PUBLIC_URL),
