@@ -194,6 +194,7 @@ describe("phone batch step parsing", () => {
     { case: "accepts 10 steps", raw: Array(10).fill({ action: "read_screen" }), steps: Array(10).fill({ action: "read_screen" }) },
     { case: "coerces both coordinates", raw: [{ action: "tap", x: "540", y: "1200" }], steps: [{ action: "tap", x: 540, y: 1200 }] },
     { case: "counts text to type in characters, as type_text does", raw: [{ action: "type_text", text: "😀".repeat(256) }], steps: [{ action: "type_text", text: "😀".repeat(256) }] },
+    { case: "ignores fields named like an object's built-ins", raw: '[{"action":"read_screen","constructor":"x","toString":"y","__proto__":{"action":"tap"}}]', steps: [{ action: "read_screen" }] },
   ])("$case", ({ raw, steps }) => {
     expect(parseSteps(raw)).toEqual(steps);
   });
@@ -227,6 +228,7 @@ describe("phone batch step parsing", () => {
     { case: "a blank coordinate string", raw: [{ action: "tap", x: " ", y: 1200 }], error: 'Step 1 (tap) needs x and y from 0 to 10000, e.g. {"action":"tap","x":540,"y":1200}. No step was performed.' },
     { case: "a negative wait", raw: [{ action: "wait", seconds: -1 }], error: 'Step 1 (wait) needs seconds as a number from 0 to 60, e.g. {"action":"wait","seconds":3}. No step was performed.' },
     { case: "a negative wait on another action", raw: [{ action: "tap", x: 1, y: 2, seconds: -1 }], error: 'Step 1 (tap) does not take seconds; put a separate {"action":"wait","seconds":3} step after it. No step was performed.' },
+    { case: "a wait given as true", raw: [{ action: "wait", seconds: true }], error: 'Step 1 (wait) needs seconds as a number from 0 to 60, e.g. {"action":"wait","seconds":3}. No step was performed.' },
   ])("refuses $case", ({ raw, error }) => {
     expect(() => parseSteps(raw)).toThrow(new Error(error));
   });
@@ -324,6 +326,12 @@ describe("phone MCP tool surface", () => {
       expect(tool(name).description).not.toContain("then use read_screen to verify");
     }
   });
+
+  it("keeps the batch hint off the tools that cannot be steps", () => {
+    for (const name of ["status", "screenshot", "list_apps"]) {
+      expect(tool(name).description).not.toContain("batch");
+    }
+  });
 });
 
 describe.skipIf(process.platform === "win32")("phone MCP calls through a stand-in adb", () => {
@@ -394,6 +402,23 @@ esac
     const response = await call("batch", { steps: [{ action: "tap_text", text: "Search" }, { action: "wait", seconds: 0 }, { action: "read_screen" }] });
     expect(response.result).toEqual({ content: [{ type: "text", text: `1. tap_text: Tapped "Search"\n2. wait: Waited 0 s\n3. read_screen:\n${SCREEN}` }] });
     expect(adbLog()).toEqual(["devices -l", DUMP, "-s FAKE123 shell input tap 100 140", DUMP]);
+  });
+
+  it("passes a step's coerced index and exact on to tap_text", async () => {
+    const twoMatches = join(home, "adb-two-matches");
+    writeFileSync(twoMatches, `#!/bin/sh
+echo "$*" >> "$(dirname "$0")/adb.log"
+case "$*" in
+  "devices -l") printf 'List of devices attached\\nFAKE123 device usb:1-2 product:husky model:Pixel_8 transport_id:4\\n' ;;
+  *"uiautomator dump /dev/tty") printf '%s' '<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0"><node text="Search" resource-id="" class="android.widget.TextView" content-desc="" bounds="[0,100][200,180]" /><node text="Search history" resource-id="" class="android.widget.TextView" content-desc="" bounds="[0,300][200,380]" /></hierarchy>' ;;
+esac
+`);
+    chmodSync(twoMatches, 0o755);
+    const onTwoMatches = startProxy({ OMB_ADB_PATH: twoMatches });
+    rmSync(join(home, "adb.log"), { force: true });
+    const response = await onTwoMatches("batch", { steps: [{ action: "tap_text", text: "search", index: "1" }, { action: "tap_text", text: "history", exact: "true" }] });
+    expect(response.result).toEqual({ content: [{ type: "text", text: `1. tap_text: Tapped "Search history"\nStep 2 failed: No visible Android text matches "history". Its effect is unknown; call read_screen or screenshot before trying it again. ${EARLIER_AND_LATER}` }] });
+    expect(adbLog()).toEqual(["devices -l", DUMP, "-s FAKE123 shell input tap 100 340", DUMP]);
   });
 
   it("refuses an invalid batch before touching the phone", async () => {
