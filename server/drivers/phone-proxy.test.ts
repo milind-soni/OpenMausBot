@@ -55,9 +55,27 @@ describe("phone MCP text input", () => {
   const ADB_KEYBOARD = "com.android.adbkeyboard/.AdbIME";
   const VENDOR_KEYBOARD = "com.baidu.input_huawei/.ImeService";
   const SENT = "Sent the text to ADBKeyBoard. Use read_screen to check that it reached the field.";
-  // Lines of `dumpsys input_method` on a Huawei Mate 9 (Android 9): a text field taking input, and the home screen.
-  const FIELD = "  mServedInputConnectionWrapper=ControlledInputConnectionWrapper{connection=com.android.internal.widget.EditableInputConnection@c54836f finished=false mParentInputMethodManager.mActive=true}\n";
-  const NO_FIELD = "  mServedInputConnectionWrapper=null\n";
+  // From `dumpsys input_method` on a Huawei Mate 9 (Android 9): an app with a text field taking input, and the home screen.
+  const FIELD = [
+    "  mServedConnecting=false",
+    "  mCurrentTextBoxAttribute:",
+    "    inputType=0x90001 imeOptions=0x3 privateImeOptions=null",
+    "    actionLabel=null actionId=0",
+    "  mServedInputConnectionWrapper=ControlledInputConnectionWrapper{connection=com.android.internal.widget.EditableInputConnection@c54836f finished=false mParentInputMethodManager.mActive=true}",
+    "  mCompletions=null",
+    "",
+  ].join("\n");
+  const NO_FIELD = [
+    "  mServedConnecting=false",
+    "  mCurrentTextBoxAttribute:",
+    "    inputType=0x0 imeOptions=0x0 privateImeOptions=null",
+    "    actionLabel=null actionId=0",
+    "  mServedInputConnectionWrapper=null",
+    "  mCompletions=null",
+    "",
+  ].join("\n");
+  // Android 13 and later print the same value under this name, followed by its handler.
+  const NO_FIELD_13 = "  mServedInputConnection=null\n  mServedInputConnectionHandler=null\n";
   const device = (keyboard: string, inputState = FIELD) => {
     const commands: string[][] = [];
     const shell = async (...command: string[]) => {
@@ -115,13 +133,34 @@ describe("phone MCP text input", () => {
     ]);
   });
 
-  it("clears nothing and types nothing when no field is taking input", async () => {
-    const phone = device(ADB_KEYBOARD, NO_FIELD);
+  it.each([
+    ["the home screen", NO_FIELD],
+    ["the name Android 13 prints", NO_FIELD_13],
+    ["the first app listed when a second one follows", NO_FIELD + FIELD],
+  ])("clears nothing and types nothing when no field is taking input (%s)", async (_state, dump) => {
+    const phone = device(ADB_KEYBOARD, dump);
     await expect(typePhoneText(phone.shell, "二手", true)).rejects.toThrow("No text field is taking input, so nothing was cleared or typed. Tap the field first, then call type_text again.");
     expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"], ["dumpsys", "input_method"]]);
   });
 
-  it("still clears on a phone whose input state it cannot read", async () => {
+  it("goes by the first app listed when a second one has no field", async () => {
+    const phone = device(ADB_KEYBOARD, FIELD + NO_FIELD);
+    await expect(typePhoneText(phone.shell, "二手", true)).resolves.toContain("Asked ADBKeyBoard to clear the field");
+    expect(phone.commands.map((command) => command[3])).toEqual(["default_input_method", undefined, "ADB_CLEAR_TEXT", "ADB_INPUT_B64"]);
+  });
+
+  it("clears nothing and types nothing when the input state cannot be read", async () => {
+    const commands: string[][] = [];
+    const shell = async (...command: string[]) => {
+      commands.push(command);
+      if (command[0] === "settings") return `${ADB_KEYBOARD}\n`;
+      throw new Error("error: closed");
+    };
+    await expect(typePhoneText(shell, "二手", true)).rejects.toThrow("error: closed");
+    expect(commands).toEqual([["settings", "get", "secure", "default_input_method"], ["dumpsys", "input_method"]]);
+  });
+
+  it("still clears on a phone whose dump does not say", async () => {
     const phone = device(ADB_KEYBOARD, "");
     await expect(typePhoneText(phone.shell, "二手", true)).resolves.toContain("Asked ADBKeyBoard to clear the field");
     expect(phone.commands.map((command) => command[3])).toEqual(["default_input_method", undefined, "ADB_CLEAR_TEXT", "ADB_INPUT_B64"]);

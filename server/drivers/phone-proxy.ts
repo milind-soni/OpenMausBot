@@ -158,8 +158,8 @@ export async function typePhoneText(shell: Shell, text: string, clear = false): 
   // -p delivers each broadcast to ADBKeyBoard alone, not to any other app listening for the action.
   const toKeyboard = (action: string, ...extras: string[]) => shell("am", "broadcast", "-a", action, "-p", "com.android.adbkeyboard", ...extras);
   if (clear) {
-    // ADBKeyBoard 2.0 and 2.1 crash on ADB_CLEAR_TEXT when the app in front has no field taking input.
-    // Android 9 then dumps that app's mServedInputConnectionWrapper as null; a dump without the line is not refused.
+    // ADBKeyBoard 2.0 and 2.1 crash on ADB_CLEAR_TEXT when the app in front has no field taking input. Android then dumps
+    // that app's served input connection as null (named ...Wrapper before Android 13); a dump without the line is not refused.
     if (/\bmServedInputConnection(?:Wrapper)?=(\S+)/.exec(await shell("dumpsys", "input_method"))?.[1] === "null") {
       throw new Error("No text field is taking input, so nothing was cleared or typed. Tap the field first, then call type_text again.");
     }
