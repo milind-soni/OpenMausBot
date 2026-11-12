@@ -8705,7 +8705,7 @@ async function interruptRoutineGroupGoal(
   if (!groupId) {
     oneOnOneGoals.stop(threadId, outcome);
     const owner = store.botByThread(threadId);
-    if (owner) await interruptDirectThread(owner.id, threadId);
+    if (owner && directRequestOwners.get(threadId)?.origin?.kind !== "user") await interruptDirectThread(owner.id, threadId);
     return;
   }
   const speaker = groupSpeakers.get(threadId);
