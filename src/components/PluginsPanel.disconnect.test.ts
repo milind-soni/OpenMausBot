@@ -64,6 +64,7 @@ beforeEach(() => {
   vi.mocked(api).mockClear();
 });
 afterEach(async () => {
+  vi.unstubAllGlobals();
   await act(async () => root.unmount());
   host.remove();
   document.body.querySelector("[role=alertdialog]")?.closest(".fixed")?.remove();
@@ -71,7 +72,8 @@ afterEach(async () => {
 
 describe("disconnecting an app account", () => {
   it("asks in the page, and removes only that account after the confirm button", async () => {
-    const nativeConfirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const nativeConfirm = vi.fn(() => true);
+    vi.stubGlobal("confirm", nativeConfirm);
     await open();
     await act(async () => { byLabel(tile(), "Disconnect work from Apollo")!.click(); });
     expect(nativeConfirm).not.toHaveBeenCalled();
@@ -83,7 +85,6 @@ describe("disconnecting an app account", () => {
     await flush();
     expect(deletes()).toEqual([["/api/connectors/apollo/accounts/ca_old", { method: "DELETE" }]]);
     expect(document.body.querySelector("[role=alertdialog]")).toBeNull();
-    nativeConfirm.mockRestore();
   });
 
   it("leaves the account connected when the confirm is cancelled", async () => {
