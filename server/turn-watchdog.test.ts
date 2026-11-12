@@ -383,6 +383,19 @@ describe("stuckCommand", () => {
     expect(stuckCommand(stalls[0]!, 1_000 + 120 * 60_000)).toEqual({ command: "ffmpeg -i talk.mov talk.mp4", minutes: 120 });
   });
 
+  it("scrubs a secret in the command it names", () => {
+    const { dog, stalls, tick } = rig();
+    const token = "sk-ant-api03-" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6";
+    dog.watch("t1", "bot1");
+    dog.observe(shellStarted("upload", `curl -H "Authorization: Bearer ${token}" https://example.com/upload`));
+    tick(TOOL_STALL);
+    dog.sweep();
+    const stuck = stuckCommand(stalls[0]!, TOOL_STALL);
+    expect(stuck?.command).toContain("curl -H");
+    expect(stuck?.command).not.toContain(token);
+    expect(JSON.stringify(stallNotice(stalls[0]!, TOOL_STALL, TOOL_STALL))).not.toContain(token);
+  });
+
   it("names nothing when no running tool runs a shell command", () => {
     const { dog, stalls, tick } = rig();
     dog.watch("t1", "bot1");

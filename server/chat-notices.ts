@@ -182,5 +182,6 @@ export function noticeTool<T extends object>(
 }
 
 export function failedNoticeTool(key: ChatNoticeKey, params?: ServerTextParams): FailedTurnTool {
-  return failedTurnTool(chatNotice(key, params), { text: { key, ...(params ? { params } : {}) } });
+  const safe = params && redactParams(params);
+  return failedTurnTool(chatNotice(key, safe), { text: { key, ...(safe ? { params: safe } : {}) } });
 }
