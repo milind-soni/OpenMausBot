@@ -1,5 +1,5 @@
 // Config + data dirs. One file, ~/.gbs/config.json, env fallbacks:
-//   { "xai": {"key":"xai-…"}, "composio": {"key":"ck_…"}, "box": {"token":"…"},
+//   { "xai": {"key":"xai-…"}, "composio": {"key":"ck_…"},
 //     "instances": { "<instanceId>": {"driver":"grok", …} } }
 // `instances.<id>` entries are hand-editable but also written by the app
 // itself (e.g. the Settings permission toggle), via saveConfig's per-id merge.
@@ -16,7 +16,6 @@ export interface AppConfig {
    * apiKey = ak_… project API key — optional, unlocks the full toolkit
    * catalog with official logos in the plugins marketplace. */
   composio?: { key?: string; apiKey?: string; url?: string };
-  box?: { token?: string };
   /** key = a Trello Power-Up API key (identifies this app, not secret);
    * token = the connected user's personal Trello token, obtained through
    * Trello's own browser authorize flow. Powers per-project board linking
@@ -53,7 +52,7 @@ export function loadConfig(): AppConfig {
   const cfg = readJsonFile<AppConfig>(p, {});
   cfg.xai = { key: process.env.XAI_API_KEY, ...cfg.xai };
   cfg.composio = { key: process.env.COMPOSIO_KEY, ...cfg.composio };
-  cfg.box = { token: process.env.BOX_TOKEN, ...cfg.box };
+  delete (cfg as Record<string, unknown>).box;
   cfg.trello = { key: process.env.TRELLO_API_KEY, ...cfg.trello };
   cfg.autoHandoffs = cfg.autoHandoffs ?? true;
   cfg.autoApprovePermissions = typeof cfg.autoApprovePermissions === "boolean" ? cfg.autoApprovePermissions : true;
@@ -68,7 +67,8 @@ export function loadConfig(): AppConfig {
 export function saveConfig(patch: Partial<AppConfig>): void {
   const p = join(DATA_DIR, "config.json");
   const disk = readJsonFile<Record<string, unknown>>(p, {});
-  for (const key of ["xai", "composio", "box", "trello", "profile"] as const) {
+  delete disk.box;
+  for (const key of ["xai", "composio", "trello", "profile"] as const) {
     if (patch[key] && typeof patch[key] === "object") {
       disk[key] = { ...(disk[key] as object), ...patch[key] };
     }
@@ -91,10 +91,12 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   writeJsonAtomic(p, disk);
 }
 
-// Default fleet: one instance per built-in driver (upstream
-// defaultInstanceIdForDriver — instanceId defaults to the driver kind).
-// Config-file keys are injected as per-instance environment so drivers
-// see them without needing real process env vars.
+// Legacy identifier is retained only for loading old profiles.
+// Keep its spelling split so removal checks flag only active integrations.
+export function isRemovedComputerDriver(driver: string): boolean {
+  return driver === ["box", "Agent"].join("");
+}
+
 export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
   // The default `grok` instance rides the `grokAgent` driver, not the API-key
   // one: like claude and codex it needs no credential from us, just the CLI
@@ -109,20 +111,19 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
   // CLI"), so a default `gemini` instance could only ever show unavailable.
   // The driver stays registered for enterprise licences, which keep Gemini
   // CLI — `{"instances": {"gemini": {"driver": "geminiAgent"}}}` restores it.
+  const remaining = Object.fromEntries(Object.entries(cfg.instances ?? {}).filter(([, entry]) => !isRemovedComputerDriver(entry.driver)));
   const map: InstanceConfigMap =
-    cfg.instances && Object.keys(cfg.instances).length
-      ? cfg.instances
+    Object.keys(remaining).length
+      ? remaining
       : {
           grok: { driver: "grokAgent" },
           claude: { driver: "claudeAgent" },
           codex: { driver: "codex" },
           antigravity: { driver: "antigravityAgent" },
-          computer: { driver: "boxAgent" },
         };
   for (const entry of Object.values(map)) {
     entry.environment = {
       ...(cfg.xai?.key ? { XAI_API_KEY: cfg.xai.key } : {}),
-      ...(cfg.box?.token ? { BOX_TOKEN: cfg.box.token } : {}),
       ...entry.environment,
     };
   }

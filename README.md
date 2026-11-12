@@ -9,7 +9,7 @@
 <sub>An open-source version of **Grok Bot** — bring-your-own-agent, local-first, on the models you already have.</sub>
 
 Every bot in the sidebar is a real agent — Claude or Codex running locally under the hood — with its own
-personality, its own model, its own cloud computer, and its own connected apps.
+personality, its own model, access to this computer, and its own connected apps.
 Talk to them like contacts. Watch them work. Approve what matters.
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
@@ -215,7 +215,6 @@ flowchart LR
     BUS -- "one SSE stream" --> UI
     REG --> CL & CX
     CL & CX -- "MCP" --> BROKER
-    server -- "Box API" --> BOX[("Cloud computer<br/>box.ascii.dev")]
     server -- "Composio Connect" --> APPS[("Gmail · Slack · GitHub · …")]
 ```
 
@@ -256,7 +255,6 @@ Optional, pasted once in **App Settings** (gear in the sidebar footer):
 |---|---|
 | Composio Connect key (`ck_…`) | The connected-apps marketplace |
 | Composio API key (`ak_…`) | The full 500+ app catalog with official logos |
-| Box token ([box.ascii.dev](https://box.ascii.dev)) | Cloud computers for your bots |
 
 ```sh
 pnpm typecheck     # app + server

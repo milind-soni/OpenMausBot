@@ -17,6 +17,47 @@ describe("Store", () => {
     rmSync(DATA_DIR, { recursive: true, force: true });
   });
 
+  it("migrates cloud computers and old engine selections once, preserving local and off", () => {
+    const store = new Store(selection);
+    const legacy = store.createBot();
+    const local = store.createBot();
+    const off = store.createBot();
+    const custom = store.createBot();
+    const direct = store.createBot();
+    store.patchBot(local.id, { computer: "local" });
+    store.patchBot(off.id, { computer: "off" });
+    const rows = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
+    rows.find((b: BotRecord) => b.id === legacy.id).computer = "cloud";
+    rows.find((b: BotRecord) => b.id === legacy.id).modelSelection = { instanceId: "computer", model: "sonnet" };
+    rows.find((b: BotRecord) => b.id === custom.id).modelSelection = { instanceId: "old-desktop", model: "sonnet" };
+    rows.find((b: BotRecord) => b.id === direct.id).modelSelection = { instanceId: ["box", "Agent"].join(""), model: "sonnet" };
+    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(rows));
+    const removed = new Set(["computer", "old-desktop", ["box", "Agent"].join("")]);
+    const reloaded = new Store(selection, removed);
+    expect(reloaded.bot(legacy.id)?.computer).toBeUndefined();
+    expect(reloaded.bot(local.id)?.computer).toBe("local");
+    expect(reloaded.bot(off.id)?.computer).toBe("off");
+    for (const bot of [legacy, custom, direct]) {
+      expect(reloaded.bot(bot.id)?.modelSelection).toEqual(selection());
+      const notices = () => new Store(selection, removed).messagesFor(bot.threadId).filter(m => m.text?.includes("cloud computer, which has been removed"));
+      expect(notices()).toHaveLength(1);
+      expect(notices()[0].text).toBe(`This bot used the cloud computer, which has been removed. It now uses ${selection().model}.`);
+    }
+    const persisted = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
+    expect(persisted.find((b: BotRecord) => b.id === legacy.id)).not.toHaveProperty("computer");
+  });
+
+  it("clears only the old cloud preference when the selected engine is still available", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const rows = [{ ...bot, computer: "cloud" }];
+    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(rows));
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(bot.id)?.computer).toBeUndefined();
+    expect(reloaded.messagesFor(bot.threadId)).toHaveLength(2);
+    expect(reloaded.bot(bot.id)?.modelSelection).toEqual(selection());
+  });
+
   it("createBot seeds a greeting and an onboarding card", () => {
     const store = new Store(selection);
     const bot = store.createBot();

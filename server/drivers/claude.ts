@@ -6,8 +6,6 @@
 //
 // Integrations become MCP servers on the CLI:
 //   - Composio Connect (connected apps → tools) over streamable HTTP
-//   - the bot's cloud computer (box.ascii.dev) via server/computer-proxy.ts
-//     — screenshot/exec/open_url, the CUA-on-the-box bridge
 import { existsSync, unlinkSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { homedir } from "node:os";
@@ -55,7 +53,6 @@ const proxyPath = (basename: string) => {
   const ts = join(dirname(fileURLToPath(import.meta.url)), "..", `${basename}.ts`);
   return existsSync(ts) ? ts : ts.replace(/\.ts$/, ".js");
 };
-const PROXY_PATH = proxyPath("computer-proxy");
 const PERM_PROXY_PATH = proxyPath("permission-proxy");
 // in the packaged app process.execPath is the Electron binary — this env
 // makes it behave as plain node for the spawned MCP proxies (harmless in dev)
@@ -268,18 +265,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         };
         allowed.push("mcp__composio");
       }
-      if (turn.integrations?.computer) {
-        mcpServers.computer = {
-          command: process.execPath,
-          args: [PROXY_PATH],
-          env: {
-            ...NODE_ENV_FLAG,
-            GBS_BOX_ID: turn.integrations.computer.boxId,
-            GBS_BOX_TOKEN: turn.integrations.computer.token,
-          },
-        };
-        allowed.push("mcp__computer");
-      } else if (turn.integrations?.localComputer) {
+      if (turn.integrations?.localComputer) {
         // this Mac, via the Electron-owned cua-driver daemon (spawn config
         // read from cua-connection.json — same "computer" name either way,
         // the agent just sees a computer)

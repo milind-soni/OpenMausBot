@@ -251,17 +251,6 @@ function ConnectionsSection() {
 
           <div className="rounded-xl border border-hairline/40 bg-panel/60 p-4">
             <ApiKeyRow
-              section="box"
-              label="Box Cloud Token"
-              placeholder="Token from box.ascii.dev"
-            />
-            <p className="mt-2 text-[12px] text-ink-secondary">
-              Enables secure cloud sandbox computers with remote GUI browsers and bash execution for agents.
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-hairline/40 bg-panel/60 p-4">
-            <ApiKeyRow
               section="xai"
               label="xAI API Key"
               placeholder="xai-…  Direct Grok model authentication"

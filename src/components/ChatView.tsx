@@ -561,7 +561,6 @@ export function ChatView({ bot }: { bot: Bot }) {
   const stream = useStreaming();
   const streaming = stream.streaming[bot.threadId];
   const reasoning = stream.reasoning[bot.threadId];
-  const provisioning = state.provisioning[bot.id];
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
 
   // only the active branch is rendered; forks stay reachable via ‹ › nav
@@ -775,14 +774,6 @@ export function ChatView({ bot }: { bot: Bot }) {
             onRegenerate={regenerate}
             onStarter={setStarterText}
           />
-          {provisioning && (
-            <div className="flex justify-start">
-              <div className="flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary">
-                <Loader2 size={13} className="animate-spin" />
-                Setting up this bot's computer…
-              </div>
-            </div>
-          )}
           {reasoning && bot.busy && <ThinkingStrip text={reasoning} active={!streaming} />}
           {streaming ? (
             <StreamingBubble text={streaming} />

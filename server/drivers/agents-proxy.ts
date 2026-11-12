@@ -8,7 +8,7 @@
 //   list/create/claim/update/delegate_task → shared task-board operations
 //
 // Speaks raw JSON-RPC 2.0 over stdio (no MCP SDK — house style, matches
-// computer-proxy / permission-proxy). All state comes from env, injected by
+// permission-proxy). All state comes from env, injected by
 // the harness when it builds the integration:
 //   GBS_HARNESS_URL  base URL of the harness (http://127.0.0.1:8899)
 //   GBS_BOT_ID       the calling bot's id (excluded from list_bots; sender)

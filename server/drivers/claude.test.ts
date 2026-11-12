@@ -170,6 +170,24 @@ posixOnly("ClaudeDriver turns (fake CLI)", () => {
     expect(argv.includes("--permission-prompt-tool")).toBe(process.getuid?.() === 0);
   });
 
+  it("keeps local computer tools and connected apps mounted together", async () => {
+    await create();
+    const dump = join(scratch, "integrations.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const localComputer = { command: "desktop-bridge", args: ["mcp"], env: { CUA_SOCKET: "local-socket" } };
+    await instance.adapter.sendTurn({
+      threadId: "t-local-computer", text: "hi",
+      integrations: { localComputer, composio: { key: "test-connected-app-key" } },
+    });
+    await recorder.until(e => e.type === "turn.completed");
+    const { argv } = JSON.parse(readFileSync(dump, "utf8"));
+    const { mcpServers } = JSON.parse(argv[argv.indexOf("--mcp-config") + 1]);
+    expect(mcpServers.computer).toEqual(localComputer);
+    expect(mcpServers.composio.headers).toEqual({ "x-consumer-api-key": "test-connected-app-key" });
+    expect(argv[argv.indexOf("--allowedTools") + 1]).toContain("mcp__computer");
+    expect(argv[argv.indexOf("--allowedTools") + 1]).toContain("mcp__composio");
+  });
+
   it("mounts the agents comms proxy as an MCP server and pre-allows its tools", async () => {
     await create();
     const dump = join(scratch, "dump.json");

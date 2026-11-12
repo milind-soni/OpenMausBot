@@ -473,17 +473,28 @@ describe("harness HTTP API", () => {
     expect(missing.status).toBe(404);
   });
 
+  it("has no cloud computer routes or config fields", async () => {
+    const { body } = await api("GET", "/api/bots");
+    const id = body.bots[0].id;
+    expect((await api("GET", `/api/bots/${id}/computer`)).status).toBe(404);
+    for (const action of ["provision", "join", "sleep", "exec", "screenshot"]) {
+      expect((await api("POST", `/api/bots/${id}/computer/${action}`, {})).status).toBe(404);
+    }
+    expect((await api("GET", "/api/config")).body).not.toHaveProperty("box");
+    expect((await api("PUT", "/api/config", { box: { token: "obsolete-secret" } })).status).toBe(400);
+  });
+
   it("saves config keys write-only and reports booleans", async () => {
     const before = await api("GET", "/api/config");
-    expect(before.body.box).toEqual({ configured: false });
+    expect(before.body.xai).toEqual({ configured: false });
 
-    const put = await api("PUT", "/api/config", { box: { token: "tok_secret_value" } });
+    const put = await api("PUT", "/api/config", { xai: { key: "tok_secret_value" } });
     expect(put.status).toBe(200);
-    expect(put.body.box).toEqual({ configured: true });
+    expect(put.body.xai).toEqual({ configured: true });
     expect(JSON.stringify(put.body)).not.toContain("tok_secret_value");
 
     const after = await api("GET", "/api/config");
-    expect(after.body.box).toEqual({ configured: true });
+    expect(after.body.xai).toEqual({ configured: true });
     expect(JSON.stringify(after.body)).not.toContain("tok_secret_value");
 
     const nothing = await api("PUT", "/api/config", {});
