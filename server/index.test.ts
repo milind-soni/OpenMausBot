@@ -10603,6 +10603,26 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("gives a hold back by its lease after the conversation it was taken through is deleted", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const lease = "viewer-lease-0123456789";
+    try {
+      const task = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Short-lived" })).body.task;
+      const control = `/api/bots/${bot.id}/computer/control?threadId=${task.threadId}`;
+      expect((await api("POST", control, { action: "take", controlLeaseId: lease })).body).toMatchObject({ held: true, owned: true });
+      expect((await api("DELETE", `/api/bots/${bot.id}/tasks/${task.threadId}`)).status).toBe(200);
+      expect((await api("GET", control)).status).toBe(404);
+      expect((await api("POST", control, { action: "take" })).status).toBe(404);
+      expect((await api("POST", control, { action: "release" })).status).toBe(404);
+      const released = await api("POST", control, { action: "release", controlLeaseId: lease });
+      expect(released.status).toBe(200);
+      expect(released.body).toMatchObject({ held: false, released: true });
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "release" }).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+    }
+  });
+
   it("hands out a Local VM's viewer only to the lease holding the computer, once the VM is ready", async () => {
     const previous = (await api("GET", "/api/config")).body.localVm;
     const bot = (await api("POST", "/api/bots")).body.bot;
@@ -10698,7 +10718,10 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it.each(["shared", "pool"])("refuses Local VM phone joins in %s mode for direct and companion callers", async testedMode => {
+  it.each([
+    { testedMode: "shared", refusal: expect.not.stringMatching(/take control|pool mode|per-bot Local VM/i) },
+    { testedMode: "pool", refusal: "Phone control is not available in pool mode. Select shared or per-bot mode in Settings → Computers." },
+  ])("answers Local VM phone joins in $testedMode mode for direct and companion callers past the mode check only when it is not pool", async ({ testedMode, refusal }) => {
     const { mode, maxInstances } = (await api("GET", "/api/config")).body.localVm;
     const previous = { mode, maxInstances };
     const bot = (await api("POST", "/api/bots")).body.bot;
@@ -10708,9 +10731,10 @@ describe("harness HTTP API", () => {
       expect((await api("PATCH", "/api/config", { localVm: { ...previous, mode: testedMode } })).status).toBe(200);
       expect((await owner.call("POST", `/api/bots/${bot.id}/computer/control`, { action: "take", controlLeaseId: lease })).body.owned).toBe(true);
       const join = `/api/bots/${bot.id}/local-computer/join?controlLeaseId=${lease}`;
+      // This suite's container runtime is unavailable, so a join past the mode and lease checks stops at readiness.
       for (const response of [await owner.call("POST", join, {}), await api("POST", join, {})]) {
         expect(response.status).toBe(409);
-        expect(response.body.error).toContain("per-bot Local VM");
+        expect(response.body.error).toEqual(refusal);
         expect(response.body.joinUrl).toBeUndefined();
         expect(response.body.socketPath).toBeUndefined();
         expect(response.body.password).toBeUndefined();

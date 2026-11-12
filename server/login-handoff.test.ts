@@ -35,16 +35,17 @@ describe("the private login handoff to the desktop's main process", () => {
     expect(parseTotpKey((posted[0] as { login: { totp: string } }).login.totp)).toEqual(totp);
   });
 
-  it("hands the 1Password token with its vaults' bots, and says plainly when there is nothing to hand", () => {
+  it("hands the 1Password token with its vaults' and items' bots, and says plainly when there is nothing to hand", () => {
     const { store, posted, ask } = setup();
     ask({ type: LOGIN_HANDOFF_REQUEST, requestId: "request-0002", what: { kind: "1password" } });
     store.setOnePasswordToken(TOKEN);
     store.setOnePasswordGrant("v1", ["pepper"]);
+    store.setOnePasswordItemGrant("v1:i1", []);
     ask({ type: LOGIN_HANDOFF_REQUEST, requestId: "request-0003", what: { kind: "1password" } });
     ask({ type: LOGIN_HANDOFF_REQUEST, requestId: "request-0004", what: { kind: "login", id: "gone" } });
     expect(posted).toEqual([
       { type: LOGIN_HANDOFF_RESULT, requestId: "request-0002", ok: false, error: "1Password is not connected on this computer." },
-      { type: LOGIN_HANDOFF_RESULT, requestId: "request-0003", ok: true, onePassword: { token: TOKEN, grants: { v1: ["pepper"] } } },
+      { type: LOGIN_HANDOFF_RESULT, requestId: "request-0003", ok: true, onePassword: { token: TOKEN, grants: { v1: ["pepper"] }, itemGrants: { "v1:i1": [] } } },
       { type: LOGIN_HANDOFF_RESULT, requestId: "request-0004", ok: false, error: "This login is no longer saved on this computer." },
     ]);
   });
@@ -62,7 +63,7 @@ describe("the private login handoff to the desktop's main process", () => {
     expect(posted).toEqual([
       { type: LOGIN_HANDOFF_RESULT, requestId: "request-0101", ok: false, error: ONE_PASSWORD_DEAD_HERE },
       { type: LOGIN_HANDOFF_RESULT, requestId: "request-0102", ok: false, error: ONE_PASSWORD_DEAD_HERE },
-      { type: LOGIN_HANDOFF_RESULT, requestId: "request-0103", ok: true, onePassword: { token: TOKEN, grants: {} } },
+      { type: LOGIN_HANDOFF_RESULT, requestId: "request-0103", ok: true, onePassword: { token: TOKEN, grants: {}, itemGrants: {} } },
     ]);
     expect(JSON.stringify(posted.slice(0, 2))).not.toContain(TOKEN);
   });

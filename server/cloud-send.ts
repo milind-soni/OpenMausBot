@@ -35,7 +35,7 @@ export interface CloudSendSources {
   /** The stored picture's bytes, or null when it is gone. */
   picture(avatarUrl: string): Uint8Array | null;
   logins(): ReadonlyArray<{ id: string; site: string; hosts: readonly string[]; exactHost: boolean; username: string; updatedAt: number }>;
-  onePassword(): { connectedAt: number; grants: Record<string, LoginBots> } | null;
+  onePassword(): { connectedAt: number; grants: Record<string, LoginBots>; itemGrants?: Record<string, LoginBots> } | null;
   /** Saved Vault secrets, never a value. Linked password-manager items are not listed: they stay linked. */
   secrets?(): ReadonlyArray<{ id: string; name: string; updatedAt: number }>;
   settings(): { profile?: { name?: string; email?: string; aboutMe?: string }; language?: string };
@@ -127,7 +127,9 @@ export function cloudSendSummary(sources: CloudSendSources, { move = false, bot:
   const onePassword = sources.onePassword();
   if (onePassword) {
     items.push({ key: itemKey.onePassword(), kind: "1password", label: "1Password",
-      parts: { token: partHash(onePassword.connectedAt), vaults: partHash(onePassword.grants) } });
+      // Items' own bots count with the vaults', so narrowing one item sends again; without any the hash stays as before.
+      parts: { token: partHash(onePassword.connectedAt),
+        vaults: partHash(Object.keys(onePassword.itemGrants ?? {}).length ? { vaults: onePassword.grants, items: onePassword.itemGrants } : onePassword.grants) } });
   }
   for (const secret of sources.secrets?.() ?? []) {
     items.push({ key: itemKey.secret(secret.id), kind: "secret", label: secret.name, id: secret.id, parts: { saved: partHash(secret.updatedAt) } });
