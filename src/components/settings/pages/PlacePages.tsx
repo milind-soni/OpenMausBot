@@ -6,6 +6,7 @@ import { skillsLibraryEnabled } from "@/lib/feature-flags";
 import { useStore } from "@/state/store";
 import { AdminOnly } from "../../AdminOnly";
 import { AutomaticRecoverySettings } from "../../AutomaticRecoverySettings";
+import { QuotaSwitchSetting } from "../../QuotaSwitchSetting";
 import { AwayEmailsSetting } from "../../AwayEmailsSetting";
 import { PausedBotsButton } from "../../AwakeBotsPicker";
 import { BuiltInBrowserRow, NewBrowserSettings, ServerSitesRow } from "../../BrowserSettingsRows";
@@ -146,7 +147,7 @@ export function AiPage() {
           <KeysPage bare exclude={anchor === "ai-keys" ? [] : ["ai"]} />
         </SettingsGroup>
       )}
-      <AdvancedSection anchor="backup-model"><SettingsGroup label={t("settings.ai.backupModel")} block="backup-model"><AutomaticRecoverySettings /></SettingsGroup></AdvancedSection>
+      <AdvancedSection anchor="backup-model"><SettingsGroup label={t("settings.ai.backupModel")} block="backup-model"><QuotaSwitchSetting /><AutomaticRecoverySettings /></SettingsGroup></AdvancedSection>
       <AdvancedSection anchor="routing"><DecisionModelSettings /></AdvancedSection>
       <AdvancedSection anchor="images"><ImageGenerationSettings /></AdvancedSection>
     </AdminOnly>

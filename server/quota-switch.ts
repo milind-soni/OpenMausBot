@@ -6,6 +6,7 @@ import { approvalModeFor, modelSwitchNeedsAsk } from "../shared/approval-mode.ts
 import type { QuotaSwitchCardData } from "../shared/wire.ts";
 import { recoveryCapabilityError } from "./automatic-recovery.ts";
 import type { EngineAccess, ModelCatalog, ModelSelection, ProviderAdapter, ProviderSnapshot } from "./contracts.ts";
+import type { AppConfig } from "./config.ts";
 import type { Coordinator } from "./coordinator.ts";
 import { readyToRun, selectDefaultModelSelection, type SelectableInstance } from "./default-model-selection.ts";
 import { classifyError } from "./drivers/retry.ts";
@@ -71,10 +72,10 @@ export const NOT_NOW = "Not now";
 
 const ENDED: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
 
-/** On unless OMB_QUOTA_SWITCH=0: a limited AI's work carries on with another AI by itself. Off, only the backups
- * Automatic recovery names take over, as before. */
-export function quotaSwitchEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.OMB_QUOTA_SWITCH?.trim() !== "0";
+/** On unless OMB_QUOTA_SWITCH=0 or Settings turned it off (features.quotaSwitch false): a limited AI's work carries on
+ * with another AI by itself. Off, only the backups Automatic recovery names take over, as before. */
+export function quotaSwitchEnabled(env: NodeJS.ProcessEnv = process.env, cfg?: Pick<AppConfig, "features">): boolean {
+  return env.OMB_QUOTA_SWITCH?.trim() !== "0" && cfg?.features?.quotaSwitch !== false;
 }
 
 const nameOf = (engine: QuotaSwitchEngine): string => engine.displayName || engine.driverKind;

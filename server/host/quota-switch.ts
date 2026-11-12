@@ -8,7 +8,7 @@ import type { BotRecord, Message } from "../store.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { resolveYourComputerAsk } from "../your-computer-consent.ts";
 
-export interface QuotaSwitchHostDeps extends Pick<QuotaSwitchDeps, "store" | "coordinator" | "turnStops" | "takeover"> {
+export interface QuotaSwitchHostDeps extends Pick<QuotaSwitchDeps, "store" | "coordinator" | "turnStops" | "takeover" | "enabled"> {
   registry: Pick<ProviderRegistry, "instances" | "access">;
   hostedModels: ReturnType<typeof hostedModelPolicy>;
   providerConfigs(): InstanceConfigMap;
@@ -33,7 +33,7 @@ export function createQuotaSwitchHost(deps: QuotaSwitchHostDeps) {
   } = deps;
 
   const quotaSwitch = createQuotaSwitch({
-    store, coordinator, registry, turnStops, takeover,
+    store, coordinator, registry, turnStops, takeover, enabled: deps.enabled,
     access: instanceId => providerConfigs()[instanceId]?.access ?? registry.access(instanceId),
     refusal: policyModelRefusal,
     gate: (thread, selection) => checkedTaskModelSwitch(thread, selection, false, false, true),

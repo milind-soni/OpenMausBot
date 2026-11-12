@@ -1,7 +1,7 @@
 import { t } from "./i18n";
 
 export interface FeatureFlagConfig {
-  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean };
+  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; quotaSwitch?: boolean; savedSteps?: boolean; savedStepsHere?: boolean };
   browserEngine?: { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; installing?: boolean; installError?: string };
 }
 
@@ -70,6 +70,11 @@ export function claudeUserMcpEnabled(config: FeatureFlagConfig | null | undefine
 
 export function claudeUserSkillsEnabled(config: FeatureFlagConfig | null | undefined): boolean {
   return config?.features?.claudeUserSkills === true;
+}
+
+/** Switching a limited bot to another AI by itself: on unless the server reports it off. */
+export function quotaSwitchEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.quotaSwitch !== false;
 }
 
 export function llmThreadTitlesEnabled(config: FeatureFlagConfig | null | undefined): boolean {

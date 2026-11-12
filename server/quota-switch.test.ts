@@ -38,7 +38,14 @@ describe("quotaSwitchEnabled", () => {
     for (const other of ["1", "", "false", "off", "no"]) expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: other }), JSON.stringify(other)).toBe(true);
   });
 
-  it("takes nothing from config.json, which has no key for it", () => {
+  it("is off when Settings turned it off (features.quotaSwitch false)", () => {
+    expect(quotaSwitchEnabled({}, { features: { quotaSwitch: false } })).toBe(false);
+    expect(quotaSwitchEnabled({}, { features: { quotaSwitch: true } })).toBe(true);
+    expect(quotaSwitchEnabled({}, { features: {} })).toBe(true);
+    expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: "0" }, { features: { quotaSwitch: true } })).toBe(false);
+  });
+
+  it("takes nothing from a top-level config.json key the schema does not know", () => {
     // A key the config schema does not know is not a setting: the next save
     // through that schema may drop it, and the offer would come back unasked.
     mkdirSync(DATA_DIR, { recursive: true });
