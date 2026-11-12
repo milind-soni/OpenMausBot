@@ -7565,6 +7565,7 @@
   "botPanel.avatar.halloween": "Halloween",
   "botPanel.avatar.diwali": "Diwali",
   "botPanel.avatar.more": "Mais opções de aparência",
+  "botPanel.avatar.bodyEverywhere": "Dar este corpo aos outros bots ({count})",
   "botPanel.avatar.costume": "Fantasiado de {name} enquanto o tema {skin} estiver ligado",
   "botPanel.avatar.drop": "Solte uma imagem aqui ou escolha uma",
   "botPanel.avatar.types": "PNG, JPEG, GIF ou WebP · até 10 MB",
