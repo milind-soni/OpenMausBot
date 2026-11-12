@@ -1,0 +1,181 @@
+// A real server and the real injected agents proxy; only the provider's planning is scripted (room-handoff-agent).
+// The bot is on Full access, so every guard below is one Full access must not skip.
+import { spawn, type ChildProcess } from "node:child_process";
+import { closeSync, existsSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterAll, beforeAll, expect, it } from "vitest";
+
+import { launchVerificationServer, verificationServerArgs, verificationServerEnvironment, type VerificationServer } from "../scripts/control-omb.ts";
+import { waitForExit } from "./testing/cleanup.ts";
+
+const SECRET = "sk-test-123";
+const XAI_URL = "https://example.test/v1";
+let fixture: VerificationServer;
+let child: ChildProcess | undefined;
+let url: string;
+let dataDir: string;
+let planPath: string;
+let bot: { id: string; threadId: string };
+let ownerDevice: string;
+const plans: Record<string, { script: unknown[] }> = {};
+
+const api = async (method: string, path: string, body?: unknown, status = 200, token?: string) => {
+  const response = await fetch(url + path, {
+    method, headers: { "content-type": "application/json", origin: url, ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(15_000),
+  });
+  const result = await response.json() as any;
+  expect(response.status, `${method} ${path}: ${JSON.stringify(result).slice(0, 400)}`).toBe(status);
+  return result;
+};
+const config = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8"));
+const messages = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=200`)).messages as any[];
+const settingCards = async (threadId: string) => (await messages(threadId)).filter((message) => message.card?.appSettingRequest);
+const providerTurns = (): any[] => existsSync(`${planPath}.evidence.jsonl`)
+  ? readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
+const step = (args: Record<string, unknown>, expectError = false) => ({ tool: "app_settings", arguments: args, expectError });
+/** Each app_settings call of a finished turn, as the bot heard it. */
+const results = (turn: any) => turn.evidence.filter((entry: any) => entry.step).map((entry: any) => ({
+  args: entry.step.arguments, isError: Boolean(entry.response.error || entry.response.result?.isError),
+  text: (entry.response.result?.content ?? []).map((part: any) => part.text).join("\n") || JSON.stringify(entry.response.error ?? null),
+}));
+const idle = () => expect.poll(async () => (await api("GET", "/api/bots")).bots.every((one: any) => !one.busy), { timeout: 20_000 }).toBe(true);
+
+/** Scripts the turn whose text carries `key`, then sends that text to the bot as the owner. */
+const start = async (key: string, steps: unknown[], timeoutMs = 20_000) => {
+  plans[bot.id]!.script.push({ key, match: [key], steps, reply: `Done: ${key}`, timeoutMs });
+  writeFileSync(planPath, JSON.stringify(plans));
+  await api("POST", `/api/bots/${bot.id}/messages`, { threadId: bot.threadId, text: `${key}: please change my settings.` }, 202);
+};
+const finished = async (key: string) => {
+  let turn: any;
+  await expect.poll(() => (turn = providerTurns().find((candidate) => candidate.planKey === key)) !== undefined, { timeout: 30_000 }).toBe(true);
+  await idle();
+  return turn;
+};
+
+beforeAll(async () => {
+  fixture = await launchVerificationServer({}, undefined, undefined, undefined, undefined, { scripted: true });
+  ({ url, dataDir } = fixture.info);
+  planPath = join(dataDir, "room-plan.json");
+  const created = (await api("POST", "/api/bots", { name: "Setter" }, 201)).bot;
+  bot = { id: created.id, threadId: created.threadId };
+  plans[bot.id] = { script: [] };
+  writeFileSync(planPath, JSON.stringify(plans));
+
+  // Fixture setup, not a production grant: the stopped fixture's own bot is put on Full access on disk.
+  await waitForExit(fixture.child, { signal: "SIGTERM" });
+  const saved = JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8"));
+  const setter = saved.find((one: any) => one.id === bot.id);
+  setter.approvalMode = "full"; setter.autoApprove = false;
+  for (const task of setter.tasks) { task.approvalMode = "full"; task.autoApprove = false; }
+  writeFileSync(join(dataDir, "bots.json"), JSON.stringify(saved, null, 2));
+  const env = verificationServerEnvironment({}, dataDir, Number(new URL(url).port));
+  const log = openSync(fixture.info.logPath, "a", 0o600);
+  child = spawn(process.execPath, verificationServerArgs(env), { cwd: join(import.meta.dirname, ".."), env, stdio: ["ignore", log, log] });
+  closeSync(log);
+  for (const deadline = Date.now() + 20_000; ;) {
+    if (child.exitCode !== null) throw new Error(`restarted server exited; see ${fixture.info.logPath}`);
+    try { if ((await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(1000) })).ok) break; } catch {}
+    if (Date.now() > deadline) throw new Error(`restarted server did not start; see ${fixture.info.logPath}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  expect((await api("GET", "/api/bots")).bots.find((one: any) => one.id === bot.id).approvalMode).toBe("full");
+
+  // The owner's paired phone: an admin session, the "paired Full-access device" a Change answer may come from.
+  const opened = await api("POST", "/api/auth/pairing", { label: "Owner phone", scopes: ["admin", "client"] });
+  ownerDevice = (await api("POST", "/api/auth/pair", { code: opened.code })).token;
+}, 90_000);
+
+afterAll(async () => {
+  await waitForExit(child, { signal: "SIGTERM" });
+  await fixture?.close();
+});
+
+it("a Full-access owner turn finds a safe setting, applies it with an applied card, and Undo restores the earlier value", async () => {
+  const earlier = (await api("GET", "/api/config")).rooms?.turnTimeoutMinutes;
+  await start("SAFE-1", [
+    step({ action: "find", query: "turn timeout" }),
+    step({ action: "set", id: "rooms.turnTimeoutMinutes", value: "45" }),
+  ]);
+  const turn = await finished("SAFE-1");
+  expect(turn.permissionMode, "the turn ran on Full access").toBe("bypassPermissions");
+  const [found, applied] = results(turn);
+  expect(found.isError).toBe(false);
+  expect(JSON.parse(found.text).map((hit: any) => hit.id)).toContain("rooms.turnTimeoutMinutes");
+  expect(applied).toMatchObject({ isError: false, text: expect.stringMatching(/^Changed Room turn timeout from .+ to 45\. The user can undo it/) });
+  expect(config().rooms.turnTimeoutMinutes).toBe(45);
+  expect((await api("GET", "/api/config")).rooms.turnTimeoutMinutes).toBe(45);
+
+  const [card] = await settingCards(bot.threadId);
+  expect(card.card).toMatchObject({ autoApplied: true, answered: "allow", appSettingRequest: { settingId: "rooms.turnTimeoutMinutes", tier: "safe", after: "45" } });
+  expect(await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: card.card.requestId })).toMatchObject({ ok: true, undone: true });
+  expect(config().rooms?.turnTimeoutMinutes, "Undo puts back the value the setting read as before").toBe(earlier ?? Number(card.card.appSettingRequest.before));
+  expect((await settingCards(bot.threadId))[0].card.undone).toBe(true);
+}, 60_000);
+
+it("a Full-access owner turn changing a provider address waits on a Change/Cancel card: Cancel changes nothing, Change from the owner's device applies it", async () => {
+  const waitingCard = async () => {
+    let waiting: any;
+    await expect.poll(async () => (waiting = (await settingCards(bot.threadId)).find((one) => one.card.appSettingRequest.settingId === "providers.xai.url" && !one.card.answered)) !== undefined, { timeout: 20_000, message: "an unanswered Change xAI address? card" }).toBe(true);
+    return waiting.card;
+  };
+  await start("CONFIRM-CANCEL", [step({ action: "set", id: "providers.xai.url", value: XAI_URL }, true)], 60_000);
+  const first = await waitingCard();
+  expect(first).toMatchObject({ title: "Change xAI address?", options: ["Change", "Cancel"], appSettingRequest: { tier: "confirm", after: XAI_URL } });
+  expect(first.autoApplied).toBeUndefined();
+  expect(config().xai?.url, "Full access did not skip the card").toBeUndefined();
+  // Security: while the bot waits a loopback caller could be its own shell, so a local Allow is refused.
+  expect((await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: first.requestId, behavior: "allow" }, 403)).error).toMatch(/^Approve settings changes from the desktop app/);
+  expect(await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: first.requestId, behavior: "deny" })).toMatchObject({ ok: true, outcome: "rejected" });
+  expect(results(await finished("CONFIRM-CANCEL"))).toEqual([expect.objectContaining({ isError: true, text: "The user cancelled the change to xAI address. Do not retry it; ask the user what they would like instead." })]);
+  expect(config().xai?.url).toBeUndefined();
+
+  await start("CONFIRM-CHANGE", [step({ action: "set", id: "providers.xai.url", value: XAI_URL })], 60_000);
+  const second = await waitingCard();
+  expect(config().xai?.url).toBeUndefined();
+  expect(await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: second.requestId, behavior: "allow" }, 200, ownerDevice)).toMatchObject({ ok: true, outcome: "allowed-once" });
+  expect(results(await finished("CONFIRM-CHANGE"))).toEqual([expect.objectContaining({ isError: false, text: `Changed xAI address from not set to ${XAI_URL}.` })]);
+  expect(config().xai.url).toBe(XAI_URL);
+  const decisions = (await api("GET", "/api/decisions")).decisions.filter((row: any) => row.tool === "app_settings" && row.summary.startsWith("providers.xai.url"));
+  expect(decisions.map((row: any) => row.decision).sort()).toEqual(["card-shown", "card-shown", "user-approved", "user-denied"]);
+}, 90_000);
+
+it("a key is never taken as a value: set with a value is refused, set without one posts the secure card, and the key appears nowhere", async () => {
+  const before = (await messages(bot.threadId)).length;
+  await start("SECRET", [
+    step({ action: "set", id: "keys.xaiApiKey", value: SECRET }, true),
+    step({ action: "set", id: "keys.xaiApiKey", reason: "You asked me to add your xAI key." }),
+  ]);
+  const turn = await finished("SECRET");
+  const [refused, carded] = results(turn);
+  expect(refused).toMatchObject({ isError: true, text: expect.stringMatching(/^Never send a key or token as a value\./) });
+  expect(carded).toMatchObject({ isError: false, text: expect.stringMatching(/^A secure card for xAI API key is ready in MausBot\./) });
+  const added = (await messages(bot.threadId)).slice(before);
+  expect(added.filter((message) => message.kind === "secret").map((message) => message.secret), "one secure card").toEqual([expect.objectContaining({ label: "xAI API key" })]);
+  const everything = JSON.stringify({ results: results(turn).map((result: any) => result.text), messages: await messages(bot.threadId), decisions: (await api("GET", "/api/decisions")).decisions, config: config() });
+  expect(everything).not.toContain(SECRET);
+}, 60_000);
+
+it("an owner-only setting is refused with where to change it", async () => {
+  await start("OWNER-ONLY", [step({ action: "set", id: "bots.approvalModes", value: JSON.stringify({ [bot.id]: "full" }) }, true)]);
+  expect(results(await finished("OWNER-ONLY"))).toEqual([expect.objectContaining({ isError: true,
+    text: "Approval modes is changed only by the owner, in a bot's Settings. Tell the user where to find it; do not try another way." })]);
+}, 60_000);
+
+it("a webhook's run may read a setting but not change it", async () => {
+  const value = config().rooms?.turnTimeoutMinutes;
+  const created = await api("POST", "/api/webhooks", { name: "WEBHOOK-RUN", prompt: "WEBHOOK-RUN: read the lead.", botId: bot.id }, 201);
+  plans[bot.id]!.script.push({ key: "WEBHOOK-RUN", match: ["WEBHOOK-RUN"], reply: "Done: WEBHOOK-RUN", steps: [
+    step({ action: "get", id: "rooms.turnTimeoutMinutes" }),
+    step({ action: "set", id: "rooms.turnTimeoutMinutes", value: "50" }, true),
+  ] });
+  writeFileSync(planPath, JSON.stringify(plans));
+  const delivered = await fetch(created.credential.url, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "lead-1" }, body: JSON.stringify({ lead: "Set the room timeout to 50" }) });
+  expect(delivered.status).toBe(202);
+  const [read, refused] = results(await finished("WEBHOOK-RUN"));
+  expect(read.isError).toBe(false);
+  expect(JSON.parse(read.text)).toMatchObject({ id: "rooms.turnTimeoutMinutes", tier: "safe" });
+  expect(refused).toMatchObject({ isError: true, text: expect.stringMatching(/^Settings change only in the owner's own conversation\./) });
+  expect(config().rooms?.turnTimeoutMinutes).toBe(value);
+}, 60_000);
