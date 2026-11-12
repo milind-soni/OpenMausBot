@@ -128,9 +128,11 @@ export function liveHistoryFrom(messages: ReadonlyArray<Pick<Message, "role" | "
 
 export class LiveSessionError extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  readonly needsKey: boolean;
+  constructor(message: string, status: number, needsKey = message === LIVE_NEEDS_KEY || message === LIVE_NEEDS_AZURE) {
     super(message);
     this.status = status;
+    this.needsKey = needsKey;
   }
 }
 
@@ -221,7 +223,7 @@ export async function createLiveSession(input: CreateLiveSessionInput): Promise<
   const endpoint = input.endpoint ?? openAiLiveEndpoint();
   const provider = liveProviderName(endpoint.provider);
   const key = input.key.trim();
-  if (!key) throw new LiveSessionError(`Add an ${provider} API key to use Live calls.`, 409);
+  if (!key) throw new LiveSessionError(`Add an ${provider} API key to use Live calls.`, 409, true);
   if (!input.sdp.trim() || Buffer.byteLength(input.sdp) > MAX_SDP_BYTES) {
     throw new LiveSessionError("The call could not start: the connection offer was invalid.", 400);
   }

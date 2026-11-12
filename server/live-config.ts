@@ -54,8 +54,9 @@ export function usableLiveKey(live: LiveConfig | undefined): string | undefined 
  * OMB_OPENAI_LIVE_KEY at the next launch: "nowhere" keeps that copy unusable until a key is saved again. */
 export function liveSavePatch(current: LiveConfig | undefined, patch: LiveConfig): LiveConfig {
   const { keyFor: _fromRequest, ...asked } = patch;
+  const explicitlyEnabled = asked.qwen?.enabled === true;
   if (asked.qwen) asked.qwen = qwenSavePatch(current?.qwen, asked.qwen);
-  if (asked.provider !== undefined && current?.qwen && asked.qwen?.enabled !== true) {
+  if (asked.provider !== undefined && current?.qwen && !explicitlyEnabled) {
     const { key: _stored, ...qwen } = current.qwen;
     asked.qwen = { ...qwen, ...asked.qwen, enabled: false };
   }

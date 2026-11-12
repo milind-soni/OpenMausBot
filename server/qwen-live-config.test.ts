@@ -62,6 +62,12 @@ describe("Qwen Live configuration", () => {
     expect(liveSavePatch(live, { qwen: { key: "" } }).qwen).toMatchObject({ key: "", keyFor: "nowhere" });
   });
 
+  it("disables stored Qwen when a native provider patch also edits Qwen settings", () => {
+    const current = { provider: "openai" as const, qwen: { enabled: true, region: "cn-beijing" as const } };
+    expect(liveSavePatch(current, { provider: "azure", qwen: { voice: "longanqian_v3.1" } }).qwen?.enabled).toBe(false);
+    expect(liveSavePatch(current, { provider: "azure", qwen: { enabled: true } }).qwen?.enabled).toBe(true);
+  });
+
   it("accepts only trusted region, workspace, model and provider-specific voice fields", () => {
     expect(qwenLiveEndpoint({ region: "ap-southeast-1", workspace: "team-1" })).toMatchObject({ apiBase: "wss://team-1.ap-southeast-1.maas.aliyuncs.com/api-ws/v1/realtime" });
     for (const qwen of [{ workspace: "https://evil.invalid" }, { workspace: "a.evil" }, { region: "us-east-1" }, { model: "arbitrary" }, { endpoint: "wss://evil.invalid" }, { voice: "a\nAuthorization: evil" }]) {

@@ -123,6 +123,22 @@ it("ends only a queued, non-progressing credit flow after 60 seconds despite zer
   expect(vi.getTimerCount()).toBe(0);
 });
 
+it("keeps the no-progress deadline on the last unconsumed playback window", async () => {
+  const f = fixture();
+  expect(f.socket.playbackCredit({ type: "playback.credit", epoch: 0, seq: 1, bytes: 24_000, contextState: "running" })).toBe(true);
+  f.audio(960);
+  f.provider.event({ type: "response.done", response: { id: "audio", status: "completed" } });
+  expect(f.delivered()).toBe(960);
+  expect(f.socket.hasPendingMedia()).toBe(true);
+  await vi.advanceTimersByTimeAsync(59_999);
+  expect(f.socket.playbackCredit({ type: "playback.credit", epoch: 0, seq: 2, bytes: 0, contextState: "running" })).toBe(true);
+  expect(f.socket.readyState).toBe(1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(f.socket.readyState).toBe(3);
+  expect(f.events).toContainEqual({ type: "error", error: { code: "qwen-playback-stalled" } });
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it.each([
   { bytes: -2 }, { bytes: 1 }, { bytes: 24_002 }, { bytes: NaN }, { bytes: Infinity }, { bytes: "960" },
   { epoch: -1 }, { epoch: 0.5 }, { epoch: 1_000_000_001 }, { seq: -1 }, { seq: 0.5 }, { seq: 1_000_000_001 },
@@ -160,6 +176,8 @@ it("pauses outstanding credit on a suspended context and resumes in order withou
   expect(f.delivered()).toBe(960);
   expect(f.socket.playbackCredit({ ...credit, seq: 3, bytes: 0 })).toBe(true);
   expect(f.delivered()).toBe(1_920);
+  expect(f.socket.playbackCredit({ ...credit, seq: 4, bytes: 1_920 })).toBe(true);
+  expect(f.socket.hasPendingMedia()).toBe(false);
   await vi.advanceTimersByTimeAsync(61_000);
   expect(f.socket.readyState).toBe(1);
   f.socket.close();

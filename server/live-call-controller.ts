@@ -200,7 +200,7 @@ export class LiveCallController {
 
   mediaDisconnected(callId: string): void {
     const call = this.call;
-    if (call?.state.callId === callId) this.finish(call, "connection-lost");
+    if (call?.state.callId === callId) this.finish(call, call.pendingEnd ?? "connection-lost");
   }
 
   async start(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient; sdp: string; transports?: readonly string[] }): Promise<{ call: LiveCallState; sdp: string; transport?: LivePcmTransport }> {
@@ -221,7 +221,7 @@ export class LiveCallController {
     if (input.device && this.revokedDevices.has(input.device)) throw new LiveCallSignedOutError();
     const key = settings.key.trim();
     const endpoint = settings.endpoint;
-    if (settings.setupProblem || !key || !endpoint) throw new LiveSessionError(settings.setupProblem || LIVE_NEEDS_KEY, 409);
+    if (settings.setupProblem || !key || !endpoint) throw new LiveSessionError(settings.setupProblem || LIVE_NEEDS_KEY, 409, true);
     const voice = qwen ? qwenVoiceSchema.parse(settings.qwenVoice ?? QWEN_VOICE) : liveVoice(settings.voice);
     const call = this.newCall(input, key, endpoint, voice);
     // Taken before the first await: a second start in the same tick is refused.
@@ -258,7 +258,10 @@ export class LiveCallController {
     } catch (error) {
       const sidebandOpened = call.socket !== null;
       this.finish(call, "error", "The call could not start.");
-      if (!sidebandOpened) this.closeOrphan(session.sessionId, key, endpoint);
+      if (!sidebandOpened) {
+        if (session.socket) session.socket.close();
+        else this.closeOrphan(session.sessionId, key, endpoint);
+      }
       throw error;
     }
     return { call: { ...call.state }, sdp: session.sdp, ...(session.transport ? { transport: session.transport } : {}) };

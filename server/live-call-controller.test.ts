@@ -89,6 +89,24 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("LiveCallController lifecycle", () => {
+  it("keeps a requested hangup reason when media disconnects before provider closure", async () => {
+    const t = setup();
+    const { call } = await t.start();
+    const ending = t.controller.end(call.callId);
+    t.controller.mediaDisconnected("unrelated");
+    expect(t.controller.current()?.status).toBe("ending");
+    t.controller.mediaDisconnected(call.callId);
+    await ending;
+    expect(t.frames.filter(Boolean).at(-1)).toMatchObject({ endReason: "hung-up" });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("closes a prepared socket if startup fails before attachment", async () => {
+    const socket = new FakeSocket("fixture", "fixture");
+    const t = setup({ createSession: async () => ({ sessionId: "prepared", sdp: "", socket }), activity: () => { throw new Error("fixture activity failed"); } });
+    await expect(t.controller.start({ auth: owner, ...BOT, client: "web", sdp: "offer" })).rejects.toThrow("fixture activity failed");
+    expect(socket.readyState).toBe(3);
+    expect(t.controller.current()).toBeNull();
+  });
   it.each(["qwen", "openai", "azure"] as const)("pins steering correlation to the %s call even if configured provider changes", async provider => {
     const t = setup();
     t.settings.provider = provider;

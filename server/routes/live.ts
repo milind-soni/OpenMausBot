@@ -74,7 +74,7 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
       } catch (error) {
         if (error instanceof LiveCallBusyError) return json(res, 409, { error: error.message, activeCall: error.call });
         if (error instanceof LiveSessionError) {
-          return json(res, error.status, error.status === 409 ? { error: error.message, needsKey: true } : { error: error.message });
+          return json(res, error.status, error.needsKey ? { error: error.message, needsKey: true } : { error: error.message });
         }
         throw error;
       }

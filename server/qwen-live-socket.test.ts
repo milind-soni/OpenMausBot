@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveSocket } from "./live-call-controller.ts";
 import { QwenLiveSocket } from "./qwen-live-socket.ts";
@@ -32,6 +34,57 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("Qwen protocol adapter", () => {
+  it.each(["cancel", "timeout", "startup-error"])("safely closes a real connecting ws socket on %s", async mode => {
+    vi.useRealTimers();
+    const { stdout } = await promisify(execFile)(process.execPath, ["--input-type=module", "-e", `
+      import assert from "node:assert/strict";
+      import { createServer } from "node:http";
+      import WebSocket from "ws";
+      import { QwenLiveSocket } from "./server/qwen-live-socket.ts";
+      import { LiveCallController } from "./server/live-call-controller.ts";
+      const mode = ${JSON.stringify(mode)};
+      const server = createServer();
+      const connections = new Set();
+      server.on("connection", socket => { connections.add(socket); socket.on("close", () => connections.delete(socket)); });
+      const upgraded = new Promise(resolve => server.once("upgrade", resolve));
+      await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+      const upstream = new WebSocket("ws://127.0.0.1:" + server.address().port);
+      const closed = new Promise(resolve => upstream.once("close", resolve));
+      const endpoint = ${JSON.stringify(endpoint)};
+      const socket = new QwenLiveSocket({ upstream, endpoint, key: "fixture", voice: "longanqian_v3.1", instructions: "fixture" });
+      const frames = [];
+      const controller = new LiveCallController({
+        store: { onChange: () => () => {} },
+        send: async () => ({ kind: "started", messageId: "fixture" }), respond: async () => ({ ok: true }),
+        queued: () => false, activity: () => { if (mode === "startup-error") throw new Error("fixture activity"); return "idle"; },
+        broadcast: frame => frames.push(frame.call), settings: () => ({ key: "fixture", endpoint, provider: "qwen", readTypedReplies: true, idleMinutes: 5 }),
+        azureRefusal: () => null, createSession: async () => ({ sessionId: "fixture", sdp: "", socket }),
+        openSocket: () => { throw new Error("prepared socket required"); }, attachUrl: () => "unused", speakable: text => [text], log: () => {},
+      });
+      try {
+        const starting = controller.start({ auth: { kind: "loopback", scopes: ["admin", "client"] }, botId: "bot", botName: "Fixture", threadId: "thread", client: "web", transports: ["ws-pcm"], sdp: "" });
+        if (mode === "startup-error") await assert.rejects(starting, /fixture activity/);
+        else {
+          const { call } = await starting;
+          await upgraded;
+          assert.equal(upstream.readyState, WebSocket.CONNECTING);
+          if (mode === "cancel") await controller.end(call.callId);
+        }
+        await closed;
+        assert.equal(upstream.readyState, WebSocket.CLOSED);
+        assert.equal(socket.readyState, 3);
+        assert.equal(controller.current(), null);
+        assert.equal(frames.at(-1).endReason, mode === "cancel" ? "hung-up" : mode === "timeout" ? "sideband-lost" : "error");
+        process.stdout.write("closed-without-unhandled-error");
+      } finally {
+        await controller.shutdown();
+        for (const connection of connections) connection.destroy();
+        await new Promise(resolve => server.close(resolve));
+      }
+    `], { cwd: new URL("../", import.meta.url), timeout: 15_000 });
+    expect(stdout).toBe("closed-without-unhandled-error");
+  }, 20_000);
+
   it("instructs Qwen in Chinese to actually invoke the empty tool for work before claiming acceptance", async () => {
     const upstream = new Upstream();
     const session = await createQwenLiveSession({ endpoint, key: "fixture", voice: "longanqian_v3.1", bot: { name: "Ada" }, history: [], upstream });

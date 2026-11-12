@@ -74,6 +74,26 @@ it.each([undefined, "credit-v1"] as const)("marks an interrupted result incomple
   expect(vi.getTimerCount()).toBe(0);
 });
 
+it.each([true, false])("retains a result until its last sent PCM is consumed, with done-before-last-send %s", async doneBeforeLastSend => {
+  const f = fixture("credit-v1");
+  try {
+    expect(f.socket.playbackCredit({ type: "playback.credit", epoch: 0, seq: 1, bytes: 24_000, contextState: "running" })).toBe(true);
+    f.socket.send(JSON.stringify({ type: "session.commentary.append", thread_id: "thread", request_id: "request", status: "completed", content: "The code is 729." }));
+    f.provider.event({ type: "response.created", response: { id: "result" } });
+    f.provider.event({ type: "response.audio.delta", response_id: "result", delta: Buffer.alloc(1_920).toString("base64") });
+    if (doneBeforeLastSend) f.provider.event({ type: "response.done", response: { id: "result", status: "completed" } });
+    await vi.advanceTimersByTimeAsync(20);
+    if (!doneBeforeLastSend) f.provider.event({ type: "response.done", response: { id: "result", status: "completed" } });
+    expect(f.delivered()).toBe(1_920);
+    expect(f.socket.playbackCredit({ type: "playback.credit", epoch: 0, seq: 2, bytes: 960, contextState: "running" })).toBe(true);
+    f.provider.event({ type: "input_audio_buffer.speech_started", item_id: "interruption", audio_start_ms: 100 });
+    expect(f.events.filter(event => event.type === "session.playback.incomplete")).toEqual([
+      { type: "session.playback.incomplete", request_id: "request", thread_id: "thread" },
+    ]);
+  } finally { f.socket.close(); }
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it("forgets a fully drained result and attributes a later interruption only to the queued result", async () => {
   const f = fixture("credit-v1");
   const note = (id: string) => f.socket.send(JSON.stringify({ type: "session.commentary.append", thread_id: "thread", request_id: id, status: "completed", content: id }));
@@ -89,6 +109,8 @@ it("forgets a fully drained result and attributes a later interruption only to t
       await vi.advanceTimersByTimeAsync(600);
     }
     expect(f.delivered()).toBe(48_000);
+    expect(f.provider.sent.filter(event => event.type === "response.create")).toHaveLength(1);
+    expect(f.socket.playbackCredit({ type: "playback.credit", epoch: 0, seq: 3, bytes: 24_000, contextState: "running" })).toBe(true);
     expect(f.provider.sent.filter(event => event.type === "response.create")).toHaveLength(2);
     expect(f.events.filter(event => event.type === "session.playback.incomplete")).toHaveLength(0);
     generated("second");
@@ -110,6 +132,8 @@ it.each([undefined, "credit-v1"] as const)("does not mark a fully drained result
     if (playbackFlow) expect(f.socket.playbackCredit({ type: "playback.credit", epoch: 0, seq: 1, bytes: 960, contextState: "running" })).toBe(true);
     await vi.advanceTimersByTimeAsync(40);
     expect(f.delivered()).toBe(960);
+    if (playbackFlow) expect(f.socket.playbackCredit({ type: "playback.credit", epoch: 0, seq: 2, bytes: 960, contextState: "running" })).toBe(true);
+    expect(f.socket.hasPendingMedia()).toBe(false);
     f.provider.event({ type: "input_audio_buffer.speech_started", item_id: "next-turn", audio_start_ms: 100 });
     expect(f.events.filter(event => event.type === "session.playback.incomplete")).toHaveLength(0);
     expect(JSON.stringify(f.provider.sent)).not.toContain("not fully spoken");

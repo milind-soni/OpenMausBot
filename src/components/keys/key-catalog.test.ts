@@ -42,7 +42,8 @@ describe("every credential has one home on the keys page", () => {
 
   it("covers every key the desktop keeps in its encrypted store, saving the ones with a row through that store", () => {
     const stored = [...electron("workspace-credentials.mjs").matchAll(/name: "(\w+)", env: "(\w+)"/g)].map(([, name, env]) => ({ name: name!, env: env! }));
-    const patched = [...electron("credential-patch.mjs").matchAll(/^ {2}(\w+): \(value\) =>/gm)].map(([, name]) => name!);
+    const patched = [...electron("credential-patch.mjs").matchAll(/^ {2}(\w+): \(value(?:, options)?\) =>/gm)].map(([, name]) => name!);
+    expect(patched).toEqual(expect.arrayContaining(["qwenLiveKey", "anthropicApiKey"]));
     expect(stored.length).toBeGreaterThan(10);
     for (const { name, env } of stored) {
       const home = homeOf(env)[0];
@@ -50,8 +51,8 @@ describe("every credential has one home on the keys page", () => {
       const row = shown(home!).find((variant) => variant.env.includes(env));
       if (row?.target) expect(row.target.slot, name).toBe(name);
     }
-    const homed = (name: string) => KEY_CATALOG.some((entry) => entry.target?.slot === name)
-      || stored.some((row) => row.name === name && KEY_CATALOG.some((entry) => entry.env.includes(row.env)));
+    const homed = (name: string) => KEY_CATALOG.some((entry) => shown(entry).some(row => row.target?.slot === name))
+      || stored.some((row) => row.name === name && homeOf(row.env).length > 0);
     for (const name of patched) expect(homed(name), name).toBe(true);
   });
 

@@ -84,6 +84,14 @@ afterEach(() => {
 });
 
 describe("the keys page", () => {
+  it("counts and searches the selected Qwen credential instead of OpenAI", () => {
+    setConfig({ ...fx.config, live: { provider: "qwen", qwenKeyConfigured: true, configured: true } });
+    page();
+    expect(expanded("voice")).toBe("true");
+    expect(section("voice").textContent).toContain("1 connected");
+    type(host.querySelector<HTMLInputElement>("[data-keys-search]")!, "Qwen");
+    expect(rowsShown()).toContain("liveKey");
+  });
   it("aligns the Qwen settings with its key editor and saved destination", () => {
     setConfig({ ...fx.config, live: { configured: false, provider: "qwen", qwenRegion: "cn-beijing", qwenWorkspace: "fixture-space", voice: "marin", readTypedReplies: true, idleMinutes: 5 } });
     page();
@@ -389,6 +397,26 @@ describe("the keys page", () => {
     await vi.waitFor(() => expect(row("liveKey")!.querySelector("[data-key-masked]")).toBeNull());
     expect(JSON.parse(fx.api.mock.calls[2][1].body)).toEqual({ live: { qwen: { key: "" } }, qwenKeyTarget: { region: "cn-beijing", workspace: "" } });
     expect(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!.value).toBe("");
+  });
+
+  it.each(["save", "remove"] as const)("ignores a late Qwen key %s response after the destination changes", async action => {
+    const live = { configured: action === "remove", provider: "qwen", qwenRegion: "cn-beijing", qwenWorkspace: "old-space", qwenKeyConfigured: action === "remove", voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    let resolve!: (config: Record<string, unknown>) => void;
+    fx.api.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    page();
+    if (action === "save") paste(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-key-old-destination");
+    else flushSync(() => row("liveKey")!.querySelector<HTMLButtonElement>("[data-key-remove]")!.click());
+    expect(fx.api).toHaveBeenCalledOnce();
+    const moved = { ...fx.config, live: { ...live, qwenWorkspace: "new-space", configured: false, qwenKeyConfigured: false } };
+    flushSync(() => setConfig(moved));
+    fx.dispatch.mockClear();
+    resolve({ ...fx.config, live: { ...live, configured: action === "save", qwenKeyConfigured: action === "save" } });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fx.dispatch).not.toHaveBeenCalled();
+    expect(fx.config).toBe(moved);
+    expect(row("liveKey")!.querySelector("[data-key-destination]")!.textContent).toContain("new-space");
   });
 
   it("captures the displayed destination before a key save waits and uses the new destination after a remote change", async () => {

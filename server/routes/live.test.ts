@@ -66,6 +66,11 @@ function deps(overrides: Partial<LiveRouteDeps> = {}): LiveRouteDeps & { saved: 
 }
 
 describe("live routes", () => {
+  it("does not label an unsupported transport conflict as a missing credential", async () => {
+    const d = deps();
+    vi.mocked(d.calls.start).mockRejectedValue(new LiveSessionError("Qwen Live needs a web or desktop client with ws-pcm support.", 409));
+    expect(await request(d, "POST", "/api/live/session", { botId: "bot1", sdp: "offer", client: "ios" })).toEqual({ status: 409, body: { error: "Qwen Live needs a web or desktop client with ws-pcm support." } });
+  });
   it("identifies invalid Qwen workspace and voice fields without saving them", async () => {
     const d = deps();
     for (const qwenWorkspace of ["x".repeat(64), "Uppercase", "-team", "team-", "a.evil.invalid"]) {

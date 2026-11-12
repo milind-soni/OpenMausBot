@@ -82,6 +82,7 @@ export class QwenLiveSocket implements LiveSocket {
   private playbackEpoch = 0;
   private playbackSeq = 0;
   private playbackBytes = 0;
+  private playbackOutstanding = 0;
   private playbackRunning = false;
   private lastAudioAt = -Infinity;
   private playbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -148,9 +149,13 @@ export class QwenLiveSocket implements LiveSocket {
     if (credit.epoch > this.playbackEpoch) return false;
     if (credit.seq <= this.playbackSeq) return true;
     if (this.playbackBytes + credit.bytes > 24_000) return false;
+    const consumed = Math.min(this.playbackOutstanding, credit.bytes);
+    this.playbackOutstanding -= consumed;
     this.playbackSeq = credit.seq;
     this.playbackBytes += credit.bytes;
     this.playbackRunning = credit.contextState === "running";
+    if (!this.hasQueuedPlayback()) this.bufferedReadout = null;
+    this.watchPlayback(consumed > 0);
     if (!this.audioTimer) this.drainAudio();
     return true;
   }
@@ -165,8 +170,12 @@ export class QwenLiveSocket implements LiveSocket {
     return true;
   }
 
+  private hasQueuedPlayback(): boolean {
+    return this.audioBytes > 0 || this.playbackOutstanding > 0;
+  }
+
   hasPendingMedia(): boolean {
-    return this.readyState === 1 && (this.speaking !== null || this.audioBytes > 0);
+    return this.readyState === 1 && (this.speaking !== null || this.hasQueuedPlayback());
   }
 
   send(raw: string): void {
@@ -223,6 +232,7 @@ export class QwenLiveSocket implements LiveSocket {
     this.readyState = 3;
     if (this.audioTimer) clearTimeout(this.audioTimer);
     this.audioTimer = null; this.audioQueue.length = 0; this.audioBytes = 0;
+    this.playbackOutstanding = 0;
     this.watchPlayback();
     this.playbackBytes = 0;
     for (const tool of this.tools.values()) if (tool.timer) clearTimeout(tool.timer);
@@ -230,7 +240,9 @@ export class QwenLiveSocket implements LiveSocket {
     this.inputs.clear(); this.responses.clear(); this.tools.clear(); this.notes.length = 0; this.committed.length = 0;
     this.bufferedReadout = null;
     this.suppressedAudio.clear(); this.retiredInputs.clear(); this.retiredResponses.clear(); this.retiredTools.clear();
-    this.upstream.onopen = this.upstream.onmessage = this.upstream.onerror = this.upstream.onclose = null;
+    this.upstream.onopen = this.upstream.onmessage = this.upstream.onclose = null;
+    // ws 8 emits an asynchronous error when a CONNECTING socket is closed.
+    this.upstream.onerror = () => {};
     try { this.upstream.close(code, reason); } catch {}
     try { this.media?.close(code, reason); } catch {}
     this.media = null;
@@ -311,7 +323,7 @@ export class QwenLiveSocket implements LiveSocket {
         const active = this.active;
         if (active.note?.status === "completed" && (active.interrupted || response.status !== "completed")) {
           this.incompleteReadout(active.note);
-        } else if (active.note?.status === "completed" && this.audioBytes > 0) this.bufferedReadout = active.note;
+        } else if (active.note?.status === "completed" && this.hasQueuedPlayback()) this.bufferedReadout = active.note;
         this.active = null;
       }
       this.flush();
@@ -441,6 +453,7 @@ export class QwenLiveSocket implements LiveSocket {
     this.bufferedReadout = null;
     if (this.audioTimer) clearTimeout(this.audioTimer);
     this.audioTimer = null; this.audioQueue.length = 0; this.audioBytes = 0;
+    this.playbackOutstanding = 0;
     this.watchPlayback();
     this.playbackBytes = 0; this.playbackSeq = 0;
     this.playbackRunning = false;
@@ -469,9 +482,9 @@ export class QwenLiveSocket implements LiveSocket {
     if (chunk.length === first.length) this.audioQueue.shift();
     else this.audioQueue[0] = first.subarray(chunk.length);
     this.audioBytes -= chunk.length;
-    if (this.playbackFlow) this.playbackBytes -= chunk.length;
+    if (this.playbackFlow) { this.playbackBytes -= chunk.length; this.playbackOutstanding += chunk.length; }
     try { this.media.send(chunk); } catch { this.close(1011, "audio playback failed"); return; }
-    if (!this.audioBytes) this.bufferedReadout = null;
+    if (!this.hasQueuedPlayback()) this.bufferedReadout = null;
     this.lastAudioAt = Date.now();
     this.watchPlayback(true);
     this.audioTimer = setTimeout(() => { this.audioTimer = null; this.drainAudio(); }, 20);
@@ -479,11 +492,11 @@ export class QwenLiveSocket implements LiveSocket {
   }
 
   private watchPlayback(progress = false): void {
-    if (!this.playbackFlow || !this.media || this.readyState !== 1 || !this.audioBytes || progress) {
+    if (!this.playbackFlow || !this.media || this.readyState !== 1 || !this.hasQueuedPlayback() || progress) {
       if (this.playbackTimer) clearTimeout(this.playbackTimer);
       this.playbackTimer = null;
     }
-    if (this.playbackFlow && this.media && this.readyState === 1 && this.audioBytes && !this.playbackTimer) {
+    if (this.playbackFlow && this.media && this.readyState === 1 && this.hasQueuedPlayback() && !this.playbackTimer) {
       this.playbackTimer = setTimeout(() => {
         this.playbackTimer = null;
         this.close(1008, "audio playback stalled");
@@ -493,7 +506,7 @@ export class QwenLiveSocket implements LiveSocket {
   }
 
   private flush(): void {
-    if (this.readyState !== 1 || this.active || this.speaking || this.awaitingTurn || this.audioBytes > 0 || !this.notes.length) return;
+    if (this.readyState !== 1 || this.active || this.speaking || this.awaitingTurn || this.hasQueuedPlayback() || !this.notes.length) return;
     const note = this.notes.shift()!;
     this.active = { note };
     if (note.callId) this.write({ type: "conversation.item.create", item: { type: "function_call_output", call_id: note.callId,

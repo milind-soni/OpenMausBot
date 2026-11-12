@@ -19,6 +19,43 @@ function fixture(savedId = "") {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Qwen browser-local output routing", () => {
+  it("releases the permission microphone when output enumeration never settles", async () => {
+    vi.useFakeTimers();
+    const stop = vi.fn();
+    const media = { getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop }] })), enumerateDevices: () => new Promise<MediaDeviceInfo[]>(() => {}) };
+    const controller = output.createQwenAudioOutput({ mediaDevices: () => media, storage: () => undefined, supportsSinkId: () => true });
+    try {
+      const pending = controller.choose();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(stop).toHaveBeenCalledOnce();
+      await pending;
+      expect(controller.getSnapshot()).toMatchObject({ busy: false, error: "unavailable" });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+  it("does not let an expired permission lookup invalidate a newer enumeration", async () => {
+    vi.useFakeTimers();
+    const stop = vi.fn();
+    let finishLatest!: (devices: MediaDeviceInfo[]) => void;
+    const media = {
+      getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop }] })),
+      enumerateDevices: vi.fn(() => new Promise<MediaDeviceInfo[]>(resolve => { finishLatest = resolve; })),
+    };
+    const controller = output.createQwenAudioOutput({ mediaDevices: () => media, storage: () => undefined, supportsSinkId: () => true });
+    try {
+      const permission = controller.choose();
+      await vi.advanceTimersByTimeAsync(0);
+      const latest = controller.refresh();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await permission;
+      finishLatest([device("new-output", "New output")]);
+      await latest;
+      expect(controller.getSnapshot().devices).toEqual([{ deviceId: "new-output", label: "New output" }]);
+      expect(stop).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
   it.each(["before", "during"])("preserves a restore warning set %s playback resumes", async (timing) => {
     const { controller, context } = fixture("headset-fixture");
     let resume!: () => void;

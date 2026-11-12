@@ -130,7 +130,12 @@ function KeyEditor({ id, row: rowId, via = "settings", onSaved, bare = false, re
   const [engineCheckError, setEngineCheckError] = useState<string | null>(null);
   const settings = useContext(SettingsLook) && !bare;
   const busyRef = useRef(false);
+  const mounted = useRef(true);
   const generation = useRef(0);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; generation.current += 1; };
+  }, []);
   const inputRef = useRef<HTMLInputElement>(null);
   const replaceRef = useRef<HTMLButtonElement>(null);
   const focusAfter = useRef<"input" | "replace" | null>(null);
@@ -209,6 +214,7 @@ function KeyEditor({ id, row: rowId, via = "settings", onSaved, bare = false, re
     setWorks(false);
     try {
       const status = await saveKey(target, value, !saved.configured);
+      if (!mounted.current) return;
       dispatch({ type: "configStatus", config: status });
       const now = target.saved(status);
       setDraft("");
@@ -221,11 +227,12 @@ function KeyEditor({ id, row: rowId, via = "settings", onSaved, bare = false, re
       if (now.configured && via === "settings") target.settingsEvent?.("add_key");
       keySaved(target.analytics, via, now.configured && target.test ? await runCheck() : savedKeyResult(target.analytics));
     } catch (cause) {
+      if (!mounted.current) return;
       setProblem(errorText(cause));
       keySaved(target.analytics, via, keySaveFailure(cause));
     } finally {
       busyRef.current = false;
-      setBusy(null);
+      if (mounted.current) setBusy(null);
     }
   };
 
@@ -264,16 +271,17 @@ function KeyEditor({ id, row: rowId, via = "settings", onSaved, bare = false, re
     setWorks(false);
     try {
       const status = await saveKey(target, "", false);
+      if (!mounted.current) return;
       dispatch({ type: "configStatus", config: status });
       setReplacing(false);
       setDraft("");
       onSaved?.(target.saved(status).configured);
       keyRemoved(target.analytics, via);
     } catch (cause) {
-      setProblem(errorText(cause));
+      if (mounted.current) setProblem(errorText(cause));
     } finally {
       busyRef.current = false;
-      setBusy(null);
+      if (mounted.current) setBusy(null);
     }
   };
 

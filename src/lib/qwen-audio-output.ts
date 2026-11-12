@@ -126,8 +126,22 @@ export function createQwenAudioOutput(env: OutputEnvironment = browser) {
         if (current()) await refresh();
       } else if (media?.getUserMedia) {
         const permissionStream = await media.getUserMedia({ audio: true });
-        try { if (current()) await refresh(); }
-        finally { for (const track of permissionStream.getTracks()) track.stop(); }
+        let deadline: ReturnType<typeof setTimeout> | undefined;
+        try {
+          if (current()) {
+            const pending = refresh();
+            const lookup = enumeration;
+            await Promise.race([pending, new Promise<never>((_, reject) => {
+              deadline = setTimeout(() => {
+                if (enumeration === lookup) enumeration += 1;
+                reject(new Error("Output enumeration timed out"));
+              }, 5_000);
+            })]);
+          }
+        } finally {
+          if (deadline !== undefined) clearTimeout(deadline);
+          for (const track of permissionStream.getTracks()) track.stop();
+        }
       } else update({ error: "unavailable" });
     } catch (error) { if (current()) update({ error: errorCode(error) }); }
     finally { if (current()) update({ busy: false }); }
