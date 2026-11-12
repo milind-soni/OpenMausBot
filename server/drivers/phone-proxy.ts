@@ -161,20 +161,34 @@ const claimedDevice = (ensureClaim: EnsureClaim, adb: Adb): OnDevice => async (s
 type Shell = (...command: string[]) => Promise<string>;
 const deviceShell = (onDevice: OnDevice, serial: string): Shell => async (...command) => (await onDevice(serial, ["shell", ...command])).toString("utf8");
 
-export async function typePhoneText(shell: Shell, text: string): Promise<string> {
+export async function typePhoneText(shell: Shell, text: string, clear = false): Promise<string> {
   if (!text || [...text].length > 256) throw new Error("Android text must be 1 to 256 characters");
-  if (SAFE_TEXT.test(text)) {
+  if (!clear && SAFE_TEXT.test(text)) {
     await shell("input", "text", text.replaceAll(" ", "%s"));
     return "Typed text into the focused Android field";
   }
   if ((await shell("settings", "get", "secure", "default_input_method")).trim() !== ADB_KEYBOARD) {
-    throw new Error("Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard. Ask the person to set it up, or type only those characters.");
+    throw new Error(clear
+      ? "A field can be cleared only when ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard. Ask the person to set it up, or call type_text without clear and remove the old text with press delete."
+      : "Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard. Ask the person to set it up, or type only those characters.");
+  }
+  // -p delivers each broadcast to ADBKeyBoard alone, not to any other app listening for the action.
+  const toKeyboard = (action: string, ...extras: string[]) => shell("am", "broadcast", "-a", action, "-p", "com.android.adbkeyboard", ...extras);
+  if (clear) {
+    // ADBKeyBoard 2.0 and 2.1 crash on ADB_CLEAR_TEXT when the app in front has no field taking input. Android then dumps
+    // that app's served input connection as null (named ...Wrapper before Android 13); a dump without the line is not refused.
+    if (/\bmServedInputConnection(?:Wrapper)?=(\S+)/.exec(await shell("dumpsys", "input_method"))?.[1] === "null") {
+      throw new Error("No text field is taking input, so nothing was cleared or typed. Tap the field first, then call type_text again.");
+    }
+    // A cleared field's text goes through ADBKeyBoard too, so the two arrive in order.
+    await toKeyboard("ADB_CLEAR_TEXT");
   }
   // ADBKeyBoard reads msg as Base64 UTF-8; Base64 also keeps the text out of the device shell's syntax.
-  // -p delivers it to ADBKeyBoard alone, not to any other app listening for the action.
-  await shell("am", "broadcast", "-a", "ADB_INPUT_B64", "-p", "com.android.adbkeyboard", "--es", "msg", Buffer.from(text, "utf8").toString("base64"));
+  await toKeyboard("ADB_INPUT_B64", "--es", "msg", Buffer.from(text, "utf8").toString("base64"));
   // ADBKeyBoard drops the text when no field has focus, and the broadcast reports success either way.
-  return "Sent the text to ADBKeyBoard. Use read_screen to check that it reached the field.";
+  return clear
+    ? "Asked ADBKeyBoard to clear the field and sent the text. Use read_screen to check that the field holds only this text."
+    : "Sent the text to ADBKeyBoard. Use read_screen to check that it reached the field.";
 }
 
 function normalize(value: string) {
@@ -283,7 +297,7 @@ export const TOOLS = [
   { name: "tap_text", description: "Tap visible Android text or an accessibility label, then use read_screen to verify.", inputSchema: { type: "object", properties: { text: { type: "string" }, exact: { type: "boolean" }, index: { type: "integer", minimum: 0 }, serial: { type: "string" } }, required: ["text"] } },
   { name: "tap", description: "Tap Android screen pixel coordinates obtained from read_screen or screenshot.", inputSchema: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, serial: { type: "string" } }, required: ["x", "y"] } },
   { name: "swipe", description: "Swipe the Android screen in a direction, then use read_screen to verify.", inputSchema: { type: "object", properties: { direction: { type: "string", enum: ["up", "down", "left", "right"] }, serial: { type: "string" } }, required: ["direction"] } },
-  { name: "type_text", description: "Type text into the focused Android field. Letters, digits, spaces and _.,@- always work; other text, such as Chinese, emoji or +, needs the ADBKeyBoard keyboard selected on the phone. Never enter passwords or payment details. A one-time code only for a sign-in the person asked for, into the app it was sent for.", inputSchema: { type: "object", properties: { text: { type: "string", maxLength: 256 }, serial: { type: "string" } }, required: ["text"] } },
+  { name: "type_text", description: "Type text into the focused Android field. Letters, digits, spaces and _.,@- always work; other text, such as Chinese, emoji or +, needs the ADBKeyBoard keyboard selected on the phone. Set clear to true to empty the field first, which also needs ADBKeyBoard. Never enter passwords or payment details. A one-time code only for a sign-in the person asked for, into the app it was sent for.", inputSchema: { type: "object", properties: { text: { type: "string", maxLength: 256 }, clear: { type: "boolean" }, serial: { type: "string" } }, required: ["text"] } },
   { name: "press", description: "Press an Android navigation or keyboard key. wakeup turns the screen on and sleep turns it off.", inputSchema: { type: "object", properties: { key: { type: "string", enum: Object.keys(KEYCODES) }, serial: { type: "string" } }, required: ["key"] } },
 ] as const;
 
@@ -391,7 +405,7 @@ async function callTool(name: string, args: Json, adb: Adb, onDevice: OnDevice):
     await onDevice(serial, ["shell", "input", "swipe", ...point.map((value) => String(Math.round(value))), "260"]);
     return textResult(`Swiped ${direction}`);
   }
-  if (name === "type_text") return textResult(await typePhoneText(deviceShell(onDevice, serial), String(args.text ?? "")));
+  if (name === "type_text") return textResult(await typePhoneText(deviceShell(onDevice, serial), String(args.text ?? ""), args.clear === true));
   if (name === "press") {
     const key = String(args.key ?? "").toLowerCase();
     if (!KEYCODES[key]) throw new Error("Unsupported Android key");

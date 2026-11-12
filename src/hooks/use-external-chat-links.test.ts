@@ -81,6 +81,32 @@ describe("useExternalChatLinks", () => {
     ]);
   });
 
+  it("opens a thread named in the web address once the bots have loaded, and only once", () => {
+    const replaceState = vi.fn();
+    vi.stubGlobal("window", { location: { pathname: "/", search: "?thread=scout-main&bot=scout", hash: "" }, history: { replaceState } });
+    const dispatch = vi.fn();
+    render(loading, dispatch);
+    expect(fixture.link).toBe("openmausbot://thread/scout-main?bot=scout");
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/");
+    expect(dispatch).not.toHaveBeenCalled();
+
+    render(loaded, dispatch);
+    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+      { type: "select", id: "scout" },
+      { type: "switchTask", botId: "scout", threadId: "scout-main" },
+      { type: "revealThread", threadId: "scout-main" },
+    ]);
+    expect(fixture.link).toBeNull();
+  });
+
+  it("says so when the web address names a thread this person can't see", () => {
+    vi.stubGlobal("window", { location: { pathname: "/", search: "?thread=elsewhere", hash: "" }, history: { replaceState: vi.fn() } });
+    const dispatch = vi.fn();
+    render(loading, dispatch);
+    render(loaded, dispatch);
+    expect(dispatch.mock.calls.map(([action]) => action)).toContainEqual({ type: "notice", notice: { kind: "thread-gone", botName: null } });
+  });
+
   it("does nothing without the desktop bridge", () => {
     vi.stubGlobal("window", {});
     const dispatch = vi.fn();

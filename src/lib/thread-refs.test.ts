@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   parseThreadRefUrl,
@@ -7,6 +7,7 @@ import {
   resolveThreadRefs,
   serializeThreadRefs,
   splitThreadRefsForDisplay,
+  takeThreadLinkFromLocation,
   threadRefUrl,
   threadTokenFromPaste,
   threadTokenSpacing,
@@ -114,6 +115,32 @@ describe("remarkThreadRefs", () => {
     remarkThreadRefs(threads)()(tree);
     expect(tree.children?.[0]?.children?.map((node) => node.type)).toEqual(["link", "inlineCode"]);
     expect(tree.children?.[0]?.children?.[0]?.children?.[0]).toEqual(text("#QA PR 245"));
+  });
+});
+
+describe("a thread named in the web app's address", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const at = (search: string, hash = "") => {
+    const replaceState = vi.fn();
+    vi.stubGlobal("window", { location: { pathname: "/", search, hash }, history: { replaceState } });
+    return replaceState;
+  };
+
+  it("becomes the chat link it stands for and leaves the address with everything else", () => {
+    const replaceState = at("?lang=fr&thread=t%201&bot=scout", "#top");
+    expect(takeThreadLinkFromLocation()).toBe("openmausbot://thread/t%201?bot=scout");
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/?lang=fr#top");
+    expect(parseThreadRefUrl("openmausbot://thread/t%201?bot=scout")).toEqual({ threadId: "t 1", botId: "scout" });
+  });
+
+  it("works without a bot, and does nothing when no thread is named", () => {
+    at("?thread=t-1");
+    expect(takeThreadLinkFromLocation()).toBe("openmausbot://thread/t-1");
+    const untouched = at("?bot=scout");
+    expect(takeThreadLinkFromLocation()).toBeNull();
+    expect(untouched).not.toHaveBeenCalled();
+    vi.stubGlobal("window", {});
+    expect(takeThreadLinkFromLocation()).toBeNull();
   });
 });
 

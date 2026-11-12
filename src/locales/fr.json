@@ -371,6 +371,7 @@
   "cloudAccount.signIn": "Se connecter à votre forfait Cloud",
   "cloudAccount.codeCheck": "Vérifiez que votre navigateur affiche ce code :",
   "cloudAccount.codeUntil": "Le code est valable jusqu'à {time}.",
+  "cloudAccount.actionFailed": "Impossible de terminer cette action Cloud. Vérifiez votre connexion et réessayez.",
   "cloudAccount.codeExpired": "Le code de connexion a expiré. Choisissez « Se connecter » pour en obtenir un nouveau.",
   "cloudAccount.free": "Pas encore de forfait",
   "cloudAccount.inactive": "{plan} · inactif pour le moment",

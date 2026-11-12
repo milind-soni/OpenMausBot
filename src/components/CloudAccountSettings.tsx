@@ -68,6 +68,7 @@ function cloudHomeCard({ machine, busy, failed, onConnect, trial = false, waking
     return <div data-cloud-home={machine.status} data-cloud-team={team ? true : undefined} data-cloud-waking={waking ? true : undefined} className="contents">
       <SettingsLinkRow title={label} subtitle={team?.name ? t("cloudHome.team.ready", { name: team.name }) : t("settings.plan.cloudReadyLine")}
         value={t(waking ? "settings.plan.cloudWaking" : "settings.plan.cloudReady")} external onClick={() => { if (!busy) onConnect(); }} data={{ "data-plan-open-cloud": "" }} />
+      {!team && cloudFilesBridge() && <p className="px-4 pb-3"><OpenFilesButton label={t("cloudHome.filesLink")} className="text-[12px] leading-4 text-accent-text hover:underline" /></p>}
       {failed && <p role="alert" className="px-4 pb-3 text-[12px] leading-4 text-danger">{t("cloudHome.connectFailed")}</p>}
     </div>;
   }
@@ -77,9 +78,7 @@ function cloudHomeCard({ machine, busy, failed, onConnect, trial = false, waking
         {machine.status === "provisioning" && machine.setup && <CloudSetupSteps step={machine.setup.step} />}
         {connectable && !team && cloudFilesBridge() && <OpenFilesButton label={t("cloudHome.filesLink")} className="text-[12px] leading-4 text-accent-text hover:underline" />}
         {failed && !unreachable && <p role="alert" className="text-danger">{t("cloudHome.connectFailed")}</p>}
-      </>}>
-      {connectable && !moving && <button type="button" disabled={busy} className="ui-button" onClick={onConnect}>{label}</button>}
-    </SettingRow>
+      </>}>{null}</SettingRow>
   </div>;
 }
 

@@ -20,7 +20,7 @@ function world({ cloud = {}, switches = { "routine:r1": true, "routine:r2": fals
   const w = {
     cloud: { origin: CLOUD, account: "acct-1", machine: CLOUD, ready: true, moves: true, ended: false, paid: false, ...cloud },
     server: { frozen: false, freezes: 0, unfreezes: 0, forgot: 0 },
-    passes: [], checked: 0, cloudCalls: [], localCalls: [], lent: [], phone: { paired: true, stopped: 0, started: 0 }, opened: [], restarted: 0, brought: [],
+    passes: [], moveAsks: [], checked: 0, cloudCalls: [], localCalls: [], lent: [], phone: { paired: true, stopped: 0, started: 0 }, opened: [], restarted: 0, brought: [],
     again: null, version: "0.1.121",
     get journal() { return journal; },
     set journal(value) { journal = value; },
@@ -38,8 +38,8 @@ function world({ cloud = {}, switches = { "routine:r1": true, "routine:r2": fals
         cloud: () => (w.cloud ? { ...w.cloud } : null),
         send: {
           async move(options) {
-            const kind = options?.final ? "final" : "copy";
-            w.passes.push(kind);
+            w.passes.push(options?.final ? "final" : "copy");
+            w.moveAsks.push(options ?? {});
             const failure = moves.shift();
             if (failure) throw failure;
           },
@@ -90,6 +90,7 @@ function world({ cloud = {}, switches = { "routine:r1": true, "routine:r2": fals
         timers: { set: (work, ms) => { const timer = { work, ms }; timers.push(timer); return timer; }, clear: (timer) => { const at = timers.indexOf(timer); if (at >= 0) timers.splice(at, 1); } },
       });
     },
+    failNext(error) { moves.push(error); },
     relaunch() { w.home?.close(); timers.splice(0); w.home = w.make(); return w.home; },
     switchedOn: () => w.cloudCalls.filter(([method]) => method === "PATCH").map(([, route]) => route),
   };
@@ -488,6 +489,37 @@ test("a newer app tops up once from the frozen copy, which is deleted 30 days af
   assert.equal(w.server.forgot, 1);
   await w.home.kick();
   assert.equal(w.server.forgot, 1);
+});
+
+test("a top-up after the move is done never sends workspace files, and a failed one retries the same way", async () => {
+  const w = world();
+  await w.home.kick();
+  assert.deepEqual(w.moveAsks, [{}, { final: true }], "the move itself still carries the files");
+
+  w.version = "0.1.122";
+  await w.relaunch().kick();
+  assert.deepEqual(w.moveAsks.at(-1), { final: true, files: false });
+  assert.equal(w.journal.version, "0.1.122");
+  await w.relaunch().kick();
+  assert.equal(w.moveAsks.length, 3, "once per version");
+
+  w.cloud.paid = false;
+  w.advance(KEPT_MS);
+  w.version = "0.1.123";
+  await w.relaunch().kick();
+  assert.equal(w.server.forgot, 0, "an unpaid copy, and a server of the person's own, is never deleted");
+  assert.deepEqual(w.moveAsks.at(-1), { final: true, files: false }, "the old files are still not sent");
+
+  const again = world();
+  await again.home.kick();
+  again.version = "0.1.122";
+  again.failNext(new Error("offline"));
+  await again.relaunch().kick();
+  assert.equal(again.journal.version, "0.1.121", "a failed top-up does not count as made");
+  again.advance(60 * 60_000);
+  await again.tick();
+  assert.equal(again.journal.version, "0.1.122");
+  assert.deepEqual(again.moveAsks.slice(-2), [{ final: true, files: false }, { final: true, files: false }]);
 });
 
 test("one home reads the Admin's word: a ready Cloud the account may move to, and a held one that ended", () => {

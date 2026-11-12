@@ -4423,6 +4423,7 @@
   "botPanel.avatar.halloween": "Halloween",
   "botPanel.avatar.diwali": "Diwali",
   "botPanel.avatar.more": "More looks",
+  "botPanel.avatar.bodyEverywhere": "Give this body to the other bots ({count})",
   "botPanel.avatar.costume": "Dressed as the {name} while the {skin} skin is on",
   "botPanel.avatar.drop": "Drop a picture here, or choose one",
   "botPanel.avatar.types": "PNG, JPEG, GIF, or WebP · up to 10 MB",

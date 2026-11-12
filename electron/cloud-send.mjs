@@ -335,12 +335,12 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
 
   /** One send at a time; one asked while another runs waits for it, then runs as it was asked. A move (`reason: "move"`)
    * carries everything; its final pass (`final`) carries the sign-ins that refresh themselves too, and this computer lets
-   * go of each once My Cloud has it. */
-  async function send({ keys = null, force = [], reason = "button", final = false, scope = null } = {}) {
+   * go of each once My Cloud has it. `files: false` leaves the bots' files. */
+  async function send({ keys = null, force = [], reason = "button", final = false, scope = null, files = true } = {}) {
     while (running) await running.promise.catch(() => {});
     const origin = cloud.origin();
     if (!origin) throw new CloudSendError("no_cloud", "This computer has no My Cloud yet.");
-    const job = { reason, final: reason === "move" && final === true, scope, promise: null, chats: false };
+    const job = { reason, final: reason === "move" && final === true, scope, files: files !== false, promise: null, chats: false };
     running = job;
     progress = null;
     localScope = scope;
@@ -432,8 +432,10 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       if (move) {
         // Its notes about the person stay with them when a bot moves into a team.
         if (!team) await kinds.moveMemory(ctx, moved);
-        try { await kinds.moveFiles(ctx, moved, computer?.label); }
-        catch (error) { result.failed.push({ key: "files", kind: "files", label: "Files", error: sentence(error?.message) ?? "The files could not be sent." }); }
+        if (job.files) {
+          try { await kinds.moveFiles(ctx, moved, computer?.label); }
+          catch (error) { result.failed.push({ key: "files", kind: "files", label: "Files", error: sentence(error?.message) ?? "The files could not be sent." }); }
+        }
       }
       const after = parseSendSummary((await session.call("GET", summaryRoute)).body);
       if (after) remember(origin, ctx, after);

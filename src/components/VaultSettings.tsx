@@ -421,7 +421,7 @@ function OnePasswordConnection({ status, disabled, bots, botNames, onChange }: {
           {status.vaults.map((vault) => <VaultAccess key={vault.id} vault={vault} bots={bots} botNames={botNames} disabled={disabled} onChange={onChange} />)}
         </ul>
       )}
-      {error && <p role="alert" className="text-[12px] leading-4 text-danger">{error}</p>}
+      {error && !open && <p role="alert" className="text-[12px] leading-4 text-danger">{error}</p>}
       {open && !status.connected && (
         <SettingsDialog title={t("settings.vault.connectManager")} onClose={() => setOpen(false)}
           footer={<>
@@ -436,6 +436,7 @@ function OnePasswordConnection({ status, disabled, bots, botNames, onChange }: {
               <input name="onePasswordToken" type="password" autoComplete="off" spellCheck={false} maxLength={8192} value={token}
                 onChange={(event) => setToken(event.target.value)} disabled={disabled || busy !== null} className={SETTINGS_INPUT} />
             </SettingsField>
+            {error && <p role="alert" className="text-[12px] leading-4 text-danger">{error}</p>}
           </form>
         </SettingsDialog>
       )}
