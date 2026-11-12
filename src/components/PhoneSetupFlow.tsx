@@ -155,7 +155,6 @@ export interface PhoneSetupController {
   cancel: () => void;
   refreshCode: () => void;
   finish: () => void;
-  /** The state after the call, or null when it did not run or failed (then `error` says why). */
   act: (call: (companion: CompanionBridge) => Promise<CompanionState>) => Promise<CompanionState | null>;
   accountAct: (call: (remote: AccountBridge) => Promise<CompanionAccountState>) => Promise<void>;
 }
@@ -248,16 +247,14 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
         companionMutationEpoch,
         () => call(companion),
       );
-      if (mounted.current) setState(next);
-      return next;
+      if (mounted.current) setState(next); return next;
     } catch (cause) {
       if (mounted.current) setError(
         normalizePhoneSetupActionError(
           cause,
           t("phone.error.remoteUpdate"),
         ),
-      );
-      return null;
+      ); return null;
     } finally {
       if (mounted.current) setActionBusy(false);
     }
