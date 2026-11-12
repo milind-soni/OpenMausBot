@@ -10,7 +10,7 @@ import {
 beforeEach(() => setLocale("en"));
 
 const ids = (ctx: SettingsContext) => visiblePages(ctx).map((page) => page.id);
-const PLACE_PAGES = ["overview", "phone", "ai", "bots", "desktops", "vault", "usage", "data"];
+const PLACE_PAGES = ["overview", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "data"];
 const find = (query: string, ctx: SettingsContext = fullContext()) => searchSettings(query, ctx, (entry) => t(entry.labelKey), (page) => t(page.labelKey));
 const first = (query: string, ctx?: SettingsContext) => find(query, ctx)[0]?.entry;
 
@@ -29,16 +29,16 @@ describe("the pages", () => {
   });
 
   it.each(Object.entries(PEOPLE))("keeps the same place pages, in the same order, for %s", (who, ctx) => {
-    // A team's member is offered none of the installation's admin pages (AI, Desktops, Spending, Data).
-    const expected = who === "a team member" ? PLACE_PAGES.filter((id) => !["ai", "desktops", "usage", "data"].includes(id)) : PLACE_PAGES;
+    // A team's member is offered none of the installation's admin pages (AI, Desktops, Spending, Import & export, Data).
+    const expected = who === "a team member" ? PLACE_PAGES.filter((id) => !["ai", "desktops", "usage", "transfer", "data"].includes(id)) : PLACE_PAGES;
     expect(ids(ctx).filter((id) => PLACE_PAGES.includes(id))).toEqual(expected);
   });
 
-  // Owner decision (Nov 11): Simple shows eight entries; Advanced adds You and your bots, Desktops & browser, Spending,
-  // Data and General in their places.
+  // Owner decisions (Nov 11, Nov 12): Simple shows nine entries, Import & export among them; Advanced adds You and your
+  // bots, Desktops & browser, Spending, Data and General in their places.
   it.each(["local only", "This computer, with My Cloud", "My Cloud's page in the desktop window", "My Cloud in a browser (owner)"] as const)(
-    "shows Simple's eight entries for %s", (who) => {
-      expect(ids({ ...PEOPLE[who], advanced: false })).toEqual(["overview", "phone", "ai", "vault", "account", "plan", "app", "appearance"]);
+    "shows Simple's nine entries for %s", (who) => {
+      expect(ids({ ...PEOPLE[who], advanced: false })).toEqual(["overview", "phone", "ai", "vault", "transfer", "account", "plan", "app", "appearance"]);
     });
 
   it("is shorter in Simple: the five Advanced pages come back in Advanced, in place", () => {
@@ -50,7 +50,9 @@ describe("the pages", () => {
   it("turns Advanced on for a link, a notice or a search hit that asks for an Advanced page or row from Simple", () => {
     const simple = fullContext({ advanced: false });
     expect(resolveSettingsTarget("general", simple)).toEqual({ page: "general", advanced: true });
-    expect(resolveSettingsTarget("backups", simple)).toEqual({ page: "data", anchor: "backups", advanced: true });
+    expect(resolveSettingsTarget("activity", simple)).toEqual({ page: "data", anchor: "activity", advanced: true });
+    expect(resolveSettingsTarget("backups", simple)).toEqual({ page: "transfer", anchor: "take-out" });
+    expect(resolveSettingsTarget("import", simple)).toEqual({ page: "transfer", anchor: "bring-in" });
     expect(resolveSettingsTarget("decisionModel", simple)).toEqual({ page: "ai", anchor: "routing", advanced: true });
     expect(resolveSettingsTarget("phone", simple)).toEqual({ page: "phone" });
     expect(needsAdvanced({ page: "general" }, fullContext())).toBe(false);
@@ -72,7 +74,7 @@ describe("the pages", () => {
       expect(hit!.advanced, query).toBe(true);
     }
     expect(find("language", simple)[0]?.entry.page).toBe("app");
-    expect(find("backups", simple)[0]?.entry.page).toBe("overview");
+    expect(find("backups", simple)[0]).toMatchObject({ entry: { page: "transfer" }, advanced: undefined });
   });
 
   it("names Phone & devices the same on every place: there is no This server page", () => {
@@ -90,7 +92,7 @@ describe("the pages", () => {
   });
 
   it("offers a team's member none of the installation's admin pages, and a team's admin all of them", () => {
-    for (const page of ["ai", "desktops", "usage", "data"] as const) {
+    for (const page of ["ai", "desktops", "usage", "transfer", "data"] as const) {
       expect(ids(PEOPLE["a team member"])).not.toContain(page);
       expect(ids(PEOPLE["a team admin"])).toContain(page);
     }
@@ -125,8 +127,8 @@ describe("old links", () => {
     expect(resolveSettingsTarget("cloudAccount", fullContext({ plan: false }))).toEqual({ page: "account" });
     expect(where("organization")).toEqual({ page: "account", anchor: "organization" });
     expect(where("desktopWorkspaces")).toEqual({ page: "app", anchor: "your-computers" });
-    expect(where("backups")).toEqual({ page: "data", anchor: "backups" });
-    expect(where("import")).toEqual({ page: "data", anchor: "bring-in" });
+    expect(where("backups")).toEqual({ page: "transfer", anchor: "take-out" });
+    expect(where("import")).toEqual({ page: "transfer", anchor: "bring-in" });
     expect(where("activity")).toEqual({ page: "data", anchor: "activity" });
     expect(where("experimental")).toEqual({ page: "bots", anchor: "early" });
     expect(where("skills")).toEqual({ page: "bots", anchor: "skills" });
@@ -161,6 +163,39 @@ describe("search", () => {
   it("finds Activity in Data where it exists: a browser, for an admin", () => {
     expect(first("activity", PEOPLE["a team admin"])?.anchor).toBe("activity");
     expect(find("activity", fullContext()).some((hit) => hit.entry.anchor === "activity")).toBe(false);
+  });
+
+  describe.each([["Simple", false], ["Advanced", true]] as const)("Import & export in %s", (_mode, advanced) => {
+    const owner = fullContext({ advanced });
+    it.each(["grok", "grok bot", "move from"])("puts Move from Grok Bot first for “%s”, with no Advanced tag", (query) => {
+      expect(find(query, owner)[0]).toMatchObject({ entry: { id: "grok-move", page: "transfer", anchor: "grok-move" }, advanced: undefined });
+    });
+
+    it.each(["import", "bring", "export", "backup", "restore"])("lands “%s” on Import & export", (query) => {
+      const hit = find(query, owner)[0];
+      expect(hit?.entry.page, query).toBe("transfer");
+      expect(hit?.advanced, query).toBeUndefined();
+    });
+
+    it("finds each row by its natural words", () => {
+      const found = (query: string) => find(query, owner).map((hit) => hit.entry.id);
+      expect(found("import")).toEqual(expect.arrayContaining(["page:transfer", "grok-move", "ai-apps", "backup-import", "bring-in"]));
+      expect(found("export")).toEqual(expect.arrayContaining(["page:transfer", "backup-export", "take-out"]));
+      expect(found("backup")).toEqual(expect.arrayContaining(["backup-export", "backup-import"]));
+      expect(first("restore", owner)?.id).toBe("backup-import");
+    });
+
+    it("offers a team's member none of it, and a team's admin all of it", () => {
+      for (const query of ["grok", "import", "export", "backup", "restore", "bring"]) {
+        expect(find(query, { ...PEOPLE["a team member"], advanced }).filter((hit) => hit.entry.page === "transfer"), query).toEqual([]);
+        expect(find(query, { ...PEOPLE["a team admin"], advanced })[0]?.entry.page, query).toBe("transfer");
+      }
+    });
+  });
+
+  it("lists no import, export or backup row under Data", () => {
+    const data = SETTINGS_INDEX.filter((entry) => entry.page === "data").map((entry) => entry.id);
+    expect(data).toEqual(["storage", "activity"]);
   });
 
   it("finds Advanced rows from Simple too, so they can be used in place", () => {

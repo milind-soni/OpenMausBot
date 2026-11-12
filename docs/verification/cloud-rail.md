@@ -103,7 +103,7 @@ would be more folders there), on the same address, one server at a time, as a
 local environment switch does. Nothing moves either way, the frozen copy keeps
 its marker and its bots, and the move's code never reaches the profile. A line
 on its page says the bots from before are on My Cloud and that an older copy
-comes in from Settings → Backups, until its ✕ closes it for good in that
+comes in from Settings → Import & export, until its ✕ closes it for good in that
 workspace, or by itself once it was shown on three days or a week went by. My
 Cloud on the rail goes back; the profile keeps running, so This Mac is one
 click again. A launch opens the place open when the app last closed (My Cloud,

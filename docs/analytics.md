@@ -129,7 +129,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `app_active` | Once a day you use the app: when this app page starts, comes into view or is focused, or when a check every ten minutes finds a new day while the page is in view and focused. At most once per day by your computer's date for each app page, and never while the page is hidden | `platform`: `desktop`, `browser`; `mode`: `simple`, `advanced`, the look this app page is in when it counts the day |
 | `onboarding_step` | A first-run screen is shown | `step`: `meet`, `chief`; `replay`: true/false |
 | `onboarding_completed` | The first run ends in the chat | `reason`: `completed`; `at`: the screen it ended on; `replay`: true/false |
-| `setup_import_applied` | You bring in the skills and MCP servers found from other AI tools on this computer, in Settings → Import | `skills`, `tools`: how many were added. Never their names or where they came from |
+| `setup_import_applied` | You bring in the skills and MCP servers found from other AI tools on this computer, in Settings → Import & export | `skills`, `tools`: how many were added. Never their names or where they came from |
 | `onboarding_cloud` | You tap Try Cloud under MausBot's first messages, which opens Add a Cloud | `action`: `start_trial` |
 | `message_sent` | You send a message | To a bot: `driver`: engine; `queued`: true/false. To a room: `room`: true; `mode`: `chat`, `goal`; `queued`: true/false |
 | `call_started` | You start a call with a bot | `driver`: engine; `mode`: `turns`, `live` |

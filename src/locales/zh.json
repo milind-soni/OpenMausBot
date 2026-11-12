@@ -5710,7 +5710,6 @@
   "skills.library.loadError": "无法加载技能库，请重试。",
   "skills.library.loading": "正在加载…",
   "skills.library.close": "关闭",
-  "settings.section.backups": "备份",
   "settings.import.appsTitle": "从你的 AI 应用导入",
   "settings.import.appsSubtitle": "从这台电脑上的 Claude Code、Codex、Cursor、Claude Desktop 和 Gemini 导入技能和 MCP 工具。导入的工具默认关闭；不会读取登录信息或历史记录。",
   "settings.import.appsLooking": "正在这台电脑上查找…",
@@ -7687,6 +7686,9 @@
   "settings.bots.intro": "{place} 上的机器人对你的了解，以及所有机器人的设置。",
   "settings.bots.newBots": "新机器人",
   "settings.data.bringIn": "导入内容",
+  "settings.page.importExport": "导入与导出",
+  "settings.data.takeOut": "导出内容",
+  "settings.import.grokTitle": "从 Grok Bot 迁移",
   "settings.data.move": "移到{place}",
   "settings.data.storage": "存储",
   "settings.desktops.automation": "自动化",
@@ -7809,7 +7811,6 @@
   "settings.threadCleanup.cap.title": "限制每个事件日志",
   "settings.threadCleanup.cap.short": "让每个线程的事件日志不超过这个大小。线程会保留。",
   "settings.import.appsShort": "这台电脑上其他 AI 应用的技能和工具。工具导入后默认关闭。",
-  "settings.import.moveTitle": "从其他应用带来机器人",
   "settings.import.moveAction": "开始",
   "settings.profiles.add": "添加",
   "settings.desktops.kinds": "桌面",
@@ -7870,7 +7871,6 @@
   "placeLook.pictureLine": "淡入侧边栏顶部的一张图片。",
   "settings.glance.appsConnected": "已连接 {count} 个",
   "settings.glance.appsNone": "暂无",
-  "settings.overview.yourData": "你的数据",
   "settings.recovery.short": "如果提供方在开始前失败，会尝试一次备用。",
   "decider.introShort": "为你的机器人整理和读取信息的小而快的模型。",
   "decider.provider.title": "提供方",
@@ -7963,6 +7963,5 @@
   "settings.domain.change": "更改",
   "settings.domain.httpsFirst": "请先为此地址开启 HTTPS，再在这里连接。",
   "settings.backTo": "返回设置",
-  "devices.route.httpsAccount": "使用你的 {app} 账号。",
-  "backup.importAction": "导入…"
+  "devices.route.httpsAccount": "使用你的 {app} 账号。"
 }
