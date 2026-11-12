@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_TASK_FILTERS,
+  TASK_STARTER_PRESETS,
   activeTaskFilterCount,
   filterBoardTasks,
   positionForDrop,
+  secondaryTaskFilterCount,
   type TaskRecord,
 } from "./taskBoard";
 
@@ -51,6 +53,13 @@ describe("task board helpers", () => {
     };
     expect(filterBoardTasks([other, match], filters, 20)).toEqual([match]);
     expect(activeTaskFilterCount(filters)).toBe(8);
+  });
+
+  it("counts only popover filters in secondaryTaskFilterCount and provides starter presets", () => {
+    expect(secondaryTaskFilterCount(EMPTY_TASK_FILTERS)).toBe(0);
+    expect(secondaryTaskFilterCount({ ...EMPTY_TASK_FILTERS, projectId: "p1", assigneeBotId: "b1", status: "todo" })).toBe(0);
+    expect(secondaryTaskFilterCount({ ...EMPTY_TASK_FILTERS, type: "bug", priority: "high", tag: "ux", overdue: true })).toBe(4);
+    expect(TASK_STARTER_PRESETS.map((preset) => preset.type)).toEqual(["feature", "research", "documentation"]);
   });
 
   it("calculates stable positions for column drops", () => {
