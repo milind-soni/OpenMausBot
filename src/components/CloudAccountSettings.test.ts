@@ -278,6 +278,13 @@ it.each([
   expect(html.includes("data-plan-open-cloud")).toBe(connectable);
   expect(html).not.toContain("Could not complete this Cloud action");
 });
+it("a ready Cloud keeps its link to Files, and a stopped one has none", async () => {
+  vi.stubGlobal("window", { ogb: { cloudAccount: { ...bridge, files: {} } } });
+  await ready({ ...pro, machine: { status: "ready", origin } });
+  all(render().html, ["data-plan-open-cloud", "Share folders with the Cloud in Files"]);
+  push({ ...pro, machine: { status: "stopped", origin } });
+  none(render().html, ["Share folders with the Cloud in Files"]);
+});
 it("while the bots move to My Cloud, says how the move goes, with nothing to open or switch back to; Open the Cloud comes back after", async () => {
   let move: unknown = { phase: "copy", chats: { done: 3, total: 12 } };
   vi.stubGlobal("window", { ogb: { cloudAccount: bridge, cloudSendPage: { notice: vi.fn(async () => ({ ready: true, bots: [], move })), onNotice: vi.fn(() => () => {}), dismiss: vi.fn() } } });
