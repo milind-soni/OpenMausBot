@@ -364,7 +364,7 @@ describe("phone MCP tool surface", () => {
 
 describe.skipIf(process.platform === "win32")("phone MCP calls through a stand-in adb", () => {
   type Response = { result: { content: Array<{ type: string; text: string }>; isError?: boolean } };
-  type Call = (name: string, args: Record<string, unknown>) => Promise<Response>;
+  type Call = (name: string, args: Record<string, unknown>, cancel?: "this call" | "another call") => Promise<Response>;
   let home = "";
   let adb = "";
   const proxies: ChildProcess[] = [];
@@ -385,9 +385,11 @@ describe.skipIf(process.platform === "win32")("phone MCP calls through a stand-i
       waiting.get(response.id)?.(response);
     });
     let id = 0;
-    return (name, args) => new Promise((resolve) => {
+    return (name, args, cancel) => new Promise((resolve) => {
       waiting.set(++id, resolve);
       proxy.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } })}\n`);
+      const cancelled = JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: cancel === "this call" ? id : id + 1000 } });
+      if (cancel) setTimeout(() => proxy.stdin!.write(`${cancelled}\n`), 100);
     });
   };
 
@@ -467,6 +469,16 @@ esac
     const response = await call("batch", { serial: "MISSING", steps: [{ action: "tap", x: 540, y: 1200 }] });
     expect(response.result).toEqual({ content: [{ type: "text", text: "No physical USB Android device is connected" }], isError: true });
     expect(adbLog()).toEqual(["devices -l"]);
+  });
+
+  it.each([
+    { cancel: "this call" as const, rest: `Stopped before step 2: The client cancelled this call. ${EARLIER_AND_LATER}`, adb: [] },
+    { cancel: "another call" as const, rest: "2. tap: Tapped 540,1200", adb: ["-s FAKE123 shell input tap 540 1200"] },
+  ])("stops a batch at the next step only when the client cancels $cancel", async ({ cancel, rest, adb }) => {
+    rmSync(join(home, "adb.log"), { force: true });
+    const response = await call("batch", { steps: [{ action: "wait", seconds: 0.4 }, { action: "tap", x: 540, y: 1200 }] }, cancel);
+    expect(response.result).toEqual({ content: [{ type: "text", text: `1. wait: Waited 0.4 s\n${rest}` }] });
+    expect(adbLog()).toEqual(["devices -l", ...adb]);
   });
 
   it("stops a batch at the next step once the harness refuses the claim", async () => {

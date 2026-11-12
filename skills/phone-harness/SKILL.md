@@ -21,8 +21,9 @@ with Bash, raw `adb`, `subprocess`, an emulator, network ADB, or Tailscale.
    use `screenshot` and pixel `tap` only when accessibility text cannot
    identify the target.
 4. Use `swipe`, `type_text`, and `press` for interaction. When you know the
-   next few steps, put them in one `batch`. To wait for content to load, add a
-   `wait` step to the batch, not Bash `sleep`.
+   next few steps, put them in one `batch`, and end the batch where the next
+   screen is uncertain, such as after a step that may open a dialog. To wait
+   for content to load, add a `wait` step to the batch, not Bash `sleep`.
 
 The tools operate the user's real phone. Navigate and read only what the task
 needs. Stop before sending, posting, purchasing, booking, deleting, changing

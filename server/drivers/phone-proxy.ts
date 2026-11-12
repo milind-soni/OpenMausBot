@@ -597,11 +597,15 @@ const send = (message: Json) => process.stdout.write(`${JSON.stringify(message)}
 const ok = (id: unknown, result: unknown) => send({ jsonrpc: "2.0", id, result });
 const rpcError = (id: unknown, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
 
+// MCP: a client that gives up on a call sends notifications/cancelled with that call's request id.
+const callsCancelled = new Map<unknown, boolean>();
+
 async function handle(message: Json, ensureClaim: () => Promise<ClaimOutcome>) {
   const id = message.id;
   const method = message.method;
   const params = (message.params ?? {}) as Json;
   if (method === "initialize") return ok(id, { protocolVersion: String(params.protocolVersion ?? "2024-11-05"), capabilities: { tools: {} }, serverInfo: { name: "openmausbot-phone", version: "1" } });
+  if (method === "notifications/cancelled" && callsCancelled.has(params.requestId)) callsCancelled.set(params.requestId, true);
   if (method === "notifications/initialized" || method === "notifications/cancelled") return;
   if (method === "ping") return ok(id, {});
   if (method === "tools/list") return ok(id, { tools: TOOLS });
@@ -610,10 +614,17 @@ async function handle(message: Json, ensureClaim: () => Promise<ClaimOutcome>) {
     if (!TOOLS.some((tool) => tool.name === name)) return rpcError(id, -32602, `Unknown tool: ${name}`);
     const claim = await ensureClaim();
     if (!claim.ok) return ok(id, textResult(claim.message, true));
+    callsCancelled.set(id, false);
+    const stillWanted = async (): Promise<ClaimOutcome> => {
+      const stillClaimed = await ensureClaim();
+      return callsCancelled.get(id) ? { ok: false, message: "The client cancelled this call." } : stillClaimed;
+    };
     try {
-      return ok(id, await callTool(name, (params.arguments ?? {}) as Json, ensureClaim));
+      return ok(id, await callTool(name, (params.arguments ?? {}) as Json, stillWanted));
     } catch (error) {
       return ok(id, textResult(error instanceof Error ? error.message : String(error), true));
+    } finally {
+      callsCancelled.delete(id);
     }
   }
   if (id !== undefined) rpcError(id, -32601, `Method not found: ${String(method)}`);
