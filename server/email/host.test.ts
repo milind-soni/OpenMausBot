@@ -75,8 +75,11 @@ describe("a turn's Email tools", () => {
     const answer = await call("EMAIL_SEND_MESSAGE", { to: ["a@b.example"], subject: "Hi", text: "Body" });
     expect(answer.isError).toBeUndefined();
     expect(sent).toEqual([{ to: ["a@b.example"], subject: "Hi", text: "Body" }]);
+    const html = '<b>signature</b>';
+    await call("EMAIL_SEND_MESSAGE", { to: ["a@b.example"], subject: "Hi", text: "Body", html, inline_images: [] });
+    expect(sent[1]).toEqual({ to: ["a@b.example"], subject: "Hi", text: "Body", html, inline_images: [] });
     expect(marked).toEqual([]);
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(2);
     expect(JSON.stringify(rows)).not.toContain("a@b.example");
     expect(JSON.stringify(rows)).not.toContain("Body");
   });

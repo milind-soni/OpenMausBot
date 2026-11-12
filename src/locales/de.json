@@ -527,6 +527,7 @@
   "cloudAccount.signIn": "Bei deinem Cloud-Tarif anmelden",
   "cloudAccount.codeCheck": "Prüfe, ob dein Browser diesen Code anzeigt:",
   "cloudAccount.codeUntil": "Der Code gilt bis {time}.",
+  "cloudAccount.actionFailed": "Diese Cloud-Aktion konnte nicht abgeschlossen werden. Prüfe deine Verbindung und versuche es erneut.",
   "cloudAccount.codeExpired": "Der Anmeldecode ist abgelaufen. Wähle „Anmelden“, um einen neuen zu erhalten.",
   "cloudAccount.free": "Noch kein Tarif",
   "cloudAccount.inactive": "{plan} · derzeit nicht aktiv",
