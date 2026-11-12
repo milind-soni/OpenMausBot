@@ -183,7 +183,7 @@ const DOCUMENT_MIMES: Readonly<Record<string, string>> = {
 
 const ACCEPTED_DOCUMENT_MIMES = new Set(Object.values(DOCUMENT_MIMES));
 
-const AUDIO_MIMES_BY_EXTENSION: Readonly<Record<string, string>> = {
+const MEDIA_MIMES_BY_EXTENSION: Readonly<Record<string, string>> = {
   opus: "audio/opus",
   ogg: "audio/ogg",
   mp3: "audio/mpeg",
@@ -191,11 +191,13 @@ const AUDIO_MIMES_BY_EXTENSION: Readonly<Record<string, string>> = {
   aac: "audio/aac",
   wav: "audio/wav",
   flac: "audio/flac",
-  webm: "audio/webm",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
 };
-const ACCEPTED_AUDIO_MIMES = new Set([
-  ...Object.values(AUDIO_MIMES_BY_EXTENSION),
-  "audio/x-m4a", "audio/x-wav", "audio/wave", "audio/x-flac",
+const ACCEPTED_MEDIA_MIMES = new Set([
+  ...Object.values(MEDIA_MIMES_BY_EXTENSION),
+  "audio/webm", "audio/x-m4a", "audio/x-wav", "audio/wave", "audio/x-flac",
 ]);
 
 export function documentMime(file: Pick<File, "name" | "type">): string | null {
@@ -364,7 +366,7 @@ export async function fileAttachmentFromFile(file: File): Promise<FileAttachment
   const declared = file.type.split(";", 1)[0]!.trim().toLowerCase();
   const extension = file.name.split(".").at(-1)?.toLowerCase() ?? "";
   const mime = documentMime(file) ??
-    (ACCEPTED_AUDIO_MIMES.has(declared) ? declared : AUDIO_MIMES_BY_EXTENSION[extension]);
+    (ACCEPTED_MEDIA_MIMES.has(declared) ? declared : MEDIA_MIMES_BY_EXTENSION[extension]);
   if (!mime) return null;
   if (file.size > FILE_MAX_BYTES) throw new AttachError(file.name, FILE_MAX_BYTES);
   const uploadId = newUploadId();
@@ -809,7 +811,7 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
   const unsupported = rejectedNames.filter((name) => !ARCHIVE_NAME.test(name));
   const uploadErrors = results.flatMap((result) => result.uploadError ? [result.uploadError] : []);
   const pathless = [
-    unsupported.length ? `Unable to attach ${unsupported.join(", ")}. Choose a supported image, document, or audio file.` : "",
+    unsupported.length ? `Unable to attach ${unsupported.join(", ")}. Choose a supported image, document, audio, or video file.` : "",
     archives.length ? `Archives can't be attached: unzip ${archives.join(", ")} and attach the files inside.` : "",
   ].filter(Boolean).join(" ") || null;
   const uploadErrorText = results.flatMap((result) => result.uploadErrorText ? [result.uploadErrorText] : []).join("; ") || null;
