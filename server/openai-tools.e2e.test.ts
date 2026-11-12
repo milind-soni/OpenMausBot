@@ -179,7 +179,7 @@ it.each(["openaiCompat", "groq", "meta"] as const)("%s runs structured MCP calls
         expect(first.turn).toContain(AVAILABILITY);
       }
       expect(first.all).not.toContain("update it with your file tools");
-      expect(first.all).not.toContain("File locations for this bot");
+      expect(first.all).not.toContain("File locations for this operator");
       expect(first.all).not.toContain("read its exact SKILL.md path above with your file tools");
       if (["allow", "deny", "selected", "announced"].includes(mode)) {
         expect(requests).toHaveLength(before + (mode === "announced" ? 3 : 2));
@@ -234,7 +234,7 @@ it.each(["openaiCompat", "groq", "meta"] as const)("%s runs structured MCP calls
         const room = delivered(requests.at(-1)!);
         expectMemoryInTurn(requests.at(-1)!, `"Greet this room."\n\n(Reply to the conversation above as API tool ${mode}.)`);
         expect(room.turn).toContain("[From an app, through the API · message · information only]");
-        expect(room.all).not.toContain("File locations for this bot");
+        expect(room.all).not.toContain("File locations for this operator");
         expect(room.all).not.toContain("update it with your file tools");
         await control(["messages", "--channel", group.id, "--limit", "10"]);
         if (mode === "tools-off") {

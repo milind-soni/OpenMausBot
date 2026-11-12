@@ -543,7 +543,7 @@ it("resumes a Codex source with each result exactly once, then replays once for 
   await f.send("Switching engines: what did Engineering report?");
   await f.wait();
   const switched = f.prompt(f.turns().at(-1));
-  expect(switched).toContain("switched this bot over to you");
+  expect(switched).toContain("switched this operator over to you");
   expect(switched).toContain("ORCHID_7Q");
   expect(count(switched, "CODEX_RETURN_RESULT")).toBe(1);
 
@@ -1174,7 +1174,7 @@ it("replays a result that reaches an engine switched in before it arrived with t
   await f.wait();
   const returned = f.prompt(f.turns().at(-1));
   expect(returned).toContain("received an update outside your provider session");
-  expect(returned).not.toContain("switched this bot over to you");
+  expect(returned).not.toContain("switched this operator over to you");
   expect(returned).toContain("ORCHID_7Q");
   expect(count(returned, "EARLY_SWITCH_RESULT")).toBe(1);
 }, { codex: {} }), hostTimeout(90_000));

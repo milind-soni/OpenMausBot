@@ -31,7 +31,7 @@ export function engineIsFresh(input: {
 const REWOUND_PREAMBLE =
   "[The user rewound this conversation (edited a message or switched to another version). Everything before this point was replaced by the following history:]";
 const FRESH_PREAMBLE =
-  "[You are joining this conversation mid-thread (the user switched this bot over to you). The conversation so far:]";
+  "[You are joining this conversation mid-thread (the user switched this operator over to you). The conversation so far:]";
 const EXTERNAL_UPDATE_PREAMBLE =
   "[This conversation received an update outside your provider session. The complete current history follows so you can use that update in your next response:]";
 

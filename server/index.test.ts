@@ -7981,7 +7981,7 @@ describe("harness HTTP API", () => {
       expect(JSON.parse(seen.argv[seen.argv.indexOf("--settings") + 1]!)).toEqual({ alwaysThinkingEnabled: false, disableAllHooks: true });
       expect(seen.argv).not.toContain("--effort");
       expect(seen.env.MAX_THINKING_TOKENS).toBeUndefined();
-      expect(seen.prompt).toContain("Bot name: Bookkeeper");
+      expect(seen.prompt).toContain("Operator name: Bookkeeper");
       expect(seen.prompt).not.toContain("Milind");
       const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
       const usage = await (await fetch(`${BASE}/api/usage.csv?from=${day(-1)}&to=${day(1)}`)).text();
@@ -8023,14 +8023,14 @@ describe("harness HTTP API", () => {
       expect((await api("PATCH", `/api/bots/${id}`, { name: "Recruiter" })).status).toBe(200);
       expect((await greeting(threadId)).setupChoicesUpdating).toEqual(expect.any(Number));
       expect((await settled(threadId)).setupChoices).toEqual(hiring);
-      expect((await readJsonFileWhenReady<{ prompt: string }>(setupAnswersDump)).prompt).toContain("Bot name: Recruiter");
+      expect((await readJsonFileWhenReady<{ prompt: string }>(setupAnswersDump)).prompt).toContain("Operator name: Recruiter");
 
       answer(everyday);
       expect((await api("PATCH", `/api/bots/${id}`, { name: "Pesto" })).status).toBe(200);
       const unnamed = await settled(threadId);
       const rewritten = existsSync(setupAnswersDump) ? await readJsonFileWhenReady<{ prompt: string }>(setupAnswersDump) : null;
       expect(unnamed.setupChoices).toEqual(rewritten ? everyday : fixed);
-      expect(rewritten?.prompt ?? "").not.toContain("Bot name:");
+      expect(rewritten?.prompt ?? "").not.toContain("Operator name:");
     } finally {
       rmSync(setupAnswersFile, { force: true });
       if (id) await api("DELETE", `/api/bots/${id}`);

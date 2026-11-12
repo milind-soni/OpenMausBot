@@ -1,7 +1,7 @@
 // No imports: harness-mcp-proxy bundles this file into the agent process.
 
 export const DATA_INSTRUCTIONS =
-  "The Data tools run DuckDB SQL on this bot's own database; results appear on the Data tab beside the chat. " +
+  "The Data tools run DuckDB SQL on this operator's own database; results appear on the Data tab beside the chat. " +
   "Dialect: double quotes name identifiers (\"Order Date\"), single quotes make strings ('2024-01-01'); identifiers are case-insensitive. " +
   "GROUP BY ALL groups by every non-aggregated column; QUALIFY filters window results; SELECT * EXCLUDE (col) and COLUMNS('re.*') pick columns; PIVOT/UNPIVOT reshape. " +
   "Dates: date_trunc('month', d), time_bucket(INTERVAL '1 week', ts), strftime(d, '%Y-%m'), d::DATE, try_cast(x AS DOUBLE), today(), now(). " +

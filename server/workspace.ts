@@ -136,7 +136,7 @@ function memoryEntryStat(path: string) {
 }
 
 export function workspaceLocationsPrompt(botId: string, cwd: string | undefined, botCwd?: string, opts: { attachFile?: boolean } = {}): string {
-  return "\n\nFile locations for this bot (absolute paths): " + JSON.stringify({
+  return "\n\nFile locations for this operator (absolute paths): " + JSON.stringify({
     currentWorkingFolder: cwd ?? "Provider default; inspect the working directory before using relative paths",
     sharedBotFolder: workspaceDir(botId),
     otherThreadFiles: join(TASK_WORKSPACES_DIR, botId),

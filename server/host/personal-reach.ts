@@ -96,7 +96,7 @@ export function createPersonalReach(deps: PersonalReachDeps) {
     /** For the system prompt, in a chat where this MausBot reaches beyond its audience. */
     prompt(from: RosterMember, threadId: string, peers: readonly RosterMember[]): string {
       if (!chatPerson(from, threadId) || !peers.some((peer) => reaches(from, peer, threadId))) return "";
-      return " The team bots in your roster are the ones this person may chat with. Work you hand one runs in that bot's own private chat with this person, which only they can see, and its result comes back here. You have no say over those bots' setup. A bot that isn't listed is not one this person can use: say only that you can't reach it.";
+      return " The teammates in your roster are the ones this person may chat with. Work you hand one runs in that operator's own private chat with this person, which only they can see, and its result comes back here. You have no say over those operators' setup. An operator that isn't listed is not one this person can use: say only that you can't reach it.";
     },
   };
 }

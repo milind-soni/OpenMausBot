@@ -26,8 +26,8 @@ describe("where the person's other bots live", () => {
   it("on a server of theirs: a bot on their computer lives there, and the way to bring them together is to make this server home", () => {
     const here = createPlacesElsewhere({ dataDir: dataDir() });
     here.write({ v: 1, self: { name: "Garage server", kind: "server" }, places: [LAPTOP, CLOUD] });
-    expect(here.explain("@scout")).toEqual({ where: "Scout lives on Work laptop, the person's computer, not here. Bots work together only within one place, so it can't be reached from here. "
-      + "Tell the person plainly. Offer to bring their bots together on Garage server: in the app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\"." });
+    expect(here.explain("@scout")).toEqual({ where: "Scout lives on Work laptop, the person's computer, not here. Operators work together only within one place, so it can't be reached from here. "
+      + "Tell the person plainly. Offer to bring their operators together on Garage server: in the app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\"." });
     expect((here.explain("reviewer-2") as { where: string }).where, "named loosely, as models slug names").toMatch(/^Reviewer 2 lives on Work laptop/u);
     expect((here.explain("Chief") as { where: string }).where, "two places of theirs that are no computer: by hand").toContain("export a backup in Settings → Backups on one place and import it on the other");
     expect(here.explain("Nobody"), "told, and nowhere: no such bot, as before").toBeNull();
@@ -36,15 +36,15 @@ describe("where the person's other bots live", () => {
   it("on their computer: a bot on their server or My Cloud lives there, and the way is that place's one tap", () => {
     const here = createPlacesElsewhere({ dataDir: dataDir() });
     here.write({ v: 1, self: { name: "this computer", kind: "computer" }, places: [GARAGE, CLOUD] });
-    expect((here.explain("Ledger") as { where: string }).where).toBe("Ledger lives on Garage server, not here. Bots work together only within one place, so it can't be reached from here. "
-      + "Tell the person plainly. Offer to bring their bots together on Garage server: in the app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\".");
-    expect((here.explain("Chief") as { where: string }).where).toContain("Offer to bring their bots together on My Cloud: in the app, choose \"Bring them together\", or turn off \"Keep this computer's bots on this computer\" in Settings → MausBot Cloud.");
+    expect((here.explain("Ledger") as { where: string }).where).toBe("Ledger lives on Garage server, not here. Operators work together only within one place, so it can't be reached from here. "
+      + "Tell the person plainly. Offer to bring their operators together on Garage server: in the app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\".");
+    expect((here.explain("Chief") as { where: string }).where).toContain("Offer to bring their operators together on My Cloud: in the app, choose \"Bring them together\", or turn off \"Keep this computer's bots on this computer\" in Settings → MausBot Cloud.");
   });
 
   it("an @mention of a bot that lives elsewhere: told to the bot answering it, and said once to the person in a room; never for a bot named like one here", () => {
     const here = createPlacesElsewhere({ dataDir: dataDir() });
     here.write({ v: 1, self: { name: "Garage server", kind: "server" }, places: [LAPTOP] });
-    expect(here.mentioned("@Scout can you check the ledger?", [{ name: "Ledger" }])).toMatch(/^ The user named @Scout, a bot of theirs that is not here: Scout lives on Work laptop/u);
+    expect(here.mentioned("@Scout can you check the ledger?", [{ name: "Ledger" }])).toMatch(/^ The user named @Scout, an operator of theirs that is not here: Scout lives on Work laptop/u);
     expect(here.mentioned("@Scout can you check?", [{ name: "scout" }]), "a bot here has that name").toBe("");
     expect(here.missed("@Scout and @Ledger, look", [{ name: "Ledger" }])).toEqual([
       "Scout lives on Work laptop, so that mention didn't reach it: bots work together only within one place. To bring your bots together on Garage server, in the app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\".",
@@ -62,11 +62,11 @@ describe("where the person's other bots live", () => {
     const here = createPlacesElsewhere({ dataDir: dataDir() });
     const bots = [{ id: "ledger", name: "Ledger" }, { id: "old-scout", name: "Scout", hidden: true }];
     const from = bots[0]!;
-    expect(resolveTeammate(bots, from, "Reviewer 2", here.explain)).toEqual({ error: expect.stringMatching(/^No bot with id or name "Reviewer 2" — call list_bots.* Bots work together only within one place/su) });
+    expect(resolveTeammate(bots, from, "Reviewer 2", here.explain)).toEqual({ error: expect.stringMatching(/^No bot with id or name "Reviewer 2" — call list_bots.* Operators work together only within one place/su) });
     here.write({ v: 1, self: { name: "Garage server", kind: "server" }, places: [LAPTOP] });
     expect(resolveTeammate(bots, from, "Reviewer 2", here.explain)).toEqual({ error: expect.stringMatching(/^Reviewer 2 lives on Work laptop, the person's computer, not here\./u) });
     expect(resolveTeammate(bots, from, "Scout", here.explain), "a bot here of that name, archived: no such reachable bot, never elsewhere").toEqual({ error: expect.stringMatching(/^No bot with id or name "Scout"/u) });
-    expect(resolveTeammate(bots, from, "Nobody", here.explain)).toEqual({ error: expect.not.stringContaining("Bots work together") });
+    expect(resolveTeammate(bots, from, "Nobody", here.explain)).toEqual({ error: expect.not.stringContaining("Operators work together") });
   });
 });
 
@@ -102,8 +102,8 @@ describe("a team the person is a member of", () => {
   it("on My Cloud a bot asked for a team's bot names the team and the two real actions: ask it there, or move this bot there", () => {
     const here = createPlacesElsewhere({ dataDir: dataDir() });
     here.write({ v: 1, self: { name: "My Cloud", kind: "cloud" }, places: [ACME] });
-    expect(here.explain("sales")).toEqual({ where: "Sales lives in Acme, the person's team, not here. Bots work together only within one place, so it can't be reached from here. "
-      + "Tell the person they can ask it in Acme, or move this bot to Acme: in the app, open the bot's menu in the sidebar and choose \"Move to Acme\"." });
+    expect(here.explain("sales")).toEqual({ where: "Sales lives in Acme, the person's team, not here. Operators work together only within one place, so it can't be reached from here. "
+      + "Tell the person they can ask it in Acme, or move this operator to Acme: in the app, open the operator's menu in the sidebar and choose \"Move to Acme\"." });
     expect(here.mentioned("ask @Sales for the numbers", [{ name: "Chief" }])).toContain("Sales lives in Acme, the person's team, not here.");
     expect(here.missed("ask @Sales for the numbers", [{ name: "Chief" }])).toEqual([
       "Sales lives in Acme, so that mention didn't reach it: bots work together only within one place. Ask it in Acme, or move this bot to Acme: in the app, open the bot's menu in the sidebar and choose \"Move to Acme\".",
@@ -114,8 +114,8 @@ describe("a team the person is a member of", () => {
     const here = createPlacesElsewhere({ dataDir: dataDir() });
     here.write({ v: 1, self: { name: "Garage server", kind: "server" }, places: [ACME] });
     const told = (here.explain("Support") as { where: string }).where;
-    expect(told).toContain("Tell the person they can ask it in Acme, or, from My Cloud, move a bot to Acme.");
-    expect(told).not.toMatch(/bring their bots together|my home|Bring them together|Keep this computer/);
+    expect(told).toContain("Tell the person they can ask it in Acme, or, from My Cloud, move an operator to Acme.");
+    expect(told).not.toMatch(/bring their operators together|my home|Bring them together|Keep this computer/);
     expect(resolveTeammate([{ id: "chief", name: "Chief" }], { id: "chief", name: "Chief" }, "Support", here.explain)).toEqual({ error: told });
   });
 });

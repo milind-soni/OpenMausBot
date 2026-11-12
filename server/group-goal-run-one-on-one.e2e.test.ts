@@ -154,7 +154,7 @@ describe("one-on-one goal runs (a room of one)", () => {
 
     const sentPrompts = prompts("done");
     expect(sentPrompts).toHaveLength(2);
-    expect(sentPrompts[0]).toContain("You are working alone toward a bounded goal.");
+    expect(sentPrompts[0]).toContain("You are a security operator working alone toward a bounded goal.");
     expect(sentPrompts[0]).toContain("Get every test passing");
     expect(sentPrompts[1]).toContain("Your next step: Fix the last failing test");
 

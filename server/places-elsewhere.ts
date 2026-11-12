@@ -26,10 +26,10 @@ export type Elsewhere = z.infer<typeof storedSchema>;
 type Place = Elsewhere["places"][number];
 export type Explained = { where: string } | { hint: string } | null;
 
-/** Bots work together only within one place; said whenever a bot can't be found and the person's app never said where else
- * their bots live. */
-export const ONE_PLACE = "Bots work together only within one place, so a bot on another computer or server can't be reached from here. "
-  + "To bring them together, the person can make one place their bots' home: in the app, right-click their own server's icon on the left of the app and choose \"Make … my home\".";
+/** Operators work together only within one place; said whenever an operator can't be found and the person's app never said
+ * where else their operators live. */
+export const ONE_PLACE = "Operators work together only within one place, so one on another computer or server can't be reached from here. "
+  + "To bring them together, the person can make one place their operators' home: in the app, right-click their own server's icon on the left of the app and choose \"Make … my home\".";
 
 const fold = (value: string) => value.replace(/^@/u, "").replace(/[-_]+/gu, " ").replace(/\s+/gu, " ").trim().toLowerCase();
 
@@ -40,27 +40,28 @@ function bringTogether(place: Place, self: Elsewhere["self"], to: "bot" | "perso
   if (place.kind === "team") return moveToTeam(place, self, to);
   const home = place.kind === "computer" ? self : self.kind === "computer" ? place : null;
   if (!home || home.kind === "computer") {
-    return `To bring ${to === "bot" ? "their" : "your"} bots together by hand, export a backup in Settings → Backups on one place and import it on the other.`;
+    return `To bring ${to === "bot" ? "their operators" : "your bots"} together by hand, export a backup in Settings → Backups on one place and import it on the other.`;
   }
   const how = home.kind === "cloud"
     ? `in the app, choose "Bring them together", or turn off "Keep this computer's bots on this computer" in Settings → MausBot Cloud`
     : `in the app, right-click ${home.name}'s icon on the left of the app and choose "Make ${home.name} my home"`;
-  return to === "bot" ? `Offer to bring their bots together on ${home.name}: ${how}.` : `To bring your bots together on ${home.name}, ${how}.`;
+  return to === "bot" ? `Offer to bring their operators together on ${home.name}: ${how}.` : `To bring your bots together on ${home.name}, ${how}.`;
 }
 
 /** Nothing connects a team to the person's own places. The app offers "Move to Acme" only on My Cloud's own page. */
 function moveToTeam(place: Place, self: Elsewhere["self"], to: "bot" | "person"): string {
+  const what = to === "bot" ? "operator" : "bot";
   const move = self.kind === "cloud"
-    ? `or move this bot to ${place.name}: in the app, open the bot's menu in the sidebar and choose "Move to ${place.name}"`
-    : `or, from My Cloud, move a bot to ${place.name}`;
+    ? `or move this ${what} to ${place.name}: in the app, open the ${what}'s menu in the sidebar and choose "Move to ${place.name}"`
+    : `or, from My Cloud, move ${to === "bot" ? "an" : "a"} ${what} to ${place.name}`;
   return to === "bot" ? `Tell the person they can ask it in ${place.name}, ${move}.` : `Ask it in ${place.name}, ${move}.`;
 }
 
 /** What a bot is told when `bot` lives in another of the person's places. */
 export function livesElsewhere(bot: string, place: Place, self: Elsewhere["self"]): string {
-  if (place.kind === "team") return `${bot} lives in ${place.name}, the person's team, not here. Bots work together only within one place, so it can't be reached from here. ${moveToTeam(place, self, "bot")}`;
+  if (place.kind === "team") return `${bot} lives in ${place.name}, the person's team, not here. Operators work together only within one place, so it can't be reached from here. ${moveToTeam(place, self, "bot")}`;
   const where = place.kind === "computer" ? `on ${place.name}, the person's computer` : `on ${place.name}`;
-  return `${bot} lives ${where}, not here. Bots work together only within one place, so it can't be reached from here. Tell the person plainly. ${bringTogether(place, self, "bot")}`;
+  return `${bot} lives ${where}, not here. Operators work together only within one place, so it can't be reached from here. Tell the person plainly. ${bringTogether(place, self, "bot")}`;
 }
 
 /** The bots of the person's other places that `text` @mentions, none named like a bot here. */
@@ -113,7 +114,7 @@ export function createPlacesElsewhere({ dataDir, now = Date.now }: { dataDir: st
      * lives, told to the bot answering it. */
     mentioned(text: string, here: ReadonlyArray<{ name: string }>): string {
       const known = read();
-      return known ? mentionsOf(known, text, here).map(({ bot, place }) => ` The user named @${bot}, a bot of theirs that is not here: ${livesElsewhere(bot, place, known.self)}`).join("") : "";
+      return known ? mentionsOf(known, text, here).map(({ bot, place }) => ` The user named @${bot}, an operator of theirs that is not here: ${livesElsewhere(bot, place, known.self)}`).join("") : "";
     },
     /** The same, as one plain line each for the chat, for the person. */
     missed(text: string, here: ReadonlyArray<{ name: string }>): string[] {

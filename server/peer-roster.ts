@@ -253,7 +253,7 @@ export function renderRoster(team: readonly RosterMember[], opts: RosterOptions)
   const departments = filed.size > 1;
   const lines = listed.map((bot) => {
     const name = clip(bot.name, ROSTER_NAME_MAX);
-    const role = clip(bot.title ?? "", ROSTER_ROLE_MAX) || "General assistant";
+    const role = clip(bot.title ?? "", ROSTER_ROLE_MAX) || "Security operator";
     const about = opts.about ? clip(bot.description ?? "", ROSTER_ABOUT_MAX) : "";
     const department = departments ? ` (${departmentLabel(bot)})` : "";
     return `- ${name} — ${role}${department}${bot.chiefOfStaff ? " [Chief of Staff]" : ""}${about ? `: ${about}` : ""} [id: ${clip(bot.id, ROSTER_NAME_MAX)}]`;

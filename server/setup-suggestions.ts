@@ -44,37 +44,37 @@ export function factLine(value: string | undefined, max: number): string {
 export function setupSuggestionPrompt(facts: SuggestionFacts): string {
   const language = factLine(facts.language, 40) || "English";
   const named = [
-    ["Bot name", factLine(facts.name, 80)],
-    ["Bot's title", factLine(facts.title, 120)],
-    ["Bot's department", factLine(facts.department, 60)],
+    ["Operator name", factLine(facts.name, 80)],
+    ["Operator's title", factLine(facts.title, 120)],
+    ["Operator's department", factLine(facts.department, 60)],
   ].filter(([, value]) => value).map(([label, value]) => `${label}: ${value}`);
   const apps = facts.apps.map((app) => factLine(app, 40)).filter(Boolean).slice(0, 15);
   const about = factLine(facts.aboutMe, 1500);
   const jobs = facts.otherJobs.map((job) => factLine(job, 120)).filter(Boolean).slice(0, 12);
   const rules = [
     named.length
-      ? 'First look at what the bot is called: its name, and its title or department if given. If that names a job, a role or a department, in any language (like "Party Planner", "Sales" or "Jardinero"), all 5 options are tasks within that job. If it is only a name (like "Max"), offer 5 different kinds of everyday help.'
-      : "Nothing says what the bot's job is: offer 5 different kinds of everyday help.",
+      ? 'First look at what the operator is called: its name, and its title or department if given. If that names a job, a role or a department, in any language (like "Incident Responder", "Threat Intel" or "Jardinero"), all 5 options are tasks within that job. If it is only a name (like "Max"), offer 5 different kinds of security work.'
+      : "Nothing says what the operator's job is: offer 5 different kinds of security work.",
     "Write exactly 5 options that differ from each other. Put the most useful option first.",
     "Each option is one concrete job in 3 to 5 words: a plain verb (like find, check, sort, draft, remind or compare) and the thing it works on. No broad areas and no vague verbs (such as manage, organize, handle or monitor).",
     apps.length
       ? "Name a connected app only where the job happens inside it, one app per option, written as listed. Never name an app that is not connected."
       : "No apps are connected: say email, calendar or spreadsheet in general words and name no apps.",
     about
-      ? 'Use what the person says about themselves to choose jobs that fit their life or work, in general words (like "my shop" or "my work"), and name their line of work in at most two options.'
+      ? 'Use what the person says about themselves to choose jobs that fit their work, in general words (like "my servers" or "my codebase"), and name their line of work in at most two options.'
       : "Nothing is known about the person, so don't guess who they are or what they do.",
-    ...(jobs.length ? ["Leave out every job the person's other bots already do, even when it is part of this bot's job and even when a connected app could do it (if another bot plans meals, offer nothing about meals or recipes). This rule comes before rule 1. Don't mention other bots."] : []),
-    "Prefer first jobs where the bot finds, checks, sorts, drafts or reminds over ones where it pays, books or sends things to other people.",
+    ...(jobs.length ? ["Leave out every job the person's other operators already do, even when it is part of this operator's job and even when a connected app could do it (if another operator reviews code, offer nothing about code review). This rule comes before rule 1. Don't mention other operators."] : []),
+    "Prefer first jobs where the operator finds, checks, sorts, drafts or reminds over ones where it pays, books or sends things to other people.",
     "Never make things up, and keep private details out, even ones the person wrote: no names of people, places or businesses (connected app names are fine), no dates, no amounts, no health details.",
-    'Write it as the person would ask: start with the verb and say "my", not "your". Use plain everyday words in sentence case. No jargon (such as automate, workflow, sync, integrate, optimize, pipeline, reconcile or dashboard), no emojis, no quotes, no numbering and no period at the end.',
+    'Write it as the person would ask: start with the verb and say "my", not "your". Use plain words in sentence case. No jargon (such as automate, workflow, sync, integrate, optimize, pipeline, reconcile or dashboard), no emojis, no quotes, no numbering and no period at the end.',
     `Write every option in ${language}, even if the facts below are in another language. Keep app names as they are.`,
   ];
   return [
-    "You write the answer options for the first message of a new bot in OpenMausBot, an app where people get everyday help from AI helpers called bots.",
+    "You write the answer options for the first message of a new operator in OpenMausBot, the app where the person runs Parth Lab, their own AI-driven cybersecurity company, and every operator in it is an AI security operator.",
     "",
-    'The person has just made the bot described below. Its first message asks "What should I help you with first?" and lists your 5 options. Tapping one makes the bot set itself up for that job straight away, so each option is a job the person hands to the bot, in their own words.',
+    'The person has just made the operator described below. Its first message asks "What should I help you with first?" and lists your 5 options. Tapping one makes the operator set itself up for that job straight away, so each option is a job the person hands the operator, in their own words.',
     "",
-    "What a bot can do:",
+    "What an operator can do:",
     "- Research: look things up on the web and sum up what it finds",
     "- Keep watch: check on something on a schedule, then report or remind",
     "- Email, calendar and messages: sort, draft, reply and plan",

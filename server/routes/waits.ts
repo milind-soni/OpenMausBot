@@ -15,7 +15,7 @@ const CANCEL = "/api/internal/waits/cancel";
 export const WAIT_MESSAGES = {
   notYours: "This conversation is not yours.",
   room: "Waits are made in a one-to-one chat with the person, not in a room.",
-  notPerson: "Only the person can set up or stop a wait, in their own chat with you; work handed to you by a bot, a routine or an outside event cannot.",
+  notPerson: "Only the person can set up or stop a wait, in their own chat with you; work handed to you by another operator, a routine or an outside event cannot.",
   serverHost: "File and program waits look at the computer MausBot runs on, and here that is a server, not the computer you work on. Use url_contains, url_missing or bot_idle.",
   guest: "File and program waits are only for the owner of this computer. Use url_contains, url_missing or bot_idle.",
   guestFollowUp: "Guests can be told when something happens, but can't set a follow-up. Make the wait without follow_up.",

@@ -242,7 +242,7 @@ describe("peerRosterSystemPrompt", () => {
     const unfiled = Array.from({ length: 30 }, (_, i) => ({ id: `bot${i}`, name: `Bot ${i}` }));
     const prompt = peerRosterSystemPrompt(unfiled);
 
-    expect(prompt).toContain("- Bot 11 — General assistant [id: bot11]");
+    expect(prompt).toContain("- Bot 11 — Security operator [id: bot11]");
     expect(prompt).not.toContain("Bot 12 —");
     expect(prompt).toContain("- …and 18 more you can reach (use list_bots for the full roster).");
   });

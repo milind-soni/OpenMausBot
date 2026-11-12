@@ -74,21 +74,21 @@ it("a bot asking for a teammate on the person's other place hears where it lives
   } finally { main.close(); }
 
   const onGarage = await coordinate(garage.base, ledger, "scout");
-  expect(onGarage).toEqual({ status: 403, error: "Scout lives on Work laptop, the person's computer, not here. Bots work together only within one place, so it can't be reached from here. "
-    + "Tell the person plainly. Offer to bring their bots together on Garage server: in the app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\"." });
+  expect(onGarage).toEqual({ status: 403, error: "Scout lives on Work laptop, the person's computer, not here. Operators work together only within one place, so it can't be reached from here. "
+    + "Tell the person plainly. Offer to bring their operators together on Garage server: in the app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\"." });
   const onComputer = await coordinate(fx.desktopBase, scout, "Ledger");
   expect(onComputer.status).toBe(403);
   expect(onComputer.error).toMatch(/^Ledger lives on Garage server, not here\. .* choose "Make Garage server my home"\.$/u);
   const typo = await coordinate(fx.desktopBase, scout, "Ledgr");
   expect(typo.error, "told, and nowhere: no such bot, as before").toMatch(/^No bot with id or name "Ledgr" — call list_bots/u);
-  expect(typo.error).not.toContain("Bots work together");
+  expect(typo.error).not.toContain("Operators work together");
   const shared = await coordinate(family.base, helper, "Scout");
   expect(shared.error, "never told where the person's other bots live").not.toContain("Work laptop");
 
   // The person @mentions Scout to Ledger: the turn is told where Scout lives, and a room says it once in plain words.
   expect((await garage.as("POST", `/api/bots/${ledger.id}/messages`, { text: "@Scout can you check this month's numbers?", threadId: ledger.threadId })).status).toBe(202);
   await expect.poll(() => { try { return JSON.parse(readFileSync(join(fx.root, "garage-turn.json"), "utf8")).systemPrompt ?? ""; } catch { return ""; } }, { timeout: 60_000, interval: 200 })
-    .toContain("The user named @Scout, a bot of theirs that is not here: Scout lives on Work laptop, the person's computer, not here.");
+    .toContain("The user named @Scout, an operator of theirs that is not here: Scout lives on Work laptop, the person's computer, not here.");
   const idle = async () => ((await garage.as("GET", "/api/bots")).body.bots as Array<{ activity?: string; busy?: boolean }>).every((bot) => bot.activity !== "working" && !bot.busy);
   await expect.poll(idle, { timeout: 60_000, interval: 200 }).toBe(true);
   const room = (await garage.as("POST", "/api/groups", { memberIds: [ledger.id], name: "Books",

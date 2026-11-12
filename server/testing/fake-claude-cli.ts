@@ -490,7 +490,7 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
   // Every new bot asks for its setup card's answers (server/setup-suggestions.ts), so that call stays out of the captures
   // below too: FAKE_CLAUDE_SETUP_DUMP records it, FAKE_CLAUDE_SETUP_FILE holds its reply, and without one it fails at once.
   // FAKE_CLAUDE_SETUP_DELAY_MS holds the reply back, so a recipe can see the card while it waits.
-  if (prompt.startsWith("You write the answer options for the first message of a new bot")) {
+  if (prompt.startsWith("You write the answer options for the first message of a new operator")) {
     if (process.env.FAKE_CLAUDE_SETUP_DUMP) writeDumpAtomic(process.env.FAKE_CLAUDE_SETUP_DUMP, JSON.stringify({ argv, env: process.env, prompt }, null, 2));
     const delay = Number(process.env.FAKE_CLAUDE_SETUP_DELAY_MS);
     if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));

@@ -164,7 +164,7 @@ describe("one goal-run loop for a room and a one-on-one chat", () => {
     });
     await goal.done;
     expect(goal.calls.map((call) => [call.bot, call.coordinator])).toEqual([["solo-id", true], ["solo-id", true]]);
-    expect(goal.calls[0]!.instructions).toContain("You are working alone toward a bounded goal.");
+    expect(goal.calls[0]!.instructions).toContain("You are a security operator working alone toward a bounded goal.");
     expect(goal.calls[0]!.instructions).toContain(`"next":"solo-id"`);
     expect(goal.calls[0]!.instructions).not.toContain("Available room members");
     expect(goal.calls[1]!.instructions).toContain("Harness note: Your next step: Fix the failing parser test");

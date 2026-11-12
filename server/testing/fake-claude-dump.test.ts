@@ -109,7 +109,7 @@ it("keeps a new bot's setup answers out of every turn and one-shot capture, fail
   const textLog = join(home, "text.jsonl");
   const setupDump = join(home, "setup.json");
   const setupFile = join(home, "setup.txt");
-  const prompt = "You write the answer options for the first message of a new bot in OpenMausBot.";
+  const prompt = "You write the answer options for the first message of a new operator in OpenMausBot.";
   const ask = async (extra: Record<string, string> = {}) => {
     const child = spawn(process.execPath, [fileURLToPath(new URL("fake-claude-cli.ts", import.meta.url)), "-p", "--output-format", "text"], {
       cwd: home,
