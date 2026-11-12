@@ -45,6 +45,25 @@ describe("resetting a bot's cloud computer", () => {
     expect(deleteManagedBoat).not.toHaveBeenCalled();
   });
 
+  it("deletes nothing when a different computer runs than the one the person was asked about", async () => {
+    listManagedBoats.mockResolvedValue({ configured: true, available: true, problem: null, instances: [instance("bx_new", "bot-a")] });
+    for (const expected of ["bx_old", null]) {
+      const refused = resetBotCloudComputer(cfg, "bot-a", owners, vi.fn(), expected);
+      await expect(refused).rejects.toMatchObject({ status: 409 });
+      await expect(refused).rejects.not.toThrow(/in use/i);
+    }
+    expect(deleteManagedBoat).not.toHaveBeenCalled();
+  });
+
+  it("deletes the computer the person was asked about, and treats it gone as reset", async () => {
+    listManagedBoats.mockResolvedValue({ configured: true, available: true, problem: null, instances: [instance("bx_mine", "bot-a")] });
+    const claim = vi.fn();
+    await expect(resetBotCloudComputer(cfg, "bot-a", owners, claim, "bx_mine")).resolves.toEqual({ ok: true });
+    expect(deleteManagedBoat).toHaveBeenCalledWith(cfg, owners, "bx_mine", "omb-bx_mine", claim);
+    listManagedBoats.mockResolvedValue({ configured: true, available: true, problem: null, instances: [] });
+    await expect(resetBotCloudComputer(cfg, "bot-a", owners, vi.fn(), "bx_mine")).resolves.toEqual({ ok: true, missing: true });
+  });
+
   it("passes on the refusal while the bot is working", async () => {
     listManagedBoats.mockResolvedValue({ configured: true, available: true, problem: null, instances: [instance("bx_mine", "bot-a")] });
     deleteManagedBoat.mockRejectedValue(Object.assign(new Error("this cloud computer is in use — stop its bot's work first"), { status: 409 }));
