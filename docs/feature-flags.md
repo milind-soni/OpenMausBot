@@ -59,6 +59,7 @@ text and extra work can increase token usage.
 | `acpPlanLines` | Off | Shows an ACP agent's plan as activity lines. | Each emitted line counts as a tool call wherever tool calls are counted; environment override below. |
 | `agentsToolBridge` | Off, except eligible local-model turns | Lists a smaller tool catalog with `find_tool` and `use_tool`. | Tool lookup can add model calls; smaller initial context is not a guaranteed saving. See [Agents tool bridge](agents-tool-bridge.md) for eligibility and measurements. |
 | `savedSteps` | On | Allows saving and repeating computer tasks from their steps on a supported host. | Currently requires a Mac server. Enabling it does not add host support. |
+| `usbPhoneTakeover` | Off | Shows the server's USB Android phone live in the Screen panel and lets a person take it over from the bots. | Not offered on a Cloud home or a hosted workspace. The first use downloads the scrcpy server (734 KB) from GitHub. |
 
 With `skillsLibrary` on, the every-bot skills a bot was taken off live in
 `<data>/skill-state/<bot id>/library-opt-out.json`. If that file is there but
