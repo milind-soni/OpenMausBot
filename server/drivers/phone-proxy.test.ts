@@ -55,11 +55,32 @@ describe("phone MCP text input", () => {
   const ADB_KEYBOARD = "com.android.adbkeyboard/.AdbIME";
   const VENDOR_KEYBOARD = "com.baidu.input_huawei/.ImeService";
   const SENT = "Sent the text to ADBKeyBoard. Use read_screen to check that it reached the field.";
-  const device = (keyboard: string) => {
+  // From `dumpsys input_method` on a Huawei Mate 9 (Android 9): an app with a text field taking input, and the home screen.
+  const FIELD = [
+    "  mServedConnecting=false",
+    "  mCurrentTextBoxAttribute:",
+    "    inputType=0x90001 imeOptions=0x3 privateImeOptions=null",
+    "    actionLabel=null actionId=0",
+    "  mServedInputConnectionWrapper=ControlledInputConnectionWrapper{connection=com.android.internal.widget.EditableInputConnection@c54836f finished=false mParentInputMethodManager.mActive=true}",
+    "  mCompletions=null",
+    "",
+  ].join("\n");
+  const NO_FIELD = [
+    "  mServedConnecting=false",
+    "  mCurrentTextBoxAttribute:",
+    "    inputType=0x0 imeOptions=0x0 privateImeOptions=null",
+    "    actionLabel=null actionId=0",
+    "  mServedInputConnectionWrapper=null",
+    "  mCompletions=null",
+    "",
+  ].join("\n");
+  // Android 13 and later print the same value under this name, followed by its handler.
+  const NO_FIELD_13 = "  mServedInputConnection=null\n  mServedInputConnectionHandler=null\n";
+  const device = (keyboard: string, inputState = FIELD) => {
     const commands: string[][] = [];
     const shell = async (...command: string[]) => {
       commands.push(command);
-      return command[0] === "settings" ? `${keyboard}\n` : "";
+      return command[0] === "settings" ? `${keyboard}\n` : command[0] === "dumpsys" ? inputState : "";
     };
     return { commands, shell };
   };
@@ -95,14 +116,88 @@ describe("phone MCP text input", () => {
 
   it("asks for ADBKeyBoard and types nothing when another keyboard is chosen", async () => {
     const phone = device(VENDOR_KEYBOARD);
-    await expect(typePhoneText(phone.shell, "二手 iPad")).rejects.toThrow("ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard");
+    await expect(typePhoneText(phone.shell, "二手 iPad")).rejects.toThrow("Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard");
     expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"]]);
   });
 
-  it.each(["", "a".repeat(257), "😀".repeat(257)])("refuses empty or over-long text without touching the phone", async (text) => {
+  const CLEAR = ["am", "broadcast", "-a", "ADB_CLEAR_TEXT", "-p", "com.android.adbkeyboard"];
+
+  it.each([["二手 iPad", "5LqM5omLIGlQYWQ="], ["iPad mini_6", "aVBhZCBtaW5pXzY="]])("clears the field through ADBKeyBoard, then sends the text the same way (%s)", async (text, base64) => {
     const phone = device(ADB_KEYBOARD);
-    await expect(typePhoneText(phone.shell, text)).rejects.toThrow("Android text must be 1 to 256 characters");
-    expect(phone.commands).toEqual([]);
+    await expect(typePhoneText(phone.shell, text, true)).resolves.toBe("Asked ADBKeyBoard to clear the field and sent the text. Use read_screen to check that the field holds only this text.");
+    expect(phone.commands).toEqual([
+      ["settings", "get", "secure", "default_input_method"],
+      ["dumpsys", "input_method"],
+      CLEAR,
+      ["am", "broadcast", "-a", "ADB_INPUT_B64", "-p", "com.android.adbkeyboard", "--es", "msg", base64],
+    ]);
+  });
+
+  it.each([
+    ["the home screen", NO_FIELD],
+    ["the name Android 13 prints", NO_FIELD_13],
+    ["the first app listed when a second one follows", NO_FIELD + FIELD],
+  ])("clears nothing and types nothing when no field is taking input (%s)", async (_state, dump) => {
+    const phone = device(ADB_KEYBOARD, dump);
+    await expect(typePhoneText(phone.shell, "二手", true)).rejects.toThrow("No text field is taking input, so nothing was cleared or typed. Tap the field first, then call type_text again.");
+    expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"], ["dumpsys", "input_method"]]);
+  });
+
+  it("goes by the first app listed when a second one has no field", async () => {
+    const phone = device(ADB_KEYBOARD, FIELD + NO_FIELD);
+    await expect(typePhoneText(phone.shell, "二手", true)).resolves.toContain("Asked ADBKeyBoard to clear the field");
+    expect(phone.commands.map((command) => command[3])).toEqual(["default_input_method", undefined, "ADB_CLEAR_TEXT", "ADB_INPUT_B64"]);
+  });
+
+  it("clears nothing and types nothing when the input state cannot be read", async () => {
+    const commands: string[][] = [];
+    const shell = async (...command: string[]) => {
+      commands.push(command);
+      if (command[0] === "settings") return `${ADB_KEYBOARD}\n`;
+      throw new Error("error: closed");
+    };
+    await expect(typePhoneText(shell, "二手", true)).rejects.toThrow("error: closed");
+    expect(commands).toEqual([["settings", "get", "secure", "default_input_method"], ["dumpsys", "input_method"]]);
+  });
+
+  it("still clears on a phone whose dump does not say", async () => {
+    const phone = device(ADB_KEYBOARD, "");
+    await expect(typePhoneText(phone.shell, "二手", true)).resolves.toContain("Asked ADBKeyBoard to clear the field");
+    expect(phone.commands.map((command) => command[3])).toEqual(["default_input_method", undefined, "ADB_CLEAR_TEXT", "ADB_INPUT_B64"]);
+  });
+
+  it.each(["二手 iPad", "iPad"])("asks for ADBKeyBoard and changes nothing when another keyboard cannot clear (%s)", async (text) => {
+    const phone = device(VENDOR_KEYBOARD);
+    const refused = typePhoneText(phone.shell, text, true);
+    await expect(refused).rejects.toThrow("A field can be cleared only when ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard");
+    await expect(refused).rejects.toThrow("call type_text without clear and remove the old text with press delete");
+    expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"]]);
+  });
+
+  it("sends no text after a clear that failed", async () => {
+    const commands: string[][] = [];
+    const shell = async (...command: string[]) => {
+      commands.push(command);
+      if (command[0] === "settings") return `${ADB_KEYBOARD}\n`;
+      if (command[0] === "dumpsys") return FIELD;
+      throw new Error("error: closed");
+    };
+    await expect(typePhoneText(shell, "二手", true)).rejects.toThrow("error: closed");
+    expect(commands).toEqual([["settings", "get", "secure", "default_input_method"], ["dumpsys", "input_method"], CLEAR]);
+  });
+
+  it("offers clear as an optional plain boolean beside the text", () => {
+    const schema = TOOLS.find((tool) => tool.name === "type_text")?.inputSchema;
+    expect(schema?.properties).toMatchObject({ clear: { type: "boolean" } });
+    expect(schema?.required).toEqual(["text"]);
+  });
+
+  it.each(["", "a".repeat(257), "😀".repeat(257)])("refuses empty or over-long text without touching the phone", async (text) => {
+    for (const clear of [false, true]) {
+      const phone = device(ADB_KEYBOARD);
+      await expect(typePhoneText(phone.shell, text, clear)).rejects.toThrow("Android text must be 1 to 256 characters");
+      expect(phone.commands).toEqual([]);
+    }
   });
 });
 
