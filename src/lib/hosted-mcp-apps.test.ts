@@ -65,6 +65,9 @@ describe("hosted MCP apps", () => {
     expect(connectedWith(app, { enabled: true, headerKeys: [header] })).toBe(true);
     expect(connectedWith(app, { enabled: true, headerKeys: [header.toLowerCase()] })).toBe(true);
     expect(connectedWith(app, { enabled: true, headerKeys: ["Authorization"] })).toBe(false);
+    expect(connectedWith(app, { enabled: true, headerKeys: [header, "X-Client-Name"] })).toBe(true);
+    expect(connectedWith(app, { enabled: true, headerKeys: ["X-Client-Name"] })).toBe(true);
+    expect(connectedWith(app, { enabled: true, headerKeys: [header, "X-Other-Token"] })).toBe(false);
     expect(connectedWith(app, { enabled: true, auth: "needs-sign-in" })).toBe(false);
     expect(connectedWith(app, { enabled: false })).toBe(false);
     expect(connectedWith(app, { enabled: false, headerKeys: [header] })).toBe(false);

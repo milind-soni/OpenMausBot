@@ -152,11 +152,16 @@ function holdsKey(server: ListedServer, key: HostedKey): boolean {
   const header = hostedKeyHeader(key).toLowerCase();
   const names = (server.headerKeys ?? []).map((name) => name.toLowerCase());
   if (!hostedKeyOptional(key)) return names.includes(header);
-  return server.auth !== "needs-sign-in" && names.every((name) => name === header);
+  return server.auth !== "needs-sign-in" && names.every((name) => name === header || !credentialHeader(name));
+}
+
+/** Headers that carry a credential: another one beside an optional key means the server isn't on the card's terms. */
+function credentialHeader(name: string): boolean {
+  return /^(authorization|proxy-authorization|cookie)$|api[-_]?key|token|secret/i.test(name);
 }
 
 /** The one rule for "connected", shared by the cards, the Connected filter and the count: the server is on and signed
- * in; for a key app, on and holding its key; for an app whose key is optional, on and holding no header but its key's. */
+ * in; for a key app, on and holding its key; for an app whose key is optional, on and holding no credential header but its key's. */
 export function hostedConnections(servers: ReadonlyArray<ListedServer>): HostedConnections {
   return Object.fromEntries(HOSTED_MCP_APPS.map((app) => [
     app.id,

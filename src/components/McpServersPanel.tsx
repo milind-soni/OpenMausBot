@@ -422,7 +422,9 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
     const name = existing?.name ?? hostedServerName(app, servers);
     forgetProbe(name);
     try {
-      const keepsSavedKey = !key && existing !== undefined;
+      // An empty field reuses the saved entry, except after an optional key was refused (the server stays off):
+      // then it drops that key and goes back to the keyless tier.
+      const keepsSavedKey = !key && existing !== undefined && !(hostedKeyOptional(app.key) && !existing.enabled);
       if (!keepsSavedKey) {
         const entry = { type: "http", url: app.url, ...(key ? { headers: hostedKeyHeaders(app.key, key) } : {}), enabled: false };
         listed((await api(existing ? `/api/mcp/servers/${name}` : "/api/mcp/servers", {
