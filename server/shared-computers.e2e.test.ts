@@ -210,8 +210,8 @@ it("a queued paired-device turn keeps its session: revocation cancels dispatch a
   await connector.save(env, { folders: [folder], terminal: false, computer: true }, await connector.identity(env));
   await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);
 
-  const queuedTurn = async (label: string, revokeBeforeDrain: boolean) => {
-    const opened = await api("POST", "/api/auth/pairing", { label, scopes: ["admin", "client"] }, { authorization: `Bearer ${desktop.token}` });
+  const queuedTurn = async (label: string, revokeBeforeDrain: boolean, restricted = false) => {
+    const opened = await api("POST", "/api/auth/pairing", { label, scopes: restricted ? ["client"] : ["admin", "client"] }, { authorization: `Bearer ${desktop.token}` });
     expect(opened.status).toBe(200);
     const device = (await api("POST", "/api/auth/pair", { code: opened.body.code, label })).body;
     const queuedBot = (await api("POST", "/api/bots", { name: `${label} queued-turn fixture` }, { authorization: `Bearer ${desktop.token}` })).body.bot;
@@ -240,8 +240,13 @@ it("a queued paired-device turn keeps its session: revocation cancels dispatch a
       try {
         await initialize();
         const list = JSON.parse((await call("list_shared_computers")).content[0].text).computers;
-        expect(list.some((computer: any) => computer.id === storedGrant().id)).toBe(true);
-        expect(list.find((computer: any) => computer.id === storedGrant().id)).toMatchObject({ computer: true, terminal: false });
+        if (restricted) {
+          expect(list).toEqual([]);
+          expect((await call("shared_computer", { computer_id: storedGrant().id, folder_id: folder.id, action: "read_file", path: "brief.txt" })).isError).toBe(true);
+        } else {
+          expect(list.some((computer: any) => computer.id === storedGrant().id)).toBe(true);
+          expect(list.find((computer: any) => computer.id === storedGrant().id)).toMatchObject({ computer: true, terminal: false });
+        }
       } finally {
         queuedProxy.kill();
         await api("POST", `/api/bots/${queuedBot.id}/interrupt`, undefined, { authorization: `Bearer ${desktop.token}` });
@@ -257,6 +262,7 @@ it("a queued paired-device turn keeps its session: revocation cancels dispatch a
   try {
     await queuedTurn("revoked Android", true);
     await queuedTurn("authorized Android", false);
+    await queuedTurn("restricted guest", false, true);
   } finally {
     lendingToken = pairing.token;
     await connector.save(env, { folders: [folder], terminal: false, computer: false }, await connector.identity(env));
