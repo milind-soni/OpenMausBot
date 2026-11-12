@@ -363,6 +363,10 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+\/title$/ },
   { methods: ["PATCH"], path: /^\/api\/bots\/[\w-]+\/profile$/ },
   { methods: ["PATCH"], path: /^\/api\/bots\/[\w-]+$/ }, // display fields only: see clientBotPatchViolation
+  // A Team Cloud member makes a bot of their own and deletes it while nobody else can use it: the handlers refuse every
+  // other session without the admin scope, and a member's bot takes only what memberBotCreateViolation allows.
+  { methods: ["POST"], path: /^\/api\/bots$/ },
+  { methods: ["DELETE"], path: /^\/api\/bots\/[\w-]+$/ },
   { methods: ["PUT"], path: /^\/api\/bots\/order$/ }, // the fleet's display order; the handler accepts only bots the caller sees
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/respond$/ },
   { methods: ["POST"], path: /^\/api\/threads\/[\w-]+\/respond$/ },
@@ -538,6 +542,15 @@ export function memberBotPatchViolation(body: unknown, level: "view" | "chat" | 
   if (!body || typeof body !== "object" || Array.isArray(body)) return "body";
   const allowed = level === "edit" ? EDITOR_BOT_PATCH_FIELDS : VIEWER_BOT_PATCH_FIELDS;
   return Object.keys(body).find((key) => !allowed.has(key)) ?? null;
+}
+
+/** What a Team Cloud member may say of a bot they make: what someone who can edit a bot may change, and nothing else.
+ * Its sharing, its department, whom it answers to, what it may do and where it runs are not theirs to set at creation:
+ * the bot starts private to them with the server's own defaults. The first field beyond that; null when there is none. */
+export function memberBotCreateViolation(body: Record<string, unknown>): string | null {
+  const { settings, useDefaults: _useDefaults, ...asked } = body;
+  const nested = settings && typeof settings === "object" && !Array.isArray(settings) ? Object.keys(settings) : settings === undefined ? [] : ["settings"];
+  return [...Object.keys(asked), ...nested].find((key) => key === "threadId" || !EDITOR_BOT_PATCH_FIELDS.has(key)) ?? null;
 }
 
 /** Same for a room: name and reading state, never its folder or who answers. */

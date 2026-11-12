@@ -141,7 +141,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
 }
 
 /** Always additive: rollback owns only the fresh records and cannot touch an existing bot or chat. */
-export function importTeamBackup(store: Store, routines: RoutineManager, input: unknown, selection: ModelSelection, options: { visibility?: BotVisibility } = {}) {
+export function importTeamBackup(store: Store, routines: RoutineManager, input: unknown, selection: ModelSelection, options: { visibility?: BotVisibility; createdBy?: string } = {}) {
   const backup = parseTeamBackup(input);
   const bots: BotRecord[] = [];
   const groups: GroupRecord[] = [];
@@ -189,6 +189,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
         modelSelection: selection, section: sectionFor(source.section),
         // who may see the imported team is the importing admin's choice
         ...(options.visibility ? { visibility: options.visibility } : {}),
+        ...(options.createdBy ? { createdBy: options.createdBy } : {}),
       }, { seedMessages: false });
       bots.push(bot);
       botIds.set(source.key, bot.id);

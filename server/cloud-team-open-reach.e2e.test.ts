@@ -37,7 +37,7 @@ const messages = async (token: string, threadId: string) => {
   return { status: read.status, messages: (read.body.messages ?? []) as Message[] };
 };
 const create = async (body: Record<string, unknown>) => {
-  const created = await team.as(olive, "POST", "/api/bots", body);
+  const created = await team.as(olive, "POST", "/api/bots", { visibility: "everyone", ...body });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   return created.body.bot as Bot;
 };

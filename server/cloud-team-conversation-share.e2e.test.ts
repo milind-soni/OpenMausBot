@@ -69,7 +69,7 @@ beforeAll(async () => {
   fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-share-${randomBytes(8).toString("hex")}`, team: { id: "team-acme-share", name: "Acme", engine: ENGINE } });
   team = fx.team!;
   for (const [who, person] of [["olive", OLIVE], ["rui", RUI], ["marta", MARTA], ["ana", ANA], ["ben", BEN]] as const) tokens[who] = (await team.pair(person)).token!;
-  const created = await as("olive", "POST", "/api/bots", { name: "Scout" });
+  const created = await as("olive", "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   scout = created.body.bot.id;
   const locked = await as("olive", "POST", "/api/bots", { name: "Vault" });
