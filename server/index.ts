@@ -29,7 +29,14 @@ import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { automaticHandoffBots, mentionedBots, Store, type Attachment, type Message } from "./store.ts";
 import { projectRegistryCandidates, readRegisteredProjects, resolveProjectContext } from "./projects.ts";
-import { isJsonContentType, isLoopbackHostname, rejectUntrustedRequest } from "./request-guard.ts";
+import {
+  listProjectPreviewFiles,
+  PreviewWatchManager,
+  readPreviewFileContent,
+  resolvePreviewFile,
+  type RegisteredProjectLike,
+} from "./previewFiles.ts";
+import { isJsonContentType, isLoopbackHostname, isPreviewAssetRead, rejectUntrustedRequest } from "./request-guard.ts";
 import {
   resolveTaskContext,
   TaskConflictError,
@@ -179,6 +186,38 @@ function broadcast(payload: unknown) {
       sseClients.delete(res);
     }
   }
+}
+
+// Preview files are served from the harness's own origin, and the request
+// guard trusts same-origin callers. A previewed page or SVG that can run
+// script must therefore get an opaque origin (CSP sandbox without
+// allow-same-origin): its API requests then carry Origin "null" and are
+// refused, so a file from an untrusted project can't drive the bots.
+// PDFs run no page script and Chromium won't render them when sandboxed.
+function previewFileCsp(mimeType: string): string {
+  const frame = "frame-ancestors 'self' http://localhost:* http://127.0.0.1:*";
+  return mimeType.startsWith("application/pdf")
+    ? frame
+    : `sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads; ${frame}`;
+}
+
+// In-memory project capabilities are issued only on trusted document reads.
+// Relative resources carry the capability in their base URL; API URLs do not.
+const previewCapabilities = new Map<string, string>();
+const previewWatchManager = new PreviewWatchManager((payload) => broadcast(payload));
+
+async function allRegisteredProjects(): Promise<RegisteredProjectLike[]> {
+  const listed = await projectService.list();
+  const byId = new Map<string, RegisteredProjectLike>();
+  for (const project of listed) {
+    byId.set(project.id, project);
+  }
+  for (const project of readRegisteredProjects()) {
+    if (!byId.has(project.id)) {
+      byId.set(project.id, project);
+    }
+  }
+  return Array.from(byId.values());
 }
 
 function usageSnapshot() {
@@ -1196,7 +1235,10 @@ const server = createServer(async (req, res) => {
   const method = req.method ?? "GET";
   try {
     if (path.startsWith("/api/")) {
-      const refused = rejectUntrustedRequest(req.headers, { allowAnyHost: !isLoopbackHostname(HOST) });
+      const refused = rejectUntrustedRequest(
+        isPreviewAssetRead(method, req.url) ? { host: req.headers.host } : req.headers,
+        { allowAnyHost: !isLoopbackHostname(HOST) },
+      );
       if (refused) return json(res, 403, { error: refused });
     }
     // ── internal peer-agent comms (localhost + shared token only) ──────
@@ -1386,6 +1428,9 @@ const server = createServer(async (req, res) => {
         clearInterval(keepalive);
         sseClients.delete(res);
         notificationClients.delete(res);
+        if (sseClients.size === 0) {
+          previewWatchManager.closeAll();
+        }
       });
       return;
     }
@@ -1824,6 +1869,91 @@ const server = createServer(async (req, res) => {
       return json(res, 201, { project });
     }
 
+    // ── read-only project file preview & auto-refresh watchers ──
+    if (method === "GET" && path === "/api/preview/files") {
+      const projectId = url.searchParams.get("projectId") ?? "";
+      const projects = await allRegisteredProjects();
+      const { project, files } = listProjectPreviewFiles(projects, projectId);
+      return json(res, 200, {
+        project: { id: project.id, name: project.name, path: project.path },
+        files,
+      });
+    }
+    if (method === "GET" && (path === "/api/preview/file" || path.startsWith("/api/preview/file/") || path.startsWith("/api/preview/asset/"))) {
+      const assetMatch = path.match(/^\/api\/preview\/asset\/([a-f0-9]{64})\/([^/]+)\/(.+)$/);
+      if (path.startsWith("/api/preview/asset/") && (!assetMatch || previewCapabilities.get(decodeURIComponent(assetMatch[2])) !== assetMatch[1])) {
+        return json(res, 403, { error: "Invalid preview access" });
+      }
+      let projectId = url.searchParams.get("projectId") ?? "";
+      let relativePath = url.searchParams.get("path") ?? "";
+      if (path.startsWith("/api/preview/file/")) {
+        const rest = path.slice("/api/preview/file/".length);
+        const slashIdx = rest.indexOf("/");
+        if (slashIdx > 0) {
+          projectId = decodeURIComponent(rest.slice(0, slashIdx));
+          relativePath = decodeURIComponent(rest.slice(slashIdx + 1));
+        }
+      }
+      if (assetMatch) {
+        projectId = decodeURIComponent(assetMatch[2]);
+        relativePath = decodeURIComponent(assetMatch[3]);
+      }
+      const projects = await allRegisteredProjects();
+      const resolved = resolvePreviewFile(projects, projectId, relativePath);
+      let data = readPreviewFileContent(resolved);
+      if (resolved.kind === "html") {
+        let capability = previewCapabilities.get(projectId);
+        if (!capability) {
+          capability = randomBytes(32).toString("hex");
+          previewCapabilities.set(projectId, capability);
+        }
+        const directory = resolved.relativePath.split("/").slice(0, -1).map(encodeURIComponent).join("/");
+        const base = `<base href="/api/preview/asset/${capability}/${encodeURIComponent(projectId)}/${directory ? directory + "/" : ""}">`;
+        const html = data.toString("utf8");
+        data = Buffer.from(/<head(?:\s[^>]*)?>/i.test(html)
+          ? html.replace(/<head(?:\s[^>]*)?>/i, (head) => head + base)
+          : base + html);
+      }
+      res.writeHead(200, {
+        "content-type": resolved.mimeType,
+        ...(assetMatch ? { "access-control-allow-origin": "*", "cross-origin-resource-policy": "cross-origin" } : {}),
+        "cache-control": "no-store, max-age=0",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "content-security-policy": previewFileCsp(resolved.mimeType),
+      });
+      return res.end(data);
+    }
+    if (method === "POST" && path === "/api/preview/watch") {
+      const body = await readBody(req);
+      const clientId = typeof body.clientId === "string" && body.clientId.trim() ? body.clientId.trim() : "default";
+      const enabled = body.enabled !== false;
+      if (!enabled) {
+        previewWatchManager.unwatchClient(clientId);
+        return json(res, 200, { ok: true, watching: false });
+      }
+      const projectId = typeof body.projectId === "string" ? body.projectId : "";
+      const relativePath = typeof body.path === "string" ? body.path : "";
+      const projects = await allRegisteredProjects();
+      const resolved = resolvePreviewFile(projects, projectId, relativePath);
+      previewWatchManager.watchFile(clientId, resolved);
+      return json(res, 200, {
+        ok: true,
+        watching: true,
+        projectId: resolved.project.id,
+        path: resolved.relativePath,
+      });
+    }
+    if (method === "DELETE" && path === "/api/preview/watch") {
+      const clientId = url.searchParams.get("clientId") ?? "";
+      if (clientId) {
+        previewWatchManager.unwatchClient(clientId);
+      } else {
+        previewWatchManager.closeAll();
+      }
+      return json(res, 200, { ok: true, watching: false });
+    }
+
     // ── app config (API keys — never echoed back, booleans only) ──
     if (method === "GET" && path === "/api/config") {
       return json(res, 200, configStatus());
@@ -1984,6 +2114,7 @@ server.listen(PORT, HOST, () => {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     stopTrelloPolling();
+    previewWatchManager.closeAll();
     clearInterval(usageTimer);
     scheduler.stop();
     void registry.disposeAll().finally(() => process.exit(0));

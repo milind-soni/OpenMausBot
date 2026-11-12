@@ -227,3 +227,46 @@ describe("schedule navigation", () => {
     expect(settings.schedulesOpen).toBe(false); expect(settings.settingsFocus).toBe("backup");
   });
 });
+describe("dedicated preview page state", () => {
+  it("opens preview and closes task board, settings, apps, and projects", () => {
+    const openProjects = reducer(initialState, { type: "toggleProjects", open: true });
+    expect(openProjects).toMatchObject({ projectsOpen: true, previewOpen: false });
+    const openPreview = reducer(openProjects, { type: "togglePreview", open: true });
+    expect(openPreview).toMatchObject({
+      previewOpen: true,
+      projectsOpen: false,
+      taskBoardOpen: false,
+      appsOpen: false,
+      appSettingsOpen: false,
+    });
+  });
+
+  it("resets previewOpen when selecting a bot or group", () => {
+    const withBotAndGroup = {
+      ...initialState,
+      previewOpen: true,
+      bots: [bot("one", "thread-1")],
+      groups: [group("room-1", "thread-r1")],
+    };
+    expect(reducer(withBotAndGroup, { type: "select", id: "one" })).toMatchObject({
+      previewOpen: false,
+      selectedId: "one",
+    });
+    expect(reducer(withBotAndGroup, { type: "select", id: "room-1" })).toMatchObject({
+      previewOpen: false,
+      selectedId: "room-1",
+    });
+  });
+});
+
+
+
+
+describe("combined schedule and preview navigation", () => {
+  it("switches between schedules and preview without leaving both selected", () => {
+    const schedules = reducer(initialState, { type: "toggleSchedules", open: true });
+    const preview = reducer(schedules, { type: "togglePreview", open: true });
+    expect(preview).toMatchObject({ previewOpen: true, schedulesOpen: false });
+    expect(reducer(preview, { type: "toggleSchedules", open: true })).toMatchObject({ previewOpen: false, schedulesOpen: true });
+  });
+});

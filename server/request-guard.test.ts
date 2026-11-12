@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isJsonContentType, rejectUntrustedRequest } from "./request-guard.ts";
+import { isJsonContentType, isPreviewAssetRead, rejectUntrustedRequest } from "./request-guard.ts";
 
 describe("rejectUntrustedRequest", () => {
   it("accepts the app's own page and non-browser local clients", () => {
@@ -35,5 +35,25 @@ describe("isJsonContentType", () => {
     expect(isJsonContentType({ "content-type": "text/plain" })).toBe(false);
     expect(isJsonContentType({ "content-type": "application/jsonp" })).toBe(false);
     expect(isJsonContentType({})).toBe(false);
+  });
+});
+
+
+describe("isPreviewAssetRead", () => {
+  const asset = `/api/preview/asset/${"a".repeat(64)}/project/`;
+  it("permits only normalized capability asset GETs", () => {
+    expect(isPreviewAssetRead("GET", `${asset}style.css?v=1`)).toBe(true);
+    expect(isPreviewAssetRead("GET", `${asset}nested/../style.css`)).toBe(true);
+    for (const method of ["POST", "HEAD", "DELETE", undefined]) {
+      expect(isPreviewAssetRead(method, `${asset}style.css`)).toBe(false);
+    }
+  });
+  it("refuses raw prefixes that normalize into privileged routes", () => {
+    for (const segment of ["..", "%2e%2e", ".%2E", "%2e."]) {
+      expect(isPreviewAssetRead("GET", `${asset}${Array(4).fill(segment).join("/")}/bots`)).toBe(false);
+    }
+    for (const url of [undefined, "//evil.example/api/preview/asset/", "http://localhost/api/bots", "/api/bots"]) {
+      expect(isPreviewAssetRead("GET", url)).toBe(false);
+    }
   });
 });

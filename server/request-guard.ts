@@ -61,3 +61,19 @@ export function isJsonContentType(headers: IncomingHttpHeaders): boolean {
   const type = headers["content-type"];
   return typeof type === "string" && /^application\/json\s*(;|$)/i.test(type);
 }
+
+/** Only capability-bearing, read-only preview assets bypass the origin check.
+ * The server validates the unguessable capability against its project before
+ * reading anything. Never use this exception for another /api route.
+ */
+export function isPreviewAssetRead(method: string | undefined, rawUrl: string | undefined): boolean {
+  if (method !== "GET" || !rawUrl?.startsWith("/") || rawUrl.startsWith("//")) return false;
+  try {
+    // Match the WHATWG-normalized pathname used by the harness router.
+    // Raw prefixes can disappear through literal or encoded dot segments.
+    const path = new URL(rawUrl, "http://localhost").pathname;
+    return /^\/api\/preview\/asset\/[a-f0-9]{64}\/[^/]+\/.+$/.test(path);
+  } catch {
+    return false;
+  }
+}

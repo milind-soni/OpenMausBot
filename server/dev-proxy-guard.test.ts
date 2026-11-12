@@ -6,6 +6,23 @@ afterEach(() => {
 });
 
 describe("dev:network API proxy", () => {
+  it("forwards capability asset GETs but never opaque API reads or writes", async () => {
+    const { default: config } = await vi.importActual<{ default: unknown }>("../vite.config.ts");
+    const proxy = (config as any).server.proxy["/api"];
+    const asset = `/api/preview/asset/${"a".repeat(64)}/project/style.css`;
+    for (const segment of ["..", "%2e%2e", ".%2E", "%2e."]) {
+      const res = { statusCode: 200, setHeader: vi.fn(), end: vi.fn() };
+      proxy.bypass({ method: "GET", url: `/api/preview/asset/${"a".repeat(64)}/project/${Array(4).fill(segment).join("/")}/bots`, headers: { host: "127.0.0.1:5199", origin: "null", "sec-fetch-site": "cross-site" } }, res);
+      expect(res.statusCode).toBe(403);
+      expect(res.end).toHaveBeenCalledOnce();
+    }
+    for (const [method, url, allowed] of [["GET", asset, true], ["POST", asset, false], ["GET", "/api/bots", false], ["GET", "/api/preview/file/project/style.css", false]]) {
+      const res = { statusCode: 200, setHeader: vi.fn(), end: vi.fn() };
+      proxy.bypass({ method, url, headers: { host: "127.0.0.1:5199", origin: "null", "sec-fetch-site": "cross-site" } }, res);
+      expect(res.end.mock.calls.length).toBe(allowed ? 0 : 1);
+    }
+  });
+
   it("permits the LAN page but blocks foreign origins before forwarding project writes", async () => {
     vi.stubEnv("VITE_HOST", "0.0.0.0");
     vi.resetModules();

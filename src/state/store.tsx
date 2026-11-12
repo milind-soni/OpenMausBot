@@ -201,6 +201,7 @@ export interface AppState {
   appSettingsTab?: string;
   projectsOpen: boolean;
   taskBoardOpen: boolean;
+  previewOpen: boolean;
   tasks: TaskRecord[];
   taskProjects: TaskProject[];
   tasksLoaded: boolean;
@@ -259,6 +260,7 @@ export type Action =
   | { type: "toggleAppSettings"; open?: boolean; tab?: string }
   | { type: "toggleProjects"; open?: boolean }
   | { type: "toggleTaskBoard"; open?: boolean }
+  | { type: "togglePreview"; open?: boolean }
   | { type: "hydrateTasks"; tasks: TaskRecord[]; projects: TaskProject[] }
   | { type: "taskUpserted"; task: TaskRecord }
   | { type: "taskDeleted"; taskId: string }
@@ -364,7 +366,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "schedules": return { ...state, schedules: action.snapshot };
     case "openSchedule": return { ...state, scheduleSheet: { target: action.target, schedule: action.schedule, prompt: action.prompt } };
     case "closeSchedule": return { ...state, scheduleSheet: null };
-    case "toggleSchedules": return { ...state, schedulesOpen: action.open ?? !state.schedulesOpen, appsOpen: false, projectsOpen: false, taskBoardOpen: false, appSettingsOpen: false, settingsOpen: false, computerOpen: false };
+    case "toggleSchedules": return { ...state, previewOpen: false, schedulesOpen: action.open ?? !state.schedulesOpen, appsOpen: false, projectsOpen: false, taskBoardOpen: false, appSettingsOpen: false, settingsOpen: false, computerOpen: false };
     case "configStatus":
       return { ...state, config: action.config };
     case "select": {
@@ -376,12 +378,13 @@ export function reducer(state: AppState, action: Action): AppState {
           appsOpen: false,
           projectsOpen: false,
           taskBoardOpen: false,
+          previewOpen: false,
           appSettingsOpen: false,
           groups: state.groups.map((g) => (g.id === action.id ? { ...g, unread: false } : g)),
         };
       }
       return updateBot(
-        withMascotMotion({ ...state, selectedId: action.id, schedulesOpen: false, appsOpen: false, projectsOpen: false, taskBoardOpen: false, appSettingsOpen: false }, action.id, "switch"),
+        withMascotMotion({ ...state, selectedId: action.id, schedulesOpen: false, previewOpen: false, appsOpen: false, projectsOpen: false, taskBoardOpen: false, appSettingsOpen: false }, action.id, "switch"),
         action.id,
         (b) => ({ ...b, unread: false }),
       );
@@ -403,6 +406,7 @@ export function reducer(state: AppState, action: Action): AppState {
         appsOpen: false,
         projectsOpen: false,
         taskBoardOpen: false,
+        previewOpen: false,
         appSettingsOpen: false,
       }, action.bot.id, "arrive");
     case "deleteBot": {
@@ -526,6 +530,7 @@ export function reducer(state: AppState, action: Action): AppState {
         projectsOpen: open ? false : state.projectsOpen,
         taskBoardOpen: open ? false : state.taskBoardOpen,
         schedulesOpen: open ? false : state.schedulesOpen,
+        previewOpen: open ? false : state.previewOpen,
       };
     }
     case "toggleApps":
@@ -540,6 +545,7 @@ export function reducer(state: AppState, action: Action): AppState {
         projectsOpen: open ? false : state.projectsOpen,
         taskBoardOpen: open ? false : state.taskBoardOpen,
         schedulesOpen: open ? false : state.schedulesOpen,
+        previewOpen: open ? false : state.previewOpen,
       };
     }
     case "toggleComputer": {
@@ -553,6 +559,7 @@ export function reducer(state: AppState, action: Action): AppState {
         projectsOpen: open ? false : state.projectsOpen,
         taskBoardOpen: open ? false : state.taskBoardOpen,
         schedulesOpen: open ? false : state.schedulesOpen,
+        previewOpen: open ? false : state.previewOpen,
       };
     }
     case "toggleAppSettings": {
@@ -567,6 +574,7 @@ export function reducer(state: AppState, action: Action): AppState {
         projectsOpen: open ? false : state.projectsOpen,
         taskBoardOpen: open ? false : state.taskBoardOpen,
         schedulesOpen: open ? false : state.schedulesOpen,
+        previewOpen: open ? false : state.previewOpen,
       };
     }
     case "toggleProjects": {
@@ -580,6 +588,7 @@ export function reducer(state: AppState, action: Action): AppState {
         appsOpen: open ? false : state.appsOpen,
         taskBoardOpen: open ? false : state.taskBoardOpen,
         schedulesOpen: open ? false : state.schedulesOpen,
+        previewOpen: open ? false : state.previewOpen,
       };
     }
     case "toggleTaskBoard": {
@@ -589,6 +598,21 @@ export function reducer(state: AppState, action: Action): AppState {
         taskBoardOpen: open,
         schedulesOpen: open ? false : state.schedulesOpen,
         projectsOpen: open ? false : state.projectsOpen,
+        previewOpen: open ? false : state.previewOpen,
+        settingsOpen: open ? false : state.settingsOpen,
+        computerOpen: open ? false : state.computerOpen,
+        appSettingsOpen: open ? false : state.appSettingsOpen,
+        appsOpen: open ? false : state.appsOpen,
+      };
+    }
+    case "togglePreview": {
+      const open = action.open ?? !state.previewOpen;
+      return {
+        ...state,
+        previewOpen: open,
+        schedulesOpen: open ? false : state.schedulesOpen,
+        projectsOpen: open ? false : state.projectsOpen,
+        taskBoardOpen: open ? false : state.taskBoardOpen,
         settingsOpen: open ? false : state.settingsOpen,
         computerOpen: open ? false : state.computerOpen,
         appSettingsOpen: open ? false : state.appSettingsOpen,
@@ -684,6 +708,7 @@ export const initialState: AppState = {
   appSettingsOpen: false,
   projectsOpen: false,
   taskBoardOpen: false,
+  previewOpen: false,
   tasks: [],
   taskProjects: [],
   tasksLoaded: false,
@@ -1144,6 +1169,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "task.deleted":
           rawDispatch({ type: "taskDeleted", taskId: frame.taskId });
+          break;
+        case "preview.reload":
+          window.dispatchEvent(new CustomEvent("gbs:preview-reload", { detail: frame }));
           break;
         case "runtime": {
           const event = frame.event;

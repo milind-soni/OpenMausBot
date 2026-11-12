@@ -1,5 +1,7 @@
 # Implementation plan: mobile device preview panel (v1)
 
+> **Status:** Superseded by [`docs/dev/plans/implementation--preview-studio.md`](./implementation--preview-studio.md) (Preview Studio: expanded quick preview panel + full Preview page with Single and Canvas modes).
+
 ## Objective
 
 Add a sidebar-toggled panel that renders an arbitrary URL inside fixed mobile device-frame viewports, so a user can sanity-check a page on a few common phone sizes without leaving the app.

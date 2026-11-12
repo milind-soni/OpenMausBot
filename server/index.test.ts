@@ -76,6 +76,22 @@ afterAll(async () => {
 });
 
 describe("harness HTTP API", () => {
+  it("rejects opaque asset-prefix requests that normalize into API routes", async () => {
+    for (const segment of ["..", "%2e%2e", ".%2E", "%2e."]) {
+      const status = await new Promise<number | undefined>((resolve, reject) => {
+        // fetch normalizes before sending; raw HTTP preserves the exploit path.
+        const req = httpRequest(`${BASE}`, {
+          method: "GET",
+          path: `/api/preview/asset/${"a".repeat(64)}/project/${Array(4).fill(segment).join("/")}/bots`,
+          headers: { origin: "null", "sec-fetch-site": "cross-site" },
+        }, (res) => { res.resume(); res.on("end", () => resolve(res.statusCode)); });
+        req.on("error", reject);
+        req.end();
+      });
+      expect(status).toBe(403);
+    }
+  });
+
   it("registers and creates host projects for browser clients", async () => {
     const parentPath = join(home, "workspace");
     const existingPath = join(parentPath, "existing-app");
@@ -658,5 +674,205 @@ describe("harness HTTP API", () => {
       req.end();
     });
     expect(rebindStatus).toBe(403);
+  });
+
+  it("serves read-only project preview files, rejects outside paths/symlinks/bad types, and pushes reload events", async () => {
+    const projectDir = join(home, "workspace", "preview-project");
+    const outsideDir = mkdtempSync(join(tmpdir(), "gbs-preview-outside-"));
+    mkdirSync(join(projectDir, "docs"), { recursive: true });
+    writeFileSync(join(projectDir, "index.html"), "<!doctype html><h1>Hello Preview</h1>");
+    writeFileSync(join(projectDir, "docs", "guide.md"), "# Guide\nPlain words.");
+    for (const [name, content] of Object.entries({ "style.css": "body { color: red }", "app.js": "console.log('preview')", "module.mjs": "export const value = 1", "font.woff2": "font-data", "photo.png": "image-data", "report.pdf": "%PDF-1.4" })) {
+      writeFileSync(join(projectDir, name), content);
+    }
+    writeFileSync(join(projectDir, "logo.svg"), '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+    writeFileSync(join(projectDir, "secret.env"), "API_KEY=top-secret");
+    writeFileSync(join(outsideDir, "outside.html"), "<h1>Outside</h1>");
+
+    try {
+      const reg = await api("POST", "/api/projects/add-existing", { projectPath: projectDir });
+      expect(reg.status).toBe(201);
+      const projectId = reg.body.project.id as string;
+
+      if (process.platform !== "win32") {
+        symlinkSync(join(outsideDir, "outside.html"), join(projectDir, "escape.html"));
+        symlinkSync(outsideDir, join(projectDir, "escape-dir"), "dir");
+        symlinkSync(join(projectDir, "secret.env"), join(projectDir, "disguised.html"));
+      }
+
+      // 1. List previewable files (excludes secret.env and outside symlinks)
+      const listRes = await api("GET", `/api/preview/files?projectId=${encodeURIComponent(projectId)}`);
+      expect(listRes.status).toBe(200);
+      const listedPaths = listRes.body.files.map((f: { path: string }) => f.path);
+      expect(listedPaths).toEqual(expect.arrayContaining(["index.html", "docs/guide.md", "logo.svg"]));
+      expect(listedPaths).not.toContain("secret.env");
+      expect(listedPaths).not.toContain("escape.html");
+      expect(listedPaths).not.toContain("disguised.html");
+
+      // 2. Serve valid HTML and Markdown files
+      const htmlRes = await fetch(
+        `${BASE}/api/preview/file?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent("index.html")}`,
+      );
+      expect(htmlRes.status).toBe(200);
+      expect(htmlRes.headers.get("content-type")).toContain("text/html");
+      const htmlBody = await htmlRes.text();
+      expect(htmlBody).toContain("Hello Preview");
+      const assetBase = htmlBody.match(/<base href="([^"]+)">/)![1];
+      const opaqueHeaders = { origin: "null", "sec-fetch-site": "cross-site" };
+      for (const [name, mime] of [["style.css", "text/css"], ["app.js", "text/javascript"], ["module.mjs", "text/javascript"], ["font.woff2", "font/woff2"], ["photo.png", "image/png"]]) {
+        const asset = await fetch(`${BASE}${assetBase}${name}`, { headers: opaqueHeaders });
+        expect(asset.status).toBe(200);
+        expect(asset.headers.get("content-type")).toContain(mime);
+        expect(asset.headers.get("x-content-type-options")).toBe("nosniff");
+        expect(asset.headers.get("access-control-allow-origin")).toBe("*");
+        expect((await asset.arrayBuffer()).byteLength).toBeGreaterThan(0);
+      }
+      expect(listedPaths).not.toContain("style.css");
+      const assetSvg = await fetch(`${BASE}${assetBase}logo.svg`, { headers: opaqueHeaders });
+      expect(assetSvg.headers.get("content-security-policy")).toContain("sandbox");
+      expect(assetSvg.headers.get("content-security-policy")).not.toContain("allow-same-origin");
+      const pdf = await fetch(`${BASE}/api/preview/file/${projectId}/report.pdf`);
+      expect(pdf.headers.get("content-type")).toBe("application/pdf");
+      expect(pdf.headers.get("content-security-policy")).not.toContain("sandbox");
+      for (const target of ["secret.env", "%2e%2e%2foutside.html", "escape.html", "escape-dir/outside.html"]) {
+        if (process.platform === "win32" && target.startsWith("escape")) continue;
+        const denied = await fetch(`${BASE}${assetBase}${target}`, { headers: opaqueHeaders });
+        expect([403, 415]).toContain(denied.status);
+      }
+      expect((await fetch(`${BASE}${assetBase.replace(/asset\/[a-f0-9]{64}/, `asset/${"0".repeat(64)}`)}style.css`, { headers: opaqueHeaders })).status).toBe(403);
+      expect((await fetch(`${BASE}${assetBase}style.css`, { method: "POST", headers: opaqueHeaders })).status).toBe(403);
+      for (const target of ["/api/bots", "/api/preview/files", `/api/preview/file/${projectId}/style.css`]) {
+        expect((await fetch(`${BASE}${target}`, { headers: opaqueHeaders })).status).toBe(403);
+      }
+      expect((await fetch(`${BASE}/api/bots/probe/messages`, { method: "POST", headers: { ...opaqueHeaders, "content-type": "application/json" }, body: JSON.stringify({ text: "must never send" }) })).status).toBe(403);
+      // Script in a previewed page must not run with the app's origin: an opaque
+      // (sandboxed) origin makes its API calls fail the same-origin guard.
+      const htmlCsp = htmlRes.headers.get("content-security-policy") ?? "";
+      expect(htmlCsp).toMatch(/(^|;\s*)sandbox\b/);
+      expect(htmlCsp).not.toContain("allow-same-origin");
+      const svgRes = await fetch(`${BASE}/api/preview/file?projectId=${encodeURIComponent(projectId)}&path=logo.svg`);
+      expect(svgRes.headers.get("content-security-policy") ?? "").toMatch(/(^|;\s*)sandbox\b/);
+      const fromSandboxedPage = await fetch(`${BASE}/api/bots`, { headers: { origin: "null", "sec-fetch-site": "cross-site" } });
+      expect(fromSandboxedPage.status).toBe(403);
+
+      const mdRes = await fetch(
+        `${BASE}/api/preview/file/${encodeURIComponent(projectId)}/docs/guide.md`,
+      );
+      expect(mdRes.status).toBe(200);
+      expect(mdRes.headers.get("content-type")).toContain("text/markdown");
+      expect(await mdRes.text()).toContain("Plain words.");
+
+      // 3. Reject unregistered project, traversal outside project, and absolute paths
+      expect((await api("GET", "/api/preview/file?projectId=unknown-proj&path=index.html")).status).toBe(404);
+      expect(
+        (await api("GET", `/api/preview/file?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent("../outside.html")}`)).status,
+      ).toBe(403);
+      expect(
+        (await api("GET", `/api/preview/file?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(join(outsideDir, "outside.html"))}`)).status,
+      ).toBe(403);
+
+      // 4. Reject symlink escapes and disguised symlink to non-allowed file type
+      if (process.platform !== "win32") {
+        const escapeFile = await api(
+          "GET",
+          `/api/preview/file?projectId=${encodeURIComponent(projectId)}&path=escape.html`,
+        );
+        expect(escapeFile.status).toBe(403);
+
+        const escapeDir = await api(
+          "GET",
+          `/api/preview/file?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent("escape-dir/outside.html")}`,
+        );
+        expect(escapeDir.status).toBe(403);
+
+        const disguised = await api(
+          "GET",
+          `/api/preview/file?projectId=${encodeURIComponent(projectId)}&path=disguised.html`,
+        );
+        expect(disguised.status).toBe(415);
+      }
+
+      // 5. Reject disallowed file extensions (.env, .ts, .sh)
+      const badEnv = await api(
+        "GET",
+        `/api/preview/file?projectId=${encodeURIComponent(projectId)}&path=secret.env`,
+      );
+      expect(badEnv.status).toBe(415);
+
+      const badScript = await api(
+        "GET",
+        `/api/preview/file?projectId=${encodeURIComponent(projectId)}&path=run.sh`,
+      );
+      expect(badScript.status).toBe(415);
+
+      // 6. Guard preview route against untrusted cross-origin requests
+      const crossOriginPreview = await fetch(
+        `${BASE}/api/preview/file?projectId=${encodeURIComponent(projectId)}&path=index.html`,
+        { headers: { origin: "https://evil.example" } },
+      );
+      expect(crossOriginPreview.status).toBe(403);
+
+      // 7. Auto-refresh file watcher pushes preview.reload over SSE and cleans up
+      const streamAbort = new AbortController();
+      const stream = await fetch(`${BASE}/api/events`, { signal: streamAbort.signal });
+      const reader = stream.body!.getReader();
+      const waitForReload = () =>
+        new Promise<any>((resolve, reject) => {
+          const decoder = new TextDecoder();
+          let buffer = "";
+          const timeout = setTimeout(() => reject(new Error("timed out waiting for preview.reload")), 3_000);
+          const pump = async () => {
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) throw new Error("event stream ended");
+              buffer += decoder.decode(value, { stream: true });
+              const chunks = buffer.split("\n\n");
+              buffer = chunks.pop() ?? "";
+              for (const chunk of chunks) {
+                const line = chunk.split("\n").find((entry) => entry.startsWith("data: "));
+                if (!line) continue;
+                const frame = JSON.parse(line.slice(6));
+                if (frame.kind === "preview.reload") {
+                  clearTimeout(timeout);
+                  resolve(frame);
+                  return;
+                }
+              }
+            }
+          };
+          void pump().catch(reject);
+        });
+
+      const watchRes = await api("POST", "/api/preview/watch", {
+        clientId: "test-client",
+        projectId,
+        path: "index.html",
+        enabled: true,
+      });
+      expect(watchRes).toEqual({
+        status: 200,
+        body: { ok: true, watching: true, projectId, path: "index.html" },
+      });
+
+      const reloadPromise = waitForReload();
+      writeFileSync(join(projectDir, "index.html"), "<!doctype html><h1>Updated Preview</h1>");
+      await expect(reloadPromise).resolves.toMatchObject({
+        kind: "preview.reload",
+        projectId,
+        path: "index.html",
+      });
+
+      const unwatchRes = await api("POST", "/api/preview/watch", {
+        clientId: "test-client",
+        enabled: false,
+      });
+      expect(unwatchRes).toEqual({
+        status: 200,
+        body: { ok: true, watching: false },
+      });
+      streamAbort.abort();
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
   });
 });
