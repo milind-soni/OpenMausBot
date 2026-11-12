@@ -1,6 +1,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { harnessMcpRequest, MAX_INPUT_BYTES } from "../harness-mcp-request.ts";
+import { MAX_SEND_JSON_BYTES, MAX_INLINE_BYTES } from "./client.ts";
 import { randomBytes } from "node:crypto";
 import { deflateSync, crc32 } from "node:zlib";
 import "../server-line-packs.ts";
@@ -59,22 +61,22 @@ async function withHost(run: (call: (args: Record<string, unknown>) => Promise<E
   } finally { rmSync(dataDir, { recursive: true, force: true }); }
 }
 
-function largePng() {
+function largePng(width = 128, height = 320) {
   const chunk = (kind: string, data: Buffer) => {
     const header = Buffer.alloc(4); header.writeUInt32BE(data.length);
     const body = Buffer.concat([Buffer.from(kind), data]);
     const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(body));
     return Buffer.concat([header, body, crc]);
   };
-  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(512); ihdr.writeUInt32BE(400, 4); ihdr[8] = 8; ihdr[9] = 6;
-  const rows = Array.from({ length: 400 }, () => Buffer.concat([Buffer.from([0]), randomBytes(512 * 4)]));
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(width); ihdr.writeUInt32BE(height, 4); ihdr[8] = 8; ihdr[9] = 6;
+  const rows = Array.from({ length: height }, () => Buffer.concat([Buffer.from([0]), randomBytes(width * 4)]));
   return Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(Buffer.concat(rows))), chunk("IEND", Buffer.alloc(0))]);
 }
 
 it("rejects combined size, missing text, paths and URLs in host before any SMTP/IMAP construction", async () => {
   const big = largePng();
-  expect(big.length).toBeGreaterThan(512 * 1024);
-  expect(big.length).toBeLessThanOrEqual(1024 * 1024);
+  expect(big.length).toBeGreaterThan(128 * 1024);
+  expect(big.length).toBeLessThanOrEqual(256 * 1024);
   const one = { cid: "one", data_base64: big.toString("base64") };
   expect(inlineAttachments([one])[0]?.content).toEqual(big);
   await withHost(async (call) => {
@@ -102,5 +104,45 @@ it("preserves HTML and inline PNG bytes through the native host and client", asy
     expect(parsed.cc).toMatchObject({ value: [{ address: input.cc[0] }] });
     expect(fake.filed).toEqual(fake.raw);
     expect(fake.smtpCalls).toBe(1); expect(fake.imapCalls).toBe(1);
+  });
+});
+
+it("passes the maximum declared aggregate through harnessMcpRequest and rejects excess before mailbox effects", async () => {
+  const small = largePng(1, 1);
+  const extra = Buffer.concat([Buffer.from("npAD"), Buffer.alloc(65536 - small.length - 12)]);
+  const size = Buffer.alloc(4); size.writeUInt32BE(extra.length - 4);
+  const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(extra));
+  const exactPng = Buffer.concat([small.subarray(0, -12), size, extra, crc, small.subarray(-12)]);
+  expect(exactPng.length * 4).toBe(MAX_INLINE_BYTES);
+  const args = { ...input, subject: "s".repeat(500), inline_images: Array.from({ length: 4 }, (_, n) => ({ cid: `image-${n}`, data_base64: exactPng.toString("base64") })), text: "汉😀\"\\\n" + "t".repeat(199990), html: "" };
+  const remaining = MAX_SEND_JSON_BYTES - Buffer.byteLength(JSON.stringify(args));
+  args.html = "\n".repeat(Math.floor(remaining / 2)) + (remaining % 2 ? "x" : "");
+  expect(Buffer.byteLength(JSON.stringify(args))).toBe(MAX_SEND_JSON_BYTES);
+  expect(args.text.length).toBeLessThanOrEqual(200000);
+  expect(args.html.length).toBeLessThanOrEqual(200000);
+  const frame = (arguments_: object) => ({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "EMAIL_SEND_MESSAGE", arguments: arguments_ } });
+  expect(Buffer.byteLength(JSON.stringify(frame(args)))).toBeLessThan(MAX_INPUT_BYTES);
+  let received = 0;
+  await withHost(async (call) => {
+    vi.stubGlobal("fetch", async (_url: unknown, init: RequestInit) => {
+      received++;
+      const body = JSON.parse(init.body as string);
+      expect(Buffer.byteLength(init.body as string)).toBeLessThan(MAX_INPUT_BYTES);
+      return new Response(JSON.stringify({ result: await call(body.params.arguments) }));
+    });
+    try {
+      const connection = { url: "http://127.0.0.1:12345", token: "fake", kind: "email" as const };
+      const valid = await harnessMcpRequest(frame(args), connection) as { result: EmailToolResult };
+      expect(valid.result.isError, JSON.stringify(valid.result)).toBeUndefined();
+      expect(fake.smtpCalls).toBe(1); expect(fake.imapCalls).toBe(1);
+      fake.smtpCalls = 0; fake.imapCalls = 0;
+      const over = { ...args, html: args.html + "x" };
+      expect(await harnessMcpRequest(frame(over), connection)).toMatchObject({ result: { isError: true } });
+      expect(received).toBe(2);
+      expect(fake.smtpCalls).toBe(0); expect(fake.imapCalls).toBe(0);
+      expect(await harnessMcpRequest(frame({ ...args, html: "\n".repeat(200000), text: "汉".repeat(200000) }), connection)).toMatchObject({ result: { isError: true } });
+      expect(received).toBe(2);
+      expect(fake.smtpCalls).toBe(0); expect(fake.imapCalls).toBe(0);
+    } finally { vi.unstubAllGlobals(); }
   });
 });

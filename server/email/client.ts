@@ -352,6 +352,14 @@ export async function readMessage(account: EmailAccount, guard: EmailGuard, inpu
   });
 }
 
+export const MAX_SEND_JSON_BYTES = 900_000;
+export const MAX_INLINE_BYTES = 256 * 1024;
+export const MAX_INLINE_BASE64_CHARS = 4 * Math.ceil(MAX_INLINE_BYTES / 3);
+
+export function checkSendBudget(input: object): void {
+  if (Buffer.byteLength(JSON.stringify(input), "utf8") > MAX_SEND_JSON_BYTES) throw new EmailError("too-big", "Email arguments exceed the 900000-byte UTF-8 JSON budget; shorten text/HTML or reduce images.");
+}
+
 export interface InlineImage { cid: string; data_base64: string }
 
 export function inlineAttachments(images: InlineImage[] = []) {
@@ -361,10 +369,10 @@ export function inlineAttachments(images: InlineImage[] = []) {
   return images.map((image) => {
     if (!image || Object.keys(image).some((key) => !["cid", "data_base64"].includes(key)) || typeof image.cid !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}$/u.test(image.cid) || cids.has(image.cid)) throw new EmailError("refused", "Inline images need unique, safe CIDs and base64 bytes only.");
     cids.add(image.cid);
-    if (typeof image.data_base64 !== "string" || image.data_base64.length > 1_398_104 || (image.data_base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(image.data_base64))) throw new EmailError("refused", "Invalid or oversized base64 PNG.");
+    if (typeof image.data_base64 !== "string" || image.data_base64.length > MAX_INLINE_BASE64_CHARS || (image.data_base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(image.data_base64))) throw new EmailError("refused", "Invalid or oversized base64 PNG.");
     const content = Buffer.from(image.data_base64, "base64");
     total += content.length;
-    if (total > 1024 * 1024 || content.toString("base64") !== image.data_base64 || content.length < 45 || !content.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")) || content.readUInt32BE(8) !== 13 || content.toString("ascii", 12, 16) !== "IHDR") throw new EmailError("refused", "Inline images must be PNG, at most 1 MiB combined.");
+    if (total > MAX_INLINE_BYTES || content.toString("base64") !== image.data_base64 || content.length < 45 || !content.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")) || content.readUInt32BE(8) !== 13 || content.toString("ascii", 12, 16) !== "IHDR") throw new EmailError("refused", "Inline images must be PNG, at most 256 KiB combined.");
     let offset = 8;
     let hasData = false;
     let ended = false;
@@ -385,6 +393,7 @@ export interface SendInput { to: string[]; cc?: string[]; bcc?: string[]; subjec
 
 /** Sends as the mailbox's own address and files a copy in its Sent folder when it has one. */
 export async function sendMessage(account: EmailAccount, guard: EmailGuard, input: SendInput): Promise<{ messageId: string; accepted: string[]; rejected: string[]; filed: boolean }> {
+  checkSendBudget(input);
   const attachments = inlineAttachments(input.inline_images);
   const server = account.smtp;
   if (!server) throw new EmailError("refused", `No outgoing server is set for ${account.address}.`);
