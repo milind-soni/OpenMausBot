@@ -67,6 +67,8 @@ const fileSchema = z.object({
   onePassword: z.object({ token: z.string().min(1), connectedAt: z.number() }).optional(),
   /** Vault id → the bots that may use its logins; a vault not named here is for every bot. Kept across reconnects. */
   onePasswordGrants: z.record(z.string(), botsSchema).optional(),
+  /** 1Password item (`<vault id>:<item id>`) → the bots that may use it, ahead of its vault's choice. Kept across reconnects. */
+  onePasswordItemGrants: z.record(z.string(), botsSchema).optional(),
   /** Security: MCP server name → the items whose `vault:<id>` that server may read. Written only when a bot's secretRef
    * is redeemed into the server (or a move carries the server), so a pointer planted in config.json reads nothing. */
   mcpKeys: z.record(z.string(), z.array(z.string().min(1))).optional(),
@@ -493,6 +495,19 @@ export class VaultStore {
     const grants = bots === "all" ? others : { ...others, [vaultId]: bots };
     const { onePasswordGrants: _grants, ...rest } = data;
     this.write(Object.keys(grants).length ? { ...rest, onePasswordGrants: grants } : rest);
+  }
+
+  onePasswordItemGrants(): Record<string, LoginBots> {
+    return this.read().onePasswordItemGrants ?? {};
+  }
+
+  /** null hands the item back to its vault's choice. */
+  setOnePasswordItemGrant(key: string, bots: LoginBots | null): void {
+    const data = this.read();
+    const { [key]: _previous, ...others } = data.onePasswordItemGrants ?? {};
+    const grants = bots === null ? others : { ...others, [key]: bots };
+    const { onePasswordItemGrants: _grants, ...rest } = data;
+    this.write(Object.keys(grants).length ? { ...rest, onePasswordItemGrants: grants } : rest);
   }
 
   secretValues(): string[] {

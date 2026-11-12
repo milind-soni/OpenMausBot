@@ -5,7 +5,7 @@
  * see a saved secret as a list row, never its value.
  */
 import { CUSTOM_SECRET_LABEL_MAX } from "./credential-request.ts";
-import type { LoginBots } from "./logins.ts";
+import type { LoginBots, OnePasswordItemRef } from "./logins.ts";
 
 /** One saved secret as Settings shows it. There is no value field, and no
  * route ever returns one: a saved value is only ever replaced. */
@@ -44,6 +44,8 @@ export interface LinkedSecret {
   bots: LoginBots;
   readOnly: true;
   lastUsedAt?: number;
+  /** From 1Password: its item, and whether its bots are its own choice rather than its vault's. */
+  onePassword?: OnePasswordItemRef;
 }
 
 /** A saved item a secure card offers under "Use a saved one": its name only. Picking it lets the asking bot use it. */

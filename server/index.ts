@@ -739,7 +739,7 @@ const heldSecrets = new HeldSecrets(logins);
 addHeldSecretScrubber((text) => heldSecrets.scrub(text));
 const onePassword = new OnePasswordLogins({
   token: () => logins.onePasswordToken(),
-  grants: () => logins.onePasswordGrants(),
+  grants: () => logins.onePasswordGrants(), itemGrants: () => logins.onePasswordItemGrants(),
   connect: async (token) => {
     let sdk: OnePasswordSdk;
     try { sdk = nativeRequire()("@1password/sdk") as OnePasswordSdk; }

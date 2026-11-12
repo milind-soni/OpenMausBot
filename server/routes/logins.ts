@@ -18,11 +18,14 @@ export interface LoginRouteDeps {
     disconnect(): OnePasswordStatus;
     /** Null for a vault the token does not read. */
     grant(vaultId: string, bots: LoginBots): OnePasswordStatus | null;
+    /** Bots for one item (`<vault id>:<item id>`) ahead of its vault's; null hands it back. False for an item the token does not read. */
+    grantItem(item: string, bots: LoginBots | null): boolean;
   };
 }
 
 const ONE_PASSWORD = "/api/logins/1password";
 const VAULT = /^\/api\/logins\/1password\/vaults\/([\w-]{1,128})$/u;
+const ITEM = /^\/api\/logins\/1password\/items\/([\w-]{1,128})\/([\w-]{1,128})$/u;
 
 const ID = /^[\w-]{1,128}$/u;
 
@@ -99,6 +102,15 @@ export function createLoginRoutes(deps: LoginRouteDeps): RouteHandler {
       if (!bots.ok || bots.value === undefined) return json(res, 400, { error: bots.ok ? LOGIN_ERRORS.bots : bots.error });
       const status = deps.onePassword.grant(vault[1]!, bots.value);
       return status ? json(res, 200, { onePassword: status }) : json(res, 404, { error: "no such vault" });
+    }
+    const item = ITEM.exec(path);
+    if (item && method === "PATCH") {
+      const body = await readBody(req, 16_384);
+      const value = body && typeof body === "object" ? body.bots : undefined;
+      const bots = value === null ? { ok: true as const, value: null } : parseBots(value, deps.botExists);
+      if (!bots.ok || bots.value === undefined) return json(res, 400, { error: bots.ok ? LOGIN_ERRORS.bots : bots.error });
+      if (!deps.onePassword.grantItem(`${item[1]!}:${item[2]!}`, bots.value)) return json(res, 404, { error: "no such item" });
+      return json(res, 200, { logins: deps.onePassword.list(), onePassword: deps.onePassword.status() });
     }
     if (path === ONE_PASSWORD || path.startsWith(`${ONE_PASSWORD}/`)) return json(res, 405, { error: "method not allowed" });
     if (path === "/api/logins" && method === "POST") {

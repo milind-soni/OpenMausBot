@@ -2,7 +2,7 @@
 // The official SDK (@1password/sdk, MIT) is a CommonJS wrapper over a 14 MB
 // WebAssembly core it reads from beside itself, so it is never bundled: it is
 // required on first use, and only when a token exists.
-import type { LoginBots, LoginPlace, LoginSummary, OnePasswordStatus, OnePasswordVault } from "../shared/logins.ts";
+import type { LoginBots, LoginPlace, LoginSummary, OnePasswordItemRef, OnePasswordStatus, OnePasswordVault } from "../shared/logins.ts";
 import { loginSite, normalizeLoginHost } from "../shared/logins.ts";
 import { parseTotpKey } from "./totp.ts";
 import type { LinkedItem, LinkedValue, VaultProvider } from "./vault/providers.ts";
@@ -119,6 +119,11 @@ const MAX_ITEMS = 500;
 const FIELDS_BATCH = 50;
 const STALE_MS = 10 * 60_000;
 
+/** How an item's own bots are stored: `<vault id>:<item id>`. */
+export function onePasswordItemKey(vaultId: string, itemId: string): string {
+  return `${vaultId}:${itemId}`;
+}
+
 export function isOnePasswordLoginId(id: string): boolean {
   return id.startsWith(ID_PREFIX);
 }
@@ -153,6 +158,7 @@ export class OnePasswordLogins implements VaultProvider {
   private readonly token: () => string | null;
   private readonly connect: (token: string) => Promise<OnePasswordClient>;
   private readonly grants: () => Record<string, LoginBots>;
+  private readonly itemGrants: () => Record<string, LoginBots>;
   private readonly now: () => number;
   private client: { token: string; client: OnePasswordClient } | null = null;
   private entries: Entry[] = [];
@@ -164,15 +170,33 @@ export class OnePasswordLogins implements VaultProvider {
   private refreshing: Promise<OnePasswordStatus> | null = null;
   private readonly lastUsed = new Map<string, number>();
 
-  constructor(options: { token: () => string | null; connect: (token: string) => Promise<OnePasswordClient>; grants?: () => Record<string, LoginBots>; now?: () => number }) {
+  constructor(options: {
+    token: () => string | null; connect: (token: string) => Promise<OnePasswordClient>; grants?: () => Record<string, LoginBots>;
+    itemGrants?: () => Record<string, LoginBots>; now?: () => number;
+  }) {
     this.token = options.token;
     this.connect = options.connect;
     this.grants = options.grants ?? (() => ({}));
+    this.itemGrants = options.itemGrants ?? (() => ({}));
     this.now = options.now ?? Date.now;
   }
 
   private botsFor(vaultId: string): LoginBots {
     return this.grants()[vaultId] ?? "all";
+  }
+
+  /** An item's own bots when it has them, else its vault's. */
+  private itemAccess(entry: { vaultId: string; itemId: string }): { bots: LoginBots; onePassword: OnePasswordItemRef } {
+    const item = onePasswordItemKey(entry.vaultId, entry.itemId);
+    const own = this.itemGrants()[item];
+    return { bots: own ?? this.botsFor(entry.vaultId), onePassword: { item, ownBots: own !== undefined } };
+  }
+
+  /** Whether the token reads this item (`<vault id>:<item id>`) as a login or a secret. */
+  hasItem(item: string): boolean {
+    if (!this.token()) return false;
+    const reads = (entry: { vaultId: string; itemId: string }) => onePasswordItemKey(entry.vaultId, entry.itemId) === item;
+    return this.entries.some(reads) || this.secrets.some(reads);
   }
 
   private connected(): OnePasswordStatus {
@@ -279,10 +303,10 @@ export class OnePasswordLogins implements VaultProvider {
     return [
       ...this.entries.map((entry): LinkedItem => ({
         kind: "login", id: entry.id, site: entry.site, hosts: [...entry.hosts], exactHost: false, username: entry.username, hasTotp: entry.hasTotp,
-        source: "1password", bots: this.botsFor(entry.vaultId), createdAt: 0, ...this.lastUsedOf(entry.itemId),
+        source: "1password", ...this.itemAccess(entry), createdAt: 0, ...this.lastUsedOf(entry.itemId),
       })),
       ...this.secrets.map((entry): LinkedItem => ({
-        kind: "secret", id: entry.id, name: entry.name, fields: [...entry.fields], source: "linked", provider: this.id, bots: this.botsFor(entry.vaultId),
+        kind: "secret", id: entry.id, name: entry.name, fields: [...entry.fields], source: "linked", provider: this.id, ...this.itemAccess(entry),
         readOnly: true, ...this.lastUsedOf(entry.itemId),
       })),
     ];

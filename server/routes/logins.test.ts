@@ -34,7 +34,8 @@ async function serve() {
   const { sdk } = fakeOnePasswordSdk({ token: TOKEN, vaults: { v1: { title: "Shared with OMB", items: [
     { id: "i1", title: "Example", urls: ["https://vault.example.com"], username: "vault-user", password: VAULT_PASSWORD },
   ] } } });
-  const onePassword = new OnePasswordLogins({ token: () => store.onePasswordToken(), grants: () => store.onePasswordGrants(), connect: (token) => sdkOnePasswordClient(sdk, token, "0.0.0") });
+  const onePassword = new OnePasswordLogins({ token: () => store.onePasswordToken(), grants: () => store.onePasswordGrants(), itemGrants: () => store.onePasswordItemGrants(),
+    connect: (token) => sdkOnePasswordClient(sdk, token, "0.0.0") });
   const logins = new BotLogins(store, onePassword);
   const routes = [createLoginRoutes(logins.routes((id) => ["pepper", "quill"].includes(id)))];
   const answers: string[] = [];
@@ -60,6 +61,7 @@ describe("Settings → Logins routes", () => {
     for (const method of ["GET", "POST"]) expect(requiredScope(method, "/api/logins")).toBe("admin");
     for (const method of ["PATCH", "DELETE"]) expect(requiredScope(method, "/api/logins/abc")).toBe("admin");
     expect(requiredScope("PATCH", "/api/logins/1password/vaults/v1")).toBe("admin");
+    expect(requiredScope("PATCH", "/api/logins/1password/items/v1/i1")).toBe("admin");
   });
 
   it("add, list, change and delete a login, and never return its password or 2FA key", async () => {
@@ -149,6 +151,32 @@ describe("Settings → Logins routes", () => {
     expect((await call("PATCH", "/api/logins/1password/vaults/v1", { bots: "all" })).body.onePassword.vaults[0].bots).toBe("all");
     expect(store.onePasswordGrants()).toEqual({});
     expect((await logins.candidates("pepper", "vault.example.com")).map((login) => login.username)).toEqual(["vault-user"]);
+  });
+
+  it("keeps one 1Password item to its own bots ahead of its vault's, and hands it back on null", async () => {
+    const { store, logins, call, answers } = await serve();
+    await call("POST", "/api/logins/1password", { token: TOKEN });
+    await call("PATCH", "/api/logins/1password/vaults/v1", { bots: [] });
+    expect(await logins.candidates("pepper", "vault.example.com")).toEqual([]);
+    const opened = await call("PATCH", "/api/logins/1password/items/v1/i1", { bots: ["pepper"] });
+    expect(opened.status).toBe(200);
+    expect(opened.body.logins[0]).toMatchObject({ bots: ["pepper"], onePassword: { item: "v1:i1", ownBots: true } });
+    expect(store.onePasswordItemGrants()).toEqual({ "v1:i1": ["pepper"] });
+    expect((await logins.candidates("pepper", "vault.example.com")).map((login) => login.username)).toEqual(["vault-user"]);
+    expect(await logins.candidates("quill", "vault.example.com")).toEqual([]);
+    // The vault's own choice does not reopen or close an item with bots of its own.
+    await call("PATCH", "/api/logins/1password/vaults/v1", { bots: "all" });
+    expect(await logins.candidates("quill", "vault.example.com")).toEqual([]);
+    expect((await call("PATCH", "/api/logins/1password/items/v1/i1", { bots: ["nobody"] })).body).toEqual({ error: LOGIN_ERRORS.bots });
+    expect((await call("PATCH", "/api/logins/1password/items/v1/i1", {})).status).toBe(400);
+    expect((await call("PATCH", "/api/logins/1password/items/v1/i9", { bots: "all" })).status).toBe(404);
+    expect((await call("PATCH", "/api/logins/1password/items/v9/i1", { bots: "all" })).status).toBe(404);
+    expect(store.onePasswordItemGrants()).toEqual({ "v1:i1": ["pepper"] });
+    const back = await call("PATCH", "/api/logins/1password/items/v1/i1", { bots: null });
+    expect(back.body.logins[0]).toMatchObject({ bots: "all", onePassword: { item: "v1:i1", ownBots: false } });
+    expect(store.onePasswordItemGrants()).toEqual({});
+    expect((await logins.candidates("quill", "vault.example.com")).map((login) => login.username)).toEqual(["vault-user"]);
+    for (const answer of answers) { expect(answer).not.toContain(VAULT_PASSWORD); expect(answer).not.toContain(TOKEN); }
   });
 
   it("takes changes as JSON only, so another page's form cannot post one", async () => {

@@ -393,6 +393,24 @@ test("1Password refused on My Cloud is told in words for this computer, not My C
   assert.equal(busy.result.failed[0].final, undefined, "any other refusal can be tried again");
 });
 
+test("1Password items with bots of their own keep them on My Cloud; a Cloud too old for that fails out loud", async () => {
+  const onePassword = { key: itemKey.onePassword(), kind: "1password", label: "1Password", parts: { token: "t" } };
+  const sides = fakeSides({ localItems: [onePassword] });
+  sides.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: { v1: [] }, itemGrants: { "v1:i1": "all", "bad:id:x": "all" } } });
+  const outcome = await createCloudSend(sides.deps).send();
+  assert.equal(outcome.result.failed.length, 0);
+  assert.ok(sides.calls.includes("PATCH /api/logins/1password/vaults/v1"));
+  assert.ok(sides.calls.includes("PATCH /api/logins/1password/items/v1/i1"), "the item's own bots go too");
+  assert.ok(!sides.calls.some((call) => call.includes("/items/bad")), "a malformed item key is skipped");
+  const old = fakeSides({ localItems: [onePassword], refuse: { "/api/logins/1password/items/v1/i1": { status: 405, error: "method not allowed" } } });
+  old.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {}, itemGrants: { "v1:i1": [] } } });
+  const refused = await createCloudSend(old.deps).send();
+  assert.deepEqual(refused.result.failed.map((entry) => entry.key), ["1password"], "never left open to every bot there");
+  const gone = fakeSides({ localItems: [onePassword], refuse: { "/api/logins/1password/items/v1/i1": { status: 404, error: "no such item" } } });
+  gone.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {}, itemGrants: { "v1:i1": [] } } });
+  assert.equal((await createCloudSend(gone.deps).send()).result.failed.length, 0, "an item My Cloud's token does not read is skipped");
+});
+
 test("chats by row: the cursor moves only past what My Cloud took; one removed there is never sent again; one being answered waits", async () => {
   const rows = { "t-a": [{ id: "a1", at: 1 }, { id: "a2", at: 2 }], "t-b": [{ id: "b1", at: 1 }], "t-c": [{ id: "c1", at: 1 }] };
   const heads = () => Object.entries(rows).map(([threadId, list]) => ({ bot: "ember", threadId, last: list.length, lastId: list.at(-1).id, busy: threadId === "t-c" }));

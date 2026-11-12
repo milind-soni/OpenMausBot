@@ -1,11 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { ChevronDown, KeyRound, Loader2, LockKeyhole, ShieldCheck, Trash2 } from "lucide-react";
 
-import { loginHeldBackFor, type LoginBots, type LoginSummary, type OnePasswordStatus, type OnePasswordVault } from "../../shared/logins";
+import { loginHeldBackFor, type LoginBots, type LoginSummary, type OnePasswordItemRef, type OnePasswordStatus, type OnePasswordVault } from "../../shared/logins";
 import type { LinkedSecret, VaultSecret } from "../../shared/vault";
 import { t } from "@/lib/i18n";
 import { productName } from "@/lib/brand";
-import { addLogin, changeLogin, connectOnePassword, deleteLogin, disconnectOnePassword, grantVault, refreshOnePassword } from "@/lib/logins";
+import { addLogin, changeLogin, connectOnePassword, deleteLogin, disconnectOnePassword, grantOnePasswordItem, grantVault, refreshOnePassword } from "@/lib/logins";
 import { relativeTime } from "@/lib/memory";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { deleteSecret, listVault } from "@/lib/vault";
@@ -125,6 +125,17 @@ export function VaultSettings() {
       </button>
     </div>
   );
+  /** A 1Password item without bots of its own follows its vault: say so, since changing the vault changes it. */
+  const whoLine = (value: LoginBots, item?: OnePasswordItemRef) =>
+    item && !item.ownBots ? t("settings.logins.onePassword.vaultChoice", { who: botNames(value) }) : botNames(value);
+  const itemButton = (id: string, name: string) => !member && editing !== id && (
+    <button type="button" className={ROW_BUTTON} disabled={busy} onClick={() => startEdit(id)}
+      aria-label={t("settings.logins.onePassword.changeItem", { name })}>{t("settings.logins.change")}</button>
+  );
+  const itemEditor = (item: OnePasswordItemRef, value: LoginBots) => (
+    <OnePasswordItemAccess item={item} value={value} bots={bots} onCancel={() => setEditing(null)}
+      onSaved={async () => { setEditing(null); await load(); }} />
+  );
   const rows = rowsOf(logins ?? [], secrets, filter, query);
   const empty = logins !== null && logins.length === 0 && secrets.length === 0;
 
@@ -144,7 +155,7 @@ export function VaultSettings() {
           <div dir="auto" className="truncate text-[12px] text-ink-secondary">{login.username || t("settings.logins.noUsername")}</div>
           {signInHostsLine(login) && <div dir="ltr" className="truncate text-[12px] text-ink-tertiary" data-login-hosts>{signInHostsLine(login)}</div>}
           <div className="mt-0.5 text-[12px] leading-snug text-ink-tertiary">
-            {[t(SOURCE_KEYS[login.source]), botNames(login.bots), used(login.lastUsedAt)].join(" · ")}
+            {[t(SOURCE_KEYS[login.source]), whoLine(login.bots, login.onePassword), used(login.lastUsedAt)].join(" · ")}
           </div>
           {loginHeldBackFor(login, state.bots).length > 0 && (
             <div className="mt-0.5 text-[12px] leading-snug text-warning" data-login-held-back>
@@ -153,8 +164,10 @@ export function VaultSettings() {
           )}
         </div>
         {login.source !== "1password" && rowButtons(login.id, "login", login.site, () => startEdit(login.id, login))}
+        {login.onePassword && itemButton(login.id, login.site)}
       </div>
-      {editing === login.id && (
+      {editing === login.id && login.onePassword && itemEditor(login.onePassword, login.bots)}
+      {editing === login.id && !login.onePassword && (
         <div className="ms-6 rounded-lg bg-inset/60 p-3">
           <LoginForm username={false} replacing submitLabel={t("settings.logins.saveChange")} autoFocus
             onCancel={() => setEditing(null)}
@@ -185,11 +198,13 @@ export function VaultSettings() {
         <div className="min-w-0 flex-1">
           <div dir="auto" className="truncate text-[13px] font-medium text-ink" title={secret.name}>{secret.name}</div>
           <div className="mt-0.5 text-[12px] leading-snug text-ink-tertiary">
-            {[t(SOURCE_KEYS[secret.source]), botNames(secret.bots), used(secret.lastUsedAt)].join(" · ")}
+            {[t(SOURCE_KEYS[secret.source]), whoLine(secret.bots, secret.source === "linked" ? secret.onePassword : undefined), used(secret.lastUsedAt)].join(" · ")}
           </div>
         </div>
         {secret.source !== "linked" && rowButtons(secret.id, "secret", secret.name, () => startEdit(secret.id))}
+        {secret.source === "linked" && secret.onePassword && itemButton(secret.id, secret.name)}
       </div>
+      {editing === secret.id && secret.source === "linked" && secret.onePassword && itemEditor(secret.onePassword, secret.bots)}
       {editing === secret.id && secret.source !== "linked" && (
         <div className="ms-6 rounded-lg bg-inset/60 p-3">
           <SecretForm secret={secret} bots={bots} onCancel={() => setEditing(null)} onSaved={async () => { setEditing(null); await load(); }} />
@@ -282,6 +297,40 @@ function ExactHostChoice({ checked, onChange, label }: { checked: boolean; onCha
       <input type="checkbox" name="exactHost" className="mt-[2px]" checked={checked} onChange={(event) => onChange(event.target.checked)} />
       {label}
     </label>
+  );
+}
+
+/** Which bots may use one 1Password item, ahead of its vault's choice; "Use the vault's choice" hands it back. */
+function OnePasswordItemAccess({ item, value: initial, bots, onCancel, onSaved }: {
+  item: OnePasswordItemRef;
+  value: LoginBots;
+  bots: ReadonlyArray<{ id: string; name: string }>;
+  onCancel: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [value, setValue] = useState<LoginBots>(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async (next: LoginBots | null) => {
+    setBusy(true);
+    setError(null);
+    try { await grantOnePasswordItem(item.item, next); await onSaved(); }
+    catch (cause) { setError(cause instanceof Error && cause.message ? cause.message : t("settings.logins.onePassword.error")); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="ms-6 flex flex-col gap-2 rounded-lg bg-inset/60 p-3" data-onepassword-item={item.item}>
+      <LoginBotPicker value={value} onChange={setValue} bots={bots} disabled={busy} />
+      <p className="text-[12px] leading-snug text-ink-tertiary">{t("settings.logins.onePassword.itemNote")}</p>
+      {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
+      <div className="flex flex-wrap justify-end gap-2">
+        {item.ownBots && (
+          <button type="button" className="ui-button ui-button-md" disabled={busy} onClick={() => void save(null)}>{t("settings.logins.onePassword.useVaultChoice")}</button>
+        )}
+        <button type="button" className="ui-button ui-button-md" disabled={busy} onClick={onCancel}>{t("logins.cancel")}</button>
+        <button type="button" className="ui-button ui-button-md ui-button-primary" disabled={busy} onClick={() => void save(value)}>{t("settings.logins.saveChange")}</button>
+      </div>
+    </div>
   );
 }
 

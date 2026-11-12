@@ -174,6 +174,11 @@ export class BotLogins {
           this.store.setOnePasswordGrant(vaultId, bots);
           return this.onePassword.status();
         },
+        grantItem: (item, bots) => {
+          if (!this.onePassword.hasItem(item)) return false;
+          this.store.setOnePasswordItemGrant(item, bots);
+          return true;
+        },
       },
     };
   }

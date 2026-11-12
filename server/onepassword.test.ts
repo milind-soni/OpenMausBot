@@ -17,7 +17,7 @@ const DEPLOY = "fake-deploy-Passw0rd";
 const NOTE = "fake-note-text-456";
 const ACME_SECRET = "fake-acme-client-secret-789";
 
-function setup(options: { token?: string | null; fail?: () => Error | null; now?: () => number; grants?: Record<string, LoginBots> } = {}) {
+function setup(options: { token?: string | null; fail?: () => Error | null; now?: () => number; grants?: Record<string, LoginBots>; itemGrants?: Record<string, LoginBots> } = {}) {
   const { sdk, calls } = fakeOnePasswordSdk({
     token: TOKEN,
     fail: options.fail,
@@ -42,7 +42,8 @@ function setup(options: { token?: string | null; fail?: () => Error | null; now?
   });
   let token: string | null = options.token === undefined ? TOKEN : options.token;
   const grants = options.grants ?? {};
-  const source = new OnePasswordLogins({ token: () => token, grants: () => grants, connect: (value) => sdkOnePasswordClient(sdk, value, "9.9.9"), now: options.now });
+  const itemGrants = options.itemGrants ?? {};
+  const source = new OnePasswordLogins({ token: () => token, grants: () => grants, itemGrants: () => itemGrants, connect: (value) => sdkOnePasswordClient(sdk, value, "9.9.9"), now: options.now });
   return { source, calls, setToken: (value: string | null) => { token = value; } };
 }
 
@@ -118,6 +119,34 @@ describe("1Password logins", () => {
     expect(source.list().find((row) => row.site === "example.net")?.bots).toEqual(["quill"]);
     expect(source.hasVault("v2")).toBe(true);
     expect(source.hasVault("v9")).toBe(false);
+  });
+
+  it("lets one item have its own bots ahead of its vault's, for logins and secrets alike", async () => {
+    // The vault is closed to every bot; only the picked items are opened, each to its own bots.
+    const { source } = setup({ grants: { v1: [] }, itemGrants: { "v1:i1": ["pepper"], "v1:i6": ["quill"], "v2:f1": [] } });
+    await source.refresh();
+    expect(linkedSites(source, "pepper").map((login) => login.site)).toEqual(["example.com"]);
+    expect(linkedCandidates(source, "accounts.example.com", "pepper").map((candidate) => candidate.username)).toEqual(["alice@example.com"]);
+    expect(linkedCandidates(source, "accounts.example.com", "quill")).toEqual([]);
+    // Another item in the same vault still follows the closed vault.
+    expect(linkedCandidates(source, "crm.example.org", "pepper")).toEqual([]);
+    // An item can be narrowed inside a vault every bot may use.
+    expect(linkedCandidates(source, "bank.example.net", "pepper")).toEqual([]);
+    expect(findLinkedSecret([source], "Stripe secret key", "quill")).toMatchObject({ secret: { id: "1password:v1:i6" } });
+    expect(findLinkedSecret([source], "Stripe secret key", "pepper")).toBeNull();
+    expect(findLinkedSecret([source], "Deploy", "quill")).toBeNull();
+    const rows = source.list();
+    expect(rows.map((row) => [row.site, row.bots, row.onePassword])).toEqual([
+      ["example.com", ["pepper"], { item: "v1:i1", ownBots: true }],
+      ["example.net", [], { item: "v2:f1", ownBots: true }],
+      ["example.org", [], { item: "v1:i2", ownBots: false }],
+    ]);
+    expect(linkedSecrets(source).map((secret) => [secret.name, secret.onePassword])).toContainEqual(["Deploy", { item: "v1:i7", ownBots: false }]);
+    expect(source.hasItem("v1:i1")).toBe(true);
+    expect(source.hasItem("v1:i6")).toBe(true);
+    expect(source.hasItem("v1:i3")).toBe(false);
+    expect(source.hasItem("v9:i1")).toBe(false);
+    expect(JSON.stringify(source.items())).not.toContain(VAULT_PASSWORD);
   });
 
   it("is filled through the same path as a saved login: same origin rule, same TOTP, nothing back to the bot", async () => {

@@ -906,6 +906,13 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       const granted = await ctx.session.call("PATCH", `/api/logins/1password/vaults/${encodeURIComponent(vault)}`, { bots: botsOnCloud(bots, ctx.cloudBots) });
       if (!granted.ok && granted.status !== 404) throw refusedError("refused", granted, "My Cloud connected 1Password but could not keep its vaults to the same bots.");
     }
+    // An item narrowed here must not open to every bot there; a Cloud too old for item choices (405) fails out loud.
+    for (const [item, bots] of Object.entries(onePassword.itemGrants ?? {})) {
+      const [vault, id, ...rest] = item.split(":");
+      if (rest.length || !VAULT_ID.test(vault ?? "") || !VAULT_ID.test(id ?? "")) continue;
+      const granted = await ctx.session.call("PATCH", `/api/logins/1password/items/${encodeURIComponent(vault)}/${encodeURIComponent(id)}`, { bots: botsOnCloud(bots, ctx.cloudBots) });
+      if (!granted.ok && granted.status !== 404) throw refusedError("refused", granted, "My Cloud connected 1Password but could not keep its logins to the same bots. Update My Cloud and send again.");
+    }
     done(ctx, row.key);
     ctx.result.onePassword = true;
   }
