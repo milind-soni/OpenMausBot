@@ -192,11 +192,19 @@ export class OnePasswordLogins implements VaultProvider {
     return { bots: own ?? this.botsFor(entry.vaultId), onePassword: { item, ownBots: own !== undefined } };
   }
 
-  /** Whether the token reads this item (`<vault id>:<item id>`) as a login or a secret. */
-  hasItem(item: string): boolean {
+  /** Whether the token reads this item (`<vault id>:<item id>`) as a login or a secret, looking again in 1Password before
+   * saying no; null when 1Password could not be read just now, so an item not loaded yet is never taken for one that is gone. */
+  async readsItem(item: string): Promise<boolean | null> {
+    const loaded = () => this.refreshedAt !== null && !this.error;
+    const reads = () => [...this.entries, ...this.secrets].some((entry) => onePasswordItemKey(entry.vaultId, entry.itemId) === item);
     if (!this.token()) return false;
-    const reads = (entry: { vaultId: string; itemId: string }) => onePasswordItemKey(entry.vaultId, entry.itemId) === item;
-    return this.entries.some(reads) || this.secrets.some(reads);
+    const before = this.refreshedAt;
+    await this.fresh();
+    if (loaded() && reads()) return true;
+    // One more look, unless the stale check just took it.
+    if (this.refreshedAt === before) await this.refresh();
+    if (!this.token()) return false;
+    return loaded() ? reads() : null;
   }
 
   private connected(): OnePasswordStatus {

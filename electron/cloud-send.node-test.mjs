@@ -85,10 +85,12 @@ test("a bot's fields reach My Cloud without Custom approval", () => {
 
 function fakeSides({ cloudItems = [], localItems = [], refuse = {} } = {}) {
   const calls = [];
+  const bodies = {};
   const reply = (status, body) => ({ status, ok: status < 400, body });
   const session = {
-    call: async (method, route) => {
+    call: async (method, route, body) => {
       calls.push(`${method} ${route}`);
+      bodies[`${method} ${route}`] = body;
       if (route === "/api/cloud-send" || route === "/api/cloud-send?move=1") return reply(200, summary(cloudItems));
       if (refuse[route]) return reply(refuse[route].status, { error: refuse[route].error });
       return reply(200, {});
@@ -99,6 +101,7 @@ function fakeSides({ cloudItems = [], localItems = [], refuse = {} } = {}) {
   const localJson = (value) => new Response(JSON.stringify(value), { status: 200 });
   return {
     calls,
+    bodies,
     deps: {
       local: async (route) => {
         if (route === "/api/cloud-send" || route === "/api/cloud-send?move=1") return localJson(summary(localItems));
@@ -400,15 +403,23 @@ test("1Password items with bots of their own keep them on My Cloud; a Cloud too 
   const outcome = await createCloudSend(sides.deps).send();
   assert.equal(outcome.result.failed.length, 0);
   assert.ok(sides.calls.includes("PATCH /api/logins/1password/vaults/v1"));
-  assert.ok(sides.calls.includes("PATCH /api/logins/1password/items/v1/i1"), "the item's own bots go too");
-  assert.ok(!sides.calls.some((call) => call.includes("/items/bad")), "a malformed item key is skipped");
-  const old = fakeSides({ localItems: [onePassword], refuse: { "/api/logins/1password/items/v1/i1": { status: 405, error: "method not allowed" } } });
+  // All of this computer's item choices in one go, so one handed back to its vault here is handed back there too.
+  assert.deepEqual(sides.bodies["PUT /api/logins/1password/items"], { items: { "v1:i1": "all" } }, "a malformed item key is skipped");
+  assert.ok(!sides.calls.includes("DELETE /api/logins/1password"));
+  const items = { "/api/logins/1password/items": { status: 405, error: "method not allowed" } };
+  const old = fakeSides({ localItems: [onePassword], refuse: items });
   old.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {}, itemGrants: { "v1:i1": [] } } });
   const refused = await createCloudSend(old.deps).send();
   assert.deepEqual(refused.result.failed.map((entry) => entry.key), ["1password"], "never left open to every bot there");
-  const gone = fakeSides({ localItems: [onePassword], refuse: { "/api/logins/1password/items/v1/i1": { status: 404, error: "no such item" } } });
-  gone.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {}, itemGrants: { "v1:i1": [] } } });
-  assert.equal((await createCloudSend(gone.deps).send()).result.failed.length, 0, "an item My Cloud's token does not read is skipped");
+  assert.ok(old.calls.includes("DELETE /api/logins/1password"), "the token this send connected is taken off again");
+  const plain = fakeSides({ localItems: [onePassword], refuse: items });
+  plain.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {} } });
+  assert.equal((await createCloudSend(plain.deps).send()).result.failed.length, 0, "a Cloud too old for item choices takes a vault-only 1Password");
+  assert.ok(!plain.calls.includes("DELETE /api/logins/1password"));
+  const vaults = fakeSides({ localItems: [onePassword], refuse: { "/api/logins/1password/vaults/v1": { status: 500, error: "boom" } } });
+  vaults.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: { v1: [] } } });
+  assert.equal((await createCloudSend(vaults.deps).send()).result.failed.length, 1);
+  assert.ok(vaults.calls.includes("DELETE /api/logins/1password"), "a vault choice that did not take closes the token too");
 });
 
 test("chats by row: the cursor moves only past what My Cloud took; one removed there is never sent again; one being answered waits", async () => {

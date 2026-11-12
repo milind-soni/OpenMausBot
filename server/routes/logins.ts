@@ -18,14 +18,20 @@ export interface LoginRouteDeps {
     disconnect(): OnePasswordStatus;
     /** Null for a vault the token does not read. */
     grant(vaultId: string, bots: LoginBots): OnePasswordStatus | null;
-    /** Bots for one item (`<vault id>:<item id>`) ahead of its vault's; null hands it back. False for an item the token does not read. */
-    grantItem(item: string, bots: LoginBots | null): boolean;
+    /** Bots for one item (`<vault id>:<item id>`) ahead of its vault's; null hands it back. False for an item the token does not
+     * read, null when 1Password could not be read just now. */
+    grantItem(item: string, bots: LoginBots | null): Promise<boolean | null>;
+    /** Every item's own bots at once (what My Cloud keeps of another computer's choices); an item left out goes back to its vault's. */
+    setItemGrants(grants: Record<string, LoginBots>): void;
   };
 }
 
 const ONE_PASSWORD = "/api/logins/1password";
 const VAULT = /^\/api\/logins\/1password\/vaults\/([\w-]{1,128})$/u;
+const ITEMS = "/api/logins/1password/items";
 const ITEM = /^\/api\/logins\/1password\/items\/([\w-]{1,128})\/([\w-]{1,128})$/u;
+const ITEM_KEY = /^[\w-]{1,128}:[\w-]{1,128}$/u;
+const UNREAD = "1Password could not be read just now. Try again in a moment.";
 
 const ID = /^[\w-]{1,128}$/u;
 
@@ -109,8 +115,23 @@ export function createLoginRoutes(deps: LoginRouteDeps): RouteHandler {
       const value = body && typeof body === "object" ? body.bots : undefined;
       const bots = value === null ? { ok: true as const, value: null } : parseBots(value, deps.botExists);
       if (!bots.ok || bots.value === undefined) return json(res, 400, { error: bots.ok ? LOGIN_ERRORS.bots : bots.error });
-      if (!deps.onePassword.grantItem(`${item[1]!}:${item[2]!}`, bots.value)) return json(res, 404, { error: "no such item" });
+      const granted = await deps.onePassword.grantItem(`${item[1]!}:${item[2]!}`, bots.value);
+      if (granted === null) return json(res, 503, { error: UNREAD });
+      if (!granted) return json(res, 404, { error: "no such item" });
       return json(res, 200, { logins: deps.onePassword.list(), onePassword: deps.onePassword.status() });
+    }
+    if (path === ITEMS && method === "PUT") {
+      const body = await readBody(req, 262_144);
+      const items = body && typeof body === "object" ? body.items : undefined;
+      if (!items || typeof items !== "object" || Array.isArray(items)) return json(res, 400, { error: "send items as an object of item ids to bots" });
+      const grants: Record<string, LoginBots> = {};
+      for (const [key, value] of Object.entries(items)) {
+        const bots = parseBots(value, deps.botExists);
+        if (!ITEM_KEY.test(key) || !bots.ok || bots.value === undefined) return json(res, 400, { error: bots.ok ? LOGIN_ERRORS.bots : bots.error });
+        grants[key] = bots.value;
+      }
+      deps.onePassword.setItemGrants(grants);
+      return json(res, 200, { items: Object.keys(grants).length });
     }
     if (path === ONE_PASSWORD || path.startsWith(`${ONE_PASSWORD}/`)) return json(res, 405, { error: "method not allowed" });
     if (path === "/api/logins" && method === "POST") {

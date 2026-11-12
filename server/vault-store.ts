@@ -503,10 +503,13 @@ export class VaultStore {
 
   /** null hands the item back to its vault's choice. */
   setOnePasswordItemGrant(key: string, bots: LoginBots | null): void {
-    const data = this.read();
-    const { [key]: _previous, ...others } = data.onePasswordItemGrants ?? {};
-    const grants = bots === null ? others : { ...others, [key]: bots };
-    const { onePasswordItemGrants: _grants, ...rest } = data;
+    const { [key]: _previous, ...others } = this.onePasswordItemGrants();
+    this.setOnePasswordItemGrants(bots === null ? others : { ...others, [key]: bots });
+  }
+
+  /** Every item's own bots at once: an item left out goes back to its vault's choice. */
+  setOnePasswordItemGrants(grants: Record<string, LoginBots>): void {
+    const { onePasswordItemGrants: _grants, ...rest } = this.read();
     this.write(Object.keys(grants).length ? { ...rest, onePasswordItemGrants: grants } : rest);
   }
 

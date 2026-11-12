@@ -31,9 +31,11 @@ async function serve() {
   const dir = mkdtempSync(join(tmpdir(), "omb-login-routes-"));
   dirs.push(dir);
   const store = new VaultStore({ dataDir: dir });
-  const { sdk } = fakeOnePasswordSdk({ token: TOKEN, vaults: { v1: { title: "Shared with OMB", items: [
+  const vaults = { v1: { title: "Shared with OMB", items: [
     { id: "i1", title: "Example", urls: ["https://vault.example.com"], username: "vault-user", password: VAULT_PASSWORD },
-  ] } } });
+  ] } };
+  let down: Error | null = null;
+  const { sdk } = fakeOnePasswordSdk({ token: TOKEN, vaults, fail: () => down });
   const onePassword = new OnePasswordLogins({ token: () => store.onePasswordToken(), grants: () => store.onePasswordGrants(), itemGrants: () => store.onePasswordItemGrants(),
     connect: (token) => sdkOnePasswordClient(sdk, token, "0.0.0") });
   const logins = new BotLogins(store, onePassword);
@@ -53,7 +55,7 @@ async function serve() {
     answers.push(text);
     return { status: response.status, body: JSON.parse(text), cache: response.headers.get("cache-control") };
   };
-  return { store, logins, call, answers };
+  return { store, logins, call, answers, vaults, setDown: (error: Error | null) => { down = error; } };
 }
 
 describe("Settings → Logins routes", () => {
@@ -62,6 +64,7 @@ describe("Settings → Logins routes", () => {
     for (const method of ["PATCH", "DELETE"]) expect(requiredScope(method, "/api/logins/abc")).toBe("admin");
     expect(requiredScope("PATCH", "/api/logins/1password/vaults/v1")).toBe("admin");
     expect(requiredScope("PATCH", "/api/logins/1password/items/v1/i1")).toBe("admin");
+    expect(requiredScope("PUT", "/api/logins/1password/items")).toBe("admin");
   });
 
   it("add, list, change and delete a login, and never return its password or 2FA key", async () => {
@@ -151,6 +154,38 @@ describe("Settings → Logins routes", () => {
     expect((await call("PATCH", "/api/logins/1password/vaults/v1", { bots: "all" })).body.onePassword.vaults[0].bots).toBe("all");
     expect(store.onePasswordGrants()).toEqual({});
     expect((await logins.candidates("pepper", "vault.example.com")).map((login) => login.username)).toEqual(["vault-user"]);
+  });
+
+  it("looks in 1Password again before calling an item gone, and never calls it gone while 1Password cannot be read", async () => {
+    const { store, call, vaults, setDown } = await serve();
+    await call("POST", "/api/logins/1password", { token: TOKEN });
+    // Added in 1Password after the last load: found on a second look, not refused.
+    vaults.v1.items.push({ id: "i2", title: "New", urls: ["https://new.example.com"], username: "new-user", password: VAULT_PASSWORD });
+    expect((await call("PATCH", "/api/logins/1password/items/v1/i2", { bots: ["pepper"] })).status).toBe(200);
+    expect(store.onePasswordItemGrants()).toEqual({ "v1:i2": ["pepper"] });
+    // 1Password unreadable: an item not in the last load is "try again", not "no such item".
+    setDown(new Error("fetch failed"));
+    const unread = await call("PATCH", "/api/logins/1password/items/v1/i3", { bots: [] });
+    expect(unread.status).toBe(503);
+    // Handing an item back to its vault's choice never waits on 1Password.
+    expect((await call("PATCH", "/api/logins/1password/items/v1/i2", { bots: null })).status).toBe(200);
+    expect(store.onePasswordItemGrants()).toEqual({});
+  });
+
+  it("takes every item's own bots at once from another computer, dropping the ones it no longer has", async () => {
+    const { store, call } = await serve();
+    await call("POST", "/api/logins/1password", { token: TOKEN });
+    await call("PATCH", "/api/logins/1password/items/v1/i1", { bots: "all" });
+    // An item not loaded here yet is kept too, so it opens no wider than where it was chosen.
+    const sent = await call("PUT", "/api/logins/1password/items", { items: { "v1:i9": [], "v2:x1": ["quill"] } });
+    expect(sent).toMatchObject({ status: 200, body: { items: 2 } });
+    expect(store.onePasswordItemGrants()).toEqual({ "v1:i9": [], "v2:x1": ["quill"] });
+    expect((await call("PUT", "/api/logins/1password/items", { items: { "v1:i1": ["nobody"] } })).status).toBe(400);
+    expect((await call("PUT", "/api/logins/1password/items", { items: { "v1/i1": [] } })).status).toBe(400);
+    expect((await call("PUT", "/api/logins/1password/items", { items: [] })).status).toBe(400);
+    expect(store.onePasswordItemGrants()).toEqual({ "v1:i9": [], "v2:x1": ["quill"] });
+    expect((await call("PUT", "/api/logins/1password/items", { items: {} })).status).toBe(200);
+    expect(store.onePasswordItemGrants()).toEqual({});
   });
 
   it("keeps one 1Password item to its own bots ahead of its vault's, and hands it back on null", async () => {

@@ -142,10 +142,10 @@ describe("1Password logins", () => {
       ["example.org", [], { item: "v1:i2", ownBots: false }],
     ]);
     expect(linkedSecrets(source).map((secret) => [secret.name, secret.onePassword])).toContainEqual(["Deploy", { item: "v1:i7", ownBots: false }]);
-    expect(source.hasItem("v1:i1")).toBe(true);
-    expect(source.hasItem("v1:i6")).toBe(true);
-    expect(source.hasItem("v1:i3")).toBe(false);
-    expect(source.hasItem("v9:i1")).toBe(false);
+    expect(await source.readsItem("v1:i1")).toBe(true);
+    expect(await source.readsItem("v1:i6")).toBe(true);
+    expect(await source.readsItem("v1:i3")).toBe(false);
+    expect(await source.readsItem("v9:i1")).toBe(false);
     expect(JSON.stringify(source.items())).not.toContain(VAULT_PASSWORD);
   });
 

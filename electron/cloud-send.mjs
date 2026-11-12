@@ -35,6 +35,7 @@ const MEMORY_FILES = 100;
 const SCOPED_READ = /^\/api\/cloud-send(?:\?move=1|\/manifest|\/chats(?:\?attachments=1)?|\/files)$/u;
 const PICTURE_TYPES = { png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 const VAULT_ID = /^[\w-]{1,128}$/u;
+const ITEM_KEY = /^[\w-]{1,128}:[\w-]{1,128}$/u;
 /** Whole sends, which carry the chats too; a send of some items (Use this computer's, one login) never does. */
 const CHAT_REASONS = new Set(["button", "my-cloud", "menu", "move"]);
 /** Bring newer chats' copy of the whole workspace, for a Cloud too old to take chats by row: never a move, which such a
@@ -897,21 +898,29 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     const onePassword = handed?.onePassword;
     if (!record(onePassword) || typeof onePassword.token !== "string") throw new CloudSendError("local", "1Password is not connected on this computer.");
     const parts = row.parts ?? ["token", "vaults"];
-    if (row.state === "only-here" || parts.includes("token")) {
+    const connecting = row.state === "only-here" || parts.includes("token");
+    if (connecting) {
       const connected = await ctx.session.call("POST", "/api/logins/1password", { token: onePassword.token });
       if (!connected.ok) throw onePasswordRefusal(connected);
     }
-    for (const [vault, bots] of Object.entries(onePassword.grants ?? {})) {
-      if (!VAULT_ID.test(vault)) continue;
-      const granted = await ctx.session.call("PATCH", `/api/logins/1password/vaults/${encodeURIComponent(vault)}`, { bots: botsOnCloud(bots, ctx.cloudBots) });
-      if (!granted.ok && granted.status !== 404) throw refusedError("refused", granted, "My Cloud connected 1Password but could not keep its vaults to the same bots.");
-    }
-    // An item narrowed here must not open to every bot there; a Cloud too old for item choices (405) fails out loud.
-    for (const [item, bots] of Object.entries(onePassword.itemGrants ?? {})) {
-      const [vault, id, ...rest] = item.split(":");
-      if (rest.length || !VAULT_ID.test(vault ?? "") || !VAULT_ID.test(id ?? "")) continue;
-      const granted = await ctx.session.call("PATCH", `/api/logins/1password/items/${encodeURIComponent(vault)}/${encodeURIComponent(id)}`, { bots: botsOnCloud(bots, ctx.cloudBots) });
-      if (!granted.ok && granted.status !== 404) throw refusedError("refused", granted, "My Cloud connected 1Password but could not keep its logins to the same bots. Update My Cloud and send again.");
+    try {
+      for (const [vault, bots] of Object.entries(onePassword.grants ?? {})) {
+        if (!VAULT_ID.test(vault)) continue;
+        const granted = await ctx.session.call("PATCH", `/api/logins/1password/vaults/${encodeURIComponent(vault)}`, { bots: botsOnCloud(bots, ctx.cloudBots) });
+        if (!granted.ok && granted.status !== 404) throw refusedError("refused", granted, "My Cloud connected 1Password but could not keep its vaults to the same bots.");
+      }
+      // My Cloud's item choices become this computer's, so one handed back to its vault here is handed back there too.
+      const items = Object.fromEntries(Object.entries(onePassword.itemGrants ?? {}).filter(([item]) => ITEM_KEY.test(item))
+        .map(([item, bots]) => [item, botsOnCloud(bots, ctx.cloudBots)]));
+      const granted = await ctx.session.call("PUT", "/api/logins/1password/items", { items });
+      // A Cloud too old for item choices has none to undo, but an item narrowed here must not open to every bot there.
+      if (!granted.ok && !(granted.status === 405 && !Object.keys(items).length)) {
+        throw refusedError("refused", granted, "My Cloud connected 1Password but could not keep its logins to the same bots. Update My Cloud and send again.");
+      }
+    } catch (error) {
+      // Fail closed: a token this send connected is taken off again rather than left open wider than here.
+      if (connecting) await ctx.session.call("DELETE", "/api/logins/1password").catch(() => {});
+      throw error;
     }
     done(ctx, row.key);
     ctx.result.onePassword = true;
