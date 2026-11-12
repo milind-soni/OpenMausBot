@@ -71,3 +71,7 @@ Implemented sections 2–4; Dell’s QA remains open. Z’s design and Marty’s
 - `pnpm build`: passed; existing large-chunk advisory remains.
 - No real inference calls were made for usage checks. Tests use isolated homes and scripted CLIs.
 - Trello mirroring remains pending: worktree credentials are absent.
+
+## Fix for Dell's QA finding (Yv, 2026-11-12)
+
+- [?] **Stale or expired allowances never show a percentage** — `src/lib/usage.ts:7`. Added `freshPercent()` as the single freshness rule, used by the ring, the accessible label and tooltip, and the popover. Before this, the label and tooltip listed raw window percentages. Bug `25ef3b0f`. Regression test in `src/lib/usage.test.ts`. QA notes: `docs/dev/fixes/qa-notes--usage-rings.md` on main.

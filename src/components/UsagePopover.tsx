@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import guide from "../../docs/guide/usage-and-limits.md?raw";
 import { useStore, type Bot, type InstanceInfo } from "@/state/store";
 import type { EngineUsage } from "../../server/usage-types";
-import { usageView, refreshTime } from "@/lib/usage";
+import { freshPercent, usageView, refreshTime } from "@/lib/usage";
 import { ProviderMark } from "./ProviderIcons";
 import { MausAvatar } from "./Avatar";
 import { usageColor } from "./UsageRingGraphic";
@@ -41,8 +41,7 @@ export function UsagePopover({ items, now, onClose }: { items: UsageItem[]; now:
       const details = <>
         <div className="py-3 text-[11px] text-ink-secondary">{usage?.updatedAt ? `Updated ${Math.max(0, Math.floor((now - Date.parse(usage.updatedAt)) / 60_000)) === 0 ? "just now" : `${Math.max(0, Math.floor((now - Date.parse(usage.updatedAt)) / 60_000))} min ago`}` : "No reading yet"}</div>
         {usage?.windows.length ? <div className="space-y-3 border-b border-hairline/40 pb-3">{usage.windows.map(w => {
-          const fresh = w.remainingPercent !== null && now - Date.parse(w.updatedAt ?? usage.updatedAt) <= 15 * 60_000 && (!w.resetsAt || Date.parse(w.resetsAt) > now) && usage.status !== "unknown";
-          const percent = fresh ? w.remainingPercent : null;
+          const percent = freshPercent(usage, w, now);
           return <div key={w.id}>
             <div className="flex justify-between gap-2 text-[12px] text-ink"><span>{w.label}</span><span>{percent === null ? "Not reported" : `${Math.round(percent)}% left`}</span></div>
             {percent !== null && <div role="progressbar" aria-label={`${instance.displayName} ${w.label} usage left`} aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-raised"><div className="h-full rounded-full" style={{ width: `${percent}%`, background: usageColor(percent === 0 ? "exhausted" : percent < 15 ? "critical" : percent <= 40 ? "low" : "ok") }} /></div>}

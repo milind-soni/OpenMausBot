@@ -26,4 +26,17 @@ describe("usage ring rendering and accessible labels", () => {
     expect(usageView(engine(70), now + 16 * 60_000).tone).toBe("unknown");
     expect(usageView({ ...engine(70), windows: [{ ...engine(70).windows[0], resetsAt: "2026-11-12T11:00:00Z" }] }, now).tone).toBe("unknown");
   });
+  it("never exposes an expired or stale window's percentage in the label", () => {
+    const mixed: EngineUsage = { ...engine(70), windows: [
+      { id: "short", label: "5-hour allowance", remainingPercent: 12, resetsAt: "2026-11-12T11:00:00Z" },
+      { id: "week", label: "Weekly allowance", remainingPercent: 70, resetsAt: "2026-11-15T12:00:00Z" },
+      { id: "old", label: "Old allowance", remainingPercent: 33, resetsAt: null, updatedAt: "2026-11-12T11:30:00Z" },
+    ] };
+    const label = usageLabel("Codex", mixed, now);
+    expect(label).toContain("70 percent left");
+    expect(label).toContain("5-hour allowance: not reported");
+    expect(label).toContain("Old allowance: not reported");
+    expect(label).not.toContain("12 percent");
+    expect(label).not.toContain("33 percent");
+  });
 });
