@@ -531,6 +531,92 @@ describe("the upkeep loop", () => {
     expect(memory()).toContain("Release 0.1.40 shipped to every computer");
   });
 
+  it.each(["MEMORY.md", "memory/travel.md"])("archives expired continuations from %s without leaving live fragments", async (path) => {
+    ensureWorkspace(BOT.id);
+    const expired = [
+      "- 2026-09-01 · Temporary deployment · until 2026-09-07",
+      "  ```sh",
+      "  deploy --temporary",
+      "",
+      "  ```",
+      "  Remove the temporary deployment.",
+    ];
+    const live = "- 2026-09-20 · Current deployment\n  Keep this detail.\n";
+    const before = `${expired.join("\n")}\n${live}`;
+    if (path === "MEMORY.md") writeMemoryFile(BOT.id, before);
+    else writeMemoryTopic(BOT.id, "travel.md", before);
+    const report = await upkeep().tidy(BOT.id);
+    await flushMemoryJournal(BOT.id);
+    expect(report.expired).toBe(1);
+    expect(readFileSync(join(workspaceDir(BOT.id), path), "utf8")).toBe(live);
+    expect(readMemoryTopic(BOT.id, "archive.md"))
+      .toContain([`${expired[0]} · expired ${TODAY}`, ...expired.slice(1)].join("\n"));
+    const row = readMemoryJournal(BOT.id, 10).find((entry) => entry.path === path && entry.via === "tidy")!;
+    expect(row.canRevert).toBe(true);
+    const reverted = revertMemoryChange(BOT.id, row.id);
+    await flushMemoryJournal(BOT.id);
+    expect(reverted.ok).toBe(true);
+    expect(readFileSync(join(workspaceDir(BOT.id), path), "utf8")).toBe(before);
+  });
+
+  it("keeps a source entry when its topic only shares the heading, while completing other moves", async () => {
+    ensureWorkspace(BOT.id);
+    const kept = "- 2026-09-25 · Deployment steps\n  deploy --new-environment\n";
+    const moved = "- 2026-09-25 · Release notes\n  Version two is ready.\n";
+    writeMemoryFile(BOT.id, `${kept}${moved}- 2026-09-25 · Short note\n`);
+    writeMemoryTopic(BOT.id, "project.md", "- 2026-09-20 · Deployment steps\n  deploy --old-environment\n- Short note\n");
+    organizeAnswer = '{"moves":[{"i":0,"topic":"project"},{"i":1,"topic":"project"},{"i":2,"topic":"project"}]}';
+    const report = await upkeep().tidy(BOT.id);
+    await flushMemoryJournal(BOT.id);
+    expect(report.organized).toBe(2);
+    expect(memory()).toBe(kept);
+    const topic = readMemoryTopic(BOT.id, "project.md")!;
+    expect(topic).toContain("deploy --old-environment");
+    expect(topic).not.toContain("deploy --new-environment");
+    expect(topic).toContain(moved);
+    expect(topic.match(/Short note/g)).toHaveLength(1);
+  });
+
+  it("completes a move without duplicating a topic that already holds the full entry", async () => {
+    ensureWorkspace(BOT.id);
+    const details = "  ```sh\n  deploy --current\n\n  ```\n  Keep the release tag.\n";
+    writeMemoryFile(BOT.id, `- 2026-09-25 · Deployment steps\n${details}`);
+    const topic = `- 2026-09-20 · Deployment steps\n${details}`;
+    writeMemoryTopic(BOT.id, "project.md", topic);
+    organizeAnswer = '{"moves":[{"i":0,"topic":"project"}]}';
+    const report = await upkeep().tidy(BOT.id);
+    await flushMemoryJournal(BOT.id);
+    expect(report.organized).toBe(1);
+    expect(memory()).toBe("");
+    expect(readMemoryTopic(BOT.id, "project.md")).toBe(topic);
+  });
+
+  it.each(["2026-09-07", "2026-09-26"].flatMap((until) => [
+    { until, details: "  deploy --current\n" },
+    { until, details: "" },
+  ]))("keeps a permanent entry when its topic copy expires on $until (details: $details)", async ({ until, details }) => {
+    ensureWorkspace(BOT.id);
+    const source = `- 2026-09-25 · Deployment steps\n${details}`;
+    writeMemoryFile(BOT.id, source);
+    writeMemoryTopic(BOT.id, "project.md", `- 2026-09-01 · Deployment steps · until ${until}\n${details}`);
+    organizeAnswer = '{"moves":[{"i":0,"topic":"project"}]}';
+    const report = await upkeep().tidy(BOT.id);
+    await flushMemoryJournal(BOT.id);
+    expect(report.organized ?? 0).toBe(0);
+    expect(memory()).toBe(source);
+  });
+
+  it("retains both code blocks when their identical headings hide meaningful whitespace differences", async () => {
+    const source = "- 2026-09-25 · Cedar command\n  ```sh\n  printf 'a b'\n  ```\n";
+    const topic = "- 2026-09-20 · Cedar command\n  ```sh\n  printf 'a  b'\n  ```\n";
+    writeMemoryFile(BOT.id, source);
+    writeMemoryTopic(BOT.id, "cedar.md", topic);
+    organizeAnswer = '{"moves":[{"i":0,"topic":"cedar"}]}';
+    expect((await upkeep().tidy(BOT.id)).organized ?? 0).toBe(0);
+    expect(memory()).toBe(source);
+    expect(readMemoryTopic(BOT.id, "cedar.md")).toBe(topic);
+  });
+
   it("moves detail the bot wrote itself out of MEMORY.md into topics, keeping core facts", async () => {
     ensureWorkspace(BOT.id);
     writeMemoryFile(BOT.id, [
