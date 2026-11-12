@@ -37,7 +37,7 @@
 //   FAKE_CODEX_STARTUP_LOG  append {pid, at, event: "initialize" | "turn/start"} per launch
 //   FAKE_CODEX_START_ERROR  JSON-RPC error rejecting thread/start
 //   FAKE_CODEX_SECTIONS  JSON thread sections threadSection/list reports (default none); "unsupported": threadSection/* and
-//     thread/name/set are refused as by a Codex older than 0.167.1
+//     thread/name/set are refused as by a Codex older than 0.167.1; "hang": they are never answered
 //   FAKE_CODEX_THREAD_LABEL  JSON {name, section} the resumed thread carries
 //   FAKE_CODEX_MCP_FAILED  MCP server whose startup fails (`mcpServer/startupStatus/updated`) as thread/start begins
 //   FAKE_CODEX_RESTORED_USAGE  report 100/50/10 tokens used before turn/start, as a resumed thread can
@@ -1121,6 +1121,7 @@ process.stdin.on("data", (chunk) => {
       case "thread/section/move":
       case "thread/name/set":
         dump();
+        if (process.env.FAKE_CODEX_SECTIONS === "hang") break;
         if (process.env.FAKE_CODEX_SECTIONS === "unsupported") {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: `unknown variant \`${msg.method}\`` } });
         } else if (msg.method === "threadSection/list") {

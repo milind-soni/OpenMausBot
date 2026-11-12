@@ -854,6 +854,12 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     it("still runs the turn on a Codex without thread sections", async () => {
       expect((await labelCalls({ FAKE_CODEX_SECTIONS: "unsupported" })).map((call) => call.method)).toEqual(["threadSection/list", "turn/start"]);
     });
+
+    it("gives up on filing, not on the turn, when Codex never answers", async () => {
+      const started = Date.now();
+      expect((await labelCalls({ FAKE_CODEX_SECTIONS: "hang" })).map((call) => call.method)).toEqual(["threadSection/list", "turn/start"]);
+      expect(Date.now() - started).toBeLessThan(30_000);
+    });
   });
 
   it("keeps the developer slot stable and delivers volatile context in-turn", async () => {

@@ -1,11 +1,12 @@
 import type { SendTurnInput } from "../contracts.ts";
 
 type Label = NonNullable<SendTurnInput["nativeLabel"]>;
-type Request = (method: string, params: unknown) => Promise<any>;
+type Request = (method: string, params: unknown, timeoutMs: number) => Promise<any>;
 type NativeThread = { id: string; name?: string | null; section?: { id?: string; name?: string } | null };
 
 const SECTION_PREFIX = "MausBot";
 const NAME_MAX = 120;
+const REQUEST_MS = 3_000;
 
 export function codexThreadLabel(label: Label): { section: string; name: string } {
   const department = label.department?.trim();
@@ -22,13 +23,13 @@ async function sectionId(request: Request, home: string, name: string): Promise<
   let cursor: string | null = null;
   do {
     const page: { data?: Array<{ id: string; name: string }>; nextCursor?: string | null } =
-      await request("threadSection/list", cursor ? { cursor } : {});
+      await request("threadSection/list", cursor ? { cursor } : {}, REQUEST_MS);
     const found = page?.data?.find((section) => section.name === name);
     if (found) return found.id;
     cursor = page?.nextCursor ?? null;
   } while (cursor);
   const key = `${home}\0${name}`;
-  const pending = creating.get(key) ?? request("threadSection/create", { name })
+  const pending = creating.get(key) ?? request("threadSection/create", { name }, REQUEST_MS)
     .then((created: { section?: { id?: string } }) => {
       if (!created?.section?.id) throw new Error("Codex did not return a section id");
       return created.section.id;
@@ -42,7 +43,7 @@ export async function fileCodexThread(request: Request, home: string, thread: Na
   const wanted = codexThreadLabel(label);
   const placedByPerson = thread.section && thread.section.name !== SECTION_PREFIX && !thread.section.name?.startsWith(`${SECTION_PREFIX} · `);
   if (!placedByPerson && thread.section?.name !== wanted.section) {
-    await request("thread/section/move", { threadId: thread.id, sectionId: await sectionId(request, home, wanted.section) });
+    await request("thread/section/move", { threadId: thread.id, sectionId: await sectionId(request, home, wanted.section) }, REQUEST_MS);
   }
-  if (thread.name !== wanted.name) await request("thread/name/set", { threadId: thread.id, name: wanted.name });
+  if (thread.name !== wanted.name) await request("thread/name/set", { threadId: thread.id, name: wanted.name }, REQUEST_MS);
 }
