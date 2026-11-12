@@ -90,7 +90,8 @@
     "control-plane:check": "pnpm --filter @openmausbot/control-plane check",
     "control-plane:test": "pnpm --filter @openmausbot/control-plane test",
     "control-plane:dry-run": "pnpm --filter @openmausbot/control-plane dry-run",
-    "dev:telephony": "node scripts/telephony-dev.mjs"
+    "dev:telephony": "node scripts/telephony-dev.mjs",
+    "agent": "node agent/omb-agent.mjs"
   },
   "dependencies": {
     "@1password/sdk": "0.5.0",
