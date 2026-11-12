@@ -18,7 +18,8 @@ export interface SignInSettleDeps {
   settleHelp(messageId: string): string[];
   handBackBrowser(bot: BotRecord, threadId: string): void;
   releaseComputer(key: string): void;
-  computerKey(bot: BotRecord): string;
+  /** The control key a person's hold on this conversation's computer sits on. */
+  computerKey(bot: BotRecord, threadId: string): string;
   /** True when several bots drive the computer behind this control key, so no one bot's card may hand it back alone. */
   sharedKey(key: string): boolean;
   /** The sign-in cards on this control key that still wait for the person. */
@@ -36,11 +37,12 @@ export function createSignInSettle(deps: SignInSettleDeps) {
   const { store } = deps;
 
   /** The person is through with the place the card lent them: its plea goes, and the browser or computer goes back to the
-   * bot. A computer several bots share goes back only when the person pressed Done or Cancel and no other card waits for it. */
+   * bot. A computer several bots share goes back only when the person pressed Done or Cancel and no other card waits for it.
+   * Their Done also hands back where the conversation works now, which a repin since the card may have moved. */
   const handPlaceBack = (bot: BotRecord, threadId: string, messageId: string, place: Surface, byPerson: boolean): void => {
     const pleaded = deps.settleHelp(messageId);
     if (place === "browser") deps.handBackBrowser(bot, threadId);
-    else for (const key of pleaded.length ? pleaded : [deps.computerKey(bot)]) {
+    else for (const key of new Set([...pleaded, ...(byPerson || !pleaded.length ? [deps.computerKey(bot, threadId)] : [])])) {
       if (!deps.sharedKey(key) || (byPerson && !deps.pleas(key).length)) deps.releaseComputer(key);
     }
   };

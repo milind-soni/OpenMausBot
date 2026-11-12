@@ -215,6 +215,7 @@ export class CompanionViewerRelay {
       session.leaseHolds = leaseHolds;
       let checking = false;
       session.watch = setInterval(() => {
+        // The server takes each check as the phone's heartbeat for the lease.
         if (checking || !session.sockets.size) return;
         checking = true;
         leaseHolds()
