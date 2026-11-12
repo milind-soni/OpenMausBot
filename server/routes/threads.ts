@@ -73,7 +73,7 @@ export interface ThreadRouteDeps {
   keptAttachments?(): ReadonlySet<string> | null;
 }
 
-/** The types the chat's video player accepts (AttachmentGallery.tsx); anything else is never streamed inline. */
+/** The types the chat's video player accepts; anything else is never streamed inline. */
 const STREAMABLE_VIDEO_MIMES = new Set(["video/mp4", "video/webm", "video/quicktime", "video/x-m4v"]);
 
 export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
@@ -189,7 +189,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
     const streamsMessageImage = Boolean(
       m && method === "GET" && url.searchParams.get("preview") === "1",
     );
-    // A <video> element can only GET, so a POST first trades its body for a link id (see message-media-links.ts).
+    // A <video> element can only GET, so a POST first trades its body for a link id.
     const mediaId = m && method === "GET" && !streamsMessageImage ? url.searchParams.get("media") : null;
     if (m && (method === "POST" || streamsMessageImage || mediaId)) {
       if (method === "POST" && !String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {

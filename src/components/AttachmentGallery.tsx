@@ -169,11 +169,7 @@ async function withStallRetry<T>(
 
 const VIDEO_MIMES = ["video/mp4", "video/webm", "video/quicktime", "video/x-m4v"];
 
-/**
- * Security: the server's MIME is required as well as the filename, so arbitrary bytes never become UI.
- * A string is the server's link for this one file, which the player streams with byte ranges; a server without
- * links answers the same request with the bytes, read whole into a Blob as before.
- */
+/** Security: the server's MIME is required as well as the filename, so arbitrary bytes never become UI. */
 export function loadMessageVideo(
   file: GalleryFile,
   message: MessageAttachmentContext,
