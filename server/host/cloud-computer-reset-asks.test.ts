@@ -135,6 +135,35 @@ describe("a bot asking for its cloud computer to be reset", () => {
     expect((await call(chief, { targetBotId: "nobody" })).status).toBe(404);
   });
 
+  it("checks again on Allow and on every retry whether the bot may still ask, and resets nothing once it may not", async () => {
+    let allowed = true;
+    const { asks, call, card, reset, flush } = setup({ refusal: () => allowed ? null : "Ada has no cloud computer of its own to reset here." });
+    await call(ada, {});
+    allowed = false;
+    asks.answer(card()!.requestId, "allow");
+    await flush();
+    expect(reset).not.toHaveBeenCalled();
+    expect(card()?.subtitle).toContain("Not reset: Ada has no cloud computer of its own to reset here.");
+
+    let busy = true;
+    allowed = true;
+    const retry = setup({
+      refusal: () => allowed ? null : "not yours",
+      reset: async () => { if (busy) throw Object.assign(new Error("this cloud computer is in use — stop its bot's work first"), { status: 409 }); return { ok: true }; },
+    });
+    await retry.call(chief, { targetBotId: "bot-a" });
+    retry.asks.answer(retry.card()!.requestId, "allow");
+    await retry.flush();
+    expect(retry.reset).toHaveBeenCalledTimes(1);
+    allowed = false;
+    busy = false;
+    retry.timers.shift()!();
+    await retry.flush();
+    expect(retry.reset).toHaveBeenCalledTimes(1);
+    expect(retry.timers).toHaveLength(0);
+    expect(retry.card()?.subtitle).toContain("Not reset: not yours");
+  });
+
   it("needs a reason, and shows no card without one", async () => {
     const { call, card, computer } = setup();
     for (const why of [undefined, "", "   "]) {

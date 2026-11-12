@@ -17,7 +17,7 @@ export const RESET_RETRIES = 36;
 const WHY_LIMIT = 300;
 
 type Reset = { ok: boolean; pending?: true; missing?: true };
-type Ask = { threadId: string; messageId: string; targetId: string; targetName: string; subtitle: string; boxId: string | null };
+type Ask = { threadId: string; messageId: string; fromId: string; targetId: string; targetName: string; subtitle: string; boxId: string | null };
 type Reply = { status: number; body: Record<string, unknown> };
 
 export interface CloudComputerResetAsksDeps {
@@ -53,6 +53,10 @@ export function createCloudComputerResetAsks(deps: CloudComputerResetAsksDeps) {
 
   async function run(ask: Ask, tries: number): Promise<void> {
     try {
+      // Who may ask can change while the card waits (a moved bot, another computer setting): checked again on every try.
+      const from = store.bot(ask.fromId), target = store.bot(ask.targetId);
+      const refused = !from || !target ? "the bot is gone" : deps.refusal(from, target);
+      if (refused) { show(ask, words(ask.threadId, "server.cloudReset.failed", { reason: refused })); return; }
       const result = await deps.reset(ask.targetId, ask.boxId);
       const key = result.missing ? "server.cloudReset.missing" : result.pending ? "server.cloudReset.pending" : "server.cloudReset.done";
       show(ask, words(ask.threadId, key, { name: ask.targetName }));
@@ -93,7 +97,7 @@ export function createCloudComputerResetAsks(deps: CloudComputerResetAsksDeps) {
       ...(room ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
       card: { title: words(threadId, "server.cloudReset.title", { name: target.name }), subtitle, options: ["Allow", "Deny"], requestId, requestType: "permission", tool: RESET_CLOUD_COMPUTER_TOOL },
     });
-    asks.set(requestId, { threadId, messageId: message.id, targetId: target.id, targetName: target.name, subtitle, boxId });
+    asks.set(requestId, { threadId, messageId: message.id, fromId: from.id, targetId: target.id, targetName: target.name, subtitle, boxId });
     const whose = target.id === from.id ? "your" : `${target.name}'s`;
     return { status: 200, body: { text: `A card asking the person to reset ${whose} cloud computer is now in this conversation. End this turn now and say in one line that it waits for them. On Allow the computer is deleted once ${target.name} is not working, and ${target.name}'s next turn makes a fresh one. You are not resumed: the card shows how it went.` } };
   }
