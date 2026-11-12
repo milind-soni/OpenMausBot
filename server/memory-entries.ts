@@ -68,9 +68,11 @@ export function isExpired(entry: Pick<MemoryEntryLine, "until" | "struck">, toda
 }
 
 export function withoutExpired(text: string, today: string): { text: string; hidden: number } {
-  const expired = new Set(parseMemoryEntries(text).filter((e) => isExpired(e, today)).map((e) => e.line));
-  if (!expired.size) return { text, hidden: 0 };
-  return { text: text.split("\n").filter((_, index) => !expired.has(index)).join("\n"), hidden: expired.size };
+  const expired = parseMemoryEntries(text).filter((e) => isExpired(e, today));
+  if (!expired.length) return { text, hidden: 0 };
+  const dropped = new Set<number>();
+  for (const entry of expired) for (let line = entry.line; line < entry.end; line++) dropped.add(line);
+  return { text: text.split("\n").filter((_, index) => !dropped.has(index)).join("\n"), hidden: expired.length };
 }
 
 /** Deliberately narrow: `-10` and `10`, `C++` and `C`, `API_KEY` and `api_key` stay different facts. */

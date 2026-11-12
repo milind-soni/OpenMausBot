@@ -5,6 +5,7 @@ import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credentia
 import { rankSkills } from "../../shared/skill-fit.ts";
 import { isSkillSwitchAction, skillSwitchVerb } from "../../shared/skill-request.ts";
 import { EMAIL_CREDENTIAL } from "../../shared/email.ts";
+import { noCloudComputerNote } from "../../shared/team-setup.ts";
 
 import { peerName } from "../peer-roster.ts";
 import { callCardTool, CARD_TOOL_NAMES } from "./agents-call-cards.ts";
@@ -522,8 +523,9 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const botName = String(args.name ?? "").trim();
     const role = String(args.role ?? "").trim();
     const instructions = String(args.instructions ?? "").trim();
-    if (!botName || !role || !instructions) {
-      return { text: "create_bot needs name, role, and instructions.", isError: true };
+    const copyFrom = typeof args.copy_from_bot_id === "string" ? args.copy_from_bot_id.trim() : "";
+    if (!botName || (!copyFrom && (!role || !instructions))) {
+      return { text: "create_bot needs name, role, and instructions, or name and copy_from_bot_id.", isError: true };
     }
     const r = await api(`/api/internal/create-bot`, {
       method: "POST",
@@ -533,6 +535,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         name: botName,
         role,
         instructions,
+        ...(copyFrom ? { copyFromBotId: copyFrom } : {}),
         ...(args.modelSelection !== undefined ? { modelSelection: args.modelSelection } : {}),
         ...(typeof args.cwd === "string" ? { cwd: args.cwd.trim() } : {}),
       }),
@@ -541,8 +544,10 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       return { text: `One review card is visible: ${String(r.title)}. @${botName} has not been created yet. End this turn; the decision and structured result resume you automatically once. Do not ask again, poll, or repeat this request.` };
     }
     if (!r.id) return completedProposalResult(r, `creating @${botName}`) ?? { text: `@${botName} was not created.`, isError: true };
+    const created = r.name ?? botName;
+    const noComputer = r.noCloudComputerYet === true ? noCloudComputerNote(String(created)) : "";
     return {
-      text: `Created @${r.name ?? botName} in ${r.section ?? "General"} [id: ${r.id}].${r.modelSelection ? ` Model: ${JSON.stringify(r.modelSelection)}.` : ""} Assign work with coordinate_bots.`,
+      text: `Created @${created} in ${r.section ?? "General"} [id: ${r.id}].${r.modelSelection ? ` Model: ${JSON.stringify(r.modelSelection)}.` : ""} Assign work with coordinate_bots.${noComputer}`,
     };
   }
   if (member === "create_room") {

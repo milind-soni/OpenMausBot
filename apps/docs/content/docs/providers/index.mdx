@@ -26,6 +26,7 @@ MausBot does not proxy every message through its own model account. It starts su
 | Qwen | Qwen CLI login | ACP integration |
 | Hermes | Hermes CLI login | ACP integration |
 | Pi | Pi CLI login | Native driver |
+| OMP | `omp login` or OMP's own provider configuration | ACP driver with live models, thinking choices, approvals, and session resume |
 
 Additional driver instances can be declared in local configuration. Unavailable engines remain visible with a reason instead of crashing the provider fleet.
 
@@ -34,6 +35,8 @@ GitHub Copilot runs the official Copilot CLI (`npm install -g @github/copilot`) 
 Command Code runs the official Command Code CLI (`npm install -g command-code`, Node.js 22 or newer) in its ACP mode (`command-code acp`) and bills the Command Code account `cmd login` signed in, or the key in `COMMAND_CODE_API_KEY`. Its picker lists every model the account offers, plus **Command Code default**, which keeps the model picked in Command Code itself. Ask runs Command Code's Standard mode, so each change it makes waits for approval in the app; Full access runs its Bypass Permissions mode.
 
 Kiro runs the official Kiro CLI (`curl -fsSL https://cli.kiro.dev/install | bash` on macOS and Linux) in its ACP mode with its V3 engine (`kiro-cli acp --agent-engine=v3`) and bills the Kiro account `kiro-cli login` signed in, or the Kiro Pro key in `KIRO_API_KEY`. Its picker lists every model the account offers, plus **Kiro default**, which keeps the model picked in Kiro itself. Ask turns Kiro's Autopilot off, so each write or command waits for approval in the app; Full access turns Autopilot on.
+
+OMP runs the official Oh My Pi CLI (`npm install -g @oh-my-pi/pi-coding-agent`) through `omp acp`. Run `omp login` or configure providers in `~/.omp/agent/models.yml`; OMP keeps its own credentials. The picker lists OMP's advertised models and their thinking choices, plus **OMP default (configured)**, which leaves the model selected in OMP itself. Threads resume their native OMP sessions, and permission prompts use MausBot's approval cards.
 
 To use OpenRouter, Fireworks AI, DeepSeek, Cline, or your own OpenAI- or Anthropic-compatible service, see [Other model providers](./model-providers.mdx).
 

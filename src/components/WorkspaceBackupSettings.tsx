@@ -77,7 +77,11 @@ export function WorkspaceBackupSummaryView({ summary }: { summary: WorkspaceBack
   </div>;
 }
 
-export function WorkspaceBackupSettings({ compact = false }: { compact?: boolean } = {}) {
+type BackupRows = { exportRow: ReactNode; importRow: ReactNode };
+const BOTH_ROWS = ({ exportRow, importRow }: BackupRows) => <SettingsRows>{exportRow}{importRow}</SettingsRows>;
+
+/** `layout` places the two rows (a page with a section for each); one instance still owns their state and dialogs. */
+export function WorkspaceBackupSettings({ layout = BOTH_ROWS }: { layout?: (rows: BackupRows) => ReactNode } = {}) {
   const [status, setStatus] = useState<BackupStatus | null>(null);
   const [busy, setBusy] = useState<"export" | "preview" | "restore" | null>(null);
   const lock = useRef(false);
@@ -181,25 +185,23 @@ export function WorkspaceBackupSettings({ compact = false }: { compact?: boolean
   const closeExport = () => { setExporting(false); setExportPassword(""); setConfirmPassword(""); };
   const closeImport = () => { setImporting(false); setFile(null); setUploadedId(null); setPreview(null); setConfirmation(""); setImportPassword(""); };
   if (status?.pendingRestore) {
-    return <SettingsRows><div className="px-4 py-3"><WorkspaceBackupRestartNotice serverRestarts={status.restarts === true} /></div></SettingsRows>;
+    return layout({ exportRow: null, importRow: <div className="px-4 py-3"><WorkspaceBackupRestartNotice serverRestarts={status.restarts === true} /></div> });
   }
   return <>
-    <SettingsRows>
-      <SettingRow title={t("backup.export")} subtitle={<>{t("backup.exportShort")}{" "}<LearnMore onClick={() => setMore((open) => !open)} /></>}
+    {layout({
+      exportRow: <SettingRow title={t("backup.export")} subtitle={<>{t("backup.exportShort")}{" "}<LearnMore onClick={() => setMore((open) => !open)} /></>}
         message={<>
           {more && <span data-backup-more="" className="flex flex-col gap-1"><span>{t("backup.scope")}</span><span>{t("backup.excluded")}</span><span>{t("backup.privacy")}</span></span>}
           {download && <a href={download.url} download={download.filename} className="break-all text-accent-text hover:underline">{t("backup.downloadAgain", { filename: download.filename })}</a>}
           {(!status || status.busy) && <span role="status">{status?.busy ? t("backup.serverBusy") : t("backup.checkStatus")}{" "}<button type="button" onClick={() => void refresh()} className="cursor-pointer text-accent-text hover:underline">{t("connectors.action.retry")}</button></span>}
           {error && <span role="alert" className="block break-words text-danger">{error}</span>}
         </>}>
-        {/* Simple's Overview keeps Your data to one row: Import is the row's quiet second button. */}
-        {compact && <button type="button" className="settings-quiet cursor-pointer" disabled={disabled} data-backup-import="" onClick={() => setImporting(true)}>{t("backup.importAction")}</button>}
         <button type="button" className="ui-button" disabled={disabled} data-backup-export="" onClick={() => setExporting(true)}>{t("backup.exportAction")}</button>
-      </SettingRow>
-      {!compact && <SettingRow title={t("backup.import")} subtitle={t("backup.importShort")}>
+      </SettingRow>,
+      importRow: <SettingRow title={t("backup.import")} subtitle={t("backup.importShort")}>
         <button type="button" className="ui-button" disabled={disabled} data-backup-import="" onClick={() => setImporting(true)}>{t("backup.chooseFile")}</button>
-      </SettingRow>}
-    </SettingsRows>
+      </SettingRow>,
+    })}
     {exporting && (
       <SettingsDialog title={t("backup.export")} onClose={closeExport}>
         <form id="backup-export" className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); void exportBackup().then(() => { if (alive.current) setExporting(false); }); }}>

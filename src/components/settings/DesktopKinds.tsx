@@ -52,7 +52,7 @@ function PrivateSetup({ status, onCheck, onClose }: { status: PrivateStatus; onC
           </li>
         ))}
       </ol>
-      {details && <div data-desktop-details="" className="max-h-[40vh] overflow-y-auto"><LocalComputerSection /></div>}
+      {details && <div data-desktop-details="" className="max-h-[40vh] overflow-y-auto"><LocalComputerSection privateOnly /></div>}
     </SettingsDialog>
   );
 }

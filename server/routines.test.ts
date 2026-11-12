@@ -1,11 +1,13 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { previousEventThread } from "./routine-same-conversation.ts";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import { isRoutineProblemRun } from "../shared/routines.ts";
 import { ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED } from "./routine-execution.ts";
+import { offAfterNoStarts } from "./routine-outcomes.ts";
 import { RUN_PROGRESS_WINDOW_MS } from "./routine-progress-save.ts";
 import {
   nextOccurrence,
@@ -328,6 +330,42 @@ describe("bounded scheduled overlap and run health", () => {
     expect(alerts).toEqual([undefined, null, undefined, undefined]);
   });
 
+  it("turns a routine off after three runs in a row on a cloud computer that didn't start, and counts afresh once turned on", async () => {
+    const h = harness(start);
+    const alerts: unknown[] = [];
+    h.options.onRunFailed = (_run, alert) => alerts.push(alert);
+    const routine = h.manager.create({ ...input(), schedule: { type: "interval", everyMinutes: 60, anchorAt: start + 3_600_000 } });
+    const noStart = "Maus's cloud desktop didn't start. Change where this routine runs.";
+    let thread = 0;
+    const attempt = async (error: string) => {
+      h.manager.runNow(routine.id); await h.manager.tick();
+      h.manager.failThread(`thread-${++thread}`, error, { cause: "refused" });
+    };
+    await attempt(noStart);
+    await attempt("Cloud computers are busy right now. Try again in a few minutes.");
+    await attempt(noStart);
+    await attempt(noStart);
+    expect(h.manager.listRoutines()[0]).toMatchObject({ enabled: true });
+    await attempt(noStart);
+    expect(h.manager.listRoutines()[0]).toMatchObject({ enabled: false, nextRunAt: null });
+    expect(alerts.at(-1)).toEqual({ detail: expect.stringContaining("turned off after 3 runs in a row") });
+    h.manager.update(routine.id, { enabled: true });
+    await attempt(noStart);
+    expect(h.manager.listRoutines()[0]).toMatchObject({ enabled: true });
+    expect(alerts.at(-1)).toBeNull();
+  });
+
+  it("does not count a run that started before the routine was last changed toward turning it off", () => {
+    const error = "Maus's cloud desktop didn't start. Change where this routine runs.";
+    const run = (id: string, createdAt: number) => ({ id, routineId: "r", status: "failed", error, createdAt, finishedAt: createdAt + 50 });
+    const afterEdit = [run("a", 150), run("b", 160)];
+    const routine = () => ({ enabled: true, nextRunAt: 1, updatedAt: 100 });
+    const queuedBeforeEdit = run("old", 50);
+    expect(offAfterNoStarts(routine(), [...afterEdit, queuedBeforeEdit], queuedBeforeEdit, 300)).toBeUndefined();
+    const third = run("c", 170);
+    expect(offAfterNoStarts(routine(), [...afterEdit, third], third, 300)?.routine).toMatchObject({ enabled: false, nextRunAt: null });
+  });
+
   it("counts restart recovery only once and sanitizes obsolete or invalid health metadata", async () => {
     const h = harness(start);
     const routine = h.manager.create({ ...input(), enabled: false });
@@ -432,6 +470,43 @@ describe("a run left waiting for the person", () => {
     expect(h.started).toHaveLength(1);
     expect(h.manager.listRuns()).toHaveLength(1);
     if (change === "rescheduled") expect(h.manager.listRoutines()[0].nextRunAt).toBe(monday + minutes(240));
+  });
+
+  it.each(["paused", "deleted"] as const)("stops a run still waiting for the person when its routine is %s, so the bot stops waiting", async (change) => {
+    const h = harness(monday);
+    const routine = h.manager.create(daily);
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    h.setNow(routine.nextRunAt! + minutes(2)); parkOnPerson(h, "thread-1");
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "waiting" });
+
+    h.setNow(routine.nextRunAt! + minutes(30));
+    if (change === "paused") h.manager.update(routine.id, { enabled: false });
+    else h.manager.remove(routine.id);
+    const why = change === "paused" ? "The routine was paused while this run waited for you" : "The routine was deleted while this run waited for you";
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "cancelled", error: why, finishedAt: routine.nextRunAt! + minutes(30), threadId: "thread-1" });
+    expect(h.manager.listRuns()[0].attention).toBeUndefined();
+    await vi.waitFor(() => expect(h.interruptedTurns).toEqual([{ botId: "maus-1", threadId: "thread-1" }]));
+  });
+
+  it("leaves a turn the person started in the waiting run's conversation running when its routine is paused", async () => {
+    const h = harness(monday);
+    const routine = h.manager.create(daily);
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    h.setNow(routine.nextRunAt! + minutes(2)); parkOnPerson(h, "thread-1");
+    h.options.personTurn = (threadId) => threadId === "thread-1";
+    h.manager.update(routine.id, { enabled: false });
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "cancelled", error: "The routine was paused while this run waited for you" });
+    await Promise.resolve();
+    expect(h.interruptedTurns).toEqual([]);
+  });
+
+  it("leaves a run that is still working alone when its routine is paused", async () => {
+    const h = harness(monday);
+    const routine = h.manager.create(daily);
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    h.manager.update(routine.id, { enabled: false });
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running" });
+    expect(h.interruptedTurns).toEqual([]);
   });
 
   it.each(["skip", "queue"] as const)("keeps today's %s overlap behind a run that was answered and is still working", async (overlap) => {
@@ -4100,5 +4175,65 @@ describe("the scheduler wakes only when work is due", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("event automations that keep one conversation", () => {
+  const event = (h: ReturnType<typeof harness>, deliveryId: string, sameConversation = true) => h.manager.enqueueWebhook({
+    webhookId: "hook", webhookName: "New lead", prompt: "Handle it", botId: "maus-1", runOn: "maus", deliveryId, receivedAt: Date.now(),
+    ...(sameConversation ? { sameConversation } : {}),
+  });
+  const done = (h: ReturnType<typeof harness>, threadId: string) => h.manager.handleRuntimeEvent({
+    eventId: `done-${threadId}`, provider: "fake", threadId, createdAt: new Date().toISOString(), type: "turn.completed", ok: true,
+  });
+  const keepOne = (h: ReturnType<typeof harness>) => {
+    h.options.joinConversation = (run) => run.sameConversation ? previousEventThread(h.manager.listRuns(), run) : null;
+  };
+
+  it("continues the previous run's conversation, one run at a time", async () => {
+    const h = harness();
+    keepOne(h);
+    const first = event(h, "d1");
+    const second = event(h, "d2");
+    await h.manager.tick();
+    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1"]);
+    expect(h.manager.listRuns().find((run) => run.id === second.id)?.status).toBe("queued");
+
+    done(h, "thread-1");
+    await h.manager.tick();
+    expect(h.taskTitles).toHaveLength(1);
+    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1", "thread-1"]);
+    expect(h.manager.listRuns().find((run) => run.id === first.id)).toMatchObject({ status: "completed", threadId: "thread-1" });
+    expect(h.manager.listRuns().find((run) => run.id === second.id)).toMatchObject({ status: "running", threadId: "thread-1", sameConversation: true });
+    expect(new RoutineManager(h.options).listRuns().find((run) => run.id === second.id)?.sameConversation).toBe(true);
+  });
+
+  it("finds no earlier conversation for the first run, a run of another trigger, or another bot", () => {
+    const h = harness();
+    const first = event(h, "d1");
+    expect(previousEventThread(h.manager.listRuns(), first as never)).toBeNull();
+    expect(previousEventThread(h.manager.listRuns(), { id: "x", botId: "maus-1" })).toBeNull();
+  });
+
+  it("starts a new conversation for every run when the option is off", async () => {
+    const h = harness();
+    keepOne(h);
+    event(h, "d1", false);
+    await h.manager.tick();
+    done(h, "thread-1");
+    event(h, "d2", false);
+    await h.manager.tick();
+    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1", "thread-2"]);
+    expect(h.manager.listRuns().every((run) => run.sameConversation === undefined)).toBe(true);
+  });
+
+  it("joins a burst only into a waiting run with the same conversation setting", () => {
+    const h = harness();
+    const queued = event(h, "d1", false);
+    const add = (prompt: string) => `${prompt}\n+event`;
+    // The option was turned on after the first event: the next one must not ride along in the old run.
+    expect(h.manager.mergeIntoQueuedRun("hook", "d2", true, add)).toBeNull();
+    expect(h.manager.mergeIntoQueuedRun("hook", "d3", false, add)).toEqual({ id: queued.id });
+    expect(h.manager.listRuns().find((run) => run.id === queued.id)?.prompt).toBe("Handle it\n+event");
   });
 });
