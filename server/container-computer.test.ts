@@ -1274,7 +1274,23 @@ describe("setupCommands", () => {
     const script = tail[2];
     expect(script.indexOf("find / -xdev"), "files move before /etc/passwd, so an interrupted start resumes")
       .toBeLessThan(script.indexOf("sed -i"));
+    // The workspace is a bind mount, which -xdev from / skips: an older desktop's files there must change owner too.
+    for (const step of [`find ${VM_WORKSPACE_GUEST} -xdev -uid "$old_uid" -exec chown -h "$uid" {} +`, `find ${VM_WORKSPACE_GUEST} -xdev -gid "$old_gid" -exec chgrp -h "$gid" {} +`]) {
+      expect(script).toContain(step);
+      expect(script.indexOf(step)).toBeLessThan(script.indexOf("sed -i"));
+    }
     expect(script).toMatch(/\|\| \{ echo "cua did not take uid \$uid gid \$gid" >&2; exit 1; \}\nfi\nexec /);
+    // chown or chgrp to an unchanged id would still clear set-id bits, so each id moves only behind its own check.
+    const uidGuard = script.indexOf('if [ "$old_uid" != "$uid" ]; then');
+    const gidGuard = script.indexOf('if [ "$old_gid" != "$gid" ]; then');
+    expect(uidGuard).toBeGreaterThan(-1);
+    expect(gidGuard).toBeGreaterThan(uidGuard);
+    const chowns = [...script.matchAll(/-exec chown /gu)].map((match) => match.index);
+    const chgrps = [...script.matchAll(/-exec chgrp /gu)].map((match) => match.index);
+    expect(chowns).toHaveLength(2);
+    expect(chgrps).toHaveLength(2);
+    for (const at of chowns) expect(at > uidGuard && at < gidGuard).toBe(true);
+    for (const at of chgrps) expect(at).toBeGreaterThan(gidGuard);
   });
 
   it("asks rootless Podman to map and privately relabel the durable workspace", () => {
