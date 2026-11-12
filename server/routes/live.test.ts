@@ -152,14 +152,13 @@ describe("live routes", () => {
     expect((await request(d, "PATCH", "/api/live/settings", { azureEndpoint: "", azureDeployment: "" })).status).toBe(200);
     expect(d.saved).toEqual([azure, { azureEndpoint: "", azureDeployment: "" }]);
   });
-  it("saves a Fish Audio provider and agent id, refusing an id that is not one", async () => {
+  it("saves Fish Audio as the provider, and takes no agent from a request", async () => {
     const d = deps();
-    expect(await request(d, "PATCH", "/api/live/settings", { provider: "fish", fishAgentId: " agent_1 " })).toMatchObject({ status: 200, body: { live: { provider: "fish", fishAgentId: "agent_1" } } });
-    for (const fishAgentId of ["../x", "a b", "x".repeat(129), 7]) {
-      expect(await request(d, "PATCH", "/api/live/settings", { fishAgentId }), String(fishAgentId)).toMatchObject({ status: 400 });
+    expect(await request(d, "PATCH", "/api/live/settings", { provider: "fish" })).toMatchObject({ status: 200, body: { live: { provider: "fish" } } });
+    for (const patch of [{ fishAgentId: "agent_1" }, { fishAgentFor: "abc" }]) {
+      expect(await request(d, "PATCH", "/api/live/settings", patch), JSON.stringify(patch)).toMatchObject({ status: 400 });
     }
-    expect((await request(d, "PATCH", "/api/live/settings", { fishAgentId: "" })).status).toBe(200);
-    expect(d.saved).toEqual([{ provider: "fish", fishAgentId: "agent_1" }, { fishAgentId: "" }]);
+    expect(d.saved).toEqual([{ provider: "fish" }]);
   });
 
   it("saves nothing for an empty patch", async () => {

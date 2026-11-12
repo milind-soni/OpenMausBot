@@ -36,8 +36,8 @@ export function LiveKeySetup({ onSaved, onSaving, locked = false, compact = fals
     setError(null);
     try {
       const status: ConfigStatus = window.ogb?.setCredential
-        ? await window.ogb.setCredential("openaiLiveKey", value)
-        : await api("/api/config", { method: "PUT", body: JSON.stringify({ live: { key: value } }) });
+        ? await window.ogb.setCredential(fish ? "fishAudioKey" : "openaiLiveKey", value)
+        : await api("/api/config", { method: "PUT", body: JSON.stringify(fish ? { tts: { fishKey: value } } : { live: { key: value } }) });
       dispatch({ type: "configStatus", config: status });
       // The save may finish after the prompt was dismissed; never turn it into a call the user already cancelled.
       if (!mounted.current) return;

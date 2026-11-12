@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { LiveSessionError } from "./live-call.ts";
 import {
-  createFishLiveSession, endFishLiveSession, fishErrorMessage, fishInstructions, fishLiveBaseUrl, fishLiveEndpoint, FishRelays,
-  FISH_UPDATE_PREFIX, isFishAgentId,
+  createFishLiveSession, endFishLiveSession, fishErrorMessage, fishInstructions, fishKeyPrint, fishLiveBaseUrl, fishLiveEndpoint, FishRelays,
+  FISH_UPDATE_PREFIX, setUpFishAgent, usableFishAgent,
 } from "./live-fish.ts";
 
-const ENDPOINT = fishLiveEndpoint("agent_123", {})!;
+const ENDPOINT = fishLiveEndpoint("agent_123", {});
 const TOKEN = {
   transport: "livekit", session_id: "sess_1", expires_at: "2026-11-11T00:00:00Z", max_duration_seconds: 900,
   livekit_url: "wss://lk.fish.audio", token: "jwt.part.sig",
@@ -24,12 +24,49 @@ describe("the Fish Audio endpoint", () => {
     }
   });
 
-  it("needs an agent id of word characters and dashes", () => {
+  it("names an agent id of word characters and dashes, and none otherwise", () => {
     expect(ENDPOINT).toEqual({ provider: "fish", apiBase: "https://api.fish.audio/v1/agent", model: "agent_123" });
-    expect(fishLiveEndpoint(" agent-9 ", {})?.model).toBe("agent-9");
-    for (const id of [undefined, "", "  ", "a/b", "../x", "a b", "x".repeat(129)]) expect(fishLiveEndpoint(id, {}), String(id)).toBeNull();
-    expect(isFishAgentId("ok_id-1")).toBe(true);
-    expect(isFishAgentId("no?query")).toBe(false);
+    expect(fishLiveEndpoint(" agent-9 ", {}).model).toBe("agent-9");
+    for (const id of [undefined, null, "", "  ", "a/b", "../x", "a b", "x".repeat(129)]) expect(fishLiveEndpoint(id, {}).model, String(id)).toBe("");
+  });
+});
+
+describe("the Fish agent for Live calls", () => {
+  it("is used only with the key of the account it was set up on, or with any key when the operator chose it", () => {
+    const own = { fishAgentId: "agent_1", fishAgentFor: fishKeyPrint("key-a") };
+    expect(fishKeyPrint(" key-a ")).toBe(fishKeyPrint("key-a"));
+    expect(fishKeyPrint("key-a")).not.toContain("key-a");
+    expect(usableFishAgent(own, "key-a")).toBe("agent_1");
+    expect(usableFishAgent(own, "key-b")).toBeNull();
+    expect(usableFishAgent(own, "")).toBeNull();
+    expect(usableFishAgent({ fishAgentId: "agent_op" }, "anything")).toBe("agent_op");
+    expect(usableFishAgent({ fishAgentId: "../x" }, "k")).toBeNull();
+    expect(usableFishAgent(undefined, "k")).toBeNull();
+  });
+
+  it("is set up as a published Live 3 agent with the delegate client tool and an overridable system prompt", async () => {
+    const answers: Record<string, unknown> = { "POST /tools": { tool_id: "tool_1" }, "POST /agents": { agent_id: "agent_new" }, "PATCH /agents/agent_new": {}, "POST /agents/agent_new/publish": { version_number: 1 } };
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const route = `${init!.method} ${String(url).replace(ENDPOINT.apiBase, "")}`;
+      return new Response(JSON.stringify(answers[route] ?? {}), { status: route in answers ? 200 : 404 });
+    });
+    await expect(setUpFishAgent(" fish-key ", { ...ENDPOINT, model: "" }, fetchImpl)).resolves.toBe("agent_new");
+    const calls = fetchImpl.mock.calls.map(([url, init]) => ({ route: `${init!.method} ${String(url).replace(ENDPOINT.apiBase, "")}`, body: JSON.parse(String(init!.body)), init: init! }));
+    expect(calls.map((call) => call.route)).toEqual(Object.keys(answers));
+    expect(calls[0]!.body).toMatchObject({ name: "delegate", tool_type: "client", expects_response: true });
+    expect(calls[1]!.body.config).toEqual({ voice: { engine: "live3", speaking_language: "en" }, tools: { enabled: true, tool_ids: ["tool_1"] } });
+    expect(calls[2]!.body).toEqual({ overrides_allowed: ["system_prompt"] });
+    for (const call of calls) {
+      expect((call.init.headers as Record<string, string>).authorization).toBe("Bearer fish-key");
+      expect(call.init.redirect).toBe("error");
+    }
+  });
+
+  it("stops at Fish's first refusal with the user's next step, never Fish's body", async () => {
+    const fetchImpl = fakeFetch(401, { message: "raw fish-key detail" });
+    await expect(setUpFishAgent("fish-key", ENDPOINT, fetchImpl)).rejects.toMatchObject({ status: 502, message: fishErrorMessage(401) });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await expect(setUpFishAgent("fish-key", ENDPOINT, fakeFetch(201, {}))).rejects.toMatchObject({ status: 502 });
   });
 });
 
@@ -77,6 +114,7 @@ describe("creating a Fish Audio session", () => {
       expect((error as LiveSessionError).message).toBe(fishErrorMessage(status));
       expect((error as LiveSessionError).message).not.toContain("fish-key");
       expect((error as LiveSessionError).status).toBe(status === 429 ? 429 : 502);
+      expect((error as { fishStatus?: number }).fishStatus).toBe(status);
     }
   });
 

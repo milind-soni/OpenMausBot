@@ -4,14 +4,14 @@ import { z } from "zod";
 import type { LiveFishRelayCommand, LiveFishRelayEvent, LiveProvider, LiveSettings } from "../../shared/wire.ts";
 import { azureLiveDeployment, azureOpenAiRoot, LiveSessionError, MAX_SDP_BYTES } from "../live-call.ts";
 import { LiveCallBusyError, type LiveCallController } from "../live-call-controller.ts";
-import { isFishAgentId, RELAY_POLL_MS } from "../live-fish.ts";
+import { RELAY_POLL_MS } from "../live-fish.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
 export interface LiveRouteDeps {
   calls: Pick<LiveCallController, "start" | "end" | "current" | "deviceRevoked">;
   resolveTarget(botId: string, threadId: string | undefined): { botId: string; botName: string; threadId: string } | null;
   settings(): LiveSettings;
-  saveSettings(patch: { provider?: LiveProvider; azureEndpoint?: string; azureDeployment?: string; fishAgentId?: string; voice?: string; readTypedReplies?: boolean; idleMinutes?: number }): Promise<LiveSettings>;
+  saveSettings(patch: { provider?: LiveProvider; azureEndpoint?: string; azureDeployment?: string; voice?: string; readTypedReplies?: boolean; idleMinutes?: number }): Promise<LiveSettings>;
   /** A running Fish Audio call's relay, only for the token its start answered with. */
   fishRelay(sessionId: string, token: string): { receive(events: LiveFishRelayEvent[], from?: number): void; poll(waitMs: number): Promise<{ commands: LiveFishRelayCommand[]; closed: boolean }> } | null;
 }
@@ -47,7 +47,6 @@ const settingsBody = z.object({
   // "" clears the field. Anything else must be an https Azure OpenAI host, since the key is sent there.
   azureEndpoint: z.string().trim().max(300).refine((url) => url === "" || azureOpenAiRoot(url) !== null).optional(),
   azureDeployment: z.string().trim().max(64).refine((name) => name === "" || azureLiveDeployment(name) === name).optional(),
-  fishAgentId: z.string().trim().max(128).refine((id) => id === "" || isFishAgentId(id)).optional(),
   voice: z.string().trim().max(40).regex(/^[a-z]*$/).optional(),
   readTypedReplies: z.boolean().optional(),
   idleMinutes: z.number().int().min(1).max(60).optional(),
@@ -123,7 +122,6 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
         const field = parsed.error.issues[0]?.path[0];
         if (field === "azureEndpoint") return json(res, 400, { error: "The Azure endpoint must be the https address of an Azure OpenAI resource, like https://my-resource.openai.azure.com." });
         if (field === "azureDeployment") return json(res, 400, { error: "The Azure deployment name may use letters, digits, '-', '_' and '.', up to 64 characters." });
-        if (field === "fishAgentId") return json(res, 400, { error: "The Fish Audio agent id may use letters, digits, '-' and '_', up to 128 characters." });
         return json(res, 400, { error: "Those Live settings are not valid." });
       }
       if (!Object.keys(parsed.data).length) return json(res, 400, { error: "nothing to save" });

@@ -132,8 +132,8 @@ describe("the keys page", () => {
     expect(row("liveCalls")).not.toBeNull();
   });
 
-  it("with Fish Audio chosen, the Live key row asks for a required Fish key and its agent id, with no OpenAI wording", () => {
-    setConfig({ ...fx.config, live: { configured: false, provider: "fish", fishAgentId: "agent_1", voice: "", readTypedReplies: true, idleMinutes: 5 } });
+  it("with Fish Audio chosen, the Live key row is the required Fish Audio key, with no OpenAI wording and nothing else to fill in", () => {
+    setConfig({ ...fx.config, live: { configured: false, provider: "fish", voice: "", readTypedReplies: true, idleMinutes: 5 } });
     page();
     const fish = row("liveKey")!;
     expect(fish.textContent).toContain("Fish Audio");
@@ -141,7 +141,8 @@ describe("the keys page", () => {
     expect(fish.textContent).not.toContain("instead of your OpenAI key");
     expect([...fish.querySelectorAll("input")].map((input) => input.placeholder)).not.toContain("sk-…");
     expect(fish.querySelector<HTMLAnchorElement>('a[href*="platform.openai.com"]')).toBeNull();
-    expect([...fish.querySelectorAll<HTMLInputElement>("input")].some((input) => input.value === "agent_1")).toBe(true);
+    expect(fish.querySelector<HTMLAnchorElement>('a[href*="fish.audio"]')).not.toBeNull();
+    expect([...fish.querySelectorAll<HTMLInputElement>("input")].every((input) => input.type === "password")).toBe(true);
     expect(row("liveCalls")).toBeNull();
   });
 
@@ -166,8 +167,8 @@ describe("the keys page", () => {
     expect(host.querySelector("[data-keys-empty]")!.textContent).toBe("No keys match “zzz”.");
   });
 
-  it("holds the Live provider and Fish agent while a key save is pending, and the key while a provider change is", async () => {
-    const live = { configured: false, provider: "fish", fishAgentId: "agent_1", voice: "", readTypedReplies: true, idleMinutes: 5 };
+  it("saves a Fish key as the Fish Audio key, holding the Live provider while it saves and the key while a provider change does", async () => {
+    const live = { configured: false, provider: "fish", voice: "", readTypedReplies: true, idleMinutes: 5 };
     setConfig({ ...fx.config, live });
     let answer: (value: unknown) => void = () => {};
     fx.api.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
@@ -176,14 +177,10 @@ describe("the keys page", () => {
     const saveKey = () => host.querySelector<HTMLInputElement>('input[type="password"]')!.closest("form")!.querySelector<HTMLButtonElement>('button[type="submit"]')!;
     type(host.querySelector<HTMLInputElement>('input[type="password"]')!, "fish-key");
     flushSync(() => saveKey().click());
-    expect(fx.api).toHaveBeenCalledWith("/api/config", expect.objectContaining({ method: "PUT" }));
+    expect(fx.api).toHaveBeenCalledWith("/api/config", expect.objectContaining({ method: "PUT", body: JSON.stringify({ tts: { fishKey: "fish-key" } }) }));
     expect(provider().disabled).toBe(true);
-    const agentForm = [...host.querySelectorAll("form")].find((form) => !form.querySelector('input[type="password"]'))!;
-    type(agentForm.querySelector<HTMLInputElement>("input")!, "agent_2");
-    expect(agentForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
-    flushSync(() => agentForm.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
     expect(fx.api).toHaveBeenCalledTimes(1);
-    await answered(() => answer({ ...fx.config, live: { ...live, keySource: "live" } }));
+    await answered(() => answer({ ...fx.config, live: { ...live, keySource: "fishAudio" } }));
     expect(provider().disabled).toBe(false);
 
     setConfig({ ...fx.config, live });

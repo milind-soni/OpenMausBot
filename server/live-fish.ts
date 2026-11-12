@@ -1,13 +1,15 @@
 // Fish Audio Live 3 calls. The Fish key never leaves the harness: the client gets only Fish's single-use session token,
 // and Fish has no server sideband, so the client relays what was said and the harness answers through FishRelay.
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { LiveFishRelayCommand, LiveFishRelayEvent, LiveFishSessionToken } from "../shared/wire.ts";
 import type { LiveSocket } from "./live-call-controller.ts";
 import { liveInstructions, LiveSessionError, type LiveBot, type LiveEndpoint, type LiveHistoryMessage } from "./live-call.ts";
+import type { LiveConfig } from "./live-config.ts";
 
 const FISH_BASE = "https://api.fish.audio";
 const CREATE_TIMEOUT_MS = 20_000;
 const END_TIMEOUT_MS = 5_000;
+const SETUP_TIMEOUT_MS = 8_000;
 /** Fish agent ids as the dashboard and `GET /v1/agent/agents` show them. */
 const AGENT_ID = /^[\w-]{1,128}$/;
 const HISTORY_MESSAGES = 8;
@@ -26,13 +28,71 @@ export function fishLiveBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   return /^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(override) ? override : FISH_BASE;
 }
 
-export function fishLiveEndpoint(agentId: string | undefined, env: NodeJS.ProcessEnv = process.env): LiveEndpoint | null {
+/** `model` is the agent id, "" while no usable one is saved. */
+export function fishLiveEndpoint(agentId: string | null | undefined, env: NodeJS.ProcessEnv = process.env): LiveEndpoint {
   const id = agentId?.trim() ?? "";
-  return AGENT_ID.test(id) ? { provider: "fish", apiBase: `${fishLiveBaseUrl(env)}/v1/agent`, model: id } : null;
+  return { provider: "fish", apiBase: `${fishLiveBaseUrl(env)}/v1/agent`, model: AGENT_ID.test(id) ? id : "" };
 }
 
-export function isFishAgentId(value: string): boolean {
-  return AGENT_ID.test(value);
+/** Which Fish Audio account an agent was set up on, without keeping its key. */
+export function fishKeyPrint(key: string): string {
+  return createHash("sha256").update(key.trim()).digest("hex").slice(0, 16);
+}
+
+/** The saved agent, while it belongs to the account of `key` or was set by the operator (no `fishAgentFor`). */
+export function usableFishAgent(live: LiveConfig | undefined, key: string): string | null {
+  const id = live?.fishAgentId?.trim() ?? "";
+  if (!AGENT_ID.test(id)) return null;
+  return live?.fishAgentFor === undefined || (key.trim() !== "" && live.fishAgentFor === fishKeyPrint(key)) ? id : null;
+}
+
+/** Fish API v1: a Live 3 agent in English with the client tool `delegate` and a system prompt each session may override
+ * (`createFishLiveSession` sends one), published so sessions can start. Returns its id. */
+export async function setUpFishAgent(key: string, endpoint: LiveEndpoint, fetchImpl: typeof fetch = fetch): Promise<string> {
+  const call = (method: string, path: string, body: unknown) => fishSetupRequest(fetchImpl, key, method, `${endpoint.apiBase}${path}`, body);
+  const tool = await call("POST", "/tools", {
+    name: FISH_DELEGATE_TOOL,
+    tool_type: "client",
+    description: "Hands the user's request to the assistant that does the work: looking things up, using apps and files, running tasks.",
+    parameters: { type: "object", properties: { request: { type: "string", description: "What the user asked for, in their own words." } }, required: ["request"] },
+    expects_response: true,
+    timeout_seconds: 30,
+  });
+  const toolId = typeof tool.tool_id === "string" ? tool.tool_id : "";
+  if (!toolId) throw new LiveSessionError(FISH_UNEXPECTED, 502);
+  const agent = await call("POST", "/agents", {
+    name: "OpenMausBot Live calls",
+    config: { voice: { engine: "live3", speaking_language: "en" }, tools: { enabled: true, tool_ids: [toolId] } },
+  });
+  const agentId = typeof agent.agent_id === "string" && AGENT_ID.test(agent.agent_id) ? agent.agent_id : "";
+  if (!agentId) throw new LiveSessionError(FISH_UNEXPECTED, 502);
+  await call("PATCH", `/agents/${encodeURIComponent(agentId)}`, { overrides_allowed: ["system_prompt"] });
+  await call("POST", `/agents/${encodeURIComponent(agentId)}/publish`, {});
+  return agentId;
+}
+
+const FISH_UNEXPECTED = "Fish Audio returned an unexpected answer. Try the call again.";
+
+async function fishSetupRequest(fetchImpl: typeof fetch, key: string, method: string, url: string, body: unknown): Promise<Record<string, unknown>> {
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method,
+      headers: { authorization: `Bearer ${key.trim()}`, "content-type": "application/json" },
+      redirect: "error",
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(SETUP_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    throw new LiveSessionError(timedOut ? "Fish Audio did not answer in time. Try the call again." : "Could not reach Fish Audio. Check the internet connection.", 502);
+  }
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new LiveSessionError(fishErrorMessage(response.status), response.status === 429 ? 429 : 502);
+  }
+  const answer = await response.json().catch(() => null) as unknown;
+  return answer && typeof answer === "object" ? answer as Record<string, unknown> : {};
 }
 
 /** The Fish agent's system prompt for this call: the GPT-Live instructions, how this agent delegates, and the recent chat. */
@@ -76,10 +136,11 @@ export interface CreateFishSessionInput {
   timeoutMs?: number;
 }
 
-/** Fish API v1 `POST /v1/agent/sessions`. Errors carry a status and a message fit for the user: never the key, never Fish's raw body. */
+/** Fish API v1 `POST /v1/agent/sessions`. Errors carry a status and a message fit for the user: never the key, never Fish's raw
+ * body; `fishStatus` is Fish's own status. */
 export async function createFishLiveSession(input: CreateFishSessionInput): Promise<LiveFishSessionToken> {
   const key = input.key.trim();
-  if (!key) throw new LiveSessionError("Add a Fish Audio API key to use Live calls.", 409);
+  if (!key) throw new LiveSessionError("Add a Fish Audio API key in Settings → API keys to use Live calls.", 409);
   const body = {
     agent_id: input.endpoint.model,
     // Fish refuses an override the agent's `overrides_allowed` does not list (400).
@@ -100,12 +161,12 @@ export async function createFishLiveSession(input: CreateFishSessionInput): Prom
   }
   if (!response.ok) {
     await response.body?.cancel().catch(() => undefined);
-    throw new LiveSessionError(fishErrorMessage(response.status), response.status === 429 ? 429 : 502);
+    throw Object.assign(new LiveSessionError(fishErrorMessage(response.status), response.status === 429 ? 429 : 502), { fishStatus: response.status });
   }
   const token = await response.json().catch(() => null) as Partial<LiveFishSessionToken> | null;
   if (!token || token.transport !== "livekit" || typeof token.session_id !== "string" || !token.session_id
     || typeof token.token !== "string" || !token.token || typeof token.livekit_url !== "string" || !/^(wss|https):\/\//.test(token.livekit_url)) {
-    throw new LiveSessionError("Fish Audio returned an unexpected answer. Try the call again.", 502);
+    throw new LiveSessionError(FISH_UNEXPECTED, 502);
   }
   return {
     transport: "livekit",
@@ -135,12 +196,12 @@ export async function endFishLiveSession(sessionId: string, key: string, endpoin
 
 export function fishErrorMessage(status: number): string {
   switch (status) {
-    case 400: return "Fish Audio rejected the call settings. In the agent's settings, allow the system prompt override.";
-    case 401: return "Fish Audio rejected the API key. Check the key for Live calls.";
+    case 400: return "Fish Audio rejected the call settings (HTTP 400).";
+    case 401: return "Fish Audio rejected the API key. Check the Fish Audio key in Settings → API keys.";
     case 402: return "The Fish Audio account has no credit for agent calls.";
-    case 403: return "This Fish Audio key may not start that agent.";
-    case 404: return "Fish Audio has no agent with that id. Check the agent id in Call settings.";
-    case 409: return "The Fish Audio agent has not been published. Publish it in Fish Audio, then call again.";
+    case 403: return "This Fish Audio key may not start agent calls.";
+    case 404: return "Fish Audio could not find the agent for Live calls. Try the call again.";
+    case 409: return "The Fish Audio agent for Live calls is not ready yet. Try the call again in a moment.";
     case 422: return "Fish Audio could not use the call request (HTTP 422).";
     case 429: return "Fish Audio is limiting agent sessions right now. Try again in a moment.";
     default: return status >= 500 ? "Fish Audio had a problem starting the call. Try again in a moment." : `Fish Audio could not start the call (HTTP ${status}).`;

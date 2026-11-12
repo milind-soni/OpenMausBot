@@ -46,25 +46,24 @@ export interface LiveCallRecord {
 }
 
 /** Who runs a Live call's voice session: OpenAI itself, a GPT-Live deployment on the user's own Azure OpenAI / Foundry
- * resource, or a published Fish Audio agent (Fish Audio Live 3), whose session the client joins with Fish's SDK. */
+ * resource, or a Fish Audio Live 3 agent the harness sets up on the person's Fish Audio account, whose session the client joins with Fish's SDK. */
 export type LiveProvider = "openai" | "azure" | "fish";
 
-/** `live`: the key saved for Live calls only; `openai`: the OpenAI API key from Settings → API keys, used when there is no `live` key. */
-export type LiveKeySource = "live" | "openai";
+/** `live`: the key saved for Live calls only; `openai`: the OpenAI API key from Settings → API keys, used when there is no `live` key;
+ * `fishAudio`: the Fish Audio key from Settings → API keys, the only key a Fish Audio call uses. */
+export type LiveKeySource = "live" | "openai" | "fishAudio";
 
 /** Non-secret Live settings, as GET /api/config and PATCH /api/live/settings report them. */
 export interface LiveSettings {
-  /** A Live call has everything it needs: a key (`keySource` says which; never the key itself), for Azure a valid endpoint and deployment, and for Fish Audio an agent id. */
+  /** A Live call has everything it needs: a key (`keySource` says which; never the key itself), and for Azure a valid endpoint and deployment. */
   configured: boolean;
   keySource?: LiveKeySource;
-  /** Absent means "openai". With "azure" or "fish" only the `live` key is used, never the OpenAI API key. */
+  /** Absent means "openai". With "azure" only the `live` key is used and with "fish" only the Fish Audio key, never the OpenAI API key. */
   provider?: LiveProvider;
   /** The Azure resource endpoint as saved, e.g. `https://my-resource.openai.azure.com`. Not a secret. */
   azureEndpoint?: string;
   /** The Azure deployment of gpt-live-1; empty means "gpt-live-1". */
   azureDeployment?: string;
-  /** The published Fish Audio agent a "fish" call starts. Not a secret. */
-  fishAgentId?: string;
   voice: string;
   readTypedReplies: boolean;
   idleMinutes: number;

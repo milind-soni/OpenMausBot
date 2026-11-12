@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { AppConfig } from "./config.ts";
 import { nestedKeyStatus } from "./key-hint.ts";
 import { LIVE_NEEDS_AZURE, LIVE_NEEDS_FISH, LIVE_NEEDS_KEY } from "./live-call.ts";
-import { LIVE_KEY_NEEDS_ENDPOINT, liveConfigWithEnv, liveKeyTarget, liveSavePatch, usableLiveKey, type LiveConfig } from "./live-config.ts";
+import { fishKeyFromLiveKey, LIVE_KEY_NEEDS_ENDPOINT, liveConfigWithEnv, liveKeyTarget, liveSavePatch, usableLiveKey, type LiveConfig } from "./live-config.ts";
+import { fishKeyPrint } from "./live-fish.ts";
 import { LIVE_IDLE_MINUTES_DEFAULT, liveCallEndpoint, liveCallKey, liveCallSettings, liveSettingsFor, liveSettingsForClient, liveSetupProblem } from "./live-settings.ts";
 
 describe("live settings", () => {
@@ -93,9 +94,9 @@ describe("Live calls through Azure OpenAI", () => {
 });
 
 describe("Live calls through Fish Audio", () => {
-  const fish = { provider: "fish" as const, fishAgentId: "agent_1" };
+  const fish = { provider: "fish" as const };
 
-  it("never use the OpenAI API key, or a key saved for OpenAI or Azure, as the Fish key", () => {
+  it("use only the Fish Audio key, never the OpenAI API key or a key saved for OpenAI or Azure", () => {
     const openai = { key: "sk-openai" };
     for (const live of [fish, { ...fish, key: "k", keyFor: "openai" }, { ...fish, key: "k", keyFor: "azure:a.openai.azure.com" }, { ...fish, key: "old" }]) {
       const cfg = { live, openai } as AppConfig;
@@ -104,48 +105,51 @@ describe("Live calls through Fish Audio", () => {
     }
   });
 
-  it("are ready with a key saved for Fish and a valid agent id, and report none of the key", () => {
-    const cfg = { live: { ...fish, key: "fish-secret", keyFor: "fish" } } as AppConfig;
-    expect(liveCallKey(cfg)).toEqual({ key: "fish-secret", source: "live" });
-    expect(liveCallEndpoint(cfg, {})).toEqual({ provider: "fish", apiBase: "https://api.fish.audio/v1/agent", model: "agent_1" });
+  it("are ready with the Fish Audio key, and report none of it", () => {
+    const cfg = { live: fish, tts: { fishKey: " fish-secret " } } as AppConfig;
+    expect(liveCallKey(cfg)).toEqual({ key: "fish-secret", source: "fishAudio" });
+    expect(liveCallEndpoint(cfg, {})).toEqual({ provider: "fish", apiBase: "https://api.fish.audio/v1/agent", model: "" });
     expect(liveSetupProblem(cfg)).toBeNull();
     const settings = liveSettingsFor(cfg);
-    expect(settings).toMatchObject({ configured: true, keySource: "live", provider: "fish", fishAgentId: "agent_1" });
+    expect(settings).toMatchObject({ configured: true, keySource: "fishAudio", provider: "fish" });
     expect(JSON.stringify(settings)).not.toContain("fish-secret");
   });
 
-  it("are not ready without a valid agent id", () => {
-    for (const fishAgentId of [undefined, "", "../x"]) {
-      const cfg = { live: { provider: "fish", fishAgentId, key: "k", keyFor: "fish" } } as AppConfig;
-      expect(liveCallEndpoint(cfg, {}), String(fishAgentId)).toBeNull();
-      expect(liveSetupProblem(cfg)).toBe(LIVE_NEEDS_FISH);
-    }
+  it("start the agent set up for the account of the Fish Audio key, and set one up for another account", () => {
+    const live = { ...fish, fishAgentId: "agent_1", fishAgentFor: fishKeyPrint("key-a") };
+    expect(liveCallEndpoint({ live, tts: { fishKey: "key-a" } } as AppConfig, {})?.model).toBe("agent_1");
+    expect(liveCallEndpoint({ live, tts: { fishKey: "key-b" } } as AppConfig, {})?.model).toBe("");
+    expect(JSON.stringify(liveSettingsFor({ live, tts: { fishKey: "key-a" } } as AppConfig))).not.toContain("agent_1");
   });
 
   it("name the provider in what a call start reads, so the Fish limit sees it before setup is done", () => {
-    expect(liveCallSettings({ live: { provider: "fish" } } as AppConfig)).toMatchObject({ provider: "fish", endpoint: null, key: "", setupProblem: LIVE_NEEDS_FISH });
+    expect(liveCallSettings({ live: { provider: "fish" } } as AppConfig)).toMatchObject({ provider: "fish", key: "", setupProblem: LIVE_NEEDS_FISH });
   });
 
-  it("tell a caller without the admin scope the service, not which agent", () => {
-    const client = liveSettingsForClient(liveSettingsFor({ live: { ...fish, key: "k", keyFor: "fish" } } as AppConfig));
-    expect(client).toEqual({ configured: true, keySource: "live", provider: "fish", voice: "", readTypedReplies: true, idleMinutes: 5 });
-    expect(JSON.stringify(client)).not.toContain("agent_1");
+  it("leave a Live key saved for OpenAI usable after a switch to Fish and back", () => {
+    const saved = { key: "k", keyFor: "openai" };
+    expect(liveSavePatch(saved, { provider: "fish" })).toEqual({ provider: "fish" });
+    expect(usableLiveKey({ ...saved, provider: "fish" })).toBe("k");
+    expect(liveSavePatch({ ...fish, key: "k", keyFor: "openai" }, { provider: "openai" })).toEqual({ provider: "openai" });
   });
 
-  it("tie a key saved for Fish to Fish, and forget it on a switch either way", () => {
-    expect(liveKeyTarget(fish)).toBe("fish");
-    expect(liveSavePatch(fish, { key: "new" })).toEqual({ key: "new", keyFor: "fish" });
-    expect(liveSavePatch({ ...fish, key: "k", keyFor: "fish" }, { fishAgentId: "agent_2" })).toEqual({ fishAgentId: "agent_2" });
-    expect(liveSavePatch({ ...fish, key: "k", keyFor: "fish" }, { provider: "openai" })).toEqual({ provider: "openai", key: "", keyFor: "nowhere" });
-    expect(liveSavePatch({ key: "k", keyFor: "openai" }, { provider: "fish" })).toEqual({ provider: "fish", key: "", keyFor: "nowhere" });
-    expect(usableLiveKey({ ...fish, key: "k", keyFor: "fish", provider: "openai" })).toBeUndefined();
+  it("read a Fish key saved as the Live key as the Fish Audio key, without replacing a saved one", () => {
+    const cfg = { live: { ...fish, key: " old-fish ", keyFor: "fish" }, tts: {} } as AppConfig;
+    fishKeyFromLiveKey(cfg);
+    expect(cfg.tts?.fishKey).toBe("old-fish");
+    const both = { live: { ...fish, key: "old-fish", keyFor: "fish" }, tts: { fishKey: "current" } } as AppConfig;
+    fishKeyFromLiveKey(both);
+    expect(both.tts?.fishKey).toBe("current");
+    const openai = { live: { key: "sk-live", keyFor: "openai" }, tts: {} } as AppConfig;
+    fishKeyFromLiveKey(openai);
+    expect(openai.tts?.fishKey).toBeUndefined();
+    expect(liveCallKey({ live: { ...fish, key: "old-fish", keyFor: "fish" } } as AppConfig)).toBeNull();
   });
 
-  it("are set up from the environment by an operator, pairing the key only when key, provider and agent are set together", () => {
-    const env = { OMB_OPENAI_LIVE_KEY: "operators", OMB_LIVE_PROVIDER: "fish", OMB_FISH_LIVE_AGENT_ID: " agent_9 " };
-    expect(liveConfigWithEnv(undefined, env)).toEqual({ key: "operators", provider: "fish", fishAgentId: "agent_9", keyFor: "fish" });
-    expect(liveConfigWithEnv(undefined, { ...env, OMB_FISH_LIVE_AGENT_ID: undefined }).keyFor).toBeUndefined();
-    expect(usableLiveKey(liveConfigWithEnv({ key: "", keyFor: "nowhere" }, env))).toBeUndefined();
+  it("take an operator's agent from the environment for any key", () => {
+    const live = liveConfigWithEnv({ fishAgentId: "agent_1", fishAgentFor: "abc" }, { OMB_LIVE_PROVIDER: "fish", OMB_FISH_LIVE_AGENT_ID: " agent_9 " });
+    expect(live).toEqual({ provider: "fish", fishAgentId: "agent_9" });
+    expect(liveConfigWithEnv({ fishAgentId: "agent_1", fishAgentFor: "abc" }, {})).toEqual({ fishAgentId: "agent_1", fishAgentFor: "abc" });
   });
 });
 

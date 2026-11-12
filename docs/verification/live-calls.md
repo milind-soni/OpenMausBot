@@ -121,24 +121,33 @@ so a caller who gets through stops at the setup prompt.
 
 ## Fish Audio Live 3 as the Live provider
 
-With `live.provider: "fish"` (`OMB_LIVE_PROVIDER=fish`) a call starts the
-person's published Fish Audio agent (`live.fishAgentId`, `OMB_FISH_LIVE_AGENT_ID`,
-letters, digits, `-` and `_`): `POST https://api.fish.audio/v1/agent/sessions`
-with `{ agent_id, overrides: { system_prompt } }` and the key as a bearer token,
+With `live.provider: "fish"` (`OMB_LIVE_PROVIDER=fish`) a call uses the Fish
+Audio key from Settings → API keys (`tts.fishKey`, `OMB_FISH_AUDIO_API_KEY`),
+the same key Fish voices use; nothing else is asked. On the first call the
+harness sets up an agent on that key's account (`server/live-fish.ts`
+`setUpFishAgent`): a client tool `delegate` (`POST /v1/agent/tools`), an agent
+on the `live3` engine in English with that tool (`POST /v1/agent/agents`),
+`overrides_allowed: ["system_prompt"]` (`PATCH /v1/agent/agents/{id}`), and a
+publish. It saves the agent as `live.fishAgentId` with `live.fishAgentFor`, a
+short SHA-256 print of the key, so a key for another account sets up its own
+agent. A saved agent that Fish answers `404` for is set up again once.
+`OMB_FISH_LIVE_AGENT_ID` names an operator's own agent, used with any key and
+never replaced. A Fish key saved as the Live key (`keyFor: "fish"`) is read as
+the Fish Audio key while none is saved.
+
+Each call is `POST https://api.fish.audio/v1/agent/sessions` with
+`{ agent_id, overrides: { system_prompt } }` and the key as a bearer token,
 redirects refused. Fish answers with a LiveKit token, which goes to the client
 as `transport: { type: "fish", session, relayToken }`; the client joins with
-`@fishaudio/agent-client` 1.x, which holds the microphone and the agent's
+`@fishaudio/agent-client` 1.0.0, which holds the microphone and the agent's
 audio. The agent's voice is its own; the Voice setting is hidden. Hanging up
 also calls `POST /v1/agent/sessions/{id}/end`. `OMB_FISH_LIVE_URL` points the
 harness at a fake Fish for tests and is honoured only as `http://127.0.0.1:<port>`;
 anything else falls back to Fish's own host.
 
-The key is only `live.key`, saved with `keyFor: "fish"`; an OpenAI or Azure key
-is never sent to Fish, and switching the Service forgets the key as for Azure.
-In the environment, `OMB_OPENAI_LIVE_KEY` with `OMB_LIVE_PROVIDER=fish` and
-`OMB_FISH_LIVE_AGENT_ID` is the operator's pairing. Without the key or a valid
-agent id, `POST /api/live/session` answers `409` with `needsKey` and the Fish
-setup sentence.
+An OpenAI or Azure key is never sent to Fish, and the Fish key never to them.
+Without a Fish Audio key, `POST /api/live/session` answers `409` with
+`needsKey` and the Fish setup sentence.
 
 Fish has no server sideband. The client reports what it hears (final user
 transcripts, the agent's speaking spans, the `delegate` tool call, the end) to
@@ -159,16 +168,12 @@ server can start one.` The phone apps do not carry the Fish SDK yet, so a call
 from iOS or Android answers `400`. The client must report `connected` within
 `FISH_ATTACH_TIMEOUT_MS` (25 s, to allow a first microphone prompt).
 
-To activate, the person needs:
+The person needs a Fish Audio API key with Agent credit (about $0.07 per
+minute of call). Live 3 speaks English only.
 
-- A Fish Audio API key with Agent credit (about $0.07 per minute of call).
-- An agent on the `live3` engine with a voice, `overrides_allowed` including
-  `system_prompt`, and a client tool named `delegate` with `expects_response`
-  and a timeout of 15–30 s attached through `tool_ids`; the agent published.
-- English as the call language.
-
-Checked with fixtures only: `server/live-fish.test.ts` (session request,
-errors, relay), `server/live-call-controller.test.ts` "with Fish Audio chosen"
+Checked with fixtures only: `server/live-fish.test.ts` (agent setup, session request,
+errors, relay), `server/live-session-wiring.test.ts` (first-call setup, a
+removed agent, an operator's agent), `server/live-call-controller.test.ts` "with Fish Audio chosen"
 (a real `FishRelay` as the sideband: heard, delegated, the bot's answer back as
 the delegate result, End and Fish's own end), `server/routes/live.test.ts`
 (relay route), `server/live-settings.test.ts`, `server/live-access.test.ts`,

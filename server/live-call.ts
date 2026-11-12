@@ -9,7 +9,7 @@ export const DEFAULT_LIVE_VOICE = "marin";
 export const MAX_SDP_BYTES = 64 * 1024;
 export const LIVE_NEEDS_KEY = "Live calls use your own OpenAI key. Add it in Settings → API keys.";
 export const LIVE_NEEDS_AZURE = "Live calls through Azure OpenAI need the resource endpoint, the GPT-Live deployment name and its key. Add them in Call settings.";
-export const LIVE_NEEDS_FISH = "Live calls through Fish Audio need a Fish Audio API key and the id of a published Fish Audio agent. Add them in Call settings.";
+export const LIVE_NEEDS_FISH = "Live calls through Fish Audio use your Fish Audio API key. Add it in Settings → API keys.";
 
 /** The client's data channel is untrusted: it may only hang up; every append goes over the sideband.
  * Exception: Azure OpenAI refuses `session.client`, so an Azure call goes without this list and its caller's channel keeps
@@ -45,7 +45,7 @@ export interface LiveEndpoint {
   provider: LiveProvider;
   /** The versioned API root, e.g. `https://api.openai.com/v1` or `https://my-res.openai.azure.com/openai/v1`. */
   apiBase: string;
-  /** The OpenAI model id, the Azure deployment name, or the Fish Audio agent id. */
+  /** The OpenAI model id, the Azure deployment name, or the Fish Audio agent id ('' until one is set up). */
   model: string;
 }
 

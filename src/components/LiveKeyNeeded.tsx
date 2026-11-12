@@ -17,7 +17,7 @@ export function LiveKeyNeeded() {
   const fish = live?.provider === "fish";
   const copy = liveKeyCopy(live?.provider);
   // A key is tied to the endpoint it is saved for, so the endpoint comes first.
-  const keyForm = ((azure && Boolean(live?.azureEndpoint)) || fish) && live?.keySource !== "live";
+  const keyForm = (azure && Boolean(live?.azureEndpoint) && live?.keySource !== "live") || (fish && live?.keySource !== "fishAudio");
   return <section aria-labelledby={titleId} className="flex flex-col gap-2.5 rounded-xl border border-hairline bg-panel p-4 text-left text-[13px]">
     <div className="flex items-start gap-2.5">
       <KeyRound size={16} className="mt-0.5 shrink-0 text-ink-secondary" aria-hidden="true" />

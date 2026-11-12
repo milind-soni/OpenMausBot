@@ -28,6 +28,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
   const azure = live.provider === "azure";
   const fish = live.provider === "fish";
   const copy = liveKeyCopy(live.provider);
+  const hasKey = live.keySource === (fish ? "fishAudio" : "live");
   const voice = live.voice || "marin";
   const known = LIVE_VOICE_OPTIONS.some((option) => option.id === voice);
 
@@ -125,7 +126,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
           )}
         </span>
       </div>
-      {live.keySource !== "live" && (azure || fish) && <div className="-mt-2 text-[12px] text-ink-tertiary">{t(copy.missing)}</div>}
+      {!hasKey && (azure || fish) && <div className="-mt-2 text-[12px] text-ink-tertiary">{t(copy.missing)}</div>}
       {live.keySource !== "live" && !azure && !fish && (
         <div className="-mt-2 text-[12px] text-ink-tertiary">{t(live.keySource === "openai" ? "call.live.keyFromApiKeys" : "call.live.needsKey")} <KeysLink id="openai" purpose="liveCalls" /></div>
       )}
