@@ -901,10 +901,8 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     if (!record(onePassword) || typeof onePassword.token !== "string") throw new CloudSendError("local", "1Password is not connected on this computer.");
     const parts = row.parts ?? ["token", "vaults"];
     const connecting = row.state === "only-here" || parts.includes("token");
-    // My Cloud's item choices become this computer's, so one handed back to its vault here is handed back there too.
-    // This computer's own choices go ahead of the token (`keep`: every other item there stays as it was), so no item is
-    // readable there under its vault's wider choice even for a moment; the ones handed back here are handed back there
-    // only last, once the token and the vaults' new choices have taken.
+    // My Cloud's item choices become this computer's. Its own go ahead of the token (`keep`: other items there stay as they
+    // were), so none is readable there under its vault's wider choice; ones handed back here go back there last, once all took.
     const items = Object.fromEntries(Object.entries(onePassword.itemGrants ?? {}).filter(([item]) => ITEM_KEY.test(item))
       .map(([item, bots]) => [item, botsOnCloud(bots, ctx.cloudBots)]));
     const putItems = async (keep) => {
