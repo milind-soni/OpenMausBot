@@ -976,7 +976,6 @@
   "ask.settled.answered": "你回答了：",
   "ask.settled.stopped": "在你回答前已停止",
   "ask.settled.expired": "无人回答，已过期",
-  "ask.settled.answeredInChat": "已在聊天中回答",
   "ask.error": "无法发送你的回答，请重试。",
   "ask.detail.more": "显示全部",
   "inbox.action.closeQuestion": "不回答并关闭",

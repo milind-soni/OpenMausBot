@@ -5668,7 +5668,6 @@
   "ask.settled.answered": "Respondiste:",
   "ask.settled.stopped": "Se detuvo antes de que respondieras",
   "ask.settled.expired": "Caducó antes de que alguien respondiera",
-  "ask.settled.answeredInChat": "Respondida en el chat",
   "ask.error": "No se pudo enviar tu respuesta. Inténtalo de nuevo.",
   "ask.detail.more": "Mostrar todo",
   "inbox.action.closeQuestion": "Cerrar sin responder",

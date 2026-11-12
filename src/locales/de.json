@@ -2840,7 +2840,6 @@
   "ask.settled.answered": "Deine Antwort:",
   "ask.settled.stopped": "Gestoppt, bevor du geantwortet hast",
   "ask.settled.expired": "Abgelaufen, bevor jemand geantwortet hat",
-  "ask.settled.answeredInChat": "Im Chat beantwortet",
   "ask.error": "Deine Antwort konnte nicht gesendet werden. Versuch es noch einmal.",
   "ask.detail.more": "Alles anzeigen",
   "inbox.action.closeQuestion": "Ohne Antwort schließen",

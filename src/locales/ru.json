@@ -6527,7 +6527,6 @@
   "ask.settled.answered": "Ваш ответ:",
   "ask.settled.stopped": "Остановлено до вашего ответа",
   "ask.settled.expired": "Истекло, пока никто не ответил",
-  "ask.settled.answeredInChat": "Ответ дан в чате",
   "ask.error": "Не удалось отправить ответ. Попробуйте ещё раз.",
   "ask.detail.more": "Показать всё",
   "inbox.action.closeQuestion": "Закрыть без ответа",

@@ -1063,7 +1063,6 @@
   "ask.settled.answered": "你回答了：",
   "ask.settled.stopped": "在你回答前已停止",
   "ask.settled.expired": "無人回答，已逾時",
-  "ask.settled.answeredInChat": "已在聊天中回答",
   "ask.error": "無法送出你的回答，請再試一次。",
   "ask.detail.more": "顯示全部",
   "inbox.action.closeQuestion": "不回答並關閉",

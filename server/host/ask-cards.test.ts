@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { HandoffView } from "../coordinator.ts";
 import type { Notification } from "../notify.ts";
 import type { RequestAuth } from "../request-auth.ts";
-import { restingOnPerson } from "../../shared/person-wait.ts";
 import type { BotRecord, Message } from "../store.ts";
 import { askToolName, createAskCards, type AskCardsDeps } from "./ask-cards.ts";
 
@@ -243,45 +242,6 @@ describe("nothing stale waits on the person", () => {
     w.cards.ownQuestion("ledger", "chat", "t1");
     expect(w.rows("chat").map((row) => [row.kind, row.text])).toEqual([["text", "I have two drafts."], ["options", "Which one do you like?"]]);
     expect(w.rows("chat")[1]!.card).toMatchObject({ subtitle: "Which one do you like?", requestType: "question", options: [] });
-  });
-});
-
-describe("a new line the person types instead of answering", () => {
-  const ask = (w: ReturnType<typeof world>, threadId: string, requestId: string, over: Partial<NonNullable<Message["card"]>> = {}, row: Partial<Message> = {}) =>
-    w.store.appendMessage(threadId, { role: "bot", kind: "options", text: "Should I?", ...row,
-      card: { title: "Your bot has a question", subtitle: "Should I?", options: ["Yes"], requestId, requestType: "question", ...over } });
-
-  it("settles the bot's earlier questions no turn waits on any more, so the conversation stops waiting on the person", () => {
-    const w = world();
-    ask(w, "chat", "req-1");
-    expect(restingOnPerson(w.rows("chat"))?.kind).toBe("question");
-    w.cards.typedOver("chat");
-    expect(w.rows("chat")[0]!.card).toMatchObject({ answered: "answer", answeredInChat: true });
-    expect(restingOnPerson(w.rows("chat"))).toBeUndefined();
-  });
-
-  it("settles a NEEDS INPUT card from the bot's own reply too", () => {
-    const w = world();
-    w.store.appendMessage("chat", { role: "bot", kind: "text", text: "NEEDS INPUT: Which one do you like?", turnId: "t1" });
-    w.cards.ownQuestion("ledger", "chat", "t1");
-    w.cards.typedOver("chat");
-    expect(w.rows("chat")[0]!.card).toMatchObject({ answered: "answer", answeredInChat: true });
-    expect(restingOnPerson(w.rows("chat"))).toBeUndefined();
-  });
-
-  it("leaves a card a turn or parked work still waits on, an approval, an inbox copy, a settled card and a room alone", () => {
-    const w = world({ live: ["req-live"] });
-    w.node({ id: "as_1", status: "waiting", question: QUESTION });
-    ask(w, "work", "req-live");
-    ask(w, "work", "needs-input-as_1-1");
-    ask(w, "work", "req-tool", { tool: "Bash", requestType: "permission" });
-    ask(w, "work", "req-copy", {}, { inbox: { botId: "ledger", threadId: "other", messageId: "x" } as unknown as Message["inbox"] });
-    ask(w, "work", "req-done", { answered: "answer", answeredText: "Yes" });
-    ask(w, "room", "req-room");
-    const before = [...w.rows("work"), ...w.rows("room")].map((row) => row.card);
-    w.cards.typedOver("work");
-    w.cards.typedOver("room");
-    expect([...w.rows("work"), ...w.rows("room")].map((row) => row.card)).toEqual(before);
   });
 });
 

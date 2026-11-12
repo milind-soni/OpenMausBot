@@ -7837,7 +7837,6 @@
   "ask.settled.answered": "Você respondeu:",
   "ask.settled.stopped": "Interrompido antes de você responder",
   "ask.settled.expired": "Expirou antes de alguém responder",
-  "ask.settled.answeredInChat": "Respondida no chat",
   "ask.error": "Não foi possível enviar a resposta. Tente novamente.",
   "ask.detail.more": "Mostrar tudo",
   "inbox.action.closeQuestion": "Fechar sem responder",
