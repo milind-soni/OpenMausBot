@@ -215,11 +215,11 @@ export function spawnContractDiff(previous: string, next: string): string[] {
     if (JSON.stringify(oldValue) === JSON.stringify(newValue)) continue;
     if (field === "mcpServers" && isObject(oldValue) && isObject(newValue)) {
       for (const name of Object.keys(oldValue)) {
-        if (!(name in newValue)) changed.push(`mcpServers:-${name}`);
+        if (!Object.hasOwn(newValue, name)) changed.push(`mcpServers:-${name}`);
         else if (JSON.stringify(oldValue[name]) !== JSON.stringify(newValue[name])) changed.push(`mcpServers:~${name}`);
       }
       for (const name of Object.keys(newValue)) {
-        if (!(name in oldValue)) changed.push(`mcpServers:+${name}`);
+        if (!Object.hasOwn(oldValue, name)) changed.push(`mcpServers:+${name}`);
       }
     } else {
       changed.push(field);

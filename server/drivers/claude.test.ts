@@ -450,6 +450,12 @@ describe("spawnContractDiff", () => {
     expect(spawnContractDiff("not json", key())).toEqual([]);
     expect(spawnContractDiff(key(), "{")).toEqual([]);
   });
+
+  it("names a server called constructor, which Object.prototype also has", () => {
+    const withConstructor = { constructor: { command: "node", args: ["ctor"] } };
+    expect(spawnContractDiff(key({ mcpServers: {} }), key({ mcpServers: withConstructor }))).toEqual(["mcpServers:+constructor"]);
+    expect(spawnContractDiff(key({ mcpServers: withConstructor }), key({ mcpServers: {} }))).toEqual(["mcpServers:-constructor"]);
+  });
 });
 
 describe("ClaudeDriver turns (fake CLI)", () => {
