@@ -25,6 +25,8 @@ let deleteCompletes = true;
 let resumeAnswers = new Set<string>();
 let deleteDelayMs = 0;
 let autoOn = true;
+const teamOwners = new Set<string>();
+const watched = new Set<string>();
 const deleteSpans: Array<{ boxId: string; start: number; end: number }> = [];
 const pendingDeletes = new Set<string>();
 
@@ -130,13 +132,14 @@ async function load() {
 function start() {
   told = [];
   health = healthModule.createBoatHealth(now);
-  recovery = recoveryModule.createBoatRecovery({ cfg: () => cfg, tell: (owner, line) => told.push([owner, line]), log: () => {}, file, now, health, pollMs: 5, autoReplace: () => autoOn });
+  recovery = recoveryModule.createBoatRecovery({ cfg: () => cfg, tell: (owner, line) => told.push([owner, line]), log: () => {}, file, now, health, pollMs: 5,
+    autoReplace: () => autoOn, eligible: (owner) => !teamOwners.has(owner), personActive: (owner) => watched.has(owner) });
 }
 
 beforeEach(async () => {
   boxes = []; requests = []; commandStatus = new Map(); boxReadStatus = new Map(); listStatus = 200; deleteCompletes = true; resumeAnswers = new Set();
   pendingDeletes.clear();
-  deleteDelayMs = 0; autoOn = true; deleteSpans.length = 0;
+  deleteDelayMs = 0; autoOn = true; deleteSpans.length = 0; teamOwners.clear(); watched.clear();
   at += 24 * 60 * 60_000;
   file = join(mkdtempSync(join(tmpdir(), "omb-repl-")), "boat-replacements.json");
   await load();
@@ -171,8 +174,18 @@ const stopsAnswering = (boxId: string) => {
   health.unanswered(boxId);
 };
 
+const stops = () => requests.filter((request) => request.method === "POST" && request.path.endsWith("/stop"));
+const DEAD_CONFIRM = 31 * 60_000;
+/** The provider's `error` must be read twice, half an hour apart, before the computer is deleted by itself. */
+async function deadTwice(botId: string) {
+  const before = deletes().length;
+  await expect(boat.provisionBoat(cfg, botId, "Bot")).rejects.toThrow(words.CLOUD_COMPUTER_DEAD_WAITING);
+  expect(deletes()).toHaveLength(before);
+  at += DEAD_CONFIRM;
+}
+
 describe("a cloud computer the provider reports in error", () => {
-  it("is never shown or used as ready, is replaced once, and the bot and the person are told once", async () => {
+  it("is never shown or used as ready, is replaced once it stays in error, and the bot and the person are told once", async () => {
     const { botId, box } = await botWith("error", { error: "machine unreachable: 278 consecutive /health failures" });
     expect(await boat.findBoat(cfg, botId)).toBeNull();
     expect(boat.deadBoatOf(botId)).toEqual({ boxId: box.id, name: box.name });
@@ -180,18 +193,29 @@ describe("a cloud computer the provider reports in error", () => {
     expect((await boat.boatStatus(cfg, botId)).box).toBeNull();
     await expect(boat.joinBoat(cfg, botId)).rejects.toThrow(/no computer yet/);
 
+    await deadTwice(botId);
+    expect(told).toEqual([[botId, "needsPerson"]]);
     await expect(boat.provisionBoat(cfg, botId, "Bot")).rejects.toMatchObject({ code: journal.BOAT_DELETION_FINISHED });
     expect(deletes()).toHaveLength(1);
     expect(deletes()[0]!.headers["x-ascii-confirm-delete"]).toBe(box.id);
-    expect(told).toEqual([[botId, "replaced"]]);
+    expect(told).toEqual([[botId, "needsPerson"], [botId, "replaced"]]);
     expect(recovery.status(botId)?.state).toBe("replaced");
 
     const created = await provisioned(botId);
     expect(created.boxId).not.toBe(box.id);
     expect(recovery.notice(created.boxId)).toBe(words.CLOUD_COMPUTER_REPLACED);
     expect(recovery.notice(created.boxId)).toBeNull();
-    expect(told).toEqual([[botId, "replaced"]]);
+    expect(told).toHaveLength(2);
     expect(deletes()).toHaveLength(1);
+  });
+
+  it("is not deleted while the provider's list fails", async () => {
+    const { botId } = await botWith("error");
+    await boat.findBoat(cfg, botId);
+    await deadTwice(botId);
+    listStatus = 502;
+    await expect(boat.provisionBoat(cfg, botId, "Bot")).rejects.toThrow();
+    expect(deletes()).toHaveLength(0);
   });
 
   it("is kept when it answered a command moments ago", async () => {
@@ -206,19 +230,37 @@ describe("a cloud computer the provider reports in error", () => {
   it("is replaced at most once an hour per bot, then left and said so", async () => {
     const { botId } = await botWith("error");
     await boat.findBoat(cfg, botId);
+    await deadTwice(botId);
     await expect(boat.provisionBoat(cfg, botId, "Bot")).rejects.toMatchObject({ code: journal.BOAT_DELETION_FINISHED });
-    const second = await boat.provisionBoat(cfg, botId, "Bot");
+    const second = await provisioned(botId);
     boxes.find((box) => box.id === second.boxId)!.state = "error";
-    at += 20 * 60_000;
+    at += 60_000;
     expect(await boat.findBoat(cfg, botId)).toBeNull();
+    await deadTwice(botId);
     await expect(boat.provisionBoat(cfg, botId, "Bot")).rejects.toThrow(/at most once an hour/);
     expect(deletes()).toHaveLength(1);
-    expect(told).toEqual([[botId, "replaced"], [botId, "capped"]]);
+    expect(told.filter(([, line]) => line === "capped")).toHaveLength(1);
     await expect(boat.provisionBoat(cfg, botId, "Bot")).rejects.toThrow(/at most once an hour/);
-    expect(told).toHaveLength(2);
+    expect(told.filter(([, line]) => line === "capped")).toHaveLength(1);
 
-    at += 41 * 60_000;
+    at += 30 * 60_000;
     await expect(boat.provisionBoat(cfg, botId, "Bot")).rejects.toMatchObject({ code: journal.BOAT_DELETION_FINISHED });
+    expect(deletes()).toHaveLength(2);
+  });
+
+  it("is deleted by itself at most once an hour for the whole installation, whoever's computer it is", async () => {
+    const first = await botWith("error");
+    const second = await botWith("error");
+    await boat.findBoat(cfg, first.botId);
+    await boat.findBoat(cfg, second.botId);
+    await expect(boat.provisionBoat(cfg, first.botId, "Bot")).rejects.toThrow(words.CLOUD_COMPUTER_DEAD_WAITING);
+    await expect(boat.provisionBoat(cfg, second.botId, "Bot")).rejects.toThrow(words.CLOUD_COMPUTER_DEAD_WAITING);
+    at += DEAD_CONFIRM;
+    await expect(boat.provisionBoat(cfg, first.botId, "Bot")).rejects.toMatchObject({ code: journal.BOAT_DELETION_FINISHED });
+    await expect(boat.provisionBoat(cfg, second.botId, "Bot")).rejects.toThrow(words.CLOUD_COMPUTER_NEEDS_PERSON);
+    expect(deletes().map((request) => request.headers["x-ascii-confirm-delete"])).toEqual([first.box.id]);
+    at += 61 * 60_000;
+    await expect(boat.provisionBoat(cfg, second.botId, "Bot")).rejects.toMatchObject({ code: journal.BOAT_DELETION_FINISHED });
     expect(deletes()).toHaveLength(2);
   });
 
@@ -226,8 +268,9 @@ describe("a cloud computer the provider reports in error", () => {
     deleteCompletes = false;
     const { botId, box } = await botWith("error");
     await boat.findBoat(cfg, botId);
+    await deadTwice(botId);
     await expect(boat.provisionBoat(cfg, botId, "Bot")).rejects.toMatchObject({ code: journal.BOAT_DELETING });
-    expect(told).toEqual([[botId, "replaced"]]);
+    expect(told).toEqual([[botId, "needsPerson"], [botId, "replaced"]]);
 
     recovery.close();
     await load();
@@ -241,10 +284,13 @@ describe("a cloud computer the provider reports in error", () => {
     expect(told).toEqual([]);
   });
 
-  it("finishes a replacement interrupted before its delete was sent, without counting it twice", async () => {
+  it("keeps every guard for a replacement recorded before its delete was sent, without counting it twice", async () => {
     const { botId, box } = await botWith("error");
     writeFileSync(file, JSON.stringify([{ owner: botId, boxId: box.id, at: now() - 60_000 }]));
+    recovery.close();
+    start();
     await boat.findBoat(cfg, botId);
+    await deadTwice(botId);
     await expect(boat.provisionBoat(cfg, botId, "Bot")).rejects.toMatchObject({ code: journal.BOAT_DELETION_FINISHED });
     expect(deletes()).toHaveLength(1);
     const created = await provisioned(botId);
@@ -263,7 +309,7 @@ describe("a cloud computer that says it is ready but does not answer", () => {
     expect(recovery.refusal(box.id, "before")).toBe(words.CLOUD_COMPUTER_NOT_RESPONDING);
     await until(() => recovery.status(botId)?.state === "replaced");
     const order = requests.filter((request) => request.path.startsWith(`/boxes/${box.id}`)).map((request) => `${request.method} ${request.path.replace(`/boxes/${box.id}`, "") || "/"}`);
-    expect(order.indexOf("POST /stop")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("POST /commands")).toBeLessThan(order.indexOf("POST /stop"));
     expect(order.indexOf("POST /resume")).toBeGreaterThan(order.indexOf("POST /stop"));
     expect(order.indexOf("DELETE /")).toBeGreaterThan(order.indexOf("POST /resume"));
     expect(deletes().map((request) => request.headers["x-ascii-confirm-delete"])).toEqual([box.id]);
@@ -274,31 +320,47 @@ describe("a cloud computer that says it is ready but does not answer", () => {
 
   it("is kept when the restart brings it back, and the bot hears that once", async () => {
     const { botId, box } = await botWith("ready");
+    const witness = await botWith("ready");
     commandStatus.set(box.id, 502);
     resumeAnswers.add(box.id);
     await boat.findBoat(cfg, botId);
     stopsAnswering(box.id);
+    health.answered(witness.box.id);
     await until(() => recovery.status(botId)?.state === "restarted");
     expect(deletes()).toHaveLength(0);
     expect(told).toEqual([[botId, "restarted"]]);
     expect(recovery.notice(box.id)).toBe(words.CLOUD_COMPUTER_RESTARTED);
     expect(recovery.notice(box.id)).toBeNull();
     expect(recovery.refusal(box.id, "before")).toBeNull();
+    expect(recovery.stuck(botId)).toBe(false);
   });
 
-  it("is never deleted when no other computer answers: the provider itself may be down", async () => {
+  it("is not stopped when a fresh probe answers: three failed probes may have been this home's own outage", async () => {
+    const { botId, box } = await botWith("ready");
+    const witness = await botWith("ready");
+    await boat.findBoat(cfg, botId);
+    stopsAnswering(box.id);
+    health.answered(witness.box.id);
+    await until(() => recovery.status(botId) === null && requests.some((request) => request.path === `/boxes/${box.id}/commands`));
+    expect(stops()).toHaveLength(0);
+    expect(deletes()).toHaveLength(0);
+  });
+
+  it("is neither restarted nor deleted when no other computer answers: it waits for the person", async () => {
     const { botId, box } = await botWith("ready");
     commandStatus.set(box.id, 502);
     await boat.findBoat(cfg, botId);
     stopsAnswering(box.id);
-    await until(() => recovery.status(botId)?.state === "unreachable");
+    await until(() => recovery.status(botId)?.state === "needs-person");
+    expect(stops()).toHaveLength(0);
     expect(deletes()).toHaveLength(0);
-    expect(told).toEqual([[botId, "unreachable"]]);
-    expect(recovery.refusal(box.id, "after")).toBe(words.CLOUD_COMPUTER_UNREACHABLE);
+    expect(told).toEqual([[botId, "needsPerson"]]);
+    expect(recovery.refusal(box.id, "after")).toBe(words.CLOUD_COMPUTER_NEEDS_PERSON);
     expect(recovery.refusal(box.id, "before")).toBeNull();
+    expect(recovery.stuck(botId)).toBe(true);
   });
 
-  it("is never deleted while the provider's list fails, even with another computer answering", async () => {
+  it("is neither restarted nor deleted while the provider's list fails", async () => {
     const { botId, box } = await botWith("ready");
     const witness = await botWith("ready");
     commandStatus.set(box.id, 502);
@@ -307,7 +369,9 @@ describe("a cloud computer that says it is ready but does not answer", () => {
     stopsAnswering(box.id);
     health.answered(witness.box.id);
     await until(() => recovery.status(botId)?.state === "unreachable");
+    expect(stops()).toHaveLength(0);
     expect(deletes()).toHaveLength(0);
+    expect(recovery.refusal(box.id, "after")).toBe(words.CLOUD_COMPUTER_UNREACHABLE);
   });
 
   it("is left alone, not even restarted, while the provider cannot say what it is", async () => {
@@ -316,18 +380,119 @@ describe("a cloud computer that says it is ready but does not answer", () => {
     boxReadStatus.set(box.id, 502);
     stopsAnswering(box.id);
     await until(() => recovery.status(botId)?.state === "unreachable");
-    expect(requests.some((request) => request.path.endsWith("/stop"))).toBe(false);
+    expect(stops()).toHaveLength(0);
     expect(deletes()).toHaveLength(0);
   });
 
-  it("is replaced at once, without a restart, once the provider says error", async () => {
+  it("is not restarted or deleted while a person has its desktop open or used it in the last ten minutes", async () => {
     const { botId, box } = await botWith("ready");
+    const witness = await botWith("ready");
+    commandStatus.set(box.id, 502);
+    await boat.findBoat(cfg, botId);
+    watched.add(botId);
+    stopsAnswering(box.id);
+    health.answered(witness.box.id);
+    await until(() => recovery.status(botId)?.state === "needs-person");
+    expect(stops()).toHaveLength(0);
+    expect(deletes()).toHaveLength(0);
+
+    const other = await botWith("ready");
+    commandStatus.set(other.box.id, 502);
+    await boat.findBoat(cfg, other.botId);
+    stopsAnswering(other.box.id);
+    health.personUsed(other.box.id);
+    health.answered(witness.box.id);
+    await until(() => recovery.status(other.botId)?.state === "needs-person");
+    expect(stops()).toHaveLength(0);
+    expect(deletes()).toHaveLength(0);
+  });
+
+  it("restarts at most one computer of the installation by itself in ten minutes", async () => {
+    const first = await botWith("ready");
+    const second = await botWith("ready");
+    const witness = await botWith("ready");
+    for (const { botId, box } of [first, second]) { commandStatus.set(box.id, 502); await boat.findBoat(cfg, botId); }
+    for (const box of [first.box, second.box]) health.unanswered(box.id);
+    at += 30_000;
+    for (const box of [first.box, second.box]) health.unanswered(box.id);
+    at += 11 * 60_000;
+    health.answered(witness.box.id);
+    for (const box of [first.box, second.box]) health.unanswered(box.id);
+    const settled = (botId: string) => ["needs-person", "replaced", "capped"].includes(recovery.status(botId)?.state ?? "");
+    await until(() => settled(first.botId) && settled(second.botId));
+    expect(stops()).toHaveLength(1);
+  });
+
+  it("is replaced only once the provider's error is seen twice half an hour apart, and without a restart", async () => {
+    const { botId, box } = await botWith("ready");
+    const witness = await botWith("ready");
     await boat.findBoat(cfg, botId);
     box.state = "error";
     stopsAnswering(box.id);
+    await until(() => recovery.status(botId)?.state === "needs-person");
+    expect(deletes()).toHaveLength(0);
+    at += DEAD_CONFIRM;
+    health.answered(witness.box.id);
+    health.unanswered(box.id);
     await until(() => recovery.status(botId)?.state === "replaced");
-    expect(requests.some((request) => request.path.endsWith("/stop"))).toBe(false);
+    expect(stops()).toHaveLength(0);
     expect(deletes()).toHaveLength(1);
+  });
+});
+
+describe("a team's shared cloud computer", () => {
+  for (const on of [false, true]) {
+    it(`is never stopped or deleted by itself, with automatic replacement ${on ? "on" : "off"}`, async () => {
+      autoOn = on;
+      const { botId, box } = await botWith("ready");
+      const witness = await botWith("ready");
+      teamOwners.add(botId);
+      commandStatus.set(box.id, 502);
+      await boat.findBoat(cfg, botId);
+      stopsAnswering(box.id);
+      health.answered(witness.box.id);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(recovery.status(botId)?.state).toBe("needs-person");
+      expect(recovery.refusal(box.id, "after")).toBe(words.CLOUD_COMPUTER_TEAM_NOT_RESPONDING);
+
+      box.state = "error";
+      expect(await boat.findBoat(cfg, botId)).toBeNull();
+      at += DEAD_CONFIRM;
+      for (let i = 0; i < 2; i++) await expect(boat.provisionBoat(cfg, botId, "Team")).rejects.toThrow(words.CLOUD_COMPUTER_TEAM_NOT_RESPONDING);
+      expect(stops()).toHaveLength(0);
+      expect(deletes()).toHaveLength(0);
+      expect(told).toEqual([[botId, "teamNotResponding"]]);
+    });
+  }
+});
+
+describe("what counts as an answer", () => {
+  it("is only the computer's own: a refusal neither answers nor fails, so it never stands witness", async () => {
+    const { box } = await botWith("ready");
+    const other = await botWith("ready");
+    commandStatus.set(other.box.id, 409);
+    const refused = await boat.runCommand(cfg, other.box.id, "true");
+    expect(refused.unanswered).toBeUndefined();
+    expect(healthModule.boatHealth.answeredWithin(other.box.id, 60_000)).toBe(false);
+    expect(healthModule.boatHealth.otherAnsweredWithin(box.id, 60_000)).toBe(false);
+    expect(await boat.probeBoat(cfg, other.box.id)).toBeNull();
+    commandStatus.delete(other.box.id);
+    await boat.runCommand(cfg, other.box.id, "true");
+    expect(healthModule.boatHealth.otherAnsweredWithin(box.id, 60_000)).toBe(true);
+  });
+});
+
+describe("the desktop link", () => {
+  it("still opens while a computer is marked not responding, so the person can save files first", async () => {
+    const { botId, box } = await botWith("ready");
+    await boat.findBoat(cfg, botId);
+    const realNow = Date.now();
+    const clock = vi.spyOn(Date, "now");
+    try {
+      for (const offset of [0, 30_000, 70_000]) { clock.mockReturnValue(realNow + offset); healthModule.boatHealth.unanswered(box.id); }
+    } finally { clock.mockRestore(); }
+    expect(healthModule.boatHealth.notRespondingSince(box.id)).not.toBeNull();
+    expect((await boat.joinReadyBoat(cfg, botId)).joinUrl).toBe("https://desktop.test/view");
   });
 });
 
@@ -389,9 +554,8 @@ describe("the computer panel's Restart computer and Replace computer", () => {
 
 describe("a start the Admin refuses right after a replacement", () => {
   it("tells the bot the computer is being replaced, not that the plan is full", async () => {
-    const { botId } = await botWith("error");
-    await boat.findBoat(cfg, botId);
-    await expect(boat.provisionBoat(cfg, botId, "Bot")).rejects.toMatchObject({ code: journal.BOAT_DELETION_FINISHED });
+    const { botId } = await botWith("ready");
+    await recovery.replace(botId);
     const refusal = boat.boatRefusal(429, "boat create", { ok: false, code: "limit_reached", reason: "at_once", limit: 1, used: 1 }, true);
     expect(recovery.claimSentence(botId, refusal)).toBe(words.CLOUD_COMPUTER_NOT_RESPONDING);
     expect(recovery.claimSentence("another-bot", refusal)).toBeUndefined();
@@ -413,7 +577,7 @@ describe("with automatic replacement off, the default", () => {
   it("never deletes a computer the provider reports in error: the bot and the person hear it once", async () => {
     const { botId } = await botWith("error");
     await boat.findBoat(cfg, botId);
-    for (let i = 0; i < 3; i++) await expect(boat.provisionBoat(cfg, botId, "Bot")).rejects.toThrow(words.CLOUD_COMPUTER_NEEDS_PERSON);
+    for (let i = 0; i < 3; i++) { await expect(boat.provisionBoat(cfg, botId, "Bot")).rejects.toThrow(words.CLOUD_COMPUTER_NEEDS_PERSON); at += DEAD_CONFIRM; }
     expect(deletes()).toHaveLength(0);
     expect(requests.some((request) => request.method === "POST" && request.path === "/boxes")).toBe(false);
     expect(told).toEqual([[botId, "needsPerson"]]);
@@ -428,15 +592,17 @@ describe("with automatic replacement off, the default", () => {
     stopsAnswering(box.id);
     health.answered(witness.box.id);
     await until(() => recovery.status(botId)?.state === "needs-person");
-    expect(requests.some((request) => request.path === `/boxes/${box.id}/stop`)).toBe(true);
+    expect(stops().map((request) => request.path)).toEqual([`/boxes/${box.id}/stop`]);
     expect(requests.some((request) => request.path === `/boxes/${box.id}/resume`)).toBe(true);
     expect(deletes()).toHaveLength(0);
     expect(told).toEqual([[botId, "needsPerson"]]);
     expect(recovery.refusal(box.id, "after")).toBe(words.CLOUD_COMPUTER_NEEDS_PERSON);
     expect(recovery.refusal(box.id, "before")).toBeNull();
     at += 6 * 60_000;
+    health.answered(witness.box.id);
     health.unanswered(box.id);
-    await until(() => recovery.status(botId)?.state === "needs-person" && !requests.slice(-1)[0]?.path.endsWith("/commands"));
+    expect(recovery.status(botId)?.state).toBe("not-responding");
+    await until(() => recovery.status(botId)?.state === "needs-person");
     expect(deletes()).toHaveLength(0);
     expect(told).toEqual([[botId, "needsPerson"]]);
   });
@@ -464,14 +630,18 @@ describe("with automatic replacement off, the default", () => {
 });
 
 describe("deletes from this installation", () => {
-  it("are sent one at a time, whoever asks for them", async () => {
+  it("are sent one at a time, whoever asks for them, with each one fenced on disk before it waits", async () => {
     deleteDelayMs = 300;
     const first = await botWith("ready");
     const second = await botWith("ready");
-    await Promise.all([recovery.replace(first.botId), recovery.replace(second.botId)]);
+    await boat.findBoat(cfg, first.botId);
+    await boat.findBoat(cfg, second.botId);
+    const both = Promise.all([recovery.replace(first.botId), recovery.replace(second.botId)]);
+    await until(() => deletes().length === 1);
+    expect(journal.getBoatDeletion(second.box.id)).toBeTruthy();
+    await both;
     expect(deleteSpans).toHaveLength(2);
     const [a, b] = deleteSpans;
     expect(b!.start).toBeGreaterThanOrEqual(a!.end);
   });
 });
-

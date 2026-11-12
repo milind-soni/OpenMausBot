@@ -7760,6 +7760,7 @@
   "server.cloudComputer.capped": "{name}의 클라우드 컴퓨터가 교체된 지 한 시간 안에 다시 응답하지 않아 MausBot이 그대로 두었어요. 컴퓨터 패널의 컴퓨터 교체로 한 번 더 시도할 수 있어요.",
   "server.cloudComputer.unreachable": "지금은 클라우드 컴퓨터에 연결할 수 없어요. MausBot이 {name}의 클라우드 컴퓨터를 그대로 두고 다시 확인할게요.",
   "server.cloudComputer.needsPerson": "{name}의 클라우드 컴퓨터가 응답하지 않아요. 컴퓨터 패널의 컴퓨터 교체로 새 컴퓨터를 받을 수 있어요. 이전 컴퓨터에만 있는 파일은 사라져요.",
+  "server.cloudComputer.teamNotResponding": "{name}이(가) 응답하지 않아요. 설정 → 컴퓨터에서 삭제한 뒤 팀 지도에서 다시 만드세요. 그 컴퓨터에만 있는 파일은 사라져요.",
   "computer.recovery.notResponding": "이 클라우드 컴퓨터가 응답하지 않아요. MausBot이 확인한 뒤 다시 시작하거나 교체할게요.",
   "computer.recovery.restarting": "이 클라우드 컴퓨터가 응답하지 않아요. MausBot이 다시 시작하는 중이에요.",
   "computer.recovery.replacing": "이 클라우드 컴퓨터가 응답하지 않아요. MausBot이 교체하는 중이에요.",

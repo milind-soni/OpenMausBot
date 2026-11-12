@@ -10266,6 +10266,7 @@
   "server.cloudComputer.capped": "{name} 的雲端電腦在被取代後一小時內又停止回應，所以 MausBot 沒有再動它。在電腦面板中按「取代電腦」可以再試一次。",
   "server.cloudComputer.unreachable": "目前無法連線到雲端電腦。MausBot 保留了 {name} 的雲端電腦，稍後會再檢查。",
   "server.cloudComputer.needsPerson": "{name} 的雲端電腦停止回應了。在電腦面板中按「取代電腦」可換一台新的；只存在舊電腦上的檔案會遺失。",
+  "server.cloudComputer.teamNotResponding": "{name} 沒有回應。請在「設定 → 電腦」中刪除它，然後在團隊地圖中重新建立；只存在它上面的檔案會遺失。",
   "computer.recovery.notResponding": "這台雲端電腦沒有回應。MausBot 正在檢查，並會重新啟動或取代它。",
   "computer.recovery.restarting": "這台雲端電腦沒有回應。MausBot 正在重新啟動它。",
   "computer.recovery.replacing": "這台雲端電腦沒有回應。MausBot 正在取代它。",

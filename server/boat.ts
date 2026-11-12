@@ -9,7 +9,7 @@ import { loadEnvironmentId } from "./environment.ts";
 import { boatCredential, boatProviderApi, type ServiceCredential } from "./included-services.ts";
 import { relayBody, relayPath } from "./boat-relay.ts";
 import { boatHealth, DEAD_COMPUTER, unansweredStatus } from "./boat-health.ts";
-import { CLOUD_COMPUTER_NO_ANSWER, CLOUD_COMPUTER_NOT_RESPONDING } from "../shared/cloud-computer-recovery.ts";
+import { CLOUD_COMPUTER_NO_ANSWER } from "../shared/cloud-computer-recovery.ts";
 import { cloudLimitFromBody, type CloudLimit } from "../shared/place-view.ts";
 import {
   blockedUntilBoatFinishes,
@@ -300,13 +300,12 @@ async function confirmAcceptedBoatDeletion(
   return reconcileRecordedBoatDeletion(cfg, next, pollDelaysMs, true);
 }
 
-/** One delete in flight per installation, whoever asked: a burst of deletes is never sent to the provider at once. */
+/** One DELETE in flight per installation, whoever asked: a burst of deletes never reaches the provider at once. */
 let deletionInFlight: Promise<unknown> = Promise.resolve();
-export const requestRecordedBoatDeletion = (...args: Parameters<typeof sendRecordedBoatDeletion>): ReturnType<typeof sendRecordedBoatDeletion> => {
-  const run = deletionInFlight.then(() => sendRecordedBoatDeletion(...args)); deletionInFlight = run.catch(() => undefined); return run; };
+const oneDeleteAtATime = <T>(send: () => Promise<T>): Promise<T> => { const run = deletionInFlight.then(send); deletionInFlight = run.catch(() => undefined); return run; };
 
 /** Send DELETE only after the immutable target is on disk. */
-async function sendRecordedBoatDeletion(
+export async function requestRecordedBoatDeletion(
   cfg: AppConfig,
   identity: { boxId: string; name: string; ownerBotId: string | null },
   pollDelaysMs: readonly number[] = BOAT_DELETE_OPERATION_POLL_DELAYS_MS,
@@ -314,7 +313,7 @@ async function sendRecordedBoatDeletion(
   const deletion = prepareBoatDeletion(identity);
   let removed: Awaited<ReturnType<typeof boatJson>>;
   try {
-    removed = await boatJson(cfg, `/sandboxes/${identity.boxId}`, { method: "DELETE", headers: { "X-Ascii-Confirm-Delete": identity.boxId }, signal: AbortSignal.timeout(60_000) });
+    removed = await oneDeleteAtATime(() => boatJson(cfg, `/sandboxes/${identity.boxId}`, { method: "DELETE", headers: { "X-Ascii-Confirm-Delete": identity.boxId }, signal: AbortSignal.timeout(60_000) }));
   } catch (error) {
     throw Object.assign(
       new Error("Could not confirm whether boat.dev accepted the delete. The computer was kept fenced; retry Delete to reconcile it"),
@@ -358,20 +357,21 @@ export async function runCommand(cfg: AppConfig, boxId: string, command: string,
   const res = await boatFetch(cfg, `/sandboxes/${boxId}/commands`, { method: "POST", body: JSON.stringify({ command }),
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs) }).catch((error: unknown) => { suspect(); throw error; });
   const body: any = await res.json().catch(() => null), unanswered = unansweredStatus(res.status);
-  if (unanswered) suspect(); else if (!probe) boatHealth.answered(boxId);
+  // Only the computer's own answer counts: a refusal (404, 409, 429, 401, 402) says nothing about the machine.
+  if (unanswered) suspect(); else if (!probe && res.ok && typeof body?.exitCode === "number") boatHealth.answered(boxId);
   return {
     ok: res.ok && body?.exitCode === 0, exitCode: body?.exitCode ?? null, stdout: body?.stdout ?? "",
     stderr: body?.stderr ?? "", ...(body?.timedOut === true ? { timedOut: true as const } : {}), ...(unanswered ? { unanswered: true as const } : {}),
   };
 }
 
-export const probeBoat = (cfg: AppConfig, boxId: string): Promise<boolean> =>
-  runCommand(cfg, boxId, "true", { timeoutMs: DEAD_COMPUTER.probeTimeoutMs, probe: true }).then((out) => !out.unanswered, () => false);
+export const probeBoat = (cfg: AppConfig, boxId: string): Promise<boolean | null> =>
+  runCommand(cfg, boxId, "true", { timeoutMs: DEAD_COMPUTER.probeTimeoutMs, probe: true }).then((out) => out.ok ? true : out.unanswered ? false : null, () => false);
 
 // Boat desktop access: VNC (POST /desktop?vnc=1) first, a plain WebSocket that survives P2P-blocking networks and answers
 // {provisioning:true} until ready; WebRTC (POST /desktop) is a STUN-only fallback that can hang. The sandbox's desktopUrl is not usable alone.
 async function mintDesktopUrl(cfg: AppConfig, boxId: string, { vncBudgetMs = 60_000, requestMs = 30_000 } = {}) {
-  assertBoatNotDeleting(boxId); if (boatHealth.notRespondingSince(boxId) !== null) throw Object.assign(new Error(CLOUD_COMPUTER_NOT_RESPONDING), { status: 409 });
+  assertBoatNotDeleting(boxId);
   const t0 = Date.now();
   while (Date.now() - t0 < vncBudgetMs) {
     assertBoatNotDeleting(boxId);
@@ -1141,7 +1141,7 @@ export async function joinBoat(cfg: AppConfig, botId: string) {
   const ready = await waitReady(cfg, boat.id);
   if (!ready) throw new Error("the cloud computer did not wake in time — try again");
   // Archive/resume keeps disk but not processes; the sandbox restarts its own driver daemon.
-  return { joinUrl: await mintDesktopUrl(cfg, boat.id), state: ready.state ?? null };
+  boatHealth.personUsed(boat.id); return { joinUrl: await mintDesktopUrl(cfg, boat.id), state: ready.state ?? null };
 }
 
 /** The only join path allowed while a bot turn is active: no lifecycle or guest-process change. */
@@ -1155,7 +1155,7 @@ export async function joinReadyBoat(cfg: AppConfig, botId: string) {
       { status: 409 },
     );
   }
-  return { joinUrl: await mintDesktopUrl(cfg, boat.id), state: boat.state ?? null };
+  boatHealth.personUsed(boat.id); return { joinUrl: await mintDesktopUrl(cfg, boat.id), state: boat.state ?? null };
 }
 
 export async function sleepBoat(cfg: AppConfig, botId: string) {

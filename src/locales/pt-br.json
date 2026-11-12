@@ -10606,6 +10606,7 @@
   "server.cloudComputer.capped": "O computador na nuvem de {name} parou de responder de novo menos de uma hora depois de ser substituído, então o MausBot o deixou como está. Substituir computador, no painel do computador, tenta mais uma vez.",
   "server.cloudComputer.unreachable": "Os computadores na nuvem não podem ser acessados agora. O MausBot manteve o computador na nuvem de {name} e vai verificá-lo de novo.",
   "server.cloudComputer.needsPerson": "O computador na nuvem de {name} parou de responder. Substituir computador, no painel do computador, dá um novo; os arquivos que estão só no computador antigo são perdidos.",
+  "server.cloudComputer.teamNotResponding": "{name} não está respondendo. Exclua em Configurações → Computadores e crie de novo pelo mapa da equipe; os arquivos que estão só nele são perdidos.",
   "computer.recovery.notResponding": "Este computador na nuvem não está respondendo. O MausBot está verificando e vai reiniciá-lo ou substituí-lo.",
   "computer.recovery.restarting": "Este computador na nuvem não está respondendo. O MausBot está reiniciando ele.",
   "computer.recovery.replacing": "Este computador na nuvem não está respondendo. O MausBot está substituindo ele.",

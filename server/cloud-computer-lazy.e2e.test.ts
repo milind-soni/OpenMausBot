@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONTROL_WAITED } from "./control-client.ts";
-import { CLOUD_COMPUTER_NEEDS_PERSON, CLOUD_COMPUTER_REPLACED, CLOUD_COMPUTER_REPLACED_BY_PERSON } from "../shared/cloud-computer-recovery.ts";
+import { CLOUD_COMPUTER_DEAD_WAITING, CLOUD_COMPUTER_NEEDS_PERSON, CLOUD_COMPUTER_REPLACED, CLOUD_COMPUTER_REPLACED_BY_PERSON } from "../shared/cloud-computer-recovery.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { openSse, type SseRecorder } from "./testing/sse.ts";
@@ -234,6 +234,8 @@ describe("a cloud computer starts only when the bot uses it", () => {
         OMB_BOAT_API: `${relayBase}/own-key-must-not-be-used`,
         OMB_CLOUD_BOAT_URL: `${relayBase}/relay/api/box/v1`,
         OMB_CLOUD_BOAT_TOKEN: INCLUDED,
+        // The provider's error is still read twice before a computer is deleted; here the reads need not be half an hour apart.
+        OMB_CLOUD_COMPUTER_DEAD_CONFIRM_MS: "0",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -390,6 +392,12 @@ describe("a cloud computer starts only when the bot uses it", () => {
     const status = await apiOk("GET", `/api/bots/${bot.id}/computer?threadId=${bot.threadId}`);
     expect(status.box).toBeNull();
 
+    // The first read of the provider's error only notes it; the next start, after a second read, replaces the computer.
+    const first = await startTurn(bot.id, "Look");
+    const noted = await callThroughWait(first);
+    expect(noted.body.result.content[0].text).toContain(CLOUD_COMPUTER_DEAD_WAITING);
+    expect(requests.slice(before).filter(request => request.method === "DELETE")).toEqual([]);
+    await finish(bot.id);
     const next = await startTurn(bot.id, "Look again");
     const replaced = await callThroughWait(next);
     expect(replaced.body.result.isError, JSON.stringify(replaced.body)).toBeFalsy();
@@ -401,9 +409,10 @@ describe("a cloud computer starts only when the bot uses it", () => {
     expect(creates()).toBe(made + 1);
     await finish(bot.id);
 
+    const waiting = "Stranded's cloud computer stopped responding. Replace computer in the computer panel gives it a new one; files only on the old computer are lost.";
     const line = "Stranded's cloud computer stopped responding, so MausBot replaced it with a new one. Files that were only on the old computer are gone.";
-    expect(await recoveryLines(bot.id)).toEqual([`recovery: ${line}`]);
-    expect(inboxNotices(bot.id)).toEqual([line]);
+    expect(await recoveryLines(bot.id)).toEqual([`recovery: ${waiting}`, `recovery: ${line}`]);
+    expect(inboxNotices(bot.id)).toEqual([waiting, line]);
     await apiOk("PATCH", "/api/config", { features: { cloudComputerAutoReplace: false } });
     await apiOk("DELETE", `/api/bots/${bot.id}`);
   }, 60_000);

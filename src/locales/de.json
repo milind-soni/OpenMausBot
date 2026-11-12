@@ -3946,6 +3946,7 @@
   "server.cloudComputer.capped": "Der Cloud-Computer von {name} hat innerhalb einer Stunde nach dem Ersetzen wieder nicht reagiert, deshalb hat MausBot ihn so gelassen. „Computer ersetzen“ im Computer-Bereich versucht es noch einmal.",
   "server.cloudComputer.unreachable": "Cloud-Computer sind gerade nicht erreichbar. MausBot hat den Cloud-Computer von {name} behalten und prüft ihn erneut.",
   "server.cloudComputer.needsPerson": "Der Cloud-Computer von {name} reagiert nicht mehr. „Computer ersetzen“ im Computer-Bereich gibt einen neuen; Dateien, die nur auf dem alten Computer liegen, gehen verloren.",
+  "server.cloudComputer.teamNotResponding": "{name} reagiert nicht. Löschen Sie ihn unter Einstellungen → Computer und erstellen Sie ihn dann in der Team-Übersicht neu; Dateien, die nur darauf liegen, gehen verloren.",
   "computer.recovery.notResponding": "Dieser Cloud-Computer reagiert nicht. MausBot prüft ihn und startet ihn neu oder ersetzt ihn.",
   "computer.recovery.restarting": "Dieser Cloud-Computer reagiert nicht. MausBot startet ihn neu.",
   "computer.recovery.replacing": "Dieser Cloud-Computer reagiert nicht. MausBot ersetzt ihn.",

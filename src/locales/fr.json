@@ -3783,6 +3783,7 @@
   "server.cloudComputer.capped": "L'ordinateur cloud de {name} a de nouveau cessé de répondre moins d'une heure après avoir été remplacé, alors MausBot l'a laissé tel quel. Remplacer l'ordinateur, dans le panneau de l'ordinateur, réessaie une fois.",
   "server.cloudComputer.unreachable": "Les ordinateurs cloud sont injoignables pour le moment. MausBot a gardé l'ordinateur cloud de {name} et le vérifiera de nouveau.",
   "server.cloudComputer.needsPerson": "L'ordinateur cloud de {name} ne répond plus. Remplacer l'ordinateur, dans le panneau de l'ordinateur, lui en donne un nouveau ; les fichiers qui ne sont que sur l'ancien ordinateur sont perdus.",
+  "server.cloudComputer.teamNotResponding": "{name} ne répond pas. Supprimez-le dans Réglages → Ordinateurs, puis recréez-le depuis la carte de l'équipe ; les fichiers qui ne sont que dessus sont perdus.",
   "computer.recovery.notResponding": "Cet ordinateur cloud ne répond pas. MausBot le vérifie et va le redémarrer ou le remplacer.",
   "computer.recovery.restarting": "Cet ordinateur cloud ne répond pas. MausBot le redémarre.",
   "computer.recovery.replacing": "Cet ordinateur cloud ne répond pas. MausBot le remplace.",

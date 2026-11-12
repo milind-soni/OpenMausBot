@@ -8076,6 +8076,7 @@
   "server.cloudComputer.capped": "{name} のクラウドコンピューターが置き換えから 1 時間以内に再び応答しなくなったため、MausBot はそのままにしました。コンピューターパネルの「コンピューターを置き換え」でもう一度試せます。",
   "server.cloudComputer.unreachable": "現在クラウドコンピューターに接続できません。MausBot は {name} のクラウドコンピューターを残し、あとで再確認します。",
   "server.cloudComputer.needsPerson": "{name} のクラウドコンピューターが応答しなくなりました。コンピューターパネルの「コンピューターを置き換え」で新しいものにできます。古いコンピューターにしかないファイルは失われます。",
+  "server.cloudComputer.teamNotResponding": "{name} が応答していません。設定 → コンピューターで削除し、チームマップから作り直してください。そこにしかないファイルは失われます。",
   "computer.recovery.notResponding": "このクラウドコンピューターは応答していません。MausBot が確認し、再起動または置き換えを行います。",
   "computer.recovery.restarting": "このクラウドコンピューターは応答していません。MausBot が再起動しています。",
   "computer.recovery.replacing": "このクラウドコンピューターは応答していません。MausBot が置き換えています。",

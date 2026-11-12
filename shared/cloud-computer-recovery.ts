@@ -32,6 +32,12 @@ export const CLOUD_COMPUTER_CAPPED =
 /** Automatic replacement is off: the person decides, from the computer panel. */
 export const CLOUD_COMPUTER_NEEDS_PERSON =
   "This bot's cloud computer isn't responding. The person can replace it from the computer panel. Do not retry computer work in this turn; tell the person.";
+/** A team's shared computer is never restarted or deleted by itself: every teammate's work is on it. */
+export const CLOUD_COMPUTER_TEAM_NOT_RESPONDING =
+  "This team's shared cloud computer isn't responding. A team admin can delete it in Settings → Computers and create it again from the Team map. Do not retry computer work in this turn; tell the person.";
+/** The provider says the machine is gone, but not yet for long enough to delete it by itself. */
+export const CLOUD_COMPUTER_DEAD_WAITING =
+  "This bot's cloud computer isn't responding. MausBot replaces it if it is still down in half an hour; the person can replace it now from the computer panel. Do not retry computer work in this turn; tell the person.";
 /** One command got no answer; the computer is not judged on one. */
 export const CLOUD_COMPUTER_NO_ANSWER =
   "The cloud computer did not answer this call, so it may not have run. Take a fresh screenshot in a moment before repeating it.";
@@ -43,5 +49,6 @@ export const CLOUD_COMPUTER_PERSON_LINES = {
   capped: "server.cloudComputer.capped",
   unreachable: "server.cloudComputer.unreachable",
   needsPerson: "server.cloudComputer.needsPerson",
+  teamNotResponding: "server.cloudComputer.teamNotResponding",
 } as const;
 export type CloudComputerPersonLine = keyof typeof CLOUD_COMPUTER_PERSON_LINES;

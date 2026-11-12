@@ -5986,6 +5986,7 @@
   "server.cloudComputer.capped": "Máy tính đám mây của {name} lại ngừng phản hồi trong vòng một giờ sau khi được thay, nên MausBot để nguyên nó. Thay máy tính trong bảng máy tính sẽ thử thêm một lần.",
   "server.cloudComputer.unreachable": "Hiện không thể kết nối tới máy tính đám mây. MausBot vẫn giữ máy tính đám mây của {name} và sẽ kiểm tra lại.",
   "server.cloudComputer.needsPerson": "Máy tính đám mây của {name} đã ngừng phản hồi. Thay máy tính trong bảng máy tính sẽ cho một máy mới; các tệp chỉ có trên máy cũ sẽ bị mất.",
+  "server.cloudComputer.teamNotResponding": "{name} không phản hồi. Hãy xóa nó trong Cài đặt → Máy tính, rồi tạo lại từ bản đồ nhóm; các tệp chỉ có trên đó sẽ bị mất.",
   "computer.recovery.notResponding": "Máy tính đám mây này không phản hồi. MausBot đang kiểm tra và sẽ khởi động lại hoặc thay nó.",
   "computer.recovery.restarting": "Máy tính đám mây này không phản hồi. MausBot đang khởi động lại nó.",
   "computer.recovery.replacing": "Máy tính đám mây này không phản hồi. MausBot đang thay nó.",

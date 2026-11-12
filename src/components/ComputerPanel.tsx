@@ -1660,7 +1660,7 @@ export function ComputerPanel({
             )}
           </div>
         )}
-        {canManageCloud && cloudBackend !== "vps" && phase !== "unconfigured" && <CloudComputerRecoveryRow botId={bot.id} name={bot.name} always={advanced} />}
+        {canManageCloud && cloudBackend !== "vps" && phase !== "unconfigured" && phase !== "team-boat" && teamComputer?.botId !== bot.id && <CloudComputerRecoveryRow botId={bot.id} name={bot.name} always={advanced} />}
         {phase !== "team-boat" && (bot.computer !== undefined || computerStatusCurrent) && <>
           <LocalScreenPreview />
           <LinuxLocalControl />

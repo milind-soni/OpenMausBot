@@ -17,6 +17,14 @@ export const DEAD_COMPUTER = {
   witnessMs: 10 * 60_000,
   /** At most this many automatic replacements per computer owner in an hour; after that it stops and says so. */
   replacementsPerHour: 1,
+  /** And at most this many automatic deletes per installation in an hour, whoever's computers they are. */
+  installationDeletesPerHour: 1,
+  /** The provider's `error` must be seen on two reads at least this far apart before a computer is deleted for it. */
+  deadConfirmMs: process.env.OMB_CLOUD_COMPUTER_DEAD_CONFIRM_MS?.trim() ? Math.max(0, Number(process.env.OMB_CLOUD_COMPUTER_DEAD_CONFIRM_MS) || 0) : 30 * 60_000,
+  /** At most one automatic restart per installation in this long. */
+  restartGapMs: 10 * 60_000,
+  /** No automatic restart or replacement while a person opened or drove the desktop this recently. */
+  personGraceMs: 10 * 60_000,
   /** A computer still not answering is reported again at most this often. */
   reportGapMs: 5 * 60_000,
 } as const;
@@ -34,6 +42,7 @@ interface BoxHealth {
   probing: boolean;
   lastProbeAt: number;
   reportedAt: number | null;
+  personAt: number | null;
 }
 
 export type NotRespondingListener = (boxId: string, since: number) => void;
@@ -43,7 +52,7 @@ export function createBoatHealth(now: () => number = Date.now) {
   const listeners = new Set<NotRespondingListener>();
   const entry = (boxId: string): BoxHealth => {
     let found = boxes.get(boxId);
-    if (!found) boxes.set(boxId, found = { failures: 0, firstFailureAt: null, lastFailureAt: null, lastAnsweredAt: null, probing: false, lastProbeAt: -Infinity, reportedAt: null });
+    if (!found) boxes.set(boxId, found = { failures: 0, firstFailureAt: null, lastFailureAt: null, lastAnsweredAt: null, probing: false, lastProbeAt: -Infinity, reportedAt: null, personAt: null });
     return found;
   };
   const notResponding = (health: BoxHealth | undefined): health is BoxHealth & { firstFailureAt: number; lastFailureAt: number } =>
@@ -65,15 +74,16 @@ export function createBoatHealth(now: () => number = Date.now) {
     for (const listener of listeners) listener(boxId, health.firstFailureAt!);
   }
 
-  /** A command to this computer got no answer: probe it once, unless a probe is under way or ran moments ago. */
-  function suspect(boxId: string, probe: () => Promise<boolean>): void {
+  /** A command to this computer got no answer: probe it once, unless a probe is under way or ran moments ago. A probe's
+   * null (refused, say, by a rate limit) counts neither way. */
+  function suspect(boxId: string, probe: () => Promise<boolean | null>): void {
     const health = entry(boxId);
     if (health.probing || now() - health.lastProbeAt < DEAD_COMPUTER.probeGapMs) return;
     health.probing = true;
     health.lastProbeAt = now();
     void probe().catch(() => false).then((ok) => {
       health.probing = false;
-      if (boxes.get(boxId) !== health) return;
+      if (boxes.get(boxId) !== health || ok === null) return;
       if (ok) answered(boxId); else unanswered(boxId);
     });
   }
@@ -94,6 +104,12 @@ export function createBoatHealth(now: () => number = Date.now) {
     /** Some other computer answered recently, so the provider and the path to it work. */
     otherAnsweredWithin: (boxId: string, ms: number): boolean =>
       [...boxes].some(([id, health]) => id !== boxId && health.lastAnsweredAt !== null && now() - health.lastAnsweredAt <= ms),
+    /** A person opened this computer's desktop. */
+    personUsed: (boxId: string) => { entry(boxId).personAt = now(); },
+    personUsedWithin: (boxId: string, ms: number): boolean => {
+      const at = boxes.get(boxId)?.personAt;
+      return at !== null && at !== undefined && now() - at <= ms;
+    },
     onNotResponding(listener: NotRespondingListener): () => void {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -105,4 +121,4 @@ export function createBoatHealth(now: () => number = Date.now) {
 
 export type BoatHealth = ReturnType<typeof createBoatHealth>;
 
-export const boatHealth = createBoatHealth();
+export const boatHealth = createBoatHealth(() => Date.now());

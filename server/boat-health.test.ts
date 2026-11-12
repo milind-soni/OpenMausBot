@@ -26,6 +26,28 @@ describe("cloud computer health", () => {
     expect(heard).toEqual([]);
   });
 
+  it("a probe the provider refused counts neither way", async () => {
+    const time = clock(), health = createBoatHealth(time.now);
+    health.unanswered("bx_a");
+    health.suspect("bx_a", async () => null);
+    await settle();
+    expect(health.answeredWithin("bx_a", 60_000)).toBe(false);
+    time.advance(30_000);
+    health.unanswered("bx_a");
+    time.advance(31_000);
+    health.unanswered("bx_a");
+    expect(health.notRespondingSince("bx_a")).not.toBeNull();
+  });
+
+  it("remembers when a person last opened a computer's desktop", () => {
+    const time = clock(), health = createBoatHealth(time.now);
+    health.personUsed("bx_a");
+    time.advance(DEAD_COMPUTER.personGraceMs);
+    expect(health.personUsedWithin("bx_a", DEAD_COMPUTER.personGraceMs)).toBe(true);
+    time.advance(1);
+    expect(health.personUsedWithin("bx_a", DEAD_COMPUTER.personGraceMs)).toBe(false);
+  });
+
   it("probes at most once per gap however many commands fail", async () => {
     const time = clock(), health = createBoatHealth(time.now);
     let probes = 0;
