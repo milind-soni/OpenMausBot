@@ -32,6 +32,7 @@ export function ownServerOwner(facts: OwnServerFacts, auth: RequestAuth): boolea
 export function createOwnHome({ facts, dataDir }: { facts(): OwnServerFacts; dataDir: string }) {
   return {
     owner: (auth: RequestAuth): auth is Extract<RequestAuth, { kind: "session" }> => ownServerOwner(facts(), auth),
+    oneOwner: () => oneOwner(facts()),
     takesMove: () => oneOwner(facts()),
     here: () => oneOwner(facts()) && movedFrom(dataDir) !== null,
   };
