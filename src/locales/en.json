@@ -4486,6 +4486,8 @@
   "botPanel.memory.empty": "Nothing remembered yet.",
   "botPanel.memory.addPlaceholder": "Tell {name} something to remember",
   "botPanel.memory.editText": "Edit as text",
+  "botPanel.memory.fullWindow": "Full window",
+  "botPanel.memory.exitFullWindow": "Exit full window",
   "botPanel.skills.remove": "Remove {name}",
   "botPanel.skills.removeConfirm": "Remove the skill “{name}”?",
   "botPanel.skills.removeFailed": "Could not remove this skill.",
