@@ -247,7 +247,8 @@ describe.skipIf(process.platform === "win32")("rescueFirefoxProfile", () => {
     const container = join(dir, "container");
     mkdirSync(join(container, "home", "cua", ".mozilla", "firefox"), { recursive: true });
     writeFileSync(join(container, "home", "cua", ".mozilla", "firefox", "profiles.ini"), "old desktop");
-    const workspace = join(dir, "workspace");
+    // An apostrophe in the path must still give a command the shell runs as written.
+    const workspace = join(dir, "o'brien workspace");
     mkdirSync(join(workspace, ".browser-profiles"), { recursive: true });
     chmodSync(join(workspace, ".browser-profiles"), 0o500);
     // The fake runtime is a path; the update itself only ever passes "docker" or "podman" through to the same spawn.
@@ -259,7 +260,7 @@ describe.skipIf(process.platform === "win32")("rescueFirefoxProfile", () => {
       chmodSync(join(workspace, ".browser-profiles"), 0o700);
     }
     expect(failure).toBeInstanceOf(Error);
-    expect((failure as Error).message).toContain(`sudo chown -R ${process.getuid?.()}:${process.getgid?.()} '${workspace}'`);
+    expect((failure as Error).message).toContain(`sudo chown -R ${process.getuid?.()}:${process.getgid?.()} '${workspace.replaceAll("'", "'\\''")}' and`);
     expect(readdirSync(workspace)).toEqual([".browser-profiles"]);
   });
 });

@@ -1280,6 +1280,17 @@ describe("setupCommands", () => {
       expect(script.indexOf(step)).toBeLessThan(script.indexOf("sed -i"));
     }
     expect(script).toMatch(/\|\| \{ echo "cua did not take uid \$uid gid \$gid" >&2; exit 1; \}\nfi\nexec /);
+    // chown or chgrp to an unchanged id would still clear set-id bits, so each id moves only behind its own check.
+    const uidGuard = script.indexOf('if [ "$old_uid" != "$uid" ]; then');
+    const gidGuard = script.indexOf('if [ "$old_gid" != "$gid" ]; then');
+    expect(uidGuard).toBeGreaterThan(-1);
+    expect(gidGuard).toBeGreaterThan(uidGuard);
+    const chowns = [...script.matchAll(/-exec chown /gu)].map((match) => match.index);
+    const chgrps = [...script.matchAll(/-exec chgrp /gu)].map((match) => match.index);
+    expect(chowns).toHaveLength(2);
+    expect(chgrps).toHaveLength(2);
+    for (const at of chowns) expect(at > uidGuard && at < gidGuard).toBe(true);
+    for (const at of chgrps) expect(at).toBeGreaterThan(gidGuard);
   });
 
   it("asks rootless Podman to map and privately relabel the durable workspace", () => {

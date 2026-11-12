@@ -7,6 +7,7 @@ import { lstat, mkdir, readdir, rename, rm, rmdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import { shellQuote } from "./browser/chrome/wrapper.ts";
 import type { ContainerComputerStatus, LocalVmTarget } from "./container-computer.ts";
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 
@@ -23,7 +24,7 @@ function withOwnershipStep(error: unknown, workspaceDir: string): Error {
   const message = error instanceof Error ? error.message : String(error);
   if (!PERMISSION_DENIED.test(message) || !process.getuid || !process.getgid) return error instanceof Error ? error : new Error(message);
   return new Error(
-    `an older desktop left files this app (uid ${process.getuid()}) cannot change; run sudo chown -R ${process.getuid()}:${process.getgid()} '${workspaceDir}' and it retries on its own (${message.slice(0, 80)})`,
+    `an older desktop left files this app (uid ${process.getuid()}) cannot change; run sudo chown -R ${process.getuid()}:${process.getgid()} ${shellQuote(workspaceDir)} and it retries on its own (${message.slice(0, 80)})`,
   );
 }
 
