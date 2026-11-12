@@ -149,7 +149,7 @@ describe("a bot's page in the chat", () => {
     expect(posted).toHaveBeenCalledWith({ jsonrpc: "2.0", method: "mausbot/point", params: { on: false } }, "*");
   });
 
-  it("sends the numbered outlines again to the frame a reload puts in place", async () => {
+  it("sends Point and the numbered outlines again to the frame a reload puts in place", async () => {
     await render(row(payload()));
     await click("Point", card());
     await fromFrame(PICK, inlineFrame().contentWindow);
@@ -158,7 +158,11 @@ describe("a bot's page in the chat", () => {
     expect(inlineFrame()).not.toBe(before);
     const posted = vi.spyOn(inlineFrame().contentWindow!, "postMessage").mockImplementation(() => {});
     await act(async () => { inlineFrame().dispatchEvent(new Event("load")); });
-    expect(posted).toHaveBeenCalledWith(marksMessage(["main > section:nth-of-type(2) > button"]), "*");
+    // The new page starts with Point off, so it is told Point is still on before it gets the outlines.
+    expect(posted.mock.calls.map(([message]) => message)).toEqual([
+      { jsonrpc: "2.0", method: "mausbot/point", params: { on: true } },
+      marksMessage(["main > section:nth-of-type(2) > button"]),
+    ]);
   });
 
   it("shares the version on screen; the card the server patches shows the link with Copy, opens it, and unpublishes it", async () => {

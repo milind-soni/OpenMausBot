@@ -173,10 +173,15 @@ export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefin
     const iframe = latest.current.frame();
     const send = () => iframe?.contentWindow?.postMessage(marksMessage(JSON.parse(marks) as string[]), "*");
     send();
-    // A new frame (full screen, a reload) gets them again once its page has loaded; `frameKey` changes with each frame.
-    iframe?.addEventListener("load", send);
-    return () => iframe?.removeEventListener("load", send);
-  }, [marks, pointing, args.view, args.frameKey]);
+    // A new frame (full screen, a reload) starts with Point off: once its page has loaded it gets the Point state, then
+    // the outlines again; `frameKey` changes with each frame.
+    const loaded = () => {
+      say(on.current);
+      send();
+    };
+    iframe?.addEventListener("load", loaded);
+    return () => iframe?.removeEventListener("load", loaded);
+  }, [marks, pointing, args.view, args.frameKey, say]);
   return { pointing, toggle: () => set(!on.current), stop: () => { if (on.current) set(false); } };
 }
 
