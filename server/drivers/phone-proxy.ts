@@ -407,11 +407,15 @@ export function parseSteps(raw: unknown): PhoneStep[] {
 
 function parseStep(raw: unknown, n: number): PhoneStep {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw refusal(`Step ${n} needs to be an object such as ${JSON.stringify(STEP_EXAMPLES.tap_text)}`);
+  const { serial } = raw as Json;
+  if (serial !== undefined && serial !== null && serial !== "") {
+    const named = typeof serial === "string" || typeof serial === "number" ? String(serial) : "<serial>";
+    throw refusal(`Step ${n} names a serial, but a batch runs on one phone; set serial once beside steps, e.g. ${JSON.stringify({ serial: named, steps: [STEP_EXAMPLES.read_screen] })}`);
+  }
   const step: Json = {};
   for (const [field, value] of Object.entries(raw)) {
     if (!Object.hasOwn(STEP_PROPERTIES, field) || value === null || value === "") continue;
-    const coerced = coerce(field, value);
-    if (coerced !== "") step[field] = coerced;
+    step[field] = typeof value === "object" ? value : coerce(field, value);
   }
   const { action } = step;
   if (action === "screenshot") throw refusal(`Step ${n}: screenshot returns an image and cannot be a batch step; use read_screen, or call screenshot after the batch`);
@@ -420,12 +424,14 @@ function parseStep(raw: unknown, n: number): PhoneStep {
   const example = JSON.stringify(STEP_EXAMPLES[action]);
   const foreign = Object.keys(step).find((field) => field !== "action" && !stepFields(action).includes(field));
   if (foreign === "seconds") {
-    const seconds = Number(step.seconds) >= 0 ? step.seconds : STEP_EXAMPLES.wait.seconds;
+    const seconds = Number.isFinite(step.seconds) && Number(step.seconds) >= 0 ? step.seconds : STEP_EXAMPLES.wait.seconds;
     throw refusal(`Step ${n} (${action}) does not take seconds; put a separate ${JSON.stringify({ action: "wait", seconds })} step after it`);
   }
   if (foreign) throw refusal(`Step ${n} (${action}) does not take ${foreign}, which belongs to ${fieldOwners(foreign).join(" or ")}; write it like ${example}`);
   const missing = (stepSchema(action).required ?? []).filter((field) => step[field] === undefined);
   if (missing.length) throw refusal(`Step ${n} (${action}) needs ${missing.join(" and ")}, e.g. ${example}`);
+  const nested = Object.keys(step).find((field) => typeof step[field] === "object");
+  if (nested) throw refusal(`Step ${n} (${action}) needs ${nested} as a single value, not a list or an object, e.g. ${example}`);
   const broken = [...(STEP_RULES[action] ?? []), ...typeRules(action)].find((rule) => !rule.ok(step));
   if (broken) throw refusal(`Step ${n} (${action}) needs ${broken.needs}, e.g. ${JSON.stringify(broken.example ?? STEP_EXAMPLES[action])}`);
   return { ...step, action };
@@ -498,7 +504,7 @@ export async function runSteps(
     try {
       output = await perform(serial, step);
     } catch (error) {
-      // An error flag leads models to redo the whole call, so it marks only a batch that changed nothing.
+      // An error flag leads models to redo the whole call, so it marks only a first-step failure, where no finished step is redone.
       return textResult([...lines, `Step ${n} failed: ${reason(error)}. Its effect is unknown; call read_screen or screenshot before trying it again. ${EARLIER_AND_LATER_STEPS}`].join("\n"), n === 1);
     }
     lines.push(step.action === "read_screen" ? `${n}. read_screen:\n${output}` : `${n}. ${step.action}: ${output}`);

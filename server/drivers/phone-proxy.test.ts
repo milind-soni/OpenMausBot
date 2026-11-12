@@ -187,13 +187,14 @@ describe("phone batch step parsing", () => {
     { case: "coerces a match index and exact", raw: [{ action: "tap_text", text: "Search", index: "1", exact: "true" }, { action: "tap_text", text: "Search", exact: "false" }], steps: [{ action: "tap_text", text: "Search", index: 1, exact: true }, { action: "tap_text", text: "Search", exact: false }] },
     { case: "treats null and empty fields as absent", raw: [{ action: "tap_text", text: "Search", index: null, exact: "", seconds: null }, { action: "wait", seconds: "" }], steps: [{ action: "tap_text", text: "Search" }, { action: "wait" }] },
     { case: "lowercases action, key and direction", raw: [{ action: "PRESS", key: "Enter" }, { action: "swipe", direction: "UP" }], steps: [{ action: "press", key: "enter" }, { action: "swipe", direction: "up" }] },
-    { case: "ignores fields no action takes", raw: [{ action: "read_screen", verify: true, serial: "X" }, { action: "open_app", name: "Settings", why: "check" }], steps: [{ action: "read_screen" }, { action: "open_app", name: "Settings" }] },
+    { case: "ignores fields no action takes", raw: [{ action: "read_screen", verify: true }, { action: "open_app", name: "Settings", why: "check" }], steps: [{ action: "read_screen" }, { action: "open_app", name: "Settings" }] },
     { case: "parses steps given as JSON text", raw: '[{"action":"read_screen"}]', steps: [{ action: "read_screen" }] },
     { case: "parses a step given as JSON text", raw: ['{"action":"press","key":"back"}'], steps: [{ action: "press", key: "back" }] },
     { case: "accepts waits from 0 and above 60", raw: [{ action: "wait" }, { action: "wait", seconds: 0 }, { action: "wait", seconds: "75" }], steps: [{ action: "wait" }, { action: "wait", seconds: 0 }, { action: "wait", seconds: 75 }] },
     { case: "accepts 10 steps", raw: Array(10).fill({ action: "read_screen" }), steps: Array(10).fill({ action: "read_screen" }) },
     { case: "coerces both coordinates", raw: [{ action: "tap", x: "540", y: "1200" }], steps: [{ action: "tap", x: 540, y: 1200 }] },
     { case: "counts text to type in characters, as type_text does", raw: [{ action: "type_text", text: "😀".repeat(256) }], steps: [{ action: "type_text", text: "😀".repeat(256) }] },
+    { case: "treats a null or empty serial on a step as absent", raw: [{ action: "read_screen", serial: null }, { action: "read_screen", serial: "" }], steps: [{ action: "read_screen" }, { action: "read_screen" }] },
     { case: "ignores fields named like an object's built-ins", raw: '[{"action":"read_screen","constructor":"x","toString":"y","__proto__":{"action":"tap"}}]', steps: [{ action: "read_screen" }] },
   ])("$case", ({ raw, steps }) => {
     expect(parseSteps(raw)).toEqual(steps);
@@ -220,17 +221,40 @@ describe("phone batch step parsing", () => {
     { case: "11 steps", raw: Array(11).fill({ action: "read_screen" }), error: "A batch runs at most 10 steps, not 11; split them into several batches. No step was performed." },
     { case: "no steps", raw: undefined, error: 'steps needs a list of 1 to 10 steps, e.g. {"steps":[{"action":"tap_text","text":"Search"},{"action":"read_screen"}]}. No step was performed.' },
     { case: "an empty step list", raw: [], error: 'steps needs a list of 1 to 10 steps, e.g. {"steps":[{"action":"tap_text","text":"Search"},{"action":"read_screen"}]}. No step was performed.' },
-    { case: "text that is empty once read as text, after a valid step", raw: [{ action: "tap", x: 540, y: 1200 }, { action: "type_text", text: [] }], error: 'Step 2 (type_text) needs text, e.g. {"action":"type_text","text":"iPad mini"}. No step was performed.' },
+    { case: "an empty list as text, after a valid step", raw: [{ action: "tap", x: 540, y: 1200 }, { action: "type_text", text: [] }], error: 'Step 2 (type_text) needs text as a single value, not a list or an object, e.g. {"action":"type_text","text":"iPad mini"}. No step was performed.' },
     { case: "a negative match index", raw: [{ action: "tap_text", text: "Search", index: -1 }], error: 'Step 1 (tap_text) needs index as a whole number from 0, e.g. {"action":"tap_text","text":"Search","index":1}. No step was performed.' },
     { case: "a y off the screen", raw: [{ action: "tap", x: 1, y: -1 }], error: 'Step 1 (tap) needs x and y from 0 to 10000, e.g. {"action":"tap","x":540,"y":1200}. No step was performed.' },
     { case: "an x past 10000", raw: [{ action: "tap", x: 10001, y: 2 }], error: 'Step 1 (tap) needs x and y from 0 to 10000, e.g. {"action":"tap","x":540,"y":1200}. No step was performed.' },
-    { case: "a coordinate that is not a number", raw: [{ action: "tap", x: [], y: 1200 }], error: 'Step 1 (tap) needs x and y from 0 to 10000, e.g. {"action":"tap","x":540,"y":1200}. No step was performed.' },
+    { case: "a coordinate that is not a number", raw: [{ action: "tap", x: true, y: 1200 }], error: 'Step 1 (tap) needs x and y from 0 to 10000, e.g. {"action":"tap","x":540,"y":1200}. No step was performed.' },
     { case: "a blank coordinate string", raw: [{ action: "tap", x: " ", y: 1200 }], error: 'Step 1 (tap) needs x and y from 0 to 10000, e.g. {"action":"tap","x":540,"y":1200}. No step was performed.' },
     { case: "a negative wait", raw: [{ action: "wait", seconds: -1 }], error: 'Step 1 (wait) needs seconds as a number from 0 to 60, e.g. {"action":"wait","seconds":3}. No step was performed.' },
     { case: "a negative wait on another action", raw: [{ action: "tap", x: 1, y: 2, seconds: -1 }], error: 'Step 1 (tap) does not take seconds; put a separate {"action":"wait","seconds":3} step after it. No step was performed.' },
     { case: "a wait given as true", raw: [{ action: "wait", seconds: true }], error: 'Step 1 (wait) needs seconds as a number from 0 to 60, e.g. {"action":"wait","seconds":3}. No step was performed.' },
+    { case: "a serial on a step", raw: [{ action: "tap", x: 1, y: 2, serial: "B" }], error: 'Step 1 names a serial, but a batch runs on one phone; set serial once beside steps, e.g. {"serial":"B","steps":[{"action":"read_screen"}]}. No step was performed.' },
+    { case: "a serial on a step that is not text", raw: [{ action: "read_screen", serial: ["B"] }], error: 'Step 1 names a serial, but a batch runs on one phone; set serial once beside steps, e.g. {"serial":"<serial>","steps":[{"action":"read_screen"}]}. No step was performed.' },
+    { case: "an action given as a list", raw: [{ action: ["read_screen"] }], error: 'Step 1 needs an action from open_app, tap_text, tap, swipe, type_text, press, read_screen, wait, e.g. {"action":"tap_text","text":"Search"}. No step was performed.' },
+    { case: "a missing field before a list", raw: [{ action: "tap", x: [1] }], error: 'Step 1 (tap) needs y, e.g. {"action":"tap","x":540,"y":1200}. No step was performed.' },
+    { case: "a zero wait on another action", raw: [{ action: "tap", x: 1, y: 2, seconds: 0 }], error: 'Step 1 (tap) does not take seconds; put a separate {"action":"wait","seconds":0} step after it. No step was performed.' },
+    { case: "an endless wait on another action", raw: [{ action: "tap", x: 1, y: 2, seconds: "Infinity" }], error: 'Step 1 (tap) does not take seconds; put a separate {"action":"wait","seconds":3} step after it. No step was performed.' },
+    { case: "a list as a wait on another action", raw: [{ action: "tap", x: 1, y: 2, seconds: [5] }], error: 'Step 1 (tap) does not take seconds; put a separate {"action":"wait","seconds":3} step after it. No step was performed.' },
   ])("refuses $case", ({ raw, error }) => {
     expect(() => parseSteps(raw)).toThrow(new Error(error));
+  });
+
+  const VALID_FIELDS: Record<string, Record<string, unknown>> = {
+    open_app: { name: "Settings" },
+    tap_text: { text: "Search", exact: true, index: 1 },
+    tap: { x: 540, y: 1200 },
+    swipe: { direction: "up" },
+    type_text: { text: "iPad mini" },
+    press: { key: "enter" },
+    wait: { seconds: 3 },
+  };
+  it.each(Object.entries(VALID_FIELDS).flatMap(([action, fields]) => Object.keys(fields).flatMap((field) => [
+    { action, field, kind: "a list", step: { action, ...fields, [field]: ["hello", "world"] } },
+    { action, field, kind: "an object", step: { action, ...fields, [field]: { value: 1 } } },
+  ])))("refuses $kind as $action's $field", ({ action, field, step }) => {
+    expect(() => parseSteps([step])).toThrow(new RegExp(`^Step 1 \\(${action}\\) needs ${field} as a single value, not a list or an object, e\\.g\\. \\{"action":"${action}".*\\}\\. No step was performed\\.$`));
   });
 });
 
@@ -325,6 +349,10 @@ describe("phone MCP tool surface", () => {
       expect(tool(name).description).toMatch(/\. To do several steps, or to act and then read the screen, in one call, use batch\.$/);
       expect(tool(name).description).not.toContain("then use read_screen to verify");
     }
+  });
+
+  it("keeps serial out of a step's fields", () => {
+    expect(tool("batch").inputSchema.properties.steps.items.properties).not.toHaveProperty("serial");
   });
 
   it("keeps the batch hint off the tools that cannot be steps", () => {
