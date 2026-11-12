@@ -657,8 +657,7 @@ export interface OptionCardData extends WaitCardField, ComputerAskField, AccessR
   /** Distinguishes a provider question from an approval after its live run ends. */
   requestType?: "permission" | "question";
   answered?: string;
-  /** What was actually answered, when the answer is words rather than a
-   * verdict. */
+  /** What was actually answered, when the answer is words rather than a verdict. */
   answeredText?: string;
   dismissed?: boolean;
   /** Who settled the card, when a person or service answered it. */
@@ -674,6 +673,7 @@ export interface OptionCardData extends WaitCardField, ComputerAskField, AccessR
   expired?: boolean;
   /** Stop ended the work that asked: nothing can answer it any more. */
   stopped?: boolean;
+  /** The person wrote a new line instead of answering, after the asking turn had ended. */ answeredInChat?: boolean;
   /** Catalog key for held when it is one of the fixed notes. */
   heldCode?: string;
   /** the narrow grant "always allow" remembers for a harness-native card. */

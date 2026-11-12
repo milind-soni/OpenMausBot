@@ -2746,6 +2746,7 @@
   "ask.settled.answered": "Vous avez répondu :",
   "ask.settled.stopped": "Arrêté avant votre réponse",
   "ask.settled.expired": "Expiré avant toute réponse",
+  "ask.settled.answeredInChat": "Répondu dans le chat",
   "ask.error": "Impossible d’envoyer votre réponse. Réessayez.",
   "ask.detail.more": "Tout afficher",
   "inbox.action.closeQuestion": "Fermer sans répondre",

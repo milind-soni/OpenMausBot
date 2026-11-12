@@ -7338,6 +7338,7 @@
   "ask.settled.answered": "あなたの回答：",
   "ask.settled.stopped": "回答する前に停止しました",
   "ask.settled.expired": "回答がないまま期限切れになりました",
+  "ask.settled.answeredInChat": "チャットで回答済み",
   "ask.error": "回答を送信できませんでした。もう一度お試しください。",
   "ask.detail.more": "すべて表示",
   "inbox.action.closeQuestion": "回答せずに閉じる",

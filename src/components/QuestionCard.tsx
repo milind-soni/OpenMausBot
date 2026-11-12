@@ -273,6 +273,7 @@ function SettledQuestion({ card, questions }: { card: NonNullable<Message["card"
   const [open, setOpen] = useState(false);
   if (card.stopped) return <AskSettledLine tone="stopped" ariaLabel={t("question.aria.card")}>{t("ask.settled.stopped")}</AskSettledLine>;
   if (card.expired) return <AskSettledLine tone="expired" ariaLabel={t("question.aria.card")}>{t("ask.settled.expired")}</AskSettledLine>;
+  if (card.answeredInChat) return <AskSettledLine ariaLabel={t("question.aria.card")}>{t("ask.settled.answeredInChat")}</AskSettledLine>;
   const answer = card.answeredText ?? (card.answered === "answer" ? null : undefined);
   if (answer === undefined || card.answered === "unavailable" || card.dismissed && !card.answeredText) {
     return <AskSettledLine tone="closed" ariaLabel={t("question.aria.card")}>{t("question.status.closed")}</AskSettledLine>;

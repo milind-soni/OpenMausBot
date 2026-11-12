@@ -910,6 +910,7 @@
   "ask.settled.answered": "내 답변:",
   "ask.settled.stopped": "답변하기 전에 중지됨",
   "ask.settled.expired": "아무도 답하기 전에 만료됨",
+  "ask.settled.answeredInChat": "채팅에서 답함",
   "ask.error": "답변을 보내지 못했어요. 다시 시도하세요.",
   "ask.detail.more": "모두 보기",
   "inbox.action.closeQuestion": "답하지 않고 닫기",

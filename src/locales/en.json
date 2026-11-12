@@ -1111,6 +1111,7 @@
   "ask.settled.answered": "You answered:",
   "ask.settled.stopped": "Stopped before you answered",
   "ask.settled.expired": "Expired before anyone answered",
+  "ask.settled.answeredInChat": "Answered in the chat",
   "ask.error": "Couldn't send your answer. Try again.",
   "ask.detail.more": "Show all",
   "inbox.action.closeQuestion": "Close without answering",

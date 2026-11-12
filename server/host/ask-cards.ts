@@ -234,11 +234,28 @@ export function createAskCards(deps: AskCardsDeps) {
     }
   }
 
+  /** The parked work a NEEDS INPUT card asks for. */
+  const parkedNode = (requestId: string): HandoffView | undefined => {
+    const id = requestId.startsWith(OPEN_QUESTION) ? requestId.slice(OPEN_QUESTION.length).replace(/-\d+$/, "") : "";
+    return id ? deps.node(id) : undefined;
+  };
+
+  /** The person typed a new line in a bot's conversation instead of answering its earlier questions: those that no turn
+   * and no parked work waits on any more settle as answered in the chat, so the conversation stops waiting on them. */
+  function typedOver(threadId: string): void {
+    if (store.groupByThread(threadId)) return;
+    for (const message of store.messagesFor(threadId)) {
+      const card = message.card;
+      if (!card?.requestId || message.inbox || liveCardKind(card) !== "question" || deps.live(threadId, card.requestId)
+        || parkedNode(card.requestId)?.status === "waiting") continue;
+      store.patchMessage(threadId, message.id, { card: { ...card, answered: "answer", answeredInChat: true } });
+    }
+  }
+
   /** The person answered a parked question's card, or its copy: the work it waits on carries their answer, whether it waits
    * in a room or a bot's conversation. False when no work waits on that card. */
   function answerParked(threadId: string, requestId: string, text: string): boolean {
-    const id = requestId.startsWith(OPEN_QUESTION) ? requestId.slice(OPEN_QUESTION.length).replace(/-\d+$/, "") : "";
-    const node = id ? deps.node(id) : undefined;
+    const node = parkedNode(requestId);
     const message = store.messagesFor(threadId).find((candidate) => candidate.card?.requestId === requestId && !candidate.inbox);
     if (!node || node.status !== "waiting" || node.question === undefined || node.cards?.length || !message?.card || !deps.answerNode(node.id, text)) return false;
     store.patchMessage(threadId, message.id, { card: { ...message.card, answered: "answer", answeredText: text, answeredBy: undefined } });
@@ -277,5 +294,5 @@ export function createAskCards(deps: AskCardsDeps) {
     questionCard({ id: `${botId}-${turnId}`, threadId, botId, executions: 1, createdAt: reply.at, startedAt: reply.at } as HandoffView, question);
   }
 
-  return { park, remind, decided, closed, askedAgain, answerParked, answeredInWords, typed, ownQuestion, showWaitingOnPersonChip, settleWaitingOnPersonChips };
+  return { park, remind, decided, closed, askedAgain, answerParked, answeredInWords, typed, typedOver, ownQuestion, showWaitingOnPersonChip, settleWaitingOnPersonChips };
 }

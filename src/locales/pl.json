@@ -6469,6 +6469,7 @@
   "ask.settled.answered": "Twoja odpowiedź:",
   "ask.settled.stopped": "Zatrzymano przed twoją odpowiedzią",
   "ask.settled.expired": "Wygasło, zanim ktoś odpowiedział",
+  "ask.settled.answeredInChat": "Odpowiedziano w czacie",
   "ask.error": "Nie udało się wysłać odpowiedzi. Spróbuj ponownie.",
   "ask.detail.more": "Pokaż wszystko",
   "inbox.action.closeQuestion": "Zamknij bez odpowiedzi",
