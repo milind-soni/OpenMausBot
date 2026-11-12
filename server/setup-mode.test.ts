@@ -115,7 +115,7 @@ describe("setupSystemPrompt working-folder clause and result ordering", () => {
     expect(text).toContain("if pending, end the turn and wait");
     expect(text).toContain("Do not repeat the list or claim success from the permission mode alone");
     expect(text).toContain("A credential request still needs the user's secure entry");
-    expect(text).toContain("Full Access does not supply answers, credentials, or broader permissions for another bot");
+    expect(text).toContain("Full Access does not supply answers, credentials, or broader permissions for another operator");
     expect(text).not.toContain("each of which the user must confirm");
     expect(text).not.toContain("propose it paused");
   });
@@ -125,7 +125,7 @@ describe("setupSystemPrompt for a Chief of Staff", () => {
   it("tells a Chief to stay the Chief and add the job to what it already does", () => {
     const chief = setupSystemPrompt(true, { chief: true, connectedApps: AVAILABLE });
     expect(chief).toContain("You are also the Chief of Staff, and setting yourself up does not change that");
-    expect(chief).toContain("add this job to your standing instructions instead of replacing them");
+    expect(chief).toContain("add this security role to your standing instructions instead of replacing them");
     for (const prompt of [setupSystemPrompt(true, { connectedApps: AVAILABLE }), setupSystemPrompt(true, { chief: false, connectedApps: AVAILABLE })]) {
       expect(prompt).not.toContain("Chief of Staff");
     }

@@ -46,7 +46,7 @@ describe("one Chief per person on a Team Cloud", () => {
   it("is told whose Chief it is, lists that person's bots as its team and everyone else as reachable", () => {
     const prompt = chiefOfStaffSystemPrompt("bob-chief", team, true);
     expect(prompt).toContain("You are Bob's assistant and Chief of Staff");
-    const [, mine = "", others = ""] = prompt.split(/Bots that report to Bob \(your team\):|Other bots you can reach \(they report to someone else\):/);
+    const [, mine = "", others = ""] = prompt.split(/Security operators that report to Bob \(your team\):|Other operators you can reach \(they report to someone else\):/);
     expect(mine).toContain("Fox");
     expect(mine).toContain("Owl");
     expect(mine).not.toContain("Tech Lead");

@@ -218,9 +218,9 @@ describe("peerRosterSystemPrompt", () => {
     expect(prompt).toContain("- Quill — Writer (Work) [id: writer]");
     expect(prompt).toContain("- Patch — Engineer (Work) [id: coder]");
     expect(prompt).toContain("- Scout — Travel planner (Personal) [id: elsewhere]");
-    expect(prompt).toContain("You can reach every other bot on this team, in every department");
+    expect(prompt).toContain("You can reach every other operator on this team, in every department");
     expect(prompt).toContain("do it yourself with coordinate_bots; nobody has to set anything up first");
-    expect(prompt).toContain("you can reach every bot listed");
+    expect(prompt).toContain("you can reach every operator listed");
     expect(prompt).not.toMatch(/allowed peer|team membership|under Permissions/i);
     expect(prompt).toContain("coordinate_bots with a teammate's bot id");
     expect(prompt).toContain("consult: true");
@@ -281,7 +281,7 @@ describe("peerRosterSystemPrompt", () => {
   });
 
   it("says so plainly when there is nobody to reach", () => {
-    expect(peerRosterSystemPrompt([])).toContain("- No other bots are reachable from here yet.");
+    expect(peerRosterSystemPrompt([])).toContain("- No other operators are reachable from here yet.");
   });
 });
 

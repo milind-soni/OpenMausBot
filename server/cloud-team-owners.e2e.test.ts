@@ -213,7 +213,7 @@ it("gives each person a Chief of Staff of their own whose team is the bots that 
   };
   // Each Chief's own team, then everyone else it can reach.
   const split = (text: string, person: string) => {
-    const [, mine = "", others = ""] = text.split(new RegExp(`Bots that report to ${person} \\(your team\\):|Other bots you can reach \\(they report to someone else\\):`));
+    const [, mine = "", others = ""] = text.split(new RegExp(`Security operators that report to ${person} \\(your team\\):|Other operators you can reach \\(they report to someone else\\):`));
     return { mine, others };
   };
   const adasPrompt = await prompt(ada, adasChief);

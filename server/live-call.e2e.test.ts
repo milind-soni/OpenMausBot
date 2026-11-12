@@ -737,7 +737,7 @@ posixOnly("Live call on the person's Cloud", () => {
     const [session] = live.sessions;
     expect(session.key).toBe(OWNER_KEY);
     const { instructions } = session.body.session as { instructions: string };
-    expect(instructions.split("\n")[0]).toBe(`You are Ada, an AI agent that runs on ${CLOUD_HOME_PLACE}.`);
+    expect(instructions.split("\n")[0]).toBe(`You are Ada, an AI security operator at Parth Lab that runs on ${CLOUD_HOME_PLACE}.`);
     expect(instructions).not.toContain("on the user's own computer");
     await live.waitForAttach(session.id);
 

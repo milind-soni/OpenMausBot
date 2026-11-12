@@ -24,7 +24,7 @@ describe("the capture prompt", () => {
     expect(prompt).not.toContain("prefers short replies");
     expect(prompt).toContain("Never infer a fact about them from a task, a question, an example or a hypothetical");
     expect(prompt).toContain("- When the Person asks to forget something, keep nothing about it.");
-    expect(prompt).toContain("- Give every preference and fact its evidence: the words it rests on, copied exactly from what was said to the assistant.");
+    expect(prompt).toContain("- Give every preference and fact its evidence: the words it rests on, copied exactly from what was said to the operator.");
     expect(prompt).toContain('"evidence": "the exact words"');
     expect(parseCandidates(JSON.stringify([{ text: "The person is vegetarian", kind: "preference", evidence: "  I'm\n vegetarian " }]), TODAY)[0]!.evidence).toBe("I'm vegetarian");
   });

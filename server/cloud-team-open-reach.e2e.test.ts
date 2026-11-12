@@ -88,7 +88,7 @@ it("lets Scout, in Bob's private chat, ask Bolt in another department and brings
   await expect.poll(settled, { timeout: 20_000 }).toBe(true);
 
   const asked = turns().find((turn) => turn.botId === scout.id && turn.turnIndex === 0)!;
-  expect(asked.system).toContain("You can reach every other bot on this team, in every department");
+  expect(asked.system).toContain("You can reach every other operator on this team, in every department");
   expect(asked.system).toContain(`- Bolt — Developer (Dev) [id: ${bolt.id}]`);
   expect(asked.system).toContain(`- Quill — Support writer (Support) [id: ${quill.id}]`);
   expect(asked.system).toContain(`[Chief of Staff] [id: ${chief.id}]`);
@@ -121,12 +121,12 @@ it("keeps Bob's Chief supervising only Bob's bots, while it can reach Bolt too",
   await expect.poll(() => turns().length, { timeout: 30_000 }).toBeGreaterThan(before);
   await expect.poll(settled, { timeout: 20_000 }).toBe(true);
   const system = turns().filter((turn) => turn.botId === chief.id).at(-1)!.system;
-  const [, mine = "", others = ""] = system.split(/Bots that report to Bob \(your team\):|Other bots you can reach \(they report to someone else\):/);
+  const [, mine = "", others = ""] = system.split(/Security operators that report to Bob \(your team\):|Other operators you can reach \(they report to someone else\):/);
   expect(mine).toContain("Scout");
   expect(mine).toContain("Quill");
   expect(mine).not.toContain("Bolt");
   expect(others).toContain("Bolt");
-  expect(system).toContain("Reaching a bot gives you no authority over it");
+  expect(system).toContain("Reaching an operator gives you no authority over it");
 }, hostTimeout(90_000));
 
 it("never carries Bob's private chat into a room, by a hand-off or a post", async () => {

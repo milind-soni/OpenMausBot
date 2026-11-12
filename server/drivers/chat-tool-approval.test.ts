@@ -241,6 +241,6 @@ describe("chat tool question lifecycle", () => {
 
 describe("a refused call, as the model reads it", () => {
   it("says it did not run and how to answer: what was not done, the simplest other way, what comes next", () => {
-    expect(refusal(null, () => undefined)).toBe("Permission denied or expired; the tool was not executed. Tell the person in one line what you did not do, offer the simplest other way (for a file: drag it into the chat or paste its text), and say what you will deliver once you have it.");
+    expect(refusal(null, () => undefined)).toBe("Permission denied or expired; the tool was not executed. Tell the person in one line what you did not do, offer the simplest other way, and say what you will deliver once you have it.");
   });
 });

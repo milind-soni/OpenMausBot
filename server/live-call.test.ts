@@ -69,7 +69,7 @@ describe("createLiveSession", () => {
     await createLiveSession({ key: "k", sdp: OFFER, bot: BOT, history: [], cloudHome: true, fetchImpl });
     await createLiveSession({ key: "k", sdp: OFFER, bot: BOT, history: [], cloudHome: false, fetchImpl });
     const [cloud, computer] = fetchImpl.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).session.instructions as string);
-    expect(cloud).toContain("runs on the user's My Cloud, their always-on OpenMausBot in the cloud, not on their own computer.");
+    expect(cloud).toContain("runs on the user's My Cloud, their always-on Parth Lab workspace in the cloud, not on their own computer.");
     expect(computer).toContain("runs in OpenMausBot on the user's own computer.");
     expect(computer).not.toContain("My Cloud");
   });
@@ -151,16 +151,16 @@ describe("live startup context", () => {
 
   it("writes one-line instructions from the bot's own profile", () => {
     const text = liveInstructions({ name: "  Rigel\n", title: "QA", description: "Line one\nline two" });
-    expect(text.split("\n")[0]).toBe("You are Rigel, QA, an AI agent that runs in OpenMausBot on the user's own computer. Line one line two");
+    expect(text.split("\n")[0]).toBe("You are Rigel, QA, an AI security operator at Parth Lab that runs in OpenMausBot on the user's own computer. Line one line two");
     expect(text).toContain("Never answer it yourself.");
   });
 
   it("on a Cloud, says the voice runs on the user's My Cloud, not their own computer", () => {
     const text = liveInstructions({ name: "Rigel", title: "QA" }, { cloudHome: true });
-    expect(text.split("\n")[0]).toBe(`You are Rigel, QA, an AI agent that runs on ${CLOUD_HOME_PLACE}.`);
-    expect(text.split("\n")[0]).toBe("You are Rigel, QA, an AI agent that runs on the user's My Cloud, their always-on OpenMausBot in the cloud, not on their own computer.");
+    expect(text.split("\n")[0]).toBe(`You are Rigel, QA, an AI security operator at Parth Lab that runs on ${CLOUD_HOME_PLACE}.`);
+    expect(text.split("\n")[0]).toBe("You are Rigel, QA, an AI security operator at Parth Lab that runs on the user's My Cloud, their always-on Parth Lab workspace in the cloud, not on their own computer.");
     expect(text).not.toContain("OMB");
-    expect(liveInstructions({ name: "Rigel" }, { cloudHome: false }).split("\n")[0]).toBe("You are Rigel, an AI agent that runs in OpenMausBot on the user's own computer.");
+    expect(liveInstructions({ name: "Rigel" }, { cloudHome: false }).split("\n")[0]).toBe("You are Rigel, an AI security operator at Parth Lab that runs in OpenMausBot on the user's own computer.");
   });
 
   it("says the bot changes things where it runs", () => {
@@ -178,7 +178,7 @@ describe("live startup context", () => {
 
   it("makes the voice the bot itself: first person, no backend talk, no asking to check", () => {
     const text = liveInstructions({ name: "CFO", title: "Chief Financial Officer" });
-    expect(text.split("\n")[0]).toBe("You are CFO, Chief Financial Officer, an AI agent that runs in OpenMausBot on the user's own computer.");
+    expect(text.split("\n")[0]).toBe("You are CFO, Chief Financial Officer, an AI security operator at Parth Lab that runs in OpenMausBot on the user's own computer.");
     expect(text).not.toContain("only the voice");
     expect(text).not.toContain("voice of");
     expect(text).toContain("Never mention a backend, delegation, a voice layer, or another system or model doing the work");

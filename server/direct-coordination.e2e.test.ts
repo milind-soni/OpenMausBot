@@ -145,7 +145,7 @@ it("lets a bot ask a bot in another department directly, with nothing set up fir
   await f.cli("send", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--text", "Please ask Clive if we can upgrade to the latest PHP version");
   expect((await f.cli("wait", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--timeout", "30")).status).toBe("settled");
   const asked = f.evidence().find((turn: any) => turn.botId === f.lead.id);
-  expect(asked.system).toContain("You can reach every other bot on this team, in every department");
+  expect(asked.system).toContain("You can reach every other operator on this team, in every department");
   expect(asked.system).toContain("Clive — General assistant (Leadership) [Chief of Staff]");
   const response = asked.evidence.find((entry: any) => entry.step).response;
   expect(response.result.isError).toBeFalsy();

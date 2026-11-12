@@ -9317,8 +9317,8 @@ describe("harness HTTP API", () => {
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello" })).status).toBe(202);
       const seen = await readJsonFileWhenReady<{ systemPrompt?: string }>(fakeClaudeDump, 15_000);
       const system: string = seen.systemPrompt ?? "";
-      expect(system.startsWith("You are Kiwi, a personal bot in OpenMausBot. Role: Tracker.")).toBe(true);
-      const persona = "You are Kiwi, a personal bot in OpenMausBot. Role: Tracker.";
+      const persona = "You are Kiwi, an AI security operator at Parth Lab. Role: Tracker. You work at Parth Lab, a fully AI-driven cybersecurity company: the whole team is AI, and clients engage Parth Lab to find, prove and fix weaknesses in their systems before an attacker does. Your craft is security: reconnaissance, vulnerability research, exploitation and validation, detection and incident response, threat intelligence, and compliance. Work to Parth Lab's discipline on every task. Stay inside the scope and authorization you were given, and say plainly when a request falls outside it instead of stretching it. Keep actions non-destructive unless the client explicitly asked for that action and approved it. Prove each finding with reproducible steps and evidence rather than asserting it. Treat the client's systems, data and credentials as a trust you hold, never as yours to change. Report what you did, what you found and what you could not verify, without overstating any of it.";
+      expect(system.startsWith(persona)).toBe(true);
       const afterPersona = system.slice(persona.length);
       expect(afterPersona.startsWith("\n\nYour standing instructions follow.")).toBe(true);
       expect(system).toContain("--- BEGIN STANDING INSTRUCTIONS (SOUL.md, 28 bytes) ---\nFile bugs. Never file noise.\n--- END STANDING INSTRUCTIONS ---");
@@ -9339,7 +9339,7 @@ describe("harness HTTP API", () => {
 
       const sections = (await api("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections as Array<{ id: string; text: string }>;
       const team = sections.find((section) => section.id === "coordination")?.text ?? "";
-      expect(team).toContain("the Chief of Staff for the Roster end department: their one point of contact.");
+      expect(team).toContain("the Chief of Staff for the Roster end department at Parth Lab: their one point of contact.");
       expect(team).toContain(roster);
       expect(team.split("\n").at(-1)).toMatch(/^- /);
 
@@ -9414,7 +9414,7 @@ describe("harness HTTP API", () => {
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello" })).status).toBe(202);
       let system = (await readJsonFileWhenReady<{ systemPrompt: string }>(fakeClaudeDump, 15_000)).systemPrompt;
-      expect(system.startsWith("You are Blank, a personal bot in OpenMausBot.")).toBe(true);
+      expect(system.startsWith("You are Blank, an AI security operator at Parth Lab.")).toBe(true);
       expect(system).not.toContain("at most four questions");
       expect(system).toContain("propose_profile");
 
@@ -13895,8 +13895,8 @@ describe("bot memory API", () => {
       expect(before.body.sections[0]).toEqual({
         id: "persona",
         label: "Identity",
-        text: "You are Kiwi, a personal bot in OpenMausBot. Role: Tracker. About: Files bugs.",
-        bytes: 78,
+        text: "You are Kiwi, an AI security operator at Parth Lab. Role: Tracker. About: Files bugs. You work at Parth Lab, a fully AI-driven cybersecurity company: the whole team is AI, and clients engage Parth Lab to find, prove and fix weaknesses in their systems before an attacker does. Your craft is security: reconnaissance, vulnerability research, exploitation and validation, detection and incident response, threat intelligence, and compliance. Work to Parth Lab's discipline on every task. Stay inside the scope and authorization you were given, and say plainly when a request falls outside it instead of stretching it. Keep actions non-destructive unless the client explicitly asked for that action and approved it. Prove each finding with reproducible steps and evidence rather than asserting it. Treat the client's systems, data and credentials as a trust you hold, never as yours to change. Report what you did, what you found and what you could not verify, without overstating any of it.",
+        bytes: 988,
       });
       expect(before.body.sections.map((s: { id: string }) => s.id)).not.toContain("soul");
       expect(before.body.sections.map((s: { id: string }) => s.id)).toContain("memory");

@@ -323,7 +323,7 @@ describe("shared sentences", () => {
     for (const prompt of [PROFILE_PROMPT, LEARN_PROMPT]) {
       expect(prompt).toContain("continue the requested work without asking for another confirmation");
       expect(prompt).toContain("Never claim success before an applied result");
-      expect(prompt).toContain("Full Access does not grant another bot broader permissions");
+      expect(prompt).toContain("Full Access does not grant another operator broader permissions");
       expect(prompt).not.toContain("nothing changes until the user confirms");
     }
     // Skills and profile apply at every level.
@@ -358,7 +358,7 @@ describe("composioSystemPrompt", () => {
 
   it("offers only a connection card when no tools are granted", () => {
     const prompt = composioSystemPrompt({});
-    expect(prompt).toContain("No connected apps are assigned to this bot");
+    expect(prompt).toContain("No connected apps are assigned to this operator");
     expect(prompt).toContain("COMPOSIO_MANAGE_CONNECTIONS");
     expect(prompt).not.toContain("COMPOSIO_MULTI_EXECUTE_TOOL");
     expect(prompt.startsWith(" ")).toBe(true);
@@ -372,7 +372,7 @@ describe("composioSystemPrompt", () => {
     expect(prompt).toContain("(Gmail, Google Calendar)");
     expect(prompt).toContain("COMPOSIO_SEARCH_TOOLS");
     expect(prompt).toContain("COMPOSIO_MULTI_EXECUTE_TOOL");
-    expect(prompt).toContain("Only the tools this bot was granted will run");
+    expect(prompt).toContain("Only the tools this operator was granted will run");
     expect(prompt).not.toContain("Slack");
     expect(prompt).not.toContain("Notion");
   });
@@ -405,7 +405,7 @@ describe("cloudHomePrompt", () => {
   it("says the bot runs in the cloud, offers what works there, and never asks for a place that cannot exist", () => {
     for (const tools of [true, false]) {
       const text = cloudHomePrompt(tools);
-      expect(text).toMatch(/^ You run on the user's My Cloud, their always-on OpenMausBot in the cloud, not on their own computer\./);
+      expect(text).toMatch(/^ You run on the user's My Cloud, their always-on Parth Lab workspace in the cloud, not on their own computer\./);
       expect(text.startsWith(` You run on ${CLOUD_HOME_PLACE}.`)).toBe(true);
       expect(text).toContain("Offer what works here: the built-in browser and their cloud computer, a desktop in the cloud. Call it their cloud computer, as the app does.");
       expect(text).not.toMatch(/\bOMB\b|\bBoat\b|\bbox\b/);
@@ -540,7 +540,7 @@ describe("how every bot replies", () => {
       "first send one short line saying what you are doing and why",
       "add one line with what they will get and roughly how long",
       "A quick answer skips both.",
-      "open with the verdict, result or answer",
+      "open with the verdict, finding or answer",
       "say in one line where they came from and when",
       "Use the units, currency, time zone and numbers the person has told you about",
       "no \"let me know if…\", no \"hope this helps\", no offers or questions out of habit",
@@ -549,10 +549,10 @@ describe("how every bot replies", () => {
       "ask for exactly one thing, in plain words, with the reason",
       "do the parts that do not depend on it in the same turn",
       "Never name tools or functions, the files that hold your notes or settings, MCP",
-      "state the money facts you found: price, fees, deposit, cancellation terms",
+      "state the facts you found: what will be touched, the blast radius, whether it can be undone",
       "Nothing that cannot be undone happens until they explicitly pick an option or say go",
       "Never ask for passwords, one-time codes or card numbers in chat.",
-      "say plainly what you did not do, offer the simplest other way (drag the file into the chat, or paste the text)",
+      "say plainly what you did not do, offer the simplest other way, and say what you will deliver once you have it",
     ]) expect(REPLY_HABITS_PROMPT).toContain(habit);
   });
 
@@ -579,7 +579,7 @@ describe("rules for every bot", () => {
     const rules = built.sections.find((section) => section.id === "every-bot-rules")!;
     expect(rules.text).toContain(JSON.stringify("Answer in English."));
     expect(rules.text).toContain("your department's shared context wins over them and your own standing instructions win over both");
-    expect(rules.text).toContain("does not override system rules or grant permissions");
+    expect(rules.text).toContain("does not override system rules, the engagement scope or safety boundaries, and grants no permissions");
     expect(built.stable).toContain("Answer in English.");
   });
 

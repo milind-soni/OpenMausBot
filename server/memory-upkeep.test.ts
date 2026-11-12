@@ -68,10 +68,10 @@ describe("capture parsing", () => {
       ],
     };
     const prompt = capturePrompt({ botName: "Scout", turns: [room], notebook: "", today: TODAY });
-    expect(prompt).toContain("Person: The launch moved to Friday\nAsha (another person): I'll own the press kit\nPixel (another bot): I deployed the site and checked it loads\nScout: Got it.");
+    expect(prompt).toContain("Person: The launch moved to Friday\nAsha (another person): I'll own the press kit\nPixel (another operator): I deployed the site and checked it loads\nScout: Got it.");
     expect(prompt).toContain('This is a group chat ("room") Scout is a member of.');
     expect(prompt).toContain("never aboutUser");
-    expect(prompt).toContain("only an outcome that bot verified");
+    expect(prompt).toContain("only an outcome that operator verified");
     expect(capturePrompt({ botName: "Scout", turns: [{ person: "hi", bot: "hello" }], notebook: "", today: TODAY })).not.toContain("group chat");
   });
 

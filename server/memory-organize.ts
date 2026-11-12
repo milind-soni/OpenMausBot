@@ -23,7 +23,7 @@ export function organizePrompt(candidates: readonly MemoryEntryLine[], topics: s
   return [
     `${ORGANIZE_MARKER}. You have no tools. Read only what is below.`,
     "",
-    `An assistant's core notebook, loaded into every conversation, holds these numbered lines${today ? ` (today is ${today})` : ""}:`,
+    `An operator's core notebook, loaded into every conversation, holds these numbered lines${today ? ` (today is ${today})` : ""}:`,
     candidates.map((e, index) => `[${index}] ${e.body} (noted ${e.date})`).join("\n") || "(nothing)",
     "",
     `Topic files it already keeps:\n${topics.trim() || "(none yet)"}`,
