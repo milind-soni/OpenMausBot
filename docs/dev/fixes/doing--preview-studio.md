@@ -1,9 +1,9 @@
 ---
-status: todo
+status: doing
 created: 2026-11-12
 updated: 2026-11-12
 scope: preview studio
-owner: SoSo
+owner: Z
 related: [done--mobile-preview-panel.md, done--mobile-preview-panel-chat-view.md]
 ---
 
@@ -15,7 +15,7 @@ Implements `docs/dev/plans/implementation--preview-studio.md`. Design work start
 
 ## 1. Design
 
-- [ ] **Design the quick preview panel and the Preview page** — Z. Cover:
+- [?] **Design the quick preview panel and the Preview page** — Z. Cover:
   - the source bar (address or file)
   - the size picker
   - Single vs Canvas mode
@@ -28,10 +28,10 @@ Implements `docs/dev/plans/implementation--preview-studio.md`. Design work start
 
 ## 2. Foundation
 
-- [ ] **Size catalog** — `src/lib/mobileDevicePresets.ts:12` becomes `src/lib/previewSizes.ts`. Groups: phone, tablet, laptop, desktop. Supports rotate and custom sizes.
-- [ ] **PreviewFrame** — Uses `<webview>` in the desktop app and a sandboxed `<iframe>` in the browser. Shared load, error, and screenshot handling.
-- [ ] **File previews** — Show HTML, PDF, images, and Markdown from registered projects through a read-only, project-scoped harness route.
-- [ ] **Auto-refresh on file change** — The harness watches the previewed file and pushes a reload event over SSE.
+- [~] **Size catalog** — `src/lib/mobileDevicePresets.ts:12` becomes `src/lib/previewSizes.ts`. Groups: phone, tablet, laptop, desktop. Supports rotate and custom sizes.
+- [~] **PreviewFrame** — Uses `<webview>` in the desktop app and a sandboxed `<iframe>` in the browser. Shared load, error, and screenshot handling.
+- [~] **File previews** — Show HTML, PDF, images, and Markdown from registered projects through a read-only, project-scoped harness route.
+- [~] **Auto-refresh on file change** — The harness watches the previewed file and pushes a reload event over SSE.
 
 ## 3. Quick preview panel
 
