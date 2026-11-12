@@ -8128,6 +8128,7 @@
   "chat.notice.resumingAfterRestart": "Retomando após uma reinicialização",
   "chat.notice.cutOffByRestart": "Uma reinicialização interrompeu {name}. Retomando.",
   "chat.notice.stalled": "Sem atividade por {minutes} min. A sessão foi interrompida.",
+  "chat.notice.stalledCommand": "O comando `{command}` rodou por {minutes} min sem terminar e parece travado. A sessão foi interrompida.",
   "chat.notice.followupInterrupted": "Uma reinicialização ou restauração interrompeu a mensagem na fila, mas talvez ela já tenha sido processada. Confira o resultado antes de enviar novamente.",
   "chat.notice.usageLimit": "Esta conta de {provider} atingiu o limite de uso{detail}. Espere o limite ser renovado ou troque a IA deste bot.",
   "chat.notice.claudeExtraUsage": "O Claude recusou esta sessão porque este modelo consome os créditos de uso extra da sua conta, e esses créditos acabaram. O uso do seu plano não foi afetado: troque este bot para um modelo incluído no plano ou adicione uso extra na sua conta do Claude.",
