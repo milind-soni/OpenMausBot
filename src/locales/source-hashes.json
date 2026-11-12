@@ -2670,6 +2670,7 @@
       "server.cloudReset.pending": "cae5248026f571c7a73a8b7319a8ae7b276ebd6b2ed3615572086f0e9b2ca36d",
       "server.cloudReset.missing": "b9e1c7f96e043bc6150f46302c0c3b8a9db3d67c44d9253f0b3a82f3a404f107",
       "server.cloudReset.failed": "b3ad7ca9b0db2a9a162e07fb9277b26352af0df7d087871000a9a5ea38992c81",
+      "server.cloudReset.gone": "3786f18b1e4f257caff54c864104de93fcc8aa37b1cf5caf28855b4b14b8bcc9",
       "server.mcp.card.newClientSecret": "3a292997500ffe2e683dbd68c64793f654b8962b9c33d06058cc13b2f93728f7",
       "server.mcp.card.keyExpired": "a042da6fc541944d38462d0d286c50df6de1ddb685c8a87a9449c44c01e97788",
       "server.mcp.card.gone": "a014f2ad78507fc71d59cfe9b10efef4c41e77bf2ac3bf7ecf23f1d0d4a0f8f6",
@@ -36494,7 +36495,8 @@
       "server.cloudReset.done": "27e4089cf08c6d6097f59d79515c7da826cf3e1cff34e03d76cb8f0cbfa161fd",
       "server.cloudReset.pending": "cae5248026f571c7a73a8b7319a8ae7b276ebd6b2ed3615572086f0e9b2ca36d",
       "server.cloudReset.missing": "b9e1c7f96e043bc6150f46302c0c3b8a9db3d67c44d9253f0b3a82f3a404f107",
-      "server.cloudReset.failed": "b3ad7ca9b0db2a9a162e07fb9277b26352af0df7d087871000a9a5ea38992c81"
+      "server.cloudReset.failed": "b3ad7ca9b0db2a9a162e07fb9277b26352af0df7d087871000a9a5ea38992c81",
+      "server.cloudReset.gone": "3786f18b1e4f257caff54c864104de93fcc8aa37b1cf5caf28855b4b14b8bcc9"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

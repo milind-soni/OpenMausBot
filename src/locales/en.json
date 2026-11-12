@@ -298,6 +298,7 @@
   "server.cloudReset.pending": "Reset started. The old cloud desktop is still being deleted; a fresh one starts with {name}'s next message once it is gone.",
   "server.cloudReset.missing": "Nothing to reset: {name} has no cloud desktop now. One starts with its next message.",
   "server.cloudReset.failed": "Not reset: {reason}",
+  "server.cloudReset.gone": "Not reset: {name} or the bot that asked no longer exists.",
   "server.mcp.card.newClientSecret": "new OAuth client secret",
   "server.mcp.card.keyExpired": "The key expired before this was answered.",
   "server.mcp.card.gone": "{name} no longer exists.",

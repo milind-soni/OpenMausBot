@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createCloudComputerResetAsks, RESET_CLOUD_COMPUTER_TOOL, RESET_RETRIES, RESET_RETRY_MS } from "./cloud-computer-reset-asks.ts";
+import { createCloudComputerResetAsks, noOwnCloudComputer, RESET_CLOUD_COMPUTER_TOOL, RESET_RETRIES, RESET_RETRY_MS } from "./cloud-computer-reset-asks.ts";
 import type { BotRecord } from "../store.ts";
 
 type Line = { id: string; role: string; kind: string; card?: Record<string, any>; from?: unknown };
@@ -10,8 +10,9 @@ const ada = bot("bot-a", "Ada"), chief = bot("chief", "Chief"), bea = bot("bot-b
 
 function setup(options: { refusal?: (from: BotRecord, target: BotRecord) => string | null; reset?: () => Promise<any>; computer?: () => Promise<string | null> } = {}) {
   const lines = new Map<string, Line[]>();
+  const roster = [ada, chief, bea];
   const store = {
-    bot: (id: string) => [ada, chief, bea].find((candidate) => candidate.id === id),
+    bot: (id: string) => roster.find((candidate) => candidate.id === id),
     groupByThread: () => undefined,
     messagesFor: (threadId: string) => lines.get(threadId) ?? [],
     appendMessage: (threadId: string, message: Omit<Line, "id">) => {
@@ -46,7 +47,7 @@ function setup(options: { refusal?: (from: BotRecord, target: BotRecord) => stri
   };
   const card = () => lines.get("t1")?.at(-1)?.card;
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-  return { asks, call, card, reset, computer, timers, flush, lines };
+  return { asks, call, card, reset, computer, timers, flush, lines, roster };
 }
 
 describe("a bot asking for its cloud computer to be reset", () => {
@@ -162,6 +163,27 @@ describe("a bot asking for its cloud computer to be reset", () => {
     expect(retry.reset).toHaveBeenCalledTimes(1);
     expect(retry.timers).toHaveLength(0);
     expect(retry.card()?.subtitle).toContain("Not reset: not yours");
+  });
+
+  it("says in the card's language that nothing was reset when a bot was deleted before Allow", async () => {
+    const { asks, call, card, reset, flush, roster } = setup();
+    await call(ada, {});
+    roster.splice(roster.indexOf(ada), 1);
+    asks.answer(card()!.requestId, "allow");
+    await flush();
+    expect(reset).not.toHaveBeenCalled();
+    expect(card()?.subtitle).toContain("Not reset: Ada or the bot that asked no longer exists.");
+  });
+
+  it("counts a bot on Auto as having a cloud computer of its own, unless it uses its department's", () => {
+    const named = (computer: BotRecord["computer"], cloudBackend?: BotRecord["cloudBackend"]) => ({ name: "Ada", computer, cloudBackend }) as Pick<BotRecord, "name" | "computer" | "cloudBackend">;
+    const none = "Ada has no cloud computer of its own to reset here.";
+    expect(noOwnCloudComputer(named(undefined), true, false)).toBeNull();
+    expect(noOwnCloudComputer(named("cloud"), true, false)).toBeNull();
+    expect(noOwnCloudComputer(named(undefined), true, true)).toBe(none);
+    expect(noOwnCloudComputer(named(undefined), false, false)).toBe(none);
+    expect(noOwnCloudComputer(named("cloud", "vps"), true, false)).toBe(none);
+    expect(noOwnCloudComputer(named("local"), true, false)).toBe(none);
   });
 
   it("needs a reason, and shows no card without one", async () => {

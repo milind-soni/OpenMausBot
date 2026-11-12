@@ -35,6 +35,13 @@ export interface CloudComputerResetAsksDeps {
   language?(threadId: string): string | undefined;
 }
 
+/** Why `target` has no cloud computer of its own to reset here, null when it may have one. Auto (no computer
+ *  setting) counts: a bot on Auto can run on its own cloud computer, unless it uses its department's. */
+export function noOwnCloudComputer(target: Pick<BotRecord, "name" | "computer" | "cloudBackend">, cloudOn: boolean, inherited: boolean): string | null {
+  const own = cloudOn && (target.computer === undefined || target.computer === "cloud") && target.cloudBackend !== "vps" && !inherited;
+  return own ? null : `${target.name} has no cloud computer of its own to reset here.`;
+}
+
 const inUse = (error: unknown) =>
   (error as { status?: unknown } | null)?.status === 409 && /in use/i.test(error instanceof Error ? error.message : "");
 
@@ -55,7 +62,8 @@ export function createCloudComputerResetAsks(deps: CloudComputerResetAsksDeps) {
     try {
       // Who may ask can change while the card waits (a moved bot, another computer setting): checked again on every try.
       const from = store.bot(ask.fromId), target = store.bot(ask.targetId);
-      const refused = !from || !target ? "the bot is gone" : deps.refusal(from, target);
+      if (!from || !target) { show(ask, words(ask.threadId, "server.cloudReset.gone", { name: ask.targetName })); return; }
+      const refused = deps.refusal(from, target);
       if (refused) { show(ask, words(ask.threadId, "server.cloudReset.failed", { reason: refused })); return; }
       const result = await deps.reset(ask.targetId, ask.boxId);
       const key = result.missing ? "server.cloudReset.missing" : result.pending ? "server.cloudReset.pending" : "server.cloudReset.done";

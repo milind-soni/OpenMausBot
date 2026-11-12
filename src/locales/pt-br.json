@@ -281,6 +281,7 @@
   "server.cloudReset.pending": "Redefinição iniciada. O desktop na nuvem antigo ainda está sendo excluído; um novo começa com a próxima mensagem de {name} quando ele sumir.",
   "server.cloudReset.missing": "Nada para redefinir: {name} não tem desktop na nuvem agora. Um começa com a próxima mensagem.",
   "server.cloudReset.failed": "Não redefinido: {reason}",
+  "server.cloudReset.gone": "Não redefinido: {name} ou o bot que pediu não existe mais.",
   "server.mcp.card.newClientSecret": "novo segredo do cliente OAuth",
   "server.mcp.card.keyExpired": "A chave expirou antes da resposta.",
   "server.mcp.card.gone": "{name} não existe mais.",

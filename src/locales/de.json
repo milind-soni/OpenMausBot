@@ -166,6 +166,7 @@
   "server.cloudReset.pending": "Zurücksetzen gestartet. Der alte Cloud-Desktop wird noch gelöscht; sobald er weg ist, startet mit der nächsten Nachricht von {name} ein neuer.",
   "server.cloudReset.missing": "Nichts zurückzusetzen: {name} hat gerade keinen Cloud-Desktop. Mit der nächsten Nachricht startet einer.",
   "server.cloudReset.failed": "Nicht zurückgesetzt: {reason}",
+  "server.cloudReset.gone": "Nicht zurückgesetzt: {name} oder der Bot, der gefragt hat, existiert nicht mehr.",
   "server.mcp.card.newClientSecret": "neues OAuth-Client-Secret",
   "server.mcp.card.keyExpired": "Der Schlüssel ist abgelaufen, bevor das beantwortet wurde.",
   "server.mcp.card.gone": "{name} gibt es nicht mehr.",
