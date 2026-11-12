@@ -140,6 +140,16 @@ describe("how it keeps its records", () => {
     manager.enable("b2");
     expect(manager.revokeMintedBy("p_ada")).toEqual([]);
   });
+
+  it("persists every host-verified QM authorization field for read-back", () => {
+    const { manager, reopen } = harness();
+    manager.enable("b1");
+    manager.record("b1", { outcome: "accepted", statusCode: 200, threadId: "t1", actorId: "p_ada", scopeId: "personal:p_ada",
+      authorizationKind: "explicit_single_turn_delegation", authority: "on_their_behalf_at_your_level", boundary: "exact_request_only", doesNotExpandReceiverPermissions: true });
+    manager.flush();
+    expect(reopen().listAttempts("b1")[0]).toMatchObject({ actorId: "p_ada", scopeId: "personal:p_ada",
+      authorizationKind: "explicit_single_turn_delegation", authority: "on_their_behalf_at_your_level", boundary: "exact_request_only", doesNotExpandReceiverPermissions: true });
+  });
 });
 
 describe("a caller's image tags", () => {
@@ -186,7 +196,8 @@ describe("QM delegation context", () => {
   it("derives actor, personal scope and exact authority only from a matching trusted actor", () => {
     expect(qmDelegationContext(envelope(), "p_ada")).toEqual({
       schema: "shifu.qm.bot-delegation.v1", actorId: "p_ada", scopeId: "personal:p_ada",
-      authority: "on_their_behalf_at_your_level", boundary: "exact_request_only", request: "Check the report",
+      authorizationKind: "explicit_single_turn_delegation", authority: "on_their_behalf_at_your_level",
+      boundary: "exact_request_only", doesNotExpandReceiverPermissions: true, request: "Check the report",
     });
     expect(qmDelegationContext(envelope(), undefined)).toBeNull();
     expect(qmDelegationContext(envelope(), "p_ben")).toBeNull();

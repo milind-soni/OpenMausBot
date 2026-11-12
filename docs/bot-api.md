@@ -91,14 +91,18 @@ authenticated app API. Read the same route with `GET` and require
 A designated credential may send `x-qm-actor` with a
 `shifu.qm.bot-delegation.v1` message. The receiver requires the header actor to match both
 `requester.actorId` and `requester.scopeId === "personal:" + actor`. Missing or mismatched
-context answers `delegation_context_invalid`; a credential not designated for QM cannot
+context, a missing schema, or an unknown `shifu.qm.bot-delegation.*` version answers
+`delegation_context_invalid`; a credential not designated for QM cannot
 create a receiver turn. The first accepted call binds its thread to that actor, and a later
 actor gets `403`.
 
-The Bot API settings response keeps the accepted call's `actorId`, `scopeId`, `authority`
-and `boundary` for read-back. The host, not the message body, supplies those fields to the
-turn. A call without `x-qm-actor` stays on the legacy raw-message path, including on a
-QM-designated key, so the sender can roll back before this compatibility path is removed.
+The Bot API settings response keeps the accepted call's `actorId`, `scopeId`,
+`authorizationKind`, `authority`, `boundary` and `doesNotExpandReceiverPermissions` for
+read-back, and the same metadata is bound to the thread. The host, not the message body,
+supplies those fields to the turn. A call without `x-qm-actor` stays on the legacy
+raw-message path only when it has neither the delegation namespace nor the
+requester/authorization/request shape, so the sender can roll back without letting a broken
+delegation become ordinary data.
 
 Each call is kept with the bot's API settings and shown on the card (count, last
 call, recent calls) to those who can manage the key. Refused calls roll up into

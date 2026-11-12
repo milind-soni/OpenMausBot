@@ -46,8 +46,10 @@ const attemptSchema = z.object({
   repeats: z.number().int().positive().optional(),
   actorId: z.string().regex(/^[\x21-\x7e]{1,256}$/).optional(),
   scopeId: z.string().max(512).optional(),
+  authorizationKind: z.literal("explicit_single_turn_delegation").optional(),
   authority: z.literal("on_their_behalf_at_your_level").optional(),
   boundary: z.literal("exact_request_only").optional(),
+  doesNotExpandReceiverPermissions: z.literal(true).optional(),
 });
 const fileSchema = z.object({
   version: z.literal(1),
@@ -71,8 +73,10 @@ export interface BotApiDelegationContext {
   schema: "shifu.qm.bot-delegation.v1";
   actorId: string;
   scopeId: string;
+  authorizationKind: "explicit_single_turn_delegation";
   authority: "on_their_behalf_at_your_level";
   boundary: "exact_request_only";
+  doesNotExpandReceiverPermissions: true;
   request: string;
 }
 
@@ -103,8 +107,10 @@ export function qmDelegationContext(message: string, trustedActor: string | unde
     schema: parsed.data.schema,
     actorId: trustedActor,
     scopeId: requester.scopeId,
+    authorizationKind: authorization.kind,
     authority: authorization.authority,
     boundary: authorization.boundary,
+    doesNotExpandReceiverPermissions: authorization.doesNotExpandReceiverPermissions,
     request: parsed.data.request,
   };
 }
@@ -112,7 +118,10 @@ export function qmDelegationContext(message: string, trustedActor: string | unde
 export function claimsQmDelegation(message: string): boolean {
   try {
     const value = parseJson(message);
-    return typeof value === "object" && value !== null && "schema" in value && (value as { schema?: unknown }).schema === "shifu.qm.bot-delegation.v1";
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const candidate = value as Record<string, unknown>;
+    if (typeof candidate.schema === "string" && candidate.schema.startsWith("shifu.qm.bot-delegation.")) return true;
+    return Object.hasOwn(candidate, "requester") && Object.hasOwn(candidate, "authorization") && Object.hasOwn(candidate, "request");
   } catch { return false; }
 }
 
@@ -259,8 +268,10 @@ export class BotApiManager {
     if (details.reason) attempt.reason = redactSecretsInText(details.reason).slice(0, 500);
     if (details.actorId) attempt.actorId = details.actorId;
     if (details.scopeId) attempt.scopeId = details.scopeId;
+    if (details.authorizationKind) attempt.authorizationKind = details.authorizationKind;
     if (details.authority) attempt.authority = details.authority;
     if (details.boundary) attempt.boundary = details.boundary;
+    if (details.doesNotExpandReceiverPermissions) attempt.doesNotExpandReceiverPermissions = details.doesNotExpandReceiverPermissions;
     this.keep(attempt);
     const record = this.bots.find((candidate) => candidate.botId === botId);
     if (record && details.outcome === "accepted") {
@@ -339,7 +350,7 @@ export function botApiPrompt(message: string, receivedAt: number): string {
 export function botApiDelegationPrompt(context: BotApiDelegationContext, receivedAt: number): string {
   return [
     fromNote(`QM for ${context.actorId}`, "assignment", AUTHORITY.behalf),
-    `[OPENMAUSBOT VERIFIED DELEGATION schema=${context.schema} actor=${JSON.stringify(context.actorId)} scope=${JSON.stringify(context.scopeId)} authority=${context.authority} boundary=${context.boundary}]`,
+    `[OPENMAUSBOT VERIFIED DELEGATION schema=${context.schema} actor=${JSON.stringify(context.actorId)} scope=${JSON.stringify(context.scopeId)} authorizationKind=${context.authorizationKind} authority=${context.authority} boundary=${context.boundary} doesNotExpandReceiverPermissions=${context.doesNotExpandReceiverPermissions}]`,
     defuse(`Received: ${new Date(receivedAt).toISOString()}`),
     "",
     withoutAttachedImages(context.request),

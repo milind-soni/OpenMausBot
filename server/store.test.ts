@@ -339,6 +339,17 @@ describe("Store", () => {
     for (const field of Object.keys(patch)) expect(wire).not.toHaveProperty(field);
   });
 
+  it("persists verified QM thread metadata but keeps it host-private", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const botApiDelegation = { actorId: "p_ada", scopeId: "personal:p_ada", authorizationKind: "explicit_single_turn_delegation" as const,
+      authority: "on_their_behalf_at_your_level" as const, boundary: "exact_request_only" as const, doesNotExpandReceiverPermissions: true as const };
+    store.patchTask(bot.id, bot.threadId, { botApi: true, botApiDelegation });
+    const reloaded = new Store(selection).taskByThread(bot.id, bot.threadId)!;
+    expect(reloaded.botApiDelegation).toEqual(botApiDelegation);
+    expect(toWireTask(reloaded, selection())).not.toHaveProperty("botApiDelegation");
+  });
+
   it("keeps a Live call row's record across a restart and scrubs a secret from its title", () => {
     const store = new Store(selection);
     const bot = store.createBot({}, { seedMessages: false });

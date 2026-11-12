@@ -18,7 +18,7 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-type Task = { threadId: string; title: string; busy: boolean; botApi?: true; botApiActor?: string; approvalMode?: string; outside?: true };
+type Task = { threadId: string; title: string; busy: boolean; botApi?: true; botApiDelegation?: { actorId: string; scopeId: string; authorizationKind: "explicit_single_turn_delegation"; authority: "on_their_behalf_at_your_level"; boundary: "exact_request_only"; doesNotExpandReceiverPermissions: true }; approvalMode?: string; outside?: true };
 
 /** The slice of the store the host reads and writes, in memory. */
 function fakeStore() {
@@ -140,14 +140,18 @@ describe("the Bot API door on the webhook receiver", () => {
     expect(result.status).toBe(200);
     const [turn] = h.turns;
     expect(turn!.opts).toMatchObject({
-      delegation: { actorId: "p_ada", scopeId: "personal:p_ada", authority: "on_their_behalf_at_your_level", boundary: "exact_request_only" },
+      delegation: { actorId: "p_ada", scopeId: "personal:p_ada", authorizationKind: "explicit_single_turn_delegation", authority: "on_their_behalf_at_your_level", boundary: "exact_request_only", doesNotExpandReceiverPermissions: true },
       origin: { kind: "user", request: "Prepare the answer" },
     });
     expect(turn!.opts).not.toHaveProperty("automationSource");
     expect(turn!.prompt).toContain("[From QM for p_ada · assignment · on their behalf at your level]");
-    expect(h.fake.bots.get("b1")!.tasks[0]).toMatchObject({ botApi: true, botApiActor: "p_ada", outside: true });
+    expect(h.fake.bots.get("b1")!.tasks[0]).toMatchObject({ botApi: true, botApiDelegation: {
+      actorId: "p_ada", scopeId: "personal:p_ada", authorizationKind: "explicit_single_turn_delegation",
+      authority: "on_their_behalf_at_your_level", boundary: "exact_request_only", doesNotExpandReceiverPermissions: true,
+    }, outside: true });
     expect((await h.app("GET", "/api/bots/b1/bot-api")).body.calls[0]).toMatchObject({
-      actorId: "p_ada", scopeId: "personal:p_ada", authority: "on_their_behalf_at_your_level", boundary: "exact_request_only",
+      actorId: "p_ada", scopeId: "personal:p_ada", authorizationKind: "explicit_single_turn_delegation",
+      authority: "on_their_behalf_at_your_level", boundary: "exact_request_only", doesNotExpandReceiverPermissions: true,
     });
   });
 
@@ -159,7 +163,11 @@ describe("the Bot API door on the webhook receiver", () => {
     expect(await h.call("b1", on.body.key, delegation("p_ada", "personal:p_ben"), { headers: { "x-qm-actor": "p_ada" } })).toMatchObject({ status: 400, body: { error: "delegation_context_invalid" } });
     const noSchema = JSON.parse(delegation().message) as Record<string, unknown>;
     delete noSchema.schema;
+    expect(await h.call("b1", on.body.key, { message: JSON.stringify(noSchema) })).toMatchObject({ status: 400, body: { error: "delegation_context_invalid" } });
     expect(await h.call("b1", on.body.key, { message: JSON.stringify(noSchema) }, { headers: { "x-qm-actor": "p_ada" } })).toMatchObject({ status: 400, body: { error: "delegation_context_invalid" } });
+    const unknownVersion = { ...(JSON.parse(delegation().message) as Record<string, unknown>), schema: "shifu.qm.bot-delegation.v2" };
+    expect(await h.call("b1", on.body.key, { message: JSON.stringify(unknownVersion) })).toMatchObject({ status: 400, body: { error: "delegation_context_invalid" } });
+    expect(await h.call("b1", on.body.key, { message: JSON.stringify(unknownVersion) }, { headers: { "x-qm-actor": "p_ada" } })).toMatchObject({ status: 400, body: { error: "delegation_context_invalid" } });
     expect(h.turns).toEqual([]);
   });
 
@@ -185,6 +193,7 @@ describe("the Bot API door on the webhook receiver", () => {
     const h = await harness(replies("legacy"));
     const on = await h.app("POST", "/api/bots/b1/bot-api", { enabled: true, trustedSource: "qm" });
     expect(await h.call("b1", on.body.key, { message: "old raw message" })).toMatchObject({ status: 200, body: { reply: "legacy" } });
+    expect(await h.call("b1", on.body.key, { message: JSON.stringify({ request: "ordinary JSON", metadata: { source: "app" } }) })).toMatchObject({ status: 200, body: { reply: "legacy" } });
     expect(h.turns[0]!.opts).toMatchObject({ automationSource: "api", unattended: true });
   });
 

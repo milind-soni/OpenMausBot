@@ -107,6 +107,8 @@ function replyText(lines: readonly Message[]): string {
     .map((line) => line.text!.trim()).join("\n\n"));
 }
 
+const delegationMetadata = ({ request: _request, schema: _schema, ...metadata }: BotApiDelegationContext) => metadata;
+
 export function createBotApiHost(deps: BotApiHostDeps) {
   const manager = deps.manager ?? new BotApiManager();
   const waitMs = deps.waitMs ?? BOT_API_DEFAULT_WAIT_MS;
@@ -146,8 +148,8 @@ export function createBotApiHost(deps: BotApiHostDeps) {
       const task = store.taskByThread(botId, threadId);
       // Only a thread this API opened: the caller never writes into the person's own conversations.
       if (!task || task.botApi !== true) fail(404, "no such thread");
-      if (task.botApiActor !== undefined && task.botApiActor !== delegation?.actorId) fail(403, "delegation_context_invalid", "This thread is bound to another actor");
-      if (task.botApiActor === undefined && delegation !== undefined) fail(403, "delegation_context_invalid", "A raw Bot API thread cannot be upgraded to a trusted delegation");
+      if (task.botApiDelegation !== undefined && task.botApiDelegation.actorId !== delegation?.actorId) fail(403, "delegation_context_invalid", "This thread is bound to another actor");
+      if (task.botApiDelegation === undefined && delegation !== undefined) fail(403, "delegation_context_invalid", "A raw Bot API thread cannot be upgraded to a trusted delegation");
       if (deps.threadBusy(botId, threadId)) return { status: 409, body: { thread: threadId, status: "working" } };
     }
     if (!deps.canStart(botId, threadId ?? "")) fail(409, BUSY, "The bot already had as many conversations going as it may");
@@ -159,7 +161,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
       if (!task) fail(404, "no such bot");
       threadId = task.threadId;
       opened = true;
-      store.patchTask(botId, threadId, { botApi: true, ...(delegation ? { botApiActor: delegation.actorId } : {}), outside: true });
+      store.patchTask(botId, threadId, { botApi: true, ...(delegation ? { botApiDelegation: delegationMetadata(delegation) } : {}), outside: true });
     }
     const receivedAt = Date.now();
     const userMessage = store.appendMessage(threadId, { role: "user", kind: "text", text: message, via: "api" });
@@ -227,7 +229,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
         const threadId = url.searchParams.get("thread") ?? "";
         const task = /^[\w-]{1,128}$/.test(threadId) ? deps.store.taskByThread(botId, threadId) : undefined;
         if (!task || task.botApi !== true) { json(res, 404, { error: "no such thread" }); return true; }
-        if (task.botApiActor !== undefined && (manager.trustedSource(botId) !== "qm" || header(req, "x-qm-actor") !== task.botApiActor)) {
+        if (task.botApiDelegation !== undefined && (manager.trustedSource(botId) !== "qm" || header(req, "x-qm-actor") !== task.botApiDelegation.actorId)) {
           json(res, 403, { error: "delegation_context_invalid" }); return true;
         }
         const state = threadState(botId, threadId);
@@ -283,7 +285,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
       try {
         const answer = await runCall(botId, call, delegation, release);
         manager.record(botId, { outcome: "accepted", statusCode: answer.status, threadId: answer.body.thread, preview: delegation?.request ?? call.message,
-          ...(delegation ? { actorId: delegation.actorId, scopeId: delegation.scopeId, authority: delegation.authority, boundary: delegation.boundary } : {}),
+          ...(delegation ? { actorId: delegation.actorId, scopeId: delegation.scopeId, authorizationKind: delegation.authorizationKind, authority: delegation.authority, boundary: delegation.boundary, doesNotExpandReceiverPermissions: delegation.doesNotExpandReceiverPermissions } : {}),
           reason: "reply" in answer.body ? "Replied" : answer.body.status === "needs_approval" ? "Stopped at an approval" : "Still working" });
         json(res, answer.status, answer.body);
       } catch (error) {
