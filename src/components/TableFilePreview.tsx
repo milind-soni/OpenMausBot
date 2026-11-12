@@ -6,7 +6,7 @@ import { TABLE_FILE_MAX_BYTES, tableDelimiter, type TextTable } from "@/lib/tabl
 import { t } from "@/lib/i18n";
 
 /** A preview limit, not a download limit: chunked responses are bounded too. Text that is not UTF-8 is refused, unless
- * `fallback` names a single-byte encoding to read it in instead (#5618); a NUL byte (UTF-16, binary) is refused even
+ * `fallback` names a single-byte encoding to read it in instead; a NUL byte (UTF-16, binary) is refused even
  * then, since such an encoding would only show it as garbage. */
 export async function readTableResponse(response: Response, signal: AbortSignal, maxBytes = TABLE_FILE_MAX_BYTES, fallback?: string): Promise<string> {
   if (Number(response.headers.get("content-length")) > maxBytes) {

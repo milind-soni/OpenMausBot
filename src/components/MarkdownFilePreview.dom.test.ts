@@ -21,7 +21,7 @@ async function open(answer: () => Promise<Response>) {
 }
 const alertText = () => host.querySelector("[role=alert]")?.textContent ?? "";
 
-describe("Markdown file preview errors and encodings (#5618)", () => {
+describe("Markdown file preview errors and encodings", () => {
   it("opens a file saved as Windows-1252 instead of failing", async () => {
     // "# Relatório\n\nAção concluída" in Windows-1252: ó=F3, ç=E7, ã=E3, í=ED.
     const bytes = new Uint8Array([0x23, 0x20, 0x52, 0x65, 0x6c, 0x61, 0x74, 0xf3, 0x72, 0x69, 0x6f, 0x0a, 0x0a, 0x41, 0xe7, 0xe3, 0x6f, 0x20, 0x63, 0x6f, 0x6e, 0x63, 0x6c, 0x75, 0xed, 0x64, 0x61]);
