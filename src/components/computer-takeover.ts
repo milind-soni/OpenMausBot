@@ -17,6 +17,28 @@ const newLeaseId = () => Array.from(crypto.getRandomValues(new Uint8Array(18)), 
 
 type Request = (action: "take" | "release", controlLeaseId?: string) => Promise<TakeoverSnapshot>;
 
+/** Kept in sessionStorage, which a reload of the page keeps, so a viewer still gives back its own hold when a reload came
+ * after its open or cut that open off. */
+const viewerLeaseKey = (botId: string) => `openmausbot.viewer-lease.${botId}`;
+function recordViewerLease(botId: string, lease: string): void {
+  try { sessionStorage.setItem(viewerLeaseKey(botId), lease); } catch { /* no storage: no record */ }
+}
+function forgetViewerLease(botId: string, lease: string): void {
+  try {
+    if (sessionStorage.getItem(viewerLeaseKey(botId)) === lease) sessionStorage.removeItem(viewerLeaseKey(botId));
+  } catch { /* no storage: no record */ }
+}
+/** What the app's viewer window gives back when it closes: only a hold its open's take owned, by that take's lease, else nothing,
+ * so no one else's hold goes. */
+export function viewerClosedRelease(botId: string): { action: "release"; controlLeaseId: string } | null {
+  let lease: string | null = null;
+  try {
+    lease = sessionStorage.getItem(viewerLeaseKey(botId));
+    sessionStorage.removeItem(viewerLeaseKey(botId));
+  } catch { /* no storage: no record */ }
+  return lease ? { action: "release", controlLeaseId: lease } : null;
+}
+
 function releaseWhenClosed(tab: Window, release: () => void): void {
   const watch = window.setInterval(() => {
     if (!tab.closed) return;
@@ -25,18 +47,18 @@ function releaseWhenClosed(tab: Window, release: () => void): void {
   }, 1_000);
 }
 
-/** A provider-hosted desktop (a Boat) ships its own viewer, so it opens in the app's viewer window or its own tab. A
- * stuck join gives the computer back instead of leaving the bot waiting. */
-export async function openProviderDesktop({ botId, title, held, request, join, current }: {
+/** A provider-hosted desktop (a Boat) ships its own viewer, so it opens in the app's viewer window or its own tab. It
+ * always takes the conversation's computer first, as a hold shown on the bot may sit on another computer. A stuck join
+ * gives the computer back instead of leaving the bot waiting. */
+export async function openProviderDesktop({ botId, title, request, join, current }: {
   botId: string;
   title: string;
-  held: boolean;
   request: Request;
   join: (signal: AbortSignal) => Promise<{ joinUrl?: unknown }>;
   /** Still the conversation and computer the person asked for. */
   current: () => boolean;
 }): Promise<void> {
-  let lease: string | null = null;
+  const lease = newLeaseId();
   // Plain web opens its blank tab synchronously, inside the user gesture; the packaged app uses the Electron viewer window.
   let fallbackTab: Window | null = null;
   if (!window.ogb?.desktopViewer && !window.ogb?.openExternal) {
@@ -45,10 +67,10 @@ export async function openProviderDesktop({ botId, title, held, request, join, c
   }
   const changed = () => new DOMException("The selected conversation changed", "AbortError");
   try {
-    if (!held) {
-      lease = newLeaseId();
-      if (!(await request("take", lease)).held) throw new LocalizedPanelError("computer.err.confirmControl");
-    }
+    const take = await request("take", lease);
+    if (!take.held) throw new LocalizedPanelError("computer.err.confirmControl");
+    const mine = take.owned ? lease : null;
+    if (mine && window.ogb?.desktopViewer) recordViewerLease(botId, mine);
     if (!current()) throw changed();
     const { joinUrl } = await join(AbortSignal.timeout(JOIN_TIMEOUT_MS));
     const viewerUrl = typeof joinUrl === "string" && joinUrl ? joinUrl : null;
@@ -58,8 +80,7 @@ export async function openProviderDesktop({ botId, title, held, request, join, c
       if (!(await window.ogb.desktopViewer.open(viewerUrl, title, botId))) throw new LocalizedPanelError("computer.err.openDesktop");
     } else if (fallbackTab) {
       fallbackTab.location.replace(viewerUrl);
-      const taken = lease;
-      if (taken) releaseWhenClosed(fallbackTab, () => void request("release", taken).catch(() => {}));
+      if (mine) releaseWhenClosed(fallbackTab, () => void request("release", mine).catch(() => {}));
     } else if (window.ogb?.openExternal) {
       if (!(await window.ogb.openExternal(viewerUrl))) throw new LocalizedPanelError("computer.err.openDesktopLink");
     } else if (!window.open(viewerUrl, "_blank", "noopener")) {
@@ -67,7 +88,8 @@ export async function openProviderDesktop({ botId, title, held, request, join, c
     }
   } catch (error) {
     fallbackTab?.close();
-    if (lease) await request("release", lease).catch(() => {});
+    forgetViewerLease(botId, lease);
+    await request("release", lease).catch(() => {});
     throw error;
   }
 }
@@ -121,13 +143,15 @@ export function useComputerTakeover({ botId, session, held, request, viewerClose
     setExpanded(expand);
   }, [request]);
 
+  /** A hold this view took is found by its lease wherever it sits; without one, this hands back another viewer's hold. */
   const handBack = useCallback(async () => {
-    const close = lease.current?.viewerClose ?? closeRef.current;
+    const mine = lease.current;
+    const close = mine?.viewerClose ?? closeRef.current;
     lease.current = null;
     end();
     setHandingBack(true);
     try {
-      await request("release");
+      await request("release", mine?.id);
     } finally {
       setHandingBack(false);
       if (close) post(close, {});

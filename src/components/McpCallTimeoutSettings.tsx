@@ -66,6 +66,7 @@ export function McpCallTimeoutSettings() {
           disabled={saving}
           aria-label={t("settings.limits.toolTime")}
           aria-invalid={Boolean(error)}
+          aria-describedby={error ? "mcp-call-timeout-error" : undefined}
           title={t("settings.mcpCalls.help")}
           onChange={(event) => {
             setValue(event.target.value);

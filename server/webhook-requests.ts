@@ -46,6 +46,7 @@ const definitionSchema = z.object({
   instructions: z.string().trim().max(INSTRUCTIONS_MAX).default(""),
   runOn: z.enum(["maus", "cloud"]).default("maus"),
   eventTypes: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
+  sameConversation: z.boolean().optional(),
 }).strict();
 const changesSchema = definitionSchema.partial().strict()
   .refine((changes) => Object.keys(changes).length > 0, "The update action needs at least one field in changes");
@@ -81,6 +82,7 @@ function snapshot(webhook: WebhookTrigger): WebhookRequestSnapshot {
     runOn: webhook.runOn,
     enabled: webhook.enabled,
     ...(webhook.eventTypes?.length ? { eventTypes: [...webhook.eventTypes] } : {}),
+    ...(webhook.sameConversation ? { sameConversation: true } : {}),
   };
 }
 
@@ -90,6 +92,7 @@ function managerInput(definition: Partial<WebhookRequestDefinition>) {
     ...(definition.instructions !== undefined ? { prompt: definition.instructions } : {}),
     ...(definition.runOn !== undefined ? { runOn: definition.runOn } : {}),
     ...(definition.eventTypes !== undefined ? { eventTypes: definition.eventTypes } : {}),
+    ...(definition.sameConversation !== undefined ? { sameConversation: definition.sameConversation } : {}),
   };
 }
 
@@ -243,7 +246,7 @@ export class WebhookRequestService {
           const before = payload.undo?.before;
           if (!current || current.updatedAt !== payload.undo?.appliedUpdatedAt) return stale;
           const patch = operation.action === "update"
-            ? before ? { ...managerInput(before), eventTypes: before.eventTypes ?? [], enabled: before.enabled } : undefined
+            ? before ? { ...managerInput(before), eventTypes: before.eventTypes ?? [], sameConversation: before.sameConversation === true, enabled: before.enabled } : undefined
             : { enabled: operation.action === "pause" };
           if (!patch || !webhooks.update(webhookId, patch)) return stale;
           break;

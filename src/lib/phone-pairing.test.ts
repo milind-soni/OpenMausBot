@@ -187,6 +187,13 @@ describe("the ?desktop-settings=phone request", () => {
     expect(pairedDestination("?next=//evil.example")).toBe("/");
     expect(pairedDestination("")).toBe("/");
   });
+
+  it("keeps a linked thread through sign-in, and nothing else with it", () => {
+    expect(pairedDestination("?thread=t-1&bot=scout")).toBe("/?thread=t-1&bot=scout");
+    expect(pairedDestination("?thread=t%201&x=1")).toBe("/?thread=t+1");
+    expect(pairedDestination("?bot=scout")).toBe("/");
+    expect(pairedDestination("?thread=t-1&next=/settings")).toBe("/settings");
+  });
 });
 
 describe("the person's Cloud as a destination on this computer", () => {

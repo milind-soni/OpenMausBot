@@ -59,6 +59,11 @@ export function signInWaits(card: { done?: unknown; cancelled?: unknown; superse
   return card.done !== true && card.cancelled !== true && card.superseded !== true && card.answeredInChat !== true;
 }
 
+/** Whether a sign-in card, if there still is one, waits on the person: not stopped and still open. */
+export function signInCardWaits(card: ({ stopped?: unknown } & Parameters<typeof signInWaits>[0]) | undefined): boolean {
+  return card !== undefined && card.stopped !== true && signInWaits(card);
+}
+
 /** How a card ended, or null while it is open. */
 export function signInOutcome(state: { done?: unknown; cancelled?: unknown }): "done" | "cancelled" | null {
   if (state.done === true) return "done";

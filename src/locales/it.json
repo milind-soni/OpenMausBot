@@ -3226,6 +3226,7 @@
   "keys.vps.descBefore": "Alias della config SSH per il VPS Linux. {app} usa la tua config SSH e il tuo agente abituali; non salva chiavi né password. Vedi la ",
   "keys.vps.descLink": "guida di configurazione",
   "keys.vps.descAfter": " per la forma richiesta dell'alias SSH.",
+  "keys.vps.anyMachine": "Funziona qualsiasi macchina Linux con Docker raggiungibile via SSH, anche un computer della tua rete Tailscale: usa il suo nome Tailscale come HostName dell'alias.",
   "keys.vps.aria": "Alias della config SSH del VPS in proprio",
   "keys.vps.removeAlias": "Rimuovi l'alias salvato",
   "usage.title": "Utilizzo",

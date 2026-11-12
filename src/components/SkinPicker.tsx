@@ -89,7 +89,7 @@ export function SkinPicker() {
           {SKINS.map((skin) => {
             const selected = skin.id === active;
             return (
-              <button key={skin.id} type="button" role="radio" aria-checked={selected} aria-pressed={selected} onClick={() => applySkin(skin.id)}
+              <button key={skin.id} type="button" role="radio" aria-checked={selected} onClick={() => applySkin(skin.id)}
                 title={tFromServer(`skins.tagline.${skin.id}`, skin.tagline)}
                 className="group flex cursor-pointer flex-col gap-2 rounded-lg text-left focus-visible:outline-none">
                 {/* Every preview: a 0.5 px frame. The chosen one adds the 2 px ink ring and a 16 px check at its top right. */}
