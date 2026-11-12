@@ -442,7 +442,7 @@ function postActivity(threadId: string, text: string) {
   broadcast({ kind: "message", threadId, message });
 }
 function publishBot(botId: string) { broadcast({ kind: "bot", bot: store.bot(botId) }); }
-async function handleUsageFailure(botId: string, context: ActiveTurnContext, failure: UsageLimitFailure, groupId?: string): Promise<boolean> {
+async function handleUsageFailure(botId: string, context: ActiveTurnContext, failure: UsageLimitFailure, groupId?: string, roomState?: { hop: number; spoken: Set<string>; epoch: number }): Promise<boolean> {
   const bot = store.bot(botId); if (!bot) return false;
   const threadId = groupId ? store.group(groupId)?.threadId : bot.threadId;
   if (!threadId) return false;
@@ -459,7 +459,7 @@ async function handleUsageFailure(botId: string, context: ActiveTurnContext, fai
     if (health.state === "available" && models.options.some(m => m.id === backup.model)) {
       store.patchBot(botId, { usingBackup: true }); publishBot(botId);
       postActivity(threadId, `Switched to ${backup.label ?? backup.model} because ${failedName}’s usage ran out. Continuing your task…`);
-      if (groupId) await runGroupMemberTurn(groupId, botId, 0, new Set(), groupQueueEpoch.get(groupId) ?? 0, { selection: backup, context });
+      if (groupId) await runGroupMemberTurn(groupId, botId, roomState?.hop ?? 0, roomState?.spoken ?? new Set(), roomState?.epoch ?? groupQueueEpoch.get(groupId) ?? 0, { selection: backup, context });
       else await startTurn(botId, context.message.text ?? context.request, { userMessage: context.message, forceModel: backup, retry: context, commsDepth: context.commsDepth });
       return true;
     }
@@ -475,6 +475,10 @@ async function handleUsageFailure(botId: string, context: ActiveTurnContext, fai
   return false;
 }
 async function deliverSchedule(job: ScheduleDelivery): Promise<boolean> {
+  const source = schedules.get(job.scheduleId);
+  if (source?.origin === "bot" && source.createdBy && !canManageSchedule(source, source.createdBy, store.groups)) {
+    schedules.finish(job.id, "failed", "The bot that created this schedule no longer has access to this conversation."); return true;
+  }
   const bot = job.target.botId ? store.bot(job.target.botId) : undefined;
   const group = job.target.groupId ? store.group(job.target.groupId) : undefined;
   if (!bot && !group) { schedules.finish(job.id, "failed", "The bot or room no longer exists."); return true; }
@@ -898,7 +902,7 @@ async function runGroupMemberTurn(
     const resume = roomResumes.get(group.threadId);
     const context: ActiveTurnContext = retry?.context ?? { botId, message: latestUserMessage, request: resume?.request ?? latestUserText,
       originalMessageId: resume?.userMessageId ?? latestUserMessage.id, attempt: resume?.attempt ?? 0, selection, usedBackup: selection.instanceId !== bot.modelSelection.instanceId };
-    if (await handleUsageFailure(botId, { ...context, selection, usedBackup: Boolean(retry) || context.usedBackup }, usageFailure, groupId)) return;
+    if (await handleUsageFailure(botId, { ...context, selection, usedBackup: Boolean(retry) || context.usedBackup }, usageFailure, groupId, { hop, spoken, epoch })) return;
   }
   if (timedOut) {
     const failure = store.appendMessage(group.threadId, {

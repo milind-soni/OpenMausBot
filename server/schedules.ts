@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { newId } from "./contracts.ts";
 import { readJsonFile, writeJsonAtomic } from "./json-file.ts";
-import { nextScheduleRun, resumeDelay } from "./schedule-time.ts";
+import { nextScheduleRun, latestScheduleRun, resumeDelay } from "./schedule-time.ts";
 import type { ResumeContext, Schedule, ScheduleDelivery, ScheduleInput, ScheduleSnapshot } from "./schedule-types.ts";
 export type { Schedule, ScheduleDelivery, ScheduleInput } from "./schedule-types.ts";
 
@@ -53,8 +53,12 @@ export class ScheduleStore {
     const old = this.get(id); if (!old) throw new Error("Schedule not found.");
     if (old.origin === "auto-resume") throw new Error("Cancel this automatic retry and create a new schedule instead.");
     const input = { ...old, ...patch }; validateSchedule(input);
-    if (!old.enabled && input.enabled && old.createdBy && this.data.schedules.filter(s => s.enabled && s.createdBy === old.createdBy).length >= 20) throw new Error("Each bot can have up to 20 active schedules.");
-    const nextRunAt = nextScheduleRun(input.repeat, input.timezone, this.now());
+    const owner = old.createdBy ?? input.target.botId;
+    if (input.enabled && owner && this.data.schedules.filter(s => s.id !== id && s.enabled && (s.createdBy ?? s.target.botId) === owner).length >= 20) throw new Error("Each bot can have up to 20 active schedules.");
+    const timingChanged = patch.repeat !== undefined || patch.timezone !== undefined || (!old.enabled && input.enabled);
+    const anchor = timingChanged ? this.now() : Date.parse(old.anchorAt ?? old.createdAt);
+    const nextRunAt = nextScheduleRun(input.repeat, input.timezone, this.now(), anchor);
+    if (input.repeat.kind === "every" && timingChanged) old.anchorAt = new Date(anchor).toISOString();
     if (input.enabled && !nextRunAt) throw new Error("Choose a future run time.");
     Object.assign(old, { target: input.target, prompt: input.prompt.trim(), repeat: input.repeat, timezone: input.timezone, enabled: input.enabled, graceMinutes: input.graceMinutes, nextRunAt });
     this.data.deliveries = this.data.deliveries.filter(j => j.scheduleId !== id || j.state === "dispatching");
@@ -69,7 +73,7 @@ export class ScheduleStore {
     const now = this.now(), at = resetsAt && Date.parse(resetsAt) > now ? Date.parse(resetsAt) + 120_000 : now + resumeDelay(attempt);
     const input: ScheduleInput = { target, prompt: `Continue where you left off. The interrupted request was:\n\n${resume.request}`, repeat: { kind: "once", at: new Date(at).toISOString() }, timezone: "UTC" };
     if (!old) { const made = this.create(input, "auto-resume", resume.botId); old = this.get(made.id)!; }
-    if (!old.enabled && this.data.schedules.filter(s => s.createdBy === resume.botId && s.enabled).length >= 20) throw new Error("Each bot can have up to 20 active schedules.");
+    if (!old.enabled && this.data.schedules.filter(s => (s.createdBy ?? s.target.botId) === resume.botId && s.enabled).length >= 20) throw new Error("Each bot can have up to 20 active schedules.");
     Object.assign(old, input, { enabled: true, nextRunAt: new Date(at).toISOString(), resume: { ...resume, attempt } });
     this.data.deliveries = this.data.deliveries.filter(j => j.scheduleId !== old!.id || j.state === "dispatching");
     this.save(); return structuredClone(old);
@@ -94,10 +98,10 @@ export class ScheduleStore {
     const now = this.now(); let changed = false;
     for (const s of this.data.schedules) {
       if (!s.enabled || !s.nextRunAt || Date.parse(s.nextRunAt) > now) continue;
-      const due = s.nextRunAt;
+      const due = latestScheduleRun(s.repeat, s.timezone, now, Date.parse(s.anchorAt ?? s.createdAt)) ?? s.nextRunAt;
       if (now - Date.parse(due) <= s.graceMinutes * 60_000) this.enqueue(s, due);
       else s.lastRun = { at: due, outcome: "missed", note: "This run was outside its catch-up window." };
-      s.nextRunAt = nextScheduleRun(s.repeat, s.timezone, now, Date.parse(s.createdAt));
+      s.nextRunAt = nextScheduleRun(s.repeat, s.timezone, now, Date.parse(s.anchorAt ?? s.createdAt));
       if (!s.nextRunAt) s.enabled = false;
       changed = true;
     }
@@ -125,7 +129,6 @@ export class Scheduler {
     try {
       this.store.collectDue();
       for (const job of this.store.pending()) {
-        if (!job.manual && this.now() - Date.parse(job.dueAt) > job.graceMinutes * 60_000) { this.store.finish(job.id, "missed", "This queued run was outside its catch-up window."); continue; }
         try { await this.deliver(job); } catch { this.store.finish(job.id, "failed", "Could not start this run. Check the chat and the selected AI app."); }
       }
     } finally { this.running = false; this.arm(); if (this.rerun) { this.rerun = false; queueMicrotask(() => void this.wake()); } }

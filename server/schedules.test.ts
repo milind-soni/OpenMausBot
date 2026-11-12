@@ -44,6 +44,7 @@ describe("durable scheduler", () => {
     scheduler.start(); await scheduler.wake(); now += 60_000; await vi.advanceTimersByTimeAsync(60_000);
     expect(store.pending()).toHaveLength(1); expect(sent).toHaveLength(0);
     const restart = new ScheduleStore(join(DATA_DIR, "busy"), () => now); expect(restart.pending()).toHaveLength(1);
+    now += 3 * 3600_000; // accepted busy work does not expire as a missed alarm
     busy = false; await scheduler.wake(); await scheduler.wake();
     expect(sent).toEqual([schedule.prompt]); expect(store.get(schedule.id)?.lastRun?.outcome).toBe("sent"); scheduler.stop();
   });
@@ -55,6 +56,12 @@ describe("durable scheduler", () => {
     now = instant("2026-11-16T12:00:00Z"); store.collectDue();
     expect(store.pending()).toHaveLength(0); expect(store.get(daily.id)?.lastRun?.outcome).toBe("missed");
     expect(store.get(daily.id)?.nextRunAt).toBe("2026-11-17T09:00:00.000Z");
+  });
+  it("uses only the most recent eligible occurrence after several offline days", () => {
+    let now = instant("2026-11-12T00:00:00Z"); const store = new ScheduleStore(join(DATA_DIR, "latest"), () => now);
+    store.create(input({ kind: "daily", time: "09:00" })); now = instant("2026-11-16T10:00:00Z"); store.collectDue();
+    expect(store.pending()).toHaveLength(1); expect(store.pending()[0].dueAt).toBe("2026-11-16T09:00:00.000Z");
+    store.collectDue(); expect(store.pending()).toHaveLength(1);
   });
   it("pauses automatic runs and cancellation removes pending work", () => {
     let now = instant("2026-11-12T00:00:00Z"); const store = new ScheduleStore(join(DATA_DIR, "pause"), () => now);
@@ -70,6 +77,25 @@ describe("durable scheduler", () => {
     expect(store.snapshot().schedules).toHaveLength(1); expect(resumeDelay(100)).toBe(6 * 3600_000);
     const known = store.upsertResume({ botId: "bot" }, context, "2026-11-12T05:00:00Z"); expect(known.nextRunAt).toBe("2026-11-12T05:02:00.000Z");
     store.cancelResume("thread"); expect(store.snapshot().schedules).toHaveLength(0);
+  });
+  it("does not replay a delivery that was being dispatched when the app closed", () => {
+    const now = instant("2026-11-12T00:00:00Z"), folder = join(DATA_DIR, "crash");
+    const store = new ScheduleStore(folder, () => now); const schedule = store.create(input({ kind: "every", hours: 4 }));
+    store.runNow(schedule.id); store.claim(store.pending()[0].id);
+    const restarted = new ScheduleStore(folder, () => now);
+    expect(restarted.pending()).toHaveLength(0); expect(restarted.get(schedule.id)?.lastRun).toMatchObject({ outcome: "failed" });
+  });
+  it("lets an explicit Run now release queued work while automatic schedules are paused", () => {
+    let now = instant("2026-11-12T00:00:00Z"); const store = new ScheduleStore(join(DATA_DIR, "manual"), () => now);
+    const schedule = store.create(input({ kind: "once", at: new Date(now + 60_000).toISOString() }));
+    now += 60_000; store.collectDue(); store.pause(true); expect(store.pending()).toHaveLength(0);
+    store.runNow(schedule.id); expect(store.pending()).toHaveLength(1); expect(store.pending()[0].manual).toBe(true);
+  });
+  it("enforces the same cap when re-enabling user-created schedules", () => {
+    const now = instant("2026-11-12T00:00:00Z"), store = new ScheduleStore(join(DATA_DIR, "enable-cap"), () => now);
+    const disabled = store.create({ ...input({ kind: "every", hours: 4 }), enabled: false });
+    for (let n = 0; n < 20; n++) store.create(input({ kind: "every", hours: 4 }));
+    expect(() => store.update(disabled.id, { enabled: true })).toThrow(/20/);
   });
   it("enforces caps, validates input, and scopes bot access", () => {
     const now = instant("2026-11-12T00:00:00Z"), store = new ScheduleStore(join(DATA_DIR, "cap"), () => now);

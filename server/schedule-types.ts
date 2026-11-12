@@ -4,7 +4,7 @@ export interface ResumeContext { botId: string; threadId: string; userMessageId:
 export interface Schedule {
   id: string; target: ScheduleTarget; prompt: string; repeat: ScheduleRepeat; timezone: string;
   enabled: boolean; origin: "user" | "bot" | "auto-resume"; createdBy?: string;
-  nextRunAt: string | null; graceMinutes: number; createdAt: string;
+  nextRunAt: string | null; anchorAt?: string; graceMinutes: number; createdAt: string;
   resume?: ResumeContext;
   lastRun?: { at: string; outcome: "sent" | "queued" | "missed" | "failed"; note?: string };
 }

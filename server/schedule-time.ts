@@ -53,4 +53,22 @@ export function nextScheduleRun(repeat: ScheduleRepeat, timezone: string, after:
   }
   throw new Error("Choose at least one day.");
 }
+/** Latest occurrence at or before now, used to catch up once without replaying a backlog. */
+export function latestScheduleRun(repeat: ScheduleRepeat, timezone: string, now: number, anchor: number): string | null {
+  formatter(timezone);
+  if (repeat.kind === "once") return Date.parse(repeat.at) <= now ? new Date(repeat.at).toISOString() : null;
+  if (repeat.kind === "every") {
+    const interval = repeat.hours * 3600_000, steps = Math.floor((now - anchor) / interval);
+    return steps >= 1 ? new Date(anchor + steps * interval).toISOString() : null;
+  }
+  const p = parts(now, timezone), start = Date.UTC(p.year, p.month - 1, p.day);
+  for (let day = 0; day <= 8; day++) {
+    const date = new Date(start - day * 86400_000), weekday = date.getUTCDay();
+    if (repeat.kind === "weekdays" && (weekday === 0 || weekday === 6)) continue;
+    if (repeat.kind === "weekly" && !repeat.days.includes(weekday)) continue;
+    const at = localInstant(date.toISOString().slice(0, 10), repeat.time, timezone);
+    if (Date.parse(at) <= now) return at;
+  }
+  return null;
+}
 export const resumeDelay = (attempt: number) => Math.min(360, 15 * 2 ** Math.min(10, Math.max(0, attempt))) * minute;

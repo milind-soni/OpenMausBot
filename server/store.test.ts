@@ -58,6 +58,14 @@ describe("Store", () => {
     expect(reloaded.bot(bot.id)?.modelSelection).toEqual(selection());
   });
 
+  it("preserves stop behavior for old profiles while new bots can wait and continue", () => {
+    const store = new Store(selection); const bot = store.createBot();
+    expect(bot.onUsageLimit).toBe("wait");
+    const rows = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
+    delete rows[0].onUsageLimit; writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(rows));
+    expect(new Store(selection).bot(bot.id)?.onUsageLimit).toBe("stop");
+  });
+
   it("createBot seeds a greeting and an onboarding card", () => {
     const store = new Store(selection);
     const bot = store.createBot();
