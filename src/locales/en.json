@@ -5750,7 +5750,7 @@
   "computer.screen.choose": "Choose a screen",
   "computer.screen.start": "Start preview",
   "computer.android.usbSubtitle": "Connected directly over USB. The screen and controls stay on this computer.",
-  "computer.android.serverSubtitle": "Connected over USB to the computer that runs OpenMausBot.",
+  "computer.android.serverSubtitle": "Connected over USB to the computer that runs {app}.",
   "computer.android.usb": "USB",
   "computer.android.unauthorized": "Unlock the Android phone, accept the “Allow USB debugging” prompt, and optionally choose Always allow from this computer.",
   "computer.android.badState": "The phone is {state}. Reconnect the USB cable and keep USB debugging enabled.",

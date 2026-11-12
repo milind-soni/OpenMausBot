@@ -5436,7 +5436,7 @@
   "computer.screen.choose": "Escolher uma tela",
   "computer.screen.start": "Iniciar prévia",
   "computer.android.usbSubtitle": "Conectado direto por USB. A tela e os controles ficam neste computador.",
-  "computer.android.serverSubtitle": "Conectado por USB ao computador onde o OpenMausBot roda.",
+  "computer.android.serverSubtitle": "Conectado por USB ao computador onde o {app} roda.",
   "computer.android.usb": "USB",
   "computer.android.unauthorized": "Desbloqueie o celular Android, aceite o aviso “Permitir depuração USB” e, se quiser, escolha Sempre permitir a partir deste computador.",
   "computer.android.badState": "Estado do celular: {state}. Reconecte o cabo USB e mantenha a depuração USB ativada.",
