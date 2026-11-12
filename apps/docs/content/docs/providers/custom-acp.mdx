@@ -42,8 +42,8 @@ Pick the instance in a bot's model picker. The picker lists the models the agent
 
 ## What MausBot passes to the CLI
 
-- **Environment.** Add an `"environment"` object to the instance to give the CLI variables. They reach the child process, except the provider key names listed in the next point: MausBot removes those even when the instance sets them here.
-- **No borrowed keys.** MausBot removes its own provider keys from the child's environment, including the ones saved for other engines, so the CLI never inherits a key it was not given. Only those names are removed: a CLI that reads its own files, or that can be pointed at another provider through its own variables, still uses whatever that provider bills.
+- **Environment.** Add an `"environment"` object to the instance to give the CLI variables. They reach the child process, except the names in the next point, which MausBot removes even when the instance sets them here. `PATH` is the one name the instance cannot set — MausBot sets it itself — so give the executable's full path in `config.cli` instead.
+- **No borrowed keys.** MausBot removes three groups from the child's environment: its own provider keys, including the ones saved for other engines; workspace credentials such as `BOX_TOKEN` or the `OMB_…` names; and control-plane variables such as `OMB_CLOUD_…` and the license key. A built-in engine keeps the provider and workspace names its own settings need; this driver keeps none of them. Nothing else is removed: a CLI that reads its own files, or that can be pointed at another provider through its own variables, still uses whatever that provider bills.
 - **Your files.** The CLI starts in the folder the bot works in, exactly as a built-in engine does. That is its working folder, not a boundary on what it may read: a CLI with its own configuration, such as `~/.vibe/.env`, reads it from your home folder.
 
 ## Approvals and questions
