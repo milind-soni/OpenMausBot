@@ -275,8 +275,6 @@ export function PluginsPanel() {
     const controls = focusable();
     (controls.find((element) => element.matches("input")) ?? controls[0] ?? dialog)?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
-      // The disconnect dialog handles its own keys. Trapping them here would close the apps panel,
-      // or pull focus off its buttons, before the account is removed.
       if (disconnectingRef.current) return;
       if (event.key === "Escape") {
         event.preventDefault();
@@ -312,10 +310,7 @@ export function PluginsPanel() {
   }, [dispatch]);
 
   const { suggestions, picking, pick } = useSuggestedApps(cards !== null && configured && inventoryPhase === "ready", `${cardsRefresh}:${Object.keys(status).filter((slug) => status[slug]?.connected).sort().join()}`);
-  // The browser confirm's OK button does nothing on the phone web while this glass panel is open, so the
-  // account stays connected. Ask in the page, above the panel.
-  const [disconnecting, setDisconnecting] = useState<{ slug: string; label: string; account: ConnectorAccount } | null>(null);
-  disconnectingRef.current = disconnecting;
+  const [disconnecting, setDisconnecting] = useState<{ slug: string; label: string; account: ConnectorAccount } | null>(null); disconnectingRef.current = disconnecting;
 
   const openConnectUrl = async (url: string) => {
     if (opening.current) return;
@@ -737,21 +732,9 @@ export function PluginsPanel() {
             </div>
           )}
         </div>
-        <ConfirmDialog
-          open={disconnecting !== null}
-          layer="z-[60]"
-          tone="danger"
-          title={t("connectors.disconnect")}
-          body={disconnecting ? disconnectAccountConfirmation(disconnecting.label, disconnecting.account) : ""}
-          confirmLabel={t("connectors.disconnect")}
-          onCancel={() => setDisconnecting(null)}
-          onConfirm={() => {
-            const pending = disconnecting;
-            if (!pending) return;
-            setDisconnecting(null);
-            disconnectAccount(pending.slug, pending.account.id);
-          }}
-        />
+        <ConfirmDialog open={disconnecting !== null} layer="z-[60]" tone="danger" title={t("connectors.disconnect")} confirmLabel={t("connectors.disconnect")}
+          body={disconnecting ? disconnectAccountConfirmation(disconnecting.label, disconnecting.account) : ""} onCancel={() => setDisconnecting(null)}
+          onConfirm={() => { if (disconnecting) disconnectAccount(disconnecting.slug, disconnecting.account.id); setDisconnecting(null); }} />
         {appGrants.changing && (
           <AppGrantPrompt
             key={appGrants.changing}
