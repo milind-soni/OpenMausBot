@@ -265,7 +265,7 @@ export interface RoutineManagerOptions {
   onRunCut?: (run: RoutineRun) => void;
   hasPendingDelegations?: (threadId: string) => boolean; /** Why a run that ended well in this thread must say a hand-off was refused, once; null when none was. */ refusedHandoff?: (threadId: string) => string | null;
   /** The turn in this thread is a routine's own, not one a person started there while its run waits on teammates. */
-  routineTurn?: (threadId: string) => boolean;
+  routineTurn?: (threadId: string) => boolean; /** The thread's latest turn is one a person started there by typing (false when not known, e.g. after a restart). */ personTurn?: (threadId: string) => boolean;
   /** When an engine's usage limit resets (epoch ms), or null while that is not known. */
   limitResetAt?: (engine: string) => number | null;
   /** The bot has a backup engine to continue on when its own engine's usage limit refuses a run, or it is signed out. */

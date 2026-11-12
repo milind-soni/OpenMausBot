@@ -18,11 +18,12 @@ export function settleOpenConnectCards(deps: ConnectCardSettleDeps, slug: string
   const app = slug.toLowerCase();
   const account = accountKey(alias);
   let settled = 0;
-  for (const threadId of deps.threadsWithCards(deps.now() - NEEDS_YOU_WINDOW_MS)) {
+  const since = deps.now() - NEEDS_YOU_WINDOW_MS;
+  for (const threadId of deps.threadsWithCards(since)) {
     const resumeKeys = new Set<string>();
     for (const message of deps.messagesFor(threadId)) {
       const card = message.kind === "connector" ? message.connector : undefined;
-      if (!card || card.source === "mcp" || card.slug.toLowerCase() !== app || accountKey(card.alias) !== account) continue;
+      if (!card || message.at < since || card.source === "mcp" || card.slug.toLowerCase() !== app || accountKey(card.alias) !== account) continue;
       if (card.status === "connected" || card.dismissed || card.superseded || card.stopped || card.resumed) continue;
       deps.patchMessage(threadId, message.id, { connector: { ...card, status: "connected", error: undefined } });
       resumeKeys.add(card.resumeKey);

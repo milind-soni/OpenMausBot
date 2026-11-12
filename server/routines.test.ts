@@ -450,6 +450,18 @@ describe("a run left waiting for the person", () => {
     await vi.waitFor(() => expect(h.interruptedTurns).toEqual([{ botId: "maus-1", threadId: "thread-1" }]));
   });
 
+  it("leaves a turn the person started in the waiting run's conversation running when its routine is paused", async () => {
+    const h = harness(monday);
+    const routine = h.manager.create(daily);
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    h.setNow(routine.nextRunAt! + minutes(2)); parkOnPerson(h, "thread-1");
+    h.options.personTurn = (threadId) => threadId === "thread-1";
+    h.manager.update(routine.id, { enabled: false });
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "cancelled", error: "The routine was paused while this run waited for you" });
+    await Promise.resolve();
+    expect(h.interruptedTurns).toEqual([]);
+  });
+
   it("leaves a run that is still working alone when its routine is paused", async () => {
     const h = harness(monday);
     const routine = h.manager.create(daily);

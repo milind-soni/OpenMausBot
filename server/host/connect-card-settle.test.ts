@@ -36,6 +36,14 @@ describe("reconnecting an app settles older open connect cards for it", () => {
     expect(h.resumed).toEqual([["old-run", "key-a"]]);
   });
 
+  it("leaves a card older than a week even when the same conversation has a newer one", () => {
+    const h = harness({ t: [{ ...card("old", {}), at: NOW - 8 * 24 * 60 * 60_000 }, card("new", {})] });
+    expect(settleOpenConnectCards(h.deps, "instagram")).toBe(1);
+    expect(h.status("t", "old")).toBe("required");
+    expect(h.status("t", "new")).toBe("connected");
+    expect(h.resumed).toEqual([["t", "key-new"]]);
+  });
+
   it("only settles cards for that same account", () => {
     const h = harness({ t: [card("work", { alias: "Work" }), card("plain", {}), card("home", { alias: "home" })] });
     expect(settleOpenConnectCards(h.deps, "instagram", " work ")).toBe(1);

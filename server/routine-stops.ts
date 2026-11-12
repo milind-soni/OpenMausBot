@@ -20,10 +20,10 @@ export function cancelUnfinishedRuns(runs: readonly RoutineRun[], routineId: str
   return { cancelled, waited };
 }
 
-/** Ends the turns of runs that stopped while their bot or room worked or waited, so their open cards stop and nothing shows them waiting. */
-export function interruptRunTurns(runs: readonly RoutineRun[], options: Pick<RoutineManagerOptions, "interruptTurn" | "interruptGoal">) {
+/** Ends the turns of runs that stopped while their bot or room worked or waited, so their open cards stop and nothing shows them waiting. A turn the person started in that conversation is theirs and keeps going. */
+export function interruptRunTurns(runs: readonly RoutineRun[], options: Pick<RoutineManagerOptions, "interruptTurn" | "interruptGoal" | "personTurn">) {
   for (const run of runs) {
     if (run.threadId && run.target === "room-goal") void options.interruptGoal?.(run.groupId, run.threadId).catch(() => {});
-    else if (run.threadId) void options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
+    else if (run.threadId && !options.personTurn?.(run.threadId)) void options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
   }
 }
