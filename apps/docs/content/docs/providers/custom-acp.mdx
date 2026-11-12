@@ -43,8 +43,8 @@ Pick the instance in a bot's model picker. The picker lists the models the agent
 ## What MausBot passes to the CLI
 
 - **Environment.** Add an `"environment"` object to the instance to give the CLI variables such as an API key. They reach the child process.
-- **No borrowed keys.** MausBot strips its own provider keys from the child's environment, including the ones saved for other engines, so a custom CLI can only ever bill the account it signed in to itself.
-- **Your files.** The CLI runs in the folder the bot works in, exactly as a built-in engine does, so it sees that bot's project and nothing else of yours.
+- **No borrowed keys.** MausBot removes its own provider keys from the child's environment, including the ones saved for other engines, so the CLI never inherits a key it was not given. Only those names are removed: a CLI that reads its own files, or that can be pointed at another provider through its own variables, still uses whatever that provider bills.
+- **Your files.** The CLI starts in the folder the bot works in, exactly as a built-in engine does. That is its working folder, not a boundary on what it may read: a CLI with its own configuration, such as `~/.vibe/.env`, reads it from your home folder.
 
 ## Approvals and questions
 
@@ -52,6 +52,6 @@ Tool permissions ride ACP's own `session/request_permission`. When the agent ask
 
 ## More than one agent
 
-Add one instance per agent, each with its own `displayName` and command, and one bot can use each. Instances are independent: a different account, a different build, or two versions of the same CLI side by side all work.
+Add one instance per agent, each with its own `displayName` and command, and one bot can use each. Instances are independent: a different build, or two versions of the same CLI side by side, all work. Instances of one CLI that signs in through its home folder share that sign-in; to use a different account, give the second instance its own `HOME` in `environment`.
 
 Vendor-written ACP modes work the same way, for example Mistral Vibe's `vibe-acp` with a Vibe sign-in, or Command Code's `cmd acp` with a `cmd login`.
