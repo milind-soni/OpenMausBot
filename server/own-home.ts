@@ -2,6 +2,7 @@
 // moves a computer's bots into it, and that computer then works for it. Security: only where nobody else signs in, so no
 // one else's bots or turns ever reach a computer lent this way, and never a Cloud, a team's Cloud or a hosted workspace.
 import { movedFrom } from "./cloud-send-arrived.ts";
+import type { OwnServer } from "./person-key.ts";
 import type { RequestAuth } from "./request-auth.ts";
 
 export interface OwnServerFacts {
@@ -32,7 +33,7 @@ export function ownServerOwner(facts: OwnServerFacts, auth: RequestAuth): boolea
 export function createOwnHome({ facts, dataDir }: { facts(): OwnServerFacts; dataDir: string }) {
   return {
     owner: (auth: RequestAuth): auth is Extract<RequestAuth, { kind: "session" }> => ownServerOwner(facts(), auth),
-    oneOwner: () => oneOwner(facts()),
+    ownServer: (): OwnServer => { const known = facts(); return oneOwner(known) ? { admin: known.admins[0] ?? null } : null; },
     takesMove: () => oneOwner(facts()),
     here: () => oneOwner(facts()) && movedFrom(dataDir) !== null,
   };
