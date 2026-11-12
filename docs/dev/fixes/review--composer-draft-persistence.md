@@ -42,3 +42,8 @@ Necessary fixes filed on the shared board:
 Validation: `pnpm exec vitest run src/lib/composerDrafts.test.ts` — 4/4 passed. Browser checks expose integration and storage-failure gaps not covered by those tests. No application code changed. All `[?]` marks remain for user approval. Electron desktop was skipped because dev mode is hard-wired to the live UI port 5199.
 
 Cleanup: isolated browser and harness/Vite processes stopped; `$TMPDIR/gbs-qa-dell` removed. No live process was stopped or restarted, no real bot was messaged, and no direct access to `~/.gbs` was made. Shared-board updates used the harness task API.
+
+## Fixes for Dell's findings (Yv, 2026-11-12)
+
+- [?] **Queued message sends while its conversation is off screen** — `src/lib/useQueuedMessageSender.ts:1`. The queue now lives in `src/lib/composerDrafts.ts`. The app shell drains it whenever the target bot or room is free, so the composer no longer has to be mounted (bug `5a1c7c16`).
+- [?] **Latest text survives failed storage writes** — `src/lib/composerDrafts.ts:41`. The latest text, including cleared text, is kept in memory and preferred over storage within a session (bug `4a6e1bd8`). Covered by `src/lib/composerDrafts.test.ts`.
