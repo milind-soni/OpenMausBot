@@ -118,6 +118,12 @@ const TRIGGER_FIELDS_SCHEMA = {
     items: { type: "string", maxLength: 200 },
     description: "Only for when=webhook: optional event names to accept (from the caller's event-type header, e.g. push). Omit to accept every call.",
   },
+  webhook_payload_filter: {
+    type: "object",
+    maxProperties: 10,
+    additionalProperties: { type: "string", maxLength: 200 },
+    description: "Only for when=webhook: optional fields the call's JSON must have before any run starts, path to text, e.g. {\"action\":\"opened\",\"pull_request.base.ref\":\"main\"}. All must match (case-insensitive); other calls are ignored without a run. Use it instead of instructions like \"if it is not X, stop\" when the sender's data says X. {} in an update removes it.",
+  },
   filter: {
     type: "object",
     additionalProperties: false,
