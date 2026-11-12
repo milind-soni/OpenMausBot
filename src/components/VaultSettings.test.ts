@@ -194,7 +194,7 @@ describe("Settings → Vault: logins", () => {
     await type("onePasswordToken", "ops_fake-wrong");
     await act(async () => inDialog("Connect 1Password").click());
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    expect(host.querySelector("[data-onepassword] [role=alert]")!.textContent).toBe("1Password did not accept the token.");
+    expect(document.body.querySelector("[data-settings-dialog] [role=alert]")?.textContent).toBe("1Password did not accept the token.");
   });
 
   it("is for admins only", async () => {

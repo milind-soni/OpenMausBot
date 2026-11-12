@@ -217,6 +217,8 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       <option value="client">{t("remote.serverPairing.scope.client")}</option>
     </Select>
   ) : null;
+  const nameRow = !simple && pairingCodes && !cloudHome && computerName !== null
+    ? <SettingsRows><ComputerNameRow saved={computerName} onSaved={setComputerName} className="px-4 py-3" /></SettingsRows> : null;
   const pairRow = (
     <PairRow reason={pairingCodes ? null : t("remote.serverPairing.portalShort")}>
       {choices}{pairButton}
@@ -229,7 +231,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       {listed.length === 0 ? (
         <SettingsGroup block="pair">
           <SettingsRows>{pairRow}</SettingsRows>
-          {!simple && pairingCodes && !cloudHome && computerName !== null && <SettingsRows><ComputerNameRow saved={computerName} onSaved={setComputerName} className="px-4 py-3" /></SettingsRows>}
+          {nameRow}
           {!pairingCodes && <p data-server-pairing-portal className="px-4 text-[12px] leading-4 text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
         </SettingsGroup>
       ) : (
@@ -250,6 +252,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
                 </div>
               ))}
             </SettingsRows>
+            {nameRow}
             {!pairingCodes && <p data-server-pairing-portal className="px-4 text-[12px] leading-4 text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
           </SettingsGroup>
       )}

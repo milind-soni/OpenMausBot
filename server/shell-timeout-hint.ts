@@ -1,4 +1,4 @@
-import { BASH_MAX_TIMEOUT_MS } from "./system-prompt.ts";
+import { BASH_MAX_TIMEOUT_TEXT } from "./system-prompt.ts";
 
 // Claude Code 2.1.296 reports a Bash call killed at its limit as a PostToolUseFailure whose error reads "Command timed out after …".
 const TIMED_OUT = /\bCommand timed out after\b/u;
@@ -12,7 +12,7 @@ export function shellTimeoutHint(toolName: unknown, toolInput: unknown, error: u
     "That command hit the shell time limit and its output was lost. Do not rerun it the same way.",
     scan
       ? "Do not search the whole disk: use `mdfind -name <name>` on macOS, or `find` in a specific folder (your workspace, home, /Applications) with -maxdepth."
-      : `If it needs longer, rerun it with a larger \`timeout\` (in milliseconds, up to ${BASH_MAX_TIMEOUT_MS}) and keep it in the foreground until it exits. Split very long media jobs into shorter pieces.`,
+      : `If it needs longer, rerun it with a larger \`timeout\` (in milliseconds, up to ${BASH_MAX_TIMEOUT_TEXT}) and keep it in the foreground until it exits. Split very long media jobs into shorter pieces.`,
   ].join(" ");
 }
 

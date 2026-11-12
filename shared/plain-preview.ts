@@ -24,9 +24,12 @@ export function plainPreviewText(text: string): string {
   out = out.replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, "");
   out = out.replace(/^[ \t]{0,3}#{1,6}[ \t]*$/gm, "");
   out = out.replace(/^[ \t]*(?:>[ \t]?)+/gm, "");
+  // A rule, before a list marker can eat its first dash: `- - -` is one rule, not a list of two dashes.
+  out = out.replace(/^[ \t]{0,3}(?:[-*_][ \t]*){3,}$/gm, "");
+  // A Setext heading's underline (`Report` over `======`, `--` under it) is no word of the line.
+  out = out.replace(/^[ \t]{0,3}(?:=+|-+)[ \t]*$/gm, "");
   out = out.replace(/^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?/gm, "");
   out = out.replace(/^[ \t]*\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)*\|?[ \t]*$/gm, "");
-  out = out.replace(/^[ \t]{0,3}(?:[-*_][ \t]*){3,}$/gm, "");
   out = out.replace(/^[ \t]*\|(.*)\|[ \t]*$/gm, (_row, cells: string) => cells.split("|").map((cell) => cell.trim()).filter(Boolean).join(" "));
   // Underscores inside a word (snake_case) and a lone * (2 * 3) are not emphasis.
   out = out.replace(/(\*{1,3}|_{1,3})(?=\S)([\s\S]*?\S)\1(?![\p{L}\p{N}])/gu, (match, marks: string, inner: string, offset: number, whole: string) => {

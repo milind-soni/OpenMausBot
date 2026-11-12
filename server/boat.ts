@@ -706,7 +706,7 @@ export async function inspectBoatIdentity(cfg: AppConfig, boxId: string): Promis
   return { available: true, identity: { boxId, name, state: safeBoatState(candidate.state) }, problem: null };
 }
 
-function inventoryFailure(inventory: ManagedBoatInventory): Error & { status: number } {
+export function inventoryFailure(inventory: ManagedBoatInventory): Error & { status: number } {
   const error = new Error(
     inventory.configured
       ? (inventory.problem ?? "Cloud computer inventory is unavailable")

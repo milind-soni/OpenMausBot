@@ -325,14 +325,14 @@ export const SETTINGS_INPUT = `h-8 w-full rounded-lg ${FIELD_EDGE} bg-app px-2 t
 export const SETTINGS_INLINE_INPUT = `h-7 w-20 rounded-lg ${FIELD_EDGE} bg-app px-2 text-right text-[13px] leading-5 tabular-nums text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-focus disabled:opacity-40`;
 
 /** The one segmented control: a 28 px pill track; the chosen part is a card-coloured pill with an edge. */
-export function Segmented<T extends string>({ value, options, onChange, label }: {
-  value: T; options: Array<{ value: T; label: string }>; onChange: (value: T) => void; label: string;
+export function Segmented<T extends string>({ value, options, onChange, label, disabled = false }: {
+  value: T; options: Array<{ value: T; label: string }>; onChange: (value: T) => void; label: string; disabled?: boolean;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} data-settings-segmented="" className="inline-flex h-7 items-center rounded-full bg-ink/[0.05] p-0.5">
+    <div role="radiogroup" aria-label={label} aria-disabled={disabled || undefined} data-settings-segmented="" className={cn("inline-flex h-7 items-center rounded-full bg-ink/[0.05] p-0.5", disabled && "opacity-40")}>
       {options.map((option) => (
-        <button key={option.value} type="button" role="radio" aria-checked={value === option.value} onClick={() => onChange(option.value)}
-          className={cn("h-6 cursor-pointer rounded-full px-3 text-[13px] leading-5 transition-colors focus-visible:outline-2 focus-visible:outline-focus",
+        <button key={option.value} type="button" role="radio" aria-checked={value === option.value} disabled={disabled} onClick={() => onChange(option.value)}
+          className={cn("h-6 cursor-pointer rounded-full disabled:cursor-default px-3 text-[13px] leading-5 transition-colors focus-visible:outline-2 focus-visible:outline-focus",
             value === option.value ? "bg-menu font-medium text-ink shadow-[inset_0_0_0_0.5px_var(--settings-edge)]" : "text-ink-secondary hover:text-ink")}>
           {option.label}
         </button>
