@@ -55,6 +55,7 @@ describe("quota switch", () => {
   let gate: ReturnType<typeof vi.fn<QuotaSwitchDeps["gate"]>>;
   let switchRefusal: string | undefined;
   let enabled: boolean;
+  let liveSessions: Set<string>;
   let deps: QuotaSwitchDeps;
   let quota: QuotaSwitch;
   let coordinator: Coordinator;
@@ -133,6 +134,7 @@ describe("quota switch", () => {
     gate = vi.fn<QuotaSwitchDeps["gate"]>((_thread, selection) => switchRefusal ? { ok: false, error: switchRefusal } : { ok: true, selection });
     switchRefusal = undefined;
     enabled = true;
+    liveSessions = new Set(["session-A"]);
     requests = new Map();
     cause = QUOTA;
     turns = 0;
@@ -158,6 +160,7 @@ describe("quota switch", () => {
       // index.ts's threadBusy; the store's own flag is what a turn's admission sets
       busy: (botId, threadId) => store.taskByThread(botId, threadId)?.busy === true,
       request: (threadId) => requests.get(threadId),
+      sessionLive: (sessionId) => liveSessions.has(sessionId),
       resend,
       after: (ms, fire) => {
         const timer = { ms, fire, cancelled: false };
@@ -201,13 +204,14 @@ describe("quota switch", () => {
     it("moves the request to the first AI that can take it, sends the same message again there, offers no card and says so once", async () => {
       const quoted = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "It will rain on Friday." }).id;
       const messageId = said("how's the weather", { dataContext: { cardId: "sales" }, replyToId: quoted });
-      expect(await limited({ messageId })).toBeNull();
+      expect(await limited({ messageId, requestSessionId: "session-A" })).toBeNull();
 
       expect(cards()).toHaveLength(0);
       expect(gate.mock.calls[0]![1]).toEqual(CODEX);
       expect(thread().modelSelection).toEqual(CODEX);
       expect(store.bot(bot.id)!.modelSelection, "the bot's own model and its other conversations stay").toEqual(defaultSelection());
       expect(resend).toHaveBeenCalledTimes(1);
+      expect(resend.mock.calls[0]?.at(-1)).toBe("session-A");
       const [, , message, replyTo, spoken] = resend.mock.calls[0]!;
       expect(message).toMatchObject({ id: messageId, text: "how's the weather", dataContext: { cardId: "sales" } });
       expect(replyTo).toMatchObject({ id: quoted });
@@ -215,6 +219,36 @@ describe("quota switch", () => {
       expect(notices()).toContainEqual({ name: "notice: continuing on Codex after hitting the usage limit", nameCode: "chat.notice.backupContinuingLimit", nameParams: { name: "Codex", engine: "Claude" }, ok: true });
       expect(told).toEqual([{ botId: bot.id, from: defaultSelection(), facts: { scope: "engine", backup: CODEX } }]);
       expect(moves, "so it goes back once the limit resets").toEqual([{ threadId: bot.threadId, from: defaultSelection(), to: CODEX }]);
+    });
+
+    it("does not resend a quota request after its original paired session is revoked during provider readiness", async () => {
+      let finishProbe!: (snapshot: ProviderSnapshot) => void;
+      engines[1] = engine("codex", "codex", "Codex", { snapshot: () => new Promise((resolve) => { finishProbe = resolve; }) });
+      const turn = begin(bot.threadId, { messageId: said("keep session bound"), requestSessionId: "session-A" });
+      coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+      const handling = ranOut(turn);
+      await vi.waitFor(() => expect(finishProbe).toBeTypeOf("function"));
+      liveSessions.delete("session-A");
+      liveSessions.add("session-B");
+      finishProbe({ state: "available", authenticated: true });
+      await handling;
+      expect(resend).not.toHaveBeenCalled();
+      expect(thread().modelSelection).toEqual(defaultSelection());
+    });
+
+    it("does not let another live session answer a quota card for a revoked requester", async () => {
+      let finishProbe!: (snapshot: ProviderSnapshot) => void;
+      engines[1] = engine("codex", "codex", "Codex", { snapshot: () => new Promise((resolve) => { finishProbe = resolve; }) });
+      const messageId = said("answer only for the original session");
+      const card = await failed(QUOTA, { messageId, requestSessionId: "session-A" });
+      const handling = quota.answer(bot.threadId, card!.card!.requestId!, "answer", "Codex");
+      await vi.waitFor(() => expect(finishProbe).toBeTypeOf("function"));
+      liveSessions.delete("session-A");
+      liveSessions.add("session-B");
+      finishProbe({ state: "available", authenticated: true });
+      await expect(handling).resolves.toBe("unavailable");
+      expect(resend).not.toHaveBeenCalled();
+      expect(thread().modelSelection).toEqual(defaultSelection());
     });
 
     it("never takes a failed tool call for the AI's usage limit, whatever the tool is called", async () => {

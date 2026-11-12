@@ -32,6 +32,8 @@ export interface QuotaRequest {
   turnId: string | null;
   stopped?: boolean;
   origin?: WorkOrigin;
+  /** Original paired/browser session; carried across provider resends and never replaced by the answering session. */
+  requestSessionId?: string;
 }
 
 export type SettledTurn = Parameters<TurnStops["failureCause"]>[0];
@@ -50,8 +52,10 @@ export interface QuotaSwitchDeps {
   reset?: (from: ModelSelection, to: ModelSelection) => Partial<TaskRecord> | undefined;
   busy: (botId: string, threadId: string) => boolean;
   request: (threadId: string) => QuotaRequest | undefined;
+  /** Current liveness of the original authenticated session, checked after asynchronous provider readiness work. */
+  sessionLive?: (sessionId: string) => boolean;
   /** A line spoken on a Live call is resent as spoken, so its words stay out of the log. */
-  resend: (botId: string, threadId: string, message: Message, replyTo: Message | undefined, spoken: { via?: "call"; callId?: string }) => Promise<unknown>;
+  resend: (botId: string, threadId: string, message: Message, replyTo: Message | undefined, spoken: { via?: "call"; callId?: string }, requestSessionId?: string) => Promise<unknown>;
   enabled?: () => boolean;
   after?: (ms: number, run: () => void) => { cancel(): void };
 }
@@ -100,6 +104,10 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
   const building = new Set<{ threadId: string; stale: boolean }>();
   /** A second press while the engine is read is the same answer, never another. */
   const answering = new Map<string, Promise<QuotaAnswer>>();
+  // A resend always belongs to its original authenticated session. If that session was revoked, never
+  // borrow the identity of whoever answered the quota card or whichever session is currently active.
+  const originalSessionLive = (request: QuotaRequest): boolean => !request.requestSessionId
+    || deps.sessionLive?.(request.requestSessionId) === true;
 
   const notice = (threadId: string, text: string, ok: boolean, setup = false, words?: ServerText): void => {
     // `notice:` makes it a status row every client shows, never a folded tool step; `setup`: signing in fixes it.
@@ -153,6 +161,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
    * and the resend see one state. */
   const continueOn = async (botId: string, threadId: string, selection: ModelSelection, request: QuotaRequest, build: { stale: boolean }, resetsAt?: number,
     scope: TakeoverScope = "engine"): Promise<boolean> => {
+    if (!originalSessionLive(request)) return false;
     const engines = deps.registry.instances();
     const engine = engines.find((candidate) => candidate.instanceId === selection.instanceId);
     const before = store.projectBotForTask(botId, threadId);
@@ -160,7 +169,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     if (!engine || !before || !current) return false;
     const ready = engine.instanceId === current.instanceId ? selection : await takeover(engine, before, current);
     const bot = store.projectBotForTask(botId, threadId);
-    if (!ready || ready === "timed-out" || !bot || build.stale || !store.taskByThread(botId, threadId)) return false;
+    if (!ready || ready === "timed-out" || !bot || build.stale || !store.taskByThread(botId, threadId) || !originalSessionLive(request)) return false;
     const checked = deps.gate(bot, selection);
     if (!checked.ok) return false;
     try {
@@ -181,9 +190,10 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     } else if (!original) {
       notice(threadId, `switched to ${name}, but your message could not be found to send again. Send it again.`, false, false, { key: "chat.notice.backupMessageMissing", params: { name } });
     } else {
+      if (!originalSessionLive(request)) return false;
       notice(threadId, `continuing on ${name} ${why}`, true, false, { key: scope === "signed-out" ? "chat.notice.backupContinuingSignedOut" : "chat.notice.backupContinuingLimit", params: { name, engine: nameOf(current) } });
       try {
-        await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId));
+        await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId), request.requestSessionId);
       } catch (error) {
         if (store.taskByThread(botId, threadId)) notice(threadId, `could not continue on ${name}: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`, false, false, { key: "chat.notice.backupCouldNotContinue", params: { name, error: (error instanceof Error ? error.message : String(error)).slice(0, 200) } });
       }
@@ -270,6 +280,8 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
 
   /** True once the thread runs on the engine; only then is the offer spent. */
   const decide = async (botId: string, threadId: string, cardId: string, chosen: QuotaSwitchCardData["engines"][number]): Promise<boolean> => {
+    const request = deps.request(threadId);
+    if (request && !originalSessionLive(request)) return false;
     const offer = () => {
       const card = store.messagesFor(threadId).find((message) => message.id === cardId)?.card;
       return card?.quotaSwitch && !card.answered && !card.dismissed ? card : undefined;
@@ -300,7 +312,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     // No await from here to the resend: the gate, the switch and the resend must see one state.
     const card = offer();
     const bot = store.projectBotForTask(botId, threadId);
-    if (!card || !bot) return false;
+    if (!card || !bot || (request && !originalSessionLive(request))) return false;
     if (selection === "timed-out") return refuse(`${chosen.name} did not answer in time — nothing switched. Try again in a moment.`);
     if (!selection) return refuse(`${chosen.name} is no longer available — nothing switched.`);
     const already = bot.modelSelection.instanceId === selection.instanceId;
@@ -325,9 +337,10 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     } else if (!original) {
       notice(threadId, `${now}, but the message that hit quota could not be found to resend — send it again.`, false);
     } else {
+      if (request && !originalSessionLive(request)) return false;
       notice(threadId, `continuing on ${chosen.name} after hitting quota`, true);
       try {
-        await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId));
+        await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId), request?.requestSessionId);
       } catch (error) {
         if (store.taskByThread(botId, threadId)) {
           notice(threadId, `could not continue on ${chosen.name} — ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`, false);

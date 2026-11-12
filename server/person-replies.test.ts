@@ -12,6 +12,7 @@ import { Store, type Message } from "./store.ts";
 
 const sonnet: ModelSelection = { instanceId: "claude", model: "claude-sonnet-5" };
 const OWNER: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
+const PAIRED: RequestAuth = { kind: "session", session: { id: "session-original" } as Extract<RequestAuth, { kind: "session" }>["session"], via: "bearer", scopes: ["admin", "client"] };
 
 beforeEach(() => rmSync(DATA_DIR, { recursive: true, force: true }));
 
@@ -35,8 +36,9 @@ function fixture(options: { busy?: boolean; roomWorking?: boolean } = {}) {
     startOrQueueDirectMessage: async (...args) => {
       calls.direct.push(args);
       const [botId, threadId, text, replyTo, sendId] = args;
+      const requestSessionId = args[12];
       if (options.busy) {
-        queueSteeredMessage(botId, threadId, text, { replyToId: replyTo.id, sendId, reaction: replyTo.reactedWith });
+        queueSteeredMessage(botId, threadId, text, { replyToId: replyTo.id, sendId, reaction: replyTo.reactedWith, requestSessionId: requestSessionId ?? null });
         return { queued: true };
       }
       store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId: replyTo.id, reaction: replyTo.reactedWith, sendId });
@@ -59,6 +61,31 @@ describe("a person's one-tap reply", () => {
     expect(calls.direct).toHaveLength(1);
     expect(calls.direct[0]!.slice(0, 5)).toEqual([scout.id, scout.threadId, "👍", target, "reaction-0123456789abcdef"]);
     expect(store.messagesFor(scout.threadId).at(-1)).toMatchObject({ role: "user", text: "👍", replyToId: target.id, reaction: "👍" });
+  });
+
+  it("passes the authenticated reaction session through direct-turn delivery", async () => {
+    const { scout, calls, replies, asked } = fixture();
+    const target = asked(scout.threadId);
+    await replies.deliver({ auth: PAIRED, threadId: scout.threadId, owner: scout, target, answer: "👍", sendId: "reaction-session-0123456789", about: "message" });
+    expect(calls.direct[0]?.at(-1)).toBe("session-original");
+  });
+
+  it("persists the reaction session when delivery enters the steer queue", async () => {
+    const { store, scout, calls, replies, asked } = fixture({ busy: true });
+    const target = asked(scout.threadId);
+    const sendId = "reaction-queued-session-0123";
+    expect(await replies.deliver({ auth: PAIRED, threadId: scout.threadId, owner: scout, target, answer: "👍", sendId, about: "message" })).toEqual({ queued: true });
+    expect(calls.direct[0]?.at(-1)).toBe("session-original");
+    let dispatchedSession: string | null | undefined;
+    drainSteeredMessages(store, (_botId, _threadId, _prompt, _message, _exclude, _unattended, head) => { dispatchedSession = head.requestSessionId; });
+    expect(dispatchedSession).toBe("session-original");
+  });
+
+  it("keeps the authenticated session on a persistent-question late answer", async () => {
+    const { store, scout, calls, replies } = fixture();
+    const card = store.appendMessage(scout.threadId, { role: "bot", kind: "options", card: { title: "Question", subtitle: "Continue?", options: ["Yes", "No"], requestId: "late-q", requestType: "question" } });
+    await replies.deliverLateQuestionAnswer(PAIRED, scout.threadId, "late-q", "Yes", card, scout);
+    expect(calls.direct[0]?.at(-1)).toBe("session-original");
   });
 
   it("addresses the writer by name in a room, and waits in the room's queue while it works", async () => {

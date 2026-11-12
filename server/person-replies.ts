@@ -19,7 +19,8 @@ export interface PersonReplyDeps {
   startGroupTurn(groupId: string, text: string, replyTo: ReplyTarget, sendId: string, mode: "chat", queueId: undefined,
     options: { threadId: string; sender?: ResolvedSender; trigger: UsageTrigger; mentions: string[] }): unknown;
   startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo: ReplyTarget, sendId: string,
-    sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string): Promise<{ queued?: true }>;
+    sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: Message["dataContext"],
+    app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] }, mentions?: string[], requestSessionId?: string): Promise<{ queued?: true }>;
 }
 
 /** A person's answer to one message: it becomes their next message to the bot that wrote it, addressed to that bot by
@@ -97,7 +98,9 @@ export function createPersonReplies(deps: PersonReplyDeps) {
         deps.startGroupTurn(current.id, text, target, sendId, "chat", undefined, { threadId, sender, trigger, mentions: [owner.id] });
         return { queued: false };
       }
-      const direct = await deps.startOrQueueDirectMessage(owner.id, threadId, text, target, sendId, sender, trigger, via, callId);
+      // Preserve the authenticated caller's session, never infer it from the sender or canonical owner.
+      const requestSessionId = auth.kind === "session" ? auth.session.id : undefined;
+      const direct = await deps.startOrQueueDirectMessage(owner.id, threadId, text, target, sendId, sender, trigger, via, callId, undefined, undefined, undefined, requestSessionId);
       return { queued: Boolean(direct.queued) };
     });
   }
