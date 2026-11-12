@@ -5,7 +5,7 @@ import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 
 export const THREAD_POST_TOOL = "post_to_thread";
 
-export async function callThreadPostTool(args: Record<string, Json>, context: ToolCallContext): Promise<ToolCallResult> {
+export async function callThreadPostTool(args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const threadId = String(args.thread_id ?? "").trim();
   const message = String(args.message ?? "").trim();
   if (!threadId || !message) return { text: "post_to_thread needs thread_id (from list_threads) and message.", isError: true };
