@@ -39,6 +39,8 @@ const lineSchema = z.object({
   text: z.string().max(NOTICE_TEXT_MAX), at: z.number(), seen: z.boolean().optional(), done: z.boolean().optional(),
   /** The conversation this result is news for: its next unread result replaces this line, so one job keeps one row. */
   job: id.optional(),
+  /** A message posted in a room: only a reply to it (or Done) answers it, not the person's other talk there. */
+  untilReply: z.boolean().optional(),
 });
 const fileSchema = z.object({ version: z.literal(1), lines: z.array(lineSchema).max(MAX_LINES), seenAsks: z.array(id).max(MAX_SEEN_ASKS) });
 type Line = z.infer<typeof lineSchema>;
@@ -110,13 +112,14 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
 
   const titleOf = (botId: string, threadId: string): string => store.groupByThread(threadId)?.name ?? store.taskByThread(botId, threadId)?.title ?? store.bot(botId)?.name ?? "";
 
-  /** The person wrote in the conversation after a bot's message reached them: that is their answer. */
+  /** The person wrote in the conversation after a bot's message reached them: that is their answer. In a room they keep
+   * talking to the others, so there only a reply to that very line answers it (or Done in the Inbox). */
   function answeredThere(line: Line): boolean {
     if (line.kind !== "message") return false;
     const said = store.messagesFor(line.threadId);
     for (let index = said.length - 1; index >= 0 && said[index]!.at >= line.at; index--) {
       const one = said[index]!;
-      if (one.role === "user" && !one.peerAsk && !one.relayed && one.via !== "api") return true;
+      if (one.role === "user" && !one.peerAsk && !one.relayed && one.via !== "api" && (!line.untilReply || one.replyToId === line.id)) return true;
     }
     return false;
   }
@@ -204,14 +207,16 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     const wire: InboxItem = { kind: "message", from: { name: bot.name, botId: bot.id }, replies: true };
     const posted = store.appendMessage(threadId, { role: "bot", kind: "text", text, inbox: wire, ...(group ? { from: { botId: bot.id, name: bot.name, color: bot.color } } : {}) });
     addLine({ id: posted.id, botId: bot.id, threadId, ...(group ? { groupId: group.id } : {}), kind: "message", from: bot.name.slice(0, 200), ...(handed ? { workingFor: handed } : {}),
-      ...(guest ? { guest } : {}), text: clip(text, NOTICE_TEXT_MAX), at: now() });
+      ...(guest ? { guest } : {}), ...(group ? { untilReply: true } : {}), text: clip(text, NOTICE_TEXT_MAX), at: now() });
     if (group) store.patchGroup(group.id, { unread: true });
     else store.patchTask(bot.id, threadId, { unread: true });
     if (!guest && bot.notifications !== false) {
       deps.send({ kind: "mention", botId: bot.id, botName: bot.name, threadId, title: handed ? serverLine(conversationLanguage(threadId), "server.notify.workingFor", { who: bot.name, other: handed.name }) : serverLine(conversationLanguage(threadId), "server.notify.message", { who: bot.name }), body: oneLine(text, 200),
         ...(group ? { groupId: group.id } : {}), ...(bot.avatarUrl ? { avatarUrl: bot.avatarUrl } : {}) });
     }
-    return { status: 200, text: "It is in their Inbox and they were notified. Their answer comes back here, and you carry on from it." };
+    return { status: 200, text: group
+      ? "It is posted in this room and in their Inbox, and they were notified; it stays open there until they reply to it or mark it done. Their answer comes back here, and you carry on from it."
+      : "It is in their Inbox and they were notified. Their answer comes back here, and you carry on from it." };
   }
 
   /** A routine's report, the answer that sums up work handed out, or a failure of work nobody is watching gets a line; the

@@ -3331,6 +3331,7 @@
   "keys.vps.descBefore": "Алиас из SSH-конфига для Linux VPS. {app} использует ваш обычный SSH-конфиг и агент; ключи и пароли не сохраняются. См. ",
   "keys.vps.descLink": "руководство по настройке",
   "keys.vps.descAfter": " для требуемого формата SSH-алиаса.",
+  "keys.vps.anyMachine": "Подойдёт любой компьютер на Linux с Docker, доступный по SSH, в том числе компьютер в вашей сети Tailscale: укажите его имя в Tailscale как HostName псевдонима.",
   "keys.vps.aria": "Алиас SSH-конфига для собственного VPS",
   "keys.vps.removeAlias": "Удалить сохранённый алиас",
   "usage.title": "Использование",

@@ -1342,6 +1342,7 @@
   "keys.vps.descBefore": "Linux VPS के लिए SSH config उपनाम। {app} आपके सामान्य SSH config और एजेंट का उपयोग करता है; यह कुंजियाँ या पासवर्ड नहीं रखता। ज़रूरी SSH उपनाम के लिए ",
   "keys.vps.descLink": "सेटअप गाइड",
   "keys.vps.descAfter": " देखें।",
+  "keys.vps.anyMachine": "SSH से पहुँचने वाली Docker वाली कोई भी Linux मशीन चलेगी, आपके Tailscale नेटवर्क का कंप्यूटर भी: alias के HostName में उसका Tailscale नाम डालें।",
   "keys.vps.aria": "स्वयं-होस्टेड VPS का SSH config उपनाम",
   "keys.vps.removeAlias": "सहेजा गया उपनाम हटाएँ",
   "usage.title": "उपयोग",
