@@ -22,6 +22,11 @@ export function cloudComputerResettable(view: CloudResetView): boolean {
   return view.phase === "busy-boat" && busyBoatView(view.boatState, false).spinner;
 }
 
+/** What the panel says after the reset route answered: Boat may accept a deletion it has not finished yet. */
+export function resetNoteKey(result: unknown): "computer.reset.pending" | null {
+  return result !== null && typeof result === "object" && (result as { pending?: unknown }).pending === true ? "computer.reset.pending" : null;
+}
+
 /** Deletes the bot's cloud computer after the person confirms; its next message makes a fresh one. */
 export function ResetCloudComputerButton({ botId, botName, view, onReset }: {
   botId: string;
@@ -31,13 +36,19 @@ export function ResetCloudComputerButton({ botId, botName, view, onReset }: {
 }) {
   const [resetting, setResetting] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   if (!cloudComputerResettable(view)) return null;
   const reset = () => {
     if (resetting || !window.confirm(t("computer.reset.confirm", { name: botName }))) return;
     setResetting(true);
     setProblem(null);
+    setNote(null);
     api(`/api/bots/${botId}/computer/remove`, { method: "POST", body: "{}" })
-      .then(onReset)
+      .then((result) => {
+        const key = resetNoteKey(result);
+        setNote(key && t(key, { name: botName }));
+        onReset();
+      })
       .catch((error) => setProblem(error instanceof Error ? error.message : String(error)))
       .finally(() => setResetting(false));
   };
@@ -53,6 +64,7 @@ export function ResetCloudComputerButton({ botId, botName, view, onReset }: {
         {resetting ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
         {t("computer.reset.button")}
       </button>
+      {note && <p role="status" className="text-[12px] text-ink-secondary">{note}</p>}
       {problem && <p role="alert" className="text-[12px] text-danger">{problem}</p>}
     </>
   );

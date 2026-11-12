@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cloudComputerResettable, type CloudResetView } from "./ResetCloudComputerButton";
+import { cloudComputerResettable, resetNoteKey, type CloudResetView } from "./ResetCloudComputerButton";
 
 const stuck: CloudResetView = {
   computer: "cloud", cloudBackend: "box", canManage: true, busy: false, pending: false,
@@ -27,5 +27,12 @@ describe("Reset cloud desktop in the Computer panel", () => {
     expect(cloudComputerResettable({ ...stuck, cloudBackend: "vps" })).toBe(false);
     expect(cloudComputerResettable({ ...stuck, computer: undefined })).toBe(false);
     expect(cloudComputerResettable({ ...stuck, canManage: false })).toBe(false);
+  });
+
+  it("says the old cloud desktop is still being deleted when the reset was accepted but not finished", () => {
+    expect(resetNoteKey({ ok: true, pending: true })).toBe("computer.reset.pending");
+    expect(resetNoteKey({ ok: true })).toBeNull();
+    expect(resetNoteKey({ ok: true, missing: true })).toBeNull();
+    expect(resetNoteKey(undefined)).toBeNull();
   });
 });

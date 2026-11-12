@@ -6310,6 +6310,7 @@
   "computer.cloud.asleep": "O desktop na nuvem de {name} está dormindo. Ele acorda em alguns segundos quando {name} precisar.",
   "computer.reset.button": "Redefinir desktop na nuvem",
   "computer.reset.confirm": "Redefinir o desktop na nuvem de {name}? Ele é excluído com os arquivos e logins do navegador, e um novo começa com a próxima mensagem de {name}. Não dá para desfazer.",
+  "computer.reset.pending": "Redefinição iniciada. O desktop na nuvem antigo ainda está sendo excluído; um novo começa com a próxima mensagem de {name} quando ele sumir.",
   "computer.badge.autoBoat": "desktop na nuvem · Auto · somente leitura",
   "desktopViewer.title": "Visualizador do desktop",
   "desktopViewer.reconnect": "Reconectar",
