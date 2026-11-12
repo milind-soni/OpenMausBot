@@ -9439,7 +9439,6 @@
   "server.routines.cron.nthWeekend.last": "每月最後一個{weekday} {time}",
   "attach.imagesLeftOutOne": "一則訊息最多可附加 {count} 張圖片，總計 {megabytes} MB。{names} 沒有附加。",
   "attach.imagesLeftOutMany": "一則訊息最多可附加 {count} 張圖片，總計 {megabytes} MB。{names} 沒有附加。",
-  "attach.archivesUnsupported": "無法附加壓縮檔：請解壓縮 {names}，再附加裡面的檔案。",
   "native.home.ownCopyNotReady": "這台電腦上的 OpenMausBot 還無法切回自己的副本。",
   "native.home.ownCopyNotRunning": "這台電腦自己的副本沒有在執行。",
   "native.cloud.connectedAppsStay": "你已連線的應用程式會留在這台電腦上：那台伺服器沒有自己的已連線應用程式服務。請到那裡的「應用程式」中重新連線。",

@@ -9866,7 +9866,6 @@
   "server.routines.cron.nthWeekend.last": "Todo mês no último {weekday} às {time}",
   "attach.imagesLeftOutOne": "Uma mensagem aceita até {count} imagens, com {megabytes} MB no total. O arquivo {names} não foi anexado.",
   "attach.imagesLeftOutMany": "Uma mensagem aceita até {count} imagens, com {megabytes} MB no total. Os arquivos {names} não foram anexados.",
-  "attach.archivesUnsupported": "Arquivos compactados não podem ser anexados: descompacte {names} e anexe os arquivos de dentro.",
   "native.home.ownCopyNotReady": "O OpenMausBot neste computador ainda não conseguiu voltar à própria cópia.",
   "native.home.ownCopyNotRunning": "A cópia deste computador não está rodando.",
   "native.cloud.connectedAppsStay": "Seus apps conectados ficam neste computador: esse servidor não tem um serviço próprio de apps conectados. Conecte-os novamente lá, em “Apps”.",
