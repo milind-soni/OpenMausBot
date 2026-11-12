@@ -1,0 +1,21 @@
+{
+  "provenance": {
+    "kind": "installed binary string evidence, not an observed RPC payload",
+    "version": "1.0.70 (f50904eaee6c)",
+    "platform": "macos-aarch64",
+    "method": "Read-only mmap search; no session/prompt call."
+  },
+  "recognizedStrings": [
+    "rate_limited",
+    "usage_pool_exhausted",
+    "usage_limit_reached",
+    "global_rate_limit",
+    "concurrency_limit",
+    "retry_after_secs"
+  ],
+  "usageHelp": "Print persisted token and cost usage for a session",
+  "usageSyntax": "grok usage [OPTIONS] <SESSION_ID> [TURN]",
+  "remainingPercentage": null,
+  "resetTime": null,
+  "limitations": "String presence does not establish RPC error code, nesting, reset units, or an account-usage read method. No limit-error wire sample was captured; do not build a parser from this file alone."
+}

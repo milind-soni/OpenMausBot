@@ -1,0 +1,81 @@
+{
+  "id": 2,
+  "result": {
+    "ordinaryUsageAllowed": true,
+    "rateLimits": {
+      "limitId": "codex",
+      "limitName": null,
+      "normalModelSlug": null,
+      "primary": {
+        "usedPercent": 7,
+        "windowDurationMins": 300,
+        "resetsAt": 1794493466
+      },
+      "secondary": {
+        "usedPercent": 1,
+        "windowDurationMins": 10080,
+        "resetsAt": 1794830295
+      },
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false,
+        "balance": "0"
+      },
+      "individualLimit": null,
+      "spendControlReached": false,
+      "planType": "plus",
+      "rateLimitReachedType": null
+    },
+    "rateLimitsByLimitId": {
+      "codex": {
+        "limitId": "codex",
+        "limitName": null,
+        "normalModelSlug": null,
+        "primary": {
+          "usedPercent": 7,
+          "windowDurationMins": 300,
+          "resetsAt": 1794493466
+        },
+        "secondary": {
+          "usedPercent": 1,
+          "windowDurationMins": 10080,
+          "resetsAt": 1794830295
+        },
+        "credits": {
+          "hasCredits": false,
+          "unlimited": false,
+          "balance": "0"
+        },
+        "individualLimit": null,
+        "spendControlReached": false,
+        "planType": "plus",
+        "rateLimitReachedType": null
+      }
+    },
+    "rateLimitResetCredits": {
+      "availableCount": 2,
+      "credits": [
+        {
+          "id": "redacted-reset-credit-1",
+          "resetType": "codexRateLimits",
+          "status": "available",
+          "grantedAt": 1793477512,
+          "expiresAt": 1796069512,
+          "title": "Full reset (Weekly + 5 hr)",
+          "description": "Thanks for using Codex! You've been granted one free rate limit reset."
+        },
+        {
+          "id": "redacted-reset-credit-2",
+          "resetType": "codexRateLimits",
+          "status": "available",
+          "grantedAt": 1793569845,
+          "expiresAt": 1796161845,
+          "title": "Full reset (Weekly + 5 hr)",
+          "description": "Thanks for using Codex! You've been granted one free rate limit reset."
+        }
+      ]
+    },
+    "accountId": "<redacted>",
+    "rateLimitUpsell": null
+  }
+}

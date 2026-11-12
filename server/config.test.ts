@@ -1,9 +1,11 @@
 // saveConfig merge behavior — the per-instance permission toggle relies on
 // an `instances` patch merging by instanceId instead of clobbering sibling
 // config, and previously `instances` wasn't merged into disk at all.
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { loadConfig, saveConfig } from "./config.ts";
+import { DATA_DIR, instanceConfigs, LEGACY_CLOUD_COMPUTER_DRIVER, loadConfig, saveConfig } from "./config.ts";
 
 describe("saveConfig instances merge", () => {
   it("defaults idle permission approval on at ten seconds and persists preferences", () => {
@@ -41,5 +43,25 @@ describe("saveConfig instances merge", () => {
     saveConfig({ instances: { claude: { driver: "claudeAgent" } } });
     const cfg = loadConfig();
     expect(cfg.profile).toEqual({ name: "Ada", email: "ada@example.com" });
+  });
+});
+
+describe("removed cloud computer config", () => {
+  it("ignores old credentials and drops them on the next atomic save", () => {
+    mkdirSync(DATA_DIR, { recursive: true });
+    const file = join(DATA_DIR, "config.json");
+    writeFileSync(file, JSON.stringify({ box: { token: "obsolete-secret" }, profile: { name: "Ada" } }));
+    expect(loadConfig()).not.toHaveProperty("box");
+    saveConfig({ autoHandoffs: false });
+    const saved = JSON.parse(readFileSync(file, "utf8"));
+    expect(saved).not.toHaveProperty("box");
+    expect(saved.profile.name).toBe("Ada");
+  });
+
+  it("filters old custom instances and provides defaults if only removed instances remain", () => {
+    const driver = LEGACY_CLOUD_COMPUTER_DRIVER;
+    expect(instanceConfigs({ instances: { old: { driver }, writer: { driver: "claudeAgent" } } })).toEqual({ writer: { driver: "claudeAgent", environment: {} } });
+    expect(Object.keys(instanceConfigs({ instances: { old: { driver } } }))).toEqual(["grok", "claude", "codex", "antigravity"]);
+    expect(instanceConfigs({})).not.toHaveProperty("computer");
   });
 });

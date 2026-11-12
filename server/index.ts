@@ -9,12 +9,11 @@ import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectService } from "../electron/projects.mjs";
 
-import * as box from "./box.ts";
 import * as composio from "./composio.ts";
 import * as trello from "./trello.ts";
 import { TrelloLinkStore } from "./trelloLinks.ts";
 import { TrelloSync } from "./trelloSync.ts";
-import { ensureDirs, instanceConfigs, loadConfig, saveConfig, DATA_DIR, EVENTS_DIR, NATIVE_DIR } from "./config.ts";
+import { ensureDirs, instanceConfigs, loadConfig, saveConfig, isRemovedComputerDriver, LEGACY_CLOUD_COMPUTER_DRIVER, DATA_DIR, EVENTS_DIR, NATIVE_DIR } from "./config.ts";
 import type { ModelSelection, RuntimeEvent, SendTurnInput } from "./contracts.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
@@ -128,8 +127,13 @@ async function defaultSelection() {
   const model = pick?.models.default || "default";
   return { instanceId: pick?.instanceId ?? "claude", model, label: pick?.models.options.find((option) => option.id === model)?.label };
 }
-let bootSelection = { instanceId: "claude", model: "default" };
-const store = new Store(() => bootSelection);
+const bootSelection = await defaultSelection();
+const removedComputerInstances = new Set([
+  ...(!cfg.instances?.computer ? ["computer"] : []),
+  LEGACY_CLOUD_COMPUTER_DRIVER,
+  ...Object.entries(cfg.instances ?? {}).filter(([, entry]) => isRemovedComputerDriver(entry.driver)).map(([id]) => id),
+]);
+const store = new Store(() => bootSelection, removedComputerInstances);
 const taskStore = new TaskStore(DATA_DIR);
 const trelloLinks = new TrelloLinkStore(DATA_DIR);
 // Match the registry the desktop app (or an isolated test) is already using.
@@ -143,7 +147,6 @@ const trelloSync = new TrelloSync({
   log: (msg) => console.error(`[trello] ${msg}`),
 });
 const stopTrelloPolling = trelloSync.startPolling();
-bootSelection = await defaultSelection();
 store.seedIfEmpty();
 
 // ── SSE fan-out to clients ─────────────────────────────────────────────
@@ -212,8 +215,6 @@ bus.subscribe((event: RuntimeEvent) => {
           if (patched) broadcast({ kind: "message.patch", threadId: event.threadId, message: patched });
           toolMessageByItem.delete(event.itemId);
         }
-        // the bot just finished acting — refresh its screen preview now
-        if (bot) pokeScreenPoller(bot.id);
       }
       break;
     case "item.started":
@@ -261,10 +262,6 @@ bus.subscribe((event: RuntimeEvent) => {
       break;
     case "turn.completed": {
       if (bot) {
-        // the last live frame becomes a settled inline screen message —
-        // the screenshot-in-chat moment
-        const frame = stopScreenPoller(bot.id);
-        if (frame) pushMessage({ role: "bot", kind: "screen", png: frame.png, mime: frame.mime });
         store.patchBot(bot.id, { busy: false, unread: true });
         broadcast({ kind: "bot", bot: store.bot(bot.id) });
       }
@@ -274,54 +271,6 @@ bus.subscribe((event: RuntimeEvent) => {
     }
   }
 });
-
-// ── live screen: poll the bot's box while it works ────────────────────
-// Frames stream to clients as SSE {kind:'screen'} (the "Bot's screen"
-// panel); the final frame is folded into the transcript on turn end.
-type Frame = { png: string; mime: string };
-const screenPollers = new Map<
-  string,
-  { timer: ReturnType<typeof setInterval>; capture: () => Promise<void>; last: Frame | null }
->();
-
-function startScreenPoller(botId: string) {
-  if (screenPollers.has(botId) || !box.boxConfigured(cfg)) return;
-  let inFlight = false;
-  const capture = async () => {
-    if (inFlight) return;
-    inFlight = true;
-    try {
-      const { png, format } = await box.screenshotBox(cfg, botId);
-      const frame = { png, mime: format === "jpeg" ? "image/jpeg" : "image/png" };
-      entry.last = frame;
-      broadcast({ kind: "screen", botId, ...frame });
-    } catch {
-      /* box asleep or mid-command — try again next tick */
-    } finally {
-      inFlight = false;
-    }
-  };
-  const entry = {
-    timer: setInterval(capture, 4000),
-    capture,
-    last: null as Frame | null,
-  };
-  screenPollers.set(botId, entry);
-}
-
-/** Event-driven refresh: capture NOW (the bot just acted on its screen)
- * instead of waiting for the next interval tick. */
-function pokeScreenPoller(botId: string) {
-  void screenPollers.get(botId)?.capture();
-}
-
-function stopScreenPoller(botId: string): Frame | null {
-  const entry = screenPollers.get(botId);
-  if (!entry) return null;
-  clearInterval(entry.timer);
-  screenPollers.delete(botId);
-  return entry.last;
-}
 
 // Where Electron's app.getPath("userData") lands, per platform — the
 // hardcoded macOS path found nothing anywhere else, and threw the
@@ -417,39 +366,21 @@ function formatAttachmentContext(attachments?: Attachment[]): string {
 // ── turn dispatch (upstream ProviderCommandReactor, miniature) ──────────
 type TurnIntegrations = NonNullable<SendTurnInput["integrations"]>;
 
-/** Connected apps and the bot's computer (cloud box or this machine) — shared
+/** Connected apps and the bot's computer on this machine — shared
  * by 1:1 and room turns so the two paths can't drift apart. */
 async function computerAndAppIntegrations(
   bot: { id: string; name: string; computer?: string },
-  driverKind: string,
 ): Promise<TurnIntegrations> {
   const integrations: TurnIntegrations = {};
   if (cfg.composio?.key) integrations.composio = { key: cfg.composio.key, url: cfg.composio.url };
-  const wants = bot.computer; // 'cloud' | 'local' | 'off' | undefined(auto)
-  if (wants !== "off" && wants !== "local" && box.boxConfigured(cfg)) {
-    let b = await box.findBox(cfg, bot.id).catch(() => null);
-    // the Computer driver runs ON the box — provision it on first use
-    if (!b && driverKind === "boxAgent") {
-      broadcast({ kind: "computer", botId: bot.id, state: "provisioning" });
-      await box.provisionBox(cfg, bot.id, bot.name);
-      b = await box.findBox(cfg, bot.id).catch(() => null);
-    }
-    if (b) integrations.computer = { boxId: b.id, token: cfg.box!.token! };
-  }
-  // local computer (this Mac) via the Electron-hosted cua-driver: the
-  // Electron main process owns the daemon (TCC attribution) and writes
-  // its spawn contract to cua-connection.json; the harness only reads it
-  if (!integrations.computer && wants !== "off" && wants !== "cloud") {
+  if (bot.computer !== "off") {
     const cua = readCuaConnection();
     if (cua) integrations.localComputer = cua;
   }
   return integrations;
 }
 
-function computerPromptHint(integrations: TurnIntegrations, driverKind: string): string {
-  if (integrations.computer && driverKind !== "boxAgent") {
-    return "You have your own cloud computer — use the computer tools (screenshot, computer_exec, open_url) whenever browsing or acting on a desktop helps.";
-  }
+function computerPromptHint(integrations: TurnIntegrations): string {
   if (integrations.localComputer) {
     return "You can act on the user's computer through the computer tools — take a screenshot or read the desktop state first, prefer accessibility actions over raw coordinates, and act carefully.";
   }
@@ -532,15 +463,14 @@ async function startTurn(
   const taskContext = resolveTaskContext([text, bot.description], taskStore.list());
 
   // busy flips immediately so the composer locks; the dispatch itself runs
-  // in the background — box provisioning can take ~90s and must never
-  // hang the HTTP request
+  // in the background so the HTTP request can finish promptly
   store.patchBot(bot.id, { busy: true, unread: false });
   broadcast({ kind: "bot", bot: store.bot(bot.id) });
 
   void (async () => {
     try {
-      const integrations = await computerAndAppIntegrations(bot, instance.driverKind);
-      const computerHint = computerPromptHint(integrations, instance.driverKind);
+      const integrations = await computerAndAppIntegrations(bot);
+      const computerHint = computerPromptHint(integrations);
       // peer-agent comms: give a user-initiated turn the list_bots/ask_bot
       // tools. A comms-invoked turn (depth ≥ cap) gets none — hard recursion
       // stop, so the user's tokens can't be burned by a bot-to-bot loop.
@@ -592,7 +522,6 @@ async function startTurn(
       });
       // dispatched: the rewind is spent, and the old cursors are dead
       if (rewound) store.patchBot(bot.id, { rewound: false, resumeCursors: {} });
-      if (integrations.computer) startScreenPoller(bot.id);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       const failure = store.appendMessage(bot.threadId, {
@@ -721,7 +650,7 @@ async function runGroupMemberTurn(
     .reverse()
     .find((message) => message.role === "user" && message.kind === "text");
   const latestUserText = latestUserMessage?.text ?? "";
-  const integrations = await computerAndAppIntegrations(bot, instance.driverKind);
+  const integrations = await computerAndAppIntegrations(bot);
 
   const attPrompt = formatAttachmentContext(latestUserMessage?.attachments);
   const projectContext = resolveProjectContext([latestUserText, group.bulletin, bot.description]);
@@ -736,7 +665,7 @@ async function runGroupMemberTurn(
     projectContext.system,
     taskContext.system,
     composioPrompt.trim(),
-    computerPromptHint(integrations, instance.driverKind),
+    computerPromptHint(integrations),
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
   ]
     .filter(Boolean)
@@ -744,7 +673,6 @@ async function runGroupMemberTurn(
 
   const text = `${serializeRoomContext(group.threadId, userName)}${attPrompt ? `\n\n${attPrompt}` : ""}\n\n(Reply to the conversation above as ${bot.name}.)`;
 
-  if (integrations.computer) startScreenPoller(bot.id);
 
   // run the turn and wait for it to settle, folding the reply text so a
   // chained @mention can be routed afterwards
@@ -861,7 +789,6 @@ function configStatus() {
   return {
     xai: { configured: Boolean(cfg.xai?.key) },
     composio: { configured: Boolean(cfg.composio?.key), apiKeyConfigured: Boolean(cfg.composio?.apiKey) },
-    box: { configured: Boolean(cfg.box?.token) },
     trello: { keyConfigured: Boolean(cfg.trello?.key), configured: Boolean(cfg.trello?.token) },
     // not a secret — the sidebar shows it
     profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" },
@@ -1469,7 +1396,6 @@ const server = createServer(async (req, res) => {
       if (!bot) return json(res, 404, { error: "no such bot" });
       // a running turn dies with its bot
       await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(bot.threadId).catch(() => {});
-      stopScreenPoller(bot.id);
       store.deleteBot(bot.id);
       deleteThreadLogs(bot.threadId);
       broadcast({ kind: "bot.deleted", botId: bot.id });
@@ -1681,7 +1607,7 @@ const server = createServer(async (req, res) => {
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
       const patch: Record<string, unknown> = {};
-      for (const key of ["xai", "composio", "box", "trello", "profile"] as const) {
+      for (const key of ["xai", "composio", "trello", "profile"] as const) {
         if (body[key] && typeof body[key] === "object") patch[key] = body[key];
       }
       if (typeof body.autoHandoffs === "boolean") patch.autoHandoffs = body.autoHandoffs;
@@ -1785,30 +1711,6 @@ const server = createServer(async (req, res) => {
     if (m && method === "POST") return json(res, 200, await composio.authorizeService(cfg, m[1]));
     m = path.match(/^\/api\/connectors\/([\w-]+)$/);
     if (m && method === "DELETE") return json(res, 200, await composio.removeService(cfg, m[1]));
-
-    // ── the bot's cloud computer (Box) ──
-    m = path.match(/^\/api\/bots\/([\w-]+)\/computer$/);
-    if (m && method === "GET") return json(res, 200, await box.boxStatus(cfg, m[1]));
-    m = path.match(/^\/api\/bots\/([\w-]+)\/computer\/(provision|join|sleep|exec|screenshot)$/);
-    if (m && method === "POST") {
-      const botId = m[1];
-      const bot = store.bot(botId);
-      if (!bot) return json(res, 404, { error: "no such bot" });
-      switch (m[2]) {
-        case "provision":
-          return json(res, 200, await box.provisionBox(cfg, botId, bot.name));
-        case "join":
-          return json(res, 200, await box.joinBox(cfg, botId));
-        case "sleep":
-          return json(res, 200, await box.sleepBox(cfg, botId));
-        case "exec": {
-          const body = await readBody(req);
-          return json(res, 200, await box.execOnBox(cfg, botId, String(body.command ?? "")));
-        }
-        case "screenshot":
-          return json(res, 200, await box.screenshotBox(cfg, botId));
-      }
-    }
 
     // packaged app: the server serves the built UI too (window → :8899 for
     // everything, no dev proxy to die). GBS_STATIC_DIR is set by Electron.

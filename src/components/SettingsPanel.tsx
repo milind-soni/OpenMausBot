@@ -162,22 +162,23 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
           <div className="rounded-xl bg-card p-4">
             <div className="text-[15px] font-medium text-ink">Computer</div>
             <div className="mt-0.5 text-[13px] text-ink-secondary">
-              Where this bot's computer runs{bot.computer ? "" : " (currently: auto)"}
+              Allow this bot to use this computer in the desktop app
             </div>
             <div className="mt-3 flex overflow-hidden rounded-lg border border-hairline/40">
-              {(["cloud", "local", "off"] as const).map((mode, i) => (
+              {(["local", "off"] as const).map((mode, i) => (
                 <button
                   key={mode}
+                  disabled={mode === "local" && !window.gbs}
                   onClick={() => patch({ computer: mode })}
                   className={cn(
                     "flex-1 py-1.5 text-[13px] capitalize",
                     i > 0 && "border-l border-hairline/40",
-                    bot.computer === mode
+                    (bot.computer ?? "local") === mode
                       ? "bg-raised text-ink"
                       : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
                   )}
                 >
-                  {mode}
+                  {mode === "local" ? "This computer" : "Off"}
                 </button>
               ))}
             </div>

@@ -1,0 +1,59 @@
+{
+  "provenance": {
+    "kind": "constructed examples matching locally generated 0.164.0 types, not observed notifications",
+    "command": "codex app-server generate-ts --out <temporary-directory>"
+  },
+  "notifications": [
+    {
+      "method": "account/rateLimits/updated",
+      "params": {
+        "rateLimits": {
+          "limitId": "codex",
+          "limitName": null,
+          "normalModelSlug": null,
+          "primary": {
+            "usedPercent": 7,
+            "windowDurationMins": 300,
+            "resetsAt": 1794493466
+          },
+          "secondary": {
+            "usedPercent": 1,
+            "windowDurationMins": 10080,
+            "resetsAt": 1794830295
+          },
+          "credits": {
+            "hasCredits": false,
+            "unlimited": false,
+            "balance": "0"
+          },
+          "individualLimit": null,
+          "spendControlReached": false,
+          "planType": "plus",
+          "rateLimitReachedType": null
+        }
+      }
+    },
+    {
+      "method": "error",
+      "params": {
+        "threadId": "redacted-thread",
+        "turnId": "redacted-turn",
+        "willRetry": false,
+        "error": {
+          "message": "Illustrative: included usage has been used up.",
+          "codexErrorInfo": "usageLimitExceeded",
+          "additionalDetails": null,
+          "misalignment": null
+        }
+      }
+    }
+  ],
+  "turnCompletedErrorPath": "params.turn.error.codexErrorInfo",
+  "distinctCodes": [
+    "usageLimitExceeded",
+    "rateLimitExceeded",
+    "sessionBudgetExceeded",
+    "contextWindowExceeded"
+  ],
+  "note": "No exhausted account was probed. Rate limits and session/context budgets must not be treated as the same condition."
+}

@@ -113,8 +113,6 @@ export interface SendTurnInput {
   /** Per-bot integrations the driver may hand to the agent as tools. */
   integrations?: {
     composio?: { url?: string; key: string };
-    /** The bot's cloud computer (box.ascii.dev) for desktop/browser use. */
-    computer?: { boxId: string; token: string };
     /** Local computer use via the Electron-hosted cua-driver daemon —
      * spawn config comes verbatim from cua-connection.json (the daemon
      * MUST be spawned by Electron main; the harness only points the agent

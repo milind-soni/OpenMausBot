@@ -103,8 +103,8 @@ export interface Bot {
   unread: boolean;
   busy?: boolean;
   modelSelection: ModelSelection;
-  /** Where this bot's computer runs; unset = auto (cloud box if one exists, else local). */
-  computer?: "cloud" | "local" | "off";
+  /** Where this bot's computer runs; unset uses this computer in the desktop app. */
+  computer?: "local" | "off";
   pinned?: boolean;
   hidden?: boolean;
   messages: Message[];
@@ -143,7 +143,6 @@ export function messageVersions(bot: Bot, message: Message): Message[] {
 export interface ConfigStatus {
   xai?: { configured: boolean };
   composio: { configured: boolean; apiKeyConfigured?: boolean };
-  box: { configured: boolean };
   trello?: { configured: boolean; keyConfigured: boolean };
   /** who's using the app — collected in onboarding, shown in the sidebar */
   profile?: { name: string; email: string };
@@ -193,10 +192,6 @@ export interface AppState {
   tasks: TaskRecord[];
   taskProjects: TaskProject[];
   tasksLoaded: boolean;
-  /** latest live frame of a bot's computer, per botId */
-  screens: Record<string, { png: string; mime: string }>;
-  /** bots whose cloud computer is being provisioned */
-  provisioning: Record<string, boolean>;
   connected: boolean;
   error: string | null;
   mascotMotion: {
@@ -236,8 +231,6 @@ export type Action =
   | { type: "botPatched"; bot: Partial<Bot> & { id: string } }
   | { type: "messageAdded"; threadId: string; message: Message }
   | { type: "messagePatched"; threadId: string; message: Message }
-  | { type: "screenFrame"; botId: string; png: string; mime: string }
-  | { type: "provisioning"; botId: string; on: boolean }
   | { type: "setModel"; botId: string; selection: ModelSelection }
   | { type: "interrupt"; botId: string }
   | { type: "connected"; value: boolean }
@@ -485,17 +478,6 @@ export function reducer(state: AppState, action: Action): AppState {
         messages: b.messages.map((m) => (m.id === action.message.id ? action.message : m)),
       }));
     }
-    case "screenFrame":
-      return {
-        ...withMascotMotion(state, action.botId, "success"),
-        screens: { ...state.screens, [action.botId]: { png: action.png, mime: action.mime } },
-        provisioning: { ...state.provisioning, [action.botId]: false },
-      };
-    case "provisioning":
-      return {
-        ...(action.on ? withMascotMotion(state, action.botId, "launch") : state),
-        provisioning: { ...state.provisioning, [action.botId]: action.on },
-      };
     case "setModel":
       return updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection }));
     case "connected":
@@ -670,8 +652,6 @@ export const initialState: AppState = {
   tasks: [],
   taskProjects: [],
   tasksLoaded: false,
-  screens: {},
-  provisioning: {},
   connected: false,
   error: null,
   mascotMotion: null,
@@ -1153,12 +1133,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           break;
         }
-        case "screen":
-          rawDispatch({ type: "screenFrame", botId: frame.botId, png: frame.png, mime: frame.mime ?? "image/png" });
-          break;
-        case "computer":
-          rawDispatch({ type: "provisioning", botId: frame.botId, on: frame.state === "provisioning" });
-          break;
         case "bot.deleted":
           rawDispatch({ type: "deleteBot", botId: frame.botId });
           break;
@@ -1171,7 +1145,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "config":
           rawDispatch({
             type: "configStatus",
-            config: { xai: frame.xai, composio: frame.composio, box: frame.box, trello: frame.trello, profile: frame.profile,
+            config: { xai: frame.xai, composio: frame.composio, trello: frame.trello, profile: frame.profile,
               autoHandoffs: frame.autoHandoffs, autoApprovePermissions: frame.autoApprovePermissions, autoApproveDelaySeconds: frame.autoApproveDelaySeconds },
           });
           api("/api/instances")

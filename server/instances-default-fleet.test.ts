@@ -75,27 +75,26 @@ afterAll(async () => {
 });
 
 describe("PATCH /api/instances/:id against a default (unconfigured) fleet", () => {
-  it("starts with the full five-instance default fleet", async () => {
+  it("starts with the full four-instance default fleet", async () => {
     const { body } = await api("GET", "/api/instances");
     const ids = body.instances.map((i: any) => i.instanceId).sort();
-    expect(ids).toEqual(["antigravity", "claude", "codex", "computer", "grok"]);
+    expect(ids).toEqual(["antigravity", "claude", "codex", "grok"]);
   });
 
   it("toggling one instance does not drop the others from disk or the API", async () => {
     const patched = await api("PATCH", "/api/instances/codex", { autoApprove: true });
     expect(patched.status).toBe(200);
     const patchedIds = patched.body.instances.map((i: any) => i.instanceId).sort();
-    expect(patchedIds).toEqual(["antigravity", "claude", "codex", "computer", "grok"]);
+    expect(patchedIds).toEqual(["antigravity", "claude", "codex", "grok"]);
 
     const disk = JSON.parse(readFileSync(join(home, ".gbs", "config.json"), "utf8"));
-    expect(Object.keys(disk.instances).sort()).toEqual(["antigravity", "claude", "codex", "computer", "grok"]);
+    expect(Object.keys(disk.instances).sort()).toEqual(["antigravity", "claude", "codex", "grok"]);
 
     const refetched = await api("GET", "/api/instances");
     expect(refetched.body.instances.map((i: any) => i.instanceId).sort()).toEqual([
       "antigravity",
       "claude",
       "codex",
-      "computer",
       "grok",
     ]);
   });

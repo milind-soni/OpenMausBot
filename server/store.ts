@@ -6,7 +6,7 @@ import { mkdirSync, unlinkSync } from "node:fs";
 import { readJsonFile, writeJsonAtomic } from "./json-file.ts";
 import { join } from "node:path";
 
-import { DATA_DIR } from "./config.ts";
+import { DATA_DIR, LEGACY_CLOUD_COMPUTER_DRIVER } from "./config.ts";
 import { newId, type Attachment, type ModelSelection, type ThreadId } from "./contracts.ts";
 import { DEFAULT_BOTS } from "./default-bots.ts";
 import { pickBotName } from "./names.ts";
@@ -106,9 +106,8 @@ export interface BotRecord {
   modelSelection: ModelSelection;
   /** provider-native continuation per instance (e.g. claude session id) */
   resumeCursors: Record<string, unknown>;
-  /** which computer the bot acts on: its cloud box, this Mac (local CUA),
-   * or none. Unset = auto (box when it exists, else local when available). */
-  computer?: "cloud" | "local" | "off";
+  /** Unset uses this computer when the desktop bridge is available. */
+  computer?: "local" | "off";
   /** true after an edit/branch-switch rewound the visible conversation:
    * provider sessions still hold the abandoned branch, so the next turn
    * must start fresh (drop cursors) and replay the surviving path. */
@@ -185,13 +184,29 @@ export class Store {
   private threads = new Map<string, ThreadState>();
   private defaultSelection: () => ModelSelection;
 
-  constructor(defaultSelection: () => ModelSelection) {
+  constructor(defaultSelection: () => ModelSelection, removedComputerInstances: ReadonlySet<string> = new Set(["computer", LEGACY_CLOUD_COMPUTER_DRIVER])) {
     this.defaultSelection = defaultSelection;
     mkdirSync(DATA_DIR, { recursive: true });
     this.bots = readJsonFile<BotRecord[]>(BOTS_FILE, []);
     this.groups = readJsonFile<GroupRecord[]>(GROUPS_FILE, []);
     // busy never survives a restart — no turn does either
-    for (const b of this.bots) b.busy = false;
+    let migrated = false;
+    for (const b of this.bots) {
+      b.busy = false;
+      if ((b.computer as string | undefined) === "cloud") {
+        delete b.computer;
+        migrated = true;
+      }
+      if (removedComputerInstances.has(b.modelSelection.instanceId)) {
+        b.modelSelection = this.defaultSelection();
+        this.appendMessage(b.threadId, {
+          role: "bot", kind: "text",
+          text: `This bot used the cloud computer, which has been removed. It now uses ${b.modelSelection.label ?? b.modelSelection.model}.`,
+        });
+        migrated = true;
+      }
+    }
+    if (migrated) this.saveBots();
     for (const g of this.groups) {
       g.autoHandoffs = g.autoHandoffs === true;
       g.busyBotId = null;

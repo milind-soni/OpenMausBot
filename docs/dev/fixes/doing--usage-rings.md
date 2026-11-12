@@ -1,5 +1,5 @@
 ---
-status: todo
+status: doing
 created: 2026-11-12
 updated: 2026-11-12
 scope: usage rings and usage-limit foundation
@@ -15,7 +15,7 @@ Implements `docs/dev/plans/implementation--usage-rings.md`. The spike and the de
 
 ## 1. Spike and design
 
-- [ ] **Engine usage-data spike** — SoSo. Capture what Claude Code, Codex, Grok, and Antigravity report about remaining usage and limit errors. Save the fixtures to `server/testing/fixtures/usage/` and fill in the table in the plan.
+- [?] **Engine usage-data spike** — SoSo. Capture what Claude Code, Codex, Grok, and Antigravity report about remaining usage and limit errors. Save the fixtures to `server/testing/fixtures/usage/` and fill in the table in the plan.
 - [ ] **Ring design** — Z. Cover:
   - size, placement, color thresholds, the unknown state
   - tooltip and popover content
@@ -39,3 +39,9 @@ Implements `docs/dev/plans/implementation--usage-rings.md`. The spike and the de
 
 - [ ] **User guide** — `docs/guide/usage-and-limits.md`.
 - [ ] **QA** — Dell. Check real engines and simulated exhausted states with the fake CLIs.
+
+## Spike handoff — 2026-11-12
+
+The engine research is ready for review. Findings and evidence provenance are in the plan and fixture inventory. One Codex account read was made without starting a model turn. Unobserved limit errors are clearly labeled as constructed examples or binary evidence. Foundation, ring design, app behavior, and QA items above remain open.
+
+Trello mirroring is pending because this worktree has no Trello credentials.
