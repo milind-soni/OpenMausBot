@@ -126,6 +126,7 @@ export function toolLabel(tool?: string): string {
     stage_skill: "approval.tool.enableSkill",
     update_skill: "approval.tool.updateSkill",
     update_profile: "approval.tool.updateProfile",
+    reset_cloud_computer: "approval.tool.resetCloudComputer",
     // ACP drivers may send the protocol's toolCall kind as the tool, so every kind maps to a phrase ("shell" is
     // execute; "tool" is no kind at all).
     shell: "approval.tool.runCommand",
