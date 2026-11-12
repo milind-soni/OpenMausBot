@@ -17,13 +17,10 @@ import { turnWaitedOnPerson } from "../waiting-on-person.ts";
 import { display, findSettings, type SettingEntry, type WritableEntry } from "./registry.ts";
 
 export const TOOL = "app_settings";
-/** How long a "Change X?" card waits on the person. */
 export const APP_SETTINGS_HOLD_MS = 9 * 60_000;
-/** Writes one turn (generation) may make. */
 export const WRITE_BUDGET = 10;
 const FIND_LIMIT = 8;
 const NOT_RETRY = "Do not retry it; ask the user what they would like instead.";
-/** What the bot reads for an unset value. */
 const NOT_SET = "not set";
 const text = (value: string) => value || NOT_SET;
 
@@ -193,7 +190,6 @@ export function createAppSettings(deps: AppSettingsDeps) {
   }
 
   return {
-    /** POST /api/internal/app-settings. */
     async handle(body: Record<string, unknown>, turn: Turn): Promise<{ status: number; body: Record<string, unknown> }> {
       if (body.action === "find") {
         const query = typeof body.query === "string" ? body.query : "";

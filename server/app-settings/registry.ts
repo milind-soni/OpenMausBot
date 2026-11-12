@@ -4,7 +4,10 @@ import { credentialIsConfigured, CREDENTIAL_TARGETS, PROVIDER_CREDENTIAL_TARGETS
 import { WINDOW_PREFS, type WindowPrefId } from "../../shared/app-settings.ts";
 import { MAX_CONCURRENT_BOT_THREADS } from "../bot-thread-limits.ts";
 import { MAX_MCP_CALL_TIMEOUT_MINUTES, MAX_ROOM_TURN_TIMEOUT_MINUTES, MIN_MCP_CALL_TIMEOUT_MINUTES, MIN_ROOM_TURN_TIMEOUT_MINUTES, type AppConfig } from "../config.ts";
-import type { BotRecord } from "../store.ts";
+import type { RequestAuth } from "../request-auth.ts";
+import { callRoute, type RouteReply } from "../routes/call-route.ts";
+import type { RouteHandler } from "../routes/table.ts";
+import type { BotRecord, Store } from "../store.ts";
 
 /** Where the person changes it by hand, as the bot tells them. */
 type Where = "Settings → Appearance" | "Settings → General" | "Settings → AI" | "Settings → AI → API keys" | "Settings → You and your bots"
@@ -179,7 +182,6 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
   return [...safe, ...confirm, ...secret, ...owner];
 }
 
-/** Up to `limit` entries whose id, label, help or synonyms carry a word of the query, best first. */
 export function findSettings(entries: readonly SettingEntry[], query: string, limit = 8): SettingEntry[] {
   const words = query.toLowerCase().split(/[^a-z0-9.-]+/).filter((word) => word.length > 1);
   if (!words.length) return [];
@@ -193,4 +195,22 @@ export function findSettings(entries: readonly SettingEntry[], query: string, li
     return { entry, score };
   }).filter((hit) => hit.score > 0).sort((a, b) => b.score - a.score);
   return scored.slice(0, limit).map((hit) => hit.entry);
+}
+
+/** The registry over the Settings window's own routes, called as the window calls them. */
+export function routeBackedRegistry(deps: {
+  cfg(): AppConfig;
+  store: Pick<Store, "bots" | "sections">;
+  routes: { config: RouteHandler; botOrder: RouteHandler; sections: RouteHandler };
+  credentials(): CredentialConfig;
+  window: RegistryDeps["window"];
+}): SettingEntry[] {
+  const auth: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
+  const refusal = async (reply: Promise<RouteReply>) => { const { status, body } = await reply; return status < 300 ? null : String(body.error ?? `HTTP ${status}`); };
+  return createSettingsRegistry({
+    cfg: deps.cfg, bots: () => deps.store.bots, sections: () => deps.store.sections, credentials: deps.credentials, window: deps.window,
+    saveConfig: (patch) => refusal(callRoute(deps.routes.config, { method: "PUT", path: "/api/config", body: patch, auth })),
+    reorderBots: (botIds) => refusal(callRoute(deps.routes.botOrder, { method: "PUT", path: "/api/bots/order", body: { botIds }, auth })),
+    groupBots: (name, botIds) => refusal(callRoute(deps.routes.sections, { method: "POST", path: "/api/sidebar-sections", body: { name, botIds }, auth })),
+  });
 }

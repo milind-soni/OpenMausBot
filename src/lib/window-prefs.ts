@@ -8,8 +8,7 @@ import { notificationSoundsEnabled, setNotificationSounds } from "./notification
 import { readSendKey, setSendKey } from "./send-key";
 import { applySkinChoice, readSkinChoice } from "./skins";
 
-type Pref<I extends WindowPrefId> = { read(): unknown; write(value: ReturnType<(typeof WINDOW_PREFS)[I]["parse"]>): void };
-const PREFS: { [I in WindowPrefId]: Pref<I> } = {
+const PREFS: Record<WindowPrefId, { read(): unknown; write(value: never): void }> = {
   "appearance.skin": { read: readSkinChoice, write: applySkinChoice },
   "appearance.advanced": { read: readAdvancedMode, write: setAdvancedMode },
   "appearance.font": { read: readFont, write: applyFont },
@@ -22,7 +21,7 @@ export function applyWindowPref(frame: WindowPrefFrame): void {
   const schema = WINDOW_PREFS[frame.id];
   const parsed = schema?.safeParse(frame.value);
   if (!parsed?.success) return;
-  (PREFS[frame.id] as Pref<typeof frame.id>).write(parsed.data as never);
+  PREFS[frame.id].write(parsed.data as never);
 }
 
 export function windowPrefValues(): Record<WindowPrefId, unknown> {

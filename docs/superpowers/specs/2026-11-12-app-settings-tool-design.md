@@ -26,12 +26,16 @@ interface SettingEntry<V> {
   synonyms?: string[];        // for find
   tier: SettingTier;
   value?: z.ZodType<V>;       // absent for secret and owner-only
-  read(ctx): Display;         // never returns a secret; keys read as "set" | "not set"
-  write?(ctx, value: V): Promise<void>;  // absent for secret and owner-only
+  read(): string;             // display; never a secret: a key reads as "set" or empty (unset)
+  current?(): V;              // the typed value as write takes it, kept in server memory for Undo
+  write?(value: V): Promise<string | null>;  // a refusal, or null; absent for secret and owner-only
 }
 ```
 
-The tier is the whole policy. Handlers branch on the tier, never on the id.
+The tier is the whole policy. Handlers branch on the tier, never on the id. As built (`server/app-settings/registry.ts`)
+the entry is a discriminated union on `tier`, so a `safe` or `confirm` entry must carry `value`, `current` and `write`,
+a `secret` entry carries only its `credentialId`, and an `owner-only` entry carries neither. Entries close over the
+registry's deps instead of taking a `ctx`.
 
 | Tier | Behaviour | Examples |
 |---|---|---|
@@ -86,3 +90,30 @@ Skin, Simple mode, font, chat width, send key and notification sounds live in th
 ## Out of scope
 
 Remote access, Cloud, Vault and backup writes. Adding or removing engine instances. Phone-side Undo for the applied card if phones do not already draw it (follow-up in mausbot-mobile).
+
+## As built (2026-11-12)
+
+Deviations from the design above, each chosen as the safer or simpler option:
+
+- **Undo keeps the typed earlier value in server memory**, keyed by the card's request id, not on the card. The card carries
+  display strings only, as designed; a display string cannot be parsed back into a number, an id list or the groups map.
+  After a server restart an older applied card's Undo answers "This change can't be undone here."
+- **A confirm write runs when the owner taps Change**, inside the card's answer route, so a refused write (the config
+  route's 4xx) is shown to the person on the tap and reaches the bot through the hold. The hold carries applied, failed,
+  cancelled or timed out to the waiting tool call.
+- **Secret entries are derived from `CREDENTIAL_TARGETS`** as `keys.<credentialId>` (19 entries), so a new credential card
+  target is a setting with no further registration.
+- **`where` strings live in the registry.** `src/components/settings/settings-index.ts` imports lucide icons and the
+  renderer's locale types, so it is not imported server-side.
+- **Window preferences count as reachable once any window has reported** (`PUT /api/window-prefs`), which every setter
+  does at start-up and on each change. There is no window-closed signal; a closed window leaves the last report in place
+  until the server restarts.
+- **The write budget counts accepted sets** (a safe or confirm write, or a secret card request). A set refused by
+  validation, the tier or the turn does not spend it.
+- **A groups write leaves an emptied group in place** rather than deleting it; the group's own delete rules
+  (`serverError.department.*`) stay with the sidebar.
+- **Stop does not close an open "Change X?" card**; it times out after 9 minutes like the outbound card.
+- **The tool is in every profile** and is not a bridge hot tool: on the bridged list it is reached through `find_tool`.
+- **Writes use the Settings window's own routes** (`PUT /api/config`, `PUT /api/bots/order`, `POST /api/sidebar-sections`)
+  through `server/routes/call-route.ts`, so provider reloads, broadcasts and refusals are the Settings window's. On a
+  shared-membership server (a Team Cloud) `turnOwner` is null for every turn, so no write happens there.
