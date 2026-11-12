@@ -9,7 +9,7 @@ type ProviderPatch = Partial<Pick<LiveSettings, "provider" | "azureEndpoint" | "
 
 const FIELD = "w-full rounded-lg border border-hairline bg-inset px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent/60";
 
-/** `locked` holds the provider while a key save is pending; `onSaving` reports a pending provider change. */
+/** `locked` holds the provider, Azure endpoint and Fish agent while a key save is pending; `onSaving` reports a pending change to them. */
 export function LiveProviderSettings({ locked = false, onSaving }: { locked?: boolean; onSaving?: (saving: boolean) => void } = {}) {
   const { state, dispatch } = useStore();
   const live: LiveSettings = state.config?.live ?? { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
@@ -23,6 +23,7 @@ export function LiveProviderSettings({ locked = false, onSaving }: { locked?: bo
   const agentChanged = agentId.trim() !== (live.fishAgentId ?? "");
 
   const save = async (patch: ProviderPatch) => {
+    if (locked) return;
     setSaving(true);
     onSaving?.(true);
     setError(null);
@@ -89,7 +90,7 @@ export function LiveProviderSettings({ locked = false, onSaving }: { locked?: bo
           {azureChanged && (
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || locked}
               className="self-start rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
             >
               {t("common.save")}
@@ -120,7 +121,7 @@ export function LiveProviderSettings({ locked = false, onSaving }: { locked?: bo
           {agentChanged && (
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || locked}
               className="self-start rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
             >
               {t("common.save")}

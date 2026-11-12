@@ -166,7 +166,7 @@ describe("the keys page", () => {
     expect(host.querySelector("[data-keys-empty]")!.textContent).toBe("No keys match “zzz”.");
   });
 
-  it("holds the Live provider while a key save is pending, and the key while a provider change is", async () => {
+  it("holds the Live provider and Fish agent while a key save is pending, and the key while a provider change is", async () => {
     const live = { configured: false, provider: "fish", fishAgentId: "agent_1", voice: "", readTypedReplies: true, idleMinutes: 5 };
     setConfig({ ...fx.config, live });
     let answer: (value: unknown) => void = () => {};
@@ -178,6 +178,11 @@ describe("the keys page", () => {
     flushSync(() => saveKey().click());
     expect(fx.api).toHaveBeenCalledWith("/api/config", expect.objectContaining({ method: "PUT" }));
     expect(provider().disabled).toBe(true);
+    const agentForm = [...host.querySelectorAll("form")].find((form) => !form.querySelector('input[type="password"]'))!;
+    type(agentForm.querySelector<HTMLInputElement>("input")!, "agent_2");
+    expect(agentForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
+    flushSync(() => agentForm.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(fx.api).toHaveBeenCalledTimes(1);
     await answered(() => answer({ ...fx.config, live: { ...live, keySource: "live" } }));
     expect(provider().disabled).toBe(false);
 
