@@ -27,8 +27,10 @@ export async function readTableResponse(response: Response, signal: AbortSignal,
     }
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
   const bytes = new Uint8Array(await new Blob(parts as BlobPart[]).arrayBuffer());
+  // NUL is valid UTF-8, so UTF-16 without a byte order mark would pass the UTF-8 check: look for it first.
+  if (fallback && bytes.includes(0)) throw new Error("encoding");
   try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch (error) {
-    if (!fallback || bytes.includes(0)) throw error;
+    if (!fallback) throw error;
     return new TextDecoder(fallback).decode(bytes);
   }
 }

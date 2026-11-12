@@ -40,7 +40,15 @@ describe("Markdown file preview errors and encodings", () => {
   it("does not show a UTF-16 file as garbage", async () => {
     const bytes = new Uint8Array([0xff, 0xfe, 0x23, 0x00, 0x20, 0x00, 0x41, 0x00, 0xe7, 0x00]);
     await open(async () => new Response(bytes));
-    expect(alertText()).toContain("Could not open this file");
+    expect(alertText()).toContain("not plain text");
+    expect(alertText()).not.toContain("Check your connection");
+  });
+
+  it("does not show a UTF-16 file without a byte order mark either", async () => {
+    // Every byte here is valid UTF-8 (NUL included), so only the NUL check stops it.
+    await open(async () => new Response(new Uint8Array([0x23, 0x00, 0x20, 0x00, 0x41, 0x00])));
+    expect(alertText()).toContain("not plain text");
+    expect(host.querySelector("[data-markdown-file]")).toBeNull();
   });
 
   it("shows the server's own reason instead of blaming the connection", async () => {
