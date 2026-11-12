@@ -2,10 +2,11 @@ import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createServer, request, type IncomingHttpHeaders, type Server } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
+import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Duplex } from "node:stream";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SessionRegistry } from "../sessions.ts";
 import { resolveRequestAuth, type RequestAuth } from "../request-auth.ts";
 import { json, readBody } from "../harness/http.ts";
@@ -337,8 +338,8 @@ const phoneTarget = viewerTargetId(perBotLocalVmTarget("test-bot"));
 const phoneBase = `/api/desktop-viewer/${phoneTarget}`;
 const bound = (query = `botId=test-bot&controlLeaseId=${lease}`) => `${phoneBase}/websockify?${query}`;
 
-it.each([SHARED_LOCAL_VM_TARGET, poolLocalVmTarget(1)])("refuses phone control of a shared desktop even with a valid bot lease: %j", async desktop => {
-  const target = viewerTargetId(desktop);
+it("refuses phone control of a pool seat even with a valid bot lease", async () => {
+  const target = viewerTargetId(poolLocalVmTarget(1));
   leases.add(leaseKey(target, "test-bot", lease));
   const query = `botId=test-bot&threadId=th-1&controlLeaseId=${lease}`;
   for (const response of [
@@ -346,9 +347,30 @@ it.each([SHARED_LOCAL_VM_TARGET, poolLocalVmTarget(1)])("refuses phone control o
     await get(`/api/desktop-viewer/${target}?${query}`),
   ]) {
     expect(response.status).toBe(409);
-    expect(JSON.stringify(response.body)).toContain("per-bot Local VM");
+    expect(JSON.stringify(response.body)).toContain("pool mode");
   }
   expect(inspected).toEqual([]);
+});
+
+it("opens the shared desktop to a phone lease that holds it", async () => {
+  const target = viewerTargetId(SHARED_LOCAL_VM_TARGET);
+  leases.add(leaseKey(target, "test-bot", lease));
+  const query = `botId=test-bot&threadId=th-1&controlLeaseId=${lease}`;
+  expect((await get(`/api/desktop-viewer/${target}?${query}`)).body).toEqual({ password: "fixture-secret" });
+  const answer = await open(`/api/desktop-viewer/${target}/websockify?${query}`);
+  expect(answer.status).toBe(101);
+  expect(inspected).toEqual(["shared", "shared"]);
+});
+
+it("keeps a TCP keepalive on a viewer's socket, so a phone that vanishes is found", async () => {
+  const keepAlive = vi.spyOn(Socket.prototype, "setKeepAlive");
+  try {
+    leases.add(leaseKey(phoneTarget, "test-bot", lease));
+    expect((await open(bound())).status).toBe(101);
+    expect(keepAlive).toHaveBeenCalledWith(true, 15_000);
+  } finally {
+    keepAlive.mockRestore();
+  }
 });
 
 it("opens a lease-bound viewer only while that lease holds the bot's computer", async () => {
