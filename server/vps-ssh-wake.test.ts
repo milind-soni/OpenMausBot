@@ -101,7 +101,12 @@ describe.skipIf(process.platform === "win32")("VPS wake script", () => {
     // The wake says when it has started and then waits to be released, so the joiner always joins a wake under way.
     host.wakeWith(`PATH=/usr/bin:/bin; : > '${started}'; while [ ! -f '${release}' ]; do sleep 0.05; done; echo up > '${host.awake}'`);
     const first = ensureVpsSshMaster(host.ssh, "paused-vps");
-    while (!existsSync(started)) await new Promise((resolve) => setTimeout(resolve, 20));
+    // Bounded: give up if the wake never says it started, and fail at once if the first wake already failed.
+    const deadline = Date.now() + 5_000;
+    while (!existsSync(started)) {
+      if (Date.now() > deadline) throw new Error("the wake script never said it started");
+      await Promise.race([first, new Promise((resolve) => setTimeout(resolve, 20))]);
+    }
     await new Promise((resolve) => setTimeout(resolve, 400));
     const joining = ensureVpsSshMaster(host.ssh, "paused-vps");
     await new Promise((resolve) => setTimeout(resolve, 100));
