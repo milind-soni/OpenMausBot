@@ -1,6 +1,7 @@
 import { processAlive } from "./browser-processes.ts";
 import type { ProviderAdapter, RuntimeEvent } from "./contracts.ts";
 import { sampleProcessTree, type ProcessSample } from "./drivers/acp/quiet-status.ts";
+import { redactSecretsInText } from "../shared/redact.ts";
 
 // A turn whose thread emits nothing for stallMs is wedged; waiting on a person or a computer is not a stall unless the
 // turn's engine is known to have no process left. Drivers report a tool only when it starts and when it ends, so a turn
@@ -32,10 +33,10 @@ function oldestCommand(turn: Partial<Pick<WatchedTurn, "runningTools">>): (Runni
 }
 
 /** The longest-running shell command of a turn stopped at stopAt, with the whole minutes it ran: what the person is told
- * looks stuck. null when no running tool runs a shell command. */
+ * looks stuck, with any secret in it scrubbed. null when no running tool runs a shell command. */
 export function stuckCommand(turn: Partial<Pick<WatchedTurn, "runningTools">>, stopAt: number): { command: string; minutes: number } | null {
   const oldest = oldestCommand(turn);
-  return oldest ? { command: oldest.command, minutes: Math.max(1, Math.round((stopAt - oldest.startedAt) / 60_000)) } : null;
+  return oldest ? { command: redactSecretsInText(oldest.command), minutes: Math.max(1, Math.round((stopAt - oldest.startedAt) / 60_000)) } : null;
 }
 
 /** What the person is told when the watchdog stops a turn silent for silentMs: the shell command still running, with how
