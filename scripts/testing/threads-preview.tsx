@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import App from "../../src/App";
 import { setAnalyticsEnabled, setEmailGateDone } from "../../src/lib/analytics";
 import { ADVANCED_MODE_KEY, setAdvancedMode } from "../../src/lib/interface-mode";
+import { languageChoice, setLanguageChoice } from "../../src/lib/language-preference";
 import { BOAT_OFFER_NOTICE, GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE } from "../../src/lib/notices";
 import { markSimpleModePromptSeen } from "../../src/lib/simple-mode-prompt";
 import { applySkinChoice, readSkinChoice } from "../../src/lib/skins";
@@ -14,6 +15,8 @@ if (new URLSearchParams(location.search).has("ombVoiceProbe")) {
   (window as typeof window & { __ombVoiceProbe?: unknown[] }).__ombVoiceProbe = [];
 }
 setAnalyticsEnabled(false);
+// Tests use English accessibility names from the first render, including after a reload.
+if (languageChoice() === null) setLanguageChoice("en");
 // Every launch is a new browser, so it opens in Simple mode as a new install does, unless a test chose a mode first.
 // ?onboarding=1 plays a brand-new install.
 if (localStorage.getItem(ADVANCED_MODE_KEY) == null) setAdvancedMode(false);
