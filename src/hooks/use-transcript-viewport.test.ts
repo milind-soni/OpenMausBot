@@ -77,11 +77,15 @@ const store = vi.hoisted(() => ({
   },
   dispatch: (() => {}) as (action: unknown) => void,
 }));
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", () => ({ useStore: () => store }));
 // Scrolling a hit into view needs the real DOM; this suite checks the window around it.
 vi.mock("@/lib/focus-message", () => ({ useFocusMessage: () => {} }));
 
 import { useTranscriptViewport } from "./use-transcript-viewport";
+import { forgetTranscriptPositions } from "@/lib/transcript-follow";
+import { noteLiveReplyEvent, resetLiveReplies } from "@/state/live-reply";
+import type { RuntimeEvent } from "../../shared/runtime-events";
 
 type Row = { id: string; role?: "user" | "bot" };
 const rows = (count: number, from = 0): Row[] => Array.from({ length: count }, (_, index) => ({ id: `m${from + index}` }));
@@ -104,13 +108,25 @@ class Scroller {
     this.calls.push(options);
     this.scrollTop = Math.max(0, Math.min(options.top ?? this.scrollTop, this.bottom));
   }
+  getBoundingClientRect() {
+    return { top: 0, bottom: this.clientHeight, height: this.clientHeight };
+  }
 }
+
+/** The mounted rows, each ROW tall, laid out from the scroller's top. */
+const transcriptOf = (shown: readonly Row[]) => ({
+  querySelectorAll: () => shown.map((row, index) => {
+    const top = index * ROW - scroller.scrollTop;
+    return { dataset: { mid: row.id }, getBoundingClientRect: () => ({ top, bottom: top + ROW, height: ROW }) };
+  }),
+});
 
 type Props = Parameters<typeof useTranscriptViewport<Row>>[0];
 let scroller: Scroller;
 let frames: FrameRequestCallback[];
 let keyListeners: Set<(event: Partial<KeyboardEvent>) => void>;
 let observers: number;
+let resized: (() => void)[];
 let dispatched: unknown[];
 
 function mount(initial: Partial<Props> = {}) {
@@ -122,7 +138,7 @@ function mount(initial: Partial<Props> = {}) {
   // React's commit before layout effects; a browser clamps scrollTop when content gets shorter.
   const commit = () => {
     result.scrollRef.current = scroller as unknown as HTMLDivElement;
-    result.transcriptRef.current = {} as HTMLDivElement;
+    result.transcriptRef.current = transcriptOf(result.windowedMessages) as unknown as HTMLDivElement;
     scroller.rows = result.windowedMessages.length;
     scroller.scrollTop = Math.min(scroller.scrollTop, scroller.bottom);
   };
@@ -154,7 +170,10 @@ beforeEach(() => {
   frames = [];
   keyListeners = new Set();
   observers = 0;
+  resized = [];
   dispatched = [];
+  forgetTranscriptPositions();
+  resetLiveReplies();
   store.state.focusMessage = null;
   store.state.loadingOlder = {};
   store.dispatch = (action) => dispatched.push(action);
@@ -164,8 +183,9 @@ beforeEach(() => {
   });
   vi.stubGlobal("requestAnimationFrame", (frame: FrameRequestCallback) => frames.push(frame));
   vi.stubGlobal("ResizeObserver", class {
-    constructor() {
+    constructor(callback: () => void) {
       observers++;
+      resized.push(callback);
     }
     observe() {}
     disconnect() {}
@@ -569,5 +589,100 @@ describe("transcript viewport", () => {
     });
 
     expect(dispatched).toEqual([{ type: "loadOlderMessages", threadId: "thread" }]);
+  });
+});
+
+describe("following a reply and coming back to a conversation", () => {
+  const readUpTo = (view: ReturnType<typeof mount>, scrollTop: number) => {
+    view.act(() => view.current.scrollHandlers.onWheel({ deltaY: -40 } as never));
+    view.act(() => {
+      scroller.scrollTop = scrollTop;
+      view.current.scrollHandlers.onScroll();
+    });
+  };
+
+  it("opens a conversation where the reader left it, and another one at its end", () => {
+    const view = mount({ messages: rows(300) });
+    readUpTo(view, 1_000);
+    expect(view.current.following).toBe(false);
+    const reading = view.current.windowedMessages[1_000 / ROW]!.id;
+
+    view.rerender({ threadId: "other", messages: rows(50, 5_000) });
+    expect(view.current.following, "a conversation never read opens at its end").toBe(true);
+    expect(scroller.scrollTop).toBe(scroller.bottom);
+
+    scroller.calls = [];
+    view.rerender({ threadId: "thread", messages: rows(300) });
+    expect(view.current.following).toBe(false);
+    expect(view.current.windowedMessages.map((row) => row.id)).toContain(reading);
+    expect(view.current.windowedMessages[scroller.scrollTop / ROW]!.id, "the same row is at the top, before any paint").toBe(reading);
+    expect(scroller.calls, "no trip to the end on the way").toEqual([]);
+    expect(view.current.showJumpToLatest).toBe(false);
+  });
+
+  it("opens at the end a conversation the reader left following, even after it grew", () => {
+    const view = mount({ messages: rows(40) });
+    view.rerender({ threadId: "other", messages: rows(40, 5_000) });
+    readUpTo(view, 200);
+    view.rerender({ threadId: "thread", messages: rows(60) });
+    expect(view.current.following).toBe(true);
+    expect(scroller.scrollTop).toBe(scroller.bottom);
+  });
+
+  it("follows the end again when the person sends a message, wherever they were reading", () => {
+    const view = mount({ messages: rows(60) });
+    readUpTo(view, 300);
+    expect(view.current.following).toBe(false);
+    view.rerender({ messages: [...rows(60), { id: "optimistic-1", role: "user" }] });
+    expect(view.current.following).toBe(true);
+    expect(scroller.scrollTop).toBe(scroller.bottom);
+  });
+
+  it("does not follow a message someone else sent while the reader is up the page", () => {
+    const view = mount({ messages: rows(60) });
+    readUpTo(view, 300);
+    view.rerender({ messages: [...rows(60), { id: "from-a-teammate", role: "user" }] });
+    expect(view.current.following).toBe(false);
+    expect(scroller.scrollTop).toBe(300);
+  });
+
+  it("glides after a growing reply while following, lands at once otherwise, and never pulls a reader down", () => {
+    const view = mount({ messages: rows(20) });
+    const grow = () => {
+      scroller.extra += 30;
+      for (const callback of resized) callback();
+    };
+    grow();
+    expect(scroller.calls.at(-1)).toEqual({ top: scroller.scrollHeight });
+
+    noteLiveReplyEvent({ eventId: "d1", provider: "claudeAgent", threadId: "thread", createdAt: "", turnId: "t", type: "content.delta", streamKind: "assistant_text", delta: "Streaming words " } as RuntimeEvent);
+    grow();
+    expect(scroller.calls.at(-1)).toEqual({ top: scroller.scrollHeight, behavior: "smooth" });
+
+    readUpTo(view, 100);
+    const calls = scroller.calls.length;
+    grow();
+    grow();
+    expect(scroller.calls.length - calls, "the reader scrolled up: growth leaves them where they are").toBe(0);
+    expect(scroller.scrollTop).toBe(100);
+  });
+
+  it("offers Jump to latest only a moment after the reader leaves the end, and hides it at once on return", () => {
+    vi.useFakeTimers();
+    try {
+      const view = mount({ messages: rows(60) });
+      readUpTo(view, 300);
+      expect(view.current.showJumpToLatest, "not on the first frame away").toBe(false);
+      view.act(() => void vi.advanceTimersByTime(150));
+      expect(view.current.showJumpToLatest).toBe(true);
+      view.act(() => {
+        scroller.scrollTop = scroller.bottom;
+        view.current.scrollHandlers.onScroll();
+      });
+      expect(view.current.following).toBe(true);
+      expect(view.current.showJumpToLatest).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

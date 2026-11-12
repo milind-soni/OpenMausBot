@@ -9,7 +9,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
 import { BUILT_IN_DATA_SYSTEM_PROMPT } from "../data/instructions.ts";
-import type { ProviderInstance, SendTurnInput } from "../contracts.ts";
+import type { ProviderDriver, ProviderInstance, SendTurnInput } from "../contracts.ts";
+import { replyProblems } from "../harness/text-items.testkit.ts";
+import { caseTokens, LIVE_REPLY_CASES } from "../testing/live-reply-cases.ts";
+import type { StreamStep } from "../testing/stream-script.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
 import { catalogServer, CUA_DRIVER_WINDOWS_TOOLS, syntheticToolNames } from "../testing/cua-driver-tools.ts";
@@ -17,6 +20,11 @@ import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 import { toolBudgetOf } from "../tool-budgets.ts";
 import { GrokDriver } from "./grok.ts";
+import { GreenferenceDriver } from "./greenference.ts";
+import { GroqDriver } from "./groq.ts";
+import { MetaDriver } from "./meta.ts";
+import { MistralDriver } from "./mistral.ts";
+import { ModelgoDriver } from "./modelgo.ts";
 import { CerebrasDriver } from "./cerebras.ts";
 import { MinimaxDriver } from "./minimax.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
@@ -34,7 +42,15 @@ interface ChatRequest {
 }
 
 type Script = (body: ChatRequest, response: ServerResponse, round: number) => void;
-type Provider = "openai-compat" | "grok" | "minimax" | "cerebras";
+type Provider = "openai-compat" | "grok" | "minimax" | "cerebras" | keyof typeof KEYED_DRIVERS;
+/** OpenAI-compatible providers configured by a URL and their own key variable. */
+const KEYED_DRIVERS = {
+  greenference: [GreenferenceDriver, "GREENFERENCE_API_KEY"],
+  groq: [GroqDriver, "GROQ_API_KEY"],
+  meta: [MetaDriver, "META_API_KEY"],
+  mistral: [MistralDriver, "MISTRAL_API_KEY"],
+  modelgo: [ModelgoDriver, "MODELGO_API_KEY"],
+} as const;
 const API_KEY_CANARY = "fixture-credential-cda00ee8d8384f54";
 
 function deferred<T = void>() {
@@ -122,7 +138,10 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
   const helper = join(directory, "mcp.mjs");
   writeFileSync(helper, MCP_SCRIPT);
   const common = { instanceId: randomUUID(), displayName: "Tool contract fixture", enabled: true };
-  const instance: ProviderInstance = provider === "minimax"
+  const keyed = provider in KEYED_DRIVERS ? KEYED_DRIVERS[provider as keyof typeof KEYED_DRIVERS] : null;
+  const instance: ProviderInstance = keyed
+    ? await (keyed[0] as ProviderDriver<unknown>).create({ ...common, config: keyed[0].decodeConfig({ url: `${origin}/v1` }), environment: { [keyed[1]]: apiKey } })
+    : provider === "minimax"
     ? await MinimaxDriver.create({ ...common, config: { url: `${origin}/v1` }, environment: { MINIMAX_API_KEY: apiKey } })
     : provider === "cerebras"
     ? await CerebrasDriver.create({ ...common, config: CerebrasDriver.decodeConfig({ url: `${origin}/v1` }), environment: { CEREBRAS_API_KEY: apiKey } })
@@ -160,6 +179,46 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
     },
   };
 }
+
+describe("streamed reply messages from an OpenAI-compatible API", () => {
+  /** A case's steps as the API's rounds: words and reasoning streamed in pieces, each tool ending its round. */
+  const rounds = (steps: StreamStep[]) => {
+    const out: Array<{ chunks: unknown[]; fail?: string }> = [{ chunks: [] }];
+    let calls = 0;
+    for (const step of steps) {
+      const round = out.at(-1)!;
+      if ("fail" in step) round.fail = step.fail;
+      else if ("tool" in step) {
+        round.chunks.push(chunk({ tool_calls: [toolCall("audit_write", JSON.stringify({ name: `step-${++calls}`, value: step.tool }), `call-${calls}`)] }, "tool_calls"));
+        out.push({ chunks: [] });
+      } else {
+        const text = "say" in step ? step.say : step.think;
+        for (let at = 0; at < text.length; at += 7) round.chunks.push(chunk("say" in step ? { content: text.slice(at, at + 7) } : { reasoning_content: text.slice(at, at + 7) }));
+      }
+    }
+    return out;
+  };
+
+  const PROVIDERS: Provider[] = ["openai-compat", "grok", "minimax", "cerebras", "greenference", "groq", "meta", "mistral", "modelgo"];
+  it.each(PROVIDERS.flatMap((provider) => LIVE_REPLY_CASES.filter((entry) => entry.action === undefined).map((entry) => ({ provider, entry, name: entry.name }))))(
+    "$provider streams the $name reply with one id per message and nothing doubled, lost or glued", async ({ provider, entry }) => {
+      const script = rounds(entry.steps);
+      const f = await fixture((_body, response, round) => {
+        const step = script[round - 1];
+        if (!step) return answer(response, "ok");
+        if (step.fail) {
+          sse(response, step.chunks, false);
+          response.destroy();
+          return;
+        }
+        sse(response, round === script.length ? [...step.chunks, chunk({}, "stop")] : step.chunks);
+      }, provider);
+      const { turnId } = await f.start({ approvalMode: "full", text: `Please answer ${entry.marker}` });
+      await f.recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId, 30_000);
+      const events = f.recorder.events.filter((event) => event.turnId === turnId);
+      expect(replyProblems(events, caseTokens(entry))).toEqual([]);
+    }, 60_000);
+});
 
 describe("bounded action announcement recovery", () => {
   const later = `${"The terminal output is absent; the launch receipt only confirms the process. ".repeat(7)}\n\nLet me execute the commands to create the file and read it back.`;

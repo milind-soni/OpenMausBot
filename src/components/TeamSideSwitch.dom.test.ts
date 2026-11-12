@@ -190,6 +190,14 @@ describe("who can see it, by the message box", () => {
     expect(label()?.textContent, "the person's own MausBot").toBe("Private · only you");
   });
 
+  it("names the one other reader of a conversation shared with one person, and says a conversation shared with the team is the team's", () => {
+    box(acme(), { bot: bot({ threadId: "handed", tasks: [MAIN, task("handed", "Kumquat launch", { shared: true, sharedWith: { name: "Marta", byYou: true } })] }) });
+    expect(label()?.getAttribute("data-team-audience")).toBe("team");
+    expect(label()?.textContent).toBe("Shared · only you and Marta can see");
+    box(acme(), { bot: bot({ threadId: "widened", tasks: [MAIN, task("widened", "Launch", { shared: true })] }) });
+    expect(label()?.textContent).toBe("Shared · everyone in Acme can see");
+  });
+
   it("never follows the switch: with Just me chosen, a shared chat on screen still says Shared", () => {
     setTeamSide("me");
     forgetShownConversations();

@@ -12,6 +12,8 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
   useState: (initial: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = typeof initial === "function" ? (initial as () => unknown)() : initial;
     return [f.values[index], (next: unknown) => { f.values[index] = typeof next === "function" ? (next as (value: unknown) => unknown)(f.values[index]) : next; }]; },
   useRef: (current: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = { current }; return f.values[index]; },
+  // Walked by hand outside a render, so the Settings look (a context) reads as unset.
+  useContext: () => false,
 }));
 import { CloudUsageCardView, CloudUsageSettingsView, confirmUpgrade, previewUpgrade, useUpgrade } from "./CloudUsageMeter";
 

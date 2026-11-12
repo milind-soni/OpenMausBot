@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { ChevronDown, KeyRound, Loader2, LockKeyhole, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from "lucide-react";
+import { ChevronDown, KeyRound, Loader2, LockKeyhole, ShieldCheck, Trash2 } from "lucide-react";
 
 import { loginHeldBackFor, type LoginBots, type LoginSummary, type OnePasswordStatus, type OnePasswordVault } from "../../shared/logins";
 import type { LinkedSecret, VaultSecret } from "../../shared/vault";
 import { t } from "@/lib/i18n";
+import { productName } from "@/lib/brand";
 import { addLogin, changeLogin, connectOnePassword, deleteLogin, disconnectOnePassword, grantVault, refreshOnePassword } from "@/lib/logins";
 import { relativeTime } from "@/lib/memory";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
@@ -11,7 +12,8 @@ import { deleteSecret, listVault } from "@/lib/vault";
 import { useStore } from "@/state/store";
 import { Segmented } from "./bot-panel/rows";
 import { LoginBotPicker, LoginForm } from "./LoginForm";
-import { Card } from "./SettingsPrimitives";
+import { Card, LearnMore, SETTINGS_INPUT, SettingsEmptyRow, SettingsField, SettingsGroup, SettingsLinkRow, SettingsRows } from "./SettingsPrimitives";
+import { SettingsDialog } from "./settings/SettingsDialog";
 import { EnvImportForm, SecretForm } from "./VaultSecretForms";
 
 // Security: a row never shows a password or a secret, which no route returns. A saved value can only be replaced.
@@ -43,6 +45,7 @@ function rowsOf(logins: LoginSummary[], secrets: Array<VaultSecret | LinkedSecre
 export function VaultSettings() {
   const { state, dispatch } = useStore();
   const ownerOrAdmin = useOwnerOrAdmin();
+  const member = ownerOrAdmin === false && Boolean(state.config?.team);
   const bots = state.bots.map((bot) => ({ id: bot.id, name: bot.name }));
   const [logins, setLogins] = useState<LoginSummary[] | null>(null);
   const [secrets, setSecrets] = useState<Array<VaultSecret | LinkedSecret>>([]);
@@ -51,6 +54,7 @@ export function VaultSettings() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [menu, setMenu] = useState(false);
+  const [more, setMore] = useState(false);
   const [adding, setAdding] = useState<Adding>(null);
   const [site, setSite] = useState("");
   const [addBots, setAddBots] = useState<LoginBots>("all");
@@ -73,9 +77,9 @@ export function VaultSettings() {
     }
     catch (cause) { setError(cause instanceof Error && cause.message ? cause.message : t("settings.vault.loadError")); }
   };
-  useEffect(() => { if (ownerOrAdmin) void load(); }, [ownerOrAdmin]);
+  useEffect(() => { if (ownerOrAdmin || member) void load(); }, [ownerOrAdmin, member]);
 
-  if (ownerOrAdmin === false) {
+  if (ownerOrAdmin === false && !member) {
     return <Card title={t("settings.vault.title")} subtitle={t("settings.vault.adminOnly")} />;
   }
 
@@ -113,8 +117,8 @@ export function VaultSettings() {
   };
   const rowButtons = (id: string, kind: "login" | "secret", name: string, onChange: () => void) => (
     <div className="flex shrink-0 gap-1">
-      <button type="button" className={ROW_BUTTON} disabled={busy} onClick={onChange}
-        aria-label={kind === "login" ? t("settings.logins.changeFor", { site: name }) : t("settings.vault.secret.changeFor", { name })}>{t("settings.logins.change")}</button>
+      {!member && <button type="button" className={ROW_BUTTON} disabled={busy} onClick={onChange}
+        aria-label={kind === "login" ? t("settings.logins.changeFor", { site: name }) : t("settings.vault.secret.changeFor", { name })}>{t("settings.logins.change")}</button>}
       <button type="button" className={ROW_BUTTON} disabled={busy} onClick={() => void remove(id, kind)}
         aria-label={deleting === id ? t("settings.logins.deleteConfirm") : kind === "login" ? t("settings.logins.deleteFor", { site: name }) : t("settings.vault.secret.deleteFor", { name })}>
         <Trash2 size={13} />{deleting === id ? t("settings.logins.deleteConfirm") : t("settings.logins.delete")}
@@ -195,83 +199,73 @@ export function VaultSettings() {
   );
 
   return (
-    <Card title={t("settings.vault.title")} subtitle={t("settings.vault.subtitle")}>
-      <div className="flex flex-col gap-3" aria-busy={logins === null || busy} data-vault>
-        {state.config?.cloudHome === true && <p className="text-[12px] leading-relaxed text-ink-secondary" data-logins-cloud-own>{t("settings.logins.cloudOwn")}</p>}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex h-8 min-w-[12rem] flex-1 items-center gap-2 rounded-lg bg-ink/[0.05] px-[9px] focus-within:ring-2 focus-within:ring-focus/60">
-            <Search size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
-            <input data-vault-search type="text" value={query} onChange={(event) => setQuery(event.target.value)} autoComplete="off" spellCheck={false}
-              placeholder={t("settings.vault.search")} aria-label={t("settings.vault.search")}
-              className="w-full min-w-0 bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none" />
-          </div>
-          <div className="relative">
-            <button type="button" className="ui-button ui-button-md" disabled={logins === null} aria-expanded={menu} onClick={() => setMenu(!menu)}
-              onKeyDown={(event) => { if (event.key === "Escape") setMenu(false); }}>
-              <Plus size={14} />{t("settings.vault.add")}<ChevronDown size={13} aria-hidden="true" />
-            </button>
-            {menu && (
-              <div className="absolute end-0 top-full z-10 mt-1 flex min-w-[11rem] flex-col rounded-lg border border-hairline/60 bg-menu p-1 shadow-lg" data-vault-add>
-                {ADD_CHOICES.map(([kind, key]) => (
-                  <button key={kind} type="button" className="rounded-md px-2.5 py-1.5 text-start text-[13px] text-ink hover:bg-control" onClick={() => startAdding(kind)}>{t(key)}</button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-        <Segmented label={t("settings.vault.filter")} attr="data-vault-filter" value={filter} onChange={setFilter}
-          options={[{ value: "all", label: t("settings.vault.filter.all") }, { value: "logins", label: t("settings.vault.filter.logins") }, { value: "secrets", label: t("settings.vault.filter.secrets") }]} />
-        {adding === "login" && (
-          <div className="rounded-lg bg-inset/60 p-3">
-            <LoginForm site={{ value: site, onChange: setSite }} submitLabel={t("settings.logins.save")} autoFocus
-              onCancel={() => setAdding(null)}
-              onSubmit={async (fields) => {
-                await addLogin(site, fields, addBots, addExact);
-                setAdding(null);
-                setSite("");
-                setAddBots("all");
-                setAddExact(false);
-                await load();
-              }}>
-              <ExactHostChoice checked={addExact} onChange={setAddExact} label={t("settings.logins.exactHost")} />
-              <LoginBotPicker value={addBots} onChange={setAddBots} bots={bots} />
-            </LoginForm>
-          </div>
-        )}
-        {adding === "secret" && (
-          <div className="rounded-lg bg-inset/60 p-3">
-            <SecretForm bots={bots} onCancel={() => setAdding(null)} onSaved={async () => { setAdding(null); await load(); }} />
-          </div>
-        )}
-        {adding === "env" && (
-          <div className="rounded-lg bg-inset/60 p-3">
-            <EnvImportForm bots={bots} onCancel={() => setAdding(null)} onSaved={load} />
-          </div>
-        )}
-        {logins === null && !error && <p className="text-[12px] text-ink-secondary">{t("settings.vault.loading")}</p>}
-        {empty && !adding && <p className="text-[12px] leading-relaxed text-ink-secondary">{t("settings.vault.empty")}</p>}
-        {!empty && logins !== null && rows.length === 0 && <p className="text-[12px] text-ink-secondary" data-vault-none>{t("settings.vault.noMatch")}</p>}
-        {rows.length > 0 && (
-          <ul className="divide-y divide-hairline/30" data-logins-list>
-            {rows.map((row) => row.kind === "login" ? loginRow(row.login) : secretRow(row.secret))}
-          </ul>
-        )}
-        <p className="text-[12px] leading-relaxed text-ink-tertiary">{t("settings.logins.limits")}</p>
-        {keysOff.length > 0 && <p role="status" className="text-[12px] leading-relaxed text-warning" data-vault-keys-off>{t("settings.vault.secret.keyOff", { servers: keysOff.join(", ") })}</p>}
-        {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-hairline/30 pt-3" data-vault-keys>
-          <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-ink">{t("settings.vault.keys.title")}</div>
-            <div className="text-[12px] leading-snug text-ink-tertiary">{t("settings.vault.keys.hint")}</div>
-          </div>
-          <button type="button" className="ui-button ui-button-md shrink-0" onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}>
-            {t("keys.row.open")}
+    <div className="flex flex-col gap-6" aria-busy={logins === null || busy} data-vault>
+      <SettingsGroup label={t("settings.vault.saved")} block="saved-list"
+        description={member ? t("settings.vault.memberSubtitle") : state.config?.cloudHome === true ? <span data-logins-cloud-own>{t("settings.logins.cloudOwn")}</span> : undefined}
+        actions={member ? undefined : <div className="relative">
+          <button type="button" className="ui-button gap-1" disabled={logins === null} aria-expanded={menu} onClick={() => setMenu(!menu)}
+            onKeyDown={(event) => { if (event.key === "Escape") setMenu(false); }}>
+            {t("settings.vault.add")}<ChevronDown size={12} aria-hidden="true" />
           </button>
-        </div>
-        <OnePasswordConnection status={onePassword} disabled={logins === null} bots={bots} botNames={botNames}
-          onChange={async (next) => { setOnePassword(next); await load(); }} />
-      </div>
-    </Card>
+          {menu && (
+            <div className="popover-surface absolute end-0 top-full z-10 mt-1 flex min-w-[11rem] flex-col rounded-[12px] p-1" data-vault-add>
+              {ADD_CHOICES.map(([kind, key]) => (
+                <button key={kind} type="button" className="h-8 rounded-lg px-2 text-start text-[14px] leading-5 text-ink hover:bg-menu-hover" onClick={() => startAdding(kind)}>{t(key)}</button>
+              ))}
+            </div>
+          )}
+        </div>}
+        footnote={member ? undefined : <>{t("settings.vault.limitsShort")}{" "}<LearnMore onClick={() => setMore((open) => !open)} />{more && <span className="mt-1 block">{t("settings.logins.limits")}</span>}</>}>
+        {!empty && (
+          <div className="flex flex-wrap items-center gap-3 px-4">
+            {!member && <Segmented label={t("settings.vault.filter")} attr="data-vault-filter" value={filter} onChange={setFilter}
+              options={[{ value: "all", label: t("settings.vault.filter.all") }, { value: "logins", label: t("settings.vault.filter.logins") }, { value: "secrets", label: t("settings.vault.filter.secrets") }]} />}
+            <input data-vault-search type="text" value={query} onChange={(event) => setQuery(event.target.value)} autoComplete="off" spellCheck={false}
+              placeholder={t("settings.vault.search")} aria-label={t("settings.vault.search")} className={`${SETTINGS_INPUT} ms-auto h-7 max-w-[200px]`} />
+          </div>
+        )}
+        <SettingsRows>
+          {adding === "login" && (
+            <div className="p-4">
+              <LoginForm site={{ value: site, onChange: setSite }} submitLabel={t("settings.logins.save")} autoFocus
+                onCancel={() => setAdding(null)}
+                onSubmit={async (fields) => {
+                  await addLogin(site, fields, addBots, addExact);
+                  setAdding(null);
+                  setSite("");
+                  setAddBots("all");
+                  setAddExact(false);
+                  await load();
+                }}>
+                <ExactHostChoice checked={addExact} onChange={setAddExact} label={t("settings.logins.exactHost")} />
+                <LoginBotPicker value={addBots} onChange={setAddBots} bots={bots} />
+              </LoginForm>
+            </div>
+          )}
+          {adding === "secret" && <div className="p-4"><SecretForm bots={bots} onCancel={() => setAdding(null)} onSaved={async () => { setAdding(null); await load(); }} /></div>}
+          {adding === "env" && <div className="p-4"><EnvImportForm bots={bots} onCancel={() => setAdding(null)} onSaved={load} /></div>}
+          {logins === null && !error && <SettingsEmptyRow>{t("settings.vault.loading")}</SettingsEmptyRow>}
+          {empty && !adding && <SettingsEmptyRow>{t(member ? "settings.vault.memberEmpty" : "settings.vault.emptyShort")}</SettingsEmptyRow>}
+          {!empty && logins !== null && rows.length === 0 && <div data-vault-none className="contents"><SettingsEmptyRow>{t("settings.vault.noMatch")}</SettingsEmptyRow></div>}
+          {rows.length > 0 && (
+            <ul className="divide-y-[0.5px] divide-(--settings-edge) px-4" data-logins-list>
+              {rows.map((row) => row.kind === "login" ? loginRow(row.login) : secretRow(row.secret))}
+            </ul>
+          )}
+        </SettingsRows>
+        {keysOff.length > 0 && <p role="status" className="px-4 text-[12px] leading-4 text-warning" data-vault-keys-off>{t("settings.vault.secret.keyOff", { servers: keysOff.join(", ") })}</p>}
+        {error && <p role="alert" className="px-4 text-[12px] leading-4 text-danger">{error}</p>}
+      </SettingsGroup>
+      {!member && <SettingsGroup label={t("settings.vault.elsewhere")} block="vault-more">
+        <SettingsRows>
+          <div data-vault-keys className="contents">
+            <SettingsLinkRow title={t("settings.vault.keys.title")} subtitle={t("settings.vault.keys.hintShort", { app: productName() })} onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })} />
+          </div>
+          <OnePasswordConnection status={onePassword} disabled={logins === null} bots={bots} botNames={botNames}
+            onChange={async (next) => { setOnePassword(next); await load(); }} />
+        </SettingsRows>
+      </SettingsGroup>}
+    </div>
   );
 }
 
@@ -343,13 +337,14 @@ function OnePasswordConnection({ status, disabled, bots, botNames, onChange }: {
   onChange: (status: OnePasswordStatus) => Promise<void>;
 }) {
   const [token, setToken] = useState("");
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<"connect" | "refresh" | "disconnect" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const run = async (kind: NonNullable<typeof busy>, work: () => Promise<OnePasswordStatus>) => {
     if (busy) return;
     setBusy(kind);
     setError(null);
-    try { await onChange(await work()); if (kind === "connect") setToken(""); }
+    try { await onChange(await work()); if (kind === "connect") { setToken(""); setOpen(false); } }
     catch (cause) { setError(cause instanceof Error && cause.message ? cause.message : t("settings.logins.onePassword.error")); }
     finally { setBusy(null); }
   };
@@ -358,47 +353,43 @@ function OnePasswordConnection({ status, disabled, bots, botNames, onChange }: {
     if (token.trim()) void run("connect", () => connectOnePassword(token.trim()));
   };
   return (
-    <section className="mt-1 flex flex-col gap-2 border-t border-hairline/30 pt-3" aria-label={t("settings.vault.manager")} data-onepassword>
-      <div className="text-[13px] font-medium text-ink">{t("settings.vault.manager")}</div>
-      <div className="text-[12px] font-medium text-ink-secondary">{t("settings.logins.onePassword.title")}</div>
-      {status.connected ? (
-        <>
-          <p className="text-[13px] leading-snug text-ink-secondary">
-            {t("settings.logins.onePassword.connected", { vaults: (status.vaults ?? []).map((vault) => vault.title).join(", ") || "—", count: String(status.items ?? 0) })}
-          </p>
-          {status.error && <p role="alert" className="text-[12px] text-danger">{status.error}</p>}
-          {!!status.vaults?.length && (
-            <ul className="divide-y divide-hairline/30" aria-label={t("settings.logins.onePassword.vaults")}>
-              {status.vaults.map((vault) => <VaultAccess key={vault.id} vault={vault} bots={bots} botNames={botNames} disabled={disabled} onChange={onChange} />)}
-            </ul>
-          )}
-          <div className="flex flex-wrap gap-2">
-            <button type="button" className="ui-button ui-button-md" disabled={disabled || busy !== null} onClick={() => void run("refresh", refreshOnePassword)}>
-              {busy === "refresh" ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}{t("settings.logins.onePassword.refresh")}
-            </button>
-            <button type="button" className="ui-button ui-button-md" disabled={disabled || busy !== null} onClick={() => void run("disconnect", disconnectOnePassword)}>
-              {t("settings.logins.onePassword.disconnect")}
-            </button>
-          </div>
-        </>
-      ) : (
-        <form className="flex flex-col gap-2" onSubmit={connect}>
-          <p className="text-[12px] leading-relaxed text-ink-secondary">{t("settings.logins.onePassword.guide")}</p>
-          <div className="flex flex-wrap gap-2">
-            <input name="onePasswordToken" type="password" autoComplete="off" spellCheck={false} maxLength={8192} value={token}
-              onChange={(event) => setToken(event.target.value)} disabled={disabled || busy !== null}
-              aria-label={t("settings.logins.onePassword.token")} placeholder={t("settings.logins.onePassword.token")}
-              className="min-w-0 flex-1 rounded-lg border border-hairline/60 bg-inset px-3 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent disabled:opacity-60" />
-            <button type="submit" className="ui-button ui-button-md ui-button-primary" disabled={disabled || busy !== null || !token.trim()}>
+    <section className="flex flex-col gap-2 px-4 py-3" aria-label={t("settings.vault.manager")} data-onepassword>
+      <div className="flex items-center gap-6">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="text-[14px] leading-5 text-ink">{t("settings.vault.connectManager")}</span>
+          <span className="text-[13px] leading-[18px] text-ink-secondary">{status.connected
+            ? t("settings.logins.onePassword.connected", { vaults: (status.vaults ?? []).map((vault) => vault.title).join(", ") || "—", count: String(status.items ?? 0) })
+            : t("settings.vault.managerLine")}</span>
+        </div>
+        {status.connected ? <>
+          <button type="button" className="settings-quiet cursor-pointer" disabled={disabled || busy !== null} onClick={() => void run("refresh", refreshOnePassword)}>{t("settings.logins.onePassword.refresh")}</button>
+          <button type="button" className="ui-button" disabled={disabled || busy !== null} onClick={() => void run("disconnect", disconnectOnePassword)}>{t("settings.logins.onePassword.disconnect")}</button>
+        </> : <button type="button" className="ui-button" disabled={disabled} onClick={() => setOpen(true)}>{t("settings.logins.onePassword.connect")}</button>}
+      </div>
+      {status.connected && status.error && <p role="alert" className="text-[12px] leading-4 text-danger">{status.error}</p>}
+      {status.connected && !!status.vaults?.length && (
+        <ul className="divide-y-[0.5px] divide-(--settings-edge)" aria-label={t("settings.logins.onePassword.vaults")}>
+          {status.vaults.map((vault) => <VaultAccess key={vault.id} vault={vault} bots={bots} botNames={botNames} disabled={disabled} onChange={onChange} />)}
+        </ul>
+      )}
+      {error && <p role="alert" className="text-[12px] leading-4 text-danger">{error}</p>}
+      {open && !status.connected && (
+        <SettingsDialog title={t("settings.vault.connectManager")} onClose={() => setOpen(false)}
+          footer={<>
+            <button type="button" className="ui-button" onClick={() => setOpen(false)}>{t("common.cancel")}</button>
+            <button type="submit" form="onepassword-connect" className="ui-button ui-button-primary gap-1.5" disabled={disabled || busy !== null || !token.trim()}>
               {busy === "connect" && <Loader2 size={13} className="animate-spin" />}{t("settings.logins.onePassword.connect")}
             </button>
-          </div>
-        </form>
+          </>}>
+          <form id="onepassword-connect" className="flex flex-col gap-3" onSubmit={(event) => { connect(event); }}>
+            <p className="text-[13px] leading-[18px] text-ink-secondary">{t("settings.logins.onePassword.guide")}</p>
+            <SettingsField label={t("settings.logins.onePassword.token")} hint={t("settings.logins.onePassword.note")}>
+              <input name="onePasswordToken" type="password" autoComplete="off" spellCheck={false} maxLength={8192} value={token}
+                onChange={(event) => setToken(event.target.value)} disabled={disabled || busy !== null} className={SETTINGS_INPUT} />
+            </SettingsField>
+          </form>
+        </SettingsDialog>
       )}
-      <p className="flex items-start gap-1 text-[12px] leading-snug text-ink-tertiary">
-        <LockKeyhole size={11} aria-hidden="true" className="mt-[3px] shrink-0" /> {t("settings.logins.onePassword.note")}
-      </p>
-      {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
     </section>
   );
 }

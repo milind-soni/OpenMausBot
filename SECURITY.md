@@ -39,5 +39,9 @@ You'll get a response as soon as possible, normally within a few days.
   access**. Full access is a standing user decision to approve provider permission requests; it must
   never answer questions or silently broaden product-level confirmations such as credentials,
   routines, skills, or peer communication.
+- The announcements file (`announcements/announcements.json`, downloaded from `main`; `docs/announcements.md`) is
+  untrusted input to every install. A card that renders markup, runs anything, navigates the app's own window, opens a
+  non-https address, loads a picture from outside the repository's `announcements/` folder, or makes the download carry
+  anything identifying the install or the person is a vulnerability.
 - Spawning must never route user-influenced strings through a shell. Report any `shell: true` /
   `cmd.exe` string-building you find.

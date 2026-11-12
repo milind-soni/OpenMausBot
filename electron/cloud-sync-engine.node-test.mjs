@@ -159,3 +159,20 @@ test("bots' work: a damaged download is thrown away, and a path from My Cloud ne
   assert.equal(s.read("ok.md"), "fine");
   assert.equal(existsSync(join(s.dir, "escape.md")), false);
 });
+
+test("bots' work: a repeatedly failing file is a problem rather than endless copying", async (t) => {
+  const s = setup(t);
+  s.cloud.put("f1", "report.md", "the report");
+  const download = s.cloud.client.download;
+  s.cloud.client.download = async () => { throw new Error("File is locked"); };
+  assert.equal((await s.outputs()).status, "copying");
+  assert.equal((await s.outputs()).status, "copying");
+  const failed = await s.outputs();
+  assert.equal(failed.status, "problem");
+  assert.equal(failed.problem, "report.md: File is locked");
+  s.cloud.client.download = download;
+  const recovered = await s.outputs();
+  assert.equal(recovered.status, "synced");
+  assert.equal(recovered.problem, null);
+  assert.deepEqual(s.state.failures(), []);
+});

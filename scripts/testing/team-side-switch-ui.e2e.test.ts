@@ -131,7 +131,7 @@ async function openAs(who: keyof typeof tokens, size: readonly [string, string])
       const added = await team.as(tokens[who], "PATCH", `/api/bots/${own.id}`, { welcomed: true, sidebarHidden: false, pinned: true });
       expect(added.status, JSON.stringify(added.body)).toBe(200);
     }
-    const created = await team.as(tokens.olive, "POST", "/api/bots", { name: "Scout" });
+    const created = await team.as(tokens.olive, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     scout = created.body.bot.id; main = created.body.bot.mainThreadId;
   }, hostTimeout(300_000));

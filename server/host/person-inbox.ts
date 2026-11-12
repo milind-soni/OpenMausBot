@@ -442,6 +442,23 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     route,
     answeredIn,
     answer: answerItem,
+    /** One line per conversation that waits on this person: while their line about it is not answered or done, a newer
+     * one takes its words and its place at the top instead of adding another. `created` when it is a new line. */
+    keepOne(to: string, delivery: Delivery & { origin: Origin }): { item: Item; created: boolean } | null {
+      const open = items.findLast((item) => item.person === to && item.kind === delivery.kind && item.origin?.threadId === delivery.origin.threadId && !item.done && !settled(item));
+      const posted = open && line(open);
+      if (!open || !posted) {
+        const item = deliver(to, { ...delivery, quiet: true });
+        return item ? { item, created: true } : null;
+      }
+      store.patchMessage(open.threadId, open.id, { text: delivery.text, ...(posted.inbox ? { inbox: { ...posted.inbox, from: delivery.from, ...(posted.inbox.origin ? { origin: { ...posted.inbox.origin, ...delivery.origin } } : {}) } } : {}) });
+      Object.assign(open, { text: oneLine(delivery.text, 400), from: delivery.from.name.slice(0, 200), origin: delivery.origin, at: now(), seen: false });
+      if (delivery.from.email) open.fromEmail = delivery.from.email; else delete open.fromEmail;
+      save();
+      touch(open.threadId);
+      store.patchTask(open.botId, open.threadId, { unread: true });
+      return { item: open, created: false };
+    },
     /** The line in this inbox that `messageId` is, when it waits on an answer. */
     replyable(threadId: string, messageId: string): Item | undefined {
       return items.find((item) => item.threadId === threadId && item.id === messageId && item.to !== undefined);

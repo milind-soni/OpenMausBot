@@ -3,8 +3,10 @@ import { Rocket, Star } from "lucide-react";
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
 import type { CloudOffer } from "../../electron/cloud-home.mjs";
 import { api, useStore } from "@/state/store";
-import { APP_REPOSITORY } from "@/lib/app-links";
+import { APP_REPOSITORY, appVersion } from "@/lib/app-links";
 import { track } from "@/lib/analytics";
+import { announcementConditions, announcementPlan, announcementPlatform, announcementSurface, markLaunchAnnouncement, pickAnnouncement, providersRestricted, rememberCardSeen, rememberSponsorDay,
+  reportAnnouncement, SPONSOR_CARDS_FOR_TEAM_MEMBERS, useAnnouncementCards, type SeenRecord } from "@/lib/announcements";
 import { boatOfferRuns } from "@/lib/boat-offer";
 import { modelgoOfferable, reportModelgoOffer } from "@/lib/modelgo-offer";
 import { brandStatus } from "@/lib/brand";
@@ -12,7 +14,7 @@ import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, clou
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits, firstChatQuiet, firstReplyPending } from "@/lib/corner-popup";
-import { BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, MODELGO_OFFER_NOTICE, nextNotice, noticeSeen, PHONE_UPDATE_NOTICE, phoneUpdateHint, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
+import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, MODELGO_OFFER_NOTICE, nextNotice, noticeSeen, PHONE_UPDATE_NOTICE, phoneUpdateHint, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
 import { useTwoPlaces } from "@/lib/two-places";
 import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { useAdvancedBackDue, useNewLookDue } from "@/lib/new-look";
@@ -23,7 +25,8 @@ import { cloudSignInDue, onboardingCloudOffered, welcomeFinishedThisLaunch, type
 import { launchDialogShown, markLaunchDialog } from "@/lib/launch-dialogs";
 import { useUpdaterState } from "@/lib/updater";
 import { phonePairingSettingsAction } from "@/lib/phone-pairing";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
+import { AnnouncementCard, announcementPlaceAction } from "./AnnouncementCard";
 import { BoatOfferCard, reportBoatOffer, type BoatOfferAction } from "./BoatOffer";
 import { engineReady } from "./EngineLibrary";
 import { ModelgoOfferCard, type ModelgoCardAction } from "./ModelgoOffer";
@@ -91,6 +94,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const [simpleShown, setSimpleShown] = useState(false);
   const [boatShown, setBoatShown] = useState(false);
   const [modelgoShown, setModelgoShown] = useState(false);
+  const [announcementShown, setAnnouncementShown] = useState<string | null>(null);
   const [grokShown, setGrokShown] = useState(false);
   const [grokOpen, setGrokOpen] = useState(false);
   const [grokLanded, setGrokLanded] = useState(false);
@@ -160,8 +164,10 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const advancedBack = backDue && advanced;
   const simpleDue = SIMPLE_ONLY ? newLookDue : advancedBack || !promptSeen;
   const simpleBlocked = useOtherDialogOpen(simpleDue) || Boolean(state.liveCall && state.liveCall.status !== "ended");
-  const boatHere = boatOfferRuns(now()) && brandStatus().source !== "file";
-  const modelgoHere = modelgoOfferable(state.config?.managedPolicy);
+  // A sponsor's card is for whoever chooses a team's providers: its Owner and Admins, never its members.
+  const sponsorsHere = SPONSOR_CARDS_FOR_TEAM_MEMBERS || !state.config?.team || viewer?.canSave === true;
+  const boatHere = sponsorsHere && boatOfferRuns(now()) && brandStatus().source !== "file";
+  const modelgoHere = sponsorsHere && modelgoOfferable(state.config?.managedPolicy);
 
   const trial = plan?.trial;
   const key = trial ? trialKey(trial) : null;
@@ -207,6 +213,23 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   // the welcome or MausBot's card took, or during a live call.
   const modelgoNow = !modelgoHere || moving || welcomeFinishedThisLaunch() || launchDialogShown() === "mausbot" || desktopState?.seen.includes(MODELGO_OFFER_NOTICE) ? false
     : organization === null || moving === null || firstChat === null || mausBotFirst || (state.liveCall && state.liveCall.status !== "ended") || (desktop && !desktopState) ? null : true;
+  // A card from the project's announcements file: the built-in sponsor card's exclusions, and src/lib/announcements.ts's rules for
+  // which card and for whom (once per person, one sponsor card a week, none on a branded build).
+  const branded = brandStatus().source === "file", team = Boolean(state.config?.team);
+  const remoteCards = useAnnouncementCards(!branded);
+  const surface = announcementSurface(local, Boolean(state.config?.cloudHome || viewer?.cloudHome));
+  const seenRecord: SeenRecord = { record, desktop: desktopState?.seen ?? [], team };
+  const picked = remoteCards.length === 0 ? null : pickAnnouncement(remoteCards, {
+    facts: { nowMs: now(), version: appVersion(), platform: announcementPlatform(globalThis.navigator?.userAgent), surface, plan: announcementPlan(surface, view, team),
+      people: usedBefore(state.bots) ? "existing" : "new", locale: activeLocale(), conditions: announcementConditions(state) },
+    seen: seenRecord, branded, admin: viewer?.canSave !== false,
+    sponsors: !providersRestricted(state.config?.managedPolicy) && sponsorsHere,
+  });
+  const announcement = picked && picked !== "wait" ? picked : null;
+  const announcementNow = !picked || moving || welcomeFinishedThisLaunch() || launchDialogShown() === "mausbot" ? false
+    : picked === "wait" || !viewer || organization === null || moving === null || firstChat === null || mausBotFirst || (state.liveCall && state.liveCall.status !== "ended") || (desktop && !desktopState) ? null : true;
+  const remembering = { desktop, liveIds: new Set(remoteCards.map(card => card.id)), save: (hintsSeen: string[]) => void api("/api/config", { method: "PUT", body: JSON.stringify({ onboarding: { hintsSeen } }) })
+    .then(config => dispatch({ type: "configStatus", config })).catch(() => {}) };
   const retiredPhones = phonesToTell(linkPhones, record);
   const phoneNow = retiredPhones?.length === 0 ? false
     : retiredPhones === undefined || !viewer || mausBotFirst || (state.liveCall && state.liveCall.status !== "ended") ? null : true;
@@ -215,7 +238,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   // FOLLOWERS); nothing else does.
   const notice = waits ? null
     : firstChatQuiet(state) ? (grokNow === true && (launch === null || launch === GROK_MOVE_NOTICE) ? GROK_MOVE_NOTICE : null)
-    : cards || whatsNewHere || consentHere || simpleDue || boatHere || modelgoHere || twoFact !== false || grokNow !== false || phoneNow !== false ? nextNotice({
+    : cards || whatsNewHere || consentHere || simpleDue || boatHere || modelgoHere || announcementNow !== false || twoFact !== false || grokNow !== false || phoneNow !== false ? nextNotice({
     [GROK_MOVE_NOTICE]: grokNow,
     [PHONE_UPDATE_NOTICE]: phoneNow,
     // As the What's new popup: never in the launch whose welcome just finished, nor over MausBot's first-launch card.
@@ -233,11 +256,12 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     [MODELGO_OFFER_NOTICE]: modelgoNow,
     [BOAT_OFFER_NOTICE]: !boatHere || moving || afterWelcome === true || !usedBefore(state.bots) || desktopState?.seen.includes(BOAT_OFFER_NOTICE) ? false
       : organization === null || moving === null || afterWelcome === null || mausBotFirst || (desktop && !desktopState) ? null : !organization,
+    [ANNOUNCEMENT_NOTICE]: announcementNow,
     [STAR_NOTICE]: !bridge || moving || brandStatus().source === "file" || !usedBefore(state.bots) ? false : moving === null ? null : true,
   }, id => id === CLOUD_INTRO ? stage === "done" && !introOpen
     : id === STAR_NOTICE || id === PRODUCT_HUNT_NOTICE || id === BOAT_OFFER_NOTICE || id === MODELGO_OFFER_NOTICE ? noticeSeen(record, id) : false, launch, closed) : null;
 
-  const shownKey = notice === CLOUD_TRIAL_NOTICE ? key : notice;
+  const shownKey = notice === CLOUD_TRIAL_NOTICE ? key : notice === ANNOUNCEMENT_NOTICE ? `${notice}:${announcement?.id}` : notice;
   useEffect(() => {
     if (!shownKey || !notice) return;
     markLaunchNotice(notice);
@@ -261,6 +285,11 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     } else if (shownKey === MODELGO_OFFER_NOTICE && !modelgoShown) {
       setModelgoShown(true);
       reportModelgoOffer("shown", "popup");
+    } else if (notice === ANNOUNCEMENT_NOTICE && announcement && announcementShown !== announcement.id) {
+      setAnnouncementShown(announcement.id);
+      markLaunchAnnouncement(announcement.id);
+      reportAnnouncement(announcement, "shown");
+      if (announcement.kind === "sponsor") rememberSponsorDay(seenRecord, now(), remembering);
     } else if (shownKey === GROK_MOVE_NOTICE && !grokShown) {
       setGrokShown(true);
       reportGrokMovePopup("shown");
@@ -352,6 +381,12 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
       void desktop?.seen(MODELGO_OFFER_NOTICE).catch(() => {});
     };
     return <ModelgoOfferCard onDone={done} />;
+  }
+  if (notice === ANNOUNCEMENT_NOTICE && announcement) {
+    const done = (action: "primary" | "secondary" | "close") => {
+      reportAnnouncement(announcement, action); close(); rememberCardSeen(seenRecord, announcement.id, remembering);
+    };
+    return <AnnouncementCard key={announcement.id} card={announcement} onDone={done} open={place => dispatch(announcementPlaceAction(place))} />;
   }
   if (notice === STAR_NOTICE) return <StarCard onDismiss={() => { close(); save(STAR_NOTICE); }} />;
   return null;

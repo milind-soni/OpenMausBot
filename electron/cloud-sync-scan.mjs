@@ -22,6 +22,7 @@ function* walkPc(root, wire = "", real = []) {
     throw error;
   }
   const names = entries.map((entry) => entry.name);
+  const syncNames = new Map();
   for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
     const file = join(root, ...real, entry.name);
     if (/\.omb-sync-[0-9a-f]+$/.test(entry.name)) {
@@ -32,6 +33,11 @@ function* walkPc(root, wire = "", real = []) {
     const name = entry.name.normalize("NFC");
     const path = wire ? `${wire}/${name}` : name;
     if (skipped(entry.name, entry.isDirectory()) || !validWirePath(path)) continue;
+    const previous = syncNames.get(name);
+    if (previous !== undefined && previous !== entry.name) {
+      throw new Error(`${JSON.stringify(previous)} and ${JSON.stringify(entry.name)} have the same sync name. Rename one before syncing.`);
+    }
+    syncNames.set(name, entry.name);
     if (entry.isDirectory()) { yield* walkPc(root, path, [...real, entry.name]); continue; }
     if (entry.isSymbolicLink()) { yield { path, kept: true, dir: statSync(file, { throwIfNoEntry: false })?.isDirectory() ?? false }; continue; }
     if (!entry.isFile()) continue;

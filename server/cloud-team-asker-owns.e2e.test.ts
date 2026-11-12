@@ -77,7 +77,7 @@ beforeAll(async () => {
   for (const [token, name] of [[ada, "Ada"], [priya, "Priya"], [tom, "Tom"], [sam, "Sam"]]) {
     expect((await team.as(token, "PUT", "/api/me", { name })).status).toBe(200);
   }
-  const created = await team.as(ada, "POST", "/api/bots", { name: "Scout" });
+  const created = await team.as(ada, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   botId = created.body.bot.id;
   shared = created.body.bot.threadId;

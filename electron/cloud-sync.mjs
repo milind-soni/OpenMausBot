@@ -250,7 +250,8 @@ export function createCloudFilesService({
           for (const [id, local] of places) {
             if (only && !only.has(id)) continue;
             try {
-              await fetchOutputs({ client: cloud, state, folder: { id }, local, platform, now, trashItem, markDownloaded, ...(freeBytes ? { freeBytes } : {}), report });
+              const result = await fetchOutputs({ client: cloud, state, folder: { id }, local, platform, now, trashItem, markDownloaded, ...(freeBytes ? { freeBytes } : {}), report });
+              outputsProblem ??= result.problem;
             } catch (error) {
               if (passStopper(error)) throw error;
               if (error?.status !== 410) outputsProblem = String(error?.message ?? error);

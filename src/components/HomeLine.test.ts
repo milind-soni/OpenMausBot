@@ -89,20 +89,19 @@ it("a team's line never offers it", async () => {
   expect(host.querySelector("[data-home-line-ai]")).toBeNull();
 });
 
-it("in This Mac's own place, the line says it is separate from My Cloud, where the bots from before are, and where an older copy comes in", async () => {
+it("in This computer's own place, the line says it is separate from My Cloud, where the bots from before are, and where an older copy comes in", async () => {
   ais.instances = [{ ready: false, instanceId: "claude", driver: "claudeCode" }];
   await mount(vi.fn().mockResolvedValue({ kind: "profile" }));
   window.ogb = { ...window.ogb, platform: "darwin" } as unknown as typeof window.ogb;
   await vi.waitFor(() => expect(host.querySelector("[data-home-line='profile']")).not.toBeNull());
-  expect(homeLineText({ kind: "profile" }, "darwin")).toBe("This Mac starts fresh, separate from My Cloud. The bots you had here are on My Cloud; to bring in an older copy, import its backup in Settings → Backups.");
-  expect(homeLineText({ kind: "profile" }, "win32")).toMatch(/^This PC starts fresh/);
+  expect(homeLineText({ kind: "profile" })).toBe("This computer starts fresh, separate from My Cloud. The bots you had here are on My Cloud; to bring in an older copy, import its backup in Settings → Backups.");
   expect(host.querySelector("[data-home-line-ai]")?.textContent, "a fresh place offers connecting an AI while none is ready").toBe("Connect an AI");
   setLocale("pt-br");
-  expect(homeLineText({ kind: "profile" }, "darwin")).toMatch(/^Este Mac começa do zero/);
+  expect(homeLineText({ kind: "profile" })).toMatch(/^Este computador começa do zero/);
 });
 
 it("in a workspace added from ＋, the line names it and says it is separate, with its own bots, chats and files", () => {
-  expect(homeLineText({ kind: "profile", name: "Work" }, "darwin")).toBe("Work starts fresh: a separate place on this computer, with its own bots, chats and files.");
+  expect(homeLineText({ kind: "profile", name: "Work" })).toBe("Work starts fresh: a separate place on this computer, with its own bots, chats and files.");
 });
 
 it("a workspace's line closes for good with its ✕, saved in that workspace's own config; connecting an AI stays offered while none is ready", async () => {

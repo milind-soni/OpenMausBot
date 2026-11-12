@@ -67,7 +67,7 @@ beforeAll(async () => {
   ada = (await team.pair(ADA)).token!;
   await team.pair(BOB);
   await team.pair(CARL);
-  const created = await team.as(olive, "POST", "/api/bots", { name: "Scout" });
+  const created = await team.as(olive, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   scout = created.body.bot;
   mainThread = scout.mainThreadId ?? scout.threadId;
