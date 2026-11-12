@@ -35,6 +35,12 @@ describe("limitBackupReady", () => {
     expect(limitBackupReady(current, [{ instanceId: "claude-work", model: "opus" }], "signed-out", engine, config)).toBe(true);
     expect(limitBackupReady(current, [{ instanceId: "grok", model: "grok-4" }, { instanceId: "codex", model: "gpt-5" }], "engine", engine, config)).toBe(true);
   });
+
+  it("does not count a backup the switch itself would refuse (policy or missing tools)", () => {
+    const refused = (_from: unknown, to: { instanceId: string }) => to.instanceId === "codex";
+    expect(limitBackupReady(current, [{ instanceId: "codex", model: "gpt-5" }], "engine", engine, config, refused)).toBe(false);
+    expect(limitBackupReady(current, [{ instanceId: "codex", model: "gpt-5" }, { instanceId: "claude", model: "sonnet" }], "model", engine, config, refused)).toBe(true);
+  });
 });
 
 describe("limitBackupAllowed", () => {

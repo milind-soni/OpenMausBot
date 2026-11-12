@@ -8771,7 +8771,7 @@ const automationDestinations = createAutomationDestinations({ store, mainThread:
 const routineModelChecks: RoutineModelChecks = { check: (raw) => checkedModelSelection(raw), bot: (botId) => store.bot(botId), engineSwitchNeedsAsk };
 routines = new RoutineManager({
   emit: broadcast, limitResetAt: (engine) => limitClock.resetAt(engine), checks: proactive.checks,
-  limitBackup: (botId, scope) => { const bot = store.bot(botId); return quotaSwitchEnabled(process.env, cfg) ? Boolean(bot && limitTakeover.backups(botId, bot.modelSelection, scope, approvalModeFor(bot)).length) : Boolean(bot && limitBackupReady(bot.modelSelection, startupBackups(bot, cfg.automaticRecovery), scope ?? "engine", (id) => registry.get(id) ?? undefined, (id) => instanceConfigs(cfg)[id])); },
+  limitBackup: (botId, scope) => { const bot = store.bot(botId); return quotaSwitchEnabled(process.env, cfg) ? Boolean(bot && limitTakeover.backups(botId, bot.modelSelection, scope, approvalModeFor(bot)).length) : Boolean(bot && limitBackupReady(bot.modelSelection, startupBackups(bot, cfg.automaticRecovery), scope ?? "engine", (id) => registry.get(id) ?? undefined, (id) => instanceConfigs(cfg)[id], (from, to) => Boolean(policyModelRefusal(to) ?? (from && recoveryCapabilityError({ driverKind: from.driverKind, capabilities: from.adapter.capabilities }, { driverKind: to.driverKind, capabilities: to.adapter.capabilities }))))); },
   launchId: DESKTOP_MANAGED && /^[\w-]{1,100}$/.test(process.env.OMB_DESKTOP_LAUNCH_ID ?? "")
     ? process.env.OMB_DESKTOP_LAUNCH_ID : undefined,
   skipStartupRuns: (startedFromSleep = Boolean(CLOUD_HOME) && wokeFromSleep(DATA_DIR)), // a Cloud home waking from a sleep it was stopped for

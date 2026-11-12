@@ -29,13 +29,14 @@ export function limitBackupAllowed(from: Engine, to: Engine, toConfig?: Pick<Ins
  * conversation's own recovery applies: the backup's engine is on and it is another model; after a usage limit the same
  * engine only when its limit was not engine-wide, another engine only when `limitBackupAllowed`; signed out, only
  * another engine. */
-export function limitBackupReady(current: Pick<ModelSelection, "instanceId" | "model">, backups: readonly Pick<ModelSelection, "instanceId" | "model">[],
-  scope: "engine" | "model" | "credits" | "signed-out", engine: (instanceId: string) => (Engine & { enabled: boolean }) | undefined,
-  config: (instanceId: string) => Pick<InstanceConfig, "environment" | "access"> | undefined): boolean {
+export function limitBackupReady<E extends Engine & { enabled: boolean }>(current: Pick<ModelSelection, "instanceId" | "model">, backups: readonly Pick<ModelSelection, "instanceId" | "model">[],
+  scope: "engine" | "model" | "credits" | "signed-out", engine: (instanceId: string) => E | undefined,
+  config: (instanceId: string) => Pick<InstanceConfig, "environment" | "access"> | undefined,
+  refused: (from: E | undefined, to: E) => boolean = () => false): boolean {
   const from = engine(current.instanceId);
   return backups.some((backup) => {
     const to = engine(backup.instanceId);
-    if (!to?.enabled || (backup.instanceId === current.instanceId && backup.model === current.model)) return false;
+    if (!to?.enabled || (backup.instanceId === current.instanceId && backup.model === current.model) || refused(from, to)) return false;
     if (backup.instanceId === current.instanceId) return scope !== "engine" && scope !== "signed-out";
     return scope === "signed-out" || Boolean(from && limitBackupAllowed(from, to, config(backup.instanceId)));
   });
