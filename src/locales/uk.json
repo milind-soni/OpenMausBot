@@ -463,6 +463,7 @@
   "cloudAccount.signIn": "Увійти у свій план Cloud",
   "cloudAccount.codeCheck": "Перевірте, що браузер показує цей код:",
   "cloudAccount.codeUntil": "Код дійсний до {time}.",
+  "cloudAccount.actionFailed": "Не вдалося виконати цю дію з Cloud. Перевірте підключення й спробуйте ще раз.",
   "cloudAccount.codeExpired": "Код для входу закінчився. Виберіть «Увійти», щоб отримати новий.",
   "cloudAccount.free": "Плану ще немає",
   "cloudAccount.inactive": "{plan} · зараз неактивний",

@@ -1,6 +1,5 @@
 import { useState } from "react";
 
-import { cn } from "@/lib/cn";
 import { shareLearnedSkillsMode, skillAuthoringEnabled, skillsLibraryEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import { api, useStore, type ConfigStatus } from "@/state/store";
@@ -43,10 +42,8 @@ export function ShareLearnedSkillsSettings() {
       <SettingRow title={t("settings.experimental.shareSkills")} tag={t("settings.early.tag")}
         subtitle={authoring ? <MoreText short={t("settings.experimental.shareSkillsShort")} long={t("settings.experimental.shareSkillsDetail")} /> : t("settings.experimental.shareSkillsNeedsAuthoring")}
         message={error ? <span role="alert" className="text-danger">{error}</span> : undefined}>
-        <span className={cn("contents", (saving || !authoring) && "[&_button]:pointer-events-none [&_[role=radiogroup]]:opacity-40")}>
-          <Segmented value={mode} label={t("settings.experimental.shareSkillsAria")} onChange={(next) => void choose(next)}
-            options={MODES.map((option) => ({ value: option.value, label: t(option.label) }))} />
-        </span>
+        <Segmented value={mode} label={t("settings.experimental.shareSkillsAria")} disabled={saving || !authoring} onChange={(next) => void choose(next)}
+          options={MODES.map((option) => ({ value: option.value, label: t(option.label) }))} />
       </SettingRow>
     </div>
   );

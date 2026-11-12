@@ -371,6 +371,7 @@
   "cloudAccount.signIn": "अपने Cloud प्लान में साइन इन करें",
   "cloudAccount.codeCheck": "जाँचें कि आपका ब्राउज़र यही कोड दिखा रहा है:",
   "cloudAccount.codeUntil": "यह कोड {time} तक काम करता है।",
+  "cloudAccount.actionFailed": "यह Cloud कार्रवाई पूरी नहीं हो सकी। अपना कनेक्शन जाँचें और फिर से कोशिश करें।",
   "cloudAccount.codeExpired": "साइन-इन कोड की समय-सीमा खत्म हो गई। नया कोड पाने के लिए \"साइन इन करें\" चुनें।",
   "cloudAccount.free": "अभी कोई प्लान नहीं",
   "cloudAccount.inactive": "{plan} · अभी सक्रिय नहीं है",

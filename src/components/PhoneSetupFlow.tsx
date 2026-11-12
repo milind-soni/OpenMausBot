@@ -155,7 +155,8 @@ export interface PhoneSetupController {
   cancel: () => void;
   refreshCode: () => void;
   finish: () => void;
-  act: (call: (companion: CompanionBridge) => Promise<CompanionState>) => Promise<void>;
+  /** The state after the call, or null when it did not run or failed (then `error` says why). */
+  act: (call: (companion: CompanionBridge) => Promise<CompanionState>) => Promise<CompanionState | null>;
   accountAct: (call: (remote: AccountBridge) => Promise<CompanionAccountState>) => Promise<void>;
 }
 
@@ -239,7 +240,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
 
   const act = useCallback(async (call: (companion: CompanionBridge) => Promise<CompanionState>) => {
     const companion = companionBridge();
-    if (!companion) return;
+    if (!companion) return null;
     setActionBusy(true);
     setError(null);
     try {
@@ -248,6 +249,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
         () => call(companion),
       );
       if (mounted.current) setState(next);
+      return next;
     } catch (cause) {
       if (mounted.current) setError(
         normalizePhoneSetupActionError(
@@ -255,6 +257,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
           t("phone.error.remoteUpdate"),
         ),
       );
+      return null;
     } finally {
       if (mounted.current) setActionBusy(false);
     }

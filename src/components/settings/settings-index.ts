@@ -122,7 +122,7 @@ export const LEGACY_SETTINGS: Record<Exclude<AppSettingsSection, SettingsPageId>
   updates: (ctx) => (ctx.desktop ? { page: "app", anchor: "updates" } : { page: "overview" }),
 };
 
-const isPage = (id: AppSettingsSection): id is SettingsPageId => SETTINGS_PAGES.some((page) => page.id === id);
+export const isSettingsPage = (id: string | null | undefined): id is SettingsPageId => SETTINGS_PAGES.some((page) => page.id === id);
 
 /** True when a row or section is one Advanced mode adds (on a page Simple shows, or on an Advanced-only page). */
 export function needsAdvanced(target: SettingsTarget, ctx: SettingsContext): boolean {
@@ -134,7 +134,7 @@ export function needsAdvanced(target: SettingsTarget, ctx: SettingsContext): boo
 /** Where a request for Settings lands here: its page (or Overview when that page can't exist on this place) and the
  * section to scroll to. A page or row only Advanced mode shows comes back with `advanced`: opening it turns Advanced on. */
 export function resolveSettingsTarget(requested: AppSettingsSection, ctx: SettingsContext): SettingsTarget & { missing?: SettingsPageId; advanced?: true } {
-  const target = isPage(requested) ? { page: requested } : LEGACY_SETTINGS[requested](ctx);
+  const target = isSettingsPage(requested) ? { page: requested } : LEGACY_SETTINGS[requested](ctx);
   if (needsAdvanced(target, ctx)) return { ...target, advanced: true };
   if (pageById(target.page).when(ctx)) return target;
   return { page: "overview", missing: target.page };

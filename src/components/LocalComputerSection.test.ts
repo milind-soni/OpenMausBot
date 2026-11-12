@@ -576,6 +576,12 @@ describe("Settings → Computers on an OMB Cloud home", () => {
     expect(titles).not.toContain("Private desktops");
     expect(titles).not.toContain("Setup");
   });
+
+  it("disables the isolation choice until the computer's status has loaded", () => {
+    const markup = renderToStaticMarkup(createElement(LocalComputerSection));
+    const isolation = markup.match(/<div role="radiogroup" aria-label="Isolation"[^>]*>(.*?)<\/div>/)?.[1] ?? "";
+    expect([...isolation.matchAll(/<button[^>]*>/g)].map(([button]) => button.includes('disabled=""'))).toEqual([true, true]);
+  });
 });
 
 describe("Local VM idle timeout setting", () => {
