@@ -6,6 +6,7 @@
 //     (FAKE_ACP_REJECT_LIVE_LOAD_DSH=1: with dsh 0.2's -32602 "session is already active" instead of -32000)
 //   FAKE_ACP_CACHED_LIVE_LOAD  a live session/load is acknowledged but keeps the old MCP credentials, like Qwen
 //   FAKE_ACP_TEXT_REPLY  answer every session/prompt with only this text
+//   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (stream-script.ts)
 //   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt
 //     | abort-in-prompt (a sign-in link, then a TCMalloc CHECK line on stderr, then exit 134 as bubblewrap reports SIGABRT) | hang
 //     | hang-initialize | unkeyed-tool | finished-tools (tool_call frames that arrive already completed or failed, one updated again)
@@ -83,6 +84,49 @@ import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
+
+// The scripted replies every fake plays (FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE); inlined, since tests copy this fake
+// out of the repo.
+type StreamStep = { say?: string; think?: string; tool?: string; fail?: string };
+type StreamScript = { steps: StreamStep[]; chars: number; ms: number };
+function streamScript(prompt: string): StreamScript | null {
+  if (!process.env.FAKE_STREAM_SCRIPT) return null;
+  let scripts: Record<string, StreamStep[]>;
+  try { scripts = JSON.parse(readFileSync(process.env.FAKE_STREAM_SCRIPT, "utf8")); } catch { return null; }
+  // A prompt can carry earlier requests as context: the newest marker in it is the request.
+  const marker = Object.keys(scripts).filter((key) => prompt.includes(key)).sort((a, b) => prompt.lastIndexOf(b) - prompt.lastIndexOf(a) || b.length - a.length)[0];
+  if (!marker) return null;
+  const [chars = 4, ms = 40] = (process.env.FAKE_STREAM_CADENCE ?? "4:40").split(":").map(Number);
+  return { steps: scripts[marker]!, chars: Math.max(1, chars), ms: Math.max(0, ms) };
+}
+function playStreamScript(script: StreamScript, play: { chunk(step: StreamStep, piece: string): void; end(step: StreamStep): void; done(failure?: string): void; cancelled(): boolean }): void {
+  const queue = script.steps.slice();
+  const next = (): void => {
+    if (play.cancelled()) return;
+    const step = queue.shift();
+    if (!step) return play.done();
+    if (step.fail !== undefined) return play.done(step.fail);
+    if (step.tool !== undefined) {
+      play.end(step);
+      setTimeout(next, script.ms);
+      return;
+    }
+    const text = step.say ?? step.think ?? "";
+    let at = 0;
+    const send = (): void => {
+      if (play.cancelled()) return;
+      if (at < text.length) {
+        play.chunk(step, text.slice(at, at += script.chars));
+        setTimeout(send, script.ms);
+        return;
+      }
+      play.end(step);
+      setTimeout(next, script.ms);
+    };
+    send();
+  };
+  next();
+}
 
 // Follow the spawning server down; on Windows ppid does not change after parent exit.
 {
@@ -443,6 +487,7 @@ let pendingAskQuestionId: number | null = null;
 let onAskQuestionAnswered: (() => void) | null = null;
 
 let hangingPromptId: unknown = null;
+let streamingPromptId: unknown = null;
 let hangKeepAlive: ReturnType<typeof setInterval> | null = null;
 
 type McpEntry = { command: string; args?: string[]; env?: Array<{ name: string; value: string }> };
@@ -1076,6 +1121,28 @@ function handle(msg: any) {
             : { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } },
         );
       };
+      const script = streamScript((Array.isArray(msg.params?.prompt) ? msg.params.prompt : []).map((block: any) => block?.text ?? "").join(""));
+      if (script) {
+        streamingPromptId = msg.id;
+        const update = (u: Record<string, unknown>) => out({ jsonrpc: "2.0", method: "session/update", params: { update: u } });
+        let tools = 0;
+        playStreamScript(script, {
+          cancelled: () => streamingPromptId !== msg.id,
+          chunk: (step, piece) => update({ sessionUpdate: step.think !== undefined ? "agent_thought_chunk" : "agent_message_chunk", content: { text: piece } }),
+          end: (step) => {
+            if (step.tool === undefined) return;
+            const id = `script-tool-${++tools}`;
+            update({ sessionUpdate: "tool_call", toolCallId: id, title: step.tool, rawInput: { command: step.tool } });
+            update({ sessionUpdate: "tool_call_update", toolCallId: id, status: "completed" });
+          },
+          done: (failure) => {
+            streamingPromptId = null;
+            if (failure) out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: failure } });
+            else complete();
+          },
+        });
+        return;
+      }
       if (mode === "quiet-then-answer") {
         const lines: string[] = process.env.FAKE_ACP_QWEN_LOG ? JSON.parse(process.env.FAKE_ACP_QWEN_LOG) : [];
         let logTimer: ReturnType<typeof setInterval> | null = null;
@@ -1537,6 +1604,10 @@ function handle(msg: any) {
       break;
     }
     case "session/cancel":
+      if (streamingPromptId !== null) {
+        result(streamingPromptId, { stopReason: "cancelled", _meta: {} });
+        streamingPromptId = null;
+      }
       if (hangingPromptId !== null && process.env.FAKE_ACP_IGNORE_CANCEL !== "1") {
         result(hangingPromptId, { stopReason: process.env.FAKE_ACP_CANCEL_STOP_REASON ?? "cancelled", _meta: {} });
         if (hangKeepAlive) clearInterval(hangKeepAlive);

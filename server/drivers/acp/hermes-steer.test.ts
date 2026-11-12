@@ -9,6 +9,7 @@ import { ensureDirs } from "../../config.ts";
 import type { AnyProviderDriver, ProviderInstance } from "../../contracts.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
+import { publishedMessages } from "../../harness/text-items.testkit.ts";
 import { AntigravityDriver } from "../antigravity.ts";
 import { ClineAgentDriver } from "./cline.ts";
 import { CommandCodeAgentDriver } from "./command-code.ts";
@@ -109,6 +110,10 @@ describe("Hermes steering", () => {
     expect(replyOf(turnId)).toEqual(["working. done; steered: Use pytest, not unittest.\nAnd keep it short."]);
     const shown = recorder!.events.filter((event) => event.turnId === turnId && event.type === "content.delta").map((event) => event.type === "content.delta" ? event.delta : "");
     expect(shown.join("")).not.toContain("Steer queued");
+    expect(publishedMessages(recorder!.events.filter((event) => event.turnId === turnId)).map(({ streamed, completed }) => ({ streamed, completed })),
+      "a steered turn is still one message under one id, with Hermes's own line left out").toEqual([
+      { streamed: "working. done; steered: Use pytest, not unittest.\nAnd keep it short.", completed: "working. done; steered: Use pytest, not unittest.\nAnd keep it short." },
+    ]);
   });
 
   it("refuses a steer once the turn has ended, without sending it", async () => {

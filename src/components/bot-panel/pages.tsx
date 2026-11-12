@@ -37,6 +37,7 @@ import type { SimplePageId } from "./page-registry";
 import { BotSwitch, buttonCls, Card, ColRow, LinkRow, NoteRow, RadioRow, RowIcon, rowCls, RowText, SwitchRow, TextRow, TrashButton } from "./rows";
 import { MemoryUpkeepCards } from "./MemoryUpkeepCards";
 import { useMemoryDoc } from "./use-memory-doc";
+import { useTeamMemoryEntries } from "../conversation-share/conversation-share";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 
@@ -170,6 +171,7 @@ export function RoutinesPage({ bot, derived }: PageContext) {
  * the hash it was read at, so a note the bot added meanwhile is never lost: a conflict re-reads and asks again. */
 export function MemoryPage({ bot }: PageContext) {
   const memory = useMemoryDoc(bot);
+  const teamSaved = useTeamMemoryEntries(bot.id, memory.mine && bot.memoryEnabled !== false && !bot.defaultBot?.person, memory.docs);
   const [draft, setDraft] = useState("");
   const [asText, setAsText] = useState<{ botId: string; doc: MemoryDoc } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -241,12 +243,21 @@ export function MemoryPage({ bot }: PageContext) {
           <NoteRow tone="warn">{t("botPanel.library.memoryError")}</NoteRow>
         ) : notes === null ? (
           <NoteRow>{t("common.checking")}</NoteRow>
-        ) : notes.length === 0 ? (
+        ) : notes.length === 0 && teamSaved.entries.length === 0 ? (
           <NoteRow>{t("botPanel.memory.empty")}</NoteRow>
         ) : notes.map((note) => (
           <div key={`${note.path}:${note.line}:${note.text}`} data-memory-note={note.line ?? note.path} className={rowCls}>
             <div className="min-w-0 flex-1 text-[13px] leading-[1.45] text-ink">{note.text}</div>
             <TrashButton label={t("botPanel.memory.forget")} disabled={saving} onClick={() => forget(note)} />
+          </div>
+        ))}
+        {memoryOn && !memory.error && notes !== null && teamSaved.entries.map((entry) => (
+          <div key={entry.id} data-team-memory-entry={entry.id} className={rowCls}>
+            <div className="min-w-0 flex-1 text-[13px] leading-[1.45] text-ink">
+              {entry.text}
+              {entry.yours && <span className="block text-[12px] text-ink-secondary">{t("teamMemorySave.yours")}</span>}
+            </div>
+            <TrashButton label={t("botPanel.memory.forget")} disabled={saving} onClick={() => void change(async () => { await teamSaved.remove(entry.id); return true; })} />
           </div>
         ))}
         {error && <NoteRow tone="warn">{error}</NoteRow>}

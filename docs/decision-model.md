@@ -8,7 +8,7 @@ providers are supported: Cloudflare's Clef on
 TypeSafe's [Jev](https://typesafe.ai) (the default) and a model of your choice
 on [OpenRouter](https://openrouter.ai).
 
-Everything is in **Settings → Decision and extraction** (Advanced mode): the
+Everything is in **Settings › AI › Routing and extraction** (Advanced mode): the
 Cloudflare Workers AI card, the Jev/OpenRouter picker under **Another key**,
 for OpenRouter the model, one master switch, each key with **Save** and
 **Test**, and a switch for room routing (**Who answers in rooms**). Each
@@ -161,7 +161,7 @@ The log stays on this machine: workspace backups leave it out.
   as `decider.workersAiAccountId` and shown back in Settings.
 - **The OpenRouter key is shared with your OpenRouter models.** The decision
   model uses the first of these it finds:
-  1. a key saved here, in **Settings → Decision and extraction**
+  1. a key saved here, in **Settings › AI › Routing and extraction**
      (`decider.openrouterKey` or `OMB_OPENROUTER_DECIDER_KEY`): the optional
      "use a different key" override, which wins so a key saved before
      sharing keeps working;

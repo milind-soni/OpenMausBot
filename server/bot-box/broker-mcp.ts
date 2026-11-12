@@ -30,7 +30,7 @@ export function mcpGrantName(name: string): string {
 export function forgetBrokeredMcp(): void { remembered.clear(); }
 
 /** The turn's custom servers with every URL server's headers moved to the broker; unchanged when the broker is off.
- * `appFor`: the connected app a server's sign-in refusal points to instead (broker-mcp-refusal.ts). */
+ * `appFor`: the connected app a sign-in refusal points to instead, for a server sent no credentials (broker-mcp-refusal.ts). */
 export function brokerRemoteMcp(
   custom: Record<string, McpServerSpec>,
   turn: BrokerTurn,
@@ -45,7 +45,7 @@ export function brokerRemoteMcp(
   const brokered: string[] = [];
   for (const [name, server] of Object.entries(custom)) {
     if (!("url" in server) || typeof server.url !== "string" || !NAME.test(name)) { out[name] = server; continue; }
-    const app = appFor?.(name, server.url);
+    const app = Object.values(server.headers ?? {}).some((value) => value !== "") ? null : appFor?.(name, server.url);
     grants[mcpGrantName(name)] = { upstream: server.url, headers: { ...server.headers }, mcpServer: name, ...(app ? { mcpApp: app } : {}) };
     brokered.push(name);
   }
