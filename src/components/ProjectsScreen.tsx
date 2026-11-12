@@ -130,7 +130,7 @@ function AddProjectModal({
     }
     setError(null);
     const projectPath = await projectsApi.chooseDirectory({
-      title: "Choose an existing project folder",
+      title: "Choose a project folder on your computer",
       buttonLabel: "Add project",
     });
     if (projectPath) finish(projectsApi.addExisting(projectPath));
@@ -165,7 +165,7 @@ function AddProjectModal({
     if (!projectsApi) return;
     setError(null);
     const selected = await projectsApi.chooseDirectory({
-      title: forClone ? "Choose where to copy the project" : "Choose a parent folder",
+      title: forClone ? "Choose where to save this project" : "Choose where to create this folder",
       buttonLabel: "Choose",
     });
     if (!selected) return;
@@ -472,7 +472,7 @@ export function ProjectsScreen() {
       return;
     }
     const projectPath = await projectsApi.chooseDirectory({
-      title: "Choose an existing project folder",
+      title: "Choose a project folder on your computer",
       buttonLabel: "Add project",
     });
     if (projectPath) {
