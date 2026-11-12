@@ -129,7 +129,7 @@ export function usePageSave(threadId: string, messageId: string, title: string) 
 /** Point mode on whichever frame shows the page. Security: a pick counts only from that frame's own window and only
  * while the person has Point on, so a page cannot fill the composer by itself. Point stays on after a pick so several
  * parts can be marked in one pass; once it ends after any pick, `picked` runs and the composer takes focus. */
-export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefined; view?: string; threadId: string; appId: string; rev: number; title: string; picked(): void }) {
+export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefined; view?: string; frameKey?: string; threadId: string; appId: string; rev: number; title: string; picked(): void }) {
   const [pointing, setPointing] = useState(false);
   const on = useRef(false);
   on.current = pointing;
@@ -173,10 +173,10 @@ export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefin
     const iframe = latest.current.frame();
     const send = () => iframe?.contentWindow?.postMessage(marksMessage(JSON.parse(marks) as string[]), "*");
     send();
-    // A new frame (full screen, a reload) gets them again once its page has loaded.
+    // A new frame (full screen, a reload) gets them again once its page has loaded; `frameKey` changes with each frame.
     iframe?.addEventListener("load", send);
     return () => iframe?.removeEventListener("load", send);
-  }, [marks, pointing, args.view]);
+  }, [marks, pointing, args.view, args.frameKey]);
   return { pointing, toggle: () => set(!on.current), stop: () => { if (on.current) set(false); } };
 }
 
