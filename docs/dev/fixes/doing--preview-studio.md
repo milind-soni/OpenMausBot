@@ -39,12 +39,12 @@ Implements `docs/dev/plans/implementation--preview-studio.md`. Design work start
 
 ## 4. Preview page
 
-- [~] **PreviewScreen with Single mode** — Add a new sidebar entry and lazy-load the screen in `src/App.tsx:18`.
-- [~] **Canvas mode** — Port the pan/zoom board from Wavez. Cap at 6 live frames, with snapshots beyond that.
-- [~] **Share to chat** — Send one size or all sizes as screenshots to a bot or room.
-- [ ] **Bot tool `open_preview`** — `server/drivers/agents-proxy.ts`.
+- [?] **PreviewScreen with Single mode** — Add a new sidebar entry and lazy-load the screen in `src/App.tsx:18`.
+- [?] **Canvas mode** — Port the pan/zoom board from Wavez. Cap at 6 live frames, with snapshots beyond that.
+- [?] **Share to chat** — Send one size or all sizes as screenshots to a bot or room.
+- [ ] **Bot tool `open_preview`** — `server/drivers/agents-proxy.ts` *(Optional per plan; deferred for a follow-up PR so the core Preview Studio UI and read-only harness routes stay focused).*
 
 ## 5. Docs and QA
 
-- [ ] **User guide** — `docs/guide/preview.md`.
+- [~] **User guide** — `docs/guide/preview.md`.
 - [ ] **QA matrix** — Dell. Run the plan's verification list in both the desktop app and the browser.

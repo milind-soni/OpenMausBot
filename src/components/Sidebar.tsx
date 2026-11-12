@@ -19,6 +19,7 @@ import {
   LayoutGrid,
   FolderKanban,
   ListTodo,
+  MonitorSmartphone,
   Trash2,
   Users,
 } from "lucide-react";
@@ -761,6 +762,21 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
         >
           <FolderKanban size={20} className={state.projectsOpen ? "text-accent" : "text-ink-secondary"} aria-hidden="true" />
           {!collapsed && <span className="text-[14px] text-ink">Projects</span>}
+        </button>
+
+        <button
+          onClick={() => dispatch({ type: "togglePreview", open: true })}
+          aria-label="Preview"
+          aria-current={state.previewOpen ? "page" : undefined}
+          title={collapsed ? "Preview" : undefined}
+          className={cn(
+            "flex items-center gap-3 rounded-xl p-2 text-left",
+            collapsed ? "justify-center p-2.5" : "w-full px-3 py-2",
+            state.previewOpen ? "bg-raised" : "hover:bg-raised/50",
+          )}
+        >
+          <MonitorSmartphone size={20} className={state.previewOpen ? "text-accent" : "text-ink-secondary"} aria-hidden="true" />
+          {!collapsed && <span className="text-[14px] text-ink">Preview</span>}
         </button>
 
         <button

@@ -214,3 +214,36 @@ describe("dedicated apps page state", () => {
   });
 });
 
+describe("dedicated preview page state", () => {
+  it("opens preview and closes task board, settings, apps, and projects", () => {
+    const openProjects = reducer(initialState, { type: "toggleProjects", open: true });
+    expect(openProjects).toMatchObject({ projectsOpen: true, previewOpen: false });
+    const openPreview = reducer(openProjects, { type: "togglePreview", open: true });
+    expect(openPreview).toMatchObject({
+      previewOpen: true,
+      projectsOpen: false,
+      taskBoardOpen: false,
+      appsOpen: false,
+      appSettingsOpen: false,
+    });
+  });
+
+  it("resets previewOpen when selecting a bot or group", () => {
+    const withBotAndGroup = {
+      ...initialState,
+      previewOpen: true,
+      bots: [bot("one", "thread-1")],
+      groups: [group("room-1", "thread-r1")],
+    };
+    expect(reducer(withBotAndGroup, { type: "select", id: "one" })).toMatchObject({
+      previewOpen: false,
+      selectedId: "one",
+    });
+    expect(reducer(withBotAndGroup, { type: "select", id: "room-1" })).toMatchObject({
+      previewOpen: false,
+      selectedId: "room-1",
+    });
+  });
+});
+
+

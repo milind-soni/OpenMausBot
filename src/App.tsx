@@ -18,6 +18,7 @@ import { useQueuedMessageSender } from "@/lib/useQueuedMessageSender";
 const SettingsScreen = lazy(() => import("@/components/SettingsScreen").then((m) => ({ default: m.SettingsScreen })));
 const AppsScreen = lazy(() => import("@/components/AppsScreen").then((m) => ({ default: m.AppsScreen })));
 const ProjectsScreen = lazy(() => import("@/components/ProjectsScreen").then((m) => ({ default: m.ProjectsScreen })));
+const PreviewScreen = lazy(() => import("@/components/PreviewScreen"));
 
 function ScreenFallback() {
   return (
@@ -81,6 +82,10 @@ function Shell() {
       ) : state.projectsOpen ? (
         <Suspense fallback={<ScreenFallback />}>
           <ProjectsScreen />
+        </Suspense>
+      ) : state.previewOpen ? (
+        <Suspense fallback={<ScreenFallback />}>
+          <PreviewScreen />
         </Suspense>
       ) : group ? (
         <GroupView key={group.id} group={group} />
