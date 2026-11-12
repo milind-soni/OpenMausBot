@@ -7777,6 +7777,7 @@
   "chat.notice.resumingAfterRestart": "重新啟動後繼續",
   "chat.notice.cutOffByRestart": "{name} 因重新啟動而中斷；正在繼續",
   "chat.notice.stalled": "已有 {minutes} 分鐘沒有活動，這個回合已停止",
+  "chat.notice.stalledCommand": "指令 `{command}` 已執行 {minutes} 分鐘仍未完成，看起來卡住了，這個回合已停止",
   "chat.notice.followupInterrupted": "排隊中的後續訊息因重新啟動或還原而中斷，可能已經執行過。再次傳送前請先檢查結果。",
   "chat.notice.usageLimit": "這個 {provider} 帳號已達到使用上限{detail}。請等它重設，或把這個機器人切換到另一個 AI。",
   "chat.notice.claudeExtraUsage": "Claude 拒絕了這個回合，因為這個模型會使用你帳號的額外用量，而這些額度已用完。你方案本身的用量不受影響：請把這個機器人切換到你方案包含的模型，或在你的 Claude 帳號中加購額外用量。",

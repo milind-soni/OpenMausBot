@@ -11,7 +11,30 @@ export interface WatchedTurn {
   lastEventAt: number;
   waitingOnHuman: boolean;
   waitingOnComputer: boolean;
-  runningTools: Set<string>;
+  runningTools: Map<string, RunningTool>;
+}
+
+/** A tool call the turn's engine started and has not ended; command: the shell command it runs, when it runs one. */
+export interface RunningTool {
+  startedAt: number;
+  command?: string;
+}
+
+/** The longest-running shell command of a turn stopped at stopAt, with the whole minutes it ran: what the person is told
+ * looks stuck. null when no running tool runs a shell command. */
+export function stuckCommand(turn: Partial<Pick<WatchedTurn, "runningTools">>, stopAt: number): { command: string; minutes: number } | null {
+  let oldest: RunningTool | undefined;
+  for (const tool of turn.runningTools?.values() ?? []) {
+    if (tool.command && (!oldest || tool.startedAt < oldest.startedAt)) oldest = tool;
+  }
+  return oldest?.command ? { command: oldest.command, minutes: Math.max(1, Math.round((stopAt - oldest.startedAt) / 60_000)) } : null;
+}
+
+/** What the person is told when the watchdog stops a turn silent for silentMs: the shell command still running, with how
+ * long it ran, so they know what looked stuck; otherwise how long the turn was silent. */
+export function stallNotice(turn: Partial<Pick<WatchedTurn, "runningTools">>, silentMs: number, stopAt: number) {
+  const stuck = stuckCommand(turn, stopAt);
+  return stuck ? { key: "chat.notice.stalledCommand" as const, params: stuck } : { key: "chat.notice.stalled" as const, params: { minutes: Math.round(silentMs / 60_000) } };
 }
 
 // Number() also reads "Infinity" and "1e309" as numbers, and an endless limit would switch the watchdog off.
@@ -87,7 +110,7 @@ export class TurnWatchdog {
   watch(threadId: string, botId: string): void {
     const at = this.now();
     this.turns.set(threadId, { threadId, botId, startedAt: at, lastEventAt: at, waitingOnHuman: false, waitingOnComputer: false,
-      runningTools: new Set() });
+      runningTools: new Map() });
   }
 
   observe(event: RuntimeEvent): void {
@@ -96,7 +119,7 @@ export class TurnWatchdog {
     turn.lastEventAt = this.now();
     if ((event.type !== "item.started" && event.type !== "item.completed") || event.itemType !== "tool" || !event.itemId) return;
     if (event.type === "item.completed") turn.runningTools.delete(event.itemId);
-    else turn.runningTools.add(event.itemId);
+    else turn.runningTools.set(event.itemId, { startedAt: turn.lastEventAt, ...(event.summary ? { command: event.summary } : {}) });
   }
 
   setWaitingOnHuman(threadId: string, waiting: boolean): void {

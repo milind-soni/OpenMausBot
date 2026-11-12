@@ -2323,7 +2323,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.argv).not.toContain("--dangerously-skip-permissions");
   });
 
-  it("lets a Bash call ask for up to ten minutes, unless the person set their own cap", async () => {
+  it("lets a Bash call ask for up to two hours, unless the person set their own cap", async () => {
     const dump = join(scratch, "bash-timeout.json");
     await create(undefined, { FAKE_CLAUDE_DUMP: dump });
     await instance.adapter.sendTurn({ threadId: "t-bash-timeout", text: "hi" });

@@ -9,7 +9,7 @@ import { join, dirname, isAbsolute, normalize } from "node:path";
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { writeFileAtomicIfChanged } from "../atomic.ts";
-import { augmentedPath } from "../env-path.ts";
+import { augmentedPath } from "../env-path.ts"; import { BASH_MAX_TIMEOUT_MS } from "../system-prompt.ts";
 import { brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
 import { cliVersionProbe } from "../cli-version-probe.ts";
 import { claudeAuthStatus } from "./claude-auth-status.ts";
@@ -115,7 +115,7 @@ function claudeEnvironment(
   instanceEnvironment: NodeJS.ProcessEnv = {},
   endpoint = false, bedrock = false,
 ): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { BASH_MAX_TIMEOUT_MS: "600000", ...source, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error" };
+  const env: NodeJS.ProcessEnv = { BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS), ...source, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error" };
   if (configDir?.trim()) env.CLAUDE_CONFIG_DIR = resolveClaudeConfigDir(configDir, env);
   else if (env.CLAUDE_CONFIG_DIR) env.CLAUDE_CONFIG_DIR = resolveClaudeConfigDir(undefined, env);
   if (configDir?.trim() || endpoint || bedrock) {

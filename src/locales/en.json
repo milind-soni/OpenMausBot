@@ -8150,6 +8150,7 @@
   "chat.notice.resumingAfterRestart": "Resuming after a restart",
   "chat.notice.cutOffByRestart": "{name} was cut off by a restart; resuming",
   "chat.notice.stalled": "no activity for {minutes} minutes — the turn was stopped",
+  "chat.notice.stalledCommand": "the command `{command}` ran for {minutes} minutes without finishing and looks stuck — the turn was stopped",
   "chat.notice.followupInterrupted": "Queued follow-up interrupted by restart or restore — it may have already run. Review the result before sending it again.",
   "chat.notice.usageLimit": "This {provider} account has reached its usage limit{detail}. Wait for it to reset, or switch this bot to another AI.",
   "chat.notice.claudeExtraUsage": "Claude refused this turn because this model runs on extra usage for your account, and those credits are used up. Your plan's own usage is not affected: switch this bot to a model your plan includes, or add extra usage in your Claude account.",

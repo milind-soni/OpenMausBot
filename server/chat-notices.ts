@@ -10,6 +10,7 @@ export const CHAT_NOTICE = {
   "chat.notice.resumingAfterRestart": "Resuming after a restart",
   "chat.notice.cutOffByRestart": "{name} was cut off by a restart; resuming",
   "chat.notice.stalled": "no activity for {minutes} minutes — the turn was stopped",
+  "chat.notice.stalledCommand": "the command `{command}` ran for {minutes} minutes without finishing and looks stuck — the turn was stopped",
   "chat.notice.followupInterrupted":
     "Queued follow-up interrupted by restart or restore — it may have already run. Review the result before sending it again.",
   "chat.notice.usageLimit": "This {provider} account has reached its usage limit{detail}. Wait for it to reset, or switch this bot to another AI.",
