@@ -94,19 +94,27 @@ describe("full backup Settings in the real renderer", () => {
     await click("Close templates");
     await click("You");
     await click("Settings");
-    await click("Backups");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain('button "Data"');
+    await click("Data");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Export full backup");
+    await click("Learn more");
     expect(await snapshot()).toContain("Saved account credentials and connections are not included");
     expect(await snapshot()).toContain("not automatically redacted");
     await ui("screenshot", "--out", join(ROOT, ".omb-scratch", "verify-evidence", "workspace-backup-settings.png"));
+    await expect.poll(() => evaluate("document.querySelector('[data-backup-export]')?.disabled")).toBe(false);
+    await click("Export…");
+    await expect.poll(snapshot).toContain('dialog "Export full backup"');
     await type("Backup password", "fixture password 123");
     await type("Confirm backup password", "fixture password 123");
-    await click("Export full backup");
+    await ui("press", "--keys", "Enter");
     await expect.poll(() => evaluate("window.backupFixture.download"), { timeout: 10_000 }).toEqual({ href: "/api/workspace-backup/download/download-stage", filename: "fixture.ombbackup" });
     expect(await evaluate("window.backupFixture.calls.find(call => call.path.endsWith('/export')).body.clientState['fixture-auth-token'] ?? null")).toBeNull();
     expect(await evaluate("window.backupFixture.calls.find(call => call.path.endsWith('/export')).body.clientState['omb-webhook-credentials'] ?? null")).toBeNull();
     expect(await evaluate("Object.values(localStorage).some(value => value.includes('fixture password 123'))")).toBe(false);
 
+    await expect.poll(() => evaluate("document.querySelector('[data-backup-import]')?.disabled")).toBe(false);
+    await click("Choose file…");
+    await expect.poll(snapshot).toContain('dialog "Import backup"');
     // A File is delivered through the native input's change event. This
     // does not claim to automate the OS file-picker dialog.
     await evaluate(`(() => { const input = document.querySelector('[role=dialog] input[type=file]'); const transfer = new DataTransfer(); transfer.items.add(new File(['encrypted fixture bytes'], 'fixture.ombbackup', { type: 'application/octet-stream' })); input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
