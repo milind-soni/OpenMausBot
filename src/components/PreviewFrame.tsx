@@ -768,9 +768,11 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
             ref={iframeRef}
             src={frameUrl}
             title={`${frameTitle} (${width} × ${height})`}
-            // Project files are served from the app's own origin, so they never get
-            // allow-same-origin (the server also sends a CSP sandbox for them).
-            sandbox={source?.kind === "file" ? "allow-scripts allow-forms" : "allow-scripts allow-same-origin allow-forms"}
+            // HTML keeps an opaque origin. PDFs alone need the native PDF viewer,
+            // which Chromium disables inside a sandbox (also exempt in server CSP).
+            sandbox={source.kind === "file"
+              ? source.fileType === "pdf" ? undefined : "allow-scripts allow-forms"
+              : "allow-scripts allow-same-origin allow-forms"}
             referrerPolicy="no-referrer"
             onLoad={() => {
               clearTimers();
