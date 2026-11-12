@@ -80,6 +80,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   list_waits: "activity.tool.team.listWaits",
   wait_until: "activity.tool.team.waitUntil",
   add_mcp_server: "activity.tool.team.addMcpServer",
+  app_settings: "activity.tool.team.appSettings",
   ask_bot: "activity.tool.team.askBot",
   assignment_status: "activity.tool.team.assignmentStatus",
   attach_file: "activity.tool.team.attachFile",
