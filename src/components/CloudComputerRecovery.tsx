@@ -15,6 +15,7 @@ const LINES: Record<CloudComputerRecoveryState, LocaleKey> = {
   replaced: "server.cloudComputer.replaced",
   unreachable: "server.cloudComputer.unreachable",
   capped: "server.cloudComputer.capped",
+  "needs-person": "server.cloudComputer.needsPerson",
 };
 
 /** The line the computer panel shows; an action the person took is worded as theirs. */

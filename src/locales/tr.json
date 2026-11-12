@@ -5985,6 +5985,7 @@
   "server.cloudComputer.restarted": "{name} botunun bulut bilgisayarı yanıt vermeyi bıraktı, bu yüzden MausBot onu yeniden başlattı. Yeniden yanıt veriyor; üzerinde açık olan programlar kapatıldı.",
   "server.cloudComputer.capped": "{name} botunun bulut bilgisayarı değiştirildikten sonraki bir saat içinde yine yanıt vermeyi bıraktı, bu yüzden MausBot onu olduğu gibi bıraktı. Bilgisayar panelindeki Bilgisayarı değiştir bir kez daha dener.",
   "server.cloudComputer.unreachable": "Bulut bilgisayarlara şu anda ulaşılamıyor. MausBot, {name} botunun bulut bilgisayarını tuttu ve yeniden kontrol edecek.",
+  "server.cloudComputer.needsPerson": "{name} botunun bulut bilgisayarı yanıt vermeyi bıraktı. Bilgisayar panelindeki Bilgisayarı değiştir yenisini verir; yalnızca eski bilgisayarda olan dosyalar kaybolur.",
   "computer.recovery.notResponding": "Bu bulut bilgisayar yanıt vermiyor. MausBot onu kontrol ediyor; yeniden başlatacak ya da değiştirecek.",
   "computer.recovery.restarting": "Bu bulut bilgisayar yanıt vermiyor. MausBot onu yeniden başlatıyor.",
   "computer.recovery.replacing": "Bu bulut bilgisayar yanıt vermiyor. MausBot onu değiştiriyor.",

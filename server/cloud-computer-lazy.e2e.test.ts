@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONTROL_WAITED } from "./control-client.ts";
-import { CLOUD_COMPUTER_REPLACED } from "../shared/cloud-computer-recovery.ts";
+import { CLOUD_COMPUTER_NEEDS_PERSON, CLOUD_COMPUTER_REPLACED, CLOUD_COMPUTER_REPLACED_BY_PERSON } from "../shared/cloud-computer-recovery.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { openSse, type SseRecorder } from "./testing/sse.ts";
@@ -333,7 +333,52 @@ describe("a cloud computer starts only when the bot uses it", () => {
     await apiOk("DELETE", `/api/bots/${bot.id}`);
   }, 60_000);
 
-  it("a computer whose machine is gone is replaced on its next use, and the bot and the person are told once", async () => {
+  const callThroughWait = async (sent: any) => {
+    let result = await computerCall(sent, "tools/call", { name: "screenshot", arguments: {} });
+    for (let tries = 0; result.body.result.content?.[0]?.text === CONTROL_WAITED && tries < 3; tries++) {
+      result = await computerCall(sent, "tools/call", { name: "screenshot", arguments: {} });
+    }
+    return result;
+  };
+  const recoveryLines = async (botId: string) => (await task(botId)).messages
+    .filter((message: any) => message.tool?.name?.startsWith("recovery:")).map((message: any) => message.tool.name);
+  const inboxNotices = (botId: string) => events.frames
+    .filter((frame: any) => frame.kind === "notify" && frame.notification?.botId === botId && frame.notification.kind === "notice")
+    .map((frame: any) => frame.notification.body);
+
+  it("by default a computer whose machine is gone is never deleted by itself: the bot and the person are told once, and Replace computer replaces it", async () => {
+    const bot = await cloudBot("Waiting");
+    await apiOk("POST", `/api/bots/${bot.id}/computer/provision`);
+    const dead = rows.at(-1)!;
+    dead.state = "error";
+    const before = requests.length, made = creates();
+    const next = await startTurn(bot.id, "Look again");
+    const held = await callThroughWait(next);
+    expect(held.body.result.isError).toBe(true);
+    expect(held.body.result.content[0].text).toContain(CLOUD_COMPUTER_NEEDS_PERSON);
+    await computerCall(next, "tools/call", { name: "screenshot", arguments: {} });
+    expect(requests.slice(before).filter(request => request.method === "DELETE")).toEqual([]);
+    expect(creates()).toBe(made);
+    const line = "Waiting's cloud computer stopped responding. Replace computer in the computer panel gives it a new one; files only on the old computer are lost.";
+    expect(await recoveryLines(bot.id)).toEqual([`recovery: ${line}`]);
+    expect(inboxNotices(bot.id)).toEqual([line]);
+
+    // The person replaces it while the turn still waits on it.
+    expect(await apiOk("POST", `/api/bots/${bot.id}/computer/recovery`, { action: "replace" })).toEqual({ replaced: true });
+    expect(requests.slice(before).filter(request => request.method === "DELETE")).toEqual([{ method: "DELETE", path: `/boxes/${dead.id}` }]);
+    await finish(bot.id);
+    const after = await startTurn(bot.id, "Try again");
+    const fresh = await callThroughWait(after);
+    expect(fresh.body.result.isError, JSON.stringify(fresh.body)).toBeFalsy();
+    expect(fresh.body.result.content[0]).toEqual({ type: "text", text: CLOUD_COMPUTER_REPLACED_BY_PERSON });
+    expect(creates()).toBe(made + 1);
+    await finish(bot.id);
+    expect(await recoveryLines(bot.id)).toHaveLength(1);
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
+  }, 60_000);
+
+  it("with automatic replacement on, a computer whose machine is gone is replaced on its next use, and the bot and the person are told once", async () => {
+    await apiOk("PATCH", "/api/config", { features: { cloudComputerAutoReplace: true } });
     const bot = await cloudBot("Stranded");
     // Made from the panel, so no command has answered on it lately: one that has is kept for a few minutes.
     await apiOk("POST", `/api/bots/${bot.id}/computer/provision`);
@@ -346,10 +391,7 @@ describe("a cloud computer starts only when the bot uses it", () => {
     expect(status.box).toBeNull();
 
     const next = await startTurn(bot.id, "Look again");
-    let replaced = await computerCall(next, "tools/call", { name: "screenshot", arguments: {} });
-    for (let tries = 0; replaced.body.result.content?.[0]?.text === CONTROL_WAITED && tries < 3; tries++) {
-      replaced = await computerCall(next, "tools/call", { name: "screenshot", arguments: {} });
-    }
+    const replaced = await callThroughWait(next);
     expect(replaced.body.result.isError, JSON.stringify(replaced.body)).toBeFalsy();
     expect(replaced.body.result.content[0]).toEqual({ type: "text", text: CLOUD_COMPUTER_REPLACED });
     expect(replaced.body.result.content[1]).toMatchObject({ type: "image", mimeType: "image/jpeg" });
@@ -360,10 +402,9 @@ describe("a cloud computer starts only when the bot uses it", () => {
     await finish(bot.id);
 
     const line = "Stranded's cloud computer stopped responding, so MausBot replaced it with a new one. Files that were only on the old computer are gone.";
-    const shown = (await task(bot.id)).messages.filter((message: any) => message.tool?.name?.startsWith("recovery:")).map((message: any) => message.tool.name);
-    expect(shown).toEqual([`recovery: ${line}`]);
-    const inbox = events.frames.filter((frame: any) => frame.kind === "notify" && frame.notification?.botId === bot.id && frame.notification.kind === "notice");
-    expect(inbox.map((frame: any) => frame.notification.body)).toEqual([line]);
+    expect(await recoveryLines(bot.id)).toEqual([`recovery: ${line}`]);
+    expect(inboxNotices(bot.id)).toEqual([line]);
+    await apiOk("PATCH", "/api/config", { features: { cloudComputerAutoReplace: false } });
     await apiOk("DELETE", `/api/bots/${bot.id}`);
   }, 60_000);
 

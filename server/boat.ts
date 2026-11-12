@@ -300,8 +300,13 @@ async function confirmAcceptedBoatDeletion(
   return reconcileRecordedBoatDeletion(cfg, next, pollDelaysMs, true);
 }
 
+/** One delete in flight per installation, whoever asked: a burst of deletes is never sent to the provider at once. */
+let deletionInFlight: Promise<unknown> = Promise.resolve();
+export const requestRecordedBoatDeletion = (...args: Parameters<typeof sendRecordedBoatDeletion>): ReturnType<typeof sendRecordedBoatDeletion> => {
+  const run = deletionInFlight.then(() => sendRecordedBoatDeletion(...args)); deletionInFlight = run.catch(() => undefined); return run; };
+
 /** Send DELETE only after the immutable target is on disk. */
-export async function requestRecordedBoatDeletion(
+async function sendRecordedBoatDeletion(
   cfg: AppConfig,
   identity: { boxId: string; name: string; ownerBotId: string | null },
   pollDelaysMs: readonly number[] = BOAT_DELETE_OPERATION_POLL_DELAYS_MS,
@@ -309,10 +314,7 @@ export async function requestRecordedBoatDeletion(
   const deletion = prepareBoatDeletion(identity);
   let removed: Awaited<ReturnType<typeof boatJson>>;
   try {
-    removed = await boatJson(cfg, `/sandboxes/${identity.boxId}`, {
-      method: "DELETE",
-      headers: { "X-Ascii-Confirm-Delete": identity.boxId },
-    });
+    removed = await boatJson(cfg, `/sandboxes/${identity.boxId}`, { method: "DELETE", headers: { "X-Ascii-Confirm-Delete": identity.boxId }, signal: AbortSignal.timeout(60_000) });
   } catch (error) {
     throw Object.assign(
       new Error("Could not confirm whether boat.dev accepted the delete. The computer was kept fenced; retry Delete to reconcile it"),
@@ -338,10 +340,7 @@ function boatBotNameParts(botId: string): { prefix: string; hash: string } {
   return { prefix, hash };
 }
 
-function legacyBoatNameFor(botId: string): string {
-  const { prefix, hash } = boatBotNameParts(botId);
-  return `ogb-${prefix}-${hash}`;
-}
+function legacyBoatNameFor(botId: string): string { const { prefix, hash } = boatBotNameParts(botId); return `ogb-${prefix}-${hash}`; }
 
 export async function boatNameFor(botId: string) {
   const { prefix, hash } = boatBotNameParts(botId);
@@ -895,10 +894,8 @@ export const boatConfigured = (cfg: AppConfig) => Boolean(boatAccount(cfg));
 const usesIncludedBoat = (cfg: AppConfig): boolean => boatAccount(cfg)?.included === true;
 
 /** Configured-or-not for Settings, never the token. */
-export function describeBoatAccount(cfg: AppConfig): { configured: boolean; included?: true } {
-  const account = boatAccount(cfg);
-  return { configured: Boolean(account), ...(account?.included ? { included: true as const } : {}) };
-}
+export const describeBoatAccount = (cfg: AppConfig): { configured: boolean; included?: true } => {
+  const account = boatAccount(cfg); return { configured: Boolean(account), ...(account?.included ? { included: true as const } : {}) }; };
 
 export async function verifyToken(token: string): Promise<{ ok: true } | { ok: false; message: string; rejected?: true }> {
   try {

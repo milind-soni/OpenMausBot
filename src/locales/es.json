@@ -6481,6 +6481,7 @@
   "server.cloudComputer.restarted": "La computadora en la nube de {name} dejó de responder, así que MausBot la reinició. Ya responde de nuevo; los programas que tenía abiertos se cerraron.",
   "server.cloudComputer.capped": "La computadora en la nube de {name} volvió a dejar de responder menos de una hora después de ser reemplazada, así que MausBot la dejó como está. Reemplazar computadora, en el panel de la computadora, lo intenta una vez más.",
   "server.cloudComputer.unreachable": "Ahora mismo no se puede acceder a las computadoras en la nube. MausBot conservó la computadora en la nube de {name} y la volverá a revisar.",
+  "server.cloudComputer.needsPerson": "La computadora en la nube de {name} dejó de responder. Reemplazar computadora, en el panel de la computadora, le da una nueva; los archivos que solo están en la computadora anterior se pierden.",
   "computer.recovery.notResponding": "Esta computadora en la nube no responde. MausBot la está revisando y la reiniciará o la reemplazará.",
   "computer.recovery.restarting": "Esta computadora en la nube no responde. MausBot la está reiniciando.",
   "computer.recovery.replacing": "Esta computadora en la nube no responde. MausBot la está reemplazando.",

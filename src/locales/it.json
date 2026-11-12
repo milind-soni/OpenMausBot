@@ -7104,6 +7104,7 @@
   "server.cloudComputer.restarted": "Il computer cloud di {name} non rispondeva più, quindi MausBot l'ha riavviato. Ora risponde di nuovo; i programmi aperti sono stati chiusi.",
   "server.cloudComputer.capped": "Il computer cloud di {name} ha smesso di nuovo di rispondere entro un'ora dalla sostituzione, quindi MausBot l'ha lasciato com'è. Sostituisci computer, nel pannello del computer, riprova una volta.",
   "server.cloudComputer.unreachable": "Al momento i computer cloud non sono raggiungibili. MausBot ha tenuto il computer cloud di {name} e lo ricontrollerà.",
+  "server.cloudComputer.needsPerson": "Il computer cloud di {name} non risponde più. Sostituisci computer, nel pannello del computer, gliene dà uno nuovo; i file che sono solo sul vecchio computer vanno persi.",
   "computer.recovery.notResponding": "Questo computer cloud non risponde. MausBot lo sta controllando e lo riavvierà o lo sostituirà.",
   "computer.recovery.restarting": "Questo computer cloud non risponde. MausBot lo sta riavviando.",
   "computer.recovery.replacing": "Questo computer cloud non risponde. MausBot lo sta sostituendo.",

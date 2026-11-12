@@ -7245,6 +7245,7 @@
   "server.cloudComputer.restarted": "Komputer w chmurze bota {name} przestał odpowiadać, więc MausBot go uruchomił ponownie. Znów odpowiada; otwarte na nim programy zostały zamknięte.",
   "server.cloudComputer.capped": "Komputer w chmurze bota {name} znów przestał odpowiadać w ciągu godziny od wymiany, więc MausBot zostawił go bez zmian. Zastąp komputer w panelu komputera spróbuje jeszcze raz.",
   "server.cloudComputer.unreachable": "Komputery w chmurze są teraz nieosiągalne. MausBot zachował komputer w chmurze bota {name} i sprawdzi go ponownie.",
+  "server.cloudComputer.needsPerson": "Komputer w chmurze bota {name} przestał odpowiadać. Zastąp komputer w panelu komputera daje nowy; pliki, które są tylko na starym komputerze, zostaną utracone.",
   "computer.recovery.notResponding": "Ten komputer w chmurze nie odpowiada. MausBot go sprawdza i uruchomi go ponownie albo zastąpi.",
   "computer.recovery.restarting": "Ten komputer w chmurze nie odpowiada. MausBot uruchamia go ponownie.",
   "computer.recovery.replacing": "Ten komputer w chmurze nie odpowiada. MausBot go zastępuje.",

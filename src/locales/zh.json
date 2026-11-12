@@ -7968,6 +7968,7 @@
   "server.cloudComputer.restarted": "{name} 的云电脑停止响应，所以 MausBot 重启了它。它已恢复响应；上面打开的程序已被关闭。",
   "server.cloudComputer.capped": "{name} 的云电脑在被替换后一小时内再次停止响应，所以 MausBot 没有再动它。在电脑面板中点“替换电脑”可以再试一次。",
   "server.cloudComputer.unreachable": "现在无法连接云电脑。MausBot 保留了 {name} 的云电脑，稍后会再检查。",
+  "server.cloudComputer.needsPerson": "{name} 的云电脑停止响应了。在电脑面板中点“替换电脑”可换一台新的；只在旧电脑上的文件会丢失。",
   "computer.recovery.notResponding": "这台云电脑没有响应。MausBot 正在检查，并会重启或替换它。",
   "computer.recovery.restarting": "这台云电脑没有响应。MausBot 正在重启它。",
   "computer.recovery.replacing": "这台云电脑没有响应。MausBot 正在替换它。",

@@ -10,7 +10,7 @@ import { boatHealth, DEAD_COMPUTER, type BoatHealth } from "./boat-health.ts";
 import { cloudFailureOf } from "./boat-limit.ts";
 import { DATA_DIR, type AppConfig } from "./config.ts";
 import {
-  CLOUD_COMPUTER_CAPPED, CLOUD_COMPUTER_NOT_RESPONDING, CLOUD_COMPUTER_REPLACED, CLOUD_COMPUTER_REPLACED_BY_PERSON,
+  CLOUD_COMPUTER_CAPPED, CLOUD_COMPUTER_NEEDS_PERSON, CLOUD_COMPUTER_NOT_RESPONDING, CLOUD_COMPUTER_REPLACED, CLOUD_COMPUTER_REPLACED_BY_PERSON,
   CLOUD_COMPUTER_RESTARTED, CLOUD_COMPUTER_UNREACHABLE, recoveryUnderWay,
   type CloudComputerPersonLine, type CloudComputerRecovery, type CloudComputerRecoveryState,
 } from "../shared/cloud-computer-recovery.ts";
@@ -35,6 +35,16 @@ interface Replacement {
   toldPerson?: true;
 }
 
+/** Whether a dead computer is deleted and replaced without the person. Off unless OMB_CLOUD_COMPUTER_AUTO_REPLACE is "1" or
+ * config.json has `"features": {"cloudComputerAutoReplace": true}`; the environment, "1" or "0", wins. Off by default until
+ * the provider confirms that deleting a computer whose host is unreachable is safe for the rest of the account. */
+export function cloudComputerAutoReplace(cfg: Pick<AppConfig, "features">, env: NodeJS.ProcessEnv = process.env): boolean {
+  const override = env.OMB_CLOUD_COMPUTER_AUTO_REPLACE?.trim();
+  if (override === "1") return true;
+  if (override === "0") return false;
+  return cfg.features?.cloudComputerAutoReplace === true;
+}
+
 export interface BoatRecoveryDeps {
   cfg(): AppConfig;
   /** Posts the person's line in the owner's chat and Inbox; an owner with no chat of its own (a team's computer) has none. */
@@ -45,16 +55,18 @@ export interface BoatRecoveryDeps {
   now?: () => number;
   health?: BoatHealth;
   pollMs?: number;
+  autoReplace?: () => boolean;
 }
 
 type Dead = { boxId: string; name: string };
-type ReplaceOutcome = "confirmed" | "pending" | "kept" | "capped" | "failed";
+type ReplaceOutcome = "confirmed" | "pending" | "kept" | "held" | "capped" | "failed";
 
 export function createBoatRecovery(deps: BoatRecoveryDeps) {
   const health = deps.health ?? boatHealth;
   const now = deps.now ?? Date.now;
   const file = deps.file ?? join(DATA_DIR, "boat-replacements.json");
   const pollMs = deps.pollMs ?? POLL_MS;
+  const autoReplace = deps.autoReplace ?? (() => cloudComputerAutoReplace(deps.cfg()));
   const states = new Map<string, CloudComputerRecovery & { boxId: string }>();
   const lanes = new Map<string, Promise<unknown>>();
   const restarts = new Map<string, number>();
@@ -135,11 +147,16 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
     const cfg = deps.cfg();
     const entries = read();
     const recorded = entries.find((entry) => entry.boxId === target.boxId);
+    if (!opts.manual && !recorded && health.answeredWithin(target.boxId, DEAD_COMPUTER.answeredGraceMs)) {
+      clear(owner, target.boxId);
+      return "kept";
+    }
+    if (!opts.manual && !autoReplace()) {
+      tellOnce(owner, target.boxId, "needs-person", "needsPerson");
+      deps.log(`cloud computer ${owner}: ${target.boxId} is ${opts.dead ? "dead" : "not responding"}; automatic replacement is off, so it waits for the person`);
+      return "held";
+    }
     if (!opts.manual && !recorded) {
-      if (health.answeredWithin(target.boxId, DEAD_COMPUTER.answeredGraceMs)) {
-        clear(owner, target.boxId);
-        return "kept";
-      }
       const recent = entries.filter((entry) => entry.owner === owner && !entry.manual && now() - entry.at < HOUR_MS);
       if (recent.length >= DEAD_COMPUTER.replacementsPerHour) {
         tellOnce(owner, target.boxId, "capped", "capped");
@@ -251,6 +268,7 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
       throw Object.assign(new Error("it stopped working within an hour of being replaced, and MausBot replaces it at most once an hour; Replace computer in the computer panel tries once more"), { status: 409 });
     }
     if (outcome === "kept") throw Object.assign(new Error(CLOUD_COMPUTER_NOT_RESPONDING), { status: 409 });
+    if (outcome === "held") throw Object.assign(new Error(CLOUD_COMPUTER_NEEDS_PERSON), { status: 409 });
     throw Object.assign(new Error("the previous cloud computer deletion finished — retry to create a new computer"),
       { status: 409, code: outcome === "confirmed" ? BOAT_DELETION_FINISHED : BOAT_DELETING });
   });
@@ -263,7 +281,7 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
       const age = now() - found.at;
       const over = recoveryUnderWay(found.state)
         ? !lanes.has(owner) && !timers.has(owner) && age >= STALE_MS
-        : age >= HOUR_MS || ((found.state === "unreachable" || found.state === "capped") && health.answeredWithin(found.boxId, age));
+        : age >= HOUR_MS || (["unreachable", "capped", "needs-person"].includes(found.state) && health.answeredWithin(found.boxId, age));
       if (over) {
         clear(owner, found.boxId);
         return null;
@@ -280,6 +298,7 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
       if (phase === "before") return null;
       if (found?.boxId === boxId && found.state === "unreachable") return CLOUD_COMPUTER_UNREACHABLE;
       if (found?.boxId === boxId && found.state === "capped") return CLOUD_COMPUTER_CAPPED;
+      if (found?.boxId === boxId && found.state === "needs-person") return CLOUD_COMPUTER_NEEDS_PERSON;
       return health.notRespondingSince(boxId) === null ? null : CLOUD_COMPUTER_NOT_RESPONDING;
     },
     /** Told once, with the first call on the owner's computer after a replacement or a restart. */

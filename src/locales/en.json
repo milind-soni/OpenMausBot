@@ -8188,6 +8188,7 @@
   "server.cloudComputer.restarted": "{name}'s cloud computer stopped responding, so MausBot restarted it. It answers again; programs that were open on it were closed.",
   "server.cloudComputer.capped": "{name}'s cloud computer stopped responding again within an hour of being replaced, so MausBot left it as it is. Replace computer in the computer panel tries once more.",
   "server.cloudComputer.unreachable": "Cloud computers can't be reached right now. MausBot kept {name}'s cloud computer and will check it again.",
+  "server.cloudComputer.needsPerson": "{name}'s cloud computer stopped responding. Replace computer in the computer panel gives it a new one; files only on the old computer are lost.",
   "computer.recovery.notResponding": "This cloud computer isn't responding. MausBot is checking it and will restart or replace it.",
   "computer.recovery.restarting": "This cloud computer isn't responding. MausBot is restarting it.",
   "computer.recovery.replacing": "This cloud computer isn't responding. MausBot is replacing it.",
