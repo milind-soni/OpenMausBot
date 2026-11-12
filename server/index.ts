@@ -10440,8 +10440,7 @@ async function runClaimedGroupMemberTurn(
   if (outcome === "stalled") return false;
   // Fallback only while this invocation still owns the room, or it would clear a newer speaker's state.
   groupSpeakers.delete(threadId);
-  const remaining = activeGroupSpeaker(group.id);
-  markGroupThreadUnreadAfterTurn(store, group.id, threadId, remaining?.botId ?? null);
+  markGroupThreadUnreadAfterTurn(store, group.id, threadId, activeGroupSpeaker(group.id)?.botId ?? null);
   if (store.bot(bot.id)?.busy) {
     store.setActivity(bot.id, "idle");
   }
