@@ -60,7 +60,7 @@ export interface AppTriggerManagerOptions {
   botState: (botId: string) => "ready" | "busy" | "missing";
   runs: {
     enqueue(input: { webhookId: string; webhookName: string; prompt: string; botId: string; runOn: RoutineRunOn; deliveryId: string; receivedAt: number; eventSource: "app"; sameConversation?: boolean }): { id: string };
-    merge(triggerId: string, eventId: string, merge: (prompt: string) => string | null): { id: string } | null;
+    merge(triggerId: string, eventId: string, sameConversation: boolean, merge: (prompt: string) => string | null): { id: string } | null;
     receipt(triggerId: string, eventId: string): { id: string } | null;
     pending(triggerId: string): number;
     cancelQueued(triggerId: string, message: string): void;
@@ -513,7 +513,7 @@ export class AppTriggerManager {
         continue;
       }
       const block = eventBlock(trigger, { id: event.id, receivedAt: event.receivedAt, test: event.kind === "test", data });
-      const joined = this.options.runs.merge(trigger.id, event.id, (prompt) => mergeEventBlock(prompt, block));
+      const joined = this.options.runs.merge(trigger.id, event.id, trigger.sameConversation === true, (prompt) => mergeEventBlock(prompt, block));
       let runId = joined?.id;
       if (!runId) {
         if (this.options.runs.pending(trigger.id) >= DEFAULT_MAX_PENDING_RUNS) {

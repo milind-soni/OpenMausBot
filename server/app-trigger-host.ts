@@ -77,7 +77,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     botState: deps.botState,
     runs: {
       enqueue: (input) => deps.routines().enqueueWebhook(input),
-      merge: (triggerId, eventId, merge) => deps.routines().mergeIntoQueuedRun(triggerId, eventId, merge),
+      merge: (triggerId, eventId, sameConversation, merge) => deps.routines().mergeIntoQueuedRun(triggerId, eventId, sameConversation, merge),
       receipt: (triggerId, eventId) => deps.routines().webhookRunReceipt(triggerId, eventId),
       pending: (triggerId) => deps.routines().activeWebhookRunCount(triggerId),
       cancelQueued: (triggerId, message) => deps.routines().cancelQueuedWebhook(triggerId, message),

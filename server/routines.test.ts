@@ -4152,4 +4152,14 @@ describe("event automations that keep one conversation", () => {
     expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1", "thread-2"]);
     expect(h.manager.listRuns().every((run) => run.sameConversation === undefined)).toBe(true);
   });
+
+  it("joins a burst only into a waiting run with the same conversation setting", () => {
+    const h = harness();
+    const queued = event(h, "d1", false);
+    const add = (prompt: string) => `${prompt}\n+event`;
+    // The option was turned on after the first event: the next one must not ride along in the old run.
+    expect(h.manager.mergeIntoQueuedRun("hook", "d2", true, add)).toBeNull();
+    expect(h.manager.mergeIntoQueuedRun("hook", "d3", false, add)).toEqual({ id: queued.id });
+    expect(h.manager.listRuns().find((run) => run.id === queued.id)?.prompt).toBe("Handle it\n+event");
+  });
 });

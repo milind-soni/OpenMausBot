@@ -54,7 +54,7 @@ function manager(overrides: Partial<AppTriggerManagerOptions> = {}) {
         if (failure === "after-save") throw new Error("crashed after the run was saved");
         return run;
       },
-      merge: (triggerId, eventId, merge) => routines.mergeIntoQueuedRun(triggerId, eventId, merge),
+      merge: (triggerId, eventId, sameConversation, merge) => routines.mergeIntoQueuedRun(triggerId, eventId, sameConversation, merge),
       receipt: (triggerId, eventId) => routines.webhookRunReceipt(triggerId, eventId),
       pending: (triggerId) => routines.activeWebhookRunCount(triggerId),
       cancelQueued: (triggerId, message) => routines.cancelQueuedWebhook(triggerId, message),
