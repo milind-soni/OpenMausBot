@@ -3938,7 +3938,5 @@
   "settings.simple.billing.included": "Inklusive Nutzung in diesem Monat",
   "settings.simple.billing.summary": "{percent} % der inklusiven Nutzung in diesem Monat",
   "settings.simple.billing.used": "genutzt",
-  "settings.skin.dressUp.title": "Meine Bots verkleiden",
-  "automations.sameConversationLabel": "Ein Gespräch fortführen",
-  "automations.sameConversationHelp": "Jeder Lauf geht im Gespräch des vorherigen Laufs weiter, damit der Bot sieht, was er zuvor getan hat. Läufe kommen nacheinander dran."
+  "settings.skin.dressUp.title": "Meine Bots verkleiden"
 }

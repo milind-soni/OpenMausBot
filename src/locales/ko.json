@@ -4723,8 +4723,6 @@
   "automations.address.keepOpen": "받을 수 있도록 {app}을 열어 두세요.",
   "automations.address.unavailable": "지금은 이 컴퓨터에서 받을 수 없어요.",
   "automations.more": "더 보기",
-  "automations.sameConversationLabel": "하나의 대화 유지",
-  "automations.sameConversationHelp": "실행할 때마다 이전 실행의 대화에서 이어가서, 봇이 전에 한 일을 알 수 있어요. 실행은 차례로 진행돼요.",
   "automations.address.showSecret": "비밀 값 / 설정 보기",
   "automations.address.secret": "비밀 값: {secret}",
   "automations.address.secretUnknown": "비밀 값은 한 번만 표시돼요. 새로 만들려면 주소를 복사하세요.",

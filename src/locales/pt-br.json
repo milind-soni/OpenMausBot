@@ -5071,8 +5071,6 @@
   "automations.address.keepOpen": "Mantenha o app {app} aberto para receber.",
   "automations.address.unavailable": "Este computador não pode receber chamadas agora.",
   "automations.more": "Mais",
-  "automations.sameConversationLabel": "Manter uma só conversa",
-  "automations.sameConversationHelp": "Cada execução continua na conversa da anterior, assim o bot vê o que fez antes. As execuções acontecem uma de cada vez.",
   "automations.address.showSecret": "Mostrar segredo / configurações",
   "automations.address.secret": "Segredo: {secret}",
   "automations.address.secretUnknown": "O segredo é mostrado uma vez. Copie o endereço para criar um novo.",

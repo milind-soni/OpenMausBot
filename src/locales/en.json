@@ -5386,8 +5386,6 @@
   "automations.address.keepOpen": "Keep {app} open so it can receive.",
   "automations.address.unavailable": "This computer can't receive right now.",
   "automations.more": "More",
-  "automations.sameConversationLabel": "Keep one conversation",
-  "automations.sameConversationHelp": "Each run continues in the previous run's conversation, so the bot sees what it did before. Runs take turns.",
   "automations.address.showSecret": "Show secret / settings",
   "automations.address.secret": "Secret: {secret}",
   "automations.address.secretUnknown": "The secret is shown once. Copy the address to make a new one.",
