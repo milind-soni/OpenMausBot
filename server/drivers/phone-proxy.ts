@@ -361,7 +361,7 @@ function coerce(field: string, value: unknown): unknown {
   const { type, enum: choices } = STEP_PROPERTIES[field];
   if (type === "number" || type === "integer") return toNumber(value);
   if (type === "boolean") return value === "true" || value === "false" ? value === "true" : value;
-  if (type === "string") return choices ? lower(value) : String(value);
+  if (type === "string") return choices ? lower(value) : typeof value === "boolean" ? value : String(value);
   return value;
 }
 
@@ -372,6 +372,7 @@ function typeRules(action: StepAction): StepRule[] {
       return [{ ok: (step) => step[field] === undefined || typeof step[field] === "boolean", needs: `${field} as true or false`, example: { ...STEP_EXAMPLES[action], [field]: true } }];
     }
     if (choices) return [{ ok: (step) => step[field] === undefined || choices.includes(String(step[field])), needs: `${field} as one of ${choices.join(", ")}` }];
+    if (type === "string") return [{ ok: (step) => step[field] === undefined || typeof step[field] === "string", needs: `${field} as a string, not true or false` }];
     return [];
   });
 }
