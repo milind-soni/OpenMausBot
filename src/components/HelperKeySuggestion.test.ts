@@ -1,6 +1,7 @@
 import { Children, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PRODUCT_NAME } from "@/lib/brand";
 import type { Message } from "@/state/store";
 import { HelperKeySuggestion } from "./HelperKeySuggestion";
 import { richRowKind } from "./RichMessageRow";
@@ -59,5 +60,13 @@ describe("the add-a-key suggestion card", () => {
     expect(answered.html).toContain("Okay, I won&#x27;t ask again.");
     expect(answered.add).toBeUndefined();
     expect(answered.notNow).toBeUndefined();
+  });
+
+  it("says it is a tip from the app and what the key and Jev are, so it never looks like a stranger's message", () => {
+    for (const view of [render(message()), render(message("notNow"))]) {
+      expect(view.html).toContain('data-testid="helper-suggestion-from"');
+      expect(view.html).toContain(`Tip from ${PRODUCT_NAME}`);
+      expect(view.html).toContain("A helper key lets a small model sort your mail without using your main AI. Jev (typesafe.ai) and Cloudflare Workers AI both offer one.");
+    }
   });
 });

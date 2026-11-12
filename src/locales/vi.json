@@ -2719,6 +2719,7 @@
   "keys.vps.descBefore": "Bí danh cấu hình SSH cho máy chủ ảo Linux VPS. {app} sử dụng cấu hình SSH và agent thông thường của bạn; ứng dụng không lưu trữ khóa hay mật khẩu. Hãy xem ",
   "keys.vps.descLink": "hướng dẫn thiết lập",
   "keys.vps.descAfter": " để biết định dạng bí danh SSH bắt buộc.",
+  "keys.vps.anyMachine": "Mọi máy Linux có Docker mà bạn truy cập được qua SSH đều dùng được, kể cả máy trong mạng Tailscale của bạn: dùng tên Tailscale của máy làm HostName cho alias.",
   "keys.vps.aria": "Bí danh cấu hình SSH của VPS tự quản trị",
   "keys.vps.removeAlias": "Xóa bí danh đã lưu",
   "usage.title": "Mức sử dụng",

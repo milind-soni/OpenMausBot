@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConfigStatus } from "@/state/store";
 import { cacheDesktopCapabilities, initialDesktopCapabilities } from "./desktop";
-import { fishSpeech } from "./fish-speech";
-import { fishListeningReady, listensHere, speechBridge } from "./speech";
+import { createEndpointer, fishSpeech } from "./fish-speech";
+import { CALL_ENDPOINT_MS, fishListeningReady, listensHere, speechBridge } from "./speech";
 
 const withDictation = (dictation: DesktopCapabilities["dictation"]): DesktopCapabilities =>
   ({ ...initialDesktopCapabilities(), dictation });
@@ -46,5 +46,26 @@ describe("listening readiness", () => {
   it("needs no key for the Mac's own recognizer, and nothing where dictation is unavailable", () => {
     expect(listensHere(withDictation(APPLE), null)).toBe(true);
     expect(listensHere(withDictation({ available: false, engine: "none", onDevice: false }), savedFish)).toBe(false);
+  });
+});
+
+describe("CALL_ENDPOINT_MS", () => {
+  const FRAME = 64;
+  const run = (endpoint: number, quietMs: number) => {
+    const heard = createEndpointer(endpoint, FRAME);
+    for (let i = 0; i < 10; i += 1) heard(0.1);
+    let last = heard(0);
+    for (let quiet = FRAME; quiet < quietMs; quiet += FRAME) last = heard(0);
+    return last;
+  };
+
+  it("keeps listening through a short thinking pause in a call", () => {
+    expect(CALL_ENDPOINT_MS).toBeGreaterThanOrEqual(1_500);
+    expect(run(CALL_ENDPOINT_MS, 1_200)).toBe("speaking");
+  });
+
+  it("still ends the turn once the person has stopped speaking", () => {
+    expect(CALL_ENDPOINT_MS).toBeLessThanOrEqual(2_500);
+    expect(run(CALL_ENDPOINT_MS, CALL_ENDPOINT_MS + FRAME)).toBe("done");
   });
 });

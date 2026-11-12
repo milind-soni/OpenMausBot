@@ -1424,6 +1424,7 @@
   "keys.vps.descBefore": "SSH-Config-Alias für den Linux-VPS. {app} nutzt deine normale SSH-Konfiguration und den Agent; Schlüssel oder Passwörter werden nicht gespeichert. Sieh dir den ",
   "keys.vps.descLink": "Einrichtungs-Leitfaden",
   "keys.vps.descAfter": " für die benötigte Alias-Form an.",
+  "keys.vps.anyMachine": "Jeder Linux-Rechner mit Docker, den du per SSH erreichst, funktioniert, auch ein Computer in deinem Tailscale-Netzwerk: Trag seinen Tailscale-Namen als HostName des Alias ein.",
   "keys.vps.aria": "SSH-Config-Alias des selbst gehosteten VPS",
   "keys.vps.removeAlias": "Gespeicherten Alias entfernen",
   "usage.title": "Nutzung",

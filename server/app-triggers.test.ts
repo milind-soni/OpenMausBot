@@ -54,7 +54,7 @@ function manager(overrides: Partial<AppTriggerManagerOptions> = {}) {
         if (failure === "after-save") throw new Error("crashed after the run was saved");
         return run;
       },
-      merge: (triggerId, eventId, merge) => routines.mergeIntoQueuedRun(triggerId, eventId, merge),
+      merge: (triggerId, eventId, sameConversation, merge) => routines.mergeIntoQueuedRun(triggerId, eventId, sameConversation, merge),
       receipt: (triggerId, eventId) => routines.webhookRunReceipt(triggerId, eventId),
       pending: (triggerId) => routines.activeWebhookRunCount(triggerId),
       cancelQueued: (triggerId, message) => routines.cancelQueuedWebhook(triggerId, message),
@@ -402,5 +402,24 @@ describe("automations made before the owner kept the managed service out", () =>
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe("app-event automation that keeps one conversation", () => {
+  it("saves the option, hands it to each run, and turns it off again", async () => {
+    const triggers = manager();
+    const trigger = await triggers.create({ botId: "bot-1", name: "Order replies", prompt: "Draft a reply.", app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE", sameConversation: true });
+    expect(trigger.sameConversation).toBe(true);
+    await broker.deliver(trigger.remote.triggerId!, { subject: "Order #1" }, "msg_same_1");
+    await drain(triggers);
+    expect(runsOf(trigger.id)[0]).toMatchObject({ eventSource: "app", sameConversation: true });
+    expect(manager().get(trigger.id)?.sameConversation).toBe(true);
+
+    expect(await triggers.update(trigger.id, { sameConversation: false })).not.toHaveProperty("sameConversation");
+    routines.cancelQueuedWebhook(trigger.id, "test");
+    await broker.deliver(trigger.remote.triggerId!, { subject: "Order #2" }, "msg_same_2");
+    await drain(triggers);
+    expect(runsOf(trigger.id)[0]).toMatchObject({ deliveryId: "msg_same_2", status: "queued" });
+    expect(runsOf(trigger.id)[0]).not.toHaveProperty("sameConversation");
   });
 });

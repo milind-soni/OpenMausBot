@@ -3557,6 +3557,7 @@
   "keys.vps.descBefore": "Linux VPS의 SSH 설정 별칭이에요. {app}은 평소 쓰는 SSH 설정과 에이전트를 쓰며, 키나 비밀번호를 저장하지 않아요. 필요한 SSH 별칭 형식은 ",
   "keys.vps.descLink": "설정 안내",
   "keys.vps.descAfter": "를 참고하세요.",
+  "keys.vps.anyMachine": "SSH로 접속할 수 있고 Docker가 있는 Linux 컴퓨터라면 무엇이든 됩니다. Tailscale 네트워크의 컴퓨터도 가능합니다. 별칭의 HostName에 그 Tailscale 이름을 넣으세요.",
   "keys.vps.aria": "직접 호스팅하는 VPS의 SSH 설정 별칭",
   "keys.vps.removeAlias": "저장된 별칭 제거",
   "usage.title": "사용량",

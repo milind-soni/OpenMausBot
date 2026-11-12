@@ -178,8 +178,11 @@ export function engineSessionFolders(dataDir: string, environments: Iterable<Rec
     if (codexFolder) codex.add(codexFolder);
     if (home) pi.add(join(home, ".pi", "agent"));
   }
-  const plans = join(resolve(dataDir), "providers", "chatgpt-plan");
-  for (const plan of entries(plans)) codex.add(join(plans, plan, "codex"));
+  // MausBot's own Codex homes (codex-shared-home.ts): a ChatGPT plan's, and those of turns on the person's own sign-in.
+  for (const kind of ["chatgpt-plan", "codex-own"]) {
+    const homes = join(resolve(dataDir), "providers", kind);
+    for (const home of entries(homes)) codex.add(join(homes, home, "codex"));
+  }
   return { claude: [...claude], codex: [...codex], pi: [...pi] };
 }
 
