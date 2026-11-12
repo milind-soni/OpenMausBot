@@ -60,7 +60,8 @@ function splitPhone(source) {
       }
     }
     const phone = source.slice(start, end);
-    if (phone.includes("[data-skin=")) return { desktop: source.slice(0, start) + source.slice(end), phone };
+    // A skin's own token block (`:is([data-skin="x"]) {`), not a rule that only scopes by skin, like the settings sheet's.
+    if (/\[data-skin="[a-z-]+"\]\)?\s*\{/.test(phone)) return { desktop: source.slice(0, start) + source.slice(end), phone };
   }
   return { desktop: source, phone: "" };
 }
