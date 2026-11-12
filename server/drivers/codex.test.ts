@@ -1228,6 +1228,9 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
 
   it("uses the instance environment for the Codex process", async () => {
     const codexHome = join(scratch, "custom-codex-home");
+    // Signed in with a login file: MausBot keeps the person's home when it has none (the login may be in the keyring).
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(join(codexHome, "auth.json"), "{}");
     await create({ environment: { CODEX_HOME: codexHome } });
     const dump = join(scratch, "environment.json");
     process.env.FAKE_CODEX_DUMP = dump;
@@ -2233,6 +2236,10 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     });
     vi.stubEnv("OPENMAUSBOT_CHATGPT_TOKEN", "inherited-token-must-not-leak");
     vi.stubEnv("OPENAI_API_KEY", "inherited-api-key-must-not-leak");
+    if (!Object.keys(opts).length) {
+      mkdirSync(join(scratch, ".codex"), { recursive: true });
+      writeFileSync(join(scratch, ".codex", "auth.json"), "{}");
+    }
     await create({ ...opts, mode: "resume", environment: { HOME: scratch, USERPROFILE: scratch, CODEX_HOME: join(scratch, ".codex") } });
     const dump = join(scratch, "model-provider-resume.json");
     process.env.FAKE_CODEX_DUMP = dump;

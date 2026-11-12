@@ -4,7 +4,7 @@
 // Codex, but MausBot's chats stay in its own home: the Codex and ChatGPT apps list every session in the person's home as
 // their history. Company Codex homes never come here: they stay fully separate.
 import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { DATA_DIR } from "../config.ts";
@@ -81,8 +81,17 @@ export type CodexHomeLogin = "own" | "person";
  * home has the login it should: its own, or the person's (none when they have none). */
 export function linkSharedCodexHome(sharedHome: string | null, mausHome: string, login: CodexHomeLogin = "own"): boolean {
   mkdirSync(mausHome, { recursive: true, mode: 0o700 });
-  if (!sharedHome || !isAbsolute(sharedHome) || !isAbsolute(mausHome)) return false;
-  const shared = resolve(sharedHome), own = resolve(mausHome);
+  if (!isAbsolute(mausHome)) return false;
+  const own = resolve(mausHome);
+  const apart = (name: string) => CHATS.has(name) || DATABASE.test(name) || (login === "own" && PRIVATE.has(name));
+  // A link from before chats were kept apart goes, even when sharing fails below, so no new chat is written through it;
+  // the person's own files behind it stay as they are.
+  for (const name of readdirSync(own)) {
+    const path = join(own, name);
+    if (apart(name)) try { if (lstatSync(path).isSymbolicLink()) unlinkSync(path); } catch {}
+  }
+  if (!sharedHome || !isAbsolute(sharedHome)) return false;
+  const shared = resolve(sharedHome);
   if (inside(shared, own) || inside(own, shared)) return false;
   let names: string[];
   try {
@@ -91,12 +100,6 @@ export function linkSharedCodexHome(sharedHome: string | null, mausHome: string,
   } catch (error) {
     note(shared, `could not share your Codex home with MausBot's: ${(error as Error).message}`);
     return false;
-  }
-  const apart = (name: string) => CHATS.has(name) || DATABASE.test(name) || (login === "own" && PRIVATE.has(name));
-  // A link from before chats were kept apart goes; the person's own files behind it stay as they are.
-  for (const name of readdirSync(own)) {
-    const path = join(own, name);
-    if (apart(name)) try { if (lstatSync(path).isSymbolicLink()) unlinkSync(path); } catch {}
   }
   const kept: string[] = [];
   for (const name of new Set([...SHARED_FOLDERS, ...names])) {
@@ -119,23 +122,34 @@ function personLogin(shared: string, own: string): boolean {
   try { return lstatSync(join(own, "auth.json")).isSymbolicLink(); } catch { return true; }
 }
 
+/** System-wide Codex settings an administrator can use to choose where logins are kept (codex-cli 0.167.2). */
+const MANAGED_CODEX_CONFIGS = process.platform === "win32" ? [] : ["/etc/codex/managed_config.toml", "/etc/codex/requirements.toml"];
+
 /** `cli_auth_credentials_store = "keyring"` or `"auto"`: Codex may keep the login in the system keyring under a name made
- * from the home's path, which another home cannot reach, and a refresh there could leave the person's own copy stale. */
-function keyringLogin(home: string): boolean {
-  let text: string;
-  try { text = readFileSync(join(home, "config.toml"), "utf8"); } catch { return false; }
-  const topLevel = text.split(/^\s*\[/m)[0] ?? "";
+ * from the home's path, which another home cannot reach, and a refresh there could leave the person's own copy stale.
+ * Any system-wide setting about the login store counts too: it can choose the keyring without the home saying so. */
+function keyringLogin(home: string, managedConfigs: readonly string[]): boolean {
+  const read = (path: string) => { try { return readFileSync(path, "utf8"); } catch { return ""; } };
+  if (managedConfigs.some(path => read(path).includes("credentials_store"))) return true;
+  const topLevel = read(join(home, "config.toml")).split(/^\s*\[/m)[0] ?? "";
   return /^\s*cli_auth_credentials_store\s*=\s*["'](?:keyring|auto)["']/m.test(topLevel);
 }
 
 /** A turn on the person's own Codex sign-in runs in MausBot's Codex home for this instance, so its chats stay out of their
  * Codex and ChatGPT apps. It keeps their home when that is MausBot's already (a Team Cloud's engine homes, anything in
- * the data folder), when their login may be in the keyring, or when their login cannot be linked. */
-export function keepChatsOutOfCodexHistory(env: Record<string, string | undefined>, instanceId: string, dataDir = DATA_DIR, teamCloud = engineHomes.active()): void {
+ * the data folder), when their home has no login file or their login may be in the keyring, or when their login cannot
+ * be linked or MausBot's home cannot be made: the turn still runs. */
+export function keepChatsOutOfCodexHistory(env: Record<string, string | undefined>, instanceId: string, dataDir = DATA_DIR,
+  teamCloud = engineHomes.active(), managedConfigs: readonly string[] = MANAGED_CODEX_CONFIGS): void {
   const person = codexHome(env);
-  if (!person || teamCloud || inside(resolve(dataDir), person) || keyringLogin(person)) return;
+  if (!person || teamCloud || inside(resolve(dataDir), person) || !existsSync(join(person, "auth.json")) || keyringLogin(person, managedConfigs)) return;
   const home = join(resolve(dataDir), "providers", "codex-own", createHash("sha256").update(instanceId).digest("hex"), "codex");
-  if (!linkSharedCodexHome(person, home, "person")) return;
+  try {
+    if (!linkSharedCodexHome(person, home, "person")) return;
+  } catch (error) {
+    note(home, `could not make MausBot's Codex home, so this turn uses yours: ${(error as Error).message}`);
+    return;
+  }
   env.CODEX_HOME = home;
   // Codex keeps its databases here too unless config.toml names another folder.
   env.CODEX_SQLITE_HOME = home;

@@ -79,6 +79,18 @@ describe("linkSharedCodexHome", () => {
     expect(readFileSync(join(shared, "state_5.sqlite"), "utf8")).toBe("person's chat list");
   });
 
+  it("removes links to the person's chats even when their home cannot be shared", () => {
+    write(join(shared, "sessions", "2026", "rollout-person.jsonl"), "person's chat");
+    write(join(shared, "mcp-oauth-locks"), "a file where a shared folder should be");
+    mkdirSync(plan, { recursive: true });
+    symlinkSync(join(shared, "sessions"), join(plan, "sessions"));
+
+    expect(linkSharedCodexHome(shared, plan)).toBe(false);
+
+    expect(() => lstatSync(join(plan, "sessions"))).toThrow();
+    expect(readFileSync(join(shared, "sessions", "2026", "rollout-person.jsonl"), "utf8")).toBe("person's chat");
+  });
+
   it("links the person's own login into a home that uses it, and says when it cannot", () => {
     write(join(shared, "auth.json"), "person's sign-in");
     write(join(shared, "models_cache.json"), "person's models");
@@ -183,9 +195,9 @@ describe("linkSharedCodexHome", () => {
 describe("keepChatsOutOfCodexHistory", () => {
   const data = () => join(root, "data");
   const mausHome = (instanceId: string) => join(data(), "providers", "codex-own", createHash("sha256").update(instanceId).digest("hex"), "codex");
-  const turnEnv = (extra: Record<string, string> = {}, teamCloud = false) => {
+  const turnEnv = (extra: Record<string, string> = {}, teamCloud = false, managed: string[] = []) => {
     const env: Record<string, string | undefined> = { HOME: join(root, "person"), ...extra };
-    keepChatsOutOfCodexHistory(env, "codex", data(), teamCloud);
+    keepChatsOutOfCodexHistory(env, "codex", data(), teamCloud, managed);
     return env;
   };
 
@@ -216,5 +228,27 @@ describe("keepChatsOutOfCodexHistory", () => {
     rmSync(mausHome("codex"), { recursive: true });
     write(join(mausHome("codex"), "auth.json"), "a login of its own");
     expect(turnEnv().CODEX_HOME).toBeUndefined();
+  });
+
+  it("keeps the person's home when it has no login file or a system-wide setting may put the login in the keyring", () => {
+    write(join(shared, "config.toml"), 'model = "gpt-5"\n');
+    expect(turnEnv().CODEX_HOME).toBeUndefined();
+    expect(existsSync(mausHome("codex"))).toBe(false);
+
+    write(join(shared, "auth.json"), "person's sign-in");
+    const managed = join(root, "etc", "codex", "requirements.toml");
+    write(managed, 'cli_auth_credentials_store = "keyring"\n');
+    expect(turnEnv({}, false, [managed, join(root, "etc", "codex", "missing.toml")]).CODEX_HOME).toBeUndefined();
+    write(managed, 'allowed_sandbox_modes = ["read-only"]\n');
+    expect(turnEnv({}, false, [managed]).CODEX_HOME).toBe(mausHome("codex"));
+  });
+
+  it("keeps the person's home, and the turn going, when MausBot's Codex home cannot be made", () => {
+    write(join(shared, "auth.json"), "person's sign-in");
+    write(join(data(), "providers", "codex-own"), "a file where a folder should be");
+    let env: Record<string, string | undefined> = {};
+    expect(() => { env = turnEnv(); }).not.toThrow();
+    expect(env.CODEX_HOME).toBeUndefined();
+    expect(env.CODEX_SQLITE_HOME).toBeUndefined();
   });
 });
