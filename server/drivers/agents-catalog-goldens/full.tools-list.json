@@ -626,6 +626,10 @@
             "type": "string",
             "description": "What this specialist is responsible for and how it should work."
           },
+          "copy_from_bot_id": {
+            "type": "string",
+            "description": "To duplicate or replace a bot: its id. Copies its soul, role and model; instructions are added after."
+          },
           "modelSelection": {
             "type": "object",
             "additionalProperties": false,
@@ -654,9 +658,7 @@
           }
         },
         "required": [
-          "name",
-          "role",
-          "instructions"
+          "name"
         ]
       }
     },

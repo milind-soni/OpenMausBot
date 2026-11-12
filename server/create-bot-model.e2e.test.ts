@@ -56,7 +56,12 @@ it("Chief creation uses the workspace default or a validated explicit model with
       await create("Invalid specialist", invalid, 400);
     }
     await create("Third specialist");
-    await create("Fourth specialist");
+    // A replacement copies a managed bot's soul, role and model; extra instructions come after.
+    const copyOf = (copyFromBotId: string, expected = 201) => api("POST", "/api/internal/create-bot", {
+      fromBotId: chief.id, fromThreadId: chief.threadId, name: "Fourth specialist", copyFromBotId, instructions: "Pick up the open work.",
+    }, expected, token);
+    await copyOf("missing-bot", 404);
+    const copy = applied(await copyOf(second.id));
     await create("Fifth specialist", undefined, 429);
     writeFileSync(gate, "finish");
     await idle();
@@ -72,6 +77,9 @@ it("Chief creation uses the workspace default or a validated explicit model with
         soul: "Complete assigned work.",
       });
     }
+    expect(bots.find((bot: any) => bot.id === copy.id)).toMatchObject({
+      title: "Specialist", modelSelection: explicit, soul: "Complete assigned work.\n\nPick up the open work.",
+    });
     await api("PATCH", "/api/config", { defaultModelSelection: explicit });
     unlinkSync(gate);
     unlinkSync(fixture.fixtureDumpPath);
