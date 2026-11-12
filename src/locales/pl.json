@@ -4320,6 +4320,8 @@
   "automations.address.keepOpen": "Pozostaw {app} otwarty, aby mógł odbierać.",
   "automations.address.unavailable": "Ten komputer nie może teraz odbierać.",
   "automations.more": "Więcej",
+  "automations.sameConversationLabel": "Jedna rozmowa",
+  "automations.sameConversationHelp": "Każde uruchomienie toczy się dalej w rozmowie poprzedniego, więc bot widzi, co zrobił wcześniej. Uruchomienia idą po kolei.",
   "automations.address.showSecret": "Pokaż sekret / ustawienia",
   "automations.address.secret": "Sekret: {secret}",
   "automations.address.secretUnknown": "Sekret jest pokazywany tylko raz. Skopiuj adres, aby utworzyć nowy.",

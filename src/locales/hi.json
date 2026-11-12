@@ -3629,5 +3629,7 @@
   "settings.simple.billing.included": "इस महीने का शामिल इस्तेमाल",
   "settings.simple.billing.summary": "इस महीने के शामिल इस्तेमाल का {percent}%",
   "settings.simple.billing.used": "इस्तेमाल हुआ",
-  "settings.skin.dressUp.title": "मेरे बॉट्स को सजाएँ"
+  "settings.skin.dressUp.title": "मेरे बॉट्स को सजाएँ",
+  "automations.sameConversationLabel": "एक ही बातचीत रखें",
+  "automations.sameConversationHelp": "हर रन पिछले रन की बातचीत में ही आगे बढ़ता है, ताकि बॉट देख सके कि उसने पहले क्या किया। रन एक-एक करके चलते हैं।"
 }

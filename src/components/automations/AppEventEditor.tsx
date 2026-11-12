@@ -10,6 +10,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useStore, type Bot } from "@/state/store";
 import { Select } from "../Select";
+import { SameConversationOption } from "./SameConversationOption";
 import { suggestedName } from "../WebhookTrigger";
 
 const FIELD = "w-full rounded-xl border border-hairline/60 bg-panel px-3.5 py-2.5 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/70";
@@ -26,6 +27,7 @@ export function AppEventEditor({ trigger, bots, initialBotId, onClose, onSaved }
   const [config, setConfig] = useState<Record<string, string>>({});
   const [prompt, setPrompt] = useState(trigger?.prompt ?? "");
   const [name, setName] = useState(trigger?.name ?? "");
+  const [sameConversation, setSameConversation] = useState(trigger?.sameConversation ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -63,11 +65,11 @@ export function AppEventEditor({ trigger, bots, initialBotId, onClose, onSaved }
     setError("");
     try {
       const saved = trigger
-        ? await appTriggerApi.update(trigger.id, { name: name.trim() || trigger.name, prompt: prompt.trim(), filter: Object.keys(cleanFilter).length ? cleanFilter : null })
+        ? await appTriggerApi.update(trigger.id, { name: name.trim() || trigger.name, prompt: prompt.trim(), filter: Object.keys(cleanFilter).length ? cleanFilter : null, sameConversation })
         : await appTriggerApi.create({
           botId, app, event: chosen?.event ?? event, prompt: prompt.trim(), name: name.trim() || suggestedName(prompt, bot),
           ...(account ? { account } : {}), ...(Object.keys(cleanFilter).length ? { filter: cleanFilter } : {}),
-          ...(Object.keys(config).length ? { config } : {}),
+          ...(Object.keys(config).length ? { config } : {}), sameConversation,
         });
       onSaved?.(saved);
       onClose();
@@ -161,6 +163,7 @@ export function AppEventEditor({ trigger, bots, initialBotId, onClose, onSaved }
             <details className="rounded-xl border border-hairline/45 bg-inset/45 px-4 py-3">
               <summary className="cursor-pointer text-[13px] font-medium text-ink">{t("automations.more")}</summary>
               <label className="mt-4 block"><span className={LABEL}>{t("automations.editor.app.name")}</span><input value={name} onChange={(input) => setName(input.target.value)} placeholder={suggestedName(prompt, bots.find((bot) => bot.id === botId))} className={FIELD} /></label>
+              <div className="mt-3"><SameConversationOption checked={sameConversation} onChange={setSameConversation} /></div>
             </details>
           )}
           {error && <div role="alert" className="rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-3 text-[12px] text-danger">{error}</div>}

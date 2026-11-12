@@ -150,6 +150,10 @@ const TRIGGER_FIELDS_SCHEMA = {
     type: "boolean",
     description: "Only for updates: set true to remove an existing safety limit. Do not combine with timeout_minutes.",
   },
+  same_conversation: {
+    type: "boolean",
+    description: "app_event and webhook only: each run continues the previous run's conversation, so it sees earlier runs. Default false.",
+  },
   continuity: {
     type: "boolean",
     description: "Schedules only: give each run the last completed run's report, for work that builds on last time (QA passes, monitoring, follow-ups). Default false; false in an update starts fresh.",

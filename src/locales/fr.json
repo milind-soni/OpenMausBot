@@ -3775,5 +3775,7 @@
   "settings.simple.billing.included": "Utilisation incluse ce mois-ci",
   "settings.simple.billing.summary": "{percent} % de l'utilisation incluse ce mois-ci",
   "settings.simple.billing.used": "utilisé",
-  "settings.skin.dressUp.title": "Déguiser mes bots"
+  "settings.skin.dressUp.title": "Déguiser mes bots",
+  "automations.sameConversationLabel": "Garder une seule conversation",
+  "automations.sameConversationHelp": "Chaque exécution continue dans la conversation de la précédente, pour que le bot voie ce qu'il a déjà fait. Les exécutions se suivent."
 }

@@ -4914,6 +4914,8 @@
   "automations.address.keepOpen": "让 {app} 保持打开，才能接收内容。",
   "automations.address.unavailable": "这台电脑目前无法接收。",
   "automations.more": "更多",
+  "automations.sameConversationLabel": "保持同一个对话",
+  "automations.sameConversationHelp": "每次运行都在上一次运行的对话中继续，机器人能看到之前做过的事。运行会依次进行。",
   "automations.address.showSecret": "显示密钥 / 设置",
   "automations.address.secret": "密钥：{secret}",
   "automations.address.secretUnknown": "密钥只显示一次。复制地址即可生成新的密钥。",

@@ -1,6 +1,7 @@
 // The editor for an automation that runs when another app sends something: who does it and what it does, with the
 // rest under More. The words a person sees never say webhook, endpoint or payload.
 import { useRef, useState } from "react";
+import { SameConversationOption } from "./automations/SameConversationOption";
 import { Cloud, Laptop, Loader2, X } from "lucide-react";
 
 import { BotAvatar } from "@/components/Avatar";
@@ -28,6 +29,7 @@ export function WebhookEditor({ webhook, bots, initialBotId, onClose, onCredenti
   const [runOn, setRunOn] = useState<RoutineRunOn>(webhook?.runOn ?? "maus");
   const [eventTypes, setEventTypes] = useState((webhook?.eventTypes ?? []).join(", "));
   const [maxPendingRuns, setMaxPendingRuns] = useState(webhook?.maxPendingRuns?.toString() ?? "");
+  const [sameConversation, setSameConversation] = useState(webhook?.sameConversation ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -41,7 +43,7 @@ export function WebhookEditor({ webhook, bots, initialBotId, onClose, onCredenti
       setError(t("automations.editor.app.limitError", { max: WEBHOOK_MAX_PENDING_RUNS_LIMIT }));
       return;
     }
-    const input: WebhookTriggerInput = { name: name.trim() || suggestedName(prompt, bot), prompt: prompt.trim(), botId, runOn, ...webhookActivationDefaults(webhook), eventTypes: eventTypes.split(",").map((value) => value.trim()).filter(Boolean), maxPendingRuns: pendingLimit };
+    const input: WebhookTriggerInput = { name: name.trim() || suggestedName(prompt, bot), prompt: prompt.trim(), botId, runOn, ...webhookActivationDefaults(webhook), eventTypes: eventTypes.split(",").map((value) => value.trim()).filter(Boolean), maxPendingRuns: pendingLimit, sameConversation };
     setSaving(true);
     setError("");
     try {
@@ -92,6 +94,7 @@ export function WebhookEditor({ webhook, bots, initialBotId, onClose, onCredenti
               </div>
               <label className="block"><span className="mb-1.5 block text-[12px] font-medium text-ink-secondary">{t("automations.editor.app.events")}</span><input value={eventTypes} onChange={(event) => setEventTypes(event.target.value)} placeholder="push, workflow_run" className={FIELD} /><span className="mt-1.5 block text-[11px] text-ink-secondary">{t("automations.editor.app.eventsHelp")}</span></label>
               <label className="block"><span className="mb-1.5 block text-[12px] font-medium text-ink-secondary">{t("automations.editor.app.limit")}</span><input type="number" inputMode="numeric" min={1} max={WEBHOOK_MAX_PENDING_RUNS_LIMIT} step={1} value={maxPendingRuns} onChange={(event) => setMaxPendingRuns(event.target.value)} placeholder={String(WEBHOOK_DEFAULT_MAX_PENDING_RUNS)} className={FIELD} /><span className="mt-1.5 block text-[11px] text-ink-secondary">{t("automations.editor.app.limitHelp", { count: WEBHOOK_DEFAULT_MAX_PENDING_RUNS })}</span></label>
+              <SameConversationOption checked={sameConversation} onChange={setSameConversation} />
             </div>
           </details>
           {error && <div className="rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-3 text-[12px] text-danger">{error}</div>}

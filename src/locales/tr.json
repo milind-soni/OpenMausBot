@@ -5979,5 +5979,7 @@
   "settings.simple.billing.included": "Bu ayın dahil kullanımı",
   "settings.simple.billing.summary": "Bu ayın dahil kullanımının %{percent} kadarı",
   "settings.simple.billing.used": "kullanıldı",
-  "settings.skin.dressUp.title": "Botlarımı giydir"
+  "settings.skin.dressUp.title": "Botlarımı giydir",
+  "automations.sameConversationLabel": "Tek sohbeti sürdür",
+  "automations.sameConversationHelp": "Her çalıştırma bir öncekinin sohbetinde devam eder, böylece bot daha önce ne yaptığını görür. Çalıştırmalar sırayla yapılır."
 }

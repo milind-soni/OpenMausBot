@@ -4371,6 +4371,8 @@
   "automations.address.keepOpen": "Держите {app} открытым, чтобы он мог принимать.",
   "automations.address.unavailable": "Сейчас этот компьютер не может принимать.",
   "automations.more": "Ещё",
+  "automations.sameConversationLabel": "Одна беседа",
+  "automations.sameConversationHelp": "Каждый запуск продолжается в беседе предыдущего, поэтому бот видит, что делал раньше. Запуски идут по очереди.",
   "automations.address.showSecret": "Показать секрет / настройки",
   "automations.address.secret": "Секрет: {secret}",
   "automations.address.secretUnknown": "Секрет показывается один раз. Скопируйте адрес, чтобы создать новый.",

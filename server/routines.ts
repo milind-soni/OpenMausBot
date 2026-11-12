@@ -119,8 +119,8 @@ export interface RoutineRun extends RoutineLineCodes {
   /** Time spent waiting on the person's answers, which the run limit does not count. */
   waitedMs?: number;
   triggerSource?: RoutineRunTrigger;
-  /** "app": a connected-app event started it; "wait": a wait's follow-up did (its triggerSource stays "webhook", an outside event). */
-  eventSource?: "app" | "wait";
+  /** "app": a connected-app event started it; "wait": a wait's follow-up did (its triggerSource stays "webhook", an outside event). sameConversation: its trigger keeps one conversation (routine-same-conversation.ts). */
+  eventSource?: "app" | "wait"; sameConversation?: true;
   webhookId?: string;
   deliveryId?: string;
   sourceThreadId?: string;
@@ -740,7 +740,7 @@ export class RoutineManager {
 
   enqueueWebhook(input: {
     webhookId: string; webhookName: string; prompt: string; botId: string; runOn: RoutineRunOn; deliveryId: string; receivedAt: number;
-    eventSource?: "app" | "wait";
+    eventSource?: "app" | "wait"; sameConversation?: boolean;
     /** Where the run reports, instead of the event's own results chat. */
     resultsThreadId?: string;
   }): { id: string } {
@@ -754,19 +754,19 @@ export class RoutineManager {
       id: randomUUID(), routineId: input.webhookId, routineName: input.webhookName, prompt: input.prompt, target: "bot",
       botId: input.botId, runOn: input.runOn, scheduledFor: input.receivedAt, status: "queued", manual: false,
       triggerSource: "webhook", webhookId: input.webhookId, deliveryId: input.deliveryId, attachments: [], createdAt: this.now(),
-      resultsThreadId: input.resultsThreadId ?? this.options.eventResultsThread?.(input), ...(input.eventSource ? { eventSource: input.eventSource } : {}),
+      resultsThreadId: input.resultsThreadId ?? this.options.eventResultsThread?.(input), ...(input.eventSource ? { eventSource: input.eventSource } : {}), ...(input.sameConversation ? { sameConversation: true } : {}),
     };
     this.commitEvent(run, input.deliveryId, () => { this.runs.push(run); });
     return cloneRun(run);
   }
 
   /** Adds an outside event to its trigger's run that has not started yet, so a burst becomes one run. Null when there
-   *  is no such run or `merge` declines (the run is full). */
-  mergeIntoQueuedRun(webhookId: string, deliveryId: string, merge: (prompt: string) => string | null): { id: string } | null {
+   *  is no such run with the same conversation setting, or `merge` declines (the run is full). */
+  mergeIntoQueuedRun(webhookId: string, deliveryId: string, sameConversation: boolean, merge: (prompt: string) => string | null): { id: string } | null {
     this.assertWritable();
     const existing = this.webhookRunReceipt(webhookId, deliveryId);
     if (existing) return existing;
-    const run = this.runs.findLast((candidate) => candidate.webhookId === webhookId && candidate.status === "queued" && !candidate.threadId);
+    const run = this.runs.findLast((candidate) => candidate.webhookId === webhookId && candidate.status === "queued" && !candidate.threadId && (candidate.sameConversation === true) === sameConversation);
     const merged = run?.prompt === undefined ? null : merge(run.prompt);
     if (!run || merged === null) return null;
     const before = run.prompt;
@@ -1094,7 +1094,7 @@ export class RoutineManager {
           this.runChecks(checked.id, checkHold(this.runs, checked.id, now, run.id), run.id).catch((error) => console.error(`routines: the checks of ${checked.id} failed`, error));
           continue;
         }
-        const sameRoutineWorking = triggerSource === "schedule" && this.runs.some(other =>
+        const sameRoutineWorking = (triggerSource === "schedule" || run.sameConversation) && this.runs.some(other =>
           other.id !== run.id && other.routineId === run.routineId && ["running", "waiting"].includes(other.status));
         const state = sameRoutineWorking ? "busy" : this.targetState(run);
         if (state === "busy") {

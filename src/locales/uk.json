@@ -4051,5 +4051,7 @@
   "settings.simple.billing.included": "Включене використання цього місяця",
   "settings.simple.billing.summary": "{percent}% включеного використання цього місяця",
   "settings.simple.billing.used": "використано",
-  "settings.skin.dressUp.title": "Перевдягнути моїх ботів"
+  "settings.skin.dressUp.title": "Перевдягнути моїх ботів",
+  "automations.sameConversationLabel": "Одна розмова",
+  "automations.sameConversationHelp": "Кожен запуск продовжується в розмові попереднього, тож бот бачить, що робив раніше. Запуски йдуть по черзі."
 }

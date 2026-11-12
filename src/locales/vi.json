@@ -5979,5 +5979,7 @@
   "settings.simple.billing.included": "Mức dùng kèm theo trong tháng này",
   "settings.simple.billing.summary": "{percent}% mức dùng kèm theo trong tháng này",
   "settings.simple.billing.used": "đã dùng",
-  "settings.skin.dressUp.title": "Hóa trang cho bot của tôi"
+  "settings.skin.dressUp.title": "Hóa trang cho bot của tôi",
+  "automations.sameConversationLabel": "Giữ một cuộc trò chuyện",
+  "automations.sameConversationHelp": "Mỗi lần chạy tiếp tục trong cuộc trò chuyện của lần trước, để bot thấy những gì nó đã làm. Các lần chạy lần lượt diễn ra."
 }

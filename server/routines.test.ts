@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { previousEventThread } from "./routine-same-conversation.ts";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -4137,5 +4138,65 @@ describe("the scheduler wakes only when work is due", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("event automations that keep one conversation", () => {
+  const event = (h: ReturnType<typeof harness>, deliveryId: string, sameConversation = true) => h.manager.enqueueWebhook({
+    webhookId: "hook", webhookName: "New lead", prompt: "Handle it", botId: "maus-1", runOn: "maus", deliveryId, receivedAt: Date.now(),
+    ...(sameConversation ? { sameConversation } : {}),
+  });
+  const done = (h: ReturnType<typeof harness>, threadId: string) => h.manager.handleRuntimeEvent({
+    eventId: `done-${threadId}`, provider: "fake", threadId, createdAt: new Date().toISOString(), type: "turn.completed", ok: true,
+  });
+  const keepOne = (h: ReturnType<typeof harness>) => {
+    h.options.joinConversation = (run) => run.sameConversation ? previousEventThread(h.manager.listRuns(), run) : null;
+  };
+
+  it("continues the previous run's conversation, one run at a time", async () => {
+    const h = harness();
+    keepOne(h);
+    const first = event(h, "d1");
+    const second = event(h, "d2");
+    await h.manager.tick();
+    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1"]);
+    expect(h.manager.listRuns().find((run) => run.id === second.id)?.status).toBe("queued");
+
+    done(h, "thread-1");
+    await h.manager.tick();
+    expect(h.taskTitles).toHaveLength(1);
+    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1", "thread-1"]);
+    expect(h.manager.listRuns().find((run) => run.id === first.id)).toMatchObject({ status: "completed", threadId: "thread-1" });
+    expect(h.manager.listRuns().find((run) => run.id === second.id)).toMatchObject({ status: "running", threadId: "thread-1", sameConversation: true });
+    expect(new RoutineManager(h.options).listRuns().find((run) => run.id === second.id)?.sameConversation).toBe(true);
+  });
+
+  it("finds no earlier conversation for the first run, a run of another trigger, or another bot", () => {
+    const h = harness();
+    const first = event(h, "d1");
+    expect(previousEventThread(h.manager.listRuns(), first as never)).toBeNull();
+    expect(previousEventThread(h.manager.listRuns(), { id: "x", botId: "maus-1" })).toBeNull();
+  });
+
+  it("starts a new conversation for every run when the option is off", async () => {
+    const h = harness();
+    keepOne(h);
+    event(h, "d1", false);
+    await h.manager.tick();
+    done(h, "thread-1");
+    event(h, "d2", false);
+    await h.manager.tick();
+    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1", "thread-2"]);
+    expect(h.manager.listRuns().every((run) => run.sameConversation === undefined)).toBe(true);
+  });
+
+  it("joins a burst only into a waiting run with the same conversation setting", () => {
+    const h = harness();
+    const queued = event(h, "d1", false);
+    const add = (prompt: string) => `${prompt}\n+event`;
+    // The option was turned on after the first event: the next one must not ride along in the old run.
+    expect(h.manager.mergeIntoQueuedRun("hook", "d2", true, add)).toBeNull();
+    expect(h.manager.mergeIntoQueuedRun("hook", "d3", false, add)).toEqual({ id: queued.id });
+    expect(h.manager.listRuns().find((run) => run.id === queued.id)?.prompt).toBe("Handle it\n+event");
   });
 });
