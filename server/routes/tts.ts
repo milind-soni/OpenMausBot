@@ -3,6 +3,7 @@
 import type { AppConfig } from "../config.ts";
 import { redactSecretsInText } from "../redact.ts";
 import * as fish from "../tts/fish.ts";
+import * as deepgram from "../tts/deepgram.ts";
 import { voiceFailure } from "../tts/errors.ts";
 import * as tts from "../tts/index.ts";
 import { toUtterances, VOICE_FIRST_BLOCK_MAX_CHARS } from "../tts/speech-text.ts";
@@ -89,8 +90,9 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
         req.resume();
         return json(res, 400, { error: "content-type must be audio/wav" });
       }
-      const key = cfg.tts?.fishKey;
-      if (!key) {
+      const deepgramKey = process.env.DEEPGRAM_API_KEY || cfg.tts?.deepgramKey;
+      const fishKey = cfg.tts?.fishKey;
+      if (!deepgramKey && !fishKey) {
         req.resume();
         return json(res, 409, userError("serverError.voice.fishKeyRequired"));
       }
@@ -112,7 +114,10 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
       });
       if (!audio) return json(res, 413, { error: `audio exceeds ${TRANSCRIBE_MAX_BYTES} bytes` });
       try {
-        return json(res, 200, { text: await fish.transcribe(audio, mime, key) });
+        if (deepgramKey) {
+          return json(res, 200, { text: await deepgram.transcribe(audio, mime, deepgramKey) });
+        }
+        return json(res, 200, { text: await fish.transcribe(audio, mime, fishKey!) });
       } catch (e) {
         return json(res, 502, { error: e instanceof Error ? e.message : String(e), ...userErrorFields(e) });
       }

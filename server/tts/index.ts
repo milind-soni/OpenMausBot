@@ -6,9 +6,10 @@ import * as openai from "./openai.ts";
 import * as grok from "./grok.ts";
 import * as fish from "./fish.ts";
 import * as gemini from "./gemini.ts";
+import * as deepgram from "./deepgram.ts";
 import * as systemVoices from "./system-voices.ts";
 
-export type VoiceProvider = "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai";
+export type VoiceProvider = "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai" | "deepgram";
 
 export class NoVoiceConfigured extends Error {
   // Not a parameter property: the harness runs under strip-only `node --experimental-strip-types`, which rejects one at load.
@@ -34,6 +35,7 @@ const elevenLabs = (cfg: AppConfig) => voiceCredential(cfg.tts?.key);
  */
 export function voiceProvider(cfg: AppConfig): VoiceProvider {
   const provider = cfg.tts?.provider;
+  if (provider === "deepgram" || (!provider && process.env.DEEPGRAM_API_KEY)) return "deepgram";
   return provider === "gemini" || provider === "openai" || provider === "xai" || provider === "fish" || provider === "system" || provider === "chatterbox" ? provider : "elevenlabs";
 }
 
@@ -44,6 +46,7 @@ export function voiceProvider(cfg: AppConfig): VoiceProvider {
  */
 export function providerConfigured(cfg: AppConfig): boolean {
   const provider = voiceProvider(cfg);
+  if (provider === "deepgram") return Boolean(cfg.tts?.deepgramKey || process.env.DEEPGRAM_API_KEY);
   if (provider === "gemini") return Boolean(cfg.tts?.geminiKey);
   if (provider === "openai") return Boolean(cfg.openai?.key);
   if (provider === "xai") return Boolean(cfg.xai?.key);
@@ -60,6 +63,7 @@ export function providerConfigured(cfg: AppConfig): boolean {
  */
 export function voiceConfigured(cfg: AppConfig): boolean {
   const provider = voiceProvider(cfg);
+  if (provider === "deepgram") return Boolean((cfg.tts?.deepgramKey || process.env.DEEPGRAM_API_KEY) && (cfg.tts?.voice || "aura-2-asteria-en"));
   if (provider === "gemini") return Boolean(cfg.tts?.geminiKey && gemini.isSupportedVoice(cfg.tts?.voice));
   if (provider === "openai") return Boolean(cfg.openai?.key && cfg.tts?.voice);
   if (provider === "xai") return Boolean(cfg.xai?.key && cfg.tts?.voice);
@@ -79,6 +83,7 @@ export function voiceConfigured(cfg: AppConfig): boolean {
  */
 export function voiceReady(cfg: AppConfig, voiceId?: string): boolean {
   const provider = voiceProvider(cfg);
+  if (provider === "deepgram") return Boolean(cfg.tts?.deepgramKey || process.env.DEEPGRAM_API_KEY);
   if (provider === "gemini") return Boolean(cfg.tts?.geminiKey && gemini.isSupportedVoice(voiceId || cfg.tts?.voice));
   if (provider === "openai") return Boolean(cfg.openai?.key && (voiceId || cfg.tts?.voice));
   if (provider === "xai") return Boolean(cfg.xai?.key && (voiceId || cfg.tts?.voice));
@@ -136,6 +141,7 @@ export async function listVoices(
   search?: fish.VoiceSearch,
 ): Promise<elevenlabs.Voice[]> {
   const provider = voiceProvider(cfg);
+  if (provider === "deepgram") return deepgram.listVoices();
   if (provider === "gemini") return cfg.tts?.geminiKey ? gemini.listVoices() : [];
   if (provider === "openai") return cfg.openai?.key ? openai.listVoices() : [];
   if (provider === "xai") return cfg.xai?.key ? grok.listVoices(cfg.xai.key) : [];
@@ -177,6 +183,12 @@ export async function addSharedVoice(cfg: AppConfig, publicOwnerId: string, voic
  */
 export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: systemVoices.Runner, signal?: AbortSignal) {
   const provider = voiceProvider(cfg);
+  if (provider === "deepgram") {
+    const key = cfg.tts?.deepgramKey || process.env.DEEPGRAM_API_KEY;
+    if (!key) throw new NoVoiceConfigured("key", "Add a Deepgram API key to use Deepgram voice.");
+    const voice = voiceId || cfg.tts?.voice || "aura-2-asteria-en";
+    return deepgram.synthesize(text, voice, key, signal);
+  }
   if (provider === "gemini") {
     const key = cfg.tts?.geminiKey;
     if (!key) throw new NoVoiceConfigured("key", "Add a Gemini API key in Settings to use Gemini voice.");

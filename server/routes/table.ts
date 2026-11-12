@@ -6,6 +6,8 @@ import { announcementRoutes } from "./announcements.ts";
 import { cloudSyncRoutes } from "./cloud-sync.ts";
 import { ownMcpHttpRoutes } from "./own-mcp-http.ts";
 import { webPanelRoutes } from "./web-panels.ts";
+import { subBotRoutes } from "./subbots.ts";
+import { telephonyRoutes } from "./telephony.ts";
 
 export const PASS: unique symbol = Symbol("route.pass");
 
@@ -24,7 +26,7 @@ export interface RouteContext {
 export type RouteHandler = (ctx: RouteContext) => Promise<typeof PASS | void>;
 
 /** Modules with no wiring from index.ts are listed here; index.ts pushes the rest. */
-export const ROUTES: RouteHandler[] = [cloudSyncRoutes, ownMcpHttpRoutes, webPanelRoutes, announcementRoutes];
+export const ROUTES: RouteHandler[] = [cloudSyncRoutes, ownMcpHttpRoutes, webPanelRoutes, announcementRoutes, telephonyRoutes, subBotRoutes];
 
 /** True means stop routing. A handler that wrote a response but returned PASS still counts as answered. */
 export async function dispatchRoutes(routes: readonly RouteHandler[], ctx: RouteContext): Promise<boolean> {

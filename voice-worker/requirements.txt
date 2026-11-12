@@ -1,0 +1,6 @@
+livekit-agents[voice]>=1.8.11,<2
+livekit-plugins-silero~=1.8.11
+livekit-plugins-deepgram~=1.8.11
+livekit-plugins-openai~=1.8.11
+aiohttp>=3.9
+python-dotenv>=1.0
