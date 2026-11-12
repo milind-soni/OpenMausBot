@@ -1,3 +1,4 @@
+import { productName } from "./brand.ts";
 import type { LiveCallDeps } from "./live-call-controller.ts";
 import { openLiveSocket } from "./live-call-controller.ts";
 import { createLiveSession, liveAttachUrl, type LiveBot, type LiveEndpoint, type LiveHistoryMessage } from "./live-call.ts";
@@ -13,6 +14,8 @@ export interface LiveSessionWiringInput {
   othersOnLoopback(): boolean;
   /** Saves the Fish Audio agent the harness set up, with the account it belongs to. */
   saveFishAgent(agent: Required<Pick<LiveConfig, "fishAgentId" | "fishAgentFor">>): void;
+  /** The name a person reads, which names the Fish agent on their account; the brand's own by default. */
+  productName?(): string;
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
 }
@@ -28,7 +31,7 @@ export function liveSessionWiring(input: LiveSessionWiringInput): {
   const fetchImpl = input.fetchImpl ?? fetch;
 
   const setUpAgent = async (key: string, endpoint: LiveEndpoint): Promise<LiveEndpoint> => {
-    const fishAgentId = await setUpFishAgent(key, endpoint, fetchImpl);
+    const fishAgentId = await setUpFishAgent(key, endpoint, (input.productName ?? productName)(), fetchImpl);
     input.saveFishAgent({ fishAgentId, fishAgentFor: fishKeyPrint(key) });
     return { ...endpoint, model: fishAgentId };
   };

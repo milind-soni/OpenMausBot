@@ -46,9 +46,9 @@ export function usableFishAgent(live: LiveConfig | undefined, key: string): stri
   return live?.fishAgentFor === undefined || (key.trim() !== "" && live.fishAgentFor === fishKeyPrint(key)) ? id : null;
 }
 
-/** Fish API v1: a Live 3 agent in English with the client tool `delegate` and a system prompt each session may override
- * (`createFishLiveSession` sends one), published so sessions can start. Returns its id. */
-export async function setUpFishAgent(key: string, endpoint: LiveEndpoint, fetchImpl: typeof fetch = fetch): Promise<string> {
+/** Fish API v1: a Live 3 agent in English named for `product`, with the client tool `delegate` and a system prompt each
+ * session may override (`createFishLiveSession` sends one), published so sessions can start. Returns its id. */
+export async function setUpFishAgent(key: string, endpoint: LiveEndpoint, product: string, fetchImpl: typeof fetch = fetch): Promise<string> {
   const call = (method: string, path: string, body: unknown) => fishSetupRequest(fetchImpl, key, method, `${endpoint.apiBase}${path}`, body);
   const tool = await call("POST", "/tools", {
     name: FISH_DELEGATE_TOOL,
@@ -61,7 +61,7 @@ export async function setUpFishAgent(key: string, endpoint: LiveEndpoint, fetchI
   const toolId = typeof tool.tool_id === "string" ? tool.tool_id : "";
   if (!toolId) throw new LiveSessionError(FISH_UNEXPECTED, 502);
   const agent = await call("POST", "/agents", {
-    name: "OpenMausBot Live calls",
+    name: `${product} Live calls`.slice(0, 120),
     config: { voice: { engine: "live3", speaking_language: "en" }, tools: { enabled: true, tool_ids: [toolId] } },
   });
   const agentId = typeof agent.agent_id === "string" && AGENT_ID.test(agent.agent_id) ? agent.agent_id : "";

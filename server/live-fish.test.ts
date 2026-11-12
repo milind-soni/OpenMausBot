@@ -50,10 +50,11 @@ describe("the Fish agent for Live calls", () => {
       const route = `${init!.method} ${String(url).replace(ENDPOINT.apiBase, "")}`;
       return new Response(JSON.stringify(answers[route] ?? {}), { status: route in answers ? 200 : 404 });
     });
-    await expect(setUpFishAgent(" fish-key ", { ...ENDPOINT, model: "" }, fetchImpl)).resolves.toBe("agent_new");
+    await expect(setUpFishAgent(" fish-key ", { ...ENDPOINT, model: "" }, "MausBot", fetchImpl)).resolves.toBe("agent_new");
     const calls = fetchImpl.mock.calls.map(([url, init]) => ({ route: `${init!.method} ${String(url).replace(ENDPOINT.apiBase, "")}`, body: JSON.parse(String(init!.body)), init: init! }));
     expect(calls.map((call) => call.route)).toEqual(Object.keys(answers));
     expect(calls[0]!.body).toMatchObject({ name: "delegate", tool_type: "client", expects_response: true });
+    expect(calls[1]!.body.name).toBe("MausBot Live calls");
     expect(calls[1]!.body.config).toEqual({ voice: { engine: "live3", speaking_language: "en" }, tools: { enabled: true, tool_ids: ["tool_1"] } });
     expect(calls[2]!.body).toEqual({ overrides_allowed: ["system_prompt"] });
     for (const call of calls) {
@@ -64,9 +65,9 @@ describe("the Fish agent for Live calls", () => {
 
   it("stops at Fish's first refusal with the user's next step, never Fish's body", async () => {
     const fetchImpl = fakeFetch(401, { message: "raw fish-key detail" });
-    await expect(setUpFishAgent("fish-key", ENDPOINT, fetchImpl)).rejects.toMatchObject({ status: 502, message: fishErrorMessage(401) });
+    await expect(setUpFishAgent("fish-key", ENDPOINT, "MausBot", fetchImpl)).rejects.toMatchObject({ status: 502, message: fishErrorMessage(401) });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    await expect(setUpFishAgent("fish-key", ENDPOINT, fakeFetch(201, {}))).rejects.toMatchObject({ status: 502 });
+    await expect(setUpFishAgent("fish-key", ENDPOINT, "MausBot", fakeFetch(201, {}))).rejects.toMatchObject({ status: 502 });
   });
 });
 

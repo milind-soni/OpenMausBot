@@ -18,7 +18,7 @@ function fakeFish({ goneAgents = [] as string[] } = {}) {
 
 function wiring(fetchImpl: typeof fetch, env: NodeJS.ProcessEnv = {}) {
   const saveFishAgent = vi.fn();
-  const wired = liveSessionWiring({ bot: () => ({ name: "Rigel" }), history: () => [], cloudHome: false, othersOnLoopback: () => false, saveFishAgent, env, fetchImpl });
+  const wired = liveSessionWiring({ bot: () => ({ name: "Rigel" }), history: () => [], cloudHome: false, othersOnLoopback: () => false, saveFishAgent, productName: () => "Acme", env, fetchImpl });
   return { ...wired, saveFishAgent };
 }
 
@@ -32,6 +32,8 @@ describe("a Fish Audio call's session", () => {
     const answer = await w.calls.createSession({ ...start, endpoint: fishLiveEndpoint("", {}) });
     expect(routes(fetchImpl)).toEqual(["POST /tools", "POST /agents", "PATCH /agents/agent_new", "POST /agents/agent_new/publish", "POST /sessions"]);
     expect(w.saveFishAgent).toHaveBeenCalledWith({ fishAgentId: "agent_new", fishAgentFor: fishKeyPrint("fish-key") });
+    const created = fetchImpl.mock.calls.find(([url, init]) => init!.method === "POST" && String(url).endsWith("/agents"))!;
+    expect(JSON.parse(String(created[1]!.body)).name).toBe("Acme Live calls");
     expect(answer).toMatchObject({ sessionId: "sess_1", fish: { type: "fish", session: TOKEN } });
     const relayToken = (answer as { fish: { relayToken: string } }).fish.relayToken;
     expect(w.fishRelay("sess_1", relayToken)).not.toBeNull();
