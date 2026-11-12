@@ -371,26 +371,35 @@ export function MobilePreviewPanel({
       {/* Row 2: Navigation, Size, Rotate, Zoom, Screenshot, Open in Preview page & Close */}
       <div className="flex h-9 items-center justify-between gap-1 border-b border-hairline/60 px-2.5">
         <div className="flex items-center gap-0.5">
-          <button
-            type="button"
-            onClick={() => frameRef.current?.goBack()}
-            disabled={!historyNav.canGoBack}
-            aria-label="Back"
-            title="Back"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-hover hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => frameRef.current?.goForward()}
-            disabled={!historyNav.canGoForward}
-            aria-label="Forward"
-            title="Forward"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-hover hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
-          >
-            <ChevronRight className="h-3.5 w-3.5" />
-          </button>
+          {window.gbs ? (
+            <>
+              <button
+                type="button"
+                onClick={() => frameRef.current?.goBack()}
+                disabled={!historyNav.canGoBack}
+                aria-label="Back"
+                title="Back"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-hover hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => frameRef.current?.goForward()}
+                disabled={!historyNav.canGoForward}
+                aria-label="Forward"
+                title="Forward"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-hover hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </>
+          ) : (
+            <span className="max-w-[80px] px-1 text-[10px] leading-tight text-ink-secondary" title="Back and Forward are available in the desktop app. Use Open in new tab for browser history.">
+              History needs the desktop app
+            </span>
+          )}
+
           <button
             type="button"
             onClick={() => frameRef.current?.reload()}
