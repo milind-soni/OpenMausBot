@@ -47,3 +47,46 @@ export function peerRequest(
   if (!from?.name || from.botId === threadBotId) return null;
   return { botId: from.botId, name: from.name, delivery: "coordinate_bots", body: message.text ?? "" };
 }
+
+const COMPACT_CHARS = 160;
+const COMPACT_LINES = 3;
+const PREVIEW_CHARS = 240;
+
+/** A long request from another bot folds to one line until opened. Null when it already fits on one. */
+export function peerPreview(body: string): string | null {
+  const text = body.trim();
+  if (text.length <= COMPACT_CHARS && text.split("\n").length <= COMPACT_LINES) return null;
+  const flat = text.replace(/\s+/g, " ");
+  return flat.length > PREVIEW_CHARS ? `${flat.slice(0, PREVIEW_CHARS).trimEnd()}…` : flat;
+}
+
+export interface ExchangeLine {
+  id: string;
+  from: "peer" | "bot";
+  text: string;
+  at: number;
+}
+
+type ExchangeMessage = Pick<Message, "id" | "role" | "kind" | "text" | "at" | "peerAsk" | "from" | "roomRequest">;
+
+/** One peer's requests in this thread and the bot's written answers to each, for the side view. */
+export function peerExchange(
+  messages: readonly ExchangeMessage[],
+  threadBotId: string,
+  peer: Pick<PeerLine, "botId" | "name">,
+): ExchangeLine[] {
+  const lines: ExchangeLine[] = [];
+  let answering = false;
+  for (const m of messages) {
+    const from = peerLine(m) ?? peerRequest(m, threadBotId);
+    if (from) {
+      answering = peer.botId && from.botId ? from.botId === peer.botId : from.name === peer.name;
+      if (answering) lines.push({ id: m.id, from: "peer", text: from.body, at: m.at });
+    } else if (m.role === "user") {
+      answering = false;
+    } else if (answering && m.role === "bot" && m.kind === "text" && m.text?.trim()) {
+      lines.push({ id: m.id, from: "bot", text: m.text, at: m.at });
+    }
+  }
+  return lines;
+}

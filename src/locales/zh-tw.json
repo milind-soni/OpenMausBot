@@ -2498,6 +2498,8 @@
   "chat.peer.handedTask": "已轉交一項任務",
   "chat.peer.openedThread": "已開啟此對話",
   "chat.peer.requested": "送出了一個請求",
+  "chat.peer.viewExchange": "查看往來訊息",
+  "chat.peer.exchangeTitle": "{peer} 和 {bot}",
   "chat.automation.openRun": "查看執行",
   "chat.automation.openRunFor": "查看這則 {name} 訊息背後的執行",
   "chat.automation.needsYou": "需要你",

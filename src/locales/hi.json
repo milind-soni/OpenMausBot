@@ -818,6 +818,8 @@
   "chat.pinnedJump": "पिन किए संदेश पर जाएँ",
   "chat.you": "आप",
   "chat.peer.handedTask": "एक काम आगे सौंपा",
+  "chat.peer.viewExchange": "बातचीत देखें",
+  "chat.peer.exchangeTitle": "{peer} और {bot}",
   "chat.assistant": "सहायक",
   "chat.webhookTask": "वेबहुक कार्य",
   "chat.viewPayload": "इवेंट का पेलोड देखें",

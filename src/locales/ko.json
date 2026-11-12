@@ -2211,6 +2211,8 @@
   "chat.peer.handedTask": "작업을 맡김",
   "chat.peer.openedThread": "이 스레드를 열었음",
   "chat.peer.requested": "요청을 보냄",
+  "chat.peer.viewExchange": "주고받은 내용 보기",
+  "chat.peer.exchangeTitle": "{peer} 및 {bot}",
   "chat.automation.openRun": "실행 보기",
   "chat.automation.openRunFor": "이 {name} 메시지를 만든 실행 보기",
   "chat.automation.needsYou": "확인 필요",

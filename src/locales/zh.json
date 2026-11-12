@@ -2350,6 +2350,8 @@
   "chat.peer.handedTask": "已转交一项任务",
   "chat.peer.openedThread": "已打开此对话",
   "chat.peer.requested": "发送了一个请求",
+  "chat.peer.viewExchange": "查看往来消息",
+  "chat.peer.exchangeTitle": "{peer} 和 {bot}",
   "chat.automation.openRun": "查看执行",
   "chat.automation.openRunFor": "查看这条 {name} 消息背后的执行",
   "chat.automation.needsYou": "需要你处理",

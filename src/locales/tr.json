@@ -1630,6 +1630,8 @@
   "chat.peer.handedTask": "bir görev aktardı",
   "chat.peer.openedThread": "bu konuyu açtı",
   "chat.peer.requested": "bir istek gönderdi",
+  "chat.peer.viewExchange": "Yazışmayı gör",
+  "chat.peer.exchangeTitle": "{peer} ve {bot}",
   "chat.automation.openRun": "Çalıştırmayı gör",
   "chat.automation.openRunFor": "Bu {name} mesajının arkasındaki çalıştırmayı gör",
   "chat.automation.needsYou": "sana ihtiyacı var",

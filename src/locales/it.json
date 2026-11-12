@@ -2019,6 +2019,8 @@
   "chat.peer.handedTask": "ha affidato un'attività",
   "chat.peer.openedThread": "ha aperto questa discussione",
   "chat.peer.requested": "ha inviato una richiesta",
+  "chat.peer.viewExchange": "Vedi lo scambio",
+  "chat.peer.exchangeTitle": "{peer} e {bot}",
   "chat.automation.openRun": "Vedi l'esecuzione",
   "chat.automation.openRunFor": "Vedi l'esecuzione dietro questo messaggio di {name}",
   "chat.automation.needsYou": "ha bisogno di te",
