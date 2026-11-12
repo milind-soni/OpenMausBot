@@ -48,7 +48,7 @@ describe.skipIf(process.platform === "win32")("VPS wake script", () => {
   it("runs the wake script with the alias when the host can't be reached, then connects", async () => {
     const host = pausedHost();
     host.wakeWith(`echo "$1" > '${host.awake}'`);
-    await expect(ensureVpsSshMaster(host.ssh, "paused-vps")).resolves.toBeUndefined();
+    await expect(ensureVpsSshMaster(host.ssh, "paused-vps")).resolves.toBeGreaterThanOrEqual(0);
     expect(readFileSync(host.awake, "utf8").trim()).toBe("paused-vps");
     expect(host.connectAttempts()).toBe(2);
   });
@@ -57,7 +57,7 @@ describe.skipIf(process.platform === "win32")("VPS wake script", () => {
     const host = pausedHost();
     writeFileSync(host.awake, "already up");
     host.wakeWith(`echo woken > '${host.awake}'`);
-    await ensureVpsSshMaster(host.ssh, "awake-vps");
+    await expect(ensureVpsSshMaster(host.ssh, "awake-vps")).resolves.toBe(0);
     expect(readFileSync(host.awake, "utf8")).toBe("already up");
     expect(host.connectAttempts()).toBe(1);
   });
@@ -66,6 +66,22 @@ describe.skipIf(process.platform === "win32")("VPS wake script", () => {
     const host = pausedHost();
     host.wakeWith("echo 'box not found' >&2; exit 3");
     await expect(ensureVpsSshMaster(host.ssh, "paused-vps")).rejects.toThrow(/Connection refused; the wake script failed: box not found/);
+    expect(host.connectAttempts()).toBe(1);
+  });
+
+  it("reports the time the wake script took, so the caller's command timeout does not count it", async () => {
+    const host = pausedHost();
+    host.wakeWith(`PATH=/usr/bin:/bin; sleep 0.4; echo up > '${host.awake}'`);
+    await expect(ensureVpsSshMaster(host.ssh, "paused-vps")).resolves.toBeGreaterThanOrEqual(350);
+  });
+
+  it("stops a wake script that runs past its own limit", async () => {
+    const host = pausedHost();
+    host.wakeWith(`PATH=/usr/bin:/bin; sleep 5; echo up > '${host.awake}'`);
+    const started = Date.now();
+    await expect(ensureVpsSshMaster(host.ssh, "paused-vps", 30_000, 300)).rejects.toThrow(/the wake script failed: VPS SSH initialization timed out/);
+    expect(Date.now() - started).toBeLessThan(4_000);
+    expect(existsSync(host.awake)).toBe(false);
     expect(host.connectAttempts()).toBe(1);
   });
 

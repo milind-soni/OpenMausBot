@@ -95,7 +95,9 @@ export function prepareVpsSsh(dataDir: string, pathValue: string, platform: Node
 const MASTER_INITIALIZATION_TIMEOUT_MS = 30_000;
 // Long enough to resume a paused cloud box; the script should return once the host takes SSH again.
 const WAKE_TIMEOUT_MS = 120_000;
-const pendingMasters = new Map<string, Promise<void>>();
+// Kept back from the wake script so the connection retry after it still has time (ssh's ConnectTimeout is 10 s).
+const WAKE_RETRY_RESERVE_MS = 15_000;
+const pendingMasters = new Map<string, Promise<number>>();
 
 /** The wake script, when the person has put an executable one there. */
 function vpsWakeScript(ssh: VpsSshSetup): string | null {
@@ -109,16 +111,25 @@ function vpsWakeScript(ssh: VpsSshSetup): string | null {
   }
 }
 
-export async function ensureVpsSshMaster(ssh: VpsSshSetup, alias: string, timeoutMs = MASTER_INITIALIZATION_TIMEOUT_MS): Promise<void> {
-  if (!ssh.configPath) return;
+/**
+ * Starts (or reuses) the shared SSH connection to the alias. Resolves with the milliseconds spent running the wake
+ * script (0 when it did not run), so callers can keep that time out of their own command deadline.
+ */
+export async function ensureVpsSshMaster(
+  ssh: VpsSshSetup,
+  alias: string,
+  timeoutMs = MASTER_INITIALIZATION_TIMEOUT_MS,
+  wakeTimeoutMs = WAKE_TIMEOUT_MS,
+): Promise<number> {
+  if (!ssh.configPath) return 0;
   const key = `${ssh.configPath}:${alias}`;
   const wake = vpsWakeScript(ssh);
-  const wakeBudget = wake ? WAKE_TIMEOUT_MS : 0;
+  const wakeBudget = wake ? wakeTimeoutMs : 0;
   let pending = pendingMasters.get(key);
   if (!pending) {
     const deadline = Date.now() + MASTER_INITIALIZATION_TIMEOUT_MS + wakeBudget;
-    const command = (args: string[], file = "ssh") => new Promise<void>((resolve, reject) => {
-      const remaining = deadline - Date.now();
+    const command = (args: string[], file = "ssh", limitMs = Infinity) => new Promise<void>((resolve, reject) => {
+      const remaining = Math.min(deadline - Date.now(), limitMs);
       if (remaining <= 0) { reject(new Error("VPS SSH initialization timed out")); return; }
       const child = execFile(file, args, {
         env: { ...process.env, PATH: ssh.path },
@@ -134,20 +145,24 @@ export async function ensureVpsSshMaster(ssh: VpsSshSetup, alias: string, timeou
       child.stdin?.end();
     });
     pending = (async () => {
-      try { await command(["-O", "check", "--", alias]); }
+      try { await command(["-O", "check", "--", alias]); return 0; }
       catch (error) {
         if ((error as { killed?: boolean }).killed) throw error;
         // ControlMaster auto only shares after authentication. A harmless first command starts the persistent master without replaying Docker work.
         const connect = () => command(["-o", "BatchMode=yes", "-o", "PermitLocalCommand=no", "-T", "--", alias, "true"]);
-        try { await connect(); }
+        try { await connect(); return 0; }
         catch (unreachable) {
           if (!wake || (unreachable as { killed?: boolean }).killed) throw unreachable;
           // A host that pauses when idle refuses SSH until resumed: wake it once, then try once more.
-          try { await command([alias], wake); }
+          const wakeStarted = Date.now();
+          // At most the wake limit, and never the time the retry below needs.
+          try { await command([alias], wake, Math.min(wakeTimeoutMs, deadline - wakeStarted - WAKE_RETRY_RESERVE_MS)); }
           catch (failure) {
             throw new Error(`${(unreachable as Error).message}; the wake script failed: ${(failure as Error).message}`);
           }
+          const wokeMs = Date.now() - wakeStarted;
           await connect();
+          return wokeMs;
         }
       }
     })().finally(() => {
@@ -157,7 +172,7 @@ export async function ensureVpsSshMaster(ssh: VpsSshSetup, alias: string, timeou
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await Promise.race([pending, new Promise<never>((_resolve, reject) => {
+    return await Promise.race([pending, new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => reject(new Error("VPS SSH initialization timed out")), timeoutMs + wakeBudget);
       timer.unref();
     })]);
