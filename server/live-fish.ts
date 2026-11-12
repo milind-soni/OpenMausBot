@@ -26,7 +26,6 @@ export function fishLiveBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   return /^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(override) ? override : FISH_BASE;
 }
 
-/** null without a usable agent id. */
 export function fishLiveEndpoint(agentId: string | undefined, env: NodeJS.ProcessEnv = process.env): LiveEndpoint | null {
   const id = agentId?.trim() ?? "";
   return AGENT_ID.test(id) ? { provider: "fish", apiBase: `${fishLiveBaseUrl(env)}/v1/agent`, model: id } : null;
@@ -172,6 +171,7 @@ export class FishRelay implements LiveSocket {
   private queue: LiveFishRelayCommand[] = [];
   private waiter: (() => void) | null = null;
   private ended: Promise<unknown> | null = null;
+  private received = 0;
 
   constructor(input: { sessionId: string; token: string; endSession: () => Promise<unknown>; forget: () => void }) {
     this.sessionId = input.sessionId;
@@ -215,8 +215,11 @@ export class FishRelay implements LiveSocket {
   }
 
   /** The client's reports, in order. Before the client has joined only `connected`, `ended` and `error` count. */
-  receive(events: LiveFishRelayEvent[]): void {
-    for (const event of events) {
+  receive(events: LiveFishRelayEvent[], from = this.received): void {
+    // A batch the client retries after a lost answer starts at events already taken; those are skipped.
+    const fresh = events.slice(Math.max(0, this.received - from));
+    this.received = Math.max(this.received, from + events.length);
+    for (const event of fresh) {
       if (this.readyState === SOCKET.closed) return;
       if (event.type === "connected") {
         if (this.readyState !== SOCKET.connecting) continue;
@@ -286,7 +289,6 @@ export class FishRelay implements LiveSocket {
   }
 }
 
-/** The relays of running fish calls, by Fish session id. */
 export class FishRelays {
   private readonly relays = new Map<string, FishRelay>();
 
@@ -301,7 +303,6 @@ export class FishRelays {
     return { relay, token };
   }
 
-  /** The controller's attach: the relay `open` made for this session. */
   socket(sessionId: string): FishRelay {
     const relay = this.relays.get(sessionId);
     if (!relay) throw new Error("no relay for that session");

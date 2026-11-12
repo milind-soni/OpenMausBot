@@ -68,6 +68,8 @@ export class FishCall {
   private session: FishAgentSession | null = null;
   private closed = false;
   private outbox: LiveFishRelayEvent[] = [];
+  /** How many events the relay has taken; a retried batch carries its first one's number, so none is applied twice. */
+  private delivered = 0;
   private flushing: Promise<void> | null = null;
   private readonly segmentStarts = new Map<string, number>();
   private speakingSince: number | null = null;
@@ -178,11 +180,14 @@ export class FishCall {
   private async flush(): Promise<void> {
     await Promise.resolve();
     while (this.outbox.length && !this.closed) {
-      const events = this.outbox.splice(0, MAX_EVENTS_PER_POST);
+      const events = this.outbox.slice(0, MAX_EVENTS_PER_POST);
       try {
-        this.apply(await this.post({ events }));
+        const answer = await this.post({ events, from: this.delivered });
+        this.delivered += events.length;
+        this.outbox.splice(0, events.length);
+        this.apply(answer);
       } catch {
-        return;
+        await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
       }
     }
   }
@@ -196,13 +201,18 @@ export class FishCall {
         this.apply(answer);
         if (answer.closed) return;
       } catch {
-        if (++failures >= MAX_POLL_FAILURES) return;
-        await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+        // Unreachable, the harness can neither answer nor end the call, so it is not left running on Fish.
+        if (++failures >= MAX_POLL_FAILURES) {
+          this.close();
+          this.hooks.ended("relay_unavailable");
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, RETRY_MS * failures));
       }
     }
   }
 
-  private post(body: { events?: LiveFishRelayEvent[]; wait?: boolean }): Promise<RelayAnswer> {
+  private post(body: { events?: LiveFishRelayEvent[]; from?: number; wait?: boolean }): Promise<RelayAnswer> {
     return this.hooks.request<RelayAnswer>("/api/live/relay", {
       method: "POST",
       body: JSON.stringify({ sessionId: this.transport.session.session_id, token: this.transport.relayToken, ...body }),

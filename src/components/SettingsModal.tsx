@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Archive, Cloud, Gauge, CloudDownload, Coins, Download, FlaskConical, KeyRound, LockKeyhole, Monitor, Palette, ScrollText, Search, Settings, Sparkles, TabletSmartphone, Terminal, User, Users, X, Building2, Zap, BookOpen, ImagePlus } from "lucide-react";
-import { useStore, type AppSettingsSection } from "@/state/store";
+import { useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { skillsLibraryEnabled } from "@/lib/feature-flags";
 import { type LocaleKey } from "@/locales";
 import { t } from "@/lib/i18n";
@@ -165,23 +165,23 @@ export function revealSettingsBlock(
   if (block) scrollWithin(scroller, block);
 }
 
-function simplePageMatches(page: SimpleSettingsPage, query: string): boolean {
+function simplePageMatches(page: SimpleSettingsPage, query: string, config?: ConfigStatus | null): boolean {
   if (!query) return true;
   if ([t(page.labelKey), ...page.keywords ?? []].some((part) => part.toLowerCase().includes(query))) return true;
   return page.sections.some((id) => {
     const entry = SECTIONS.find((candidate) => candidate.id === id);
-    return entry ? sectionMatches(entry, query) : false;
+    return entry ? sectionMatches(entry, query, config) : false;
   });
 }
 
-export function sectionMatches(section: (typeof SECTIONS)[number], query: string): boolean {
+export function sectionMatches(section: (typeof SECTIONS)[number], query: string, config?: ConfigStatus | null): boolean {
   if (!query) return true;
-  if (section.id === "connections" && KEY_CATALOG.some((entry) => keyMatches(entry, query))) return true;
+  if (section.id === "connections" && KEY_CATALOG.some((entry) => keyMatches(entry, query, config))) return true;
   return [t(section.labelKey), ...section.keywords].some((part) => part.toLowerCase().includes(query));
 }
 
-export function keySearchResults(query: string): KeyEntry[] {
-  return query ? KEY_CATALOG.filter((entry) => keyMatches(entry, query)).slice(0, 8) : [];
+export function keySearchResults(query: string, config?: ConfigStatus | null): KeyEntry[] {
+  return query ? KEY_CATALOG.filter((entry) => keyMatches(entry, query, config)).slice(0, 8) : [];
 }
 
 export const openKeyResult = (entry: KeyEntry) => entry.uses ? openKeySettings(entry.uses, entry.id) : openKeySettings(entry.id);
@@ -224,11 +224,11 @@ function SettingsDialog() {
     .filter((entry) => entry.id !== "botAccess" || (Boolean(state.config?.team) && ownerOrAdmin === true))
     .filter((entry) => !(state.config?.team && ownerOrAdmin === false && TEAM_ADMIN_SECTIONS.includes(entry.id)));
   const availableSections = baseSections.filter((entry) => entry.id !== "skills" || skillsLibraryEnabled(state.config));
-  const visibleSections = availableSections.filter((entry) => sectionMatches(entry, q));
+  const visibleSections = availableSections.filter((entry) => sectionMatches(entry, q, state.config));
 
   const simpleAvailable = new Set<AppSettingsSection>([...availableSections.map((entry) => entry.id), ...(remoteActive ? [] : ["updates" as const])]);
   const simplePages = advanced ? [] : simpleSettingsPages(simpleAvailable, section);
-  const visiblePages = simplePages.filter((page) => simplePageMatches(page, q));
+  const visiblePages = simplePages.filter((page) => simplePageMatches(page, q, state.config));
   const currentPage = simplePages.find((page) => page.sections.includes(section));
 
   const sectionLabelKey = advanced
@@ -258,7 +258,7 @@ function SettingsDialog() {
   const [reveal, setReveal] = useState<string | null>(null);
   const advancedMatches = advanced || SIMPLE_ONLY || !q ? [] : SIMPLE_ADVANCED_ONLY.filter((key) => t(key).toLowerCase().includes(q));
   const moreSections = availableSections.filter((entry) => SIMPLE_HIDDEN_SECTIONS.includes(entry.id));
-  const keyResults = remoteActive || !availableSections.some((entry) => entry.id === "connections") ? [] : keySearchResults(q);
+  const keyResults = remoteActive || !availableSections.some((entry) => entry.id === "connections") ? [] : keySearchResults(q, state.config);
   const keyResultButtons = (className: string) => keyResults.map((entry) => (
     <button key={entry.id} type="button" data-settings-key-result={entry.id} className={className}
       onClick={() => { setQuery(""); setSubPage(null); dispatch(openKeyResult(entry)); }}>
@@ -506,7 +506,7 @@ function SettingsDialog() {
     const resultClass = "flex min-h-8 shrink-0 cursor-pointer items-center rounded-lg px-[9px] py-1.5 text-left text-[13px] leading-[18px] text-ink transition-colors hover:bg-ink/[0.06] motion-reduce:transition-none";
     const goTo = (id: AppSettingsSection) => { setSubPage(null); openSection(id); };
     const moreMatches = !q ? [] : [
-      ...moreSections.filter((entry) => sectionMatches(entry, q)).map((entry) => ({ key: entry.id, labelKey: entry.labelKey, open: () => goTo(entry.id) })),
+      ...moreSections.filter((entry) => sectionMatches(entry, q, state.config)).map((entry) => ({ key: entry.id, labelKey: entry.labelKey, open: () => goTo(entry.id) })),
       ...(simpleAvailable.has("general") ? SIMPLE_MORE_LIMITS : []).filter((key) => t(key).toLowerCase().includes(q))
         .map((key) => ({ key, labelKey: key, open: () => { openMore(); setReveal("limits"); } })),
     ];

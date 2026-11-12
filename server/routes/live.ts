@@ -13,7 +13,7 @@ export interface LiveRouteDeps {
   settings(): LiveSettings;
   saveSettings(patch: { provider?: LiveProvider; azureEndpoint?: string; azureDeployment?: string; fishAgentId?: string; voice?: string; readTypedReplies?: boolean; idleMinutes?: number }): Promise<LiveSettings>;
   /** A running Fish Audio call's relay, only for the token its start answered with. */
-  fishRelay(sessionId: string, token: string): { receive(events: LiveFishRelayEvent[]): void; poll(waitMs: number): Promise<{ commands: LiveFishRelayCommand[]; closed: boolean }> } | null;
+  fishRelay(sessionId: string, token: string): { receive(events: LiveFishRelayEvent[], from?: number): void; poll(waitMs: number): Promise<{ commands: LiveFishRelayCommand[]; closed: boolean }> } | null;
 }
 
 const id = z.string().regex(/^[\w-]{1,120}$/);
@@ -38,6 +38,7 @@ const relayBody = z.object({
   sessionId: z.string().min(1).max(200),
   token: z.string().min(1).max(200),
   events: z.array(relayEvent).max(20).optional(),
+  from: z.number().int().min(0).max(1_000_000).optional(),
   wait: z.boolean().optional(),
 }).strict();
 // Strict, so `key` is refused rather than ignored: the key is saved only through the credential store or PUT /api/config.
@@ -105,7 +106,7 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
       if (!parsed.success) return json(res, 400, { error: "The call update was not valid." });
       const relay = deps.fishRelay(parsed.data.sessionId, parsed.data.token);
       if (!relay) return json(res, 404, { error: "That call is not running." });
-      if (parsed.data.events?.length) relay.receive(parsed.data.events);
+      if (parsed.data.events?.length) relay.receive(parsed.data.events, parsed.data.from);
       return json(res, 200, await relay.poll(parsed.data.wait && !parsed.data.events?.length ? RELAY_POLL_MS : 0));
     }
 

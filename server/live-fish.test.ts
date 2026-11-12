@@ -146,6 +146,17 @@ describe("the relay of a Fish call", () => {
     ]);
   });
 
+  it("takes a batch the client posts again only from the events it has not had", () => {
+    const { relay, messages } = opened();
+    relay.receive([{ type: "connected" }, { type: "delegate", id: "d1", atMs: 1 }], 0);
+    relay.receive([{ type: "connected" }, { type: "delegate", id: "d1", atMs: 1 }, { type: "spoke", startMs: 2, endMs: 3 }], 0);
+    relay.receive([{ type: "spoke", startMs: 2, endMs: 3 }], 2);
+    expect(messages).toEqual([
+      { type: "session.delegation.created", delegation: { id: "d1", target: "client" }, offset_ms: 1 },
+      { type: "session.output_transcript.delta", start_ms: 2, end_ms: 3 },
+    ]);
+  });
+
   it("maps only known endings to a reason", () => {
     const { relay, messages } = opened();
     relay.receive([{ type: "ended", reason: "user_hangup" }, { type: "ended", reason: "conversation_timeout" }]);

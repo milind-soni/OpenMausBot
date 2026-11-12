@@ -250,7 +250,7 @@ describe("a Fish Audio call", () => {
     const { d, relay } = relayDeps();
     const events = [{ type: "connected" }, { type: "heard", text: "hi", startMs: 1, endMs: 2 }, { type: "delegate", id: "call_1", atMs: 3 }];
     expect(await request(d, "POST", "/api/live/relay", body({ events, wait: true }))).toEqual({ status: 200, body: { commands: [{ type: "close" }], closed: false } });
-    expect(relay.receive).toHaveBeenCalledWith(events);
+    expect(relay.receive).toHaveBeenCalledWith(events, undefined);
     expect(relay.poll).toHaveBeenCalledWith(0);
   });
 

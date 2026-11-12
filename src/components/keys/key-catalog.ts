@@ -238,10 +238,12 @@ export function savedState(entry: KeyEntry, config: ConfigStatus | null | undefi
   return entry.target?.saved(config) ?? entry.status?.(config) ?? { configured: false };
 }
 
-export function keyMatches(entry: KeyEntry, query: string): boolean {
+/** With `config`, the row is matched as shown: the Live key row by the provider Live calls use. */
+export function keyMatches(entry: KeyEntry, query: string, config?: ConfigStatus | null): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  return [t(entry.labelKey), t(entry.purposeKey), t(keySection(entry).titleKey), entry.name, ...entry.words].some((part) => part.toLowerCase().includes(q));
+  const shown = config ? shownKeyEntry(entry.id, config) : entry;
+  return [t(shown.labelKey), t(shown.purposeKey), t(keySection(shown).titleKey), shown.name, ...shown.words].some((part) => part.toLowerCase().includes(q));
 }
 
 export function looksLikeOtherKey(entry: KeyEntry, value: string): KeyEntry | null {

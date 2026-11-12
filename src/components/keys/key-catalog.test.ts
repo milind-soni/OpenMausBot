@@ -110,6 +110,14 @@ describe("searching the keys", () => {
     expect(found("gemini")).toEqual(["openaiCompat", "geminiTts", "imageGemini"]);
     expect(found("no such key anywhere")).toEqual([]);
   });
+
+  it("matches the Live key row by the provider Live calls use", () => {
+    const shown = (query: string, provider: "fish" | "azure") =>
+      KEY_CATALOG.filter((entry) => keyMatches(entry, query, { live: { provider } } as never)).map((entry) => entry.id);
+    expect(shown("fish", "fish")).toEqual(expect.arrayContaining(["fishAudio", "liveKey"]));
+    expect(shown("azure", "azure")).toContain("liveKey");
+    expect(found("fish")).not.toContain("liveKey");
+  });
 });
 
 describe("a key pasted into the wrong row", () => {

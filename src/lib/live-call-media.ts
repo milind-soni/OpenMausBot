@@ -301,16 +301,23 @@ async function startFishCall(target: { botId: string; threadId: string }, mine: 
       if (mine === generation) set({ caption: text.slice(-CAPTION_CHARS), heard: "" });
     },
     ended: () => {
-      if (mine === generation) onSessionClosed();
+      if (mine !== generation) return;
+      // Closing the call drops its queued `ended` report, so the server hears of it here.
+      if (state.callId) void endOnServer(state.callId);
+      onSessionClosed();
     },
     now: () => Date.now(),
   }, deps.startFish);
   fishCall = call;
-  connectTimer = setTimeout(() => {
-    if (mine === generation) void dropped(t("call.live.droppedNoAudio"));
-  }, MEDIA_CONNECT_TIMEOUT_MS);
+  // Started only now: the SDK's start includes the microphone prompt, which may take the person a while.
   await call.start();
-  if (mine === generation && state.muted) call.setMuted(true);
+  if (mine !== generation) return;
+  if (state.muted) call.setMuted(true);
+  if (!fishConnected) {
+    connectTimer = setTimeout(() => {
+      if (mine === generation) void dropped(t("call.live.droppedNoAudio"));
+    }, MEDIA_CONNECT_TIMEOUT_MS);
+  }
 }
 
 export async function hangUpLiveCall(): Promise<void> {

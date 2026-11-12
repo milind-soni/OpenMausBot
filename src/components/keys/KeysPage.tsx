@@ -151,7 +151,7 @@ export function KeysPage() {
 
   // With Azure or Fish Audio chosen, Live calls do not use the OpenAI key that row points at.
   const azureLive = state.config?.live?.provider === "azure" || state.config?.live?.provider === "fish";
-  const rows = KEY_CATALOG.filter((entry) => keyMatches(entry, q) && !(azureLive && entry.id === "liveCalls"));
+  const rows = KEY_CATALOG.filter((entry) => keyMatches(entry, q, state.config) && !(azureLive && entry.id === "liveCalls"));
   const sections = KEY_SECTIONS.flatMap((section) => {
     const own = rows.filter((entry) => entry.section === section.id);
     return own.length > 0 ? [{ id: section.id, rows: own }] : [];

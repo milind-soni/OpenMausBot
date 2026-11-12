@@ -19,7 +19,6 @@ class FakeSession {
   tool(callId: string) { return this.options.clientTools[FISH_DELEGATE_TOOL]!({}, { callId }); }
 }
 
-/** A relay that records what the call posts and hands each waiting poll the next queued batch. */
 function fakeRelay() {
   const posted: Array<Record<string, unknown>> = [];
   const batches: Array<{ commands: LiveFishRelayCommand[]; closed: boolean }> = [];
@@ -178,6 +177,47 @@ describe("a Fish Audio call's relay", () => {
     expect(made!.end).toHaveBeenCalledTimes(1);
     expect(relay.posted).toEqual([]);
   });
+
+  it("posts a batch again after a failed post, numbered so the relay takes none of it twice", async () => {
+    const relay = fakeRelay();
+    const deliver = relay.request.getMockImplementation()!;
+    let failNext = true;
+    relay.request.mockImplementation(async (path: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (body.events && failNext) {
+        failNext = false;
+        relay.posted.push(body);
+        throw new Error("offline");
+      }
+      return deliver(path, init);
+    });
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const { session } = await joined(relay);
+    session.on.onConnect({ sessionId: "sess_1" });
+    const batches = () => relay.posted.filter((body) => body.events);
+    await vi.waitFor(() => expect(batches()).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(batches().map((body) => [body.from, body.events])).toEqual([[0, [{ type: "connected" }]], [0, [{ type: "connected" }]]]);
+    session.on.onError({ code: "late" });
+    await vi.waitFor(() => expect(batches()).toHaveLength(3));
+    expect(batches()[2]).toMatchObject({ from: 1, events: [{ type: "error", code: "late" }] });
+  });
+
+  it("ends the call on Fish when the harness stays unreachable", async () => {
+    const relay = fakeRelay();
+    relay.request.mockImplementation(async (_path: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      relay.posted.push(body);
+      if (body.wait) throw new Error("offline");
+      return { commands: [], closed: false };
+    });
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const { session, hooks } = await joined(relay);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(session.end).toHaveBeenCalledTimes(1);
+    expect(hooks.ended).toHaveBeenCalledWith("relay_unavailable");
+    expect(relay.posted.filter((body) => body.wait)).toHaveLength(5);
+  });
 });
 
 describe("a Fish Audio Live call on screen", () => {
@@ -202,7 +242,7 @@ describe("a Fish Audio Live call on screen", () => {
     resetLiveMedia();
     configureLiveMedia({ request: request as never, startFish: startFish as never, getUserMedia: getUserMedia as never, createPeer: vi.fn() as never });
   });
-  afterEach(() => { resetLiveMedia(); vi.unstubAllGlobals(); });
+  afterEach(() => { resetLiveMedia(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
   it("asks the harness for a Fish session without an offer, and leaves the microphone to Fish's SDK", async () => {
     await startLiveCall({ botId: "b1", threadId: "t1", provider: "fish" });
@@ -233,6 +273,30 @@ describe("a Fish Audio Live call on screen", () => {
     expect(session!.end).toHaveBeenCalledTimes(1);
     expect(request).toHaveBeenCalledWith("/api/live/call/end", expect.objectContaining({ body: JSON.stringify({ callId: "c1" }) }));
     expect(liveMedia().phase).toBe("idle");
+  });
+
+  it("ends the harness's call when Fish drops the session", async () => {
+    await startLiveCall({ botId: "b1", threadId: "t1", provider: "fish" });
+    session!.on.onConnect({ sessionId: "sess_1" });
+    session!.on.onDisconnect({ reason: "connection_lost" });
+    expect(request).toHaveBeenCalledWith("/api/live/call/end", expect.objectContaining({ body: JSON.stringify({ callId: "c1" }) }));
+  });
+
+  it("does not drop the call while Fish's SDK waits on the microphone prompt", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    let grant: (() => void) | null = null;
+    startFish.mockImplementationOnce((options: FishSessionOptions) => new Promise((resolve) => {
+      grant = () => resolve(session = new FakeSession(options));
+    }));
+    const starting = startLiveCall({ botId: "b1", threadId: "t1", provider: "fish" });
+    await vi.waitFor(() => expect(grant).not.toBeNull());
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(liveMedia().phase).toBe("starting");
+    grant!();
+    await starting;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(liveMedia().phase).toBe("failed");
+    expect(request).toHaveBeenCalledWith("/api/live/call/end", expect.anything());
   });
 
   it("explains a microphone Fish was refused, and retries as a Fish call", async () => {
