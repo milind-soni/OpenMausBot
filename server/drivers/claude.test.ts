@@ -2055,6 +2055,32 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       resetPathCacheForTests();
     }
   });
+  it.skipIf(process.platform === "win32")("launches a turn with its own copy's flags when another copy's late version check lands while it waits", async () => {
+    // A turn checks 2.1.197 and waits for its --help; snapshot()'s late --version answer from 2.1.321 lands meanwhile and
+    // writes 2.1.321's version. The turn must not launch 2.1.197 with 2.1.321's --system-prompt-snapshot.
+    const slow = join(scratch, "newer-race-slow"), versionAsked = join(scratch, "newer-race-version"), helpAsked = join(scratch, "older-race-help");
+    const newer = join(scratch, "newer-race"), older = join(scratch, "older-race");
+    mkdirSync(newer); mkdirSync(older);
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\nif [ -e "${slow}" ] && [ "$1" = --version ]; then : > "${versionAsked}"; sleep 1; fi\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    // The older copy's first --help is slow, and it refuses --system-prompt-snapshot like 2.1.197 does.
+    writeFileSync(join(older, "claude"), `#!/bin/sh\nif [ "$1" = --help ] && [ ! -e "${helpAsked}" ]; then : > "${helpAsked}"; sleep 2; fi\nfor a in "$@"; do [ "$a" = --system-prompt-snapshot ] && { echo "error: unknown option '$a'" >&2; exit 1; }; done\nFAKE_CLAUDE_VERSION=2.1.197 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, {}, { cli: "claude" });
+      await instance.snapshot();
+      writeFileSync(slow, "");
+      const snapshot = instance.snapshot();
+      await vi.waitFor(() => expect(existsSync(versionAsked)).toBe(true), { timeout: 5000 });
+      registerPathDir(older);
+      await instance.adapter.sendTurn({ threadId: "t-late-check-race", text: "hi" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-late-check-race")).toMatchObject({ ok: true });
+      expect(existsSync(helpAsked)).toBe(true);
+      await snapshot;
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
   it.skipIf(process.platform === "win32")("keeps the new copy's flags when the old copy's slower --help read finishes last", async () => {
     // snapshot() is still reading 2.1.321's help when PATH finds 2.1.197 (no --autocompact); that old read must not restore 2.1.321's flags.
     const refused = join(scratch, "stale-help-autocompact.jsonl"), helpStarted = join(scratch, "newer-help-started");
