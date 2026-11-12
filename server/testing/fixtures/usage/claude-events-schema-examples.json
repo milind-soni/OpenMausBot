@@ -1,0 +1,55 @@
+{
+  "provenance": {
+    "kind": "constructed examples from published SDK types, not live captures",
+    "cliVersion": "2.1.312",
+    "source": "https://code.claude.com/docs/en/agent-sdk/typescript#sdkratelimitevent",
+    "note": "Numbers and messages are illustrative; no inference request was made. Optional fields may be absent."
+  },
+  "events": [
+    {
+      "type": "rate_limit_event",
+      "rate_limit_info": {
+        "status": "allowed_warning",
+        "utilization": 0.85,
+        "resetsAt": 1794492000,
+        "overageEnabled": false
+      },
+      "uuid": "redacted-event-1",
+      "session_id": "redacted-session"
+    },
+    {
+      "type": "rate_limit_event",
+      "rate_limit_info": {
+        "status": "rejected",
+        "errorCode": "credits_required",
+        "canUserPurchaseCredits": true,
+        "hasChargeableSavedPaymentMethod": false
+      },
+      "uuid": "redacted-event-2",
+      "session_id": "redacted-session"
+    },
+    {
+      "type": "rate_limit_event",
+      "rate_limit_info": {
+        "status": "rejected"
+      },
+      "uuid": "redacted-event-3",
+      "session_id": "redacted-session"
+    }
+  ],
+  "otherErrorEvidence": {
+    "assistant.error": [
+      "rate_limit",
+      "billing_error",
+      "overloaded"
+    ],
+    "result": {
+      "subtype": "error_during_execution",
+      "is_error": true,
+      "errors": [
+        "Illustrative usage-limit message; reset time may be absent."
+      ]
+    },
+    "note": "Result excerpt only; a generic execution error is not sufficient evidence of exhausted usage."
+  }
+}

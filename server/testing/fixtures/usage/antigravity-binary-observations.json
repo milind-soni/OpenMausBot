@@ -1,0 +1,37 @@
+{
+  "provenance": {
+    "kind": "installed protobuf descriptor and symbol evidence, not a live quota response",
+    "version": "1.5.6",
+    "platform": "macos-arm64",
+    "method": "Read-only mmap inspection; no prompt or backend quota call."
+  },
+  "descriptor": "google/gca/aicode/v1main/quota_status.proto",
+  "types": {
+    "QuotaSummary": [
+      "description",
+      "groups"
+    ],
+    "QuotaSummary.Group": [
+      "display_name",
+      "description",
+      "buckets"
+    ],
+    "QuotaSummary.Bucket": [
+      "bucket_id",
+      "display_name",
+      "description",
+      "refresh_window_label",
+      "remaining_fraction",
+      "disabled",
+      "reset_time"
+    ]
+  },
+  "resetTimeType": "google.protobuf.Timestamp",
+  "otherObservedStrings": [
+    "fetchQuotaStatus",
+    "RESOURCE_EXHAUSTED",
+    "QuotaFailure",
+    "RetryInfo"
+  ],
+  "limitations": "Backend schema is not an ACP session/update contract. RESOURCE_EXHAUSTED alone does not identify plan exhaustion. The app currently uses print stream-json, not ACP."
+}
