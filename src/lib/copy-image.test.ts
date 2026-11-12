@@ -17,7 +17,34 @@ function stubClipboard(write: Write = async (items) => void (await items[0]!.ite
 
 const blob = (type: string) => new Blob(["x"], { type });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+/** Stands in for the browser's image decoder and canvas, which the test runner does not have. */
+function stubCanvas({ png = blob("image/png") as Blob | null, decodes = true } = {}) {
+  const drawImage = vi.fn();
+  const canvas = {
+    width: 0,
+    height: 0,
+    getContext: vi.fn(() => ({ drawImage })),
+    toBlob: vi.fn((done: (b: Blob | null) => void, type: string) => done(type === "image/png" ? png : null)),
+  };
+  class FakeImage {
+    src = "";
+    naturalWidth = 640;
+    naturalHeight = 480;
+    decode = async () => {
+      if (!decodes) throw new Error("bad image");
+    };
+  }
+  vi.stubGlobal("Image", FakeImage);
+  vi.stubGlobal("document", { createElement: vi.fn(() => canvas) });
+  const created = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:image");
+  const revoked = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  return { canvas, drawImage, created, revoked };
+}
 
 describe("copyImage", () => {
   it("is offered only where the clipboard takes images", () => {
@@ -70,5 +97,29 @@ describe("copyImage", () => {
     vi.stubGlobal("fetch", fetchSpy);
     expect(await copyImage("/api/files/a.png")).toBe("failed");
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("redraws other image types on a canvas by default", async () => {
+    const write = stubClipboard();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(blob("image/webp"))));
+    const png = blob("image/png");
+    const { canvas, drawImage, created, revoked } = stubCanvas({ png });
+    expect(await copyImage("/api/files/a.webp")).toBe("copied");
+    expect(await write.mock.calls[0]![0][0]!.items["image/png"]).toBe(png);
+    expect([canvas.width, canvas.height]).toEqual([640, 480]);
+    expect(drawImage).toHaveBeenCalledOnce();
+    expect(canvas.toBlob.mock.calls[0]![1]).toBe("image/png");
+    expect(revoked).toHaveBeenCalledWith(created.mock.results[0]!.value);
+  });
+
+  it("reports a failure and frees the image when the default redraw fails", async () => {
+    stubClipboard();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(blob("image/webp"))));
+    const { revoked } = stubCanvas({ decodes: false });
+    expect(await copyImage("/api/files/a.webp")).toBe("failed");
+    expect(revoked).toHaveBeenCalledWith("blob:image");
+
+    stubCanvas({ png: null });
+    expect(await copyImage("/api/files/a.webp")).toBe("failed");
   });
 });
