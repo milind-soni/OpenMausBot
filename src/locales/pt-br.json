@@ -5887,7 +5887,6 @@
   "skills.library.loadError": "Não foi possível carregar a biblioteca de habilidades. Tente novamente.",
   "skills.library.loading": "Carregando…",
   "skills.library.close": "Fechar",
-  "settings.section.backups": "Backups",
   "settings.import.appsTitle": "Dos seus apps de IA",
   "settings.import.appsSubtitle": "Habilidades e ferramentas MCP do Claude Code, Codex, Cursor, Claude Desktop e Gemini neste computador. As ferramentas chegam desligadas; logins e histórico nunca são lidos.",
   "settings.import.appsLooking": "Procurando neste computador…",
@@ -10313,6 +10312,8 @@
   "settings.bots.intro": "O que os bots em {place} sabem sobre você, e configurações para todos eles.",
   "settings.bots.newBots": "Novos bots",
   "settings.data.bringIn": "Trazer coisas",
+  "settings.page.importExport": "Importar e exportar",
+  "settings.data.takeOut": "Levar coisas",
   "settings.data.move": "Mover para {place}",
   "settings.data.storage": "Armazenamento",
   "settings.desktops.automation": "Automação",
@@ -10434,7 +10435,6 @@
   "settings.threadCleanup.cap.title": "Limitar cada registro de eventos",
   "settings.threadCleanup.cap.short": "Mantém o registro de eventos de cada conversa até este tamanho. As conversas ficam.",
   "settings.import.appsShort": "Skills e ferramentas de outros apps de IA deste computador. As ferramentas chegam desligadas.",
-  "settings.import.moveTitle": "Trazer um bot de outro app",
   "settings.import.moveAction": "Começar",
   "settings.profiles.add": "Adicionar",
   "settings.desktops.kinds": "Desktops",
@@ -10495,7 +10495,6 @@
   "placeLook.pictureLine": "Uma imagem esmaecida no topo da barra lateral.",
   "settings.glance.appsConnected": "{count} conectados",
   "settings.glance.appsNone": "Nenhum ainda",
-  "settings.overview.yourData": "Seus dados",
   "settings.recovery.short": "Se um provedor falhar antes de começar, tenta um reserva uma vez.",
   "decider.introShort": "Modelos pequenos e rápidos que organizam e leem coisas para seus bots.",
   "decider.provider.title": "Provedor",
@@ -10571,6 +10570,5 @@
   "settings.domain.change": "Alterar",
   "settings.domain.httpsFirst": "Ative o HTTPS neste endereço primeiro e depois conecte-o aqui.",
   "settings.backTo": "Voltar às Configurações",
-  "devices.route.httpsAccount": "Usa sua conta do {app}.",
-  "backup.importAction": "Importar…"
+  "devices.route.httpsAccount": "Usa sua conta do {app}."
 }

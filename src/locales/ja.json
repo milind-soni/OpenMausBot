@@ -5728,7 +5728,6 @@
   "skills.library.loadError": "スキルライブラリーを読み込めませんでした。もう一度お試しください。",
   "skills.library.loading": "読み込み中…",
   "skills.library.close": "閉じる",
-  "settings.section.backups": "バックアップ",
   "settings.import.appsTitle": "お使いの AI アプリから",
   "settings.import.appsSubtitle": "このコンピューター上の Claude Code、Codex、Cursor、Claude Desktop、Gemini からスキルと MCP ツールを取り込みます。ツールはオフの状態で取り込まれ、ログイン情報や履歴は読み取りません。",
   "settings.import.appsLooking": "このコンピューターを検索しています…",
@@ -7796,6 +7795,8 @@
   "settings.bots.intro": "{place} のボットがあなたについて知っていることと、すべてのボットの設定。",
   "settings.bots.newBots": "新しいボット",
   "settings.data.bringIn": "取り込み",
+  "settings.page.importExport": "インポートとエクスポート",
+  "settings.data.takeOut": "取り出し",
   "settings.data.move": "{place} に移動",
   "settings.data.storage": "ストレージ",
   "settings.desktops.automation": "自動化",
@@ -7918,7 +7919,6 @@
   "settings.threadCleanup.cap.title": "イベントログの上限",
   "settings.threadCleanup.cap.short": "各スレッドのイベントログをこのサイズ以下に保ちます。スレッドは残ります。",
   "settings.import.appsShort": "このコンピューターにある他の AI アプリのスキルとツール。ツールはオフの状態で取り込まれます。",
-  "settings.import.moveTitle": "別のアプリからボットを持ってくる",
   "settings.import.moveAction": "開始",
   "settings.profiles.add": "追加",
   "settings.desktops.kinds": "デスクトップ",
@@ -7979,7 +7979,6 @@
   "placeLook.pictureLine": "サイドバーの上部にフェードする画像。",
   "settings.glance.appsConnected": "{count} 件接続済み",
   "settings.glance.appsNone": "まだありません",
-  "settings.overview.yourData": "あなたのデータ",
   "settings.recovery.short": "プロバイダーが開始前に失敗した場合、予備を一度試します。",
   "decider.introShort": "ボットのために物事を仕分けて読む、小さく速いモデル。",
   "decider.provider.title": "プロバイダー",
@@ -8071,6 +8070,5 @@
   "settings.domain.change": "変更",
   "settings.domain.httpsFirst": "まずこのアドレスで HTTPS を有効にしてから、ここで接続します。",
   "settings.backTo": "設定に戻る",
-  "devices.route.httpsAccount": "{app} アカウントを使います。",
-  "backup.importAction": "インポート…"
+  "devices.route.httpsAccount": "{app} アカウントを使います。"
 }

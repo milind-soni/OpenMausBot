@@ -320,13 +320,13 @@ function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place
 }
 
 const PAGE_OWNER: Record<SettingsPageId, SettingsOwner> = {
-  overview: "place", phone: "place", ai: "place", bots: "place", desktops: "place", vault: "place", usage: "place", data: "place",
+  overview: "place", phone: "place", ai: "place", bots: "place", desktops: "place", vault: "place", usage: "place", transfer: "place", data: "place",
   people: "place", installations: "place", account: "account", plan: "account", app: "app", general: "app", appearance: "app",
 };
 
 const PAGE_KEY: Partial<Record<SettingsPageId, Parameters<typeof t>[0]>> = {
   phone: "settings.section.phoneDevices", ai: "settings.group.ai", bots: "settings.page.bots", desktops: "settings.page.desktops",
-  vault: "settings.section.vault", usage: "settings.page.spending", data: "settings.page.data", people: "settings.section.people",
+  vault: "settings.section.vault", usage: "settings.page.spending", transfer: "settings.page.importExport", data: "settings.page.data", people: "settings.section.people",
   installations: "settings.section.workspaces", plan: "settings.page.plan", general: "settings.section.general", appearance: "settings.section.appearance",
 };
 

@@ -6201,7 +6201,6 @@
   "skills.library.loadError": "Couldn't load the skills library. Try again.",
   "skills.library.loading": "Loading…",
   "skills.library.close": "Close",
-  "settings.section.backups": "Backups",
   "settings.import.appsTitle": "From your AI apps",
   "settings.import.appsSubtitle": "Skills and MCP tools from Claude Code, Codex, Cursor, Claude Desktop and Gemini on this computer. Tools arrive switched off; logins and history are never read.",
   "settings.import.appsLooking": "Looking on this computer…",
@@ -10313,6 +10312,8 @@
   "settings.bots.intro": "What bots on {place} know about you, and settings for all of them.",
   "settings.bots.newBots": "New bots",
   "settings.data.bringIn": "Bring things in",
+  "settings.page.importExport": "Import & export",
+  "settings.data.takeOut": "Take things out",
   "settings.data.move": "Move to {place}",
   "settings.data.storage": "Storage",
   "settings.desktops.automation": "Automation",
@@ -10434,7 +10435,6 @@
   "settings.threadCleanup.cap.title": "Limit each event log",
   "settings.threadCleanup.cap.short": "Keep each thread's event log at or under this size. Threads stay.",
   "settings.import.appsShort": "Skills and tools from other AI apps on this computer. Tools arrive switched off.",
-  "settings.import.moveTitle": "Bring in a bot from another app",
   "settings.import.moveAction": "Start",
   "settings.profiles.add": "Add",
   "settings.desktops.kinds": "Desktops",
@@ -10495,7 +10495,6 @@
   "placeLook.pictureLine": "An image faded into the top of the sidebar.",
   "settings.glance.appsConnected": "{count} connected",
   "settings.glance.appsNone": "None yet",
-  "settings.overview.yourData": "Your data",
   "settings.recovery.short": "If a provider fails before it starts, try a backup once.",
   "decider.introShort": "Small, fast models that sort and read things for your bots.",
   "decider.provider.title": "Provider",
@@ -10571,6 +10570,5 @@
   "settings.domain.change": "Change",
   "settings.domain.httpsFirst": "Turn on HTTPS for this address first, then connect it here.",
   "settings.backTo": "Back to Settings",
-  "devices.route.httpsAccount": "Uses your {app} account.",
-  "backup.importAction": "Import…"
+  "devices.route.httpsAccount": "Uses your {app} account."
 }
