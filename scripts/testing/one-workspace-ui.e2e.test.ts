@@ -33,8 +33,11 @@ const PAIR_FORM = "Boolean(document.querySelector('form input') && /pairing code
     }
   };
   const page = <T>(expression: string) => world.window.evaluate<T>(expression);
-  const onCloudPage = () => until(() => page<boolean>("Boolean(document.querySelector('textarea[aria-label^=\"Message\"]'))"), Boolean, 60_000, "My Cloud's page")
-    .then(() => expect(new URL(world.window.url).origin).toBe(world.cloudOrigin));
+  const onWorkspacePage = (origin: string, name: string) => until(
+    () => page<boolean>(`location.origin === ${JSON.stringify(origin)} && Boolean(document.querySelector('textarea[aria-label^="Message"]'))`),
+    Boolean, 60_000, name,
+  );
+  const onCloudPage = () => onWorkspacePage(world.cloudOrigin, "My Cloud's page");
   const screen = () => page<string | null>("document.querySelector('[data-home-screen]')?.dataset.homeScreen ?? null");
   const blank = async () => {
     await world.window.loadURL("about:blank");
@@ -250,8 +253,7 @@ const PAIR_FORM = "Boolean(document.querySelector('form input') && /pairing code
 
   // T3: the team switcher. The session lists a team; its Cloud is the team server at world.teamOrigin.
   const ACME = () => ({ id: "team-acme", name: "Acme", role: "admin", machine: { status: "ready", origin: world.teamOrigin } });
-  const onTeamPage = () => until(() => page<boolean>("Boolean(document.querySelector('textarea[aria-label^=\"Message\"]'))"), Boolean, 60_000, "the team's page")
-    .then(() => expect(new URL(world.window.url).origin).toBe(world.teamOrigin));
+  const onTeamPage = () => onWorkspacePage(world.teamOrigin, "the team's page");
   const homeLine = () => page<string | null>("document.querySelector('[data-home-line]')?.textContent ?? null");
   const bridgeState = () => page<Record<string, unknown>>("window.ogb.workspaces.state()");
 
@@ -339,13 +341,16 @@ const PAIR_FORM = "Boolean(document.querySelector('form input') && /pairing code
     expect((await world.cloudCookies()).length).toBe(before);
     // Removed on the Admin while the session still lists Acme: the next renewal is refused, and Acme goes now.
     world.admin.removed.add("team-acme");
-    await world.home.renew();
-    await onCloudPage();
-    await until(() => homeLine(), (text) => text === "You're no longer in Acme.", 20_000, "the one line");
-    expect(world.menu().map((item) => item.label), "gone from the switcher at once").toEqual(["My Cloud"]);
-    expect(world.places.remembered()).toBeNull();
-    world.admin.removed.clear();
-    await world.sync();
+    try {
+      await world.home.renew();
+      await onCloudPage();
+      await until(() => homeLine(), (text) => text === "You're no longer in Acme.", 20_000, "the one line");
+      expect(world.menu().map((item) => item.label), "gone from the switcher at once").toEqual(["My Cloud"]);
+      expect(world.places.remembered()).toBeNull();
+    } finally {
+      world.admin.removed.delete("team-acme");
+      await world.sync();
+    }
     expect(world.menu().map((item) => item.label), "the session still lists Acme: back").toEqual(["My Cloud", "Acme"]);
   }, hostTimeout(180_000));
 
