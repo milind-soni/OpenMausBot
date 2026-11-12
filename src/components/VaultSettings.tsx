@@ -321,7 +321,7 @@ function OnePasswordItemAccess({ item, value: initial, bots, onCancel, onSaved }
   return (
     <div className="ms-6 flex flex-col gap-2 rounded-lg bg-inset/60 p-3" data-onepassword-item={item.item}>
       <LoginBotPicker value={value} onChange={setValue} bots={bots} disabled={busy} />
-      <p className="text-[12px] leading-snug text-ink-tertiary">{t("settings.logins.onePassword.itemNote")}</p>
+      <p className="text-[12px] text-ink-tertiary">{t("settings.logins.onePassword.itemNote")}</p>
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">
         {item.ownBots && (

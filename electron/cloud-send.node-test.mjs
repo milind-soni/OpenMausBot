@@ -92,7 +92,8 @@ function fakeSides({ cloudItems = [], localItems = [], refuse = {} } = {}) {
       calls.push(`${method} ${route}`);
       bodies[`${method} ${route}`] = body;
       if (route === "/api/cloud-send" || route === "/api/cloud-send?move=1") return reply(200, summary(cloudItems));
-      if (refuse[route]) return reply(refuse[route].status, { error: refuse[route].error });
+      const refused = refuse[`${method} ${route}`] ?? refuse[route];
+      if (refused) return reply(refused.status, { error: refused.error });
       return reply(200, {});
     },
     upload: async (route) => { calls.push(`UPLOAD ${route}`); return reply(201, { path: "/data/attachments/abc.png" }); },
@@ -411,7 +412,7 @@ test("1Password items with bots of their own keep them on My Cloud; a Cloud too 
   old.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {}, itemGrants: { "v1:i1": [] } } });
   const refused = await createCloudSend(old.deps).send();
   assert.deepEqual(refused.result.failed.map((entry) => entry.key), ["1password"], "never left open to every bot there");
-  assert.ok(old.calls.includes("DELETE /api/logins/1password"), "the token this send connected is taken off again");
+  assert.ok(!old.calls.includes("POST /api/logins/1password"), "a refused item choice never connects the token");
   const plain = fakeSides({ localItems: [onePassword], refuse: items });
   plain.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {} } });
   assert.equal((await createCloudSend(plain.deps).send()).result.failed.length, 0, "a Cloud too old for item choices takes a vault-only 1Password");
@@ -420,6 +421,13 @@ test("1Password items with bots of their own keep them on My Cloud; a Cloud too 
   vaults.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: { v1: [] } } });
   assert.equal((await createCloudSend(vaults.deps).send()).result.failed.length, 1);
   assert.ok(vaults.calls.includes("DELETE /api/logins/1password"), "a vault choice that did not take closes the token too");
+  // Item choices are in place there before the token is.
+  assert.ok(sides.calls.indexOf("PUT /api/logins/1password/items") < sides.calls.indexOf("POST /api/logins/1password"));
+  const stuck = fakeSides({ localItems: [onePassword], refuse: { "/api/logins/1password/vaults/v1": { status: 500, error: "boom" }, "DELETE /api/logins/1password": { status: 500, error: "down" } } });
+  stuck.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: { v1: [] } } });
+  const left = (await createCloudSend(stuck.deps).send()).result.failed;
+  assert.equal(left.length, 1);
+  assert.match(JSON.stringify(left[0]), /Disconnect 1Password/, "a token that could not be taken off again is said out loud");
 });
 
 test("chats by row: the cursor moves only past what My Cloud took; one removed there is never sent again; one being answered waits", async () => {

@@ -36470,7 +36470,11 @@
       "settings.domain.httpsFirst": "41486ac1d5f39e25ccf3835d520137ecac15a0f49a9dcb5b73f7523fe6df330f",
       "settings.backTo": "ea37ec29c3865c359d3efb005bd252c35457976140bb718824f39d157ea32567",
       "devices.route.httpsAccount": "518ed79b3110cf735bc507bd796cf5c9cd701c3b2dc72bd764e599d411e3baf5",
-      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c"
+      "backup.importAction": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
+      "settings.logins.onePassword.changeItem": "95e5d6046e9d25e73ce6f33a97f95108c2c3027ebb01c08a94739467135ff468",
+      "settings.logins.onePassword.vaultChoice": "79ecc022e82d6ad96c1f0f82806170d3a0e69d331ac91851a0dd8d6c806c503b",
+      "settings.logins.onePassword.itemNote": "eee14017812e91c3b664d8e16e51132ae281c22c00810c0da99fd732bb3ae486",
+      "settings.logins.onePassword.useVaultChoice": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

@@ -899,6 +899,15 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     if (!record(onePassword) || typeof onePassword.token !== "string") throw new CloudSendError("local", "1Password is not connected on this computer.");
     const parts = row.parts ?? ["token", "vaults"];
     const connecting = row.state === "only-here" || parts.includes("token");
+    // My Cloud's item choices become this computer's, so one handed back to its vault here is handed back there too.
+    // They go ahead of the token, so no item is readable there under its vault's wider choice even for a moment.
+    const items = Object.fromEntries(Object.entries(onePassword.itemGrants ?? {}).filter(([item]) => ITEM_KEY.test(item))
+      .map(([item, bots]) => [item, botsOnCloud(bots, ctx.cloudBots)]));
+    const itemsKept = await ctx.session.call("PUT", "/api/logins/1password/items", { items });
+    // A Cloud too old for item choices has none to undo, but an item narrowed here must not open to every bot there.
+    if (!itemsKept.ok && !(itemsKept.status === 405 && !Object.keys(items).length)) {
+      throw refusedError("refused", itemsKept, "My Cloud could not keep its 1Password logins to the same bots. Update My Cloud and send again.");
+    }
     if (connecting) {
       const connected = await ctx.session.call("POST", "/api/logins/1password", { token: onePassword.token });
       if (!connected.ok) throw onePasswordRefusal(connected);
@@ -909,17 +918,14 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
         const granted = await ctx.session.call("PATCH", `/api/logins/1password/vaults/${encodeURIComponent(vault)}`, { bots: botsOnCloud(bots, ctx.cloudBots) });
         if (!granted.ok && granted.status !== 404) throw refusedError("refused", granted, "My Cloud connected 1Password but could not keep its vaults to the same bots.");
       }
-      // My Cloud's item choices become this computer's, so one handed back to its vault here is handed back there too.
-      const items = Object.fromEntries(Object.entries(onePassword.itemGrants ?? {}).filter(([item]) => ITEM_KEY.test(item))
-        .map(([item, bots]) => [item, botsOnCloud(bots, ctx.cloudBots)]));
-      const granted = await ctx.session.call("PUT", "/api/logins/1password/items", { items });
-      // A Cloud too old for item choices has none to undo, but an item narrowed here must not open to every bot there.
-      if (!granted.ok && !(granted.status === 405 && !Object.keys(items).length)) {
-        throw refusedError("refused", granted, "My Cloud connected 1Password but could not keep its logins to the same bots. Update My Cloud and send again.");
-      }
     } catch (error) {
       // Fail closed: a token this send connected is taken off again rather than left open wider than here.
-      if (connecting) await ctx.session.call("DELETE", "/api/logins/1password").catch(() => {});
+      if (connecting) {
+        const removed = await ctx.session.call("DELETE", "/api/logins/1password").catch(() => null);
+        if (!removed?.ok) {
+          throw new CloudSendError("refused", "My Cloud connected 1Password but could not keep its vaults to the same bots, nor disconnect it again. Disconnect 1Password in My Cloud's settings, then send again.", { cause: error });
+        }
+      }
       throw error;
     }
     done(ctx, row.key);
