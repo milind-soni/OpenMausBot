@@ -1,9 +1,9 @@
 ---
-status: doing
+status: review
 created: 2026-09-24
 updated: 2026-11-12
 scope: first-run UX audit and onboarding friction
-owner: Yv
+owner: Z
 related:
   - docs/dev/fixes/done--projects-screen.md
   - docs/dev/product-copy--onboarding-auth-sync-updates.md
@@ -44,3 +44,27 @@ Comprehensive UX and motion design audit of a new user's first 5 minutes in Gere
 
 - [x] **Verify absence of legacy product branding in active interface** — Code audit across `src/`, `server/`, `electron/`, and metadata confirmed that the former product identity (*OpenMausBot* / *OMB*) is completely removed from all visible user interfaces, window titles, settings, and logs. Upstream attribution in `README.md:291` is appropriate for open-source compliance.
 - [ ] **Recapture 7 README screenshots from running desktop build** — `docs/screenshots/hero.png`, `model-picker.png`, `computer-panel.png`, `approval-card.png`, `marketplace.png`, `context-menu.png`, `app-settings.png`. Existing screenshots predate recent UI refinements (Usage Analytics toggle in Settings, Projects header updates, and Codex tool fixes). Requires running on a host with an active display server or macOS desktop environment.
+
+---
+
+## Review handoff — 2026-11-12
+
+All first-run UX items across Sections 1, 2, and 3 are implemented on branch `feat/first-run-polish` (`/Users/esoefildine/Documents/Dev/GBS-worktrees/z-ux`). Only the README screenshot recapture in Section 4 remains `[ ]` per instructions.
+
+### Summary of changes (`feat/first-run-polish`)
+- **Task Board filter bar, drag-and-drop & empty state** (`75e88ed` — `src/components/TaskBoardScreen.tsx`, `src/lib/taskBoard.ts`, `src/lib/taskBoard.test.ts`):
+  - Single-row filter bar at `1024px` (`lg:flex-nowrap`) with Search + Project + Assigned bot + Status inline; Category, Priority, Label, and Overdue inside a **Filters** popover with active-count badge (`secondaryTaskFilterCount`) and **Clear** action.
+  - Drag-and-drop lifted-card elevation (`scale-[1.02] shadow-xl`), drop-column ring/highlight, target card insertion bar, and `motion-reduce:transition-none motion-reduce:transform-none`.
+  - Empty state primary-accent CTA (`+ Create first task`) and quick-start presets (`TASK_STARTER_PRESETS`).
+- **Projects screen browser folder suggestions, host hint & empty state** (`d062fc0`, `6e2c7fc` — `src/components/ProjectsScreen.tsx`, `src/lib/projectSuggestions.ts`, `src/lib/projectSuggestions.test.ts`):
+  - Browser-mode (`!window.gbs?.projects`) host computer hint and clickable home-relative folder chips (`~/Projects`, `~/Documents`, `~/Desktop`, `~/workspace`, plus unique parent folders from registered projects; auto-appending repo name in `clone` mode).
+  - Empty state primary-accent CTA (`+ Add a project`) and quick-start mode buttons (`Folder on your computer`, `New folder`, `From GitHub`), plus Marty's plain-language copy sweep.
+- **Onboarding Step 0, Step 1 & Step 2** (`58c2bdf` — `src/components/Onboarding.tsx`, `src/lib/onboardingCopy.ts`, `src/lib/onboardingCopy.test.ts`):
+  - Step 0 local-first guarantee badge (*"100% Local-First: Your chats and project files stay on this computer."*), optional email helper note for product updates only, and **Continue without email** button (`resolveOnboardingProfile`).
+  - Step 1 (**Your AI apps**) & Step 2 (**Studio permissions**) plain-language copy, neutral optional wording, and **Show command** toggle with **Copy** button (`InstallHelp`).
+
+### Validation
+- `pnpm -s typecheck`: passed (`0` errors).
+- `pnpm -s test`: `44` test files passed (`44/44`), `337` tests passed (`337/337`), including `9` unit tests in `src/lib/taskBoard.test.ts`, `src/lib/projectSuggestions.test.ts`, and `src/lib/onboardingCopy.test.ts`.
+- `pnpm -s build`: passed (`vite build` succeeded in `3.41s`).
+- Trello mirroring remains pending: worktree credentials are absent.
