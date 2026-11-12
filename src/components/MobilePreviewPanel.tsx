@@ -1,3 +1,4 @@
+import { PAGE_SHARE_NOTICE, previewShareLink, sharesLinkOnly } from "@/lib/previewSharing";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeftRight,
@@ -57,7 +58,7 @@ export function MobilePreviewPanel({
   onSendScreenshotToChat,
   className,
 }: MobilePreviewPanelProps) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const initial = useMemo(() => loadMobilePreviewState(), []);
 
   const [inputUrl, setInputUrl] = useState(initial.input);
@@ -217,6 +218,13 @@ export function MobilePreviewPanel({
       setCapturing(true);
       setToast(null);
       try {
+        if (sharesLinkOnly(activeSource, Boolean(window.gbs))) {
+          const text = `Preview: ${previewShareLink(activeSource, window.location.origin)}\nShared as a link; no screenshot was captured.`;
+          window.dispatchEvent(new CustomEvent("gbs:preview-share-link", { detail: { targetId: state.selectedId, text } }));
+          setToast("Link added to chat");
+          setTimeout(() => setToast(null), 2500);
+          return;
+        }
         const attachment = await frameRef.current.captureScreenshot(mode, {
           title: preset.label,
           width: effectiveDims.width,
@@ -237,6 +245,7 @@ export function MobilePreviewPanel({
     },
     [
       activeSource,
+      state.selectedId,
       capturing,
       effectiveDims.height,
       effectiveDims.width,
@@ -537,8 +546,8 @@ export function MobilePreviewPanel({
                 type="button"
                 onClick={() => setScreenshotMenuOpen((v) => !v)}
                 disabled={!activeSource || capturing}
-                aria-label="Send screenshot to chat"
-                title="Send screenshot to chat"
+                aria-label={sharesLinkOnly(activeSource, Boolean(window.gbs)) ? "Add preview link to chat" : "Send screenshot to chat"}
+                title={sharesLinkOnly(activeSource, Boolean(window.gbs)) ? PAGE_SHARE_NOTICE : "Send screenshot to chat"}
                 className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-hover hover:text-ink disabled:opacity-35"
               >
                 <Camera className="h-3.5 w-3.5" />
@@ -550,14 +559,14 @@ export function MobilePreviewPanel({
                     onClick={() => void handleCaptureScreenshot("visible")}
                     className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[11.5px] text-ink transition-colors hover:bg-hover"
                   >
-                    Send visible area to chat
+                    {sharesLinkOnly(activeSource, Boolean(window.gbs)) ? "Add preview link to chat" : "Send visible area to chat"}
                   </button>
                   <button
                     type="button"
                     onClick={() => void handleCaptureScreenshot("full")}
                     className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[11.5px] text-ink transition-colors hover:bg-hover"
                   >
-                    Send full page to chat
+                    {sharesLinkOnly(activeSource, Boolean(window.gbs)) ? "Add preview link to chat" : "Send full page to chat"}
                   </button>
                 </div>
               )}
@@ -586,6 +595,9 @@ export function MobilePreviewPanel({
         </div>
       </div>
 
+      {sharesLinkOnly(activeSource, Boolean(window.gbs)) && (
+        <p role="status" className="border-b border-hairline px-3 py-2 text-[11px] text-ink-secondary">{PAGE_SHARE_NOTICE}</p>
+      )}
       {/* Inline validation error banner */}
       {urlError && (
         <div

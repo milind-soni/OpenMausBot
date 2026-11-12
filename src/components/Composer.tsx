@@ -203,6 +203,17 @@ export function Composer({
     });
   }, [pendingText, onPendingTextConsumed]);
 
+  useEffect(() => {
+    const onPreviewLink = (event: Event) => {
+      const detail = (event as CustomEvent<{ targetId: string; text: string }>).detail;
+      if (!detail || detail.targetId !== (group?.id ?? bot?.id) || typeof detail.text !== "string") return;
+      setText((previous) => previous ? `${previous}\n\n${detail.text}` : detail.text);
+      inputRef.current?.focus();
+    };
+    window.addEventListener("gbs:preview-share-link", onPreviewLink);
+    return () => window.removeEventListener("gbs:preview-share-link", onPreviewLink);
+  }, [bot?.id, group?.id]);
+
   const handlePaste = (e: React.ClipboardEvent) => {
     const files = e.clipboardData?.files;
     if (files && files.length > 0) {

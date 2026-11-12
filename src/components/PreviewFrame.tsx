@@ -22,6 +22,7 @@ import {
   describePreviewSource,
   type PreviewSource,
 } from "@/lib/mobilePreviewUrl";
+import { captureMarkdown } from "@/lib/previewSharing";
 import type { Attachment } from "@/state/store";
 
 const LOAD_TIMEOUT_MS = 15_000;
@@ -59,77 +60,6 @@ export interface PreviewFrameProps {
   externalScrollRatioY?: number | null;
   frameTitle?: string;
   showDeviceBezel?: boolean;
-}
-
-function renderFallbackPreviewCanvas(opts: {
-  title: string;
-  sourceLabel: string;
-  width: number;
-  height: number;
-  markdownText?: string;
-  imageElement?: HTMLImageElement | null;
-}): string {
-  const canvas = document.createElement("canvas");
-  const outW = Math.max(320, Math.min(1600, Math.round(opts.width)));
-  const outH = Math.max(240, Math.min(1200, Math.round(opts.height)));
-  canvas.width = outW;
-  canvas.height = outH;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
-  }
-
-  ctx.fillStyle = "#14161b";
-  ctx.fillRect(0, 0, outW, outH);
-
-  // Header bar
-  ctx.fillStyle = "#1d2028";
-  ctx.fillRect(0, 0, outW, 44);
-  ctx.fillStyle = "#e6e8ee";
-  ctx.font = "600 13px -apple-system, BlinkMacSystemFont, sans-serif";
-  ctx.fillText(`${opts.title} (${opts.width} × ${opts.height})`, 16, 27);
-
-  ctx.fillStyle = "#8e95a5";
-  ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, monospace";
-  ctx.fillText(opts.sourceLabel.slice(0, 80), 16, 68);
-
-  if (opts.imageElement && opts.imageElement.naturalWidth > 0) {
-    const availW = outW - 32;
-    const availH = outH - 96;
-    const ratio = Math.min(
-      availW / opts.imageElement.naturalWidth,
-      availH / opts.imageElement.naturalHeight,
-      1,
-    );
-    const drawW = opts.imageElement.naturalWidth * ratio;
-    const drawH = opts.imageElement.naturalHeight * ratio;
-    const drawX = 16 + (availW - drawW) / 2;
-    const drawY = 82 + (availH - drawH) / 2;
-    try {
-      ctx.drawImage(opts.imageElement, drawX, drawY, drawW, drawH);
-    } catch {
-      // Cross-origin image taint fallback
-    }
-  } else if (opts.markdownText) {
-    ctx.fillStyle = "#d5d9e2";
-    ctx.font = "13px -apple-system, BlinkMacSystemFont, sans-serif";
-    const lines = opts.markdownText.split(/\r?\n/).slice(0, 22);
-    let y = 96;
-    for (const line of lines) {
-      ctx.fillText(line.slice(0, 90), 16, y);
-      y += 20;
-      if (y > outH - 20) break;
-    }
-  } else {
-    ctx.strokeStyle = "#2b303c";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(16, 84, outW - 32, outH - 104);
-    ctx.fillStyle = "#a5adbd";
-    ctx.font = "14px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText(`Preview snapshot — ${opts.sourceLabel.slice(0, 64)}`, 32, 124);
-  }
-
-  return canvas.toDataURL("image/png");
 }
 
 function dataUrlByteSize(dataUrl: string): number {
@@ -253,7 +183,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
     ): Promise<Attachment> => {
       const safeSlug = meta.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "preview";
       const fileName = `preview-${safeSlug}-${meta.width}x${meta.height}-${Date.now()}.png`;
-      const sourceLabel = describePreviewSource(source);
+
 
       const el = webviewRef.current as any;
       if (
@@ -285,18 +215,26 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
             };
           }
         } catch {
-          // Fall through to canvas capture
+          // Never manufacture a screenshot when native capture fails.
         }
       }
 
-      const dataUrl = renderFallbackPreviewCanvas({
-        title: meta.title,
-        sourceLabel,
-        width: meta.width,
-        height: meta.height,
-        markdownText: source?.kind === "file" && source.fileType === "markdown" ? markdownContent : undefined,
-        imageElement: source?.kind === "file" && source.fileType === "image" ? imageRef.current : null,
-      });
+      let dataUrl: string;
+      if (source?.kind === "file" && source.fileType === "markdown" && markdownScrollRef.current) {
+        dataUrl = await captureMarkdown(markdownScrollRef.current, meta.width, meta.height, mode === "full");
+      } else if (source?.kind === "file" && source.fileType === "image" && imageRef.current?.naturalWidth) {
+        const image = imageRef.current;
+        const canvas = document.createElement("canvas");
+        const ratio = Math.min(1, 1600 / image.naturalWidth, 1200 / image.naturalHeight);
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * ratio));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * ratio));
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Screenshot capture is unavailable.");
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        dataUrl = canvas.toDataURL("image/png");
+      } else {
+        throw new Error("Page screenshots need the desktop app. Share the preview link instead.");
+      }
 
       return {
         id: `preview-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -306,7 +244,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
         dataUrl,
       };
     },
-    [isElectron, markdownContent, source],
+    [isElectron, source],
   );
 
   useImperativeHandle(

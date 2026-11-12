@@ -1,3 +1,4 @@
+import { sharesLinkOnly, previewShareLink } from "@/lib/previewSharing";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -278,7 +279,10 @@ export default function PreviewScreen() {
       if (!activeSource) return;
       const attachments: Attachment[] = [];
 
-      if (shareOverrideArtboard) {
+      const linkOnly = sharesLinkOnly(activeSource, Boolean(window.gbs));
+      if (linkOnly) {
+        // Browser frames cannot supply a faithful page screenshot.
+      } else if (shareOverrideArtboard) {
         const handle = canvasFrameRefs.current.get(shareOverrideArtboard.id);
         if (handle) {
           const att = await handle.captureScreenshot(request.area, {
@@ -318,12 +322,13 @@ export default function PreviewScreen() {
         }
       }
 
-      const sourceDesc = describePreviewSource(activeSource);
+      const sourceDesc = linkOnly ? previewShareLink(activeSource, window.location.origin) : describePreviewSource(activeSource);
       const defaultCaption =
         attachments.length > 1
           ? `Shared ${attachments.length} preview sizes for ${sourceDesc}`
           : `Preview (${shareOverrideArtboard?.preset.label ?? activePreset.label}): ${sourceDesc}`;
-      const text = request.note ? `${request.note}\n\n${defaultCaption}` : defaultCaption;
+      const caption = linkOnly ? `${defaultCaption}\nShared as a link; no screenshot was captured.` : defaultCaption;
+      const text = request.note ? `${request.note}\n\n${caption}` : caption;
 
       if (request.target.kind === "group") {
         dispatch({
@@ -880,6 +885,7 @@ export default function PreviewScreen() {
 
       <SharePreviewModal
         open={shareModalOpen}
+        linkOnly={sharesLinkOnly(activeSource, Boolean(window.gbs))}
         onClose={() => {
           setShareModalOpen(false);
           setShareOverrideArtboard(null);

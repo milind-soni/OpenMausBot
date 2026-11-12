@@ -1,3 +1,4 @@
+import { PAGE_SHARE_NOTICE } from "@/lib/previewSharing";
 import { useEffect, useState } from "react";
 import { Camera, RefreshCw, Send, X } from "lucide-react";
 import { useStore } from "@/state/store";
@@ -17,6 +18,7 @@ export interface SharePreviewRequest {
 
 export interface SharePreviewModalProps {
   open: boolean;
+  linkOnly?: boolean;
   onClose: () => void;
   currentSizeLabel: string;
   currentDimensionsLabel: string;
@@ -27,6 +29,7 @@ export interface SharePreviewModalProps {
 
 export function SharePreviewModal({
   open,
+  linkOnly = false,
   onClose,
   currentSizeLabel,
   currentDimensionsLabel,
@@ -134,8 +137,9 @@ export function SharePreviewModal({
         </div>
 
         <div className="space-y-4 pt-2">
+          {linkOnly && <p role="status" className="rounded-lg border border-hairline bg-inset p-3 text-[12px] text-ink-secondary">{PAGE_SHARE_NOTICE}</p>}
           {/* What to capture */}
-          <fieldset>
+          {!linkOnly && <fieldset>
             <legend className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">
               What to capture
             </legend>
@@ -182,10 +186,10 @@ export function SharePreviewModal({
                 </label>
               )}
             </div>
-          </fieldset>
+          </fieldset>}
 
           {/* Capture area */}
-          <fieldset>
+          {!linkOnly && <fieldset>
             <legend className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">
               Capture area
             </legend>
@@ -213,7 +217,7 @@ export function SharePreviewModal({
                 Full page
               </button>
             </div>
-          </fieldset>
+          </fieldset>}
 
           {/* Send to */}
           <div>
