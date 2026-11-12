@@ -1,4 +1,7 @@
 {
+  "settings.hoverThreads.title": "ホバー時に最近のチャットを表示",
+  "settings.hoverThreads.subtitle": "サイドバーで展開せず、ボットの横に最近のチャットを表示します。スレッドを有効にする必要があります。",
+  "settings.hoverThreads.sessionOnly": "保存できなかったため、この設定は現在のセッションでのみ有効です。",
   "connectedWorkspaces.localTitle": "このコンピューターの環境",
   "connectedWorkspaces.missing": "見つかりません",
   "connectedWorkspaces.current": "使用中",

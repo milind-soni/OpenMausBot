@@ -108,7 +108,7 @@ describe("bot row expansion follows the visible thread tree", () => {
     render({ ...bot, ...status });
     fixture.effects.forEach(effect => effect());
     const markup = render({ ...bot, ...status });
-    expectSoleRow(markup);
+    expect(markup).toContain('data-sidebar-thread-row="current"');
     expect(markup).toContain(label);
   });
 });

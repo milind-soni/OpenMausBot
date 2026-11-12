@@ -1,4 +1,7 @@
 {
+  "settings.hoverThreads.title": "Показувати нещодавні чати при наведенні",
+  "settings.hoverThreads.subtitle": "Показувати нещодавні чати поруч із ботом замість розгортання на бічній панелі. Потрібно ввімкнути гілки.",
+  "settings.hoverThreads.sessionOnly": "Не вдалося зберегти налаштування, тому воно діє лише протягом цього сеансу.",
   "voice.gemini.keyPlaceholder": "Вставте свій API-ключ Google AI Studio",
   "voice.gemini.model": "Модель синтезу мовлення Gemini",
   "keys.label.geminiTts": "API-ключ синтезу мовлення Gemini",

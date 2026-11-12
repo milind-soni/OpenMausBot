@@ -1,4 +1,7 @@
 {
+  "settings.hoverThreads.title": "滑鼠移上時顯示最近的對話",
+  "settings.hoverThreads.subtitle": "在機器人旁顯示最近的對話，而不是在側邊欄展開。需要啟用對話串。",
+  "settings.hoverThreads.sessionOnly": "無法儲存此設定，因此只在本次工作階段生效。",
   "connectedWorkspaces.localTitle": "這台電腦上的環境",
   "connectedWorkspaces.missing": "遺失",
   "connectedWorkspaces.current": "目前",

@@ -1,4 +1,7 @@
 {
+  "settings.hoverThreads.title": "鼠标悬停时显示最近的聊天",
+  "settings.hoverThreads.subtitle": "在机器人旁显示最近的聊天，而不是在侧边栏展开。需要启用会话。",
+  "settings.hoverThreads.sessionOnly": "由于无法保存，此设置仅在本次会话中有效。",
   "voice.gemini.keyPlaceholder": "粘贴你的 Google AI Studio API 密钥",
   "voice.gemini.model": "Gemini 语音合成模型",
   "keys.label.geminiTts": "Gemini 语音合成 API 密钥",

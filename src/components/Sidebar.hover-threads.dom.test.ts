@@ -69,6 +69,20 @@ it("restores the inline arrow for a single chat when hover is disabled", async (
   await act(async () => { root.unmount(); });
 });
 
+it("reveals the target chat in its bot popup without opening another bot", async () => {
+  setSidebarHoverThreads(true);
+  const bot: Bot = { id: "reveal", threadId: "one", name: "Reveal", title: "", description: "", notifications: true, color: "green", unread: false,
+    modelSelection: { instanceId: "claude", model: "test" }, messages: [], tasks: [{ threadId: "one", title: "First", createdAt: 1 }] };
+  const other = { ...bot, id: "other", name: "Other", threadId: "two", tasks: [{ threadId: "two", title: "Second", createdAt: 2 }] };
+  const state = { ...initialState, activeView: "chat" as const, selectedId: "reveal", revealThread: { threadId: "one", nonce: 1 } };
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  await act(async () => { root.render(createElement("div", null, ...[bot, other].map((item) => createElement(BotListItem, { ...botRowProps(state, vi.fn(), item, { density: "comfortable", query: "", onMenu: vi.fn() }), key: item.id })))); });
+  expect(document.querySelector('[data-recent-chats-popup="reveal"] [data-sidebar-thread-row="one"]')).not.toBeNull();
+  expect(document.querySelector('[data-recent-chats-popup="other"]')).toBeNull();
+  await act(async () => { root.unmount(); });
+});
+
 it("focuses an empty popup and dismisses it after its menu closes", async () => {
   vi.useFakeTimers();
   function Fixture() {

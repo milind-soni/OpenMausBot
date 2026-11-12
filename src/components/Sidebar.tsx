@@ -695,10 +695,10 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const [renaming, setRenaming] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [threadsOpen, setThreadsOpen] = useSearchDisclosure(`bot:${bot.id}`, showThreads ? query : "", searchMatchesThreads(query, bot.tasks, bot.projects));
-  useEffect(() => { if (reveal && showThreads) setThreadsOpen(true); }, [reveal, showThreads]);
   const taskCount = bot.tasks?.filter((task) => !task.routineRunId).length ?? 0, hasThreadList = taskCount > 1 || (bot.projects?.length ?? 0) > 0 || Boolean(query);
   const [singleThreadOpen, setSingleThreadOpen] = useState(false), inlineOpen = hasThreadList ? threadsOpen : singleThreadOpen;
   const iconOnly = density === "icons", popupMode = advanced && showThreads && hoverThreads && !iconOnly && ((bot.tasks?.filter((task) => !task.routineRunId).length ?? 0) > 0 || (bot.projects?.length ?? 0) > 0);
+  useEffect(() => { if (reveal && showThreads) { if (popupMode) openPopover(); else if (hasThreadList) setThreadsOpen(true); else setSingleThreadOpen(true); } }, [reveal, showThreads, popupMode]);
   useEffect(() => { if (!popupMode) { cancelClose(); setPopover(null); } }, [popupMode]);
   const expanded = showThreads && !popupMode && !iconOnly && inlineOpen && (hasThreadList || taskCount === 1);
   useEffect(() => { if (iconOnly) setRenaming(false); }, [iconOnly]);
@@ -814,7 +814,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           {expanded && unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
           {simpleRow && (unread || waiting) && <RowDot waiting={waiting} />}
         </div>
-        {(!expanded || deleting) && <div className="flex items-center justify-between gap-2">
+        {(!expanded || !hasThreadList || deleting) && <div className="flex items-center justify-between gap-2">
           {deleting ? (
             <span role="status" className="flex min-w-0 items-center gap-1.5 truncate text-[13px] leading-[18px] text-ink-secondary">
               <Loader2 size={12} className="shrink-0 animate-spin" />
