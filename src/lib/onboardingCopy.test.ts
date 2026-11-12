@@ -33,8 +33,10 @@ function makeInstance(
 }
 
 describe("onboarding copy and profile helpers", () => {
-  it("exposes local-first guarantee and plain-language onboarding copy", () => {
-    expect(ONBOARDING_LOCAL_GUARANTEE).toContain("stay on this computer");
+  it("distinguishes local storage from connected AI processing and qualifies speech transcription", () => {
+    expect(ONBOARDING_LOCAL_GUARANTEE).toContain("stores your chats and project folders on the computer running Studio");
+    expect(ONBOARDING_LOCAL_GUARANTEE).toContain("connected AI app receives your messages and the relevant content needed");
+    expect(ONBOARDING_LOCAL_GUARANTEE).not.toContain("100% Local-First");
     expect(ONBOARDING_WELCOME_SUBTITLE).toContain("real work on your computer");
     expect(ONBOARDING_EMAIL_HELPER).toContain("Optional");
     expect(ONBOARDING_EMAIL_HELPER).toContain("product updates");
@@ -44,8 +46,11 @@ describe("onboarding copy and profile helpers", () => {
       "Bots run on the AI apps already installed on this Mac — here’s what we found.",
     );
     expect(ONBOARDING_PERMISSIONS_TITLE).toBe("Studio permissions");
-    expect(ONBOARDING_PERMISSIONS_SUBTITLE).toContain("stays private on this computer");
-    expect(ONBOARDING_MIC_DETAIL).toContain("transcribed privately on your computer");
+    expect(ONBOARDING_PERMISSIONS_SUBTITLE).toContain("Optional device access");
+    expect(ONBOARDING_PERMISSIONS_SUBTITLE).not.toContain("stays private on this computer");
+    expect(ONBOARDING_MIC_DETAIL).toContain("when on-device recognition is available");
+    expect(ONBOARDING_MIC_DETAIL).toContain("system speech service");
+    expect(ONBOARDING_MIC_DETAIL).not.toContain("transcribed privately on your computer");
   });
 
   it("supports continuing with or without email", () => {

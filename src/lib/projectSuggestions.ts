@@ -1,4 +1,4 @@
-import type { ProjectRecord } from "@/types/gbs";
+import type { ProjectRecord } from "../types/gbs.ts";
 
 export const BROWSER_SUGGESTED_FOLDERS = [
   "~/Projects",

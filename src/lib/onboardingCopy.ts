@@ -32,7 +32,7 @@ export const ONBOARDING_WELCOME_TITLE = "Welcome to Gerer Build Studio";
 export const ONBOARDING_WELCOME_SUBTITLE =
   "Bots that do real work on your computer. Tell us who you are to personalize your workspace.";
 export const ONBOARDING_LOCAL_GUARANTEE =
-  "100% Local-First: Your chats and project files stay on this computer.";
+  "Studio stores your chats and project folders on the computer running Studio. When you message a bot, the connected AI app receives your messages and the relevant content needed for the requested work under that service's policy.";
 export const ONBOARDING_EMAIL_HELPER =
   "Optional — only used if you want occasional product updates.";
 export const ONBOARDING_CONTINUE_WITHOUT_EMAIL = "Continue without email";
@@ -44,9 +44,9 @@ export function onboardingEnginesSubtitle(hostLabel: string): string {
 
 export const ONBOARDING_PERMISSIONS_TITLE = "Studio permissions";
 export const ONBOARDING_PERMISSIONS_SUBTITLE =
-  "Everything is optional and stays private on this computer. You can change these anytime in Settings.";
+  "Optional device access used only when you start the feature. You can change these anytime in Settings.";
 export const ONBOARDING_MIC_DETAIL =
-  "Speak your messages instead of typing. Speech is transcribed privately on your computer.";
+  "Speak your messages instead of typing. Speech is transcribed on your computer when on-device recognition is available, or may fall back to your system speech service when unavailable.";
 
 export function isValidOnboardingEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());

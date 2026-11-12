@@ -647,7 +647,7 @@ export function TaskBoardScreen() {
   const moreFilterCount = secondaryTaskFilterCount(filters);
   const tags = useMemo(() => [...new Set(state.tasks.flatMap((task) => task.tags))].sort(), [state.tasks]);
   const selectClass =
-    "h-9 shrink-0 rounded-lg border border-hairline/50 bg-panel px-2.5 text-[12px] text-ink focus:border-accent/70 focus:outline-none";
+    "h-9 min-w-0 shrink rounded-lg border border-hairline/50 bg-panel px-2 text-[12px] text-ink truncate focus:border-accent/70 focus:outline-none";
 
   useEffect(() => {
     let alive = true;
@@ -737,9 +737,9 @@ export function TaskBoardScreen() {
       </header>
 
       {/* Single-row filter bar at >=1024px: Search + Project + Assigned bot + Status inline, secondary filters in Popover */}
-      <section className="shrink-0 border-b border-hairline/40 px-4 py-2.5">
-        <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
-          <div className="flex h-9 min-w-[180px] flex-1 items-center gap-2 rounded-lg border border-hairline/50 bg-panel px-3">
+      <section className="min-w-0 shrink-0 border-b border-hairline/40 px-4 py-2.5">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5 lg:flex-nowrap">
+          <div className="flex h-9 min-w-[100px] flex-1 basis-[120px] items-center gap-1.5 rounded-lg border border-hairline/50 bg-panel px-2.5">
             <Search size={15} className="shrink-0 text-ink-secondary" />
             <input
               value={filters.text}
@@ -753,7 +753,7 @@ export function TaskBoardScreen() {
                 type="button"
                 onClick={() => setFilters({ ...filters, text: "" })}
                 aria-label="Clear search"
-                className="text-ink-secondary hover:text-ink"
+                className="shrink-0 text-ink-secondary hover:text-ink"
               >
                 <X size={13} />
               </button>
@@ -763,7 +763,7 @@ export function TaskBoardScreen() {
           <select
             value={filters.projectId}
             onChange={(event) => setFilters({ ...filters, projectId: event.target.value })}
-            className={selectClass}
+            className={cn(selectClass, "max-w-[132px] xl:max-w-[180px]")}
             aria-label="Filter by project"
           >
             <option value="">All projects</option>
@@ -778,7 +778,7 @@ export function TaskBoardScreen() {
           <select
             value={filters.assigneeBotId}
             onChange={(event) => setFilters({ ...filters, assigneeBotId: event.target.value })}
-            className={selectClass}
+            className={cn(selectClass, "max-w-[116px] xl:max-w-[160px]")}
             aria-label="Filter by bot"
           >
             <option value="">All bots</option>
@@ -793,7 +793,7 @@ export function TaskBoardScreen() {
           <select
             value={filters.status}
             onChange={(event) => setFilters({ ...filters, status: event.target.value })}
-            className={selectClass}
+            className={cn(selectClass, "max-w-[104px] xl:max-w-[130px]")}
             aria-label="Filter by status"
           >
             <option value="">All statuses</option>
@@ -813,7 +813,7 @@ export function TaskBoardScreen() {
               aria-haspopup="dialog"
               aria-label={moreFilterCount > 0 ? `Filters (${moreFilterCount} active)` : "Filters"}
               className={cn(
-                "flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[12px] font-medium transition-colors",
+                "flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 text-[12px] font-medium transition-colors",
                 moreFilterCount > 0 || filtersOpen
                   ? "border-accent/60 bg-accent/10 text-accent"
                   : "border-hairline/50 bg-panel text-ink-secondary hover:text-ink",
@@ -925,7 +925,7 @@ export function TaskBoardScreen() {
             <button
               type="button"
               onClick={() => setFilters(EMPTY_TASK_FILTERS)}
-              className="h-9 shrink-0 rounded-lg px-2.5 text-[12px] font-medium text-accent hover:bg-accent/10"
+              className="h-9 shrink-0 whitespace-nowrap rounded-lg px-2 text-[12px] font-medium text-accent hover:bg-accent/10"
             >
               Clear ({filterCount})
             </button>

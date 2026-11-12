@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { ProjectService, parseGitHubRepositoryUrl, projectMentionSlug } from "./projects.mjs";
@@ -146,6 +146,90 @@ describe("ProjectService", () => {
     ).rejects.toThrow("authentication failed");
     await expect(readFile(path.join(dataDir, "projects.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(destinationPath)).resolves.toMatchObject({});
+  });
+
+  it("resolves ~/ folder chip paths against the host home directory for addExisting, createProject, and cloneProject", async () => {
+    const homeDir = path.join(root, "host-home");
+    const projectsDir = path.join(homeDir, "Projects");
+    await mkdir(projectsDir, { recursive: true });
+    const canonicalProjectsDir = await realpath(projectsDir);
+
+    const cloneRepository = vi.fn(async ({ destinationPath }) => {
+      await mkdir(destinationPath);
+    });
+    const service = new ProjectService({ dataDir, homeDir, cloneRepository });
+
+    const existing = await service.addExisting("~/Projects");
+    expect(existing).toMatchObject({
+      name: "Projects",
+      path: canonicalProjectsDir,
+      source: "existing",
+      missing: false,
+    });
+
+    const created = await service.createProject({
+      parentPath: "~/Projects",
+      name: "qa-chip-folder",
+      allowedRoot: homeDir,
+    });
+    expect(created).toMatchObject({
+      name: "qa-chip-folder",
+      path: path.join(canonicalProjectsDir, "qa-chip-folder"),
+      source: "created",
+      missing: false,
+    });
+
+    const cloned = await service.cloneProject({
+      repositoryUrl: "https://github.com/example/qa-repository",
+      destinationPath: "~/Projects/qa-repository",
+      allowedRoot: homeDir,
+    });
+    expect(cloned).toMatchObject({
+      name: "qa-repository",
+      path: path.join(canonicalProjectsDir, "qa-repository"),
+      source: "github",
+      missing: false,
+    });
+  });
+
+  it("blocks expanded ~/ traversal and symlinks that escape the allowed home root", async () => {
+    const homeDir = path.join(root, "host-home");
+    const outsideDir = path.join(root, "outside-root");
+    await mkdir(path.join(homeDir, "Projects"), { recursive: true });
+    await mkdir(outsideDir, { recursive: true });
+    const symlinkEscape = path.join(homeDir, "escape-link");
+    await symlink(outsideDir, symlinkEscape, "dir");
+
+    const cloneRepository = vi.fn(async ({ destinationPath }) => {
+      await mkdir(destinationPath);
+    });
+    const service = new ProjectService({ dataDir, homeDir, cloneRepository });
+
+    await expect(service.addExisting("~/../outside-root")).rejects.toThrow("inside your home directory");
+    await expect(service.addExisting("~/escape-link")).rejects.toThrow("inside your home directory");
+
+    await expect(
+      service.createProject({ parentPath: "~/../outside-root", name: "escaped", allowedRoot: homeDir }),
+    ).rejects.toThrow("inside your home directory");
+    await expect(
+      service.createProject({ parentPath: "~/escape-link", name: "escaped", allowedRoot: homeDir }),
+    ).rejects.toThrow("inside your home directory");
+
+    await expect(
+      service.cloneProject({
+        repositoryUrl: "https://github.com/example/qa-repository",
+        destinationPath: "~/Projects/../../outside-root/qa-repository",
+        allowedRoot: homeDir,
+      }),
+    ).rejects.toThrow("inside your home directory");
+    await expect(
+      service.cloneProject({
+        repositoryUrl: "https://github.com/example/qa-repository",
+        destinationPath: "~/escape-link/qa-repository",
+        allowedRoot: homeDir,
+      }),
+    ).rejects.toThrow("inside your home directory");
+    expect(cloneRepository).not.toHaveBeenCalled();
   });
 });
 

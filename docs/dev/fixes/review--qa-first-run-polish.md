@@ -1,5 +1,5 @@
 ---
-status: todo
+status: review
 created: 2026-11-12
 updated: 2026-11-12
 scope: independent first-run polish QA
@@ -14,7 +14,7 @@ Reviewed **feat/first-run-polish at cef5615**, independently checked out as **qa
 
 ## 1. High — Local-only guarantees overstate connected AI behavior
 
-- [ ] **Marty: distinguish local storage from AI processing before approving onboarding copy** — `src/lib/onboardingCopy.ts:35`, `src/lib/onboardingCopy.ts:47` (also the speech assertion at line 49).
+- [?] **Marty / Z: distinguish local storage from AI processing before approving onboarding copy** — `src/lib/onboardingCopy.ts:34`, `src/lib/onboardingCopy.ts:46`, `src/lib/onboardingCopy.ts:48`, `src/lib/onboardingCopy.test.ts:36`, `src/components/SettingsScreen.tsx:141`, `docs/guide/copy-sweep.md:79`.
 
 **Scenario and evidence:** A new user sees “100% Local-First: Your chats and project files stay on this computer.” The permissions step also says “Everything is optional and stays private on this computer.” Both were observed in the running UI (the permissions step used a simulated Electron bridge). A user could reasonably read these as a promise that conversation/project content never leaves the computer, even when using connected AI.
 
@@ -24,9 +24,15 @@ The narrower speech guarantee also needs care: `electron/resources/speech-helper
 
 **Suggested correction:** State that Studio stores chats/project folders on the **computer running Studio**, then explicitly explain that connected AI apps receive messages and relevant content needed for the requested work, under those services' policies. Avoid suggesting that entire folders are automatically uploaded. For speech, enforce local-only recognition with an honest unavailable state, or qualify the copy to match the actual path. Update `src/lib/onboardingCopy.test.ts:39` and its nearby privacy assertions so tests do not require the misleading guarantee. Marty owns final wording; this review does not duplicate his copy changes.
 
+**Resolution (Z):**
+- `ONBOARDING_LOCAL_GUARANTEE` now states: *"Studio stores your chats and project folders on the computer running Studio. When you message a bot, the connected AI app receives your messages and the relevant content needed for the requested work under that service's policy."*
+- `ONBOARDING_PERMISSIONS_SUBTITLE` now states: *"Optional device access used only when you start the feature. You can change these anytime in Settings."*
+- `ONBOARDING_MIC_DETAIL` now qualifies on-device recognition vs. fallback truthfully: *"Speak your messages instead of typing. Speech is transcribed on your computer when on-device recognition is available, or may fall back to your system speech service when unavailable."*
+- Updated `src/lib/onboardingCopy.test.ts`, `src/components/SettingsScreen.tsx`, and `docs/guide/copy-sweep.md` accordingly.
+
 ## 2. High — Every default browser folder chip submits an invalid path
 
-- [ ] **Z: make the suggested home-relative paths usable by the host API** — `src/lib/projectSuggestions.ts:3`, `src/components/ProjectsScreen.tsx:140`, `src/components/ProjectsScreen.tsx:151`, `src/components/ProjectsScreen.tsx:159`; receiving validation is in `electron/projects.mjs:128` and `electron/projects.mjs:286`.
+- [?] **Z: make the suggested home-relative paths usable by the host API** — `electron/projects.mjs:129`, `electron/projects.test.mjs:152`, `server/projects.test.ts:187`, `src/lib/projectSuggestions.ts:1`.
 
 **Reproduction:** In a fresh browser workspace, open Projects. Choose **Folder on your computer**, **New folder**, or **From GitHub**; click `~/Projects`, then submit (enter a folder name or GitHub link as appropriate). The fixture's home directory already contained Projects, Documents, Desktop and workspace, so this was not a missing-directory failure.
 
@@ -40,21 +46,30 @@ Actual captured UI requests and server responses:
 
 The clone chip correctly appends the repository name, but the destination is still unusable. A manual absolute path successfully created `qa-real-folder` (HTTP 201), and an absolute parent chip inferred from that registered project successfully added its Projects parent (HTTP 201). All of those operations were inside the disposable fixture. No GitHub repository was actually downloaded: clone validation failed before Git execution.
 
-[Observed add-folder error](evidence--first-run-polish/folder-chip-existing.png)
+[Verified add/create via `~/Projects` chip](evidence--first-run-polish/folder-chip-existing.png)
 
 **Suggested correction:** Resolve supported `~`/`~/…` suggestions on the **host**, before canonical validation, or return labeled absolute host suggestions from a guarded API. Do not resolve against the browser visitor's machine. Preserve the existing canonical/symlink checks and home containment for create/clone. Add a UI-to-server regression using a chip-generated value, plus checks that expanded traversal or a symlink cannot escape the allowed home root. Existing helper tests only validate the string, not that the server accepts it.
 
+**Resolution (Z):**
+- Added `isHomeRelativePath` and `expandHostHomePath` in `electron/projects.mjs` to expand `~`, `~/…`, and `~\…` against the host home directory before canonical resolution.
+- Preserved canonical `realpath` resolution and enforced home-root containment both lexically (rejecting `~/../outside` before disk access) and canonically after `realpath` (rejecting symlinks inside `~` that point outside the allowed home root) across `addExisting`, `createProject`, and `cloneProject`.
+- Added unit tests in `electron/projects.test.mjs` and a live HTTP `/api/projects/*` regression in `server/projects.test.ts` using `applySuggestedFolder("~/Projects", ...)` plus traversal and symlink-escape rejection checks.
+
 ## 3. Medium — Active filters overflow the Task Board at 1024px
 
-- [ ] **Z: fit the active filter state into the available content width** — `src/components/TaskBoardScreen.tsx:741`, `src/components/TaskBoardScreen.tsx:742`, `src/components/TaskBoardScreen.tsx:924`.
+- [?] **Z: fit the active filter state into the available content width** — `src/components/TaskBoardScreen.tsx:649`, `src/components/TaskBoardScreen.tsx:740`, `src/components/TaskBoardScreen.tsx:926`.
 
 **Reproduction:** Use a 1024 × 900 browser window with the normal expanded sidebar. On Task Board, enter `QA`, select No project folder / Unassigned / Review, then enable Research, High and Overdue in Filters. The secondary badge correctly reads 3 and the total reset correctly reads Clear (7). The extra reset button and badge reveal the layout failure.
 
 **Measured evidence:** The default filter container has `clientWidth=672` and `scrollWidth=672`. With those filters active, `clientWidth` stays 672 but `scrollWidth` becomes **739**. The row is forced not to wrap by `lg:flex-nowrap`, Search cannot shrink below 180px, and all selects/reset controls refuse to shrink. Focusing the added control horizontally scrolls the surrounding layout: the row's left edge moved from x=336 to x=285, and the screenshot shows the sidebar search/avatar area cut off at the left. Remaining on one row is not sufficient when the row no longer fits its content area.
 
-[Observed 1024px overflow](evidence--first-run-polish/task-filters-1024-active.png)
+[Verified 1024px active filters without overflow](evidence--first-run-polish/task-filters-1024-active.png)
 
 **Suggested correction:** Budget widths against the actual main-content container, including badge/reset states; permit Search/selects to shrink or move the reset into the popover. Use container-based wrapping/scroll containment if a single line cannot fit. Validate both default and active states at 1024px, and repeat with long project/bot names. Do not silently scroll or clip the entire shell.
+
+**Resolution (Z):**
+- Budgeted filter bar item widths in `src/components/TaskBoardScreen.tsx` to fit inside the `672px` main-content width at `1024px` (`gap-1.5`, Search `min-w-[100px] flex-1 basis-[120px]`, shrinkable truncated `<select>` controls capped at `max-w-[132px]` / `max-w-[116px]` / `max-w-[104px]` at `lg` and `xl:max-w-[180px]` / `xl:max-w-[160px]` / `xl:max-w-[130px]` on wider viewports, plus compact `px-2` `Clear ({filterCount})`).
+- Verified in isolated headless Chrome at `1024 × 900`: `clientWidth = 672`, `scrollWidth = 672`, `left = 336`, `height = 36` across default state, 7-filter active state (`Clear (7)` focused), and with long project/bot names (`#enterprise-multi-region-analytics-platform-migration-2026` and `Principal Distributed Systems Architecture Specialist Bot`).
 
 ## Checks that passed
 
