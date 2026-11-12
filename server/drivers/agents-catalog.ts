@@ -906,7 +906,7 @@ const TOOL_DEFINITIONS = [
         action: { type: "string", enum: ["find", "get", "set"] },
         query: { type: "string", maxLength: 200, description: "find: words such as dark mode." },
         id: { type: "string", maxLength: 80, description: "get, set: the id from find." },
-        value: { description: "set: the new value, as get's allowed values say." },
+        value: { type: "string", maxLength: 4000, description: "set: the new value as text; numbers, true/false and JSON lists are read from it." },
         reason: { type: "string", maxLength: 240, description: "set on a secret: why, for the card." },
       },
       required: ["action"],

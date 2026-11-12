@@ -24,6 +24,19 @@ const NOT_RETRY = "Do not retry it; ask the user what they would like instead.";
 const NOT_SET = "not set";
 const text = (value: string) => value || NOT_SET;
 
+/** The tool sends every value as text so strict-schema providers accept it; numbers, true/false and JSON lists are read
+ * back from it when the text alone does not fit the setting. */
+function parseValue(entry: WritableEntry, value: unknown) {
+  const direct = entry.value.safeParse(value);
+  if (direct.success || typeof value !== "string") return direct;
+  try {
+    const read = entry.value.safeParse(JSON.parse(value));
+    return read.success ? read : direct;
+  } catch {
+    return direct;
+  }
+}
+
 export interface Turn {
   botId: string;
   threadId: string;
@@ -181,7 +194,7 @@ export function createAppSettings(deps: AppSettingsDeps) {
       if (posted.status >= 300) return refuse(posted.status, String(posted.body.error ?? "The secure card could not be shown."));
       return reply(200, { text: `A secure card for ${entry.label} is ready in MausBot. End this turn now and say in one line that you are waiting for it; MausBot resumes you when the user saves it or declines. You never see the key.` });
     }
-    const parsed = entry.value.safeParse(body.value);
+    const parsed = parseValue(entry, body.value);
     if (!parsed.success) return refuse(400, `${entry.label} takes ${entry.allowed}. ${parsed.error.issues.map((issue) => issue.message).join("; ")}`);
     const budget = spendWrite(turn);
     if (budget) return refuse(429, budget);

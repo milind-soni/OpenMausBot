@@ -2146,7 +2146,8 @@
             "description": "get, set: the id from find."
           },
           "value": {
-            "description": "set: the new value, as get's allowed values say."
+            "type": "string",
+            "description": "set: the new value as text; numbers, true/false and JSON lists are read from it."
           },
           "reason": {
             "type": "string",

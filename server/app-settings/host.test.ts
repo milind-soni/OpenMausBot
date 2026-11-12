@@ -122,6 +122,12 @@ describe("reads", () => {
     expect(bad.body.error).toContain("1 to 1440 minutes");
     expect(saved).toEqual([]);
   });
+  it("reads numbers and JSON lists from the text the tool sends", async () => {
+    const { set, saved } = fixture();
+    expect((await set("rooms.turnTimeoutMinutes", "45")).status).toBe(200);
+    expect((await set("rooms.turnTimeoutMinutes", "lots")).status).toBe(400);
+    expect(saved).toHaveLength(1);
+  });
 });
 
 describe("safe tier", () => {
