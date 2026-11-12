@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, it, vi } from "vitest";
+import { expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import { runControlOmb } from "../control-omb.ts";
@@ -23,10 +23,11 @@ if (!enabled) console.log("skipping usage details UI: set OMB_UI_E2E=1 to instal
     child.stdout!.on("data", chunk => { stdout += String(chunk); });
     child.stderr!.on("data", chunk => { stderr += String(chunk); });
     await expect.poll(() => {
-      if (child!.exitCode !== null || child!.signalCode !== null) throw new Error(`UI launcher exited: ${stderr}`);
+      if (child!.exitCode !== null || child!.signalCode !== null) return true;
       try { info = JSON.parse(stdout); return Boolean(info?.ui); } catch { return false; }
     }, { timeout: 600_000, interval: 250 }).toBe(true);
-    const handle = info!;
+    if (!info) throw new Error(`UI launcher exited: ${stderr}`);
+    const handle = info;
     const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", handle.ui, ...args]) as Promise<Record<string, any>>;
     await ui("eval", "--js", ENABLE_ADVANCED_UI);
     await ui("type", "--name", "Message Pepper", "--text", "Check the fixture usage");
@@ -86,25 +87,29 @@ if (!enabled) console.log("skipping usage details UI: set OMB_UI_E2E=1 to instal
     await agentBrowser(browser.binary, sessionEnv(browser), ["set", "viewport", "1100", "900"]);
     await expect.poll(() => evaluate("innerWidth")).toBe(1100);
     const density = await evaluate("localStorage.getItem('openmausbot.sidebarDensity')");
+    const activate = async (selector: string) => {
+      await expect.poll(() => evaluate(`(() => {
+        const button = document.querySelector(${JSON.stringify(selector)});
+        if (!button) return false;
+        button.focus();
+        return document.activeElement === button;
+      })()`), { timeout: 10_000 }).toBe(true);
+      await ui("press", "--keys", "Enter");
+    };
+    const openMore = () => activate('[data-chathead-controls] button[aria-label="More"][aria-expanded="false"]');
     const openUsage = async () => {
-      await ui("click", "--name", "More");
-      const ref = await vi.waitFor(async () => {
-        const snapshot = await ui("snapshot", "--interactive");
-        const usage = Object.entries(snapshot.refs as Record<string, { name: string; role: string }>).find(([, entry]) => entry.role === "menuitem" && entry.name.startsWith("Usage"));
-        expect(usage).toBeDefined();
-        return usage![0];
-      }, { timeout: 10_000 });
-      await ui("click", "--ref", `@${ref}`);
+      await openMore();
+      await activate('[role="menu"][aria-label="More"] button[data-menu-key="usage"]');
     };
     await openUsage();
     await expect.poll(() => evaluate("document.querySelector('[data-sidebar]').getBoundingClientRect().width")).toBe(80);
     expect(await evaluate("localStorage.getItem('openmausbot.sidebarDensity')")).toBe(density);
-    await ui("screenshot", "--out", `${handle.logPath}.settings-1100.png`);
     await expect.poll(() => evaluate("Boolean(document.querySelector('[role=dialog]'))"), { timeout: 10_000 }).toBe(true);
+    await ui("screenshot", "--out", `${handle.logPath}.settings-1100.png`);
     await ui("press", "--keys", "Escape");
     await expect.poll(() => evaluate("document.querySelector('[data-sidebar]').getBoundingClientRect().width")).toBe(320);
-    await ui("click", "--name", "More");
-    await ui("click", "--name", "Inspector");
+    await openMore();
+    await activate('[role="menu"][aria-label="More"] button[data-menu-key="inspector"]');
     await expect.poll(() => evaluate("Boolean(document.querySelector('[aria-label=Inspector]'))"), { timeout: 10_000 }).toBe(true);
     await openUsage();
     await expect.poll(() => evaluate("document.querySelector('[role=dialog]') && getComputedStyle(document.querySelector('[role=dialog]')).position")).toBe("absolute");
