@@ -1,3 +1,4 @@
+import { UsageRings } from "./UsageRings";
 import { useEffect, useMemo, useState, type CSSProperties, type DragEvent } from "react";
 import {
   AlertTriangle,
@@ -576,9 +577,10 @@ export function TaskBoardScreen() {
 
   return (
     <main className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
-      <header className="flex min-h-[64px] shrink-0 items-center justify-between border-b border-hairline/40 px-5 py-3" style={{ WebkitAppRegion: "drag" } as CSSProperties}>
+      <header className="flex min-h-[64px] shrink-0 items-center justify-between border-b border-hairline/40 px-5 py-3" style={{ WebkitAppRegion: "drag", paddingRight: window.gbs?.platform === "win32" ? 148 : undefined } as CSSProperties}>
         <div className="flex items-center gap-2.5"><ClipboardCheck size={20} className="text-accent" /><div><h1 className="text-[16px] font-semibold text-ink">Task Board</h1><p className="text-[11px] text-ink-secondary">Shared work for you and your agents.</p></div></div>
         <div className="flex items-center gap-2" style={{ WebkitAppRegion: "no-drag" } as CSSProperties}>
+          <UsageRings />
           <button onClick={() => setTrelloOpen(true)} className="flex items-center gap-2 rounded-lg bg-raised px-3.5 py-2 text-[13px] text-ink hover:bg-raised-hover" title="Link projects to Trello boards"><Trello size={16} /> Trello</button>
           <button onClick={() => { setNewStatus("todo"); setEditing(null); }} className="flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-medium text-white hover:brightness-110"><Plus size={16} /> New task</button>
         </div>

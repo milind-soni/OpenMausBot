@@ -58,6 +58,12 @@ process.stdin.on("end", () => {
 
   out({ type: "system", subtype: "init", session_id: sessionId, model });
 
+  if (mode === "usage-limit") {
+    out({ type: "rate_limit_event", rate_limit_info: { status: "rejected", errorCode: "credits_required" } });
+    out({ type: "result", is_error: true, subtype: "error_during_execution", errors: ["Usage ran out"] });
+    return;
+  }
+
   if (mode === "hang") {
     // stay alive until killed — lets tests exercise interrupt + the
     // permission broker while a turn is officially in flight

@@ -1,3 +1,4 @@
+import { UsageRings } from "./UsageRings";
 import { Component, memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
@@ -684,6 +685,7 @@ export function ChatView({ bot }: { bot: Bot }) {
               Stop
             </button>
           )}
+          <UsageRings />
           <ModelPicker bot={bot} />
           <button
             onClick={() => dispatch({ type: "toggleComputer" })}

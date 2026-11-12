@@ -71,6 +71,36 @@ posixOnly("CodexDriver turns (fake app-server)", () => {
     rmSync(scratch, { recursive: true, force: true });
   });
 
+  it("reads idle usage without creating a thread or sending a model prompt", async () => {
+    await create();
+    const dump = join(scratch, "usage.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.refreshUsage!();
+    expect(await recorder.until(e => e.type === "usage.updated")).toMatchObject({ usage: { source: "reported", status: "ok" } });
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls.map((c: { method: string }) => c.method);
+    expect(calls).toEqual(["initialize", "initialized", "account/rateLimits/read"]);
+    expect(recorder.events.some(e => e.type === "turn.started")).toBe(false);
+  });
+
+  it("keeps unavailable account reads unknown without failing a conversation", async () => {
+    process.env.FAKE_CODEX_MODE = "usage-unavailable";
+    await create();
+    await instance.adapter.refreshUsage!();
+    expect(await recorder.until(e => e.type === "usage.updated")).toMatchObject({ usage: { status: "unknown" } });
+    await instance.adapter.sendTurn({ threadId: "usage-unsupported", text: "hi" });
+    expect(await recorder.until(e => e.type === "turn.completed")).toMatchObject({ ok: true });
+  });
+
+  it("emits normalized usage failures from failed turns and rolling account updates", async () => {
+    process.env.FAKE_CODEX_MODE = "usage-limit";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "usage-exhausted", text: "hi" });
+    const done = await recorder.until(e => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: false, failure: { kind: "usage_limit" } });
+    expect(recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.error", failure: { kind: "usage_limit" } }));
+    expect(recorder.events).toContainEqual(expect.objectContaining({ type: "usage.updated", usage: expect.objectContaining({ windows: expect.arrayContaining([expect.objectContaining({ remainingPercent: 0 })]) }) }));
+  });
+
   it("runs the handshake and normalizes a full turn", async () => {
     await create();
     const dump = join(scratch, "dump.json");
@@ -87,6 +117,7 @@ posixOnly("CodexDriver turns (fake app-server)", () => {
     const types = recorder.events.map((e) => e.type);
     expect(types).toEqual([
       "turn.started",
+      "usage.updated",
       "session.started",
       "item.started", // commandExecution ls -la
       "item.completed", // commandExecution done
@@ -109,7 +140,7 @@ posixOnly("CodexDriver turns (fake app-server)", () => {
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.env.OPENAI_API_KEY).toBeUndefined();
     const methods = seen.calls.map((c: { method: string }) => c.method);
-    expect(methods).toEqual(["initialize", "initialized", "thread/start", "turn/start"]);
+    expect(methods).toEqual(["initialize", "initialized", "account/rateLimits/read", "thread/start", "turn/start"]);
     // persona rides in front of the prompt text — codex has no system slot
     const turnStart = seen.calls.at(-1);
     expect(turnStart.params.input[0].text).toBe("You are Testy.\n\nlist files");

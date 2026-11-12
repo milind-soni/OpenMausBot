@@ -1,3 +1,4 @@
+import { UsageRings } from "./UsageRings";
 // Dedicated full-screen App Store page for browsing, searching, and connecting
 // integrations powered by Composio Connect.
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
@@ -535,7 +536,7 @@ export function AppsScreen() {
       {/* Header bar */}
       <header
         className="flex h-[64px] shrink-0 items-center justify-between border-b border-hairline/40 px-6"
-        style={{ WebkitAppRegion: "drag" } as CSSProperties}
+        style={{ WebkitAppRegion: "drag", paddingRight: window.gbs?.platform === "win32" ? 148 : undefined } as CSSProperties}
       >
         <div className="flex items-center gap-3">
           <button
@@ -565,6 +566,7 @@ export function AppsScreen() {
         </div>
 
         <div className="flex items-center gap-2" style={{ WebkitAppRegion: "no-drag" } as CSSProperties}>
+          <UsageRings />
           <button
             onClick={() => {
               if (cards) refreshStatus(cards.map((c) => c.slug).slice(0, 50));

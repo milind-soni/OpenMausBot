@@ -1,3 +1,4 @@
+import type { UsagePreferences } from "./usage-types.ts";
 // Config + data dirs. One file, ~/.gbs/config.json, env fallbacks:
 //   { "xai": {"key":"xai-…"}, "composio": {"key":"ck_…"},
 //     "instances": { "<instanceId>": {"driver":"grok", …} } }
@@ -29,6 +30,7 @@ export interface AppConfig {
   /** UI-side idle approval of permission cards; questions are never automatic. */
   autoApprovePermissions?: boolean;
   autoApproveDelaySeconds?: number;
+  usageDisplay?: UsagePreferences;
   instances?: InstanceConfigMap;
 }
 
@@ -59,6 +61,8 @@ export function loadConfig(): AppConfig {
   const approvalDelay = cfg.autoApproveDelaySeconds;
   cfg.autoApproveDelaySeconds = typeof approvalDelay === "number" && Number.isInteger(approvalDelay) && approvalDelay >= 1 && approvalDelay <= 120
     ? approvalDelay : 10;
+  const display = cfg.usageDisplay;
+  cfg.usageDisplay = { show: display?.show !== false, hiddenInstances: Array.isArray(display?.hiddenInstances) ? display.hiddenInstances.filter((id): id is string => typeof id === "string").slice(0, 100) : [] };
   return cfg;
 }
 
@@ -80,6 +84,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   if (Number.isInteger(patch.autoApproveDelaySeconds) && patch.autoApproveDelaySeconds! >= 1 && patch.autoApproveDelaySeconds! <= 120) {
     disk.autoApproveDelaySeconds = patch.autoApproveDelaySeconds;
   }
+  if (patch.usageDisplay) disk.usageDisplay = patch.usageDisplay;
   if (patch.instances && typeof patch.instances === "object") {
     const diskInstances = { ...((disk.instances as InstanceConfigMap) ?? {}) };
     for (const [instanceId, instancePatch] of Object.entries(patch.instances)) {

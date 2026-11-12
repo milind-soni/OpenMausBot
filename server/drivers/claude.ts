@@ -1,3 +1,5 @@
+import { classifyClaudeUsage } from "../usage-classifiers.ts";
+import type { UsageLimitFailure } from "../usage-types.ts";
 // Claude driver — upstream ClaudeDriver skeleton over agentcal's
 // drivers/claude.js runtime (stream-json both directions, prompt over
 // stdin, completion from a real `result` event — verified against
@@ -329,13 +331,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         stdio: ["pipe", "pipe", "pipe"],
       });
 
+      let failure: UsageLimitFailure | undefined;
       let settled = false;
       const settle = (ok: boolean, stopReason: string | null, cost: number | null = null) => {
         if (settled) return;
         settled = true;
         broker?.close();
         active.delete(threadId);
-        emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost });
+        emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost, failure });
       };
 
       // token streaming: true while --include-partial-messages is delivering
@@ -351,6 +354,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           return;
         }
         appendNative(threadId, { dir: "in", source: "claude.sdk.message", msg: o });
+        const classified = classifyClaudeUsage(o);
+        if (classified.usage) emit({ ...base(threadId, turnId), type: "usage.updated", usage: classified.usage });
+        if (classified.failure && !failure) {
+          failure = classified.failure;
+          emit({ ...base(threadId, turnId), type: "runtime.error", message: "This AI app’s usage ran out.", failure });
+        }
         switch (o.type) {
           case "system":
             if (o.subtype === "init") {
@@ -408,6 +417,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             }
             break;
           case "result":
+            if (o.is_error !== true && failure) {
+              failure = undefined;
+              emit({ ...base(threadId, turnId), type: "usage.updated", usage: { source: "inferred", status: "unknown" } });
+            }
             settle(o.is_error !== true, o.stop_reason ?? o.terminal_reason ?? null, o.total_cost_usd ?? null);
             break;
         }

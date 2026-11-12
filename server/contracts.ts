@@ -1,3 +1,4 @@
+import type { UsagePatch, UsageLimitFailure } from "./usage-types.ts";
 // Canonical harness contracts — ported from upstream
 // (apps/server/src/provider/ProviderDriver.ts, Services/ProviderAdapter.ts,
 // packages/contracts/src/{provider,providerInstance,providerRuntime}.ts),
@@ -62,6 +63,7 @@ export type RuntimeEvent = RuntimeEventBase &
         stopReason?: string | null;
         cost?: number | null;
         denials?: string[];
+        failure?: UsageLimitFailure;
       }
     | { type: "item.started"; itemType: "tool" | "reasoning"; title?: string }
     | { type: "item.updated"; itemType: "tool" | "reasoning"; tokens?: number | null }
@@ -77,7 +79,8 @@ export type RuntimeEvent = RuntimeEventBase &
       }
     | { type: "request.resolved"; behavior: string; source: string }
     | { type: "thread.token-usage.updated"; input: number; output: number }
-    | { type: "runtime.error"; message: string }
+    | { type: "runtime.error"; message: string; failure?: UsageLimitFailure }
+    | { type: "usage.updated"; usage: UsagePatch }
   );
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;
@@ -146,6 +149,8 @@ export interface ProviderAdapter {
     requestId: string,
     decision: { behavior: "allow" | "deny" | "answer"; message?: string },
   ): Promise<void>;
+  /** Cheap account read only; absent for apps without a verified endpoint. */
+  refreshUsage?(): Promise<void>;
   hasSession(threadId: ThreadId): boolean;
   stopAll(): Promise<void>;
   onEvent(listener: RuntimeEventListener): () => void;
