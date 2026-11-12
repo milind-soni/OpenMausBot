@@ -12785,9 +12785,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         expiresAt: opened.expiresAt,
         url: base ? `${base}/pair#code=${code}` : null,
         inviteUrl: invite,
-        serverName, ...(phoneRelay ? { relay: phoneRelay.status() } : {}),
-        // False until a desktop app hands this server its phone key; a self-hosted server never gets one.
-        phoneSecrets: phoneSecrets.ready,
+        serverName, ...(phoneRelay ? { relay: phoneRelay.status() } : {}), phoneSecrets: phoneSecrets.ready,
         hint: base
           ? null
           : "this server has no public address to put in a link: set OMB_PUBLIC_URL, or open /pair on the address you use and type the code",

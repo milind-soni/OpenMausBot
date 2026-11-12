@@ -186,8 +186,14 @@ describe("PhoneSecretBridge", () => {
 
     const desktop = new PhoneSecretBridge(() => true, 50);
     await expect(desktop.provide(context)).rejects.toMatchObject({ message: expect.stringContaining("Reopen OpenMausBot") });
-    desktop.receive((await keyMaterial()).message);
-    expect(desktop.ready).toBe(true);
+    const material = await keyMaterial();
+    desktop.receive(material.message);
+    await vi.waitFor(() => expect(desktop.ready).toBe(true));
+
+    desktop.receive({ ...material.message, version: 2 });
+    expect(desktop.ready).toBe(false);
+    await expect(desktop.provide(context)).rejects.toMatchObject({ status: 503 });
+    expect(desktop.ready).toBe(false);
   });
 
   it("rejects a private scalar that does not match the advertised public point", async () => {

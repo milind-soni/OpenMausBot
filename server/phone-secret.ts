@@ -314,6 +314,7 @@ function decodeSaveResult(raw: unknown): { requestId: string; ok: boolean; error
 /** The HTTP route hands this ciphertext only; plaintext exists only after HPKE opens it on the desktop and never reaches HTTP, chat, SQLite, SSE or logs. */
 export class PhoneSecretBridge {
   private identity: Promise<PhoneSecretIdentity> | null = null;
+  private imported = false;
   private readonly pending = new Map<string, PendingSave>();
   private active = 0;
   private readonly send: SendPrivateMessage;
@@ -337,7 +338,7 @@ export class PhoneSecretBridge {
 
   /** Whether a phone can seal a secret for this computer: only after the desktop app has handed over its key. */
   get ready(): boolean {
-    return this.identity !== null;
+    return this.imported;
   }
 
   receive(raw: unknown): boolean {
@@ -345,8 +346,11 @@ export class PhoneSecretBridge {
     if (!message || typeof message !== "object" || Array.isArray(message)) return false;
     const record = message as Record<string, unknown>;
     if (record.type === "openmausbot:phone-secret-key") {
-      this.identity = importIdentity(record);
-      void this.identity.catch(() => {});
+      const identity = importIdentity(record);
+      this.identity = identity;
+      this.imported = false;
+      // Ready only once this key imports; a failed or superseded import never counts.
+      identity.then(() => { if (this.identity === identity) this.imported = true; }, () => {});
       return true;
     }
     const result = decodeSaveResult(record);
