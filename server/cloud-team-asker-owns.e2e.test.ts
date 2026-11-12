@@ -10,27 +10,33 @@ import { afterAll, afterEach, beforeAll, expect, it } from "vitest";
 
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
+import { startFakeOpenAiLive, type FakeOpenAiLive } from "./testing/fake-openai-live.ts";
 
 const ENGINE = `process.env.FAKE_CLAUDE_TOOL_CALLS_FILE = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/tool-calls.json";
 process.env.FAKE_CLAUDE_RELEASE = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/release";
 process.env.FAKE_CLAUDE_MARKER_REPLIES = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/markers.json";`;
 const POLL = { name: "Bash", input: { command: "gh run watch 42" }, hold: true };
 const [PRIYA_ASK, TOM_ASK, SAM_ASK, PRIYA_MORE] = ["Watch CI for PR 42", "What is due on Friday?", "Book the room for Monday", "Is the PR up yet?"];
+const LIVE_ASK = "Check the quarterly totals.";
 /** A resumed turn's prompt can carry earlier lines too, and the fake engine answers the first marker it finds: newest asks first. */
 const ANSWERS: Record<string, string> = {
   [PRIYA_MORE]: "Yes, PR 42 is up.",
   [SAM_ASK]: "Booked the room for Monday.",
   [TOM_ASK]: "The invoice run is due on Friday.",
+  [LIVE_ASK]: "The quarterly totals are ready.",
   "Check this week's pay runs.": "This week's pay runs are fine.",
   [PRIYA_ASK]: "CI for PR 42 is green.",
 };
 
-type Row = { id: string; role: string; kind: string; text?: string; steered?: boolean; sender?: { name: string; id?: string }; tool?: { name: string }; stoppedBy?: { name: string; id?: string } };
+type Row = { id: string; role: string; kind: string; text?: string; steered?: boolean; sender?: { name: string; id?: string }; tool?: { name: string }; stoppedBy?: { name: string; id?: string }; requestMessageId?: string; turnTerminal?: boolean; via?: string; callId?: string; queueId?: string };
 type Queued = { queueId: string; text: string; sender?: { name: string; id?: string } };
 
 let fx: CloudSendFixture, team: CloudTeamFixture;
 let ada = "", priya = "", tom = "", sam = "", dev = "";
+let admin = "";
 let botId = "", shared = "";
+let live: FakeOpenAiLive;
+const calls = new Map<string, string>();
 
 const home = (name: string) => join(team.home, name);
 const transcript = async (token: string, threadId = shared) =>
@@ -44,6 +50,21 @@ const busy = async (threadId = shared, token = ada) => {
 const answered = async (text: string, threadId = shared, token = ada) => (await transcript(token, threadId)).some((row) => row.role === "bot" && row.kind === "text" && row.text?.includes(text));
 const personFirstStops = async (threadId = shared, token = ada) => (await transcript(token, threadId)).filter((row) => row.kind === "activity" && (row.tool?.name ?? "").endsWith("to answer you first")).length;
 const send = (token: string, text: string, threadId = shared) => team.as(token, "POST", `/api/bots/${botId}/messages`, { text, threadId });
+const speak = (sessionId: string, text: string) => {
+  live.emit(sessionId, { type: "session.input_transcript.delta", delta: text, start_ms: 100, end_ms: 900 });
+  live.emit(sessionId, { type: "session.delegation.created", offset_ms: 950, delegation: { id: `spoken-${sessionId}`, target: "client", type: "delegation" } });
+};
+async function startCall(token: string) {
+  const before = live.sessions.length;
+  const started = await team.as(token, "POST", "/api/live/session", { botId, threadId: shared, sdp: "v=0\r\n", client: "web" });
+  expect(started.status, JSON.stringify(started.body)).toBe(201);
+  const callId = started.body.call.callId as string;
+  calls.set(callId, token);
+  const session = live.sessions[before];
+  expect(session).toBeDefined();
+  await live.waitForAttach(session.id);
+  return { callId, session };
+}
 
 /** Priya's request starts and holds in its CI poll; later turns call no tool. */
 async function priyaRuns(threadId = shared) {
@@ -64,8 +85,9 @@ async function release(threadId = shared, token = ada) {
 const pastPersonFirst = () => new Promise((resolve) => setTimeout(resolve, 3_000));
 
 beforeAll(async () => {
+  live = await startFakeOpenAiLive();
   fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-asker-${randomBytes(8).toString("hex")}`, team: { id: "team-acme-asker", name: "Acme", engine: ENGINE,
-    env: { OMB_BOT_BOX: "0", OMB_PERSON_FIRST_MS: "1500" } } });
+    env: { OMB_BOT_BOX: "0", OMB_PERSON_FIRST_MS: "1500", OMB_OPENAI_LIVE_URL: live.url, OMB_OPENAI_LIVE_KEY: "openai-team-fixture" } } });
   team = fx.team!;
   writeFileSync(home("markers.json"), JSON.stringify(ANSWERS));
   writeFileSync(home("tool-calls.json"), "[]");
@@ -74,7 +96,8 @@ beforeAll(async () => {
   tom = (await team.pair({ email: "tom@acme.test", role: "member" })).token!;
   sam = (await team.pair({ email: "sam@acme.test", role: "member" })).token!;
   dev = (await team.pair({ email: "dev@acme.test", role: "member" })).token!;
-  for (const [token, name] of [[ada, "Ada"], [priya, "Priya"], [tom, "Tom"], [sam, "Sam"]]) {
+  admin = (await team.pair({ email: "amir@acme.test", role: "admin" })).token!;
+  for (const [token, name] of [[ada, "Ada"], [priya, "Priya"], [tom, "Tom"], [sam, "Sam"], [admin, "Amir"]]) {
     expect((await team.as(token, "PUT", "/api/me", { name })).status).toBe(200);
   }
   const created = await team.as(ada, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
@@ -85,6 +108,11 @@ beforeAll(async () => {
 
 /** Whatever a test left holding (a stopped run's CI poll, a waiting line) ends before the next one starts. */
 afterEach(async () => {
+  for (const [callId, token] of calls) {
+    const ended = await team.as(token, "POST", "/api/live/call/end", { callId });
+    expect([200, 404], JSON.stringify(ended.body)).toContain(ended.status);
+  }
+  calls.clear();
   writeFileSync(home("release"), "");
   writeFileSync(home("tool-calls.json"), "[]");
   await expect.poll(async () => !(await busy()) && (await queue(ada)).length === 0, { timeout: hostTimeout(60_000), interval: 100 }).toBe(true);
@@ -92,6 +120,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   await fx?.close();
+  await live?.stop();
 });
 
 it("Tom's line during Priya's run waits its turn: it never reaches her run, nor stops it, and runs after as Tom's own turn", async () => {
@@ -184,15 +213,64 @@ it("in the shared chat Ada started, Priya retries and rewords her own stopped re
   }
 }, hostTimeout(180_000));
 
-it("Priya adding to her own run in the shared chat is steered into it, and person-first still answers her first", async () => {
+it("Priya's steered follow-up is answered before Tom's already queued request", async () => {
+  const start = (await transcript(priya)).length;
   await priyaRuns();
   const stopsBefore = await personFirstStops();
+  expect((await send(tom, TOM_ASK)).body.queued).toBe(true);
   const more = await send(priya, PRIYA_MORE);
   expect(more.status, JSON.stringify(more.body)).toBe(202);
   expect(more.body.steered).toBe(true);
   await expect.poll(() => personFirstStops(), { timeout: hostTimeout(30_000), interval: 100 }).toBeGreaterThan(stopsBefore);
-  await expect.poll(() => answered(ANSWERS[PRIYA_MORE]), { timeout: hostTimeout(30_000), interval: 100 }).toBe(true);
+  await expect.poll(async () => !(await busy()) && (await queue(ada)).length === 0, { timeout: hostTimeout(60_000), interval: 100 }).toBe(true);
+  const rows = (await transcript(priya)).slice(start);
+  const followUpId = more.body.message.id as string;
+  const priyaTerminal = rows.findIndex(row => row.turnTerminal && row.requestMessageId === followUpId);
+  const tomLine = rows.findIndex(row => row.role === "user" && row.text === TOM_ASK);
+  expect(priyaTerminal).toBeGreaterThan(-1);
+  expect(rows[priyaTerminal].text).toContain(ANSWERS[PRIYA_MORE]);
+  expect(priyaTerminal).toBeLessThan(tomLine);
+  expect(rows[tomLine]).toMatchObject({ sender: { name: "Tom" } });
+  expect(rows[tomLine].steered).toBeUndefined();
+  expect(rows.findIndex(row => row.turnTerminal && row.requestMessageId === rows[tomLine].id)).toBeGreaterThan(tomLine);
+}, hostTimeout(120_000));
+
+it("an admin's spoken request waits for Priya's run and receives its own terminal answer", async () => {
+  const start = (await transcript(ada)).length;
+  await priyaRuns();
+  const stopsBefore = await personFirstStops();
+  const { callId, session } = await startCall(admin);
+  speak(session.id, LIVE_ASK);
+  await expect.poll(async () => (await queue(priya)).find(item => item.text === LIVE_ASK), { timeout: hostTimeout(20_000) })
+    .toMatchObject({ sender: { name: "Amir" } });
+  expect((await transcript(priya)).slice(start).some(row => row.text === LIVE_ASK)).toBe(false);
+  await pastPersonFirst();
+  expect(await busy()).toBe(true);
+  expect(await personFirstStops()).toBe(stopsBefore);
+  await release();
+  const rows = (await transcript(ada)).slice(start);
+  const request = rows.find(row => row.role === "user" && row.text === LIVE_ASK)!;
+  expect(request).toMatchObject({ via: "call", callId, sender: { name: "Amir" }, queueId: expect.any(String) });
+  expect(request.steered).toBeUndefined();
+  const priyaTerminal = rows.findIndex(row => row.turnTerminal && row.text?.includes(ANSWERS[PRIYA_ASK]));
+  expect(priyaTerminal).toBeGreaterThan(-1);
+  expect(rows[priyaTerminal].text).not.toContain(LIVE_ASK);
+  expect(priyaTerminal).toBeLessThan(rows.indexOf(request));
+  expect(rows.find(row => row.turnTerminal && row.requestMessageId === request.id)?.text).toContain(ANSWERS[LIVE_ASK]);
+  await live.waitForCommand(session.id, command => command.type === "session.commentary.append" && String(command.content).includes(ANSWERS[LIVE_ASK]), hostTimeout(20_000));
+}, hostTimeout(120_000));
+
+it.each([["Owner", () => ada, "Ada"], ["Admin", () => admin, "Amir"]] as const)("an %s can stop someone else's run through a Live call", async (_role, token, name) => {
+  await priyaRuns();
+  const before = (await transcript(ada)).length;
+  const { callId, session } = await startCall(token());
+  speak(session.id, "stop");
   await expect.poll(() => busy(), { timeout: hostTimeout(30_000), interval: 100 }).toBe(false);
+  const rows = (await transcript(ada)).slice(before);
+  expect(rows.find(row => row.role === "user" && row.text === "stop")).toMatchObject({ via: "call", callId, sender: { name } });
+  expect(rows.find(row => row.kind === "activity" && row.tool?.name.startsWith("stopped:"))).toMatchObject({ stoppedBy: { name } });
+  expect(rows.some(row => row.role === "bot" && row.text?.includes(ANSWERS[PRIYA_ASK]))).toBe(false);
+  expect(await queue(ada)).toEqual([]);
 }, hostTimeout(120_000));
 
 it("three people: everyone sees whose lines wait, in order; each removes only their own; nobody else's waits steer her run", async () => {

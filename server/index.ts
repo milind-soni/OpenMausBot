@@ -90,7 +90,7 @@ import { createQueuedNotes, createWaitWords } from "./host/wait-words.ts";
 import { landTurnFiles, parkedFilesKey, settleParkedFiles, takeParkedFiles, type ParkedTurnAttachment } from "./host/turn-attachments.ts";
 import { createReplyVoiceNotes } from "./host/reply-voice-notes.ts";
 import { runtimeRequestCardFields } from "./request-card.ts";
-import type { DirectSendInput, DirectSendReceipt } from "./direct-send.ts";
+import { liveSendReceipt, type DirectSendInput, type DirectSendReceipt } from "./direct-send.ts";
 import { finishedWithoutSummaryLine, ROOM_SUMMARY_REASK, roomTurnNarrationIds, roomTurnReply } from "./room-reply.ts";
 import { chosenPlace, pickComputer } from "./computer-selection.ts";
 import * as boat from "./boat.ts"; import { keyHint, keyStatus, nestedKeyStatus, withoutKeyHints } from "./key-hint.ts";
@@ -319,7 +319,8 @@ import * as tts from "./tts/index.ts";
 import { voiceNoteFailure } from "./tts/errors.ts";
 import { createDecider, deciderReady, describeDecider } from "./decider/index.ts"; import { createExtractor, describeHelpers } from "./extractor/index.ts";
 import { createStopLineRoutes } from "./routes/stop-line.ts"; import { decideRoomResponder } from "./decider/room-routing.ts"; import { roomRoutingInput } from "./host/room-routing-input.ts";
-import { createLiveSession, liveAttachUrl, liveHistoryFrom, LiveSessionError, type LiveBot, type LiveHistoryMessage } from "./live-call.ts";
+import { liveAttachUrl } from "./live-call.ts";
+import { createLiveSessionContext } from "./host/live-session-context.ts";
 import { LiveCallController, LiveCallSignedOutError, openLiveSocket } from "./live-call-controller.ts";
 import { liveCallSettings, liveSettingsFor, liveSettingsForClient, saveLiveSettings } from "./live-settings.ts"; import { azureLiveCallRefusal, liveScopeRefusal } from "./live-access.ts";
 import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-record.ts"; import { noteGroupTurn, turnsSince } from "./room-round-turns.ts";
@@ -626,6 +627,8 @@ import { createComputerRoutes } from "./routes/computers.ts";
 import { createStatusRoutes } from "./routes/status.ts";
 import { findAntigravityLeftovers, removeAntigravityLeftovers } from "./drivers/antigravity-temp.ts";
 import { createLiveRoutes } from "./routes/live.ts";
+import { createLiveMediaRoutes } from "./routes/live-media.ts";
+import { createProviderLiveSession } from "./qwen-live-session.ts";
 import { createNotificationRoutes, notificationListedFor } from "./routes/notifications.ts";
 import { createTodayRoutes } from "./routes/today.ts"; import { createInboxRoutes } from "./routes/inbox.ts"; import { createSidebarSectionRoutes } from "./routes/sidebar-sections.ts";
 import { createToolTimingRoute, createUsageRoutes } from "./routes/usage.ts"; import { createPrivateRecords } from "./host/private-records.ts"; import { createPublishedApps } from "./host/published-apps.ts"; import { savedNetlifyToken } from "./host/netlify-sites.ts"; import { createIncludedHosting } from "./host/included-hosting.ts"; import { createAppPublisher } from "./host/app-publisher.ts"; import { createPublishedAppsRoutes } from "./routes/published-apps.ts";
@@ -7266,12 +7269,14 @@ async function acceptDirectSend(
         const steerInput = extractTurnImages(text);
         const carriesImages = steerInput.images.length > 0;
         const steerTarget = handoffs.current(threadId);
+        const steerRequestId = directRequestOwners.get(threadId)?.messageId;
+        const steerGeneration = directTurnGenerationByThread.get(threadId);
         const busyAdmission = admit("direct-busy", {
           carriesImages,
           engineCanSteerImages: engineSteersImages(instance),
           pendingComputerSelection: Boolean(computerSelectionTurns.get(threadId)?.selected),
           engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer),
-          followUp,
+          followUp, requireSteerRequestId: input.requireSteerRequestId, steerRequestId,
         });
         // A chosen wait (queue, or restart's Stop) is never cut short by person-first.
         const chose = busyAdmission.action === "queue" ? busyAdmission.chose : undefined;
@@ -7289,6 +7294,7 @@ async function acceptDirectSend(
           throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
         }
         const delivered = steered !== "refused";
+        const sameSteerTurn = directTurnGenerationByThread.get(threadId) === steerGeneration;
         if (delivered) {
           if (steered === "steered" && !current.busy) {
             throw Object.assign(
@@ -7297,7 +7303,7 @@ async function acceptDirectSend(
             );
           }
           // "indeterminate" is recorded too: the words may already be in a turn, and a resend could run them twice.
-          if (personPresent) clearUnattended(threadId);
+          if (sameSteerTurn && personPresent) clearUnattended(threadId);
           const message = store.appendMessage(threadId, {
             role: "user",
             kind: "text",
@@ -7310,10 +7316,10 @@ async function acceptDirectSend(
             ...spokenLineFields(via, callId),
           });
           store.setTaskAskedAt(botId, threadId, message.at);
-          handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
-          signInSettle.answerInChat(botId, threadId);
-          if (personsOwn) personFirst.wait(threadId, { requeue: (note) => void queueSteeredMessage(current.id, threadId, text, { prompt: note ? `${queuedPrompt}\n\n${note}` : queuedPrompt, rowId: message.id, first: true, queuedAt: message.at, replyToId: replyTo?.id, dataContext, sender, trigger, via, callId, mentions, aheadOfOthers: runOwners.askerFirst(threadId) }) });
-          return { ok: true as const, steered: true as const, threadId, message };
+          if (sameSteerTurn) handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
+          if (sameSteerTurn) signInSettle.answerInChat(botId, threadId);
+          if (sameSteerTurn && personsOwn) personFirst.wait(threadId, { requeue: (note) => void queueSteeredMessage(current.id, threadId, text, { prompt: note ? `${queuedPrompt}\n\n${note}` : queuedPrompt, rowId: message.id, first: true, queuedAt: message.at, replyToId: replyTo?.id, dataContext, sender, trigger, via, callId, mentions, aheadOfOthers: runOwners.askerFirst(threadId) }) });
+          return { ok: true as const, steered: true as const, threadId, message, requestMessageId: steerRequestId };
         }
         if (!current.busy) {
           return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions);
@@ -12442,19 +12448,8 @@ ROUTES.push(createBrowserViewerRoutes({
 }));
 const internalToolRoutes = createInternalToolRoutes({ engineLimits: { instances: () => registry.instances(), configs: () => instanceConfigs(cfg), status: (instanceId) => registry.knownSnapshot(instanceId), load: (accounts) => loadPlanUsage({ accounts }), audienceOf: (threadId) => teamHost.audienceOf(threadId), guestDriven: cloudGuestDriven, dataDir: DATA_DIR }, helpers: { decider, extractor }, notifications: { bot: (id) => store.bot(id), team: sharedMembership, broadcast }, xResearch: { credential: () => researchCredential(cfg.treg?.key), botEnabled: (botId) => store.bot(botId)?.xResearch !== false, cloudHome: CLOUD_HOME !== null, researchOff: () => researchAvailability.refused() }, appPublisher }); const waitRoutes = createWaitRoutes({ waits: botWaits, cloudHome: Boolean(CLOUD_HOME), sleeps: Boolean(CLOUD_HOME) && CLOUD_TEAM === null }); ROUTES.push(createXConnectorRoutes({ credential: () => researchCredential(cfg.treg?.key), included: () => xCredential(), unavailable: () => xResearchStatus().unavailable === true }));
 
-// Live calls: the client holds the WebRTC audio; the key never leaves the harness, which creates the session.
-function liveBotFor(botId: string): LiveBot {
-  const bot = store.bot(botId);
-  if (!bot) throw new LiveSessionError("That bot no longer exists.", 404);
-  return { name: bot.name, title: bot.title, description: bot.description };
-}
-function liveHistoryFor(threadId: string): LiveHistoryMessage[] {
-  return liveHistoryFrom(sinceFreshStart(store.activePath(threadId)));
-}
-/** A signed-out or removed person's call must not keep reaching the bot or spending the key. */
-function liveSignedIn(auth: RequestAuth): boolean {
-  return auth.kind !== "session" || sessions.isLive(auth.session.id);
-}
+// Live clients negotiate WebRTC or PCM audio; the provider key never leaves the harness.
+const { liveBotFor, liveHistoryFor, liveSignedIn } = createLiveSessionContext({ store, sessions });
 /** On the bot's own engine, which already saw the requests, so nothing new reaches OpenAI. */
 function liveCallTitle(botId: string, threadId: string, excerpt: string): Promise<string | null> | null {
   const bot = store.projectBotForTask(botId, threadId);
@@ -12464,7 +12459,7 @@ function liveCallTitle(botId: string, threadId: string, excerpt: string): Promis
 }
 const liveCalls = new LiveCallController({
   store,
-  send: async ({ auth, botId, threadId, text, callId }) => {
+  send: async ({ auth, botId, threadId, text, callId, requireSteerRequestId }) => {
     if (!liveSignedIn(auth)) throw new LiveCallSignedOutError();
     const receipt = await acceptDirectSend({
       botId, threadId, text,
@@ -12472,11 +12467,10 @@ const liveCalls = new LiveCallController({
       sender: messageSender(auth),
       trigger: usageTriggerFor(auth),
       via: "call",
-      callId,
+      callId, requireSteerRequestId,
       personPresent: true, admin: runActor(auth).admin,
     });
-    if ("queued" in receipt) return { kind: "queued", queueId: receipt.queueId };
-    return { kind: receipt.steered ? "steered" : "started", messageId: receipt.message.id };
+    return liveSendReceipt(receipt);
   },
   respond: async (input) => {
     const result = await respondToCard({ ...input, via: "call" });
@@ -12495,7 +12489,7 @@ const liveCalls = new LiveCallController({
   broadcast: (frame) => broadcast(frame, { adminOnly: true }),
   settings: () => liveCallSettings(cfg),
   azureRefusal: (auth) => azureLiveCallRefusal(auth, { othersOnLoopback: adminActivityRecording() }),
-  createSession: ({ key, endpoint, sdp, botId, threadId, voice }) => createLiveSession({ key, endpoint, sdp, voice, bot: liveBotFor(botId), history: liveHistoryFor(threadId), cloudHome: Boolean(CLOUD_HOME) }),
+  createSession: ({ key, endpoint, sdp, botId, threadId, voice }) => createProviderLiveSession({ key, endpoint, sdp, voice, bot: liveBotFor(botId), history: liveHistoryFor(threadId), cloudHome: Boolean(CLOUD_HOME) }),
   openSocket: openLiveSocket,
   attachUrl: (sessionId, endpoint) => liveAttachUrl(sessionId, endpoint),
   speakable: (text) => toUtterances(text),
@@ -12518,6 +12512,8 @@ const liveCalls = new LiveCallController({
   log: (line) => console.log(line),
 });
 sessions.onSessionRevoked((sessionId) => liveCalls.sessionRevoked(sessionId));
+const liveMediaRoutes = createLiveMediaRoutes({ upgrades, calls: liveCalls, log: (line) => console.log(line) });
+ROUTES.push(liveMediaRoutes);
 ROUTES.push(createDataRoutes({
   bot: (id) => store.bot(id),
   engine: dataEngine,
@@ -15474,7 +15470,7 @@ const gracefulShutdown = createGracefulShutdown({
       await Promise.all([...temporaries, browserSweep.closeAll()]);
       await browserRuntime.closeAll();
     },
-    () => liveCalls.shutdown(),
+    () => { liveMediaRoutes.close(); return liveCalls.shutdown(); },
     () => flushAllProfileHistory(),
     () => flushAllMemoryJournals(),
     () => flushUsageLedger(DATA_DIR),

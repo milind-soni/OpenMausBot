@@ -9,7 +9,7 @@ vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({ capabilities: null, ready: false }),
 }));
 
-import { CallButton, CallOverlay, CallTargetButton } from "./CallView";
+import { CallButton, CallOverlay, CallTargetButton, CallModeMenu } from "./CallView";
 import { setCallMode } from "@/lib/call-mode";
 import { endCall, startCall } from "@/lib/call";
 import { configureLiveMedia, dismissStartPrompt, resetLiveMedia, startLiveCall } from "@/lib/live-call-media";
@@ -38,6 +38,12 @@ afterEach(() => {
 });
 
 describe("call modes", () => {
+  it("discloses Qwen and limited headset use in the existing Call menu", () => {
+    const html = render(createElement(CallModeMenu, { id: "qwen-menu", mode: "live", qwen: true, onChoose: vi.fn(), onClose: vi.fn() }));
+    expect(html).toContain("Alibaba Cloud Qwen");
+    expect(html).toContain("headphones");
+    expect(html).not.toContain("voice to OpenAI");
+  });
   it("offers a Live call to one bot without on-device dictation or a configured voice", () => {
     setCallMode("turns");
     expect(render(createElement(CallButton, { bot }))).toContain('aria-label="Checking call availability"');

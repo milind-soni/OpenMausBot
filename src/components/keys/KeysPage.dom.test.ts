@@ -84,6 +84,389 @@ afterEach(() => {
 });
 
 describe("the keys page", () => {
+  it("counts and searches the selected Qwen credential instead of OpenAI", () => {
+    setConfig({ ...fx.config, live: { provider: "qwen", qwenKeyConfigured: true, configured: true } });
+    page();
+    expect(expanded("voice")).toBe("true");
+    expect(section("voice").textContent).toContain("1 connected");
+    type(host.querySelector<HTMLInputElement>("[data-keys-search]")!, "Qwen");
+    expect(rowsShown()).toContain("liveKey");
+  });
+  it("aligns the Qwen settings with its key editor and saved destination", () => {
+    setConfig({ ...fx.config, live: { configured: false, provider: "qwen", qwenRegion: "cn-beijing", qwenWorkspace: "fixture-space", voice: "marin", readTypedReplies: true, idleMinutes: 5 } });
+    page();
+    const liveRow = row("liveKey")!;
+    const keyContent = liveRow.querySelector("[data-key-destination]")!.parentElement!;
+    const settingsContent = liveRow.lastElementChild!;
+    expect(settingsContent.querySelector("[data-qwen-live-settings]")).not.toBeNull();
+    expect(settingsContent.className).toBe(keyContent.className);
+  });
+
+  it("updates untouched Qwen fields and the credential destination after a remote settings change", () => {
+    const live = { configured: false, provider: "qwen", qwenRegion: "cn-beijing", qwenWorkspace: "old-space", qwenModel: "qwen-audio-3.1-realtime-flash", qwenVoice: "old_custom", voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    page();
+    const form = row("liveKey")!.querySelector<HTMLFormElement>("[data-qwen-live-settings]")!;
+    flushSync(() => setConfig({ ...fx.config, live: { ...live, qwenRegion: "ap-southeast-1", qwenWorkspace: "current-space", qwenModel: "qwen-audio-3.1-realtime-plus", qwenVoice: "longanqian_v3.1" } }));
+    expect(row("liveKey")!.querySelector("[data-qwen-live-settings]")).toBe(form);
+    expect(form.querySelector<HTMLSelectElement>('[aria-label="Qwen API region"]')!.value).toBe("ap-southeast-1");
+    expect(form.querySelector<HTMLInputElement>('[aria-label="Qwen business space"]')!.value).toBe("current-space");
+    expect(form.querySelector<HTMLSelectElement>('[aria-label="Qwen model"]')!.value).toBe("qwen-audio-3.1-realtime-plus");
+    expect(form.querySelector<HTMLSelectElement>('[aria-label="Qwen voice"]')!.value).toBe("longanqian_v3.1");
+    expect(form.querySelector('[aria-label="Custom voice ID"]')).toBeNull();
+    expect(row("liveKey")!.querySelector("[data-key-destination]")!.textContent).toContain("International (Singapore)");
+    expect(row("liveKey")!.querySelector("[data-key-destination]")!.textContent).toContain("current-space");
+    expect(fx.api).not.toHaveBeenCalled();
+  });
+  it("preserves edited Qwen fields while showing the saved credential destination", () => {
+    const live = { configured: false, provider: "qwen", qwenRegion: "cn-beijing", qwenWorkspace: "saved-space", qwenModel: "qwen-audio-3.1-realtime-flash", qwenVoice: "saved_custom", voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    page();
+    const form = row("liveKey")!.querySelector<HTMLFormElement>("[data-qwen-live-settings]")!;
+    type(form.querySelector<HTMLInputElement>('[aria-label="Qwen business space"]')!, "draft-space");
+    type(form.querySelector<HTMLInputElement>('[aria-label="Custom voice ID"]')!, "longanqian_v3.1");
+    flushSync(() => setConfig({ ...fx.config, live: { ...live, qwenRegion: "ap-southeast-1", qwenWorkspace: "current-space", qwenModel: "qwen-audio-3.1-realtime-plus", qwenVoice: "remote_custom" } }));
+    expect(form.querySelector<HTMLInputElement>('[aria-label="Qwen business space"]')!.value).toBe("draft-space");
+    expect(form.querySelector<HTMLInputElement>('[aria-label="Custom voice ID"]')!.value).toBe("longanqian_v3.1");
+    expect(form.querySelector<HTMLSelectElement>('[aria-label="Qwen API region"]')!.value).toBe("ap-southeast-1");
+    expect(form.querySelector<HTMLSelectElement>('[aria-label="Qwen model"]')!.value).toBe("qwen-audio-3.1-realtime-plus");
+    const destination = row("liveKey")!.querySelector("[data-key-destination]")!;
+    expect(destination.textContent).toContain("International (Singapore)");
+    expect(destination.textContent).toContain("current-space");
+    expect(destination.textContent).not.toContain("draft-space");
+    expect(fx.api).not.toHaveBeenCalled();
+  });
+  it("keeps every Qwen draft field when another client broadcasts saved settings", () => {
+    const live = { configured: false, provider: "qwen", qwenRegion: "cn-beijing", qwenWorkspace: "saved", qwenModel: "qwen-audio-3.1-realtime-flash", qwenVoice: "longanqian_v3.1", voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    page();
+    const form = row("liveKey")!.querySelector<HTMLFormElement>("[data-qwen-live-settings]")!;
+    const choose = (label: string, value: string) => {
+      const select = form.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!;
+      flushSync(() => { select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    };
+    choose("Qwen API region", "ap-southeast-1");
+    choose("Qwen model", "qwen-audio-3.1-realtime-plus");
+    choose("Qwen voice", "custom");
+    type(form.querySelector<HTMLInputElement>('[aria-label="Qwen business space"]')!, "draft-workspace");
+    type(form.querySelector<HTMLInputElement>('[aria-label="Custom voice ID"]')!, "draft_voice");
+    type(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-key-for-old-workspace");
+    flushSync(() => setConfig({ ...fx.config, live: { ...live, qwenRegion: "ap-southeast-1", qwenWorkspace: "remote", qwenModel: "qwen-audio-3.1-realtime-plus", qwenVoice: "yuxiaoyun_v3.1" } }));
+    expect(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!.value).toBe("");
+    flushSync(() => setConfig({ ...fx.config, live: { ...live, qwenWorkspace: "another-remote" } }));
+    expect(row("liveKey")!.querySelector("[data-qwen-live-settings]")).toBe(form);
+    expect(form.querySelector<HTMLSelectElement>('[aria-label="Qwen API region"]')!.value).toBe("ap-southeast-1");
+    expect(form.querySelector<HTMLInputElement>('[aria-label="Qwen business space"]')!.value).toBe("draft-workspace");
+    expect(form.querySelector<HTMLSelectElement>('[aria-label="Qwen model"]')!.value).toBe("qwen-audio-3.1-realtime-plus");
+    expect(form.querySelector<HTMLSelectElement>('[aria-label="Qwen voice"]')!.value).toBe("custom");
+    expect(form.querySelector<HTMLInputElement>('[aria-label="Custom voice ID"]')!.value).toBe("draft_voice");
+    expect(fx.api).not.toHaveBeenCalled();
+  });
+  it("loads saved provider settings and clears credential drafts when switching providers", () => {
+    const live = { configured: false, provider: "qwen", qwenWorkspace: "saved-qwen", azureEndpoint: "https://old.openai.azure.com", azureDeployment: "old-deployment", voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    page();
+    type(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-qwen-key");
+    flushSync(() => setConfig({ ...fx.config, live: { ...live, provider: "azure", azureEndpoint: "https://current.openai.azure.com", azureDeployment: "current-deployment" } }));
+    const endpoint = row("liveKey")!.querySelector<HTMLInputElement>('input[type="url"]')!;
+    expect(endpoint.value).toBe("https://current.openai.azure.com");
+    expect(row("liveKey")!.querySelector<HTMLInputElement>('input[placeholder="gpt-live-1"]')!.value).toBe("current-deployment");
+    expect(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!.value).toBe("");
+    type(endpoint, "https://draft.openai.azure.com");
+    type(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-azure-key");
+    flushSync(() => setConfig({ ...fx.config, live }));
+    expect(row("liveKey")!.querySelector<HTMLInputElement>('[aria-label="Qwen business space"]')!.value).toBe("saved-qwen");
+    expect(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!.value).toBe("");
+    flushSync(() => setConfig({ ...fx.config, live: { ...live, provider: "azure" } }));
+    expect(row("liveKey")!.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe(live.azureEndpoint);
+    expect(fx.api).not.toHaveBeenCalled();
+  });
+  it("resets Qwen drafts from a successful local save even when the saved settings did not change", async () => {
+    const live = { configured: false, provider: "qwen", qwenRegion: "cn-beijing", qwenWorkspace: "saved", qwenModel: "qwen-audio-3.1-realtime-flash", qwenVoice: "longanqian_v3.1", voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    fx.api.mockResolvedValue({ live });
+    page();
+    const form = row("liveKey")!.querySelector<HTMLFormElement>("[data-qwen-live-settings]")!;
+    const workspace = form.querySelector<HTMLInputElement>('[aria-label="Qwen business space"]')!;
+    const voice = form.querySelector<HTMLSelectElement>('[aria-label="Qwen voice"]')!;
+    flushSync(() => { voice.value = "custom"; voice.dispatchEvent(new Event("change", { bubbles: true })); });
+    type(workspace, "  saved  ");
+    type(form.querySelector<HTMLInputElement>('[aria-label="Custom voice ID"]')!, "  longanqian_v3.1  ");
+    flushSync(() => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    await vi.waitFor(() => expect(fx.api).toHaveBeenCalledOnce());
+    expect(JSON.parse(fx.api.mock.calls[0][1].body)).toMatchObject({ qwenWorkspace: "saved", qwenVoice: "longanqian_v3.1" });
+    await vi.waitFor(() => expect(workspace.value).toBe("saved"));
+    expect(voice.value).toBe("longanqian_v3.1");
+    expect(form.querySelector('[aria-label="Custom voice ID"]')).toBeNull();
+    flushSync(() => setConfig({ ...fx.config, live: { ...live, qwenWorkspace: "remote-after-save", qwenVoice: "remote_custom" } }));
+    expect(workspace.value).toBe("remote-after-save");
+    expect(form.querySelector<HTMLInputElement>('[aria-label="Custom voice ID"]')!.value).toBe("remote_custom");
+  });
+  it("preserves Qwen drafts when a local save fails", async () => {
+    const live = { configured: false, provider: "qwen", qwenVoice: "saved_custom", voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    fx.api.mockRejectedValue(new Error("Fixture settings failure"));
+    page();
+    const form = row("liveKey")!.querySelector<HTMLFormElement>("[data-qwen-live-settings]")!;
+    const workspace = form.querySelector<HTMLInputElement>('[aria-label="Qwen business space"]')!;
+    const voice = form.querySelector<HTMLInputElement>('[aria-label="Custom voice ID"]')!;
+    type(workspace, "draft-workspace");
+    type(voice, "draft_custom");
+    flushSync(() => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    await vi.waitFor(() => expect(row("liveKey")!.textContent).toContain("Fixture settings failure"));
+    expect(workspace.value).toBe("draft-workspace");
+    expect(voice.value).toBe("draft_custom");
+    expect(form.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(false);
+    expect(fx.dispatch).not.toHaveBeenCalled();
+  });
+  it("blocks blank custom Qwen voices and matches the workspace length limit", async () => {
+    setConfig({ ...fx.config, live: { configured: false, provider: "qwen", qwenVoice: "saved_custom", voice: "marin", readTypedReplies: true, idleMinutes: 5 } });
+    page();
+    const form = row("liveKey")!.querySelector<HTMLFormElement>("[data-qwen-live-settings]")!;
+    expect(form.querySelector<HTMLInputElement>('[aria-label="Qwen business space"]')!.maxLength).toBe(63);
+    const voice = form.querySelector<HTMLInputElement>('[aria-label="Custom voice ID"]')!;
+    for (const value of ["", "   ", " \t "]) {
+      type(voice, value);
+      expect(form.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
+      flushSync(() => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+      await Promise.resolve();
+      expect(fx.api).not.toHaveBeenCalled();
+    }
+    type(voice, "valid_custom");
+    expect(form.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(false);
+  });
+  it("saves an official Qwen voice, shows its Chinese traits, and keeps it after reopening or changing 3.1 models", async () => {
+    setLocale("zh");
+    const live = { configured: true, provider: "qwen", qwenKeyConfigured: true, voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    fx.api.mockImplementation(async (_path: string, init: RequestInit) => ({ live: { ...live, ...JSON.parse(String(init.body)) } }));
+    page();
+    const getVoice = () => row("liveKey")!.querySelector<HTMLSelectElement>('select[aria-label="千问音色"]')!;
+    expect(getVoice()).not.toBeNull();
+    expect(getVoice().value).toBe("longanqian_v3.1");
+    expect(getVoice().querySelector('[value="yuxiaoyun_v3.1"]')!.textContent).toContain("于小云");
+    expect(getVoice().querySelector('[value="yuxiaoyun_v3.1"]')!.textContent).toContain("元气、亲切、自然");
+    flushSync(() => { getVoice().value = "yuxiaoyun_v3.1"; getVoice().dispatchEvent(new Event("change", { bubbles: true })); });
+    flushSync(() => row("liveKey")!.querySelector<HTMLFormElement>("[data-qwen-live-settings]")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    await vi.waitFor(() => expect(fx.api).toHaveBeenCalledOnce());
+    expect(JSON.parse(fx.api.mock.calls[0][1].body).qwenVoice).toBe("yuxiaoyun_v3.1");
+    await vi.waitFor(() => expect(getVoice().value).toBe("yuxiaoyun_v3.1"));
+    render(); page();
+    expect(getVoice().value).toBe("yuxiaoyun_v3.1");
+    const model = row("liveKey")!.querySelector<HTMLSelectElement>('select[aria-label="千问模型"]')!;
+    flushSync(() => { model.value = "qwen-audio-3.1-realtime-plus"; model.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(getVoice().value).toBe("yuxiaoyun_v3.1");
+    expect(row("liveKey")!.querySelector('input[aria-label="自定义音色 ID"]')).toBeNull();
+    expect(row("liveKey")!.textContent).toContain("下一次通话");
+  });
+  it("preserves unknown/custom Qwen IDs and lets the user edit them without a silent default", async () => {
+    const live = { configured: true, provider: "qwen", qwenVoice: "qwen-audio-3.1-realtime-flash-myvoice-fixture", voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    fx.api.mockImplementation(async (_path: string, init: RequestInit) => ({ live: { ...live, ...JSON.parse(String(init.body)) } }));
+    page();
+    const select = row("liveKey")!.querySelector<HTMLSelectElement>('select[aria-label="Qwen voice"]')!;
+    expect(select).not.toBeNull();
+    expect(select.value).toBe("custom");
+    const input = row("liveKey")!.querySelector<HTMLInputElement>('input[aria-label="Custom voice ID"]')!;
+    expect(input.value).toBe(live.qwenVoice);
+    expect(input.maxLength).toBe(80);
+    const model = row("liveKey")!.querySelector<HTMLSelectElement>('select[aria-label="Qwen model"]')!;
+    flushSync(() => { model.value = "qwen-audio-3.1-realtime-plus"; model.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(input.value).toBe(live.qwenVoice);
+    expect(row("liveKey")!.textContent).toContain("target model");
+    type(input, "fixture-custom-voice");
+    flushSync(() => row("liveKey")!.querySelector<HTMLFormElement>("[data-qwen-live-settings]")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    await vi.waitFor(() => expect(fx.api).toHaveBeenCalledOnce());
+    expect(JSON.parse(fx.api.mock.calls[0][1].body).qwenVoice).toBe("fixture-custom-voice");
+    await vi.waitFor(() => expect(row("liveKey")!.querySelector<HTMLInputElement>('input[aria-label="Custom voice ID"]')!.value).toBe("fixture-custom-voice"));
+    render(); page();
+    expect(row("liveKey")!.querySelector<HTMLInputElement>('input[aria-label="Custom voice ID"]')!.value).toBe("fixture-custom-voice");
+  });
+  it("saves, replaces and clears Qwen through the desktop's encrypted store with the destination it showed", async () => {
+    const live = { configured: false, provider: "qwen", qwenRegion: "ap-southeast-1", qwenWorkspace: "fixture-space", qwenKeyConfigured: false, voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    const setCredential = vi.fn(async (_slot: string, value: string) => ({ ...fx.config, live: { ...live, configured: !!value, qwenKeyConfigured: !!value } }));
+    const original = window.ogb;
+    window.ogb = { setCredential } as never;
+    try {
+      page();
+      paste(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-qwen-desktop-key");
+      await vi.waitFor(() => expect(row("liveKey")!.querySelector("[data-key-masked]")).not.toBeNull());
+      flushSync(() => row("liveKey")!.querySelector<HTMLButtonElement>("[data-key-remove]")!.click());
+      await vi.waitFor(() => expect(row("liveKey")!.querySelector("[data-key-masked]")).toBeNull());
+      const destination = { qwenKeyTarget: { region: "ap-southeast-1", workspace: "fixture-space" } };
+      expect(setCredential.mock.calls).toEqual([["qwenLiveKey", "fixture-qwen-desktop-key", destination], ["qwenLiveKey", "", destination]]);
+      expect(fx.api).not.toHaveBeenCalled();
+    } finally { window.ogb = original; }
+  });
+
+  it("refuses a Qwen key an older desktop bridge cannot keep encrypted, and never falls back to plaintext config", async () => {
+    const live = { configured: false, provider: "qwen", qwenKeyConfigured: false, voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    const setCredential = vi.fn(async () => { throw new Error("Unsupported credential"); });
+    const original = window.ogb;
+    window.ogb = { setCredential } as never;
+    try {
+      page();
+      paste(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-qwen-old-bridge-key");
+      await vi.waitFor(() => expect(row("liveKey")!.textContent).toContain("Unsupported credential"));
+      expect(setCredential).toHaveBeenCalledOnce();
+      expect(fx.api).not.toHaveBeenCalled();
+      expect(row("liveKey")!.querySelector("[data-key-masked]")).toBeNull();
+      expect(row("liveKey")!.textContent).not.toContain("Saved");
+    } finally { window.ogb = original; }
+  });
+
+  it("sends a Qwen key typed on a desktop paired to another computer to that computer's server", async () => {
+    const live = { configured: false, provider: "qwen", qwenKeyConfigured: false, voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    fx.api.mockImplementation(async () => ({ ...fx.config, live: { ...live, configured: true, qwenKeyConfigured: true } }));
+    const setCredential = vi.fn();
+    const original = window.ogb;
+    window.ogb = { setCredential, remoteClient: { active: true } } as never;
+    try {
+      page();
+      paste(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-qwen-remote-key");
+      await vi.waitFor(() => expect(row("liveKey")!.querySelector("[data-key-masked]")).not.toBeNull());
+      expect(fx.api).toHaveBeenCalledExactlyOnceWith("/api/config", { method: "PUT", body: JSON.stringify({ live: { qwen: { key: "fixture-qwen-remote-key" } }, qwenKeyTarget: { region: "cn-beijing", workspace: "" } }) });
+      expect(setCredential).not.toHaveBeenCalled();
+    } finally { window.ogb = original; }
+  });
+
+  it("shows the Qwen key editor and limited availability in Chinese", () => {
+    setLocale("zh");
+    setConfig({ ...fx.config, live: { provider: "qwen", qwenKeyConfigured: true, configured: true, voice: "marin", readTypedReplies: true, idleMinutes: 5 } });
+    page();
+    expect(row("liveKey")!.textContent).toContain("千问实时通话 API 密钥");
+    expect(row("liveKey")!.textContent).toContain("受限可用");
+    expect(row("liveKey")!.textContent).toContain("审批请点击聊天卡片");
+    expect(row("liveKey")!.textContent).toContain("按用量计费");
+    expect(row("liveKey")!.querySelector("[data-key-masked]")).not.toBeNull();
+    expect(row("liveKey")!.textContent).not.toContain("$0.05");
+  });
+  it("saves Qwen region, optional workspace, whitelisted model and a separate voice", async () => {
+    const live = { configured: false, provider: "qwen", qwenKeyConfigured: false, voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    fx.api.mockImplementation(async (_path: string, init: RequestInit) => ({ live: { ...live, ...JSON.parse(String(init.body)) } }));
+    page();
+    const form = row("liveKey")!.querySelector<HTMLFormElement>("[data-qwen-live-settings]");
+    expect(form).not.toBeNull();
+    const region = form!.querySelector<HTMLSelectElement>('[aria-label="Qwen API region"]')!;
+    expect([...region.options].map((option) => option.value)).toEqual(["cn-beijing", "ap-southeast-1"]);
+    expect(region.value).toBe("cn-beijing");
+    const model = form!.querySelector<HTMLSelectElement>('[aria-label="Qwen model"]')!;
+    expect([...model.options].map((option) => option.value)).toEqual(["qwen-audio-3.1-realtime-flash", "qwen-audio-3.1-realtime-plus"]);
+    const workspace = form!.querySelector<HTMLInputElement>('[aria-label="Qwen business space"]')!;
+    const voiceChoice = form!.querySelector<HTMLSelectElement>('select[aria-label="Qwen voice"]')!;
+    expect(workspace.value).toBe("");
+    expect(voiceChoice.value).toBe("longanqian_v3.1");
+    flushSync(() => { region.value = "ap-southeast-1"; region.dispatchEvent(new Event("change", { bubbles: true })); });
+    flushSync(() => { model.value = "qwen-audio-3.1-realtime-plus"; model.dispatchEvent(new Event("change", { bubbles: true })); });
+    flushSync(() => { voiceChoice.value = "custom"; voiceChoice.dispatchEvent(new Event("change", { bubbles: true })); });
+    const voice = form!.querySelector<HTMLInputElement>('input[aria-label="Custom voice ID"]')!;
+    type(workspace, "workspace-fixture"); type(voice, "fixture_voice_v3.1");
+    flushSync(() => form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    await vi.waitFor(() => expect(fx.api).toHaveBeenCalledOnce());
+    expect(JSON.parse(fx.api.mock.calls[0][1].body)).toEqual({ provider: "qwen", qwenRegion: "ap-southeast-1", qwenWorkspace: "workspace-fixture", qwenModel: "qwen-audio-3.1-realtime-plus", qwenVoice: "fixture_voice_v3.1" });
+    expect(row("liveKey")!.textContent).toContain("Limited availability");
+    expect(row("liveKey")!.textContent).toContain("headphones");
+    expect(row("liveKey")!.textContent).toContain("Billed by usage");
+    expect(row("liveKey")!.textContent).not.toContain("$0.05");
+  });
+  it("saves, replaces and clears the Qwen key with the existing masked key editor", async () => {
+    const live = { configured: false, provider: "qwen", qwenKeyConfigured: false, voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    fx.api.mockImplementation(async (_path: string, init: RequestInit) => {
+      const key = JSON.parse(String(init.body)).live.qwen.key;
+      return { ...fx.config, live: { ...live, configured: !!key, qwenKeyConfigured: !!key } };
+    });
+    page();
+    paste(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-qwen-key-first");
+    await vi.waitFor(() => expect(row("liveKey")!.querySelector("[data-key-masked]")).not.toBeNull());
+    expect(JSON.parse(fx.api.mock.calls[0][1].body)).toEqual({ live: { qwen: { key: "fixture-qwen-key-first" } }, qwenKeyTarget: { region: "cn-beijing", workspace: "" } });
+    expect(row("liveKey")!.textContent).toContain("Saved");
+    expect(JSON.stringify(fx.config)).not.toContain("fixture-qwen-key");
+    expect(host.innerHTML).not.toContain("fixture-qwen-key");
+    flushSync(() => row("liveKey")!.querySelector<HTMLButtonElement>("[data-key-replace]")!.click());
+    const replacement = row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!;
+    type(replacement, "fixture-qwen-key-second");
+    flushSync(() => row("liveKey")!.querySelector<HTMLButtonElement>("[data-key-save]")!.click());
+    await vi.waitFor(() => expect(row("liveKey")!.querySelector("[data-key-masked]")).not.toBeNull());
+    expect(JSON.parse(fx.api.mock.calls[1][1].body)).toEqual({ live: { qwen: { key: "fixture-qwen-key-second" } }, qwenKeyTarget: { region: "cn-beijing", workspace: "" } });
+    flushSync(() => row("liveKey")!.querySelector<HTMLButtonElement>("[data-key-remove]")!.click());
+    await vi.waitFor(() => expect(row("liveKey")!.querySelector("[data-key-masked]")).toBeNull());
+    expect(JSON.parse(fx.api.mock.calls[2][1].body)).toEqual({ live: { qwen: { key: "" } }, qwenKeyTarget: { region: "cn-beijing", workspace: "" } });
+    expect(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!.value).toBe("");
+  });
+
+  it.each(["save", "remove"] as const)("ignores a late Qwen key %s response after the destination changes", async action => {
+    const live = { configured: action === "remove", provider: "qwen", qwenRegion: "cn-beijing", qwenWorkspace: "old-space", qwenKeyConfigured: action === "remove", voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    let resolve!: (config: Record<string, unknown>) => void;
+    fx.api.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    page();
+    if (action === "save") paste(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-key-old-destination");
+    else flushSync(() => row("liveKey")!.querySelector<HTMLButtonElement>("[data-key-remove]")!.click());
+    expect(fx.api).toHaveBeenCalledOnce();
+    const moved = { ...fx.config, live: { ...live, qwenWorkspace: "new-space", configured: false, qwenKeyConfigured: false } };
+    flushSync(() => setConfig(moved));
+    fx.dispatch.mockClear();
+    resolve({ ...fx.config, live: { ...live, configured: action === "save", qwenKeyConfigured: action === "save" } });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fx.dispatch).not.toHaveBeenCalled();
+    expect(fx.config).toBe(moved);
+    expect(row("liveKey")!.querySelector("[data-key-destination]")!.textContent).toContain("new-space");
+  });
+
+  it("captures the displayed destination before a key save waits and uses the new destination after a remote change", async () => {
+    const live = { configured: false, provider: "qwen", qwenRegion: "cn-beijing", qwenWorkspace: "old-space", qwenKeyConfigured: false, voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    let refuse!: (error: Error) => void;
+    fx.api.mockImplementationOnce(() => new Promise((_resolve, reject) => { refuse = reject; }));
+    page();
+    paste(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-key-old-destination");
+    expect(JSON.parse(fx.api.mock.calls[0][1].body)).toEqual({ live: { qwen: { key: "fixture-key-old-destination" } }, qwenKeyTarget: { region: "cn-beijing", workspace: "old-space" } });
+    const moved = { ...live, qwenRegion: "ap-southeast-1", qwenWorkspace: "new-space" };
+    flushSync(() => setConfig({ ...fx.config, live: moved }));
+    refuse(new Error("The Qwen key destination changed. Reload Call settings before saving or removing the key."));
+    await Promise.resolve();
+    expect(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!.value).toBe("");
+    expect(row("liveKey")!.querySelector("[data-key-destination]")!.textContent).toContain("new-space");
+    fx.api.mockResolvedValueOnce({ ...fx.config, live: { ...moved, configured: true, qwenKeyConfigured: true } });
+    paste(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-key-new-destination");
+    await vi.waitFor(() => expect(row("liveKey")!.querySelector("[data-key-masked]")).not.toBeNull());
+    expect(JSON.parse(fx.api.mock.calls[1][1].body)).toEqual({ live: { qwen: { key: "fixture-key-new-destination" } }, qwenKeyTarget: { region: "ap-southeast-1", workspace: "new-space" } });
+  });
+
+  it("discards a draft key on provider switch rather than offering it to the new provider", async () => {
+    const live = { configured: false, provider: "openai", voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    fx.api.mockImplementation(async () => ({ live: { ...live, provider: "qwen", qwenKeyConfigured: false } }));
+    page();
+    type(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!, "fixture-native-draft");
+    const select = row("liveKey")!.querySelector<HTMLSelectElement>("select")!;
+    flushSync(() => { select.value = "qwen"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    await vi.waitFor(() => expect(row("liveKey")!.textContent).toContain("Qwen API key"));
+    expect(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!.value).toBe("");
+    expect(fx.api).toHaveBeenCalledOnce();
+  });
+  it("selects Qwen on the existing Live key row and offers its independent key field", async () => {
+    const live = { configured: false, provider: "openai", voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    fx.api.mockImplementation(async () => ({ live: { ...live, provider: "qwen", qwenKeyConfigured: false } }));
+    page();
+    const select = row("liveKey")!.querySelector<HTMLSelectElement>("select")!;
+    expect([...select.options].map((option) => option.value)).toContain("qwen");
+    flushSync(() => { select.value = "qwen"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    await vi.waitFor(() => expect(row("liveKey")!.textContent).toContain("Qwen API key for Live calls"));
+    expect(fx.api).toHaveBeenCalledWith("/api/live/settings", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ provider: "qwen" }) }));
+    expect(row("liveKey")!.querySelector<HTMLInputElement>("[data-key-input]")!.type).toBe("password");
+    expect(host.querySelectorAll('[data-key-row="liveKey"]')).toHaveLength(1);
+    expect(row("liveCalls")).toBeNull();
+    expect(row("liveKey")!.textContent).toContain("Required");
+    expect(row("liveKey")!.textContent).not.toContain("instead of your OpenAI key");
+  });
   it("groups the keys into plain sections, AI providers open first", () => {
     page();
     expect([...host.querySelectorAll<HTMLElement>("[data-keys-section]")].map((element) => element.dataset.keysSection))
@@ -99,7 +482,7 @@ describe("the keys page", () => {
     setConfig({ ...fx.config, live: { configured: false, provider: "azure", voice: "", readTypedReplies: true, idleMinutes: 5 } });
     page();
     const select = row("liveKey")!.querySelector<HTMLSelectElement>("select")!;
-    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure"]);
+    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure", "qwen"]);
     expect(select.value).toBe("azure");
     expect(row("liveKey")!.querySelector('input[type="url"]')).not.toBeNull();
   });

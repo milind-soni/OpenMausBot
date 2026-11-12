@@ -238,6 +238,34 @@ describe("migrating config.json on disk", () => {
     expect(credentials).toEqual({ mistralApiKey: "mistral-secret" });
   });
 
+  it("moves a plaintext Qwen key into the store before blanking it, keeping its binding and settings", async () => {
+    const qwen = { enabled: true, region: "ap-southeast-1", workspace: "fixture-space", voice: "longanqian_v3.1", key: " qwen-fixture-secret ", keyFor: "qwen:fixture-space.ap-southeast-1.maas.aliyuncs.com" };
+    const path = configFile({ live: { key: "openai-live-secret", voice: "marin", qwen } });
+    const save = vi.fn(async () => { expect(readFileSync(path, "utf8")).toContain("qwen-fixture-secret"); });
+    const credentials = await migrateWorkspaceConfigFile({ configPath: path, credentials: {}, save, log: vi.fn() });
+    expect(save).toHaveBeenCalledExactlyOnceWith({ openaiLiveKey: "openai-live-secret", qwenLiveKey: "qwen-fixture-secret" });
+    expect(credentials).toEqual({ openaiLiveKey: "openai-live-secret", qwenLiveKey: "qwen-fixture-secret" });
+    const { key: _plaintext, ...kept } = qwen;
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ live: { voice: "marin", qwen: kept } });
+    expect(workspaceCredentialEnv(credentials)).toEqual({ OMB_OPENAI_LIVE_KEY: "openai-live-secret", OMB_QWEN_LIVE_KEY: "qwen-fixture-secret" });
+  });
+
+  it("keeps a plaintext Qwen key in the file when the store cannot save it", async () => {
+    const before = { live: { qwen: { enabled: true, key: "qwen-fixture-secret", keyFor: "qwen:dashscope.aliyuncs.com" } } };
+    const path = configFile(before);
+    const save = vi.fn().mockRejectedValue(new Error("The operating-system credential store is unavailable"));
+    await expect(migrateWorkspaceConfigFile({ configPath: path, credentials: {}, save, log: vi.fn() })).resolves.toEqual({});
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(before);
+  });
+
+  it("drops a Qwen tombstone without touching the stored copy, and ignores a malformed Qwen section", () => {
+    const result = migrateWorkspaceCredentials({ live: { qwen: { key: "", keyFor: "nowhere" } } }, { qwenLiveKey: "stored" });
+    expect(result).toMatchObject({ config: { live: { qwen: { keyFor: "nowhere" } } }, credentials: { qwenLiveKey: "stored" }, configChanged: true, credentialsChanged: false });
+    for (const live of [{ qwen: "qwen-fixture-secret" }, { qwen: ["qwen-fixture-secret"] }, "qwen-fixture-secret"]) {
+      expect(migrateWorkspaceCredentials({ live }, {})).toMatchObject({ config: { live }, configChanged: false, credentialsChanged: false });
+    }
+  });
+
   it("changes nothing when there is no config.json yet", async () => {
     const path = join(configFile({}), "..", "absent", "config.json");
     const log = vi.fn();

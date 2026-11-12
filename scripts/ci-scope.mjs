@@ -126,6 +126,7 @@ export const VITEST_SUBSETS = {
       "server/one-home.e2e.test.ts",
       "server/parked-cards.e2e.test.ts",
       "server/question-cards.e2e.test.ts",
+      "server/qwen-live-config.e2e.test.ts",
       "server/shared-computers.e2e.test.ts",
       "server/shared-computers.gate.test.ts",
       "server/team-move.e2e.test.ts",

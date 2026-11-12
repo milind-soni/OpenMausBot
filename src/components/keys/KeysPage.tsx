@@ -1,5 +1,5 @@
 import { SettingsFoldRow, SettingsRows } from "../SettingsPrimitives";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, Search } from "lucide-react";
 import { useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -10,7 +10,7 @@ import { LiveProviderSettings } from "../LiveProviderSettings";
 import { VoiceEveryReplySetting } from "../VoiceEveryReplySetting";
 import { BuiltInReplyWait, LmStudioServer, OtherOpenAiCompatServers } from "../OpenAiCompatServers";
 import { OllamaServer } from "../OllamaServer";
-import { KEY_CATALOG, KEY_SECTIONS, keyMatches, savedState, type KeyEntry, type KeyId, type KeySectionId } from "./key-catalog";
+import { KEY_CATALOG, KEY_SECTIONS, keyMatches, savedState, shownKeyEntry, type KeyEntry, type KeyId, type KeySectionId } from "./key-catalog";
 import { finishKeyFocus, useKeyFocus, type KeyFocusRequest } from "./key-focus";
 import { AnthropicEveryClaudeBot, OpenAiCompatUrl, OpenCodeProviderKeys, VpsConnection } from "./KeyPanels";
 import { KEY_CONTENT, KEY_ROW, KeyRow, MaskedKey, RowHeading, type KeyStatus } from "./KeyRow";
@@ -32,7 +32,8 @@ const EXTRAS: Partial<Record<KeyId, () => ReactNode>> = {
   liveKey: () => <LiveProviderSettings />,
 };
 
-function connected(entry: KeyEntry, config: ConfigStatus | null | undefined): boolean {
+function connected(base: KeyEntry, config: ConfigStatus | null | undefined): boolean {
+  const entry = shownKeyEntry(base.id, config);
   if (entry.kind === "uses") return false;
   const saved = savedState(entry, config);
   return saved.configured || saved.included === true;
@@ -76,10 +77,16 @@ function ElsewhereRow({ entry }: { entry: KeyEntry }) {
 }
 
 export function KeyCatalogRow({ entry, visible }: { entry: KeyEntry; visible: boolean }) {
+  const { state } = useStore();
+  const live = state.config?.live;
+  const editorKey = entry.id === "liveKey" ? JSON.stringify([live?.provider, live?.qwenRegion, live?.qwenWorkspace]) : entry.id;
   if (entry.kind === "uses" && entry.uses) return <KeyRow id={entry.uses} row={entry.id} />;
   if (entry.kind === "panel") return <PanelRow entry={entry} visible={visible} />;
   if (entry.kind === "elsewhere") return <ElsewhereRow entry={entry} />;
-  return <KeyRow id={entry.id}>{EXTRAS[entry.id]?.()}</KeyRow>;
+  const extra = EXTRAS[entry.id]?.();
+  return <KeyRow editorKey={editorKey} id={entry.id}>
+    {extra && <Fragment key={entry.id === "liveKey" ? live?.provider ?? "openai" : entry.id}>{extra}</Fragment>}
+  </KeyRow>;
 }
 
 function KeySection({ id, rows, open, onToggle }: { id: KeySectionId; rows: KeyEntry[]; open: boolean; onToggle: () => void }) {
@@ -152,9 +159,8 @@ export function KeysPage({ bare = false, exclude = [] }: { bare?: boolean; exclu
     return () => window.cancelAnimationFrame(frame);
   }, [focus]);
 
-  // With Azure chosen, Live calls do not use the OpenAI key that row points at.
-  const azureLive = state.config?.live?.provider === "azure";
-  const rows = KEY_CATALOG.filter((entry) => keyMatches(entry, q) && !(azureLive && entry.id === "liveCalls"));
+  const ownKeyLive = state.config?.live?.provider === "azure" || state.config?.live?.provider === "qwen";
+  const rows = KEY_CATALOG.filter((entry) => keyMatches(shownKeyEntry(entry.id, state.config), q) && !(ownKeyLive && entry.id === "liveCalls"));
   const asked = focus ? KEY_CATALOG.find((entry) => entry.id === focus.row)?.section : undefined;
   const sections = KEY_SECTIONS.filter((section) => !exclude.includes(section.id) || section.id === asked).flatMap((section) => {
     const own = rows.filter((entry) => entry.section === section.id);

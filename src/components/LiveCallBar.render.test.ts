@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BotEditorStore, initialState, StoreProvider, type AppState, type Bot } from "@/state/store";
 import { endCall } from "@/lib/call";
+import { qwenAudioOutput } from "@/lib/qwen-audio-output";
 import { configureLiveMedia, resetLiveMedia, startLiveCall } from "@/lib/live-call-media";
 import { LiveCallBar } from "./LiveCallBar";
 import { LiveCallSettings } from "./LiveCallSettings";
@@ -39,6 +40,20 @@ afterEach(() => {
 });
 
 describe("LiveCallBar", () => {
+  it("exposes PCM pause recovery directly in the call bar without opening settings", () => {
+    vi.stubGlobal("window", { ogb: { speechStop: vi.fn(async () => {}) } });
+    configureLiveMedia({ getUserMedia: () => new Promise<MediaStream>(() => {}) });
+    void startLiveCall({ botId: bot.id, threadId: bot.threadId });
+    const attached = qwenAudioOutput.attach(Object.assign(new EventTarget(), { state: "suspended", resume: vi.fn(async () => {}) }));
+    try {
+      const markup = render(createElement(LiveCallBar, { bot }));
+      expect(markup).toContain("data-qwen-audio-resume");
+      expect(markup).toContain("Restore call audio");
+      expect(markup).toContain('aria-label="Mute"');
+      expect(markup).toContain('aria-label="Hang up"');
+    } finally { attached.release(); }
+    expect(render(createElement(LiveCallBar, { bot }))).not.toContain("data-qwen-audio-resume");
+  });
   it("renders nothing without a call", () => {
     expect(render(createElement(LiveCallBar, { bot }))).toBe("");
   });
@@ -131,6 +146,17 @@ describe("LiveCallBar", () => {
 });
 
 describe("LiveCallSettings", () => {
+  it("exposes Qwen output selection in Call settings without disabling the rest of the call on unsupported browsers", () => {
+    const live = { provider: "qwen", configured: true, qwenKeyConfigured: true, voice: "marin", readTypedReplies: true, idleMinutes: 5 } as LiveSettings;
+    const value = { state: { ...initialState, config: { live } as AppState["config"] }, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+    const markup = renderToStaticMarkup(createElement(BotEditorStore, { value, children: createElement(LiveCallSettings, { onClose: vi.fn() }) }));
+    expect(markup).toContain('data-qwen-output');
+    expect(markup).toContain('aria-label="Qwen audio output (this device)"');
+    expect(markup).toContain("This browser cannot switch the phone earpiece/speaker");
+    expect(markup).toMatch(/<input type="checkbox"(?![^>]*disabled)[^>]*checked=""/);
+    const native = render(createElement(LiveCallSettings, { onClose: vi.fn() }));
+    expect(native).not.toContain('data-qwen-output');
+  });
   it("offers voice, typed replies, idle minutes and the key, defaulting to 5 minutes", () => {
     const markup = render(createElement(LiveCallSettings, { onClose: vi.fn() }));
     expect(markup).toContain('aria-label="Call settings"');

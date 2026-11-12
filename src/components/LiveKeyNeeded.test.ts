@@ -7,6 +7,7 @@ vi.mock("react", async (original) => ({ ...await original<typeof import("react")
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: { cloudHome: f.cloudHome, live: f.live } }, dispatch: f.dispatch }), api: vi.fn() }));
 vi.mock("@/lib/live-call-media", () => ({ dismissLiveNotice: f.dismiss }));
 import { LiveKeyNeeded } from "./LiveKeyNeeded";
+import { LiveCallSettings } from "./LiveCallSettings";
 import { finishKeyFocus, useKeyFocus } from "./keys/key-focus";
 
 beforeEach(() => {
@@ -17,6 +18,21 @@ beforeEach(() => {
 
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => void }>;
 const nodes = (value: ReactNode): Node[] => !isValidElement(value) ? [] : [value as Node, ...Children.toArray((value as Node).props.children).flatMap(nodes)];
+
+it("Qwen key prompts and Call settings use the same masked editor, Qwen voice and usage disclosure", () => {
+  f.live = { configured: false, provider: "qwen", qwenKeyConfigured: false, voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+  for (const view of [createElement(LiveKeyNeeded), createElement(LiveCallSettings, { onClose: () => {} })]) {
+    const html = renderToStaticMarkup(view);
+    expect(html).toContain('aria-label="Qwen API key for Live calls"');
+    expect(html).toContain('data-key-input');
+    expect(html).toContain('value="longanqian_v3.1"');
+    expect(html).toContain("Billed by usage");
+    expect(html).toContain("headphones");
+    expect(html).not.toContain("$0.05");
+    expect(html).not.toContain('value="marin"');
+    expect(html).not.toContain("OpenAI key stays");
+  }
+});
 
 it("says one plain thing, names OpenAI, and offers only the way to Settings → API keys", () => {
   const html = renderToStaticMarkup(createElement(LiveKeyNeeded));

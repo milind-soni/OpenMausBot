@@ -12,6 +12,7 @@ import { cn } from "@/lib/cn";
 import type { LiveCallState, LiveClient } from "../../shared/wire";
 import { LiveCallSettings } from "./LiveCallSettings";
 import { OpenSystemSettings } from "./OpenSystemSettings";
+import { QwenPlaybackRecovery } from "./QwenAudioOutputSettings";
 
 export type LiveCallBarView =
   | { kind: "local"; title: string; caption: string; heard: string; muted: boolean; ending: boolean; hint: string | null }
@@ -180,6 +181,7 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
         <bdi dir="ltr">{spoken}</bdi>
       </span>
       {view.hint && <span role="status" className="order-last w-full min-w-0 truncate text-[12px] text-warning" title={view.hint}>{view.hint}</span>}
+      {!view.ending && <QwenPlaybackRecovery />}
       <span className="ml-auto flex shrink-0 items-center gap-1">
         <button
           ref={gearRef}

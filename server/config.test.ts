@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { botThreadLimitText, defaultBotThreads, maxConcurrentBotThreads, maxConcurrentChildThreads } from "./bot-thread-limits.ts";
 import type { JsonValue } from "./schema.ts";
 import { imageSlots } from "./image-generation.ts";
+import { saveLiveSettings } from "./live-settings.ts";
+import { usableQwenKey } from "./qwen-live-config.ts";
 
 import { cacheUntilConfigChanges,
   changedInstanceIds,
@@ -2204,6 +2206,53 @@ describe("live settings", () => {
       expect(loadConfig().live).toEqual({ key: "sk-from-keychain", readTypedReplies: false, voice: "cedar" });
       expect(JSON.parse(readFileSync(path, "utf8")).live).toEqual({ key: "", readTypedReplies: false, voice: "cedar" });
     });
+  });
+});
+
+describe("a Qwen key kept outside config.json", () => {
+  const path = join(DATA_DIR, "config.json");
+  const bound = "qwen:dashscope.aliyuncs.com";
+  let envKey: string | undefined;
+  const disk = () => readFileSync(path, "utf8");
+  beforeEach(() => {
+    envKey = process.env.OMB_QWEN_LIVE_KEY;
+    delete process.env.OMB_QWEN_LIVE_KEY;
+    mkdirSync(DATA_DIR, { recursive: true });
+    rmSync(path, { force: true });
+  });
+  afterEach(() => {
+    if (envKey === undefined) delete process.env.OMB_QWEN_LIVE_KEY;
+    else process.env.OMB_QWEN_LIVE_KEY = envKey;
+    rmSync(path, { force: true });
+  });
+
+  it("stays out of the file through settings saves, and a restart cannot revive it after the destination moves", () => {
+    saveConfig({ live: { voice: "marin", qwen: { enabled: true, region: "cn-beijing", key: "", keyFor: bound } } });
+    process.env.OMB_QWEN_LIVE_KEY = "qwen-store-fixture";
+    expect(usableQwenKey(loadConfig().live?.qwen)).toBe("qwen-store-fixture");
+    saveLiveSettings(loadConfig(), { qwenVoice: "longanqian_v3.1", qwenModel: "qwen-audio-3.1-realtime-plus" });
+    saveLiveSettings(loadConfig(), { provider: "openai" });
+    saveLiveSettings(loadConfig(), { provider: "qwen" });
+    expect(disk()).not.toContain("qwen-store-fixture");
+    expect(JSON.parse(disk()).live).toEqual({ voice: "marin", provider: "openai", qwen: { enabled: true, region: "cn-beijing", key: "", keyFor: bound, voice: "longanqian_v3.1", model: "qwen-audio-3.1-realtime-plus" } });
+    expect(usableQwenKey(loadConfig().live?.qwen)).toBe("qwen-store-fixture");
+
+    saveLiveSettings(loadConfig(), { qwenRegion: "ap-southeast-1" });
+    expect(process.env.OMB_QWEN_LIVE_KEY).toBeUndefined();
+    expect(JSON.parse(disk()).live.qwen).toMatchObject({ region: "ap-southeast-1", key: "", keyFor: "nowhere" });
+    process.env.OMB_QWEN_LIVE_KEY = "qwen-store-fixture";
+    expect(usableQwenKey(loadConfig().live?.qwen)).toBeUndefined();
+    saveLiveSettings(loadConfig(), { qwenRegion: "cn-beijing" });
+    process.env.OMB_QWEN_LIVE_KEY = "qwen-store-fixture";
+    expect(usableQwenKey(loadConfig().live?.qwen)).toBeUndefined();
+    expect(disk()).not.toContain("qwen-store-fixture");
+  });
+
+  it("keeps a server's own plaintext Qwen key when only its settings change", () => {
+    saveConfig({ live: { qwen: { enabled: true, key: "qwen-server-fixture", keyFor: bound } } });
+    saveLiveSettings(loadConfig(), { qwenVoice: "longanqian_v3.1" });
+    expect(JSON.parse(disk()).live.qwen).toEqual({ enabled: true, key: "qwen-server-fixture", keyFor: bound, voice: "longanqian_v3.1" });
+    expect(usableQwenKey(loadConfig().live?.qwen)).toBe("qwen-server-fixture");
   });
 });
 

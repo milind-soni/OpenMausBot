@@ -1,5 +1,6 @@
 import type { AppConfig } from "./config.ts";
 import { usableLiveKey } from "./live-config.ts";
+import { usableQwenKey } from "./qwen-live-config.ts";
 
 /** Security: a hint is the last four characters of a key long enough that four reveal nothing useful, and only admins
  * receive one; withoutKeyHints() takes every hint off what a client session is sent. */
@@ -26,6 +27,7 @@ export function nestedKeyStatus(cfg: AppConfig) {
     customImageApiKey: keyStatus(cfg.imageGen?.customApiKey),
     geminiImageApiKey: keyStatus(cfg.imageGen?.geminiKey),
     openaiLiveKey: keyStatus(usableLiveKey(cfg.live)),
+    qwenLiveKey: { configured: Boolean(usableQwenKey(cfg.live?.qwen)) },
   };
 }
 

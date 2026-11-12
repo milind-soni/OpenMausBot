@@ -36,7 +36,13 @@ const { KeyRow } = await import("./KeyRow");
 
 type Props = { children?: ReactNode; type?: string; onChange?: (event: { target: { value: string } }) => void; onKeyDown?: (event: { key: string; preventDefault: () => void }) => void; onClick?: () => void; "data-key-remove"?: boolean };
 function nodes(tree: ReactNode): Array<ReactElement<Props>> {
-  return Children.toArray(tree).flatMap((child) => isValidElement<Props>(child) ? [child, ...nodes(child.props.children)] : []);
+  return Children.toArray(tree).flatMap((child) => {
+    if (!isValidElement<Props>(child)) return [];
+    const children = typeof child.type === "function"
+      ? (child.type as (props: Props) => ReactNode)(child.props)
+      : child.props.children;
+    return [child, ...nodes(children)];
+  });
 }
 function render(props: Parameters<typeof KeyRow>[0]) {
   fixture.index = 0;

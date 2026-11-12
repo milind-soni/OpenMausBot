@@ -24,6 +24,7 @@ export const WORKSPACE_CREDENTIALS = [
   { section: "imageGen", field: "customApiKey", name: "customImageApiKey", env: "OMB_CUSTOM_IMAGE_KEY" },
   { section: "imageGen", field: "geminiKey", name: "geminiImageApiKey", env: "OMB_GEMINI_IMAGE_KEY" },
   { section: "live", field: "key", name: "openaiLiveKey", env: "OMB_OPENAI_LIVE_KEY" },
+  { section: "live", subsection: "qwen", field: "key", name: "qwenLiveKey", env: "OMB_QWEN_LIVE_KEY" },
   { section: "treg", field: "key", name: "tregApiKey", env: "OMB_TREG_KEY" },
   { section: "postiz", field: "key", name: "postizApiKey", env: "OMB_POSTIZ_API_KEY" },
   { section: "opencodeGo", field: "apiKey", name: "opencodeGoApiKey", env: "OPENCODE_API_KEY" },
@@ -36,8 +37,8 @@ export function migrateWorkspaceCredentials(config, credentials) {
   const nextCredentials = { ...credentials };
   let configChanged = false;
   let credentialsChanged = false;
-  for (const { section, field, name } of WORKSPACE_CREDENTIALS) {
-    const home = nextConfig?.[section];
+  for (const { section, subsection, field, name } of WORKSPACE_CREDENTIALS) {
+    const home = subsection ? nextConfig?.[section]?.[subsection] : nextConfig?.[section];
     if (!home || typeof home !== "object" || Array.isArray(home)) continue;
     if (!Object.hasOwn(home, field)) continue;
     const value = home[field];

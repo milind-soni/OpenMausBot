@@ -5,6 +5,19 @@ import { describe, expect, it } from "vitest";
 import { admit, roomTurnHolds } from "./admission.ts";
 
 describe("admission golden tables", () => {
+  it.each([undefined, "steer"] as const)("direct-busy: queues a request needing correlation before steering (%s)", followUp => {
+    const message = { engineCanSteer: true, requireSteerRequestId: true, followUp };
+    expect(admit("direct-busy", message)).toEqual({ action: "queue" });
+    expect(admit("direct-busy", { ...message, steerRequestId: "running-request" })).toEqual({ action: "steer" });
+    expect(admit("direct-busy", { ...message, requireSteerRequestId: false })).toEqual({ action: "steer" });
+  });
+
+  it("direct-busy: preserves explicit queue and restart choices when correlation is required", () => {
+    const message = { engineCanSteer: true, requireSteerRequestId: true };
+    expect(admit("direct-busy", { ...message, followUp: "queue" })).toEqual({ action: "queue", chose: "queue" });
+    expect(admit("direct-busy", { ...message, followUp: "restart" })).toEqual({ action: "queue", chose: "restart" });
+  });
+
   it("direct-busy: steers plain text into a capable engine, parks everything else", () => {
     const plain = { carriesImages: false, pendingComputerSelection: false, engineCanSteer: true };
     expect(admit("direct-busy", plain)).toEqual({ action: "steer" });

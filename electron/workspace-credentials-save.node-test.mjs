@@ -13,18 +13,32 @@ import { WORKSPACE_CREDENTIALS } from "./workspace-credentials.mjs";
 const configRoutes = readFileSync(new URL("../server/routes/config.ts", import.meta.url), "utf8");
 
 test("credential:set can save and clear every migrated workspace secret", () => {
-  for (const { name, section, field } of WORKSPACE_CREDENTIALS) {
+  for (const { name, section, subsection, field } of WORKSPACE_CREDENTIALS) {
     assert.ok(Object.hasOwn(CREDENTIAL_PATCH, name), `${name} is missing from CREDENTIAL_PATCH`);
-    for (const value of ["secret", ""]) assert.deepEqual(CREDENTIAL_PATCH[name](value), { [section]: { [field]: value } }, name);
+    for (const value of ["secret", ""]) {
+      assert.deepEqual(CREDENTIAL_PATCH[name](value), { [section]: subsection ? { [subsection]: { [field]: value } } : { [field]: value } }, name);
+    }
   }
 });
 
 test("the external secret save never leaves a migrated secret in config.json", () => {
-  for (const { section, field } of WORKSPACE_CREDENTIALS) {
+  for (const { section, subsection, field } of WORKSPACE_CREDENTIALS) {
+    const path = subsection ? `${section}?.${subsection}` : section;
+    const write = subsection ? `${section}.${subsection}` : section;
     assert.ok(
-      configRoutes.includes(`if (persisted.${section}?.${field} !== undefined) persisted.${section}.${field} = "";`),
-      `${section}.${field} has no tombstone in the secretStorage=external save`,
+      configRoutes.includes(`if (persisted.${path}?.${field} !== undefined) persisted.${write}.${field} = "";`),
+      `${write}.${field} has no tombstone in the secretStorage=external save`,
     );
+  }
+});
+
+test("a Qwen key carries only the destination the page showed, so the server can refuse a stale one", () => {
+  const target = { region: "ap-southeast-1", workspace: "fixture-space" };
+  assert.deepEqual(CREDENTIAL_PATCH.qwenLiveKey("secret", { qwenKeyTarget: { ...target, keyFor: "qwen:evil.invalid" }, everyClaudeBot: false }),
+    { live: { qwen: { key: "secret" } }, qwenKeyTarget: target });
+  assert.deepEqual(CREDENTIAL_PATCH.qwenLiveKey("", { qwenKeyTarget: target }), { live: { qwen: { key: "" } }, qwenKeyTarget: target });
+  for (const options of [undefined, {}, { qwenKeyTarget: { region: "cn-beijing" } }, { qwenKeyTarget: { region: 1, workspace: "" } }, { live: { qwen: { keyFor: "qwen:evil.invalid" } } }]) {
+    assert.deepEqual(CREDENTIAL_PATCH.qwenLiveKey("secret", options), { live: { qwen: { key: "secret" } } });
   }
 });
 
