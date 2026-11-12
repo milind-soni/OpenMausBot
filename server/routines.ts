@@ -32,6 +32,7 @@ import { EVENT_RETRY_WINDOW_MS, loadEventReceipts, MAX_EVENT_RECEIPTS, type Even
 import { attachmentPathsOf, attachmentsMalformed, cloneAttachments } from "./routine-attachments.ts";
 import { loadInstalledPackage, loadRequestReceipts, loadRoutine, loadRun } from "./routine-load.ts";
 import { applyHolds, holdCauses, type AppliedHolds } from "./routine-holds.ts";
+import { cancelUnfinishedRuns, interruptRunTurns } from "./routine-stops.ts";
 import { sanitizeInput } from "./routine-input.ts";
 import { applyCheckResult, routineLine, runLineFields, type RoutineLineCodes, type RoutineTroubleCode } from "./routine-lines.ts";
 import { checkHold, CHECK_BOOT_HOLD_MS, type CheckHold } from "./routine-check-pacing.ts";
@@ -264,7 +265,7 @@ export interface RoutineManagerOptions {
   onRunCut?: (run: RoutineRun) => void;
   hasPendingDelegations?: (threadId: string) => boolean; /** Why a run that ended well in this thread must say a hand-off was refused, once; null when none was. */ refusedHandoff?: (threadId: string) => string | null;
   /** The turn in this thread is a routine's own, not one a person started there while its run waits on teammates. */
-  routineTurn?: (threadId: string) => boolean;
+  routineTurn?: (threadId: string) => boolean; /** The thread's latest turn is one a person started there by typing (false when not known, e.g. after a restart). */ personTurn?: (threadId: string) => boolean;
   /** When an engine's usage limit resets (epoch ms), or null while that is not known. */
   limitResetAt?: (engine: string) => number | null;
   /** The bot has a backup engine to continue on when its own engine's usage limit refuses a run, or it is signed out. */
@@ -608,7 +609,7 @@ export class RoutineManager {
     const destination = { ...routine, ...clean };
     if (destination.botId !== routine.botId) delete destination.resultsThreadId;
     const discardResults = this.applyResultsInput(destination, patch.resultsThreadId);
-    const cancelledRuns: RoutineRun[] = [];
+    let stopped: ReturnType<typeof cancelUnfinishedRuns> | undefined;
     this.commitMutation(() => {
       Object.assign(routine, clean, {
         resultsThreadId: destination.resultsThreadId,
@@ -622,19 +623,11 @@ export class RoutineManager {
       if (Object.hasOwn(patch, "timeoutMinutes") && patch.timeoutMinutes == null) {
         delete routine.timeoutMinutes;
       }
-      if (patch.enabled === false) {
-        for (const run of this.runs) {
-          if (run.routineId !== routine.id || run.status !== "queued") continue;
-          run.status = "cancelled";
-          run.attention = undefined;
-          run.finishedAt = this.now();
-          run.error = "The routine was paused before this run started";
-          cancelledRuns.push(run);
-        }
-      }
+      if (patch.enabled === false) stopped = cancelUnfinishedRuns(this.runs, routine.id, this.now(), "paused");
       if (request) this.rememberRoutineRequest(request, routine.id, now);
     }, discardResults);
-    for (const run of cancelledRuns) this.emitRun(run);
+    for (const run of stopped?.cancelled ?? []) this.emitRun(run);
+    interruptRunTurns(stopped?.waited ?? [], this.options);
     this.emitRoutine(routine);
     return this.routineWithHealth(routine);
   }
@@ -645,23 +638,19 @@ export class RoutineManager {
     const at = this.routines.findIndex((r) => r.id === id);
     if (at === -1) return false;
     const changedRuns: RoutineRun[] = [];
+    let stopped: ReturnType<typeof cancelUnfinishedRuns> | undefined;
     this.commitMutation(() => {
       this.routines.splice(at, 1);
       for (const run of this.runs) {
-        if (run.routineId !== id) continue;
-        if (run.status === "queued") {
-          run.status = "cancelled";
-          run.attention = undefined;
-          run.finishedAt = this.now();
-          changedRuns.push(run);
-        } else if (!run.seenAt && isRoutineProblemRun(run)) {
-          run.seenAt = this.now();
-          changedRuns.push(run);
-        }
+        if (run.routineId !== id || run.status === "queued" || run.status === "waiting" || run.seenAt || !isRoutineProblemRun(run)) continue;
+        run.seenAt = this.now();
+        changedRuns.push(run);
       }
+      stopped = cancelUnfinishedRuns(this.runs, id, this.now(), "deleted");
       if (request) this.rememberRoutineRequest(request, id, this.now());
     });
-    for (const run of changedRuns) this.emitRun(run);
+    for (const run of [...stopped!.cancelled, ...changedRuns]) this.emitRun(run);
+    interruptRunTurns(stopped!.waited, this.options);
     this.options.emit?.({ kind: "routine.deleted", routineId: id });
     return true;
   }
@@ -677,8 +666,7 @@ export class RoutineManager {
       run.finishedAt = this.now();
       run.error = routineId === undefined ? "The assigned bot was deleted" : "The routine was deleted";
       this.emitRun(run);
-      if (run.threadId && run.target === "room-goal") void this.options.interruptGoal?.(run.groupId, run.threadId).catch(() => {});
-      else if (run.threadId) void this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
+      interruptRunTurns([run], this.options);
     }
     const kept = this.runs.filter((run) => run.botId !== botId || (routineId !== undefined && run.routineId !== routineId));
     if (kept.length !== this.runs.length) this.commitMutation(() => { this.runs = kept; });
