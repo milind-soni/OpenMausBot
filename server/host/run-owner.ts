@@ -3,7 +3,7 @@
 // steers the run, never stops it and never cuts it short to be answered first: it waits in the queue, which everyone
 // there sees, and runs after as its own turn. Only the asker, or an Owner or Admin, stops it. A run no person asked for (a
 // bot's own work, an app's or the API's line) is nobody's: anyone who may chat there stops it, and a person's line waits
-// only until it ends. A private chat, a personal install and a My Cloud have one person, so nothing here applies there.
+// only until it ends. Team asker ownership is limited to shared Team conversations; direct paired turns retain their authenticated session boundary on personal and self-hosted homes.
 import type { ResolvedSender, WireTask } from "../../shared/wire.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { shownPersonName } from "../../shared/bot-owner.ts";
@@ -23,12 +23,22 @@ export interface Actor {
 
 export type ArrivalDecision = "as-today" | "queue";
 
+/** Sessionless work keeps its existing path; session-bound work requires an exact session match on every side. */
+export function sameSessionExecutionContext(activeSessionId: string | undefined, incomingSessionId: string | undefined, queuedSessionIds: ReadonlyArray<string | null | undefined> = []): boolean {
+  if (activeSessionId === undefined && incomingSessionId === undefined && queuedSessionIds.every((id) => id == null)) return true;
+  return typeof activeSessionId === "string" && incomingSessionId === activeSessionId && queuedSessionIds.every((id) => id === activeSessionId);
+}
+
 export function runActorOf(auth: RequestAuth, personOf: (auth: RequestAuth & { kind: "session" }) => string): Actor {
   return auth.kind === "session" ? { person: personOf(auth), admin: auth.scopes.includes("admin") } : { admin: false };
 }
 
 /** A new line `from` a person (absent: not a person's own line) in a conversation whose run `asker` owns. */
-export function arrivalDecision(input: { shared: boolean; asker: RunAsker; from?: string }): ArrivalDecision {
+export function arrivalDecision(input: { shared: boolean; asker: RunAsker; from?: string; activeSessionId?: string; incomingSessionId?: string }): ArrivalDecision {
+  // A person key identifies the owner, not the device session that authorized this turn. If either
+  // side has authenticated session provenance, only that exact session may add work to the turn.
+  // Missing provenance cannot borrow the other session's authority.
+  if (!sameSessionExecutionContext(input.activeSessionId, input.incomingSessionId)) return "queue";
   if (!input.shared) return "as-today";
   return input.asker !== null && input.from !== undefined && input.from === input.asker.person ? "as-today" : "queue";
 }
@@ -72,7 +82,7 @@ export interface RunOwnersDeps {
   /** More than one person reads this conversation: a Team Cloud conversation that is not someone's private one. */
   shared(threadId: string): boolean;
   /** The one-on-one conversation's running request (index.ts directRequestOwners). */
-  directRequest(threadId: string): { messageId?: string; stopped?: boolean; automation?: unknown; origin?: WorkOrigin } | undefined;
+  directRequest(threadId: string): { messageId?: string; requestSessionId?: string; stopped?: boolean; automation?: unknown; origin?: WorkOrigin } | undefined;
   /** The person's line the group chat's live run answers, if one does. */
   roomRequestMessageId(threadId: string): string | undefined;
   isRoom(threadId: string): boolean;
@@ -112,9 +122,16 @@ export function createRunOwners(deps: RunOwnersDeps) {
       return owner ? { askedBy: { name: owner.name, id: owner.person } } : {};
     },
     /** A new line while this conversation's run goes on: as today, or into the queue behind it. */
-    arrival(threadId: string, sender: ResolvedSender | undefined, ownLine: boolean): ArrivalDecision {
-      if (!deps.shared(threadId)) return "as-today";
-      return arrivalDecision({ shared: true, asker: asker(threadId), from: ownLine ? sender?.id : undefined });
+    arrival(threadId: string, sender: ResolvedSender | undefined, ownLine: boolean, incomingSessionId?: string): ArrivalDecision {
+      const request = deps.isRoom(threadId) ? undefined : deps.directRequest(threadId);
+      const shared = deps.shared(threadId);
+      return arrivalDecision({
+        shared,
+        asker: shared ? asker(threadId) : null,
+        from: ownLine ? sender?.id : undefined,
+        activeSessionId: request?.requestSessionId,
+        incomingSessionId,
+      });
     },
     /** The sentence someone who may not stop this conversation's run reads, or null when they may. */
     stopRefusal(threadId: string, by: Actor): string | null {
@@ -134,6 +151,14 @@ export function createRunOwners(deps: RunOwnersDeps) {
       const shared = deps.shared(threadId);
       return mayJoinRun({ shared, asker: shared ? asker(threadId) : null, senders, by }) ? null : serverLine(deps.language(threadId), "server.runOwner.waitsItsTurn");
     },
+    /** A queued direct message may be manually steered only by the session that owns the live turn. */
+    steerSessionRefusal(threadId: string, incomingSessionId: string | undefined, queuedSessionIds: ReadonlyArray<string | null | undefined>): string | null {
+      if (deps.isRoom(threadId)) return null;
+      const activeSessionId = deps.directRequest(threadId)?.requestSessionId;
+      return sameSessionExecutionContext(activeSessionId, incomingSessionId, queuedSessionIds)
+        ? null
+        : serverLine(deps.language(threadId), "server.runOwner.waitsItsTurn");
+    },
     /** The sentence someone who may not run this request again reads, or null when they may. */
     retryRefusal(threadId: string, sender: ResolvedSender | undefined, by: Actor): string | null {
       if (mayRetry({ shared: deps.shared(threadId), sender, by })) return null;
@@ -144,7 +169,7 @@ export function createRunOwners(deps: RunOwnersDeps) {
 
 export type RunOwners = ReturnType<typeof createRunOwners>;
 
-export type RouteRunOwners = Pick<RunOwners, "shared" | "stopRefusal" | "removeRefusal" | "joinRefusal" | "retryRefusal">;
+export type RouteRunOwners = Pick<RunOwners, "shared" | "stopRefusal" | "removeRefusal" | "joinRefusal" | "steerSessionRefusal" | "retryRefusal">;
 
 /** The rule as a route asks it, by the request's sign-in. A route built without it (a server one person uses, or a
  * route's own test) refuses nothing and sees no admin, so nothing changes there. */
@@ -157,6 +182,8 @@ export function routeRunOwners(owners: RouteRunOwners | undefined, actorOf: ((au
     stopRefusal: (auth: RequestAuth, threadId: string) => owners?.stopRefusal(threadId, by(auth)) ?? null,
     removeRefusal: (auth: RequestAuth, threadId: string, sender: ResolvedSender | undefined) => owners?.removeRefusal(threadId, sender, by(auth)) ?? null,
     joinRefusal: (auth: RequestAuth, threadId: string, senders: ReadonlyArray<ResolvedSender | undefined>) => owners?.joinRefusal(threadId, senders, by(auth)) ?? null,
+    steerSessionRefusal: (auth: RequestAuth, threadId: string, queuedSessionIds: ReadonlyArray<string | null | undefined>) =>
+      owners?.steerSessionRefusal(threadId, auth.kind === "session" ? auth.session.id : undefined, queuedSessionIds) ?? null,
     retryRefusal: (auth: RequestAuth, threadId: string, sender: ResolvedSender | undefined) => owners?.retryRefusal(threadId, sender, by(auth)) ?? null,
   };
 }

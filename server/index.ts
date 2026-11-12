@@ -7221,6 +7221,12 @@ async function acceptDirectSend(
     sendId ? `bot:${botId}:${threadId}:${sendId}` : undefined,
     sendFingerprint(text, replyTo?.id),
     async (): Promise<DirectSendReceipt> => {
+      const requireLiveRequestSession = () => {
+        if (requestSessionId && !sessions.isLive(requestSessionId)) {
+          throw new DirectSendRefused(401, { error: "The session that submitted this message has ended." });
+        }
+      };
+      requireLiveRequestSession();
       if (sendId) {
         if (cancelledChatFollowup("bot", botId, threadId, sendId)) {
           throw Object.assign(new Error("this queued sendId was cancelled; send a new message to try again"), { status: 409 });
@@ -7257,6 +7263,8 @@ async function acceptDirectSend(
         if (enginesRead) await enginesRead;
         registry.forgetSnapshots(); await refreshUnsetModelSelections();
       }
+      // The route's session may have been revoked while provider discovery yielded.
+      requireLiveRequestSession();
       const currentAtStart = store.projectBotForTask(botId, threadId);
       if (!currentAtStart) throw Object.assign(new Error("no such bot"), { status: 404 });
       if (!store.taskByThread(currentAtStart.id, threadId)) {
@@ -7267,8 +7275,10 @@ async function acceptDirectSend(
 
       const typedStop = await stopOnTypedCommand({ botId, threadId, text, trigger, personPresent, fromApp: Boolean(app), busy: currentAtStart.busy === true, row: { replyToId: replyTo?.id, sendId, sender, ...spokenLineFields(via, callId) }, by: { ...(sender?.id ? { person: sender.id } : {}), admin: admin === true } });
       if (typedStop) return typedStop;
+      // stop-command handling may itself wait; do not carry the route's earlier session check past it.
+      requireLiveRequestSession();
       if (currentAtStart.busy) {
-        const personsOwn = personPresent && !app && (trigger.kind === "user" || trigger.kind === "owner"), queuedPrompt = (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(text, dataContext), replyTo, userNameFor(threadId))); if (runOwners.arrival(threadId, sender, personPresent && Boolean(sender?.id)) === "queue") return { ok: true as const, queued: true as const, threadId, queueId: queueSteeredMessage(currentAtStart.id, threadId, text, { replyToId: replyTo?.id, sendId, dataContext, fromApp: app?.fromApp, mentions, prompt: queuedPrompt, sender, trigger, requestSessionId: requestSessionId ?? null, via, callId, first: personPresent && Boolean(sender?.id) }).id };
+        const personsOwn = personPresent && !app && (trigger.kind === "user" || trigger.kind === "owner"), queuedPrompt = (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(text, dataContext), replyTo, userNameFor(threadId))); if (runOwners.arrival(threadId, sender, personPresent && Boolean(sender?.id), requestSessionId) === "queue") return { ok: true as const, queued: true as const, threadId, queueId: queueSteeredMessage(currentAtStart.id, threadId, text, { replyToId: replyTo?.id, sendId, dataContext, fromApp: app?.fromApp, mentions, prompt: queuedPrompt, sender, trigger, requestSessionId: requestSessionId ?? null, via, callId, first: personPresent && Boolean(sender?.id) }).id };
         const instance = runningTurnInstance(currentAtStart, threadId);
         let steered: SteerOutcome = "refused";
         const steerInput = extractTurnImages(text);

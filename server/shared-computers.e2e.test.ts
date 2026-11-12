@@ -375,6 +375,89 @@ it("a queued paired-device turn keeps its session: revocation cancels dispatch a
   evidence.push("a real paired-device follow-up retains session provenance through queue drain: revocation prevents dispatch; a live full-access pairing dispatches and lists the lent computer through MCP");
 }, 90_000);
 
+it("a restricted pairing cannot steer a privileged direct turn and stays restricted after queue dispatch", async () => {
+  const dump = join(fixture.info.dataDir, "fake-claude-dump.json");
+  const ownerWindow = await api("POST", "/api/auth/pairing", { label: "Steering owner", scopes: ["admin", "client"] });
+  const owner = (await api("POST", "/api/auth/pair", { code: ownerWindow.body.code })).body;
+  lendingToken = owner.token;
+  await connector.save(env, { folders: [folder], terminal: false, computer: true }, await connector.identity(env));
+  await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);
+  const restrictedWindow = await api("POST", "/api/auth/pairing", { label: "Steering client-only", scopes: ["client"] }, { authorization: `Bearer ${owner.token}` });
+  const restricted = (await api("POST", "/api/auth/pair", { code: restrictedWindow.body.code })).body;
+  const target = (await api("POST", "/api/bots", { name: "Steering isolation fixture" }, { authorization: `Bearer ${owner.token}` })).body.bot;
+  const active = await agentProxyFor(target.id, owner.token, "Hold this owner-authorized turn while another device sends a message.");
+  let queuedProxy: ChildProcess | undefined;
+  try {
+    const incoming = await api("POST", `/api/bots/${target.id}/messages`, { text: "steering restricted request: access the shared computer" }, { authorization: `Bearer ${restricted.token}` });
+    expect(incoming.status).toBe(202);
+    expect(incoming.body).toMatchObject({ queued: true, queueId: expect.any(String) });
+    expect(incoming.body.steered).toBeUndefined();
+    const manualJoin = await api("POST", `/api/bots/${target.id}/queue/${incoming.body.queueId}/steer`, { threadId: target.threadId }, { authorization: `Bearer ${owner.token}` });
+    expect(manualJoin.status).toBe(403);
+    expect(manualJoin.body.code).toBe("session_context");
+
+    // Drain through the actual agent queue, then exercise the native shared-computer tool with that turn's capability.
+    rmSync(dump, { force: true });
+    expect((await api("POST", `/api/bots/${target.id}/interrupt`, undefined, { authorization: `Bearer ${owner.token}` })).status).toBe(200);
+    const current = async () => (await api("GET", "/api/bots", undefined, { authorization: `Bearer ${owner.token}` })).body.bots.find((candidate: any) => candidate.id === target.id);
+    await vi.waitFor(async () => expect(existsSync(dump) && (await current()).busy).toBe(true), { timeout: 15_000 });
+    const agents = JSON.parse(readFileSync(dump, "utf8")).mcpConfig.mcpServers.agents;
+    queuedProxy = spawn(agents.command, agents.args, { env: { PATH: process.env.PATH, HOME: fixture.info.dataDir, ...agents.env }, stdio: ["pipe", "pipe", "pipe"] });
+    const { initialize, call } = mcpClient(queuedProxy);
+    await initialize();
+    expect(JSON.parse((await call("list_shared_computers")).content[0].text).computers).toEqual([]);
+    expect((await call("shared_computer", { computer_id: storedGrant().id, folder_id: folder.id, action: "read_file", path: "brief.txt" })).isError).toBe(true);
+  } finally {
+    queuedProxy?.kill(); active.kill();
+    await api("POST", `/api/bots/${target.id}/interrupt`, undefined, { authorization: `Bearer ${owner.token}` });
+    await api("DELETE", `/api/auth/sessions/${restricted.session.id}`, undefined, { authorization: `Bearer ${owner.token}` });
+    await api("DELETE", `/api/auth/sessions/${owner.session.id}`, undefined, { authorization: `Bearer ${owner.token}` });
+    lendingToken = pairing.token;
+    await connector.save(env, { folders: [folder], terminal: false, computer: false }, await connector.identity(env));
+    await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);
+  }
+  evidence.push("a real authenticated client-only message is queued outside an owner-authorized active turn; after real queue dispatch its native shared-computer inventory remains empty and control is denied");
+}, 90_000);
+
+it("same-session direct sends retain live steering while a different full-access session is queued and revocation cancels it", async () => {
+  const dump = join(fixture.info.dataDir, "fake-claude-dump.json");
+  const firstWindow = await api("POST", "/api/auth/pairing", { label: "Steering full-access A", scopes: ["admin", "client"] });
+  const first = (await api("POST", "/api/auth/pair", { code: firstWindow.body.code })).body;
+  const secondWindow = await api("POST", "/api/auth/pairing", { label: "Steering full-access B", scopes: ["admin", "client"] }, { authorization: `Bearer ${first.token}` });
+  const second = (await api("POST", "/api/auth/pair", { code: secondWindow.body.code })).body;
+  const target = (await api("POST", "/api/bots", { name: "Session steering fixture" }, { authorization: `Bearer ${first.token}` })).body.bot;
+  const active = await agentProxyFor(target.id, first.token, "Hold session A's turn while testing session-bound steering.");
+  try {
+    const same = await api("POST", `/api/bots/${target.id}/messages`, { text: "same-session steering control" }, { authorization: `Bearer ${first.token}` });
+    expect(same.status).toBe(202);
+    expect(same.body.steered).toBe(true);
+
+    const other = await api("POST", `/api/bots/${target.id}/messages`, { text: "different full-access session request" }, { authorization: `Bearer ${second.token}` });
+    expect(other.status).toBe(202);
+    expect(other.body).toMatchObject({ queued: true, queueId: expect.any(String) });
+    expect(other.body.steered).toBeUndefined();
+    const manualJoin = await api("POST", `/api/bots/${target.id}/queue/${other.body.queueId}/steer`, { threadId: target.threadId }, { authorization: `Bearer ${first.token}` });
+    expect(manualJoin.status).toBe(403);
+    expect(manualJoin.body.code).toBe("session_context");
+    expect((await api("DELETE", `/api/auth/sessions/${second.session.id}`, undefined, { authorization: `Bearer ${first.token}` })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${target.id}/messages`, { text: "revoked session must not steer" }, { authorization: `Bearer ${second.token}` })).status).toBe(401);
+    const ownerBots = await api("GET", "/api/bots", undefined, { authorization: `Bearer ${first.token}` });
+    expect(ownerBots.body.bots.find((candidate: any) => candidate.id === target.id).busy).toBe(true);
+
+    rmSync(dump, { force: true });
+    expect((await api("POST", `/api/bots/${target.id}/interrupt`, undefined, { authorization: `Bearer ${first.token}` })).status).toBe(200);
+    const current = async () => (await api("GET", "/api/bots", undefined, { authorization: `Bearer ${first.token}` })).body.bots.find((candidate: any) => candidate.id === target.id);
+    await vi.waitFor(async () => expect((await current()).busy).toBe(false), { timeout: 15_000 });
+    expect(existsSync(dump)).toBe(false);
+    expect((await current()).messages.some((message: any) => message.text === "different full-access session request")).toBe(false);
+  } finally {
+    active.kill();
+    await api("POST", `/api/bots/${target.id}/interrupt`, undefined, { authorization: `Bearer ${first.token}` });
+    await api("DELETE", `/api/auth/sessions/${first.session.id}`, undefined, { authorization: `Bearer ${first.token}` });
+  }
+  evidence.push("same-session direct steering remains available; a second full-access session queues separately and its revoked queued turn is not dispatched");
+}, 90_000);
+
 it("a big lent file changes by one passage, gains lines at its end, and is deleted only once read", async () => {
   await connector.save(env, { folders: [{ ...folder, write: true }], terminal: false, computer: false }, await connector.identity(env));
   await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);

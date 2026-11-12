@@ -387,6 +387,11 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         restoreHeldSteeredQueue(held);
         return json(res, 403, { error: waitsItsTurn, code: "waits_its_turn" });
       }
+      const wrongSession = owners.steerSessionRefusal(auth, bot.threadId, held.items.map((item) => item.requestSessionId));
+      if (wrongSession) {
+        restoreHeldSteeredQueue(held);
+        return json(res, 403, { error: wrongSession, code: "session_context" });
+      }
       const currentAtStart = store.projectBotForTask(bot.id, bot.threadId);
       const instance = currentAtStart?.busy ? runningTurnInstance(currentAtStart, bot.threadId) : undefined;
       const engineCanSteer = Boolean(currentAtStart?.busy && instance?.adapter.capabilities.queueing && instance.adapter.steer);

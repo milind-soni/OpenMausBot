@@ -23,6 +23,15 @@ describe("the rule", () => {
     expect(mayJoinRun({ shared: false, asker: priya, senders: [{ name: "Tom", id: TOM }], by: { person: TOM, admin: false } })).toBe(true);
   });
 
+  it("lets only the same authenticated session steer a session-bound turn, even for one owner", () => {
+    expect(arrivalDecision({ shared: false, asker: priya, activeSessionId: "session-a", incomingSessionId: "session-a" })).toBe("as-today");
+    expect(arrivalDecision({ shared: false, asker: priya, activeSessionId: "session-a", incomingSessionId: "session-b" })).toBe("queue");
+    expect(arrivalDecision({ shared: false, asker: priya, activeSessionId: "session-a" })).toBe("queue");
+    expect(arrivalDecision({ shared: false, asker: priya, incomingSessionId: "session-a" })).toBe("queue");
+    // Existing sessionless local/system flows keep their established admission rule.
+    expect(arrivalDecision({ shared: false, asker: priya })).toBe("as-today");
+  });
+
   it("lets the asker or an admin stop a person's run, and anyone who may chat stop a run no person asked for", () => {
     expect(mayStop({ shared: true, asker: priya, by: { person: PRIYA, admin: false } })).toBe(true);
     expect(mayStop({ shared: true, asker: priya, by: { person: TOM, admin: false } })).toBe(false);
@@ -72,6 +81,17 @@ describe("who asked", () => {
   it("is the person whose own line the run answers", () => {
     expect(owners({ messageId: "m1" }).asker("t")).toEqual(priya);
     expect(owners(undefined, "m1").asker("t")).toEqual(priya);
+  });
+
+  it("checks session provenance before the shared-conversation asker rule", () => {
+    const active = owners({ messageId: "m1", requestSessionId: "session-a" });
+    expect(active.arrival("t", { name: "Priya", id: PRIYA }, true, "session-a")).toBe("as-today");
+    expect(active.arrival("t", { name: "Priya", id: PRIYA }, true, "session-b")).toBe("queue");
+    expect(active.arrival("t", { name: "Priya", id: PRIYA }, true)).toBe("queue");
+    expect(active.steerSessionRefusal("t", "session-a", ["session-a"])).toBeNull();
+    expect(active.steerSessionRefusal("t", "session-a", ["session-b"])).toBeTruthy();
+    expect(active.steerSessionRefusal("t", "session-b", ["session-a"])).toBeTruthy();
+    expect(active.steerSessionRefusal("t", "session-a", [undefined])).toBeTruthy();
   });
 
   it("is nobody for a relayed line, a bot's ask, an API line, a routine or webhook run, and a stopped run", () => {
