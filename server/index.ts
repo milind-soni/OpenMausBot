@@ -21,6 +21,13 @@ import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { automaticHandoffBots, mentionedBots, Store, type Attachment, type Message } from "./store.ts";
 import { projectRegistryCandidates, readRegisteredProjects, resolveProjectContext } from "./projects.ts";
+import {
+  listProjectPreviewFiles,
+  PreviewWatchManager,
+  readPreviewFileContent,
+  resolvePreviewFile,
+  type RegisteredProjectLike,
+} from "./previewFiles.ts";
 import { isJsonContentType, isLoopbackHostname, rejectUntrustedRequest } from "./request-guard.ts";
 import {
   resolveTaskContext,
@@ -160,6 +167,22 @@ function broadcast(payload: unknown) {
       sseClients.delete(res);
     }
   }
+}
+
+const previewWatchManager = new PreviewWatchManager((payload) => broadcast(payload));
+
+async function allRegisteredProjects(): Promise<RegisteredProjectLike[]> {
+  const listed = await projectService.list();
+  const byId = new Map<string, RegisteredProjectLike>();
+  for (const project of listed) {
+    byId.set(project.id, project);
+  }
+  for (const project of readRegisteredProjects()) {
+    if (!byId.has(project.id)) {
+      byId.set(project.id, project);
+    }
+  }
+  return Array.from(byId.values());
 }
 
 function deleteThreadLogs(threadId: string) {
@@ -1175,6 +1198,9 @@ const server = createServer(async (req, res) => {
       req.on("close", () => {
         clearInterval(keepalive);
         sseClients.delete(res);
+        if (sseClients.size === 0) {
+          previewWatchManager.closeAll();
+        }
       });
       return;
     }
@@ -1600,6 +1626,69 @@ const server = createServer(async (req, res) => {
       return json(res, 201, { project });
     }
 
+    // ── read-only project file preview & auto-refresh watchers ──
+    if (method === "GET" && path === "/api/preview/files") {
+      const projectId = url.searchParams.get("projectId") ?? "";
+      const projects = await allRegisteredProjects();
+      const { project, files } = listProjectPreviewFiles(projects, projectId);
+      return json(res, 200, {
+        project: { id: project.id, name: project.name, path: project.path },
+        files,
+      });
+    }
+    if (method === "GET" && (path === "/api/preview/file" || path.startsWith("/api/preview/file/"))) {
+      let projectId = url.searchParams.get("projectId") ?? "";
+      let relativePath = url.searchParams.get("path") ?? "";
+      if (path.startsWith("/api/preview/file/")) {
+        const rest = path.slice("/api/preview/file/".length);
+        const slashIdx = rest.indexOf("/");
+        if (slashIdx > 0) {
+          projectId = decodeURIComponent(rest.slice(0, slashIdx));
+          relativePath = decodeURIComponent(rest.slice(slashIdx + 1));
+        }
+      }
+      const projects = await allRegisteredProjects();
+      const resolved = resolvePreviewFile(projects, projectId, relativePath);
+      const data = readPreviewFileContent(resolved);
+      res.writeHead(200, {
+        "content-type": resolved.mimeType,
+        "cache-control": "no-store, max-age=0",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "content-security-policy": "frame-ancestors 'self' http://localhost:* http://127.0.0.1:*",
+      });
+      return res.end(data);
+    }
+    if (method === "POST" && path === "/api/preview/watch") {
+      const body = await readBody(req);
+      const clientId = typeof body.clientId === "string" && body.clientId.trim() ? body.clientId.trim() : "default";
+      const enabled = body.enabled !== false;
+      if (!enabled) {
+        previewWatchManager.unwatchClient(clientId);
+        return json(res, 200, { ok: true, watching: false });
+      }
+      const projectId = typeof body.projectId === "string" ? body.projectId : "";
+      const relativePath = typeof body.path === "string" ? body.path : "";
+      const projects = await allRegisteredProjects();
+      const resolved = resolvePreviewFile(projects, projectId, relativePath);
+      previewWatchManager.watchFile(clientId, resolved);
+      return json(res, 200, {
+        ok: true,
+        watching: true,
+        projectId: resolved.project.id,
+        path: resolved.relativePath,
+      });
+    }
+    if (method === "DELETE" && path === "/api/preview/watch") {
+      const clientId = url.searchParams.get("clientId") ?? "";
+      if (clientId) {
+        previewWatchManager.unwatchClient(clientId);
+      } else {
+        previewWatchManager.closeAll();
+      }
+      return json(res, 200, { ok: true, watching: false });
+    }
+
     // ── app config (API keys — never echoed back, booleans only) ──
     if (method === "GET" && path === "/api/config") {
       return json(res, 200, configStatus());
@@ -1751,6 +1840,7 @@ server.listen(PORT, HOST, () => {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     stopTrelloPolling();
+    previewWatchManager.closeAll();
     void registry.disposeAll().finally(() => process.exit(0));
   });
 }
