@@ -110,3 +110,21 @@ it("a client whose host runs the bot on its Local VM takes and opens that deskto
   expect(fixture.joins).toEqual([`/api/bots/scout/local-computer/join?controlLeaseId=${lease}`]);
   expect(open).toHaveBeenCalledWith(new URL("/vps-viewer/relay-1", window.location.origin).toString(), expect.any(String), "scout");
 });
+
+it("a client whose host's Local VM is already held in another view is told so, and never joins with a lease it does not own", async () => {
+  fixture.owned = false;
+  const open = vi.fn(async () => true);
+  vi.stubGlobal("ogb", { desktopViewer: { open, close: vi.fn(async () => true), onState: () => () => {}, currentState: async () => ({ open: false, contextId: null }) } });
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  flushSync(() => root!.render(createElement(BotEditorStore, { value: {
+    state: { ...initialState, instances: [engine], config: { box: { configured: true } } as AppState["config"] } as AppState,
+    dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {},
+  }, children: createElement(RemoteDesktopPanel, { bot: { ...bot, computer: "vm" } }) })));
+  const take = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Take control");
+  flushSync(() => take!.click());
+  await vi.waitFor(() => expect(document.querySelector("[role=alert]")?.textContent).toContain("already controlling this desktop in another view"));
+  expect(fixture.joins).toEqual([]);
+  expect(open).not.toHaveBeenCalled();
+});

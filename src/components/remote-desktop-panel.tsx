@@ -15,7 +15,7 @@ import { RoutineEditor } from "./RoutinesPage";
 import { BrowserPanel, type BrowserSignIn } from "./BrowserPanel";
 import { SignInBanner } from "./SignInRequestCard";
 import { openProviderDesktop } from "./computer-takeover";
-import { panelErrorText } from "@/lib/computer-messages";
+import { LocalizedPanelError, panelErrorText } from "@/lib/computer-messages";
 
 function viewerAddress(raw: unknown): string {
   if (typeof raw !== "string" || !raw) throw new Error(t("remoteDesktop.noLink"));
@@ -189,7 +189,12 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
           method: "POST", body: JSON.stringify({ action, controlLeaseId, ...(target ? { target } : {}) }),
         }),
         join: async (signal, controlLeaseId) => {
-          const path = localVm ? `local-computer/join?${new URLSearchParams({ controlLeaseId })}` : "computer/join";
+          // The host binds a Local VM viewer to the lease holding it; a hold another view owns can't be joined from here.
+          let path = "computer/join";
+          if (localVm) {
+            if (!controlLeaseId) throw new LocalizedPanelError("vm.workspace.alreadyControlled");
+            path = `local-computer/join?${new URLSearchParams({ controlLeaseId })}`;
+          }
           return { joinUrl: viewerAddress((await api(`/api/bots/${bot.id}/${path}`, { method: "POST", body: "{}", signal })).joinUrl) };
         },
       });
