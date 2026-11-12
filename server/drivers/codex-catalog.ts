@@ -8,6 +8,7 @@ import type { ModelCatalog } from "../contracts.ts";
 import { qualifiedModelLabel } from "../contracts.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { codexHome } from "./codex-identity.ts";
+import { TIERED_ID } from "./codex-tier.ts";
 import { unconfirmedModelCatalog } from "../startup-model-catalog.ts";
 import { codexLocalProviderArgs, mergeLocalInject } from "./local-inject.ts";
 
@@ -38,10 +39,6 @@ const PROVIDER_ID = /^[a-z][a-z0-9_-]*$/i;
 export function encodeCodexSelection(provider: string, model: string): string {
   return `${provider}${SEP}${model}`;
 }
-
-/** An official row run on one of its model's service tiers (`gpt-5.5+priority`, the catalog's Fast). The driver sends
- * the tier as turn/start's `serviceTierForTurn`: that turn only, so the thread's own tier stays and a plain row is standard. */
-const TIERED_ID = /^(.+)\+([a-z][a-z0-9_-]*)$/i;
 
 export function decodeCodexSelection(id: string | null | undefined): {
   model: string | null;
