@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DATA_DIR } from "./config.ts";
 import { localInstant, nextScheduleRun, resumeDelay } from "./schedule-time.ts";
-import { ScheduleStore, Scheduler, canManageSchedule } from "./schedules.ts";
+import { ScheduleStore, Scheduler, canManageSchedule, validateSchedule } from "./schedules.ts";
 import { canUseBackup, turnSelection } from "./backup-model.ts";
 import type { ScheduleInput } from "./schedule-types.ts";
 const instant = (text: string) => Date.parse(text);
@@ -32,6 +32,34 @@ describe("schedule time calculations", () => {
   it("keeps local daily time across both DST changes", () => {
     expect(nextScheduleRun({ kind: "daily", time: "09:00" }, "America/New_York", instant("2026-03-07T14:00:00Z"))).toBe("2026-03-08T13:00:00.000Z");
     expect(nextScheduleRun({ kind: "daily", time: "09:00" }, "Europe/Berlin", instant("2026-10-24T07:00:00Z"))).toBe("2026-10-25T08:00:00.000Z");
+  });
+});
+describe("schedule target validation", () => {
+  it.each([
+    { botId: "bot", groupId: 3 }, { botId: "bot", groupId: false }, { botId: "bot", groupId: null },
+    { botId: "bot", groupId: undefined }, { botId: "bot", groupId: "room" },
+    { groupId: "room", botId: 3 }, { groupId: "room", botId: false }, { groupId: "room", botId: null },
+    { groupId: "room", botId: undefined }, { botId: "" }, { groupId: "  " },
+    { botId: 3 }, { groupId: false }, {}, null, [], "bot", { botId: "bot", extra: true },
+  ])("rejects malformed target %j before persistence", target => {
+    const now = instant("2026-11-12T00:00:00Z");
+    const store = new ScheduleStore(join(DATA_DIR, "invalid-target"), () => now);
+    const good = input({ kind: "once", at: new Date(now + 3600_000).toISOString() });
+    const invalid = { ...good, target } as unknown as ScheduleInput;
+    const before = store.snapshot();
+    expect(() => validateSchedule(invalid)).toThrow("Choose a bot or room.");
+    expect(() => store.create(invalid)).toThrow("Choose a bot or room.");
+    expect(store.snapshot()).toEqual(before);
+  });
+  it("preserves the saved schedule after an invalid update and accepts either single target", () => {
+    const now = instant("2026-11-12T00:00:00Z"), folder = join(DATA_DIR, "invalid-target-update");
+    const store = new ScheduleStore(folder, () => now);
+    const good = input({ kind: "once", at: new Date(now + 3600_000).toISOString() });
+    const schedule = store.create(good), before = store.snapshot();
+    expect(() => store.update(schedule.id, { target: { botId: "bot", groupId: null } as unknown as ScheduleInput["target"] })).toThrow("Choose a bot or room.");
+    expect(store.snapshot()).toEqual(before);
+    expect(new ScheduleStore(folder, () => now).snapshot()).toEqual(before);
+    expect(() => validateSchedule({ ...good, target: { groupId: "room" } })).not.toThrow();
   });
 });
 describe("durable scheduler", () => {

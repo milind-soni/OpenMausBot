@@ -7,7 +7,13 @@ import type { ResumeContext, Schedule, ScheduleDelivery, ScheduleInput, Schedule
 export type { Schedule, ScheduleDelivery, ScheduleInput } from "./schedule-types.ts";
 
 export function validateSchedule(input: ScheduleInput) {
-  if (!input || !input.target || (typeof input.target.botId === "string") === (typeof input.target.groupId === "string")) throw new Error("Choose a bot or room.");
+  const target = input?.target;
+  const keys = target && typeof target === "object" && !Array.isArray(target) ? Object.keys(target) : [];
+  if (keys.length !== 1 || !["botId", "groupId"].includes(keys[0]) ||
+      typeof target[keys[0] as keyof typeof target] !== "string" ||
+      !target[keys[0] as keyof typeof target]?.trim()) {
+    throw new Error("Choose a bot or room.");
+  }
   if (typeof input.prompt !== "string" || !input.prompt.trim() || input.prompt.length > 30_000) throw new Error("Write instructions of up to 30,000 characters.");
   if (typeof input.timezone !== "string") throw new Error("Choose a timezone.");
   new Intl.DateTimeFormat("en", { timeZone: input.timezone }).format();
