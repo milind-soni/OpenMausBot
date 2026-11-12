@@ -139,7 +139,7 @@ export function mergeMeetings(events: readonly CalendarEvent[], address: string 
 export function clashes<T extends CalendarEvent>(meetings: readonly T[], input: { now: number; timeZone?: string }): Array<[T, T]> {
   const today = localDate(input.now, input.timeZone);
   const open = meetings
-    .filter((meeting) => qualifies(meeting) && meeting.end > input.now && localDate(meeting.start, input.timeZone) === today)
+    .filter((meeting) => qualifies(meeting) && !meeting.transparent && meeting.end > input.now && localDate(meeting.start, input.timeZone) === today)
     .sort((a, b) => a.start - b.start);
   const pairs: Array<[T, T]> = [];
   open.forEach((first, index) => {
