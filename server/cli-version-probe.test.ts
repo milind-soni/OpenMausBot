@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { cliVersionProbe } from "./cli-version-probe.ts";
+import { cliToLaunch, cliVersionProbe } from "./cli-version-probe.ts";
 import { cliVersionReader, type execCli } from "./procs.ts";
 
 afterEach(() => vi.useRealTimers());
@@ -110,4 +110,11 @@ it("does not report one copy's version for another copy that PATH now finds firs
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+it("launches the checked copy by its path on Windows, where spawn resolves the app's PATH rather than the turn's", () => {
+  const checked = join("C:", "Users", "me", "AppData", "Roaming", "npm", "claude.cmd");
+  expect(cliToLaunch("claude", checked, "win32")).toBe(checked);
+  expect(cliToLaunch("claude", undefined, "win32")).toBe("claude"); // nothing found on the turn's PATH: unchanged
+  for (const platform of ["darwin", "linux"] as const) expect(cliToLaunch("claude", "/opt/homebrew/bin/claude", platform)).toBe("claude"); // POSIX spawn already uses the turn's PATH
 });
