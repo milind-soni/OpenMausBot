@@ -121,8 +121,11 @@ it("moves Scout with its two chats, its routine and its files; its notes about A
   expect(phaseOf(scout.bot.id)?.phase, JSON.stringify(fx.teamMove.journal())).toBe("done");
   expect(fx.teamMove.view()).toEqual({ bot: { id: scout.bot.id, name: "Scout" }, team: ACME, phase: "done" });
 
-  // Everyone in Acme has Scout.
-  for (const who of ["olive", "ben", "ada", "cleo"]) expect((await teamBots(who)).some((bot) => bot.id === scout.bot.id && bot.name === "Scout"), who).toBe(true);
+  // Scout is Ada's until she shares it: she and Acme's admins have it, and another User does not.
+  for (const who of ["olive", "ben", "ada"]) expect((await teamBots(who)).some((bot) => bot.id === scout.bot.id && bot.name === "Scout"), who).toBe(true);
+  expect(((await teamBots("ada")).find((bot) => bot.id === scout.bot.id) as { access?: unknown }).access).toEqual({ everyone: "none", people: {} });
+  expect((await teamBots("cleo")).some((bot) => bot.id === scout.bot.id), "cleo").toBe(false);
+  expect((await onTeam("cleo")("POST", `/api/bots/${scout.bot.id}/messages`, { text: "hello" })).status, "nor reaches it by id").toBe(404);
   // Its two chats are Ada's own there: private, never the team's main chat, with her lines as hers.
   const there = (await teamBots("ada")).find((bot) => bot.id === scout.bot.id)!;
   expect(there.threadId === scout.main || (there as { mainThreadId?: string }).mainThreadId === scout.main, "its main chat in Acme is a new one of the team's").toBe(false);
@@ -135,7 +138,7 @@ it("moves Scout with its two chats, its routine and its files; its notes about A
     expect((await onTeam("olive")("GET", `/api/threads/${threadId}/messages`)).status, "nor does the Owner").toBe(404);
     expect((await onTeam("cleo")("GET", `/api/threads/${threadId}/messages`)).status, "another Member never does").toBe(404);
   }
-  expect((await teamBots("cleo")).find((bot) => bot.id === scout.bot.id)!.tasks?.some((task) => [scout.main, scout.budget].includes(task.threadId))).toBe(false);
+  expect((await teamBots("ben")).find((bot) => bot.id === scout.bot.id)!.tasks?.some((task) => [scout.main, scout.budget].includes(task.threadId))).toBe(false);
 
   // The routine arrived off and was switched on after the check; it is gone from My Cloud, never on in both places.
   const routines = (await onTeam("ada")("GET", "/api/routines")).body.routines as Array<{ id: string; enabled: boolean; resultsThreadId?: string; botId: string }>;
@@ -239,8 +242,8 @@ it("a bot whose name Acme already uses arrives as \"Scout (Ada)\"", async () => 
   await say(bot, bot.threadId, "Hello, second Scout.");
   await move(bot);
   expect(phaseOf(bot.id)?.phase).toBe("done");
-  expect((await teamBots("cleo")).find((entry) => entry.id === bot.id)?.name).toBe("Scout (Ada)");
-  expect((await teamBots("cleo")).find((entry) => entry.id === scout.bot.id)?.name).toBe("Scout");
+  expect((await teamBots("ben")).find((entry) => entry.id === bot.id)?.name).toBe("Scout (Ada)");
+  expect((await teamBots("ben")).find((entry) => entry.id === scout.bot.id)?.name).toBe("Scout");
 }, hostTimeout(180_000));
 
 it("refuses a team the person isn't in, any page but My Cloud's, and Ada leaving Acme mid-move lets the bot go on on My Cloud", async () => {

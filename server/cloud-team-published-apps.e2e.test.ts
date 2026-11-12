@@ -78,7 +78,7 @@ beforeAll(async () => {
   admin = (await team.pair(ADMIN)).token!;
   ada = (await team.pair(ADA)).token!;
   ben = (await team.pair(BEN)).token!;
-  mira = (await team.as(owner, "POST", "/api/bots", { name: "Mira" })).body.bot;
+  mira = (await team.as(owner, "POST", "/api/bots", { name: "Mira", visibility: "everyone" })).body.bot;
   adaMaus = (await botsOf(ada)).find((bot) => bot.defaultBot?.person === ADA.email)!;
   expect(adaMaus, "Ada has a MausBot of her own").toBeTruthy();
   mainThread = mira.mainThreadId ?? mira.threadId;

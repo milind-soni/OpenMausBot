@@ -4,10 +4,11 @@ import { t } from "@/lib/i18n";
 import { api, useStore } from "@/state/store";
 import type { LiveProvider, LiveSettings } from "../../shared/wire";
 import { Select } from "./Select";
+import { KEY_FIELD } from "./keys/KeyRow";
 
 type ProviderPatch = Partial<Pick<LiveSettings, "provider" | "azureEndpoint" | "azureDeployment" | "fishAgentId">>;
 
-const FIELD = "w-full rounded-lg border border-hairline bg-inset px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent/60";
+const FIELD = KEY_FIELD;
 
 /** `locked` holds the provider, Azure endpoint and Fish agent while a key save is pending; `onSaving` reports a pending change to them. */
 export function LiveProviderSettings({ locked = false, onSaving }: { locked?: boolean; onSaving?: (saving: boolean) => void } = {}) {
@@ -41,7 +42,7 @@ export function LiveProviderSettings({ locked = false, onSaving }: { locked?: bo
   return (
     <div className="flex flex-col gap-2">
       <label className="flex items-center justify-between gap-2">
-        <span className="text-[13px] text-ink-secondary">{t("call.live.provider")}</span>
+        <span className="text-[13px] font-medium leading-[18px] text-ink">{t("call.live.provider")}</span>
         <Select
           size="sm"
           value={provider}
@@ -61,8 +62,8 @@ export function LiveProviderSettings({ locked = false, onSaving }: { locked?: bo
             void save({ azureEndpoint: endpoint.trim(), azureDeployment: deployment.trim() });
           }}
         >
-          <label className="flex flex-col gap-1">
-            <span className="text-[12px] text-ink-secondary">{t("call.live.azureEndpoint")}</span>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] font-medium leading-[18px] text-ink">{t("call.live.azureEndpoint")}</span>
             <input
               type="url"
               inputMode="url"
@@ -74,8 +75,8 @@ export function LiveProviderSettings({ locked = false, onSaving }: { locked?: bo
               className={FIELD}
             />
           </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[12px] text-ink-secondary">{t("call.live.azureDeployment")}</span>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] font-medium leading-[18px] text-ink">{t("call.live.azureDeployment")}</span>
             <input
               type="text"
               autoComplete="off"
@@ -86,12 +87,12 @@ export function LiveProviderSettings({ locked = false, onSaving }: { locked?: bo
               className={FIELD}
             />
           </label>
-          <div className="text-[12px] text-ink-tertiary">{t("call.live.azureHint")}</div>
+          <div className="text-[12px] leading-4 text-ink-secondary">{t("call.live.azureHint")}</div>
           {azureChanged && (
             <button
               type="submit"
               disabled={saving || locked}
-              className="self-start rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+              className="ui-button ui-button-md self-end rounded-full"
             >
               {t("common.save")}
             </button>
@@ -106,8 +107,8 @@ export function LiveProviderSettings({ locked = false, onSaving }: { locked?: bo
             void save({ fishAgentId: agentId.trim() });
           }}
         >
-          <label className="flex flex-col gap-1">
-            <span className="text-[12px] text-ink-secondary">{t("call.live.fishAgentId")}</span>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] font-medium leading-[18px] text-ink">{t("call.live.fishAgentId")}</span>
             <input
               type="text"
               autoComplete="off"
@@ -117,12 +118,12 @@ export function LiveProviderSettings({ locked = false, onSaving }: { locked?: bo
               className={FIELD}
             />
           </label>
-          <div className="text-[12px] text-ink-tertiary">{t("call.live.fishHint")}</div>
+          <div className="text-[12px] leading-4 text-ink-secondary">{t("call.live.fishHint")}</div>
           {agentChanged && (
             <button
               type="submit"
               disabled={saving || locked}
-              className="self-start rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+              className="ui-button ui-button-md self-end rounded-full"
             >
               {t("common.save")}
             </button>

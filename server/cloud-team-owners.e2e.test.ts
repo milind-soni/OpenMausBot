@@ -53,7 +53,7 @@ afterAll(async () => {
 });
 
 const create = async (token: string, body: Record<string, unknown>) => {
-  const created = await team.as(token, "POST", "/api/bots", body);
+  const created = await team.as(token, "POST", "/api/bots", { visibility: "everyone", ...body });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   return created.body.bot as Bot;
 };

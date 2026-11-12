@@ -25,6 +25,12 @@ describe("the fixture's fake engine knobs", () => {
     expect(env).toMatchObject({ FAKE_CLAUDE_TEXT_ROUTES: "/tmp/routes.json", FAKE_CODEX_TEXT_ROUTES: "/tmp/codex-routes.json", FAKE_CODEX_TEXT_LOG: "/tmp/codex.jsonl" });
     for (const key of ["FAKE_CODEX_MODE", "FAKE_CODEX_DUMP", "SOME_SECRET"]) expect(env, key).not.toHaveProperty(key);
   });
+
+  it("lets every fake's scripted stream cross, for a reply that arrives in pieces", () => {
+    const env = childEnv({ FAKE_STREAM_SCRIPT: "/tmp/script.json", FAKE_STREAM_CADENCE: "3:90", FAKE_ACP_DUMP: "/tmp/acp.json" });
+    expect(env).toMatchObject({ FAKE_STREAM_SCRIPT: "/tmp/script.json", FAKE_STREAM_CADENCE: "3:90" });
+    expect(env).not.toHaveProperty("FAKE_ACP_DUMP");
+  });
 });
 
 describe("the fixture's Netlify stand-in", () => {
@@ -52,6 +58,19 @@ describe("the fixture's Live call environment", () => {
       expect(env, url).not.toHaveProperty("OMB_OPENAI_LIVE_KEY");
     }
     expect(childEnv({ OMB_OPENAI_LIVE_KEY: "sk-real" })).not.toHaveProperty("OMB_OPENAI_LIVE_KEY");
+  });
+});
+
+describe("the fixture's included app hosting relay", () => {
+  it("passes a loopback stand-in and its token through together, and neither for any other address", () => {
+    expect(childEnv({ OMB_CLOUD_HOSTING_URL: " http://127.0.0.1:4400/api/cloud/services/hosting/v1 ", OMB_CLOUD_HOSTING_TOKEN: "omb_host_fixture" }))
+      .toMatchObject({ OMB_CLOUD_HOSTING_URL: "http://127.0.0.1:4400/api/cloud/services/hosting/v1", OMB_CLOUD_HOSTING_TOKEN: "omb_host_fixture" });
+    for (const url of ["https://cloud.openmausbot.com/api/cloud/services/hosting/v1", "http://localhost:4400/api/cloud/services/hosting/v1", "http://192.0.2.1:4400", "http://127.0.0.1:4400/../x?y", ""]) {
+      const env = childEnv({ OMB_CLOUD_HOSTING_URL: url, OMB_CLOUD_HOSTING_TOKEN: "omb_host_real" });
+      expect(env, url).not.toHaveProperty("OMB_CLOUD_HOSTING_URL");
+      expect(env, url).not.toHaveProperty("OMB_CLOUD_HOSTING_TOKEN");
+    }
+    expect(childEnv({ OMB_CLOUD_HOSTING_URL: "http://127.0.0.1:4400/api/cloud/services/hosting/v1" })).not.toHaveProperty("OMB_CLOUD_HOSTING_URL");
   });
 });
 
