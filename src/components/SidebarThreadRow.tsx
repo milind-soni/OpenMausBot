@@ -133,11 +133,12 @@ export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
   if (showAll) return tasks;
   let open = 0;
   const runOf = new Map(routineRuns.flatMap((run) => run.threadId ? [[run.threadId, run] as const] : []));
-  // Newest by the run's start, not sidebar order: an older run that finished later sorts first.
+  // Newest by the run's start, not sidebar order (an older run that finished later sorts first), among runs the list can show.
   const newestRun = new Map<string, Pick<RoutineRun, "routineId" | "createdAt">>();
   for (const task of tasks) {
     const run = runOf.get(task.threadId);
     if (!run || task.pinned === true || task.openedBy?.burstId || isArchived(task)) continue;
+    if ((task.closedBy || isSnoozed(task)) && !demandsAttention(task, activeId)) continue;
     const seen = newestRun.get(run.routineId);
     if (!seen || run.createdAt > seen.createdAt) newestRun.set(run.routineId, run);
   }

@@ -80,6 +80,14 @@ describe("sidebar thread visibility", () => {
     expect(visibleSidebarThreads(rows, "", "", [], false, runs).map((task) => task.threadId)).toEqual(["run-b"]);
     expect(visibleSidebarThreads([{ ...rows[0] }, { ...rows[1], archivedAt: 40 }], "", "", [], false, runs).map((task) => task.threadId)).toEqual(["run-a"]);
   });
+  it("falls back to the next run when the newest run is closed or snoozed and needs nothing", () => {
+    const rows = [{ threadId: "run-a", title: "Daily brief", createdAt: 10 }, { threadId: "run-b", title: "Daily brief", createdAt: 30 }];
+    const runs = [{ routineId: "daily", threadId: "run-a", createdAt: 10 }, { routineId: "daily", threadId: "run-b", createdAt: 30 }];
+    const ids = (newest: Partial<Parameters<typeof visibleSidebarThreads>[0][number]>) => visibleSidebarThreads([rows[0], { ...rows[1], ...newest }], "", "", [], false, runs).map((task) => task.threadId);
+    expect(ids({ closedBy: { botId: "bot-a", name: "Ada", at: 1 } })).toEqual(["run-a"]);
+    expect(ids({ snoozedUntil: Date.now() + 60_000 })).toEqual(["run-a"]);
+    expect(ids({ closedBy: { botId: "bot-a", name: "Ada", at: 1 }, unread: true })).toEqual(["run-b"]);
+  });
   it("keeps queued older threads visible", () => {
     const rows = tasks.map((task) => ({ ...task, queued: task.threadId === "9" }));
     expect(visibleSidebarThreads(rows, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "9"]);
