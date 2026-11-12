@@ -187,6 +187,39 @@ describe("Settings → Vault: logins", () => {
     expect(host.querySelector('[data-login-row="example.com"]')!.textContent).toContain("From 1Password · Quill");
   });
 
+  it("keeps one 1Password item to its own bots ahead of its vault's, and hands it back to the vault's choice", async () => {
+    const on = { connected: true, vaults: [{ id: "v1", title: "Shared with OMB", items: 1, bots: "all" }], items: 1 };
+    const follows = { ...VAULT_LOGIN, onePassword: { item: "v1:i1", ownBots: false } };
+    const own = { ...VAULT_LOGIN, bots: ["quill"], onePassword: { item: "v1:i1", ownBots: true } };
+    fixture.api
+      .mockResolvedValueOnce({ logins: [follows], onePassword: on })
+      .mockResolvedValueOnce({ logins: [own], onePassword: on })
+      .mockResolvedValueOnce({ logins: [own], onePassword: on })
+      .mockResolvedValueOnce({ logins: [follows], onePassword: on })
+      .mockResolvedValueOnce({ logins: [follows], onePassword: on });
+    await render();
+    const row = () => host.querySelector('[data-login-row="example.com"]')!;
+    const editor = () => host.querySelector('[data-onepassword-item="v1:i1"]')!;
+    const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(row().textContent).toContain("From 1Password · All bots (its vault's choice)");
+    await click("Change who can use example.com");
+    expect(host.querySelector("[data-login-form]"), "a 1Password item's password is not changed here").toBeNull();
+    expect(button("Use the vault's choice"), "it already follows its vault").toBeUndefined();
+    await act(async () => { [...editor().querySelectorAll<HTMLInputElement>('input[type="radio"]')][1]!.click(); });
+    await act(async () => { [...editor().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')][1]!.click(); });
+    await click("Save changes");
+    await flush();
+    expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/1password/items/v1/i1", { method: "PATCH", body: JSON.stringify({ bots: ["quill"] }) });
+    expect(row().textContent).toContain("From 1Password · Quill");
+    expect(row().textContent).not.toContain("vault's choice");
+    await click("Change who can use example.com");
+    await click("Use the vault's choice");
+    await flush();
+    expect(fixture.api).toHaveBeenNthCalledWith(4, "/api/logins/1password/items/v1/i1", { method: "PATCH", body: JSON.stringify({ bots: null }) });
+    expect(row().textContent).toContain("From 1Password · All bots (its vault's choice)");
+    expect(host.querySelector("[data-onepassword-item]")).toBeNull();
+  });
+
   it("says why 1Password refused a token", async () => {
     fixture.api.mockResolvedValueOnce({ logins: [], onePassword: OFF }).mockRejectedValueOnce(new Error("1Password did not accept the token."));
     await render();

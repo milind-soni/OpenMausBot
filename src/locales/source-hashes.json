@@ -36509,6 +36509,10 @@
       "chat.helperSuggestion.from": "a18ce56f0c7920f241bf64e3146c8d865c3a1f5b9e8b793bd2e4c9729fd2de27",
       "chat.helperSuggestion.about": "90a8c616bbb161c27ffad72536c2ba545bbe837e31c70c581a19c0d0d5bb0bbf",
       "chat.notice.stalledCommand": "5aa1ec21810ef3815f243d2058f4e167ad71aee5a8fabe1543ca83c6144399d1",
+      "settings.logins.onePassword.changeItem": "95e5d6046e9d25e73ce6f33a97f95108c2c3027ebb01c08a94739467135ff468",
+      "settings.logins.onePassword.vaultChoice": "79ecc022e82d6ad96c1f0f82806170d3a0e69d331ac91851a0dd8d6c806c503b",
+      "settings.logins.onePassword.itemNote": "eee14017812e91c3b664d8e16e51132ae281c22c00810c0da99fd732bb3ae486",
+      "settings.logins.onePassword.useVaultChoice": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
       "botPanel.advanced.title": "d823803689ad1713989d7cd80dde661392f93c2a6a5690e748ab88ed10c98237",
       "botPanel.advanced.hint": "434ef07a7c8eafd2789a2fc936f8d050b62d7658d6777b0494db07e3c7d6294f"
     },
