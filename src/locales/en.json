@@ -6622,6 +6622,8 @@
   "computer.phase.showPendingBoat": "Auto found an existing cloud desktop that is not ready. It was not changed.",
   "computer.cloud.new": "{name} gets its own cloud desktop the first time a task needs one. The first start takes about a minute.",
   "computer.cloud.asleep": "{name}'s cloud desktop is asleep. It wakes in a few seconds when {name} needs it.",
+  "computer.reset.button": "Reset cloud desktop",
+  "computer.reset.confirm": "Reset {name}'s cloud desktop? It is deleted with its files and browser sign-ins, and a fresh one starts with {name}'s next message. This cannot be undone.",
   "computer.badge.autoBoat": "cloud desktop · Auto · read-only",
   "desktopViewer.title": "Desktop viewer",
   "desktopViewer.reconnect": "Reconnect",

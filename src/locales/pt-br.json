@@ -6308,6 +6308,8 @@
   "computer.phase.showPendingBoat": "O modo Auto encontrou um desktop na nuvem que não está pronto. Ele não foi alterado.",
   "computer.cloud.new": "{name} ganha o próprio desktop na nuvem na primeira vez que uma tarefa precisar. A primeira inicialização leva cerca de um minuto.",
   "computer.cloud.asleep": "O desktop na nuvem de {name} está dormindo. Ele acorda em alguns segundos quando {name} precisar.",
+  "computer.reset.button": "Redefinir desktop na nuvem",
+  "computer.reset.confirm": "Redefinir o desktop na nuvem de {name}? Ele é excluído com os arquivos e logins do navegador, e um novo começa com a próxima mensagem de {name}. Não dá para desfazer.",
   "computer.badge.autoBoat": "desktop na nuvem · Auto · somente leitura",
   "desktopViewer.title": "Visualizador do desktop",
   "desktopViewer.reconnect": "Reconectar",
