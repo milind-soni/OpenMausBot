@@ -49,6 +49,7 @@ export function OptionCard({
 
   const options = parseChoices(card.options, MAX_CHOICES) ?? [];
   const optionLabel = (option: string): string => {
+    if (card.appSettingRequest) return option === "Cancel" ? t("common.cancel") : option === options[0] ? t("approval.action.change") : option;
     if (!card.mcpRequest) return option;
     if (option === "Cancel") return t("mcp.cancel");
     return option === options[0] ? mcpRequestActionLabel(card.mcpRequest.action) : option;

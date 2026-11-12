@@ -1,4 +1,5 @@
 import { CHAT_WIDTH_IDS } from "../../shared/app-settings";
+import { reportWindowPrefs } from "./window-prefs";
 
 export { CHAT_WIDTH_IDS };
 export type ChatWidthId = (typeof CHAT_WIDTH_IDS)[number];
@@ -36,4 +37,5 @@ export function applyChatWidth(id: ChatWidthId): void {
   } catch {
     // Storage can be full or blocked in private mode; the width still applies this session.
   }
+  reportWindowPrefs();
 }

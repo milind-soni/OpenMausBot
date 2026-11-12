@@ -34,6 +34,7 @@ const LINES: Record<string, number> = {
   "src/components/LocalComputerSection.tsx": 1437,
   "src/components/CursorAvatar.tsx": 1324,
   "server/skills.ts": 1379,
+  "shared/wire.ts": 1004,
   "server/composio.ts": 1038,
   "server/vps-computer.ts": 1287,
   "scripts/mcp-server.ts": 1411,
