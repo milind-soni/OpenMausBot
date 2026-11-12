@@ -3713,6 +3713,7 @@
   "keys.vps.descBefore": "Linux VPS 的 SSH config 别名。{app} 使用你平时的 SSH 配置和代理，不会保存密钥或密码。所需的别名格式见",
   "keys.vps.descLink": "安装指南",
   "keys.vps.descAfter": "。",
+  "keys.vps.anyMachine": "任何可通过 SSH 访问、装有 Docker 的 Linux 机器都可以，包括你 Tailscale 网络中的电脑：把它的 Tailscale 名称填为别名的 HostName。",
   "keys.vps.aria": "自建 VPS 的 SSH config 别名",
   "keys.vps.removeAlias": "移除已保存的别名",
   "usage.title": "用量",
