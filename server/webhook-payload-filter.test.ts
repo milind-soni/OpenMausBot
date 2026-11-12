@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { callTool, type ToolCallContext } from "./drivers/agents-call.ts";
+import { fullInputSchema } from "./drivers/agents-catalog.ts";
 import { parseTriggerRequest } from "./trigger-tools.ts";
 import { unmatchedPayloadField, WebhookManager, type WebhookManagerOptions } from "./webhooks.ts";
 
@@ -122,5 +123,15 @@ describe("webhook_payload_filter in the trigger tool", () => {
     expect(calls).toEqual([]);
     expect(parseTriggerRequest({ fromBotId: "b", fromThreadId: "t", action: "update", triggerId: "r-1", changes: { payloadFilter: { a: "b" } } }, () => "schedule"))
       .toEqual({ ok: false, error: "webhook_payload_filter applies only to webhook triggers" });
+  });
+});
+
+describe("webhook_payload_filter in the tool schema", () => {
+  it("advertises {} (a plain object) to clear the filter, never a null the schema would refuse", () => {
+    const schema = fullInputSchema("trigger") as { properties: Record<string, { type: unknown; description: string }> };
+    const field = schema.properties.webhook_payload_filter!;
+    expect(field.type).toBe("object");
+    expect(field.description).toContain("{} in an update removes it");
+    expect(field.description).not.toMatch(/\bnull\b/);
   });
 });
