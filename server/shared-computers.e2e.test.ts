@@ -13,6 +13,7 @@ let connector: ReturnType<typeof createComputerSharing>;
 let proxy: ChildProcess;
 let env: { id: string; origin: string; name: string };
 let pairing: any;
+let lendingToken = "";
 let folder: SharedFolder;
 let grantFile: string;
 let bot: any;
@@ -62,10 +63,11 @@ beforeAll(async () => {
   expect(opened.status).toBe(200);
   pairing = (await api("POST", "/api/auth/pair", { code: opened.body.code })).body;
   expect(pairing.token).toMatch(/^omb_sess_/);
+  lendingToken = pairing.token;
   connector = createComputerSharing({
     file: grantFile, environments: () => [env], cuaConnection: async () => null,
     enabled: async () => localSharingEnabled,
-    fetch: (url: string, init: RequestInit) => fetch(url, { ...init, headers: { ...init.headers, authorization: `Bearer ${pairing.token}` } }),
+    fetch: (url: string, init: RequestInit) => fetch(url, { ...init, headers: { ...init.headers, authorization: `Bearer ${lendingToken}` } }),
   });
   bot = (await api("POST", "/api/bots", { name: "Shared desktop tester" })).body.bot;
   proxy = await agentProxyFor(bot.id, pairing.token, "Inspect the folder shared by my desktop; do not use files on the server.");
@@ -159,6 +161,44 @@ it("explicit edits and terminal work; old credentials and other sessions cannot 
   const cookie = `${sessionCookieName(Number(new URL(env.origin).port), grant.environmentId)}=${pairing.token}`;
   expect((await api("POST", `/api/shared-computers/${grant.id}/lease`, {}, { cookie, origin: "https://evil.invalid", "x-omb-computer-secret": grant.secret })).status).toBe(403);
   evidence.push("explicit hash-guarded edit and real terminal; cross-session, stale-secret, CSRF, local-control gate refusals");
+}, 60_000);
+
+it("a second full-access paired device uses the canonical owner in a real agent turn, then loses access on revocation", async () => {
+  writeFileSync(join(folder.path, "brief.txt"), "A real local file. 🌱");
+  const desktopWindow = await api("POST", "/api/auth/pairing", { label: "Full-access desktop fixture", scopes: ["admin", "client"] });
+  expect(desktopWindow.status).toBe(200);
+  const desktop = (await api("POST", "/api/auth/pair", { code: desktopWindow.body.code })).body;
+  lendingToken = desktop.token;
+  await connector.save(env, { folders: [folder], terminal: false, computer: true }, await connector.identity(env));
+  await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);
+  const opened = await api("POST", "/api/auth/pairing", { label: "Android fixture", scopes: ["admin", "client"] }, { authorization: `Bearer ${desktop.token}` });
+  expect(opened.status).toBe(200);
+  const phone = (await api("POST", "/api/auth/pair", { code: opened.body.code, label: "Android fixture" })).body;
+  expect(phone.session.scopes).toEqual(["admin", "client"]);
+
+  const phoneBot = (await api("POST", "/api/bots", { name: "Android agent-turn tester" })).body.bot;
+  const child = await agentProxyFor(phoneBot.id, phone.token, "List my shared computers and read the fixture brief.");
+  const { initialize, call } = mcpClient(child);
+  try {
+    await initialize();
+    const listed = JSON.parse((await call("list_shared_computers")).content[0].text).computers;
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({ computer: true, terminal: false, folders: [{ id: folder.id, write: false }] });
+    const read = await call("shared_computer", { computer_id: storedGrant().id, folder_id: folder.id, action: "read_file", path: "brief.txt" });
+    expect(JSON.parse(read.content[0].text).content).toBe("A real local file. 🌱");
+
+    expect((await api("DELETE", `/api/auth/sessions/${phone.session.id}`, undefined, { authorization: `Bearer ${desktop.token}` })).status).toBe(200);
+    const afterRevoke = await call("shared_computer", { computer_id: storedGrant().id, folder_id: folder.id, action: "read_file", path: "brief.txt" });
+    expect(afterRevoke.isError).toBe(true);
+    expect(JSON.stringify(afterRevoke)).not.toContain("A real local file");
+  } finally {
+    child.kill();
+    // Return the shared fixture to the original client session so later tests retain their own assumptions.
+    lendingToken = pairing.token;
+    await connector.save(env, { folders: [folder], terminal: false, computer: false }, await connector.identity(env));
+    await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);
+  }
+  evidence.push("real second full-access paired-device turn lists and reads the owner's read-only computer; revoking that exact session blocks a subsequent tool action in the still-running turn");
 }, 60_000);
 
 it("a big lent file changes by one passage, gains lines at its end, and is deleted only once read", async () => {

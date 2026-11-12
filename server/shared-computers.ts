@@ -362,8 +362,10 @@ export class SharedComputers {
     entry.seen = Date.now();
     const job = entry.jobs.get(jobId);
     if (job?.sent !== true) return false;
+    // Revoke the queued action before the desktop leases it; release the slot so no later poll can keep it alive.
+    if (!job.active()) { this.finish(entry, job, failure("The requesting turn ended")); return false; }
     job.leased = true; clearTimeout(job.delivery);
-    return job.active();
+    return true;
   }
   complete(id: string, session: string, secret: string, jobId: string, result: unknown) {
     const entry = this.authorize(id, session, secret);

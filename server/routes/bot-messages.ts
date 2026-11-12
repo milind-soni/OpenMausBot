@@ -328,7 +328,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
               throw Object.assign(new Error("wait for a free thread slot before retrying this message"), { status: 409, code: "guarded_busy" });
             }
             // The relayed line is named after the person it is for; with no key it is nobody's own line and acts for nobody.
-            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender: onBehalfOf ? { name: onBehalfOf.name ?? onBehalfOf.email! } : sender, trigger, relayed: true, dataContext });
+            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender: onBehalfOf ? { name: onBehalfOf.name ?? onBehalfOf.email! } : sender, trigger, relayed: true, dataContext, ...(auth.kind === "session" ? { requestSessionId: auth.session.id } : {}) });
             return { ok: true as const, threadId, message };
           }
         : undefined;
@@ -341,7 +341,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       try {
         const receipt = await acceptDirectSend({
           botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext, ...(app ? { app } : {}),
-          personPresent, admin: owners.admin(auth), ...(followUp ? { followUp } : {}),
+          personPresent, admin: owners.admin(auth), ...(auth.kind === "session" ? { requestSessionId: auth.session.id } : {}), ...(followUp ? { followUp } : {}),
           ...(mentions?.length && !press && !appSent ? { mentions } : {}),
         }, guardedStart);
         press?.settle("queueId" in receipt ? receipt.queueId : undefined);
@@ -541,7 +541,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const quoted = source.replyToId ? resolveReplyTarget(bot.threadId, source.replyToId) : undefined;
       const replyTo: ReplyTarget | undefined = quoted && source.reaction && text === source.text ? { ...quoted, reactedWith: source.reaction } : quoted;
       const dataContext = parseDataContext(body.dataContext) ?? (text === source.text ? source.dataContext : undefined);
-      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo, sendId, trigger: usageTriggerFor(auth), dataContext,
+      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo, sendId, trigger: usageTriggerFor(auth), dataContext, ...(auth.kind === "session" ? { requestSessionId: auth.session.id } : {}),
         ...(CLOUD_HOME ? { sender: messageSender(auth) } : {}) });
       return json(res, 202, { ok: true, message });
     }

@@ -183,7 +183,8 @@ describe("shared computer authority and lifecycle", () => {
     const job = await broker.poll(computer.id, "owner", secret);
     active = false;
     expect(broker.liveJob(computer.id, "owner", secret, job!.id)).toBe(false);
-    broker.complete(computer.id, "owner", secret, job!.id, {}); await rejection;
+    await rejection;
+    expect(() => broker.complete(computer.id, "owner", secret, job!.id, {})).toThrow(/expired/);
     active = true;
     const queued = broker.request({ computer_id: computer.id, action: "computer_tools" }, alice.person, () => active);
     const stopped = expect(queued).rejects.toThrow(/turn ended/);
@@ -191,6 +192,18 @@ describe("shared computer authority and lifecycle", () => {
     const poll = broker.poll(computer.id, "owner", secret);
     await vi.advanceTimersByTimeAsync(20_000);
     await expect(poll).resolves.toBeNull(); await stopped;
+    broker.close();
+  });
+  it("withholds a result when a paired device is revoked after a desktop has leased its action", async () => {
+    const broker = new SharedComputers(() => true);
+    const computer = registration({ computer: true }); broker.register(computer, alice, secret);
+    let active = true;
+    const pending = broker.request({ computer_id: computer.id, action: "computer_tools" }, alice.person, () => active);
+    const job = await broker.poll(computer.id, "owner", secret);
+    expect(broker.liveJob(computer.id, "owner", secret, job!.id)).toBe(true);
+    active = false;
+    broker.complete(computer.id, "owner", secret, job!.id, { result: "must not reach the revoked turn" });
+    await expect(pending).rejects.toThrow(/turn ended/);
     broker.close();
   });
   it("expires offline registrations and rejects revoked sessions", async () => {
