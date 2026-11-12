@@ -67,5 +67,13 @@ export function isJsonContentType(headers: IncomingHttpHeaders): boolean {
  * reading anything. Never use this exception for another /api route.
  */
 export function isPreviewAssetRead(method: string | undefined, rawUrl: string | undefined): boolean {
-  return method === "GET" && /^\/api\/preview\/asset\/[a-f0-9]{64}\/[^/?]+\/[^?]+(?:\?.*)?$/.test(rawUrl ?? "");
+  if (method !== "GET" || !rawUrl?.startsWith("/") || rawUrl.startsWith("//")) return false;
+  try {
+    // Match the WHATWG-normalized pathname used by the harness router.
+    // Raw prefixes can disappear through literal or encoded dot segments.
+    const path = new URL(rawUrl, "http://localhost").pathname;
+    return /^\/api\/preview\/asset\/[a-f0-9]{64}\/[^/]+\/.+$/.test(path);
+  } catch {
+    return false;
+  }
 }

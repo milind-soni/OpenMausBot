@@ -76,6 +76,22 @@ afterAll(async () => {
 });
 
 describe("harness HTTP API", () => {
+  it("rejects opaque asset-prefix requests that normalize into API routes", async () => {
+    for (const segment of ["..", "%2e%2e", ".%2E", "%2e."]) {
+      const status = await new Promise<number | undefined>((resolve, reject) => {
+        // fetch normalizes before sending; raw HTTP preserves the exploit path.
+        const req = httpRequest(`${BASE}`, {
+          method: "GET",
+          path: `/api/preview/asset/${"a".repeat(64)}/project/${Array(4).fill(segment).join("/")}/bots`,
+          headers: { origin: "null", "sec-fetch-site": "cross-site" },
+        }, (res) => { res.resume(); res.on("end", () => resolve(res.statusCode)); });
+        req.on("error", reject);
+        req.end();
+      });
+      expect(status).toBe(403);
+    }
+  });
+
   it("registers and creates host projects for browser clients", async () => {
     const parentPath = join(home, "workspace");
     const existingPath = join(parentPath, "existing-app");
