@@ -3,9 +3,17 @@ import { z } from "zod";
 import { credentialIsConfigured, CREDENTIAL_TARGETS, PROVIDER_CREDENTIAL_TARGETS, type CredentialConfig, type CredentialTargetId } from "../../shared/credential-request.ts";
 import { WINDOW_PREFS, type WindowPrefId } from "../../shared/app-settings.ts";
 import { defaultBotThreads, MAX_CONCURRENT_BOT_THREADS } from "../bot-thread-limits.ts";
-import { MAX_MCP_CALL_TIMEOUT_MINUTES, MAX_ROOM_TURN_TIMEOUT_MINUTES, mcpCallTimeoutMinutes, MIN_MCP_CALL_TIMEOUT_MINUTES, MIN_ROOM_TURN_TIMEOUT_MINUTES, roomTurnTimeoutMinutes, type AppConfig } from "../config.ts";
+import { isClaudeBedrock } from "../claude-bedrock.ts";
+import { isClaudeEndpoint } from "../claude-endpoints.ts";
+import { isCodexEndpoint } from "../codex-endpoints.ts";
+import { MAX_MCP_CALL_TIMEOUT_MINUTES, MAX_ROOM_TURN_TIMEOUT_MINUTES, mcpCallTimeoutMinutes, MIN_MCP_CALL_TIMEOUT_MINUTES, MIN_ROOM_TURN_TIMEOUT_MINUTES, persistableInstanceConfigs, roomTurnTimeoutMinutes, type AppConfig } from "../config.ts";
+import type { InstanceConfig } from "../contracts.ts";
+import { BUILT_IN_DRIVERS } from "../drivers/builtIn.ts";
+import type { ProviderRegistry } from "../harness/registry.ts";
+import { endpointDisplayUrl, isAddedEndpoint } from "../openai-compat-endpoints.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { callRoute, type RouteReply } from "../routes/call-route.ts";
+import { engineChosen } from "../routes/instances.ts";
 import type { RouteHandler } from "../routes/table.ts";
 import type { BotRecord, Store } from "../store.ts";
 
@@ -22,13 +30,16 @@ interface Base {
   /** What a person or bot sees. Never a secret: a key reads as set or not set. */
   read(): string;
 }
-/** `value` checks what the bot sends at the boundary; `current` is the typed value as `write` takes it, kept for Undo. */
+/** `value` checks what the bot sends at the boundary; `current` is the typed value as `write` takes it, kept for Undo.
+ * `describe` is for a change that does not read as before → after: the one line its card shows, or why it can't happen
+ * now, before any card. */
 interface Writable {
   tier: "safe" | "confirm";
   value: z.ZodType;
   allowed: string;
   current(): unknown;
   write(value: unknown): Promise<string | null>;
+  describe?(value: unknown): { change: string } | { refusal: string };
 }
 interface Secret {
   tier: "secret";
@@ -51,6 +62,12 @@ export interface RegistryDeps {
   groupBots(name: string, botIds: string[]): Promise<string | null>;
   credentials(): CredentialConfig;
   window: { read(id: WindowPrefId): unknown; write(id: WindowPrefId, value: unknown): string | null };
+  /** The engines Settings → AI lists; never a key. */
+  engines(): Array<{ instanceId: string; name: string; working: boolean }>;
+  engineChosen(instanceId: string): boolean;
+  /** POST /api/instances/<path> and DELETE /api/instances/<id>, as Settings does; a refusal comes back as its text. */
+  addEngine(path: "openai-compat" | "claude-bedrock", body: Record<string, unknown>): Promise<string | null>;
+  removeEngine(instanceId: string): Promise<string | null>;
 }
 
 /** A setting's value for a person or bot; empty when unset, so each edge can say "not set" in its own words. */
@@ -62,7 +79,33 @@ const KEY_WHERE: Partial<Record<CredentialTargetId, Where>> = {
   onePasswordToken: "Settings → Vault", boxToken: "Settings → Desktops & browser", composioApiKey: "Settings → AI",
 };
 
-type WritableSpec = Omit<Base, "read"> & Omit<Writable, "write"> & { read?(): string; write(value: never): Promise<string | null> };
+type WritableSpec = Omit<Base, "read"> & Omit<Writable, "write" | "describe"> & { read?(): string; write(value: never): Promise<string | null>; describe?(value: never): { change: string } | { refusal: string } };
+
+const PROVIDER_KEY_SECTION = {
+  openaiApiKey: "openai", anthropicApiKey: "anthropic", openrouterApiKey: "openrouter", mistralApiKey: "mistral", cerebrasApiKey: "cerebras",
+  groqApiKey: "groq", greenferenceApiKey: "greenference", modelgoApiKey: "modelgo", metaApiKey: "meta", deepseekApiKey: "deepseek",
+} as const satisfies Record<(typeof PROVIDER_CREDENTIAL_TARGETS)[number], keyof CredentialConfig>;
+type ProviderKeyId = keyof typeof PROVIDER_KEY_SECTION;
+/** A local server takes no key; Settings sends the same stand-in for one. */
+const LOCAL_SERVER = { ollama: { name: "Ollama", key: "ollama" }, lmstudio: { name: "LM Studio", key: "lm-studio" } } as const;
+
+const engineName = z.string().trim().min(1).max(80);
+const engineUrl = z.string().trim().min(1).max(512);
+/** Security: a key never passes through the bot. An engine that needs one names a key the person saved through the
+ * secure card (`keyFrom`), and the server reads it at the moment the owner taps Change. */
+const engineChange = z.record(z.string(), z.unknown())
+  .refine((fields) => !Object.keys(fields).some((field) => field !== "keyFrom" && /key|token|secret|password/i.test(field)),
+    "Never put a key or token in the value. Save it first with set on keys.<id> (a secure card asks the user), then name that id in keyFrom.")
+  .pipe(z.discriminatedUnion("kind", [
+    z.object({ kind: z.enum(["ollama", "lmstudio"]), name: engineName.optional(), url: engineUrl }).strict(),
+    z.object({ kind: z.literal("openai-compat"), name: engineName, url: engineUrl, keyFrom: z.enum(PROVIDER_CREDENTIAL_TARGETS), models: z.array(z.string().trim().min(1).max(200)).max(64).optional() }).strict(),
+    z.object({ kind: z.literal("bedrock"), name: engineName, awsProfile: z.string().trim().min(1).max(128), awsRegion: z.string().trim().min(1).max(40), model: z.string().trim().min(1).max(160) }).strict(),
+    z.object({ kind: z.literal("remove"), instanceId: z.string().regex(/^[\w.-]{1,120}$/) }).strict(),
+  ]));
+type EngineChange = z.infer<typeof engineChange>;
+/** The engines a bot may remove: added without a sign-in. Accounts and the built-in engines stay with the owner. */
+const removableKind = (instanceId: string, entry: InstanceConfig | undefined) => isAddedEndpoint(instanceId, entry) ? "OpenAI-compatible server"
+  : isClaudeBedrock(entry) ? "Claude on Amazon Bedrock" : isClaudeEndpoint(entry) ? "Claude endpoint" : isCodexEndpoint(entry) ? "Codex endpoint" : null;
 
 export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
   const cfg = deps.cfg;
@@ -167,6 +210,53 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
     };
   });
 
+  const instances = () => persistableInstanceConfigs(cfg());
+  const savedKey = (id: ProviderKeyId) => deps.credentials()[PROVIDER_KEY_SECTION[id]]?.key;
+  const keyMissing = (id: ProviderKeyId) => `Your ${CREDENTIAL_TARGETS[id].label} is not saved yet. Call set on keys.${id} with no value first (a secure card asks the user for it), then add the engine.`;
+  const listEngines = () => deps.engines().map(({ instanceId, name, working }) => {
+    const entry = instances()[instanceId];
+    const url = isAddedEndpoint(instanceId, entry) ? endpointDisplayUrl(entry!.config) : undefined;
+    return `${instanceId}: ${name}${url ? ` at ${url}` : ""}${working ? "" : " (not working)"}${removableKind(instanceId, entry) ? "" : " (removed only in Settings)"}`;
+  }).join("; ");
+  const engines = writable({
+    id: "engines", label: "AI engines", help: "The AI engines bots run on. get lists each one's id; set adds or removes one, always on a Change/Cancel card.", where: "Settings → AI",
+    synonyms: ["engine", "engines", "ai engine", "add engine", "remove engine", "provider", "providers", "ollama", "lm studio", "lmstudio", "bedrock", "endpoint", "local model"], tier: "confirm",
+    value: engineChange,
+    allowed: '{"kind":"ollama" or "lmstudio","url"} for a local server; {"kind":"openai-compat","name","url","keyFrom":"<a keys.* id, e.g. openrouterApiKey>","models"?:[...]}; '
+      + '{"kind":"bedrock","name","awsProfile","awsRegion","model"}; {"kind":"remove","instanceId"}. Sign-in accounts (Claude, ChatGPT, Antigravity) are added, signed in and removed by the user in Settings → AI',
+    current: () => undefined, read: listEngines,
+    describe: (change: EngineChange) => {
+      if (change.kind === "remove") {
+        const entry = instances()[change.instanceId];
+        const listed = deps.engines().find((engine) => engine.instanceId === change.instanceId);
+        if (!entry && !listed) return { refusal: `No engine has the id ${change.instanceId}. Use get on engines to list them.` };
+        const name = listed?.name ?? entry?.displayName ?? change.instanceId;
+        const kind = removableKind(change.instanceId, entry);
+        if (!kind) return { refusal: `${name} is removed only by the user, in Settings → AI. Tell them where; do not try another way.` };
+        if (deps.engineChosen(change.instanceId)) return { refusal: `Bots or the default model for new bots use ${name}. Move them to another model first (a bot's Settings, or bots.defaultModel), then remove it.` };
+        const last = deps.engines().filter((engine) => engine.working).every((engine) => engine.instanceId === change.instanceId);
+        const url = isAddedEndpoint(change.instanceId, entry) ? endpointDisplayUrl(entry.config) : undefined;
+        return { change: `Remove the engine "${name}" (${kind}${url ? `, ${url}` : ""})${last ? ". It is your only working engine" : ""}` };
+      }
+      if (change.kind === "openai-compat") {
+        if (!savedKey(change.keyFrom)) return { refusal: keyMissing(change.keyFrom) };
+        return { change: `Add the engine "${change.name}" (OpenAI-compatible) at ${change.url}, sending it your saved ${CREDENTIAL_TARGETS[change.keyFrom].label}` };
+      }
+      if (change.kind === "bedrock") return { change: `Add the engine "${change.name}" (Claude on Amazon Bedrock), AWS profile ${change.awsProfile} in ${change.awsRegion}, model ${change.model}` };
+      return { change: `Add the engine "${change.name ?? LOCAL_SERVER[change.kind].name}" (${LOCAL_SERVER[change.kind].name} on ${change.url})` };
+    },
+    write: async (change: EngineChange) => {
+      if (change.kind === "remove") return deps.removeEngine(change.instanceId);
+      if (change.kind === "bedrock") return deps.addEngine("claude-bedrock", { displayName: change.name, awsProfile: change.awsProfile, awsRegion: change.awsRegion, model: change.model });
+      if (change.kind === "openai-compat") {
+        const key = savedKey(change.keyFrom);
+        return key ? deps.addEngine("openai-compat", { displayName: change.name, url: change.url, key, ...(change.models ? { models: change.models } : {}) }) : keyMissing(change.keyFrom);
+      }
+      const local = LOCAL_SERVER[change.kind];
+      return deps.addEngine("openai-compat", { displayName: change.name ?? local.name, url: change.url, key: local.key, catalog: change.kind });
+    },
+  });
+
   const ownerOnly = (id: string, label: string, help: string, where: Where, synonyms: string[], read: () => string): SettingEntry => ({ id, label, help, where, synonyms, tier: "owner-only", read });
   const owner: SettingEntry[] = [
     ownerOnly("bots.approvalModes", "Approval modes", "What each bot may do without asking (Ask, Approve for me, Full access).", "a bot's Settings", ["permissions", "full access", "approve", "ask", "approval", "autonomy"],
@@ -179,7 +269,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
     ownerOnly("computer.sharing", "Computer sharing", "Lending this computer to other places and people.", "Settings → Desktops & browser", ["share computer", "lend", "lending", "shared computers", "desktop"], () => "managed in Settings"),
   ];
 
-  return [...safe, ...confirm, ...secret, ...owner];
+  return [...safe, ...confirm, engines, ...secret, ...owner];
 }
 
 export function findSettings(entries: readonly SettingEntry[], query: string, limit = 8): SettingEntry[] {
@@ -200,8 +290,9 @@ export function findSettings(entries: readonly SettingEntry[], query: string, li
 /** The registry over the Settings window's own routes, called as the window calls them. */
 export function routeBackedRegistry(deps: {
   cfg(): AppConfig;
-  store: Pick<Store, "bots" | "sections">;
-  routes: { config: RouteHandler; botOrder: RouteHandler; sections: RouteHandler };
+  store: Pick<Store, "bots" | "sections" | "tasks">;
+  routes: { config: RouteHandler; botOrder: RouteHandler; sections: RouteHandler; instances: RouteHandler };
+  providers: Pick<ProviderRegistry, "instances" | "lastSnapshot">;
   credentials(): CredentialConfig;
   window: RegistryDeps["window"];
 }): SettingEntry[] {
@@ -212,5 +303,12 @@ export function routeBackedRegistry(deps: {
     saveConfig: (patch) => refusal(callRoute(deps.routes.config, { method: "PUT", path: "/api/config", body: patch, auth })),
     reorderBots: (botIds) => refusal(callRoute(deps.routes.botOrder, { method: "PUT", path: "/api/bots/order", body: { botIds }, auth })),
     groupBots: (name, botIds) => refusal(callRoute(deps.routes.sections, { method: "POST", path: "/api/sidebar-sections", body: { name, botIds }, auth })),
+    engines: () => deps.providers.instances().filter((instance) => instance.enabled).map((instance) => ({
+      instanceId: instance.instanceId, working: deps.providers.lastSnapshot(instance.instanceId)?.state === "available",
+      name: instance.displayName ?? BUILT_IN_DRIVERS.find((driver) => driver.driverKind === instance.driverKind)?.metadata.displayName ?? instance.instanceId,
+    })),
+    engineChosen: (instanceId) => engineChosen(deps.store, deps.cfg(), instanceId),
+    addEngine: (path, body) => refusal(callRoute(deps.routes.instances, { method: "POST", path: `/api/instances/${path}`, body, auth })),
+    removeEngine: (instanceId) => refusal(callRoute(deps.routes.instances, { method: "DELETE", path: `/api/instances/${encodeURIComponent(instanceId)}`, auth })),
   });
 }

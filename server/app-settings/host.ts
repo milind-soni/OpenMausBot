@@ -23,15 +23,22 @@ const FIND_LIMIT = 8;
 const NOT_RETRY = "Do not retry it; ask the user what they would like instead.";
 const NOT_SET = "not set";
 const text = (value: string) => value || NOT_SET;
+/** What a card and the bot see of a change: before → after, or, with no `before`, one line saying what it does. */
+interface Shown {
+  before?: string;
+  after: string;
+}
+const said = ({ before, after }: Shown) => (before === undefined ? after : `${text(before)} → ${text(after)}`);
 
-/** The tool sends every value as text so strict-schema providers accept it; numbers, true/false and JSON lists are read
- * back from it when the text alone does not fit the setting. */
+/** The tool sends every value as text so strict-schema providers accept it; numbers, true/false and JSON are read back
+ * from it when the text alone does not fit the setting. A JSON object or list is judged as itself. */
 function parseValue(entry: WritableEntry, value: unknown) {
   const direct = entry.value.safeParse(value);
   if (direct.success || typeof value !== "string") return direct;
   try {
-    const read = entry.value.safeParse(JSON.parse(value));
-    return read.success ? read : direct;
+    const json: unknown = JSON.parse(value);
+    const read = entry.value.safeParse(json);
+    return read.success || (typeof json === "object" && json !== null) ? read : direct;
   } catch {
     return direct;
   }
@@ -49,7 +56,7 @@ interface Held {
   threadId: string;
   entry: WritableEntry;
   value: unknown;
-  before: string;
+  shown: Shown;
   earlier: unknown;
   settle(outcome: Outcome): void;
   timer: ReturnType<typeof setTimeout>;
@@ -98,13 +105,13 @@ export function createAppSettings(deps: AppSettingsDeps) {
   const decide = (turn: Turn, bot: BotRecord | undefined, entry: SettingEntry, summary: string, decision: "auto-approved" | "card-shown", requestId?: string) =>
     appendDecision(deps.dataDir, { threadId: turn.threadId, ...(requestId ? { requestId } : {}), botId: turn.botId, botName: bot?.name, tool: TOOL, summary: `${entry.id}: ${summary}`, decision, source: "app-settings" });
   const from = (bot: BotRecord, threadId: string) => (deps.connectorThread(bot.id, threadId)?.group ? { from: { botId: bot.id, name: bot.name, color: bot.color } } : {});
-  const card = (bot: BotRecord, threadId: string, entry: WritableEntry, before: string, after: string, requestId: string, options: string[], settled: Partial<OptionCardData>) => {
+  const card = (bot: BotRecord, threadId: string, entry: WritableEntry, { before, after }: Shown, requestId: string, options: string[], settled: Partial<OptionCardData>) => {
     const language = deps.language(threadId);
     const shown = (value: string) => value || serverLine(language, "server.appSettings.notSet");
-    const appSettingRequest: AppSettingRequest = { settingId: entry.id, label: entry.label, before, after, tier: entry.tier };
+    const appSettingRequest: AppSettingRequest = { settingId: entry.id, label: entry.label, ...(before === undefined ? {} : { before }), after, tier: entry.tier };
     return store.appendMessage(threadId, {
       role: "bot", kind: "options", ...from(bot, threadId),
-      card: { title: serverLine(language, "server.appSettings.change", { label: entry.label }), subtitle: `${shown(before)} → ${shown(after)}`, options, requestId, tool: TOOL, fixedOptions: true, appSettingRequest, ...settled },
+      card: { title: serverLine(language, "server.appSettings.change", { label: entry.label }), subtitle: before === undefined ? after : `${shown(before)} → ${shown(after)}`, options, requestId, tool: TOOL, fixedOptions: true, appSettingRequest, ...settled },
     });
   };
   const spendWrite = (turn: Turn): string | null => {
@@ -115,38 +122,37 @@ export function createAppSettings(deps: AppSettingsDeps) {
     return null;
   };
 
-  async function apply(entry: WritableEntry, value: unknown, before: string): Promise<Outcome> {
+  async function apply(entry: WritableEntry, value: unknown, { before, after }: Shown): Promise<Outcome> {
     const refusal = await entry.write(value);
     if (refusal) return { kind: "failed", error: refusal };
-    return { kind: "applied", text: `Changed ${entry.label} from ${text(before)} to ${text(entry.read())}.` };
+    return { kind: "applied", text: before === undefined ? `Done: ${after}. ${entry.label} now: ${text(entry.read())}.` : `Changed ${entry.label} from ${text(before)} to ${text(entry.read())}.` };
   }
 
   async function setSafe(turn: Turn, bot: BotRecord, entry: WritableEntry, value: unknown, before: string) {
     const earlier = entry.current();
-    const outcome = await apply(entry, value, before);
+    const outcome = await apply(entry, value, { before, after: display(value) });
     if (outcome.kind !== "applied") return refuse(409, outcome.kind === "failed" ? outcome.error : "The change was not applied.");
-    const after = entry.read();
+    const shown = { before, after: entry.read() };
     const requestId = randomUUID();
-    card(bot, turn.threadId, entry, before, after, requestId, [], { answered: "allow", dismissed: true, autoApplied: true });
-    undoable.set(requestId, { entry, before: earlier, after });
-    decide(turn, bot, entry, `${text(before)} → ${text(after)}`, "auto-approved", requestId);
+    card(bot, turn.threadId, entry, shown, requestId, [], { answered: "allow", dismissed: true, autoApplied: true });
+    undoable.set(requestId, { entry, before: earlier, after: shown.after });
+    decide(turn, bot, entry, said(shown), "auto-approved", requestId);
     return reply(200, { text: `${outcome.text} The user can undo it from the card in the conversation.` });
   }
 
-  async function setConfirm(turn: Turn, bot: BotRecord, entry: WritableEntry, value: unknown, before: string, ended?: AbortSignal) {
+  async function setConfirm(turn: Turn, bot: BotRecord, entry: WritableEntry, value: unknown, shown: Shown, ended?: AbortSignal) {
     if (ended?.aborted) return refuse(409, `This turn was stopped, so nothing changed. ${NOT_RETRY}`);
     if (openByBot.has(bot.id)) return refuse(409, "A settings change is already waiting on the user. End your turn and wait for the answer.");
     const requestId = randomUUID();
-    const after = display(value);
     let settle!: (outcome: Outcome) => void;
     const answer = new Promise<Outcome>((resolve) => { settle = resolve; });
     const timer = setTimeout(() => settleHold(requestId, { kind: "timeout" }), holdMs);
     timer.unref?.();
     ended?.addEventListener("abort", () => settleHold(requestId, { kind: "stopped" }), { once: true });
-    held.set(requestId, { botId: bot.id, threadId: turn.threadId, entry, value, before, earlier: entry.current(), settle, timer });
+    held.set(requestId, { botId: bot.id, threadId: turn.threadId, entry, value, shown, earlier: entry.current(), settle, timer });
     openByBot.set(bot.id, requestId);
-    const message = card(bot, turn.threadId, entry, before, after, requestId, ["Change", "Cancel"], {});
-    decide(turn, bot, entry, `${text(before)} → ${text(after)}`, "card-shown", requestId);
+    const message = card(bot, turn.threadId, entry, shown, requestId, ["Change", "Cancel"], {});
+    decide(turn, bot, entry, said(shown), "card-shown", requestId);
     waiting(bot, turn.threadId, true);
     deps.notify(buildNotification("approval", bot, turn.threadId, message.card!.subtitle, { avatarUrl: bot.avatarUrl }));
     const outcome = await answer;
@@ -199,10 +205,12 @@ export function createAppSettings(deps: AppSettingsDeps) {
     }
     const parsed = parseValue(entry, body.value);
     if (!parsed.success) return refuse(400, `${entry.label} takes ${entry.allowed}. ${parsed.error.issues.map((issue) => issue.message).join("; ")}`);
+    const described = entry.describe?.(parsed.data);
+    if (described && "refusal" in described) return refuse(409, described.refusal);
     const budget = spendWrite(turn);
     if (budget) return refuse(429, budget);
-    const before = entry.read();
-    return entry.tier === "safe" ? setSafe(turn, bot, entry, parsed.data, before) : setConfirm(turn, bot, entry, parsed.data, before, ended);
+    if (entry.tier === "safe") return setSafe(turn, bot, entry, parsed.data, entry.read());
+    return setConfirm(turn, bot, entry, parsed.data, described ? { after: described.change } : { before: entry.read(), after: display(parsed.data) }, ended);
   }
 
   return {
@@ -251,9 +259,12 @@ export function createAppSettings(deps: AppSettingsDeps) {
         json(res, 200, { ok: true, outcome: "rejected" });
         return true;
       }
-      void apply(hold.entry, hold.value, hold.before).then((outcome) => {
+      // Settled now so a Stop or the timeout landing while the write runs can't tell the bot nothing changed.
+      hold.answered = true;
+      clearTimeout(hold.timer);
+      void apply(hold.entry, hold.value, hold.shown).then((outcome) => {
         if (outcome.kind === "applied") undoable.set(args.requestId, { entry: hold.entry, before: hold.earlier, after: hold.entry.read() });
-        settleHold(args.requestId, outcome);
+        hold.settle(outcome);
       });
       json(res, 200, { ok: true, outcome: "allowed-once" });
       return true;

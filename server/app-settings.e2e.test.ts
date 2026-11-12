@@ -159,6 +159,58 @@ it("Stop settles a waiting Change card at once: the card shows as unavailable, a
   expect(results(await finished("CONFIRM-AFTER-STOP"))[0]?.text).toMatch(/^The user cancelled the change to Groq address\./);
 }, 90_000);
 
+it("a Full-access bot adds and removes an AI engine only through Change/Cancel cards, with a saved key it never sees", async () => {
+  const routerKey = "sk-or-v1-e2e-0123456789";
+  await api("PUT", "/api/config", { openrouter: { key: routerKey } }, 200, ownerDevice);
+  const engines = () => Object.entries(config().instances ?? {}).filter(([id]) => id.startsWith("openai-compat-")) as Array<[string, any]>;
+  const engineCard = async () => {
+    let waiting: any;
+    await expect.poll(async () => (waiting = (await settingCards(bot.threadId)).find((one) => one.card.appSettingRequest.settingId === "engines" && !one.card.answered)) !== undefined, { timeout: 20_000, message: "an unanswered Change AI engines? card" }).toBe(true);
+    return waiting.card;
+  };
+  const answer = (card: any, behavior: "allow" | "deny") => api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: card.requestId, behavior }, 200, ownerDevice);
+
+  await start("ENGINE-CANCEL", [step({ action: "set", id: "engines", value: JSON.stringify({ kind: "ollama", url: "http://127.0.0.1:9" }) }, true)], 60_000);
+  const cancelled = await engineCard();
+  expect(cancelled).toMatchObject({ title: "Change AI engines?", subtitle: "Add the engine \"Ollama\" (Ollama on http://127.0.0.1:9)", options: ["Change", "Cancel"] });
+  await answer(cancelled, "deny");
+  expect(results(await finished("ENGINE-CANCEL"))[0]?.text).toMatch(/^The user cancelled the change to AI engines\./);
+  expect(engines()).toEqual([]);
+
+  const gateway = { kind: "openai-compat", name: "Gateway", url: "https://gw.example.test/v1", keyFrom: "openrouterApiKey" };
+  await start("ENGINE-ADD", [
+    step({ action: "set", id: "engines", value: JSON.stringify({ ...gateway, keyFrom: undefined, key: routerKey }) }, true),
+    step({ action: "set", id: "engines", value: JSON.stringify(gateway) }),
+  ], 60_000);
+  const adding = await engineCard();
+  expect(adding.subtitle).toBe("Add the engine \"Gateway\" (OpenAI-compatible) at https://gw.example.test/v1, sending it your saved OpenRouter API key");
+  expect(engines(), "nothing is added while the card waits").toEqual([]);
+  await answer(adding, "allow");
+  const added = await finished("ENGINE-ADD");
+  const [inline, applied] = results(added);
+  expect(inline).toMatchObject({ isError: true, text: expect.stringContaining("Never put a key or token in the value") });
+  expect(applied).toMatchObject({ isError: false, text: expect.stringMatching(/^Done: Add the engine "Gateway"/) });
+  const [[engineId, engine]] = engines();
+  expect(engine).toMatchObject({ driver: "openai-compat", displayName: "Gateway", config: { url: "https://gw.example.test/v1", key: routerKey } });
+  expect((await api("GET", "/api/instances")).instances.map((instance: any) => instance.instanceId)).toContain(engineId);
+  const everything = JSON.stringify({ results: results(added).map((result: any) => result.text), messages: await messages(bot.threadId), decisions: (await api("GET", "/api/decisions")).decisions });
+  expect(everything).not.toContain(routerKey);
+
+  await start("ENGINE-REMOVE", [
+    step({ action: "get", id: "engines" }),
+    step({ action: "set", id: "engines", value: JSON.stringify({ kind: "remove", instanceId: engineId }) }),
+  ], 60_000);
+  const removing = await engineCard();
+  expect(removing.subtitle).toBe(`Remove the engine "Gateway" (OpenAI-compatible server, https://gw.example.test/v1)`);
+  expect(engines()).toHaveLength(1);
+  await answer(removing, "allow");
+  const [listed, removed] = results(await finished("ENGINE-REMOVE"));
+  expect(JSON.parse(listed.text).value).toContain(`${engineId}: Gateway at https://gw.example.test/v1`);
+  expect(listed.text).not.toContain(routerKey);
+  expect(removed.isError).toBe(false);
+  expect(engines()).toEqual([]);
+}, 120_000);
+
 it("a key is never taken as a value: set with a value is refused, set without one posts the secure card, and the key appears nowhere", async () => {
   const before = (await messages(bot.threadId)).length;
   await start("SECRET", [

@@ -13,20 +13,24 @@ import { createAppSettings, WRITE_BUDGET } from "./host.ts";
 import { createSettingsRegistry } from "./registry.ts";
 
 const OPENAI_KEY = "sk-live-9f8e7d6c5b4a3210";
+const GATEWAY_KEY = "sk-gateway-0a1b2c3d";
 const dirs: string[] = [];
 afterEach(() => {
   vi.useRealTimers();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; window?: boolean } = {}) {
+function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; window?: boolean; chosen?: string[] } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "app-settings-"));
   dirs.push(dataDir);
   const bots: BotRecord[] = [
     { id: "kiwi", name: "Kiwi", color: "#0f0", threadId: "t-kiwi", approvalMode: "full", section: "Sales" } as unknown as BotRecord,
     { id: "clive", name: "Clive", color: "#00f", threadId: "t-clive", approvalMode: "ask" } as unknown as BotRecord,
   ];
-  const cfg = { language: "en", rooms: { turnTimeoutMinutes: 30 }, mcp: {}, threads: { maxConcurrentPerBot: 3 }, openai: { key: OPENAI_KEY }, anthropic: { url: "https://api.anthropic.com" } } as AppConfig;
+  const cfg = { language: "en", rooms: { turnTimeoutMinutes: 30 }, mcp: {}, threads: { maxConcurrentPerBot: 3 }, openai: { key: OPENAI_KEY }, anthropic: { url: "https://api.anthropic.com" },
+    instances: { "openai-compat-gw": { driver: "openai-compat", displayName: "Gateway", config: { key: GATEWAY_KEY, url: "https://gw.example/v1" } } } } as unknown as AppConfig;
+  const engineCalls: unknown[] = [];
+  const chosen = new Set<string>(options.chosen ?? []);
   const saved: Record<string, unknown>[] = [];
   const messages: Array<Record<string, any>> = [];
   const windowValues = new Map<string, unknown>(options.window === false ? [] : [["appearance.skin", "daylight"]]);
@@ -65,6 +69,10 @@ function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; w
       read: (id) => windowValues.get(id),
       write: (id, value) => { if (!windowValues.size) return "Open MausBot on this computer first."; windowValues.set(id, value); return null; },
     },
+    engines: () => [{ instanceId: "claude", name: "Claude", working: true }, { instanceId: "openai-compat-gw", name: "Gateway", working: true }],
+    engineChosen: (instanceId) => chosen.has(instanceId),
+    addEngine: async (path, body) => { engineCalls.push({ add: path, body }); return null; },
+    removeEngine: async (instanceId) => { engineCalls.push({ remove: instanceId }); return null; },
   });
   const notified: unknown[] = [];
   const host = createAppSettings({
@@ -86,7 +94,7 @@ function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; w
     return { claimed, sent: sent as { status: number; body: Record<string, unknown> } | null };
   };
   const cards = () => messages.filter((message) => message.card?.appSettingRequest);
-  return { host, cfg, saved, messages, cards, credentialCards, notified, windowValues, bots, turn, set, answer, dataDir };
+  return { host, cfg, saved, messages, cards, credentialCards, notified, windowValues, bots, turn, set, answer, dataDir, engineCalls };
 }
 
 describe("reads", () => {
@@ -272,6 +280,89 @@ describe("a stopped turn", () => {
     expect(saved).toEqual([]);
     expect((await set("providers.anthropic.url", "https://proxy.example/v1", turn.generation, stop.signal)).status).toBe(409);
     expect(cards()).toHaveLength(1);
+  });
+
+  it("a Stop landing after Change, while the write runs, still tells the bot it changed", async () => {
+    const { set, cards, answer, saved, turn } = fixture();
+    const stop = new AbortController();
+    const pending = set("providers.anthropic.url", "https://proxy.example/v1", turn.generation, stop.signal);
+    await vi.waitFor(() => expect(cards()).toHaveLength(1));
+    answer(String(cards()[0]!.card.requestId), "allow");
+    stop.abort();
+    expect(await pending).toMatchObject({ status: 200, body: { text: expect.stringMatching(/^Changed Anthropic address/) } });
+    expect(cards()[0]!.card).toMatchObject({ answered: "allow" });
+    expect(saved).toHaveLength(1);
+  });
+});
+
+describe("AI engines", () => {
+  const confirmed = async (fx: ReturnType<typeof fixture>, value: unknown) => {
+    const pending = fx.set("engines", JSON.stringify(value));
+    await vi.waitFor(() => expect(fx.cards().filter((card) => !card.card.answered)).toHaveLength(1));
+    return { pending, card: fx.cards().at(-1)!.card };
+  };
+
+  it("get lists the engines by id with no key, and find reaches them", async () => {
+    const { host, turn } = fixture();
+    const got = JSON.parse(String((await host.handle({ action: "get", id: "engines" }, turn)).body.text));
+    expect(got).toMatchObject({ tier: "confirm", value: "claude: Claude (removed only in Settings); openai-compat-gw: Gateway at https://gw.example/v1" });
+    expect(JSON.stringify(got)).not.toContain(GATEWAY_KEY);
+    const found = JSON.parse(String((await host.handle({ action: "find", query: "add ollama engine" }, turn)).body.text));
+    expect(found[0].id).toBe("engines");
+  });
+
+  it("adds a local server only after the owner's Change on a card naming kind, name and address", async () => {
+    const fx = fixture();
+    const { pending, card } = await confirmed(fx, { kind: "ollama", url: "http://127.0.0.1:11434" });
+    expect(card).toMatchObject({ title: "Change AI engines?", subtitle: "Add the engine \"Ollama\" (Ollama on http://127.0.0.1:11434)", options: ["Change", "Cancel"],
+      appSettingRequest: { settingId: "engines", tier: "confirm", after: "Add the engine \"Ollama\" (Ollama on http://127.0.0.1:11434)" } });
+    expect(card.appSettingRequest).not.toHaveProperty("before");
+    expect(fx.answer(String(card.requestId), "allow", false).sent).toMatchObject({ status: 403 });
+    expect(fx.engineCalls).toEqual([]);
+    fx.answer(String(card.requestId), "allow");
+    expect((await pending).body.text).toMatch(/^Done: Add the engine "Ollama" \(Ollama on http:\/\/127\.0\.0\.1:11434\)\. AI engines now: /);
+    expect(fx.engineCalls).toEqual([{ add: "openai-compat", body: { displayName: "Ollama", url: "http://127.0.0.1:11434", key: "ollama", catalog: "ollama" } }]);
+  });
+
+  it("an engine that needs a key takes only a saved key's id, which the server reads at the tap; the key is shown nowhere", async () => {
+    const fx = fixture();
+    const missing = await fx.set("engines", JSON.stringify({ kind: "openai-compat", name: "Proxy", url: "https://proxy.example/v1", keyFrom: "mistralApiKey" }));
+    expect(missing).toMatchObject({ status: 409, body: { error: "Your Mistral API key is not saved yet. Call set on keys.mistralApiKey with no value first (a secure card asks the user for it), then add the engine." } });
+    for (const field of ["key", "apiKey", "token"]) {
+      const inline = await fx.set("engines", JSON.stringify({ kind: "openai-compat", name: "Proxy", url: "https://proxy.example/v1", [field]: OPENAI_KEY }));
+      expect(inline.status, field).toBe(400);
+      expect(inline.body.error, field).toContain("Never put a key or token in the value");
+    }
+    expect(fx.cards()).toEqual([]);
+    const { pending, card } = await confirmed(fx, { kind: "openai-compat", name: "Proxy", url: "https://proxy.example/v1", keyFrom: "openaiApiKey" });
+    expect(card.subtitle).toBe("Add the engine \"Proxy\" (OpenAI-compatible) at https://proxy.example/v1, sending it your saved OpenAI API key");
+    fx.answer(String(card.requestId), "allow");
+    const result = await pending;
+    expect(fx.engineCalls).toEqual([{ add: "openai-compat", body: { displayName: "Proxy", url: "https://proxy.example/v1", key: OPENAI_KEY } }]);
+    await flushDecisionLog(fx.dataDir);
+    expect(JSON.stringify([missing, result, fx.messages, readDecisions(fx.dataDir, 20)])).not.toContain(OPENAI_KEY);
+  });
+
+  it("removes only an engine added without a sign-in and chosen by no bot, after Change; Cancel removes nothing", async () => {
+    const fx = fixture();
+    expect((await fx.set("engines", JSON.stringify({ kind: "remove", instanceId: "nope" }))).body.error).toContain("No engine has the id nope");
+    expect((await fx.set("engines", JSON.stringify({ kind: "remove", instanceId: "claude" }))).body.error).toBe("Claude is removed only by the user, in Settings → AI. Tell them where; do not try another way.");
+    const cancelled = await confirmed(fx, { kind: "remove", instanceId: "openai-compat-gw" });
+    expect(cancelled.card.subtitle).toBe("Remove the engine \"Gateway\" (OpenAI-compatible server, https://gw.example/v1)");
+    fx.answer(String(cancelled.card.requestId), "deny");
+    expect((await cancelled.pending).body.error).toContain("cancelled");
+    expect(fx.engineCalls).toEqual([]);
+    const applied = await confirmed(fx, { kind: "remove", instanceId: "openai-compat-gw" });
+    fx.answer(String(applied.card.requestId), "allow");
+    expect((await applied.pending).status).toBe(200);
+    expect(fx.engineCalls).toEqual([{ remove: "openai-compat-gw" }]);
+  });
+
+  it("refuses to remove an engine a bot or the new-bot default uses, before any card", async () => {
+    const fx = fixture({ chosen: ["openai-compat-gw"] });
+    const refused = await fx.set("engines", JSON.stringify({ kind: "remove", instanceId: "openai-compat-gw" }));
+    expect(refused).toMatchObject({ status: 409, body: { error: expect.stringMatching(/^Bots or the default model for new bots use Gateway\./) } });
+    expect(fx.cards()).toEqual([]);
   });
 });
 

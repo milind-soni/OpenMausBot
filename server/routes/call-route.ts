@@ -22,7 +22,7 @@ export async function callRoute(route: RouteHandler, call: RouteCall): Promise<R
   const url = new URL(call.path, "http://127.0.0.1");
   const res = { headersSent: false, writableEnded: false } as ServerResponse;
   const out = await route({
-    req: {} as IncomingMessage, res, url, path: url.pathname, method: call.method, auth: call.auth,
+    req: { headers: { "content-type": "application/json" } } as unknown as IncomingMessage, res, url, path: url.pathname, method: call.method, auth: call.auth,
     json: (_res, status, body) => { reply = { status, body: (body ?? {}) as Record<string, unknown> }; },
     readBody: async () => call.body,
   });

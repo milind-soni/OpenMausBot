@@ -33,6 +33,16 @@ would. Nothing touches live app data.
   row or saved config.
 - **Owner-only.** `set bots.approvalModes` is refused with where the owner
   changes it.
+- **Stop.** Stopping a turn whose provider-address card waits closes the card as
+  unavailable at once; a later Change applies nothing, and the next turn can ask again.
+- **Window preferences.** A skin change is refused while no app window's live
+  stream (`/api/events?window=1`) is open, applied once one connects, refused
+  after it closes, and applied again on reconnect.
+- **AI engines.** A Full-access bot's Ollama add waits on a "Change AI engines?" card and Cancel adds nothing. An
+  OpenAI-compatible add with a key in the value is refused; with `keyFrom` naming the saved OpenRouter key it posts a
+  card naming the address and the key it will receive, adds nothing while it waits, and Change adds it with the saved
+  key. `get` lists it with no key, and removing it takes another Change. The key is in no tool result, message or
+  decision row.
 - **Not the owner's turn.** A webhook's run can `get` a setting, but its `set`
   is refused and the setting stays as it was.
 
@@ -40,8 +50,7 @@ would. Nothing touches live app data.
 
 The scripted engine stands in for the model. This recipe does not show whether
 a real model follows the tool's instructions. It checks server and proxy
-behaviour, not the rendered cards or how phones draw them. The window-only
-preferences (skin, font and the rest, which need a connected window), a second
-open card and the 9-minute timeout of an unanswered card are covered only by
+behaviour, not the rendered cards or how phones draw them. A second open card, a Stop landing after Change,
+the refusal to remove an engine in use, and the 9-minute timeout of an unanswered card are covered only by
 the unit tests in `server/app-settings/host.test.ts`. The fixture's engine reports no tool
 activity lines, so the secret check reads the thread as the fixture writes it.

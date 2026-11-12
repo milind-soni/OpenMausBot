@@ -89,7 +89,7 @@ Skin, Simple mode, font, chat width, send key and notification sounds live in th
 
 ## Out of scope
 
-Remote access, Cloud, Vault and backup writes. Adding or removing engine instances. Phone-side Undo for the applied card if phones do not already draw it (follow-up in mausbot-mobile).
+Remote access, Cloud, Vault and backup writes. Adding, signing in or removing sign-in accounts (Claude, ChatGPT, Antigravity).
 
 ## As built (2026-11-12)
 
@@ -105,15 +105,26 @@ Deviations from the design above, each chosen as the safer or simpler option:
   target is a setting with no further registration.
 - **`where` strings live in the registry.** `src/components/settings/settings-index.ts` imports lucide icons and the
   renderer's locale types, so it is not imported server-side.
-- **Window preferences count as reachable once any window has reported** (`PUT /api/window-prefs`), which every setter
-  does at start-up and on each change. There is no window-closed signal; a closed window leaves the last report in place
-  until the server restarts.
+- **Window preferences change only while an owner's app window holds its live stream open** (`/api/events?window=1`).
+  With none open, `set` refuses with "Open MausBot on this computer first". The window reports its values with
+  `PUT /api/window-prefs` so `read` can show them.
 - **The write budget counts accepted sets** (a safe or confirm write, or a secret card request). A set refused by
   validation, the tier or the turn does not spend it.
 - **A groups write leaves an emptied group in place** rather than deleting it; the group's own delete rules
   (`serverError.department.*`) stay with the sidebar.
-- **Stop does not close an open "Change X?" card**; it times out after 9 minutes like the outbound card.
+- **Stop closes a waiting "Change X?" card at once.** Stopping or revoking the turn, or the call going away, marks the
+  card unavailable and tells the bot nothing changed; a later tap changes nothing. Once the owner taps Change the answer
+  is settled, so a Stop that lands while the write runs still reports the change.
 - **The tool is in every profile** and is not a bridge hot tool: on the bridged list it is reached through `find_tool`.
 - **Writes use the Settings window's own routes** (`PUT /api/config`, `PUT /api/bots/order`, `POST /api/sidebar-sections`)
   through `server/routes/call-route.ts`, so provider reloads, broadcasts and refusals are the Settings window's. On a
   shared-membership server (a Team Cloud) `turnOwner` is null for every turn, so no write happens there.
+- **AI engines are one `confirm` setting, `engines`.** `get` lists each engine's id, name and address, never a key.
+  `set` takes `{"kind":"ollama"|"lmstudio","url"}`, `{"kind":"openai-compat","name","url","keyFrom"}`,
+  `{"kind":"bedrock",...}` or `{"kind":"remove","instanceId"}`, and always posts a card naming what changes. A key never
+  passes through the bot: any key-like field is refused, and `keyFrom` names a key the person saved through the secure
+  card, read by the server only when the owner taps Change (the card says which saved key the engine will receive).
+  Removal is refused before any card for sign-in accounts, built-in engines, and an engine a bot, its backups, its
+  threads or the new-bot default uses; the card warns when it is the only working engine. Writes go through
+  `POST /api/instances/*` and `DELETE /api/instances/:id`, so the Settings window's checks (including a running turn on
+  the engine) still apply.
