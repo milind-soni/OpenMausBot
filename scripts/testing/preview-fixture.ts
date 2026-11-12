@@ -61,9 +61,10 @@ export async function mountPreview(
 ): Promise<MountedPreview> {
   const { entry, route, title, extraRoutes = [], viewport = "width=device-width, initial-scale=1", logLevel, proxyHeaders } = options;
   const page = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="${escapeHtml(viewport)}"><title>${escapeHtml(title)}</title></head><body><div id="root"></div><script type="module" src="${escapeHtml(entry)}"></script></body></html>`;
-  const cacheDir = await mkdtemp(join(tmpdir(), "omb-preview-vite-"));
+  const cacheRoot = await mkdtemp(join(tmpdir(), "omb-preview-vite-"));
+  // The React plugin excludes node_modules from Babel transforms.
   const ui = await createServer({
-    root: REPO_ROOT, cacheDir,
+    root: REPO_ROOT, cacheDir: join(cacheRoot, "node_modules", ".vite"),
     ...(logLevel ? { logLevel } : {}),
     // A worktree's node_modules may be a link to another checkout's: its files (the fonts) are served from there.
     server: { host: "127.0.0.1", port: 0, fs: { allow: [REPO_ROOT, realpathSync(join(REPO_ROOT, "node_modules"))] }, proxy: {
@@ -91,10 +92,10 @@ export async function mountPreview(
         });
       },
     }],
-  }).catch(async (error: unknown) => { await removeTempDir(cacheDir); throw error; });
+  }).catch(async (error: unknown) => { await removeTempDir(cacheRoot); throw error; });
   const close = async () => {
     try { await ui.close(); }
-    finally { await removeTempDir(cacheDir); }
+    finally { await removeTempDir(cacheRoot); }
   };
   try {
     await ui.listen();

@@ -191,13 +191,9 @@ type BotRecord = {
     expect(await evaluate("Boolean(document.querySelector('[data-team-canvas]'))")).toBe(true);
     await expect.poll(() => evaluate("[...document.querySelectorAll('[data-team-canvas] [aria-label^=\"Desktop for \"]')].map(button => button.getAttribute('aria-label'))"))
       .toEqual(["Desktop for Ben"]);
-    // Opening settings resizes the canvas. Wait until the recentered card can receive a real pointer click.
-    await expect.poll(() => evaluate(`(() => {
-      const button = document.querySelector('[aria-label="Desktop for Ben"]');
-      const rect = button?.getBoundingClientRect();
-      return Boolean(rect && button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)));
-    })()`), { timeout: 10_000 }).toBe(true);
-    await click("Desktop for Ben");
+    // The settings pane shifts the canvas between the browser tool's coordinate lookup and click.
+    await evaluate(`document.querySelector('[aria-label="Desktop for Ben"]').focus(); true`);
+    await ui("press", "--keys", "Enter");
     await expect.poll(() => evaluate("document.querySelector('[data-bot-settings-section=access] > button')?.getAttribute('aria-expanded')")).toBe("true");
     await click("Close settings");
     await expect.poll(() => evaluate("document.querySelectorAll('[data-team-canvas] [aria-label^=\"Desktop for \"]').length")).toBe(0);

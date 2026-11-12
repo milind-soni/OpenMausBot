@@ -337,7 +337,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, versionEve
   const size = { width: 1280, height: 800 };
 
   // My Cloud's edge: the renderer from source, and its API on the real Cloud-mode server with the edge's own headers.
-  const cloudEdge = await vite(join(fx.root, "vite-cloud"), cloudPort, "localhost", (server) => {
+  const cloudEdge = await vite(join(fx.root, "node_modules", ".vite-cloud"), cloudPort, "localhost", (server) => {
     server.middlewares.use((req, res, next) => {
       if (network.down || network.nameMissing) { req.socket.destroy(); return; }
       if ((req.url ?? "").startsWith("/api/") || (req.url ?? "").startsWith("/.well-known/")) cloudRequests.push({ path: (req.url ?? "").split("?")[0]!, at: Date.now() });
@@ -354,7 +354,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, versionEve
   }])));
   cleanup.push(() => cloudEdge.close());
   // The team's Cloud: the same server, its own origin (so its own cookie, its own page).
-  const teamEdge = await vite(join(fx.root, "vite-team"), teamPort, "::1", (server) => {
+  const teamEdge = await vite(join(fx.root, "node_modules", ".vite-team"), teamPort, "::1", (server) => {
     server.middlewares.use((req, _res, next) => { if (network.teamDown) { req.socket.destroy(); return; } next(); });
   }, Object.fromEntries(PROXIED.map((path) => [path, {
     target: fx.cloudBase, ws: true, headers: fx.edge,
@@ -368,7 +368,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, versionEve
   cleanup.push(() => teamEdge.close());
 
   // This computer's page: the same renderer, and its real server, as the desktop's owner, decides which page it serves.
-  const localEdge = await vite(join(fx.root, "vite-local"), localPort, "127.0.0.1", (server) => {
+  const localEdge = await vite(join(fx.root, "node_modules", ".vite-local"), localPort, "127.0.0.1", (server) => {
     server.middlewares.use(async (req, res, next) => {
       const path = (req.url ?? "/").split("?")[0]!;
       const page = req.method === "GET" && !path.startsWith("/api/") && !path.startsWith("/@") && !path.startsWith("/src/") && !path.startsWith("/node_modules/")
