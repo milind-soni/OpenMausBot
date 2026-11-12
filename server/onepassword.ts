@@ -19,14 +19,15 @@ export interface OnePasswordItemContent { fields: SdkField[]; notes?: string }
 export interface OnePasswordClient {
   vaults(): Promise<Array<{ id: string; title: string }>>;
   items(vaultId: string): Promise<Array<{ id: string; title: string; category: string; urls: string[] }>>;
-  contents(vaultId: string, itemIds: string[]): Promise<Map<string, OnePasswordItemContent>>;
+  /** null for an item 1Password failed to read just now (an internal error), never for one that is gone. */
+  contents(vaultId: string, itemIds: string[]): Promise<Map<string, OnePasswordItemContent | null>>;
 }
 
 interface SdkClient {
   vaults: { list(): Promise<Array<{ id: string; title: string }>> };
   items: {
     list(vaultId: string): Promise<Array<{ id: string; title: string; category: string; websites?: Array<{ url: string }> }>>;
-    getAll(vaultId: string, itemIds: string[]): Promise<{ individualResponses: Array<{ content?: { id: string; fields: SdkField[]; notes?: string }; error?: unknown }> }>;
+    getAll(vaultId: string, itemIds: string[]): Promise<{ individualResponses: Array<{ content?: { id: string; fields: SdkField[]; notes?: string }; error?: { type: string } }> }>;
   };
 }
 export interface OnePasswordSdk {
@@ -108,10 +109,12 @@ export async function sdkOnePasswordClient(sdk: OnePasswordSdk, token: string, v
     items: async (vaultId) => (await client.items.list(vaultId))
       .map((item) => ({ id: item.id, title: item.title, category: item.category, urls: (item.websites ?? []).map((site) => site.url) })),
     contents: async (vaultId, itemIds) => {
-      const found = new Map<string, OnePasswordItemContent>();
+      const found = new Map<string, OnePasswordItemContent | null>();
       if (!itemIds.length) return found;
       const { individualResponses } = await client.items.getAll(vaultId, itemIds);
       for (const { content } of individualResponses) if (content) found.set(content.id, { fields: content.fields, ...(content.notes ? { notes: content.notes } : {}) });
+      // An error answer names no item, so every item the batch did not return may be the one 1Password could not read.
+      if (individualResponses.some(({ error }) => error?.type === "internal")) for (const id of itemIds) if (!found.has(id)) found.set(id, null);
       return found;
     },
   };
@@ -187,6 +190,8 @@ export class OnePasswordLogins implements VaultProvider {
   private client: { token: string; client: OnePasswordClient } | null = null;
   private entries: Entry[] = [];
   private secrets: SecretEntry[] = [];
+  /** `<vault id>:<item id>` of items 1Password failed to read at the last load. */
+  private unreadable = new Set<string>();
   private vaults: Array<Omit<OnePasswordVault, "bots">> = [];
   private itemCount = 0;
   private refreshedAt: number | null = null;
@@ -228,7 +233,7 @@ export class OnePasswordLogins implements VaultProvider {
     // One more look, unless the stale check just took it.
     if (this.refreshedAt === before) await this.refresh();
     if (!this.token()) return false;
-    return loaded() ? reads() : null;
+    return loaded() && !this.unreadable.has(item) ? reads() : null;
   }
 
   private connected(): OnePasswordStatus {
@@ -266,6 +271,7 @@ export class OnePasswordLogins implements VaultProvider {
       const vaults = await client.vaults();
       const entries: Entry[] = [];
       const secrets: SecretEntry[] = [];
+      const unreadable = new Set<string>();
       const counted: Array<Omit<OnePasswordVault, "bots">> = [];
       for (const vault of vaults) {
         let items = 0;
@@ -279,6 +285,7 @@ export class OnePasswordLogins implements VaultProvider {
           const contents = await client.contents(vault.id, batch.map((item) => item.id));
           for (const item of batch) {
             const content = contents.get(item.id);
+            if (content === null) unreadable.add(onePasswordItemKey(vault.id, item.id));
             if (!content) continue;
             const fields = secretValues(item.category, content);
             if (fields.has("")) secrets.push({ id: `${ID_PREFIX}${vault.id}:${item.id}`, vaultId: vault.id, itemId: item.id, category: item.category, name: item.title.trim() || item.category,
@@ -297,6 +304,7 @@ export class OnePasswordLogins implements VaultProvider {
       }
       this.entries = entries.sort((a, b) => a.site.localeCompare(b.site) || a.username.localeCompare(b.username));
       this.secrets = secrets.sort((a, b) => a.name.localeCompare(b.name));
+      this.unreadable = unreadable;
       this.vaults = counted.sort((a, b) => a.title.localeCompare(b.title));
       this.itemCount = counted.reduce((sum, vault) => sum + vault.items, 0);
       this.refreshedAt = this.now();
@@ -314,6 +322,7 @@ export class OnePasswordLogins implements VaultProvider {
     this.client = null;
     this.entries = [];
     this.secrets = [];
+    this.unreadable.clear();
     this.vaults = [];
     this.itemCount = 0;
     this.refreshedAt = null;
@@ -354,7 +363,7 @@ export class OnePasswordLogins implements VaultProvider {
     if (!token) return undefined;
     try {
       const client = await this.clientFor(token);
-      return (await client.contents(vaultId, [itemId])).get(itemId);
+      return (await client.contents(vaultId, [itemId])).get(itemId) ?? undefined;
     } catch (error) {
       this.client = null;
       throw new Error(onePasswordProblem(error));

@@ -155,6 +155,25 @@ describe("1Password logins", () => {
     expect(JSON.stringify(source.items())).not.toContain(VAULT_PASSWORD);
   });
 
+  it("says 1Password could not be read, not that an item is gone, when 1Password fails to read that item", async () => {
+    const answers: Record<string, Array<{ error: { type: string; message?: string } }>> = {
+      internal: [{ error: { type: "internal", message: "fake read failure" } }],
+      itemNotFound: [{ error: { type: "itemNotFound" } }],
+    };
+    for (const [kind, expected] of [["internal", null], ["itemNotFound", false]] as const) {
+      const sdk = { createClient: async () => ({
+        vaults: { list: async () => [{ id: "v1", title: "Shared" }] },
+        items: {
+          list: async () => [{ id: "i1", title: "Example", category: "Login", websites: [{ url: "https://accounts.example.com" }] }],
+          getAll: async () => ({ individualResponses: answers[kind] }),
+        },
+      }) };
+      const source = new OnePasswordLogins({ token: () => TOKEN, connect: (value) => sdkOnePasswordClient(sdk, value, "9.9.9") });
+      expect(await source.readsItem("v1:i1"), kind).toBe(expected);
+      expect(await source.readsItem("v1:i2"), kind).toBe(false);
+    }
+  });
+
   it("is filled through the same path as a saved login: same origin rule, same TOTP, nothing back to the bot", async () => {
     const { source } = setup();
     await source.refresh();
