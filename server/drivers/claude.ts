@@ -60,7 +60,7 @@ import type { KeepWarmContract } from "./claude-keepwarm.ts"; import { claudeFor
 import { BACKGROUND_CALL_TIMEOUT_MS, backgroundCallArgs, spawnBackgroundCall } from "./claude-background.ts"; import { withEndpointFolder } from "./claude-endpoint-folder.ts";
 import { permissionLaunchCwd, shellRequest } from "./permission-command.ts"; import { readToolPaths } from "../own-file-reads.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
-import { extractMcpImages } from "../mcp-tool-images.ts"; import { claudeToolDraft } from "./tool-progress.ts";
+import { extractMcpImages } from "../mcp-tool-images.ts"; import { claudeToolDraft } from "./tool-progress.ts"; import { redactSecretsInText } from "../../shared/redact.ts";
 import {
   ASK_USER_QUESTION_TOOL,
   ASK_USER_TOOL,
@@ -843,6 +843,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       sessionId: string | null;
       /** `init` arrived; before it the CLI took nothing, so a resume retry is safe */
       sawInit: boolean;
+      /** why the CLI refused `--resume` with an error result instead of exiting, for the log line */
+      resumeRefusal?: string;
       /** the mode `init` reports: the CLI accepts `--permission-mode auto` for any model but runs
        * "default" silently where auto is unavailable (Haiku 4.5, Sonnet 4.5, an org that disabled it) */
       nativePermissionMode: string | null;
@@ -890,6 +892,22 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       void killCliTree(session.child).then((stopped) => {
         if (stopped) void session.finishClose?.();
       });
+    };
+    /** Forgets a CLI that died mid-turn and removes its files, so the retry starts a clean session. */
+    const discardSession = (threadId: string, session: Session) => {
+      session.elicit.close();
+      if (session.mcpConfigPath) {
+        try {
+          rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
+        } catch {}
+        session.mcpConfigPath = null;
+      }
+      if (session.systemPromptPath) {
+        removePrivateTempDir(session.systemPromptPath);
+        session.systemPromptPath = null;
+      }
+      sessions.delete(threadId);
+      session.turn = null;
     };
     const closeSession = (threadId: string, why: string) => {
       const s = sessions.get(threadId);
@@ -1589,6 +1607,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             // After a long idle 2.1.295 answers a --resume it no longer has with an error result ("No
             // conversation found with session ID …") and stays up; end it so its close rebuilds once.
             if (o.is_error === true && sessionId && !session.sawInit && session.turn && !session.turn.settled) {
+              session.resumeRefusal = claudeResultError(o);
               closeSession(threadId, "resume refused");
               break;
             }
@@ -1728,19 +1747,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             session.broker = undefined;
             failedBroker?.pause();
             failedBroker?.close();
-            session.elicit.close();
-            if (session.mcpConfigPath) {
-              try {
-                rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
-              } catch {}
-              session.mcpConfigPath = null;
-            }
-            if (session.systemPromptPath) {
-              removePrivateTempDir(session.systemPromptPath);
-              session.systemPromptPath = null;
-            }
-            sessions.delete(threadId);
-            session.turn = null;
+            discardSession(threadId, session);
             let delayMs = 0;
             if (!endedBeforeTurn) {
               retry.attempt++;
@@ -1801,6 +1808,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             producedOutput: session.turn.sawStreamDelta,
           });
           if (mayReplay(resumeFailure) && !retry.cancelled) {
+            // Without this line a refused --resume looks like an ordinary new session in the logs.
+            console.error(`claude (${instanceId}): could not resume session ${sessionId} for thread ${threadId}, starting a new one: ${redactSecretsInText(session.resumeRefusal ?? message)}`);
             const recovery = recoveryPromptFor({
               recoveryText: turn.recoveryText,
               currentText: turn.text,
@@ -1808,19 +1817,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             });
             session.broker?.close();
             session.broker = undefined;
-            session.elicit.close();
-            if (session.mcpConfigPath) {
-              try {
-                rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
-              } catch {}
-              session.mcpConfigPath = null;
-            }
-            if (session.systemPromptPath) {
-              removePrivateTempDir(session.systemPromptPath);
-              session.systemPromptPath = null;
-            }
-            sessions.delete(threadId);
-            session.turn = null;
+            discardSession(threadId, session);
             retry.rebuilt = recovery.replayed;
             retryState.set(threadId, retry);
             active.set(threadId, { stop: () => { retry.cancelled = true; retryAbort.abort(); }, turnId });
