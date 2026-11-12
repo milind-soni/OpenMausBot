@@ -2024,6 +2024,37 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       resetPathCacheForTests();
     }
   });
+  it.skipIf(process.platform === "win32")("keeps the new copy's flags when the old copy's late --version answer starts a help read", async () => {
+    // snapshot() asks 2.1.321 for --version, PATH finds 2.1.197 (no --autocompact), and 2.1.321's late answer starts its own --help read;
+    // the next turn re-checks 2.1.197, and that old help read finishing afterwards must not hand 2.1.321's flags to 2.1.197.
+    const refused = join(scratch, "late-version-autocompact.jsonl"), slow = join(scratch, "newer-late-slow"), versionAsked = join(scratch, "newer-late-version"), helpAsked = join(scratch, "newer-late-help");
+    const newer = join(scratch, "newer-late"), older = join(scratch, "older-late");
+    mkdirSync(newer); mkdirSync(older);
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\nif [ -e "${slow}" ]; then case "$1" in --version) : > "${versionAsked}"; sleep 1;; --help) : > "${helpAsked}"; sleep 3;; esac; fi\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(older, "claude"), `#!/bin/sh\nFAKE_CLAUDE_VERSION=2.1.197 FAKE_CLAUDE_AUTOCOMPACT=0 FAKE_CLAUDE_REJECT_AUTOCOMPACT="${refused}" exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, {}, { cli: "claude" });
+      await instance.snapshot();
+      writeFileSync(slow, "");
+      const snapshot = instance.snapshot();
+      await vi.waitFor(() => expect(existsSync(versionAsked)).toBe(true), { timeout: 5000 });
+      registerPathDir(older);
+      const turn = async (threadId: string) => {
+        await instance.adapter.sendTurn({ threadId, text: "hi" });
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId)).toMatchObject({ ok: true });
+      };
+      await turn("t-late-version-1");
+      await vi.waitFor(() => expect(existsSync(helpAsked)).toBe(true), { timeout: 5000 }); // 2.1.321's late answer is in and its help read started
+      await turn("t-late-version-2");
+      await snapshot; // the old copy's help read has finished by now
+      await turn("t-late-version-3");
+      expect(existsSync(refused)).toBe(false);
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
   it.skipIf(process.platform === "win32")("keeps the new copy's flags when the old copy's slower --help read finishes last", async () => {
     // snapshot() is still reading 2.1.321's help when PATH finds 2.1.197 (no --autocompact); that old read must not restore 2.1.321's flags.
     const refused = join(scratch, "stale-help-autocompact.jsonl"), helpStarted = join(scratch, "newer-help-started");

@@ -809,7 +809,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (reprobed && at === cliProbedAt) { await helpRead?.done; return; } // a help read for this copy may still be running
       const probe = await readCliVersion(env);
       if ("version" in probe) [cliVersion, cliVersionChecked, cliProbedAt] = [parseClaudeCliVersion(probe.version), true, at]; else if (reprobed) [cliVersion, cliVersionChecked, cliHasAutocompact, cliHelpVersion, helpRead] = [null, false, null, null, null]; // another copy that could not be checked: none of the old copy's flags (nor a running read of its help), check again next turn
-      if (seen && "version" in probe && probe.version !== cliHelpVersion) await readCliHelp(probe.version, env);
+      if (seen && "version" in probe && (probe.version !== cliHelpVersion || helpRead)) await readCliHelp(probe.version, env); // a running read of another copy's help (a late answer started it) is replaced
     };
     let helpRead: { version: string; done: Promise<void> } | null = null;
     const readCliHelp = (version: string, env: NodeJS.ProcessEnv): Promise<void> => {
@@ -1913,7 +1913,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const { version } = probe;
       [cliVersion, cliVersionChecked, cliProbedAt] = [parseClaudeCliVersion(version), true, findCliCandidates(config.cli, env.PATH ?? "")[0]];
       if (!config.managed && !config.endpointModels) models = withCliVersionGate(models, "claude", cliVersion);
-      if (version !== cliHelpVersion) await readCliHelp(version, env);
+      if (version !== cliHelpVersion || helpRead) await readCliHelp(version, env);
       const update = claudeCliUpdate(version, config.cli);
       const warning = claudeInheritWarning(env);
       if (config.requireApiKey && !input.environment.ANTHROPIC_API_KEY) return { state: "unavailable", version, reason: NO_ANTHROPIC_KEY };
