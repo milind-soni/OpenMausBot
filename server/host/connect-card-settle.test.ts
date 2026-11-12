@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConnectorCardData } from "../../shared/connector-card.ts";
 import type { WireMessage as Message } from "../../shared/wire.ts";
-import { settleOpenConnectCards } from "./connect-card-settle.ts";
+import { createConnectCardSettle, settleOpenConnectCards } from "./connect-card-settle.ts";
 
 const NOW = Date.parse("2026-11-12T10:00:00Z");
 const card = (id: string, connector: Partial<ConnectorCardData>): Message => ({
@@ -55,5 +55,15 @@ describe("reconnecting an app settles older open connect cards for it", () => {
     const h = harness({ t: [card("one", { resumeKey: "k" }), card("two", { resumeKey: "k", status: "failed", error: "Connection expired" })] });
     expect(settleOpenConnectCards(h.deps, "instagram")).toBe(2);
     expect(h.resumed).toEqual([["t", "k"]]);
+  });
+
+  it("settles from what Settings reads once an app or an account is active, and nothing for one still pending", () => {
+    const h = harness({ t: [card("plain", {}), card("work", { alias: "work" }), card("gmail", { slug: "gmail", label: "Gmail" }), card("drive", { slug: "googledrive", label: "Drive" })] });
+    createConnectCardSettle(h.deps).services({
+      instagram: { connected: true, accounts: [{ alias: "work", status: "ACTIVE" }] },
+      gmail: { connected: false, accounts: [{ status: "INITIATED" }] },
+      googledrive: undefined,
+    });
+    expect(["plain", "work", "gmail", "drive"].map((id) => h.status("t", id))).toEqual(["connected", "connected", "required", "required"]);
   });
 });

@@ -32,3 +32,18 @@ export function settleOpenConnectCards(deps: ConnectCardSettleDeps, slug: string
   }
   return settled;
 }
+
+type ServiceStatus = { connected?: boolean; accounts?: ReadonlyArray<{ alias?: string; status: string }> } | undefined;
+
+/** The host's two moments an account connects: a connect card's own check, and Settings asking about apps it is connecting. */
+export function createConnectCardSettle(deps: ConnectCardSettleDeps) {
+  return {
+    card: (slug: string, alias?: string) => settleOpenConnectCards(deps, slug, alias),
+    services(services: Record<string, ServiceStatus>) {
+      for (const [slug, service] of Object.entries(services)) {
+        if (service?.connected) settleOpenConnectCards(deps, slug);
+        for (const account of service?.accounts ?? []) if (account.alias && /^active$/i.test(account.status)) settleOpenConnectCards(deps, slug, account.alias);
+      }
+    },
+  };
+}
