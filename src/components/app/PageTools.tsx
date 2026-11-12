@@ -129,7 +129,7 @@ export function usePageSave(threadId: string, messageId: string, title: string) 
 /** Point mode on whichever frame shows the page. Security: a pick counts only from that frame's own window and only
  * while the person has Point on, so a page cannot fill the composer by itself. Point stays on after a pick so several
  * parts can be marked in one pass; once it ends after any pick, `picked` runs and the composer takes focus. */
-export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefined; threadId: string; appId: string; rev: number; title: string; picked(): void }) {
+export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefined; view?: string; threadId: string; appId: string; rev: number; title: string; picked(): void }) {
   const [pointing, setPointing] = useState(false);
   const on = useRef(false);
   on.current = pointing;
@@ -152,7 +152,6 @@ export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefin
       if (!heard || !on.current) return;
       if (heard.kind === "ended") return set(false);
       const { threadId, appId, rev, title } = latest.current;
-      // Past the limit the pick is refused and Point ends, so the person sees it stop instead of losing an earlier part.
       if (addPointedChip(threadId, { appId, rev, title, ...heard.part })) pickedAny.current = true;
       else set(false);
     };
@@ -171,8 +170,13 @@ export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefin
   const chips = usePointedChips(args.threadId);
   const marks = JSON.stringify(chips.map((chip) => (chip.appId === args.appId && chip.rev === args.rev ? chip.selector : "")));
   useEffect(() => {
-    latest.current.frame()?.contentWindow?.postMessage(marksMessage(JSON.parse(marks) as string[]), "*");
-  }, [marks, pointing]);
+    const iframe = latest.current.frame();
+    const send = () => iframe?.contentWindow?.postMessage(marksMessage(JSON.parse(marks) as string[]), "*");
+    send();
+    // A new frame (full screen, a reload) gets them again once its page has loaded.
+    iframe?.addEventListener("load", send);
+    return () => iframe?.removeEventListener("load", send);
+  }, [marks, pointing, args.view]);
   return { pointing, toggle: () => set(!on.current), stop: () => { if (on.current) set(false); } };
 }
 

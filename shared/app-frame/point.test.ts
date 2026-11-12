@@ -113,6 +113,21 @@ describe("the page's point script", () => {
     expect(outlines()).toEqual([]);
   });
 
+  it("hides an outline whose part has no box, and moves it when the page moves the part", async () => {
+    const { say } = boot();
+    const target = document.querySelector("footer > a")!;
+    let rect = { left: 0, top: 0, width: 0, height: 0 };
+    target.getBoundingClientRect = () => ({ ...rect, right: rect.left + rect.width, bottom: rect.top + rect.height, x: rect.left, y: rect.top, toJSON: () => rect }) as DOMRect;
+    say(marksMessage(["footer > a"]));
+    const mark = document.querySelector<HTMLElement>("[data-mausbot-point=mark]")!;
+    expect(mark.style.display).toBe("none");
+    rect = { left: 10, top: 40, width: 50, height: 20 };
+    document.querySelector("main")!.insertAdjacentHTML("afterbegin", "<p>opened</p>");
+    await new Promise((done) => setTimeout(done, 0));
+    await new Promise((done) => requestAnimationFrame(() => done(null)));
+    expect([mark.style.display, mark.style.top, mark.style.height]).toEqual(["block", "40px", "20px"]);
+  });
+
   it("keeps a space between a badge and the words after it, so the chip label reads as the page does", () => {
     const { say } = boot();
     document.body.innerHTML = `<div class="card"><span style="display:inline-block">Cloud</span>Restore <b>fin</b>ishes<script>ignored()</script>

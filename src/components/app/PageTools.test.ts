@@ -137,11 +137,13 @@ describe("a bot's page in the chat", () => {
     expect(chips()).toEqual([{ appId: "a1", rev: 0, title: "Pricing", tag: "button", role: "button", text: "Choose Pro",
       selector: "main > section:nth-of-type(2) > button", html: "<button>Choose Pro</button>" }]);
     expect(posted).toHaveBeenCalledWith(marksMessage(["main > section:nth-of-type(2) > button"]), "*");
-    // Point stays on, so the next part is one click away.
     expect(button("Point", card()).getAttribute("aria-pressed")).toBe("true");
     await fromFrame({ ...PICK, params: { ...PICK.params, text: "Terms", selector: "footer > a" } }, inlineFrame().contentWindow);
     expect(chips()).toHaveLength(2);
     expect(posted).toHaveBeenLastCalledWith(marksMessage(["main > section:nth-of-type(2) > button", "footer > a"]), "*");
+    posted.mockClear();
+    await act(async () => { inlineFrame().dispatchEvent(new Event("load")); });
+    expect(posted).toHaveBeenCalledWith(marksMessage(["main > section:nth-of-type(2) > button", "footer > a"]), "*");
     await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
     expect(button("Point", card()).getAttribute("aria-pressed")).toBe("false");
     expect(posted).toHaveBeenCalledWith({ jsonrpc: "2.0", method: "mausbot/point", params: { on: false } }, "*");

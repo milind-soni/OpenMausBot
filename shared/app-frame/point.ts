@@ -207,6 +207,7 @@ export const APP_POINT_SOURCE = `(function () {
   var drawMarks = function () {
     marks.forEach(function (mark) {
       var rect = mark.element.isConnected ? mark.element.getBoundingClientRect() : null;
+      if (rect && (rect.width <= 0 || rect.height <= 0)) rect = null;
       mark.box.style.display = rect ? "block" : "none";
       if (!rect) return;
       mark.box.style.left = rect.left + "px";
@@ -238,8 +239,18 @@ export const APP_POINT_SOURCE = `(function () {
     });
     drawMarks();
   };
-  window.addEventListener("scroll", function () { if (marks.length) drawMarks(); }, true);
-  window.addEventListener("resize", function () { if (marks.length) drawMarks(); });
+  var redrawing = false;
+  var redraw = function () {
+    if (!marks.length || redrawing) return;
+    redrawing = true;
+    requestAnimationFrame(function () { redrawing = false; drawMarks(); });
+  };
+  window.addEventListener("scroll", redraw, true);
+  window.addEventListener("resize", redraw);
+  // A page can move a marked part without a scroll or resize (a section opens). The outlines sit outside body.
+  if (typeof MutationObserver === "function" && document.body) {
+    new MutationObserver(redraw).observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+  }
   var post = function (method, params) { parent.postMessage({ jsonrpc: "2.0", method: method, params: params }, "*"); };
   var set = function (next) {
     on = next;
