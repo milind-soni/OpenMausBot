@@ -393,7 +393,7 @@ export interface SendInput { to: string[]; cc?: string[]; bcc?: string[]; subjec
 
 /** Sends as the mailbox's own address and files a copy in its Sent folder when it has one. */
 export async function sendMessage(account: EmailAccount, guard: EmailGuard, input: SendInput): Promise<{ messageId: string; accepted: string[]; rejected: string[]; filed: boolean }> {
-  checkSendBudget(input);
+  checkSendBudget({ ...input, inReplyTo: undefined, references: undefined });
   const attachments = inlineAttachments(input.inline_images);
   const server = account.smtp;
   if (!server) throw new EmailError("refused", `No outgoing server is set for ${account.address}.`);

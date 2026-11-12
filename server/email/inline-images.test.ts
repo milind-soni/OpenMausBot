@@ -15,14 +15,14 @@ import { inlineAttachments, openGuard, sendMessage } from "./client.ts";
 import type { EmailAccount } from "./store.ts";
 import { emailToolCallProblem } from "./tools.ts";
 
-const fake = vi.hoisted(() => ({ raw: Buffer.alloc(0) as Buffer, filed: Buffer.alloc(0) as Buffer, envelope: {} as any, fail: false, smtpCalls: 0, imapCalls: 0 }));
+const fake = vi.hoisted(() => ({ raw: Buffer.alloc(0) as Buffer, filed: Buffer.alloc(0) as Buffer, envelope: {} as any, fail: false, smtpCalls: 0, imapCalls: 0, readCalls: 0 }));
 vi.mock("nodemailer", () => ({ createTransport: () => { fake.smtpCalls++; return ({ sendMail: async ({ raw, envelope }: any) => { fake.raw = raw; fake.envelope = envelope; return { accepted: envelope.to }; }, close() {} }); } }));
 vi.mock("imapflow", () => ({ ImapFlow: class { constructor() { fake.imapCalls++; } on() {} async connect() {} async logout() {} async list() { return [{ path: "Sent", specialUse: "\\Sent" }]; } async append(_path: string, raw: Buffer) { if (fake.fail) throw Error("offline"); fake.filed = Buffer.from(raw); } } }));
 const png = largePng();
 const image = { cid: "logo", data_base64: png.toString("base64") };
 const account = { address: "me@example.test", username: "fake", password: "fake", smtp: { host: "fake.invalid", port: 465, secure: true }, imap: { host: "fake.invalid", port: 993, secure: true } } as EmailAccount;
 const input = { to: ["to@example.test"], cc: ["cc@example.test"], bcc: ["bcc@example.test"], subject: "test", text: "plain" };
-beforeEach(() => { fake.fail = false; fake.smtpCalls = 0; fake.imapCalls = 0; });
+beforeEach(() => { fake.fail = false; fake.smtpCalls = 0; fake.imapCalls = 0; fake.readCalls = 0; });
 it("composes alternatives, original PNG CID bytes, recipients and reply headers; files the identical raw", async () => {
   const result = await sendMessage(account, openGuard, { ...input, html: '<p>rich<img src="cid:logo"></p>', inline_images: [image], inReplyTo: "<original@example.test>" });
   const parsed = await simpleParser(fake.raw, { skipImageLinks: true });
@@ -51,12 +51,12 @@ it("rejects unknown inputs, URLs, paths, malformed PNG, duplicate CIDs and size/
   expect(() => inlineAttachments([{ ...image, data_base64: "file:///tmp/a" }])).toThrow();
 });
 
-async function withHost(run: (call: (args: Record<string, unknown>) => Promise<EmailToolResult>) => Promise<void>) {
+async function withHost(run: (call: (args: Record<string, unknown>) => Promise<EmailToolResult>) => Promise<void>, replyMessageId = "<original@example.test>") {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-inline-host-"));
   try {
     const service = createEmailService({ dataDir, publicOnly: false, guard: openGuard, discover: { fetchText: async () => null, mx: async () => [], srv: async () => [], cname: async () => [], reverse: async () => [] }, test: { mailbox: (async () => ({ messages: 1 })) as never, sending: (async () => {}) as never } });
     await service.connect({ address: "me@shop.example", password: "fake-password" });
-    const host = createEmailHost({ service, dataDir, bot: () => ({ id: "b1", name: "Test" }), inRoom: () => false, appendMessage() {}, markOutside() {}, run: { readMessage: (async () => ({ messageId: "<original@example.test>" })) as never } });
+    const host = createEmailHost({ service, dataDir, bot: () => ({ id: "b1", name: "Test" }), inRoom: () => false, appendMessage() {}, markOutside() {}, run: { readMessage: (async () => { fake.readCalls++; return { messageId: replyMessageId }; }) as never } });
     await run((args) => host.handle({ method: "tools/call", params: { name: "EMAIL_SEND_MESSAGE", arguments: args } }, { botId: "b1", threadId: "t1" }, () => {}) as Promise<EmailToolResult>);
   } finally { rmSync(dataDir, { recursive: true, force: true }); }
 }
@@ -114,7 +114,8 @@ it("passes the maximum declared aggregate through harnessMcpRequest and rejects 
   const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(extra));
   const exactPng = Buffer.concat([small.subarray(0, -12), size, extra, crc, small.subarray(-12)]);
   expect(exactPng.length * 4).toBe(MAX_INLINE_BYTES);
-  const args = { ...input, subject: "s".repeat(500), inline_images: Array.from({ length: 4 }, (_, n) => ({ cid: `image-${n}`, data_base64: exactPng.toString("base64") })), text: "汉😀\"\\\n" + "t".repeat(199990), html: "" };
+  const replyMessageId = `<${"original".repeat(60)}@example.test>`;
+  const args = { ...input, reply_to_uid: 1, subject: "s".repeat(500), inline_images: Array.from({ length: 4 }, (_, n) => ({ cid: `image-${n}`, data_base64: exactPng.toString("base64") })), text: "汉😀\"\\\n" + "t".repeat(199990), html: "" };
   const remaining = MAX_SEND_JSON_BYTES - Buffer.byteLength(JSON.stringify(args));
   args.html = "\n".repeat(Math.floor(remaining / 2)) + (remaining % 2 ? "x" : "");
   expect(Buffer.byteLength(JSON.stringify(args))).toBe(MAX_SEND_JSON_BYTES);
@@ -135,14 +136,23 @@ it("passes the maximum declared aggregate through harnessMcpRequest and rejects 
       const valid = await harnessMcpRequest(frame(args), connection) as { result: EmailToolResult };
       expect(valid.result.isError, JSON.stringify(valid.result)).toBeUndefined();
       expect(fake.smtpCalls).toBe(1); expect(fake.imapCalls).toBe(1);
-      fake.smtpCalls = 0; fake.imapCalls = 0;
+      expect(fake.readCalls).toBe(1);
+      const parsed = await simpleParser(fake.raw, { skipImageLinks: true });
+      expect(parsed.inReplyTo).toBe(replyMessageId);
+      expect(parsed.references).toBe(replyMessageId);
+      expect(parsed.html).toBe(args.html);
+      expect(fake.filed).toEqual(fake.raw);
+      expect(JSON.parse(valid.result.content[0]!.text).filed).toBe(true);
+      fake.smtpCalls = 0; fake.imapCalls = 0; fake.readCalls = 0;
       const over = { ...args, html: args.html + "x" };
       expect(await harnessMcpRequest(frame(over), connection)).toMatchObject({ result: { isError: true } });
+      expect(fake.readCalls).toBe(0);
       expect(received).toBe(2);
       expect(fake.smtpCalls).toBe(0); expect(fake.imapCalls).toBe(0);
       expect(await harnessMcpRequest(frame({ ...args, html: "\n".repeat(200000), text: "汉".repeat(200000) }), connection)).toMatchObject({ result: { isError: true } });
+      expect(fake.readCalls).toBe(0);
       expect(received).toBe(2);
       expect(fake.smtpCalls).toBe(0); expect(fake.imapCalls).toBe(0);
     } finally { vi.unstubAllGlobals(); }
-  });
+  }, replyMessageId);
 });
