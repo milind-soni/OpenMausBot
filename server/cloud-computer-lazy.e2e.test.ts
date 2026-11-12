@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONTROL_WAITED } from "./control-client.ts";
+import { CLOUD_COMPUTER_REPLACED } from "../shared/cloud-computer-recovery.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { openSse, type SseRecorder } from "./testing/sse.ts";
@@ -39,6 +40,8 @@ describe("a cloud computer starts only when the bot uses it", () => {
    * hours are used up. */
   const refuse = { creates: false };
   const requests: Request[] = [];
+  /** Computers deleted at the relay: no longer listed, and a 404 to a direct read. */
+  const gone = new Set<string>();
   /** Files the bots wrote on their computers, by path. */
   const written = new Map<string, string>();
   /** Boat ids in Boat's own alphabet, one per computer created. */
@@ -149,7 +152,7 @@ describe("a cloud computer starts only when the bot uses it", () => {
           return send(401, { ok: false, code: "unauthorized", message: "Unauthorized" });
         }
         const body = raw ? JSON.parse(raw) : {};
-        if (path === "/boxes" && req.method === "GET") return send(200, { ok: true, boxes: rows, pageInfo: { nextCursor: null } });
+        if (path === "/boxes" && req.method === "GET") return send(200, { ok: true, boxes: rows.filter(row => !gone.has(row.id)), pageInfo: { nextCursor: null } });
         if (path === "/boxes" && req.method === "POST") {
           if (refuse.creates) return send(402, { ok: false, code: "hours_used", message: "This month's 50 cloud computer hours are used up." });
           const row = { id: boxId(rows.length), state: "provisioning" };
@@ -157,8 +160,13 @@ describe("a cloud computer starts only when the bot uses it", () => {
           return send(201, { ok: true, box: row });
         }
         const [, id = "", verb = ""] = /^\/boxes\/([^/]+)(?:\/(.+))?$/.exec(path) ?? [];
-        const row = rows.find(candidate => candidate.id === id);
+        const row = rows.find(candidate => candidate.id === id && !gone.has(candidate.id));
         if (!row) return send(404, { ok: false, code: "not_found", message: "Not found" });
+        if (!verb && req.method === "DELETE") {
+          if (req.headers["x-ascii-confirm-delete"] !== row.id) return send(409, { ok: false, code: "confirmation_required" });
+          gone.add(row.id);
+          return send(202, { ok: true, operation: { id: `bdop_${"0".repeat(24)}${row.id.slice(3)}`, kind: "box", targetId: row.id, status: "completed" } });
+        }
         if (!verb && req.method === "PATCH") {
           row.name = body.name;
           return send(200, { ok: true, box: row });
@@ -322,6 +330,40 @@ describe("a cloud computer starts only when the bot uses it", () => {
     expect(creates()).toBe(1);
     expect(starts(bot.id)).toEqual([{ state: "provisioning", place: "cloud" }, { state: "waking", place: "cloud" }]);
     await finish(bot.id);
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
+  }, 60_000);
+
+  it("a computer whose machine is gone is replaced on its next use, and the bot and the person are told once", async () => {
+    const bot = await cloudBot("Stranded");
+    // Made from the panel, so no command has answered on it lately: one that has is kept for a few minutes.
+    await apiOk("POST", `/api/bots/${bot.id}/computer/provision`);
+    const dead = rows.at(-1)!;
+    expect(dead.name).toBeTruthy();
+    // What Boat reports once the host under a computer is lost.
+    dead.state = "error";
+    const before = requests.length, made = creates();
+    const status = await apiOk("GET", `/api/bots/${bot.id}/computer?threadId=${bot.threadId}`);
+    expect(status.box).toBeNull();
+
+    const next = await startTurn(bot.id, "Look again");
+    let replaced = await computerCall(next, "tools/call", { name: "screenshot", arguments: {} });
+    for (let tries = 0; replaced.body.result.content?.[0]?.text === CONTROL_WAITED && tries < 3; tries++) {
+      replaced = await computerCall(next, "tools/call", { name: "screenshot", arguments: {} });
+    }
+    expect(replaced.body.result.isError, JSON.stringify(replaced.body)).toBeFalsy();
+    expect(replaced.body.result.content[0]).toEqual({ type: "text", text: CLOUD_COMPUTER_REPLACED });
+    expect(replaced.body.result.content[1]).toMatchObject({ type: "image", mimeType: "image/jpeg" });
+    const again = await computerCall(next, "tools/call", { name: "screenshot", arguments: {} });
+    expect(again.body.result.content).toHaveLength(1);
+    expect(requests.slice(before).filter(request => request.method === "DELETE")).toEqual([{ method: "DELETE", path: `/boxes/${dead.id}` }]);
+    expect(creates()).toBe(made + 1);
+    await finish(bot.id);
+
+    const line = "Stranded's cloud computer stopped responding, so MausBot replaced it with a new one. Files that were only on the old computer are gone.";
+    const shown = (await task(bot.id)).messages.filter((message: any) => message.tool?.name?.startsWith("recovery:")).map((message: any) => message.tool.name);
+    expect(shown).toEqual([`recovery: ${line}`]);
+    const inbox = events.frames.filter((frame: any) => frame.kind === "notify" && frame.notification?.botId === bot.id && frame.notification.kind === "notice");
+    expect(inbox.map((frame: any) => frame.notification.body)).toEqual([line]);
     await apiOk("DELETE", `/api/bots/${bot.id}`);
   }, 60_000);
 

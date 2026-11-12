@@ -7963,5 +7963,20 @@
   "settings.domain.change": "更改",
   "settings.domain.httpsFirst": "请先为此地址开启 HTTPS，再在这里连接。",
   "settings.backTo": "返回设置",
-  "devices.route.httpsAccount": "使用你的 {app} 账号。"
+  "devices.route.httpsAccount": "使用你的 {app} 账号。",
+  "server.cloudComputer.replaced": "{name} 的云电脑停止响应，所以 MausBot 用一台新的替换了它。只在旧电脑上的文件已经没有了。",
+  "server.cloudComputer.restarted": "{name} 的云电脑停止响应，所以 MausBot 重启了它。它已恢复响应；上面打开的程序已被关闭。",
+  "server.cloudComputer.capped": "{name} 的云电脑在被替换后一小时内再次停止响应，所以 MausBot 没有再动它。在电脑面板中点“替换电脑”可以再试一次。",
+  "server.cloudComputer.unreachable": "现在无法连接云电脑。MausBot 保留了 {name} 的云电脑，稍后会再检查。",
+  "computer.recovery.notResponding": "这台云电脑没有响应。MausBot 正在检查，并会重启或替换它。",
+  "computer.recovery.restarting": "这台云电脑没有响应。MausBot 正在重启它。",
+  "computer.recovery.replacing": "这台云电脑没有响应。MausBot 正在替换它。",
+  "computer.recovery.replacedManual": "已替换。{name} 下次需要时会获得一台新的云电脑。",
+  "computer.recovery.restartedManual": "已重启。云电脑已恢复响应。",
+  "computer.recovery.stillNotAnswering": "重启后云电脑仍然没有响应。“替换电脑”会给 {name} 一台新的。",
+  "computer.recovery.confirmReplace": "要把 {name} 的云电脑替换成一台新的吗？只在这台电脑上的文件会丢失。",
+  "computer.recovery.restart": "重启电脑",
+  "computer.recovery.restartTitle": "停止并重新启动这台云电脑。打开的程序会被关闭；文件会保留。",
+  "computer.recovery.replace": "替换电脑",
+  "computer.recovery.replaceTitle": "删除这台云电脑并给机器人一台新的。只在上面的文件会丢失。"
 }

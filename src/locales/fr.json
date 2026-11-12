@@ -3777,5 +3777,20 @@
   "settings.simple.billing.included": "Utilisation incluse ce mois-ci",
   "settings.simple.billing.summary": "{percent} % de l'utilisation incluse ce mois-ci",
   "settings.simple.billing.used": "utilisé",
-  "settings.skin.dressUp.title": "Déguiser mes bots"
+  "settings.skin.dressUp.title": "Déguiser mes bots",
+  "server.cloudComputer.replaced": "L'ordinateur cloud de {name} ne répondait plus, alors MausBot l'a remplacé par un nouveau. Les fichiers qui n'étaient que sur l'ancien ordinateur sont perdus.",
+  "server.cloudComputer.restarted": "L'ordinateur cloud de {name} ne répondait plus, alors MausBot l'a redémarré. Il répond de nouveau ; les programmes qui y étaient ouverts ont été fermés.",
+  "server.cloudComputer.capped": "L'ordinateur cloud de {name} a de nouveau cessé de répondre moins d'une heure après avoir été remplacé, alors MausBot l'a laissé tel quel. Remplacer l'ordinateur, dans le panneau de l'ordinateur, réessaie une fois.",
+  "server.cloudComputer.unreachable": "Les ordinateurs cloud sont injoignables pour le moment. MausBot a gardé l'ordinateur cloud de {name} et le vérifiera de nouveau.",
+  "computer.recovery.notResponding": "Cet ordinateur cloud ne répond pas. MausBot le vérifie et va le redémarrer ou le remplacer.",
+  "computer.recovery.restarting": "Cet ordinateur cloud ne répond pas. MausBot le redémarre.",
+  "computer.recovery.replacing": "Cet ordinateur cloud ne répond pas. MausBot le remplace.",
+  "computer.recovery.replacedManual": "Remplacé. {name} aura un nouvel ordinateur cloud la prochaine fois qu'il en aura besoin.",
+  "computer.recovery.restartedManual": "Redémarré. L'ordinateur cloud répond de nouveau.",
+  "computer.recovery.stillNotAnswering": "L'ordinateur cloud ne répond toujours pas après un redémarrage. Remplacer l'ordinateur donne un nouvel ordinateur à {name}.",
+  "computer.recovery.confirmReplace": "Remplacer l'ordinateur cloud de {name} par un nouveau ? Les fichiers qui ne sont que sur cet ordinateur seront perdus.",
+  "computer.recovery.restart": "Redémarrer l'ordinateur",
+  "computer.recovery.restartTitle": "Arrête puis relance cet ordinateur cloud. Les programmes ouverts sont fermés ; ses fichiers restent.",
+  "computer.recovery.replace": "Remplacer l'ordinateur",
+  "computer.recovery.replaceTitle": "Supprime cet ordinateur cloud et en donne un nouveau au bot. Les fichiers qui ne sont que dessus sont perdus."
 }

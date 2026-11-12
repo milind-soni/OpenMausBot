@@ -10600,5 +10600,20 @@
   "settings.domain.change": "Alterar",
   "settings.domain.httpsFirst": "Ative o HTTPS neste endereço primeiro e depois conecte-o aqui.",
   "settings.backTo": "Voltar às Configurações",
-  "devices.route.httpsAccount": "Usa sua conta do {app}."
+  "devices.route.httpsAccount": "Usa sua conta do {app}.",
+  "server.cloudComputer.replaced": "O computador na nuvem de {name} parou de responder, então o MausBot o substituiu por um novo. Os arquivos que estavam só no computador antigo foram perdidos.",
+  "server.cloudComputer.restarted": "O computador na nuvem de {name} parou de responder, então o MausBot o reiniciou. Ele voltou a responder; os programas que estavam abertos nele foram fechados.",
+  "server.cloudComputer.capped": "O computador na nuvem de {name} parou de responder de novo menos de uma hora depois de ser substituído, então o MausBot o deixou como está. Substituir computador, no painel do computador, tenta mais uma vez.",
+  "server.cloudComputer.unreachable": "Os computadores na nuvem não podem ser acessados agora. O MausBot manteve o computador na nuvem de {name} e vai verificá-lo de novo.",
+  "computer.recovery.notResponding": "Este computador na nuvem não está respondendo. O MausBot está verificando e vai reiniciá-lo ou substituí-lo.",
+  "computer.recovery.restarting": "Este computador na nuvem não está respondendo. O MausBot está reiniciando ele.",
+  "computer.recovery.replacing": "Este computador na nuvem não está respondendo. O MausBot está substituindo ele.",
+  "computer.recovery.replacedManual": "Substituído. {name} vai ganhar um computador na nuvem novo na próxima vez que precisar.",
+  "computer.recovery.restartedManual": "Reiniciado. O computador na nuvem voltou a responder.",
+  "computer.recovery.stillNotAnswering": "O computador na nuvem ainda não responde depois de reiniciar. Substituir computador dá um novo para {name}.",
+  "computer.recovery.confirmReplace": "Substituir o computador na nuvem de {name} por um novo? Os arquivos que estão só neste computador serão perdidos.",
+  "computer.recovery.restart": "Reiniciar computador",
+  "computer.recovery.restartTitle": "Para e inicia de novo este computador na nuvem. Os programas abertos são fechados; os arquivos continuam lá.",
+  "computer.recovery.replace": "Substituir computador",
+  "computer.recovery.replaceTitle": "Exclui este computador na nuvem e dá um novo ao bot. Os arquivos que estão só nele são perdidos."
 }

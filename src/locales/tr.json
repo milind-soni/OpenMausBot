@@ -5980,5 +5980,20 @@
   "settings.simple.billing.included": "Bu ayın dahil kullanımı",
   "settings.simple.billing.summary": "Bu ayın dahil kullanımının %{percent} kadarı",
   "settings.simple.billing.used": "kullanıldı",
-  "settings.skin.dressUp.title": "Botlarımı giydir"
+  "settings.skin.dressUp.title": "Botlarımı giydir",
+  "server.cloudComputer.replaced": "{name} botunun bulut bilgisayarı yanıt vermeyi bıraktı, bu yüzden MausBot onu yenisiyle değiştirdi. Yalnızca eski bilgisayarda olan dosyalar artık yok.",
+  "server.cloudComputer.restarted": "{name} botunun bulut bilgisayarı yanıt vermeyi bıraktı, bu yüzden MausBot onu yeniden başlattı. Yeniden yanıt veriyor; üzerinde açık olan programlar kapatıldı.",
+  "server.cloudComputer.capped": "{name} botunun bulut bilgisayarı değiştirildikten sonraki bir saat içinde yine yanıt vermeyi bıraktı, bu yüzden MausBot onu olduğu gibi bıraktı. Bilgisayar panelindeki Bilgisayarı değiştir bir kez daha dener.",
+  "server.cloudComputer.unreachable": "Bulut bilgisayarlara şu anda ulaşılamıyor. MausBot, {name} botunun bulut bilgisayarını tuttu ve yeniden kontrol edecek.",
+  "computer.recovery.notResponding": "Bu bulut bilgisayar yanıt vermiyor. MausBot onu kontrol ediyor; yeniden başlatacak ya da değiştirecek.",
+  "computer.recovery.restarting": "Bu bulut bilgisayar yanıt vermiyor. MausBot onu yeniden başlatıyor.",
+  "computer.recovery.replacing": "Bu bulut bilgisayar yanıt vermiyor. MausBot onu değiştiriyor.",
+  "computer.recovery.replacedManual": "Değiştirildi. {name} bir dahaki sefere ihtiyaç duyduğunda yeni bir bulut bilgisayar alacak.",
+  "computer.recovery.restartedManual": "Yeniden başlatıldı. Bulut bilgisayar yeniden yanıt veriyor.",
+  "computer.recovery.stillNotAnswering": "Bulut bilgisayar yeniden başlatıldıktan sonra da yanıt vermiyor. Bilgisayarı değiştir, {name} için yeni bir tane verir.",
+  "computer.recovery.confirmReplace": "{name} botunun bulut bilgisayarı yenisiyle değiştirilsin mi? Yalnızca bu bilgisayarda olan dosyalar kaybolur.",
+  "computer.recovery.restart": "Bilgisayarı yeniden başlat",
+  "computer.recovery.restartTitle": "Bu bulut bilgisayarı durdurup yeniden başlatır. Açık programlar kapanır; dosyaları kalır.",
+  "computer.recovery.replace": "Bilgisayarı değiştir",
+  "computer.recovery.replaceTitle": "Bu bulut bilgisayarı siler ve bota yenisini verir. Yalnızca üzerinde olan dosyalar kaybolur."
 }

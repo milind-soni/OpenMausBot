@@ -94,7 +94,7 @@ import type { DirectSendInput, DirectSendReceipt } from "./direct-send.ts";
 import { finishedWithoutSummaryLine, ROOM_SUMMARY_REASK, roomTurnNarrationIds, roomTurnReply } from "./room-reply.ts";
 import { chosenPlace, pickComputer } from "./computer-selection.ts";
 import * as boat from "./boat.ts"; import { keyHint, keyStatus, nestedKeyStatus, withoutKeyHints } from "./key-hint.ts";
-import { cloudComputerRpc } from "./cloud-computer-tools.ts";
+import { cloudComputerRpc } from "./cloud-computer-tools.ts"; import { createBoatRecovery } from "./boat-recovery.ts"; import { CLOUD_COMPUTER_PERSON_LINES } from "../shared/cloud-computer-recovery.ts";
 import { chartRenderer, compileChart, dataEngine, validateVegaLite } from "./data/deps.ts";
 import { BUILT_IN_DATA_SYSTEM_PROMPT } from "./data/instructions.ts";
 import { DATA_INTERNAL_MCP_PATH, dataRpc } from "./data/rpc.ts";
@@ -5655,7 +5655,7 @@ const meetingsHost = createMeetingsHost({ cfg, dataDir: DATA_DIR, store, startTu
   routineComputer: routine => { const bot = store.bot(routine.botId); return bot && turnProvider(bot, routine.runOn) === "box" ? botComputerControlKey(bot) : null; },
   busy: owner => computerProviderConfigTransitions.has("box") || boatLifecycleBusyBots.has(owner) || managedBoatOwners().some(entry => entry.botId === owner && entry.inUse) || meetingsHost.keepsAwake(owner),
   claim: owner => { const team = teamComputers.list().find(entry => teamComputerOwner(entry.id) === owner); return team ? claimTeamComputerLifecycle(team) : claimBotComputerLifecycle(owner); },
-});
+}); const boatRecovery = createBoatRecovery({ cfg: () => cfg, log: line => console.warn(line), tell: (owner, key) => { const bot = store.bot(owner); if (!bot) return; const text = serverLine(conversationLanguage(bot.threadId), CLOUD_COMPUTER_PERSON_LINES[key], { name: bot.name }); store.appendMessage(bot.threadId, { role: "bot", kind: "activity", tool: { name: `recovery: ${text}`, ok: true } }); notify(buildNoticeNotification(bot, bot.threadId, text)); } });
 
 function inheritedTeamComputer(bot: Pick<BotRecord, "section" | "computer" | "cloudBackend">): TeamComputerRecord | undefined {
   return teamComputers.forBot(bot);
@@ -5793,7 +5793,7 @@ function mountTeamBoat(computer: TeamComputerRecord, botId: string, owner: TurnO
   if (!boat.boatConfigured(cfg)) throw new Error("The team's Boat account is not configured; reconnect it in Settings");
   teamComputerTurns.set(owner.threadId, { owner, computerId: computer.id, botId });
   const slot: AutoVmClaimSlot = { owner, lazy: true, startsComputer: true, label: "the team's cloud computer", onRejected: opts.onRejected, claim: async () => {
-    const attached = await attachTeamBoat(computer, owner, () => { slot.pendingReason = CLOUD_COMPUTER_STARTING; }).catch((error: unknown) => { slot.limit = cloudLimitText(error); throw error; });
+    const attached = await attachTeamBoat(computer, owner, () => { slot.pendingReason = CLOUD_COMPUTER_STARTING; }).catch((error: unknown) => { slot.limit = boatRecovery.claimSentence(teamComputerOwner(computer.id), error) ?? cloudLimitText(error); throw error; });
     slot.boxId = attached.boxId;
     opts.onClaimed(attached.capture);
   } };
@@ -5893,7 +5893,7 @@ function mountBotBoat(
         if (!attached) throw new Error(opts.existingOnly ? "this bot no longer has a cloud computer of its own" : "the cloud computer could not be created or reached");
       } catch (error) {
         slot.cause = error instanceof Error ? error.message : String(error);
-        slot.limit = cloudLimitText(error);
+        slot.limit = boatRecovery.claimSentence(bot.id, error) ?? cloudLimitText(error);
         throw keepTransient(error, opts.source ? await asPlaceFailure(error, "cloud", opts.source, bot, "box") : error);
       }
       slot.boxId = attached.boxId;
@@ -12414,7 +12414,7 @@ ROUTES.push(createComputerRoutes({
   localVmPayload, localVmInventoryPayload, existingPerBotLocalVmCount, teamComputersPayload, teamComputerInUse,
   managedBoatOwners, providerTransitionMessage, botHasActiveTurn, botComputerControlKey, botComputerControlSnapshot,
   computerPreviewBot, computerPreviewSurface, claimTeamComputerLifecycle, claimBotComputerLifecycle,
-  claimBoatInventoryRequest, claimManagedBoatMutation, claimManagedVpsMutation, cloudComputerUsed: owner => cloudComputerPower.used(owner),
+  claimBoatInventoryRequest, claimManagedBoatMutation, claimManagedVpsMutation, cloudComputerUsed: owner => cloudComputerPower.used(owner), boatRecovery,
 }));
 ROUTES.push(createStatusRoutes({
   store, cfg,
@@ -13148,7 +13148,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           cfg, signal: abort.signal, folder: () => messageFileRootsForThread(internalCapability.botId, internalCapability.threadId)[0],
           boxId: () => internalCapability.boxId ?? claimedBoatId(internalCapability),
           gate: () => computerCallGate(internalCapability, abort.signal),
-          assertActive: requireActiveInternalCapability,
+          assertActive: requireActiveInternalCapability, recovery: boatRecovery,
         }) });
       }
       // DuckDB runs here on the bot's own database; the agent process holds only the turn's capability.
@@ -15455,7 +15455,7 @@ const gracefulShutdown = createGracefulShutdown({
       desktopViewer.closeAll();
       upgrades.close();
       for (const idle of localVmIdles.values()) idle.cancel();
-      cloudComputerPower.close();
+      cloudComputerPower.close(); boatRecovery.close();
       vps.closeAllVpsDesktopTunnels();
       watchdog.stop();
       routines?.close(); void appTriggers.stop();

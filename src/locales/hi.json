@@ -3631,5 +3631,20 @@
   "settings.simple.billing.included": "इस महीने का शामिल इस्तेमाल",
   "settings.simple.billing.summary": "इस महीने के शामिल इस्तेमाल का {percent}%",
   "settings.simple.billing.used": "इस्तेमाल हुआ",
-  "settings.skin.dressUp.title": "मेरे बॉट्स को सजाएँ"
+  "settings.skin.dressUp.title": "मेरे बॉट्स को सजाएँ",
+  "server.cloudComputer.replaced": "{name} का क्लाउड कंप्यूटर जवाब नहीं दे रहा था, इसलिए MausBot ने उसे नए कंप्यूटर से बदल दिया। जो फ़ाइलें सिर्फ़ पुराने कंप्यूटर पर थीं, वे अब नहीं रहीं।",
+  "server.cloudComputer.restarted": "{name} का क्लाउड कंप्यूटर जवाब नहीं दे रहा था, इसलिए MausBot ने उसे फिर से चालू किया। अब वह फिर जवाब दे रहा है; उस पर खुले प्रोग्राम बंद हो गए।",
+  "server.cloudComputer.capped": "{name} का क्लाउड कंप्यूटर बदले जाने के एक घंटे के अंदर फिर से जवाब देना बंद कर गया, इसलिए MausBot ने उसे वैसे ही छोड़ दिया। कंप्यूटर पैनल में कंप्यूटर बदलें एक बार और कोशिश करता है।",
+  "server.cloudComputer.unreachable": "अभी क्लाउड कंप्यूटर तक पहुँचा नहीं जा सकता। MausBot ने {name} का क्लाउड कंप्यूटर रखा है और उसे फिर से जाँचेगा।",
+  "computer.recovery.notResponding": "यह क्लाउड कंप्यूटर जवाब नहीं दे रहा। MausBot इसे जाँच रहा है और इसे फिर से चालू करेगा या बदल देगा।",
+  "computer.recovery.restarting": "यह क्लाउड कंप्यूटर जवाब नहीं दे रहा। MausBot इसे फिर से चालू कर रहा है।",
+  "computer.recovery.replacing": "यह क्लाउड कंप्यूटर जवाब नहीं दे रहा। MausBot इसे बदल रहा है।",
+  "computer.recovery.replacedManual": "बदल दिया गया। अगली बार ज़रूरत होने पर {name} को नया क्लाउड कंप्यूटर मिलेगा।",
+  "computer.recovery.restartedManual": "फिर से चालू किया गया। क्लाउड कंप्यूटर फिर जवाब दे रहा है।",
+  "computer.recovery.stillNotAnswering": "फिर से चालू करने के बाद भी क्लाउड कंप्यूटर जवाब नहीं दे रहा। कंप्यूटर बदलें से {name} को नया कंप्यूटर मिलेगा।",
+  "computer.recovery.confirmReplace": "{name} के क्लाउड कंप्यूटर को नए से बदलें? जो फ़ाइलें सिर्फ़ इसी कंप्यूटर पर हैं, वे खो जाएँगी।",
+  "computer.recovery.restart": "कंप्यूटर फिर से चालू करें",
+  "computer.recovery.restartTitle": "इस क्लाउड कंप्यूटर को बंद करके फिर से चालू करें। खुले प्रोग्राम बंद हो जाते हैं; फ़ाइलें बनी रहती हैं।",
+  "computer.recovery.replace": "कंप्यूटर बदलें",
+  "computer.recovery.replaceTitle": "यह क्लाउड कंप्यूटर हटाकर बॉट को नया दें। जो फ़ाइलें सिर्फ़ इस पर हैं, वे खो जाती हैं।"
 }

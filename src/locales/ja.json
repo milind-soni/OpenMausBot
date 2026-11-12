@@ -8070,5 +8070,20 @@
   "settings.domain.change": "変更",
   "settings.domain.httpsFirst": "まずこのアドレスで HTTPS を有効にしてから、ここで接続します。",
   "settings.backTo": "設定に戻る",
-  "devices.route.httpsAccount": "{app} アカウントを使います。"
+  "devices.route.httpsAccount": "{app} アカウントを使います。",
+  "server.cloudComputer.replaced": "{name} のクラウドコンピューターが応答しなくなったため、MausBot が新しいものに置き換えました。古いコンピューターにしかなかったファイルは失われました。",
+  "server.cloudComputer.restarted": "{name} のクラウドコンピューターが応答しなくなったため、MausBot が再起動しました。再び応答しています。開いていたプログラムは閉じられました。",
+  "server.cloudComputer.capped": "{name} のクラウドコンピューターが置き換えから 1 時間以内に再び応答しなくなったため、MausBot はそのままにしました。コンピューターパネルの「コンピューターを置き換え」でもう一度試せます。",
+  "server.cloudComputer.unreachable": "現在クラウドコンピューターに接続できません。MausBot は {name} のクラウドコンピューターを残し、あとで再確認します。",
+  "computer.recovery.notResponding": "このクラウドコンピューターは応答していません。MausBot が確認し、再起動または置き換えを行います。",
+  "computer.recovery.restarting": "このクラウドコンピューターは応答していません。MausBot が再起動しています。",
+  "computer.recovery.replacing": "このクラウドコンピューターは応答していません。MausBot が置き換えています。",
+  "computer.recovery.replacedManual": "置き換えました。{name} は次に必要になったときに新しいクラウドコンピューターを使います。",
+  "computer.recovery.restartedManual": "再起動しました。クラウドコンピューターは再び応答しています。",
+  "computer.recovery.stillNotAnswering": "再起動してもクラウドコンピューターが応答しません。「コンピューターを置き換え」で {name} に新しいものを用意できます。",
+  "computer.recovery.confirmReplace": "{name} のクラウドコンピューターを新しいものに置き換えますか？このコンピューターにしかないファイルは失われます。",
+  "computer.recovery.restart": "コンピューターを再起動",
+  "computer.recovery.restartTitle": "このクラウドコンピューターを停止して起動し直します。開いているプログラムは閉じられますが、ファイルは残ります。",
+  "computer.recovery.replace": "コンピューターを置き換え",
+  "computer.recovery.replaceTitle": "このクラウドコンピューターを削除し、ボットに新しいものを用意します。ここにしかないファイルは失われます。"
 }

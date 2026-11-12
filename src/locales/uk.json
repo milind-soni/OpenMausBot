@@ -4052,5 +4052,20 @@
   "settings.simple.billing.included": "Включене використання цього місяця",
   "settings.simple.billing.summary": "{percent}% включеного використання цього місяця",
   "settings.simple.billing.used": "використано",
-  "settings.skin.dressUp.title": "Перевдягнути моїх ботів"
+  "settings.skin.dressUp.title": "Перевдягнути моїх ботів",
+  "server.cloudComputer.replaced": "Хмарний комп'ютер бота {name} перестав відповідати, тому MausBot замінив його новим. Файли, які були лише на старому комп'ютері, втрачено.",
+  "server.cloudComputer.restarted": "Хмарний комп'ютер бота {name} перестав відповідати, тому MausBot перезапустив його. Він знову відповідає; відкриті на ньому програми було закрито.",
+  "server.cloudComputer.capped": "Хмарний комп'ютер бота {name} знову перестав відповідати протягом години після заміни, тому MausBot залишив його як є. Кнопка «Замінити комп'ютер» на панелі комп'ютера спробує ще раз.",
+  "server.cloudComputer.unreachable": "Хмарні комп'ютери зараз недоступні. MausBot зберіг хмарний комп'ютер бота {name} і перевірить його знову.",
+  "computer.recovery.notResponding": "Цей хмарний комп'ютер не відповідає. MausBot перевіряє його й перезапустить або замінить.",
+  "computer.recovery.restarting": "Цей хмарний комп'ютер не відповідає. MausBot перезапускає його.",
+  "computer.recovery.replacing": "Цей хмарний комп'ютер не відповідає. MausBot замінює його.",
+  "computer.recovery.replacedManual": "Замінено. {name} отримає новий хмарний комп'ютер, коли він знадобиться наступного разу.",
+  "computer.recovery.restartedManual": "Перезапущено. Хмарний комп'ютер знову відповідає.",
+  "computer.recovery.stillNotAnswering": "Хмарний комп'ютер не відповідає й після перезапуску. «Замінити комп'ютер» дасть боту {name} новий.",
+  "computer.recovery.confirmReplace": "Замінити хмарний комп'ютер бота {name} новим? Файли, які є лише на цьому комп'ютері, буде втрачено.",
+  "computer.recovery.restart": "Перезапустити комп'ютер",
+  "computer.recovery.restartTitle": "Зупинити й знову запустити цей хмарний комп'ютер. Відкриті програми закриються; файли залишаться.",
+  "computer.recovery.replace": "Замінити комп'ютер",
+  "computer.recovery.replaceTitle": "Видалити цей хмарний комп'ютер і дати боту новий. Файли, які є лише на ньому, буде втрачено."
 }

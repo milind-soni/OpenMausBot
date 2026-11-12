@@ -7099,5 +7099,20 @@
   "backup.excluded": "Le credenziali degli account salvate e le connessioni non sono incluse. Ricollega i tuoi account sul nuovo computer; le credenziali già presenti lì non cambiano. Non sono inclusi nemmeno gli accessi ad altre app AI e i dischi dei desktop remoti.",
   "settings.simple.billing.included": "Uso incluso di questo mese",
   "settings.simple.billing.summary": "{percent}% dell'uso incluso di questo mese",
-  "settings.simple.billing.used": "usato"
+  "settings.simple.billing.used": "usato",
+  "server.cloudComputer.replaced": "Il computer cloud di {name} non rispondeva più, quindi MausBot l'ha sostituito con uno nuovo. I file che erano solo sul vecchio computer sono andati persi.",
+  "server.cloudComputer.restarted": "Il computer cloud di {name} non rispondeva più, quindi MausBot l'ha riavviato. Ora risponde di nuovo; i programmi aperti sono stati chiusi.",
+  "server.cloudComputer.capped": "Il computer cloud di {name} ha smesso di nuovo di rispondere entro un'ora dalla sostituzione, quindi MausBot l'ha lasciato com'è. Sostituisci computer, nel pannello del computer, riprova una volta.",
+  "server.cloudComputer.unreachable": "Al momento i computer cloud non sono raggiungibili. MausBot ha tenuto il computer cloud di {name} e lo ricontrollerà.",
+  "computer.recovery.notResponding": "Questo computer cloud non risponde. MausBot lo sta controllando e lo riavvierà o lo sostituirà.",
+  "computer.recovery.restarting": "Questo computer cloud non risponde. MausBot lo sta riavviando.",
+  "computer.recovery.replacing": "Questo computer cloud non risponde. MausBot lo sta sostituendo.",
+  "computer.recovery.replacedManual": "Sostituito. {name} avrà un nuovo computer cloud la prossima volta che ne avrà bisogno.",
+  "computer.recovery.restartedManual": "Riavviato. Il computer cloud risponde di nuovo.",
+  "computer.recovery.stillNotAnswering": "Il computer cloud non risponde ancora dopo il riavvio. Sostituisci computer dà a {name} un computer nuovo.",
+  "computer.recovery.confirmReplace": "Sostituire il computer cloud di {name} con uno nuovo? I file che sono solo su questo computer andranno persi.",
+  "computer.recovery.restart": "Riavvia computer",
+  "computer.recovery.restartTitle": "Ferma e riavvia questo computer cloud. I programmi aperti vengono chiusi; i suoi file restano.",
+  "computer.recovery.replace": "Sostituisci computer",
+  "computer.recovery.replaceTitle": "Elimina questo computer cloud e ne dà uno nuovo al bot. I file che sono solo lì vanno persi."
 }

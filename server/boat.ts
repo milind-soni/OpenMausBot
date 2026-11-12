@@ -8,6 +8,8 @@ import { DATA_DIR, type AppConfig } from "./config.ts";
 import { loadEnvironmentId } from "./environment.ts";
 import { boatCredential, boatProviderApi, type ServiceCredential } from "./included-services.ts";
 import { relayBody, relayPath } from "./boat-relay.ts";
+import { boatHealth, DEAD_COMPUTER, unansweredStatus } from "./boat-health.ts";
+import { CLOUD_COMPUTER_NO_ANSWER, CLOUD_COMPUTER_NOT_RESPONDING } from "../shared/cloud-computer-recovery.ts";
 import { cloudLimitFromBody, type CloudLimit } from "../shared/place-view.ts";
 import {
   blockedUntilBoatFinishes,
@@ -124,7 +126,7 @@ export type BoatTurnLifecycleAction = "attach" | "provision" | "wake";
 
 export function boatTurnLifecycleAction(state: string | null): BoatTurnLifecycleAction {
   if (state && READY.has(state)) return "attach";
-  return state ? "wake" : "provision";
+  return state && !TERMINAL.has(state) ? "wake" : "provision";
 }
 
 export type ManagedBoatMutationClaim = (
@@ -299,7 +301,7 @@ async function confirmAcceptedBoatDeletion(
 }
 
 /** Send DELETE only after the immutable target is on disk. */
-async function requestRecordedBoatDeletion(
+export async function requestRecordedBoatDeletion(
   cfg: AppConfig,
   identity: { boxId: string; name: string; ownerBotId: string | null },
   pollDelaysMs: readonly number[] = BOAT_DELETE_OPERATION_POLL_DELAYS_MS,
@@ -350,26 +352,27 @@ export async function boatNameMatchesBot(botId: string, name: string): Promise<b
   return name === await boatNameFor(botId) || name === legacyBoatNameFor(botId);
 }
 
-export async function runCommand(cfg: AppConfig, boxId: string, command: string, { timeoutMs = 120_000, signal }: { timeoutMs?: number; signal?: AbortSignal } = {}) {
+/** `probe`: the health check itself, which records nothing; any other command that gets no answer starts one. */
+export async function runCommand(cfg: AppConfig, boxId: string, command: string, { timeoutMs = 120_000, signal, probe = false }: { timeoutMs?: number; signal?: AbortSignal; probe?: boolean } = {}) {
   assertBoatNotDeleting(boxId);
-  const res = await boatFetch(cfg, `/sandboxes/${boxId}/commands`, {
-    method: "POST",
-    body: JSON.stringify({ command }),
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
-  });
-  const body: any = await res.json().catch(() => null);
+  const suspect = () => { if (!probe && !signal?.aborted) boatHealth.suspect(boxId, () => probeBoat(cfg, boxId)); };
+  const res = await boatFetch(cfg, `/sandboxes/${boxId}/commands`, { method: "POST", body: JSON.stringify({ command }),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs) }).catch((error: unknown) => { suspect(); throw error; });
+  const body: any = await res.json().catch(() => null), unanswered = unansweredStatus(res.status);
+  if (unanswered) suspect(); else if (!probe) boatHealth.answered(boxId);
   return {
-    ok: res.ok && body?.exitCode === 0,
-    exitCode: body?.exitCode ?? null,
-    stdout: body?.stdout ?? "",
-    stderr: body?.stderr ?? "", ...(body?.timedOut === true ? { timedOut: true as const } : {}),
+    ok: res.ok && body?.exitCode === 0, exitCode: body?.exitCode ?? null, stdout: body?.stdout ?? "",
+    stderr: body?.stderr ?? "", ...(body?.timedOut === true ? { timedOut: true as const } : {}), ...(unanswered ? { unanswered: true as const } : {}),
   };
 }
+
+export const probeBoat = (cfg: AppConfig, boxId: string): Promise<boolean> =>
+  runCommand(cfg, boxId, "true", { timeoutMs: DEAD_COMPUTER.probeTimeoutMs, probe: true }).then((out) => !out.unanswered, () => false);
 
 // Boat desktop access: VNC (POST /desktop?vnc=1) first, a plain WebSocket that survives P2P-blocking networks and answers
 // {provisioning:true} until ready; WebRTC (POST /desktop) is a STUN-only fallback that can hang. The sandbox's desktopUrl is not usable alone.
 async function mintDesktopUrl(cfg: AppConfig, boxId: string, { vncBudgetMs = 60_000, requestMs = 30_000 } = {}) {
-  assertBoatNotDeleting(boxId);
+  assertBoatNotDeleting(boxId); if (boatHealth.notRespondingSince(boxId) !== null) throw Object.assign(new Error(CLOUD_COMPUTER_NOT_RESPONDING), { status: 409 });
   const t0 = Date.now();
   while (Date.now() - t0 < vncBudgetMs) {
     assertBoatNotDeleting(boxId);
@@ -415,6 +418,14 @@ async function waitReady(cfg: AppConfig, boxId: string, budgetMs = 90_000) {
 }
 
 const boatIdCache = new Map<string, string>();
+/** The bot's computer the provider reports in `error`: its machine is gone and it never runs again, but until it is
+ * deleted it still has the bot's name and may hold one of the plan's computers. */
+const deadBoats = new Map<string, { boxId: string; name: string }>();
+export type DeadBoatHandler = (cfg: AppConfig, owner: string, dead: { boxId: string; name: string }) => Promise<never>;
+let deadBoatHandler: DeadBoatHandler | null = null;
+export const onDeadBoat = (handler: DeadBoatHandler | null) => { deadBoatHandler = handler; };
+export const deadBoatOf = (owner: string) => deadBoats.get(owner) ?? null, boatIdOf = (owner: string) => boatIdCache.get(owner) ?? null,
+  boatOwnerOf = (boxId: string) => [...boatIdCache].find(([, id]) => id === boxId)?.[0] ?? null;
 
 function boatInventoryProblem(status: number, body: any, included = false): string {
   if (status === 401 || status === 403) {
@@ -716,20 +727,12 @@ function inventoryFailure(inventory: ManagedBoatInventory): Error & { status: nu
   return error;
 }
 
-function deletionFenceError(): Error & { status: number } {
-  return Object.assign(
-    new Error("this cloud computer is being deleted — wait for it to finish, or retry Delete if it needs attention"),
-    { status: 409, code: BOAT_DELETING },
-  );
-}
+const deletionFenceError = (): Error & { status: number } => Object.assign(
+  new Error("this cloud computer is being deleted — wait for it to finish, or retry Delete if it needs attention"), { status: 409, code: BOAT_DELETING });
 
-export function assertBoatNotDeleting(boxId: string): void {
-  if (getBoatDeletion(boxId)) throw deletionFenceError();
-}
+export function assertBoatNotDeleting(boxId: string): void { if (getBoatDeletion(boxId)) throw deletionFenceError(); }
 
-function assertBotBoatNotDeleting(botId: string): void {
-  if (hasPendingBoatDeletionForBot(botId)) throw deletionFenceError();
-}
+function assertBotBoatNotDeleting(botId: string): void { if (hasPendingBoatDeletionForBot(botId)) throw deletionFenceError(); }
 
 async function revalidateManagedBoat(
   cfg: AppConfig,
@@ -760,7 +763,7 @@ async function stopBoat(cfg: AppConfig, boxId: string): Promise<void> {
   }
 }
 
-function forgetBoatId(boxId: string): void {
+export function forgetBoatId(boxId: string): void {
   for (const [botId, cachedId] of boatIdCache) {
     if (cachedId === boxId) boatIdCache.delete(botId);
   }
@@ -865,6 +868,7 @@ export async function findBoat(cfg: AppConfig, botId: string) {
   const found = expected.find((candidate: any) => candidate.name === name && !TERMINAL.has(candidate.state))
     ?? expected.find((candidate: any) => candidate.name === legacyName && !TERMINAL.has(candidate.state))
     ?? null;
+  const dead = found ? undefined : expected.find((candidate: any) => candidate.state === "error"); if (dead) deadBoats.set(botId, { boxId: dead.id, name: dead.name }); else deadBoats.delete(botId);
   if (found) {
     const duplicateId = listed.boats.filter((candidate: any) => candidate?.id === found.id).length !== 1;
     if (duplicateId) {
@@ -884,17 +888,11 @@ export async function readyBoat(cfg: AppConfig, botId: string, budgetMs = 60_000
   return waitReady(cfg, boat.id, budgetMs);
 }
 
-export function boatAccount(cfg: AppConfig): ServiceCredential | null {
-  return boatCredential(cfg.box?.token);
-}
+export const boatAccount = (cfg: AppConfig): ServiceCredential | null => boatCredential(cfg.box?.token);
 
-export function boatConfigured(cfg: AppConfig) {
-  return Boolean(boatAccount(cfg));
-}
+export const boatConfigured = (cfg: AppConfig) => Boolean(boatAccount(cfg));
 
-function usesIncludedBoat(cfg: AppConfig): boolean {
-  return boatAccount(cfg)?.included === true;
-}
+const usesIncludedBoat = (cfg: AppConfig): boolean => boatAccount(cfg)?.included === true;
 
 /** Configured-or-not for Settings, never the token. */
 export function describeBoatAccount(cfg: AppConfig): { configured: boolean; included?: true } {
@@ -1080,6 +1078,7 @@ export async function provisionBoat(cfg: AppConfig, botId: string, _botName: str
   let createRequest: BoatCreateRequest | null = null;
   try {
     if (!boat) {
+      const dead = deadBoats.get(botId); if (dead && deadBoatHandler) await deadBoatHandler(cfg, botId, dead);
       // Another process may have prepared a deletion since the lookup; never create a replacement before the fence is reconciled.
       assertBotBoatNotDeleting(botId);
       // Boat's TTL archives the computer if every stop path dies.
@@ -1249,7 +1248,7 @@ export async function screenshotBoat(cfg: AppConfig, botId: string, knownBoatId?
   const out = await runCommand(cfg, boxId, options?.nativeSize ? panelShotCommand({ framePath, nativeSize: true }) : SHOT_CMD,
     { timeoutMs: 60_000, signal: options?.signal });
   if (!/captured/.test(out.stdout)) {
-    throw new Error(out.stderr.slice(0, 200) || "screen capture failed on the cloud computer");
+    throw new Error(out.unanswered ? CLOUD_COMPUTER_NO_ANSWER : out.stderr.slice(0, 200) || "screen capture failed on the cloud computer");
   }
   const data = await readFileBase64(cfg, boxId, framePath, options?.signal);
   if (!data) throw new Error("could not read the frame back from the cloud computer");

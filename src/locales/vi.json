@@ -5980,5 +5980,20 @@
   "settings.simple.billing.included": "Mức dùng kèm theo trong tháng này",
   "settings.simple.billing.summary": "{percent}% mức dùng kèm theo trong tháng này",
   "settings.simple.billing.used": "đã dùng",
-  "settings.skin.dressUp.title": "Hóa trang cho bot của tôi"
+  "settings.skin.dressUp.title": "Hóa trang cho bot của tôi",
+  "server.cloudComputer.replaced": "Máy tính đám mây của {name} đã ngừng phản hồi, nên MausBot đã thay nó bằng máy mới. Các tệp chỉ có trên máy cũ đã mất.",
+  "server.cloudComputer.restarted": "Máy tính đám mây của {name} đã ngừng phản hồi, nên MausBot đã khởi động lại nó. Máy đã phản hồi trở lại; các chương trình đang mở trên đó đã bị đóng.",
+  "server.cloudComputer.capped": "Máy tính đám mây của {name} lại ngừng phản hồi trong vòng một giờ sau khi được thay, nên MausBot để nguyên nó. Thay máy tính trong bảng máy tính sẽ thử thêm một lần.",
+  "server.cloudComputer.unreachable": "Hiện không thể kết nối tới máy tính đám mây. MausBot vẫn giữ máy tính đám mây của {name} và sẽ kiểm tra lại.",
+  "computer.recovery.notResponding": "Máy tính đám mây này không phản hồi. MausBot đang kiểm tra và sẽ khởi động lại hoặc thay nó.",
+  "computer.recovery.restarting": "Máy tính đám mây này không phản hồi. MausBot đang khởi động lại nó.",
+  "computer.recovery.replacing": "Máy tính đám mây này không phản hồi. MausBot đang thay nó.",
+  "computer.recovery.replacedManual": "Đã thay. {name} sẽ có máy tính đám mây mới vào lần tới cần dùng.",
+  "computer.recovery.restartedManual": "Đã khởi động lại. Máy tính đám mây đã phản hồi trở lại.",
+  "computer.recovery.stillNotAnswering": "Máy tính đám mây vẫn không phản hồi sau khi khởi động lại. Thay máy tính sẽ cho {name} một máy mới.",
+  "computer.recovery.confirmReplace": "Thay máy tính đám mây của {name} bằng máy mới? Các tệp chỉ có trên máy này sẽ bị mất.",
+  "computer.recovery.restart": "Khởi động lại máy tính",
+  "computer.recovery.restartTitle": "Dừng rồi khởi động lại máy tính đám mây này. Các chương trình đang mở sẽ bị đóng; tệp vẫn còn.",
+  "computer.recovery.replace": "Thay máy tính",
+  "computer.recovery.replaceTitle": "Xóa máy tính đám mây này và cho bot một máy mới. Các tệp chỉ có trên máy này sẽ bị mất."
 }
