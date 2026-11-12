@@ -39,6 +39,8 @@ type ReceiptArgs = {
   applied?: boolean;
   previous?: SkillRequestCardData["previous"];
   shared?: SkillShareRecord;
+  /** An automatic review records the change without putting a SKILL.md card into the conversation. */
+  silent?: boolean;
   staged: {
     id: string;
     action: "create" | "update";
@@ -201,6 +203,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     threadId: string,
     change: { name: string; skillMd: string; gist?: string; expectSha256: string | undefined },
     direct: DirectApply,
+    silent = false,
   ): { name: string; summary: string; shared: string } | { error: string } {
     const bots = shareBotsNow();
     const self = bots.find((bot) => bot.id === from.id);
@@ -226,6 +229,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       applied: true,
       previous: { preview: updated.previous.skillMd, source: updated.previous.source },
       shared: updated.share,
+      ...(silent ? { silent: true } : {}),
       staged: {
         id: randomUUID(),
         action: "update",
@@ -326,7 +330,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       { ok: true } | { ok: false; error: string } {
       const updated = applySharedUpdate(bot, threadId, {
         name: change.name, skillMd: change.skillMd, gist: change.gist || undefined, expectSha256: change.baseSha256,
-      }, direct);
+      }, direct, true);
       return "error" in updated ? { ok: false, error: updated.error } : { ok: true };
     },
 

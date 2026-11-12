@@ -5353,7 +5353,7 @@ const skillReview = createSkillReview({
       source: learnSource("automatic review of this conversation"),
     });
     if ("error" in staged) return { ok: false, error: staged.error };
-    const applied = applyOwnStagedSkill(bot, threadId, staged, direct);
+    const applied = applyOwnStagedSkill(bot, threadId, staged, direct, { silent: true });
     return "error" in applied ? { ok: false, error: applied.error } : { ok: true };
   },
   statePath: join(DATA_DIR, "skill-review.json"),
@@ -11227,10 +11227,11 @@ function applyOwnStagedSkill(
   threadId: string,
   staged: Exclude<ReturnType<typeof stageSkillWrite>, { error: string }>,
   direct: DirectApply,
+  options: { silent?: boolean } = {},
 ): ReturnType<typeof applySkillWriteWithReceipt> & { shared?: string; shareError?: string } {
   const previous = previousSkillVersion(from.id, staged);
   const applied = applySkillWriteWithReceipt(from.id, staged, () => {
-    const receipt = appendSkillRequestCard({ botId: from.id, threadId, staged, applied: true, previous });
+    const receipt = appendSkillRequestCard({ botId: from.id, threadId, staged, applied: true, previous, ...(options.silent ? { silent: true } : {}) });
     appendDecision(DATA_DIR, { threadId, requestId: receipt.requestId, botId: from.id, botName: from.name,
       tool: "stage_skill", summary: receipt.summary, decision: "auto-approved", source: direct });
   });
@@ -11243,6 +11244,7 @@ function appendSkillRequestCard(args: {
   threadId: string;
   applied?: boolean;
   previous?: SkillRequestCardData["previous"];
+  silent?: boolean;
   staged: {
     id: string;
     action: "create" | "update";
@@ -11257,6 +11259,11 @@ function appendSkillRequestCard(args: {
 } & Pick<SkillRequestCardData, "shared">): { requestId: string; summary: string } {
   const requestId = randomUUID();
   const copy = skillCardCopy(args.staged);
+  const summary = `${copy.title} ${args.staged.gist}`.trim();
+  if (args.silent) {
+    skillReview.noteSkillChange(args.botId, args.threadId);
+    return { requestId, summary };
+  }
   const payload: SkillRequestCardData = {
     version: 1,
     requestId,
@@ -11290,10 +11297,7 @@ function appendSkillRequestCard(args: {
       skillRequest: payload,
     },
   });
-  return {
-    requestId,
-    summary: `${copy.title} ${args.staged.gist}`.trim(),
-  };
+  return { requestId, summary };
 }
 
 const skillSwitch = createSkillSwitchHost({ store, dataDir: DATA_DIR, persistence: skillProposalPersistence, listBotSkills, readBotSkillFile, noteSkillChange: (botId, threadId) => skillReview.noteSkillChange(botId, threadId) });

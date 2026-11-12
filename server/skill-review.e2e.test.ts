@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -50,9 +50,15 @@ it("reviews a conversation in the background once its tool steps reach the thres
     expect((await messages(bot)).some((message) => message.card?.skillRequest)).toBe(false);
 
     await turn(bot, "Shorter please, five bullets at most.");
-    await expect.poll(async () => (await messages(bot)).find((message) => message.card?.skillRequest)?.card, { timeout: 20_000 })
-      .toMatchObject({ answered: "allow", autoApplied: true, title: 'Skill "weekly-report" enabled' });
-    expect((await api<{ text: string }>(`/api/bots/${bot.id}/skills/weekly-report`)).text).toContain("Keep it to five bullets.");
+    // The review's change lands in the skill file, and no "Skill updated" card takes over the conversation.
+    await expect.poll(async () => (await api<{ text: string }>(`/api/bots/${bot.id}/skills/weekly-report`)).text, { timeout: 20_000 })
+      .toContain("Keep it to five bullets.");
+    expect((await messages(bot)).some((message) => message.card?.skillRequest)).toBe(false);
+    const decisionRows = () => readdirSync(join(fixture.info.dataDir, "decisions"))
+      .flatMap((file) => readFileSync(join(fixture.info.dataDir, "decisions", file), "utf8").split("\n").filter(Boolean))
+      .map((line) => JSON.parse(line) as { botId?: string; tool?: string; decision?: string; summary?: string });
+    await expect.poll(() => decisionRows().some((row) => row.botId === bot.id && row.tool === "stage_skill"
+      && row.decision === "auto-approved" && (row.summary ?? "").includes("weekly-report"))).toBe(true);
 
     const review = JSON.parse(readFileSync(join(scratch, "one-shot.json"), "utf8")) as { prompt: string };
     expect(review.prompt).toContain("Shorter please, five bullets at most.");
@@ -101,9 +107,9 @@ it("reviews a Codex bot's conversation through Codex's own background call", asy
     // Each fake Codex turn runs a command and a web search: two tool steps.
     await turn(bot, "Write the weekly report from the notes.");
     await turn(bot, "Shorter please, five bullets at most.");
-    await expect.poll(async () => (await messages(bot)).find((message) => message.card?.skillRequest)?.card, { timeout: 20_000 })
-      .toMatchObject({ answered: "allow", autoApplied: true, title: 'Skill "weekly-report" enabled' });
-    expect((await api<{ text: string }>(`/api/bots/${bot.id}/skills/weekly-report`)).text).toContain("Keep it to five bullets.");
+    await expect.poll(async () => (await api<{ text: string }>(`/api/bots/${bot.id}/skills/weekly-report`)).text, { timeout: 20_000 })
+      .toContain("Keep it to five bullets.");
+    expect((await messages(bot)).some((message) => message.card?.skillRequest)).toBe(false);
     // SAFETY: the fake CLI appends exactly this shape, one object per line
     const review = readFileSync(textLog, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as { argv: string[]; prompt: string })
       .find((call) => call.prompt.includes(SKILL_REVIEW_MARKER));
