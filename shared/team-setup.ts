@@ -53,6 +53,11 @@ export interface TeamSetupUndo {
   revisions: Record<string, string>;
 }
 
+/** A new bot gets no cloud computer until the person writes in its chat, unless it is set to work on one (it then starts one on its first turn), uses a VPS or the team's computer. */
+export function startsWithoutCloudComputer(bot: { computer?: string; cloudBackend?: string }, place: { cloudOn: boolean; teamComputer: boolean }): boolean {
+  return place.cloudOn && !place.teamComputer && bot.cloudBackend !== "vps" && bot.computer !== "cloud";
+}
+
 /** Told to a Chief about a bot it just made that has no cloud computer of its own yet. */
 export function noCloudComputerNote(name: string): string {
   return ` @${name} has no cloud computer yet: work you hand it runs without one until the person writes to it in its own chat, which sets one up. If its first job needs a computer, tell the person that in one line.`;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { teamSetupDecisionText, type TeamSetupRequest } from "./team-setup.ts";
+import { startsWithoutCloudComputer, teamSetupDecisionText, type TeamSetupRequest } from "./team-setup.ts";
 
 const request = (result: TeamSetupRequest["result"]): TeamSetupRequest => ({
   version: 1, requestId: "req-1", botId: "chief", threadId: "t1", reason: "", createdAt: 0, requesterRevision: "r",
@@ -26,5 +26,19 @@ describe("teamSetupDecisionText", () => {
       expect(text).not.toContain("no cloud computer");
       expect(text.endsWith("Existing thread models were not changed.")).toBe(true);
     }
+  });
+});
+
+describe("startsWithoutCloudComputer", () => {
+  it("is false for a bot set to work on its cloud computer, which starts one on its first turn", () => {
+    expect(startsWithoutCloudComputer({ computer: "cloud" }, { cloudOn: true, teamComputer: false })).toBe(false);
+  });
+
+  it("is true only for a box-backed bot with no team computer when the Cloud offers computers", () => {
+    expect(startsWithoutCloudComputer({}, { cloudOn: true, teamComputer: false })).toBe(true);
+    expect(startsWithoutCloudComputer({ computer: "browser" }, { cloudOn: true, teamComputer: false })).toBe(true);
+    expect(startsWithoutCloudComputer({}, { cloudOn: false, teamComputer: false })).toBe(false);
+    expect(startsWithoutCloudComputer({}, { cloudOn: true, teamComputer: true })).toBe(false);
+    expect(startsWithoutCloudComputer({ cloudBackend: "vps" }, { cloudOn: true, teamComputer: false })).toBe(false);
   });
 });
