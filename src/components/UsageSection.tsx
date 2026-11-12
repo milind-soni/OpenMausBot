@@ -5,7 +5,7 @@ import { cn } from "@/lib/cn";
 import { activeLocale, documentLanguage, t } from "@/lib/i18n";
 import { listenLiveFrames } from "@/lib/live-events";
 import { formatTokens, hasFiniteCost, headlineTokens } from "@/lib/usage";
-import { fetchTraces, formatCost, formatDuration, USAGE_PERIODS, usageExportHref, usagePeriodRange, type UsagePeriod } from "@/lib/usage-trace";
+import { currentBotName, fetchTraces, formatCost, formatDuration, runTitle, USAGE_PERIODS, usageExportHref, usagePeriodRange, type UsagePeriod } from "@/lib/usage-trace";
 import { api, useStore } from "@/state/store";
 import type { LocaleKey } from "@/locales";
 import type { TraceList, TraceRootSummary } from "../../shared/usage-trace";
@@ -93,7 +93,7 @@ export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: 
           <li key={group.key} className="grid grid-cols-[minmax(0,9rem)_1fr_auto] items-center gap-3 text-[13px]" title={t("usage.page.turns", { count: String(group.turns) })}>
             <span className="flex min-w-0 items-center gap-2 text-ink">
               {bot && <BotAvatar bot={bot} state="idle" size={18} animated={false} />}
-              <span className="truncate">{groupBy === "model" ? modelName(group.label, state.instances) : usageGroupLabel(groupBy, group)}</span>
+              <span className="truncate">{bot ? bot.name : groupBy === "model" ? modelName(group.label, state.instances) : usageGroupLabel(groupBy, group)}</span>
             </span>
             <span className={cn("h-2 overflow-hidden rounded-full", settings ? "bg-ink/[0.08]" : "bg-raised")}>
               <span className={cn("block h-full rounded-full", settings ? "bg-ink" : "bg-accent/70")} style={{ width: `${Math.max(2, (headlineTokens(group) / max) * 100)}%` }} />
@@ -182,7 +182,8 @@ function startedLabel(at: number): string {
 
 export function RunRow({ root, onOpen }: { root: TraceRootSummary; onOpen: () => void }) {
   const { state } = useStore();
-  const title = root.title || t(`trace.source.${root.source}`, { bot: root.bots[0]?.name ?? "" });
+  const title = runTitle(root, state.bots);
+  const names = root.bots.map((entry) => currentBotName(state.bots, entry.id, entry.name)).join(", ");
   return (
     <li>
       <button type="button" onClick={onOpen} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-raised/50" data-testid="usage-run">
@@ -196,7 +197,7 @@ export function RunRow({ root, onOpen }: { root: TraceRootSummary; onOpen: () =>
         </span>
         <span className="min-w-0">
           <span className="block truncate text-[14px] text-ink">{title}</span>
-          <span className="block truncate text-[12px] text-ink-tertiary">{startedLabel(root.startedAt)} · {root.bots.map((bot) => bot.name).join(", ")}</span>
+          <span className="block truncate text-[12px] text-ink-tertiary">{startedLabel(root.startedAt)} · {names}</span>
         </span>
         <span className="flex items-center gap-3 text-[13px] tabular-nums text-ink-secondary">
           {root.running && <LiveBadge />}

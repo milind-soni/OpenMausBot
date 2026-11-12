@@ -173,3 +173,28 @@ it("a save that finishes after moving to another bot does not show in that bot's
   expect(host.textContent).toContain("Prefers short replies.");
   expect(host.textContent).not.toContain("Late note.");
 });
+
+it("opens the same text full window and back, keeping what was typed, and saves from there", async () => {
+  await open();
+  await type("# Memory\n\n- Typed in the panel.\n");
+  await click(host.querySelector("[data-memory-wide]"));
+  const full = () => document.querySelector<HTMLElement>('[data-memory-full-window][role="dialog"]');
+  // Over the whole window, not squeezed inside the panel.
+  expect(full()).toBeTruthy();
+  expect(host.contains(full())).toBe(false);
+  const wideField = full()!.querySelector<HTMLTextAreaElement>("[data-memory-text]");
+  expect(wideField?.value).toBe("# Memory\n\n- Typed in the panel.\n");
+  expect(document.activeElement).toBe(wideField);
+
+  await act(async () => { full()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  await settle();
+  expect(full()).toBeNull();
+  expect(textarea()?.value).toBe("# Memory\n\n- Typed in the panel.\n");
+  expect(puts).toEqual([]);
+
+  await click(host.querySelector("[data-memory-wide]"));
+  await click(full()!.querySelector('[data-panel-done="memory-text"]'));
+  expect(files["MEMORY.md"]).toBe("# Memory\n\n- Typed in the panel.\n");
+  expect(full()).toBeNull();
+  expect(host.textContent).toContain("Typed in the panel.");
+});

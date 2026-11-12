@@ -39,7 +39,7 @@ import { clearLeftoverTailscaleServe, explainTailscaleFailure, tailnetListenFall
 import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { HEADLESS_VERB_NAMES, usage } from "./cli-usage.ts";
 import { normalizePhoneOrigin, phonePairingInstructions, runPhoneSetup } from "./cli-phone-setup.ts";
-import { browserSignInLines, formatSessions, pairingBlock, RELAY_NOT_WITH_TUNNEL, relayPairingBlock, showRelayPairing } from "./cli-pairing.ts";
+import { browserSignInLines, desktopOwnedRefusal, formatSessions, pairingBlock, RELAY_NOT_WITH_TUNNEL, relayPairingBlock, showRelayPairing } from "./cli-pairing.ts";
 import { cliCommand, cliPrefix } from "./cli-invocation.ts";
 import { checkReach, envPublicUrl, lanProblem, localLinkBase, noRouteLines, publicUrlProblem, reachLines, waitForReach, type Route } from "./cli-reach.ts";
 import { lanUrl } from "./lan-address.ts";
@@ -351,8 +351,8 @@ async function mintPairing(port: number, options: { label?: string; client?: boo
   const chatOnly = Boolean(options.client || options.phone);
   const request = { ...(options.label ? { label: options.label } : {}), ...(chatOnly ? { scopes: ["client"] } : {}), ...(options.ttlMs ? { ttlMs: options.ttlMs } : {}) };
   const { status, body } = await api(port, "/api/auth/pairing", { method: "POST", body: JSON.stringify(request) });
-  if (refusedAsService(status, body)) throw new Error(SERVICE_TRUST_HELP);
-  if (status !== 200) throw new Error(`server refused to mint a pairing code: ${typeof body?.error === "string" ? body.error : status}`);
+  const refusal = refusedAsService(status, body) ? SERVICE_TRUST_HELP : desktopOwnedRefusal(status, body);
+  if (refusal || status !== 200) throw new Error(refusal ?? `server refused to mint a pairing code: ${typeof body?.error === "string" ? body.error : status}`);
   const reachable = options.publicUrl && !isLoopbackHost(new URL(options.publicUrl).hostname) ? options.publicUrl : null;
   const link = reachable ? `${reachable}/pair#code=${body.code}` : typeof body.url === "string" && !isLoopbackHost(new URL(body.url).hostname) ? body.url : null;
   const invite = (reachable && typeof body.credential === "string" ? phonePairingLink({ address: reachable, token: body.credential, name: typeof body.serverName === "string" ? body.serverName : undefined }) : null) ?? (typeof body.inviteUrl === "string" ? body.inviteUrl : null);

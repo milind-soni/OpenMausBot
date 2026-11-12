@@ -4175,4 +4175,36 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const turnStart = seen.calls.find((c: any) => c.method === "turn/start");
     expect(turnStart.params).not.toHaveProperty("effort");
   });
+
+  it("runs a Fast row on its base model with the Fast tier for that turn only", async () => {
+    await create();
+    const dump = join(scratch, "fast.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-fast", text: "hi", model: "gpt-5.5+priority", effort: "high" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    const threadStart = seen.calls.find((c: any) => c.method === "thread/start");
+    const turnStart = seen.calls.find((c: any) => c.method === "turn/start");
+    expect(threadStart.params).toMatchObject({ model: "gpt-5.5", modelProvider: "openai" });
+    expect(threadStart.params).not.toHaveProperty("serviceTier");
+    expect(turnStart.params).toMatchObject({ serviceTierForTurn: "priority", effort: "high" });
+    expect(turnStart.params).not.toHaveProperty("serviceTier");
+  });
+
+  it("sends no service tier for a plain row", async () => {
+    await create();
+    const dump = join(scratch, "plain.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-plain", text: "hi", model: "gpt-5.5" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    const turnStart = seen.calls.find((c: any) => c.method === "turn/start");
+    expect(seen.calls.find((c: any) => c.method === "thread/start").params.model).toBe("gpt-5.5");
+    expect(turnStart.params).not.toHaveProperty("serviceTierForTurn");
+    expect(turnStart.params).not.toHaveProperty("serviceTier");
+  });
 });

@@ -52,7 +52,7 @@ export const BASE_IMAGE = `${BASE_IMAGE_REPOSITORY}@${BASE_IMAGE_DIGEST}`;
 // localhost/ is explicit: Podman prepends it to unqualified build tags and may then resolve the name on Docker Hub.
 // Image and container labels, not this mutable tag, decide compatibility.
 export const IMAGE_REPOSITORY = "localhost/openmausbot/cua-local-vm";
-export const IMAGE_LAYER_VERSION = "8";
+export const IMAGE_LAYER_VERSION = "9";
 export const IMAGE_LAYER_LABEL = "com.openmausbot.image-layer";
 export const IMAGE = `${IMAGE_REPOSITORY}:driver-${CUA_DRIVER_VERSION}-v${IMAGE_LAYER_VERSION}`;
 export const CONTAINER = "openmausbot-computer";
@@ -179,7 +179,7 @@ RUN set -eux; \\
     echo '6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2  /usr/local/share/licenses/noto-cjk/OFL.txt' | sha256sum -c -; \\
     fc-cache -f
 ${workspacePreparationDockerfile(VM_WORKSPACE_GUEST)}
-# A bot's own desktop: a 200 ms (not 800) watch for windows an action opens still sees Firefox popups; no cursor glide; plain logs; Chrome's own sandbox off, since it needs namespaces this hardened container (capabilities dropped, runtime seccomp) refuses and Chrome exits with code 21; the container is the isolation boundary here.
+# A bot's own desktop: a 200 ms (not 800) watch for windows an action opens still sees Firefox popups; no cursor glide; plain logs; Chrome's own sandbox off, since it needs namespaces this hardened container (capabilities dropped, runtime seccomp) refuses and Chrome exits with code 21; the container is the isolation boundary here. --grant existing-profile lets the bot attach the browser tools to Chromium it opened on this desktop; without it every attach is refused with browser_consent_required.
 RUN printf '%s\\n' \\
       '#!/bin/sh' \\
       '/usr/local/bin/prepare-openmausbot-workspace.sh' \\
@@ -189,7 +189,7 @@ RUN printf '%s\\n' \\
       '  if [ "$attempt" -ge 45 ]; then echo "X display :1 did not become ready within 45 seconds" >&2; exit 1; fi' \\
       '  sleep 1' \\
       'done' \\
-      'exec env CUA_DRIVER_BROWSER_NO_SANDBOX=1 CUA_DRIVER_INSTALL_CHANNEL=python_package CUA_DRIVER_RS_TELEMETRY_ENABLED=0 CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS=200 NO_COLOR=1 ${CUA_EXECUTABLE} serve --socket ${CUA_SOCKET} --permission-mode standard --cursor-reduced-motion on' \\
+      'exec env CUA_DRIVER_BROWSER_NO_SANDBOX=1 CUA_DRIVER_INSTALL_CHANNEL=python_package CUA_DRIVER_RS_TELEMETRY_ENABLED=0 CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS=200 NO_COLOR=1 ${CUA_EXECUTABLE} serve --socket ${CUA_SOCKET} --permission-mode standard --grant existing-profile --cursor-reduced-motion on' \\
       > /usr/local/bin/start-openmausbot-cua-driver.sh \\
     && chmod 0755 /usr/local/bin/start-openmausbot-cua-driver.sh
 RUN printf '%s\\n' \\

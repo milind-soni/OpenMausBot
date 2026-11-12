@@ -155,7 +155,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
 
   const current = slot.live ? loaded?.doc : undefined;
   const point = usePagePoint({
-    frame: () => (fullScreen ? wide.current : frame.current)?.iframe,
+    frame: () => (fullScreen ? wide.current : frame.current)?.iframe, view: fullScreen ? "full" : "inline", frameKey: loaded?.key,
     // In the pane the message box stays usable, so the page stays open while the person writes about what they picked.
     threadId, appId: message.id, rev, title: payload.title, picked: () => { if (!pane) setFullScreen(false); },
   });

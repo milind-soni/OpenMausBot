@@ -100,6 +100,13 @@ describe("the update card", () => {
     expect(install).toHaveBeenCalledOnce();
   });
 
+  it("names the desktop app's version, not the version of a server page it shows", async () => {
+    (window as unknown as { ogb: { app: unknown } }).ogb.app = { version: "9.8.7", ownPage: false };
+    await emit({ status: "downloaded", version: "0.2.0", releaseNotes: NOTES, installMode: "restart" });
+    await act(async () => button()!.click());
+    expect(card()!.textContent).toContain("you have 9.8.7");
+  });
+
   it("shows the download's progress and holds the action until it is done", async () => {
     await emit({ status: "downloading", version: "0.2.0", percent: 45 });
     await act(async () => button()!.click());
