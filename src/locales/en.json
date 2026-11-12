@@ -160,6 +160,7 @@
   "markdown.loading": "Opening file…",
   "markdown.tooLarge": "This file is too large for an in-app preview (2 MB). Download the original to view it.",
   "markdown.loadFailed": "Could not open this file. Check your connection and try again. UTF-8 text files are supported.",
+  "markdown.refused": "Could not open this file: {reason}",
   "markdown.rendered": "View formatted",
   "table.loading": "Opening table…",
   "table.tooLarge": "This file is too large for an in-app preview (10 MB, 100,000 rows, 200 columns or 500,000 cells). Download the original to view it all.",

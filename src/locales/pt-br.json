@@ -143,6 +143,7 @@
   "markdown.loading": "Abrindo arquivo…",
   "markdown.tooLarge": "Este arquivo é grande demais para a prévia no app (2 MB). Baixe o original para vê-lo.",
   "markdown.loadFailed": "Não foi possível abrir este arquivo. Verifique sua conexão e tente novamente. Arquivos de texto UTF-8 são compatíveis.",
+  "markdown.refused": "Não foi possível abrir este arquivo: {reason}",
   "markdown.rendered": "Ver formatado",
   "table.loading": "Abrindo a tabela…",
   "table.tooLarge": "Este arquivo é grande demais para a prévia no app (10 MB, 100.000 linhas, 200 colunas ou 500.000 células). Baixe o original para ver tudo.",
