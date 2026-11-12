@@ -12408,7 +12408,7 @@ ROUTES.push(createComputerRoutes({
   localVmPayload, localVmInventoryPayload, existingPerBotLocalVmCount, teamComputersPayload, teamComputerInUse,
   managedBoatOwners, providerTransitionMessage, botHasActiveTurn, localVmLeaseKey: sharedVm.leaseKey, botComputerControlSnapshot: sharedVm.snapshot,
   computerPreviewBot, computerPreviewSurface, claimTeamComputerLifecycle, claimBotComputerLifecycle,
-  claimBoatInventoryRequest, claimManagedBoatMutation, claimManagedVpsMutation, cloudComputerUsed: owner => cloudComputerPower.used(owner), boatRecovery,
+  claimBoatInventoryRequest, claimManagedBoatMutation, claimManagedVpsMutation, cloudComputerUsed: owner => cloudComputerPower.used(owner), boatRecovery, cloudComputerOwner: botComputerControlKey,
 }));
 ROUTES.push(createStatusRoutes({
   store, cfg,

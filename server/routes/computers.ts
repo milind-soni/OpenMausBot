@@ -82,6 +82,8 @@ export interface ComputerRouteDeps {
   /** A cloud computer was just woken, created or opened: its idle window starts again. */
   cloudComputerUsed(owner: string): void;
   boatRecovery: CloudComputerRecoveryRouteDeps["boatRecovery"];
+  /** Whose cloud computer a bot uses: its own id, or its team computer's key. */
+  cloudComputerOwner(bot: BotRecord): string;
 }
 
 export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
@@ -98,7 +100,7 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
   const usage = createComputerUsageRoutes(deps);
   // A map owner is a bot id or a team computer's key; a bot's hold may sit on the shared desktop's key.
   const frames = createComputerFramesRoutes({ ...deps, computerControl: { snapshot: botComputerControlSnapshot } });
-  const recovery = createCloudComputerRecoveryRoutes(deps);
+  const recovery = createCloudComputerRecoveryRoutes({ ...deps, botComputerControlKey: deps.cloudComputerOwner });
   return async (context) => {
     if (await usage(context) !== PASS) return;
     if (await frames(context) !== PASS) return;
