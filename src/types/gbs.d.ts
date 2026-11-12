@@ -4,6 +4,7 @@ export {};
 declare global {
   interface Window {
     gbs?: {
+      background?: { get(): Promise<boolean>; set(enabled: boolean): Promise<boolean> };
       platform: string;
       screenFrame(): Promise<string | null>;
       /** Screenshots the mobile preview <webview>. fullPage captures beyond

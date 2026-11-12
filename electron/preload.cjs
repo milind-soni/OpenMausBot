@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("gbs", {
   /** Host platform ("darwin" | "win32" | "linux") — for platform-aware UI. */
   platform: process.platform,
+  background: { get: () => ipcRenderer.invoke("background:get"), set: (enabled) => ipcRenderer.invoke("background:set", enabled) },
   /** One frame of this Mac's screen as a data: URL (Screen Recording TCC). */
   screenFrame: () => ipcRenderer.invoke("screen:frame"),
   /** Screenshots the mobile preview <webview>. fullPage captures beyond the

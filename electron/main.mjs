@@ -1,4 +1,6 @@
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences, utilityProcess, webContents } from "electron";
+import { createBackgroundMode } from "./background.mjs";
+import { startScheduleNotifications } from "./schedule-notifications.mjs";
+import { app, Tray, Menu, nativeImage, Notification, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences, utilityProcess, webContents } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -37,6 +39,8 @@ const APP_ICON = path.join(__dirname, "resources/app-icon.png");
 // our API shape, not just a 200).
 let serverProc = null;
 let serverReady = true;
+let backgroundMode = null;
+let stopScheduleNotifications = () => {};
 
 // The packaged app has no terminal: everything about the server child's life
 // goes to server.log in the platform log dir (macOS: ~/Library/Logs/Gerer
@@ -189,6 +193,7 @@ function createWindow() {
     },
   });
 
+  backgroundMode?.attach(win);
   win.webContents.setWindowOpenHandler(({ url }) => {
     openExternalSafely(url);
     return { action: "deny" };
@@ -332,6 +337,7 @@ app.on("second-instance", () => {
   const [win] = BrowserWindow.getAllWindows();
   if (!win) return;
   if (win.isMinimized()) win.restore();
+  win.show();
   win.focus();
 });
 
@@ -360,17 +366,19 @@ app.whenReady().then(async () => {
   // The CUA driver is macOS-only.
   if (process.platform === "darwin") startCua().catch((e) => console.error("[cua] start failed:", e));
   if (app.isPackaged) serverReady = await startServerPackaged();
+  backgroundMode = createBackgroundMode({ app, ipcMain, Tray, Menu, nativeImage, iconPath: APP_ICON, getWindows: () => BrowserWindow.getAllWindows(), openWindow: createWindow });
+  stopScheduleNotifications = startScheduleNotifications(app.isPackaged ? `http://127.0.0.1:${SERVER_PORT}` : new URL(DEV_URL).origin, Notification);
   const win = createWindow();
   // in-app auto-update (packaged only) — checks GitHub releases, downloads on
   // the user's click, installs on "Restart to update"
   startUpdater(win);
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    backgroundMode?.open();
   });
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  if (!backgroundMode?.enabled()) app.quit();
 });
 
 // EMBEDDING.md lifecycle rule: defer the first quit until the embedded
@@ -399,6 +407,7 @@ function stopServer() {
 let cuaCleanedUp = false;
 app.on("before-quit", (e) => {
   if (cuaCleanedUp) return;
+  stopScheduleNotifications();
   e.preventDefault();
   Promise.allSettled([stopServer(), stopCua()]).finally(() => {
     cuaCleanedUp = true;
