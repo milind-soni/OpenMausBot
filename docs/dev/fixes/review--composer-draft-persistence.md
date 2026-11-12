@@ -47,3 +47,28 @@ Cleanup: isolated browser and harness/Vite processes stopped; `$TMPDIR/gbs-qa-de
 
 - [?] **Queued message sends while its conversation is off screen** — `src/lib/useQueuedMessageSender.ts:1`. The queue now lives in `src/lib/composerDrafts.ts`. The app shell drains it whenever the target bot or room is free, so the composer no longer has to be mounted (bug `5a1c7c16`).
 - [?] **Latest text survives failed storage writes** — `src/lib/composerDrafts.ts:41`. The latest text, including cleared text, is kept in memory and preferred over storage within a session (bug `4a6e1bd8`). Covered by `src/lib/composerDrafts.test.ts`.
+
+
+## QA re-test (Dell, 2026-11-12)
+
+Verified main at `52a441d` in Chrome via Playwright, isolated harness `8911` / Vite `5211`, `GBS_DATA_DIR=$TMPDIR/gbs-qa-dell`. Used `TEST · A`, `TEST · B`, `TEST · Room`, and a temporary copy of `server/testing/fake-claude-cli.ts` with response completion delayed 12 seconds. No application source changed.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| 1. Text across bot/room switches | PASS | Distinct A multiline, B, and room drafts restored exactly. |
+| 2. Full page reload | PASS | All three exact text values restored after reload and selecting each target. |
+| 3. Staged attachment | PASS | A's `notes.txt` (18 B) restored after visiting B and the room. |
+| 4. Queued send while away / original bug `5a1c7c16` | PASS | A remained busy after switching to B. Its queued `Dell queue fixed` sent on natural completion while B remained selected; exactly one transcript entry remained after completion and reopening A. |
+| 5. Sending clears draft | PASS | A text and staged attachment cleared. A blocked-storage send also stayed empty after switching away and back. |
+| 6. Starter suggestions | PASS | All three starter buttons filled B's empty-thread composer with their exact label text. |
+| 7. No draft leakage | PASS | Distinct text restored for each target; A attachment count in B and the room was zero. |
+| Storage-failure repro / original bug `4a6e1bd8` | PASS | With `Storage.prototype.setItem` throwing `QuotaExceededError` only for `composer-drafts`, replacing B's persisted text with `Dell blocked new text`, switching to room, and returning restored the new text. Sending under the same failure kept it empty after another switch. Original storage method restored afterward. |
+| Queue banner and discard | PASS | Banner showed queued text and busy target; discard removed the banner/control. Discarded `Dell discard queue` never appeared in the transcript after completion. |
+| Room queue while viewing bot | PASS | While room was busy with an explicit mention of A, queued `@TEST · A Dell room queued`, switched to B, and confirmed room still busy. Queued message entered room transcript exactly once without reopening it. |
+| Delete bot with queued message | PASS | Queued a message while A was busy, then deleted A through its sidebar menu before completion. Queue entry became null, no POST for the queued text occurred, and no browser exception was raised. Repeated deletion coverage with B. |
+
+Validation: draft-store unit tests **6/6 passed**; browser console **0 errors / 0 warnings**. Both original bugs are fixed in this scope. No new failure found. Desktop Electron computer use was not exercised; its development port belongs to the live app. Existing `[?]` marks remain unchanged.
+
+Shared-board status updates: request both `5a1c7c16-29f5-4bf0-bc12-a9f7f6a31af4` and `4a6e1bd8-64f0-4c05-b737-a512a081171f` move to **review** with this evidence. Updates are pending authorization for the task API: this turn prohibits touching port 8899, and no shared-task tools are exposed. No access to 8899/5199 or `~/.gbs` was made during this re-test.
+
+Cleanup confirmed: isolated browser sessions, harnesses and Vite processes stopped; both QA data directories removed.

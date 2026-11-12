@@ -1,3 +1,7 @@
+import { UsageStore } from "./usage.ts";
+import { UsageRefreshGate } from "./usage-refresh.ts";
+import { USAGE_REFRESH_MS } from "./usage-types.ts";
+import { usageLimitReset } from "./usage-classifiers.ts";
 // Gerer Build Studio server — the harness host. Clients hold no transports
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
@@ -58,6 +62,8 @@ const MIME: Record<string, string> = {
 
 ensureDirs();
 const cfg = loadConfig();
+const usageStore = new UsageStore(DATA_DIR);
+const usageRefreshGate = new UsageRefreshGate();
 const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
 await registry.load(instanceConfigs(cfg));
 
@@ -198,6 +204,19 @@ async function allRegisteredProjects(): Promise<RegisteredProjectLike[]> {
   return Array.from(byId.values());
 }
 
+function usageSnapshot() {
+  return usageStore.list(registry.entries().map(instance => instance.instanceId));
+}
+async function refreshIdleUsage() {
+  await Promise.allSettled(registry.instances().filter(instance => instance.enabled && instance.adapter.refreshUsage).map(instance =>
+    usageRefreshGate.run(instance.instanceId, sseClients.size > 0,
+      !store.bots.some(bot => bot.busy && bot.modelSelection.instanceId === instance.instanceId) &&
+      !store.groups.some(group => group.busyBotId && store.bot(group.busyBotId)?.modelSelection.instanceId === instance.instanceId),
+      () => instance.adapter.refreshUsage!())));
+}
+const usageTimer = setInterval(() => void refreshIdleUsage(), USAGE_REFRESH_MS);
+usageTimer.unref();
+
 function deleteThreadLogs(threadId: string) {
   for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
     try {
@@ -219,6 +238,16 @@ const requestKey = (threadId: string, requestId: string) => `${threadId}:${reque
 const groupSpeakers = new Map<string, { botId: string; name: string; color: string }>();
 
 bus.subscribe((event: RuntimeEvent) => {
+  if (event.type === "usage.updated" && event.providerInstanceId) {
+    usageStore.merge(event.providerInstanceId, event.usage);
+    usageRefreshGate.noteRead(event.providerInstanceId);
+    broadcast({ kind: "usage", engines: usageSnapshot() });
+    return;
+  }
+  if ((event.type === "runtime.error" || event.type === "turn.completed") && event.failure && event.providerInstanceId) {
+    const resetsAt = usageLimitReset(usageStore.get(event.providerInstanceId).windows);
+    if (resetsAt) event.failure = { ...event.failure, resetsAt };
+  }
   const bot = store.botByThread(event.threadId);
   const group = bot ? undefined : store.groupByThread(event.threadId);
   if (!bot && !group) return;
@@ -294,7 +323,7 @@ bus.subscribe((event: RuntimeEvent) => {
       break;
     }
     case "runtime.error":
-      pushMessage({ role: "bot", kind: "activity", tool: { name: `error: ${event.message.slice(0, 160)}`, ok: false } });
+      pushMessage({ role: "bot", kind: "activity", tool: { name: event.failure?.kind === "usage_limit" ? "This AI app’s usage ran out." : `error: ${event.message.slice(0, 160)}`, ok: false } });
       break;
     case "turn.completed": {
       if (bot) {
@@ -828,6 +857,7 @@ function configStatus() {
     trello: { keyConfigured: Boolean(cfg.trello?.key), configured: Boolean(cfg.trello?.token) },
     // not a secret — the sidebar shows it
     profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" },
+    usageDisplay: cfg.usageDisplay,
     autoHandoffs: cfg.autoHandoffs ?? true,
     autoApprovePermissions: cfg.autoApprovePermissions ?? true,
     autoApproveDelaySeconds: cfg.autoApproveDelaySeconds ?? 10,
@@ -1194,6 +1224,8 @@ const server = createServer(async (req, res) => {
       return json(res, 404, { error: "unknown internal endpoint" });
     }
 
+    if (method === "GET" && path === "/api/usage") return json(res, 200, { engines: usageSnapshot() });
+
     // ── events stream ──
     if (method === "GET" && path === "/api/events") {
       res.writeHead(200, {
@@ -1203,6 +1235,8 @@ const server = createServer(async (req, res) => {
       });
       res.write(`data: ${JSON.stringify({ kind: "hello" })}\n\n`);
       sseClients.add(res);
+      res.write(`data: ${JSON.stringify({ kind: "usage", engines: usageSnapshot() })}\n\n`);
+      void refreshIdleUsage();
       const keepalive = setInterval(() => {
         try {
           res.write(": keepalive\n\n");
@@ -1723,12 +1757,20 @@ const server = createServer(async (req, res) => {
         }
         patch.autoApproveDelaySeconds = body.autoApproveDelaySeconds;
       }
+      if (body.usageDisplay !== undefined) {
+        const display = body.usageDisplay;
+        if (!display || typeof display.show !== "boolean" || !Array.isArray(display.hiddenInstances) || display.hiddenInstances.length > 100 ||
+          !display.hiddenInstances.every((id: unknown) => typeof id === "string" && id.length <= 200)) {
+          return json(res, 400, { error: "Choose which AI apps to show." });
+        }
+        patch.usageDisplay = { show: display.show, hiddenInstances: [...new Set(display.hiddenInstances)] };
+      }
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
       saveConfig(patch);
       Object.assign(cfg, loadConfig());
       // provider keys change the fleet; a profile, Trello, or autoHandoffs edit must not
       // kill in-flight turns with a pointless reload
-      if (Object.keys(patch).some((k) => !["profile", "trello", "autoHandoffs", "autoApprovePermissions", "autoApproveDelaySeconds"].includes(k))) await reloadProviders();
+      if (Object.keys(patch).some((k) => !["profile", "trello", "autoHandoffs", "autoApprovePermissions", "autoApproveDelaySeconds", "usageDisplay"].includes(k))) await reloadProviders();
       const status = configStatus();
       broadcast({ kind: "config", ...status });
       return json(res, 200, status);
@@ -1854,6 +1896,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     stopTrelloPolling();
     previewWatchManager.closeAll();
+    clearInterval(usageTimer);
     void registry.disposeAll().finally(() => process.exit(0));
   });
 }

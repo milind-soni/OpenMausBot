@@ -1,3 +1,4 @@
+import { UsageRings } from "./UsageRings";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   AlertTriangle,
@@ -313,7 +314,7 @@ export function ProjectsScreen() {
     <main className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
       <header
         className="flex h-[64px] shrink-0 items-center justify-between gap-3 border-b border-hairline/40 px-6"
-        style={{ WebkitAppRegion: "drag" } as CSSProperties}
+        style={{ WebkitAppRegion: "drag", paddingRight: window.gbs?.platform === "win32" ? 148 : undefined } as CSSProperties}
       >
         <div className="flex min-w-0 items-center gap-2.5">
           <FolderKanban size={20} className="shrink-0 text-accent" />
@@ -323,6 +324,7 @@ export function ProjectsScreen() {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2" style={{ WebkitAppRegion: "no-drag" } as CSSProperties}>
+          <UsageRings />
           <button
             onClick={() => void refresh(true)}
             disabled={refreshing}

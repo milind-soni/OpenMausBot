@@ -59,3 +59,15 @@ and plan 5 consumes it.
 - The work is documented for users (`docs/guide/`) and for maintainers (the
   plan is updated to match what shipped).
 - It is committed locally. Nothing is pushed without the user asking.
+
+## Status (updated 2026-11-12)
+
+| # | Initiative | State | Where |
+|---|---|---|---|
+| 0 | Keep typed messages when switching | Built, QA passed after two fixes, awaiting user approval | `main` (`1930420`, `52a441d`) |
+| 1 | First-run friction | P0 awaiting approval. P1/P2 are scheduled after the feature branches merge, to avoid conflicts | `main` |
+| 2 | Plain-language pass | Glossary, copy sweep, and copy decks written. The copy sweep is applied after the feature branches merge | `docs/guide/` |
+| 3 | Remove cloud computer | Built, QA passed, merged | `main` (`0d55254`) |
+| 4 | Preview Studio | Being built by Z | `feat/preview-studio` |
+| 5 | Schedules, auto-resume, backup model | Being built by SoSo | `feat/scheduled-runs` |
+| 6 | Usage rings | Built, Dell QA in progress | `feat/usage-rings` (`31cd246`) |

@@ -9,7 +9,7 @@
 //   FAKE_CODEX_MCP_SERVER  serverName for mcp-approval (default gbs_agents)
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
 const calls: Array<{ method: string; params: unknown }> = [];
@@ -28,6 +28,13 @@ const dump = () => {
 };
 
 const finishTurn = () => {
+  if (mode === "usage-limit") {
+    notify("account/rateLimits/updated", { rateLimits: { limitId: "codex", primary: { usedPercent: 100, resetsAt: 4102444800, windowDurationMins: 300 } } });
+    notify("error", { error: { message: "Usage is used up", codexErrorInfo: "usageLimitExceeded" }, willRetry: false });
+    dump();
+    notify("turn/completed", { turn: { status: "failed", error: { message: "Usage is used up", codexErrorInfo: "usageLimitExceeded" } } });
+    return;
+  }
   notify("item/completed", { item: { id: "i1", type: "commandExecution", status: "completed" } });
   if (mode === "stream") {
     // token deltas, then the whole message — the driver must not double-emit
@@ -68,6 +75,15 @@ process.stdin.on("data", (chunk) => {
       case "initialize":
         out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
         break;
+      case "account/rateLimits/read": {
+        dump();
+        if (mode === "usage-unavailable") out({ id: msg.id, error: { code: -1, message: "Unsupported authentication" } });
+        else {
+          const capture = JSON.parse(readFileSync(new URL("./fixtures/usage/codex-read-observed.json", import.meta.url), "utf8"));
+          out({ id: msg.id, result: capture.result });
+        }
+        break;
+      }
       case "model/list": {
         const second = msg.params?.cursor === "next-page";
         const models = JSON.parse(second

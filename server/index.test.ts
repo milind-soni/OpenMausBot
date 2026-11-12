@@ -484,6 +484,30 @@ describe("harness HTTP API", () => {
     expect((await api("PUT", "/api/config", { box: { token: "obsolete-secret" } })).status).toBe(400);
   });
 
+  it("serves usage through the request guard and persists display choices without reloading providers", async () => {
+    const before = await api("GET", "/api/usage");
+    expect(before.status).toBe(200);
+    expect(before.body.engines).toEqual([expect.objectContaining({ instanceId: "ghost", status: "unknown", windows: [] })]);
+    const controller = new AbortController();
+    const stream = await fetch(`${BASE}/api/events`, { signal: controller.signal });
+    try {
+      const reader = stream.body!.getReader();
+      let text = "";
+      while (!text.includes('"kind":"usage"')) {
+        const chunk = await reader.read();
+        if (chunk.done) throw new Error("Stream ended before usage frame");
+        text += new TextDecoder().decode(chunk.value);
+      }
+      expect(text).toContain('"instanceId":"ghost"');
+    } finally { controller.abort(); }
+    const rejected = await fetch(`${BASE}/api/usage`, { headers: { origin: "https://untrusted.example" } });
+    expect(rejected.status).toBe(403);
+    const saved = await api("PUT", "/api/config", { usageDisplay: { show: false, hiddenInstances: ["ghost"] } });
+    expect(saved.status).toBe(200);
+    expect((await api("GET", "/api/config")).body.usageDisplay).toEqual({ show: false, hiddenInstances: ["ghost"] });
+    expect((await api("PUT", "/api/config", { usageDisplay: { show: "yes", hiddenInstances: [] } })).status).toBe(400);
+  });
+
   it("saves config keys write-only and reports booleans", async () => {
     const before = await api("GET", "/api/config");
     expect(before.body.xai).toEqual({ configured: false });

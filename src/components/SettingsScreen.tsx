@@ -1,3 +1,5 @@
+import { UsageSettings } from "./UsageSettings";
+import { UsageRings } from "./UsageRings";
 // Dedicated full-screen Settings page with categorized sections:
 // Profile & Account, Connections & API Keys, Models & Providers, System & Updates.
 import { useEffect, useRef, useState, type CSSProperties } from "react";
@@ -493,6 +495,7 @@ function ModelsSection() {
         )}
       </div>
 
+      <UsageSettings />
       <div className="rounded-2xl border border-hairline/50 bg-card p-6 shadow-sm">
         <h3 className="text-[14px] font-medium text-ink">Provider CLI Setup Reference</h3>
         <p className="mt-1 text-[13px] text-ink-secondary">
@@ -899,7 +902,7 @@ export function SettingsScreen() {
       {/* Header bar */}
       <header
         className="flex h-[64px] shrink-0 items-center justify-between border-b border-hairline/40 px-6"
-        style={{ WebkitAppRegion: "drag" } as CSSProperties}
+        style={{ WebkitAppRegion: "drag", paddingRight: window.gbs?.platform === "win32" ? 148 : undefined } as CSSProperties}
       >
         <div className="flex items-center gap-3">
           <button
@@ -920,6 +923,7 @@ export function SettingsScreen() {
         </div>
 
         <div className="flex items-center gap-2" style={{ WebkitAppRegion: "no-drag" } as CSSProperties}>
+          <UsageRings />
           <button
             onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
             className="rounded-lg bg-raised px-3.5 py-1.5 text-[13px] font-medium text-ink hover:bg-raised-hover transition-colors"

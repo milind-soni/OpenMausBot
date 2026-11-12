@@ -202,3 +202,41 @@ transport mapping is labeled in the fixture inventory.
 ## Approval
 
 Status: approved by the user on 2026-11-12
+
+## Implementation contract — 2026-11-12
+
+The shared types live in `server/usage-types.ts`; `server/usage.ts` re-exports
+`EngineUsage`, `UsageWindow`, `UsagePatch`, and `UsageLimitFailure` for server
+consumers. Per-engine pure functions live in `server/usage-classifiers.ts`.
+Unknown Grok/Antigravity transports intentionally produce no classification.
+Claude is status-only until its numeric conventions are verified.
+
+A `UsageLimitFailure` has `{ kind: "usage_limit", resetsAt?: string }`, where
+`resetsAt` is ISO 8601 when known. Runtime errors and failed turn completions
+carry it as `event.failure`. Account updates use `usage.updated` internally
+and `{ kind: "usage", engines: EngineUsage[] }` on SSE. `GET /api/usage`
+returns the same array under `engines`. Account events have no chat thread
+and do not write transcript logs. Raw account identifiers and credit balances
+are never included in these normalized frames.
+
+The harness enriches a turn failure with the latest future reset of its
+currently exhausted windows, only if all of those resets are known. No reset
+is parsed from prose. A past reset or a sparse percentage update does not
+clear a known exhausted state. Scheduling and backup work must confirm
+availability before resuming; these events alone never authorize paid
+additional usage or guarantee that another request will succeed.
+
+Idle refreshes are guarded by open SSE clients and the app’s idle state,
+with an instance-wide five-minute cadence and overlap prevention. The Codex
+adapter also checks for active turns. Its dedicated reader only sends
+initialize/initialized/account-rate-limit-read messages, has a ten-second
+timeout and bounded response size, and is reaped during stop/dispose.
+Turn app-server initialization requests a snapshot without awaiting it, so
+unsupported account reads cannot prevent a model turn from starting.
+
+Readings become unknown after 15 minutes. Each window retains its own
+measurement time across sparse updates. An elapsed refresh masks that
+window’s old percentage, rather than inventing a fresh allowance.
+`config.usageDisplay` holds `{ show: boolean, hiddenInstances: string[] }`;
+editing it does not reload providers. Backup switching and automatic resume
+are intentionally left to their separate approved plan.
