@@ -96,12 +96,18 @@ describe.skipIf(process.platform === "win32")("VPS wake script", () => {
 
   it("credits a caller that joins a wake under way only with the time it waited", async () => {
     const host = pausedHost();
-    host.wakeWith(`PATH=/usr/bin:/bin; sleep 0.6; echo up > '${host.awake}'`);
+    const started = `${host.awake}-started`;
+    const release = `${host.awake}-release`;
+    // The wake says when it has started and then waits to be released, so the joiner always joins a wake under way.
+    host.wakeWith(`PATH=/usr/bin:/bin; : > '${started}'; while [ ! -f '${release}' ]; do sleep 0.05; done; echo up > '${host.awake}'`);
     const first = ensureVpsSshMaster(host.ssh, "paused-vps");
+    while (!existsSync(started)) await new Promise((resolve) => setTimeout(resolve, 20));
     await new Promise((resolve) => setTimeout(resolve, 400));
-    const joined = await ensureVpsSshMaster(host.ssh, "paused-vps");
-    const firstWoke = await first;
-    expect(firstWoke).toBeGreaterThanOrEqual(550);
+    const joining = ensureVpsSshMaster(host.ssh, "paused-vps");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    writeFileSync(release, "");
+    const [firstWoke, joined] = await Promise.all([first, joining]);
+    expect(firstWoke).toBeGreaterThanOrEqual(400);
     expect(joined).toBeLessThan(firstWoke - 250);
     expect(host.connectAttempts()).toBe(2);
   });
