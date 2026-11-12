@@ -25,6 +25,22 @@ export function limitBackupAllowed(from: Engine, to: Engine, toConfig?: Pick<Ins
   return billsEachUse(toConfig);
 }
 
+/** Whether one of a bot's chosen `backups` may take over after `current` was refused for `scope`, by the rules a
+ * conversation's own recovery applies: the backup's engine is on and it is another model; after a usage limit the same
+ * engine only when its limit was not engine-wide, another engine only when `limitBackupAllowed`; signed out, only
+ * another engine. */
+export function limitBackupReady(current: Pick<ModelSelection, "instanceId" | "model">, backups: readonly Pick<ModelSelection, "instanceId" | "model">[],
+  scope: "engine" | "model" | "credits" | "signed-out", engine: (instanceId: string) => (Engine & { enabled: boolean }) | undefined,
+  config: (instanceId: string) => Pick<InstanceConfig, "environment" | "access"> | undefined): boolean {
+  const from = engine(current.instanceId);
+  return backups.some((backup) => {
+    const to = engine(backup.instanceId);
+    if (!to?.enabled || (backup.instanceId === current.instanceId && backup.model === current.model)) return false;
+    if (backup.instanceId === current.instanceId) return scope !== "engine" && scope !== "signed-out";
+    return scope === "signed-out" || Boolean(from && limitBackupAllowed(from, to, config(backup.instanceId)));
+  });
+}
+
 /** An engine instance that bills each use (a pay-per-use key, as its access or in its environment) instead of drawing on
  * a plan's limit. */
 export function billsEachUse(config?: Pick<InstanceConfig, "environment" | "access">): boolean {

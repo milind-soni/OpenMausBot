@@ -3,11 +3,39 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { failoverLine, LimitFailovers, limitBackupAllowed, type LimitFailover } from "./limit-failover.ts";
+import { failoverLine, LimitFailovers, limitBackupAllowed, limitBackupReady, type LimitFailover } from "./limit-failover.ts";
 
 const claude = { instanceId: "claude", driverKind: "claudeAgent" };
 const NOW = Date.parse("2026-10-19T10:00:00Z");
 const HOUR = 3_600_000;
+
+describe("limitBackupReady", () => {
+  const engines: Record<string, { instanceId: string; driverKind: string; enabled: boolean }> = {
+    claude: { ...claude, enabled: true }, "claude-work": { instanceId: "claude-work", driverKind: "claudeAgent", enabled: true },
+    codex: { instanceId: "codex", driverKind: "codex", enabled: true }, grok: { instanceId: "grok", driverKind: "grokAgent", enabled: false },
+  };
+  const engine = (id: string) => engines[id];
+  const config = () => undefined;
+  const current = { instanceId: "claude", model: "opus" };
+
+  it("does not count a backup the conversation's own recovery would refuse", () => {
+    expect(limitBackupReady(current, [{ instanceId: "claude-work", model: "opus" }], "engine", engine, config)).toBe(false);
+    expect(limitBackupReady(current, [{ instanceId: "grok", model: "grok-4" }], "engine", engine, config)).toBe(false);
+    expect(limitBackupReady(current, [{ instanceId: "missing", model: "x" }], "engine", engine, config)).toBe(false);
+    expect(limitBackupReady(current, [{ instanceId: "claude", model: "opus" }], "model", engine, config)).toBe(false);
+    expect(limitBackupReady(current, [{ instanceId: "claude", model: "sonnet" }], "engine", engine, config)).toBe(false);
+    expect(limitBackupReady(current, [{ instanceId: "claude", model: "sonnet" }], "signed-out", engine, config)).toBe(false);
+    expect(limitBackupReady(current, [], "engine", engine, config)).toBe(false);
+  });
+
+  it("counts a backup the conversation's own recovery would use", () => {
+    expect(limitBackupReady(current, [{ instanceId: "codex", model: "gpt-5" }], "engine", engine, config)).toBe(true);
+    expect(limitBackupReady(current, [{ instanceId: "claude", model: "sonnet" }], "model", engine, config)).toBe(true);
+    expect(limitBackupReady(current, [{ instanceId: "claude-work", model: "opus" }], "engine", engine, (id) => id === "claude-work" ? { access: "api" } : undefined)).toBe(true);
+    expect(limitBackupReady(current, [{ instanceId: "claude-work", model: "opus" }], "signed-out", engine, config)).toBe(true);
+    expect(limitBackupReady(current, [{ instanceId: "grok", model: "grok-4" }, { instanceId: "codex", model: "gpt-5" }], "engine", engine, config)).toBe(true);
+  });
+});
 
 describe("limitBackupAllowed", () => {
   it("never rotates to another sign-in of the same subscription engine", () => {
