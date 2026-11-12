@@ -60,7 +60,8 @@ function splitPhone(source) {
       }
     }
     const phone = source.slice(start, end);
-    if (phone.includes("[data-skin=")) return { desktop: source.slice(0, start) + source.slice(end), phone };
+    // A skin's own token block (`:is([data-skin="x"]) {`), not a rule that only scopes by skin, like the settings sheet's.
+    if (/\[data-skin="[a-z-]+"\]\)?\s*\{/.test(phone)) return { desktop: source.slice(0, start) + source.slice(end), phone };
   }
   return { desktop: source, phone: "" };
 }
@@ -190,8 +191,6 @@ const PAIRS = [
   ["--color-inset", "--color-card", 1.04],
   ["--color-card", "--color-app", 1.04],
   ["--color-panel", "--color-app", 1.03],
-  // The app's card is told from the frame round it.
-  ["--color-frame", "--color-app", 1.05],
 ];
 
 const skins = parseSkins(css);
@@ -247,6 +246,17 @@ for (const [id, tokens] of skins) {
   }
   if (skinFailed) failed = true;
 }
+
+// The window's frame is the sidebar's colour in every skin, so the top bar, the rail and the sidebar read as one field;
+// the chat in the app's card is told from it by --color-panel on --color-app above. The rail of places is a page 36px
+// wide, so it renders the phone tokens beside a full-width page: there too its frame must be the desktop sidebar's.
+const tokenHex = (id, token) => resolve(skins.get(id)?.[token] ?? "", skins.get(id) ?? {}).toLowerCase();
+const frameMisses = [...skins.keys()].filter((id) => tokenHex(id, "--color-frame") !== tokenHex(id.replace(/ \(phone\)$/, ""), "--color-panel"));
+for (const id of frameMisses) {
+  console.log(`✗ ${id} frame — ${tokenHex(id, "--color-frame") || "undefined"}, not the sidebar's ${tokenHex(id.replace(/ \(phone\)$/, ""), "--color-panel")}`);
+}
+if (frameMisses.length) failed = true;
+else console.log(`✓ frame — the sidebar's colour in all ${skins.size} skins, phone widths included`);
 
 // The inverted bubbles (Daylight's ink-black, Pop's ink) have
 // their own inherited context: the editor, labels, quotes and file chips
