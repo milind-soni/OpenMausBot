@@ -3844,7 +3844,7 @@
   "settings.logins.onePassword.refresh": "Refresh",
   "settings.logins.onePassword.disconnect": "Disconnect",
   "settings.logins.onePassword.vaults": "1Password vaults",
-  "settings.logins.onePassword.vaultUse": "{count} logins · {who}",
+  "settings.logins.onePassword.vaultUse": "{count} website logins · {who}",
   "settings.logins.onePassword.changeVault": "Change who can use {vault}",
   "settings.logins.onePassword.error": "Couldn't reach 1Password. Check your internet connection and the token, then try again.",
   "settings.logins.onePassword.note": "The token is encrypted on the computer {app} runs on and never shown again. 1Password logins appear in the list above, filled the same way, and are changed in 1Password. A vault is for every bot unless you choose bots for it.",

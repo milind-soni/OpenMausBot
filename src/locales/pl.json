@@ -3111,7 +3111,7 @@
   "settings.logins.onePassword.refresh": "Odśwież",
   "settings.logins.onePassword.disconnect": "Rozłącz",
   "settings.logins.onePassword.vaults": "Sejfy 1Password",
-  "settings.logins.onePassword.vaultUse": "Logowania: {count} · {who}",
+  "settings.logins.onePassword.vaultUse": "Logowania do stron: {count} · {who}",
   "settings.logins.onePassword.changeVault": "Zmień, kto może używać {vault}",
   "settings.logins.onePassword.note": "Token jest zaszyfrowany na komputerze, na którym działa {app}, i nigdy nie jest pokazywany ponownie. Logowania z 1Password pojawiają się na powyższej liście, uzupełniane w ten sam sposób, i są zmieniane w 1Password. Sejf jest dla każdego bota, chyba że wybierzesz boty dla niego.",
   "settings.logins.cloudOwn": "To są logowania samej Chmury. Logowania z twojego komputera trafiają tutaj same, gdy aplikacja {app} na tym komputerze przeniesie tu twoje boty.",

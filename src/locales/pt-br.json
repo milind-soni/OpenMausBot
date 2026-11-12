@@ -3667,7 +3667,7 @@
   "settings.logins.onePassword.refresh": "Atualizar",
   "settings.logins.onePassword.disconnect": "Desconectar",
   "settings.logins.onePassword.vaults": "Cofres do 1Password",
-  "settings.logins.onePassword.vaultUse": "Logins: {count} · {who}",
+  "settings.logins.onePassword.vaultUse": "Logins de sites: {count} · {who}",
   "settings.logins.onePassword.changeVault": "Alterar quem pode usar {vault}",
   "settings.logins.onePassword.error": "Não foi possível acessar o 1Password. Confira a conexão com a internet e o token e tente novamente.",
   "settings.logins.onePassword.note": "O token é criptografado no computador onde o app {app} roda e nunca mais é exibido. Os logins do 1Password aparecem na lista acima e são preenchidos da mesma forma. Edite-os no 1Password. Um cofre fica disponível para todos os bots, a menos que você escolha quais podem usá-lo.",
