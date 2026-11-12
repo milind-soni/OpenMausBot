@@ -95,7 +95,7 @@ describe("phone MCP text input", () => {
 
   it("asks for ADBKeyBoard and types nothing when another keyboard is chosen", async () => {
     const phone = device(VENDOR_KEYBOARD);
-    await expect(typePhoneText(phone.shell, "二手 iPad")).rejects.toThrow("ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard");
+    await expect(typePhoneText(phone.shell, "二手 iPad")).rejects.toThrow("Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard");
     expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"]]);
   });
 
@@ -113,7 +113,9 @@ describe("phone MCP text input", () => {
 
   it.each(["二手 iPad", "iPad"])("asks for ADBKeyBoard and changes nothing when another keyboard cannot clear (%s)", async (text) => {
     const phone = device(VENDOR_KEYBOARD);
-    await expect(typePhoneText(phone.shell, text, true)).rejects.toThrow("A field can be cleared only when ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard");
+    const refused = typePhoneText(phone.shell, text, true);
+    await expect(refused).rejects.toThrow("A field can be cleared only when ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard");
+    await expect(refused).rejects.toThrow("call type_text without clear and remove the old text with press delete");
     expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"]]);
   });
 
@@ -128,14 +130,18 @@ describe("phone MCP text input", () => {
     expect(commands).toEqual([["settings", "get", "secure", "default_input_method"], CLEAR]);
   });
 
-  it("offers clear as a plain boolean beside the text", () => {
-    expect(TOOLS.find((tool) => tool.name === "type_text")?.inputSchema.properties).toMatchObject({ clear: { type: "boolean" } });
+  it("offers clear as an optional plain boolean beside the text", () => {
+    const schema = TOOLS.find((tool) => tool.name === "type_text")?.inputSchema;
+    expect(schema?.properties).toMatchObject({ clear: { type: "boolean" } });
+    expect(schema?.required).toEqual(["text"]);
   });
 
   it.each(["", "a".repeat(257), "😀".repeat(257)])("refuses empty or over-long text without touching the phone", async (text) => {
-    const phone = device(ADB_KEYBOARD);
-    await expect(typePhoneText(phone.shell, text)).rejects.toThrow("Android text must be 1 to 256 characters");
-    expect(phone.commands).toEqual([]);
+    for (const clear of [false, true]) {
+      const phone = device(ADB_KEYBOARD);
+      await expect(typePhoneText(phone.shell, text, clear)).rejects.toThrow("Android text must be 1 to 256 characters");
+      expect(phone.commands).toEqual([]);
+    }
   });
 });
 
