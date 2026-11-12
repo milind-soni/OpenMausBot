@@ -5,7 +5,7 @@
 // the shadow-instance behavior end to end while it's at it.
 import { spawn, type ChildProcess } from "node:child_process";
 import { request as httpRequest } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -83,14 +83,14 @@ describe("harness HTTP API", () => {
 
     const added = await api("POST", "/api/projects/add-existing", { projectPath: existingPath });
     expect(added.status).toBe(201);
-    expect(added.body.project).toMatchObject({ path: existingPath, source: "existing", missing: false });
+    expect(added.body.project).toMatchObject({ path: realpathSync(existingPath), source: "existing", missing: false });
 
     const duplicate = await api("POST", "/api/projects/add-existing", { projectPath: existingPath });
     expect(duplicate.body.project.id).toBe(added.body.project.id);
 
     const created = await api("POST", "/api/projects/create", { parentPath, name: "new-app" });
     expect(created.status).toBe(201);
-    expect(created.body.project).toMatchObject({ path: join(parentPath, "new-app"), source: "created" });
+    expect(created.body.project).toMatchObject({ path: join(realpathSync(parentPath), "new-app"), source: "created" });
     expect(existsSync(join(parentPath, "new-app"))).toBe(true);
 
     const listed = await api("GET", "/api/projects");
@@ -130,7 +130,7 @@ describe("harness HTTP API", () => {
 
       const registered = await api("POST", "/api/projects/add-existing", { projectPath: outside });
       expect(registered.status).toBe(201);
-      expect(registered.body.project.path).toBe(outside);
+      expect(registered.body.project.path).toBe(realpathSync(outside));
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
