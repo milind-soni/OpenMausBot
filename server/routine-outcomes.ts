@@ -23,7 +23,7 @@ const NO_START = new RegExp(`^${beforeBot}.+${afterBot}`);
  * run in a row turns the routine off and says so. Turning it on again, or any change, starts the count afresh. A busy
  * or unavailable Cloud service is not counted: that passes by itself, and nothing would turn the routine back on. */
 export function offAfterNoStarts<R extends { enabled: boolean; nextRunAt: number | null; updatedAt: number }, T extends Outcome>(routine: R | undefined, runs: readonly T[], run: T, now: number): { routine: R; alert: { detail: string } } | undefined {
-  if (!routine?.enabled || run.status !== "failed" || !run.error || !NO_START.test(run.error)) return undefined;
+  if (!routine?.enabled || run.status !== "failed" || !run.error || run.createdAt < routine.updatedAt || !NO_START.test(run.error)) return undefined;
   const earlier = outcomesNewestFirst(runs, run.routineId, run.id).slice(0, NO_START_RUNS_BEFORE_OFF - 1);
   if (earlier.length < NO_START_RUNS_BEFORE_OFF - 1 || earlier.some((other) => other.status !== "failed" || other.error !== run.error || other.createdAt < routine.updatedAt)) return undefined;
   Object.assign(routine, { enabled: false, nextRunAt: null, updatedAt: Math.max(now, routine.updatedAt + 1) });

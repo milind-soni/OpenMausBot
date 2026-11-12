@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import { isRoutineProblemRun } from "../shared/routines.ts";
 import { ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED } from "./routine-execution.ts";
+import { offAfterNoStarts } from "./routine-outcomes.ts";
 import { RUN_PROGRESS_WINDOW_MS } from "./routine-progress-save.ts";
 import {
   nextOccurrence,
@@ -351,6 +352,17 @@ describe("bounded scheduled overlap and run health", () => {
     await attempt(noStart);
     expect(h.manager.listRoutines()[0]).toMatchObject({ enabled: true });
     expect(alerts.at(-1)).toBeNull();
+  });
+
+  it("does not count a run that started before the routine was last changed toward turning it off", () => {
+    const error = "Maus's cloud desktop didn't start. Change where this routine runs.";
+    const run = (id: string, createdAt: number) => ({ id, routineId: "r", status: "failed", error, createdAt, finishedAt: createdAt + 50 });
+    const afterEdit = [run("a", 150), run("b", 160)];
+    const routine = () => ({ enabled: true, nextRunAt: 1, updatedAt: 100 });
+    const queuedBeforeEdit = run("old", 50);
+    expect(offAfterNoStarts(routine(), [...afterEdit, queuedBeforeEdit], queuedBeforeEdit, 300)).toBeUndefined();
+    const third = run("c", 170);
+    expect(offAfterNoStarts(routine(), [...afterEdit, third], third, 300)?.routine).toMatchObject({ enabled: false, nextRunAt: null });
   });
 
   it("counts restart recovery only once and sanitizes obsolete or invalid health metadata", async () => {
