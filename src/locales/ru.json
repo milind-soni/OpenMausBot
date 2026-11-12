@@ -3136,7 +3136,7 @@
   "settings.logins.onePassword.refresh": "Обновить",
   "settings.logins.onePassword.disconnect": "Отключить",
   "settings.logins.onePassword.vaults": "Хранилища 1Password",
-  "settings.logins.onePassword.vaultUse": "{count} учётных данных · {who}",
+  "settings.logins.onePassword.vaultUse": "{count} учётных данных для сайтов · {who}",
   "settings.logins.onePassword.changeVault": "Изменить, кто может пользоваться {vault}",
   "settings.logins.onePassword.note": "Токен шифруется на компьютере, где работает {app}, и больше никогда не показывается. Учётные данные 1Password появятся в списке выше и подставляются так же; изменяются они в 1Password. Хранилище доступно всем ботам, если вы не выберете для него конкретных ботов.",
   "settings.logins.cloudOwn": "Это собственные учётные данные облака. Учётные данные вашего компьютера появятся здесь сами, когда приложение {app} на том компьютере перенесёт сюда ваших ботов.",
