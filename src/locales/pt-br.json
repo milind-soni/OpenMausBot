@@ -7534,6 +7534,8 @@
   "chat.preview.removePoint": "Remover {label}",
   "chat.preview.pointedAt": "Você apontou para {parts}",
   "chat.helperSuggestion.text": "Quer que eu organize seus e-mails de graça? Adicione uma chave do Cloudflare Workers AI (plano grátis) ou do Jev.",
+  "chat.helperSuggestion.from": "Dica do OpenMausBot",
+  "chat.helperSuggestion.about": "Uma chave auxiliar deixa um modelo pequeno organizar seus e-mails sem usar sua IA principal. O Jev (typesafe.ai) e o Cloudflare Workers AI oferecem um.",
   "chat.helperSuggestion.addKey": "Adicionar chave",
   "chat.helperSuggestion.notNow": "Agora não",
   "chat.helperSuggestion.declined": "Tudo bem, não vou perguntar novamente.",
