@@ -16,7 +16,7 @@ Readings older than 15 minutes stop showing a percentage. An allowance whose ref
 
 In a narrow window, the rings become one summary. It shows the AI app that needs attention first. Open it to see the others.
 
-“Set a backup model…” currently opens the bot’s settings. Automatic switching and waiting to continue are being added separately; this display does not enable them. You can choose another AI model in bot settings if you want to continue now.
+“Set a backup model…” opens the backup choice in bot settings. You can choose whether to retry on a backup, wait and continue, or stop and tell you. The rings themselves do not turn automatic continuation on. See the related guides below.
 
 To hide the rings, open Settings → Models & Providers and turn off “Show usage in the top bar.” You can also hide individual AI apps there. These settings only change the display.
 

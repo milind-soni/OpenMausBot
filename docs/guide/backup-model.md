@@ -1,68 +1,33 @@
-# Backup Models: Never Get Interrupted When Usage Runs Out
+# Backup model and waiting to continue
 
-Every AI provider—whether Anthropic (Claude), OpenAI (Codex/GPT), or xAI (Grok)—has limits on how much work you can run in a given hour or week. 
+A backup model is an alternate AI model your bot can use if its main AI app reports that usage has run out. It helps with supported interruptions; it cannot guarantee that work will always continue.
 
-In most tools, hitting a limit means your work abruptly fails with a cryptic error code. In Gerer Build Studio, your bot simply hands the baton to a **Backup Model** and keeps right on working.
+## Choose what happens
 
----
+Open the bot’s settings and find **Backup model**. Choose a model from a different AI app, then choose **When usage runs out**:
 
-## 1. What Is a Backup Model?
+- **Switch to backup model:** retry the interrupted request on the backup after the failed attempt has ended. If that backup is unavailable or has also run out, save a retry for later.
+- **Wait and continue:** keep the request and schedule a new attempt.
+- **Stop and tell me:** leave the conversation paused so you can decide what to do.
 
-A backup model is a secondary AI model you designate for a bot. If the bot's primary model runs out of usage allowance while working on a project, the bot switches to the backup model automatically and finishes the task without making you wait.
+Existing bots keep **Stop and tell me** when upgrading, so an update does not start automatic work you did not previously enable. Newly created bots default to **Wait and continue**. Choosing a backup selects **Switch to backup model**; removing it selects **Wait and continue**. You can change that choice before the next task. Model choices cannot change while the bot is working.
 
-### Best Practice: Pair Different AI Apps
-For the most reliable setup, we recommend choosing a backup model from a different AI app than your primary model:
-- **Primary:** Claude 3.5 Sonnet / Claude Opus → **Backup:** OpenAI Codex / GPT-5
-- **Primary:** OpenAI GPT-5 → **Backup:** Claude 3.5 Sonnet
-- **Primary:** xAI Grok Build → **Backup:** Claude 3.5 Sonnet
+## Waiting to continue
 
-Because Claude and OpenAI track usage on completely separate services, Claude running out will never affect your OpenAI allowance!
+When a supported usage interruption occurs, the conversation shows its saved retry with **Cancel** and **Resume now**. Cancel removes pending retry work. Resume now queues one attempt as soon as the bot is free; it does not create several copies.
 
----
+When the AI app reports a verified refresh time, the retry is set for two minutes after that time. Without a known time, the first retry is in 15 minutes, then 30 minutes, then an hour. Further waits grow up to six hours. This also allows for brief interruptions that clear before a daily or weekly allowance refreshes.
 
-## 2. How to Set a Backup Model
+There is only one pending automatic retry per conversation. Repeated failures update it. The original request stays saved. A new message from you replaces the pending retry, and Stop cancels pending continuation for the task you stopped.
 
-You can add a backup model to any bot in seconds:
+Where the AI app supports checking usage without doing work, Studio checks again before an automatic retry. If it still reports no usage, the retry is moved. Otherwise the next attempt tries to continue your saved request. A displayed time is not a promise that the account will be available. Claude does not currently provide a verified refresh time here. Grok and Antigravity interruptions without a supported usage signal remain ordinary errors; Studio does not guess that their usage ran out.
 
-1. Click on the bot in the left sidebar to open its chat.
-2. Click the **Settings icon** in the top right header (or right-click the bot in the sidebar and choose **Edit Profile**).
-3. Scroll to the **AI Model** section.
-4. Under **Backup model**, pick an alternate model from the dropdown.
-5. Choose what should happen under **When usage runs out**:
-   - **Switch to backup model (Recommended):** The bot will switch immediately and finish the current task.
-   - **Wait and continue:** The bot will automatically schedule itself to resume as soon as your main model's allowance refreshes.
-   - **Stop and tell me:** The bot will pause and post a message letting you choose your next move.
-6. Your settings save automatically!
+Automatic retries appear in **Schedules** and obey **Pause all schedules** and the catch-up window. Studio must still be running; see [Schedules](schedules.md). Cancelled or missed retries do not wake a sleeping computer or restart a fully quit app.
 
----
+## Using a backup
 
-## 3. How Auto-Switching Works in Practice
+Switching happens after a failed attempt ends. The original user message is kept once, and the retry uses the saved conversation. Studio asks the backup to inspect existing results before repeating actions, but you should review work with outside effects after an interruption.
 
-When your bot encounters a usage limit:
+The **Using backup** badge shows that a backup is selected for new work while the main AI app remains unavailable or its usage is unknown. A fresh reading alone does not switch a running conversation. The next new turn can use the main model once usage is reported as available. **Keep this model** makes the backup the main choice. **Switch back now** returns to the main model for the next message, even if its usage has not refreshed yet. Neither one interrupts a running task.
 
-1. **Seamless transition:** The bot detects the out-of-credit status and hands off the current conversation to your backup model.
-2. **Clear notice in the chat:** The bot posts a friendly line:
-   > *"Switched to GPT-5 because Claude's usage ran out. Continuing your task…"*
-3. **"Using backup" badge:** A compact indicator appears beside the model picker in the header so you always know which model is speaking.
-4. **Automatic return:** When your primary model's usage refreshes (for example, at the top of the hour), the bot automatically switches back to your primary model for your next new message.
-
-*(Coming soon: One-click option from the badge to permanently keep the backup model as your primary).*
-
----
-
-## 4. What If I Don't Have a Backup Model Configured?
-
-If you don't configure a backup model, your bot defaults to **Wait and continue**:
-
-- The bot calculates when your AI app's usage resets (for example, at 3:42 PM).
-- It creates an automatic scheduled run:
-  > *"Claude's usage ran out. I'll pick this up automatically at 3:42 PM."*
-- You can click **Resume now** at any time if you'd like to retry immediately, or **Cancel auto-resume** to clear the timer.
-
----
-
-## 5. Keep an Eye on Your Usage
-
-You don't have to wait for usage to run out to know where you stand. Check the **Usage Rings** in the top bar anytime to see your live remaining balance. 
-
-Read our [Usage & Limits Guide](file:///Users/esoefildine/Documents/Dev/GererBuildStudio/docs/guide/usage-and-limits.md) to learn how to read your usage rings and avoid surprises.
+If the main app’s usage cannot be checked, Studio does not guess that it refreshed. You can select it manually when you are ready. Read [Usage left](usage-and-limits.md) to understand unknown readings and refresh times.

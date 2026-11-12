@@ -1,77 +1,43 @@
-# Scheduled Runs: An Alarm Clock for Your Bots
+# Schedules
 
-Imagine having your personal bots wake up at 8:30 AM every weekday, scan your open tasks, summarize the day's priorities, and leave a fresh brief waiting in your project room before you even open your laptop.
+Have a bot start work at a set time: a morning briefing, a weekday project check-in, or a message you want sent later.
 
-That is what **Scheduled Runs** do in Gerer Build Studio. You can set any instruction to run automatically once, daily, on weekdays, weekly, or every few hours.
+## Create a schedule
 
----
+Open **Schedules** in the sidebar and choose **New schedule**. You can also use the clock in a chat or room header. Beside the send button, **Send later…** starts a schedule with your draft text. The draft clears only after the schedule is saved. Scheduled messages currently support text; attachments stay in the normal composer.
 
-## 1. What Are Scheduled Runs?
+Choose a bot or room, write the instructions, and choose when it should run:
 
-A scheduled run is an automated timer attached to a bot or a room. When the clock strikes your scheduled time, the studio sends your prompt as a normal message—exactly as if you had typed it into the chat yourself.
+- **One time:** a date and time.
+- **Every day:** the same local time each day.
+- **Monday to Friday (Weekdays):** the same local time on weekdays.
+- **Every week:** selected days and a time.
+- **Every few hours:** an interval of 1–168 hours, measured as elapsed time.
 
-Your bot starts working, reads your project files, consults with teammates if needed, and posts its completed work in the conversation.
+The timezone starts with your computer’s timezone. The preview shows the next run in the saved timezone. For rooms, mention the bots that should reply; a room with one member addresses that member automatically. `#project` mentions work as they do in a normal message.
 
-### Popular Ways to Use Schedules
-- **Morning Briefings (Every weekday at 8:30 AM):** Ask your CEO or Lead Project Manager bot to summarize in-progress work across your projects.
-- **Content Draft Check-ins (Daily at 2:00 PM):** Have your Writer bot review draft notes and suggest headline polish or copy edits.
-- **Research Summaries (Every Monday at 9:00 AM):** Have your Researcher bot gather recent papers or findings and compile a weekly overview.
-- **Task Board Clean-up (Every Friday at 5:00 PM):** Have a bot flag overdue tasks or tasks ready for review.
+The catch-up window defaults to two hours and can be changed under **Catch-up window**. The scheduled message appears in the conversation with an **⏰ Scheduled** label. If a bot is busy, the message waits on the computer running Studio, rather than disappearing when you leave the chat.
 
----
+## The app must be running
 
-## 2. How to Set Up a Schedule
+Schedules run on the computer running Gerer Build Studio. You can close a browser tab while Studio keeps running there. They do not wake a sleeping computer or run after Studio has fully quit.
 
-You can create a schedule in two quick ways:
+In the desktop app, you can turn on **Keep running in the menu bar when the window is closed** (macOS) or **Keep running in the system tray when the window is closed** (Windows and Linux). This is off by default. With it on, closing the window hides it; use the menu-bar or tray icon to reopen Studio or quit it fully. Without it, closing the last desktop window quits Studio.
 
-### Method A: From the Schedules Screen
-1. Click **Schedules** (the alarm clock icon) in the left sidebar.
-2. Click **+ New schedule** in the top right.
-3. Fill out the simple form:
-   - **Who should work on this?** Choose a bot or a room.
-   - **What should they do?** Type your instruction (e.g. `Check open tasks in #gererbuildstudio and list top priorities`).
-   - **When should it run?** Choose your cadence:
-     - **One time:** Runs once at a specific date and time.
-     - **Every day:** Runs daily at the selected time.
-     - **Monday to Friday (Weekdays):** Runs every weekday morning or afternoon.
-     - **Every week:** Choose specific days (e.g., Monday and Thursday).
-     - **Every few hours:** Runs at set intervals (e.g., every 4 hours).
-4. Click **Schedule run**.
+Desktop notifications announce scheduled work when the bot’s notifications are on and your system permits notifications. A browser can announce a run only while its tab is open and notification access has already been granted.
 
-### Method B: Directly from Any Chat
-1. Open any bot chat or collaborative room.
-2. Click the **Clock icon** in the top header, or click the arrow on the composer send button and pick **Send later…**.
-3. The schedule sheet opens with your bot already pre-filled. Enter your prompt, pick a time, and save!
+## Missed, paused, and queued runs
 
----
+When your computer wakes or Studio reopens, a missed run starts once if it is inside its catch-up window. Older missed runs are marked **Missed** in Schedules. Several days of work are never replayed in bulk. Only the latest eligible occurrence is considered. Each repeating schedule then moves to its next future time. Work already accepted into the busy queue stays queued until it starts or you cancel it; the catch-up window applies to alarms that had not yet been accepted.
 
-## 3. Important: The App Runs on Your Computer
+**Pause all schedules** holds automatic runs, including automatic retries. It does not interrupt work already starting or running. **Run now** is an explicit request and still works while automatic runs are paused. Runs that are too old when you resume are marked missed.
 
-> [!NOTE]
-> **Schedules run while Gerer Build Studio is open.**
-> Because Gerer Build Studio is a private, local-first app that runs directly on your computer rather than on a remote cloud server, your bots work while the app is running.
+Each card shows whether the message was sent, is queued, was missed, or failed to start. “Sent” means the message reached its conversation; it does not promise the bot completed the task. If the app closed while a run was starting and its result is uncertain, Studio marks it failed for review instead of risking repeating actions. Check the chat before choosing **Run now**.
 
-### What Happens If My Computer Was Asleep?
-Don't worry—you won't lose your work:
-- **Caught-up runs (within 2 hours):** If your computer was asleep or the app was closed when a schedule was due, Gerer Build Studio will catch up and run the task as soon as you reopen the app or wake your computer.
-- **Older missed runs:** If your computer was closed for an extended period (e.g., over a long weekend), the app will not flood your chat with dozens of overdue runs. It will simply skip the missed ones and notify you, ready for the next scheduled time.
+Daily and weekly schedules follow their saved local clock through daylight-saving changes. If a time does not exist when clocks move forward, it shifts forward by that clock change. When a time occurs twice as clocks move back, the first occurrence is used, once that day. Hourly intervals follow elapsed hours instead.
 
-*(Coming soon: Running in the background from your system menu bar even when the main window is closed).*
+## Manage schedules
 
----
+Use each card to edit, turn on or off, run now, or delete. One-time schedules remain visible after they run. Bot-created schedules show their creator. Bots can create work only in their own chat or rooms they belong to, with at most 20 active schedules per bot. You can always cancel their pending schedules. Deleting a schedule does not stop a task that already began; use the conversation’s Stop control for that.
 
-## 4. Managing Your Schedules
-
-Open the **Schedules** screen from the sidebar anytime to:
-- **Turn schedules on or off:** Use the toggle switch on any row to pause a schedule without deleting it.
-- **Run immediately:** Click **Run now** to test your schedule right away without waiting for the clock.
-- **Edit or delete:** Click the menu (`···`) on any row to update the instructions or delete the schedule.
-- **Pause everything:** Going on vacation? Click **Pause all schedules** at the top of the screen to temporarily silence all automated tasks.
-
----
-
-## 5. Automatic Bot Resumes
-
-Bots can also create scheduled runs for themselves! 
-
-When a bot's AI app runs out of hourly or daily credits, the bot automatically schedules a resume run for the exact moment its usage refreshes. See [Backup Models](file:///Users/esoefildine/Documents/Dev/GererBuildStudio/docs/guide/backup-model.md) and [Usage & Limits](file:///Users/esoefildine/Documents/Dev/GererBuildStudio/docs/guide/usage-and-limits.md) to learn more.
+Automatic retry schedules are managed through **Cancel** and **Resume now**, rather than edited. See [Backup model](backup-model.md) and [Usage left](usage-and-limits.md) for their behavior.
