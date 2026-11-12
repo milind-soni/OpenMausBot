@@ -8,7 +8,7 @@ import { foundExports, grokErrorText, lookForGrokBot, NOTHING_FOUND, previewGrok
 import { t } from "@/lib/i18n";
 import { localSetupImport } from "@/lib/setup-import";
 import { api, useStore } from "@/state/store";
-import { GROK_EXPORT_MAX_CHARS, GROK_EXPORT_PROMPT, parseGrokExport, type GrokBot } from "../../shared/grok-import";
+import { GROK_EXPORT_MAX_CHARS, GROK_EXPORT_PROMPT, HERMES_EXPORT_PROMPT, parseGrokExport, type BotMoveSource, type GrokBot } from "../../shared/grok-import";
 
 const PRIMARY = "ui-button ui-button-primary min-h-9 px-4 text-[14px]";
 const SECONDARY = "ui-button min-h-9 px-4 text-[14px]";
@@ -49,7 +49,8 @@ export function GrokMoveLines({ paused, files = null, apps, moved, unreadable, f
   return lines.length > 0 && <div className="flex flex-col gap-1">{lines.map((line) => <p key={line} className={LINE}>{line}</p>)}</div>;
 }
 
-function BringBack({ local, look, found, reply, error, onReply, onFile, onFound }: {
+function BringBack({ source, local, look, found, reply, error, onReply, onFile, onFound }: {
+  source: BotMoveSource;
   local: boolean;
   look: GrokLook;
   found: ReturnType<typeof foundExports>;
@@ -60,10 +61,10 @@ function BringBack({ local, look, found, reply, error, onReply, onFile, onFound 
   onFound: () => void;
 }) {
   const picker = useRef<HTMLInputElement>(null);
-  const { state: copied, copy } = useCopyFeedback(GROK_EXPORT_PROMPT);
+  const { state: copied, copy } = useCopyFeedback(source === "hermes" ? HERMES_EXPORT_PROMPT : GROK_EXPORT_PROMPT);
   return (
     <>
-      <p className="text-[13px] leading-relaxed text-ink-secondary">{t("grokMove.intro")}</p>
+      <p className="text-[13px] leading-relaxed text-ink-secondary">{t(source === "hermes" ? "hermesMove.intro" : "grokMove.intro")}</p>
       <section className="flex flex-col items-start gap-1.5">
         <h3 className="text-[14px] font-medium text-ink">{t("grokMove.step1")}</h3>
         <p className="text-[13px] leading-relaxed text-ink-secondary">{t("grokMove.step1Hint")}</p>
@@ -98,9 +99,9 @@ function BringBack({ local, look, found, reply, error, onReply, onFile, onFound 
 
 /** Settings → Import → Move from Grok Bot: the message, what the Bot wrote, the preview, the import, the report. Nothing on
  * this computer is read until this dialog is open. */
-export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => void; inline?: boolean }) {
+export function GrokMoveDialog({ onClose, inline = false, source = "grok" }: { onClose: () => void; inline?: boolean; source?: BotMoveSource }) {
   const { state, dispatch } = useStore();
-  const local = localSetupImport(state.config?.cloudHome === true);
+  const local = source === "grok" && localSetupImport(state.config?.cloudHome === true);
   const [look, setLook] = useState<GrokLook>(NOTHING_FOUND);
   const [reply, setReply] = useState("");
   const [error, setError] = useState("");
@@ -125,7 +126,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
     try {
       const bots = read();
       const servers = await api<{ servers?: Array<{ name: string }> }>("/api/mcp/servers").then((answer) => answer.servers ?? [], () => []);
-      setPreview(previewGrokMove(bots, { bots: state.bots, servers: new Set(servers.map((server) => server.name)), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }));
+      setPreview(previewGrokMove(bots, { source, bots: state.bots, servers: new Set(servers.map((server) => server.name)), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }));
       setError("");
     } catch (cause) {
       setError(grokErrorText(cause));
@@ -161,7 +162,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
     if (!preview) return;
     setImporting(true);
     const done = await runGrokMove(preview, dispatch);
-    track("team_imported", { members: preview.plans.length, source: "grok", mode: "add", format: "package" });
+    track("team_imported", { members: preview.plans.length, source, mode: "add", format: "package" });
     setReport(done);
     setPreview(null);
     setImporting(false);
@@ -185,7 +186,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
         className={inline ? "mt-3 flex flex-col rounded-lg border border-hairline/40 text-left outline-none" : "ui-modal animate-pop-in flex max-h-[min(720px,calc(100dvh-32px))] w-[560px] max-w-full flex-col overflow-hidden text-left outline-none"}>
         {(!inline || preview) && <><div className="flex h-[52px] shrink-0 items-center justify-between pl-4 pr-3">
           <h2 id="grok-move-title" className="text-[14px] font-semibold leading-[22px] text-ink">
-            {preview ? t("grokMove.previewTitle") : t("settings.import.grokTitle")}
+            {preview ? t("grokMove.previewTitle") : t(source === "hermes" ? "settings.import.hermesTitle" : "settings.import.grokTitle")}
           </h2>
           {!inline && <button type="button" disabled={importing} onClick={onClose} aria-label={t("common.close")} title={t("common.close")}
             className="flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink disabled:opacity-40">
@@ -197,7 +198,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
           {report ? (
             <>
               {report.bots.map((bot) => <BotCounts key={bot.name} heading={t("grokMove.isHere", { name: bot.name })} {...bot} />)}
-              <GrokMoveLines paused={report.bots.some((bot) => bot.routines > 0) ? t("grokMove.pausedReport") : null} files={t("grokMove.filesStay")} apps={report.bots.reduce((total, bot) => total + bot.apps, 0)}
+              <GrokMoveLines paused={report.bots.some((bot) => bot.routines > 0) ? t(source === "hermes" ? "hermesMove.pausedReport" : "grokMove.pausedReport") : null} files={t(source === "hermes" ? "hermesMove.filesStay" : "grokMove.filesStay")} apps={report.bots.reduce((total, bot) => total + bot.apps, 0)}
                 moved={report.moved} unreadable={report.unreadable} failed={report.failed} />
             </>
           ) : preview ? (
@@ -210,7 +211,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
                 moved={preview.moved} unreadable={preview.unreadable} />
             </>
           ) : (
-            <BringBack local={local} look={look} found={found} reply={reply} error={error} onReply={setReply}
+            <BringBack source={source} local={local} look={look} found={found} reply={reply} error={error} onReply={setReply}
               onFile={(file) => readFile.current(file)} onFound={() => void show(() => found.bots)} />
           )}
         </div>

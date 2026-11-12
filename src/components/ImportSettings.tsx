@@ -11,6 +11,7 @@ import { importOutcome, localSetupImport, setupImportApi, skillsSummary, toolsSu
 import { useStore } from "@/state/store";
 import { detectionCount, detectionSources, type SetupDetection, type SetupImportResult, type SetupSource } from "../../shared/setup-import";
 import { GrokBotMark } from "./GrokBotMark";
+import type { BotMoveSource } from "../../shared/grok-import";
 import { GrokMoveDialog } from "./lazy-screens";
 import { ClaudeMark, CodexMark, CursorMark, PresetProviderMark } from "./ProviderIcons";
 
@@ -215,28 +216,28 @@ function AiAppsImport({ client, local }: { client: SetupImportClient; local: boo
     onSkip={() => (status === "failed" ? setStatus("idle") : setDetection({ skills: [], tools: [] }))} />;
 }
 
-export function GrokImportSection() {
+export function GrokImportSection({ source = "grok" }: { source?: BotMoveSource }) {
   const [started, setStarted] = useState(false);
   const [open, setOpen] = useState(false);
   if (useContext(SettingsLook)) {
     return (
-      <div data-import-section="grok" data-settings-block="grok-move" className="flex flex-col">
-        <SettingRow title={t("settings.import.grokTitle")} subtitle={t("settings.import.grokLine")} leading={<SettingsMark><GrokBotMark size={18} /></SettingsMark>}>
+      <div data-import-section={source} data-settings-block={`${source}-move`} className="flex flex-col">
+        <SettingRow title={t(source === "hermes" ? "settings.import.hermesTitle" : "settings.import.grokTitle")} subtitle={t("settings.import.grokLine")} leading={<SettingsMark>{source === "grok" ? <GrokBotMark size={18} /> : <BookOpen size={18} />}</SettingsMark>}>
           <button type="button" className="ui-button" data-grok-move-open aria-expanded={open} onClick={() => { setStarted(true); setOpen(!open); }}>{t(open ? "common.close" : "settings.import.moveAction")}</button>
         </SettingRow>
-        {started && <div className={open ? "px-4 pb-3" : "hidden"}><GrokMoveDialog inline onClose={() => { setStarted(false); setOpen(false); }} /></div>}
+        {started && <div className={open ? "px-4 pb-3" : "hidden"}><GrokMoveDialog source={source} inline onClose={() => { setStarted(false); setOpen(false); }} /></div>}
       </div>
     );
   }
   return (
-    <section data-import-section="grok" className="rounded-xl bg-card p-4">
-      <div className="flex items-center gap-2 text-[15px] font-medium text-ink"><GrokBotMark size={16} />{t("settings.import.grokTitle")}</div>
+    <section data-import-section={source} className="rounded-xl bg-card p-4">
+      <div className="flex items-center gap-2 text-[15px] font-medium text-ink">{source === "grok" && <GrokBotMark size={16} />}{t(source === "hermes" ? "settings.import.hermesTitle" : "settings.import.grokTitle")}</div>
       <div className="mt-0.5 text-[13px] leading-relaxed text-ink-secondary">{t("settings.import.grokSubtitle")}</div>
       <button type="button" data-grok-move-open aria-expanded={open} onClick={() => { setStarted(true); setOpen(!open); }} className={cn(BUTTON, "mt-3")}>
-        {t("settings.import.grokTitle")}
+        {t(source === "hermes" ? "settings.import.hermesTitle" : "settings.import.grokTitle")}
         <ChevronDown size={14} aria-hidden="true" className={cn("transition-transform", open && "rotate-180")} />
       </button>
-      {started && <div className={open ? undefined : "hidden"}><GrokMoveDialog inline onClose={() => { setStarted(false); setOpen(false); }} /></div>}
+      {started && <div className={open ? undefined : "hidden"}><GrokMoveDialog source={source} inline onClose={() => { setStarted(false); setOpen(false); }} /></div>}
     </section>
   );
 }
@@ -247,6 +248,7 @@ export function ImportSettings({ client = setupImportApi, children }: { client?:
     return (
       <SettingsRows>
         <GrokImportSection />
+        <GrokImportSection source="hermes" />
         <AiAppsImport client={client} local={localSetupImport(state.config?.cloudHome === true)} />
         {children}
       </SettingsRows>
@@ -255,6 +257,7 @@ export function ImportSettings({ client = setupImportApi, children }: { client?:
   return (
     <div className="flex flex-col gap-4">
       <GrokImportSection />
+      <GrokImportSection source="hermes" />
       <AiAppsImport client={client} local={localSetupImport(state.config?.cloudHome === true)} />
       {children}
     </div>

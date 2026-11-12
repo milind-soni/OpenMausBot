@@ -8,7 +8,7 @@ vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f
 vi.mock("@/lib/analytics", () => ({ track: f.track }));
 
 import { setLocale } from "@/lib/i18n";
-import { GROK_EXPORT_FORMAT, GROK_EXPORT_PROMPT } from "../../shared/grok-import";
+import { GROK_EXPORT_FORMAT, GROK_EXPORT_PROMPT, HERMES_EXPORT_PROMPT } from "../../shared/grok-import";
 import { ComposerAttachments } from "./ComposerAttachments";
 import { GROK_BOT_MARK_PATH } from "./GrokBotMark";
 import { GrokMoveDialog } from "./GrokMoveDialog";
@@ -80,6 +80,32 @@ afterEach(async () => {
 });
 
 describe("Move from Grok Bot", () => {
+  it("moves a Hermes profile through the same preview and package import without reading Grok files", async () => {
+    vi.stubGlobal("ogb", { remoteClient: { active: false } });
+    await act(async () => root.render(createElement(GrokMoveDialog, { source: "hermes", onClose: vi.fn() })));
+    await tick();
+    expect(shown()).toContain("Move from Hermes");
+    expect(shown()).toContain("current profile");
+    expect(shown()).not.toContain("Grok Bot");
+    expect(f.api.mock.calls.map(([path]) => path)).not.toContain("/api/setup-import/grok");
+    const write = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    try {
+      await act(async () => button("Copy the message")!.click());
+      expect(write).toHaveBeenCalledWith(HERMES_EXPORT_PROMPT);
+    } finally {
+      write.mockRestore();
+    }
+    await paste(EXPORT.replace(GROK_EXPORT_FORMAT, "hermes-bot-export"));
+    expect(counts()).toEqual({ Skills: 2, Routines: 1, Memories: 2, "Routines saved as notes": 1 });
+    await importIt();
+    const imported = f.api.mock.calls.find(([path]) => path === "/api/teams/import?mode=add")!;
+    expect(JSON.parse(imported[1].body).package.author.name).toBe("Hermes");
+    expect(shown()).toContain("Turn each one off in Hermes");
+    expect(shown()).toContain("Supporting skill files");
+    expect(shown()).not.toContain("Grok Bot");
+    expect(f.track).toHaveBeenCalledWith("team_imported", expect.objectContaining({ source: "hermes" }));
+  });
+
   it("the preview names the Bot and counts it, says routines are paused and how many apps, and writes nothing", async () => {
     await open();
     expect(shown()).toContain("Copy the message");

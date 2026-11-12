@@ -3,7 +3,7 @@ import { addTemplate } from "@/lib/template-add";
 import { api, type Action, type Bot } from "@/state/store";
 import type { LocaleKey } from "@/locales";
 import { takeImportName } from "../../shared/import-name";
-import { GrokImportError, grokMovePlan, mergeGrokBots, parseGrokExport, type GrokBot, type GrokMovePlan } from "../../shared/grok-import";
+import { GrokImportError, grokMovePlan, mergeGrokBots, parseGrokExport, type BotMoveSource, type GrokBot, type GrokMovePlan } from "../../shared/grok-import";
 
 /** What the desktop app found on this computer. */
 export interface GrokLook {
@@ -54,6 +54,7 @@ export interface GrokPreview {
 }
 
 export interface GrokPreviewFacts {
+  source?: BotMoveSource;
   bots: readonly Pick<Bot, "name" | "installedPackage">[];
   servers: ReadonlySet<string>;
   timeZone: string;
@@ -67,7 +68,7 @@ export function previewGrokMove(bots: readonly GrokBot[], facts: GrokPreviewFact
   const preview: GrokPreview = { plans: [], moved: [], unreadable: [] };
   for (const bot of bots) {
     try {
-      const plan = grokMovePlan(bot, { timeZone: facts.timeZone, takenServers: servers });
+      const plan = grokMovePlan(bot, { timeZone: facts.timeZone, takenServers: servers, source: facts.source });
       if (installed.has(plan.packageId)) {
         preview.moved.push(plan.name);
         continue;

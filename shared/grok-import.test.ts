@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { GROK_EXPORT_FORMAT, GROK_EXPORT_PROMPT, GROK_NOTES_FILE, GrokImportError, grokMovePlan, mergeGrokBots, parseGrokExport, type GrokBot } from "./grok-import.ts";
+import { GROK_EXPORT_FORMAT, GROK_EXPORT_PROMPT, GROK_NOTES_FILE, HERMES_EXPORT_PROMPT, GrokImportError, grokMovePlan, mergeGrokBots, parseGrokExport, type GrokBot } from "./grok-import.ts";
 import { parsePackageDocument } from "./package-format.ts";
 
 const TOKEN = "sk-abcdefghijklmnopqrstuvwx";
@@ -28,6 +28,38 @@ const BOT = {
 const EXPORT = { format: GROK_EXPORT_FORMAT, version: 1, bots: [BOT] };
 const FILE = JSON.stringify(EXPORT, null, 2);
 const plan = (bot: unknown = BOT) => grokMovePlan(parseGrokExport(JSON.stringify({ format: GROK_EXPORT_FORMAT, bots: [bot] }))[0]!, { timeZone: "Europe/Berlin" });
+
+describe("Hermes profile export", () => {
+  it("asks for the current profile's setup without reading logins or changing the source", () => {
+    expect(HERMES_EXPORT_PROMPT).toContain('"format": "hermes-bot-export"');
+    expect(HERMES_EXPORT_PROMPT).toContain("hermes-bot-export-<your name>.json");
+    for (const path of ["SOUL.md", "memories/MEMORY.md", "memories/USER.md", "skills/**/SKILL.md", "HERMES_HOME"]) {
+      expect(HERMES_EXPORT_PROMPT).toContain(path);
+    }
+    expect(HERMES_EXPORT_PROMPT).toContain("Never read or include .env, auth.json");
+    expect(HERMES_EXPORT_PROMPT).toContain("Do not change, pause or delete anything");
+  });
+
+  it("keeps Hermes provenance and identity separate from an identical Grok bot", () => {
+    const bots = parseGrokExport(`Here is the export:\n\`\`\`json\n${JSON.stringify({ format: "hermes-bot-export", version: 1, bots: [BOT] })}\n\`\`\``);
+    const hermes = grokMovePlan(bots[0]!, { source: "hermes", timeZone: "Europe/Berlin" });
+    expect(hermes.packageId).not.toBe(plan().packageId);
+    expect(hermes.document.package.author.name).toBe("Hermes");
+    const seed = hermes.document.package.agents[0]!.seed?.memory;
+    expect(seed?.["MEMORY.md"]).toContain("# Notes from Hermes");
+    expect(seed?.["memory/hermes-event-routines.md"]).toContain("Hermes routines");
+    expect(JSON.stringify(hermes.document)).not.toContain("Grok Bot");
+    expect(hermes.routines).toBe(2);
+    expect(hermes.notes).toBe(2);
+    expect(hermes.document.package.routines?.every((routine) => routine.enabledAfterInstall === false)).toBe(true);
+    expect(JSON.stringify(hermes.document)).not.toContain(TOKEN);
+  });
+
+  it("refuses credentials in a Hermes export before making a plan", () => {
+    expect(() => parseGrokExport(JSON.stringify({ format: "hermes-bot-export", bots: [{ ...BOT, api_key: "private" }] })))
+      .toThrow(GrokImportError);
+  });
+});
 const refused = (input: unknown) => {
   try {
     parseGrokExport(typeof input === "string" ? input : JSON.stringify(input));

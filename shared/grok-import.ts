@@ -62,6 +62,11 @@ Rules: include EVERY routine you own (paused ones too) and EVERY skill enabled f
 If it is too long for one message or file, split it: send several documents, each complete and valid in this same shape with the same bot name, each holding the part the others do not. They are imported together.
 `;
 
+export type BotMoveSource = "grok" | "hermes";
+export const HERMES_EXPORT_PROMPT = GROK_EXPORT_PROMPT.replaceAll("grok-bot-export", "hermes-bot-export") + `
+For Hermes Agent, export only the current profile, not other profiles. Read its SOUL.md for instructions, memories/MEMORY.md for memories, memories/USER.md for user_facts, and skills/**/SKILL.md for full skill text. Use the active HERMES_HOME (normally ~/.hermes), including when this is a named profile. List cron jobs read-only and map their actual prompt, schedule and time zone into routines; preserve a schedule you cannot represent as schedule_text instead of guessing a cron expression. List connected apps by name and public MCP URL only. Never read or include .env, auth.json, credentials, sessions, chat history or state.db. Do not run a job or change any source file. Do not include supporting skill files: tell me which ones I must copy separately.
+`;
+
 export type GrokImportErrorCode = "notExport" | "cutOff" | "tooLarge" | "credentials" | "newerVersion" | "unusable";
 
 export class GrokImportError extends Error {
@@ -393,34 +398,36 @@ const dedupe = (lines: string[], seen: Set<string>) => lines.filter((line) => {
   return true;
 });
 
-function memoryNotes(bot: GrokBot): { count: number; text: string | null } {
+function memoryNotes(bot: GrokBot, sourceName: string): { count: number; text: string | null } {
   const seen = new Set<string>();
   const facts = dedupe(bot.memories.map((line) => line.replace(/\s*\n\s*/g, " ")), seen);
   const about = dedupe(bot.userFacts.map((line) => line.replace(/\s*\n\s*/g, " ")), seen);
   const count = facts.length + about.length;
   if (!count) return { count, text: null };
   const part = (heading: string, items: string[]) => (items.length ? `## ${heading}\n\n${items.map((item) => `- ${item}`).join("\n")}\n\n` : "");
-  return { count, text: `# Notes from Grok Bot\n\n${part("What I remember", facts)}${part("About the person", about)}`.trimEnd() + "\n" };
+  return { count, text: `# Notes from ${sourceName}\n\n${part("What I remember", facts)}${part("About the person", about)}`.trimEnd() + "\n" };
 }
 
-function eventNotes(name: string, routines: readonly GrokRoutine[]): string {
+function eventNotes(name: string, routines: readonly GrokRoutine[], sourceName: string): string {
   const sections = routines.flatMap((routine) => [
     `## ${routine.name || "routine"}`, "",
     `- Trigger: ${routine.trigger || "unknown"}`,
     `- Details: ${routine.details || routine.when || "n/a"}`, "",
     routine.instruction, "",
   ]);
-  return [`# ${name}: Grok Bot routines that run on an event`, "",
+  return [`# ${name}: ${sourceName} routines that run on an event`, "",
     "These start on something happening instead of a schedule, so they were not turned into routines. Set up each one again here.", "",
     ...sections].join("\n");
 }
 
-/** One Grok Bot as one bot in an openmaus.package v2 file, and how much of it comes over. `takenServers` holds server names
+/** One exported bot as one bot in an openmaus.package v2 file, and how much of it comes over. `takenServers` holds server names
  * already here: one of those is skipped, never overwritten or shared. */
-export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenServers?: ReadonlySet<string> } = {}): GrokMovePlan {
+export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenServers?: ReadonlySet<string>; source?: BotMoveSource } = {}): GrokMovePlan {
+  const sourceName = options.source === "hermes" ? "Hermes" : "Grok Bot";
+  const notesFile = options.source === "hermes" ? "memory/hermes-event-routines.md" : GROK_NOTES_FILE;
   const timeZone = options.timeZone?.trim() || "UTC";
-  const name = clip(bot.name || "Grok Bot", 100);
-  const agentKey = slug(name, 60) || "grok-bot";
+  const name = clip(bot.name || sourceName, 100);
+  const agentKey = slug(name, 60) || slug(sourceName, 60);
   const soul = fitBytes(bot.instructions.trim(), BOT_PROFILE_LIMITS.soul);
 
   const skillNames = new Set<string>();
@@ -466,12 +473,12 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenSe
     });
   }
 
-  const memory = memoryNotes(bot);
+  const memory = memoryNotes(bot, sourceName);
   const seed: Record<string, string> = {};
   if (memory.text && utf8Bytes(memory.text) <= SEED_FILE_MAX_BYTES) seed["MEMORY.md"] = memory.text;
   if (unscheduled.length) {
-    const notes = eventNotes(name, unscheduled);
-    if (utf8Bytes(notes) <= SEED_FILE_MAX_BYTES) seed[GROK_NOTES_FILE] = notes;
+    const notes = eventNotes(name, unscheduled, sourceName);
+    if (utf8Bytes(notes) <= SEED_FILE_MAX_BYTES) seed[notesFile] = notes;
   }
 
   const connectionKeys = new Set<string>();
@@ -487,14 +494,14 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenSe
     connections.push({
       key: uniqueSlug(proposed, proposed, connectionKeys, 28),
       label,
-      reason: clip(`${name} used ${label} in Grok Bot.`, 240),
+      reason: clip(`${name} used ${label} in ${sourceName}.`, 240),
       mcp: { transport: app.transport === "sse" || /\/sse\/?$/.test(new URL(address).pathname) ? "sse" : "http", url: address, valueNames: app.headerNames.filter((header) => VALID_HEADER.test(header)).slice(0, 32) },
     });
   }
 
   const description = bot.description.trim();
-  const summary = clip(description || bot.title || `${name}, brought over from Grok Bot.`, 2_000);
-  const hash = shortHash(`${name}\n${soul}`);
+  const summary = clip(description || bot.title || `${name}, brought over from ${sourceName}.`, 2_000);
+  const hash = shortHash(`${options.source === "hermes" ? "hermes\n" : ""}${name}\n${soul}`);
   const packageId = `${agentKey}-${hash.toString(16).padStart(8, "0").slice(0, 6)}`;
   const draft: PackageDocument = {
     format: PACKAGE_FORMAT,
@@ -506,7 +513,7 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenSe
       tagline: clip(oneLine(summary), 160),
       summary,
       category: "Imported",
-      author: { name: "Grok Bot" },
+      author: { name: sourceName },
       license: "See source",
       outcomes: [clip(`${name} runs in OpenMausBot with your own engine and apps.`, 240)],
       setupMinutes: 5,
@@ -536,7 +543,7 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenSe
   }
   return {
     name, packageId, document, skills: planned, routines: routines.length,
-    notes: seed[GROK_NOTES_FILE] ? unscheduled.length : 0,
+    notes: seed[notesFile] ? unscheduled.length : 0,
     memories: seed["MEMORY.md"] ? memory.count : 0,
     apps,
   };

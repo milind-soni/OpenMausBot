@@ -166,6 +166,29 @@ The mapping lives in `shared/grok-import.ts`, the local look in
 `server/grok-local.ts`, the dialog in `src/components/GrokMoveDialog.tsx`, the
 popup in `src/components/GrokMovePopup.tsx`.
 
+### Move from Hermes
+
+Settings → Import → **Move from Hermes** uses the same reviewed package import.
+Copy its message into the Hermes profile you want to move, then paste the reply
+or choose the JSON file it produces. Review the preview before choosing Import.
+The message asks Hermes to read the current profile's instructions, skill text,
+memories, scheduled jobs and app references. It does not change the source.
+
+Scheduled routines arrive paused; unrepresentable schedules and event triggers
+are saved as notes. Apps need reconnecting. Chat history, credentials and
+supporting skill files are excluded; copy any needed support files separately.
+The profile's export is produced by Hermes, so check its reply for anything it
+could not read. No local Hermes installation is required on the receiving device.
+
+Hermes layout references: [profiles](https://hermes-agent.nousresearch.com/docs/user-guide/profiles),
+[memory](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory),
+and [scheduled tasks](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron).
+
+Verification: `server/hermes-move.e2e.test.ts` starts an isolated fake-engine
+server, imports a synthetic Hermes export through the real package API, and
+reads back its bot, memory, skills, paused routine and disabled MCP connection.
+It does not run a real Hermes agent or verify the completeness of its reply.
+
 ## The file format
 
 `openmaus.package` version 2, defined in `shared/package-format.ts`, the one
