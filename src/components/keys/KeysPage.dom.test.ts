@@ -59,6 +59,12 @@ function type(input: HTMLInputElement, value: string) {
   });
 }
 
+async function answered(reply: () => void) {
+  reply();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync(() => {});
+}
+
 function paste(input: HTMLInputElement, text: string) {
   const event = new Event("paste", { bubbles: true, cancelable: true });
   Object.defineProperty(event, "clipboardData", { value: { getData: () => text } });
@@ -95,11 +101,11 @@ describe("the keys page", () => {
     expect(rowsShown()).not.toContain("elevenlabs");
   });
 
-  it("offers the Live calls service, OpenAI or Azure OpenAI, on the separate live key row", () => {
+  it("offers the Live calls service, OpenAI, Azure OpenAI or Fish Audio, on the separate live key row", () => {
     setConfig({ ...fx.config, live: { configured: false, provider: "azure", voice: "", readTypedReplies: true, idleMinutes: 5 } });
     page();
     const select = row("liveKey")!.querySelector<HTMLSelectElement>("select")!;
-    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure"]);
+    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure", "fish"]);
     expect(select.value).toBe("azure");
     expect(row("liveKey")!.querySelector('input[type="url"]')).not.toBeNull();
   });
@@ -126,6 +132,20 @@ describe("the keys page", () => {
     expect(row("liveCalls")).not.toBeNull();
   });
 
+  it("with Fish Audio chosen, the Live key row is the required Fish Audio key, with no OpenAI wording and nothing else to fill in", () => {
+    setConfig({ ...fx.config, live: { configured: false, provider: "fish", voice: "", readTypedReplies: true, idleMinutes: 5 } });
+    page();
+    const fish = row("liveKey")!;
+    expect(fish.textContent).toContain("Fish Audio");
+    expect(fish.textContent).toContain("Required");
+    expect(fish.textContent).not.toContain("instead of your OpenAI key");
+    expect([...fish.querySelectorAll("input")].map((input) => input.placeholder)).not.toContain("sk-…");
+    expect(fish.querySelector<HTMLAnchorElement>('a[href*="platform.openai.com"]')).toBeNull();
+    expect(fish.querySelector<HTMLAnchorElement>('a[href*="fish.audio"]')).not.toBeNull();
+    expect([...fish.querySelectorAll<HTMLInputElement>("input")].every((input) => input.type === "password")).toBe(true);
+    expect(row("liveCalls")).toBeNull();
+  });
+
   it("opens a section that holds a saved key, and counts what is connected", () => {
     setConfig({ ...fx.config, box: { configured: true, last4: "c3d4" } });
     page();
@@ -145,6 +165,34 @@ describe("the keys page", () => {
     type(search, "zzz");
     expect(rowsShown()).toEqual([]);
     expect(host.querySelector("[data-keys-empty]")!.textContent).toBe("No keys match “zzz”.");
+  });
+
+  it("saves a Fish key as the Fish Audio key, holding the Live provider while it saves and the key while a provider change does", async () => {
+    const live = { configured: false, provider: "fish", voice: "", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    let answer: (value: unknown) => void = () => {};
+    fx.api.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    render(() => createElement(LiveKeyNeeded, { key: "notice" }));
+    const provider = () => host.querySelector<HTMLSelectElement>("select")!;
+    const saveKey = () => host.querySelector<HTMLInputElement>('input[type="password"]')!.closest("form")!.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    type(host.querySelector<HTMLInputElement>('input[type="password"]')!, "fish-key");
+    flushSync(() => saveKey().click());
+    expect(fx.api).toHaveBeenCalledWith("/api/config", expect.objectContaining({ method: "PUT", body: JSON.stringify({ tts: { fishKey: "fish-key" } }) }));
+    expect(provider().disabled).toBe(true);
+    expect(fx.api).toHaveBeenCalledTimes(1);
+    await answered(() => answer({ ...fx.config, live: { ...live, keySource: "fishAudio" } }));
+    expect(provider().disabled).toBe(false);
+
+    setConfig({ ...fx.config, live });
+    flushSync(() => {
+      provider().value = "openai";
+      provider().dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(fx.api).toHaveBeenLastCalledWith("/api/live/settings", expect.objectContaining({ method: "PATCH" }));
+    type(host.querySelector<HTMLInputElement>('input[type="password"]')!, "fish-key");
+    expect(saveKey().disabled).toBe(true);
+    await answered(() => answer({ live }));
+    expect(saveKey().disabled).toBe(false);
   });
 
   it("lands the live-call notice's button on the OpenAI row in Voice and calls, focused and lit", async () => {

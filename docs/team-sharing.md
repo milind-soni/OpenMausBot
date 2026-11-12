@@ -106,7 +106,7 @@ If any step fails, everything the import created is removed again.
 
 ## Moving from Grok Bot
 
-**Settings → Import → Move from Grok Bot** opens one dialog. It needs no sign-in
+**Settings → Import & export → Move from Grok Bot** opens one dialog. It needs no sign-in
 and the import makes no network call. Grok Bot has no export button, so each Bot
 writes down its own setup.
 
