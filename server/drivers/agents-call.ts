@@ -5,6 +5,7 @@ import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credentia
 import { rankSkills } from "../../shared/skill-fit.ts";
 import { isSkillSwitchAction, skillSwitchVerb } from "../../shared/skill-request.ts";
 import { EMAIL_CREDENTIAL } from "../../shared/email.ts";
+import { noCloudComputerNote } from "../../shared/team-setup.ts";
 
 import { peerName } from "../peer-roster.ts";
 import { callCardTool, CARD_TOOL_NAMES } from "./agents-call-cards.ts";
@@ -534,9 +535,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     }
     if (!r.id) return completedProposalResult(r, `creating @${botName}`) ?? { text: `@${botName} was not created.`, isError: true };
     const created = r.name ?? botName;
-    const noComputer = r.noCloudComputerYet === true
-      ? ` @${created} has no cloud computer yet: work you hand it runs without one until the person writes to it in its own chat, which sets one up. If its first job needs a computer, tell the person that in one line.`
-      : "";
+    const noComputer = r.noCloudComputerYet === true ? noCloudComputerNote(String(created)) : "";
     return {
       text: `Created @${created} in ${r.section ?? "General"} [id: ${r.id}].${r.modelSelection ? ` Model: ${JSON.stringify(r.modelSelection)}.` : ""} Assign work with coordinate_bots.${noComputer}`,
     };
