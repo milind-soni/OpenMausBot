@@ -533,8 +533,12 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       return { text: `One review card is visible: ${String(r.title)}. @${botName} has not been created yet. End this turn; the decision and structured result resume you automatically once. Do not ask again, poll, or repeat this request.` };
     }
     if (!r.id) return completedProposalResult(r, `creating @${botName}`) ?? { text: `@${botName} was not created.`, isError: true };
+    const created = r.name ?? botName;
+    const noComputer = r.noCloudComputerYet === true
+      ? ` @${created} has no cloud computer yet: work you hand it runs without one until the person writes to it in its own chat, which sets one up. If its first job needs a computer, tell the person that in one line.`
+      : "";
     return {
-      text: `Created @${r.name ?? botName} in ${r.section ?? "General"} [id: ${r.id}].${r.modelSelection ? ` Model: ${JSON.stringify(r.modelSelection)}.` : ""} Assign work with coordinate_bots.`,
+      text: `Created @${created} in ${r.section ?? "General"} [id: ${r.id}].${r.modelSelection ? ` Model: ${JSON.stringify(r.modelSelection)}.` : ""} Assign work with coordinate_bots.${noComputer}`,
     };
   }
   if (member === "create_room") {
