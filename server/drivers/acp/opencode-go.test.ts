@@ -337,6 +337,15 @@ describe("OpenCode catalog", () => {
     expect(openCodePromptUnreachedModel(apiError(message))).toBe(true);
   });
 
+  // OpenCode 2.2.5's ACP answer for a model declared under a provider it has no SDK package for.
+  it("knows a model OpenCode has no route to never got the prompt", () => {
+    expect(openCodePromptUnreachedModel(Object.assign(
+      new Error("Internal error: Unsupported package for chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017: unknown (session/prompt, service: session, provider.no-route)"),
+      { code: -32603, data: { service: "session", errorName: "provider.no-route" } },
+    ))).toBe(true);
+    expect(classifyOpenCodeError({ code: -32603, data: { service: "session", errorName: "provider.no-route" } })).toBeUndefined();
+  });
+
   it.each([
     apiError("Internal error: Invalid API key."),
     apiError("Internal error: socket hang up"),

@@ -441,6 +441,28 @@ describe("EventBus streamed text", () => {
     expect(summary(logged("thread-1"))).toEqual(expected);
   });
 
+  it("keys each message's text by its own id, merged per message and kept on its completion", async () => {
+    const bus = new EventBus();
+    const seen: RuntimeEvent[] = [];
+    bus.subscribe((event) => seen.push(event));
+
+    bus.publish(delta("\n", { eventId: "w" }));
+    bus.publish(delta("Let me ", { eventId: "a1" }));
+    bus.publish(delta("check.", { eventId: "a2" }));
+    bus.publish(testEvent({ eventId: "a", type: "item.completed", itemType: "assistant_text", text: "Let me check.", turnId: "turn-1" }));
+    bus.publish(testEvent({ eventId: "tool", type: "item.started", itemType: "tool", title: "Read", turnId: "turn-1" }));
+    bus.publish(delta("Done.", { eventId: "b1" }));
+    bus.publish(testEvent({ eventId: "b", type: "item.completed", itemType: "assistant_text", text: "Done.", turnId: "turn-1" }));
+
+    const text = seen.filter((event) => event.type === "content.delta" || (event.type === "item.completed" && event.itemType === "assistant_text"));
+    expect(text.map((event) => event.type === "content.delta" ? event.delta : event.type)).toEqual(["Let me check.", "item.completed", "Done.", "item.completed"]);
+    expect(text[0]!.itemId).toBeTruthy();
+    expect(text[1]!.itemId, "a message's completion carries its words' id").toBe(text[0]!.itemId);
+    expect(text[2]!.itemId).not.toBe(text[0]!.itemId);
+    expect(text[3]!.itemId).toBe(text[2]!.itemId);
+    await bus.flush();
+  });
+
   it("never merges across threads, stream kinds, turns or synthetic text", async () => {
     const bus = new EventBus();
     const seen: RuntimeEvent[] = [];

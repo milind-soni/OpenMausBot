@@ -1,5 +1,5 @@
 // Security: model output never reaches the DOM as raw HTML (no rehype-raw); Shiki's output is generator-escaped.
-import { createContext, memo, use, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { createContext, Fragment, memo, use, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import Markdown, { defaultUrlTransform, type Components, type ExtraProps, type Options as MarkdownOptions } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -11,6 +11,8 @@ import { cn } from "@/lib/cn";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { remarkMentions, sameMentionPerson, type MentionPeer, type MentionPerson } from "@/lib/mentions";
 import { createMarkdownRenderCache } from "@/lib/markdown-render-cache";
+import { closedFence, openFence, splitMarkdownBlocks } from "@/lib/markdown-stream-blocks";
+import { StreamingReplyContext } from "@/state/live-reply";
 
 import { parseFenceInfo } from "../lib/code-block";
 import { markdownImageName, markdownImageOpenUrl } from "../lib/markdown-image";
@@ -520,16 +522,19 @@ export function normalizeMathDelimiters(text: string, imageOffsets?: Map<number,
 const normalizedCache = new Map<string, Pick<MessageScope, "imageOffsets"> & { source: string }>();
 const NORMALIZED_CACHE_MAX = TRANSCRIPT_WINDOW_SIZE * 2;
 
+function normalizeMarkdown(text: string) {
+  const imageOffsets = text.includes(MARKDOWN_IMAGE) ? new Map<number, number>() : undefined;
+  return { source: normalizeMathDelimiters(imageOffsets ? text : repairMarkdownTables(text), imageOffsets), imageOffsets };
+}
+
 function normalizeMessageMarkdown(text: string) {
   const cached = normalizedCache.get(text);
   if (cached) return cached;
-  const imageOffsets = text.includes(MARKDOWN_IMAGE) ? new Map<number, number>() : undefined;
-  const source = normalizeMathDelimiters(imageOffsets ? text : repairMarkdownTables(text), imageOffsets);
+  const normalized = normalizeMarkdown(text);
   if (normalizedCache.size >= NORMALIZED_CACHE_MAX) {
     const first = normalizedCache.keys().next().value;
     if (first !== undefined) normalizedCache.delete(first);
   }
-  const normalized = { source, imageOffsets };
   normalizedCache.set(text, normalized);
   return normalized;
 }
@@ -592,18 +597,23 @@ export type DeliveredFiles = Readonly<Record<string, string>>;
 const fileName = (path: string) => path.split(/[\\/]/).at(-1) ?? path;
 
 const MessageScopeContext = createContext<MessageScope>({ threads: [] });
+/** The source of the block still being written, whose last fence may be open; null for finished text. */
+const StreamSourceContext = createContext<string | null>(null);
 
 function MarkdownCode({ node, children }: BlockProps) {
+  const streamSource = use(StreamSourceContext);
+  const position = (node as { position?: { start: { offset?: number }; end: { offset?: number } } } | undefined)?.position;
+  const open = streamSource !== null && !closedFence(streamSource, position?.start.offset, position?.end.offset);
   const child: any = Array.isArray(children) ? children[0] : children;
   const className: string = child?.props?.className ?? "";
   const { lang, wrap } = parseFenceInfo(/language-([^\s]+)/.exec(className)?.[1] ?? "", (node as { children?: { data?: { meta?: unknown } }[] })?.children?.[0]?.data?.meta);
   const flat = (n: any): string =>
     typeof n === "string" ? n : Array.isArray(n) ? n.map(flat).join("") : (n?.props?.children ? flat(n.props.children) : "");
   const code = flat(child?.props?.children).replace(/\n$/, "");
-  if (lang.trim().toLowerCase() === "mermaid") {
+  if (lang.trim().toLowerCase() === "mermaid" && !open) {
     return <MermaidDiagram code={code} />;
   }
-  return <CodeBlock code={code} lang={lang} initialWrap={wrap} />;
+  return <CodeBlock code={code} lang={lang} initialWrap={wrap} open={open} />;
 }
 
 function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
@@ -630,7 +640,7 @@ function MarkdownLink({ href, children, ...rest }: { href?: string; children?: R
   // SAFETY: react-markdown hands hast data-* attributes through as string props
   const props = rest as Record<string, unknown>;
   const { threads, currentBotId, message, delivered, originals } = useContext(MessageScopeContext);
-  const linkMenu = useThreadLinkMenu(href), openPage = usePageOpener();
+  const linkMenu = useThreadLinkMenu(href), openPage = usePageOpener({ beside: true });
   if (!href) return <span className="break-words">{children}</span>;
   if (isUseMyComputerUrl(href)) return <UseMyComputerLink>{children}</UseMyComputerLink>;
   const address = parseThreadRefUrl(href);
@@ -774,6 +784,30 @@ export function clearChatMarkdownCache(): void {
   markdownCache.clear();
 }
 
+interface MarkdownPart {
+  text: string;
+  source: string;
+  imageOffsets?: Map<number, number>;
+  /** Finished text, whose drawing is kept for the next render. */
+  finished: boolean;
+  /** A code fence still being written, drawn without parsing. */
+  fence?: { lang: string; wrap: boolean; code: string };
+}
+
+/** A finished message is one part. A streaming one is its blocks: the finished ones are parsed once and kept, and only
+ * the last is parsed again as text arrives. */
+function markdownParts(text: string, streaming: boolean): MarkdownPart[] {
+  if (!streaming) return [{ text, ...normalizeMessageMarkdown(text), finished: true }];
+  const blocks = splitMarkdownBlocks(text) ?? [text];
+  return blocks.map((block, index): MarkdownPart => {
+    if (index < blocks.length - 1) return { text: block, ...normalizeMessageMarkdown(block), finished: true };
+    const fence = openFence(block);
+    if (!fence) return { text: block, ...normalizeMarkdown(block), finished: false };
+    const [info = "", ...meta] = fence.info.split(/\s+/);
+    return { text: block, source: block, finished: false, fence: { ...parseFenceInfo(info, meta.join(" ")), code: fence.code } };
+  });
+}
+
 function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS, everyone = false, mentionPerson, delivered, originals }: {
   text: string; message?: MessageAttachmentContext;
   mentionPeers?: readonly MentionPeer[]; everyone?: boolean; mentionPerson?: MentionPerson;
@@ -782,8 +816,9 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
 }) {
   // use() may be called conditionally: only a message that can hold a thread link subscribes to the thread list.
   const { threads, currentBotId } = MAY_LINK_THREAD.test(text) ? use(ThreadRefsContext) : NO_THREAD_REFS;
-  const { source, imageOffsets } = normalizeMessageMarkdown(text);
-  const needsMath = normalizedSourceHasMath(source);
+  const streaming = use(StreamingReplyContext);
+  const parts = useMemo(() => markdownParts(text, streaming), [text, streaming]);
+  const needsMath = parts.some((part) => !part.fence && normalizedSourceHasMath(part.source));
   const [katexReady, setKatexReady] = useState(() => katexPlugin !== null);
   useEffect(() => {
     if (!needsMath) return;
@@ -801,18 +836,30 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
     };
   }, [needsMath]);
   const mathPlugin = needsMath && katexReady ? katexPlugin : null;
-  const mentions = source.includes("@"), linksThreads = threads.length > 0;
-  const variant = `${mathPlugin ? "math" : ""}\u0003${mentions ? `${peerSignature(mentionPeers)}\u0001${everyone ? 1 : 0}\u0001${mentionPerson?.profileName ?? ""}` : ""}\u0003${linksThreads ? `${threadListId(threads)}\u0001${currentBotId ?? ""}` : ""}`;
-  // Markdown is a plain function of its options (no hooks), so its elements can be kept and drawn again.
-  const markdown = markdownCache.render(text, variant, () => {
-    const remarkPlugins = [...BASE_REMARK_PLUGINS];
-    if (mentions) remarkPlugins.push([remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }]);
-    if (linksThreads) remarkPlugins.push(remarkThreadRefs(threads, currentBotId));
-    return Markdown({ children: source, remarkPlugins, rehypePlugins: rehypePluginsFor(mathPlugin), urlTransform: chatUrlTransform, components: MARKDOWN_COMPONENTS });
-  });
+  const linksThreads = threads.length > 0;
+  const draw = ({ text: partText, source, finished }: MarkdownPart) => {
+    const mentions = source.includes("@");
+    const variant = `${mathPlugin ? "math" : ""}\u0003${mentions ? `${peerSignature(mentionPeers)}\u0001${everyone ? 1 : 0}\u0001${mentionPerson?.profileName ?? ""}` : ""}\u0003${linksThreads ? `${threadListId(threads)}\u0001${currentBotId ?? ""}` : ""}`;
+    // Markdown is a plain function of its options (no hooks), so its elements can be kept and drawn again.
+    const render = () => {
+      const remarkPlugins = [...BASE_REMARK_PLUGINS];
+      if (mentions) remarkPlugins.push([remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }]);
+      if (linksThreads) remarkPlugins.push(remarkThreadRefs(threads, currentBotId));
+      return Markdown({ children: source, remarkPlugins, rehypePlugins: rehypePluginsFor(mathPlugin), urlTransform: chatUrlTransform, components: MARKDOWN_COMPONENTS });
+    };
+    // Streamed text grows each render; keeping its drawing would only fill the cache with prefixes.
+    return finished ? markdownCache.render(partText, variant, render) : <StreamSourceContext value={source}>{render()}</StreamSourceContext>;
+  };
+  // A message still streaming has no saved files to fetch yet.
+  const scope = { message: streaming ? undefined : message, imageOffsets: streaming ? undefined : parts[0]?.imageOffsets, threads, currentBotId, delivered, originals };
   return (
-    <MessageScopeContext.Provider value={{ message, imageOffsets, threads, currentBotId, delivered, originals }}>
-      <div className="chat-md min-w-0 [&>*+*]:mt-2">{markdown}</div>
+    <MessageScopeContext.Provider value={scope}>
+      <div className="chat-md min-w-0 [&>*+*]:mt-2">
+        {parts.map((part, index) => (
+          // The whole text's tree puts a line break between its top-level blocks; the parts keep it.
+          <Fragment key={index}>{index > 0 && "\n"}{part.fence ? <CodeBlock code={part.fence.code} lang={part.fence.lang} initialWrap={part.fence.wrap} open /> : draw(part)}</Fragment>
+        ))}
+      </div>
     </MessageScopeContext.Provider>
   );
 }

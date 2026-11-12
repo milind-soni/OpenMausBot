@@ -21,6 +21,8 @@ export interface ConfirmDialogProps {
   /** A gentler way to the same end, offered beside the confirm button ("Archive instead"). */
   alternative?: { label: string; onClick: () => void };
   pending?: boolean;
+  /** The confirm button waits for a choice the body asks for. */
+  confirmDisabled?: boolean;
   returnFocusRef?: RefObject<HTMLElement | null>;
   /** Where it sits among open dialogs, when another one above the usual layer asked it. */
   layer?: string;
@@ -47,7 +49,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
         return;
       }
       if (event.key === "Tab") {
-        const controls = dialogRef.current?.querySelectorAll<HTMLElement>("button:not([disabled])");
+        const controls = dialogRef.current?.querySelectorAll<HTMLElement>("button:not([disabled]), select:not([disabled]), textarea:not([disabled])");
         if (!controls?.length) { event.preventDefault(); dialogRef.current?.focus(); return; }
         const first = controls[0]!;
         const last = controls[controls.length - 1]!;
@@ -101,6 +103,7 @@ export function ConfirmDialogCard({
   onConfirm,
   alternative,
   pending = false,
+  confirmDisabled = false,
 }: ConfirmDialogProps & {
   ref?: React.Ref<HTMLDivElement>;
   cancelRef?: React.Ref<HTMLButtonElement>;
@@ -148,7 +151,7 @@ export function ConfirmDialogCard({
         <button
           type="button"
           onClick={onConfirm}
-          disabled={pending}
+          disabled={pending || confirmDisabled}
           className={cn(
             "rounded-xl px-4 py-2 text-[13px] font-medium",
             danger ? "bg-danger text-white hover:brightness-110" : "bg-accent text-white hover:brightness-110",

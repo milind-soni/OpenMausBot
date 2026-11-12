@@ -10,7 +10,7 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 - **Signing in.** Each person pairs from the app with a link the Admin signs for them; the machine shows the team's name
   wherever a server names itself. Owners and Admins get everything an admin session can do (Super admin and Admin in the
   app); a Member (User) uses each bot as far as it is shared with them (below, "Who can use a bot"), uses rooms and
-  makes routines, and connects no app and makes no webhook. Owners and Admins also get **Invite someone** under People in
+  makes routines and bots of their own (below, "A User's own bot"), and connects no app and makes no webhook. Owners and Admins also get **Invite someone** under People in
   the sidebar, in Simple too and when they are alone on the team: it opens the team's People page on the Cloud in their
   browser, where they sign in if that browser hasn't yet.
   With Azure OpenAI chosen for Live calls, only an Owner or
@@ -69,7 +69,7 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   `fillEmpty: true`, the picture uploaded first as their own attachment): each field once (`GET /api/me` lists the
   `seeded` ones), never over what they set on the team and never again after they clear it there. Nothing else goes up.
   **A teammate's name and picture are visible to everyone in the team, like any team app. About you and everything
-  else stay private.** Wherever the app shows a person (the Looked after by picker, the Team map's "Who looks after what", a card's "Asking
+  else stay private.** Wherever the app shows a person (the Owner picker, a card's "Asking
   Ada", the @ list, a "Told Bob" chip, a Needs you line from them) it shows
   their picture, or their initial when they have none; the picture is served to the team's signed-in members only
   (below), never off the team.
@@ -80,7 +80,12 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   person's own* (below): then every member connects their own, and only their own chats use it. A person's
   connections from elsewhere have no way in: a share code, a moved MCP sign-in or a mailbox is refused with
   *"Personal connections never enter Acme. Ask an admin to connect it for Acme."* A login from a sign-in card is saved by
-  an Admin only, for the whole team.
+  an Admin only, for the whole team. A secret (an API key, a token) a person types into a bot's card in their own private
+  chat is theirs: that bot uses it only in their own chats with it (and their routines there), never in another
+  member's chat, a shared chat, a group chat or an MCP server, all of which get the card as if nothing were saved. They
+  see and delete it in Settings → Vault, which shows a member their own secrets only; an Admin's Vault, exports and
+  backups never list it, and leaving the team deletes it. A secret an Admin saves in Settings → Vault, or one typed into a
+  card in a shared chat or a group chat, is the team's. One saved before this rule is the team's.
 - **Browsers.** Each private chat with a bot drives that person's own browser of the bot, each group chat the group
   chat's, and the bot's main chat the team's: separate Chrome profiles, saved sign-ins and live views, so a site one
   member signed in to in their chat never opens signed in for another member. The live view shows the browser of the
@@ -112,15 +117,26 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   With the team's rule turning remote access off, a User's browser sign-in is refused (`remote_access_off`) and their open
   browsers sign out with their phones (`closeMemberBrowsers`); an Owner's and an Admin's stay, since their admin pages
   open in a browser and the rule is theirs to change.
-- **The first screen.** A User's first time in the team (TeamWelcome): "Welcome to Acme", who invited them (the Admin's
+- **The first screen.** An invited person's first time in the team, a User's or an Admin's (TeamWelcome): "Welcome to Acme", who invited them (the Admin's
   `member.invitedBy`, named from the people list), who else is in it with their pictures, the bots shared with them with one
   line each, the privacy sentence (said here, so the first private chat doesn't say it again) and one action, Start a chat
   with the first bot they can chat with. Shown once per person, in the app or a browser: kept in
   `people/<person>/welcome.json` (`GET /api/me` `welcome: { invitedBy, welcomedAt, hints }`, `PUT /api/me/welcome {
-  welcomed: true }`). Admins get the Cloud's own welcome; on a team its own record (shown, done, hidden:
-  `TEAM_PERSONAL_HINTS`) is each person's too, kept in the same file, so one admin finishing it ends it for nobody else
-  (the Owner also keeps what the team's record said before). The Owner's last step offers Invite people, the team's People
-  page on MausBot Cloud.
+  welcomed: true }`). Only the Owner, who set the team up, gets the Cloud's own welcome and its setup list (the session's
+  `team.role`); its record (shown, done, hidden: `TEAM_PERSONAL_HINTS`) is each person's, kept in the same file (the Owner
+  also keeps what the team's record said before). An empty team starts fresh: the Owner's own MausBot and the team's first
+  bot don't count as bots already there. The finished list ("Acme is ready") shows once: it is recorded as done as it
+  shows, names the first bot ("Say hi to Poppy", never a Chief of Staff) and offers Invite people, the team's People page
+  on MausBot Cloud.
+- **What a User isn't shown.** No sponsor card (the Owner and Admins, who choose the team's providers, still get them), no
+  "Meet MausBot" card (an Admin gets it at a later launch than their welcome, without the line about a Chief of Staff's
+  powers), no Rename on a bot they can't edit, and in Settings no AI, bots' computers, usage, import or domain: what only
+  an admin can change is left out instead of shown with "Only an admin of this installation…". A refusal the server still
+  sends them reads "Only the owner or an admin can do that.", with the server's words under Details. **Connect apps** opens
+  their own apps only, "Yours to connect" (`GET /api/team/my-connections`; below, "Connections"), each with Connect,
+  Reconnect or Disconnect; the team's apps, which an admin connects for everyone, aren't listed there.
+- **New bot** (an Owner's or an Admin's) asks for the bot's name before it is made; anywhere else it is made at once with
+  a suggested name.
 
 ### Signed in without a desktop
 
@@ -259,7 +275,7 @@ this server shares with every bot. It exists only on a Team Cloud.
   toward the person's and the team's totals (`server/host/private-records.ts`). What a person changes on their own
   MausBot is never recorded in admin activity.
 - For a business sign-in (Claude or ChatGPT on this server), the Admin opens this server's own pages signed in as that
-  admin (a browser sign-in with the member's claim) at `/?connect=ai` (or `apps`, `mcp`, `keys`).
+  admin (a browser sign-in with the member's claim) at `/?connect=ai` (or `apps`, `mcp`, `keys`, and `bots` for Settings → Bot access, which opens for an admin only).
 
 ## Connections: the team's or each person's
 
@@ -364,10 +380,10 @@ record that still names it (a usage trace, an activity row) stays theirs and no 
 own chats before they go is not built.
 
 What they did for the team stays, without them. A routine they wrote for a shared place (a bot, a group chat) keeps
-running as the routine of whoever looks after its bot now, or nobody's when nobody does, whose asks go to the Admins
+running as the routine of whoever owns its bot now, or nobody's when nobody does, whose asks go to the Admins
 (`routinesHandedOver`); one that reported into a chat of theirs gets a chat of its new owner's. Each is one admin
 activity row, *Handed a routine over*, naming the routine and its new owner. They come off every bot's sharing
-(`access.people` and `visibility`, an `@domain` entry kept) and "Looked after by": a bot they looked after, by
+(`access.people` and `visibility`, an `@domain` entry kept) and ownership: a bot they owned, by
 `reportsTo` or as its creator, is nobody's and falls to the Admins (`botsHandedBack`); a Chief that would then be its
 department's second gives up its crown. So joining again restores nothing: they start as a new member. One more row,
 *Left the team*, names who left and when, with `botsHandedBack` and `routinesHandedOver` and nothing of what was
@@ -500,7 +516,7 @@ group chat): whoever sees that place sees it, without the id of a conversation t
 **Its results follow where it lives** (`server/host/team-routines.ts`). A private routine's runs open their
 conversations as its person and report into a chat of theirs. A routine of a shared place opens its runs as the team,
 whoever made it or runs it (the schedule, its writer or an Admin), and reports into the shared chat or into a results
-chat of its own that everyone who reads the place reads; its asks go to whoever looks after the bot, or the Admins. The
+chat of its own that everyone who reads the place reads; its asks go to the bot's owner, or the Admins. The
 routine form on a team offers two places: **Just me** (`resultsThreadId: "just-me"`, the person's own private chat with
 the bot, or a new one named for the routine) and **Shared chat** (the bot's main chat); anyone who can chat with the bot
 may choose either, and an older app's "The bot's main thread" (`null`) is the shared place's own results chat. A new
@@ -530,8 +546,11 @@ none, and the person can hide it.
 - **Just me** lists the bots the person can chat with privately (their own MausBot among them), each with their own
   conversations with it, and no group chat. A bot opens the person's own chat with it, made through `POST
   /api/bots/<id>/tasks` the first time.
-- **Team** lists the bots that have a shared chat, each with its shared conversations only, and the group chats. A bot
-  opens its shared chat. A bot with no shared chat (a person's own MausBot) is not listed there. No new conversation is
+- **Team** lists the bots shared with someone (everyone, or at least one person besides whoever looks after it), each
+  with its shared conversations only, and the group chats. A bot opens its shared chat. A person's own MausBot is not
+  listed there, and neither is a bot only its owner and the admins can use (`sharedWithOthers`): that one is under Just
+  me whole, its main chat with it, which still says who reads it by the message box (*"Shared · only people added and
+  admins can see"*) and is never called private. No new conversation is
   offered beside a shared chat: a conversation a person opens is always private, so New conversation is under Just me.
 - **Which side a conversation is on is the server's answer**, never the switch: `private: true` on the task (or a
   conversation this page just made through that route, or the person's own MausBot) is Just me; everything else, a
@@ -557,22 +576,59 @@ none, and the person can hide it.
 - With one side empty (nobody shared a bot with them yet, say) there is no switch and the sidebar lists everything.
   The first time the switch shows on a device, one line under it says what the two sides are.
 
-## Who looks after a bot
+## Sharing a conversation
 
-Every team bot is **looked after by** one member, its owner in the data: `reportsTo` (an email) names them; without it
-the bot is looked after by `createdBy`, the member who created it or moved it in (a bot a Chief creates gets the Chief's
-owner). Bots made before owners were recorded have none until someone picks one, and their asks go to the Admins. The app
-says "Looked after by Ada" wherever it names this (the Share dialog, Bot access, a new bot's form, a bot's menu) and
-shows no face on a bot's sidebar row and no caption beside a department. The Team map's "Who looks after what" (also "See
-who looks after what" in a department's menu) shows each person with the bots they look after by department. Each face is
-the person's picture from their team profile, or their initial when they have none.
+A private conversation is shared only by the person it is private to, from its menu (the bot panel's This conversation
+rows in Simple, the header's ⋯ in Advanced, and its row in a conversation list): **Share with the team** or **Share
+with…** one teammate who can chat with that bot. A confirm step says who will read the whole conversation, everything
+already in it and its files included, and that it can't be made private again (`POST
+/api/bots/<bot>/tasks/<thread>/share { with: "team" | { email } }`, `GET` the same path for whom it can go to;
+`server/routes/conversation-share.ts`). Nobody else, an admin included, can share it: to them it is no such conversation.
+
+- **With the team** it becomes the team's (audience `team`): on the Team side for everyone who sees the bot, with the
+  shared chat's label, its turns reading and writing the team's notes. Nobody gets an inbox line or a notification for it.
+- **With one person** it gets an audience of its own, `member:<share key>`, the key made from the conversation and held by
+  no session (`server/host/conversation-shares.ts`): its own memory layer, engine home and browser, so neither person's
+  notes, About you or other chats reach it. Exactly its owner and that person read it, never an admin; both see it on
+  the Team side, *"Shared · only you and Marta can see"* (`WireTask.shared`, `sharedWith`). Either of them writes in it and
+  the bot keeps its context: the next turn opens a new engine session given the whole conversation so far. The person
+  gets one inbox line and one notification linking it. From then on, what one of them writes, or the bot answers them,
+  waits in the other's inbox while they don't have it open: one line per conversation, updated in place until they answer
+  there. Its owner may still widen it to the team; nothing narrows it.
+- **What stays.** Notifications from before the share stay with whoever they were for. A conversation a routine lives in
+  is refused until the routine goes, and so is one the bot is working in. When one of the two people leaves the team the
+  conversation becomes the other's private chat; one shared with the team stays the team's.
+- **No way back.** It can't be made private again: nobody can un-read what was shared, and what others wrote in it, the
+  notes its turns saved and the files they made would have no clear owner. Its owner can still delete it.
+
+## Saving to team memory
+
+**Save to team memory** on a message of a conversation with a team bot (not a group chat, not one's own MausBot) puts
+that message into the bot's team notes (MEMORY.md in its own folder, which every conversation with it reads) in one
+click, as one line saying who saved it and the day: *"We ship on 3 March (saved by Rui, 2026-11-11)"*. A message longer
+than one note keeps its start and says *"shortened"*. Undo on the toast takes it out again (`POST`/`GET
+/api/bots/<bot>/memory/team`, `DELETE /api/bots/<bot>/memory/team/<id>`; `server/host/team-memory-saves.ts`). It needs
+Can chat on the bot and a conversation the person reads, so from a private chat only its own person saves. The line
+names no conversation. Its author sees and removes it in the bot's What it remembers; an admin removes any line there
+or in the notes; nobody else can remove or change it. Nothing is ever saved there on its own, and nothing from a
+conversation that came in from outside.
+
+## A bot's owner
+
+Every team bot has one **owner**, a member: `reportsTo` (an email) names them; without it the owner is `createdBy`, the
+member who created it, imported it or moved it in (a bot a Chief creates gets the Chief's owner). Bots made before owners were
+recorded have none until someone picks one, and their asks go to the Admins. The app says "Owner" wherever it names this
+(Bot access, a new bot's form, a bot's menu: "Owner: Ada…"; the Share dialog still says "Looks after it") and shows no
+face on a bot's sidebar row and no caption beside a department. An Admin, or the owner handing it over, changes it one bot
+at a time from the bot's menu or the Share dialog. The Team map shows departments only, and a department's menu sets no
+owner. Each face is the person's picture from their team profile, or their initial when they have none.
 
 | Route | Who | What |
 |---|---|---|
 | `GET /api/team/people` | any member | the members the Admin has paired here (`team-people.json`), each `{email, name, role, you?, pictureUrl?, here}` (below, "Who is here") |
 | `GET /api/team/people/<person>/picture?v=<version>` | the team's members | that member's picture (`<person>` is their person key). `pictureUrl` names it, and its `v` changes whenever they change it; it is revalidated on every use (`private, no-cache` with an ETag). A session that isn't a member of this team gets 403, anything off a team or not a current member's picture 404 |
 | `PUT /api/bots/<id>/reports-to {email}` | an Admin, or the bot's owner handing it over | one bot's owner; `null` hands it back to its creator |
-| `PUT /api/team/reports-to {botIds, email}` | an Admin | "Set who looks after all bots…" on a department |
+| `PUT /api/team/reports-to {botIds, email}` | an Admin | one owner for several bots; the app has no control for it |
 | `GET /api/needs-you` | any member | what bots ask of this person now, and the tags and passed messages waiting for them |
 
 **Routing** (`server/ask-routing.ts`). A bot's ask is a question or approval card, a sign-in, a failure, or a routine's
@@ -621,7 +677,7 @@ Every bot still reaches every bot there.
 
 Someone with a My Cloud moves a bot into a team from two places: **Move to Acme** in the bot's menu on My Cloud, and on the
 team's own page in the desktop app, **Bring your stuff**, which lists My Cloud's bots with one **Move** each. Both say the
-same before anything moves: who can use it there, what goes (instructions, skills, files, routines, their chats), what
+same before anything moves: that only they and the team's admins can use it there until they share it, what goes (instructions, skills, files, routines, their chats), what
 stays on My Cloud (what the bot remembers, their connections, MausBot), and that there is no way back.
 
 A team's server isn't the person's own, so its page gets less than My Cloud's does (`electron/team-move-main.mjs`). It reads
@@ -651,8 +707,37 @@ allow, folders), where it runs, its department, whom it answers to or directs, c
   the whole value sets it (Undo puts the previous one back): someone who can edit it only, a new person must be a
   current member of the team (an older list's address or `@domain` may stay), and the owner is never stored. The bot's
   `visibility` follows in the same write (everyone when everyone may at least view it, else the owner and the people
-  added), so every rule of the audience rule above that reads who sees a bot holds unchanged. A new team bot is
-  Everyone · Can chat. A member's own MausBot stays theirs alone, as before.
+  added), so every rule of the audience rule above that reads who sees a bot holds unchanged. A member's own
+  MausBot stays theirs alone, as before.
+- **A new bot is its maker's until they share it** (`server/new-bot-sharing.ts`, the one place that decides, set on the
+  store before anything is made). A bot made on a team starts as Only people added with nobody added: whoever looks
+  after it and the admins reach it, and to every other member it does not exist. That holds for New bot, a preset, a
+  copy, a package or template (the organization library's too), a backup and a bot moved in from My Cloud; an import
+  records the member who ran it as the one who made its bots. Three things differ. A request that says who sees the
+  bot wins: `visibility` on `POST /api/bots` ("everyone" is Everyone · Can chat) and `?visibility=` on an import, an
+  admin's choice. A bot another bot makes (a Chief's reviewed setup) is shared exactly as its maker is, because bots
+  reach each other only with the same audience (above), so a private Chief makes private bots and a shared one bots
+  shared with the same people. And the team's first bot, which nobody made, is everyone's. New bot's form states
+  General access as Just me or Everyone in Acme, preset to Just me. Bots made before this are untouched.
+- **A User's own bot.** A User makes a bot with New bot (`POST /api/bots`, which the handler opens to a Team Cloud
+  member and to no other session without the admin scope). It is theirs: they look after it, it is private to them,
+  and they change it as anyone who can edit a bot does. The request takes only what Can edit lets a person change
+  (`memberBotCreateViolation`, the same fields as the edit rule): its name, picture, instructions, profile, model, and
+  which of the team's connected apps and MCP servers it uses. Anything an admin alone sets is refused by name, at
+  creation and on every later edit (403 *"approvalMode" is an admin's to set*): what it may do on its computer, where
+  it runs, its department, whom it answers to or directs, a crown, its tool selection, a preset, its sharing at
+  creation (it starts private; they share it after). The admin's saved New bot defaults are not applied to it, so
+  those settings are what the server gives any bot nobody set up. Templates, packages, backups and the Grok Bot
+  import stay an admin's: they carry skills, notes, routines and approval levels. The team's bot limit counts every
+  bot alike, and the team's rules apply to a User's bot as to any other. An admin sees and changes it as any team
+  bot, and still reads none of its owner's private chats with it. **Deleting:** a User deletes a bot they look after
+  while nobody else can use it (`DELETE /api/bots/<id>`, `server/host/member-bots.ts`). Once it is shared with anyone,
+  or for any bot they do not look after, deleting stays with the admins, as it always was: the app shows Delete with
+  the reason, *"Only an admin can delete a shared bot. Stop sharing it first."*, and the route answers 403 in the same
+  words. Duplicate is offered for a bot they can edit and copies who it is and how it looks.
+- **Being told.** Sharing a bot with a person (`PUT /api/bots/<id>/access` newly naming a User who could not use it)
+  puts one line in that person's inbox, "Ada shared Quotes with you.", linked to the bot (`server/host/share-notice.ts`).
+  Sharing with everyone tells nobody, and neither does adding an admin or someone who could already use it.
 - **A person's own MausBot exists for nobody else.** To every other member and every Admin, the Owner included, it is
   in no list, stream, search, export, routine picker or group chat, whatever its stored sharing says
   (`VisibleSet.bot`), and every route naming it, by path (its memory layers too) or in a body, answers exactly as an id
@@ -674,8 +759,12 @@ allow, folders), where it runs, its department, whom it answers to or directs, c
   that names nobody needs everyone to be able to. The live stream sends each person their own `yourAccess` with every
   bot frame, withdraws a bot that stops being shown (`bot.deleted`, and their stream ends to start fresh) and sends one
   that becomes shown whole.
-- **The app.** The bot's Share button (the bot panel in Simple, the settings header in Advanced) opens the Share
-  dialog on a team; the conversation's copy and download sit under the ⋯ of its header. On a team the dialog offers two
+- **The app.** The bot's Share button (the top right of its chat header, the bot panel in Simple, the settings header
+  in Advanced) opens the Share dialog on a team. Left of the header's Share is who the bot is shared with
+  (`HeaderShare`): the faces of the people added, a few and then "+N", each saying its person's name; one "Everyone in
+  Acme" mark when everyone can use it; nothing for a bot only its owner uses. It is read from what each person is
+  sent: only someone who can edit the bot is sent its sharing, so anyone else sees "Everyone in Acme" or "Only people
+  added" and never who. A narrow header folds the faces into one count. Each mark opens the Share dialog; the conversation's copy and download sit under the ⋯ of its header. On a team the dialog offers two
   choices: "Everyone in Acme can use it" (`everyone: "chat"`) or "Only people added" (`everyone: "none"`), and lists
   who looks after the bot and each person added, with Remove and the handover; it shows no Can view / Can chat / Can
   edit menu. A person added gets `chat`; a `view` or `edit` stored earlier (or set through the API) stays as it is
@@ -683,10 +772,10 @@ allow, folders), where it runs, its department, whom it answers to or directs, c
   bot sees "You can view Payroll, not chat with it." where the composer would be (and in a room with that bot), opens
   its main chat rather than a new one of their own, and is offered no New conversation. Off a team none of this shows.
 - **Bot access** (its own Settings page, for a team's admins): one row per team bot (each person's own MausBot stays
-  out) with who looks after it, what everyone gets and the faces of those added; a row opens that bot's Share dialog.
+  out) with its owner, what everyone gets and the faces of those added; a row opens that bot's Share dialog.
   Everyone's access reads as one column, "Everyone can use it" or "Only people added". By person lists each User, and
   opening one shows their bots, each with Remove where they were added. The same sharing as the Share dialog, applied at
-  once with Undo. Editing a bot stays with admins and the person who looks after it; "Ask Ada to chat" stays (below).
+  once with Undo. Editing a bot stays with admins and its owner; "Ask Ada to chat" stays (below).
 - **Asking to chat.** Beside "You can view Payroll" sits "Ask Ada to chat" (Ada owns it; "Ask an admin to chat" when
   nobody on the team does). `POST /api/bots/<id>/access-request` (anyone who can view the bot; someone who can chat
   already gets 409) puts an Allow / Not now card in the owner's inbox, or each admin's when the owner is gone
@@ -771,6 +860,7 @@ inbox is unread.
 | a question or approval routed to Ben (`ask-routing.ts`), from a shared chat, a room, a routine or work handed on | a copy of the card, `"ask"` | the card where it was asked: the copy's buttons answer it there (`answeredIn`) and the copy follows it |
 | a routine's report or a failure routed to Ben | the report, `"result"` / `"notice"` | nothing |
 | a routine Ben wrote that tried to hand work to a bot it may not reach | what was refused, `"notice"` | nothing |
+| a bot someone shared with Ben by name | "Ada shared Quotes with you.", `"notice"`, linked to the bot | nothing |
 
 An ask in the person's own private chat, where they are, stays only there. The Admins' asks (a bot nobody owns) are not
 anyone's inbox. A member without any bot of their own gets the notification where it was written, as before.
@@ -918,6 +1008,9 @@ opens the team's page on the Cloud site (`/cloud/team/<id>`), not a chat. Nothin
 
 - **Saved logins per member.** A login saved from a sign-in card is the team's (an Admin saves it, for every bot in the
   team); per-member saved logins are not built. Sign-ins a member makes in their own browser stay in it (above).
+- **A secret typed into a card outside a private chat.** In a bot's shared chats and group chats the card is entered by
+  whoever looks after the bot there (the Admins when nobody does), and what they type is the team's, for that bot
+  everywhere, as before; only a private chat's secrets are the person's own.
 - **The new browser engine and temporary browsers in a box.** The new engine (`browserEngine.engine: "chrome"`, off by
   default) starts Chrome itself over a pipe and is not boxed; a temporary browser is boxed, but a file a turn uploads
   into it is not reachable from its box.

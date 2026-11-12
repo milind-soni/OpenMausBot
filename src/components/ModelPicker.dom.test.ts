@@ -267,9 +267,12 @@ describe("an OpenCode model typed by hand", () => {
   const opencode: InstanceInfo = {
     instanceId: "opencode", driverKind: "opencodeGo", displayName: "OpenCode", access: "subscription",
     snapshot: { state: "available", version: "1.19.4", authenticated: true },
-    models: { default: "opencode/big-pickle", options: [{ id: "opencode/big-pickle", label: "Zen · Big Pickle" }] },
+    models: { default: "opencode/big-pickle", options: [
+      { id: "opencode/big-pickle", label: "Zen · Big Pickle" }, { id: "venice/deepseek-v4-flash", label: "Venice · DeepSeek V4 Flash" },
+    ] },
   };
   const onOpenCode = (model: string): Bot => ({ ...scout(), modelSelection: { instanceId: "opencode", model } });
+  const typedRows = () => [...document.querySelectorAll<HTMLElement>("[data-menu-row]")].filter((candidate) => candidate.textContent?.includes("typed by hand"));
 
   it.each([false, true])("is picked from the search box (advanced: %s) and then named as typed by hand", async (advanced) => {
     fixture.advanced = advanced;
@@ -283,6 +286,15 @@ describe("an OpenCode model typed by hand", () => {
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ type: "setModel", selection: { instanceId: "opencode", model: `typed::${typed}` } }));
     render(onOpenCode(`typed::${typed}`));
     expect(chip().textContent).toContain(`${typed} · typed by hand`);
+  });
+
+  it.each([false, true])("is never offered under a provider OpenCode lists no model of (advanced: %s)", async (advanced) => {
+    fixture.advanced = advanced;
+    fixture.instances = [opencode];
+    render(onOpenCode("opencode/big-pickle"));
+    await openWith("click");
+    type(document.querySelector<HTMLInputElement>("[data-menu-search]")!, "chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017");
+    expect(typedRows()).toEqual([]);
   });
 });
 
