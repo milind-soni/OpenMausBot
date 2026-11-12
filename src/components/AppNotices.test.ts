@@ -453,6 +453,15 @@ describe("Boat's credit offer", () => {
   };
   afterEach(() => { BOAT_OFFER.until = null; });
 
+  it("never reaches a Team Cloud's member", async () => {
+    fresh(); storage.delete(STAR_NOTICE);
+    f.state.config.team = { id: "team-acme", name: "Acme" };
+    viewer = { hosted: false, canSave: false };
+    expect(await launch()).not.toContain(html(TITLE));
+    delete f.state.config.team; viewer = LOCAL_VIEWER;
+    expect(await relaunch(), "off a team as before").toContain(html(TITLE));
+  });
+
   it("shows once to someone who used the app before this launch: what Boat gives, that they claim it themselves, Get Boat, the claim and Not now", async () => {
     fresh(); storage.delete(STAR_NOTICE);
     const shown = await launch();
@@ -1459,6 +1468,14 @@ describe("ModelGo's sponsor card", () => {
     expect(await relaunch(), "a Team Cloud's rules are no organization-managed desktop").toContain(TITLE);
   });
 
+  it("never reaches a Team Cloud's member; its Owner and Admins, who choose its providers, still see it", async () => {
+    f.state.config.team = { id: "team-acme", name: "Acme" };
+    viewer = { hosted: false, canSave: false };
+    expect(await launch(), "a member").not.toContain(TITLE);
+    viewer = { hosted: false, canSave: true };
+    expect(await relaunch(), "an admin").toContain(TITLE);
+  });
+
   it("after an update, What's new takes the launch and the card follows it in that same launch once it closes, then never again", async () => {
     returning(); desk.saved = null; storage.delete(WHATS_NEW_NOTICE);
     const first = await launch();
@@ -1722,7 +1739,7 @@ describe("Update MausBot on your phone", () => {
   it("Open Phone & devices opens pairing in Settings, and the card is done for that phone", async () => {
     await launch();
     tree().find(node => node.type === "button" && node.props.children === "Open Phone & devices")!.props.onClick(); await flush();
-    expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "companion", phonePairing: true });
+    expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "phone", phonePairing: true });
     expect(hints()).toContain("phone-app-update:0f8c2a41");
     expect(render()).toBe("");
     expect(await relaunch()).not.toContain(TITLE);

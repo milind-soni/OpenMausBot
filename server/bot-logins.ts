@@ -4,7 +4,7 @@ import { browserMatesOf, loginPageCheck, loginPlace, loginSite, type LoginBots, 
 import type { LinkedSecret } from "../shared/vault.ts";
 import type { FillCandidate } from "./login-fill.ts";
 import { receiveLoginHandoff, type ConnectionHandoffAnswer, type ConnectionHandoffWhat, type LoginHandoffResult } from "./login-handoff.ts";
-import type { VaultStore } from "./vault-store.ts";
+import type { VaultReader, VaultStore } from "./vault-store.ts";
 import type { OnePasswordLogins } from "./onepassword.ts";
 import type { LoginRouteDeps } from "./routes/logins.ts";
 import { findLinkedSecret, linkedCandidates, linkedSecretNames, linkedSecrets, linkedSites, readLinkedSecret, type VaultProvider } from "./vault/providers.ts";
@@ -111,10 +111,10 @@ export class BotLogins {
     return this.providers.flatMap((provider) => linkedSecrets(provider));
   }
 
-  /** The names of the secrets the bot may use, for its prompt: never a value. */
-  secretNamesFor(botId: string): Array<{ name: string; refOnly?: true }> {
+  /** The names of the secrets the bot may use in a turn `reader` names, for its prompt: never a value. */
+  secretNamesFor(botId: string, reader: VaultReader): Array<{ name: string; refOnly?: true }> {
     const linked = this.providers.flatMap((provider) => linkedSecrets(provider, botId).flatMap((secret) => linkedSecretNames(secret).map(({ name }) => ({ name }))));
-    return [...this.store.secretNamesFor(botId), ...linked];
+    return [...this.store.secretNamesFor(botId, reader), ...linked];
   }
 
   /** A secret a linked manager holds for the bot by this name, read from it now; its id is safe as a file name. */

@@ -41,7 +41,7 @@ function composeUp() {
   if (!wanted) fail(`pull access denied for ${composeImage()}`);
   if (state.failUp === wanted.id) fail("Error response from daemon: driver failed programming external connectivity");
   const crashes = wanted.behaviour === "crashes";
-  state.containers.omb = { id: `omb-${++state.serial}`, image: wanted.id, status: crashes ? "restarting" : "running", restarts: crashes ? 5 : 0 };
+  state.containers.omb = { id: `omb-${++state.serial}`, image: wanted.id, status: crashes ? "restarting" : "running", restarts: crashes ? 5 : 0, started: `start-${state.serial}` };
   state.containers.caddy = { id: `caddy-${state.serial}`, status: wanted.behaviour === "no-caddy" ? "exited" : "running" };
   // A server that starts writes to its data, as a new version's migrations do.
   if (!crashes) appendFileSync(join(volume(state.dataVolume), "started-by.txt"), `${wanted.version}\n`);
@@ -84,7 +84,11 @@ function inspect(format, target) {
   if (format === "{{.Image}}") return out(omb.image);
   if (format === "{{.State.Running}}") return out(String(omb.status === "running"));
   if (format === "{{.State.Status}} {{.RestartCount}} {{.Image}}") return out(`${omb.status} ${omb.restarts} ${omb.image}`);
+  // Where /data is on the host: the volume's folder here (update-runner.sh reads its owner).
+  if (format.includes(".Mounts") && !format.includes(".Name")) return out(volume(state.dataVolume));
   if (format.includes(".Mounts")) return out(state.dataVolume);
+  // A container's id and when it started: both stay the same across a run that stopped nothing.
+  if (format === "{{.Id}} {{.State.StartedAt}}") return out(`${omb.id} ${omb.started ?? "start-0"}`);
   if (format.includes("com.docker.compose.project")) return out("deploy");
   fail(`fake docker: unknown inspect format: ${format}`, 64);
 }

@@ -115,7 +115,7 @@ try {
     return answer.body;
   };
   const payroll = (await as("ada", "POST", "/api/bots", { name: "Payroll", title: "Answers pay questions", color: "teal" })).bot as { id: string; threadId: string };
-  const helpdesk = (await as("ada", "POST", "/api/bots", { name: "Helpdesk", title: "IT questions", color: "blue" })).bot as { id: string };
+  const helpdesk = (await as("ada", "POST", "/api/bots", { name: "Helpdesk", title: "IT questions", color: "blue", visibility: "everyone" })).bot as { id: string };
   if (before) await as("ada", "PATCH", `/api/bots/${payroll.id}`, { visibility: { people: [PEOPLE.bob.email, PEOPLE.cara.email, PEOPLE.dan.email] } });
   else await as("ada", "PUT", `/api/bots/${payroll.id}/access`, { everyone: "none", people: { [PEOPLE.bob.email]: "view", [PEOPLE.cara.email]: "chat", [PEOPLE.dan.email]: "edit" } });
   const sales = (await as("ada", "POST", "/api/bots", { name: "Sales notes", title: "Keeps the deal notes", color: "orange" })).bot as { id: string };
@@ -331,7 +331,7 @@ try {
     const added = Object.fromEntries(CROWD.map((person) => [person.email, "chat" as const]));
     for (const person of CROWD) await team.pair(person);
     await as("ada", "PUT", `/api/bots/${payroll.id}/access`, { everyone: "none", people: { [PEOPLE.bob.email]: "view", [PEOPLE.cara.email]: "chat", [PEOPLE.dan.email]: "edit", [PEOPLE.eve.email]: "view", ...added } });
-    for (let i = 1; i <= 46; i++) await as("ada", "POST", "/api/bots", { name: `Bot ${String(i).padStart(2, "0")} with quite a long name for the list`, title: "Filler", color: "teal" });
+    for (let i = 1; i <= 46; i++) await as("ada", "POST", "/api/bots", { name: `Bot ${String(i).padStart(2, "0")} with quite a long name for the list`, title: "Filler", color: "teal", visibility: "everyone" });
   }
   let serving: Who | null = null;
   for (const shot of SHOTS.filter((entry) => !only || only.has(entry.name))) {

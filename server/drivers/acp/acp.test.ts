@@ -10,6 +10,7 @@ import { BUILT_IN_DATA_SYSTEM_PROMPT } from "../../data/instructions.ts";
 import type { ProviderInstance } from "../../contracts.ts";
 import { TurnNotStartedError } from "../../contracts.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
+import { publishedMessages } from "../../harness/text-items.testkit.ts";
 import { promptSplitFingerprints, writePromptSplitReceipt } from "../prompt-split.ts";
 import { classifyError } from "../retry.ts";
 import { createAcpDriver, skipSubscriptionAuthForLocalInject, type AcpSupport } from "./core.ts";
@@ -1001,6 +1002,11 @@ describe("ACP turns (fake CLI)", () => {
       .filter((e) => e.type === "item.completed" && (e as { itemType?: string }).itemType === "assistant_text")
       .map((e) => (e as { text: string }).text);
     expect(texts).toEqual(["before one", "before two", "after"]);
+    expect(publishedMessages(recorder.events), "each message's words and its completion share one id of their own").toEqual([
+      { itemId: expect.any(String), streamed: "before one", completed: "before one" },
+      { itemId: expect.any(String), streamed: "before two", completed: "before two" },
+      { itemId: expect.any(String), streamed: "after", completed: "after" },
+    ]);
   });
 
   it("normalizes a structured ACP image block without treating it as text", async () => {
@@ -2838,6 +2844,31 @@ describe("ACP turns (fake CLI)", () => {
         expect(await pending.catch((error) => error)).toBeInstanceOf(TurnNotStartedError);
         const timer = started.mock.results[started.mock.calls.findIndex(([, ms]) => ms === 4321)].value;
         expect(cleared.mock.calls.some(([handle]) => handle === timer)).toBe(true);
+      });
+
+      describe("a model OpenCode has no route to", () => {
+        // OpenCode 2.2.5's answer for a model declared under a provider it has no SDK package for.
+        const noRoute = { code: -32603, message: "Internal error: Unsupported package for chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017: unknown", data: { service: "session", errorName: "provider.no-route" } };
+
+        it("hands the turn to the bot's backup, as nothing reached a model", async () => {
+          await refusePrompt(noRoute);
+          releaseFailure();
+          const failed = await instance.adapter.sendTurn({ threadId: "no-route-backup", text: "go", startupRecovery: true }).catch((error) => error);
+          expect(failed).toBeInstanceOf(TurnNotStartedError);
+          expect(recorder.events.some((event) => event.type === "runtime.error" || event.type === "turn.completed")).toBe(false);
+        });
+
+        it("without a backup, fails in one plain sentence naming the model", async () => {
+          await refusePrompt(noRoute);
+          releaseFailure();
+          const ack = await instance.adapter.sendTurn({ threadId: "no-route-alone", text: "go" });
+          expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === ack.turnId))
+            .toMatchObject({ ok: false, stopReason: "rpc_error" });
+          expect(recorder.events.filter((event) => event.type === "runtime.error" && event.turnId === ack.turnId)).toEqual([expect.objectContaining({
+            message: "Select Model Test can't use the model chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017 here, so choose another model for this bot.",
+            text: { key: "chat.notice.modelNoRoute", params: { provider: "Select Model Test", model: "chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017" } },
+          })]);
+        });
       });
 
       it("fails normally for another prompt error before any activity", async () => {

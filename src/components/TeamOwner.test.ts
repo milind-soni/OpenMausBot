@@ -53,10 +53,10 @@ describe("who looks after a team bot, in the sidebar", () => {
     expect(header).not.toContain("→");
   });
 
-  it("offers Set owner for all bots in a department's menu only when the caller passes it", () => {
-    const items = (onSetOwner?: () => void) => renderToStaticMarkup(createElement(TeamMenuItems, { onAddBots: vi.fn(), onRename: vi.fn(), onShare: vi.fn(), onDelete: vi.fn(), onSetOwner }));
-    expect(items(vi.fn())).toContain("Set who looks after all bots…");
-    expect(items()).not.toContain("Set who looks after all bots…");
+  it("a department's menu sets no owner for all its bots and opens no map of who owns what", () => {
+    const items = renderToStaticMarkup(createElement(TeamMenuItems, { onAddBots: vi.fn(), onRename: vi.fn(), onShare: vi.fn(), onDelete: vi.fn(), onSetForAll: vi.fn() }));
+    expect(items).not.toMatch(/looks? after|owner/i);
+    expect(items).toContain("Rename department");
   });
 });
 

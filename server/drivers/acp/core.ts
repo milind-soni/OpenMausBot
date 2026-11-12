@@ -236,10 +236,7 @@ export interface AcpSupport {
   /** Compose the session/prompt text. Default prepends the persona. */
   buildPromptText?(turn: SendTurnInput): string;
   /** Rewrite a picker id (`omlx::model`) into the CLI-native id before spawn and session/select. */
-  resolveTurnModel?(
-    model: string | undefined,
-    env: Record<string, string | undefined>,
-  ): string | undefined;
+  resolveTurnModel?(model: string | undefined, env: Record<string, string | undefined>, catalog: ModelCatalog): string | undefined;
   /** Map a saved selection onto the live session's catalog (a retired model id), once session/new or load answers. */
   normalizeSessionSelection?(turn: SendTurnInput, offeredModels: readonly string[]): SendTurnInput;
   /** Per-session settings between session/new (or load) and the first prompt. Some CLIs ignore argv
@@ -1018,7 +1015,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             return { turnId };
           }
         }
-        const resolvedModel = support.resolveTurnModel?.(turn.model, env);
+        const resolvedModel = support.resolveTurnModel?.(turn.model, env, catalog.models);
         const toolLimitKey = JSON.stringify([instanceId, resolvedModel ?? null]);
         const mcpServers = acpMcpServers(turn, { http: support.ownMcpOverHttp === true, engine: support.driverKind,
           toolBudget: mcpToolBudget(learnedToolCountLimit(toolLimitKey), support.engineTools ?? 32) });

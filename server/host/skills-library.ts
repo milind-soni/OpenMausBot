@@ -11,7 +11,7 @@ import {
   importedSkillListings, importedSkillsFor, importedSkillsPrompt, listedImportedSkills, nativeSkillFolders, readImportedSkillFile,
   readImportedSkills, type ImportedSkillView, type SkillTurnEngine,
 } from "../imported-skills.ts";
-import { disabledNativeSkillNames, isNativeSkillEnabled } from "../native-skill-choices.ts";
+import { isNativeSkillEnabled } from "../native-skill-choices.ts";
 import { nativeSkillListing, nativeSkills, projectSkillListing, projectSkills, projectSkillsPrompt, readNativeSkillFile, type NativeSkill } from "../native-skills.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { readSectionContext } from "../section-context.ts";
@@ -318,12 +318,9 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       const cwd = engine ? threadFolder(bot, threadId, privateOnly) : null;
       if (files.size < mentioned.length) {
         // A skill switched off on the Skills page stays off, even when the engine holds one of the same name.
-        const switched = new Set([
-          ...[...resolveBotSkills(bot.id, assigned), ...importedSkillListings(bot.id, new Set())]
-            .filter((skill) => !skill.enabled).map((skill) => skill.name),
-          ...disabledNativeSkillNames(bot.id),
-        ]);
-        add(nativesFor(bot, threadId, instance, cwd).filter((skill) => !switched.has(skill.name)));
+        const switched = new Set([...resolveBotSkills(bot.id, assigned), ...importedSkillListings(bot.id, new Set())]
+          .filter((skill) => !skill.enabled).map((skill) => skill.name));
+        add(nativesFor(bot, threadId, instance, cwd).filter((skill) => !switched.has(skill.name) && isNativeSkillEnabled(bot.id, skill.name)));
       }
       if (files.size < mentioned.length) add(projectInUse(bot, threadId, cwd, instance, assigned).filter((skill) => !skill.modelOnly));
       return skillCommandTurnText(text, files, typed, ownStart);
