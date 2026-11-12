@@ -32,6 +32,9 @@ export const AREA_CHECKS = {
   // The Windows CUA job starts these the way the installed app does, then lends the PC's screen through them.
   "windows-computer-control": [...SERVER_CHECKS, "windows-cua"],
   "control-plane": ["control-plane"],
+  // The announcements file and its pictures: static validates them (scripts/check-announcements.mjs), and nothing else
+  // reads them but the server's bundled copy, which that check covers.
+  announcements: [],
   // The relay is its own package with its own lockfile; nothing outside relay/ reaches it except the shared vectors,
   // which it keeps a pinned copy of.
   relay: ["relay"],
@@ -62,7 +65,9 @@ export const VITEST_SUBSETS = {
       "scripts/testing/one-workspace-ui.e2e.test.ts",
       "scripts/testing/rail-profile-ui.e2e.test.ts",
       "scripts/testing/secret-card-descriptions.test.ts",
+      "scripts/testing/team-conversation-share-ui.e2e.test.ts",
       "scripts/testing/team-own-chat.e2e.test.ts",
+      "scripts/testing/team-private-default-ui.e2e.test.ts",
       "scripts/testing/team-side-switch-ui.e2e.test.ts",
       "server/body-thread-guards.e2e.test.ts",
       "server/client-notifications.e2e.test.ts",
@@ -83,10 +88,13 @@ export const VITEST_SUBSETS = {
       "server/cloud-team-away.e2e.test.ts",
       "server/cloud-team-browser.e2e.test.ts",
       "server/cloud-team-connections.e2e.test.ts",
+      "server/cloud-team-conversation-share.e2e.test.ts",
       "server/cloud-team-engine-homes.e2e.test.ts",
       "server/cloud-team-gateway-mcp.e2e.test.ts",
       "server/cloud-team-inbox.e2e.test.ts",
+      "server/cloud-team-included-hosting.e2e.test.ts",
       "server/cloud-team-mausbot-reach.e2e.test.ts",
+      "server/cloud-team-member-secrets.e2e.test.ts",
       "server/cloud-team-new-chat-private.e2e.test.ts",
       "server/cloud-team-open-reach.e2e.test.ts",
       "server/cloud-team-own-key-apps.e2e.test.ts",
@@ -97,8 +105,10 @@ export const VITEST_SUBSETS = {
       "server/cloud-team-pictures.e2e.test.ts",
       "server/cloud-team-presence.e2e.test.ts",
       "server/cloud-team-privacy-holes.e2e.test.ts",
+      "server/cloud-team-private-default.e2e.test.ts",
       "server/cloud-team-private.e2e.test.ts",
       "server/cloud-team-profile.e2e.test.ts",
+      "server/cloud-team-published-apps.e2e.test.ts",
       "server/cloud-team-requests.e2e.test.ts",
       "server/cloud-team-routines.e2e.test.ts",
       "server/cloud-team-setup-request.e2e.test.ts",
@@ -161,6 +171,7 @@ export const VITEST_SUBSETS = {
       "server/host/wait-words.test.ts",
       "server/place-inbox.e2e.test.ts",
       "server/bot-api-team.e2e.test.ts",
+      "server/cloud-team-conversation-share.e2e.test.ts",
       "server/cloud-team-first-look.e2e.test.ts",
       "server/cloud-team-mausbot-own-chat.e2e.test.ts",
       "server/connector-stayed.e2e.test.ts",
@@ -210,6 +221,7 @@ const AREAS = [
   [/^electron\/(?:cua|cua-failure|cua-connection|capabilities|screen-status|shared-cua-connection|shared-computer-access|lent-screen-tools|lent-screen-failures|paced-typing)\.[cm]js$/, "windows-computer-control"],
   [/^(?:electron|build)\/|^(?:electron-builder\.yml|index\.html|rail\.html)$/, "desktop"],
   [/^cloudflare\/control-plane\//, "control-plane"],
+  [/^announcements\//, "announcements"],
   [/^relay\//, "relay"],
 ];
 

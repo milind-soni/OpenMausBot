@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Check, CircleAlert, ExternalLink, Eye, EyeOff, Loader2, TriangleAlert } from "lucide-react";
 import { useStore } from "@/state/store";
 import { installCommandFor } from "@/state/engine-install";
@@ -7,11 +7,12 @@ import { t } from "@/lib/i18n";
 import type { KeyResult, KeyVia } from "@/lib/analytics-allowlist";
 import { keyRemoved, keySaved, keySaveFailure, savedKeyResult } from "@/lib/product-events";
 import { InstanceProviderMark } from "../ProviderIcons";
+import { FIELD_EDGE, SettingsLook, SettingsMark } from "../SettingsPrimitives";
 import { keyEntry, keyForInstance, looksLikeOtherKey, savedState, shownKeyEntry, type KeyEntry, type KeyId, type SavedState } from "./key-catalog";
 import { checkKey, cleanKey, looksLikeKey, saveKey } from "./key-save";
 
-export const KEY_FIELD = "h-8 w-full min-w-0 rounded-lg border border-hairline/60 bg-inset px-3 font-mono text-[13px] leading-8 text-ink placeholder:text-ink-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus/60 disabled:opacity-60";
-export const KEY_ROW = "group flex scroll-mt-24 flex-col gap-2 rounded-[8px] px-4 py-2.5 transition-[background-color,box-shadow] duration-500 data-[key-highlight]:bg-accent/10 data-[key-highlight]:ring-1 data-[key-highlight]:ring-accent/40 motion-reduce:transition-none";
+export const KEY_FIELD = `h-8 w-full min-w-0 rounded-lg ${FIELD_EDGE} bg-app px-2 text-[13px] leading-5 text-ink placeholder:text-ink-tertiary focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-focus disabled:opacity-40`;
+export const KEY_ROW = "group flex scroll-mt-24 flex-col gap-2 px-4 py-3 transition-[background-color,box-shadow] duration-500 data-[key-highlight]:bg-accent/10 data-[key-highlight]:ring-1 data-[key-highlight]:ring-accent/40 motion-reduce:transition-none";
 const MASK = "••••••••";
 
 export function KeyMarkIcon({ entry }: { entry: KeyEntry }) {
@@ -61,10 +62,13 @@ export function SavedKeyLine({ id }: { id: KeyId }) {
   );
 }
 
+/** Where a key row's content starts: past the 32 px leading slot and its 12 px gap, so it shares the title's edge. */
+export const KEY_CONTENT = "pl-11";
+
 export function RowHeading({ entry, status, titleId }: { entry: KeyEntry; status: KeyStatus; titleId?: string }) {
   return (
-    <div className="flex items-start gap-3">
-      <span className="flex size-5 shrink-0 items-center justify-center"><KeyMarkIcon entry={entry} /></span>
+    <div className="flex items-center gap-3">
+      <span data-settings-slot="" className="flex size-8 shrink-0 items-center justify-center"><SettingsMark><KeyMarkIcon entry={entry} /></SettingsMark></span>
       <div className="min-w-0 flex-1">
         <div id={titleId} className="text-[14px] leading-5 text-ink">{t(entry.labelKey)}</div>
         <div className="text-[13px] leading-[18px] text-ink-secondary">{t(entry.purposeKey)}</div>
@@ -106,7 +110,7 @@ export function KeyRow({ children, className, editorKey, ...props }: KeyRowProps
       className={cn(KEY_ROW, className)}
     >
       <KeyEditor key={editorKey} {...props} titleId={titleId} />
-      {children && <div className={cn("flex flex-col gap-2", !props.bare && "pl-8")}>{children}</div>}
+      {children && <div className={cn("flex flex-col gap-2", !props.bare && KEY_CONTENT)}>{children}</div>}
     </div>
   );
 }
@@ -124,6 +128,7 @@ function KeyEditor({ id, row: rowId, via = "settings", onSaved, bare = false, re
   const [works, setWorks] = useState(false);
   const [enginesChecking, setEnginesChecking] = useState(false);
   const [engineCheckError, setEngineCheckError] = useState<string | null>(null);
+  const settings = useContext(SettingsLook) && !bare;
   const busyRef = useRef(false);
   const generation = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -286,7 +291,60 @@ function KeyEditor({ id, row: rowId, via = "settings", onSaved, bare = false, re
     focusAfter.current = "replace";
   };
 
-  const field = (
+  const input = (
+    <input
+      ref={inputRef}
+      data-key-input
+      type="password"
+      value={draft}
+      onChange={(event) => { setDraft(event.target.value); setNotice(null); setProblem(null); }}
+      onPaste={(event) => {
+        const pasted = cleanKey(event.clipboardData.getData("text"));
+        if (!pasted) return;
+        event.preventDefault();
+        setDraft(pasted);
+        setNotice(null);
+        setProblem(null);
+        if (looksLikeKey(pasted) && !looksLikeOtherKey(row, pasted)) void save(pasted);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          void save(draft);
+        } else if (event.key === "Escape" && replacing) {
+          event.preventDefault();
+          event.stopPropagation();
+          cancelReplace();
+        }
+      }}
+      disabled={busy === "saving"}
+      placeholder={replacing ? t("keys.row.newKey") : t("keys.row.pasteKey")}
+      aria-label={label}
+      autoComplete="off"
+      spellCheck={false}
+      className={KEY_FIELD}
+    />
+  );
+  // In Settings: the field, one line ending in Get a key, then Save on the right (§6.5 provider fold).
+  const settingsField = (
+    <div className="flex flex-col gap-2">
+      {input}
+      {target.href && (
+        <p className="text-[13px] leading-[18px] text-ink-secondary">
+          <a href={target.href} target="_blank" rel="noopener noreferrer" onClick={() => { if (via === "settings") target.settingsEvent?.("get_key"); }} className="text-accent-text hover:underline focus-visible:underline">
+            {t("keys.row.getKey")}
+          </a>
+        </p>
+      )}
+      <span className="flex items-center justify-end gap-2">
+        {replacing && <button type="button" className="settings-quiet cursor-pointer" onClick={cancelReplace}>{t("common.cancel")}</button>}
+        <button type="button" data-key-save className="ui-button ui-button-md rounded-full" disabled={!draft.trim() || busy !== null} onClick={() => void save(draft)}>
+          {t("common.save")}
+        </button>
+      </span>
+    </div>
+  );
+  const field = settings ? settingsField : (
     <div className="flex flex-wrap items-center gap-2">
       <div className="relative min-w-[min(100%,12rem)] flex-1">
         <input
@@ -332,7 +390,7 @@ function KeyEditor({ id, row: rowId, via = "settings", onSaved, bare = false, re
         </button>
       </div>
       <span className="flex shrink-0 items-center gap-2">
-        <button type="button" data-key-save className="ui-button ui-button-primary" disabled={!draft.trim() || busy !== null} onClick={() => void save(draft)}>
+        <button type="button" data-key-save className="ui-button" disabled={!draft.trim() || busy !== null} onClick={() => void save(draft)}>
           {t("common.save")}
         </button>
         {replacing && <button type="button" className="ui-button" onClick={cancelReplace}>{t("common.cancel")}</button>}
@@ -345,7 +403,7 @@ function KeyEditor({ id, row: rowId, via = "settings", onSaved, bare = false, re
       <MaskedKey saved={saved} label={label} />
       <span className="flex shrink-0 items-center gap-2">
         <button ref={replaceRef} type="button" data-key-replace className="ui-button" disabled={busy !== null} onClick={startReplace}>{t("keys.row.replace")}</button>
-        {!pointer && <button type="button" data-key-remove className="ui-button" disabled={busy !== null} onClick={() => void remove()}>{t("keys.row.remove")}</button>}
+        {!pointer && <button type="button" data-key-remove data-danger="" className="settings-quiet cursor-pointer" disabled={busy !== null} onClick={() => void remove()}>{t("keys.row.remove")}</button>}
       </span>
     </div>
   );
@@ -357,7 +415,7 @@ function KeyEditor({ id, row: rowId, via = "settings", onSaved, bare = false, re
   return (
     <>
       {bare ? status && <KeyStatusChip status={status} /> : <RowHeading entry={row} status={status} titleId={titleId} />}
-      <div className={cn("flex flex-col gap-2", !bare && "pl-8")}>
+      <div className={cn("flex flex-col gap-2", !bare && KEY_CONTENT)}>
         {qwenDestination && <div data-key-destination className="text-[12px] text-ink-secondary">
           {t("call.live.qwen.region")}: {t(qwenDestination.qwenRegion === "ap-southeast-1" ? "call.live.qwen.region.singapore" : "call.live.qwen.region.beijing")}
           {" · "}{t("call.live.qwen.workspace")}: {qwenDestination.qwenWorkspace || "—"}
@@ -367,7 +425,7 @@ function KeyEditor({ id, row: rowId, via = "settings", onSaved, bare = false, re
             <button type="button" data-key-own className="ui-button" onClick={() => { setOwnKey(true); focusAfter.current = "input"; }}>{t("keys.row.useOwn")}</button>
           </div>
         )}
-        {(notice || failure || other || warning || installCommand || note || verdict || (fieldShown && target.href) || (!fieldShown && saved.configured && target.test)) && (
+        {(notice || failure || other || warning || installCommand || note || verdict || (fieldShown && target.href && !settings) || (!fieldShown && saved.configured && target.test)) && (
           <div className="flex flex-col gap-1.5 text-[12px] leading-4">
             {notice && <p role="alert" className="text-danger">{notice}</p>}
             {failure && (
@@ -404,9 +462,9 @@ function KeyEditor({ id, row: rowId, via = "settings", onSaved, bare = false, re
             )}
             {note && <p className="text-ink-secondary">{note}</p>}
             {verdict && <p role="status" className="whitespace-pre-line text-ink-secondary">{verdict}</p>}
-            {(fieldShown && target.href) || (!fieldShown && saved.configured && target.test) ? (
+            {(fieldShown && target.href && !settings) || (!fieldShown && saved.configured && target.test) ? (
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                {fieldShown && target.href && (
+                {fieldShown && target.href && !settings && (
                   <a href={target.href} target="_blank" rel="noopener noreferrer" onClick={() => { if (via === "settings") target.settingsEvent?.("get_key"); }} className="inline-flex items-center gap-1 font-medium text-accent-text hover:underline">
                     {t("keys.row.getKey")}
                     <ExternalLink size={11} aria-hidden="true" />

@@ -9,6 +9,8 @@ const fixture = vi.hoisted(() => ({
 }));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
+  // The row reads whether it sits in the Settings window; these rows are the old look.
+  useContext: () => false,
   useState: (initial: unknown) => {
     const index = fixture.index++;
     if (!(index in fixture.values)) fixture.values[index] = initial;

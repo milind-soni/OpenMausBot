@@ -5,6 +5,7 @@ import { validateBotCwd } from "../bot-cwd.ts";
 import { fetchBotDirectory, matchDirectoryBots, type MatchedDirectoryBot } from "../bot-directory.ts";
 import { isBotPackage, packageSummary, parsePackageDocument, renderBotPackageMarkdown, type PackageDocument } from "../bot-package.ts";
 import { parseVisibility } from "../bot-visibility.ts";
+import { teamCreator } from "../new-bot-sharing.ts";
 import type { AppConfig } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
 import type { OrgLibrary } from "../org-library.ts";
@@ -267,7 +268,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
       const packageId = typeof body?.packageId === "string" && /^[a-f0-9-]{36}$/.test(body.packageId) ? body.packageId : null;
       if (!packageId) return json(res, 400, { error: "Choose a package from your organization's library." });
       if (!orgLibrary) return json(res, 404, { error: "This package is not in your organization's library.", code: "not_listed" });
-      const outcome = orgLibrary.add(packageId, packageImportDeps(await defaultSelection()));
+      const outcome = orgLibrary.add(packageId, { ...packageImportDeps(await defaultSelection()), ...teamCreator(auth) });
       if (!outcome.ok) return json(res, outcome.status, { error: outcome.error, code: outcome.code });
       if (outcome.value.alreadyAdded) return json(res, 200, outcome.value);
       const imported = outcome.value.result;
@@ -338,7 +339,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
       if (body?.format === "openmaus.backup") {
         if (importMode !== "add") return json(res, 400, { error: "Import backups alongside your existing bots; project mode is only for templates" });
         try {
-          const imported = importTeamBackup(store, routines!, body, await defaultSelection(), { visibility: importVisibility });
+          const imported = importTeamBackup(store, routines!, body, await defaultSelection(), { visibility: importVisibility, ...teamCreator(auth) });
           // A restore writes transcripts without store events: these frames carry the restored pages to other clients.
           const bots = imported.bots.map((bot) => publicBot(bot));
           const groups = imported.groups.map((group) => groupWithThread(group));
@@ -358,7 +359,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
       } catch (error) {
         return json(res, 400, { error: error instanceof Error ? error.message : "Invalid bot package" });
       }
-      const deps = packageImportDeps(await defaultSelection());
+      const deps = { ...packageImportDeps(await defaultSelection()), ...teamCreator(auth) };
       const options = {
         mode: importMode as "add" | "project",
         cwd: projectCwd,

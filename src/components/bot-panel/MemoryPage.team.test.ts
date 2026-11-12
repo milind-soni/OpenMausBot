@@ -19,6 +19,7 @@ const bot = { id: "scout", threadId: "t1", name: "Scout", title: "", description
   modelSelection: { instanceId: "x", model: "x" } } as unknown as Bot;
 const files: Record<string, string> = {};
 const calls: Array<[string, string]> = [];
+let teamLines: Array<{ id: string; text: string; at: number; yours?: true }> = [];
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 let host: HTMLDivElement;
 let root: Root;
@@ -26,11 +27,17 @@ let root: Root;
 beforeEach(() => {
   fixture.team = true;
   calls.length = 0;
+  teamLines = [];
   Object.assign(files, { "MEMORY.md": "# Memory\n", "memory/food.md": "- Ada's favourite fruit is durian\n" });
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, "http://x");
     const method = init?.method ?? "GET";
     calls.push([method, url.pathname]);
+    if (url.pathname.endsWith("/memory/team")) return reply(200, { entries: teamLines });
+    if (url.pathname.includes("/memory/team/") && method === "DELETE") {
+      teamLines = teamLines.filter((line) => !url.pathname.endsWith(`/${line.id}`));
+      return reply(200, { ok: true, removed: true });
+    }
     if (!url.pathname.includes("/memory/mine")) return reply(403, { error: "forbidden: this session lacks the admin scope" });
     const path = url.searchParams.get("path") ?? (init?.body ? JSON.parse(String(init.body)).path : "MEMORY.md");
     if (url.pathname.endsWith("/mine")) return reply(200, { topics: Object.keys(files).filter((file) => file.startsWith("memory/")).map((file) => ({ path: file })) });
@@ -56,7 +63,7 @@ it("on a Team Cloud shows what the bot remembers about the person, from their ow
   await settle();
   expect(host.textContent).toContain("Ada's favourite fruit is durian");
   expect(host.textContent).not.toContain("Couldn't read the memory file");
-  expect(calls.every(([, path]) => path.includes("/memory/mine"))).toBe(true);
+  expect(calls.every(([, path]) => path.includes("/memory/mine") || path.includes("/memory/team")), "never the bot's own notes file").toBe(true);
   const forget = host.querySelector<HTMLButtonElement>("[data-memory-note] button")!;
   await act(async () => forget.click());
   await settle();
@@ -68,4 +75,18 @@ it("counts those notes on the Library tab", async () => {
   await act(async () => root.render(createElement(LibraryTab, { bot, onOpen: () => {} })));
   await settle();
   expect(host.querySelector('[data-panel-page="memory"]')?.textContent).toContain("1 note");
+});
+
+it("lists the lines the person saved to the team's memory beside their own notes, and takes one out through the team route", async () => {
+  teamLines = [{ id: "l1", text: "We ship on 3 March (saved by Rui, 2026-11-11)", at: 1, yours: true }];
+  await act(async () => root.render(createElement(MemoryPage, { bot, derived: {} as never })));
+  await settle();
+  const row = host.querySelector<HTMLElement>('[data-team-memory-entry="l1"]')!;
+  expect(row.textContent).toContain("We ship on 3 March (saved by Rui, 2026-11-11)");
+  expect(row.textContent).toContain("In team memory · added by you");
+  await act(async () => row.querySelector<HTMLButtonElement>("button")!.click());
+  await settle();
+  expect(calls).toContainEqual(["DELETE", "/api/bots/scout/memory/team/l1"]);
+  expect(host.querySelector('[data-team-memory-entry="l1"]')).toBeNull();
+  expect(calls.some(([method, path]) => method !== "GET" && path.endsWith("/memory/file"))).toBe(false);
 });

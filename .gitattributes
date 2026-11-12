@@ -19,6 +19,10 @@ third_party/browser/** text eol=lf
 # on Windows fails both for a reason that has nothing to do with the evals.
 evals/live/judge/prompts/** text eol=lf
 evals/golden/**/*.json text eol=lf
+# The announcements file and its JSON Schema: scripts/check-announcements.mjs compares the committed schema with the one
+# it generates (LF), and installs read the file as main serves it. The comparison ignores line endings too; this keeps a
+# Windows checkout identical to what installs download.
+announcements/*.json text eol=lf
 # The bundled model catalog is compared byte for byte with what
 # scripts/build-model-catalog.mjs writes (LF), and its licence text with the
 # LICENSE files, in scripts/build-model-catalog.test.mjs and by --check.
@@ -50,3 +54,8 @@ relay/test/vectors/** text eol=lf
 # a CRLF checkout on Windows fails every match for a reason that has nothing to do with the edge.
 deploy/fly/Caddyfile* text eol=lf
 deploy/fly/*.caddy text eol=lf
+
+# Bundled skills ship to Linux Clouds as they are, and server/skill-publish-to-netlify.test.ts imports a skill's helper
+# through vitest: Vite's transform (vitest 4.1.11) fails with "Invalid or unexpected token" on a file that starts
+# with a shebang and has CRLF line endings, which is what a Windows checkout made of it.
+skills/** text eol=lf

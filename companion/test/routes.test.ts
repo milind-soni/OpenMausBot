@@ -41,6 +41,7 @@ describe("what the app may do", () => {
     ["GET", "/api/bots"],
     ["POST", "/api/bots"],
     ["PATCH", "/api/bots/bot_123"],
+    ["DELETE", "/api/bots/bot_123"],
     ["PUT", "/api/bots/order"],
     ["POST", "/api/sidebar-sections"],
     ["POST", "/api/bots/bot_123/messages"],
@@ -281,7 +282,7 @@ describe("what it may not", () => {
 
   it("allows a path only for the methods it was allowed for", () => {
     expect(allowed("GET", "/api/bots")).toBe(true);
-    expect(allowed("DELETE", "/api/bots/bot_123")).toBe(false);
+    expect(allowed("DELETE", "/api/bots")).toBe(false);
     expect(allowed("POST", "/api/threads/th_1/messages")).toBe(false);
     expect(allowed("GET", "/api/threads/th_1/messages/msg_2/file")).toBe(false);
     expect(allowed("POST", "/api/threads/th_1/messages/msg_2/file/extra")).toBe(false);
@@ -354,6 +355,15 @@ describe("what it may not", () => {
       ["POST", "/api/bots/bot_123/apps/../rpc"],
       ["GET", "/api/threads/th_1/messages/msg_2/app/../../../config"],
     ] as const) expect(allowed(method, path), `${method} ${path}`).toBe(false);
+  });
+
+  it("lets a paired phone delete one bot, and nothing beside it", () => {
+    expect(allowed("DELETE", "/api/bots/bot_123")).toBe(true);
+    expect(allowed("DELETE", "/api/bots")).toBe(false);
+    expect(allowed("DELETE", "/api/bots/bot_123/extra")).toBe(false);
+    expect(allowed("DELETE", "/api/bots/../config")).toBe(false);
+    expect(allowed("GET", "/api/bots/bot_123")).toBe(false);
+    expect(ask("DELETE", "/api/bots/bot_123", false)?.status).toBe(401);
   });
 
   it("is not fooled by a prefix", () => {

@@ -495,7 +495,7 @@ describe("the keys page", () => {
   it("lands the live-call notice's button on the OpenAI row in Voice and calls, focused and lit", async () => {
     render(() => createElement(LiveKeyNeeded, { key: "notice" }), () => createElement(KeysPage, { key: "page" }));
     expect(expanded("voice")).toBe("false");
-    const button = [...host.querySelectorAll("button")].find((candidate) => candidate.textContent === "Open API keys")!;
+    const button = [...host.querySelectorAll("button")].find((candidate) => candidate.textContent === "Open AI › Other services")!;
     flushSync(() => button.click());
     expect(fx.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "connections" });
     const live = () => row("liveCalls")!.querySelector<HTMLInputElement>("[data-key-input]")!;

@@ -7,6 +7,7 @@ import { useSyncExternalStore } from "react";
 import type { RuntimeEvent } from "../../shared/runtime-events";
 import { isCancelledTranscriptRow } from "../../shared/client-cancel";
 import type { Message } from "@/state/store";
+import { stopLiveReply } from "@/state/live-reply";
 
 export const STOP_REPEAT_MS = 1_000;
 
@@ -66,6 +67,7 @@ export function sendStop(api: Api, action: StopAction, showError: (error: unknow
   const last = lastStops.get(key);
   if (last !== undefined && now - last < STOP_REPEAT_MS) return;
   lastStops.set(key, now);
+  if (action.threadId) stopLiveReply(action.threadId);
   const turnId = action.threadId ? liveTurns.get(action.threadId) : undefined;
   api(`/api/bots/${action.botId}/interrupt`, {
     method: "POST",

@@ -15,6 +15,7 @@ MausBot is designed around a local owner, explicit capabilities, and narrow proc
 - Local computer control is a separate opt-in and per-bot selection.
 - Paired phones use a default-deny API allowlist and per-device bearer tokens.
 - Cloud and VPS backends are validated before reuse.
+- The app downloads the project's public announcements file from GitHub, at most hourly and with nothing of yours in it, and may show one of its cards (product news, a tip, a sponsor's offer) once per person. The cards are plain text with fixed button actions, never pages or code. `OMB_DISABLE_ANNOUNCEMENTS=1` turns it off on a server.
 - Usage analytics are optional. In the desktop app, the switch in Settings turns them off, and a server's page its window shows starts with them off too (once that server runs the same version); in a browser, each server's page has its own switch. They send counts and fixed words, never keys, names, addresses or content; [Usage analytics](/docs/security/analytics) lists every event.
 
 ## Your responsibility

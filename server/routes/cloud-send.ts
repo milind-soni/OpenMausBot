@@ -21,7 +21,7 @@ import { cloudSendSummary, partHash, type CloudSendSources } from "../cloud-send
 import { cloudSendChatsRoute, type CloudSendChatsDeps } from "../cloud-send-chats.ts";
 import { loginFingerprints, VERIFY_NONCE } from "../cloud-send-verify.ts";
 import type { AppConfig } from "../config.ts";
-import type { VaultStore } from "../vault-store.ts";
+import { TEAM_READER, type VaultStore } from "../vault-store.ts";
 import type { MoveAutomations } from "../move-freeze.ts";
 import { threadHeads } from "../message-db.ts";
 import type { LineLanguage } from "../server-lines.ts";
@@ -69,7 +69,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     skills: deps.skills,
     picture: (avatarUrl) => botAvatarUrlSchema.safeParse(avatarUrl).success ? readAttachment(avatarUrl.slice("/api/attachments/".length))?.bytes ?? null : null,
     logins: () => deps.logins.changes(),
-    secrets: () => deps.logins.listSecrets(),
+    secrets: () => deps.logins.listSecrets(TEAM_READER),
     onePassword: () => {
       const connectedAt = deps.logins.onePasswordConnectedAt();
       return connectedAt === null ? null : { connectedAt, grants: deps.logins.onePasswordGrants() };

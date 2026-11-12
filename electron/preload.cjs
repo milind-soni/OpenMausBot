@@ -74,7 +74,7 @@ function railKeepsItsSize() {
 if (typeof window !== "undefined") {
   for (const type of ["resize", "DOMContentLoaded"]) window.addEventListener(type, () => { leaveRailRoom(); railKeepsItsSize(); });
 }
-const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering"]);
+const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering", "appUpdate"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
 const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
 function updaterOffered() {
@@ -209,6 +209,10 @@ const bridge = {
       ipcRenderer.on("rail:state", handler);
       return () => ipcRenderer.removeListener("rail:state", handler);
     },
+    // "Switch to This computer" on a Cloud's settings: only from the person's click, and only a settings page's name.
+    openComputer: (page) => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("rail:open-computer", typeof page === "string" && /^[a-z-]{1,32}$/.test(page) ? page : "")
+      : Promise.reject(new Error("Choose Switch to This computer.")),
     ...(isLocalPage ? {
       expand: (on) => ipcRenderer.invoke("rail:expand", on === true),
       onSkin: (cb) => {
@@ -426,6 +430,13 @@ const bridge = {
   credentialStore: {
     unreadable: () => ipcRenderer.invoke("credential-store:unreadable"),
     reset: () => ipcRenderer.invoke("credential-store:reset"),
+  },
+
+  // A server's page from the Server menu, once that server is newer than this app, asks for this app's own update from
+  // the person's click. It learns only what was done; main asks in a dialog of its own before anything restarts.
+  appUpdate: {
+    request: () => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("update:for-server-page") : Promise.reject(new Error("Choose Update app.")),
   },
 
   updater: {

@@ -40,7 +40,7 @@ it("mounts the full-window backdrop outside the sidebar's glass stacking context
   expect(backdrop().parentElement).toBe(document.body);
   expect(backdrop().closest("[data-glass-bar]")).toBeNull();
   expect(host.querySelector("[role=dialog]")).toBeNull();
-  expect(dialog()!.querySelectorAll("svg")).toHaveLength(2);
+  expect(dialog()!.querySelectorAll("svg")).toHaveLength(0);
 });
 
 it("also escapes a transformed sidebar's fixed-position containing block", () => {

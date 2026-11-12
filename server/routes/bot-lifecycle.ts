@@ -1,4 +1,5 @@
 import type { ProviderRegistry } from "../harness/registry.ts";
+import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -14,6 +15,9 @@ export interface BotLifecycleRouteDeps {
   runningTurnInstance(bot: BotRecord | null | undefined, threadId: string): ReturnType<ProviderRegistry["get"]>;
   closeOpenApprovals(threadId: string): void;
   deleteBotWithLifecycle(botId: string): Promise<{ status: number; body: unknown }>;
+  /** Security: the route is client-scoped, so this is the gate. Why this session may not delete the bot; null when it
+   * may. */
+  deleteRefusal(auth: RequestAuth, botId: string): string | null;
 }
 
 export function createBotLifecycleRoutes(deps: BotLifecycleRouteDeps): RouteHandler {
@@ -21,7 +25,7 @@ export function createBotLifecycleRoutes(deps: BotLifecycleRouteDeps): RouteHand
     store, interruptAllDirectThreads, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread, activeGroupTurnForBot,
     cancelGroupTurnOperations, runningTurnInstance, closeOpenApprovals, deleteBotWithLifecycle,
   } = deps;
-  return async ({ req, res, path, method, json }) => {
+  return async ({ req, res, path, method, auth, json }) => {
     let m: RegExpMatchArray | null = null;
     const routines = deps.routines();
     if (method === "POST" && path === "/api/local-computer/interrupt") {
@@ -54,6 +58,8 @@ export function createBotLifecycleRoutes(deps: BotLifecycleRouteDeps): RouteHand
     }
     m = path.match(/^\/api\/bots\/([\w-]+)$/);
     if (m && method === "DELETE") {
+      const refused = deps.deleteRefusal(auth, m[1]!);
+      if (refused) return json(res, 403, { error: refused });
       const result = await deleteBotWithLifecycle(m[1]);
       return json(res, result.status, result.body);
     }

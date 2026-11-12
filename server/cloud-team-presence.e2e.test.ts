@@ -53,10 +53,10 @@ beforeAll(async () => {
   owner = (await team.pair(OWNER)).token!;
   admin = (await team.pair(ADMIN)).token!;
   bob = (await team.pair(BOB)).token!;
-  const made = await team.as(owner, "POST", "/api/bots", { name: "Scout" });
+  const made = await team.as(owner, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
   expect(made.status, JSON.stringify(made.body)).toBe(201);
   scout = made.body.bot;
-  const other = await team.as(owner, "POST", "/api/bots", { name: "Payroll" });
+  const other = await team.as(owner, "POST", "/api/bots", { name: "Payroll", visibility: "everyone" });
   expect(other.status, JSON.stringify(other.body)).toBe(201);
   payroll = other.body.bot;
   expect((await team.as(owner, "PUT", `/api/bots/${payroll.id}/access`, { everyone: "none", people: {} })).status).toBe(200);

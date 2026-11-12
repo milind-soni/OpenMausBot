@@ -42,7 +42,7 @@ if (!teamFixture) console.info("skipping the team own-chat e2e: the cloud fixtur
       ada: { email: "ada@acme.test", role: "member" }, cleo: { email: "cleo@acme.test", role: "member" } } as Record<string, Member>)) {
       tokens[who] = (await team.pair(member)).token!;
     }
-    const created = await team.as(tokens.olive!, "POST", "/api/bots", { name: "Scout" });
+    const created = await team.as(tokens.olive!, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     scout = created.body.bot.id; main = created.body.bot.mainThreadId;
   }, hostTimeout(180_000));

@@ -1,5 +1,5 @@
 import type { InstanceInfo, ModelSelection } from "@/state/store";
-import { typedOpenCodeModel, typedOpenCodeModelId } from "../../shared/opencode-model-id";
+import { openCodeRunsTypedModel, typedOpenCodeModel, typedOpenCodeModelId } from "../../shared/opencode-model-id";
 import { t } from "./i18n";
 
 type ModelOption = InstanceInfo["models"]["options"][number];
@@ -37,7 +37,8 @@ export function takesTypedModels(instance: InstanceInfo | undefined): boolean {
   return instance?.driverKind === "opencodeGo";
 }
 
-/** OpenCode runs a `provider/model` id its catalog lacks: offer the one in the search box, and keep the selected one listed. */
+/** OpenCode runs a `provider/model` id its catalog lacks under a provider it lists: offer the one in the search box, and
+ * keep the selected one listed. */
 export function withTypedModels(instances: readonly InstanceInfo[], selection: ModelSelection, query: string): InstanceInfo[] {
   return instances.map((instance) => {
     if (!takesTypedModels(instance)) return instance;
@@ -45,7 +46,8 @@ export function withTypedModels(instances: readonly InstanceInfo[], selection: M
     const selected = instance.instanceId === selection.instanceId && typedOpenCodeModel(selection.model) ? selection.model : null;
     const searched = typedOpenCodeModelId(query);
     const typed = [selected, searched && !listed(typedOpenCodeModel(searched)!) ? searched : null]
-      .filter((id, index, all): id is string => id !== null && !listed(id) && all.indexOf(id) === index);
+      .filter((id, index, all): id is string => id !== null && !listed(id) && all.indexOf(id) === index
+        && openCodeRunsTypedModel(typedOpenCodeModel(id)!, instance.models.options));
     return typed.length ? { ...instance, models: { ...instance.models,
       options: [...instance.models.options, ...typed.map((id) => ({ id, label: t("model.typedByHand", { id: typedOpenCodeModel(id)! }) }))] } } : instance;
   });

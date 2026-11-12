@@ -2,6 +2,7 @@ import { brokerRemoteMcp, type BrokerTurn } from "./bot-box/broker-mcp.ts";
 import type { AppConfig } from "./config.ts";
 import type { McpServerSpec, SendTurnInput } from "./contracts.ts";
 import { parseStoredMcpServer } from "./mcp-registry.ts";
+import type { McpServerApp } from "./mcp-server-app.ts";
 
 export function customMcpResultBudgets(cfg: AppConfig, names: readonly string[]): Record<string, number> {
   const out: Record<string, number> = {};
@@ -21,9 +22,11 @@ export function attachCustomMcp(
   cfg: AppConfig,
   /** The turn, so a URL server's secret headers stay with the credential broker on a boxed Cloud home (server/bot-box). */
   turn?: BrokerTurn,
+  /** The connected app a URL server's sign-in refusal points to instead, when this turn can use it. */
+  appFor?: (name: string, url: string) => McpServerApp | null,
 ): void {
   if (!Object.keys(custom).length) return;
-  integrations.custom = turn ? brokerRemoteMcp(custom, turn) : custom;
+  integrations.custom = turn ? brokerRemoteMcp(custom, turn, undefined, appFor) : custom;
   const budgets = customMcpResultBudgets(cfg, Object.keys(custom));
   if (Object.keys(budgets).length) integrations.customResultBudgets = budgets;
 }
