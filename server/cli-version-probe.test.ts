@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { cliToLaunch, cliVersionProbe } from "./cli-version-probe.ts";
+import { findCliCandidates } from "./env-path.ts";
 import { cliVersionReader, type execCli } from "./procs.ts";
 
 afterEach(() => vi.useRealTimers());
@@ -117,4 +118,19 @@ it("launches the checked copy by its path on Windows, where spawn resolves the a
   expect(cliToLaunch("claude", checked, "win32")).toBe(checked);
   expect(cliToLaunch("claude", undefined, "win32")).toBe("claude"); // nothing found on the turn's PATH: unchanged
   for (const platform of ["darwin", "linux"] as const) expect(cliToLaunch("claude", "/opt/homebrew/bin/claude", platform)).toBe("claude"); // POSIX spawn already uses the turn's PATH
+});
+
+it("checks the version of the copy the caller's PATH finds, by its path on Windows, so a PATH change cannot swap the copy mid-check", async () => {
+  const root = mkdtempSync(join(tmpdir(), "omb-cli-probe-win-"));
+  try {
+    for (const file of ["claude", "claude.cmd"]) writeFileSync(join(root, file), "");
+    const checked = findCliCandidates("claude", root)[0];
+    const run = vi.fn<typeof execCli>((_cli, _args, _options, callback) => callback(null, "2.1.321"));
+    expect(await cliVersionProbe("claude", run, "win32")({ PATH: root })).toEqual({ version: "2.1.321" });
+    expect(run.mock.calls[0]?.[0]).toBe(checked); // execCli on Windows resolves a bare name with the app's PATH
+    expect(await cliVersionProbe("claude", run, "linux")({ PATH: root })).toEqual({ version: "2.1.321" });
+    expect(run.mock.calls[1]?.[0]).toBe("claude"); // POSIX lookups already use the caller's PATH
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -817,7 +817,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const read = {
         version,
         done: new Promise<string | null>((resolve) => {
-          execCli(config.cli, ["--help"], { timeout: 8000, env }, (err, stdout) => resolve(err ? null : stdout));
+          execCli(cliToLaunch(config.cli, findCliCandidates(config.cli, env.PATH ?? "")[0]), ["--help"], { timeout: 8000, env }, (err, stdout) => resolve(err ? null : stdout)); // on Windows the copy this env finds, not the app PATH's
         }).then((help) => { // a read another copy's read or a failed re-probe replaced since must not bring back its flags
           if (helpRead === read) [cliHasAutocompact, cliHelpVersion, helpRead] = [help === null ? null : !autocompactRefusedBy.has(version) && /^\s*--autocompact\b/m.test(help), version, null];
         }),

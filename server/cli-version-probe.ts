@@ -8,7 +8,7 @@ export function cliToLaunch(cli: string, checked: string | undefined, platform: 
 
 // Shares version checks and retries empty responses. A failed check falls back to the last version only while PATH
 // still finds the same copy of the CLI, so a newly found copy is never reported with another copy's version.
-export function cliVersionProbe(cli: string, run: typeof execCli = execCli) {
+export function cliVersionProbe(cli: string, run: typeof execCli = execCli, platform: NodeJS.Platform = process.platform) {
   let read = cliVersionReader(cli), readAt: string | undefined;
   let pending: { path: string | undefined; probe: Promise<ReturnType<typeof read>> } | undefined; // shared only by callers with the same PATH
   return (env: NodeJS.ProcessEnv): Promise<ReturnType<typeof read>> => {
@@ -18,7 +18,7 @@ export function cliVersionProbe(cli: string, run: typeof execCli = execCli) {
     const reader = read;
     const deadline = Date.now() + CLI_VERSION_TIMEOUT_MS;
     const attempt = () => new Promise<{ error: Error | null; stdout: string }>((resolve) => {
-      run(cli, ["--version"], { timeout: Math.max(1, deadline - Date.now()), env }, (error, stdout) => resolve({ error, stdout }));
+      run(cliToLaunch(cli, at, platform), ["--version"], { timeout: Math.max(1, deadline - Date.now()), env }, (error, stdout) => resolve({ error, stdout }));
     });
     const entry: NonNullable<typeof pending> = { path: env.PATH, probe: (async () => {
       let result = await attempt();
