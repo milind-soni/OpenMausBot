@@ -32,6 +32,7 @@ import type { ModelCatalog } from "../../contracts.ts";
 import { harnessHome } from "../../env-path.ts";
 import { resolveCli, spawnCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { acpVariantOption } from "./config-options.ts";
 
 export const DEEPSEEK_MODELS: ModelCatalog = {
   default: "deepseek-official/deepseek-v4-flash",
@@ -162,6 +163,9 @@ export function parseDeepSeekCatalog(sessionResult: unknown): ModelCatalog {
   collect(option?.options, undefined);
   if (!out.length) throw new Error("dsh advertised no models");
   const current = typeof option?.currentValue === "string" ? deepseekPickerId(option.currentValue) : null;
+  const selected = out.find((model) => model.id === current);
+  const variants = acpVariantOption(sessionResult)?.options;
+  if (selected && variants?.length) selected.variants = variants;
   return {
     default: current && out.some((row) => row.id === current) ? current : out[0]!.id,
     options: out,
@@ -180,9 +184,12 @@ function catalogTimeoutMs(env: Record<string, string | undefined>): number {
   return Number.isInteger(parsed) && parsed > 0 && parsed <= 2_147_483_647 ? parsed : DEEPSEEK_MODELS_DEFAULT_TIMEOUT_MS;
 }
 
+const VARIANT_DISCOVERY_MODEL_LIMIT = 128;
+
 /** Ask the installed dsh what it offers: initialize, session/new in `cwd`,
- * read the catalog, session/close. Rejects on any failure so the core keeps
- * the last usable catalog; never resolves to an empty or guessed list. */
+ * read each model's thinking choices (a model dsh won't switch to keeps none), session/close.
+ * Rejects on any other failure so the core keeps the last usable catalog; never resolves to an
+ * empty or guessed list. */
 export function fetchDeepSeekCatalog(
   cli: string,
   env: Record<string, string | undefined>,
@@ -243,6 +250,18 @@ export function fetchDeepSeekCatalog(
     let sessionReqId = 0;
     let closeId = 0;
     let catalog: ModelCatalog | null = null;
+    let sessionId: string | null = null;
+    let selectId = 0;
+    let selectedModel: ModelCatalog["options"][number] | undefined;
+    const pendingModels: ModelCatalog["options"] = [];
+    const nextModel = () => {
+      selectedModel = pendingModels.shift();
+      if (selectedModel) {
+        selectId = send("session/set_config_option", { sessionId, configId: "model", value: deepseekWireValue(selectedModel.id) });
+      } else {
+        closeId = send("session/close", { sessionId });
+      }
+    };
     child.stdout?.on("data", (chunk) => {
       buf += String(chunk);
       let nl: number;
@@ -259,7 +278,7 @@ export function fetchDeepSeekCatalog(
           if (!msg.result) return finish({ error: new Error(`dsh rejected initialize: ${JSON.stringify(msg.error ?? msg)}`) });
           sessionReqId = send("session/new", { cwd, mcpServers: [] });
         } else if (sessionReqId && msg?.id === sessionReqId) {
-          const sessionId = typeof msg.result?.sessionId === "string" ? msg.result.sessionId : null;
+          sessionId = typeof msg.result?.sessionId === "string" ? msg.result.sessionId : null;
           try {
             catalog = parseDeepSeekCatalog(msg.result);
           } catch (error) {
@@ -268,8 +287,17 @@ export function fetchDeepSeekCatalog(
             return finish({ error: error instanceof Error ? error : new Error(String(error)) });
           }
           if (!sessionId) return finish({ catalog });
-          // Leave no half-open session behind in dsh's persisted list.
-          closeId = send("session/close", { sessionId });
+          if (catalog.options.length <= VARIANT_DISCOVERY_MODEL_LIMIT) {
+            const current = offeredWireValues(msg.result, "model").current;
+            pendingModels.push(...catalog.options.filter((model) => deepseekWireValue(model.id) !== current));
+          }
+          nextModel();
+        } else if (selectId && msg?.id === selectId && selectedModel) {
+          if (offeredWireValues(msg.result, "model").current === deepseekWireValue(selectedModel.id)) {
+            const variants = acpVariantOption(msg.result)?.options;
+            if (variants?.length) selectedModel.variants = variants;
+          }
+          nextModel();
         } else if (closeId && msg?.id === closeId) {
           finish({ catalog: catalog! });
         }
