@@ -13,6 +13,7 @@ import { api, ApiError, useStore, type Bot } from "@/state/store";
 import { releaseComputerPanelFocus, takeComputerPanelBrowserView, useComputerPanelEntry } from "@/lib/computer-panel-focus";
 import { RoutineEditor } from "./RoutinesPage";
 import { BrowserPanel, type BrowserSignIn } from "./BrowserPanel";
+import { ComputerWatchGallery } from "./ComputerWatchGallery";
 import { SignInBanner } from "./SignInRequestCard";
 import { productName } from "@/lib/brand";
 
@@ -260,6 +261,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
         </div>
       ) : (
       <div className="flex flex-1 flex-col items-center gap-4 overflow-y-auto px-6 py-5 text-center">
+        <div className="w-full text-left"><ComputerWatchGallery bot={bot} /></div>
         {help && help.place !== "browser" && <div className="-mt-3 w-full"><SignInBanner help={help} askerName={asker} onError={setError} /></div>}
         <button
           type="button"
