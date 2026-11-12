@@ -576,6 +576,14 @@ describe("Settings → Computers on an OMB Cloud home", () => {
     expect(titles).not.toContain("Private desktops");
     expect(titles).not.toContain("Setup");
   });
+
+  it("shows only the private desktop cards inside the private desktop setup's Details", () => {
+    const markup = renderToStaticMarkup(createElement(LocalComputerSection, { privateOnly: true }));
+    const titles = [...markup.matchAll(/<div class="text-\[16px\] font-semibold text-ink[^"]*">([^<]+)<\/div>/g)].map((match) => match[1]);
+    expect(titles).toEqual(expect.arrayContaining(["Private desktops", "Setup"]));
+    expect(titles).not.toContain("Cloud desktops");
+    expect(markup).not.toContain("Self-hosted VPS computers");
+  });
 });
 
 describe("Local VM idle timeout setting", () => {
