@@ -54,7 +54,9 @@ function readNativeSkill(root: string, name: string, modelOnly = false): NativeS
 }
 
 /** Each skill in `roots`, the first of a name winning. */
-function skillsIn(roots: readonly string[], options: { modelOnly?: boolean; outside?: string } = {}, seen = new Set<string>()): NativeSkill[] {
+/** `outside`: no skill whose folder, links followed, is in there. `within`: only skills whose folder, links followed, is in
+ * there. */
+function skillsIn(roots: readonly string[], options: { modelOnly?: boolean; outside?: string; within?: string } = {}, seen = new Set<string>()): NativeSkill[] {
   return roots.flatMap((root) => {
     let names: string[];
     try {
@@ -64,7 +66,9 @@ function skillsIn(roots: readonly string[], options: { modelOnly?: boolean; outs
     }
     return names.flatMap((name) => {
       if (seen.has(name)) return [];
-      if (options.outside && isInside(resolveThroughLinks(join(root, name)), options.outside)) return [];
+      const real = options.outside || options.within ? resolveThroughLinks(join(root, name)) : "";
+      if (options.outside && isInside(real, options.outside)) return [];
+      if (options.within && !isInside(real, options.within)) return [];
       const skill = readNativeSkill(root, name, options.modelOnly);
       if (!skill) return [];
       seen.add(name);
@@ -93,14 +97,17 @@ const PROJECT_SKILL_DIRS = [".agents/skills", "agents/skills", ".claude/skills"]
 /** The skills a project ships for any agent, in the folders the engine does not load by itself, from `cwd` up to the
  * nearest git root, or in `cwd` alone outside a repository, so a folder above the project never counts as part of it;
  * the nearer folder wins a name. None from inside `dataDir`, links followed: those folders are the app's own, and hold
- * links to the bot's own skills. */
+ * links to the bot's own skills. None through a link that leaves the project either. */
 export function projectSkills(engine: SkillTurnEngine, options: { cwd: string; dataDir: string; home?: string }): NativeSkill[] {
   const dataDir = resolveThroughLinks(options.dataDir);
   if (isInside(resolveThroughLinks(options.cwd), dataDir)) return [];
   const dirs = PROJECT_SKILL_DIRS.filter((dir) => dir !== ENGINE_PROJECT_DIRS[engine.driverKind]);
   const levels = projectLevels(options.cwd, options.home ?? homedir());
   const inRepo = levels.some((level) => entryExistsWithoutFollowing(join(level, ".git")));
-  return skillsIn((inRepo ? levels : levels.slice(0, 1)).flatMap((level) => dirs.map((dir) => join(level, dir))), { modelOnly: true, outside: dataDir });
+  const used = inRepo ? levels : levels.slice(0, 1);
+  const top = used.at(-1);
+  if (!top) return [];
+  return skillsIn(used.flatMap((level) => dirs.map((dir) => join(level, dir))), { modelOnly: true, outside: dataDir, within: resolveThroughLinks(top) });
 }
 
 /** After the skills from this computer, in a turn's skills index. */
@@ -132,9 +139,9 @@ export function nativeSkillListing(skill: NativeSkill, enabled = true): SkillLis
   };
 }
 
-/** Shown with the bot's skills whether or not they are on, so the owner sees what a project would bring. */
-export function projectSkillListing(skill: NativeSkill, enabled: boolean): SkillListing & { origin: "project" } {
-  return { ...nativeSkillListing(skill, enabled), origin: "project" };
+/** Shown with the bot's skills; always on while the bot works in that project, and changed only there. */
+export function projectSkillListing(skill: NativeSkill): SkillListing & { origin: "project" } {
+  return { ...nativeSkillListing(skill), origin: "project" };
 }
 
 export function readNativeSkillFile(skill: NativeSkill): string | null {

@@ -5,7 +5,7 @@ import { FileText, FolderOpen, Maximize2, Minimize2, Plus, Server } from "lucide
 import { appSwitchPatch } from "@/lib/bot-app-access";
 import { cn } from "@/lib/cn";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
-import { projectSkillsEnabled, skillsLibraryEnabled } from "@/lib/feature-flags";
+import { skillsLibraryEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import { mcpServersForBot, mcpServersOfBot, mcpSwitch, useMcpServers } from "@/lib/mcp-servers";
 import { deleteMemoryDoc, MEMORY_INDEX, saveMemoryDoc, type MemoryDoc } from "@/lib/memory";
@@ -14,7 +14,7 @@ import type { Routine } from "@/lib/routines";
 import type { SkillImportSummary } from "../../../shared/skill-import";
 import { shortPath } from "@/lib/short-path";
 import { skillImportLines } from "@/lib/skill-import";
-import { api as appApi, useStore, type Bot, type ConfigStatus } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { connectAppFromBot } from "../AppGrantPrompt";
 import { ServiceIcon } from "../ServiceIcon";
@@ -417,25 +417,8 @@ export function SkillsPage({ bot }: PageContext) {
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState<string[]>([]);
   const libraryOn = skillsLibraryEnabled(state.config);
-  const projectOn = projectSkillsEnabled(state.config);
-  const [savingProject, setSavingProject] = useState(false);
   const own = skills.skills.filter((skill) => skill.origin !== "project");
   const project = skills.skills.filter((skill) => skill.origin === "project");
-
-  const toggleProjectSkills = async () => {
-    if (savingProject) return;
-    setSavingProject(true);
-    skills.setError("");
-    try {
-      const config = await appApi<ConfigStatus>("/api/config", { method: "PATCH", body: JSON.stringify({ features: { projectSkills: !projectOn } }) });
-      dispatch({ type: "configStatus", config });
-      await skills.refresh();
-    } catch (cause) {
-      skills.setError(errorText(cause, t("botPanel.skills.projectFailed")));
-    } finally {
-      setSavingProject(false);
-    }
-  };
 
   const remove = async (skill: ManagedSkill) => {
     if (skills.working) return;
@@ -500,17 +483,8 @@ export function SkillsPage({ bot }: PageContext) {
         ))}
         {skills.error && !skills.reviewing && <NoteRow tone="warn">{skills.error}</NoteRow>}
       </Card>
-      {(project.length > 0 || projectOn) && (
+      {project.length > 0 && (
         <Card label={t("botPanel.skills.project")} anchor="project-skills">
-          <SwitchRow
-            data-panel-row="project-skills"
-            title={t("botPanel.skills.projectUse")}
-            hint={t("botPanel.skills.projectHint")}
-            color={bot.color}
-            checked={projectOn}
-            disabled={savingProject}
-            onChange={() => void toggleProjectSkills()}
-          />
           {project.map((skill) => (
             <ItemRow key={skill.name} data-panel-row={`project-skill:${skill.name}`} title={skill.name} hint={skill.description || skill.source} />
           ))}

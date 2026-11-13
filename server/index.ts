@@ -432,7 +432,7 @@ import { CLOUD_COMPUTER_DID_NOT_START, CLOUD_COMPUTER_START_BUDGET_MS, CLOUD_COM
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { LocalVmSeatPool, type LocalVmSeatHolder } from "./local-vm-seat-pool.ts";
 import { createLoopGuard, loopGuardSettings } from "./host/loop-guard.ts"; import { createPersonFirst } from "./host/person-first.ts"; import { createRunOwners, runActorOf } from "./host/run-owner.ts";
-import { claudeUserSkillsEnabled, projectSkillsEnabled, settingsTurnFields } from "./turn-settings.ts";
+import { claudeUserSkillsEnabled, settingsTurnFields } from "./turn-settings.ts";
 import { addHeldSecretScrubber, redactSecretsInText, scrubHeldSecrets } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { vpsConfigForBot, vpsSshAliasForBot } from "./vps-hosts.ts";
@@ -11782,7 +11782,7 @@ function configStatus() {
       browser: builtInBrowserEnabled(cfg),
       sharedComputers: sharedComputersEnabled(cfg),
       claudeUserMcp: claudeUserMcpEnabled(cfg),
-      claudeUserSkills: claudeUserSkillsEnabled(cfg), projectSkills: projectSkillsEnabled(cfg),
+      claudeUserSkills: claudeUserSkillsEnabled(cfg),
       autoRecall: autoRecallEnabled(cfg),
       roomMemoryCapture: roomMemoryCaptureEnabled(cfg),
       parallelRoomJobs: parallelRoomJobsEnabled(cfg),

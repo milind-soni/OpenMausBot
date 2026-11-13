@@ -29,7 +29,7 @@ import {
 } from "../skill-share.ts";
 import { enabledSkillFiles, listSkills, readSkillFile, resolveBotSkills, skillsSystemPrompt, type SkillListing } from "../skills.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
-import { claudeUserSkillsEnabled, projectSkillsEnabled } from "../turn-settings.ts";
+import { claudeUserSkillsEnabled } from "../turn-settings.ts";
 import { typedWords } from "../typed-sends.ts";
 import { supportsWorkspaceFiles, TASK_WORKSPACES_DIR } from "../workspace.ts";
 
@@ -98,7 +98,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     const project = projectFor(bot, threadId).filter((skill) => !names.has(skill.name));
     return [
       ...listed, ...natives.map((skill) => nativeSkillListing(skill, isNativeSkillEnabled(bot.id, skill.name))),
-      ...project.map((skill) => projectSkillListing(skill, projectSkillsEnabled(cfg))),
+      ...project.map(projectSkillListing),
     ];
   };
   const readBotSkillFile = (bot: BotRecord, name: string): string | null => {
@@ -177,10 +177,9 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     const folder = cwd === undefined ? threadFolder(bot, threadId) : cwd;
     return folder ? projectSkills(engine, { cwd: folder, dataDir: DATA_DIR }) : [];
   };
-  /** The project's skills a turn's prompt and `/` menu use: none until the owner turns them on, and none of a name the
-   * bot already has or its engine loads by itself. */
+  /** The project's skills a turn's prompt and `/` menu use, found by themselves as Claude Code finds `.claude/skills`: none
+   * of a name the bot already has or its engine loads by itself. */
   const projectInUse = (bot: BotRecord, threadId: string, cwd: string | null | undefined, instance: TurnInstance | undefined, assigned: readonly string[] | undefined): NativeSkill[] => {
-    if (!projectSkillsEnabled(cfg)) return [];
     const folder = cwd === undefined ? threadFolder(bot, threadId) : cwd;
     const names = new Set([
       ...resolveBotSkills(bot.id, assigned).map((skill) => skill.name), ...Object.keys(readImportedSkills()),
