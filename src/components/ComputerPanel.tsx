@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CalendarClock,
   Loader2,
@@ -12,6 +12,21 @@ import { cn } from "@/lib/cn";
 
 export function ComputerPanel({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
+  const triggerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    triggerRef.current = (document.activeElement as HTMLElement) ?? null;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) {
+        e.preventDefault();
+        dispatch({ type: "toggleComputer", open: false });
+        triggerRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [dispatch]);
+
   const localShort = "this computer";
   const localLong = "This computer";
   const phase = bot.computer === "off" ? "off" : window.gbs ? "local" : "local-unavailable";
@@ -59,8 +74,12 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         </button>
         <span className="text-[15px] font-semibold text-ink">Computer</span>
         <button
-          onClick={() => dispatch({ type: "toggleComputer", open: false })}
+          onClick={() => {
+            dispatch({ type: "toggleComputer", open: false });
+            triggerRef.current?.focus();
+          }}
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          aria-label="Close computer panel"
         >
           <X size={18} />
         </button>

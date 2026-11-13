@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { BackupSettings } from "./BackupSettings";
 import { ChevronLeft, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
@@ -39,13 +40,32 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   ) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
   const activeState = stateForBot(bot);
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
+  const triggerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    triggerRef.current = (document.activeElement as HTMLElement) ?? null;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) {
+        e.preventDefault();
+        dispatch({ type: "toggleSettings", open: false });
+        triggerRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [dispatch]);
 
   return (
     <aside className="animate-panel-in relative z-30 flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
         <button
-          onClick={() => dispatch({ type: "toggleSettings", open: false })}
+          onClick={() => {
+            dispatch({ type: "toggleSettings", open: false });
+            triggerRef.current?.focus();
+          }}
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
           aria-label="Back to chat"
         >
@@ -53,7 +73,10 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         </button>
         <span className="text-[15px] font-semibold text-ink">Settings</span>
         <button
-          onClick={() => dispatch({ type: "toggleSettings", open: false })}
+          onClick={() => {
+            dispatch({ type: "toggleSettings", open: false });
+            triggerRef.current?.focus();
+          }}
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
           aria-label="Close settings"
         >

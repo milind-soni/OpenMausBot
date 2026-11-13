@@ -372,7 +372,7 @@ export function Composer({
           <div
             role="listbox"
             aria-label="Reference a task"
-            className="absolute bottom-full left-2 z-20 mb-2 w-72 overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg"
+            className="absolute bottom-full left-2 z-20 mb-2 w-72 max-w-[calc(100%-1rem)] overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg"
           >
             {taskCandidates.map((task, i) => (
               <button
@@ -396,7 +396,7 @@ export function Composer({
           <div
             role="listbox"
             aria-label="Tag a bot"
-            className="absolute bottom-full left-2 z-20 mb-2 w-72 overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg"
+            className="absolute bottom-full left-2 z-20 mb-2 w-72 max-w-[calc(100%-1rem)] overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg"
           >
             {botCandidates.map((peer, i) => (
               <button

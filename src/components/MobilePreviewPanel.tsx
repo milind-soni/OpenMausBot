@@ -127,9 +127,25 @@ export function MobilePreviewPanel({
   const [historyList, setHistoryList] = useState<string[]>(() => getMobilePreviewUrlHistory());
   const [historyOpen, setHistoryOpen] = useState(false);
   const [sizeMenuOpen, setSizeMenuOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [screenshotMenuOpen, setScreenshotMenuOpen] = useState(false);
   const [filePickerOpen, setFilePickerOpen] = useState(false);
   const filePickerTriggerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!sizeMenuOpen) return;
+    const rafId = requestAnimationFrame(() => {
+      if (!sizeMenuRef.current) return;
+      const selectedItem =
+        sizeMenuRef.current.querySelector<HTMLButtonElement>(
+          '[role="menuitem"][aria-selected="true"]',
+        ) ||
+        sizeMenuRef.current.querySelector<HTMLButtonElement>('[role="menuitem"]');
+      selectedItem?.focus();
+      selectedItem?.scrollIntoView({ block: "nearest" });
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [sizeMenuOpen]);
 
   const [sizeCoords, setSizeCoords] = useState<{ top: number; right: number } | null>(null);
   const [historyCoords, setHistoryCoords] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -283,21 +299,51 @@ export function MobilePreviewPanel({
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (historyOpen) {
-        setHistoryOpen(false);
-        historyButtonRef.current?.focus();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (historyOpen) {
+          setHistoryOpen(false);
+          historyButtonRef.current?.focus();
+        }
+        if (sizeMenuOpen) {
+          setSizeMenuOpen(false);
+          sizeButtonRef.current?.focus();
+        }
+        if (screenshotMenuOpen) {
+          setScreenshotMenuOpen(false);
+          screenshotButtonRef.current?.focus();
+        }
+        return;
       }
-      if (sizeMenuOpen) {
-        setSizeMenuOpen(false);
-        sizeButtonRef.current?.focus();
+
+      if (sizeMenuOpen && sizeMenuRef.current) {
+        const menuItems = Array.from(
+          sizeMenuRef.current.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not([disabled])'),
+        );
+        if (menuItems.length > 0) {
+          const activeIdx = menuItems.indexOf(document.activeElement as HTMLButtonElement);
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            const nextIdx = (activeIdx + 1) % menuItems.length;
+            menuItems[nextIdx]?.focus();
+            menuItems[nextIdx]?.scrollIntoView({ block: "nearest" });
+            return;
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            const prevIdx = (activeIdx - 1 + menuItems.length) % menuItems.length;
+            menuItems[prevIdx]?.focus();
+            menuItems[prevIdx]?.scrollIntoView({ block: "nearest" });
+            return;
+          }
+        }
       }
-      if (screenshotMenuOpen) {
-        setScreenshotMenuOpen(false);
-        screenshotButtonRef.current?.focus();
-      }
+    };
+
+    const handleBlur = () => {
+      if (historyOpen) setHistoryOpen(false);
+      if (sizeMenuOpen) setSizeMenuOpen(false);
+      if (screenshotMenuOpen) setScreenshotMenuOpen(false);
     };
 
     const handleScrollOrResize = () => {
@@ -310,11 +356,13 @@ export function MobilePreviewPanel({
     window.addEventListener("keydown", handleKeyDown, true);
     window.addEventListener("scroll", handleScrollOrResize, true);
     window.addEventListener("resize", handleScrollOrResize);
+    window.addEventListener("blur", handleBlur);
     return () => {
       document.removeEventListener("mousedown", handlePointerDown, true);
       window.removeEventListener("keydown", handleKeyDown, true);
       window.removeEventListener("scroll", handleScrollOrResize, true);
       window.removeEventListener("resize", handleScrollOrResize);
+      window.removeEventListener("blur", handleBlur);
     };
   }, [historyOpen, screenshotMenuOpen, sizeMenuOpen, updateHistoryPosition, updateScreenshotPosition, updateSizePosition]);
 
@@ -511,8 +559,18 @@ export function MobilePreviewPanel({
                     if (!sizeMenuOpen) updateSizePosition();
                     setSizeMenuOpen((v) => !v);
                   }}
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+                      if (!sizeMenuOpen) {
+                        e.preventDefault();
+                        updateSizePosition();
+                        setSizeMenuOpen(true);
+                      }
+                    }
+                  }}
                   aria-label="Choose preview size"
                   aria-expanded={sizeMenuOpen}
+                  aria-haspopup="menu"
                   title={`${preset.label} (${effectiveDims.width}×${effectiveDims.height})`}
                   className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-hairline/60 bg-inset px-1.5 text-[11px] font-medium text-ink transition-colors hover:border-hairline hover:bg-raised-hover"
                 >
@@ -555,6 +613,7 @@ export function MobilePreviewPanel({
                 historyNav={historyNav}
                 onGoBack={() => frameRef.current?.goBack()}
                 onGoForward={() => frameRef.current?.goForward()}
+                onOpenChange={setMoreMenuOpen}
               />
 
               {/* Close Button */}
@@ -689,6 +748,18 @@ export function MobilePreviewPanel({
         ref={stageRef}
         className="relative flex flex-1 items-start justify-center overflow-auto bg-inset/50 p-4"
       >
+        {(sizeMenuOpen || moreMenuOpen || historyOpen || screenshotMenuOpen) && (
+          <div
+            className="absolute inset-0 z-20 cursor-default bg-transparent"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              setSizeMenuOpen(false);
+              setMoreMenuOpen(false);
+              setHistoryOpen(false);
+              setScreenshotMenuOpen(false);
+            }}
+          />
+        )}
         <PreviewFrame
           ref={frameRef}
           source={activeSource}
@@ -774,6 +845,8 @@ export function MobilePreviewPanel({
         createPortal(
           <div
             ref={sizeMenuRef}
+            role="menu"
+            aria-label="Choose preview size"
             style={{
               position: "fixed",
               top: `${sizeCoords.top}px`,
@@ -794,6 +867,9 @@ export function MobilePreviewPanel({
                       <button
                         key={item.id}
                         type="button"
+                        role="menuitem"
+                        aria-selected={active}
+                        tabIndex={active ? 0 : -1}
                         onClick={() => {
                           setPresetId(item.id);
                           setSizeMenuOpen(false);
@@ -818,7 +894,13 @@ export function MobilePreviewPanel({
               <div className="mt-1 border-t border-hairline/50 pt-1.5">
                 <button
                   type="button"
-                  onClick={() => setPresetId("custom")}
+                  role="menuitem"
+                  aria-selected={preset.id === "custom"}
+                  tabIndex={preset.id === "custom" ? 0 : -1}
+                  onClick={() => {
+                    setPresetId("custom");
+                    sizeButtonRef.current?.focus();
+                  }}
                   className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-[11.5px] transition-colors ${
                     preset.id === "custom"
                       ? "bg-accent/15 font-medium text-ink"

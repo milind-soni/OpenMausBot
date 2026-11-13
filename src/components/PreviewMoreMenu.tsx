@@ -28,6 +28,7 @@ export interface PreviewMoreMenuProps {
   historyNav: { canGoBack: boolean; canGoForward: boolean };
   onGoBack: () => void;
   onGoForward: () => void;
+  onOpenChange?: (open: boolean) => void;
   className?: string;
 }
 
@@ -45,6 +46,7 @@ export function PreviewMoreMenu({
   historyNav,
   onGoBack,
   onGoForward,
+  onOpenChange,
   className,
 }: PreviewMoreMenuProps) {
   const [open, setOpen] = useState(false);
@@ -72,6 +74,10 @@ export function PreviewMoreMenu({
   };
 
   useEffect(() => {
+    onOpenChange?.(open);
+  }, [open, onOpenChange]);
+
+  useEffect(() => {
     if (!open) return;
 
     // Focus first active menuitem
@@ -79,6 +85,10 @@ export function PreviewMoreMenu({
       const firstItem = menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not([disabled])');
       firstItem?.focus();
     });
+
+    const onBlur = () => {
+      setOpen(false);
+    };
 
     const onMouseDown = (e: MouseEvent) => {
       const target = e.target as Node | null;
@@ -137,6 +147,7 @@ export function PreviewMoreMenu({
     window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("scroll", onScrollOrResize, true);
     window.addEventListener("resize", onScrollOrResize);
+    window.addEventListener("blur", onBlur);
 
     return () => {
       cancelAnimationFrame(rafId);
@@ -144,6 +155,7 @@ export function PreviewMoreMenu({
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("scroll", onScrollOrResize, true);
       window.removeEventListener("resize", onScrollOrResize);
+      window.removeEventListener("blur", onBlur);
     };
   }, [open]);
 

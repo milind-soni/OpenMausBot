@@ -19,7 +19,7 @@ export function ProjectSuggestionList({
     <div
       role="listbox"
       aria-label="Reference a project"
-      className={cn("z-20 w-80 overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg", className)}
+      className={cn("z-20 w-80 max-w-[calc(100%-1rem)] overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg", className)}
     >
       {projects.map((project, index) => (
         <button

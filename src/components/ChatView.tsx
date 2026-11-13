@@ -704,6 +704,7 @@ export function ChatView({ bot }: { bot: Bot }) {
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !e.defaultPrevented) {
+        if (state.settingsOpen || state.computerOpen) return;
         setMobilePreviewOpen(false);
         setTasksOpen(false);
       }
@@ -766,7 +767,7 @@ export function ChatView({ bot }: { bot: Bot }) {
 
   return (
     <main ref={mainRef} className="relative flex h-full min-w-0 flex-1 bg-app overflow-hidden">
-      <section className="relative flex h-full min-w-[360px] flex-1 flex-col overflow-hidden">
+      <section className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       {/* Header */}
       <div
         ref={headerRef}
@@ -791,7 +792,9 @@ export function ChatView({ bot }: { bot: Bot }) {
             motion={mascotMotion?.kind ?? "none"}
             motionKey={mascotMotion?.nonce ?? 0}
           />
-          <span className="max-w-[10rem] truncate text-[15px] font-semibold text-ink">{bot.name}</span>
+          <span className={cn("truncate text-[15px] font-semibold text-ink", collapse.isTight ? "max-w-[4.5rem]" : "max-w-[10rem]")}>
+            {bot.name}
+          </span>
           {bot.busy && <Loader2 size={14} className="shrink-0 animate-spin text-ink-secondary" />}
         </button>
         <div ref={actionsRef} className="flex shrink-0 items-center gap-1.5" style={noDrag}>
@@ -1002,7 +1005,7 @@ export function ChatView({ bot }: { bot: Bot }) {
         <MobilePreviewPanel
           onClose={closeAllDrawers}
           onScreenshot={setPreviewAttachment}
-          className="absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl"
+          className="absolute inset-y-0 right-0 z-30 flex max-w-full w-[380px] shadow-2xl"
         />
       )}
 
@@ -1012,7 +1015,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           tasks={botTasks}
           emptyLabel="No tasks assigned to this agent yet."
           onClose={closeAllDrawers}
-          className="absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl"
+          className="absolute inset-y-0 right-0 z-30 flex max-w-full w-[320px] shadow-2xl"
         />
       )}
 
@@ -1032,7 +1035,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             onScreenshot={setPreviewAttachment}
             className={cn(
               previewAsDrawer
-                ? "absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl"
+                ? "absolute inset-y-0 right-0 z-30 flex max-w-full w-[380px] shadow-2xl"
                 : "static inset-auto z-auto max-w-none shadow-none flex",
             )}
           />

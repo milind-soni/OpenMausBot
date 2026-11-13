@@ -321,7 +321,7 @@ export function GroupView({ group }: { group: Group }) {
 
   return (
     <main ref={mainRef} className="relative flex h-full min-w-0 flex-1 bg-app overflow-hidden">
-      <section className="relative flex h-full min-w-[360px] flex-1 flex-col overflow-hidden">
+      <section className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       {/* Header: name left, member mauses right — their motion IS the status */}
       <div
         ref={headerRef}
@@ -624,7 +624,7 @@ export function GroupView({ group }: { group: Group }) {
         <MobilePreviewPanel
           onClose={closeAllDrawers}
           onScreenshot={setPreviewAttachment}
-          className="absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl"
+          className="absolute inset-y-0 right-0 z-30 flex max-w-full w-[380px] shadow-2xl"
         />
       )}
 
@@ -635,7 +635,7 @@ export function GroupView({ group }: { group: Group }) {
           emptyLabel={group.projectId ? "No tasks in this project yet." : "Set a project above to see its tasks here."}
           headerExtra={tasksProjectPicker}
           onClose={closeAllDrawers}
-          className="absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl"
+          className="absolute inset-y-0 right-0 z-30 flex max-w-full w-[320px] shadow-2xl"
         />
       )}
 
@@ -655,7 +655,7 @@ export function GroupView({ group }: { group: Group }) {
             onScreenshot={setPreviewAttachment}
             className={cn(
               previewAsDrawer
-                ? "absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl"
+                ? "absolute inset-y-0 right-0 z-30 flex max-w-full w-[380px] shadow-2xl"
                 : "static inset-auto z-auto max-w-none shadow-none flex",
             )}
           />

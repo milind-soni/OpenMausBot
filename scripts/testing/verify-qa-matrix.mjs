@@ -272,6 +272,114 @@ try {
   assert.ok(moreClosed1024.focusRestored, "Escape must restore focus to More preview options button");
 
   console.log("\n========================================================");
+  console.log("TEST CASE (cb76884d): Outside dismissal on rendered page (y=750) & blur");
+  console.log("========================================================");
+  // Open More menu
+  await page.getByRole("button", { name: "More preview options" }).click();
+  await page.waitForTimeout(200);
+  assert.ok(await page.evaluate(() => Boolean(document.querySelector('div[role="menu"][aria-label="More preview options"]'))), "More menu must be open");
+
+  // Click panel horizontal center at y=750 (rendered page area)
+  const panelCenter = await page.evaluate(() => {
+    const p = document.querySelector('aside[aria-label="Quick preview panel"]');
+    if (!p) return null;
+    const r = p.getBoundingClientRect();
+    return r.left + r.width / 2;
+  });
+  await page.mouse.click(panelCenter, 750);
+  await page.waitForTimeout(300);
+
+  const moreAfterPageClick = await page.evaluate(() => ({
+    menuOpen: Boolean(document.querySelector('div[role="menu"][aria-label="More preview options"]')),
+    panelOpen: Boolean(document.querySelector('aside[aria-label="Quick preview panel"]')),
+  }));
+  console.log("After clicking page at y=750 with More menu open:", moreAfterPageClick);
+  assert.ok(!moreAfterPageClick.menuOpen, "Clicking rendered page at y=750 must dismiss More menu");
+  assert.ok(moreAfterPageClick.panelOpen, "Quick preview panel must remain open");
+
+  // Open Size menu
+  await page.getByRole("button", { name: "Choose preview size" }).click();
+  await page.waitForTimeout(200);
+  assert.ok(await page.evaluate(() => Boolean(document.querySelector('div[role="menu"][aria-label="Choose preview size"]'))), "Size menu must be open");
+
+  // Click panel horizontal center at y=750
+  await page.mouse.click(panelCenter, 750);
+  await page.waitForTimeout(300);
+
+  const sizeAfterPageClick = await page.evaluate(() => ({
+    menuOpen: Boolean(document.querySelector('div[role="menu"][aria-label="Choose preview size"]')),
+    panelOpen: Boolean(document.querySelector('aside[aria-label="Quick preview panel"]')),
+  }));
+  console.log("After clicking page at y=750 with Size menu open:", sizeAfterPageClick);
+  assert.ok(!sizeAfterPageClick.menuOpen, "Clicking rendered page at y=750 must dismiss Size menu");
+  assert.ok(sizeAfterPageClick.panelOpen, "Quick preview panel must remain open");
+
+  console.log("\n========================================================");
+  console.log("TEST CASE (cb76884d): Size selector keyboard navigation");
+  console.log("========================================================");
+  // Focus trigger button
+  await page.locator('button[aria-label="Choose preview size"]').focus();
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(200);
+
+  // Verify menu is open and focused element is a menuitem
+  const initialFocus = await page.evaluate(() => {
+    const menu = document.querySelector('div[role="menu"][aria-label="Choose preview size"]');
+    const active = document.activeElement;
+    return {
+      menuOpen: Boolean(menu),
+      activeIsMenuItem: active?.getAttribute("role") === "menuitem",
+      activeText: active?.textContent?.trim().slice(0, 30),
+      activeSelected: active?.getAttribute("aria-selected") === "true",
+    };
+  });
+  console.log("Initial focus after Enter on Choose preview size:", initialFocus);
+  assert.ok(initialFocus.menuOpen, "Size menu must open on Enter");
+  assert.ok(initialFocus.activeIsMenuItem, "Focus must move to a role='menuitem' option");
+
+  // ArrowDown moves focus
+  await page.keyboard.press("ArrowDown");
+  await page.waitForTimeout(100);
+  const afterDown = await page.evaluate(() => {
+    const active = document.activeElement;
+    return {
+      activeIsMenuItem: active?.getAttribute("role") === "menuitem",
+      activeText: active?.textContent?.trim().slice(0, 30),
+    };
+  });
+  console.log("After ArrowDown:", afterDown);
+  assert.ok(afterDown.activeIsMenuItem, "ArrowDown must keep focus on role='menuitem'");
+
+  // ArrowUp moves focus back
+  await page.keyboard.press("ArrowUp");
+  await page.waitForTimeout(100);
+  const afterUp = await page.evaluate(() => {
+    const active = document.activeElement;
+    return {
+      activeIsMenuItem: active?.getAttribute("role") === "menuitem",
+      activeText: active?.textContent?.trim().slice(0, 30),
+    };
+  });
+  console.log("After ArrowUp:", afterUp);
+  assert.ok(afterUp.activeIsMenuItem, "ArrowUp must move focus");
+
+  // Escape closes menu and restores focus to trigger
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  const afterEscape = await page.evaluate(() => {
+    const menu = document.querySelector('div[role="menu"][aria-label="Choose preview size"]');
+    const active = document.activeElement;
+    const btn = document.querySelector('button[aria-label="Choose preview size"]');
+    return {
+      menuClosed: !menu,
+      focusRestored: active === btn,
+    };
+  });
+  console.log("After Escape on Size menu:", afterEscape);
+  assert.ok(afterEscape.menuClosed, "Escape must close size menu");
+  assert.ok(afterEscape.focusRestored, "Escape must restore focus to trigger button");
+
+  console.log("\n========================================================");
   console.log("TEST CASE (cb76884d): Quick preview More menu at 1440px & Close button with Tasks closed");
   console.log("========================================================");
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -466,6 +574,147 @@ try {
   assert.ok(!afterBackdropClick.previewOpen && !afterBackdropClick.tasksOpen, "Backdrop click must close drawers back to chat!");
 
   console.log("\n========================================================");
+  console.log("TEST CASE (0d25eafe): 1024px with Settings open & Composer # menu open (Screenshot a)");
+  console.log("========================================================");
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await page.evaluate(() => {
+    localStorage.setItem("chat-mobile-preview-open", "false");
+    localStorage.setItem("chat-tasks-open", "false");
+  });
+  await page.goto(ui);
+  await page.waitForSelector("main");
+  await page.locator('button[data-conversation-id="bot-long-name"]').click();
+  await page.waitForTimeout(500);
+
+  // Open Settings via bot name button in header
+  await page.locator('main button[title="Bot settings"]').click();
+  await page.waitForTimeout(1000);
+
+  // Type '#' in composer textarea
+  const composerInput = page.locator('main textarea');
+  await composerInput.click();
+  await composerInput.fill("#");
+  await page.waitForTimeout(400);
+
+  // Verify Project suggestion menu is visible and inside main (< 624)
+  const hashMenuMeasurements = await page.evaluate(() => {
+    const list = document.querySelector('div[role="listbox"][aria-label="Reference a project"]');
+    const settingsAside = document.querySelector('aside:has(button[aria-label="Close settings"])');
+    if (!list || !settingsAside) return { found: false };
+    const lRect = list.getBoundingClientRect();
+    const sRect = settingsAside.getBoundingClientRect();
+
+    // elementFromPoint on right edge of list
+    const rightHit = document.elementFromPoint(lRect.right - 5, lRect.top + lRect.height / 2);
+    const leftHit = document.elementFromPoint(lRect.left + 5, lRect.top + lRect.height / 2);
+
+    return {
+      found: true,
+      listRect: { left: lRect.left, right: lRect.right, width: lRect.width },
+      settingsRect: { left: sRect.left, right: sRect.right, width: sRect.width },
+      fitsInMain: lRect.right <= sRect.left + 1,
+      rightHitInsideList: list.contains(rightHit),
+      leftHitInsideList: list.contains(leftHit),
+    };
+  });
+  console.log("1024px Settings + Composer # menu measurements:", hashMenuMeasurements);
+  assert.ok(hashMenuMeasurements.found, "Project suggestion list and Settings panel must both be open");
+  assert.ok(hashMenuMeasurements.fitsInMain, "Project suggestion list must fit inside main without clipping");
+  assert.ok(hashMenuMeasurements.rightHitInsideList, "Right edge of Project suggestion list must pass elementFromPoint");
+
+  const screenshotA = join(screenshotsDir, "bot_settings_open_1024_composer_hash_menu.png");
+  await page.screenshot({ path: screenshotA });
+  console.log(`Saved screenshot (a) to ${screenshotA}`);
+
+  // Clear composer text and close Settings via Escape
+  await composerInput.fill("");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
+  assert.ok(await page.evaluate(() => !document.querySelector('aside:has(button[aria-label="Close settings"])')), "Escape must close Settings panel");
+
+  console.log("\n========================================================");
+  console.log("TEST CASE (0d25eafe): 1024px with Computer open & Show tasks visible in header (Screenshot b)");
+  console.log("========================================================");
+  // Open Computer panel: click HeaderMoreMenu ("More actions"), then "Bot's computer"
+  const moreActionsBtn = page.getByRole("button", { name: "More actions" });
+  if (await moreActionsBtn.isVisible()) {
+    await moreActionsBtn.click();
+    await page.waitForTimeout(200);
+    await page.getByRole("menuitem", { name: "Bot's computer" }).click();
+  } else {
+    await page.locator('main button[title="Bot\'s computer"]').click();
+  }
+  await page.waitForTimeout(800);
+
+  // Measure Computer panel and Show tasks button
+  const computerMeasurements = await page.evaluate(() => {
+    const computerAside = Array.from(document.querySelectorAll("aside")).find((a) =>
+      a.textContent?.includes("Computer") && a.querySelector('button[aria-label="Close computer panel"]'),
+    );
+    const tasksBtn = document.querySelector('main button[aria-label="Show tasks"], main button[title="Show tasks"]');
+    if (!computerAside || !tasksBtn) return { found: false };
+    const cRect = computerAside.getBoundingClientRect();
+    const tRect = tasksBtn.getBoundingClientRect();
+    const center = tRect.left + tRect.width / 2;
+    const hit = document.elementFromPoint(center, tRect.top + tRect.height / 2);
+
+    return {
+      found: true,
+      computerRect: { left: cRect.left, right: cRect.right, width: cRect.width },
+      tasksBtnRect: { left: tRect.left, right: tRect.right, width: tRect.width },
+      fitsInMain: tRect.right <= cRect.left + 1,
+      hitTestPass: tasksBtn.contains(hit),
+    };
+  });
+  console.log("1024px Computer + Show tasks measurements:", computerMeasurements);
+  assert.ok(computerMeasurements.found, "Computer panel and Show tasks button must both be open/present");
+  assert.ok(computerMeasurements.fitsInMain, "Show tasks button must sit inside main without clipping");
+  assert.ok(computerMeasurements.hitTestPass, "Show tasks center must pass elementFromPoint");
+
+  const screenshotB = join(screenshotsDir, "bot_chat_long_name_1024_computer_show_tasks.png");
+  await page.screenshot({ path: screenshotB });
+  console.log(`Saved screenshot (b) to ${screenshotB}`);
+
+  // Test Escape closes Computer panel and restores focus
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
+  assert.ok(await page.evaluate(() => !document.querySelector('aside:has(button[aria-label="Close computer panel"])')), "Escape must close Computer panel");
+
+  console.log("\n========================================================");
+  console.log("TEST CASE (0d25eafe): 1024px Preview drawer constrained to max-w-full without left clip");
+  console.log("========================================================");
+  // Open Preview and Settings at 1024px (using keyboard/dispatch per Dell's note)
+  await page.getByRole("button", { name: "Show mobile preview" }).click();
+  await page.waitForTimeout(300);
+  await page.locator('main button[title="Bot settings"]').dispatchEvent("click");
+  await page.waitForTimeout(800);
+
+  const drawer1024Measurements = await page.evaluate(() => {
+    const previewDrawer = document.querySelector('aside[aria-label="Quick preview panel"]');
+    const mainEl = document.querySelector('main');
+    if (!previewDrawer || !mainEl) return { found: false };
+    const pRect = previewDrawer.getBoundingClientRect();
+    const mRect = mainEl.getBoundingClientRect();
+    return {
+      found: true,
+      mainLeft: mRect.left,
+      mainRight: mRect.right,
+      mainWidth: mRect.width,
+      previewLeft: pRect.left,
+      previewRight: pRect.right,
+      previewWidth: pRect.width,
+      leftNotClipped: pRect.left >= mRect.left - 1,
+    };
+  });
+  console.log("1024px Preview drawer with Settings open measurements:", drawer1024Measurements);
+  assert.ok(drawer1024Measurements.found, "Preview drawer and main must exist");
+  assert.ok(drawer1024Measurements.leftNotClipped, "Preview drawer left edge must not extend beyond main left edge");
+
+  // Close Settings via Escape
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
+
+  console.log("\n========================================================");
   console.log("DESKTOP CHECK: Isolated second Electron instance");
   console.log("========================================================");
   const electronExecutable =
@@ -520,6 +769,28 @@ try {
   });
   console.log("Electron Quick preview More menu:", electronMoreMenu);
   assert.ok(electronMoreMenu?.allItemsPass, "In Electron, Quick preview More menu items must be hit-testable");
+
+  // In Electron: outside dismissal on webview at y=750
+  const electronPanelCenter = await electronWindow.evaluate(() => {
+    const p = document.querySelector('aside[aria-label="Quick preview panel"]');
+    if (!p) return null;
+    const r = p.getBoundingClientRect();
+    return r.left + r.width / 2;
+  });
+  await electronWindow.mouse.click(electronPanelCenter, 750);
+  await electronWindow.waitForTimeout(300);
+  const electronMoreAfterClick = await electronWindow.evaluate(() => Boolean(document.querySelector('div[role="menu"][aria-label="More preview options"]')));
+  assert.ok(!electronMoreAfterClick, "In Electron, clicking webview at y=750 must dismiss More menu");
+
+  // In Electron: Size menu keyboard navigation
+  await electronWindow.locator('button[aria-label="Choose preview size"]').focus();
+  await electronWindow.keyboard.press("Enter");
+  await electronWindow.waitForTimeout(200);
+  const electronSizeActive = await electronWindow.evaluate(() => {
+    const active = document.activeElement;
+    return active?.getAttribute("role") === "menuitem";
+  });
+  assert.ok(electronSizeActive, "In Electron, Enter on Choose preview size must focus role='menuitem'");
   await electronWindow.keyboard.press("Escape");
   await electronWindow.waitForTimeout(200);
 
