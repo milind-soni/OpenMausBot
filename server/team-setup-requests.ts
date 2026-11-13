@@ -221,9 +221,11 @@ export class TeamSetupRequestService {
         // A bot this Chief may not change is never read here; validate() refuses it.
         if (target && !target.hidden && this.options.hasTeamAuthority(chief, target.section)) {
           // Re-saving runs the whole text through redaction; never let an added rule rewrite what the bot already had.
-          const current = target.soul ?? "";
-          if (redactSecretsInText(current) !== current) throw new TeamSetupError(`@${target.name}'s instructions hold credential-like text; change them with a full soul instead`);
-          requested.soul = current.trim() ? `${current.trimEnd()}\n\n${soulAppend}` : soulAppend;
+          // Check the joined text: an added rule can complete a pattern that starts in the existing instructions.
+          const kept = (target.soul ?? "").trimEnd();
+          const joined = kept ? `${kept}\n\n${soulAppend}` : soulAppend;
+          if (!redactSecretsInText(joined).startsWith(kept)) throw new TeamSetupError(`@${target.name}'s instructions hold credential-like text; change them with a full soul instead`);
+          requested.soul = joined;
         }
       }
       const fields = this.fields({ ...requested, section: requested.section ?? target?.section ?? chief.section ?? "" }, target ?? undefined);

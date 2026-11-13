@@ -378,6 +378,9 @@ describe("reviewed Chief team setup", () => {
     expect(() => h.propose([{ action: "update", botId: outsider.id, fields: { soulAppend: "More." } }])).toThrow(/Private/);
     h.peer.soul = `Use key sk-${"a".repeat(24)} for the API.`;
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { soulAppend: "More." } }])).toThrow(/credential-like text/);
+    // Clean on its own, but the added rule completes a pattern that reaches back into the existing text.
+    h.peer.soul = "Paste keys after -----BEGIN RSA PRIVATE KEY----- and keep them out of chat.";
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { soulAppend: "Stop at -----END RSA PRIVATE KEY-----." } }])).toThrow(/credential-like text/);
   });
 });
 
