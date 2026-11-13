@@ -6771,6 +6771,7 @@
   "settings.page.importExport": "Importa ed esporta",
   "settings.data.takeOut": "Porta fuori le tue cose",
   "settings.import.grokTitle": "Passa da Grok Bot",
+  "settings.import.hermesTitle": "Passa da Hermes",
   "settings.data.move": "Sposta su {place}",
   "settings.data.storage": "Spazio",
   "settings.desktops.automation": "Automazione",

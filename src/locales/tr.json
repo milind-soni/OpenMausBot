@@ -5649,6 +5649,7 @@
   "settings.page.importExport": "İçe ve dışa aktar",
   "settings.data.takeOut": "Dışarı aktar",
   "settings.import.grokTitle": "Grok Bot'tan taşın",
+  "settings.import.hermesTitle": "Hermes'ten taşın",
   "settings.import.appsTitle": "Yapay zekâ uygulamalarından",
   "settings.data.move": "{place} konumuna taşı",
   "settings.data.storage": "Depolama",

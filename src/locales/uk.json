@@ -3676,6 +3676,7 @@
   "settings.page.importExport": "Імпорт і експорт",
   "settings.data.takeOut": "Забрати своє",
   "settings.import.grokTitle": "Переїзд із Grok Bot",
+  "settings.import.hermesTitle": "Переїзд із Hermes",
   "settings.import.appsTitle": "З ваших застосунків ШІ",
   "settings.data.move": "Перенести на {place}",
   "settings.data.storage": "Сховище",

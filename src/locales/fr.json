@@ -3386,6 +3386,7 @@
   "settings.page.importExport": "Importer et exporter",
   "settings.data.takeOut": "Exporter des choses",
   "settings.import.grokTitle": "Passer de Grok Bot",
+  "settings.import.hermesTitle": "Migrer depuis Hermes",
   "settings.import.appsTitle": "Depuis vos apps d'IA",
   "backup.import": "Importer une sauvegarde",
   "settings.data.move": "Déplacer vers {place}",

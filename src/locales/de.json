@@ -3561,6 +3561,7 @@
   "settings.page.importExport": "Import & Export",
   "settings.data.takeOut": "Dinge mitnehmen",
   "settings.import.grokTitle": "Von Grok Bot umziehen",
+  "settings.import.hermesTitle": "Von Hermes umziehen",
   "settings.import.appsTitle": "Aus deinen KI-Apps",
   "backup.import": "Backup importieren",
   "settings.data.move": "Nach {place} umziehen",

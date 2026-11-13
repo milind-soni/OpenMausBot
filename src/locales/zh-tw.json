@@ -5938,6 +5938,7 @@
   "settings.import.appsNothing": "你的 AI 應用程式沒有可匯入的新內容。",
   "settings.import.appsLocalOnly": "只有執行 {app} 那台電腦上的桌面應用程式，才能匯入該電腦的技能和工具。",
   "settings.import.grokTitle": "從 Grok Bot 搬過來",
+  "settings.import.hermesTitle": "從 Hermes 搬過來",
   "settings.import.grokSubtitle": "把一個 Bot 連同它的技能、例行工作、記憶和應用程式一起搬過來。",
   "backup.scope": "這個安裝實例的密碼保護備份，涵蓋機器人、對話、指示、本機檔案與非機密設定。此瀏覽器的草稿與偏好設定也會一併納入。",
   "backup.excluded": "不包含已儲存的帳號憑證和連線。請在新機器上重新連線你的帳號；目的地現有的憑證不會變更。其他 AI 應用程式的登入狀態和遠端桌面的磁碟也不包含在內。",

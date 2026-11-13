@@ -3239,6 +3239,7 @@
   "settings.page.importExport": "इंपोर्ट और एक्सपोर्ट",
   "settings.data.takeOut": "चीज़ें बाहर ले जाएँ",
   "settings.import.grokTitle": "Grok Bot से यहाँ आएँ",
+  "settings.import.hermesTitle": "Hermes से यहाँ आएँ",
   "settings.import.appsTitle": "आपके AI ऐप से",
   "backup.import": "बैकअप इंपोर्ट करें",
   "settings.data.move": "{place} पर ले जाएँ",

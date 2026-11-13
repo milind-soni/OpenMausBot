@@ -6910,6 +6910,7 @@
   "settings.page.importExport": "Import i eksport",
   "settings.data.takeOut": "Zabierz swoje rzeczy",
   "settings.import.grokTitle": "Przenieś się z Grok Bot",
+  "settings.import.hermesTitle": "Przenieś się z Hermes",
   "settings.data.move": "Przenieś do {place}",
   "settings.data.storage": "Miejsce na dane",
   "settings.desktops.automation": "Automatyzacja",

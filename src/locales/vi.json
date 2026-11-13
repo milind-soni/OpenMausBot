@@ -5649,6 +5649,7 @@
   "settings.page.importExport": "Nhập và xuất",
   "settings.data.takeOut": "Đưa dữ liệu ra",
   "settings.import.grokTitle": "Chuyển từ Grok Bot",
+  "settings.import.hermesTitle": "Chuyển từ Hermes",
   "settings.import.appsTitle": "Từ các ứng dụng AI của bạn",
   "settings.data.move": "Chuyển sang {place}",
   "settings.data.storage": "Lưu trữ",

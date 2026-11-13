@@ -5928,6 +5928,7 @@
   "settings.import.appsNothing": "Nada novo para trazer dos seus apps de IA.",
   "settings.import.appsLocalOnly": "Só o app para computador na máquina onde o app {app} roda pode importar as habilidades e ferramentas dela.",
   "settings.import.grokTitle": "Migrar do Grok Bot",
+  "settings.import.hermesTitle": "Migrar do Hermes",
   "settings.import.grokSubtitle": "Traga um bot com suas habilidades, rotinas, memórias e apps.",
   "backup.scope": "Um backup desta instalação, protegido por senha: bots, conversas, instruções, arquivos locais e configurações sem dados sigilosos. Rascunhos e preferências deste navegador estão incluídos.",
   "backup.excluded": "O backup não inclui credenciais de contas nem conexões salvas. Reconecte as contas em uma nova máquina. As credenciais existentes no destino não mudam. Logins de outros apps de IA e discos de desktops remotos também ficam de fora.",

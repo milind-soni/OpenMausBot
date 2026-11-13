@@ -7693,6 +7693,7 @@
   "settings.page.importExport": "导入与导出",
   "settings.data.takeOut": "导出内容",
   "settings.import.grokTitle": "从 Grok Bot 迁移",
+  "settings.import.hermesTitle": "从 Hermes 迁移",
   "settings.data.move": "移到{place}",
   "settings.data.storage": "存储",
   "settings.desktops.automation": "自动化",

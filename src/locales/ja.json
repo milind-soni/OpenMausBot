@@ -5738,6 +5738,7 @@
   "settings.import.appsNothing": "AI アプリから取り込める新しい項目はありません。",
   "settings.import.appsLocalOnly": "そのコンピューターのスキルとツールを取り込めるのは、{app} を実行しているコンピューターのデスクトップアプリだけです。",
   "settings.import.grokTitle": "Grok Bot から移行",
+  "settings.import.hermesTitle": "Hermes から移行",
   "settings.import.grokSubtitle": "Grok Bot のボットを、スキル、ルーティン、メモリー、アプリごと移します。",
   "backup.scope": "このインストール環境のボット、会話、指示、ローカルファイル、機密情報を含まない設定を、パスワードで保護してバックアップします。このブラウザーの下書きと環境設定も含まれます。",
   "backup.excluded": "保存したアカウントの認証情報と接続は含まれません。新しいコンピューターでアカウントを接続し直してください。復元先にある認証情報は変わりません。ほかの AI アプリへのサインインと、リモートデスクトップのディスクも含まれません。",
