@@ -4530,6 +4530,7 @@
   "botPanel.skills.importFailed": "Could not add that skill.",
   "botPanel.skills.importPlaceholder": "Paste a skill link or owner/repo",
   "botPanel.skills.browse": "Browse skills",
+  "botPanel.skills.project": "In this project",
   "botPanel.folder.private": "Private",
   "botPanel.folder.intro": "Where {name} keeps and edits files.",
   "botPanel.folder.own": "Its own private folder",
@@ -6204,6 +6205,8 @@
   "skills.origin.importedHint": "Brought in from this computer. Each bot lists the ones that fit its role and finds the rest when a task needs them. Switch it on to list it for this bot, or off to keep it from this bot.",
   "skills.origin.native": "AI",
   "skills.origin.nativeHint": "The bot's AI loads this from the folder under Source. Turn it off here for this bot only; the files stay where they are.",
+  "skills.origin.project": "project",
+  "skills.origin.projectHint": "Shipped in the project folder under Source. The bot uses it while it works there. Edit or remove it there.",
   "skills.write.title": "Write a command",
   "skills.write.hint": "Give the bot a short command for something you ask often. Type /name in a chat to run it. Anything after the name fills in {input}.",
   "skills.write.name": "Command name",
@@ -10663,5 +10666,11 @@
   "settings.domain.change": "Change",
   "settings.domain.httpsFirst": "Turn on HTTPS for this address first, then connect it here.",
   "settings.backTo": "Back to Settings",
-  "devices.route.httpsAccount": "Uses your {app} account."
+  "devices.route.httpsAccount": "Uses your {app} account.",
+  "settings.browser.proxy": "SOCKS5 proxy",
+  "settings.browser.proxyDetail": "Optional, unauthenticated SOCKS5 proxy for public websites in the built-in browser. My Chrome keeps its own settings; private and local destinations keep existing protections.",
+  "settings.browser.proxyConfigured": "New built-in browser connections use this SOCKS5 proxy. My Chrome keeps its own settings; private and local destinations stay protected.",
+  "settings.browser.proxyInactive": "Saved, but active only with the built-in browser on supported hosts.",
+  "settings.browser.proxySave": "Save",
+  "settings.browser.proxyClear": "Remove"
 }

@@ -49,6 +49,7 @@ export interface ChromeEngineOptions {
   idleMs(): number;
   held?(session: string): boolean;
   egressNotice(key: string): string | null;
+  language?(): string | undefined;
   log?: (line: string) => void;
 }
 
@@ -70,10 +71,10 @@ export class ChromeEngine {
     const env = options.env ?? process.env;
     const platform = options.platform ?? process.platform;
     const sandbox = !sandboxDisabled(env);
-    this.launcher = new ChromeLauncher({ dataDir: options.dataDir, env, platform, engine: () => ({ managed: true }), wrapper: false, sandbox, ...(options.log ? { log: options.log } : {}) });
+    this.launcher = new ChromeLauncher({ dataDir: options.dataDir, env, platform, language: options.language, engine: () => ({ managed: true }), wrapper: false, sandbox, ...(options.log ? { log: options.log } : {}) });
     this.#registry = new ProcessRegistry(browserRoot(options.dataDir));
     let screen: ReturnType<typeof displayScreen> | null = null;
-    const locale = browserLanguage(env) ?? null;
+    const locale = () => browserLanguage(env, options.language?.()) ?? null;
     const backend = new LocalBackend({
       dataDir: options.dataDir,
       host: options.host,
@@ -83,8 +84,8 @@ export class ChromeEngine {
         return { path: binary.path, identity: { ...binary.identity, product: binary.product } };
       },
       screen: () => (screen ??= displayScreen(options.host, { platform, env })),
-      locale: () => locale,
-      acceptLanguages: () => languageList(locale ?? undefined),
+      locale,
+      acceptLanguages: () => languageList(locale() ?? undefined),
       timezone: () => browserTimeZone(env, platform) ?? null,
       egressPort: (key) => options.egressPort(key),
       registry: this.#registry,
