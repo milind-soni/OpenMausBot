@@ -4940,26 +4940,47 @@ describe("harness HTTP API", () => {
       body: { error: "Confirm additional department access (acknowledgePeerScope)", errorKey: "serverError.department.confirmExtra" } });
   });
 
-  it("makes only a confirmed Chief responsible for every department and revokes it with the role", async () => {
-    const bot = (await api("POST", "/api/bots")).body.bot;
+  it("gives a Chief in charge of every department each new one, live, and nothing to a Chief in charge of only some", async () => {
+    const whole = (await api("POST", "/api/bots")).body.bot;
+    const partial = (await api("POST", "/api/bots")).body.bot;
+    const made: string[] = [];
+    const department = async (name: string) => {
+      made.push(name);
+      expect((await api("POST", "/api/sidebar-sections", { name, botIds: [] })).status).toBe(200);
+    };
+    const managed = async (id: string) => ((await api("GET", "/api/bots?messages=0")).body.bots
+      .find((entry: { id: string }) => entry.id === id).managedSections ?? []) as string[];
     try {
-      await api("PATCH", `/api/bots/${bot.id}`, { section: "All departments fixture" });
-      expect(await api("PATCH", `/api/bots/${bot.id}`, { managesAllSections: true, acknowledgePeerScope: true }))
-        .toMatchObject({ status: 400, body: { errorKey: "serverError.department.chiefResponsibility" } });
-      expect(await api("PATCH", `/api/bots/${bot.id}`, { chiefOfStaff: true, managesAllSections: "yes", acknowledgePeerScope: true }))
-        .toMatchObject({ status: 400 });
-      expect(await api("PATCH", `/api/bots/${bot.id}`, { chiefOfStaff: true, managesAllSections: true }))
-        .toMatchObject({ status: 400, body: { errorKey: "serverError.department.confirmResponsibility" } });
-      const listed = async () => (await api("GET", "/api/bots")).body.bots.find((entry: { id: string }) => entry.id === bot.id);
-      expect(Boolean((await listed()).chiefOfStaff)).toBe(false);
-      expect((await api("PATCH", `/api/bots/${bot.id}`, { chiefOfStaff: true, managesAllSections: true, acknowledgePeerScope: true })).status).toBe(200);
-      expect(await listed()).toMatchObject({ chiefOfStaff: true, managesAllSections: true });
-      expect((await api("PATCH", `/api/bots/${bot.id}`, { chiefOfStaff: false })).status).toBe(200);
-      expect(Boolean((await listed()).managesAllSections)).toBe(false);
-      expect(await api("PATCH", `/api/bots/${bot.id}`, { managesAllSections: true, acknowledgePeerScope: true }))
-        .toMatchObject({ status: 400, body: { errorKey: "serverError.department.chiefResponsibility" } });
+      await department("Whole fixture");
+      await department("Partial fixture");
+      for (const [bot, section] of [[whole, "Whole fixture"], [partial, "Partial fixture"]] as const) {
+        expect((await api("PATCH", `/api/bots/${bot.id}`, { section })).status).toBe(200);
+      }
+      const others = ((await api("GET", "/api/sidebar-sections")).body.sections as string[]).filter((name) => name !== "Whole fixture");
+      expect((await api("PATCH", `/api/bots/${whole.id}`, { chiefOfStaff: true, managedSections: ["", ...others], acknowledgePeerScope: true })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${partial.id}`, { chiefOfStaff: true, managedSections: [""], acknowledgePeerScope: true })).status).toBe(200);
+
+      const stream = await openSse(`${BASE}/api/events`);
+      try {
+        await stream.until((frame) => frame.kind === "hello");
+        await department("New fixture A");
+        const frame = await stream.until((candidate) => candidate.kind === "bot" && candidate.bot?.id === whole.id &&
+          Boolean(candidate.bot.managedSections?.includes("New fixture A")));
+        expect(frame.bot.chiefOfStaff).toBe(true);
+      } finally {
+        stream.close();
+      }
+      expect(await managed(whole.id)).toEqual(["", ...others, "New fixture A"]);
+      expect(await managed(partial.id)).toEqual([""]);
+
+      // The owner can still untick it, and a Chief no longer in charge of every department gets no new one.
+      expect((await api("PATCH", `/api/bots/${whole.id}`, { managedSections: ["", ...others] })).status).toBe(200);
+      await department("New fixture B");
+      expect(await managed(whole.id)).toEqual(["", ...others]);
+      expect(await managed(partial.id)).toEqual([""]);
     } finally {
-      await api("DELETE", `/api/bots/${bot.id}`);
+      for (const bot of [whole, partial]) await api("DELETE", `/api/bots/${bot.id}`);
+      for (const name of made) await api("DELETE", `/api/sidebar-sections?section=${encodeURIComponent(name)}`);
     }
   });
 

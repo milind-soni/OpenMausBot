@@ -59,8 +59,9 @@ export interface OverviewFacts {
     | "browser"
     | "chiefOfStaff"
     | "managedSections"
-    | "managesAllSections"
   >;
+  /** A Chief in charge of every department, which therefore also gets each new one (server/department-grants.ts). */
+  allDepartments?: boolean;
   routines: Array<{
     id: string;
     name: string;
@@ -245,7 +246,7 @@ function reachesLines(facts: OverviewFacts): string[] {
   const peers = facts.sectionPeers;
   if (facts.engine?.agentsMcp && peers > 0) lines.push(peers === 1 ? "Can talk to the other bot." : `Can talk to all ${peers} other bots, in any department.`);
   if (facts.bot.chiefOfStaff) lines.push("Coordinates its department as Chief of Staff.");
-  if (facts.bot.chiefOfStaff && facts.bot.managesAllSections === true) lines.push("In charge of every department, including new ones.");
+  if (facts.bot.chiefOfStaff && facts.allDepartments) lines.push("In charge of every department, including new ones.");
   else if (facts.bot.chiefOfStaff && facts.bot.managedSections?.length) {
     lines.push(`Also in charge of these departments: ${facts.bot.managedSections.map(name => name || "General").join(", ")}.`);
   }

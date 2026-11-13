@@ -13,7 +13,6 @@ export interface IncidentBot {
   section?: string;
   chiefOfStaff?: boolean;
   managedSections?: string[];
-  managesAllSections?: boolean;
   createdBy?: string;
   reportsTo?: string;
   hidden?: boolean;

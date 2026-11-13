@@ -546,7 +546,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           error: "Auto mode on this computer requires confirming the warning first (acknowledgeLocalAuto)",
         });
       }
-      const staysChief = body.chiefOfStaff === true || Boolean(existingBot?.chiefOfStaff && body.chiefOfStaff !== false);
       if (body.managedSections !== undefined) {
         const parsed = z.array(z.string().trim().max(60)).max(100).safeParse(body.managedSections);
         if (!parsed.success) return json(res, 400, { error: "managedSections must be a list of up to 100 department names (60 characters each)" });
@@ -555,7 +554,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (newSections.some(section => section !== "" && !store.sections.includes(section))) {
           return json(res, 400, userError("serverError.department.createFirst"));
         }
-        if (sections.length && !staysChief) {
+        if (sections.length && !(body.chiefOfStaff === true || (existingBot?.chiefOfStaff && body.chiefOfStaff !== false))) {
           return json(res, 400, userError("serverError.department.chiefResponsibility"));
         }
         if (newSections.length && body.acknowledgePeerScope !== true) {
@@ -563,18 +562,8 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         }
         patch.managedSections = sections;
       }
-      if (body.managesAllSections !== undefined) {
-        if (typeof body.managesAllSections !== "boolean") return json(res, 400, { error: "managesAllSections must be true or false" });
-        if (body.managesAllSections && !staysChief) {
-          return json(res, 400, userError("serverError.department.chiefResponsibility"));
-        }
-        if (body.managesAllSections && existingBot?.managesAllSections !== true && body.acknowledgePeerScope !== true) {
-          return json(res, 400, userError("serverError.department.confirmResponsibility"));
-        }
-        patch.managesAllSections = body.managesAllSections;
-      }
       // Losing the role revokes its grants: no dormant authority returns if it is elected again.
-      if (body.chiefOfStaff === false) { patch.managedSections = []; patch.managesAllSections = false; }
+      if (body.chiefOfStaff === false) patch.managedSections = [];
       // "everyone" (default), "admins" or { people: [...] }; members' PATCHes never get here.
       if (Object.hasOwn(body, "visibility")) {
         const parsed = parseVisibility(body.visibility);
@@ -607,9 +596,8 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (Array.isArray(patch.managedSections) && patch.managedSections.some(section => !(existingBot?.managedSections ?? []).includes(section))) {
         loosened.push("managedSections");
       }
-      if (patch.managesAllSections === true && existingBot?.managesAllSections !== true) loosened.push("managesAllSections");
       // A shell can forge an Origin header: new cross-team authority from local scripts only while every bot is idle.
-      if ((loosened.includes("managedSections") || loosened.includes("managesAllSections")) && auth.kind === "loopback" && !DESKTOP_MANAGED && store.bots.some(bot => bot.busy)) {
+      if (loosened.includes("managedSections") && auth.kind === "loopback" && !DESKTOP_MANAGED && store.bots.some(bot => bot.busy)) {
         return json(res, 409, userError("serverError.department.stopBots"));
       }
       if (section !== undefined && sectionKey(existingBot?.section) !== sectionKey(section)) loosened.push("section");
@@ -648,10 +636,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         section !== undefined &&
         sectionKey(existingBot?.section) !== sectionKey(section);
       let bot: BotRecord | null;
-      // Rechecked: a turn can start during the awaits above, and nothing awaits between here and the write.
-      if ((loosened.includes("managedSections") || loosened.includes("managesAllSections")) && auth.kind === "loopback" && !DESKTOP_MANAGED && store.bots.some(bot => bot.busy)) {
-        return json(res, 409, userError("serverError.department.stopBots"));
-      }
       const freshBrowserBot = store.bot(m[1]);
       // Rechecked: the awaits above can yield after the first memory check.
       if (freshBrowserBot && body.memoryEnabled !== undefined &&

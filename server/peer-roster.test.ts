@@ -6,6 +6,7 @@ import {
   departmentRefusal,
   hasAuthority,
   hasTeamAuthority,
+  inChargeOfEvery,
   PEER_ACCESS_HELP,
   LIVE_PEER_ROSTER_MAX,
   livePeerRoster,
@@ -102,15 +103,17 @@ describe("Chief authority over additional departments", () => {
     expect(hasTeamAuthority({ ...chief, managedSections: [null] as unknown as string[] }, "Personal")).toBe(false);
     expect(hasTeamAuthority({ ...chief, managedSections: [""] }, undefined)).toBe(true);
   });
-  it("gives a Chief made responsible for every department authority there, including new ones, and nobody else", () => {
-    const everywhere = { ...self, chiefOfStaff: true, managesAllSections: true };
-    expect(hasTeamAuthority(everywhere, "Finance")).toBe(true);
-    expect(hasTeamAuthority(everywhere, "A department added later")).toBe(true);
-    expect(hasAuthority(everywhere, fleet[4]!)).toBe(true);
-    expect(hasAuthority(fleet[4]!, everywhere)).toBe(false);
-    expect(hasTeamAuthority({ ...everywhere, chiefOfStaff: false }, "Finance")).toBe(false);
-    expect(hasTeamAuthority({ ...everywhere, managesAllSections: false }, "Finance")).toBe(false);
-    expect(hasTeamAuthority({ ...everywhere, managesAllSections: "true" as unknown as boolean }, "Finance")).toBe(false);
+  it("counts a Chief in charge of every department only when the owner ticked each one, General included", () => {
+    const everywhere = { ...self, chiefOfStaff: true, managedSections: ["", "Personal", "Finance"] };
+    expect(inChargeOfEvery(everywhere, ["Work", "Personal", "Finance"])).toBe(true);
+    expect(inChargeOfEvery(everywhere, ["Work", "Personal", "Finance", "Legal"])).toBe(false);
+    expect(inChargeOfEvery({ ...everywhere, managedSections: ["Personal", "Finance"] }, ["Work", "Personal", "Finance"])).toBe(false);
+    expect(inChargeOfEvery({ ...everywhere, chiefOfStaff: false }, ["Work", "Personal", "Finance"])).toBe(false);
+    expect(inChargeOfEvery({ ...everywhere, managedSections: ["", "Personal", 7 as unknown as string] }, ["Work", "Personal", "Finance"])).toBe(false);
+    // With nothing to tick yet, the owner has not put it in charge of anything beyond its own department.
+    expect(inChargeOfEvery({ id: "c", name: "C", chiefOfStaff: true }, [])).toBe(false);
+    // A member's own Chief on a Team Cloud answers for its person's bots, never for departments.
+    expect(inChargeOfEvery({ ...everywhere, createdBy: "ada@example.test" }, ["Work", "Personal", "Finance"])).toBe(false);
   });
 });
 

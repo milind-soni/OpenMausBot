@@ -48,8 +48,9 @@ describe("buildBotOverview", () => {
   });
 
   it("says when a Chief is in charge of every department, only while it is the Chief", () => {
-    const facts = baseFacts({ bot: { ...baseFacts().bot, chiefOfStaff: true, managesAllSections: true }, engine: { agentsMcp: true }, sectionPeers: 3 });
+    const facts = baseFacts({ bot: { ...baseFacts().bot, chiefOfStaff: true, managedSections: ["", "Research"] }, allDepartments: true, engine: { agentsMcp: true }, sectionPeers: 3 });
     expect(buildBotOverview(facts).reaches).toContain("In charge of every department, including new ones.");
+    expect(buildBotOverview(facts).reaches.join(" ")).not.toContain("Also in charge of these departments");
     facts.bot.chiefOfStaff = false;
     expect(buildBotOverview(facts).reaches.join(" ")).not.toContain("every department, including new ones");
   });

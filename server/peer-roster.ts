@@ -12,7 +12,6 @@ export interface RosterMember extends Pick<DefaultBotFields, "defaultBot"> {
   section?: string;
   chiefOfStaff?: boolean;
   managedSections?: string[];
-  managesAllSections?: boolean;
   createdBy?: string;
   reportsTo?: string;
   activity?: BotActivity;
@@ -28,14 +27,24 @@ export const PEER_ACCESS_HELP = "Every bot can reach every other bot, in any dep
 
 /** A title, peer id, imported persona or room membership is not a grant; invalid saved grants fail closed. */
 export function hasTeamAuthority(
-  from: Pick<RosterMember, "section" | "chiefOfStaff" | "managedSections" | "managesAllSections">,
+  from: Pick<RosterMember, "section" | "chiefOfStaff" | "managedSections">,
   section?: string,
 ): boolean {
   const target = sectionKey(section);
-  if (from.chiefOfStaff === true && from.managesAllSections === true) return true;
   return target === sectionKey(from.section) || Boolean(from.chiefOfStaff &&
     Array.isArray(from.managedSections) && from.managedSections.some(value =>
       typeof value === "string" && sectionKey(value) === target));
+}
+
+/** A Chief the owner put in charge of every department there is (General and each one ticked under "Also in charge of"),
+ * which is why it also gets each new one (server/department-grants.ts). Never a Chief someone owns on a Team Cloud: it
+ * answers for its person's bots, not for departments. */
+export function inChargeOfEvery(
+  bot: Pick<RosterMember, "section" | "chiefOfStaff" | "managedSections" | "createdBy" | "reportsTo" | "defaultBot">,
+  departments: readonly string[],
+): boolean {
+  if (bot.chiefOfStaff !== true || botOwner(bot) || !Array.isArray(bot.managedSections) || !bot.managedSections.length) return false;
+  return ["", ...departments].every(name => hasTeamAuthority(bot, name));
 }
 
 /** What widens `bot`'s departments, so a refused Chief can tell the person the one step instead of guessing. Only a

@@ -96,11 +96,11 @@ export function PermissionsSection({
         </div>
         <ProposalStatus bot={bot} kind="chief" />
         {bot.chiefOfStaff && <ManagedTeamsSettings
-          key={bot.id + JSON.stringify(bot.managedSections ?? []) + String(bot.managesAllSections === true)}
+          key={bot.id + JSON.stringify(bot.managedSections ?? [])}
           name={bot.name} ownTeam={bot.section?.trim() || ""}
           teams={["", ...(state.sections ?? []), ...[...state.bots, ...state.groups].map(member => member.section?.trim() || "")]}
-          allowed={bot.managedSections ?? []} allowAll={bot.managesAllSections === true}
-          onSave={(managedSections, managesAllSections) => patch({ managedSections, managesAllSections, acknowledgePeerScope: true })}
+          allowed={bot.managedSections ?? []}
+          onSave={managedSections => patch({ managedSections, acknowledgePeerScope: true })}
         />}
         {bot.chiefOfStaff && <ProposalStatus bot={bot} kind="owner" />}
       </div>}

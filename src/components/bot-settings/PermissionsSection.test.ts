@@ -101,34 +101,6 @@ describe("on a team", () => {
   });
 });
 
-describe("departments a Chief is in charge of", () => {
-  const chief: Bot = { ...base, chiefOfStaff: true, managedSections: ["Sales"] };
-  const allBox = () => [...host.querySelectorAll("label")].find(label => label.textContent === t("botAccess.teams.all"))!.querySelector("input")!;
-  const saveTeams = () => [...host.querySelectorAll("button")].find(button => button.textContent === t("botAccess.teams.save"))!;
-
-  it("saves every department, including new ones, with the confirmation the server asks for", () => {
-    render(chief, false, [{ ...base, id: "seller", name: "Seller", section: "Sales" }]);
-    expect(allBox().checked).toBe(false);
-    expect(saveTeams().disabled).toBe(true);
-    flushSync(() => allBox().click());
-    expect(host.querySelector("fieldset")!.disabled).toBe(true);
-    flushSync(() => saveTeams().click());
-    expect(dispatch).toHaveBeenCalledExactlyOnceWith({
-      type: "updateBot", botId: "pepper", patch: { managedSections: ["Sales"], managesAllSections: true, acknowledgePeerScope: true },
-    });
-  });
-
-  it("shows a saved every-department choice and can turn it off", () => {
-    render({ ...chief, managesAllSections: true });
-    expect(allBox().checked).toBe(true);
-    flushSync(() => allBox().click());
-    flushSync(() => saveTeams().click());
-    expect(dispatch).toHaveBeenCalledExactlyOnceWith({
-      type: "updateBot", botId: "pepper", patch: { managedSections: ["Sales"], managesAllSections: false, acknowledgePeerScope: true },
-    });
-  });
-});
-
 describe("PermissionsSection parts", () => {
   it("leaves Chief of Staff out of a page that asks only for approvals", () => {
     const derived = {

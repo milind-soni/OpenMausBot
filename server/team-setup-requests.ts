@@ -46,7 +46,7 @@ export function teamSetupRevision(bot: BotRecord, fields?: TeamSetupFields): str
     return createHash("sha256").update(JSON.stringify({
       ...profileSnapshot(bot), section: section(bot.section), modelSelection: bot.modelSelection,
       hidden: Boolean(bot.hidden), chiefOfStaff: Boolean(bot.chiefOfStaff),
-      managedSections: bot.managedSections, managesAllSections: bot.managesAllSections,
+      managedSections: bot.managedSections,
       approvalMode: bot.approvalMode, autoApprove: bot.autoApprove, approvalGrant: bot.approvalGrant,
       receipt: bot.lastTeamSetupReceipt?.requestId,
     })).digest("hex");
