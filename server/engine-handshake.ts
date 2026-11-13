@@ -29,6 +29,7 @@ export function acpHandshake(command: string, args: readonly string[], env: Node
     const timer = setTimeout(() => finish("it did not answer the ACP handshake in time"), timeoutMs);
     timer.unref?.();
     child.once("error", (error) => finish(error.message));
+    child.stdin.on("error", (error) => finish(error.message));
     child.once("exit", (code) => {
       const said = stripVTControlCharacters(stderr).split(/\r?\n/u).map((line) => line.trim()).find(Boolean);
       finish(said ? said.slice(0, 400) : `it stopped with exit code ${code} before the ACP handshake`);
