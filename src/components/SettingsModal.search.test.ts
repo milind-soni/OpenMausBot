@@ -99,7 +99,7 @@ describe("Settings search in Simple mode", () => {
 
   it("finds the server pairing card from the phrase \"server pairing\"", () => {
     type("server pairing");
-    expect(host.querySelector('[data-settings-page="phone"]')).not.toBeNull();
+    expect(document.querySelector('[data-settings-hit="page:phone"]')).not.toBeNull();
   });
 
   it("puts the nav back when the search is cleared", () => {

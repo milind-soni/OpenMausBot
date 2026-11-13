@@ -51,6 +51,8 @@ const renderCard = async (props: Parameters<typeof ServerPairingCard>[0] = {}) =
 };
 
 const createButton = () => host.querySelector<HTMLButtonElement>("[data-phone-pairing-action]")!;
+// The offer opens in a modal dialog, which Layer portals onto document.body.
+const offerCode = () => document.querySelector("[data-pairing-code]")?.textContent;
 const pairingCall = () => fixture.api.mock.calls.find(([path]) => path === "/api/auth/pairing");
 const pairingScopes = () => {
   const [, init] = pairingCall() ?? [];
@@ -58,7 +60,7 @@ const pairingScopes = () => {
 };
 
 const device = { id: "d1", label: "MacBook", scopes: ["admin"], lastSeenAt: Date.now(), expiresAt: Date.now() + 3_600_000 };
-const signOutButton = () => [...host.querySelectorAll("button")].find((button) => button.textContent?.includes("Sign out")) as HTMLButtonElement | undefined;
+const signOutButton = () => host.querySelector<HTMLButtonElement>("button[data-danger]") ?? undefined;
 const installSessionsMock = (failOnCall: number | null) => {
   let sessionsCalls = 0;
   fixture.api.mockImplementation(async (path: string, init?: { signal?: AbortSignal }) => {
@@ -178,7 +180,7 @@ describe("ServerPairingCard waits for the pairing configuration", () => {
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 0; });
     try {
       await renderCard({ focusRequest: 1 });
-      const scope = host.querySelector<HTMLInputElement>('input[name="server-pairing-scope"]');
+      const scope = host.querySelector<HTMLSelectElement>("select");
       expect(scope).not.toBeNull();
       await act(async () => { scope!.focus(); });
       expect(document.activeElement).toBe(scope);
@@ -200,7 +202,7 @@ describe("ServerPairingCard waits for the pairing configuration", () => {
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 0; });
     try {
       await renderCard({ focusRequest: 1 });
-      const scope = host.querySelector<HTMLInputElement>('input[name="server-pairing-scope"]');
+      const scope = host.querySelector<HTMLSelectElement>("select");
       expect(scope).not.toBeNull();
       await act(async () => { scope!.focus(); });
       expect(document.activeElement).toBe(scope);
@@ -304,7 +306,7 @@ describe("ServerPairingCard waits for the pairing configuration", () => {
     await act(async () => { createButton().click(); });
     await flush();
     expect(pairingScopes()).toEqual(["admin", "client"]);
-    expect(host.textContent).toContain("ABCD-EFGH-IJKL");
+    expect(offerCode()).toBe("ABCD-EFGH-IJKL");
   });
 
   it("creates a client-scoped invitation when the client scope is picked", async () => {
@@ -314,13 +316,16 @@ describe("ServerPairingCard waits for the pairing configuration", () => {
       await new Promise((r) => setTimeout(r, 0));
     });
     await flush();
-    const client = [...host.querySelectorAll('input[name="server-pairing-scope"]')].find((el) => el.closest("label")?.textContent?.includes("Chat and approvals only")) as HTMLInputElement;
-    expect(client).not.toBeUndefined();
-    await act(async () => { client.click(); });
+    const scope = host.querySelector<HTMLSelectElement>("select");
+    expect(scope).not.toBeNull();
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(scope, "client");
+      scope!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
     await act(async () => { createButton().click(); });
     await flush();
     expect(pairingScopes()).toEqual(["client"]);
-    expect(host.textContent).toContain("ABCD-EFGH-IJKL");
+    expect(offerCode()).toBe("ABCD-EFGH-IJKL");
   });
 
   it("keeps a config error visible when a device signs out", async () => {
@@ -351,7 +356,7 @@ describe("ServerPairingCard waits for the pairing configuration", () => {
     expect(createButton().disabled).toBe(false);
     await act(async () => { createButton().click(); });
     await flush();
-    expect(host.textContent).toContain("ABCD-EFGH-IJKL");
+    expect(offerCode()).toBe("ABCD-EFGH-IJKL");
     expect(host.textContent).toContain("sessions down");
   });
 
@@ -389,6 +394,6 @@ describe("ServerPairingCard waits for the pairing configuration", () => {
     await act(async () => { createButton().click(); });
     await flush();
     expect(host.textContent).not.toContain("create down");
-    expect(host.textContent).toContain("ABCD-EFGH-IJKL");
+    expect(offerCode()).toBe("ABCD-EFGH-IJKL");
   });
 });
