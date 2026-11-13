@@ -6,7 +6,7 @@
 //
 // Needs a container runtime.
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, writeSync } from "node:fs";
 import path from "node:path";
 
 import { packageInstallCommand } from "../electron/package-install-command.mjs";
@@ -40,22 +40,38 @@ function inContainer(script, { expectFailure = false } = {}) {
         IMAGE,
         "/bin/bash", "-c", script,
       ],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15 * 60 * 1000 },
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 },
     );
     if (expectFailure) fail("the command was expected to fail but succeeded");
     return output;
   } catch (error) {
     if (expectFailure) return String(error.stdout ?? "") + String(error.stderr ?? "");
-    console.error(String(error.stdout ?? ""));
-    console.error(String(error.stderr ?? ""));
-    throw error;
+    // Only the tails: apt's full output runs past 100 KB, and dumping it whole
+    // (or throwing the error that carries it) buried dpkg's actual reason.
+    // writeSync, because process.exit can drop a pending write to a pipe.
+    writeSync(2, `${tail(error.stdout)}\n${tail(error.stderr)}\n`);
+    fail(`the container exited with ${error.status ?? error.signal ?? error.code}`);
   }
 }
+
+function tail(text, lines = 200) {
+  return String(text ?? "").trimEnd().split("\n").slice(-lines).join("\n");
+}
+
+// On any failure, print dpkg's own record and the maintainer scripts' output
+// (apt keeps both in its logs) last, where the tail above will show them.
+const diagnostics = [
+  "trap 'status=$?; if [ \"$status\" -ne 0 ]; then",
+  '  echo "--- /var/log/dpkg.log (tail) ---"; tail -n 40 /var/log/dpkg.log || true',
+  '  echo "--- /var/log/apt/term.log (tail) ---"; tail -n 80 /var/log/apt/term.log || true',
+  "fi; exit \"$status\"' EXIT",
+].join("\n");
 
 // Everything before the command under test is setup; `set -e` keeps a failed
 // setup from being read as a failed install.
 const prepare = [
   "set -e",
+  diagnostics,
   "apt-get update -qq",
   "apt-get install -y -qq sudo >/dev/null",
   `mkdir -p "$(dirname "${staged}")"`,
