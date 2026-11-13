@@ -12,7 +12,7 @@ Skills are instructions, not permissions. A skill can tell a bot *how* to do som
 
 Only the skills that are switched on for a bot take part. Each turn, the bot gets an index of them — name, one-line description, and the path of the file — and reads the full `SKILL.md` with its file tools when a task actually matches. That keeps the prompt small: a bot never pays for the body of a skill it doesn't use.
 
-Skills are reference material, and the bot is told so explicitly: a skill cannot override the bot's instructions or your own message.
+Skills are reference material, and the bot is told to treat them that way: it is instructed not to let a skill override its instructions or your own message. That is an instruction to the model, not a check on the text — nothing scans a skill for a rule that conflicts with the bot's own.
 
 ## Where to find them
 
@@ -64,5 +64,5 @@ A learned skill belongs to one bot until you share it. **Share learned skills wi
 Imported and learned skills are text written somewhere else, so treat them the way you would treat a script from a stranger:
 
 - A skill imported into a bot's profile arrives switched off until you switch it on. A library skill is switched on once, in the library, and then follows its assignments; until you switch it on there, assigning it changes nothing.
-- A skill whose text pipes a download into a shell (`curl | sh`), carries a long base64-looking blob, or contains invisible Unicode characters is flagged with a warning when it arrives. The warning is advice, not a block: it never stops a skill from being switched on, so read the text before you do.
+- The text is scanned when it arrives for a few known patterns: a download piped into a shell, a long base64-looking blob, and invisible Unicode characters. A match comes with a warning. The scanner is a short list of patterns, not a safety check — a command it does not recognise, such as `curl … | /bin/sh`, or a character outside its Unicode range, passes unflagged — and the warning is advice, not a block: it never stops a skill from being switched on. Read the text before you do.
 - Read the `SKILL.md` before switching it on. The bot follows it, and a skill can be just as wrong as any other instructions.
