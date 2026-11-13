@@ -874,6 +874,7 @@ describe("Antigravity driver over shared ACP", () => {
         }),
         FAKE_ACP_MODES: "default,yolo,auto_edit",
         FAKE_ACP_DUMP: dump,
+        FAKE_ACP_DUMP_PROMPT: "1",
         // Inherited temp folders: replaced on Windows, passed through elsewhere.
         TEMP: fake.directory,
         TMP: fake.directory,
@@ -882,9 +883,15 @@ describe("Antigravity driver over shared ACP", () => {
       config: { cli: fake.executable, fullAuto: false },
     });
     recorder = recordEvents(instance.adapter);
+    const skillDirectory = join(DATA_DIR, "workspaces", "skill-bot", "skills", ".revisions", "a".repeat(64));
+    mkdirSync(join(skillDirectory, "references"), { recursive: true });
+    const skillFile = join(skillDirectory, "SKILL.md");
+    writeFileSync(skillFile, "Read references/guide.md.");
+    writeFileSync(join(skillDirectory, "references", "guide.md"), "Reviewed instructions");
     const { turnId } = await instance.adapter.sendTurn({
       threadId: "thread-antigravity",
-      text: "hello",
+      text: "Read " + JSON.stringify(skillFile),
+      skillFiles: [skillFile],
       approvalMode,
       resumeCursor: "fake-acp-session",
       // Existing bots can have the pre-variant fallback ID saved. The official
@@ -899,6 +906,11 @@ describe("Antigravity driver over shared ACP", () => {
     const events = recorder.events.filter((event) => event.turnId === turnId);
     expect(events.some((event) => event.type === "item.completed" && event.itemType === "assistant_text")).toBe(true);
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+    const prompt = JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8"));
+    const stagedFile = JSON.parse(prompt[0].text.slice(5)) as string;
+    expect(stagedFile.startsWith(join(fake.directory, ".omb-skills"))).toBe(true);
+    expect(readFileSync(stagedFile, "utf8")).toBe("Read references/guide.md.");
+    expect(readFileSync(join(dirname(stagedFile), "references", "guide.md"), "utf8")).toBe("Reviewed instructions");
     const dumpState = JSON.parse(readFileSync(dump, "utf8"));
     expect(dumpState.argv).toEqual(process.platform === "linux" ? ["--uid="] : []);
     expect(dumpState.env.GEMINI_HOME).toBe(antigravityProfileDirectory(instanceId));

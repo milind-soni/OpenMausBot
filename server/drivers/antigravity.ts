@@ -1,6 +1,8 @@
 // Google Antigravity through its official ACP server: managed runtime, isolated Google profile,
 // model/mode configuration and OAuth.
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
+import { homedir } from "node:os";
+import { stageAntigravitySkills } from "./antigravity-skills.ts";
 import { antigravityAccount } from "./antigravity-account.ts";
 import type {
   DriverCreateInput,
@@ -169,6 +171,10 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
     };
     return {
       ...base,
+      adapter: {
+        ...base.adapter,
+        sendTurn: (turn) => base.adapter.sendTurn(stageAntigravitySkills(turn, turn.cwd ?? input.config.workspace ?? homedir())),
+      },
       get models() {
         return base.models;
       },

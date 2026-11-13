@@ -268,6 +268,13 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       return listedImports(bot, importsFor(bot, conversationSkills(bot, threadId), instance));
     },
 
+    turnSkillFiles(bot: BotRecord, threadId: string, instance?: TurnInstance): string[] {
+      const assigned = conversationSkills(bot, threadId);
+      const names = resolveBotSkills(bot.id, assigned).filter((skill) => skill.enabled).map((skill) => skill.name);
+      return [...enabledSkillFiles(bot.id, names, assigned).values(),
+        ...importsFor(bot, assigned, instance).map((skill) => skill.file)];
+    },
+
     /** Each `/name` called for one of the bot's own, library or imported skills, or one its engine loads by itself. `lines`
      * are the turn's own lines when it is a person's turn: only words they typed can call a skill past the start of the text. */
     expandSkillCommand(bot: BotRecord, threadId: string, text: string, instance?: TurnInstance, lines: ReadonlyArray<{ sendId?: string; text?: string }> = [], ownStart = false): string {

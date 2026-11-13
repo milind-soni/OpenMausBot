@@ -60,6 +60,14 @@ describe("parseSkillCommand", () => {
 });
 
 describe("words a person typed", () => {
+  it("offers only enabled skill files for driver staging", () => {
+    const bot = botWith("standup");
+    const record = { id: bot } as BotRecord;
+    expect(host.turnSkillFiles(record, "thread")).toEqual([enabledSkillFile(bot, "standup")]);
+    expect("error" in setSkillEnabled(bot, "standup", false)).toBe(false);
+    expect(host.turnSkillFiles(record, "thread")).toEqual([]);
+  });
+
   it("points the engine at the enabled skill's reviewed SKILL.md", () => {
     const bot = botWith("standup");
     const file = join(workspaceDir(bot), "skills", "standup", "SKILL.md");
