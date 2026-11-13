@@ -2,6 +2,7 @@ import { PAGE_SHARE_NOTICE } from "@/lib/previewSharing";
 import { useEffect, useRef, useState } from "react";
 import { Camera, RefreshCw, Send, X } from "lucide-react";
 import { useStore } from "@/state/store";
+import { useDialogFocus } from "@/lib/dialogFocus";
 
 export interface SharePreviewTarget {
   kind: "bot" | "group";
@@ -25,10 +26,8 @@ export interface SharePreviewModalProps {
   selectedSizesCount: number;
   defaultScope?: "current" | "all";
   onSubmit: (request: SharePreviewRequest) => Promise<void>;
+  triggerRef?: React.RefObject<HTMLElement | null> | HTMLElement | null;
 }
-
-const FOCUSABLE_SELECTOR =
-  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function SharePreviewModal({
   open,
@@ -39,6 +38,7 @@ export function SharePreviewModal({
   selectedSizesCount,
   defaultScope = "current",
   onSubmit,
+  triggerRef,
 }: SharePreviewModalProps) {
   const { state } = useStore();
   const visibleBots = state.bots.filter((b) => !b.hidden);
@@ -53,51 +53,15 @@ export function SharePreviewModal({
 
   const formRef = useRef<HTMLFormElement | null>(null);
   const targetSelectRef = useRef<HTMLSelectElement | null>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
 
   // Focus entry, focus trap, Escape dismissal, and focus return on close
-  useEffect(() => {
-    if (!open) return;
-    const previousFocus = document.activeElement as HTMLElement | null;
-    targetSelectRef.current?.focus();
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        onCloseRef.current();
-        return;
-      }
-      if (e.key === "Tab" && formRef.current) {
-        const focusables = Array.from(
-          formRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-        );
-        if (focusables.length === 0) return;
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        const active = document.activeElement as HTMLElement | null;
-        if (e.shiftKey) {
-          if (!active || active === first || !formRef.current.contains(active)) {
-            e.preventDefault();
-            last.focus();
-          }
-        } else if (!active || active === last || !formRef.current.contains(active)) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown, true);
-      if (previousFocus && typeof previousFocus.focus === "function" && previousFocus.isConnected) {
-        previousFocus.focus();
-      }
-    };
-  }, [open]);
+  useDialogFocus({
+    open,
+    containerRef: formRef,
+    entryFocusRef: targetSelectRef,
+    triggerRef,
+    onClose,
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -289,7 +253,6 @@ export function SharePreviewModal({
             </label>
             <select
               ref={targetSelectRef}
-              autoFocus
               id="share-preview-target"
               value={selectedTargetKey}
               onChange={(e) => setSelectedTargetKey(e.target.value)}

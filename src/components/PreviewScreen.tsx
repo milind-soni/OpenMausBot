@@ -89,6 +89,20 @@ export default function PreviewScreen() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [filePickerOpen, setFilePickerOpen] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  const filePickerTriggerRef = useRef<HTMLElement | null>(null);
+  const shareTriggerRef = useRef<HTMLElement | null>(null);
+
+  const openFilePicker = (trigger?: HTMLElement | null) => {
+    filePickerTriggerRef.current =
+      trigger || (typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null);
+    setFilePickerOpen(true);
+  };
+
+  const openShareModal = (trigger?: HTMLElement | null) => {
+    shareTriggerRef.current =
+      trigger || (typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null);
+    setShareModalOpen(true);
+  };
   const [shareDefaultScope, setShareDefaultScope] = useState<"current" | "all">("current");
   const [shareOverrideArtboard, setShareOverrideArtboard] = useState<CanvasArtboardBox | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -448,9 +462,9 @@ export default function PreviewScreen() {
             </button>
             <button
               type="button"
-              onClick={() => {
+              onClick={(e) => {
                 setSourceKindTab("file");
-                setFilePickerOpen(true);
+                openFilePicker(e.currentTarget);
               }}
               className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[11.5px] font-medium transition-colors ${
                 sourceKindTab === "file"
@@ -540,7 +554,7 @@ export default function PreviewScreen() {
 
           <button
             type="button"
-            onClick={() => setFilePickerOpen(true)}
+            onClick={(e) => openFilePicker(e.currentTarget)}
             aria-label="Choose a file from a project"
             title="Choose a file from a project"
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-hairline/70 bg-inset text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
@@ -620,10 +634,10 @@ export default function PreviewScreen() {
           <button
             type="button"
             disabled={!activeSource}
-            onClick={() => {
+            onClick={(e) => {
               setShareOverrideArtboard(null);
               setShareDefaultScope(mode === "canvas" && selectedSizeIds.length > 1 ? "all" : "current");
-              setShareModalOpen(true);
+              openShareModal(e.currentTarget);
             }}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-[12px] font-medium text-white transition-colors hover:brightness-110 disabled:opacity-45"
           >
@@ -894,7 +908,7 @@ export default function PreviewScreen() {
               setInputUrl(presetUrl);
               handleNavigate(presetUrl);
             }}
-            onOpenFilePicker={() => setFilePickerOpen(true)}
+            onOpenFilePicker={() => openFilePicker()}
             onStatusChange={setFrameStatus}
             onHistoryStateChange={setHistoryNav}
             frameTitle={activePreset.label}
@@ -918,7 +932,7 @@ export default function PreviewScreen() {
           onShareArtboard={(artboard) => {
             setShareOverrideArtboard(artboard);
             setShareDefaultScope("current");
-            setShareModalOpen(true);
+            openShareModal();
           }}
           onStatusChange={setFrameStatus}
           pendingConfirmUrl={pendingLocalUrl}
@@ -930,7 +944,7 @@ export default function PreviewScreen() {
             setInputUrl(presetUrl);
             handleNavigate(presetUrl);
           }}
-          onOpenFilePicker={() => setFilePickerOpen(true)}
+          onOpenFilePicker={() => openFilePicker()}
           scrollSync={scrollSync}
           onToggleScrollSync={() => setScrollSync((v) => !v)}
           frameRefsMap={canvasFrameRefs}
@@ -939,6 +953,7 @@ export default function PreviewScreen() {
 
       <PreviewFilePicker
         open={filePickerOpen}
+        triggerRef={filePickerTriggerRef}
         onClose={() => setFilePickerOpen(false)}
         onSelectFile={handleSelectProjectFile}
         initialProjectId={activeSource?.kind === "file" ? activeSource.projectId : undefined}
@@ -946,6 +961,7 @@ export default function PreviewScreen() {
 
       <SharePreviewModal
         open={shareModalOpen}
+        triggerRef={shareTriggerRef}
         linkOnly={sharesLinkOnly(activeSource, Boolean(window.gbs))}
         onClose={() => {
           setShareModalOpen(false);

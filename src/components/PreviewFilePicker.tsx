@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FileCode2, FileImage, FileText, FolderOpen, RefreshCw, Search, X } from "lucide-react";
 import type { PreviewFileKind, PreviewFileSource } from "@/lib/mobilePreviewUrl";
+import { useDialogFocus } from "@/lib/dialogFocus";
 
 interface RegisteredProjectSummary {
   id: string;
@@ -22,10 +23,8 @@ export interface PreviewFilePickerProps {
   onClose: () => void;
   onSelectFile: (source: PreviewFileSource) => void;
   initialProjectId?: string;
+  triggerRef?: React.RefObject<HTMLElement | null> | HTMLElement | null;
 }
-
-const FOCUSABLE_SELECTOR =
-  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function usePreviewAutoRefreshWatcher(
   clientId: string,
@@ -84,6 +83,7 @@ export function PreviewFilePicker({
   onClose,
   onSelectFile,
   initialProjectId,
+  triggerRef,
 }: PreviewFilePickerProps) {
   const [projects, setProjects] = useState<RegisteredProjectSummary[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>(initialProjectId ?? "");
@@ -95,51 +95,15 @@ export function PreviewFilePicker({
 
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
 
   // Focus entry, focus trap, Escape dismissal, and focus return on close
-  useEffect(() => {
-    if (!open) return;
-    const previousFocus = document.activeElement as HTMLElement | null;
-    searchInputRef.current?.focus();
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        onCloseRef.current();
-        return;
-      }
-      if (e.key === "Tab" && dialogRef.current) {
-        const focusables = Array.from(
-          dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-        );
-        if (focusables.length === 0) return;
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        const active = document.activeElement as HTMLElement | null;
-        if (e.shiftKey) {
-          if (!active || active === first || !dialogRef.current.contains(active)) {
-            e.preventDefault();
-            last.focus();
-          }
-        } else if (!active || active === last || !dialogRef.current.contains(active)) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown, true);
-      if (previousFocus && typeof previousFocus.focus === "function" && previousFocus.isConnected) {
-        previousFocus.focus();
-      }
-    };
-  }, [open]);
+  useDialogFocus({
+    open,
+    containerRef: dialogRef,
+    entryFocusRef: searchInputRef,
+    triggerRef,
+    onClose,
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -266,7 +230,6 @@ export function PreviewFilePicker({
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-secondary" />
             <input
               ref={searchInputRef}
-              autoFocus
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
