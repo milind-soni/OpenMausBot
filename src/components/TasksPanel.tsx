@@ -89,8 +89,8 @@ export function TasksPanel({
 
   return (
     <aside className={cn("flex h-full w-[320px] shrink-0 flex-col border-l border-hairline/40 bg-panel", className)} aria-label="Tasks">
-      <div className="shrink-0 border-b border-hairline/40">
-        <div className={cn("flex items-center justify-between px-4", SHARED_HEADER_HEIGHT_CLASS)}>
+      <div className="shrink-0">
+        <div className={cn("flex items-center justify-between px-4 border-b border-hairline/40", SHARED_HEADER_HEIGHT_CLASS)}>
           <div className="flex items-center gap-2 text-[14px] font-semibold text-ink">
             <ClipboardList size={16} className="text-accent" /> Tasks
             {tasks.length > 0 && (
@@ -103,7 +103,7 @@ export function TasksPanel({
             </button>
           )}
         </div>
-        {headerExtra && <div className="px-4 pb-3">{headerExtra}</div>}
+        {headerExtra && <div className="px-4 pb-3 border-b border-hairline/40">{headerExtra}</div>}
       </div>
       <div className="flex-1 overflow-y-auto p-3">
         {tasks.length === 0 ? (

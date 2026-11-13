@@ -13,7 +13,6 @@ import {
   Copy,
   Loader2,
   Monitor,
-  MoreHorizontal,
   Pencil,
   RefreshCw,
   Smartphone,
@@ -35,8 +34,8 @@ import { botIntro } from "@/lib/botIntro";
 import { AttachmentList } from "./AttachmentViewer";
 import { MobilePreviewPanel } from "./MobilePreviewPanel";
 import { useMediaQuery } from "@/lib/useMediaQuery";
-import { useContainerWidth } from "@/lib/useContainerWidth";
-import { resolveHeaderCollapse } from "@/lib/headerCollapse";
+import { useHeaderCollapse } from "@/lib/useHeaderCollapse";
+import { HeaderMoreMenu } from "./HeaderMoreMenu";
 import { SHARED_HEADER_HEIGHT_CLASS } from "@/lib/layoutTokens";
 import type { Attachment } from "@/state/store";
 
@@ -633,8 +632,13 @@ export function ChatView({ bot }: { bot: Bot }) {
   const togglePreview = useCallback(() => {
     setMobilePreviewOpen((open) => {
       const next = !open;
-      if (next && !isLargeScreen) {
-        setLastRequestedDrawer("preview");
+      if (!isLargeScreen) {
+        if (next) {
+          setLastRequestedDrawer("preview");
+          setTasksOpen(false);
+        } else {
+          setTasksOpen(false);
+        }
       }
       return next;
     });
@@ -643,8 +647,13 @@ export function ChatView({ bot }: { bot: Bot }) {
   const toggleTasks = useCallback(() => {
     setTasksOpen((open) => {
       const next = !open;
-      if (next && !isLargeScreen) {
-        setLastRequestedDrawer("tasks");
+      if (!isLargeScreen) {
+        if (next) {
+          setLastRequestedDrawer("tasks");
+          setMobilePreviewOpen(false);
+        } else {
+          setMobilePreviewOpen(false);
+        }
       }
       return next;
     });
@@ -658,29 +667,39 @@ export function ChatView({ bot }: { bot: Bot }) {
     return null;
   }, [isLargeScreen, mobilePreviewOpen, tasksOpen, lastRequestedDrawer]);
 
-  const headerRef = useRef<HTMLDivElement>(null);
-  const headerWidth = useContainerWidth(headerRef);
-  const collapse = resolveHeaderCollapse(headerWidth);
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const moreMenuRef = useRef<HTMLDivElement>(null);
-
+  // Escape key closes drawers at narrow viewports (<1180px)
   useEffect(() => {
-    if (!moreMenuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (!moreMenuRef.current?.contains(e.target as Node)) {
-        setMoreMenuOpen(false);
+    if (isLargeScreen) return;
+    if (!mobilePreviewOpen && !tasksOpen) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) {
+        setMobilePreviewOpen(false);
+        setTasksOpen(false);
       }
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMoreMenuOpen(false);
-    };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [moreMenuOpen]);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isLargeScreen, mobilePreviewOpen, tasksOpen]);
+
+  const estimatedInitialWidth = useMemo(() => {
+    if (typeof window === "undefined") return 1024;
+    const sidebarWidth = 320;
+    const previewWidth = isDualPanelWide && mobilePreviewOpen ? 380 : 0;
+    const tasksWidth = isDualPanelWide && tasksOpen ? 320 : 0;
+    return window.innerWidth - sidebarWidth - previewWidth - tasksWidth;
+  }, [isDualPanelWide, mobilePreviewOpen, tasksOpen]);
+
+  const headerRef = useRef<HTMLDivElement>(null);
+  const nameRef = useRef<HTMLButtonElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+
+  const collapse = useHeaderCollapse({
+    headerRef,
+    nameRef,
+    actionsRef,
+    estimatedInitialWidth,
+  });
 
   useEffect(() => setFollow(true), [bot.id]);
   useEffect(() => localStorage.setItem("chat-mobile-preview-open", String(mobilePreviewOpen)), [mobilePreviewOpen]);
@@ -721,15 +740,16 @@ export function ChatView({ bot }: { bot: Bot }) {
       <div
         ref={headerRef}
         className={cn(
-          "flex shrink-0 items-center justify-between gap-2 px-3.5 min-[1600px]:px-5 border-b border-transparent min-w-0 max-w-full overflow-hidden",
+          "flex shrink-0 items-center justify-between gap-2 px-3.5 min-[1600px]:px-5 border-b border-transparent min-w-0 max-w-full",
           SHARED_HEADER_HEIGHT_CLASS,
           isWin && "pr-[148px]",
         )}
         style={drag}
       >
         <button
+          ref={nameRef}
           onClick={() => dispatch({ type: "toggleSettings" })}
-          className="flex min-w-0 shrink-0 items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-raised/50"
+          className="flex min-w-0 shrink items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-raised/50"
           title="Bot settings"
           style={noDrag}
         >
@@ -743,7 +763,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           <span className="max-w-[10rem] truncate text-[15px] font-semibold text-ink">{bot.name}</span>
           {bot.busy && <Loader2 size={14} className="shrink-0 animate-spin text-ink-secondary" />}
         </button>
-        <div className="flex shrink-0 items-center gap-1.5" style={noDrag}>
+        <div ref={actionsRef} className="flex shrink-0 items-center gap-1.5" style={noDrag}>
           {bot.busy && (
             <button
               onClick={() => dispatch({ type: "interrupt", botId: bot.id })}
@@ -789,55 +809,22 @@ export function ChatView({ bot }: { bot: Bot }) {
           )}
 
           {collapse.collapseSecondaryToMenu && (
-            <div className="relative" ref={moreMenuRef}>
-              <button
-                type="button"
-                onClick={() => setMoreMenuOpen((o) => !o)}
-                aria-label="More actions"
-                aria-expanded={moreMenuOpen}
-                title="More actions"
-                className={cn(
-                  "rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink transition-colors",
-                  moreMenuOpen && "bg-raised text-ink",
-                )}
-              >
-                <MoreHorizontal size={16} />
-              </button>
-
-              {moreMenuOpen && (
-                <div
-                  role="menu"
-                  aria-label="More actions"
-                  className="absolute right-0 top-full z-40 mt-1 w-44 overflow-hidden rounded-xl border border-hairline/60 bg-panel p-1.5 shadow-xl"
-                >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMoreMenuOpen(false);
-                      dispatch({ type: "openSchedule", target: { botId: bot.id } });
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-ink transition-colors hover:bg-raised-hover"
-                  >
-                    <span>⏰</span>
-                    <span>Schedule run…</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMoreMenuOpen(false);
-                      dispatch({ type: "toggleComputer" });
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-ink transition-colors hover:bg-raised-hover"
-                  >
-                    <Monitor size={14} className="text-ink-secondary" />
-                    <span>Bot's computer</span>
-                  </button>
-                </div>
-              )}
-            </div>
+            <HeaderMoreMenu
+              items={[
+                {
+                  id: "schedule",
+                  label: "Schedule run…",
+                  icon: "⏰",
+                  onClick: () => dispatch({ type: "openSchedule", target: { botId: bot.id } }),
+                },
+                {
+                  id: "computer",
+                  label: "Bot's computer",
+                  icon: <Monitor size={14} />,
+                  onClick: () => dispatch({ type: "toggleComputer" }),
+                },
+              ]}
+            />
           )}
 
           <button
@@ -847,7 +834,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             aria-pressed={mobilePreviewOpen}
             title={mobilePreviewOpen ? "Hide mobile preview" : "Show mobile preview"}
             className={cn(
-              "relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px]",
+              "relative flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px]",
               mobilePreviewOpen ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
             )}
           >
@@ -862,7 +849,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             aria-pressed={tasksOpen}
             title={tasksOpen ? "Hide tasks" : "Show tasks"}
             className={cn(
-              "relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px]",
+              "relative flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px]",
               tasksOpen ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
             )}
           >

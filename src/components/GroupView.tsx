@@ -6,7 +6,7 @@ import { UsageRings } from "./UsageRings";
 // bot messages carry a small maus + name cluster label. Bots reply only
 // when @mentioned (the composer's @ picker knows the members).
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, ArrowDown, ClipboardList, MoreHorizontal, Pin, Smartphone } from "lucide-react";
+import { Activity, ArrowDown, ClipboardList, Pin, Smartphone } from "lucide-react";
 import { useStore, useStreaming, formatTime, type Attachment, type Bot, type Group } from "@/state/store";
 import { MausAvatar } from "./Avatar";
 import { normalizeState } from "@/lib/mascot";
@@ -22,8 +22,8 @@ import { TasksPanel } from "./TasksPanel";
 import { OptionCard } from "./OptionCard";
 import { AttachmentList } from "./AttachmentViewer";
 import { useMediaQuery } from "@/lib/useMediaQuery";
-import { useContainerWidth } from "@/lib/useContainerWidth";
-import { resolveHeaderCollapse } from "@/lib/headerCollapse";
+import { useHeaderCollapse } from "@/lib/useHeaderCollapse";
+import { HeaderMoreMenu } from "./HeaderMoreMenu";
 import { SHARED_HEADER_HEIGHT_CLASS } from "@/lib/layoutTokens";
 
 function dayLabel(at: number): string {
@@ -163,8 +163,13 @@ export function GroupView({ group }: { group: Group }) {
   const togglePreview = useCallback(() => {
     setMobilePreviewOpen((open) => {
       const next = !open;
-      if (next && !isLargeScreen) {
-        setLastRequestedDrawer("preview");
+      if (!isLargeScreen) {
+        if (next) {
+          setLastRequestedDrawer("preview");
+          setTasksOpen(false);
+        } else {
+          setTasksOpen(false);
+        }
       }
       return next;
     });
@@ -173,8 +178,13 @@ export function GroupView({ group }: { group: Group }) {
   const toggleTasks = useCallback(() => {
     setTasksOpen((open) => {
       const next = !open;
-      if (next && !isLargeScreen) {
-        setLastRequestedDrawer("tasks");
+      if (!isLargeScreen) {
+        if (next) {
+          setLastRequestedDrawer("tasks");
+          setMobilePreviewOpen(false);
+        } else {
+          setMobilePreviewOpen(false);
+        }
       }
       return next;
     });
@@ -188,29 +198,39 @@ export function GroupView({ group }: { group: Group }) {
     return null;
   }, [isLargeScreen, mobilePreviewOpen, tasksOpen, lastRequestedDrawer]);
 
-  const headerRef = useRef<HTMLDivElement>(null);
-  const headerWidth = useContainerWidth(headerRef);
-  const collapse = resolveHeaderCollapse(headerWidth);
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const moreMenuRef = useRef<HTMLDivElement>(null);
-
+  // Escape key closes drawers at narrow viewports (<1180px)
   useEffect(() => {
-    if (!moreMenuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (!moreMenuRef.current?.contains(e.target as Node)) {
-        setMoreMenuOpen(false);
+    if (isLargeScreen) return;
+    if (!mobilePreviewOpen && !tasksOpen) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) {
+        setMobilePreviewOpen(false);
+        setTasksOpen(false);
       }
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMoreMenuOpen(false);
-    };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [moreMenuOpen]);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isLargeScreen, mobilePreviewOpen, tasksOpen]);
+
+  const estimatedInitialWidth = useMemo(() => {
+    if (typeof window === "undefined") return 1024;
+    const sidebarWidth = 320;
+    const previewWidth = isDualPanelWide && mobilePreviewOpen ? 380 : 0;
+    const tasksWidth = isDualPanelWide && tasksOpen ? 320 : 0;
+    return window.innerWidth - sidebarWidth - previewWidth - tasksWidth;
+  }, [isDualPanelWide, mobilePreviewOpen, tasksOpen]);
+
+  const headerRef = useRef<HTMLDivElement>(null);
+  const nameRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+
+  const collapse = useHeaderCollapse({
+    headerRef,
+    nameRef,
+    actionsRef,
+    estimatedInitialWidth,
+  });
 
   const members = useMemo(
     () => group.memberIds.map((id) => state.bots.find((b) => b.id === id)).filter((b): b is Bot => Boolean(b)),
@@ -277,17 +297,17 @@ export function GroupView({ group }: { group: Group }) {
       <div
         ref={headerRef}
         className={cn(
-          "flex shrink-0 items-center justify-between gap-2 px-3.5 min-[1600px]:px-5 border-b border-transparent min-w-0 max-w-full overflow-hidden",
+          "flex shrink-0 items-center justify-between gap-2 px-3.5 min-[1600px]:px-5 border-b border-transparent min-w-0 max-w-full",
           SHARED_HEADER_HEIGHT_CLASS,
           isWin && "pr-[148px]",
         )}
         style={drag}
       >
-        <span className="max-w-[10rem] shrink-0 truncate text-[15px] font-semibold text-ink">{group.name}</span>
-        <div className="flex shrink-0 items-center gap-1.5" style={noDrag}>
+        <div ref={nameRef} className="flex min-w-0 shrink items-center gap-2">
+          <span className="max-w-[10rem] truncate text-[15px] font-semibold text-ink">{group.name}</span>
           {/* Member avatars: when tight and more than 2 members, show first 2 plus a count badge */}
           {collapse.isTight && members.length > 2 ? (
-            <div className="flex items-center -space-x-1.5 pr-1">
+            <div className="flex items-center -space-x-1.5 pr-1 shrink-0">
               {members.slice(0, 2).map((b) => (
                 <span key={b.id} title={`${b.name}${group.busyBotId === b.id ? " — working…" : ""}`}>
                   <MausAvatar
@@ -304,7 +324,7 @@ export function GroupView({ group }: { group: Group }) {
               </span>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 shrink-0">
               {members.map((b) => (
                 <span key={b.id} title={`${b.name}${group.busyBotId === b.id ? " — working…" : ""}`}>
                   <MausAvatar
@@ -318,6 +338,8 @@ export function GroupView({ group }: { group: Group }) {
               ))}
             </div>
           )}
+        </div>
+        <div ref={actionsRef} className="flex shrink-0 items-center gap-1.5" style={noDrag}>
           {!collapse.collapseSecondaryToMenu && (
             <button
               type="button"
@@ -339,7 +361,7 @@ export function GroupView({ group }: { group: Group }) {
               aria-pressed={activityOpen}
               title={activityOpen ? "Hide room activity" : "Show room activity"}
               className={cn(
-                "relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px]",
+                "relative flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px]",
                 activityOpen ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
               )}
             >
@@ -354,62 +376,22 @@ export function GroupView({ group }: { group: Group }) {
           )}
 
           {collapse.collapseSecondaryToMenu && (
-            <div className="relative" ref={moreMenuRef}>
-              <button
-                type="button"
-                onClick={() => setMoreMenuOpen((o) => !o)}
-                aria-label="More actions"
-                aria-expanded={moreMenuOpen}
-                title="More actions"
-                className={cn(
-                  "rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink transition-colors",
-                  moreMenuOpen && "bg-raised text-ink",
-                )}
-              >
-                <MoreHorizontal size={16} />
-              </button>
-
-              {moreMenuOpen && (
-                <div
-                  role="menu"
-                  aria-label="More actions"
-                  className="absolute right-0 top-full z-40 mt-1 w-44 overflow-hidden rounded-xl border border-hairline/60 bg-panel p-1.5 shadow-xl"
-                >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMoreMenuOpen(false);
-                      dispatch({ type: "openSchedule", target: { groupId: group.id } });
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-ink transition-colors hover:bg-raised-hover"
-                  >
-                    <span>⏰</span>
-                    <span>Schedule run…</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMoreMenuOpen(false);
-                      setActivityOpen((o) => !o);
-                    }}
-                    className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[12px] text-ink transition-colors hover:bg-raised-hover"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Activity size={14} className="text-ink-secondary" />
-                      <span>Room activity</span>
-                    </div>
-                    {activityCount > 0 && (
-                      <span className="flex min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
-                        {activityCount}
-                      </span>
-                    )}
-                  </button>
-                </div>
-              )}
-            </div>
+            <HeaderMoreMenu
+              items={[
+                {
+                  id: "schedule",
+                  label: "Schedule run…",
+                  icon: "⏰",
+                  onClick: () => dispatch({ type: "openSchedule", target: { groupId: group.id } }),
+                },
+                {
+                  id: "activity",
+                  label: "Room activity",
+                  icon: <Activity size={14} />,
+                  onClick: () => setActivityOpen((o) => !o),
+                },
+              ]}
+            />
           )}
           <button
             type="button"
@@ -418,7 +400,7 @@ export function GroupView({ group }: { group: Group }) {
             aria-pressed={mobilePreviewOpen}
             title={mobilePreviewOpen ? "Hide mobile preview" : "Show mobile preview"}
             className={cn(
-              "relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px]",
+              "relative flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px]",
               mobilePreviewOpen ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
             )}
           >
@@ -432,7 +414,7 @@ export function GroupView({ group }: { group: Group }) {
             aria-pressed={tasksOpen}
             title={tasksOpen ? "Hide tasks" : "Show tasks"}
             className={cn(
-              "relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px]",
+              "relative flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px]",
               tasksOpen ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
             )}
           >
