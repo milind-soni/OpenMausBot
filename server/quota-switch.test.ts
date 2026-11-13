@@ -60,6 +60,7 @@ describe("quota switch", () => {
   let quota: QuotaSwitch;
   let coordinator: Coordinator;
   let requests: Map<string, QuotaRequest>;
+  let requestSessions: Map<string, { requestSessionId?: string }>;
   /** What TurnStops holds for the turn that is failing. */
   let cause: string;
   let turns: number;
@@ -96,6 +97,10 @@ describe("quota switch", () => {
     });
     if (!offered.length) return null;
     const messageId = requests.get(turn.event.threadId)?.messageId;
+    if (messageId) {
+      const request = requests.get(turn.event.threadId)!;
+      requestSessions.set(messageId, request.requestSessionId ? { requestSessionId: request.requestSessionId } : {});
+    }
     const original = store.activePath(turn.event.threadId).find((m) => m.id === messageId && m.role === "user" && m.kind === "text" && m.text && !m.peerAsk);
     return store.appendMessage(turn.event.threadId, {
       role: "bot", kind: "options",
@@ -136,6 +141,7 @@ describe("quota switch", () => {
     enabled = true;
     liveSessions = new Set(["session-A"]);
     requests = new Map();
+    requestSessions = new Map();
     cause = QUOTA;
     turns = 0;
     teammateSays = undefined;
@@ -160,6 +166,7 @@ describe("quota switch", () => {
       // index.ts's threadBusy; the store's own flag is what a turn's admission sets
       busy: (botId, threadId) => store.taskByThread(botId, threadId)?.busy === true,
       request: (threadId) => requests.get(threadId),
+      requestSessionForMessage: (_threadId, messageId) => requestSessions.get(messageId),
       sessionLive: (sessionId) => liveSessions.has(sessionId),
       resend,
       after: (ms, fire) => {
@@ -249,6 +256,44 @@ describe("quota switch", () => {
       await expect(handling).resolves.toBe("unavailable");
       expect(resend).not.toHaveBeenCalled();
       expect(thread().modelSelection).toEqual(defaultSelection());
+    });
+
+    it("resends a durable card only with the session bound to its original message", async () => {
+      const originalId = said("original from session A");
+      const card = await failed(QUOTA, { messageId: originalId, requestSessionId: "session-A" });
+      const newerId = said("new request from session B");
+      requests.set(bot.threadId, { generations: new Set(), turnId: null, messageId: newerId, requestSessionId: "session-B" });
+      requestSessions.set(newerId, { requestSessionId: "session-B" });
+      expect(JSON.stringify(card)).not.toContain("session-A");
+      await answer(card!, "Codex");
+      expect(resend).toHaveBeenCalledTimes(1);
+      expect(resend.mock.calls[0]?.[2]).toMatchObject({ id: originalId, text: "original from session A" });
+      expect(resend.mock.calls[0]?.at(-1)).toBe("session-A");
+    });
+
+    it("rejects a durable card after restart when its original session provenance is missing", async () => {
+      const messageId = said("must not be rebound after restart");
+      const card = await failed(QUOTA, { messageId, requestSessionId: "session-A" });
+      requestSessions.delete(messageId);
+      requests.clear();
+      await expect(answer(card!, "Codex")).resolves.toBe("unavailable");
+      expect(resend).not.toHaveBeenCalled();
+    });
+
+    it("keeps an intentionally session-unbound request unbound", async () => {
+      const messageId = said("local unbound request");
+      const card = await failed(QUOTA, { messageId });
+      await answer(card!, "Codex");
+      expect(resend).toHaveBeenCalledTimes(1);
+      expect(resend.mock.calls[0]?.at(-1)).toBeUndefined();
+    });
+
+    it("fails closed for a resend whose original message has no provenance record", async () => {
+      const messageId = said("legacy request");
+      const card = await failed(QUOTA, { messageId, requestSessionId: "session-A" });
+      requestSessions.delete(messageId);
+      await expect(answer(card!, "Codex")).resolves.toBe("unavailable");
+      expect(resend).not.toHaveBeenCalled();
     });
 
     it("never takes a failed tool call for the AI's usage limit, whatever the tool is called", async () => {

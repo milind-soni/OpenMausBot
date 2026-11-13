@@ -1,7 +1,7 @@
 // accept and replyTarget stand in for acceptDirectSend and resolveReplyTarget, which live in server/index.ts (a route
 // module never imports it); accept keeps only the receipt contract and starts no turn.
 import { rmSync } from "node:fs";
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,7 +14,7 @@ import { createRunOwners } from "../host/run-owner.ts";
 import { promptWithReply } from "../replies.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { acceptedSendMatch, sendFingerprint, SendSequencer } from "../send-idempotency.ts";
-import { _queuedCount, drainSteeredMessages, queuedSteeredMessage, queueSteeredMessage } from "../steer-queue.ts";
+import { _queuedCount, cancelSteeredMessage, drainSteeredMessages, queuedSteeredMessage, queueSteeredMessage } from "../steer-queue.ts";
 import { Store, type Message } from "../store.ts";
 import { typedWords } from "../typed-sends.ts";
 import { createBotMessageRoutes, type BotMessageRouteDeps } from "./bot-messages.ts";
@@ -42,7 +42,7 @@ class DirectSendRefused extends Error {
 
 type AcceptInput = Parameters<BotMessageRouteDeps["acceptDirectSend"]>[0];
 
-async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>> = {}, desktopManaged = true) {
+async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>> & { auth?: RequestAuth; readBody?: (req: IncomingMessage) => Promise<unknown> } = {}, desktopManaged = true) {
   const store = new Store(() => sonnet);
   const bot = store.createBot({ name: "Scout" });
   const threadId = bot.threadId;
@@ -131,8 +131,8 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     try {
-      const auth = { kind: "loopback", scopes: ["admin"] } as RequestAuth;
-      const handled = await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth, json, readBody });
+      const auth = over.auth ?? { kind: "loopback", scopes: ["admin"] } as RequestAuth;
+      const handled = await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth, json, readBody: over.readBody ?? readBody });
       if (!handled) json(res, 404, { from: "inline routes" });
     } catch (error) {
       json(res, (error as { status?: number }).status ?? 500, { error: error instanceof Error ? error.message : String(error) });
@@ -154,6 +154,10 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
     const response = await fetch(`${base}/api/bots/${bot.id}/queue/${queueId}`, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) });
     return { status: response.status, body: await response.json() as Record<string, any> };
   };
+  const steerQueued = async (queueId: string) => {
+    const response = await fetch(`${base}/api/bots/${bot.id}/queue/${queueId}/steer`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) });
+    return { status: response.status, body: await response.json() as Record<string, any> };
+  };
   const show = (sample: string, thread = threadId): string => {
     const result = createAgentCard({ store, bot, threadId: thread, input: { tool: "show_widget", widget: WIDGET_SAMPLES[sample] } });
     if (!result.ok) throw new Error(result.error);
@@ -161,7 +165,7 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
   };
   const row = (id: string, thread = threadId): Message => store.messagesFor(thread).find((message) => message.id === id)!;
   const sent = (thread = threadId): Message[] => store.messagesFor(thread).filter((message) => message.role === "user");
-  return { store, bot, threadId, state, post, edit, cancelQueued, show, row, sent, patches: vi.spyOn(store, "patchMessage") };
+  return { store, bot, threadId, state, post, edit, cancelQueued, steerQueued, show, row, sent, patches: vi.spyOn(store, "patchMessage") };
 }
 
 describe("editing a message with no AI", () => {
@@ -177,6 +181,53 @@ describe("editing a message with no AI", () => {
     const { store, threadId, edit } = await fixture({ registry: { get: () => undefined }, noAiRefusal: () => null });
     const sent = store.appendMessage(threadId, { role: "user", kind: "text", text: "Hello" });
     expect((await edit(sent.id, { threadId, text: "Hello again" })).body.error).toContain("is unavailable");
+  });
+});
+
+describe("manual steering session liveness", () => {
+  it("allows a live authenticated session to steer its queued message", async () => {
+    const steer = vi.fn(async () => "steered" as const);
+    const auth = { kind: "session", session: { id: "session-a" }, via: "bearer", scopes: ["admin"] } as unknown as RequestAuth;
+    const harness = await fixture({
+      auth,
+      sessionLive: () => true,
+      engineSteersImages: () => false,
+      handoffs: { current: () => undefined, steered: () => {} },
+      clearUnattended: () => {},
+      runningTurnInstance: () => ({ adapter: { capabilities: { queueing: true }, steer } }),
+    });
+    harness.store.setTaskActivity(harness.bot.id, harness.threadId, "working");
+    const queued = queueSteeredMessage(harness.bot.id, harness.threadId, "same authorized session", { requestSessionId: "session-a" });
+    const response = await harness.steerQueued(queued.id);
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
+    expect(response.body.steered).toBe(true);
+    expect(steer).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a session revoked while the request body is being read before invoking the adapter", async () => {
+    let live = true;
+    let beginRead!: () => void;
+    let releaseRead!: () => void;
+    const reading = new Promise<void>((resolve) => { beginRead = resolve; });
+    const bodyGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+    let harness!: Awaited<ReturnType<typeof fixture>>;
+    const steer = vi.fn(async () => "steered" as const);
+    const auth = { kind: "session", session: { id: "session-a" }, via: "bearer", scopes: ["admin"] } as unknown as RequestAuth;
+    harness = await fixture({
+      auth,
+      sessionLive: () => live,
+      readBody: async () => { beginRead(); await bodyGate; return { threadId: harness.threadId }; },
+      runningTurnInstance: () => ({ adapter: { capabilities: { queueing: true }, steer } }),
+    });
+    harness.store.setTaskActivity(harness.bot.id, harness.threadId, "working");
+    const queued = queueSteeredMessage(harness.bot.id, harness.threadId, "use shared computer", { requestSessionId: "session-a" });
+    const response = harness.steerQueued(queued.id);
+    await reading;
+    live = false;
+    releaseRead();
+    await expect(response).resolves.toMatchObject({ status: 401 });
+    expect(steer).not.toHaveBeenCalled();
+    cancelSteeredMessage(harness.bot.id, queued.id, harness.threadId);
   });
 });
 

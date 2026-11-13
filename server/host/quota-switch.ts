@@ -18,6 +18,8 @@ export interface QuotaSwitchHostDeps extends Pick<QuotaSwitchDeps, "store" | "co
   ): ReturnType<QuotaSwitchDeps["gate"]>;
   threadBusy(botId: string, threadId: string): boolean;
   directRequestOwners: { get(threadId: string): QuotaRequest | undefined };
+  requestSessionForMessage(threadId: string, messageId: string): { requestSessionId?: string } | undefined;
+  forgetRequestSessionForMessage(threadId: string, messageId: string): void;
   sessionLive(sessionId: string): boolean;
   /** Other cards the harness raises and settles itself: true when it was one. */
   ownCards?(requestId: string, behavior: "allow" | "deny" | "answer"): boolean;
@@ -40,7 +42,7 @@ export function createQuotaSwitchHost(deps: QuotaSwitchHostDeps) {
     refusal: policyModelRefusal,
     gate: (thread, selection) => checkedTaskModelSwitch(thread, selection, false, false, true),
     reset: (from, to) => hostedModels?.resetTask(from, to),
-    busy: threadBusy,
+    busy: threadBusy, requestSessionForMessage: deps.requestSessionForMessage, forgetRequestSessionForMessage: deps.forgetRequestSessionForMessage,
     request: threadId => directRequestOwners.get(threadId), sessionLive: deps.sessionLive,
     resend: (botId, threadId, message, replyTo, spoken, requestSessionId) => startOrQueueDirectMessage(botId, threadId, message.text ?? "", replyTo, undefined, message.sender, undefined, spoken.via, spoken.callId, message.dataContext, undefined, undefined, requestSessionId),
   });

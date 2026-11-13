@@ -54,6 +54,12 @@ function open(): DatabaseSync {
       json TEXT NOT NULL,
       PRIMARY KEY (thread_id, id)
     );
+    CREATE TABLE IF NOT EXISTS quota_request_sessions (
+      thread_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      session_id TEXT,
+      PRIMARY KEY (thread_id, message_id)
+    );
     CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id);
     -- at is not part of the primary key, so newest-per-thread reads cannot
     -- walk these rows in time order on messages_thread. Created on every
@@ -649,6 +655,7 @@ export function deleteThreads(threadIds: readonly string[], beforeCommit?: () =>
   if (threadIds.length === 0 && !beforeCommit) return;
   writeFollowups((connection) => {
     const statements = [
+      connection.prepare("DELETE FROM quota_request_sessions WHERE thread_id = ?"),
       connection.prepare("DELETE FROM chat_followups WHERE thread_id = ?"),
       connection.prepare("DELETE FROM messages WHERE thread_id = ?"),
       connection.prepare("DELETE FROM thread_state WHERE thread_id = ?"),

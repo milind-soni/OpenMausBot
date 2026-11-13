@@ -29,6 +29,7 @@ import { closeMessageDb,
   searchMessages,
   setActiveLeaf,
   updateMessage, describeMissingFts5 } from "./message-db.ts";
+import { forgetQuotaRequestSession, quotaRequestSession, setQuotaRequestSession } from "./message-db-quota-session.ts";
 import type { NotificationLogEntry } from "../shared/notification.ts";
 import { withPeerProvenance } from "./peer-provenance.ts";
 import { Store, type Message } from "./store.ts";
@@ -50,6 +51,19 @@ describe("message-db", () => {
     closeMessageDb();
     rmSync(DATA_DIR, { recursive: true, force: true });
     mkdirSync(DATA_DIR, { recursive: true });
+  });
+
+  it("persists quota request session provenance privately and distinguishes an unbound request", () => {
+    setQuotaRequestSession("t1", "m1", "session-private");
+    setQuotaRequestSession("t1", "m2", undefined);
+    closeMessageDb();
+    expect(quotaRequestSession("t1", "m1")).toEqual({ requestSessionId: "session-private" });
+    expect(quotaRequestSession("t1", "m2")).toEqual({});
+    expect(quotaRequestSession("t1", "missing")).toBeUndefined();
+    forgetQuotaRequestSession("t1", "m1");
+    expect(quotaRequestSession("t1", "m1")).toBeUndefined();
+    deleteThread("t1");
+    expect(quotaRequestSession("t1", "m2")).toBeUndefined();
   });
 
   it("persists inserts, updates, and the active leaf across a reopen", () => {

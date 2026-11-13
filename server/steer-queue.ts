@@ -213,8 +213,8 @@ export function drainSteeredMessages(
     if (isAuthorized && !isAuthorized(entry.botId, threadId, head)) {
       const rest = entry.items.slice(group.length);
       settleChatFollowups(ids, "cancelled");
+      queues.delete(threadId);
       if (rest.length > 0) queues.set(threadId, { botId: entry.botId, items: rest });
-      else queues.delete(threadId);
       changed();
       continue;
     }

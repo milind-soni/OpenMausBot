@@ -46,6 +46,10 @@ export function requestSessionGuard(sessionId: string | undefined, isLive: (id: 
   return () => { if (sessionId && !isLive(sessionId)) throw refuse(); };
 }
 
+export function requireLiveBeforeSteerFallback(outcome: "steered" | "refused" | "indeterminate", requireLive: () => void): void {
+  if (outcome === "refused") requireLive();
+}
+
 export function queuedRequestSessionMayDispatch(head: { requestSessionId?: string | null; trigger?: { kind?: string } }, isLive: (id: string) => boolean): boolean {
   return head.requestSessionId === undefined
     ? head.trigger?.kind !== "user" && head.trigger?.kind !== "owner"

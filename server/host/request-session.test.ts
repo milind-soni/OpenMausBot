@@ -3,6 +3,7 @@ import { OUTSIDE } from "../peer-provenance.ts";
 import {
   queuedRequestSessionMayDispatch,
   requestSessionGuard,
+  requireLiveBeforeSteerFallback,
   requestSessionOptions,
   settledPrincipalRemainsAuthorized,
   sharedComputerPrincipalForRequest,
@@ -10,6 +11,30 @@ import {
 } from "./request-session.ts";
 
 describe("request session provenance", () => {
+  it("revalidates after a refused asynchronous steer before fallback", async () => {
+    let live = true;
+    let release!: (outcome: "refused" | "steered" | "indeterminate") => void;
+    const steering = new Promise<"refused" | "steered" | "indeterminate">((resolve) => { release = resolve; });
+    const guard = requestSessionGuard("session-a", () => live, () => new Error("revoked"));
+    const fallback = vi.fn();
+    const dispatch = steering.then((outcome) => {
+      requireLiveBeforeSteerFallback(outcome, guard);
+      if (outcome === "refused") fallback();
+    });
+    live = false;
+    release("refused");
+    await expect(dispatch).rejects.toThrow("revoked");
+    expect(fallback).not.toHaveBeenCalled();
+    for (const outcome of ["steered", "indeterminate"] as const) {
+      expect(() => requireLiveBeforeSteerFallback(outcome, guard)).not.toThrow();
+    }
+  });
+
+  it("permits a live session's refused-steer fallback", () => {
+    const guard = requestSessionGuard("session-a", () => true, () => new Error("revoked"));
+    expect(() => requireLiveBeforeSteerFallback("refused", guard)).not.toThrow();
+  });
+
   it("requires the original live session before dispatch and shared-computer principal resolution", () => {
     const live = requestSessionGuard("session-a", (id) => id === "session-a", () => new Error("revoked"));
     expect(live).not.toThrow();

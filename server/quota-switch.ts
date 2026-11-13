@@ -52,6 +52,9 @@ export interface QuotaSwitchDeps {
   reset?: (from: ModelSelection, to: ModelSelection) => Partial<TaskRecord> | undefined;
   busy: (botId: string, threadId: string) => boolean;
   request: (threadId: string) => QuotaRequest | undefined;
+  /** Durable server-only request provenance; absent means it was lost, while `{}` means intentionally unbound. */
+  requestSessionForMessage?: (threadId: string, messageId: string) => { requestSessionId?: string } | undefined;
+  forgetRequestSessionForMessage?: (threadId: string, messageId: string) => void;
   /** Current liveness of the original authenticated session, checked after asynchronous provider readiness work. */
   sessionLive?: (sessionId: string) => boolean;
   /** A line spoken on a Live call is resent as spoken, so its words stay out of the log. */
@@ -261,7 +264,10 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     for (const build of building) if (build.threadId === threadId) build.stale = true;
     try {
       const open = openCard(threadId);
-      if (open?.card) store.patchMessage(threadId, open.id, { card: { ...open.card, answered: "unavailable", dismissed: true } });
+      if (open?.card) {
+        store.patchMessage(threadId, open.id, { card: { ...open.card, answered: "unavailable", dismissed: true } });
+        if (open.card.quotaSwitch?.messageId) deps.forgetRequestSessionForMessage?.(threadId, open.card.quotaSwitch.messageId);
+      }
     } catch (error) {
       console.warn(`quota switch: stale card left open in ${threadId}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -280,12 +286,15 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
 
   /** True once the thread runs on the engine; only then is the offer spent. */
   const decide = async (botId: string, threadId: string, cardId: string, chosen: QuotaSwitchCardData["engines"][number]): Promise<boolean> => {
-    const request = deps.request(threadId);
-    if (request && !originalSessionLive(request)) return false;
     const offer = () => {
       const card = store.messagesFor(threadId).find((message) => message.id === cardId)?.card;
       return card?.quotaSwitch && !card.answered && !card.dismissed ? card : undefined;
     };
+    const messageId = offer()?.quotaSwitch?.messageId;
+    const provenance = messageId ? deps.requestSessionForMessage?.(threadId, messageId) : undefined;
+    if (messageId && !provenance) return false;
+    const originalRequest: QuotaRequest = { generations: new Set(), turnId: null, ...provenance };
+    if (provenance && !originalSessionLive(originalRequest)) return false;
     /** Rewrites the card even when unchanged: a client folds it on press and must show it open again. */
     const refuse = (why: string, left: (card: NonNullable<Message["card"]>) => Partial<NonNullable<Message["card"]>> = () => ({})): false => {
       const card = offer();
@@ -312,7 +321,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     // No await from here to the resend: the gate, the switch and the resend must see one state.
     const card = offer();
     const bot = store.projectBotForTask(botId, threadId);
-    if (!card || !bot || (request && !originalSessionLive(request))) return false;
+    if (!card || !bot || (provenance && !originalSessionLive(originalRequest))) return false;
     if (selection === "timed-out") return refuse(`${chosen.name} did not answer in time — nothing switched. Try again in a moment.`);
     if (!selection) return refuse(`${chosen.name} is no longer available — nothing switched.`);
     const already = bot.modelSelection.instanceId === selection.instanceId;
@@ -326,6 +335,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
       }
     }
     store.patchMessage(threadId, cardId, { card: { ...card, answered: "answer", answeredText: chosen.name } });
+    if (card.quotaSwitch!.messageId) deps.forgetRequestSessionForMessage?.(threadId, card.quotaSwitch!.messageId);
     const now = `${already ? "already on" : "switched to"} ${chosen.name}`;
     const held = heldBy(botId, threadId, card.quotaSwitch!.rootId);
     const original = held ? undefined : resendable(store, threadId, card.quotaSwitch!.messageId);
@@ -337,10 +347,10 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     } else if (!original) {
       notice(threadId, `${now}, but the message that hit quota could not be found to resend — send it again.`, false);
     } else {
-      if (request && !originalSessionLive(request)) return false;
+      if (provenance && !originalSessionLive(originalRequest)) return false;
       notice(threadId, `continuing on ${chosen.name} after hitting quota`, true);
       try {
-        await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId), request?.requestSessionId);
+        await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId), provenance?.requestSessionId);
       } catch (error) {
         if (store.taskByThread(botId, threadId)) {
           notice(threadId, `could not continue on ${chosen.name} — ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`, false);

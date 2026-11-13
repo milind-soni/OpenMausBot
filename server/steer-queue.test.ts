@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { saveChatFollowup } from "./message-db.ts";
+import { chatFollowups, saveChatFollowup } from "./message-db.ts";
 import { killCliTree } from "./procs.ts";
 import {
   cancelSteeredMessage,
@@ -102,22 +102,22 @@ describe("steer-queue module", () => {
     expect(store.messages.filter((message) => message.role === "user")).toHaveLength(1);
   });
 
-  it("preserves each authenticated session, cancels revoked queued work, and never coalesces sessions", () => {
+  it("cancels revoked queue heads and drains the next eligible session in order", async () => {
     const bot = fakeBot("bot-session-provenance", "thread-session-provenance", true);
     const store = fakeStore([bot]);
-    queueSteeredMessage(bot.id, bot.threadId, "from revoked device", { sender: { name: "Owner", id: "p_owner" }, requestSessionId: "session-revoked" });
-    queueSteeredMessage(bot.id, bot.threadId, "from live device", { sender: { name: "Owner", id: "p_owner" }, requestSessionId: "session-live" });
+    const revoked = queueSteeredMessage(bot.id, bot.threadId, "from revoked device", { sender: { name: "Owner", id: "p_owner" }, requestSessionId: "session-revoked" });
+    const live = queueSteeredMessage(bot.id, bot.threadId, "from live device", { sender: { name: "Owner", id: "p_owner" }, requestSessionId: "session-live" });
     bot.busy = false;
     const run = vi.fn();
     const authorized = (_botId: string, _threadId: string, head: { requestSessionId?: string | null }) => head.requestSessionId !== "session-revoked";
     drainSteeredMessages(store, run, undefined, authorized);
-    expect(run).not.toHaveBeenCalled();
-    expect(store.messages.filter(message => message.role === "user")).toHaveLength(0);
-    expect(_queuedCount(bot.threadId)).toBe(1);
-    drainSteeredMessages(store, run, undefined, authorized);
     expect(run).toHaveBeenCalledTimes(1);
-    expect(run.mock.calls[0]![6]).toMatchObject({ requestSessionId: "session-live" });
     expect(store.messages.filter(message => message.role === "user").map(message => message.text)).toEqual(["from live device"]);
+    expect(_queuedCount(bot.threadId)).toBe(0);
+    expect(run.mock.calls[0]![6]).toMatchObject({ requestSessionId: "session-live" });
+    await Promise.resolve();
+    expect(chatFollowups("bot").find((item) => item.id === revoked.id)).toMatchObject({ status: "cancelled", payload: { text: "" } });
+    expect(chatFollowups("bot").some((item) => item.id === live.id)).toBe(false);
   });
 
   it("retains request-session provenance across durable restore before dispatch", () => {
@@ -141,10 +141,8 @@ describe("steer-queue module", () => {
     const authorized = (_botId: string, _threadId: string, head: { requestSessionId?: string | null; trigger?: { kind: string } }) =>
       head.requestSessionId === undefined ? head.trigger?.kind !== "user" && head.trigger?.kind !== "owner" : head.requestSessionId === null;
     drainSteeredMessages(store, run, undefined, authorized);
-    expect(run).not.toHaveBeenCalled();
-    expect(_queuedCount(bot.threadId)).toBe(1);
-    drainSteeredMessages(store, run, undefined, authorized);
     expect(run).toHaveBeenCalledTimes(1);
+    expect(_queuedCount(bot.threadId)).toBe(0);
     expect(run.mock.calls[0]![6]).toMatchObject({ requestSessionId: null, trigger: { kind: "user" } });
     expect(store.messages.filter(message => message.role === "user").map(message => message.text)).toEqual(["explicit local turn"]);
   });
