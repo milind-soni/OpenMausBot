@@ -264,13 +264,16 @@ function checkJsx(value: unknown): AppInputResult<string> {
 
 function checkPage(input: Record<string, unknown>): AppInputResult<{ html: string } | { jsx: string } | { path: string }> {
   const given = (value: unknown) => value !== undefined && value !== null;
-  if ([input.html, input.jsx, input.path].filter(given).length > 1) return { ok: false, error: "Send one of html, jsx or path." };
-  if (given(input.path)) {
+  const filled = (value: unknown) => given(value) && (typeof value !== "string" || value.trim() !== "");
+  // A model that means one of these leaves the others as "", so a blank one must not compete with the one it filled in.
+  const carries = [input.html, input.jsx, input.path].some(filled) ? filled : given;
+  if ([input.html, input.jsx, input.path].filter(carries).length > 1) return { ok: false, error: "Send one of html, jsx or path." };
+  if (carries(input.path)) {
     const path = typeof input.path === "string" ? input.path.trim() : "";
     if (!path || path.length > 4_096) return { ok: false, error: "path: the folder with index.html, or the .html file, in your working folder." };
     return { ok: true, value: { path } };
   }
-  if (given(input.jsx)) {
+  if (carries(input.jsx)) {
     const jsx = checkJsx(input.jsx);
     return jsx.ok ? { ok: true, value: { jsx: jsx.value } } : jsx;
   }

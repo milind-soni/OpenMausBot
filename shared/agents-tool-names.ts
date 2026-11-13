@@ -5,7 +5,9 @@
 // tool of its own.
 type Args = Record<string, unknown>;
 
-const given = (args: Args, key: string) => args[key] !== undefined && args[key] !== null;
+/** Whether the call carries this argument. A blank string is how a model leaves an optional one out, so it must not
+ * route the call to the member that needs it: a page sent with `app_id: ""` makes a page, it does not update one. */
+const given = (value: unknown) => value !== undefined && value !== null && (typeof value !== "string" || value.trim() !== "");
 
 function record(value: unknown): value is Args {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -22,9 +24,9 @@ export const AGENTS_ACTION_TOOLS: Readonly<Record<string, AgentsActionTool>> = {
   trigger: { members: ["create_trigger", "manage_trigger"], member: (args) => args.action === "create" ? "create_trigger" : "manage_trigger" },
   delete_trigger: { members: ["manage_trigger"], member: () => "manage_trigger" },
   manage_room: { members: ["manage_room", "create_room"], member: (args) => args.action === "create" ? "create_room" : "manage_room" },
-  session_search: { members: ["session_search", "session_read"], member: (args) => given(args, "thread_id") || given(args, "message_id") ? "session_read" : "session_search" },
-  show_widget: { members: ["show_widget", "update_widget"], member: (args) => given(args, "widget_id") ? "update_widget" : "show_widget" },
-  show_html: { members: ["show_html", "update_html"], member: (args) => given(args, "app_id") ? "update_html" : "show_html" },
+  session_search: { members: ["session_search", "session_read"], member: (args) => given(args.thread_id) || given(args.message_id) ? "session_read" : "session_search" },
+  show_widget: { members: ["show_widget", "update_widget"], member: (args) => given(args.widget_id) ? "update_widget" : "show_widget" },
+  show_html: { members: ["show_html", "update_html"], member: (args) => given(args.app_id) ? "update_html" : "show_html" },
   x_search: {
     members: ["x_search", "x_user_posts", "x_post", "x_profile"],
     member: (args) => args.action === "user_posts" ? "x_user_posts" : args.action === "post" ? "x_post" : args.action === "profile" ? "x_profile" : "x_search",
@@ -39,8 +41,9 @@ export interface AgentsAlias {
 }
 
 const as = (name: string, args: Args) => ({ name, arguments: args });
-/** An id the call must carry to mean an update: empty when it was left out, so the tool refuses rather than creates. */
-const required = (args: Args, key: string): Args => ({ ...args, [key]: args[key] ?? "" });
+/** An id the call must carry to mean an update. One left out or blank becomes `false`, which still reads as given, so
+ * the update is refused for its type rather than quietly creating a page or widget instead. */
+const required = (args: Args, key: string): Args => ({ ...args, [key]: given(args[key]) ? args[key] : false });
 
 export const AGENTS_TOOL_ALIASES: Readonly<Record<string, AgentsAlias>> = {
   list_triggers: { tools: ["trigger_info"], resolve: (args) => as("trigger_info", { ...args, action: "list" }) },
