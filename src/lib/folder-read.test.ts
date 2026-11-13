@@ -84,8 +84,10 @@ describe("mark a department as read", () => {
   });
   const bots = [member("ada", "Ops", true), member("ben", "Ops", false), member("cara", "Sales", true), member("dan", "Ops", true, { hidden: true }), member("eve", " Ops ", true)];
   const groups = [
-    { id: "standup", unread: true, section: "Ops" }, { id: "quiet", unread: false, section: "Ops" },
-    { id: "dm", unread: true, section: "Ops", dm: true }, { id: "deals", unread: true, section: "Sales" },
+    { id: "standup", threadId: "standup-main", tasks: [{ threadId: "standup-main", unread: true }, { threadId: "standup-fork", unread: true }], unread: true, section: "Ops" },
+    { id: "quiet", threadId: "quiet-main", unread: false, section: "Ops" },
+    { id: "dm", threadId: "dm-main", unread: true, section: "Ops", dm: true },
+    { id: "deals", threadId: "deals-main", unread: true, section: "Sales" },
   ];
 
   it("covers the department's shown bots with unread conversations and its unread group chats, nothing else", () => {
@@ -106,9 +108,10 @@ describe("mark a department as read", () => {
     expect(calls).toEqual([
       '/api/bots/ada/read {"threadId":"ada-main"}', '/api/bots/ada/read {"threadId":"ada-side"}',
       '/api/bots/eve/read {"threadId":"eve-main"}', '/api/bots/eve/read {"threadId":"eve-side"}',
-      "/api/groups/standup/read",
+      '/api/groups/standup/read {"threadId":"standup-main"}',
+      '/api/groups/standup/read {"threadId":"standup-fork"}',
     ]);
-    expect(read.groups).toEqual(["standup"]);
+    expect(read.groups).toEqual(["standup", "standup"]);
   });
 
   it("keeps the reads before a failure and reports it", async () => {

@@ -18,9 +18,13 @@ const teamName = z.string().trim().min(1).max(60).refine(fitsOnOneLine).refine((
 const FIELD_LABELS: Record<string, string> = { name: "Name", title: "Title", description: "Description", section: "Department", cwd: "Working folder" };
 const modelSelectionText = (selection: ModelSelection) =>
   `${selection.instanceId}/${selection.model}${selection.variant ? ` (variant ${selection.variant})` : " (no variant)"}${selection.effort ? ` (effort ${selection.effort})` : ""}`;
+/** One setup may edit a whole department at once (a model switch, an added rule), but each new bot still needs a close review. */
+const MAX_SETUP_BOTS = 40;
+const MAX_NEW_BOTS = 8;
 const fieldsSchema = z.object({
   chiefOfStaff: z.boolean().optional(),
   name: z.string().optional(), title: z.string().optional(), description: z.string().optional(), soul: z.string().optional(),
+  soulAppend: z.string().trim().min(1).optional(),
   cwd: z.string().optional(),
   section: z.string().trim().max(60).refine(fitsOnOneLine).refine((value) => redactSecretsInText(value) === value, "Team names cannot contain credentials").optional(),
   modelSelection: z.object({ instanceId: z.string().trim().min(1), model: z.string().trim().min(1), effort: z.string().optional(), variant: z.string().optional() }).strict().optional(),
@@ -31,7 +35,7 @@ const planSchema = z.object({
   operations: z.array(z.discriminatedUnion("action", [
     z.object({ action: z.literal("create"), key: z.string().trim().min(1).max(80), fields: fieldsSchema }).strict(),
     z.object({ action: z.literal("update"), botId: z.string().min(1).max(128), fields: fieldsSchema }).strict(),
-  ])).min(1).max(24),
+  ])).min(1).max(MAX_SETUP_BOTS, `Review at most ${MAX_SETUP_BOTS} bots in one setup`),
 }).strict();
 
 export class TeamSetupError extends Error {
@@ -201,12 +205,30 @@ export class TeamSetupRequestService {
     for (const operation of parsed.data.operations) {
       const key = operation.action === "create" ? `create:${operation.key}` : `update:${operation.botId}`;
       const previous = combined.get(key);
-      combined.set(key, { ...operation, fields: { ...previous?.fields, ...operation.fields } });
+      if (operation.fields.soul !== undefined && operation.fields.soulAppend !== undefined) throw new TeamSetupError("Use either soul or soulAppend for a bot, not both");
+      // Repeated added rules for one bot all land, in order; any other repeated field keeps its last value.
+      const soulAppend = [previous?.fields.soulAppend, operation.fields.soulAppend].filter(Boolean).join("\n\n") || undefined;
+      combined.set(key, { ...operation, fields: { ...previous?.fields, ...operation.fields, soulAppend } });
     }
-    if (combined.size > 8) throw new TeamSetupError("Review at most eight bots in one setup");
-    const operations: TeamSetupOperation[] = [...combined.values()].map((operation) => {
+    const entries = [...combined.values()];
+    if (entries.filter((operation) => operation.action === "create").length > MAX_NEW_BOTS) throw new TeamSetupError(`Review at most ${MAX_NEW_BOTS} new bots in one setup`);
+    const operations: TeamSetupOperation[] = entries.map((operation) => {
       const target = operation.action === "update" ? this.options.store.bot(operation.botId) : undefined;
-      const fields = this.fields({ ...operation.fields, section: operation.fields.section ?? target?.section ?? chief.section ?? "" }, target ?? undefined);
+      const { soulAppend, ...requested } = operation.fields;
+      if (soulAppend !== undefined) {
+        if (operation.action === "create") throw new TeamSetupError("soulAppend only adds to an existing bot's instructions; give a new bot its full soul");
+        if (requested.soul !== undefined) throw new TeamSetupError("Use either soul or soulAppend for a bot, not both");
+        // A bot this Chief may not change is never read here; validate() refuses it.
+        if (target && !target.hidden && this.options.hasTeamAuthority(chief, target.section)) {
+          // Re-saving runs the whole text through redaction; never let an added rule rewrite what the bot already had.
+          // Check the joined text: an added rule can complete a pattern that starts in the existing instructions.
+          const kept = (target.soul ?? "").trimEnd();
+          const joined = kept ? `${kept}\n\n${soulAppend}` : soulAppend;
+          if (!redactSecretsInText(joined).startsWith(kept)) throw new TeamSetupError(`@${target.name}'s instructions hold credential-like text; change them with a full soul instead`);
+          requested.soul = joined;
+        }
+      }
+      const fields = this.fields({ ...requested, section: requested.section ?? target?.section ?? chief.section ?? "" }, target ?? undefined);
       return { action: operation.action, botId: operation.action === "create" ? newId() : operation.botId,
         ...(operation.action === "create" ? { threadId: newId() } : {}),
         fields,

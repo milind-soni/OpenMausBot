@@ -6,7 +6,7 @@ import { expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import { runControlOmb } from "../control-omb.ts";
-import { OPEN_SIDEBAR_TOOLS, UI_TOOLS_DIR } from "./control-omb-ui.ts";
+import { ENABLE_ADVANCED_UI, OPEN_SIDEBAR_TOOLS, UI_TOOLS_DIR } from "./control-omb-ui.ts";
 import { fixtureApi } from "./preview-fixture.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -39,6 +39,7 @@ type BotRecord = {
     const fixture = info!;
     const api = fixtureApi(fixture.url);
     const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", fixture.ui, ...args]) as Promise<Record<string, any>>;
+    await ui("eval", "--js", ENABLE_ADVANCED_UI);
     const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
     const snapshot = async () => (await ui("snapshot")).snapshot as string;
     const focused = () => evaluate("document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.trim()");
@@ -190,7 +191,9 @@ type BotRecord = {
     expect(await evaluate("Boolean(document.querySelector('[data-team-canvas]'))")).toBe(true);
     await expect.poll(() => evaluate("[...document.querySelectorAll('[data-team-canvas] [aria-label^=\"Desktop for \"]')].map(button => button.getAttribute('aria-label'))"))
       .toEqual(["Desktop for Ben"]);
-    await click("Desktop for Ben");
+    // The settings pane shifts the canvas between the browser tool's coordinate lookup and click.
+    await evaluate(`document.querySelector('[aria-label="Desktop for Ben"]').focus(); true`);
+    await ui("press", "--keys", "Enter");
     await expect.poll(() => evaluate("document.querySelector('[data-bot-settings-section=access] > button')?.getAttribute('aria-expanded')")).toBe("true");
     await click("Close settings");
     await expect.poll(() => evaluate("document.querySelectorAll('[data-team-canvas] [aria-label^=\"Desktop for \"]').length")).toBe(0);
