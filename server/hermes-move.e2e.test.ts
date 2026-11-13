@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { launchVerificationServer } from "../scripts/control-omb.ts";
 import { request } from "../scripts/mcp-server.ts";
-import { grokMovePlan, parseGrokExport } from "../shared/grok-import.ts";
+import { hermesMovePlan, parseHermesExport } from "../shared/hermes-import.ts";
 
 it("imports a Hermes profile through the real package API with memory, skills and paused routines", async () => {
   const fixture = await launchVerificationServer();
@@ -15,7 +15,7 @@ it("imports a Hermes profile through the real package API with memory, skills an
     apps: [{ name: "Linear", mcp_url: "https://mcp.linear.app/mcp" }],
   }] });
   try {
-    const plan = grokMovePlan(parseGrokExport(exported)[0]!, { source: "hermes" });
+    const plan = hermesMovePlan(parseHermesExport(exported)[0]!);
     const imported = await request("/api/teams/import?mode=add", {
       method: "POST", body: JSON.stringify(plan.document),
     }, url);

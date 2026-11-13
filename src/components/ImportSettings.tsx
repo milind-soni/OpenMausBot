@@ -1,8 +1,8 @@
 // Settings → Import: everything that brings work in from elsewhere, in one place. "From your AI apps" brings the skills
 // and MCP servers another AI tool keeps on this computer.
-import { BookOpen, Check, ChevronDown, Info, Loader2, Plug } from "lucide-react";
+import { BookOpen, Check, Info, Loader2, Plug } from "lucide-react";
 import { useContext, useEffect, useState, type ReactNode } from "react";
-import { SettingRow, SettingsLook, SettingsMark, SettingsRows, Switch } from "./SettingsPrimitives";
+import { SettingRow, SettingsLook, SettingsRows, Switch } from "./SettingsPrimitives";
 
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
@@ -10,10 +10,11 @@ import { t } from "@/lib/i18n";
 import { importOutcome, localSetupImport, setupImportApi, skillsSummary, toolsSummary, type SetupImportClient } from "@/lib/setup-import";
 import { useStore } from "@/state/store";
 import { detectionCount, detectionSources, type SetupDetection, type SetupImportResult, type SetupSource } from "../../shared/setup-import";
-import { GrokBotMark } from "./GrokBotMark";
-import type { BotMoveSource } from "../../shared/grok-import";
-import { GrokMoveDialog } from "./lazy-screens";
+import { GrokImportSection } from "./GrokImportSection";
+import { HermesImportSection } from "./HermesImportSection";
 import { ClaudeMark, CodexMark, CursorMark, PresetProviderMark } from "./ProviderIcons";
+
+export { GrokImportSection } from "./GrokImportSection";
 
 function SourceMarks({ sources }: { sources: readonly SetupSource[] }) {
   const marks = [...new Set(sources.map((source) => (source === "claudeDesktop" ? "claudeCode" : source)))];
@@ -216,39 +217,13 @@ function AiAppsImport({ client, local }: { client: SetupImportClient; local: boo
     onSkip={() => (status === "failed" ? setStatus("idle") : setDetection({ skills: [], tools: [] }))} />;
 }
 
-export function GrokImportSection({ source = "grok" }: { source?: BotMoveSource }) {
-  const [started, setStarted] = useState(false);
-  const [open, setOpen] = useState(false);
-  if (useContext(SettingsLook)) {
-    return (
-      <div data-import-section={source} data-settings-block={`${source}-move`} className="flex flex-col">
-        <SettingRow title={t(source === "hermes" ? "settings.import.hermesTitle" : "settings.import.grokTitle")} subtitle={t("settings.import.grokLine")} leading={<SettingsMark>{source === "grok" ? <GrokBotMark size={18} /> : <BookOpen size={18} />}</SettingsMark>}>
-          <button type="button" className="ui-button" data-grok-move-open aria-expanded={open} onClick={() => { setStarted(true); setOpen(!open); }}>{t(open ? "common.close" : "settings.import.moveAction")}</button>
-        </SettingRow>
-        {started && <div className={open ? "px-4 pb-3" : "hidden"}><GrokMoveDialog source={source} inline onClose={() => { setStarted(false); setOpen(false); }} /></div>}
-      </div>
-    );
-  }
-  return (
-    <section data-import-section={source} className="rounded-xl bg-card p-4">
-      <div className="flex items-center gap-2 text-[15px] font-medium text-ink">{source === "grok" && <GrokBotMark size={16} />}{t(source === "hermes" ? "settings.import.hermesTitle" : "settings.import.grokTitle")}</div>
-      <div className="mt-0.5 text-[13px] leading-relaxed text-ink-secondary">{t("settings.import.grokSubtitle")}</div>
-      <button type="button" data-grok-move-open aria-expanded={open} onClick={() => { setStarted(true); setOpen(!open); }} className={cn(BUTTON, "mt-3")}>
-        {t(source === "hermes" ? "settings.import.hermesTitle" : "settings.import.grokTitle")}
-        <ChevronDown size={14} aria-hidden="true" className={cn("transition-transform", open && "rotate-180")} />
-      </button>
-      {started && <div className={open ? undefined : "hidden"}><GrokMoveDialog source={source} inline onClose={() => { setStarted(false); setOpen(false); }} /></div>}
-    </section>
-  );
-}
-
 export function ImportSettings({ client = setupImportApi, children }: { client?: SetupImportClient; children?: ReactNode }) {
   const { state } = useStore();
   if (useContext(SettingsLook)) {
     return (
       <SettingsRows>
         <GrokImportSection />
-        <GrokImportSection source="hermes" />
+        <HermesImportSection />
         <AiAppsImport client={client} local={localSetupImport(state.config?.cloudHome === true)} />
         {children}
       </SettingsRows>
@@ -257,7 +232,7 @@ export function ImportSettings({ client = setupImportApi, children }: { client?:
   return (
     <div className="flex flex-col gap-4">
       <GrokImportSection />
-      <GrokImportSection source="hermes" />
+      <HermesImportSection />
       <AiAppsImport client={client} local={localSetupImport(state.config?.cloudHome === true)} />
       {children}
     </div>

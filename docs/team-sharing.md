@@ -169,6 +169,12 @@ popup in `src/components/GrokMovePopup.tsx`.
 ### Move from Hermes
 
 Settings → Import → **Move from Hermes** uses the same reviewed package import.
+Its source-specific format, dialog and settings row live in
+`shared/hermes-import.ts`, `src/components/HermesMoveDialog.tsx` and
+`src/components/HermesImportSection.tsx`. Both importers share parsing and
+installation code in the neutral `bot-import.ts`, `bot-move.ts` and
+`BotMoveDialog.tsx` modules.
+
 Copy its message into the Hermes profile you want to move, then paste the reply
 or choose the JSON file it produces. Review the preview before choosing Import.
 The message asks Hermes to read the current profile's instructions, skill text,

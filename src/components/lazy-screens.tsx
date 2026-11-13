@@ -87,6 +87,7 @@ export const CloudAddDialog = lazyScreen("CloudAddDialog", async () => (await im
 export const PhoneAppDialog = lazyScreen("PhoneAppDialog", async () => (await import("./PhoneAppDialog")).PhoneAppDialog);
 export const ShareTeamDialog = lazyScreen("ShareTeamDialog", async () => (await import("./ShareTeamDialog")).ShareTeamDialog);
 export const GrokMoveDialog = lazyScreen("GrokMoveDialog", async () => (await import("./GrokMoveDialog")).GrokMoveDialog);
+export const HermesMoveDialog = lazyScreen("HermesMoveDialog", async () => (await import("./HermesMoveDialog")).HermesMoveDialog);
 export const TeamLibraryPanel = lazyScreen("TeamLibraryPanel", async () => (await import("./TeamLibraryPanel")).TeamLibraryPanel);
 
 // Most opened first: a Cloud page fetches these in this order.
