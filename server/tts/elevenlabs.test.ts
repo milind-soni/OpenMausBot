@@ -1,7 +1,24 @@
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { addSharedVoice, listVoices, synthesize, verifyKey } from "./elevenlabs.ts";
+import { addSharedVoice, listVoices, speechModel, synthesize, verifyKey } from "./elevenlabs.ts";
+
+describe("ElevenLabs speech model", () => {
+  it("speaks Thai and other scripts Flash lacks with Eleven v3", () => {
+    expect(speechModel("สวัสดีครับ วันนี้อากาศดี")).toBe("eleven_v3");
+    expect(speechModel("Done. ส่งไฟล์แล้ว")).toBe("eleven_v3");
+    expect(speechModel("שלום")).toBe("eleven_v3");
+    expect(speechModel("নমস্কার")).toBe("eleven_v3");
+    expect(speechModel("გამარჯობა")).toBe("eleven_v3");
+    expect(speechModel("ᲒᲐᲛᲐᲠᲯᲝᲑᲐ")).toBe("eleven_v3");
+  });
+
+  it("keeps Flash for languages it speaks", () => {
+    for (const text of ["Hello there", "こんにちは", "你好", "नमस्ते", "Xin chào", "Привет", "مرحبا", "வணக்கம்"]) {
+      expect(speechModel(text)).toBe("eleven_flash_v2_5");
+    }
+  });
+});
 
 const listen = async (server: Server) => {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
