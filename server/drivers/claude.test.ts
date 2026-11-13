@@ -25,11 +25,11 @@ import {
   claudeCostSnapshot,
   restoredCostBase,
   STEERED_CONTINUATION_GRACE_MS,
-  spawnContractDiff,
   sumNativeTurnResults,
   turnCostFromRunningTotal,
   type ClaudeConfig,
 } from "./claude.ts";
+import { spawnContractDiff } from "./claude-spawn-contract.ts";
 import { TEAM_TOOLS_FAILED } from "./team-tools.ts";
 import { claudeLimitMessage } from "./claude-limits.ts";
 import { removeTempDir } from "../testing/cleanup.ts";

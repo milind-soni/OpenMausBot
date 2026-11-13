@@ -19,7 +19,7 @@ import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
 import { claudeAuthFailure, claudeAuthRecovery, claudeOAuthExpired } from "./claude-auth-recovery.ts"; import { AWS_CREDENTIAL_ENV_KEYS, bedrockResultError, withBedrockCredentialError } from "./claude-bedrock-aws.ts";
 import { CLAUDE_MODEL_ID, STATIC_CLAUDE_MODELS, claudeModelExtras, currentEngineCatalog, endpointModelCatalog, withCliVersionGate } from "./claude-model-extras.ts";
 import { claudeToolSearchSetting } from "./claude-tool-search.ts"; import { claudeDisabledNativeSkillRules, unusableBuiltIns } from "./claude-unusable-tools.ts"; import { EMAIL_READ_TOOL_NAMES } from "../../shared/email.ts";
-import { claudeElicitations } from "./claude-elicitation.ts";
+import { claudeElicitations } from "./claude-elicitation.ts"; import { spawnContractDiff } from "./claude-spawn-contract.ts";
 import { readCostHistory, recordCostState } from "./claude-cost-history.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
 import { ClaudeLoginController } from "./claude-login-auth.ts";
@@ -191,42 +191,6 @@ export function autoCompactWindow(env: NodeJS.ProcessEnv): string | null {
 }
 
 const DEFAULT_AUTOCOMPACT_TOKENS = 200_000;
-
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** Which fields of a spawn-contract key changed between two turns, for the close line when a
- * warm process is replaced. Names only, never values: a server's config carries credentials,
- * and the two hashes already hide their inputs. */
-export function spawnContractDiff(previous: string, next: string): string[] {
-  let oldKey: unknown;
-  let newKey: unknown;
-  try {
-    oldKey = JSON.parse(previous);
-    newKey = JSON.parse(next);
-  } catch {
-    return [];
-  }
-  if (!isObject(oldKey) || !isObject(newKey)) return [];
-  const changed: string[] = [];
-  for (const field of new Set([...Object.keys(oldKey), ...Object.keys(newKey)])) {
-    const oldValue = oldKey[field];
-    const newValue = newKey[field];
-    if (JSON.stringify(oldValue) === JSON.stringify(newValue)) continue;
-    if (field === "mcpServers" && isObject(oldValue) && isObject(newValue)) {
-      for (const name of Object.keys(oldValue)) {
-        if (!Object.hasOwn(newValue, name)) changed.push(`mcpServers:-${name}`);
-        else if (JSON.stringify(oldValue[name]) !== JSON.stringify(newValue[name])) changed.push(`mcpServers:~${name}`);
-      }
-      for (const name of Object.keys(newValue)) {
-        if (!Object.hasOwn(oldValue, name)) changed.push(`mcpServers:+${name}`);
-      }
-    } else {
-      changed.push(field);
-    }
-  }
-  return changed;
-}
 
 /** The first Claude CLI to accept each flag; an unknown flag is a hard argument error. Checked
  * against the published binaries (the changelog never records --autocompact): --strict-mcp-config
@@ -1273,10 +1237,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         }
         return { turnId };
       }
-      if (live) {
-        const contractChanged = turn.sessionReset ? undefined : spawnContractDiff(live.argsKey, argsKey);
-        closeSession(threadId, turn.sessionReset ? "context reset" : "spawn contract changed", contractChanged);
-      }
+      if (live) closeSession(threadId, turn.sessionReset ? "context reset" : "spawn contract changed", turn.sessionReset ? undefined : spawnContractDiff(live.argsKey, argsKey));
       // A new process gets the stable half only; the volatile half rides its first message, so a relaunch reuses the cached prefix.
       const halves = promptHalves(turn);
       const launchSystem = halves.stable ?? turn.system;
