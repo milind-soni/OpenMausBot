@@ -173,14 +173,12 @@ describe("intakeFiles", () => {
     expect(out.notice).toBeNull();
   });
 
-  it("explains that an archive needs unzipping instead of calling it unsupported", async () => {
-    const out = await intakeFiles([file("아카이브.zip", "application/zip"), file("run.exe", "application/octet-stream")], {
+  it("names a file it can't take as unsupported", async () => {
+    const out = await intakeFiles([file("run.exe", "application/octet-stream")], {
       allowImages: true, getPath: () => "", uploadImage: upload, uploadFile: async () => null,
     });
     expect(out.attachments).toEqual([]);
-    expect(out.notice).toBe(
-      "Unable to attach run.exe. Choose a supported image, document, or audio file. Archives can't be attached: unzip 아카이브.zip and attach the files inside.",
-    );
+    expect(out.notice).toBe("Unable to attach run.exe. Choose a supported image, document, or audio file.");
   });
 
   it("counts the images already in the draft, and names pasted images past the slots left", () => {

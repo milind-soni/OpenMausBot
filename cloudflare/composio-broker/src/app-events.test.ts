@@ -703,6 +703,14 @@ describe("event types", () => {
     expect((await h.call(owner, `/v1/trigger-types/${GMAIL_TYPE.slug.toLowerCase()}`)).status).toBe(200);
     expect((await h.call(owner, "/v1/trigger-types/GMAIL_NOT_A_THING")).status).toBe(404);
   });
+
+  it("says an event that needs setup on our side can't be used yet, instead of calling it unknown", async () => {
+    const owner = await h.install();
+    const response = await h.call(owner, "/v1/trigger-types/gmail_own_endpoint");
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ error: "GMAIL_OWN_ENDPOINT can't be used yet: this event needs webhook setup on our side first. Pick another event this app offers." });
+    expect((await h.call(owner, "/v1/trigger-types/GMAIL_OWN_ENDPOINT")).status).toBe(422);
+  });
 });
 
 describe("status events", () => {

@@ -344,6 +344,7 @@ export function AccountsCard({ group, accounts, advanced, bare = false }: { grou
               describedBy={group === "chatgpt" ? noteId : undefined} onAdded={setSigningIn} />
             {group === "chatgpt" && <p id={noteId} className="px-2 text-[12px] leading-relaxed text-ink-secondary">{t("accounts.addChatgptWorkspaceNote")}</p>}
           </>}
+          {group === "chatgpt" && <p data-codex-shared-setup className="px-2 text-[12px] leading-relaxed text-ink-secondary">{t("accounts.chatgptSharedSetupNote")}</p>}
         </div>
       )}
       {primary.snapshot.update && <EngineUpdateNotice update={primary.snapshot.update} instance={primary} className="mt-3" quiet />}

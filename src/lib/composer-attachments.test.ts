@@ -547,6 +547,27 @@ describe("private document intake", () => {
     expect(documentMime({ name: "archive.zip", type: "application/zip" })).toBeNull();
   });
 
+  it("uploads archives as plain files, typed by their filename", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({
+      path: "/private/attachments/1.zip", name: "x", bytes: 3,
+    }), { status: 201, headers: { "content-type": "application/json" } }));
+    try {
+      for (const [name, type, mime] of [
+        ["Project.zip", "application/x-zip-compressed", "application/zip"],
+        ["logs.TAR.GZ", "", "application/gzip"],
+        ["src.tgz", "application/octet-stream", "application/x-compressed-tar"],
+        ["dump.7z", "", "application/x-7z-compressed"],
+      ] as const) {
+        const file = new File([new Uint8Array([1, 2, 3])], name, { type });
+        await expect(fileAttachmentFromFile(file)).resolves.toMatchObject({ kind: "file", path: "/private/attachments/1.zip" });
+        expect(fetch).toHaveBeenLastCalledWith(expect.stringMatching(/^\/api\/files\?/), expect.objectContaining({ headers: { "content-type": mime } }));
+      }
+      await expect(fileAttachmentFromFile(new File([new Uint8Array([1])], "zip-renamed.bin", { type: "application/zip" }))).resolves.toBeNull();
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
   it("uses the server path and safe name returned by the private store", async () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
       path: "/private/attachments/123.pdf",
