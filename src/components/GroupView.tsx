@@ -39,6 +39,8 @@ import { CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyActio
 import { ReactAction, ReactionChips, useCanReact } from "./Reactions";
 import { ClusterLabel } from "./RoomClusterLabel";
 import { roomPin, useBotMessageMenu, userMessageMenu } from "./message-menu";
+import { forkMessageItem, ForkLinks } from "./ForkMessage";
+import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
 import { SpeakButton } from "./SpeakButton";
 import { useSpeech } from "@/lib/tts/useSpeech";
@@ -73,7 +75,7 @@ import { ActivityRun } from "./ActivityRun";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { useLiveToolIds } from "@/hooks/use-live-tool-ids";
-import { roomNeedsSetup } from "@/lib/room-setup";
+import { roomNeedsSetup, setupResponderMode, type RoomResponderMode } from "@/lib/room-setup";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { awaitedMemberId, showWorkingDots } from "@/lib/turn-tail";
@@ -98,7 +100,7 @@ import { HandoffChip } from "./HandoffReply"; import { TeammateChip } from "./Te
 import { RoomWorkingFolder } from "./RoomWorkingFolder";
 import { RoomBulletin } from "./RoomBulletin";
 import { RoomHeader } from "./RoomHeader";
-import { useChatFindRequests } from "@/lib/chat-find";
+import { useChatFindRequests, useChatFindShortcut } from "@/lib/chat-find";
 import { simpleRoomHeader } from "@/lib/room-panel";
 
 export function RoomToolChip({ message, roomId, threadId, live = false }: { message: Message; roomId?: string; threadId?: string; live?: boolean }) {
@@ -141,6 +143,7 @@ function RoomTextMessage({
   eager,
   onReply,
   canReact,
+  phone,
 }: {
   group: Group;
   message: Message;
@@ -150,6 +153,7 @@ function RoomTextMessage({
   eager: boolean;
   onReply: (message: Message) => void;
   canReact: boolean;
+  phone: boolean;
 }) {
   const { state, dispatch } = useStore();
   const user = m.role === "user";
@@ -171,6 +175,8 @@ function RoomTextMessage({
   const speakerBot = members.find((member) => member.id === m.from?.botId);
   const botText = rawText; const teammates = useTeammates(); const peers = useMemo(() => [...members, ...teammates.peers], [members, teammates]);
   const pin = roomPin(group, m, dispatch);
+  const forkAction = !phone && !group.dm && m.kind === "text" && !m.id.startsWith("optimistic-")
+    ? [forkMessageItem({ kind: "group", ownerId: group.id, threadId: group.threadId, messageId: m.id }, dispatch, roomThreadWorking(group, group.threadId))] : [];
   const botMenu = useBotMessageMenu({
     text: botText,
     botId: speakerBot?.id,
@@ -187,7 +193,7 @@ function RoomTextMessage({
   const blocks = useMemo(() => simple && !user && !viewRaw && botText.trim() ? splitReplyBlocks(botText) : null, [simple, user, viewRaw, botText]);
   const tabled = Boolean(blocks?.some((block) => block.kind === "table"));
   const botActions = !user && (
-    <MessageActions side="bot" forceOpen={viewRaw || speaking} menu={botMenu}>
+    <MessageActions side="bot" forceOpen={viewRaw || speaking} menu={[...botMenu, ...forkAction]}>
       <ReplyAction onReply={() => onReply(m)} />
       {canReact && m.from && <ReactAction threadId={group.threadId} message={m} />}
       {botText && <CopyButton text={botText} className={messageActionClass} />}
@@ -200,7 +206,7 @@ function RoomTextMessage({
       {speaker && <div className="mb-0.5 px-1 text-[12px] font-medium text-ink-secondary">{speaker}</div>}
       <div className={cn("flex w-full items-end gap-1.5", user ? "justify-end" : "justify-start")}>
         {user && (
-          <MessageActions side="user" menu={userMessageMenu({ messageId: m.id, pin })}>
+          <MessageActions side="user" menu={[...userMessageMenu({ messageId: m.id, pin }), ...forkAction]}>
             <ReplyAction onReply={() => onReply(m)} />
             {Boolean(display.trim()) && <CopyButton text={display} className={messageActionClass} />}
           </MessageActions>
@@ -298,6 +304,7 @@ function RoomTextMessage({
         </span>
       </div>
       <ReactionChips threadId={group.threadId} message={m} bots={members} align={user ? "end" : "start"} canReact={canReact} />
+      <ForkLinks kind="group" ownerId={group.id} threadId={group.threadId} messageId={m.id} phone={phone} />
       {!user && m.routedBy && <RoutedByLine routedBy={m.routedBy} />}
     </div>
   );
@@ -325,6 +332,7 @@ export const Transcript = memo(function Transcript({
   onReply: (message: Message) => void;
 }) {
   const { state, dispatch } = useStore();
+  const phone = useMediaQuery(PHONE_LAYOUT);
   const showThreads = useShowThreads();
   const showToolCalls = showToolCallsEnabled(state.config);
   const canReact = useCanReact(group.threadId); const teammatePeers = useTeammates().peers;
@@ -473,6 +481,7 @@ export const Transcript = memo(function Transcript({
                 eager={m.id === newestMessageId || m.id === newestUserMessageId}
                 onReply={onReply}
                 canReact={canReact}
+                phone={phone}
               />
             )
           ) : null;
@@ -508,6 +517,7 @@ export const Transcript = memo(function Transcript({
                       eager={false}
                       onReply={onReply}
                       canReact={canReact}
+                      phone={phone}
                     />
                   </div>
                 ))}
@@ -520,12 +530,6 @@ export const Transcript = memo(function Transcript({
     </>
   );
 });
-
-type RoomResponderMode = "lead" | "everyone" | "mentions" | "auto";
-
-function setupResponderMode(responder: GroupDefaultResponder): RoomResponderMode {
-  return responder.kind === "member" ? "lead" : responder.kind;
-}
 
 function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
   const { state, dispatch } = useStore();
@@ -876,7 +880,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
     </section>
   );
 }
-export function GroupView({ group }: { group: Group }) {
+export function GroupView({ group, inForkPanel = false }: { group: Group; inForkPanel?: boolean }) {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -893,16 +897,7 @@ export function GroupView({ group }: { group: Group }) {
   const closeMembers = useCallback(() => setMembersOpen(false), []);
   useEffect(() => setFindOpen(false), [group.threadId]);
   useChatFindRequests(group.threadId, findOpen, setFindOpen);
-  useEffect(() => {
-    const onFind = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
-        event.preventDefault();
-        setFindOpen(true);
-      }
-    };
-    window.addEventListener("keydown", onFind);
-    return () => window.removeEventListener("keydown", onFind);
-  }, []);
+  useChatFindShortcut(inForkPanel, Boolean(state.forkPanel), setFindOpen);
 
   const members = useMemo(
     () => group.memberIds.map((id) => state.bots.find((b) => b.id === id)).filter((b): b is Bot => Boolean(b)),
@@ -1020,7 +1015,7 @@ export function GroupView({ group }: { group: Group }) {
         membersTriggerRef={membersTriggerRef}
       />
 
-      {findOpen && <ChatFindBar threadId={group.threadId} onClose={() => setFindOpen(false)} />}
+      {findOpen && <ChatFindBar threadId={group.threadId} inForkPanel={inForkPanel} onClose={() => setFindOpen(false)} />}
       <ChatErrorBanner message={state.error} onDismiss={() => dispatch({ type: "error", message: null })} />
       <ChatNotice notice={state.notice} />
       {!setupPending && <RoomContextWarnings group={group} members={members} />}{!setupPending && !remoteClient && <RoomChiefAbsent group={group} />}

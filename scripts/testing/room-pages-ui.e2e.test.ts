@@ -188,9 +188,8 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     await inView(pageId);
     await ui("screenshot", "--out", join(evidenceDir, "room-pages-clicked-send.png"));
 
-    const board = await inView(boardRow.id);
-    // The board's "Paint it red" button: under its heading and its result line, in the browser's default styles.
-    await click(board, 48, 124);
+    await inView(boardRow.id);
+    await ui("click", "--name", "Paint it red");
     await until(() => shows(`Error -32000: ${ROOM_VIEW_ONLY}`), "the board to show the host's refusal");
     await inView(boardRow.id);
     await ui("screenshot", "--out", join(evidenceDir, "room-pages-clicked-app.png"));
