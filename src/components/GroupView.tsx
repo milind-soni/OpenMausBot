@@ -5,8 +5,8 @@ import { UsageRings } from "./UsageRings";
 // idle/working motion IS the status), the bulletin is one pinned line, and
 // bot messages carry a small maus + name cluster label. Bots reply only
 // when @mentioned (the composer's @ picker knows the members).
-import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, ArrowDown, ClipboardList, Pin, Smartphone } from "lucide-react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { Activity, ArrowDown, ClipboardList, MoreHorizontal, Pin, Smartphone } from "lucide-react";
 import { useStore, useStreaming, formatTime, type Attachment, type Bot, type Group } from "@/state/store";
 import { MausAvatar } from "./Avatar";
 import { normalizeState } from "@/lib/mascot";
@@ -22,6 +22,9 @@ import { TasksPanel } from "./TasksPanel";
 import { OptionCard } from "./OptionCard";
 import { AttachmentList } from "./AttachmentViewer";
 import { useMediaQuery } from "@/lib/useMediaQuery";
+import { useContainerWidth } from "@/lib/useContainerWidth";
+import { resolveHeaderCollapse } from "@/lib/headerCollapse";
+import { SHARED_HEADER_HEIGHT_CLASS } from "@/lib/layoutTokens";
 
 function dayLabel(at: number): string {
   const d = new Date(at);
@@ -151,8 +154,63 @@ export function GroupView({ group }: { group: Group }) {
   );
   const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
   const [tasksOpen, setTasksOpen] = useState(() => localStorage.getItem("room-tasks-open") === "true");
+  const isLargeScreen = useMediaQuery("(min-width: 1180px)");
   const isDualPanelWide = useMediaQuery("(min-width: 1400px)");
   const previewAsDrawer = !isDualPanelWide && tasksOpen;
+
+  const [lastRequestedDrawer, setLastRequestedDrawer] = useState<"preview" | "tasks">("preview");
+
+  const togglePreview = useCallback(() => {
+    setMobilePreviewOpen((open) => {
+      const next = !open;
+      if (next && !isLargeScreen) {
+        setLastRequestedDrawer("preview");
+      }
+      return next;
+    });
+  }, [isLargeScreen]);
+
+  const toggleTasks = useCallback(() => {
+    setTasksOpen((open) => {
+      const next = !open;
+      if (next && !isLargeScreen) {
+        setLastRequestedDrawer("tasks");
+      }
+      return next;
+    });
+  }, [isLargeScreen]);
+
+  const activeMobileDrawer: "preview" | "tasks" | null = useMemo(() => {
+    if (isLargeScreen) return null;
+    if (mobilePreviewOpen && tasksOpen) return lastRequestedDrawer;
+    if (mobilePreviewOpen) return "preview";
+    if (tasksOpen) return "tasks";
+    return null;
+  }, [isLargeScreen, mobilePreviewOpen, tasksOpen, lastRequestedDrawer]);
+
+  const headerRef = useRef<HTMLDivElement>(null);
+  const headerWidth = useContainerWidth(headerRef);
+  const collapse = resolveHeaderCollapse(headerWidth);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!moreMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!moreMenuRef.current?.contains(e.target as Node)) {
+        setMoreMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMoreMenuOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [moreMenuOpen]);
 
   const members = useMemo(
     () => group.memberIds.map((id) => state.bots.find((b) => b.id === id)).filter((b): b is Bot => Boolean(b)),
@@ -214,69 +272,172 @@ export function GroupView({ group }: { group: Group }) {
 
   return (
     <main className="relative flex h-full min-w-0 flex-1 bg-app">
-      <section className="relative flex h-full min-w-[360px] flex-1 flex-col">
+      <section className="relative flex h-full min-w-[360px] flex-1 flex-col overflow-hidden">
       {/* Header: name left, member mauses right — their motion IS the status */}
-      <div className={cn("flex items-center justify-between gap-2 px-5 py-3", isWin && "pr-[148px]")} style={drag}>
+      <div
+        ref={headerRef}
+        className={cn(
+          "flex shrink-0 items-center justify-between gap-2 px-3.5 min-[1600px]:px-5 border-b border-transparent min-w-0 max-w-full overflow-hidden",
+          SHARED_HEADER_HEIGHT_CLASS,
+          isWin && "pr-[148px]",
+        )}
+        style={drag}
+      >
         <span className="max-w-[10rem] shrink-0 truncate text-[15px] font-semibold text-ink">{group.name}</span>
         <div className="flex shrink-0 items-center gap-1.5" style={noDrag}>
-          <div className="flex items-center gap-1.5">
-            {members.map((b) => (
-              <span key={b.id} title={`${b.name}${group.busyBotId === b.id ? " — working…" : ""}`}>
-                <MausAvatar
-                  color={b.color}
-                  state={normalizeState(b.mascotExpression) ?? "happy"}
-                  size={24}
-                  motion={group.busyBotId === b.id ? "working" : "none"}
-                  motionKey={group.busyBotId === b.id ? 1 : 0}
-                />
+          {/* Member avatars: when tight and more than 2 members, show first 2 plus a count badge */}
+          {collapse.isTight && members.length > 2 ? (
+            <div className="flex items-center -space-x-1.5 pr-1">
+              {members.slice(0, 2).map((b) => (
+                <span key={b.id} title={`${b.name}${group.busyBotId === b.id ? " — working…" : ""}`}>
+                  <MausAvatar
+                    color={b.color}
+                    state={normalizeState(b.mascotExpression) ?? "happy"}
+                    size={24}
+                    motion={group.busyBotId === b.id ? "working" : "none"}
+                    motionKey={group.busyBotId === b.id ? 1 : 0}
+                  />
+                </span>
+              ))}
+              <span className="flex h-6 items-center justify-center rounded-full bg-raised px-1.5 text-[10px] font-medium text-ink-secondary border border-hairline/60">
+                +{members.length - 2}
               </span>
-            ))}
-          </div>
-          <button type="button" title="Schedule run…" aria-label="Schedule run…" onClick={() => dispatch({ type: "openSchedule", target: { groupId: group.id } })} className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised">⏰</button>
-          <UsageRings />
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              {members.map((b) => (
+                <span key={b.id} title={`${b.name}${group.busyBotId === b.id ? " — working…" : ""}`}>
+                  <MausAvatar
+                    color={b.color}
+                    state={normalizeState(b.mascotExpression) ?? "happy"}
+                    size={24}
+                    motion={group.busyBotId === b.id ? "working" : "none"}
+                    motionKey={group.busyBotId === b.id ? 1 : 0}
+                  />
+                </span>
+              ))}
+            </div>
+          )}
+          {!collapse.collapseSecondaryToMenu && (
+            <button
+              type="button"
+              title="Schedule run…"
+              aria-label="Schedule run…"
+              onClick={() => dispatch({ type: "openSchedule", target: { groupId: group.id } })}
+              className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised"
+            >
+              ⏰
+            </button>
+          )}
+
+          <UsageRings compact={collapse.isTight || !isDualPanelWide || tasksOpen} />
+          {!collapse.collapseSecondaryToMenu && (
+            <button
+              type="button"
+              onClick={() => setActivityOpen((open) => !open)}
+              aria-label={activityOpen ? "Hide room activity" : "Show room activity"}
+              aria-pressed={activityOpen}
+              title={activityOpen ? "Hide room activity" : "Show room activity"}
+              className={cn(
+                "relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px]",
+                activityOpen ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
+              )}
+            >
+              <Activity size={14} />
+              {collapse.showButtonsText && <span>Activity</span>}
+              {activityCount > 0 && (
+                <span className="flex min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
+                  {activityCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {collapse.collapseSecondaryToMenu && (
+            <div className="relative" ref={moreMenuRef}>
+              <button
+                type="button"
+                onClick={() => setMoreMenuOpen((o) => !o)}
+                aria-label="More actions"
+                aria-expanded={moreMenuOpen}
+                title="More actions"
+                className={cn(
+                  "rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink transition-colors",
+                  moreMenuOpen && "bg-raised text-ink",
+                )}
+              >
+                <MoreHorizontal size={16} />
+              </button>
+
+              {moreMenuOpen && (
+                <div
+                  role="menu"
+                  aria-label="More actions"
+                  className="absolute right-0 top-full z-40 mt-1 w-44 overflow-hidden rounded-xl border border-hairline/60 bg-panel p-1.5 shadow-xl"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMoreMenuOpen(false);
+                      dispatch({ type: "openSchedule", target: { groupId: group.id } });
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-ink transition-colors hover:bg-raised-hover"
+                  >
+                    <span>⏰</span>
+                    <span>Schedule run…</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMoreMenuOpen(false);
+                      setActivityOpen((o) => !o);
+                    }}
+                    className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[12px] text-ink transition-colors hover:bg-raised-hover"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Activity size={14} className="text-ink-secondary" />
+                      <span>Room activity</span>
+                    </div>
+                    {activityCount > 0 && (
+                      <span className="flex min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
+                        {activityCount}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <button
             type="button"
-            onClick={() => setActivityOpen((open) => !open)}
-            aria-label={activityOpen ? "Hide room activity" : "Show room activity"}
-            aria-pressed={activityOpen}
-            className={cn(
-              "relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px]",
-              activityOpen ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
-            )}
-          >
-            <Activity size={14} />
-            <span className="hidden min-[1600px]:inline">Activity</span>
-            {activityCount > 0 && (
-              <span className="flex min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
-                {activityCount}
-              </span>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => setMobilePreviewOpen((open) => !open)}
+            onClick={togglePreview}
             aria-label={mobilePreviewOpen ? "Hide mobile preview" : "Show mobile preview"}
             aria-pressed={mobilePreviewOpen}
+            title={mobilePreviewOpen ? "Hide mobile preview" : "Show mobile preview"}
             className={cn(
               "relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px]",
               mobilePreviewOpen ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
             )}
           >
             <Smartphone size={14} />
-            <span className="hidden min-[1600px]:inline">Preview</span>
+            {collapse.showButtonsText && <span>Preview</span>}
           </button>
           <button
             type="button"
-            onClick={() => setTasksOpen((open) => !open)}
+            onClick={toggleTasks}
             aria-label={tasksOpen ? "Hide tasks" : "Show tasks"}
             aria-pressed={tasksOpen}
+            title={tasksOpen ? "Hide tasks" : "Show tasks"}
             className={cn(
               "relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px]",
               tasksOpen ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
             )}
           >
             <ClipboardList size={14} />
-            <span className="hidden min-[1600px]:inline">Tasks</span>
+            {collapse.showButtonsText && <span>Tasks</span>}
             {roomTasks.length > 0 && (
               <span className="flex min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
                 {roomTasks.length}
@@ -437,54 +598,71 @@ export function GroupView({ group }: { group: Group }) {
         </>
       )}
 
-      {mobilePreviewOpen && (
-        <>
-          <button
-            type="button"
-            aria-label="Close mobile preview panel"
-            onClick={() => setMobilePreviewOpen(false)}
-            className={cn(
-              "absolute inset-0 z-20 bg-black/55",
-              previewAsDrawer ? "block" : "min-[1180px]:hidden",
-            )}
-          />
-          <MobilePreviewPanel
-            onClose={() => setMobilePreviewOpen(false)}
-            onScreenshot={setPreviewAttachment}
-            className={cn(
-              "absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl",
-              !previewAsDrawer && "min-[1180px]:static min-[1180px]:inset-auto min-[1180px]:z-auto min-[1180px]:max-w-none min-[1180px]:shadow-none",
-            )}
-          />
-        </>
+      {/* Drawer mode: Single backdrop for narrow viewports (< 1180px) */}
+      {!isLargeScreen && activeMobileDrawer && (
+        <button
+          type="button"
+          aria-label={activeMobileDrawer === "preview" ? "Close mobile preview panel" : "Close tasks panel"}
+          onClick={() => {
+            if (activeMobileDrawer === "preview") setMobilePreviewOpen(false);
+            else setTasksOpen(false);
+          }}
+          className="absolute inset-0 z-20 bg-black/55"
+        />
       )}
 
-      {tasksOpen && (
+      {/* Preview drawer below 1180px */}
+      {!isLargeScreen && mobilePreviewOpen && activeMobileDrawer === "preview" && (
+        <MobilePreviewPanel
+          onClose={() => setMobilePreviewOpen(false)}
+          onScreenshot={setPreviewAttachment}
+          className="absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl"
+        />
+      )}
+
+      {/* Tasks drawer below 1180px */}
+      {!isLargeScreen && tasksOpen && activeMobileDrawer === "tasks" && (
         <TasksPanel
           tasks={roomTasks}
           emptyLabel={group.projectId ? "No tasks in this project yet." : "Set a project above to see its tasks here."}
           headerExtra={tasksProjectPicker}
           onClose={() => setTasksOpen(false)}
-          className="hidden min-[1180px]:flex"
+          className="absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl"
         />
       )}
 
-      {tasksOpen && (
+      {/* Large screen (>= 1180px): Preview (docked or overlay drawer) */}
+      {isLargeScreen && mobilePreviewOpen && (
         <>
-          <button
-            type="button"
-            aria-label="Close tasks panel"
-            onClick={() => setTasksOpen(false)}
-            className="absolute inset-0 z-20 bg-black/55 min-[1180px]:hidden"
-          />
-          <TasksPanel
-            tasks={roomTasks}
-            emptyLabel={group.projectId ? "No tasks in this project yet." : "Set a project above to see its tasks here."}
-            headerExtra={tasksProjectPicker}
-            onClose={() => setTasksOpen(false)}
-            className="absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl min-[1180px]:hidden"
+          {previewAsDrawer && (
+            <button
+              type="button"
+              aria-label="Close mobile preview panel"
+              onClick={() => setMobilePreviewOpen(false)}
+              className="absolute inset-0 z-20 bg-black/55"
+            />
+          )}
+          <MobilePreviewPanel
+            onClose={() => setMobilePreviewOpen(false)}
+            onScreenshot={setPreviewAttachment}
+            className={cn(
+              previewAsDrawer
+                ? "absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl"
+                : "static inset-auto z-auto max-w-none shadow-none flex",
+            )}
           />
         </>
+      )}
+
+      {/* Large screen (>= 1180px): Tasks docks statically */}
+      {isLargeScreen && tasksOpen && (
+        <TasksPanel
+          tasks={roomTasks}
+          emptyLabel={group.projectId ? "No tasks in this project yet." : "Set a project above to see its tasks here."}
+          headerExtra={tasksProjectPicker}
+          onClose={() => setTasksOpen(false)}
+          className="flex"
+        />
       )}
     </main>
   );
