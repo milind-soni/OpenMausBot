@@ -63,6 +63,7 @@ function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; w
     bots: () => bots,
     sections: () => ["Sales"],
     reorderBots: async (botIds) => { bots.sort((a, b) => botIds.indexOf(a.id) - botIds.indexOf(b.id)); return null; },
+    pinBot: async (botId, pinned) => { (bots.find((bot) => bot.id === botId) as { pinned?: boolean }).pinned = pinned || undefined; return null; },
     groupBots: async (name, botIds) => { for (const bot of bots) if (botIds.includes(bot.id)) (bot as { section?: string }).section = name || undefined; return null; },
     credentials: () => cfg,
     window: {
@@ -188,6 +189,19 @@ describe("safe tier", () => {
     expect(bots.map((bot) => bot.section)).toEqual([undefined, "Ops"]);
     expect(await host.undo({ threadId: turn.threadId, requestId: String(cards()[1]!.card.requestId) })).toEqual({ claimed: true, state: "undone" });
     expect(bots.map((bot) => bot.section)).toEqual(["Sales", undefined]);
+  });
+
+  it("pins and unpins bots from the full list sent, refuses an unknown id, and Undo restores the earlier pins", async () => {
+    const { host, set, bots, cards, turn } = fixture();
+    const pins = () => bots.filter((bot) => bot.pinned).map((bot) => bot.id);
+    expect((await set("bots.pinned", JSON.stringify(["clive"]))).body.text).toMatch(/^Changed Pinned bots from not set to Clive\./);
+    expect(pins()).toEqual(["clive"]);
+    expect((await set("bots.pinned", ["kiwi"])).status).toBe(200);
+    expect(pins()).toEqual(["kiwi"]);
+    expect(await host.undo({ threadId: turn.threadId, requestId: String(cards()[1]!.card.requestId) })).toEqual({ claimed: true, state: "undone" });
+    expect(pins()).toEqual(["clive"]);
+    expect((await set("bots.pinned", ["ghost"])).body.error).toContain("No bot has the id ghost");
+    expect(pins()).toEqual(["clive"]);
   });
 
   it("a window preference refuses until a window has reported, then pushes the change", async () => {

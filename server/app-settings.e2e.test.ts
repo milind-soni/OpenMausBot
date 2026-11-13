@@ -233,6 +233,17 @@ it("an owner-only setting is refused with where to change it", async () => {
     text: "Approval modes is changed only by the owner, in a bot's Settings. Tell the user where to find it; do not try another way." })]);
 }, 60_000);
 
+it("pinning a bot goes through the sidebar's own bot route, and Undo unpins it", async () => {
+  const pinnedNow = async () => (await api("GET", "/api/bots")).bots.find((one: any) => one.id === bot.id)?.pinned === true;
+  expect(await pinnedNow()).toBe(false);
+  await start("PIN-1", [step({ action: "set", id: "bots.pinned", value: JSON.stringify([bot.id]) })]);
+  expect(results(await finished("PIN-1"))[0]).toMatchObject({ isError: false, text: expect.stringMatching(/^Changed Pinned bots from not set to /) });
+  expect(await pinnedNow()).toBe(true);
+  const card = (await settingCards(bot.threadId)).find((one) => one.card.appSettingRequest.settingId === "bots.pinned");
+  expect(await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: card.card.requestId })).toMatchObject({ ok: true, undone: true });
+  expect(await pinnedNow()).toBe(false);
+}, 60_000);
+
 it("a window preference changes only while the app window's stream is open: refused with none, applied once one connects, refused after it closes, applied again on reconnect", async () => {
   const openWindow = async () => {
     const closed = new AbortController();
