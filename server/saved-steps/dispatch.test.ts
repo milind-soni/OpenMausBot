@@ -802,7 +802,7 @@ describe("SavedStepsDispatch with the quick model fallback", () => {
     const real = { instanceId: "claude", driverKind: "claudeAgent", adapter } as unknown as ProviderInstance;
     failAt = "list_apps";
     let bus!: EventBus;
-    const quick = new QuickModelFallback({ file: join(scratch, "refused.json"), publish: (event) => { if (!composed.take(event)) bus.publish(event); }, stopped: () => false });
+    const quick = new QuickModelFallback({ file: join(scratch, "refused.json"), publish: (event) => { if (!composed.take(event)) bus.publish(event); }, stopped: () => false, mayDispatch: (_threadId, owner) => Boolean(owner) });
     const composed: SavedStepsDispatch = new SavedStepsDispatch({ ...deps, publish: (event) => bus.publish(event) });
     bus = new EventBus(() => {}, (event) => quick.take(event) || composed.take(event));
     bus.attach([real]);
@@ -810,7 +810,7 @@ describe("SavedStepsDispatch with the quick model fallback", () => {
     bus.subscribe((event) => delivered.push(event));
 
     const { turnId } = await composed.sendTurn(real, REQ, { ...INPUT, model: "quick-model" }, (input) =>
-      quick.sendTurn(real, input, { model: "quick-model", own: { model: "own-model" }, onFallback: () => {} }));
+      quick.sendTurn(real, input, { model: "quick-model", own: { model: "own-model" }, onFallback: () => {} }, { botId: "bot", generation: "generation" }));
     await vi.waitFor(() => expect(delivered.some((event) => event.type === "turn.completed")).toBe(true));
     bus.detachAll();
 

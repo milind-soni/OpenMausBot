@@ -1495,7 +1495,7 @@ utilityParentPort?.on("message", (event) => {
 });
 
 const savedSteps = createSavedSteps({ enabled: () => savedStepsEnabled(cfg), bot: (id) => store.bot(id), publish: (event) => bus.publish(event), engines: { get: (threadId) => runningTurnEngines.get(threadId), set: (threadId, engine) => { runningTurnEngines.set(threadId, engine); } }, stopped: (threadId) => directRequestOwners.get(threadId)?.stopped === true, generation: (threadId) => directTurnGenerationByThread.get(threadId), patchMessage: (threadId, messageId, patch) => { store.patchMessage(threadId, messageId, patch); }, withholdHandoff: (threadId) => handoffs.withhold(threadId), contextChanged: (botId, threadId) => { const owner = store.bot(botId); if (owner) markTaskContextExternallyUpdated(owner, threadId); } });
-const quickFallback = new QuickModelFallback({ file: join(DATA_DIR, "refused-quick-models.json"), publish: (event) => { if (!savedSteps.dispatch.take(event)) bus.publish(event); }, stopped: (threadId) => directRequestOwners.get(threadId)?.stopped === true });
+const quickFallback = new QuickModelFallback({ file: join(DATA_DIR, "refused-quick-models.json"), publish: (event) => { if (!savedSteps.dispatch.take(event)) bus.publish(event); }, stopped: (threadId) => directRequestOwners.get(threadId)?.stopped === true, mayDispatch: (threadId, owner) => { const request = directRequestOwners.get(threadId); return Boolean(owner && directTurnGenerationByThread.get(threadId) === owner.generation && directTurnClaimIsCurrent(owner.botId, owner.generation, threadId) && request?.generations.has(owner.generation) && request.requestSessionId === owner.requestSessionId && !request.stopped && directTurnRequestSessionMayDispatch({ requestSessionId: owner.requestSessionId }, (sessionId) => sessions.isLive(sessionId))); } });
 const bus = new EventBus(undefined, (event) => quickFallback.take(event) || savedSteps.dispatch.take(event));
 bus.attach(registry.instances()); bus.subscribe((event) => savedSteps.observe(event));
 let companyRuntimeReady!: () => void;
@@ -8449,7 +8449,7 @@ async function beginTurn(
         ...settingsTurnFields(cfg, DATA_DIR, managedPolicy.restrictsMcp()),
         cwd, ...(worksInWorkspace || guestConfined || cloudGuestOpened(threadId) ? {} : { toolResultFolder: messageFileRootsForThread(bot.id, threadId).find((root) => root !== ATTACHMENTS_DIR) }),
         botSettingsFile: botSettingsFile(bot),
-      }, (input) => quickFallback.sendTurn(instance, input, route.quickModel ? { model, own: bot.modelSelection, onFallback: () => store.patchMessage(threadId, userMessage.id, { quickModel: undefined }) } : undefined))), () => companyShutdown || !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
+      }, (input) => quickFallback.sendTurn(instance, input, route.quickModel ? { model, own: bot.modelSelection, onFallback: () => store.patchMessage(threadId, userMessage.id, { quickModel: undefined }) } : undefined, { botId: bot.id, generation: dispatchClaimId, requestSessionId: directRequestOwners.get(threadId)?.requestSessionId }))), () => companyShutdown || !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
         await (runningTurnEngines.get(threadId) ?? instance).adapter.interruptTurn(threadId).catch(() => {});
       });
       if (dispatch.cancelled) {

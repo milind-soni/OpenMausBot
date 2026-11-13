@@ -23,6 +23,13 @@ export interface QuickRoute {
   onFallback: () => void;
 }
 
+/** Immutable provenance for the request generation that owns a possible retry. */
+export interface QuickRetryOwner {
+  botId: string;
+  generation: string;
+  requestSessionId?: string;
+}
+
 type Engine = { instanceId: string; adapter: Pick<ProviderAdapter, "sendTurn" | "interruptTurn"> };
 
 /** An engine turn that runs again in place of a turn the conversation already shows. */
@@ -47,6 +54,7 @@ interface Armed extends RetriedTurn {
   input: SendTurnInput;
   quick: QuickRoute;
   phase: "quick" | "refused" | "retrying";
+  retryOwner?: QuickRetryOwner;
   /** The refusal and the rest of the quick turn, published only if no retry runs. */
   held: RuntimeEvent[];
 }
@@ -56,6 +64,8 @@ export interface QuickModelFallbackDeps {
   publish: (event: RuntimeEvent) => void;
   /** The person stopped this thread's request. */
   stopped: (threadId: string) => boolean;
+  /** Rechecks the exact request generation and its original session before the deferred retry. */
+  mayDispatch: (threadId: string, owner: QuickRetryOwner | undefined) => boolean;
 }
 
 const NONE: ReadonlySet<string> = new Set();
@@ -92,10 +102,10 @@ export class QuickModelFallback {
     return armed && armed.phase !== "retrying" ? armed.quick.model : undefined;
   }
 
-  sendTurn(engine: Engine, input: SendTurnInput, quick?: QuickRoute): Promise<TurnStartResult> {
+  sendTurn(engine: Engine, input: SendTurnInput, quick?: QuickRoute, retryOwner?: QuickRetryOwner): Promise<TurnStartResult> {
     this.armed.delete(input.threadId);
     if (!quick) return engine.adapter.sendTurn(input);
-    const armed: Armed = { engine, input, quick, phase: "quick", held: [] };
+    const armed: Armed = { engine, input, quick, ...(retryOwner ? { retryOwner } : {}), phase: "quick", held: [] };
     this.armed.set(input.threadId, armed);
     return engine.adapter.sendTurn(input).then((sent) => {
       armed.turnId ??= sent.turnId;
@@ -164,6 +174,7 @@ export class QuickModelFallback {
     // After the adapter that emitted the refusal has finished settling the quick turn.
     setImmediate(() => {
       if (this.armed.get(threadId) !== armed) return;
+      if (!this.deps.mayDispatch(threadId, armed.retryOwner)) return this.giveUp(armed);
       armed.engine.adapter.sendTurn({ ...armed.input, model, effort, variant }).then((sent) => {
         armed.retryTurnId ??= sent.turnId;
         if (this.deps.stopped(threadId)) void armed.engine.adapter.interruptTurn(threadId).catch(() => {});
