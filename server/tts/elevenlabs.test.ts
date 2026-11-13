@@ -13,6 +13,10 @@ describe("ElevenLabs speech model", () => {
     expect(speechModel("ᲒᲐᲛᲐᲠᲯᲝᲑᲐ")).toBe("eleven_v3");
   });
 
+  it("stays on Flash through the plan's included voice, whose relay takes Flash and Turbo only", () => {
+    expect(speechModel("สวัสดีครับ วันนี้อากาศดี", true)).toBe("eleven_flash_v2_5");
+  });
+
   it("keeps Flash for languages it speaks", () => {
     for (const text of ["Hello there", "こんにちは", "你好", "नमस्ते", "Xin chào", "Привет", "مرحبا", "வணக்கம்"]) {
       expect(speechModel(text)).toBe("eleven_flash_v2_5");

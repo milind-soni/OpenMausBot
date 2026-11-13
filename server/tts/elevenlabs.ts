@@ -5,9 +5,10 @@ import { userErrorThrown } from "../user-errors.ts";
 
 const MODEL = "eleven_flash_v2_5";
 // Flash v2.5 has no Thai, Bengali, Hebrew, Georgian, Armenian, Gujarati, Punjabi, Telugu, Kannada or Malayalam; Eleven v3
-// speaks them. Text in one of their scripts goes to v3, everything else stays on the faster Flash.
+// speaks them. Text in one of their scripts goes to v3, everything else stays on the faster Flash. The plan's included
+// voice relay takes Flash and Turbo only, so through it every line stays on Flash.
 const BEYOND_FLASH = /[\u0E00-\u0E7F\u0980-\u09FF\u0590-\u05FF\u10A0-\u10FF\u1C90-\u1CBF\u0530-\u058F\u0A80-\u0AFF\u0A00-\u0A7F\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F]/;
-export const speechModel = (text: string): string => (BEYOND_FLASH.test(text) ? "eleven_v3" : MODEL);
+export const speechModel = (text: string, included = false): string => (!included && BEYOND_FLASH.test(text) ? "eleven_v3" : MODEL);
 const HEARING_MODEL = "scribe_v2";
 // 64kbps mono is indistinguishable for speech and a third of the bytes
 const FORMAT = "mp3_44100_64";
@@ -155,7 +156,7 @@ export interface Synthesis {
   audio: Promise<Audio>;
 }
 
-export function synthesize(text: string, voiceId: string, key: string, api: string): Synthesis {
+export function synthesize(text: string, voiceId: string, key: string, api: string, included = false): Synthesis {
   const firstAudio = withResolvers<Audio>();
   const audio = withResolvers<Audio>();
   // Callers may consume only `audio`: a failure before the first chunk must not become an unhandled rejection.
@@ -165,7 +166,7 @@ export function synthesize(text: string, voiceId: string, key: string, api: stri
       const res = await fetch(`${api}/text-to-speech/${encodeURIComponent(voiceId)}/stream?output_format=${FORMAT}`, {
         method: "POST",
         headers: { "xi-api-key": key, "content-type": "application/json", accept: "audio/mpeg" },
-        body: JSON.stringify({ text, model_id: speechModel(text) }),
+        body: JSON.stringify({ text, model_id: speechModel(text, included) }),
         redirect: "error",
         signal: AbortSignal.timeout(60_000),
       });
