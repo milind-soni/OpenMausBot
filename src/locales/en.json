@@ -6124,6 +6124,7 @@
   "remote.serverPairing.title": "Pair a phone or another computer",
   "remote.serverPairing.subtitle": "Create a one-time code, then scan it with the {app} app or open the link in a browser. Codes work once and expire after five minutes.",
   "remote.serverPairing.noPhoneSecrets": "This phone can chat and approve here, but secrets must be entered on the web or computer.",
+  "remote.serverPairing.sameWifiOnly": "This link works only on the same Wi-Fi as this computer. To use it away from home, pair the {app} phone app and choose Anywhere (this computer needs {app} Relay on), or give this computer an HTTPS address, for example with Tailscale.",
   "remote.serverPairing.scope.admin": "Full access",
   "remote.serverPairing.scope.client": "Chat and approvals only",
   "remote.serverPairing.create": "Create pairing code",

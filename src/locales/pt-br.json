@@ -5816,6 +5816,7 @@
   "remote.serverPairing.copied": "Copiado",
   "remote.serverPairing.noLink": "Este servidor ainda não tem um endereço público para o link: abra /pair no endereço que você usa e digite o código.",
   "remote.serverPairing.noPhoneSecrets": "Este celular pode conversar e aprovar aqui, mas os segredos precisam ser inseridos na web ou no computador.",
+  "remote.serverPairing.sameWifiOnly": "Este link só funciona no mesmo Wi-Fi deste computador. Para usar fora de casa, pareie o app {app} no celular e escolha Qualquer lugar (este computador precisa do {app} Relay ligado), ou dê a este computador um endereço HTTPS, por exemplo com o Tailscale.",
   "remote.serverPairing.chatOnly": "Este dispositivo está conectado só com chat e aprovações, então não pode parear outros. No computador que roda o servidor, rode `openmausbot pair` (ou abra as Configurações lá) para gerar um código com acesso total e conecte este dispositivo novamente com ele.",
   "remote.serverPairing.devices": "Dispositivos pareados",
   "remote.serverPairing.noDevices": "Nenhum dispositivo pareado ainda.",
