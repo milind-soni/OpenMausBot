@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ModelCatalog, ProviderInstance, RuntimeEvent, RuntimeEventListener, SendTurnInput } from "./contracts.ts";
 import { EventBus } from "./harness/bus.ts";
+import { quickRetryRequestMayDispatch } from "./host/request-session.ts";
 import { QuickModelFallback, refusesModel, type QuickRetryOwner, type QuickRoute } from "./quick-model-fallback.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { routeDirectTurn } from "./turn-route.ts";
@@ -12,7 +13,7 @@ import { routeDirectTurn } from "./turn-route.ts";
 const CHATGPT_REFUSAL = 'unexpected status 400 Bad Request: {"type":"invalid_request_error","message":"The \'gpt-5.4-mini\' model is not supported when using Codex with a ChatGPT account."}';
 
 type Emit = (type: string, extra?: Record<string, unknown>) => void;
-type Play = (emit: Emit) => void;
+type Play = (emit: Emit) => void | Promise<void>;
 
 /** An engine whose nth sendTurn plays the nth script, after sendTurn has answered, as real adapters do. */
 function engine(scripts: Play[]) {
@@ -31,7 +32,7 @@ function engine(scripts: Play[]) {
           listener({ eventId: `${turnId}-${type}`, provider: "codex", threadId: input.threadId, turnId, createdAt: "2026-10-23T00:00:00Z", type, ...extra } as RuntimeEvent);
         }
       };
-      setImmediate(() => play?.(emit));
+      setImmediate(() => { void play?.(emit); });
       return { turnId };
     },
     interruptTurn: async (threadId: string) => { interrupted.push(threadId); },
@@ -72,7 +73,13 @@ describe("QuickModelFallback", () => {
   let file: string;
   let stopped: boolean;
   let liveSession: string | undefined;
+  let requestSessionId: string | undefined;
   let activeGeneration: string;
+  let turnBusy: boolean;
+  let companyShutdown: boolean;
+  let dispatchClaimPresent: boolean;
+  let observeClaimAtRetry: boolean;
+  let claimsAtRetry: boolean[];
   let fallback: QuickModelFallback;
   let bus: EventBus;
   let delivered: Array<{ event: RuntimeEvent; routed: string | undefined }>;
@@ -82,9 +89,17 @@ describe("QuickModelFallback", () => {
     file = join(scratch, "refused-quick-models.json");
     stopped = false;
     liveSession = "session-a";
+    requestSessionId = "session-a";
     activeGeneration = "generation-a";
+    turnBusy = true;
+    companyShutdown = false;
+    dispatchClaimPresent = true;
+    observeClaimAtRetry = false;
+    claimsAtRetry = [];
     fallback = new QuickModelFallback({ file, publish: (event) => bus.publish(event), stopped: () => stopped,
-      mayDispatch: (_threadId, owner) => Boolean(!stopped && owner && owner.generation === activeGeneration && owner.requestSessionId === liveSession) });
+      mayDispatch: (_threadId, owner) => quickRetryRequestMayDispatch(owner, activeGeneration,
+        { generation: activeGeneration, generations: new Set([activeGeneration]), requestSessionId, stopped, turnId: null },
+        (botId) => { if (observeClaimAtRetry) claimsAtRetry.push(dispatchClaimPresent); return botId === "bot-a" && !companyShutdown && turnBusy; }, (id) => id === liveSession) });
     bus = new EventBus(() => {}, (event) => fallback.take(event));
     delivered = [];
     bus.subscribe((event) => delivered.push({ event, routed: fallback.routedModel(event.threadId) }));
@@ -187,6 +202,34 @@ describe("QuickModelFallback", () => {
     expect(sent).toHaveLength(1);
   });
 
+  it("retries after provider acknowledgement releases the dispatch claim while the same turn remains busy", async () => {
+    let reportStarted!: () => void;
+    let releaseRefusal!: () => void;
+    const started = new Promise<void>((resolve) => { reportStarted = resolve; });
+    const refusalGate = new Promise<void>((resolve) => { releaseRefusal = resolve; });
+    const refusedAfterAck: Play = async (emit) => {
+      emit("turn.started");
+      reportStarted();
+      await refusalGate;
+      emit("runtime.error", { message: CHATGPT_REFUSAL });
+      emit("turn.completed", { ok: false, stopReason: CHATGPT_REFUSAL, cost: null });
+    };
+    const { instance, sent } = engine([refusedAfterAck, answered]);
+    bus.attach([instance]);
+    observeClaimAtRetry = true;
+
+    await fallback.sendTurn(instance, input, quick(), retryOwner);
+    await started;
+    dispatchClaimPresent = false;
+    releaseRefusal();
+    await settled();
+
+    expect(claimsAtRetry).toEqual([false]);
+    expect(sent).toHaveLength(2);
+    expect(sent[1].model).toBe("gpt-6-luna");
+    expect(delivered.at(-1)?.event).toMatchObject({ type: "turn.completed", ok: true });
+  });
+
   it("does not retry when the original session is revoked after scheduling", async () => {
     const { instance, sent } = engine([(emit) => {
       emit("turn.started");
@@ -213,6 +256,7 @@ describe("QuickModelFallback", () => {
       emit("turn.completed", { ok: false, stopReason: CHATGPT_REFUSAL, cost: null });
       activeGeneration = "generation-b";
       liveSession = "session-b";
+      requestSessionId = "session-b";
     }, answered]);
     bus.attach([instance]);
     const route = quick();
@@ -226,6 +270,7 @@ describe("QuickModelFallback", () => {
 
   it("keeps explicitly owned sessionless routine retries working", async () => {
     liveSession = undefined;
+    requestSessionId = undefined;
     const { instance, sent } = engine([refusedQuickTurn, answered]);
     bus.attach([instance]);
     await fallback.sendTurn(instance, input, quick(), { botId: "bot-a", generation: "generation-a" });
@@ -233,6 +278,21 @@ describe("QuickModelFallback", () => {
 
     expect(sent).toHaveLength(2);
     expect(delivered.at(-1)?.event).toMatchObject({ type: "turn.completed", ok: true });
+  });
+
+  it("does not retry after company shutdown even when the request session remains live", async () => {
+    const { instance, sent } = engine([(emit) => {
+      emit("turn.started");
+      emit("runtime.error", { message: CHATGPT_REFUSAL });
+      emit("turn.completed", { ok: false, stopReason: CHATGPT_REFUSAL, cost: null });
+      companyShutdown = true;
+    }, answered]);
+    bus.attach([instance]);
+    await fallback.sendTurn(instance, input, quick(), retryOwner);
+    await settled();
+
+    expect(sent).toHaveLength(1);
+    expect(delivered.at(-1)?.event).toMatchObject({ ok: false, stopReason: CHATGPT_REFUSAL });
   });
 
   it("reports the refusal when the run on the bot's own model cannot start", async () => {

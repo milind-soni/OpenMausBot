@@ -64,10 +64,10 @@ export function quickRetryRequestMayDispatch(
   owner: { botId: string; generation: string; requestSessionId?: string } | undefined,
   currentGeneration: string | undefined,
   request: DirectRequestOwner | undefined,
-  claimIsCurrent: (botId: string, generation: string) => boolean,
+  turnIsRunning: (botId: string) => boolean,
   isLive: (id: string) => boolean,
 ): boolean {
-  return Boolean(owner && currentGeneration === owner.generation && claimIsCurrent(owner.botId, owner.generation) &&
+  return Boolean(owner && currentGeneration === owner.generation && turnIsRunning(owner.botId) &&
     request?.generations.has(owner.generation) && request.requestSessionId === owner.requestSessionId && !request.stopped &&
     directTurnRequestSessionMayDispatch(request, isLive));
 }

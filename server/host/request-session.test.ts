@@ -78,16 +78,17 @@ describe("request session provenance", () => {
   it("authorizes a deferred retry only for its exact live generation and captured session", () => {
     const owner = { botId: "bot-a", generation: "generation-a", requestSessionId: "session-a" };
     const request = { generation: "generation-a", generations: new Set(["generation-a"]), requestSessionId: "session-a", turnId: null };
-    const current = (sessionId: string | undefined, generation = "generation-a") => quickRetryRequestMayDispatch(
-      owner, generation, { ...request, requestSessionId: sessionId }, (botId, id) => botId === "bot-a" && id === "generation-a", (id) => id === "session-a",
+    const current = (sessionId: string | undefined, generation = "generation-a", live = true) => quickRetryRequestMayDispatch(
+      owner, generation, { ...request, requestSessionId: sessionId }, (botId) => botId === "bot-a", (id) => live && id === "session-a",
     );
     expect(current("session-a")).toBe(true);
-    expect(current("revoked-session")).toBe(false);
-    expect(current("session-b")).toBe(false);
+    expect(current("session-a", "generation-a", false)).toBe(false);
+    expect(current("session-b", "generation-b")).toBe(false);
     expect(current("session-a", "generation-b")).toBe(false);
     expect(quickRetryRequestMayDispatch(undefined, "generation-a", request, () => true, () => true)).toBe(false);
     expect(quickRetryRequestMayDispatch({ botId: "bot-a", generation: "generation-a" }, "generation-a",
       { ...request, requestSessionId: undefined }, () => true, () => false)).toBe(true);
+    expect(quickRetryRequestMayDispatch(owner, "generation-a", request, () => false, () => true)).toBe(false);
     expect(quickRetryRequestMayDispatch(owner, "generation-a", { ...request, stopped: true }, () => true, () => true)).toBe(false);
   });
 
