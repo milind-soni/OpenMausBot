@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { lendingPersonKey, OWN_SERVER_LENDER, personKey } from "./person-key.ts";
+import type { LoopbackTurnProvenance } from "./direct-send.ts";
 import { loopbackSharedComputerPrincipal, loopbackTurnProvenance, requestSharedComputerPrincipal, requestTurnProvenance, SharedComputerTurnAuthorization } from "./loopback-turn-provenance.ts";
 import { loopbackCredentialId, resolveRequestAuth } from "./request-auth.ts";
 import { SessionRegistry } from "./sessions.ts";
@@ -88,7 +89,7 @@ describe("loopback shared-computer request provenance", () => {
     const proof = { kind: "companion" as const, deviceId: "paired-device", credentialId: "rotated-proof" };
     const request = { requestProvenance: proof, messageId: "request-message", generations: new Set(["new-generation"]) };
     expect(authz.principal(request, "old-generation", own, [], () => false, [])).toBeNull();
-    const credentialIsCurrent = (candidate: typeof proof) => candidate.credentialId === proof.credentialId;
+    const credentialIsCurrent = (candidate: LoopbackTurnProvenance) => candidate.kind === "companion" && candidate.credentialId === proof.credentialId;
     expect(authz.principal(request, "new-generation", own, [], () => false, [], credentialIsCurrent)).toBe(OWN_SERVER_LENDER);
     authz.revokeCompanion("paired-device", [request]);
     expect(request).toHaveProperty("stopped", true);
