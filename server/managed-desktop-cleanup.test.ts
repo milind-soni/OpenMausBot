@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 import { expect, it } from "vitest";
 import { changedInstanceIds, engineLaunches } from "./config.ts";
 
