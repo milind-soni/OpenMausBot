@@ -28,7 +28,7 @@ MausBot does not proxy every message through its own model account. It starts su
 | Pi | Pi CLI login | Native driver |
 | OMP | `omp login` or OMP's own provider configuration | ACP driver with live models, thinking choices, approvals, and session resume |
 
-Additional driver instances can be declared in local configuration. Unavailable engines remain visible with a reason instead of crashing the provider fleet.
+Additional driver instances can be declared in local configuration. An agent CLI with its own ACP entry point runs this way too, from one entry in `config.json`: see [Custom engines](./custom-acp.mdx). Unavailable engines remain visible with a reason instead of crashing the provider fleet.
 
 GitHub Copilot runs the official Copilot CLI (`npm install -g @github/copilot`) in its ACP mode and bills the signed-in Copilot plan, unless the CLI is set up to bring its own key: `COPILOT_PROVIDER_*` variables in the `githubCopilot` instance's `environment`, or a `providers.json` in the Copilot CLI home (`~/.copilot`, or `COPILOT_HOME`), send model requests to that provider, which bills them. A `GH_TOKEN` or `GITHUB_TOKEN` in MausBot's own environment never reaches it, because either would take precedence over the CLI's login; put one in the `githubCopilot` instance's `environment` to use it. `COPILOT_ALLOW_ALL` is always removed, so tool approvals stay with MausBot.
 

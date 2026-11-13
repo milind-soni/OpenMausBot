@@ -2758,6 +2758,7 @@
   "ask.error": "Impossible d’envoyer votre réponse. Réessayez.",
   "ask.detail.more": "Tout afficher",
   "inbox.action.closeQuestion": "Fermer sans répondre",
+  "inbox.markAllRead": "Tout marquer comme lu",
   "question.somethingElse": "Autre chose…",
   "question.done": "Terminé",
   "common.done": "Terminé",
