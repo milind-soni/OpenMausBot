@@ -368,8 +368,8 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   pinnedMessageId?: string;
   /** The coordinator for this bot's sidebar section. */
   chiefOfStaff?: boolean;
-  /** Owner-selected additional teams this Chief may coordinate. */
-  managedSections?: string[];
+  /** Owner-selected additional teams this Chief may coordinate; managesAllSections: every department, including ones added later. */
+  managedSections?: string[]; managesAllSections?: boolean;
   /** Team Cloud only: the lowercased email of the member who created the bot (or moved it in). */
   createdBy?: string;
   /** Team Cloud only: the lowercased email of the member the bot reports to, whose inbox its questions, approvals,

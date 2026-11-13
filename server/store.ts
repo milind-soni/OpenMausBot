@@ -434,7 +434,7 @@ export class Store {
         continue;
       }
       b.chiefOfStaff = false;
-      delete b.managedSections;
+      delete b.managedSections; delete b.managesAllSections;
       botsMigrated = true;
     }
     for (const b of this.bots as Array<BotRecord & { peers?: unknown; approvePeerComms?: unknown }>) {
@@ -1392,7 +1392,7 @@ export class Store {
         if (operation.fields.modelSelection) next.tasks = this.withDefaultModel(previous, operation.fields.modelSelection);
         nextBots[at] = next;
       }
-      if (operation.fields.chiefOfStaff === false) delete next.managedSections;
+      if (operation.fields.chiefOfStaff === false) { delete next.managedSections; delete next.managesAllSections; }
       next.section = sectionKey(next.section) || undefined;
       if (operation.fields.soul !== undefined) { next.soulHash = soulHash(operation.fields.soul); next.soulDrift = false; }
       changed.push(next);
@@ -1682,7 +1682,7 @@ export class Store {
         bot.hidden = false;
       } else {
         bot.chiefOfStaff = false;
-        delete bot.managedSections;
+        delete bot.managedSections; delete bot.managesAllSections;
       }
       changed.push(bot);
     }

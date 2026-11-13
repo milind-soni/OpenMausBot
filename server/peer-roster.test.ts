@@ -100,6 +100,16 @@ describe("Chief authority over additional departments", () => {
     expect(hasTeamAuthority({ ...chief, managedSections: [null] as unknown as string[] }, "Personal")).toBe(false);
     expect(hasTeamAuthority({ ...chief, managedSections: [""] }, undefined)).toBe(true);
   });
+  it("gives a Chief made responsible for every department authority there, including new ones, and nobody else", () => {
+    const everywhere = { ...self, chiefOfStaff: true, managesAllSections: true };
+    expect(hasTeamAuthority(everywhere, "Finance")).toBe(true);
+    expect(hasTeamAuthority(everywhere, "A department added later")).toBe(true);
+    expect(hasAuthority(everywhere, fleet[4]!)).toBe(true);
+    expect(hasAuthority(fleet[4]!, everywhere)).toBe(false);
+    expect(hasTeamAuthority({ ...everywhere, chiefOfStaff: false }, "Finance")).toBe(false);
+    expect(hasTeamAuthority({ ...everywhere, managesAllSections: false }, "Finance")).toBe(false);
+    expect(hasTeamAuthority({ ...everywhere, managesAllSections: "true" as unknown as boolean }, "Finance")).toBe(false);
+  });
 });
 
 describe("reach across departments", () => {

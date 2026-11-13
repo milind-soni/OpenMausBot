@@ -37,6 +37,7 @@ export type BotPatch = Partial<
     | "voice"
     | "chiefOfStaff"
     | "managedSections"
+    | "managesAllSections"
     | "composio"
     | "browser"
     | "recordBrowserSteps"

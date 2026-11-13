@@ -4899,6 +4899,29 @@ describe("harness HTTP API", () => {
       body: { error: "Confirm additional department access (acknowledgePeerScope)", errorKey: "serverError.department.confirmExtra" } });
   });
 
+  it("makes only a confirmed Chief responsible for every department and revokes it with the role", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${bot.id}`, { section: "All departments fixture" });
+      expect(await api("PATCH", `/api/bots/${bot.id}`, { managesAllSections: true, acknowledgePeerScope: true }))
+        .toMatchObject({ status: 400, body: { errorKey: "serverError.department.chiefResponsibility" } });
+      expect(await api("PATCH", `/api/bots/${bot.id}`, { chiefOfStaff: true, managesAllSections: "yes", acknowledgePeerScope: true }))
+        .toMatchObject({ status: 400 });
+      expect(await api("PATCH", `/api/bots/${bot.id}`, { chiefOfStaff: true, managesAllSections: true }))
+        .toMatchObject({ status: 400, body: { errorKey: "serverError.department.confirmResponsibility" } });
+      const listed = async () => (await api("GET", "/api/bots")).body.bots.find((entry: { id: string }) => entry.id === bot.id);
+      expect(Boolean((await listed()).chiefOfStaff)).toBe(false);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { chiefOfStaff: true, managesAllSections: true, acknowledgePeerScope: true })).status).toBe(200);
+      expect(await listed()).toMatchObject({ chiefOfStaff: true, managesAllSections: true });
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { chiefOfStaff: false })).status).toBe(200);
+      expect(Boolean((await listed()).managesAllSections)).toBe(false);
+      expect(await api("PATCH", `/api/bots/${bot.id}`, { managesAllSections: true, acknowledgePeerScope: true }))
+        .toMatchObject({ status: 400, body: { errorKey: "serverError.department.chiefResponsibility" } });
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("rejects a sidebar section Chief collision without changing any bot", async () => {
     const incumbent = (await api("POST", "/api/bots")).body.bot;
     const incoming = (await api("POST", "/api/bots")).body.bot;
