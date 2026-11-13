@@ -58,8 +58,12 @@ async function loadMonth(file: string): Promise<UsageRow[]> {
   }
   const cached = cache.get(file);
   if (cached && cached.size === size) return cached.rows;
-  const rows = cached && cached.size < size ? cached.rows : [];
-  const consumed = await readFrom(file, cached && cached.size < size ? cached.size : 0, rows);
+  const growing = cached && cached.size < size ? cached : undefined;
+  const added: UsageRow[] = [];
+  const consumed = await readFrom(file, growing?.size ?? 0, added);
+  // Keep the cached rows and byte offset together: a failed stream must not publish a partial append.
+  const rows = growing?.rows ?? added;
+  if (growing) for (const row of added) rows.push(row);
   cache.delete(file);
   cache.set(file, { size: consumed, rows });
   if (cache.size > MAX_CACHED_MONTHS) cache.delete(cache.keys().next().value as string);
