@@ -1,4 +1,4 @@
-import { sharesLinkOnly, previewShareLink } from "@/lib/previewSharing";
+import { sharesLinkOnly, previewShareLink, captureProjectFileSizes } from "@/lib/previewSharing";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -302,43 +302,43 @@ export default function PreviewScreen() {
       const linkOnly = sharesLinkOnly(activeSource, Boolean(window.gbs));
       if (linkOnly) {
         // Browser frames cannot supply a faithful page screenshot.
+      } else if (activeSource.kind === "file" && (activeSource.fileType === "markdown" || activeSource.fileType === "image") && request.scope === "all" && mode === "canvas" && !shareOverrideArtboard) {
+        const sizes = selectedSizeIds.map(id => {
+          const preset = resolvePreviewSize(id, customSize);
+          return { title: preset.label, ...applyRotation(preset, Boolean(rotatedById[id])) };
+        });
+        attachments.push(...await captureProjectFileSizes(activeSource, sizes, request.area === "full"));
       } else if (shareOverrideArtboard) {
         const handle = canvasFrameRefs.current.get(shareOverrideArtboard.id);
-        if (handle) {
-          const att = await handle.captureScreenshot(request.area, {
-            title: shareOverrideArtboard.preset.label,
-            width: shareOverrideArtboard.width,
-            height: shareOverrideArtboard.height,
-          });
-          attachments.push(att);
-        }
+        if (!handle) throw new Error("This preview is not ready to capture. Reload it and try again.");
+        attachments.push(await handle.captureScreenshot(request.area, {
+          title: shareOverrideArtboard.preset.label,
+          width: shareOverrideArtboard.width,
+          height: shareOverrideArtboard.height,
+        }));
       } else if (request.scope === "current" || mode === "single") {
         const handle =
           mode === "single"
             ? singleFrameRef.current
             : canvasFrameRefs.current.get(activePreset.id) ??
               canvasFrameRefs.current.values().next().value;
-        if (handle) {
-          const att = await handle.captureScreenshot(request.area, {
-            title: activePreset.label,
-            width: singleDims.width,
-            height: singleDims.height,
-          });
-          attachments.push(att);
-        }
+        if (!handle) throw new Error("This preview is not ready to capture. Reload it and try again.");
+        attachments.push(await handle.captureScreenshot(request.area, {
+          title: activePreset.label,
+          width: singleDims.width,
+          height: singleDims.height,
+        }));
       } else {
         for (const id of selectedSizeIds) {
           const preset = resolvePreviewSize(id, customSize);
           const dims = applyRotation(preset, Boolean(rotatedById[id]));
           const handle = canvasFrameRefs.current.get(id) ?? singleFrameRef.current;
-          if (handle) {
-            const att = await handle.captureScreenshot(request.area, {
-              title: preset.label,
-              width: dims.width,
-              height: dims.height,
-            });
-            attachments.push(att);
-          }
+          if (!handle) throw new Error(`The ${preset.label} preview is not ready to capture. Reload it and try again.`);
+          attachments.push(await handle.captureScreenshot(request.area, {
+            title: preset.label,
+            width: dims.width,
+            height: dims.height,
+          }));
         }
       }
 
