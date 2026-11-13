@@ -5650,6 +5650,7 @@
   "settings.data.takeOut": "Đưa dữ liệu ra",
   "settings.import.grokTitle": "Chuyển từ Grok Bot",
   "settings.import.hermesTitle": "Chuyển từ Hermes",
+  "grokMove.error.memoryTooLarge": "Bộ nhớ hoặc ghi chú nhập của một bot vượt quá 256 KB. Chưa có nội dung nào được nhập. Hãy rút gọn bộ nhớ hoặc ghi chú đã lưu của bot đó, rồi xuất và thử lại.",
   "settings.import.appsTitle": "Từ các ứng dụng AI của bạn",
   "settings.data.move": "Chuyển sang {place}",
   "settings.data.storage": "Lưu trữ",

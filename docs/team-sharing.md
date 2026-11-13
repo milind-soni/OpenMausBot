@@ -183,6 +183,9 @@ memories, scheduled jobs and app references. It does not change the source.
 Scheduled routines arrive paused; unrepresentable schedules and event triggers
 are saved as notes. Apps need reconnecting. Chat history, credentials and
 supporting skill files are excluded; copy any needed support files separately.
+Apps without an imported MCP connection are listed in the bot's
+`memory/import-apps.md`. A memory or import-notes file over 256 KB stops the
+preview with a size error before anything is imported.
 The profile's export is produced by Hermes, so check its reply for anything it
 could not read. No local Hermes installation is required on the receiving device.
 

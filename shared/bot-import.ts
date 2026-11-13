@@ -54,7 +54,7 @@ If it is too long for one message or file, split it: send several documents, eac
 `;
 }
 
-export type BotImportErrorCode = "notExport" | "cutOff" | "tooLarge" | "credentials" | "newerVersion" | "unusable";
+export type BotImportErrorCode = "notExport" | "cutOff" | "tooLarge" | "memoryTooLarge" | "credentials" | "newerVersion" | "unusable";
 
 export class BotImportError extends Error {
   readonly code: BotImportErrorCode;
@@ -466,14 +466,15 @@ export function botMovePlan(bot: ImportedBot, origin: BotImportOrigin, options: 
 
   const memory = memoryNotes(bot, sourceName);
   const seed: Record<string, string> = {};
-  if (memory.text && utf8Bytes(memory.text) <= SEED_FILE_MAX_BYTES) seed["MEMORY.md"] = memory.text;
+  if (memory.text) seed["MEMORY.md"] = memory.text;
   if (unscheduled.length) {
     const notes = eventNotes(name, unscheduled, sourceName);
-    if (utf8Bytes(notes) <= SEED_FILE_MAX_BYTES) seed[notesFile] = notes;
+    seed[notesFile] = notes;
   }
 
   const connectionKeys = new Set<string>();
   const connections: NonNullable<PackageDocument["package"]["connections"]> = [];
+  const reconnect: string[] = [];
   let apps = 0;
   for (const app of bot.apps) {
     const label = clip(app.name, 100);
@@ -481,7 +482,10 @@ export function botMovePlan(bot: ImportedBot, origin: BotImportOrigin, options: 
     const proposed = slug(`${/^[a-z]/i.test(label) ? "" : "server-"}${label}`, 25) || `server-${connections.length + 1}`;
     if (address && options.takenServers?.has(proposed)) continue;
     apps += 1;
-    if (!address || connections.length >= PACKAGE_MAX_CONNECTIONS) continue;
+    if (!address || connections.length >= PACKAGE_MAX_CONNECTIONS) {
+      reconnect.push(label);
+      continue;
+    }
     connections.push({
       key: uniqueSlug(proposed, proposed, connectionKeys, 28),
       label,
@@ -489,6 +493,11 @@ export function botMovePlan(bot: ImportedBot, origin: BotImportOrigin, options: 
       mcp: { transport: app.transport === "sse" || /\/sse\/?$/.test(new URL(address).pathname) ? "sse" : "http", url: address, valueNames: app.headerNames.filter((header) => VALID_HEADER.test(header)).slice(0, 32) },
     });
   }
+
+  if (reconnect.length) {
+    seed["memory/import-apps.md"] = `# Apps to reconnect from ${sourceName}\n\nConnect these apps again in OpenMausBot. Their credentials were not imported.\n\n${reconnect.map((label) => `- ${label}`).join("\n")}\n`;
+  }
+  if (Object.values(seed).some((text) => utf8Bytes(text) > SEED_FILE_MAX_BYTES)) throw new BotImportError("memoryTooLarge");
 
   const description = bot.description.trim();
   const summary = clip(description || bot.title || `${name}, brought over from ${sourceName}.`, 2_000);

@@ -3677,6 +3677,7 @@
   "settings.data.takeOut": "Забрати своє",
   "settings.import.grokTitle": "Переїзд із Grok Bot",
   "settings.import.hermesTitle": "Переїзд із Hermes",
+  "grokMove.error.memoryTooLarge": "Спогади або нотатки для імпорту одного з ботів перевищують 256 КБ. Нічого не імпортовано. Скоротіть збережені спогади або нотатки цього бота, потім експортуйте їх і повторіть спробу.",
   "settings.import.appsTitle": "З ваших застосунків ШІ",
   "settings.data.move": "Перенести на {place}",
   "settings.data.storage": "Сховище",

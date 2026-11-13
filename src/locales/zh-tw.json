@@ -7677,6 +7677,7 @@
   "grokMove.error.notExport": "這看起來不像你的 Bot 寫的內容。請複製它的完整回覆，或選擇它產生的檔案。",
   "grokMove.error.cutOff": "你 Bot 的回覆看起來被截斷了。請它以相同格式用另一則訊息傳送其餘部分，然後兩則都貼上。",
   "grokMove.error.tooLarge": "內容超過 4 MB。請你的 Bot 將它拆成幾則訊息。",
+  "grokMove.error.memoryTooLarge": "某個機器人的記憶或匯入筆記超過 256 KB。尚未匯入任何內容。請精簡該機器人儲存的記憶或筆記，再重新匯出並重試。",
   "grokMove.error.credentials": "其中含有密碼或金鑰，因此沒有讀取任何內容：{keys}。請你的 Bot 去掉這些後重新撰寫。",
   "grokMove.error.newerVersion": "這是為較新版的 OpenMausBot 撰寫的。請更新應用程式後再試一次。",
   "grokMove.error.unusable": "無法將這個內容轉成機器人。請你的 Bot 重新撰寫。",

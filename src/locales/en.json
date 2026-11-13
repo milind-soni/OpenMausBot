@@ -8102,6 +8102,7 @@
   "grokMove.error.notExport": "That doesn't look like what your Bot writes. Copy its whole reply, or choose the file it made.",
   "grokMove.error.cutOff": "Your Bot's reply looks cut off. Ask it to send the rest as another message in the same shape, then paste both.",
   "grokMove.error.tooLarge": "That's larger than 4 MB. Ask your Bot to split it into several messages.",
+  "grokMove.error.memoryTooLarge": "One bot's memories or import notes exceed 256 KB. Nothing was imported. Reduce that bot's saved memories or notes, then export and try again.",
   "grokMove.error.credentials": "This has passwords or keys in it, so nothing was read: {keys}. Ask your Bot to write it again without them.",
   "grokMove.error.newerVersion": "This was written for a newer OpenMausBot. Update the app, then try again.",
   "grokMove.error.unusable": "This couldn't be turned into a bot. Ask your Bot to write it again.",

@@ -7694,6 +7694,7 @@
   "settings.data.takeOut": "导出内容",
   "settings.import.grokTitle": "从 Grok Bot 迁移",
   "settings.import.hermesTitle": "从 Hermes 迁移",
+  "grokMove.error.memoryTooLarge": "某个机器人的记忆或导入笔记超过 256 KB。未导入任何内容。请精简该机器人保存的记忆或笔记，再重新导出并重试。",
   "settings.data.move": "移到{place}",
   "settings.data.storage": "存储",
   "settings.desktops.automation": "自动化",

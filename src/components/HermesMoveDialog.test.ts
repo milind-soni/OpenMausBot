@@ -91,6 +91,17 @@ it("refuses credentials through the Hermes entry point", async () => {
   expect(f.api.mock.calls.some(([path]) => path.startsWith("/api/teams/import"))).toBe(false);
 });
 
+it("shows an explicit oversized-memory error without importing, and permits a corrected export", async () => {
+  await act(async () => root.render(createElement(HermesMoveDialog, { onClose: vi.fn() })));
+  await paste(JSON.stringify({ format: HERMES_EXPORT_FORMAT, bots: [{ name: "Orchid", memories: ["x".repeat(270_000)] }] }));
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("exceed 256 KB");
+  expect(host.querySelector('[data-hermes-move="start"]')).not.toBeNull();
+  expect(f.api.mock.calls.some(([path]) => path.startsWith("/api/teams/import"))).toBe(false);
+  await paste(EXPORT);
+  expect(host.querySelector('[data-hermes-move="preview"]')).not.toBeNull();
+  expect(button("Import").disabled).toBe(false);
+});
+
 it("opens the dedicated Hermes section inline at its settings search anchor", async () => {
   await act(async () => root.render(createElement(SettingsLook.Provider, { value: true }, createElement(HermesImportSection))));
   expect(host.querySelector('[data-settings-block="hermes-move"]')).not.toBeNull();

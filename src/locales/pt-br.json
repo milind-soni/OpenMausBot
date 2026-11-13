@@ -8067,6 +8067,7 @@
   "grokMove.error.notExport": "Isso não parece uma resposta do seu bot. Copie a resposta inteira dele ou escolha o arquivo que ele criou.",
   "grokMove.error.cutOff": "A resposta do seu bot parece incompleta. Peça a ele que envie o restante em outra mensagem, no mesmo formato, e cole as duas.",
   "grokMove.error.tooLarge": "Isso tem mais de 4 MB. Peça ao seu bot que divida em várias mensagens.",
+  "grokMove.error.memoryTooLarge": "As memórias ou notas de importação de um bot excedem 256 KB. Nada foi importado. Reduza as memórias ou notas salvas desse bot, exporte novamente e tente outra vez.",
   "grokMove.error.credentials": "Isso tem senhas ou chaves, por isso não lemos nada: {keys}. Peça ao seu bot que escreva novamente sem elas.",
   "grokMove.error.newerVersion": "Isso é para uma versão mais recente do OpenMausBot. Atualize o app e tente novamente.",
   "grokMove.error.unusable": "Não foi possível transformar isso em um bot. Peça ao seu bot que escreva novamente.",

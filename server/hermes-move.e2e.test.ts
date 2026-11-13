@@ -12,7 +12,7 @@ it("imports a Hermes profile through the real package API with memory, skills an
     memories: ["Project code is Orchid"], user_facts: ["Prefers short replies"],
     skills: [{ name: "Daily brief", description: "Write the brief", instructions: "Summarize the day's work." }],
     routines: [{ name: "Morning", instruction: "Write the brief.", schedule_cron: "0 9 * * 1-5", timezone: "Asia/Kolkata" }],
-    apps: [{ name: "Linear", mcp_url: "https://mcp.linear.app/mcp" }],
+    apps: [{ name: "Linear", mcp_url: "https://mcp.linear.app/mcp" }, { name: "Gmail", mcp_url: "" }],
   }] });
   try {
     const plan = hermesMovePlan(parseHermesExport(exported)[0]!);
@@ -26,6 +26,8 @@ it("imports a Hermes profile through the real package API with memory, skills an
     expect(memory.text).toContain("# Notes from Hermes");
     expect(memory.text).toContain("Project code is Orchid");
     expect(memory.text).toContain("Prefers short replies");
+    const reconnect = await request(`/api/bots/${bot.id}/memory/file?path=memory%2Fimport-apps.md`, {}, url);
+    expect(reconnect.text).toContain("- Gmail");
     const routines = await request("/api/routines", {}, url);
     expect(routines.routines).toContainEqual(expect.objectContaining({
       botId: bot.id, enabled: false, schedule: { type: "cron", expression: "0 9 * * 1-5", timeZone: "Asia/Kolkata" },

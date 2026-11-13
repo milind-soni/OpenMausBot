@@ -6149,6 +6149,7 @@
   "settings.data.takeOut": "Llevarte cosas",
   "settings.import.grokTitle": "Pasar desde Grok Bot",
   "settings.import.hermesTitle": "Pasar desde Hermes",
+  "grokMove.error.memoryTooLarge": "Los recuerdos o las notas de importación de un bot superan los 256 KB. No se ha importado nada. Reduce los recuerdos o las notas guardadas de ese bot, vuelve a exportarlos e inténtalo de nuevo.",
   "settings.import.appsTitle": "Desde tus apps de IA",
   "settings.data.move": "Mover a {place}",
   "settings.data.storage": "Almacenamiento",

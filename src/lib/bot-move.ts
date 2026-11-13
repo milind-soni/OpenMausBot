@@ -47,7 +47,8 @@ export function previewBotMove(bots: readonly ImportedBot[], facts: BotPreviewFa
       }
       for (const connection of plan.document.package.connections ?? []) servers.add(connection.key);
       preview.plans.push({ ...plan, addedAs: takeImportName(plan.name, names) });
-    } catch {
+    } catch (cause) {
+      if (cause instanceof BotImportError && cause.code === "memoryTooLarge") throw cause;
       preview.unreadable.push(bot.name);
     }
   }
