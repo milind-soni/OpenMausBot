@@ -224,7 +224,10 @@ export function spawnCli(
   const resolved = resolveCli(cli, args);
   assertSafeCliArgv(resolved);
   const homed = owner === "bot" || opts.engineHome ? engineHomes.forSpawn(opts.env ?? process.env) : null;
-  const options: CliSpawnOptions = homed ? { ...opts, env: homed.env } : opts;
+  const env = homed?.env ?? opts.env;
+  const options: CliSpawnOptions = resolved.env
+    ? { ...opts, env: { ...(env ?? process.env), ...resolved.env } }
+    : homed ? { ...opts, env } : opts;
   const boxed = boxedSpawn(resolved, options, owner, homed);
   const { box: _box, engineHome: _engineHome, botWork, ...spawnOpts } = boxed ? options : outsideBoxOptions(resolved.command, options);
   // The box's extra descriptors (its seccomp filter) follow stdio; only a plain three-entry stdio can take them.
@@ -322,7 +325,8 @@ export function execCli(
   let escalate: NodeJS.Timeout | undefined;
   let deadline: NodeJS.Timeout | undefined;
   let timedOut = false;
-  const child = execFile(resolved.command, resolved.args, { ...opts, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) => {
+  const env = resolved.env ? { ...(opts.env ?? process.env), ...resolved.env } : opts.env;
+  const child = execFile(resolved.command, resolved.args, { ...opts, env, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) => {
     clearTimeout(escalate);
     clearTimeout(deadline);
     cb(err ?? (timedOut ? cutOffError(cli, opts.timeout) : null), stdout, stderr);
