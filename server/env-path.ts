@@ -180,7 +180,7 @@ export function findCliCandidates(name: string, path: string = augmentedPath()):
     if (!dir) continue;
     for (const ext of exts) {
       const p = join(dir, name + ext);
-      if (existsSync(p)) {
+      if (isFile(p)) {
         out.push(p);
         break;
       }
