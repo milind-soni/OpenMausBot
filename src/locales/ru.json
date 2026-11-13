@@ -209,6 +209,7 @@
   "server.rooms.finishingElsewhere": "{bot} заканчивает другой разговор и ответит здесь, когда освободится",
   "server.rooms.finishingElsewhereSpoken": "{bot} заканчивает другой разговор",
   "server.rooms.unavailable": "{bot} больше недоступен, поэтому пропущен в этом раунде",
+  "server.threads.posted": "{bot} оставил здесь сообщение",
   "server.stop.nothingRunning": "Здесь ничего не выполнялось, так что останавливать было нечего.",
   "server.memory.wait": "Ожидание памяти в этом Cloud. Сейчас выполняется: {running}. Впереди: {ahead}. Запустится само, когда освободится место.",
   "server.memory.still": "Всё ещё ожидание памяти. Сейчас выполняется: {running}. Впереди: {ahead}.",

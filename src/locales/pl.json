@@ -209,6 +209,7 @@
   "server.rooms.finishingElsewhere": "{bot} kończy inną rozmowę i odpowie tutaj, gdy będzie wolny",
   "server.rooms.finishingElsewhereSpoken": "{bot} kończy inną rozmowę",
   "server.rooms.unavailable": "{bot} nie jest już dostępny; pominięty w tej rundzie",
+  "server.threads.posted": "{bot} opublikował tu wiadomość",
   "server.stop.nothingRunning": "Nic tu nie działało, więc nie było czego zatrzymywać.",
   "server.memory.wait": "Czeka na pamięć w tym Cloud. Działa teraz: {running}. Przed tym zadaniem: {ahead}. Uruchomi się samo, gdy będzie miejsce.",
   "server.memory.still": "Nadal czeka na pamięć. Działa teraz: {running}. Przed tym zadaniem: {ahead}.",
