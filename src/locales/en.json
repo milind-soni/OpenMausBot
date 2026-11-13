@@ -10657,5 +10657,11 @@
   "settings.domain.change": "Change",
   "settings.domain.httpsFirst": "Turn on HTTPS for this address first, then connect it here.",
   "settings.backTo": "Back to Settings",
-  "devices.route.httpsAccount": "Uses your {app} account."
+  "devices.route.httpsAccount": "Uses your {app} account.",
+  "settings.browser.proxy": "SOCKS5 proxy",
+  "settings.browser.proxyDetail": "Optional, unauthenticated SOCKS5 proxy for public websites in the built-in browser. My Chrome keeps its own settings; private and local destinations keep existing protections.",
+  "settings.browser.proxyConfigured": "New built-in browser connections use this SOCKS5 proxy. My Chrome keeps its own settings; private and local destinations stay protected.",
+  "settings.browser.proxyInactive": "Saved, but active only with the built-in browser on supported hosts.",
+  "settings.browser.proxySave": "Save",
+  "settings.browser.proxyClear": "Remove"
 }

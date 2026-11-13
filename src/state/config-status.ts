@@ -203,6 +203,12 @@ export interface BrowserEngineSummary {
   /** Self-hosted servers only: whether bots' browsers may open this server's own sites and its local network
    * (browserEngine.egress.localNetwork, off by default). Absent on the desktop and on MausBot Cloud. */
   serverSites?: boolean;
+  /** Whether an owner-configured SOCKS5 upstream is active; the endpoint is never exposed in config status. */
+  proxyConfigured?: boolean;
+  /** Whether an owner-configured SOCKS5 upstream is saved, even if the current browser engine cannot use it. */
+  proxySaved?: boolean;
+  /** Team Cloud only: whether this caller may change the shared SOCKS5 upstream. */
+  proxyEditable?: boolean;
 }
 
 export interface BrowserProfile {

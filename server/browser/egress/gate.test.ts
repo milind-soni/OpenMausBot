@@ -198,6 +198,209 @@ describe("egress gate", () => {
     expect(refusals).toEqual([[{ host: "rebind.example", port: 8799 }, "rebinding" satisfies Refusal]]);
   });
 
+  it("routes allowed public destinations through the configured SOCKS5 upstream using the checked IP", async () => {
+    const upstream = NodeNet.createServer((socket) => {
+      let data = Buffer.alloc(0);
+      let greeted = false;
+      socket.on("data", (chunk) => {
+        data = Buffer.concat([data, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+        if (!greeted && data.length >= 3 && data[0] === 5 && data[1] === 1) {
+          socket.write(Buffer.from([5, 0]));
+          data = data.subarray(3);
+          greeted = true;
+        }
+        if (greeted && data.length >= 10 && data[0] === 5 && data[1] === 1) {
+          expect([...data.subarray(4, 8)].join(".")).toBe("93.184.215.14");
+          socket.write(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]));
+          socket.removeAllListeners("data");
+        }
+      });
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const proxyPort = (upstream.address() as NodeNet.AddressInfo).port;
+    const opened = await openGate({
+      decide: async () => null,
+      resolve: async () => [{ address: "93.184.215.14", family: 4 }],
+      upstreamProxy: () => ({ host: "127.0.0.1", port: proxyPort }),
+    });
+    gates.push(opened);
+    const { code, socket } = await connectThrough(opened.port, domainTarget("example.com", 443));
+    socket.destroy();
+    expect(code).toBe(0);
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  });
+
+  it("buffers client bytes sent while the SOCKS5 upstream handshake is pending", async () => {
+    const payload = Buffer.from("early browser bytes");
+    let releaseGreeting!: () => void;
+    let greetingReceived!: () => void;
+    const handshakeHeld = new Promise<void>((resolve) => { greetingReceived = resolve; });
+    const greetingReleased = new Promise<void>((resolve) => { releaseGreeting = resolve; });
+    const upstream = NodeNet.createServer((socket) => {
+      let data = Buffer.alloc(0);
+      let greeted = false;
+      let connected = false;
+      socket.on("data", (chunk) => {
+        data = Buffer.concat([data, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+        if (!greeted && data.length >= 3) {
+          data = data.subarray(3);
+          greeted = true;
+          greetingReceived();
+          void greetingReleased.then(() => socket.write(Buffer.from([5, 0])));
+        }
+        if (greeted && !connected && data.length >= 10 && data[0] === 5 && data[1] === 1) {
+          data = data.subarray(10);
+          connected = true;
+          socket.write(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]));
+          socket.on("data", (bytes) => socket.write(Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes)));
+        }
+      });
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const proxyPort = (upstream.address() as NodeNet.AddressInfo).port;
+    const opened = await openGate({
+      decide: async () => null,
+      resolve: async () => [{ address: "93.184.215.14", family: 4 }],
+      upstreamProxy: () => ({ host: "127.0.0.1", port: proxyPort }),
+    });
+    gates.push(opened);
+    const socket = NodeNet.connect(opened.port, "127.0.0.1");
+    socket.on("error", () => {});
+    let received = Buffer.alloc(0);
+    let resolveMethod!: () => void;
+    let methodResolved = false;
+    const methodReply = new Promise<void>((resolve) => { resolveMethod = resolve; });
+    const response = new Promise<Buffer>((resolve) => {
+      socket.on("data", (chunk) => {
+        received = Buffer.concat([received, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+        if (!methodResolved && received.length >= 2) { methodResolved = true; resolveMethod(); }
+        if (received.includes(payload)) resolve(received);
+      });
+    });
+    await new Promise<void>((resolve) => socket.once("connect", resolve));
+    socket.write(Buffer.concat([Buffer.from([5, 1, 0, 5, 1, 0]), domainTarget("example.com", 443)]));
+    await methodReply;
+    await handshakeHeld;
+    socket.write(payload);
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    releaseGreeting();
+    const bytes = await Promise.race([
+      response,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("The proxy tunnel dropped client bytes sent during its handshake.")), 1_000)),
+    ]);
+    expect(bytes.subarray(0, 2)).toEqual(Buffer.from([5, 0]));
+    expect(bytes.subarray(2, 12)).toEqual(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]));
+    expect(bytes.subarray(12)).toEqual(payload);
+    socket.destroy();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  });
+
+  it("preserves destination bytes sent with a SOCKS5 CONNECT reply", async () => {
+    const first = Buffer.from("first-bytes");
+    const upstream = NodeNet.createServer((socket) => {
+      let data = Buffer.alloc(0);
+      let greeted = false;
+      socket.on("data", (chunk) => {
+        data = Buffer.concat([data, chunk]);
+        if (!greeted && data.length >= 3) {
+          data = data.subarray(3);
+          greeted = true;
+          socket.write(Buffer.from([5, 0]));
+        }
+        if (greeted && data.length >= 10 && data[0] === 5 && data[1] === 1) {
+          socket.write(Buffer.concat([Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]), first]));
+          socket.removeAllListeners("data");
+        }
+      });
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const proxyPort = (upstream.address() as NodeNet.AddressInfo).port;
+    const opened = await openGate({
+      decide: async () => null,
+      resolve: async () => [{ address: "93.184.215.14", family: 4 }],
+      upstreamProxy: () => ({ host: "127.0.0.1", port: proxyPort }),
+    });
+    gates.push(opened);
+    const socket = NodeNet.connect(opened.port, "127.0.0.1");
+    socket.on("error", () => {});
+    let received = Buffer.alloc(0);
+    const response = new Promise<Buffer>((resolve) => {
+      socket.on("data", (chunk) => {
+        received = Buffer.concat([received, chunk]);
+        if (received.includes(first)) resolve(received);
+      });
+    });
+    await new Promise<void>((resolve) => socket.once("connect", resolve));
+    socket.write(Buffer.concat([Buffer.from([5, 1, 0, 5, 1, 0]), domainTarget("example.com", 443)]));
+    const bytes = await response;
+    expect(bytes.subarray(0, 2)).toEqual(Buffer.from([5, 0]));
+    expect(bytes.subarray(2, 12)).toEqual(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]));
+    expect(bytes.subarray(12)).toEqual(first);
+    socket.destroy();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  });
+
+  it("proxies checked public answers in mixed DNS results and keeps permitted local answers direct", async () => {
+    const requested: string[] = [];
+    const proxy = NodeNet.createServer((socket) => {
+      let data = Buffer.alloc(0);
+      let greeted = false;
+      socket.on("data", (chunk) => {
+        data = Buffer.concat([data, chunk]);
+        if (!greeted && data.length >= 3) {
+          data = data.subarray(3);
+          greeted = true;
+          socket.write(Buffer.from([5, 0]));
+        }
+        if (greeted && data.length >= 10 && data[0] === 5 && data[1] === 1) {
+          requested.push([...data.subarray(4, 8)].join("."));
+          socket.write(Buffer.from([5, 5, 0, 1, 0, 0, 0, 0, 0, 0]));
+          socket.removeAllListeners("data");
+        }
+      });
+    });
+    const local = NodeNet.createServer((socket) => socket.pipe(socket));
+    await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) => local.listen(0, "127.0.0.1", resolve));
+    const proxyPort = (proxy.address() as NodeNet.AddressInfo).port;
+    const localPort = (local.address() as NodeNet.AddressInfo).port;
+    const opened = await openGate({
+      decide: async () => null,
+      resolve: async () => [{ address: "93.184.215.14", family: 4 }, { address: "127.0.0.1", family: 4 }],
+      upstreamProxy: () => ({ host: "127.0.0.1", port: proxyPort }),
+    });
+    gates.push(opened);
+    const { code, socket } = await connectThrough(opened.port, domainTarget("mixed.example", localPort));
+    expect(code).toBe(0);
+    expect(requested).toEqual(["93.184.215.14"]);
+    const echoed = new Promise<Buffer>((resolve) => socket.once("data", resolve));
+    socket.write("direct-local");
+    expect((await echoed).toString()).toBe("direct-local");
+    socket.destroy();
+    await Promise.all([
+      new Promise<void>((resolve) => proxy.close(() => resolve())),
+      new Promise<void>((resolve) => local.close(() => resolve())),
+    ]);
+  });
+
+  it("does not contact the configured upstream when the destination policy refuses", async () => {
+    let proxyConnections = 0;
+    const upstream = NodeNet.createServer(() => { proxyConnections++; });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const proxyPort = (upstream.address() as NodeNet.AddressInfo).port;
+    const opened = await openGate({
+      decide: async () => "local-network",
+      resolve: async () => [{ address: "10.0.0.5", family: 4 }],
+      upstreamProxy: () => ({ host: "127.0.0.1", port: proxyPort }),
+    });
+    gates.push(opened);
+    const { code, socket } = await connectThrough(opened.port, domainTarget("private.example", 443));
+    socket.destroy();
+    expect(code).toBe(2);
+    expect(proxyConnections).toBe(0);
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  });
+
   it("answers connection-refused when the allowed destination is not listening", async () => {
     const closed = NodeNet.createServer();
     await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));

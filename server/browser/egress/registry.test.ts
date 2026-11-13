@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { createServer, type AddressInfo } from "node:net";
+import { createServer, isIP, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -72,7 +72,10 @@ describe("one gate per browser session", () => {
   const ownership = { botOwned: async () => false } as unknown as ListenerOwnership;
   const egress = (config = {}) => {
     const value = new BrowserEgress();
-    value.configure({ host: "server", config: () => config, listeners: new OwnListeners("server", { env: {}, ...noScans }), ownership });
+    value.configure({ host: "server", config: () => config, listeners: new OwnListeners("server", { env: {}, ...noScans }), ownership, resolve: async (host) => {
+      const family = isIP(host);
+      return family ? [{ address: host, family }] : [];
+    } });
     return value;
   };
 
