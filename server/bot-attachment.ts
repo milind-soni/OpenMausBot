@@ -118,6 +118,10 @@ export function deliveredCopy(messages: readonly Message[], reply: Message, name
   return found;
 }
 
+export function attachedFileLine(attachment: BotAttachment, sentInTurn: string | undefined, from?: Message["from"]): Omit<Message, "id" | "at"> {
+  return { role: "bot", kind: "text", text: "", attachments: [attachment], ...(sentInTurn ? { sentInTurn } : {}), ...(from ? { from } : {}) };
+}
+
 export type AttachForTurnOutcome<S> =
   | { status: "attached"; saved: S }
   | { status: "limit" }
