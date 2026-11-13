@@ -13199,7 +13199,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const principal = sharedComputerPrincipal(internalCapability);
         const why = (CLOUD_TEAM ? managedPolicy.computerRefusal("thisComputer") : null) ?? (CLOUD_HOME && !principal ? cloudLendingRefusalForBot(internalCapability) : null);
         if (why) return json(res, 403, { error: why });
-        return json(res, 200, { result: lentScreenResult(parsed.data, await sharedComputers.request(parsed.data, principal, () => botLending() && internalCapabilityIsActive(internalCapability))) });
+        return json(res, 200, { result: lentScreenResult(parsed.data, await sharedComputers.request(parsed.data, principal, () => botLending() && internalCapabilityIsActive(internalCapability), store.bot(internalCapability.botId))) });
       }
       if (method === "GET" && path === "/api/internal/agents") {
         const sender = internalSender;
