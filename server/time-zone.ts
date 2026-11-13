@@ -10,13 +10,12 @@ import { writeFileAtomic } from "./atomic.ts";
 
 export const TIME_ZONE_FILE = "time-zone.json";
 
-/** An IANA Area/Location name (or UTC) the runtime knows, as a browser reports it; null for an offset, an abbreviation
- * such as "IST" (which ICU still takes) or anything else. */
+/** A canonical IANA Area/Location name (or UTC) the runtime knows; null for an offset, an abbreviation such as "IST"
+ * (which ICU still takes) or anything else. Intl accepts mixed case, but the process's TZ needs the zone's spelling. */
 export function knownTimeZone(value: unknown): string | null {
   if (typeof value !== "string" || value.length > 64 || (value !== "UTC" && !/^[A-Za-z][\w+-]*(\/[\w+-]+){1,2}$/.test(value))) return null;
   try {
-    new Intl.DateTimeFormat("en-US", { timeZone: value });
-    return value;
+    return new Intl.DateTimeFormat("en-US", { timeZone: value }).resolvedOptions().timeZone;
   } catch {
     return null;
   }

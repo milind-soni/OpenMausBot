@@ -35,16 +35,17 @@ const put = (base: string, body: unknown) => fetch(`${base}/api/time-zone`, { me
 
 describe("/api/time-zone", () => {
   it("on a Cloud home, takes the owner's zone once, tells routines, and answers what it tells time in", async () => {
+    const canonical = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Kolkata" }).resolvedOptions().timeZone;
     vi.stubEnv("TZ", "UTC");
     const { base, changed } = await serve(true);
     expect(await (await fetch(`${base}/api/time-zone`)).json()).toEqual({ timeZone: "UTC", adopts: true });
     const first = await put(base, { timeZone: "Asia/Kolkata" });
     expect(first.status).toBe(200);
-    expect(await first.json()).toEqual({ timeZone: "Asia/Kolkata", changed: true });
-    expect(changed).toHaveBeenCalledExactlyOnceWith("Asia/Kolkata");
-    expect(await (await put(base, { timeZone: "Asia/Kolkata" })).json()).toEqual({ timeZone: "Asia/Kolkata", changed: false });
+    expect(await first.json()).toEqual({ timeZone: canonical, changed: true });
+    expect(changed).toHaveBeenCalledExactlyOnceWith(canonical);
+    expect(await (await put(base, { timeZone: "Asia/Kolkata" })).json()).toEqual({ timeZone: canonical, changed: false });
     expect(changed).toHaveBeenCalledTimes(1);
-    expect(await (await fetch(`${base}/api/time-zone`)).json()).toEqual({ timeZone: "Asia/Kolkata", adopts: true });
+    expect(await (await fetch(`${base}/api/time-zone`)).json()).toEqual({ timeZone: canonical, adopts: true });
   });
 
   it("refuses an offset or an abbreviation", async () => {
