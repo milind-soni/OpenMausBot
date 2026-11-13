@@ -163,6 +163,7 @@ export const VITEST_SUBSETS = {
       "server/team-small-fixes.e2e.test.ts",
       "server/team-mausbot-followup.e2e.test.ts",
       "server/team-no-ai.e2e.test.ts",
+      "server/team-phone-data.e2e.test.ts",
       "server/team-refused-handoff.e2e.test.ts",
       "server/two-places.e2e.test.ts",
       "scripts/ci-workflow.test.ts",
