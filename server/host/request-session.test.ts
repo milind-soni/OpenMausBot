@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { OUTSIDE } from "../peer-provenance.ts";
 import {
   queuedRequestSessionMayDispatch,
+  cloudHandoffSessionMayResume,
   requestSessionGuard,
   requireLiveBeforeSteerFallback,
   requestSessionOptions,
@@ -44,6 +45,19 @@ describe("request session provenance", () => {
     expect(sharedComputerPrincipalForRequest("session-a", () => false, resolve)).toBeNull();
     expect(resolve).not.toHaveBeenCalled();
     expect(sharedComputerPrincipalForRequest("session-a", () => true, resolve)).toBe("owner");
+  });
+
+  it("requires a live session for Cloud-home lending and restored lending handoffs", () => {
+    const resolve = vi.fn(() => "cloud-home");
+    expect(sharedComputerPrincipalForRequest(undefined, () => true, resolve, true)).toBeNull();
+    expect(sharedComputerPrincipalForRequest("session-a", () => false, resolve, true)).toBeNull();
+    expect(resolve).not.toHaveBeenCalled();
+    expect(sharedComputerPrincipalForRequest("session-a", () => true, resolve, true)).toBe("cloud-home");
+    expect(cloudHandoffSessionMayResume(true, true, undefined, () => true)).toBe(false);
+    expect(cloudHandoffSessionMayResume(true, true, "session-a", () => false)).toBe(false);
+    expect(cloudHandoffSessionMayResume(true, true, "session-a", () => true)).toBe(true);
+    expect(cloudHandoffSessionMayResume(false, true, undefined, () => false)).toBe(true);
+    expect(cloudHandoffSessionMayResume(true, false, undefined, () => false)).toBe(true);
   });
 
   it("fails closed for user turns without provenance while allowing explicit system work", () => {

@@ -18,6 +18,7 @@ export const HANDED_PEOPLE_FILE = "handed-people.json";
 
 const PERSON = /^p_[\w-]{22}$/;
 const WORK = /^[\w-]{1,128}$/;
+const SESSION_ID = z.string().uuid();
 /** As long as the coordinator keeps finished work, and no more entries than a busy team hands on in that time. */
 const KEEP_MS = 30 * 24 * 60 * 60_000;
 const MAX_ENTRIES = 20_000;
@@ -29,6 +30,7 @@ export type ActingLine = {
 /** A one-on-one conversation's latest request (index.ts directRequestOwners). */
 export type DirectRequest = {
   generation: string; generations: ReadonlySet<string>; messageId?: string; stopped?: boolean; automation?: unknown; origin?: WorkOrigin;
+  requestSessionId?: string;
 };
 /** Handed-on work a room member does: whom it acts for, and since when the room's words count against it. */
 export type HandedRun = { person: string; since: number };
@@ -38,7 +40,7 @@ export type RoomRun = { requestMessageId?: string; cancelled: boolean; queuedQue
 
 const fileSchema = z.object({
   v: z.literal(1),
-  work: z.record(z.string().regex(WORK), z.object({ person: z.string().regex(PERSON), at: z.number().int().nonnegative(), lends: z.literal(true).optional() })),
+  work: z.record(z.string().regex(WORK), z.object({ person: z.string().regex(PERSON), at: z.number().int().nonnegative(), lends: z.literal(true).optional(), requestSessionId: SESSION_ID.optional() })),
 });
 
 /** Whom each piece of handed-on work acts for, recorded once as it is handed on. A missing or damaged file holds nobody:
@@ -46,7 +48,7 @@ const fileSchema = z.object({
 export class HandedPeople {
   readonly #file: string;
   readonly #now: () => number;
-  readonly #work = new Map<string, { person: string; at: number; lends?: true }>();
+  readonly #work = new Map<string, { person: string; at: number; lends?: true; requestSessionId?: string }>();
 
   constructor(file: string, now: () => number = Date.now) {
     this.#file = file;
@@ -61,10 +63,10 @@ export class HandedPeople {
 
   /** Work handed on by a turn that acted for `person`; once, so handing the same work on again changes nothing. `lends`: a
    * turn that could use their lent computer when it handed this on, so the work may go on using it. */
-  record(workId: string, person: string | null, lends = false): void {
+  record(workId: string, person: string | null, lends = false, requestSessionId?: string): void {
     if (!person || !PERSON.test(person) || !WORK.test(workId) || this.#work.has(workId)) return;
     const now = this.#now();
-    this.#work.set(workId, { person, at: now, ...(lends ? { lends: true as const } : {}) });
+    this.#work.set(workId, { person, at: now, ...(lends ? { lends: true as const } : {}), ...(lends && requestSessionId && SESSION_ID.safeParse(requestSessionId).success ? { requestSessionId } : {}) });
     for (const [id, entry] of this.#work) if (now - entry.at > KEEP_MS) this.#work.delete(id);
     while (this.#work.size > MAX_ENTRIES) this.#work.delete(this.#work.keys().next().value!);
     try {
@@ -74,7 +76,7 @@ export class HandedPeople {
     }
   }
 
-  get(workId: string): { person: string; at: number; lends?: true } | undefined {
+  get(workId: string): { person: string; at: number; lends?: true; requestSessionId?: string } | undefined {
     return this.#work.get(workId);
   }
 }
@@ -143,13 +145,19 @@ export function createActingPeople(deps: ActingPeopleDeps) {
      * the person's lent computer (cloud-lending-turns handsOnLending). */
     handOn(turn: { threadId: string; generation: string }, work: { id: string; rootId: string }, lends = false): void {
       const person = requester(turn.threadId, turn.generation);
-      deps.handed.record(work.id, person, lends);
-      if (work.rootId === turn.generation) deps.handed.record(work.rootId, person, lends);
+      const request = deps.direct(turn.threadId);
+      const requestSessionId = request && request.generations.has(turn.generation) ? request.requestSessionId : undefined;
+      deps.handed.record(work.id, person, lends, requestSessionId);
+      if (work.rootId === turn.generation) deps.handed.record(work.rootId, person, lends, requestSessionId);
     },
     /** A handed-on origin with the person its work was handed on for, if any. */
     handedOrigin(origin: WorkOrigin, workId: string): WorkOrigin {
       const handed = deps.handed.get(workId);
       return withPerson(origin, handed?.person, handed?.lends === true);
+    },
+    handedRequest(origin: WorkOrigin, workId: string): { origin: WorkOrigin; requestSessionId?: string } {
+      const handed = deps.handed.get(workId);
+      return { origin: withPerson(origin, handed?.person, handed?.lends === true), ...(handed?.requestSessionId ? { requestSessionId: handed.requestSessionId } : {}) };
     },
     /** What a room member doing handed-on work acts for: the room's words since it was handed on count against it. */
     handedRun(workId: string): HandedRun | undefined {

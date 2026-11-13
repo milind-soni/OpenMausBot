@@ -40,8 +40,14 @@ export function requestSessionOptions<T extends { messageId?: string; requestSes
   return requestSessionId ? { requestSessionId } : {};
 }
 
-export function sharedComputerPrincipalForRequest<T>(requestSessionId: string | undefined, isLive: (id: string) => boolean, resolve: () => T | null): T | null {
+export function sharedComputerPrincipalForRequest<T>(requestSessionId: string | undefined, isLive: (id: string) => boolean, resolve: () => T | null, requireSession = false): T | null {
+  if (requireSession && !requestSessionId) return null;
   return requestSessionId && !isLive(requestSessionId) ? null : resolve();
+}
+
+/** A restored Cloud-home handoff may keep borrowing the computer only for the still-live session that authorized it. */
+export function cloudHandoffSessionMayResume(cloudHome: boolean, lends: boolean, requestSessionId: string | undefined, isLive: (id: string) => boolean): boolean {
+  return !cloudHome || !lends || Boolean(requestSessionId && isLive(requestSessionId));
 }
 
 export function requestSessionGuard(sessionId: string | undefined, isLive: (id: string) => boolean, refuse: () => Error): () => void {

@@ -124,6 +124,25 @@ describe("work handed on acts for whoever the turn that handed it on acted for",
     expect(people.handedRun("node-1")).toEqual({ person: ADA, since: expect.any(Number) });
   });
 
+  it("persists only the originating live-turn session with lent work and restores it for coordinated reruns", () => {
+    const { people, handed, dir } = world({
+      threads: { ada: [said("m1", 10, ADA)] },
+      direct: { ada: request("root-1", { messageId: "m1", requestSessionId: "11111111-1111-4111-8111-111111111111" }) },
+    });
+    people.handOn({ threadId: "ada", generation: "root-1" }, { id: "node-1", rootId: "root-1" }, true);
+    expect(people.handedRequest(userOrigin(), "node-1")).toEqual({ origin: lending(ADA), requestSessionId: "11111111-1111-4111-8111-111111111111" });
+    expect(people.handedRequest(userOrigin(), "root-1").requestSessionId).toBe("11111111-1111-4111-8111-111111111111");
+    expect(new HandedPeople(join(dir, "handed-people.json")).get("node-1")).toMatchObject({ person: ADA, lends: true, requestSessionId: "11111111-1111-4111-8111-111111111111" });
+
+    const { people: wrongGeneration } = world({
+      threads: { ada: [said("m1", 10, ADA)] },
+      direct: { ada: request("root-1", { messageId: "m1", requestSessionId: "22222222-2222-4222-8222-222222222222" }) },
+    });
+    wrongGeneration.handOn({ threadId: "ada", generation: "other-generation" }, { id: "other-node", rootId: "other-root" }, true);
+    expect(wrongGeneration.handedRequest(userOrigin(), "other-node").requestSessionId).toBeUndefined();
+    expect(handed.get("node-1")?.requestSessionId).toBe("11111111-1111-4111-8111-111111111111");
+  });
+
   it("a delegated turn acts for its person only while nobody else has written in its conversation", () => {
     const direct = { work: request("g2", { messageId: "a1", origin: userOrigin(ADA) }) };
     expect(world({ threads: { work: [ask("a1", 20), botLine("b1", 21)] }, direct }).people.requester("work", "g2")).toBe(ADA);

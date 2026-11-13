@@ -327,7 +327,7 @@ import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-rec
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { createTtsRoutes } from "./routes/tts.ts";
 import { turnStartLogLine } from "./turn-log.ts";
-import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts"; import { queuedRequestSessionMayDispatch, requestSessionGuard, requestSessionOptions, requireLiveBeforeSteerFallback, settledPrincipalRemainsAuthorized, sharedComputerPrincipalForRequest, turnOriginForRequest, type DirectRequestOwner } from "./host/request-session.ts";
+import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts"; import { cloudHandoffSessionMayResume, queuedRequestSessionMayDispatch, requestSessionGuard, requestSessionOptions, requireLiveBeforeSteerFallback, settledPrincipalRemainsAuthorized, sharedComputerPrincipalForRequest, turnOriginForRequest, type DirectRequestOwner } from "./host/request-session.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts";
 import { extractReplayImages, extractTurnImages, videoFramesWithin } from "./turn-images.ts";
@@ -895,7 +895,7 @@ function turnOrigin(capability: Pick<InternalCapability, "threadId" | "generatio
 /** Fail closed: only the person whose own message provably started this exact turn generation. Deliberately not the usage ledger's trigger, which defaults to the owner. */
 function sharedComputerPrincipal(capability: Pick<InternalCapability, "botId" | "threadId" | "generation">): string | null {
   const request = directRequestOwners.get(capability.threadId);
-  return sharedComputerPrincipalForRequest(request?.requestSessionId, (sessionId) => sessions.isLive(sessionId), () => CLOUD_HOME ? (cloudLendingRefusal(capability) === null ? CLOUD_HOME_LENDER : null) : lendingPerson(provenRequestPerson(request, capability.generation, (messageId) => linePersonKey(store.messagesFor(capability.threadId).find((message) => message.id === messageId))), ownHome.ownServer(), () => sessions.list()));
+  return sharedComputerPrincipalForRequest(request?.requestSessionId, (sessionId) => sessions.isLive(sessionId), () => CLOUD_HOME ? (cloudLendingRefusal(capability) === null ? CLOUD_HOME_LENDER : null) : lendingPerson(provenRequestPerson(request, capability.generation, (messageId) => linePersonKey(store.messagesFor(capability.threadId).find((message) => message.id === messageId))), ownHome.ownServer(), () => sessions.list()), CLOUD_HOME !== null);
 }
 
 /** The only conversations that may feed a bot's memory, daily log, recall or brief; dropped whenever a session is revoked. */
@@ -3835,13 +3835,12 @@ function runRoomRootTurn(node: HandoffView, group: GroupRecord, bot: BotRecord, 
 }
 
 function runRootTurn(node: HandoffView, bot: BotRecord, signal: AbortSignal, composed: ComposedTurn): Promise<HostTurnResult> {
-  if (composed.turn === "rerun" && node.goalRunId && !oneOnOneGoals.isLive(node.threadId, node.goalRunId)) {
-    return Promise.resolve({ ok: false, text: "The goal run this step belonged to ended with the restart." });
-  }
+  if (composed.turn === "rerun" && node.goalRunId && !oneOnOneGoals.isLive(node.threadId, node.goalRunId)) return Promise.resolve({ ok: false, text: "The goal run this step belonged to ended with the restart." });
   if (composed.turn === "rerun") store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: noticeTool("chat.notice.resumingAfterRestart", undefined, { ok: true }) });
   parkedSeats.delete(node.id);
-  const owner = directRequestOwners.get(node.threadId);
-  const ownRequest = owner && !owner.stopped && owner.generations.has(node.id) ? owner : undefined;
+  const owner = directRequestOwners.get(node.threadId), ownRequest = owner && !owner.stopped && owner.generations.has(node.id) ? owner : undefined;
+  const handoff = actingPeople.handedRequest(node.origin ?? OUTSIDE, node.id);
+  if (!ownRequest && !cloudHandoffSessionMayResume(Boolean(CLOUD_HOME), handoff.origin.kind === "user" && handoff.origin.lends === true, handoff.requestSessionId, (sessionId) => sessions.isLive(sessionId))) return Promise.resolve({ ok: false, text: "The session that authorized this computer access is no longer live." });
   return new Promise<HostTurnResult>(resolve => {
     let done = false;
     const finish = (outcome: HostTurnResult) => {
@@ -3857,7 +3856,7 @@ function runRootTurn(node: HandoffView, bot: BotRecord, signal: AbortSignal, com
     void startTurn(bot.id, composed.text, {
       threadId: node.threadId, cardContinuation: true,
       ...(ownRequest?.messageId ? { requestMessageId: ownRequest.messageId } : {}),
-      ...(ownRequest ? {} : { origin: actingPeople.handedOrigin(node.origin ?? OUTSIDE, node.id) }),
+      ...(!ownRequest ? { origin: handoff.origin, ...(handoff.requestSessionId ? { requestSessionId: handoff.requestSessionId } : {}) } : {}),
       unattended: isUnattended(bot.id, node.threadId),
       coordination: { id: node.id, resumed: false, settle: finish },
       onDispatchError: error => finish({ ok: false, text: error }),
