@@ -16,12 +16,17 @@ export const departmentGrants = new AsyncLocalStorage<DepartmentGrant[]>();
 /** The settings page saves at most this many departments for one Chief (server/routes/bot-patch.ts). */
 const MAX_MANAGED = 100;
 
-/** `added` just joined the departments. The grant waits until the store's current write is done, which may still be
- * saving a copy of the bots. */
-export function grantNewDepartments(store: Pick<Store, "sections" | "bots" | "patchBot">, added: readonly string[]): void {
+/** `added` just joined the departments. Who qualifies is read now, from the bots as they were before the write that
+ * made the department (a bot made Chief by that same write does not count); the grant waits until that write is done,
+ * since it may still be saving a copy of the bots, and goes only to a Chief that still qualifies then. */
+export function grantNewDepartments(store: Pick<Store, "sections" | "bots" | "bot" | "patchBot">, added: readonly string[]): void {
   const before = store.sections.filter((name) => !added.includes(name));
+  const chiefs = store.bots.filter((bot) => inChargeOfEvery(bot, before)).map((bot) => bot.id);
+  if (!chiefs.length) return;
   void Promise.resolve().then(() => {
-    for (const chief of store.bots.filter((bot) => inChargeOfEvery(bot, before))) {
+    for (const id of chiefs) {
+      const chief = store.bot(id);
+      if (!chief || !inChargeOfEvery(chief, before)) continue;
       const previous = [...chief.managedSections!];
       const managedSections = [...new Set([...previous, ...added])];
       if (managedSections.length === previous.length || managedSections.length > MAX_MANAGED) continue;

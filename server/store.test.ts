@@ -1268,6 +1268,7 @@ describe("Store", () => {
   it("gives a new department to a Chief in charge of every department once the write that made it is saved", async () => {
     const store = new Store(selection);
     const lead = store.createBot({ name: "Lead", section: "Ops" });
+    // Made Chief only after Ops was made: Ops is its own department, never one it was given.
     store.patchBot(lead.id, { chiefOfStaff: true, managedSections: [""] });
     const planner = store.createBot({ name: "Planner" });
     store.setChiefOfStaff(planner.id);
