@@ -55,13 +55,12 @@ function noSteps(): EngineUpdaterOptions["steps"] {
 }
 
 describe("the version table", () => {
-  it("pins every engine installable on this platform, at or above its minimum, and a standalone engine at its pinned build", () => {
+  it("pins every engine the app installs, at or above its minimum, and a standalone engine at its pinned build", () => {
     for (const driver of BUILT_IN_DRIVERS) {
       const installs = Boolean(npmPackageOf(driver.install) || driver.install?.standalone || driver.install?.managed);
-      if (installs) expect(ENGINE_VERSIONS[driver.driverKind], driver.driverKind).toBeDefined();
+      expect(Boolean(ENGINE_VERSIONS[driver.driverKind]), driver.driverKind).toBe(installs);
     }
     for (const [kind, pin] of Object.entries(ENGINE_VERSIONS)) {
-      expect(BUILT_IN_DRIVERS.some((driver) => driver.driverKind === kind), kind).toBe(true);
       if (pin.target !== LATEST) expect(isNewerVersion(pin.minimum, pin.target), kind).toBe(false);
     }
     for (const plan of enginePlans(BUILT_IN_DRIVERS)) {

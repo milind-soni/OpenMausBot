@@ -35,7 +35,7 @@ export function chromeLaunchArgs(profile: string, args: string[], platform: Node
   return [
     "--headless=new", "--remote-debugging-pipe", `--user-data-dir=${profile}`,
     "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-component-update",
-    "--disable-sync", "--disable-features=Translate,OptimizationHints,MediaRouter,AimEnabled,PreconnectToSearch",
+    "--disable-sync", "--disable-features=Translate,OptimizationHints,MediaRouter",
     ...credentialStoreFlags(platform),
     // Ubuntu 23.10+ restricts the unprivileged user namespaces Chrome's sandbox needs; the sandbox is not under test here.
     ...(platform === "linux" ? ["--no-sandbox"] : []),

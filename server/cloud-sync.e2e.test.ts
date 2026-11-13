@@ -115,7 +115,6 @@ function desktop(pcHome: string) {
     settingsFile: join(pcHome, "user", "settings.json"), stateFile: join(pcHome, "user", "state.db"),
     documentsDir: join(pcHome, "Documents"), localDataDir: join(pcHome, ".openmausbot"), homeDir: pcHome, platform: process.platform, hostname: "Ash-PC",
     cloudOrigin: () => PC_ORIGIN, fetch: desktopFetch as typeof fetch, trashItem: async (file: string) => rmSync(file), markDownloaded: async () => {},
-    freeBytes: () => 100 * 1024 ** 3,
     watch: () => () => {}, now: () => Date.now() + 60_000,
   });
 }

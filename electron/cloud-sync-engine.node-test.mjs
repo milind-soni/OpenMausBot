@@ -125,22 +125,6 @@ test("bots' work: new files come down marked as downloaded; nothing here is dele
   assert.equal(s.read("report.md"), "v1");
 });
 
-test("bots' work: waits for the local disk reserve, then downloads when it fits", async (t) => {
-  const s = setup(t);
-  s.cloud.put("f1", "report.md", "v1");
-  const waiting = await s.outputs({ freeBytes: () => GB + 1 });
-  assert.equal(waiting.status, "waiting");
-  assert.equal(waiting.waitingBytes, 2);
-  assert.equal(existsSync(join(s.local, "report.md")), false);
-  assert.deepEqual(s.cloud.calls.filter(([kind]) => kind === "download"), []);
-
-  const ready = await s.outputs({ freeBytes: () => GB + 2 });
-  assert.equal(ready.status, "synced");
-  assert.equal(ready.waitingBytes, 0);
-  assert.equal(s.read("report.md"), "v1");
-  assert.deepEqual(s.cloud.calls.filter(([kind]) => kind === "download"), [["download", "report.md"]]);
-});
-
 test("bots' work: a newer version replaces an untouched file (the old one to the Recycle Bin), and lands beside the person's edit", async (t) => {
   const s = setup(t);
   s.cloud.put("f1", "report.md", "v1");
