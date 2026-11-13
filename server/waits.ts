@@ -395,7 +395,8 @@ export class WaitManager {
         const says = pageSays(page.text, condition.text);
         if (condition.kind === "url_contains") return { met: says, page: { ok: true } };
         if (says) condition.sawText = true;
-        return { met: condition.sawText && !says, page: { ok: true } };
+        // A prefix can prove text is present, but missing text may still be in the unread tail.
+        return { met: condition.sawText && !says && !page.truncated, page: { ok: true } };
       }
       case "file_exists": return { met: (await this.probes.stamp(condition.path)) !== null };
       case "file_missing": return { met: (await this.probes.stamp(condition.path)) === null };

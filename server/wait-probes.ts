@@ -178,9 +178,9 @@ export const PAGE_MAX_BYTES = 2 * 1024 * 1024;
 export const PAGE_MAX_REDIRECTS = 3;
 
 type Failure = { ok: false; refused: boolean; error: string };
-export type PageResult = { ok: true; text: string } | Failure;
+export type PageResult = { ok: true; text: string; truncated?: true } | Failure;
 /** The 2xx answer a redirect chain ended on: its address, headers and at most `maxBytes` of its body. */
-export type PublicPage = { ok: true; url: URL; headers: IncomingHttpHeaders; body: Buffer } | Failure;
+export type PublicPage = { ok: true; url: URL; headers: IncomingHttpHeaders; body: Buffer; truncated?: true } | Failure;
 
 export interface PageFetchOptions {
   allow?: (target: { host: string; address: string }) => boolean;
@@ -190,7 +190,7 @@ export interface PageFetchOptions {
   maxRedirects?: number;
 }
 
-type Answer = { status: number; location?: string; headers: IncomingHttpHeaders; body: Buffer };
+type Answer = { status: number; location?: string; headers: IncomingHttpHeaders; body: Buffer; truncated?: true };
 
 const fail = (error: string, refused = false): Failure => ({ ok: false, refused, error });
 
@@ -224,7 +224,7 @@ function requestOnce(url: URL, address: { address: string; family: number }, sig
           size += chunk.length;
           if (size >= maxBytes) {
             response.destroy();
-            resolve({ status, headers, body: Buffer.concat(chunks).subarray(0, maxBytes) });
+            resolve({ status, headers, body: Buffer.concat(chunks).subarray(0, maxBytes), truncated: true });
           }
         });
         response.on("end", () => resolve({ status, headers, body: Buffer.concat(chunks) }));
@@ -247,7 +247,7 @@ function withinSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 
 export async function fetchPageText(rawUrl: string, options: PageFetchOptions = {}): Promise<PageResult> {
   const page = await fetchPublicPage(rawUrl, options);
-  return page.ok ? { ok: true, text: pageText(page.body.toString("utf8")) } : page;
+  return page.ok ? { ok: true, text: pageText(page.body.toString("utf8")), ...(page.truncated ? { truncated: true } : {}) } : page;
 }
 
 /** Security: only a public address, checked again on every redirect and pinned for the request, so a page can't
@@ -283,7 +283,7 @@ export async function fetchPublicPage(rawUrl: string, options: PageFetchOptions 
         continue;
       }
       if (answer.status < 200 || answer.status >= 300) return fail(`The page answered ${answer.status}.`);
-      return { ok: true, url, headers: answer.headers, body: answer.body };
+      return { ok: true, url, headers: answer.headers, body: answer.body, ...(answer.truncated ? { truncated: true } : {}) };
     }
   } catch {
     return signal.aborted ? fail("The page took too long to answer.") : fail("The page could not be reached.");

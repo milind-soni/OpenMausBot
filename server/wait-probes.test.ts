@@ -154,6 +154,12 @@ describe("fetchPageText", () => {
     expect(big.ok && big.text.includes("needle")).toBe(false);
     expect(await fetchPageText(`http://status.test:${port}/slow`, { ...test, timeoutMs: 200 })).toEqual({ ok: false, refused: false, error: "The page took too long to answer." });
   });
+  it("marks a page cut off at the byte limit as incomplete evidence", async () => {
+    const page = await fetchPageText(`http://status.test:${port}/big`, test);
+    expect(page).toMatchObject({ ok: true, truncated: true });
+    expect(page.ok && page.text.includes("needle")).toBe(false);
+    expect(await fetchPageText(`http://status.test:${port}/`, test)).toEqual({ ok: true, text: "Build: Shipped" });
+  });
   it("gives up on a lookup that never answers within its timeout", async () => {
     const started = Date.now();
     const result = await fetchPageText("http://stuck.test/", { lookup: () => new Promise(() => {}), timeoutMs: 200 });

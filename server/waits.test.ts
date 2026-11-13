@@ -90,6 +90,39 @@ function harness(options: Partial<WaitManagerOptions> = {}) {
 }
 
 describe("WaitManager", () => {
+  it("does not treat a truncated page prefix as proof that previously seen text disappeared", async () => {
+    const h = harness();
+    h.page = { ok: true, text: "deployment pending" };
+    await h.create({ kind: "url_missing", url: "https://status.test", text: "pending" }, { followUp: "Check the deployment." });
+    h.page = { ok: true, text: "a large page prefix", truncated: true };
+    h.advance(60_000); await h.manager.tick();
+    expect(h.posts).toEqual([]);
+    expect(h.followUp).not.toHaveBeenCalled();
+    expect(h.manager.list("bot-1")).toHaveLength(1);
+    h.page = { ok: true, text: "deployment complete" };
+    h.advance(60_000); await h.manager.tick();
+    expect(h.posts).toHaveLength(1);
+    expect(h.posts[0]?.status).toBe("fired");
+    expect(h.followUp).toHaveBeenCalledTimes(1);
+  });
+
+  it("can prove text is present in a truncated page prefix", async () => {
+    const h = harness();
+    await h.create({ kind: "url_contains", url: "https://status.test", text: "ready" });
+    h.page = { ok: true, text: "ready", truncated: true };
+    h.advance(60_000); await h.manager.tick();
+    expect(h.posts[0]?.status).toBe("fired");
+  });
+
+  it("remembers text seen in a truncated page before a complete page loses it", async () => {
+    const h = harness();
+    h.page = { ok: true, text: "pending", truncated: true };
+    await h.create({ kind: "url_missing", url: "https://status.test", text: "pending" });
+    h.page = { ok: true, text: "complete" };
+    h.advance(60_000); await h.manager.tick();
+    expect(h.posts[0]?.status).toBe("fired");
+  });
+
   it("creates a wait with a 24-hour default and its first check due, and keeps it across a restart", async () => {
     const h = harness();
     const created = await h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the report", condition: { kind: "file_exists", path: "/r.txt" } });
