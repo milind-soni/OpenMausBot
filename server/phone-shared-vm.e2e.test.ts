@@ -28,12 +28,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const lease = () => randomUUID().replaceAll("-", "");
 
 describe("a person's hold on the shared Local VM", () => {
-  let home = "";
-  let base = "";
-  let stateFile = "";
-  let dumpFile = "";
-  let finishFile = "";
-  let output = "";
+  let home = "", base = "", stateFile = "", dumpFile = "", finishFile = "", output = "";
   let child: ChildProcess | null = null;
   let boatServer: Server;
   let boatRow: { id: string; name: string; state: string } | null = null;
@@ -357,9 +352,9 @@ describe("a person's hold on the shared Local VM", () => {
     vmState();
     await setIdleMinutes(480);
 
-    vmState({ ...READY, holdPull: true });
+    rmSync(`${stateFile}.pull`, { force: true }); vmState({ ...READY, holdPull: true });
     const pulling = api("POST", "/api/local-computer/pull", {});
-    await sleep(300);
+    await until(() => existsSync(`${stateFile}.pull`), Boolean);
     const refused = await control(api, witness, { action: "take" });
     expect(refused.status).toBe(409);
     expect(await held(witness)).toBe(false);

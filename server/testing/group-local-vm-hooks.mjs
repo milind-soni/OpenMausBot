@@ -83,7 +83,7 @@ registerHooks({
       }
       export async function containerComputerAction(action, _run, _platform, target = SHARED_LOCAL_VM_TARGET) {
         if (action === 'pull' && read().containers) {
-          while (read().holdPull) await new Promise(r => setTimeout(r, 30));
+          while (read().holdPull) { writeFileSync(file + '.pull', '1'); await new Promise(r => setTimeout(r, 30)); }
           const state = read();
           state.imageMissing = false;
           state.actions = [...(state.actions ?? []), { action, target: target.key }];
