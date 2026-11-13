@@ -203,6 +203,7 @@ export interface ResolvedSpawn {
 export function splitCliString(cli: string): string[] {
   const out: string[] = [];
   let cur = "";
+  let started = false;
   let quote: '"' | "'" | null = null;
   for (const ch of cli.trim()) {
     if (quote) {
@@ -210,14 +211,17 @@ export function splitCliString(cli: string): string[] {
       else cur += ch;
     } else if (ch === '"' || ch === "'") {
       quote = ch;
+      started = true;
     } else if (/\s/.test(ch)) {
-      if (cur) out.push(cur);
+      if (started) out.push(cur);
       cur = "";
+      started = false;
     } else {
       cur += ch;
+      started = true;
     }
   }
-  if (cur) out.push(cur);
+  if (started) out.push(cur);
   return out;
 }
 
