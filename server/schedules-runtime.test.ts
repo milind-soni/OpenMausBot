@@ -125,6 +125,20 @@ describe.skipIf(process.platform === "win32")("scheduled runs and recovery over 
     expect(switched.body.bot.modelSelection).toEqual(before.modelSelection);
     expect(switched.body.bot.backupModelSelection).toEqual({ instanceId: "backup", model: "grok-4.6" });
   });
+  it("rejects malformed dual targets through public create and update without persisting them", async () => {
+    const bots = (await api("GET", "/api/bots")).body.bots;
+    const group = (await api("POST", "/api/groups", { name: "Target validation", memberIds: [bots[0].id] })).body.group;
+    const existing = await schedule(bots[0].id, "Keep this target");
+    const before = (await api("GET", "/api/schedules")).body.schedules;
+    for (const invalid of [3, false, null, ""]) {
+      for (const target of [{ botId: bots[0].id, groupId: invalid }, { groupId: group.id, botId: invalid }]) {
+        expect((await api("POST", "/api/schedules", { target, prompt: "Invalid target", repeat: future(), timezone: "UTC" })).status).toBe(400);
+        expect((await api("PATCH", `/api/schedules/${existing.id}`, { target })).status).toBe(400);
+      }
+    }
+    expect((await api("GET", "/api/schedules")).body.schedules).toEqual(before);
+    await api("DELETE", `/api/schedules/${existing.id}`);
+  });
   it("guards schedule mutations and scopes bot-created schedules and the 20-schedule cap", async () => {
     const bots = (await api("GET", "/api/bots")).body.bots;
     const dumped = JSON.parse(readFileSync(join(home, "claude-dump.json"), "utf8"));
@@ -132,6 +146,13 @@ describe.skipIf(process.platform === "win32")("scheduled runs and recovery over 
     const headers = { authorization: `Bearer ${config.mcpServers.agents.env.GBS_COMMS_TOKEN}`, "x-gbs-bot-id": bots[0].id };
     const create = (target: unknown) => api("POST", "/api/internal/schedules", { target, prompt: "Daily task", repeat: { kind: "daily", time: "09:00" }, timezone: "UTC" }, headers);
     expect((await create({ botId: bots[1].id })).status).toBe(403);
+    const group = (await api("POST", "/api/groups", { name: "Internal target validation", memberIds: [bots[0].id] })).body.group;
+    const before = (await api("GET", "/api/internal/schedules", undefined, headers)).body.schedules;
+    for (const invalid of [3, false, null, ""]) {
+      expect((await create({ botId: bots[0].id, groupId: invalid })).status).toBe(400);
+      expect((await create({ groupId: group.id, botId: invalid })).status).toBe(400);
+    }
+    expect((await api("GET", "/api/internal/schedules", undefined, headers)).body.schedules).toEqual(before);
     const made = await create({ botId: bots[0].id }); expect(made.status).toBe(201);
     for (let i = 1; i < 20; i++) expect((await create({ botId: bots[0].id })).status).toBe(201);
     expect((await create({ botId: bots[0].id })).status).toBe(400);

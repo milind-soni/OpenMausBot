@@ -1,5 +1,5 @@
 import { ProjectMentionTextarea } from "./ProjectMentionTextarea";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, useStore } from "@/state/store";
 import { localInstant, nextScheduleRun } from "../../server/schedule-time";
 import type { Schedule, ScheduleRepeat, ScheduleTarget } from "../../server/schedule-types";
@@ -24,11 +24,37 @@ export function ScheduleSheet({ target, schedule, prompt: initialPrompt = "", on
   const [grace, setGrace] = useState(schedule?.graceMinutes ?? 120);
   const [pending, setPending] = useState(false), [error, setError] = useState("");
   const panel = useRef<HTMLDivElement>(null);
+  const errorNotice = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     const trigger = document.activeElement as HTMLElement;
     panel.current?.querySelector<HTMLElement>("select")?.focus();
     return () => trigger?.focus();
   }, []);
+  // Disabling the focused submit control can move focus to BODY. Keep the
+  // pending/error states inside the sheet, and announce a failed save in place.
+  useLayoutEffect(() => {
+    if (error && !pending) errorNotice.current?.focus();
+    else if (pending) panel.current?.focus();
+  }, [error, pending]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.key === "Escape") {
+        event.preventDefault(); event.stopPropagation();
+        if (!pending) onClose();
+      }
+      if (event.key === "Tab") {
+        const fields = [...(panel.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, a[href], [tabindex="0"]') ?? [])].filter(field => field.getClientRects().length > 0);
+        const first = fields[0], last = fields.at(-1);
+        if (!panel.current?.contains(document.activeElement) || document.activeElement === panel.current ||
+            (event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last)) {
+          event.preventDefault(); (event.shiftKey ? last : first)?.focus();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose, pending]);
   const repeat = (): ScheduleRepeat => kind === "once" ? { kind, at: localInstant(date, time, timezone) } : kind === "every" ? { kind, hours } : kind === "weekly" ? { kind, time, days } : { kind, time };
   let preview = "Choose when this should run.";
   try { const next = nextScheduleRun(repeat(), timezone, Date.now()); preview = next ? `Next run: ${new Date(next).toLocaleString(undefined, { timeZone: timezone })} (${timezone}).` : "Choose a future run time."; } catch { /* fields are still being edited */ }
@@ -43,10 +69,7 @@ export function ScheduleSheet({ target, schedule, prompt: initialPrompt = "", on
   };
   const field = "w-full rounded-xl border border-hairline/50 bg-inset px-3 py-2 text-[13px] text-ink focus:border-accent focus:outline-none";
   return <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" onMouseDown={e => { if (e.target === e.currentTarget && !pending) onClose(); }}>
-    <div ref={panel} role="dialog" aria-modal="true" aria-labelledby="schedule-sheet-title" className="max-h-[90vh] w-full max-w-[520px] overflow-y-auto rounded-2xl border border-hairline/50 bg-card p-5 shadow-2xl" onKeyDown={e => {
-      if (e.key === "Escape") { e.stopPropagation(); if (!pending) onClose(); }
-      if (e.key === "Tab") { const fields = [...(panel.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input, textarea, select') ?? [])]; const first = fields[0], last = fields.at(-1); if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); } }
-    }}>
+    <div ref={panel} role="dialog" aria-modal="true" aria-labelledby="schedule-sheet-title" tabIndex={-1} className="max-h-[90vh] w-full max-w-[520px] overflow-y-auto rounded-2xl border border-hairline/50 bg-card p-5 shadow-2xl">
       <h2 id="schedule-sheet-title" className="mb-4 text-[17px] font-semibold text-ink">{schedule ? "Edit schedule" : "New schedule"}</h2>
       <form className="space-y-3" onSubmit={e => { e.preventDefault(); void save(); }}>
         <label className="block text-[13px] text-ink">Who should work on this?<select className={field} value={targetValue} onChange={e => setTargetValue(e.target.value)}><optgroup label="Bots">{state.bots.filter(b => !b.hidden).map(b => <option key={b.id} value={`bot:${b.id}`}>{b.name}</option>)}</optgroup><optgroup label="Rooms">{state.groups.map(g => <option key={g.id} value={`room:${g.id}`}>{g.name}</option>)}</optgroup></select></label>
@@ -60,7 +83,7 @@ export function ScheduleSheet({ target, schedule, prompt: initialPrompt = "", on
         <details className="text-[12px] text-ink-secondary"><summary>Catch-up window</summary><label>Start missed work within (minutes)<input type="number" min={0} max={1440} className={field} value={grace} onChange={e => setGrace(Number(e.target.value))} /></label></details>
         <p className="rounded-xl bg-panel p-3 text-[12px] text-ink-secondary">{preview}</p>
         <p className="text-[12px] text-ink-secondary">Schedules run while Gerer Build Studio is open. If the app is closed or your computer is asleep, a missed task starts once when you return within its catch-up window.</p>
-        {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
+        {error && <p ref={errorNotice} tabIndex={-1} role="alert" className="text-[12px] text-danger">{error}</p>}
         <div className="flex justify-end gap-2"><button type="button" disabled={pending} onClick={onClose} className="rounded-xl bg-raised px-4 py-2 text-[13px] text-ink">Cancel</button><button type="submit" disabled={pending || !prompt.trim()} className="rounded-xl bg-accent px-4 py-2 text-[13px] text-white disabled:opacity-40">{pending ? "Saving…" : schedule ? "Save changes" : "Schedule run"}</button></div>
       </form>
     </div>
