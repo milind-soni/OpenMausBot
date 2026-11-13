@@ -203,7 +203,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     followEvent({ type: "leftEnd" });
     setTranscriptWindow({ key: transcriptKey, start: range.start, end: range.end });
   }, [threadId, messages, followEvent, focusMessage, transcriptKey]);
-  useFocusMessage(threadId, messages.length > 0);
+  useFocusMessage(threadId, messages.length > 0, scrollRef);
 
   // Before paint, so a conversation opens at its end with no frame elsewhere. `follow` is omitted on purpose: re-arming
   // only arms future content and never scrolls.

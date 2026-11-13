@@ -7,6 +7,7 @@ import { engineHomes } from "../engine-homes/engine-homes.ts";
 import { audienceHome } from "../engine-homes/layout.ts";
 import * as procs from "../procs.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
+import { recordEvents } from "../testing/events.ts";
 import {
   MuseCodeDriver, museApprovalMode, museCatalog, museChoice, museModelLabel, museQuestions, museServeArgs,
   museToolOutput, museToolStart,
@@ -191,15 +192,22 @@ describe.skipIf(process.platform === "win32")("Muse Code's process", () => {
         const engine: ReturnType<typeof procs.spawnCli> = spawned.mock.results[bot]!.value;
         return engine.exitCode !== null || engine.signalCode !== null;
       };
-      const settled: { started?: boolean; completed?: RuntimeEvent; hostExited?: boolean } = {};
+      const settled: { completed?: RuntimeEvent; hostExited?: boolean } = {};
       instance.adapter.onEvent((event) => {
-        if (event.type === "turn.started") settled.started = true;
         if (event.type !== "turn.completed") return;
         settled.completed = event;
         settled.hostExited = exited();
       });
-      await instance.adapter.sendTurn({ threadId: "t-stop", text: "work", cwd: root, approvalMode: "full" });
-      await vi.waitFor(() => expect(settled.started).toBe(true));
+      const events = recordEvents(instance.adapter);
+      try {
+        await instance.adapter.sendTurn({ threadId: "t-stop", text: "work", cwd: root, approvalMode: "full" });
+        await events.until((event) => event.type === "turn.started");
+      } catch (error) {
+        await instance.dispose();
+        throw error;
+      } finally {
+        events.stop();
+      }
       return { instance, settled, exited };
     };
 

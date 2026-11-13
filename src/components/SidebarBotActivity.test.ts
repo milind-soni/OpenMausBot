@@ -142,6 +142,14 @@ describe("group attention", () => {
     expect(tasks[0].unread).toBe(true);
   });
 
+  it("shows an unread reply in a background room fork", () => {
+    const room = group("g", "Crew", "g0", { unread: true, tasks: [
+      { threadId: "g0", title: "Main", createdAt: 0, unread: false },
+      { threadId: "fork", title: "Fork", createdAt: 1, unread: true },
+    ] });
+    expect(sidebarGroupActivityTasks(room, [], {}).map((task) => task.threadId)).toEqual(["fork"]);
+  });
+
   it("shows each thread's own work when a room's threads run side by side", () => {
     const room = group("g", "Crew", "g0", {
       working: true,
