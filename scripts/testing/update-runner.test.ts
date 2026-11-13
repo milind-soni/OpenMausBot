@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { parseRun, parseRunner } from "../../server/server-update.ts";
+import { hostTimeout } from "../../server/testing/host-timeout.ts";
 
 const DEPLOY = join(import.meta.dirname, "..", "..", "deploy");
 const RUNNER = join(DEPLOY, "update-runner.sh");
@@ -147,7 +148,12 @@ exec /usr/bin/install $args
   return { fakes, log: () => readFileSync(log, "utf8").trim().split("\n") };
 }
 
-describe.skipIf(!posix)("deploy/update-runner.sh", () => {
+// Nothing here waits on the clock (QUIET_S, GAP_S and IDLE_S are 0 unless a test says otherwise); the time is processes.
+// Each run is the runner and update.sh in sh and bash, and every `docker` they call starts Node for the stand-in: 8 for a
+// refused run, 24 for one with nothing to do, 57 for an update, 79 for one rolled back. A laptop does an update in about
+// 2 s; a macOS CI runner took up to 3.4 times as long, so a test of five or six runs (7 to 9 s on a laptop) took 17 to 24 s
+// there, over the 20 s default. A real hang is still cut off by each run's own 60 s limit.
+describe.skipIf(!posix)("deploy/update-runner.sh", { timeout: hostTimeout(60_000) }, () => {
   it("is plain POSIX sh", () => {
     expect(spawnSync("sh", ["-n", RUNNER]).status).toBe(0);
     const dash = spawnSync("dash", ["-n", RUNNER]);
@@ -410,22 +416,32 @@ describe.skipIf(!posix)("deploy/update-runner.sh", () => {
 
   it("lets runs that change nothing pass freely, and keeps updates that change something four minutes apart", () => {
     const box = install({ stable: OLD });
-    // A hostile requester's runs while there is nothing to update to: they stop nothing, and use up no gap.
-    for (let at = 1; at <= 3; at += 1) {
+    // A hostile requester's runs while there is nothing to update to: they stop nothing, and use up no gap. Each one is a
+    // whole run of update.sh (IDLE_S is 0 here), so two show a run after one that changed nothing goes ahead as well as three.
+    for (let at = 1; at <= 2; at += 1) {
       box.ask();
       expect(box.last()).toMatchObject({ run: at, result: "updated" });
     }
     expect(box.fakeState().containers.omb.id).toBe("omb-1");
     box.setStable(NEW);
     box.ask();
-    expect(box.last()).toMatchObject({ run: 4, result: "updated" });
+    expect(box.last()).toMatchObject({ run: 3, result: "updated" });
     expect(box.fakeState().containers.omb.image).toBe(NEW.id);
     // The run that changed something counts: the next one with something to change waits for the gap.
     box.setStable(NEXT);
     box.ask();
+    expect(box.last()).toMatchObject({ run: 4, result: "too-soon" });
+    expect(box.fakeState().containers.omb.image).toBe(NEW.id);
+    // Four minutes by the runner's own record, not by waiting: that update dated 230 seconds back still waits, 250 back
+    // goes ahead (the seconds either side leave room for the clock to tick between here and the run).
+    const ranAgo = (seconds: number) => writeFileSync(join(box.state, "status", "last"), box.lastText().replace(/^ran=\d+$/m, `ran=${Math.floor(Date.now() / 1000) - seconds}`));
+    ranAgo(230);
+    box.ask();
     expect(box.last()).toMatchObject({ run: 5, result: "too-soon" });
     expect(box.fakeState().containers.omb.image).toBe(NEW.id);
-    box.ask({ OMB_RUNNER_GAP_S: "0" });
+    ranAgo(250);
+    box.ask();
+    expect(box.last()).toMatchObject({ run: 6, result: "updated" });
     expect(box.fakeState().containers.omb.image).toBe(NEXT.id);
   });
 
