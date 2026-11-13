@@ -4,20 +4,35 @@ import { t } from "@/lib/i18n";
 import { stepKey } from "@/lib/sidebar-bot-drop";
 import { planRoomDrop, ROOM_ROW_DRAG_TYPE, roomDropPlace, stepRoom, type RoomDropPlace } from "@/lib/sidebar-room-drop";
 import { api, type Action, type Group } from "@/state/store";
+import { reorderIfMoved } from "../../shared/bot-order";
 import { useMayMoveBots } from "./bot-sections";
 import { BotDropLine, botRowDropClass } from "./SidebarBotDrag";
 
 const failure = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
+/** Room-order saves run one at a time, in the order asked, so the server ends on the last order asked for. Once the
+ * last one settles after any failed, the rooms go back to the order the server confirmed (never an older one). */
+const roomOrder = { saves: Promise.resolve(), pending: 0, failed: false, cause: undefined as unknown, confirmed: [] as { id: string }[] };
+
 /** Saves the rooms' new order: shown at once, then stored on the server (every client gets it); put back on failure. */
 export function saveRoomOrder(dispatch: Dispatch<Action>, groups: readonly Pick<Group, "id">[], groupIds: string[]): void {
   const before = groups.filter((group) => groupIds.includes(group.id)).map((group) => group.id);
   if (before.length === groupIds.length && before.every((id, index) => id === groupIds[index])) return;
+  if (!roomOrder.pending) roomOrder.confirmed = groups.map(({ id }) => ({ id }));
+  roomOrder.pending += 1;
   dispatch({ type: "groupsOrdered", groupIds });
-  void api("/api/groups/order", { method: "PUT", body: JSON.stringify({ groupIds }) }).catch((cause) => {
-    dispatch({ type: "groupsOrdered", groupIds: before });
-    dispatch({ type: "error", message: failure(cause) });
-  });
+  roomOrder.saves = roomOrder.saves
+    .then(() => api("/api/groups/order", { method: "PUT", body: JSON.stringify({ groupIds }) }))
+    .then(
+      () => { roomOrder.confirmed = reorderIfMoved(roomOrder.confirmed, groupIds) ?? roomOrder.confirmed; },
+      (cause: unknown) => { roomOrder.failed = true; roomOrder.cause = cause; },
+    )
+    .finally(() => {
+      if (--roomOrder.pending || !roomOrder.failed) return;
+      roomOrder.failed = false;
+      dispatch({ type: "groupsOrdered", groupIds: roomOrder.confirmed.map(({ id }) => id) });
+      dispatch({ type: "error", message: failure(roomOrder.cause) });
+    });
 }
 
 type RowHandlers = {
@@ -126,13 +141,14 @@ export function useSidebarRoomDrag({ dispatch, announce, enabled, groups }: {
       if (items.length > 1) latest.current.lists.push(items.map((item) => item.id));
       return items;
     },
-    /** A room's row (and its open thread list) inside its drop target while rooms may move; the row alone otherwise.
-     * The target lays its children out like the sidebar list around it, so nothing moves on screen. */
+    /** A room's row (and its open thread list) inside its drop target, which takes drags only while rooms may move.
+     * The target is always there, so the row is not remounted when moving turns on or off, and it lays its children out
+     * like the sidebar list around it, so nothing moves on screen. */
     wrap(groupId: string, item: ReactElement): ReactElement {
-      if (!latest.current.enabled || !listOf(groupId)) return item;
-      const place = drop?.groupId === groupId ? drop.place : null;
+      const on = latest.current.enabled && Boolean(listOf(groupId));
+      const place = on && drop?.groupId === groupId ? drop.place : null;
       return (
-        <div key={groupId} className={cn("relative flex flex-col [gap:inherit]", botRowDropClass(place, dragging === groupId))} {...row(groupId)}>
+        <div key={groupId} className={cn("relative flex flex-col [gap:inherit]", botRowDropClass(place, on && dragging === groupId))} {...(on ? row(groupId) : {})}>
           <BotDropLine place={place} />
           {item}
         </div>
