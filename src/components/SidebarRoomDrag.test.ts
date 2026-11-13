@@ -63,6 +63,16 @@ describe("saveRoomOrder", () => {
     expect(dispatch).toHaveBeenLastCalledWith({ type: "error", message: "offline" });
   });
 
+  it("puts back only the rooms its saves moved, keeping another list's newer order", async () => {
+    const dispatch = vi.fn();
+    saveRoomOrder(dispatch, rooms("a", "b", "c", "d"), ["b", "a"]);
+    await flush();
+    fixture.calls[0]!.settle(new Error("offline"));
+    await flush();
+    // Only a and b are put back; c and d (another list, maybe reordered by another client meanwhile) are left alone.
+    expect(orders(dispatch)).toEqual([["b", "a"], ["a", "b"]]);
+  });
+
   it("does nothing when the order did not change", () => {
     const dispatch = vi.fn();
     saveRoomOrder(dispatch, rooms("a", "b"), ["a", "b"]);
