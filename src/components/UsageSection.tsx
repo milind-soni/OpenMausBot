@@ -171,7 +171,7 @@ function ModelLegend({ groups }: { groups: readonly UsageGroup[] }) {
   const items = [...totals.entries()].sort((a, b) => b[1].tokens - a[1].tokens);
   if (items.length < 2) return null;
   return (
-    <ul className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1">
+    <ul className="mt-3 flex flex-wrap gap-x-3 gap-y-1">
       {items.map(([key, item]) => (
         <li key={key} className="flex min-w-0 items-center gap-1.5 text-[11px] text-ink-secondary">
           <span aria-hidden="true" data-model-color={modelColor(key)} className="size-2 shrink-0 rounded-full" style={{ backgroundColor: modelColor(key) }} />
