@@ -107,7 +107,7 @@ import { createDataRoutes } from "./data/routes.ts";
 import { DataSheetRegistry } from "./data/sheet.ts";
 import { DataFailure } from "./data/types.ts";
 import { TeamComputers, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
-import { isEffortLevel, type CardAnswerer, type ResolvedSender, type SignInRequestCardData, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
+import { isEffortLevel, type AuthPairResponse, type CardAnswerer, type PairResponse, type ResolvedSender, type ServerFrame, type SignInRequestCardData, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
 import { isPersistentQuestionCard, shouldSettleRequestCard } from "../shared/ask-question.ts";
 import { parseToolScope } from "../shared/tool-scope.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
@@ -12606,7 +12606,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, result.token, { secure, maxAgeSeconds: cookieMaxAgeSeconds(result.session) }));
         return json(res, 200, { session: result.session, environment });
       }
-      return json(res, 200, { token: result.token, session: result.session, environment });
+      return json(res, 200, { token: result.token, session: result.session, environment } satisfies AuthPairResponse);
     }
     // The companion apps' pairing route: same window, lockout and single-use exchange as /api/auth/pair; redeeming the credential IS the sign-in.
     if (method === "POST" && path === "/api/pair") {
@@ -12634,7 +12634,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         },
         serverName: cfg.computerName || environmentDescriptor({ environmentId: ENVIRONMENT_ID, ...TEAM_LABEL, desktopManaged: DESKTOP_MANAGED }).label,
         ...phoneRelay?.pairedOver(req),
-      });
+      } satisfies PairResponse);
     }
     const gate = resolveRequestAuth(req, {
       sessions,
@@ -14669,7 +14669,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           kind: "hello",
           cursor: `${STREAM_ID}:${lastSeq}`,
           resumed,
-        })}\n\n`,
+        } satisfies ServerFrame)}\n\n`,
       );
       if (resumed) {
         for (const buffered of replayBuffer) {
