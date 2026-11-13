@@ -1,16 +1,17 @@
-// Preferences the app window keeps, or reaches through the desktop app's bridge, that change only on a Change/Cancel
-// card. The window is told only once the owner taps Change, and a window that can't apply one (a browser has no desktop
-// bridge) is refused before any card shows.
-import { z } from "zod";
-
+// More preferences the app window keeps, or reaches through the desktop app's bridge, each applied with Undo on a card
+// saying what it does. A window that can't apply one (a browser has no desktop bridge) refuses it.
 import { PLACE_SWATCHES, TALK_KEYS } from "../../shared/app-settings.ts";
-import type { SettingEntry, WindowPref } from "./registry.ts";
+import { personOnly, type SettingEntry, type WindowPref } from "./registry.ts";
 
 const turn = (on: boolean, yes: string, no: string) => (on ? yes : no);
 
 export function windowEntries(windowPref: WindowPref): SettingEntry[] {
   const flag = (id: Parameters<WindowPref>[0], label: string, help: string, where: Parameters<WindowPref>[3], synonyms: string[], yes: string, no: string) =>
     windowPref(id, label, help, where, synonyms, "true or false", { says: (on: boolean) => turn(on, yes, no) });
+  /** A way in to this computer: a bot may turn it on, but turning it off can cut off the device the person is using now. */
+  const wayIn = (id: Parameters<WindowPref>[0], label: string, help: string, synonyms: string[], yes: string) =>
+    windowPref(id, label, help, "Settings → Phone & devices", synonyms, "true (turning it off is done by the person, in Settings)",
+      { says: () => yes, refusal: (on: boolean) => (on ? null : personOnly(`Turning off ${label}`, "Settings → Phone & devices")) });
   return [
     flag("appearance.userBubbles", "Coloured messages", "Your own messages take the bot's colour.", "Settings → Appearance", ["bubbles", "message color", "my messages"],
       "Colour your messages with each bot's colour", "Show your messages in plain grey"),
@@ -45,19 +46,16 @@ export function windowEntries(windowPref: WindowPref): SettingEntry[] {
       "Open MausBot when you log in", "Don't open MausBot at login"),
     windowPref("general.talkShortcut", "Talk shortcut", "A key held anywhere on this Mac to talk to MausBot (desktop app).", "Settings → General", ["talk", "voice", "dictation", "microphone", "hotkey"],
       `{"enabled":true|false,"key":${TALK_KEYS.map((key) => `"${key}"`).join(" | ")}}`, {
-        value: z.object({ enabled: z.boolean(), key: z.enum(TALK_KEYS) }).strict(),
         says: ({ enabled, key }: { enabled: boolean; key: string }) => (enabled ? `Hold ${key.replaceAll("-", "+")} anywhere to talk to MausBot` : "Turn off the talk shortcut"),
       }),
     flag("account.productEmails", "Product update emails", "MausBot emails you product updates.", "Settings → Your account", ["emails", "newsletter", "product updates", "email updates"],
       "Get MausBot product update emails (your email address is sent to MausBot)", "Stop MausBot product update emails"),
-    flag("remote.wifi", "Same Wi-Fi", "Paired phones reach this computer on the same Wi-Fi network.", "Settings → Phone & devices", ["wifi", "wi-fi", "lan", "local network", "remote access"],
-      "Let your paired phones reach this computer on the same Wi-Fi", "Stop paired phones reaching this computer over Wi-Fi"),
-    flag("remote.relay", "Reach from anywhere", "Paired phones reach this computer from anywhere through MausBot's relay (needs a MausBot sign-in).", "Settings → Phone & devices", ["relay", "anywhere", "away", "remote access"],
-      "Let your paired phones reach this computer from anywhere, through MausBot's relay", "Stop paired phones reaching this computer from anywhere"),
-    flag("remote.tailscale", "Tailscale", "Paired devices reach this computer over your Tailscale network (Tailscale must be installed and signed in).", "Settings → Phone & devices", ["tailscale", "tailnet", "remote access"],
-      "Let your devices reach this computer over Tailscale", "Stop devices reaching this computer over Tailscale"),
-    windowPref("remote.httpsAddress", "HTTPS address", "This computer's public HTTPS address for paired devices. It is set up while pairing; a bot can only turn it off.", "Settings → Phone & devices",
-      ["https", "public address", "remote access"], "false", { value: z.literal(false), says: () => "Turn off this computer's HTTPS address for paired devices" }),
+    wayIn("remote.wifi", "Same Wi-Fi", "Paired phones reach this computer on the same Wi-Fi network.", ["wifi", "wi-fi", "lan", "local network", "remote access"],
+      "Let your paired phones reach this computer on the same Wi-Fi"),
+    wayIn("remote.relay", "Reach from anywhere", "Paired phones reach this computer from anywhere through MausBot's relay (needs a MausBot sign-in).", ["relay", "anywhere", "away", "remote access"],
+      "Let your paired phones reach this computer from anywhere, through MausBot's relay"),
+    wayIn("remote.tailscale", "Tailscale", "Paired devices reach this computer over your Tailscale network (Tailscale must be installed and signed in).", ["tailscale", "tailnet", "remote access"],
+      "Let your devices reach this computer over Tailscale"),
     flag("remote.keepAwake", "Keep awake", "Keep this computer awake while a way in is on, so paired phones can reach it.", "Settings → Phone & devices", ["sleep", "awake", "overnight"],
       "Keep this computer awake so paired phones can reach it", "Let this computer sleep"),
   ];

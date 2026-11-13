@@ -7,13 +7,13 @@ export type LiveCardKind = "approval" | "review" | "question";
 
 /** "approval": a provider or peer ask the voice may decide with a strict yes/no.
  * "review": a harness-native proposal (skill, routine, profile, default
- * model, team setup, an MCP server change, an app setting, a quota-switch offer) that must be
+ * model, team setup, an MCP server change, a quota-switch offer) that must be
  * reviewed on screen.
  * "question": a provider question. An expired proposal is settled: nothing
  * can answer it any more. */
 export function liveCardKind(card: OptionCardData | undefined): LiveCardKind | null {
   if (!card?.requestId || card.answered || card.dismissed || card.expired) return null;
-  if (card.skillRequest || card.routineRequest || card.profileRequest || card.modelRequest || card.teamSetupRequest || card.mcpRequest || card.appSettingRequest || card.quotaSwitch || card.lendingLift) {
+  if (card.skillRequest || card.routineRequest || card.profileRequest || card.modelRequest || card.teamSetupRequest || card.mcpRequest || card.quotaSwitch || card.lendingLift) {
     return "review";
   }
   return card.tool ? "approval" : "question";

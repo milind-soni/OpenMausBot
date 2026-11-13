@@ -1,5 +1,5 @@
 // A real server and the real injected agents proxy; only the provider's planning is scripted (room-handoff-agent).
-// The bot is on Full access, so every guard below is one Full access must not skip.
+// The bot is on Full access, the default: changes apply at once with Undo, and no card waits on an answer.
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -82,7 +82,7 @@ beforeAll(async () => {
   }
   expect((await api("GET", "/api/bots")).bots.find((one: any) => one.id === bot.id).approvalMode).toBe("full");
 
-  // The owner's paired phone: an admin session, the "paired Full-access device" a Change answer may come from.
+  // The owner's paired phone: an admin session, which saves a provider key as Settings does.
   const opened = await api("POST", "/api/auth/pairing", { label: "Owner phone", scopes: ["admin", "client"] });
   ownerDevice = (await api("POST", "/api/auth/pair", { code: opened.code })).token;
 }, 90_000);
@@ -114,82 +114,31 @@ it("a Full-access owner turn finds a safe setting, applies it with an applied ca
   expect((await settingCards(bot.threadId))[0].card.undone).toBe(true);
 }, 60_000);
 
-it("a Full-access owner turn changing a provider address waits on a Change/Cancel card: Cancel changes nothing, Change from the owner's device applies it", async () => {
-  const waitingCard = async () => {
-    let waiting: any;
-    await expect.poll(async () => (waiting = (await settingCards(bot.threadId)).find((one) => one.card.appSettingRequest.settingId === "providers.xai.url" && !one.card.answered)) !== undefined, { timeout: 20_000, message: "an unanswered Change xAI address? card" }).toBe(true);
-    return waiting.card;
-  };
-  await start("CONFIRM-CANCEL", [step({ action: "set", id: "providers.xai.url", value: XAI_URL }, true)], 60_000);
-  const first = await waitingCard();
-  expect(first).toMatchObject({ title: "Change xAI address?", options: ["Change", "Cancel"], appSettingRequest: { tier: "confirm", after: XAI_URL } });
-  expect(first.autoApplied).toBeUndefined();
-  expect(config().xai?.url, "Full access did not skip the card").toBeUndefined();
-  // Security: while the bot waits a loopback caller could be its own shell, so a local Allow is refused.
-  expect((await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: first.requestId, behavior: "allow" }, 403)).error).toMatch(/^Approve settings changes from the desktop app/);
-  expect(await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: first.requestId, behavior: "deny" })).toMatchObject({ ok: true, outcome: "rejected" });
-  expect(results(await finished("CONFIRM-CANCEL"))).toEqual([expect.objectContaining({ isError: true, text: "The user cancelled the change to xAI address. Do not retry it; ask the user what they would like instead." })]);
-  expect(config().xai?.url).toBeUndefined();
-
-  await start("CONFIRM-CHANGE", [step({ action: "set", id: "providers.xai.url", value: XAI_URL })], 60_000);
-  const second = await waitingCard();
-  expect(config().xai?.url).toBeUndefined();
-  expect(await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: second.requestId, behavior: "allow" }, 200, ownerDevice)).toMatchObject({ ok: true, outcome: "allowed-once" });
-  expect(results(await finished("CONFIRM-CHANGE"))).toEqual([expect.objectContaining({ isError: false, text: `Changed xAI address from not set to ${XAI_URL}.` })]);
+it("a Full-access owner turn changing a provider address applies it at once with no card to answer, and logs it", async () => {
+  await start("PROVIDER", [step({ action: "set", id: "providers.xai.url", value: XAI_URL })]);
+  expect(results(await finished("PROVIDER"))).toEqual([expect.objectContaining({ isError: false, text: `Changed xAI address from not set to ${XAI_URL}. The user can undo it from the card in the conversation.` })]);
   expect(config().xai.url).toBe(XAI_URL);
+  const card = (await settingCards(bot.threadId)).find((one) => one.card.appSettingRequest.settingId === "providers.xai.url");
+  expect(card.card).toMatchObject({ title: "Changed xAI address", options: [], answered: "allow", autoApplied: true, appSettingRequest: { tier: "safe", after: XAI_URL } });
   const decisions = (await api("GET", "/api/decisions")).decisions.filter((row: any) => row.tool === "app_settings" && row.summary.startsWith("providers.xai.url"));
-  expect(decisions.map((row: any) => row.decision).sort()).toEqual(["card-shown", "card-shown", "user-approved", "user-denied"]);
-}, 90_000);
+  expect(decisions.map((row: any) => [row.decision, row.source])).toEqual([["auto-approved", "app-settings"]]);
+  expect(await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: card.card.requestId })).toMatchObject({ ok: true, undone: true });
+  expect(config().xai?.url ?? "").toBe("");
+}, 60_000);
 
-it("Stop settles a waiting Change card at once: the card shows as unavailable, a later Change applies nothing, and the next turn can ask again", async () => {
-  await start("CONFIRM-STOP", [step({ action: "set", id: "providers.groq.url", value: XAI_URL }, true)], 60_000);
-  let waiting: any;
-  await expect.poll(async () => (waiting = (await settingCards(bot.threadId)).find((one) => one.card.appSettingRequest.settingId === "providers.groq.url" && !one.card.answered)) !== undefined, { timeout: 20_000 }).toBe(true);
-  await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId });
-  await expect.poll(async () => (await settingCards(bot.threadId)).find((one) => one.id === waiting.id)?.card, { timeout: 10_000 }).toMatchObject({ answered: "unavailable", dismissed: true });
-  expect(await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: waiting.card.requestId, behavior: "allow" }, 200, ownerDevice)).toMatchObject({ outcome: "unavailable" });
-  expect(config().groq?.url).toBeUndefined();
-  await idle();
-
-  // The stopped card no longer holds the bot's one open slot, so the next turn's change gets its own card.
-  await start("CONFIRM-AFTER-STOP", [step({ action: "set", id: "providers.groq.url", value: XAI_URL }, true)], 60_000);
-  let next: any;
-  await expect.poll(async () => (next = (await settingCards(bot.threadId)).find((one) => one.card.appSettingRequest.settingId === "providers.groq.url" && !one.card.answered)) !== undefined, { timeout: 20_000 }).toBe(true);
-  await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: next.card.requestId, behavior: "deny" });
-  expect(results(await finished("CONFIRM-AFTER-STOP"))[0]?.text).toMatch(/^The user cancelled the change to Groq address\./);
-}, 90_000);
-
-it("a Full-access bot adds and removes an AI engine only through Change/Cancel cards, with a saved key it never sees", async () => {
+it("a Full-access bot adds an AI engine at once with a saved key it never sees, Undo removes it, and removing one is left to the person", async () => {
   const routerKey = "sk-or-v1-e2e-0123456789";
   await api("PUT", "/api/config", { openrouter: { key: routerKey } }, 200, ownerDevice);
   const engines = () => Object.entries(config().instances ?? {}).filter(([id]) => id.startsWith("openai-compat-")) as Array<[string, any]>;
-  const engineCard = async () => {
-    let waiting: any;
-    await expect.poll(async () => (waiting = (await settingCards(bot.threadId)).find((one) => one.card.appSettingRequest.settingId === "engines" && !one.card.answered)) !== undefined, { timeout: 20_000, message: "an unanswered Change AI engines? card" }).toBe(true);
-    return waiting.card;
-  };
-  const answer = (card: any, behavior: "allow" | "deny") => api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: card.requestId, behavior }, 200, ownerDevice);
-
-  await start("ENGINE-CANCEL", [step({ action: "set", id: "engines", value: JSON.stringify({ kind: "ollama", url: "http://127.0.0.1:9" }) }, true)], 60_000);
-  const cancelled = await engineCard();
-  expect(cancelled).toMatchObject({ title: "Change AI engines?", subtitle: "Add the engine \"Ollama\" (Ollama on http://127.0.0.1:9)", options: ["Change", "Cancel"] });
-  await answer(cancelled, "deny");
-  expect(results(await finished("ENGINE-CANCEL"))[0]?.text).toMatch(/^The user cancelled the change to AI engines\./);
-  expect(engines()).toEqual([]);
-
   const gateway = { kind: "openai-compat", name: "Gateway", url: "https://gw.example.test/v1", keyFrom: "openrouterApiKey" };
   await start("ENGINE-ADD", [
     step({ action: "set", id: "engines", value: JSON.stringify({ ...gateway, keyFrom: undefined, key: routerKey }) }, true),
     step({ action: "set", id: "engines", value: JSON.stringify(gateway) }),
   ], 60_000);
-  const adding = await engineCard();
-  expect(adding.subtitle).toBe("Add the engine \"Gateway\" (OpenAI-compatible) at https://gw.example.test/v1, sending it your saved OpenRouter API key");
-  expect(engines(), "nothing is added while the card waits").toEqual([]);
-  await answer(adding, "allow");
   const added = await finished("ENGINE-ADD");
   const [inline, applied] = results(added);
   expect(inline).toMatchObject({ isError: true, text: expect.stringContaining("Never put a key or token in the value") });
-  expect(applied).toMatchObject({ isError: false, text: expect.stringMatching(/^Done: Add the engine "Gateway"/) });
+  expect(applied).toMatchObject({ isError: false, text: expect.stringMatching(/^Done: Add the engine "Gateway" \(OpenAI-compatible\) at https:\/\/gw\.example\.test\/v1, sending it your saved OpenRouter API key\./) });
   const [[engineId, engine]] = engines();
   expect(engine).toMatchObject({ driver: "openai-compat", displayName: "Gateway", config: { url: "https://gw.example.test/v1", key: routerKey } });
   expect((await api("GET", "/api/instances")).instances.map((instance: any) => instance.instanceId)).toContain(engineId);
@@ -198,16 +147,16 @@ it("a Full-access bot adds and removes an AI engine only through Change/Cancel c
 
   await start("ENGINE-REMOVE", [
     step({ action: "get", id: "engines" }),
-    step({ action: "set", id: "engines", value: JSON.stringify({ kind: "remove", instanceId: engineId }) }),
+    step({ action: "set", id: "engines", value: JSON.stringify({ kind: "remove", instanceId: engineId }) }, true),
   ], 60_000);
-  const removing = await engineCard();
-  expect(removing.subtitle).toBe(`Remove the engine "Gateway" (OpenAI-compatible server, https://gw.example.test/v1)`);
-  expect(engines()).toHaveLength(1);
-  await answer(removing, "allow");
-  const [listed, removed] = results(await finished("ENGINE-REMOVE"));
+  const [listed, refused] = results(await finished("ENGINE-REMOVE"));
   expect(JSON.parse(listed.text).value).toContain(`${engineId}: Gateway at https://gw.example.test/v1`);
   expect(listed.text).not.toContain(routerKey);
-  expect(removed.isError).toBe(false);
+  expect(refused).toMatchObject({ isError: true, text: "Removing an AI engine is changed only by the person, in Settings → AI. Tell them where in one line; do not try another way." });
+  expect(engines()).toHaveLength(1);
+
+  const card = (await settingCards(bot.threadId)).find((one) => one.card.appSettingRequest.settingId === "engines");
+  expect(await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: card.card.requestId })).toMatchObject({ ok: true, undone: true });
   expect(engines()).toEqual([]);
 }, 120_000);
 
@@ -233,58 +182,35 @@ it("an owner-only setting is refused with where to change it", async () => {
     text: "Vault and logins is changed only by the owner, in Settings → Vault. Tell the user where to find it; do not try another way." })]);
 }, 60_000);
 
-/** The unanswered card for `settingId`, once it shows. */
-const waitingCard = async (settingId: string) => {
-  let waiting: any;
-  await expect.poll(async () => (waiting = (await settingCards(bot.threadId)).find((one) => one.card.appSettingRequest.settingId === settingId && !one.card.answered)) !== undefined,
-    { timeout: 20_000, message: `an unanswered ${settingId} card` }).toBe(true);
-  return waiting.card;
-};
 const botNow = async () => (await api("GET", "/api/bots")).bots.find((one: any) => one.id === bot.id);
+const newest = async (settingId: string) => (await settingCards(bot.threadId)).filter((one) => one.card.appSettingRequest.settingId === settingId).at(-1).card;
 
-it("a bot's own name and a server setting change through the real routes only on the owner's Change", async () => {
+it("a bot's own name and a server setting change at once through the real routes, and Undo puts each back", async () => {
   await start("BOT-AND-CONFIG", [
     step({ action: "set", id: "bots.name", value: JSON.stringify({ botId: bot.id, name: "Setter Two" }) }),
     step({ action: "set", id: "profile.name", value: "Ada" }),
   ], 60_000);
-  const rename = await waitingCard("bots.name");
-  expect(rename).toMatchObject({ title: "Change Bot name?", subtitle: "Rename Setter to \"Setter Two\"", options: ["Change", "Cancel"] });
-  expect((await botNow()).name, "nothing changes while the card waits").toBe("Setter");
-  await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: rename.requestId, behavior: "allow" }, 200, ownerDevice);
-  const profile = await waitingCard("profile.name");
-  expect(profile.subtitle).toBe("not set → Ada");
-  expect(config().profile?.name).toBeUndefined();
-  await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: profile.requestId, behavior: "allow" }, 200, ownerDevice);
   const [renamed, named] = results(await finished("BOT-AND-CONFIG"));
   expect(renamed).toMatchObject({ isError: false, text: expect.stringMatching(/^Done: Rename Setter to "Setter Two"\./) });
-  expect(named).toMatchObject({ isError: false, text: "Changed Your name from not set to Ada." });
+  expect(named).toMatchObject({ isError: false, text: expect.stringMatching(/^Changed Your name from not set to Ada\./) });
   expect((await botNow()).name).toBe("Setter Two");
   expect(config().profile.name).toBe("Ada");
+  expect(await newest("bots.name")).toMatchObject({ subtitle: "Rename Setter to \"Setter Two\"", options: [], autoApplied: true });
+  await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: (await newest("bots.name")).requestId });
+  await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: (await newest("profile.name")).requestId });
+  expect((await botNow()).name).toBe("Setter");
+  expect(config().profile?.name ?? "").toBe("");
 }, 90_000);
 
-it("a Full-access bot's own approval mode changes only on a card: Cancel keeps it, Change from the owner's device applies it to every thread", async () => {
-  const change = step({ action: "set", id: "bots.approvalModes", value: JSON.stringify({ botId: bot.id, mode: "ask" }) });
-  await start("APPROVAL-CANCEL", [{ ...change, expectError: true }], 60_000);
-  const first = await waitingCard("bots.approvalModes");
-  expect(first).toMatchObject({ title: "Change Approval mode?", options: ["Change", "Cancel"] });
-  expect(first.subtitle).toMatch(/^Make Setter( Two)? ask you before each command or file change \(Ask for approval\)$/);
-  // Security: a local Allow while the bot works could be the bot's own shell.
-  expect((await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: first.requestId, behavior: "allow" }, 403)).error).toMatch(/^Approve settings changes from the desktop app/);
-  await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: first.requestId, behavior: "deny" }, 200, ownerDevice);
-  expect(results(await finished("APPROVAL-CANCEL"))[0]?.text).toMatch(/^The user cancelled the change to Approval mode\./);
-  expect((await botNow()).approvalMode).toBe("full");
-
-  await start("APPROVAL-CHANGE", [change], 60_000);
-  const second = await waitingCard("bots.approvalModes");
-  expect((await botNow()).approvalMode, "Full access did not skip the card").toBe("full");
-  await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: second.requestId, behavior: "allow" }, 200, ownerDevice);
-  expect(results(await finished("APPROVAL-CHANGE"))[0]).toMatchObject({ isError: false, text: expect.stringMatching(/^Done: Make Setter/) });
+it("a Full-access bot's own approval mode changes at once on every thread, and Undo puts it back on Full access", async () => {
+  await start("APPROVAL", [step({ action: "set", id: "bots.approvalModes", value: JSON.stringify({ botId: bot.id, mode: "ask" }) })], 60_000);
+  expect(results(await finished("APPROVAL"))[0]).toMatchObject({ isError: false, text: expect.stringMatching(/^Done: Make Setter ask you before each command or file change \(Ask for approval\)\./) });
   const now = await botNow();
   expect(now.approvalMode).toBe("ask");
   expect(now.tasks.every((task: any) => (task.approvalMode ?? "ask") === "ask")).toBe(true);
-  // Fixture cleanup: the owner's device puts the bot back on Full access for the tests after this one.
-  await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "full", applyToAllThreads: true }, 200, ownerDevice);
-}, 120_000);
+  expect(await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: (await newest("bots.approvalModes")).requestId })).toMatchObject({ ok: true, undone: true });
+  expect((await botNow()).approvalMode).toBe("full");
+}, 90_000);
 
 it("pinning a bot goes through the sidebar's own bot route, and Undo unpins it", async () => {
   const pinnedNow = async () => (await api("GET", "/api/bots")).bots.find((one: any) => one.id === bot.id)?.pinned === true;

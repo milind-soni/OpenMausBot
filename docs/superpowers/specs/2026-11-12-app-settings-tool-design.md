@@ -2,6 +2,15 @@
 
 Date: 2026-11-12. Base: origin/main 2d74ba961.
 
+**Reworked Nov 13, on the owner's rule of no new asks, cards or confirm steps at Full access.** There is no `confirm`
+tier and no Change/Cancel card. Every setting that was `confirm` now applies at once with Undo, as `safe` does; Undo
+restores the value read just before the change (per bot, the fields that change; for an added engine, its removal).
+What can't be undone, or could lock the person out, is owner-only: the bot says in one line where in Settings the
+person changes it. That adds `people.signIn` (changing sign-in), `remote.domain` and `remote.httpsAddress` (turning
+off remote access the person may be using), `profile.photo` (a file), removing an AI engine (its setup and key are
+deleted) and turning off `remote.wifi`, `remote.relay` or `remote.tailscale`. Where the sections below say `confirm`,
+read `safe`, except for those.
+
 ## Goal
 
 A bot can find, explain and change MausBot's own settings from chat: add an AI provider, reorder bots, group them into sidebar sections, switch the theme, change thread limits, and answer "where do I change X?" for every setting. Settings stop being a page the user has to learn.
@@ -16,7 +25,7 @@ A bot can find, explain and change MausBot's own settings from chat: add an AI p
 One registry, `SETTINGS`, keyed by a stable id. Each entry:
 
 ```ts
-type SettingTier = "safe" | "confirm" | "secret" | "owner-only";
+type SettingTier = "safe" | "secret" | "owner-only";
 
 interface SettingEntry<V> {
   id: SettingId;              // "appearance.skin", "providers.openai.url", "bots.order"
@@ -33,25 +42,21 @@ interface SettingEntry<V> {
 ```
 
 The tier is the whole policy. Handlers branch on the tier, never on the id. As built (`server/app-settings/registry.ts`)
-the entry is a discriminated union on `tier`, so a `safe` or `confirm` entry must carry `value`, `current` and `write`,
+the entry is a discriminated union on `tier`, so a `safe` entry must carry `value`, `current` and `write`,
 a `secret` entry carries only its `credentialId`, and an `owner-only` entry carries neither. Entries close over the
 registry's deps instead of taking a `ctx`.
 
 | Tier | Behaviour | Examples |
 |---|---|---|
 | `safe` | Applies at once. Posts an applied-change card with Undo. | skin/theme, Simple or Advanced, font, chat width, send key, notification sounds, language, bot order, sidebar groups, thread limits and cleanup, room turn timeout, MCP call timeout, default model for new bots |
-| `confirm` | Always posts a "Change X?" card with Change and Cancel, at every approval level including Full access. The tool call waits on the answer (outbound-hold style, 9 minutes). Allow needs owner review. | provider base URLs, AI engines, and every setting added since (each bot's approval mode, name, colour and model, remote access, server config values, the rest of the window's preferences): see the inventory below |
 | `secret` | `set` never takes a value. It posts the existing secret card (`secretCards.requestCredential` with a `CREDENTIAL_TARGETS` id). The person types the key into the card. The bot hears only provided or dismissed. | provider keys (OpenAI, Anthropic, OpenRouter, Mistral, Groq, ...) |
-| `owner-only` | Readable and explainable. `set` is refused with where to change it. | Cloud account, Vault, backups and restore, pairing devices, lending folders, sidebar picture, organization |
+| `owner-only` | Readable and explainable. `set` is refused with one line saying where in Settings the person changes it. | Cloud account, Vault, backups and restore, pairing devices, lending folders, sidebar picture, organization, who may sign in, custom domain, HTTPS address, your photo |
 
 ## Guards
 
 - **Owner turns only for writes.** Every `set` requires `phones.turnOwner({ botId, threadId, generation }) !== null`. That already refuses peer asks, relayed lines, webhook and routine runs the owner did not write, guests, shared-membership servers, and service-trust loopback. Reads are allowed in any turn the internal gate admits.
-- **Full access never skips a confirm card.** The confirm path must not consult `fullAccess()`.
 - **No secret ever reaches the bot.** `read` returns configured-or-not for keys. Secret writes go only through the secret card.
-- **A bot cannot raise its own permissions on its own.** An approval mode change is a `confirm` card that only the owner's review can approve.
-- **Owner review on Allow.** A confirm card's Allow counts only with `ownerReview` (bot-messages.ts), so a bot's own shell cannot approve its card.
-- **One open confirm card per bot.** A second `set` on a confirm setting while one waits is refused.
+- **No card waits on an answer.** Every write applies at once with an applied card and Undo, at every approval level.
 - **Write budget.** At most 10 writes per turn (generation). The rest are refused.
 - **Fences stay closed.** The new internal route is not added to the outside, Bot API or read-and-draft allowlists, so confined turns are refused by default.
 - **Every change is recorded.** `appendDecision` with `source: "app-settings"`, the setting id, before and after display values (never secrets), and the decision.

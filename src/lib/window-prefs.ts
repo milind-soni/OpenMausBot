@@ -94,7 +94,6 @@ const PREFS: { [I in WindowPrefId]: Pref<I> } = {
   "remote.wifi": route("wifi"),
   "remote.relay": route("relay"),
   "remote.tailscale": route("tailscale"),
-  "remote.httpsAddress": route("https"),
   "remote.keepAwake": { read: async () => (await companion()?.state())?.keepAwake, write: (on) => companion()?.keepAwake(on) },
 };
 

@@ -13,7 +13,6 @@ import type { ProviderRegistry } from "../harness/registry.ts";
 import { endpointDisplayUrl, isAddedEndpoint } from "../openai-compat-endpoints.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { callRoute, type RouteReply } from "../routes/call-route.ts";
-import { engineChosen } from "../routes/instances.ts";
 import type { RouteHandler } from "../routes/table.ts";
 import type { BotRecord, Store } from "../store.ts";
 import { botEntries } from "./registry-bots.ts";
@@ -33,14 +32,14 @@ interface Base {
   /** What a person or bot sees. Never a secret: a key reads as set or not set. */
   read(): string;
 }
-/** `value` checks what the bot sends at the boundary; `current` is the typed value as `write` takes it, kept for Undo.
- * `describe` is for a change that does not read as before → after: the one line its card shows, or why it can't happen
- * now, before any card. */
+/** `value` checks what the bot sends at the boundary. `current`, read just before the write, is what Undo writes back to
+ * put things as they were (typed as `write` takes it); undefined when the earlier state can't be set back. `describe` is
+ * for a change that does not read as before → after: the one line its applied card shows, or why a bot may not make it. */
 interface Writable {
-  tier: "safe" | "confirm";
+  tier: "safe";
   value: z.ZodType;
   allowed: string;
-  current(): unknown;
+  current(value: unknown): unknown;
   write(value: unknown): Promise<string | null>;
   describe?(value: unknown): { change: string } | { refusal: string };
 }
@@ -54,7 +53,7 @@ interface OwnerOnly {
 export type SettingEntry = Base & (Writable | Secret | OwnerOnly);
 export type WritableEntry = Base & Writable;
 
-export type AppRoute = "customDomain" | "starterAwake" | "skills";
+export type AppRoute = "starterAwake" | "skills";
 export interface RegistryDeps {
   cfg(): AppConfig;
   /** PUT /api/config as Settings does; a refusal comes back as its text. */
@@ -69,11 +68,14 @@ export interface RegistryDeps {
   patchBot(botId: string, body: Record<string, unknown>): Promise<string | null>;
   /** Another of the Settings window's routes, called as the window calls it. */
   call(route: AppRoute, method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: Record<string, unknown>): Promise<string | null>;
+  /** GET on one of those routes, as the window reads it; null when it answers with an error. */
+  read(route: AppRoute, path: string): Promise<Record<string, unknown> | null>;
+  /** On a Starter Cloud, the bots paused past the plan's limit now. */
+  paused(): string[];
   credentials(): CredentialConfig;
   window: { read(id: WindowPrefId): unknown; write(id: WindowPrefId, value: unknown): string | null };
   /** The engines Settings → AI lists; never a key. */
   engines(): Array<{ instanceId: string; name: string; working: boolean }>;
-  engineChosen(instanceId: string): boolean;
   /** POST /api/instances/<path> and DELETE /api/instances/<id>, as Settings does; a refusal comes back as its text. */
   addEngine(path: "openai-compat" | "claude-bedrock", body: Record<string, unknown>): Promise<string | null>;
   removeEngine(instanceId: string): Promise<string | null>;
@@ -88,9 +90,14 @@ const KEY_WHERE: Partial<Record<CredentialTargetId, Where>> = {
   onePasswordToken: "Settings → Vault", boxToken: "Settings → Desktops & browser", composioApiKey: "Settings → AI",
 };
 
-export type WritableSpec = Omit<Base, "read"> & Omit<Writable, "write" | "describe"> & { read?(): string; write(value: never): Promise<string | null>; describe?(value: never): { change: string } | { refusal: string } };
+export type WritableSpec = Omit<Base, "read"> & Omit<Writable, "tier" | "current" | "write" | "describe"> & {
+  read?(): string; current(value: never): unknown; write(value: never): Promise<string | null>; describe?(value: never): { change: string } | { refusal: string };
+};
+/** `line` says what the new value does on the applied card; `refusal` names a value only the person sets, in Settings. */
 export type WindowPref = (id: WindowPrefId, label: string, help: string, where: Where, synonyms: string[], allowed: string,
-  confirm?: { says(value: never): string; value?: z.ZodType }) => SettingEntry;
+  line?: { says(value: never): string; refusal?(value: never): string | null }) => SettingEntry;
+/** One plain line for a change only the person makes, in Settings. */
+export const personOnly = (what: string, where: Where) => `${what} is changed only by the person, in ${where}. Tell them where in one line; do not try another way.`;
 
 /** Security: a key never passes through the bot. A value naming a key, token, secret or password field is refused at
  * the boundary; `except` lets through a field that only names a saved key. */
@@ -119,6 +126,8 @@ const engineChange = withoutKeys(z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("remove"), instanceId: z.string().regex(/^[\w.-]{1,120}$/) }).strict(),
   ]), ["keyFrom"]);
 type EngineChange = z.infer<typeof engineChange>;
+/** What Undo of an added engine writes: remove any engine a bot may remove that is not in this list. */
+type EngineKeep = { kind: "keep"; instanceIds: string[] };
 /** The engines a bot may remove: added without a sign-in. Accounts and the built-in engines stay with the owner. */
 const removableKind = (instanceId: string, entry: InstanceConfig | undefined) => isAddedEndpoint(instanceId, entry) ? "OpenAI-compatible server"
   : isClaudeBedrock(entry) ? "Claude on Amazon Bedrock" : isClaudeEndpoint(entry) ? "Claude endpoint" : isCodexEndpoint(entry) ? "Codex endpoint" : null;
@@ -126,13 +135,15 @@ const removableKind = (instanceId: string, entry: InstanceConfig | undefined) =>
 export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
   const cfg = deps.cfg;
   const names = (ids: readonly string[]) => ids.map((id) => deps.bots().find((bot) => bot.id === id)?.name ?? id).join(", ");
-  const writable = (spec: WritableSpec): SettingEntry => ({ ...spec, read: spec.read ?? (() => display(spec.current())), write: spec.write as Writable["write"] });
+  const writable = (spec: WritableSpec): SettingEntry => ({
+    ...spec, tier: "safe", read: spec.read ?? (() => display((spec.current as () => unknown)())), current: spec.current as Writable["current"],
+    write: spec.write as Writable["write"], ...(spec.describe ? { describe: spec.describe as Writable["describe"] } : {}),
+  });
   const config = <V,>(patch: (value: V) => Record<string, unknown>) => (value: V) => deps.saveConfig(patch(value));
-  /** With `confirm`, a Change/Cancel card says what the new value does, and the window is told only on Change. */
-  const windowPref: WindowPref = (id, label, help, where, synonyms, allowed, confirm) => writable({
-    id, label, help, where, synonyms, tier: confirm ? "confirm" : "safe", value: confirm?.value ?? WINDOW_PREFS[id], allowed,
+  const windowPref: WindowPref = (id, label, help, where, synonyms, allowed, line) => writable({
+    id, label, help, where, synonyms, value: WINDOW_PREFS[id], allowed,
     current: () => deps.window.read(id), write: async (value: unknown) => deps.window.write(id, value),
-    ...(confirm ? { describe: (value: never) => ({ change: confirm.says(value) }) } : {}),
+    ...(line ? { describe: (value: never) => { const refusal = line.refusal?.(value); return refusal ? { refusal } : { change: line.says(value) }; } } : {}),
   });
   const enumOf = (values: readonly string[]) => values.join(", ");
   const pinned = () => deps.bots().filter((bot) => bot.pinned).map((bot) => bot.id);
@@ -147,17 +158,17 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
     windowPref("general.notificationSounds", "Notification sounds", "Play a sound when a bot needs you or finishes.", "Settings → General", ["sound", "sounds", "mute", "alerts", "notifications"], "true or false"),
     writable({
       id: "general.language", label: "Language", help: "The app's language, as a tag such as en, de or pt-br; empty follows the computer.", where: "Settings → General",
-      synonyms: ["locale", "translation"], tier: "safe", value: z.string().trim().max(16).regex(/^[a-z]{2,3}(-[a-z0-9]{2,8})*$|^$/i, "a language tag such as en or pt-br"), allowed: "a language tag such as en, de, ja, pt-br, zh-tw; empty to follow the computer",
+      synonyms: ["locale", "translation"], value: z.string().trim().max(16).regex(/^[a-z]{2,3}(-[a-z0-9]{2,8})*$|^$/i, "a language tag such as en or pt-br"), allowed: "a language tag such as en, de, ja, pt-br, zh-tw; empty to follow the computer",
       current: () => cfg().language ?? "", write: config((language: string) => ({ language })),
     }),
     writable({
       id: "bots.order", label: "Bot order", help: "The order bots are listed in the sidebar and on phones. Send bot ids from list_bots; bots you leave out keep their places.", where: "the sidebar",
-      synonyms: ["reorder", "sidebar order", "sort bots", "move bot", "arrange"], tier: "safe", value: z.array(z.string().regex(/^[\w-]+$/)).min(1).max(100), allowed: "an array of bot ids in the wanted order",
+      synonyms: ["reorder", "sidebar order", "sort bots", "move bot", "arrange"], value: z.array(z.string().regex(/^[\w-]+$/)).min(1).max(100), allowed: "an array of bot ids in the wanted order",
       current: () => deps.bots().map((bot) => bot.id), read: () => names(deps.bots().map((bot) => bot.id)), write: (botIds: string[]) => deps.reorderBots(botIds),
     }),
     writable({
       id: "bots.pinned", label: "Pinned bots", help: "Which bots are pinned to the top of the sidebar. Send every bot id that should be pinned, including ones already pinned; the rest are unpinned.", where: "the sidebar",
-      synonyms: ["pin", "pinned", "unpin", "favorite", "favourite", "top", "star"], tier: "safe", value: z.array(z.string().regex(/^[\w-]+$/)).max(100), allowed: "an array of the bot ids to pin; an empty array unpins every bot",
+      synonyms: ["pin", "pinned", "unpin", "favorite", "favourite", "top", "star"], value: z.array(z.string().regex(/^[\w-]+$/)).max(100), allowed: "an array of the bot ids to pin; an empty array unpins every bot",
       current: pinned, read: () => names(pinned()),
       write: async (botIds: string[]) => {
         const unknown = botIds.find((id) => !deps.bots().some((bot) => bot.id === id));
@@ -172,7 +183,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
     }),
     writable({
       id: "bots.groups", label: "Sidebar groups", help: "Which bots sit in which sidebar group (department). Send an object of group name to bot ids; a bot in no listed group is ungrouped.", where: "the sidebar",
-      synonyms: ["group", "groups", "department", "departments", "section", "sections", "team", "folder"], tier: "safe",
+      synonyms: ["group", "groups", "department", "departments", "section", "sections", "team", "folder"],
       value: z.record(z.string().trim().min(1).max(60), z.array(z.string().regex(/^[\w-]+$/)).max(100)), allowed: "an object: group name → array of bot ids",
       current: groups,
       read: () => {
@@ -192,28 +203,28 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
     }),
     writable({
       id: "threads.maxConcurrentPerBot", label: "Threads per bot", help: "How many conversations one bot may work on at once.", where: "Settings → You and your bots",
-      synonyms: ["concurrent", "parallel", "limit", "limits", "thread limit"], tier: "safe", value: z.number().int().min(1).max(MAX_CONCURRENT_BOT_THREADS), allowed: `1 to ${MAX_CONCURRENT_BOT_THREADS}`,
+      synonyms: ["concurrent", "parallel", "limit", "limits", "thread limit"], value: z.number().int().min(1).max(MAX_CONCURRENT_BOT_THREADS), allowed: `1 to ${MAX_CONCURRENT_BOT_THREADS}`,
       current: () => cfg().threads?.maxConcurrentPerBot ?? defaultBotThreads(), write: config((maxConcurrentPerBot: number) => ({ threads: { maxConcurrentPerBot } })),
     }),
     writable({
       id: "threads.eventLogRetentionDays", label: "Thread log retention", help: "Days a closed conversation's event logs are kept; null keeps them forever.", where: "Settings → Data",
-      synonyms: ["cleanup", "clean up", "retention", "logs", "delete old", "storage"], tier: "safe", value: z.number().int().min(1).max(3650).nullable(), allowed: "1 to 3650 days, or null to keep forever",
+      synonyms: ["cleanup", "clean up", "retention", "logs", "delete old", "storage"], value: z.number().int().min(1).max(3650).nullable(), allowed: "1 to 3650 days, or null to keep forever",
       current: () => cfg().threads?.eventLogRetentionDays ?? null, read: () => display(cfg().threads?.eventLogRetentionDays ?? "forever"),
       write: config((eventLogRetentionDays: number | null) => ({ threads: { eventLogRetentionDays } })),
     }),
     writable({
       id: "rooms.turnTimeoutMinutes", label: "Room turn timeout", help: "Minutes a bot's turn in a room may run before it is stopped.", where: "Settings → You and your bots",
-      synonyms: ["room", "channel", "timeout", "turn limit"], tier: "safe", value: z.number().int().min(MIN_ROOM_TURN_TIMEOUT_MINUTES).max(MAX_ROOM_TURN_TIMEOUT_MINUTES), allowed: `${MIN_ROOM_TURN_TIMEOUT_MINUTES} to ${MAX_ROOM_TURN_TIMEOUT_MINUTES} minutes`,
+      synonyms: ["room", "channel", "timeout", "turn limit"], value: z.number().int().min(MIN_ROOM_TURN_TIMEOUT_MINUTES).max(MAX_ROOM_TURN_TIMEOUT_MINUTES), allowed: `${MIN_ROOM_TURN_TIMEOUT_MINUTES} to ${MAX_ROOM_TURN_TIMEOUT_MINUTES} minutes`,
       current: () => roomTurnTimeoutMinutes(cfg()), write: config((turnTimeoutMinutes: number) => ({ rooms: { turnTimeoutMinutes } })),
     }),
     writable({
       id: "mcp.callTimeoutMinutes", label: "MCP call timeout", help: "Minutes one MCP tool call may run.", where: "Settings → AI",
-      synonyms: ["mcp", "tool timeout", "call timeout"], tier: "safe", value: z.number().int().min(MIN_MCP_CALL_TIMEOUT_MINUTES).max(MAX_MCP_CALL_TIMEOUT_MINUTES), allowed: `${MIN_MCP_CALL_TIMEOUT_MINUTES} to ${MAX_MCP_CALL_TIMEOUT_MINUTES} minutes`,
+      synonyms: ["mcp", "tool timeout", "call timeout"], value: z.number().int().min(MIN_MCP_CALL_TIMEOUT_MINUTES).max(MAX_MCP_CALL_TIMEOUT_MINUTES), allowed: `${MIN_MCP_CALL_TIMEOUT_MINUTES} to ${MAX_MCP_CALL_TIMEOUT_MINUTES} minutes`,
       current: () => mcpCallTimeoutMinutes(cfg()), write: config((callTimeoutMinutes: number) => ({ mcp: { callTimeoutMinutes } })),
     }),
     writable({
       id: "bots.defaultModel", label: "Default model for new bots", help: "The engine and model a newly created bot starts on; existing bots keep theirs. Ids come from list_models.", where: "Settings → You and your bots",
-      synonyms: ["default model", "new bots", "model", "engine"], tier: "safe", value: z.object({ instanceId: z.string().min(1).max(80), model: z.string().min(1).max(200) }), allowed: "{ instanceId, model } from list_models",
+      synonyms: ["default model", "new bots", "model", "engine"], value: z.object({ instanceId: z.string().min(1).max(80), model: z.string().min(1).max(200) }), allowed: "{ instanceId, model } from list_models",
       current: () => cfg().defaultModelSelection, read: () => { const selection = cfg().defaultModelSelection; return selection ? `${selection.instanceId} / ${selection.model}` : ""; },
       write: config((defaultModelSelection: { instanceId: string; model: string }) => ({ defaultModelSelection })),
     }),
@@ -221,9 +232,9 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
 
   const provider = (id: string, label: string, synonyms: string[], current: () => string | undefined, patch: (text: string) => Record<string, unknown>): SettingEntry => writable({
     id, label, help: `${label}: the address MausBot sends requests to. Empty uses the provider's own.`, where: "Settings → AI", synonyms: [...synonyms, "url", "base url", "endpoint", "address", "proxy"],
-    tier: "confirm", value: url, allowed: "an http(s) address, or empty to clear", current: () => current() ?? "", write: config(patch),
+    value: url, allowed: "an http(s) address, or empty to clear", current: () => current() ?? "", write: config(patch),
   });
-  const confirm: SettingEntry[] = [
+  const providers: SettingEntry[] = [
     provider("providers.anthropic.url", "Anthropic address", ["anthropic", "claude"], () => cfg().anthropic?.url, (text) => ({ anthropic: { ...cfg().anthropic, url: text } })),
     provider("providers.xai.url", "xAI address", ["xai", "grok"], () => cfg().xai?.url, (text) => ({ xai: { ...cfg().xai, url: text } })),
     provider("providers.groq.url", "Groq address", ["groq"], () => cfg().groq?.url, (text) => ({ groq: { ...cfg().groq, url: text } })),
@@ -231,7 +242,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
     provider("providers.openaiCompat.url", "OpenAI-compatible address", ["openai compatible", "custom provider", "ollama", "lm studio", "openrouter"], () => cfg().openaiCompat?.url, (text) => ({ openaiCompat: { ...cfg().openaiCompat, url: text } })),
     writable({
       id: "providers.openaiCompat.model", label: "OpenAI-compatible model", help: "The model name sent to the OpenAI-compatible provider.", where: "Settings → AI",
-      synonyms: ["openai compatible", "custom provider", "model name"], tier: "confirm", value: z.string().trim().max(200), allowed: "a model name, or empty to clear",
+      synonyms: ["openai compatible", "custom provider", "model name"], value: z.string().trim().max(200), allowed: "a model name, or empty to clear",
       current: () => cfg().openaiCompat?.model ?? "", write: config((model: string) => ({ openaiCompat: { ...cfg().openaiCompat, model } })),
     }),
     provider("voice.baseUrl", "Voice server address", ["tts", "voice", "speech", "chatterbox"], () => cfg().tts?.baseUrl, (text) => ({ tts: { ...cfg().tts, baseUrl: text } })),
@@ -255,25 +266,14 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
     return `${instanceId}: ${name}${url ? ` at ${url}` : ""}${working ? "" : " (not working)"}${removableKind(instanceId, entry) ? "" : " (removed only in Settings)"}`;
   }).join("; ");
   const engines = writable({
-    id: "engines", label: "AI engines", help: "The AI engines bots run on. get lists each one's id; set adds or removes one, always on a Change/Cancel card.", where: "Settings → AI",
-    synonyms: ["engine", "engines", "ai engine", "add engine", "remove engine", "provider", "providers", "ollama", "lm studio", "lmstudio", "bedrock", "endpoint", "local model"], tier: "confirm",
+    id: "engines", label: "AI engines", help: "The AI engines bots run on. get lists each one's id; set adds one, with Undo. Removing one deletes its setup and key, so only the person does that, in Settings.", where: "Settings → AI",
+    synonyms: ["engine", "engines", "ai engine", "add engine", "remove engine", "provider", "providers", "ollama", "lm studio", "lmstudio", "bedrock", "endpoint", "local model"],
     value: engineChange,
     allowed: '{"kind":"ollama" or "lmstudio","url"} for a local server; {"kind":"openai-compat","name","url","keyFrom":"<a keys.* id, e.g. openrouterApiKey>","models"?:[...]}; '
-      + '{"kind":"bedrock","name","awsProfile","awsRegion","model"}; {"kind":"remove","instanceId"}. Sign-in accounts (Claude, ChatGPT, Antigravity) are added, signed in and removed by the user in Settings → AI',
-    current: () => undefined, read: listEngines,
+      + '{"kind":"bedrock","name","awsProfile","awsRegion","model"}. Sign-in accounts (Claude, ChatGPT, Antigravity) are added and signed in by the user in Settings → AI',
+    current: (): EngineKeep => ({ kind: "keep", instanceIds: deps.engines().map((engine) => engine.instanceId) }), read: listEngines,
     describe: (change: EngineChange) => {
-      if (change.kind === "remove") {
-        const entry = instances()[change.instanceId];
-        const listed = deps.engines().find((engine) => engine.instanceId === change.instanceId);
-        if (!entry && !listed) return { refusal: `No engine has the id ${change.instanceId}. Use get on engines to list them.` };
-        const name = listed?.name ?? entry?.displayName ?? change.instanceId;
-        const kind = removableKind(change.instanceId, entry);
-        if (!kind) return { refusal: `${name} is removed only by the user, in Settings → AI. Tell them where; do not try another way.` };
-        if (deps.engineChosen(change.instanceId)) return { refusal: `Bots or the default model for new bots use ${name}. Move them to another model first (a bot's Settings, or bots.defaultModel), then remove it.` };
-        const last = deps.engines().filter((engine) => engine.working).every((engine) => engine.instanceId === change.instanceId);
-        const url = isAddedEndpoint(change.instanceId, entry) ? endpointDisplayUrl(entry.config) : undefined;
-        return { change: `Remove the engine "${name}" (${kind}${url ? `, ${url}` : ""})${last ? ". It is your only working engine" : ""}` };
-      }
+      if (change.kind === "remove") return { refusal: personOnly("Removing an AI engine", "Settings → AI") };
       if (change.kind === "openai-compat") {
         if (!savedKey(change.keyFrom)) return { refusal: keyMissing(change.keyFrom) };
         return { change: `Add the engine "${change.name}" (OpenAI-compatible) at ${change.url}, sending it your saved ${CREDENTIAL_TARGETS[change.keyFrom].label}` };
@@ -281,8 +281,16 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
       if (change.kind === "bedrock") return { change: `Add the engine "${change.name}" (Claude on Amazon Bedrock), AWS profile ${change.awsProfile} in ${change.awsRegion}, model ${change.model}` };
       return { change: `Add the engine "${change.name ?? LOCAL_SERVER[change.kind].name}" (${LOCAL_SERVER[change.kind].name} on ${change.url})` };
     },
-    write: async (change: EngineChange) => {
-      if (change.kind === "remove") return deps.removeEngine(change.instanceId);
+    write: async (change: EngineChange | EngineKeep) => {
+      if (change.kind === "keep") {
+        for (const { instanceId } of deps.engines()) {
+          if (change.instanceIds.includes(instanceId) || !removableKind(instanceId, instances()[instanceId])) continue;
+          const refusal = await deps.removeEngine(instanceId);
+          if (refusal) return refusal;
+        }
+        return null;
+      }
+      if (change.kind === "remove") return personOnly("Removing an AI engine", "Settings → AI");
       if (change.kind === "bedrock") return deps.addEngine("claude-bedrock", { displayName: change.name, awsProfile: change.awsProfile, awsRegion: change.awsRegion, model: change.model });
       if (change.kind === "openai-compat") {
         const key = savedKey(change.keyFrom);
@@ -309,9 +317,17 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
       ["wallpaper", "background", "banner", "sidebar image", "picture"], () => "managed in Settings"),
     ownerOnly("account.organization", "Organization", "Joining or leaving a company's managed MausBot; it signs in through the company's portal.", "Settings → Your account",
       ["organization", "organisation", "company", "managed"], () => "managed in Settings"),
+    ownerOnly("people.signIn", "Who may sign in", "On a self-hosted server, the emails or @domains that may sign in, as admins or members. A change could lock someone out, or hand every setting to someone new.",
+      "Settings → Your account", ["people", "members", "invite", "roles", "admins", "sign in access"], () => "managed in Settings"),
+    ownerOnly("remote.domain", "Custom domain", "The web address this self-hosted server answers on. Changing it can cut off the address the person is using right now.", "Settings → Overview",
+      ["domain", "custom domain", "dns", "public url"], () => cfg().customDomain ?? ""),
+    ownerOnly("remote.httpsAddress", "HTTPS address", "This computer's public HTTPS address for paired devices; turning it off can cut off the device the person is using now.", "Settings → Phone & devices",
+      ["https", "public address"], () => "managed in Settings"),
+    ownerOnly("profile.photo", "Your photo", "Your profile photo; it is a file the person picks or removes.", "Settings → You and your bots", ["photo", "avatar", "profile picture"],
+      () => (cfg().profile?.avatarUrl ? "set" : "")),
   ];
 
-  return [...safe, ...confirm, engines, ...botEntries(deps, writable), ...configEntries(deps, writable), ...windowEntries(windowPref), ...secret, ...owner];
+  return [...safe, ...providers, engines, ...botEntries(deps, writable), ...configEntries(deps, writable), ...windowEntries(windowPref), ...secret, ...owner];
 }
 
 export function findSettings(entries: readonly SettingEntry[], query: string, limit = 8): SettingEntry[] {
@@ -332,11 +348,12 @@ export function findSettings(entries: readonly SettingEntry[], query: string, li
 /** The registry over the Settings window's own routes, called as the window calls them. */
 export function routeBackedRegistry(deps: {
   cfg(): AppConfig;
-  store: Pick<Store, "bots" | "sections" | "tasks">;
+  store: Pick<Store, "bots" | "sections">;
   routes: { config: RouteHandler; botOrder: RouteHandler; botPatch: RouteHandler; sections: RouteHandler; instances: RouteHandler } & Record<AppRoute, RouteHandler>;
   providers: Pick<ProviderRegistry, "instances" | "lastSnapshot">;
   credentials(): CredentialConfig;
   window: RegistryDeps["window"];
+  paused(): string[];
 }): SettingEntry[] {
   const auth: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
   const refusal = async (reply: Promise<RouteReply>) => {
@@ -348,18 +365,21 @@ export function routeBackedRegistry(deps: {
     }
   };
   return createSettingsRegistry({
-    cfg: deps.cfg, bots: () => deps.store.bots, sections: () => deps.store.sections, credentials: deps.credentials, window: deps.window,
+    cfg: deps.cfg, bots: () => deps.store.bots, sections: () => deps.store.sections, credentials: deps.credentials, window: deps.window, paused: deps.paused,
     saveConfig: (patch) => refusal(callRoute(deps.routes.config, { method: "PUT", path: "/api/config", body: patch, auth })),
     reorderBots: (botIds) => refusal(callRoute(deps.routes.botOrder, { method: "PUT", path: "/api/bots/order", body: { botIds }, auth })),
     pinBot: (botId, pinned) => refusal(callRoute(deps.routes.botPatch, { method: "PATCH", path: `/api/bots/${encodeURIComponent(botId)}`, body: { pinned }, auth })),
     patchBot: (botId, body) => refusal(callRoute(deps.routes.botPatch, { method: "PATCH", path: `/api/bots/${encodeURIComponent(botId)}`, body, auth })),
     call: (route, method, path, body) => refusal(callRoute(deps.routes[route], { method, path, ...(body ? { body } : {}), auth })),
+    read: async (route, path) => {
+      const reply = await callRoute(deps.routes[route], { method: "GET", path, auth }).catch(() => null);
+      return reply && reply.status < 300 ? reply.body : null;
+    },
     groupBots: (name, botIds) => refusal(callRoute(deps.routes.sections, { method: "POST", path: "/api/sidebar-sections", body: { name, botIds }, auth })),
     engines: () => deps.providers.instances().filter((instance) => instance.enabled).map((instance) => ({
       instanceId: instance.instanceId, working: deps.providers.lastSnapshot(instance.instanceId)?.state === "available",
       name: instance.displayName ?? BUILT_IN_DRIVERS.find((driver) => driver.driverKind === instance.driverKind)?.metadata.displayName ?? instance.instanceId,
     })),
-    engineChosen: (instanceId) => engineChosen(deps.store, deps.cfg(), instanceId),
     addEngine: (path, body) => refusal(callRoute(deps.routes.instances, { method: "POST", path: `/api/instances/${path}`, body, auth })),
     removeEngine: (instanceId) => refusal(callRoute(deps.routes.instances, { method: "DELETE", path: `/api/instances/${encodeURIComponent(instanceId)}`, auth })),
   });

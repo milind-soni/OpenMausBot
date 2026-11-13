@@ -1,4 +1,4 @@
-// One bot's own settings, as its Settings panel edits them: every change is a Change/Cancel card naming the bot and the
+// One bot's own settings, as its Settings panel edits them: each change applies with Undo on a card naming the bot and the
 // exact effect, written through PATCH /api/bots/:id so that route's checks still run.
 import { z } from "zod";
 
@@ -24,28 +24,31 @@ const COMPUTER = {
   local: "use this computer's own desktop, as you", browser: "use only the built-in browser", off: "use no computer",
 } as const;
 const onOff = (on: boolean | null) => (on === null ? "follow the app's setting" : on ? "on" : "off");
-/** The other fields the bot panel edits that a loopback caller may set while a bot works; the route checks each one. */
+const on = (field: boolean | undefined) => field !== false;
+const set = (field: boolean | undefined) => field === true;
+/** The other fields the bot panel edits that a loopback caller may set while a bot works; the route checks each one.
+ * `was` reads the bot's value as it runs on, defaults included, for Undo. */
 const OTHER = {
-  title: { label: "title", value: z.string().max(BOT_PROFILE_LIMITS.title), shown: (text: unknown) => `"${String(text)}"` },
-  description: { label: "description", value: z.string().max(BOT_PROFILE_LIMITS.description), shown: (text: unknown) => `"${String(text)}"` },
-  soul: { label: "instructions", value: z.string().max(4000), shown: (text: unknown) => `"${String(text).slice(0, 120)}${String(text).length > 120 ? "…" : ""}"` },
-  notifications: { label: "notifications", value: z.boolean(), shown: onOff },
-  speakReplies: { label: "spoken replies", value: z.boolean(), shown: onOff },
-  replyStyle: { label: "reply style", value: z.enum(["default", "conversational"]), shown: String },
-  voice: { label: "voice", value: z.string().max(BOT_PROFILE_LIMITS.voice), shown: String },
-  voiceNotes: { label: "voice notes", value: z.boolean(), shown: onOff },
-  voiceNoteEveryReply: { label: "a voice note with every reply", value: z.boolean().nullable(), shown: onOff },
-  memoryEnabled: { label: "memory", value: z.boolean(), shown: onOff },
-  memoryUpkeep: { label: "memory upkeep", value: z.boolean(), shown: onOff },
-  helperModel: { label: "helper model", value: z.boolean(), shown: onOff },
-  browser: { label: "built-in browser", value: z.boolean(), shown: onOff },
-  recordBrowserSteps: { label: "saving browser steps", value: z.boolean(), shown: onOff },
-  composio: { label: "Composio apps", value: z.boolean(), shown: onOff },
-  xResearch: { label: "X research", value: z.boolean(), shown: onOff },
-  parkDirectMessages: { label: "holding direct messages behind delegated work", value: z.boolean(), shown: onOff },
-  cacheKeepWarm: { label: "keeping its cache warm", value: z.boolean().nullable(), shown: onOff },
-  autoStartVps: { label: "starting its own server", value: z.boolean(), shown: onOff },
-  computer: { label: "computer", value: z.enum(["auto", "cloud", "vm", "local", "browser", "off"]), shown: (kind: unknown) => COMPUTER[kind as keyof typeof COMPUTER] },
+  title: { label: "title", value: z.string().max(BOT_PROFILE_LIMITS.title), shown: (text: unknown) => `"${String(text)}"`, was: (one: BotRecord) => one.title ?? "" },
+  description: { label: "description", value: z.string().max(BOT_PROFILE_LIMITS.description), shown: (text: unknown) => `"${String(text)}"`, was: (one: BotRecord) => one.description ?? "" },
+  soul: { label: "instructions", value: z.string().max(4000), shown: (text: unknown) => `"${String(text).slice(0, 120)}${String(text).length > 120 ? "…" : ""}"`, was: (one: BotRecord) => one.soul ?? "" },
+  notifications: { label: "notifications", value: z.boolean(), shown: onOff, was: (one: BotRecord) => on(one.notifications) },
+  speakReplies: { label: "spoken replies", value: z.boolean(), shown: onOff, was: (one: BotRecord) => set(one.speakReplies) },
+  replyStyle: { label: "reply style", value: z.enum(["default", "conversational"]), shown: String, was: (one: BotRecord) => one.replyStyle ?? "default" },
+  voice: { label: "voice", value: z.string().max(BOT_PROFILE_LIMITS.voice), shown: String, was: (one: BotRecord) => one.voice ?? "" },
+  voiceNotes: { label: "voice notes", value: z.boolean(), shown: onOff, was: (one: BotRecord) => on(one.voiceNotes) },
+  voiceNoteEveryReply: { label: "a voice note with every reply", value: z.boolean().nullable(), shown: onOff, was: (one: BotRecord) => one.voiceNoteEveryReply ?? null },
+  memoryEnabled: { label: "memory", value: z.boolean(), shown: onOff, was: (one: BotRecord) => on(one.memoryEnabled) },
+  memoryUpkeep: { label: "memory upkeep", value: z.boolean(), shown: onOff, was: (one: BotRecord) => on(one.memoryUpkeep) },
+  helperModel: { label: "helper model", value: z.boolean(), shown: onOff, was: (one: BotRecord) => on(one.helperModel) },
+  browser: { label: "built-in browser", value: z.boolean(), shown: onOff, was: (one: BotRecord) => on(one.browser) },
+  recordBrowserSteps: { label: "saving browser steps", value: z.boolean(), shown: onOff, was: (one: BotRecord) => set(one.recordBrowserSteps) },
+  composio: { label: "Composio apps", value: z.boolean(), shown: onOff, was: (one: BotRecord) => on(one.composio) },
+  xResearch: { label: "X research", value: z.boolean(), shown: onOff, was: (one: BotRecord) => set(one.xResearch) },
+  parkDirectMessages: { label: "holding direct messages behind delegated work", value: z.boolean(), shown: onOff, was: (one: BotRecord) => set(one.parkDirectMessages) },
+  cacheKeepWarm: { label: "keeping its cache warm", value: z.boolean().nullable(), shown: onOff, was: (one: BotRecord) => one.cacheKeepWarm ?? null },
+  autoStartVps: { label: "starting its own server", value: z.boolean(), shown: onOff, was: (one: BotRecord) => set(one.autoStartVps) },
+  computer: { label: "computer", value: z.enum(["auto", "cloud", "vm", "local", "browser", "off"]), shown: (kind: unknown) => COMPUTER[kind as keyof typeof COMPUTER], was: (one: BotRecord) => one.computer ?? "auto" },
 } as const;
 type OtherField = keyof typeof OTHER;
 
@@ -53,11 +56,12 @@ export function botEntries(deps: Pick<RegistryDeps, "bots" | "engines" | "patchB
   const bot = (id: string) => deps.bots().find((candidate) => candidate.id === id);
   const missing = (id: string) => ({ refusal: `No bot has the id ${id}. Use list_bots for the ids.` });
   const everyBot = (line: (one: BotRecord) => string) => () => deps.bots().map((one) => `${one.name}: ${line(one)}`).join("; ");
-  /** A per-bot entry: `effect` names the change for the card, or refuses it, once the bot is known to exist. */
-  const perBot = <V extends { botId: string }>(spec: Omit<WritableSpec, "tier" | "current" | "write" | "describe" | "value"> & {
-    value: z.ZodType<V>; effect(one: BotRecord, value: V): { change: string } | { refusal: string }; patch(one: BotRecord, value: V): Record<string, unknown>;
+  /** A per-bot entry: `effect` names the change for the card, or refuses it, once the bot is known to exist; `was` is the
+   * same bot's value before it, for Undo. */
+  const perBot = <V extends { botId: string }>(spec: Omit<WritableSpec, "current" | "write" | "describe" | "value"> & {
+    value: z.ZodType<V>; effect(one: BotRecord, value: V): { change: string } | { refusal: string }; was(one: BotRecord, value: V): V; patch(one: BotRecord, value: V): Record<string, unknown>;
   }) => writable({
-    ...spec, tier: "confirm", current: () => undefined,
+    ...spec, current: (value: V) => { const one = bot(value.botId); return one ? spec.was(one, value) : undefined; },
     describe: (value: V) => { const one = bot(value.botId); return one ? spec.effect(one, value) : missing(value.botId); },
     write: (value: V) => { const one = bot(value.botId); return one ? deps.patchBot(one.id, spec.patch(one, value)) : Promise.resolve(missing(value.botId).refusal); },
   });
@@ -75,17 +79,18 @@ export function botEntries(deps: Pick<RegistryDeps, "bots" | "engines" | "patchB
         if (mode === "auto" && one.computer === "local") return { refusal: `Approve for me while ${one.name} uses this computer's own desktop needs a warning only ${one.name}'s Settings shows. Tell the user to choose it there.` };
         return { change: `${APPROVAL[mode].effect(one.name)} (${APPROVAL[mode].label})` };
       },
+      was: (one, { botId }) => ({ botId, mode: approvalModeFor(one) as Exclude<ApprovalMode, "custom"> }),
       patch: (_one, { mode }) => ({ approvalMode: mode, applyToAllThreads: true }),
     }),
     perBot({
       id: "bots.name", label: "Bot name", help: "A bot's name, as the sidebar and chats show it.", where: "a bot's Settings", synonyms: ["rename", "name", "call", "bot name"],
       value: forBot({ name: z.string().trim().min(1).max(BOT_PROFILE_LIMITS.name) }), allowed: '{"botId","name"}', read: everyBot((one) => one.name),
-      effect: (one, { name }) => ({ change: `Rename ${one.name} to "${name}"` }), patch: (_one, { name }) => ({ name }),
+      effect: (one, { name }) => ({ change: `Rename ${one.name} to "${name}"` }), was: (one, { botId }) => ({ botId, name: one.name }), patch: (_one, { name }) => ({ name }),
     }),
     perBot({
       id: "bots.color", label: "Bot colour", help: "A bot's colour in the sidebar and its chat.", where: "a bot's Settings", synonyms: ["color", "colour", "tint", "bot color"],
       value: forBot({ color: z.enum(MAUS_COLOR_NAMES) }), allowed: `{"botId","color"} with color one of ${MAUS_COLOR_NAMES.join(", ")}`, read: everyBot((one) => one.color),
-      effect: (one, { color }) => ({ change: `Make ${one.name} ${color}` }), patch: (_one, { color }) => ({ color }),
+      effect: (one, { color }) => ({ change: `Make ${one.name} ${color}` }), was: (one, { botId }) => ({ botId, color: one.color }), patch: (_one, { color }) => ({ color }),
     }),
     perBot({
       id: "bots.model", label: "Bot model", help: "The engine and model one bot runs on, for its conversations. Ids come from list_models.", where: "a bot's Settings",
@@ -97,6 +102,7 @@ export function botEntries(deps: Pick<RegistryDeps, "bots" | "engines" | "patchB
         if (!engine) return { refusal: `No engine has the id ${instanceId}. Use list_models for engine and model ids.` };
         return { change: `Move ${one.name} to ${engine.name}, model ${model}${effort ? `, ${effort} effort` : ""}` };
       },
+      was: (one, { botId }) => ({ botId, instanceId: one.modelSelection.instanceId, model: one.modelSelection.model, ...(one.modelSelection.effort ? { effort: one.modelSelection.effort } : {}) }),
       patch: (_one, { instanceId, model, effort }) => ({ modelSelection: { instanceId, model, ...(effort ? { effort } : {}) }, requireAvailableModel: true }),
     }),
     perBot({
@@ -105,11 +111,12 @@ export function botEntries(deps: Pick<RegistryDeps, "bots" | "engines" | "patchB
       value: forBot({ archived: z.boolean() }), allowed: '{"botId","archived":true|false}', read: () => deps.bots().filter((one) => one.hidden).map((one) => one.name).join(", "),
       effect: (one, { archived }) => one.defaultBot && archived ? { refusal: `${one.name} is this place's own bot and is never archived. To take it out of the sidebar use sidebar.showHelper.` }
         : { change: archived ? `Archive ${one.name}: it leaves the sidebar and keeps its chats${one.chiefOfStaff ? ", and stops being Chief of Staff" : ""}` : `Bring ${one.name} back to the sidebar` },
+      was: (one, { botId }) => ({ botId, archived: one.hidden === true }),
       patch: (one, { archived }) => ({ hidden: archived, ...(archived && one.chiefOfStaff ? { chiefOfStaff: false } : {}) }),
     }),
     writable({
       id: "sidebar.showHelper", label: "Show MausBot in the sidebar", help: "Whether this place's own bot, MausBot, has a row in the sidebar; it keeps working either way.", where: "Settings → Overview",
-      synonyms: ["helper", "starter", "default bot", "mausbot", "show helper"], tier: "confirm", value: z.boolean(), allowed: "true or false",
+      synonyms: ["helper", "starter", "default bot", "mausbot", "show helper"], value: z.boolean(), allowed: "true or false",
       current: () => { const helper = deps.bots().find((one) => one.defaultBot); return helper ? !helper.sidebarHidden : undefined; },
       describe: (show: boolean) => (deps.bots().some((one) => one.defaultBot) ? { change: show ? "Show MausBot in the sidebar" : "Take MausBot out of the sidebar; it keeps working" } : { refusal: "This place has no MausBot of its own." }),
       write: (show: boolean) => { const helper = deps.bots().find((one) => one.defaultBot); return helper ? deps.patchBot(helper.id, { sidebarHidden: !show }) : Promise.resolve("This place has no MausBot of its own."); },
@@ -123,6 +130,7 @@ export function botEntries(deps: Pick<RegistryDeps, "bots" | "engines" | "patchB
       read: () => "use get on a bot's own fields through list_bots",
       effect: (one, value) => ({ change: `${one.name}: ${(Object.keys(value) as Array<OtherField | "botId">).filter((field) => field !== "botId")
         .map((field) => `${OTHER[field as OtherField].label} ${OTHER[field as OtherField].shown(value[field as OtherField] as never)}`).join("; ")}` }),
+      was: (one, value) => ({ botId: one.id, ...Object.fromEntries(Object.keys(value).filter((field) => field !== "botId").map((field) => [field, OTHER[field as OtherField].was(one)])) }),
       patch: (_one, { botId: _id, computer, ...rest }) => ({ ...rest, ...(computer ? { computer: computer === "auto" ? null : computer } : {}) }),
     }),
   ];

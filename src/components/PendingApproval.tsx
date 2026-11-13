@@ -135,7 +135,7 @@ function approvalWords(pending: Pending, botName?: string): { line: string; summ
   const detail = (pending.commandAllowlist?.command ?? ask?.detail ?? (card ? approvalDetailText(card) : pending.detail)).trim();
   if (outbound) return { line: outbound.headline, ...(outbound.summary ? { summary: outbound.summary } : {}), detail };
   if (ask) return { line: ask.line, detail };
-  if (card?.mcpRequest || card?.lendingLift || card?.appSettingRequest) return { line: card.title, inline: detail, detail };
+  if (card?.mcpRequest || card?.lendingLift) return { line: card.title, inline: detail, detail };
   if (isDurable(pending)) return { line: label(pending), detail };
   const action = COMMAND_TOOLS.has(pending.tool) ? t("approval.tool.runCommand") : toolLabel(pending.tool);
   return { line: botName ? t("approval.card.namedWantsTo", { name: botName, action }) : label(pending), inline: detail, detail };

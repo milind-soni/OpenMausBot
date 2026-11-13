@@ -1,5 +1,5 @@
-// The server's own settings from the Settings pages, each on a Change/Cancel card. Writes go through PUT /api/config
-// (or the one route the page itself calls), so that route's checks, side effects and broadcasts still run.
+// The server's own settings from the Settings pages, each applied with Undo. Writes go through PUT /api/config (or the one
+// route the page itself calls), so that route's checks, side effects and broadcasts still run.
 import { randomUUID } from "node:crypto";
 
 import { z } from "zod";
@@ -7,6 +7,7 @@ import { z } from "zod";
 import { IMAGE_PROVIDERS } from "../../shared/image-generation.ts";
 import { EFFORT_LEVELS } from "../../shared/wire.ts";
 import { DEFAULT_WINDOW_MINUTES } from "../cache-keepwarm.ts";
+import { botsTowardLimit } from "../../shared/bot-limit.ts";
 import { CONFIG_PATCH_FIELDS as F, MAX_THREAD_EVENT_LOG_BYTES, MIN_THREAD_EVENT_LOG_BYTES } from "../config.ts";
 import { display, withoutKeys, type RegistryDeps, type SettingEntry, type Where, type WritableSpec } from "./registry.ts";
 
@@ -20,12 +21,12 @@ const nonEmpty = <T extends z.ZodType<object>>(schema: T) => schema.refine((valu
 type BrowserProfileChange = { id?: string; name: string; browser?: "chrome" };
 const imageSlot = z.object({ provider: z.enum(IMAGE_PROVIDERS), model: z.string().trim().max(200).optional() }).strict();
 
-export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "bots" | "call">, writable: (spec: WritableSpec) => SettingEntry): SettingEntry[] {
+export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "bots" | "call" | "read" | "paused">, writable: (spec: WritableSpec) => SettingEntry): SettingEntry[] {
   const cfg = deps.cfg;
-  /** A confirm setting saved with PUT /api/config; `says` is the card's line, else it shows before → after. */
+  /** A setting saved with PUT /api/config; `says` is the applied card's line, else it shows before → after. */
   const section = <V,>(spec: { id: string; label: string; help: string; where: Where; synonyms: string[]; value: z.ZodType<V>; allowed: string;
     current(): unknown; patch(value: V): Record<string, unknown>; says?(value: V): string; read?(): string }) => writable({
-    id: spec.id, label: spec.label, help: spec.help, where: spec.where, synonyms: spec.synonyms, tier: "confirm", value: spec.value, allowed: spec.allowed,
+    id: spec.id, label: spec.label, help: spec.help, where: spec.where, synonyms: spec.synonyms, value: spec.value, allowed: spec.allowed,
     current: spec.current, read: spec.read ?? (() => display(visible(spec.current()))), write: (value: V) => deps.saveConfig(spec.patch(value)),
     ...(spec.says ? { describe: (value: V) => ({ change: spec.says!(value) }) } : {}),
   });
@@ -34,7 +35,9 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
     current: () => { const set = (cfg().features as Record<string, unknown> | undefined)?.[field]; return onUnlessFalse ? set !== false : set === true; },
     patch: (on: boolean) => ({ features: { [field]: on } }), says: (on: boolean) => (on ? yes : no),
   });
-  const routed = (spec: Omit<WritableSpec, "tier" | "current"> & { current?(): unknown }) => writable({ ...spec, tier: "confirm", current: spec.current ?? (() => undefined) });
+  const libraryList = async () => ((await deps.read("skills", "/api/skills-library"))?.skills ?? []) as Array<{ name: string; enabled: boolean; everyBot: boolean }>;
+  /** The bots a Starter Cloud's limit counts that are awake now, as POST /api/starter/awake takes them. */
+  const awakeNow = () => { const paused = deps.paused(); return deps.bots().filter((bot) => botsTowardLimit([bot]) === 1 && !bot.chiefOfStaff && !paused.includes(bot.id)).map((bot) => bot.id); };
   const botName = (id: string) => deps.bots().find((bot) => bot.id === id)?.name;
 
   return [
@@ -72,11 +75,6 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
       id: "profile.aboutMe", label: "About you", help: "What every bot knows about you.", where: "Settings → You and your bots", synonyms: ["about me", "about you", "profile", "bio"],
       value: z.string().max(4000), allowed: "text up to 4000 characters, or empty to clear", current: () => cfg().profile?.aboutMe ?? "", read: () => cfg().profile?.aboutMe ?? "",
       patch: (aboutMe) => ({ profile: { aboutMe } }), says: (text) => (text ? `Tell every bot this about you: ${quoted(text)}` : "Clear what every bot knows about you"),
-    }),
-    section({
-      id: "profile.photo", label: "Your photo", help: "Your profile photo. A bot can only remove it; a new one is picked in Settings.", where: "Settings → You and your bots", synonyms: ["photo", "avatar", "profile picture"],
-      value: z.literal(""), allowed: '"" to remove it', current: () => undefined, read: () => (cfg().profile?.avatarUrl ? "set" : ""),
-      patch: () => ({ profile: { avatarUrl: "" } }), says: () => "Remove your profile photo",
     }),
     section({
       id: "bots.everyBotRules", label: "Rules for every bot", help: "Instructions every bot follows, ahead of its own.", where: "Settings → You and your bots", synonyms: ["rules", "rules for every bot", "instructions", "every bot"],
@@ -148,9 +146,10 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
       "Let every paired device lend its computer to bots here, not only your own. A lent folder can be used to reach a shell", "Stop every device, your own included, lending its computer to bots here"),
     writable({
       id: "desktops.browserProfiles", label: "Browser profiles", help: "Named browser profiles bots use, each keeping its own logins. Send the full list; leave out id for a new one. Removing one deletes its logins, so only the user does that.",
-      where: "Settings → Desktops & browser", synonyms: ["browser profiles", "profiles", "my chrome", "logins"], tier: "confirm",
+      where: "Settings → Desktops & browser", synonyms: ["browser profiles", "profiles", "my chrome", "logins"],
       value: z.array(z.object({ id: z.string().regex(/^[a-z0-9-]{1,80}$/).optional(), name: z.string().trim().min(1).max(40), browser: z.literal("chrome").optional() }).strict()).max(20),
-      allowed: '[{"id"?,"name","browser"?:"chrome"}]; "chrome" uses your own running Chrome', current: () => undefined,
+      allowed: '[{"id"?,"name","browser"?:"chrome"}]; "chrome" uses your own running Chrome',
+      current: () => (cfg().browserProfiles ?? []).map(({ id, name, browser }) => ({ id, name, ...(browser ? { browser } : {}) })),
       read: () => (cfg().browserProfiles ?? []).map((profile) => `${profile.id}: ${profile.name}${profile.browser ? " (your Chrome)" : ""}`).join("; "),
       describe: (next: BrowserProfileChange[]) => {
         const current = cfg().browserProfiles ?? [];
@@ -172,44 +171,28 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
         return deps.saveConfig({ browserProfiles, expectedBrowserProfiles: current });
       },
     }),
-    section({
-      id: "people.signIn", label: "Who may sign in", help: "On a self-hosted server: the email addresses or @domains that may sign in with an emailed code. Admins get every setting; members only chat. Send both full lists.",
-      where: "Settings → Your account", synonyms: ["people", "members", "invite", "roles", "admins", "sign in access"],
-      value: z.object({ admins: z.array(z.string().trim().min(3).max(320)).max(500), members: z.array(z.string().trim().min(3).max(320)).max(5000) }).strict(),
-      allowed: '{"admins":[emails or @domains],"members":[...]}', current: () => ({ admins: cfg().signIn?.admins ?? [], members: cfg().signIn?.members ?? [] }),
-      patch: (signIn) => ({ signIn }),
-      says: ({ admins, members }) => {
-        const was = { admins: cfg().signIn?.admins ?? [], members: cfg().signIn?.members ?? [] };
-        const added = (list: string[], before: string[]) => list.filter((entry) => !before.includes(entry));
-        const lines = [...added(admins, was.admins).map((entry) => `let ${entry} sign in as an admin, with every setting`), ...added(members, was.members).map((entry) => `let ${entry} sign in as a member`),
-          ...[...was.admins, ...was.members].filter((entry) => !admins.includes(entry) && !members.includes(entry)).map((entry) => `stop ${entry} signing in`)];
-        return lines.length ? `Sign-in: ${lines.join("; ")}` : "Keep who may sign in as it is";
-      },
-    }),
-    routed({
-      id: "remote.domain", label: "Custom domain", help: "The web address this self-hosted server answers on; it is checked live, and new pairing links use it.", where: "Settings → Overview",
-      synonyms: ["domain", "custom domain", "dns", "https", "public url", "remote access"], value: z.string().trim().max(253), allowed: "a domain such as bots.example.com, or empty to remove it",
-      read: () => cfg().customDomain ?? "", current: () => cfg().customDomain ?? "",
-      describe: (domain: string) => ({ change: domain ? `Serve this place at ${domain} (checked live), and give it in new pairing links` : "Remove this place's custom domain; new pairing links use its other address" }),
-      write: (domain: string) => (domain ? deps.call("customDomain", "POST", "/api/settings/custom-domain", { domain }) : deps.call("customDomain", "DELETE", "/api/settings/custom-domain")),
-    }),
-    routed({
+    writable({
       id: "bots.awake", label: "Bots kept awake", help: "On a Starter Cloud, which bots stay awake past the plan's limit; the rest pause. Send exactly as many as the plan keeps.", where: "Settings → You and your bots",
       synonyms: ["awake", "paused bots", "starter", "limit"], value: z.array(z.string().regex(/^[\w-]{1,120}$/)).min(1).max(100), allowed: "a list of bot ids",
-      read: () => "", describe: (ids: string[]) => { const missing = ids.find((id) => !botName(id)); return missing ? { refusal: `No bot has the id ${missing}. Use list_bots for the ids.` } : { change: `Keep ${ids.map(botName).join(", ")} awake; your other bots pause` }; },
+      current: awakeNow, read: () => (deps.paused().length ? `awake: ${awakeNow().map(botName).join(", ")}` : ""), describe: (ids: string[]) => { const missing = ids.find((id) => !botName(id)); return missing ? { refusal: `No bot has the id ${missing}. Use list_bots for the ids.` } : { change: `Keep ${ids.map(botName).join(", ")} awake; your other bots pause` }; },
       write: (awake: string[]) => deps.call("starterAwake", "POST", "/api/starter/awake", { awake }),
     }),
-    routed({
+    writable({
       id: "skills.library", label: "Skills library", help: "Turn a library skill on or off, or give it to every bot. Library skills are listed in Settings.", where: "Settings → You and your bots",
       synonyms: ["skills", "skill library", "library", "every bot skill"],
       value: z.object({ name: z.string().regex(/^[a-z0-9-]{1,64}$/), enabled: z.boolean().optional(), everyBot: z.boolean().optional() }).strict().refine((value) => (value.enabled === undefined) !== (value.everyBot === undefined), "send enabled or everyBot, one of them"),
       allowed: '{"name","enabled":true|false} or {"name","everyBot":true|false}', read: () => "",
+      current: async ({ name, enabled }: { name: string; enabled?: boolean }) => {
+        const skill = (await libraryList()).find((one) => one.name === name);
+        return skill ? (enabled !== undefined ? { name, enabled: skill.enabled } : { name, everyBot: skill.everyBot }) : undefined;
+      },
       describe: ({ name, enabled, everyBot }: { name: string; enabled?: boolean; everyBot?: boolean }) => ({ change: enabled !== undefined ? `${enabled ? "Turn on" : "Turn off"} the library skill ${name}` : `${everyBot ? "Give" : "Stop giving"} the library skill ${name} to every bot` }),
       write: ({ name, ...change }: { name: string; enabled?: boolean; everyBot?: boolean }) => deps.call("skills", "PATCH", `/api/skills-library/${name}`, change),
     }),
-    routed({
+    writable({
       id: "bots.skills", label: "A bot's library skills", help: "Which library skills one bot uses. Send the full list.", where: "a bot's Settings", synonyms: ["skills", "assign skills", "bot skills"],
       value: z.object({ botId: z.string().regex(/^[\w-]{1,120}$/), skills: z.array(z.string().min(1).max(64)).max(200) }).strict(), allowed: '{"botId","skills":[names]}', read: () => "",
+      current: ({ botId }: { botId: string }) => { const bot = deps.bots().find((one) => one.id === botId); return bot ? { botId, skills: bot.assignedSkills ?? [] } : undefined; },
       describe: ({ botId, skills }: { botId: string; skills: string[] }) => { const name = botName(botId); return name ? { change: skills.length ? `Give ${name} the library skills ${skills.join(", ")}` : `Take every library skill from ${name}` } : { refusal: `No bot has the id ${botId}. Use list_bots for the ids.` }; },
       write: ({ botId, skills }: { botId: string; skills: string[] }) => deps.call("skills", "PUT", `/api/bots/${encodeURIComponent(botId)}/skills-library`, { skills }),
     }),
