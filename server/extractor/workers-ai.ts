@@ -7,7 +7,7 @@ import { parseJevResponse } from "../decider/jev.ts";
 import type { DeciderQuestion } from "../decider/types.ts";
 import { callWorkersAi, clefRequestBody, CLEF_FLASH, workersAiEndpoint } from "../decider/workers-ai.ts";
 import { typedValue } from "./contract.ts";
-import type { ExtractBackendRequest, ExtractBackendResult, ExtractedValues, FieldSchema, FieldSpec } from "./types.ts";
+import type { ExtractBackendRequest, ExtractBackendResult, ExtractedValues, FieldSchema, FieldSpec, FieldValue } from "./types.ts";
 
 const CLAIRIC_TYPE = { string: "text", number: "number", date: "date" } as const;
 /** Clef's yes/no reads as true or false only when it leans clearly; in between, the input does not say. */
@@ -21,9 +21,12 @@ const images = (request: ExtractBackendRequest) => request.input.images?.length
   : {};
 
 function split(fields: FieldSchema): { clairic: FieldSchema; clef: FieldSchema } {
-  const clairic: FieldSchema = {}, clef: FieldSchema = {};
-  for (const [name, spec] of Object.entries(fields)) (spec.type === "boolean" || spec.type === "enum" ? clef : clairic)[name] = spec;
-  return { clairic, clef };
+  const entries = Object.entries(fields);
+  const usesClef = ([, spec]: [string, FieldSpec]) => spec.type === "boolean" || spec.type === "enum";
+  return {
+    clairic: Object.fromEntries(entries.filter((entry) => !usesClef(entry))),
+    clef: Object.fromEntries(entries.filter(usesClef)),
+  };
 }
 
 export function clairicRequestBody(request: Pick<ExtractBackendRequest, "input" | "referenceDate">, fields: FieldSchema) {
@@ -47,15 +50,15 @@ export function clefQuestions(fields: FieldSchema): Record<string, DeciderQuesti
 
 function clairicValues(result: unknown, fields: FieldSchema): ExtractedValues | null {
   if (!isRecord(result) || !isRecord(result.answers)) return null;
-  const out: ExtractedValues = {};
+  const out: Array<[string, FieldValue]> = [];
   for (const [name, spec] of Object.entries(fields)) {
-    const answer = result.answers[name];
+    const answer = Object.hasOwn(result.answers, name) ? result.answers[name] : undefined;
     if (!isRecord(answer)) return null;
     const value = typedValue(spec, answer.value);
     if (value === undefined) return null;
-    out[name] = value;
+    out.push([name, value]);
   }
-  return out;
+  return Object.fromEntries(out);
 }
 
 function clefValues(result: unknown, fields: FieldSchema): ExtractedValues | null {
@@ -84,6 +87,8 @@ export async function extractWithWorkersAi(request: ExtractBackendRequest): Prom
   const fromClairic = read?.ok ? clairicValues(read.result, clairic) : {};
   const fromClef = decided?.ok ? clefValues(decided.result, clef) : {};
   if (!fromClairic || !fromClef) return { ok: false, reason: "malformed" };
-  const values = Object.fromEntries(Object.keys(request.fields).map((name) => [name, fromClairic[name] ?? fromClef[name] ?? null]));
+  const values = Object.fromEntries(Object.keys(request.fields).map((name) => [name,
+    Object.hasOwn(fromClairic, name) ? fromClairic[name] : Object.hasOwn(fromClef, name) ? fromClef[name] : null,
+  ]));
   return { ok: true, values, model: [read && "clairic", decided && CLEF_FLASH].filter(Boolean).join("+") };
 }

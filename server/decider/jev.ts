@@ -47,20 +47,20 @@ type WireQuestion =
   | { type: "noul"; instructions: string; criteria?: { true?: string; false?: string } };
 
 export function jevRequestBody(state: unknown, questions: Record<string, DeciderQuestion>) {
-  const wire: Record<string, WireQuestion> = {};
+  const wire: Array<[string, WireQuestion]> = [];
   for (const [id, question] of Object.entries(questions)) {
     if (question.type === "choice") {
-      wire[id] = { type: "choice", instructions: question.instructions, criteria: { ...question.options } };
+      wire.push([id, { type: "choice", instructions: question.instructions, criteria: { ...question.options } }]);
     } else if (question.type === "score") {
-      wire[id] = { type: "score", instructions: question.instructions, criteria: [...question.levels] };
+      wire.push([id, { type: "score", instructions: question.instructions, criteria: [...question.levels] }]);
     } else {
       const criteria = question.criteria?.yes || question.criteria?.no
         ? { ...(question.criteria.yes ? { true: question.criteria.yes } : {}), ...(question.criteria.no ? { false: question.criteria.no } : {}) }
         : undefined;
-      wire[id] = { type: "noul", instructions: question.instructions, ...(criteria ? { criteria } : {}) };
+      wire.push([id, { type: "noul", instructions: question.instructions, ...(criteria ? { criteria } : {}) }]);
     }
   }
-  return { state, model: JEV_MODEL, questions: wire };
+  return { state, model: JEV_MODEL, questions: Object.fromEntries(wire) };
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -76,15 +76,16 @@ function parseChoice(raw: Record<string, unknown>, question: Extract<DeciderQues
   const choice = raw.choice;
   if (typeof choice !== "string" || !offered.has(choice)) return null;
   if (!isRecord(raw.probabilities)) return null;
-  const probabilities: Record<string, number> = {};
+  const entries: Array<[string, number]> = [];
   let sum = 0;
   for (const [key, value] of Object.entries(raw.probabilities)) {
     if (!offered.has(key) || !isProbability(value)) return null;
-    probabilities[key] = value;
+    entries.push([key, value]);
     sum += value;
   }
   if (!(Math.abs(sum - 1) <= SUM_TOLERANCE)) return null;
-  const pTop = probabilities[choice];
+  const probabilities = Object.fromEntries(entries);
+  const pTop = Object.hasOwn(probabilities, choice) ? probabilities[choice] : undefined;
   if (pTop === undefined) return null;
   const others = Object.entries(probabilities).filter(([key]) => key !== choice).map(([, value]) => value);
   const runnerUp = others.length ? Math.max(...others) : 0;
@@ -121,21 +122,21 @@ export function parseJevResponse(
   questions: Record<string, DeciderQuestion>,
 ): { ok: true; answers: Record<string, DeciderAnswer>; inputTokens?: number; model?: string } | { ok: false } {
   if (!isRecord(body) || !isRecord(body.answers)) return { ok: false };
-  const answers: Record<string, DeciderAnswer> = {};
+  const answers: Array<[string, DeciderAnswer]> = [];
   for (const [id, question] of Object.entries(questions)) {
-    const raw = body.answers[id];
+    const raw = Object.hasOwn(body.answers, id) ? body.answers[id] : undefined;
     if (!isRecord(raw)) return { ok: false };
     if (raw.type !== undefined && raw.type !== WIRE_TYPE[question.type]) return { ok: false };
     const parsed = question.type === "choice" ? parseChoice(raw, question)
       : question.type === "score" ? parseScore(raw, question)
         : parseYesNo(raw);
     if (!parsed) return { ok: false };
-    answers[id] = parsed;
+    answers.push([id, parsed]);
   }
   const usage = isRecord(body.usage) ? body.usage.input_tokens : undefined;
   const inputTokens = typeof usage === "number" && Number.isFinite(usage) && usage >= 0 ? usage : undefined;
   const model = typeof body.model === "string" && body.model.length <= 80 ? body.model : undefined;
-  return { ok: true, answers, ...(inputTokens !== undefined ? { inputTokens } : {}), ...(model ? { model } : {}) };
+  return { ok: true, answers: Object.fromEntries(answers), ...(inputTokens !== undefined ? { inputTokens } : {}), ...(model ? { model } : {}) };
 }
 
 export function refusal(status: number): BackendResult {
