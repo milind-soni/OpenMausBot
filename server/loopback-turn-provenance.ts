@@ -1,6 +1,6 @@
 import { lendingPerson, OWN_SERVER_LENDER, type OwnServer } from "./person-key.ts";
 import type { LoopbackTurnProvenance } from "./direct-send.ts";
-import type { RequestAuth } from "./request-auth.ts";
+import { loopbackCredentialId, type RequestAuth } from "./request-auth.ts";
 import type { PublicSession } from "./sessions.ts";
 import { provenRequestPerson } from "./shared-computers.ts";
 import { linePersonKey } from "./host/thread-person.ts";
@@ -71,10 +71,11 @@ export class SharedComputerTurnAuthorization {
     sessions: readonly LenderSession[],
     sessionLive: (id: string) => boolean,
     messages: readonly Message[],
+  loopbackCredentialIsCurrent: (proof: Extract<LoopbackTurnProvenance, { kind: "desktop-owner" | "companion" }>) => boolean = () => false,
   ): string | null {
     if (request?.requestProvenance) {
       if (!request.messageId || request.stopped || !request.generations.has(generation)) return null;
-      return requestSharedComputerPrincipal(request.requestProvenance, own, sessions, sessionLive, (id) => this.revokedCompanions.has(id));
+      return requestSharedComputerPrincipal(request.requestProvenance, own, sessions, sessionLive, (id) => this.revokedCompanions.has(id), loopbackCredentialIsCurrent);
     }
     return lendingPerson(provenRequestPerson(request, generation,
       (id) => linePersonKey(messages.find((message) => message.id === id))), own, () => sessions);
@@ -85,10 +86,17 @@ export function requestTurnProvenance(auth: RequestAuth, ownServer: OwnServer, s
   return auth.kind === "session" ? { kind: "session", sessionId: auth.session.id, person: sessionPerson(auth) } : loopbackTurnProvenance(auth, ownServer);
 }
 
+export function loopbackCredentialIsCurrent(proof: Extract<LoopbackTurnProvenance, { kind: "desktop-owner" | "companion" }>, desktopToken: string | undefined, companionToken: string | undefined): boolean {
+  return proof.kind === "desktop-owner"
+    ? Boolean(desktopToken) && proof.credentialId === loopbackCredentialId(desktopToken!)
+    : Boolean(companionToken) && proof.credentialId === loopbackCredentialId(companionToken!);
+}
+
 export function loopbackTurnProvenance(auth: RequestAuth, ownServer: OwnServer): LoopbackTurnProvenance | undefined {
   if (auth.kind !== "loopback" || !ownServer) return undefined;
-  if (auth.desktopOwner) return { kind: "desktop-owner" };
-  if (auth.companionDevice) return { kind: "companion", deviceId: auth.companionDevice };
+  if (!auth.loopbackCredentialId) return undefined;
+  if (auth.desktopOwner) return { kind: "desktop-owner", credentialId: auth.loopbackCredentialId };
+  if (auth.companionDevice) return { kind: "companion", deviceId: auth.companionDevice, credentialId: auth.loopbackCredentialId };
   return undefined;
 }
 
@@ -96,8 +104,9 @@ export function loopbackSharedComputerPrincipal(
   proof: LoopbackTurnProvenance | undefined,
   ownServer: OwnServer,
   companionRevoked: (deviceId: string) => boolean = () => false,
+  credentialIsCurrent: (proof: Extract<LoopbackTurnProvenance, { kind: "desktop-owner" | "companion" }>) => boolean = () => false,
 ): string | null {
-  if (!proof || proof.kind === "session" || !ownServer || (proof.kind === "companion" && companionRevoked(proof.deviceId))) return null;
+  if (!proof || proof.kind === "session" || !ownServer || !credentialIsCurrent(proof) || (proof.kind === "companion" && companionRevoked(proof.deviceId))) return null;
   return OWN_SERVER_LENDER;
 }
 
@@ -107,9 +116,10 @@ export function requestSharedComputerPrincipal(
   sessions: readonly LenderSession[],
   sessionLive: (id: string) => boolean,
   companionRevoked: (deviceId: string) => boolean = () => false,
+  credentialIsCurrent: (proof: Extract<LoopbackTurnProvenance, { kind: "desktop-owner" | "companion" }>) => boolean = () => false,
 ): string | null {
   if (proof?.kind === "session") {
     return sessionLive(proof.sessionId) ? lendingPerson(proof.person, ownServer, () => sessions) : null;
   }
-  return loopbackSharedComputerPrincipal(proof, ownServer, companionRevoked);
+  return loopbackSharedComputerPrincipal(proof, ownServer, companionRevoked, credentialIsCurrent);
 }

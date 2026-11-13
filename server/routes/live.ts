@@ -114,6 +114,7 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
       if (req.headers["x-openmausbot-companion"] !== "1") return json(res, 403, { error: "Only the phone companion can report an unpaired phone." });
       const device = companionDevice(req);
       if (!device) return json(res, 400, { error: "The unpaired phone was not named." });
+      if (auth.kind !== "loopback" || auth.companionDevice !== device) return json(res, 403, { error: "The authenticated companion does not match the reported phone." });
       const call = deps.calls.deviceRevoked(device);
       deps.companionRevoked?.(device);
       return json(res, 200, { call });

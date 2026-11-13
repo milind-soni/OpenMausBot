@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { lendingPersonKey, OWN_SERVER_LENDER, personKey } from "./person-key.ts";
 import { loopbackSharedComputerPrincipal, loopbackTurnProvenance, requestSharedComputerPrincipal, requestTurnProvenance, SharedComputerTurnAuthorization } from "./loopback-turn-provenance.ts";
-import { resolveRequestAuth } from "./request-auth.ts";
+import { loopbackCredentialId, resolveRequestAuth } from "./request-auth.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { SharedComputers } from "./shared-computers.ts";
 
@@ -26,7 +26,7 @@ describe("loopback shared-computer request provenance", () => {
     const auth = resolve(headers);
     expect(auth).not.toBeNull();
     const proof = loopbackTurnProvenance(auth!, own);
-    const principal = loopbackSharedComputerPrincipal(proof, own);
+    const principal = loopbackSharedComputerPrincipal(proof, own, () => false, (candidate) => candidate.credentialId === loopbackCredentialId(candidate.kind === "desktop-owner" ? "desktop-proof" : "sidecar-proof"));
     expect(principal).toBe(OWN_SERVER_LENDER);
 
     const computers = new SharedComputers((session) => session === "registered-lender");
@@ -45,8 +45,15 @@ describe("loopback shared-computer request provenance", () => {
       expect(auth ? loopbackTurnProvenance(auth, own) : undefined).toBeUndefined();
       expect(loopbackSharedComputerPrincipal(undefined, own)).toBeNull();
     }
-    expect(loopbackSharedComputerPrincipal({ kind: "desktop-owner" }, null)).toBeNull();
-    expect(loopbackSharedComputerPrincipal({ kind: "companion", deviceId: "paired-device" }, own, (id) => id === "paired-device")).toBeNull();
+    expect(loopbackSharedComputerPrincipal({ kind: "desktop-owner", credentialId: "unknown" }, own, () => false, () => false)).toBeNull();
+    expect(loopbackSharedComputerPrincipal({ kind: "companion", deviceId: "paired-device", credentialId: "unknown" }, own, (id) => id === "paired-device", () => false)).toBeNull();
+  });
+
+  it("invalidates loopback turn provenance when its authenticated credential rotates", () => {
+    const auth = resolve({ host: "127.0.0.1:8799", "x-openmausbot-desktop-owner": "desktop-proof" });
+    const proof = loopbackTurnProvenance(auth!, own)!;
+    expect(loopbackSharedComputerPrincipal(proof, own, () => false, (candidate) => candidate.credentialId === loopbackCredentialId("desktop-proof"))).toBe(OWN_SERVER_LENDER);
+    expect(loopbackSharedComputerPrincipal(proof, own, () => false, (candidate) => candidate.credentialId === loopbackCredentialId("rotated-token"))).toBeNull();
   });
 
   it("keeps a nameless authenticated session's verified key and fails closed when revoked", () => {
@@ -78,7 +85,7 @@ describe("loopback shared-computer request provenance", () => {
 
   it("does not let replaced generations or revoked companions retain inventory access", () => {
     const authz = new SharedComputerTurnAuthorization();
-    const proof = { kind: "companion" as const, deviceId: "paired-device" };
+    const proof = { kind: "companion" as const, deviceId: "paired-device", credentialId: "rotated-proof" };
     const request = { requestProvenance: proof, messageId: "request-message", generations: new Set(["new-generation"]) };
     expect(authz.principal(request, "old-generation", own, [], () => false, [])).toBeNull();
     authz.revokeCompanion("paired-device", [request]);

@@ -644,7 +644,7 @@ import { createReactionRoutes } from "./routes/reactions.ts";
 import { createReactions, withReactionNotes, type Reactor } from "./reactions.ts";
 import { createPersonReplies } from "./person-replies.ts";
 import { lendingPersonKey, personKey, relayedPersonKey } from "./person-key.ts";
-import { requestTurnProvenance, SharedComputerTurnAuthorization } from "./loopback-turn-provenance.ts";
+import { loopbackCredentialIsCurrent, requestTurnProvenance, SharedComputerTurnAuthorization } from "./loopback-turn-provenance.ts";
 import { createOutsideLineage, OUTSIDE_STAYS_HERE } from "./host/outside-lineage.ts"; import { OUTSIDE_REFUSAL, outsideRouteRefused } from "./host/outside-fence.ts"; import { createOutsideWrites } from "./host/outside-writes.ts";
 import { teamAiOwner } from "./host/team-ai-owner.ts"; import { createTeamOwners, type AskViewer } from "./host/team-owners.ts"; import { createTeamMessages } from "./host/team-messages.ts"; import { createTeamAwayHost } from "./host/team-away-host.ts"; import { createPlaceInbox, guestNameIn, placeInboxViewer } from "./host/place-inbox.ts"; import { relayedTurn } from "./host/relayed-turn.ts"; import { createPersonCalendar } from "./host/person-calendar.ts";
 import { createDevsReports } from "./host/devs-reports.ts"; import { bugReportEndpoint, devsReportSender, devsStatusAsker } from "./devs-report-send.ts"; import { captureRecentLog } from "./recent-log.ts"; import { createShareAnswer } from "./host/share-answer.ts";
@@ -904,7 +904,7 @@ function turnOrigin(capability: Pick<InternalCapability, "threadId" | "generatio
 }
 
 /** Fail closed: only the person whose own message provably started this exact turn generation. Deliberately not the usage ledger's trigger, which defaults to the owner. */
-function sharedComputerPrincipal(capability: Pick<InternalCapability, "botId" | "threadId" | "generation">): string | null { return CLOUD_HOME ? cloudLendingRefusal(capability) === null ? CLOUD_HOME_LENDER : null : sharedComputerAuthorization.principal(directRequestOwners.get(capability.threadId), capability.generation, ownHome.ownServer(), sessions.list(), (id) => sessions.isLive(id), store.messagesFor(capability.threadId)); }
+function sharedComputerPrincipal(capability: Pick<InternalCapability, "botId" | "threadId" | "generation">): string | null { return CLOUD_HOME ? cloudLendingRefusal(capability) === null ? CLOUD_HOME_LENDER : null : sharedComputerAuthorization.principal(directRequestOwners.get(capability.threadId), capability.generation, ownHome.ownServer(), sessions.list(), (id) => sessions.isLive(id), store.messagesFor(capability.threadId), (proof) => loopbackCredentialIsCurrent(proof, desktopMutationToken, companionMutationToken)); }
 
 /** The only conversations that may feed a bot's memory, daily log, recall or brief; dropped whenever a session is revoked. */
 const ownerOnlyCache = new Map<string, { length: number; last?: string; owner: boolean }>();

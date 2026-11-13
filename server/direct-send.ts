@@ -6,8 +6,8 @@ import type { Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
 
 export type LoopbackTurnProvenance =
-  | { kind: "desktop-owner" }
-  | { kind: "companion"; deviceId: string }
+  | { kind: "desktop-owner"; credentialId: string }
+  | { kind: "companion"; deviceId: string; credentialId: string }
   | { kind: "session"; sessionId: string; person: string };
 
 export interface DirectSendInput {
