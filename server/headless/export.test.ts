@@ -1,6 +1,6 @@
 import "../testing/scrub-ambient-omb-env.ts";
 
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -193,6 +193,39 @@ describe("export", () => {
     expect(markdown).not.toContain(KEY);
     expect(markdown).not.toContain("The very first message");
     expect(markdown).toContain("**User:**\n\nmessage 52");
+  });
+
+  it("numbers new downloads around existing files that are not in the earlier manifest", async () => {
+    const out = join(dir, "existing-downloads");
+    const existing = {
+      "files/conversation-lead-thr/report.md": "my report",
+      "files/conversation-lead-thr/report (2).md": "my other report",
+      "files/conversation-lead-thr/shots/a.png": "my picture",
+      "screens/conversation-lead-thr/001-s1.png": "my screen",
+    };
+    for (const [file, text] of Object.entries(existing)) {
+      mkdirSync(join(out, file, ".."), { recursive: true });
+      writeFileSync(join(out, file), text);
+    }
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const { code, result } = await run(["export", "--thread", LEAD, "--out", out, "--force", "--max-bytes", "2KB", "--json"]);
+      expect(code).toBe(0);
+      for (const [file, text] of Object.entries(existing)) expect(readFileSync(join(out, file), "utf8")).toBe(text);
+      expect(result.files.map((file: { file: string }) => file.file)).toContain("files/conversation-lead-thr/report (3).md");
+      expect(result.files.map((file: { file: string }) => file.file)).toContain("files/conversation-lead-thr/shots/a (2).png");
+      expect(result.screens[0].file).toBe("screens/conversation-lead-thr/001-s1 (2).png");
+      expect(readFileSync(join(out, "files/conversation-lead-thr/report (3).md"), "utf8")).toBe("# Launch report");
+    }
+  });
+
+  it("numbers a download around an existing directory with the same filename", async () => {
+    const out = join(dir, "existing-directory");
+    mkdirSync(join(out, "files/conversation-lead-thr/report.md"), { recursive: true });
+    writeFileSync(join(out, "files/conversation-lead-thr/report.md/mine.txt"), "mine");
+    const { code, result } = await run(["export", "--thread", LEAD, "--out", out, "--force", "--max-bytes", "2KB", "--json"]);
+    expect(code).toBe(0);
+    expect(readFileSync(join(out, "files/conversation-lead-thr/report.md/mine.txt"), "utf8")).toBe("mine");
+    expect(result.files.map((file: { file: string }) => file.file)).toContain("files/conversation-lead-thr/report (2).md");
   });
 
   it("names every file so any system can write it: no path, no device name, no trailing dot", () => {
