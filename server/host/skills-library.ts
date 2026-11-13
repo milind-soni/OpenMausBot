@@ -29,7 +29,7 @@ import {
 } from "../skill-share.ts";
 import { enabledSkillFiles, listSkills, readSkillFile, resolveBotSkills, skillsSystemPrompt, type SkillListing } from "../skills.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
-import { claudeUserSkillsEnabled } from "../turn-settings.ts";
+import { claudeUserSkillsEnabled, settingsTurnFields } from "../turn-settings.ts";
 import { typedWords } from "../typed-sends.ts";
 import { TASK_WORKSPACES_DIR } from "../workspace.ts";
 
@@ -128,6 +128,12 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   const liveAssigned = (bot: BotRecord) => store.bot(bot.id)?.assignedSkills ?? bot.assignedSkills ?? [];
   const conversationSkills = (bot: BotRecord, threadId: string): string[] | undefined =>
     skillsLibraryEnabled(cfg) ? conversationAssignedSkills(bot.id, liveAssigned(bot), conversationStartedAt(threadId)) : undefined;
+  const turnSkillFiles = (bot: BotRecord, threadId: string, instance?: TurnInstance): string[] => {
+    const assigned = conversationSkills(bot, threadId);
+    const names = resolveBotSkills(bot.id, assigned).filter((skill) => skill.enabled).map((skill) => skill.name);
+    return [...enabledSkillFiles(bot.id, names, assigned).values(),
+      ...importsFor(bot, assigned, instance).map((skill) => skill.file)];
+  };
 
   const engineOf = (instance: TurnInstance | undefined): SkillTurnEngine | undefined => {
     if (!instance) return undefined;
@@ -268,11 +274,13 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       return listedImports(bot, importsFor(bot, conversationSkills(bot, threadId), instance));
     },
 
-    turnSkillFiles(bot: BotRecord, threadId: string, instance?: TurnInstance): string[] {
-      const assigned = conversationSkills(bot, threadId);
-      const names = resolveBotSkills(bot.id, assigned).filter((skill) => skill.enabled).map((skill) => skill.name);
-      return [...enabledSkillFiles(bot.id, names, assigned).values(),
-        ...importsFor(bot, assigned, instance).map((skill) => skill.file)];
+    turnSkillFiles,
+
+    turnSettings(bot: BotRecord, threadId: string, instance: TurnInstance, restrictsMcp: boolean) {
+      return {
+        ...settingsTurnFields(cfg, DATA_DIR, restrictsMcp),
+        ...(instance.driverKind === "antigravityAgent" ? { skillFiles: turnSkillFiles(bot, threadId, instance) } : {}),
+      };
     },
 
     /** Each `/name` called for one of the bot's own, library or imported skills, or one its engine loads by itself. `lines`

@@ -64,6 +64,10 @@ describe("words a person typed", () => {
     const bot = botWith("standup");
     const record = { id: bot } as BotRecord;
     expect(host.turnSkillFiles(record, "thread")).toEqual([enabledSkillFile(bot, "standup")]);
+    expect(host.turnSettings(record, "thread", { instanceId: "antigravity", driverKind: "antigravityAgent" }, true))
+      .toMatchObject({ skillFiles: [enabledSkillFile(bot, "standup")], mcpFromUserConfig: false });
+    expect(host.turnSettings(record, "thread", { instanceId: "claude", driverKind: "claudeAgent" }, false))
+      .not.toHaveProperty("skillFiles");
     expect("error" in setSkillEnabled(bot, "standup", false)).toBe(false);
     expect(host.turnSkillFiles(record, "thread")).toEqual([]);
   });
