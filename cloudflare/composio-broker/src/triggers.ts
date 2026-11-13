@@ -211,7 +211,7 @@ export async function listTriggerTypes(url: URL, installation: EventInstallation
 export async function getTriggerType(slug: string, env: Env) {
   const type = await lookupTriggerType(env, slug);
   if (type === NEEDS_SETUP) {
-    return json({ error: `${slug.toUpperCase()} can't be used yet: this event needs setup on OpenMausBot's side first. Pick another event this app offers.` }, 422);
+    return json({ error: `${slug.toUpperCase()} can't be used yet: this event needs webhook setup on our side first. Pick another event this app offers.` }, 422);
   }
   return type ? json(type) : json({ error: "unknown or unsupported event type" }, 404);
 }

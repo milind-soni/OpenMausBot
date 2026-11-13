@@ -708,7 +708,7 @@ describe("event types", () => {
     const owner = await h.install();
     const response = await h.call(owner, "/v1/trigger-types/gmail_own_endpoint");
     expect(response.status).toBe(422);
-    expect(await response.json()).toEqual({ error: "GMAIL_OWN_ENDPOINT can't be used yet: this event needs setup on OpenMausBot's side first. Pick another event this app offers." });
+    expect(await response.json()).toEqual({ error: "GMAIL_OWN_ENDPOINT can't be used yet: this event needs webhook setup on our side first. Pick another event this app offers." });
     expect((await h.call(owner, "/v1/trigger-types/GMAIL_OWN_ENDPOINT")).status).toBe(422);
   });
 });

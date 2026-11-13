@@ -171,7 +171,7 @@ describe("AppTriggerManager", () => {
   it("says an event that needs setup on our side can't be used yet, and an unknown one can't be watched", async () => {
     const triggers = manager();
     const create = (event: string) => triggers.create({ botId: "bot-1", name: "New mail", prompt: "Summarize it.", app: "gmail", event });
-    await expect(create("GMAIL_OWN_ENDPOINT")).rejects.toThrow("GMAIL_OWN_ENDPOINT can't be used yet: this event needs setup on OpenMausBot's side first. Pick another event this app offers.");
+    await expect(create("GMAIL_OWN_ENDPOINT")).rejects.toThrow("GMAIL_OWN_ENDPOINT can't be used yet: this event needs webhook setup on our side first. Pick another event this app offers.");
     await expect(create("GMAIL_NOT_A_THING")).rejects.toThrow("GMAIL_NOT_A_THING is not an event OpenMausBot can watch.");
     expect(triggers.list()).toEqual([]);
   });
