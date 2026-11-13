@@ -362,8 +362,13 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       const pointed = pointing ? prepareRoomPointed(store, threadId, body.pointed) : null;
       if (pointed && !pointed.ok) return json(res, pointed.status, refusalBody(pointed));
       const pick = pointed?.pick;
-      if (pick && !roomPickBots(pick).some((id) => group.memberIds.includes(id) && store.bot(id))) {
+      // Every page bot must still be here and free to answer, or part of the pick would reach no one.
+      const pageBotIds = roomPickBots(pick);
+      if (!pageBotIds.every((id) => group.memberIds.includes(id) && store.bot(id))) {
         return json(res, 409, { error: "the bot that made this page is no longer in this room" });
+      }
+      if (!group.dm && pageBotIds.some((id) => group.holds?.[id])) {
+        return json(res, 409, { error: "the bot that made this page is on hold in this room; let it answer again first" });
       }
       const sendId = parseSendId(body.sendId);
       const replyTo = resolveReplyTarget(threadId, body.replyToId);

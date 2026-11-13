@@ -70,4 +70,11 @@ it("sends a pick on a room page to the bot that made it, and to no other member"
   // A pick must name a page in this room, and a goal is a plain typed line.
   expect((await api(`/api/groups/${group.id}/messages`, { text: "This", pointed: [{ ...pointed, appId: "not-a-page" }] })).status).toBe(404);
   expect((await api(`/api/groups/${group.id}/messages`, { text: "This", mode: "goal", pointed: [pointed] })).status).toBe(400);
+
+  // A pick whose page bot is on hold would reach no one, so it is refused until the bot may answer again.
+  expect((await api(`/api/groups/${group.id}/holds`, { botId: designer.id, held: true })).status).toBeLessThan(300);
+  const held = await api(`/api/groups/${group.id}/messages`, { text: "This", pointed: [pointed] });
+  expect(held.status, JSON.stringify(held.body)).toBe(409);
+  expect(held.body.error).toContain("on hold");
+  expect(evidence(designer.id).length).toBe(designerTurns + 1);
 }, 120_000);
