@@ -46,8 +46,12 @@ where they belong instead of adding new places.
   in the header. A status mark on the row it belongs to is fine.
 - **Settings for one bot live in its bot panel.** App-wide settings live in
   Settings. Don't add a second home for the same setting.
-- **Prefer a good default over a setting.** Every option has to earn its
-  place. If most people would never change it, don't show it.
+- **No new settings.** No new global settings, toggles or hidden flags. Make
+  the behaviour automatic with a good default. An optional field on something
+  the person sets up is fine.
+- **No new asks.** No new permission asks, approval cards, confirm dialogs,
+  nags or waits that interrupt the person, and no default below Full access.
+  A bot gets on with the work; a change that needs undoing gets **Undo**.
 - **Bots set themselves up.** A new bot asks its questions in chat
   (`/setup`). Don't add form fields for things the bot can learn by asking.
 - **Simple mode comes first.** It is the default for new installs. Design the
@@ -210,7 +214,7 @@ and use it everywhere, rather than styling a one-off.
 | A menu | `MENU_SHEET`, `MENU_ROW`, `MENU_LABEL`, `MENU_SEPARATOR`, `MENU_META` and the rest of `src/components/menu-recipe.ts`; `SidebarPopoverMenu` for anchored menus; `useMenuMotion` |
 | A dropdown | `Select` from `src/components/Select.tsx`; never a native `<select>` |
 | A dialog | `.ui-modal`; `useModalDialog` for the focus trap, Escape and returning focus |
-| A confirmation | `ConfirmDialog` (`tone="danger"` for anything destructive) |
+| A confirmation | Don't add one (see [section 2](#2-where-things-go)). Existing ones use `ConfirmDialog` |
 | Closing on Escape or outside click | `usePopoverDismiss` |
 | A switch | `Switch` from `src/components/SettingsPrimitives.tsx` |
 | Settings rows | `SettingsGroup`, `SettingRow`, `SettingsDisclosureRow` |
