@@ -33,4 +33,11 @@ describe("window preferences on the server", () => {
     expect(prefs.write("appearance.skin", "dusk")).toBeNull();
     expect(frames.map((frame) => frame.value)).toEqual(["midnight", "dusk"]);
   });
+
+  it("refuses a preference the window never reported, such as a desktop-only one from a browser", () => {
+    const frames: Record<string, unknown>[] = [];
+    const prefs = createWindowPrefs({ broadcast: (frame) => frames.push(frame), ownerOrAdmin: () => true, windowOpen: () => true });
+    expect(prefs.write("remote.relay", true)).toMatch(/^The open MausBot window can't change this here\./);
+    expect(frames).toEqual([]);
+  });
 });

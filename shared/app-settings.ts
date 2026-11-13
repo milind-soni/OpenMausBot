@@ -32,8 +32,12 @@ export const FONT_IDS = ["skin", "system", "inter", "poppins", "serif"] as const
 export const CHAT_WIDTH_IDS = ["standard", "wide", "full"] as const;
 /** The Enter-adds-a-line modes are for input methods that confirm a conversion with Enter (Japanese). */
 export const SEND_KEYS = ["enter", "shift-enter", "mod-enter"] as const;
+export const PLACE_SWATCHES = ["blue", "green", "amber", "rose", "violet", "slate"] as const;
+export const TALK_KEYS = ["ctrl-opt-space", "ctrl-shift-space", "opt-shift-space"] as const;
+const pinnedPage = z.object({ name: z.string().trim().min(1).max(40), url: z.string().trim().max(2048).regex(/^https?:\/\/\S+$/, "an http(s) address") }).strict();
 
-/** Preferences kept in the window, by setting id; the renderer applies a frame with the matching setter. */
+/** Preferences kept in the window or behind the desktop app's own bridge, by setting id; the renderer applies a frame with
+ * the matching setter. */
 export const WINDOW_PREFS = {
   "appearance.skin": z.enum([...SKIN_IDS, "system"]),
   "appearance.advanced": z.boolean(),
@@ -41,6 +45,28 @@ export const WINDOW_PREFS = {
   "appearance.chatWidth": z.enum(CHAT_WIDTH_IDS),
   "general.sendKey": z.enum(SEND_KEYS),
   "general.notificationSounds": z.boolean(),
+  "appearance.userBubbles": z.boolean(),
+  "appearance.runCard": z.boolean(),
+  "appearance.showThreads": z.boolean(),
+  "appearance.toolsLayout": z.enum(["rows", "toolbar"]),
+  "appearance.pinnedCircles": z.boolean(),
+  "appearance.universalPins": z.boolean(),
+  "appearance.pinnedPages": z.array(pinnedPage).max(6),
+  "appearance.showComputers": z.boolean(),
+  "appearance.windowFrame": z.boolean(),
+  "appearance.sidebarColor": z.enum([...PLACE_SWATCHES, "none"]),
+  "general.followUp": z.enum(["steer", "queue"]),
+  "general.finishedNotifications": z.boolean(),
+  "general.notificationFeed": z.boolean(),
+  "general.analytics": z.boolean(),
+  "general.openAtLogin": z.boolean(),
+  "general.talkShortcut": z.object({ enabled: z.boolean(), key: z.enum(TALK_KEYS) }).strict(),
+  "account.productEmails": z.boolean(),
+  "remote.wifi": z.boolean(),
+  "remote.relay": z.boolean(),
+  "remote.tailscale": z.boolean(),
+  "remote.keepAwake": z.boolean(),
+  "remote.httpsAddress": z.boolean(),
 } as const;
 export type WindowPrefId = keyof typeof WINDOW_PREFS;
 export type WindowPrefValue<I extends WindowPrefId> = z.infer<(typeof WINDOW_PREFS)[I]>;
