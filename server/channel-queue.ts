@@ -6,6 +6,7 @@ import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-
 import { drainCoalesceHead, DRAIN_COALESCE_MAX_ITEMS } from "./admission.ts";
 import type { ResolvedSender } from "../shared/wire.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
+import type { RoomPick } from "./room-pointed.ts";
 
 export interface ChannelQueueItem {
   id: string;
@@ -19,6 +20,8 @@ export interface ChannelQueueItem {
   reaction?: string;
   /** Bot ids picked from the @ list; the turn that drains this line reads its @names with them. */
   mentions?: string[];
+  /** What the person pointed at in a member's page; only that page's bot reads it. */
+  pointed?: RoomPick;
   queuedAt: number;
 }
 
@@ -65,6 +68,7 @@ export function queueChannelMessage(
     trigger?: UsageTrigger;
     reaction?: string;
     mentions?: string[];
+    pointed?: RoomPick;
   } = {},
 ): QueuedChannelMessage {
   const entry = queues.get(threadId) ?? { groupId, items: [] };
@@ -80,6 +84,7 @@ export function queueChannelMessage(
     trigger: options.trigger,
     ...(options.reaction ? { reaction: options.reaction } : {}),
     ...(options.mentions?.length ? { mentions: options.mentions } : {}),
+    ...(options.pointed ? { pointed: options.pointed } : {}),
     queuedAt: Date.now(),
   };
   saveChatFollowup({ id: item.id, kind: "channel", ownerId: groupId, threadId, payload: item });
@@ -208,6 +213,7 @@ export function headChannelGroup(items: readonly ChannelQueueItem[]): ChannelQue
 function coalesceIdentity(item: ChannelQueueItem): string {
   if (item.via === "api") return `api:${item.id}`;
   if (item.mode !== "chat") return `mode:${item.mode}:${item.id}`;
+  if (item.pointed) return `pointed:${item.id}`;
   if (item.sender) return `person:${item.sender.id ?? item.sender.name}`;
   return "person:local";
 }

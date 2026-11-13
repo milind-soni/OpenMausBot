@@ -1,8 +1,15 @@
 // Runs on the harness, never the renderer: the key must not leave the server. OMB_ELEVENLABS_API overrides the
 // base URL for dev and tests.
 import { elevenLabsProviderApi } from "../included-services.ts";
+import { userErrorThrown } from "../user-errors.ts";
 
 const MODEL = "eleven_flash_v2_5";
+// Flash v2.5 has no Thai, Bengali, Hebrew, Georgian, Armenian, Gujarati, Punjabi, Telugu, Kannada or Malayalam; Eleven v3
+// speaks them. Text in one of their scripts goes to v3, everything else stays on the faster Flash. The plan's included
+// voice relay takes Flash and Turbo only, so through it every line stays on Flash.
+const BEYOND_FLASH = /[\u0E00-\u0E7F\u0980-\u09FF\u0590-\u05FF\u10A0-\u10FF\u1C90-\u1CBF\u0530-\u058F\u0A80-\u0AFF\u0A00-\u0A7F\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F]/;
+export const speechModel = (text: string, included = false): string => (!included && BEYOND_FLASH.test(text) ? "eleven_v3" : MODEL);
+const HEARING_MODEL = "scribe_v2";
 // 64kbps mono is indistinguishable for speech and a third of the bytes
 const FORMAT = "mp3_44100_64";
 
@@ -28,14 +35,14 @@ async function safeJson(res: Response): Promise<any> {
   }
 }
 
-function message(status: number, what: string, body: any): string {
+function message(status: number, what: string, body: any, permissions = "Voices and Text to Speech"): string {
   const theirs =
     (typeof body?.detail === "string" && body.detail.trim()) ||
     (typeof body?.detail?.message === "string" && body.detail.message.trim()) ||
     (typeof body?.message === "string" && body.message.trim()) ||
     "";
   if (status === 401 || status === 403) {
-    return "ElevenLabs rejected that key. If it's a restricted key, give it the Voices and Text to Speech permissions — or paste an unrestricted one.";
+    return `ElevenLabs rejected that key. If it's a restricted key, give it the ${permissions} permissions — or paste an unrestricted one.`;
   }
   if (status === 429) return theirs || "ElevenLabs is rate-limiting this account — wait a moment and try again.";
   if (status === 402) return theirs || "ElevenLabs says this account is out of credit.";
@@ -149,7 +156,7 @@ export interface Synthesis {
   audio: Promise<Audio>;
 }
 
-export function synthesize(text: string, voiceId: string, key: string, api: string): Synthesis {
+export function synthesize(text: string, voiceId: string, key: string, api: string, included = false): Synthesis {
   const firstAudio = withResolvers<Audio>();
   const audio = withResolvers<Audio>();
   // Callers may consume only `audio`: a failure before the first chunk must not become an unhandled rejection.
@@ -159,7 +166,7 @@ export function synthesize(text: string, voiceId: string, key: string, api: stri
       const res = await fetch(`${api}/text-to-speech/${encodeURIComponent(voiceId)}/stream?output_format=${FORMAT}`, {
         method: "POST",
         headers: { "xi-api-key": key, "content-type": "application/json", accept: "audio/mpeg" },
-        body: JSON.stringify({ text, model_id: MODEL }),
+        body: JSON.stringify({ text, model_id: speechModel(text, included) }),
         redirect: "error",
         signal: AbortSignal.timeout(60_000),
       });
@@ -182,4 +189,27 @@ export function synthesize(text: string, voiceId: string, key: string, api: stri
     }
   })();
   return { firstAudio: firstAudio.promise, audio: audio.promise };
+}
+
+/** Speech-to-text with Scribe, for listening where no Fish Audio key is saved. Only the person's own key comes here. */
+export async function transcribe(audio: Uint8Array, mime: string, key: string, api: string): Promise<string> {
+  const form = new FormData();
+  form.append("model_id", HEARING_MODEL);
+  form.append("tag_audio_events", "false");
+  form.append("file", new Blob([audio as Uint8Array<ArrayBuffer>], { type: mime }), "speech.wav");
+  let res: Response;
+  try {
+    res = await fetch(`${api}/speech-to-text`, {
+      method: "POST",
+      headers: { "xi-api-key": key },
+      body: form,
+      redirect: "error",
+      signal: AbortSignal.timeout(60_000),
+    });
+  } catch {
+    throw userErrorThrown("serverError.voice.elevenLabsTranscribeConnection");
+  }
+  const body = await safeJson(res);
+  if (!res.ok) throw new Error(message(res.status, "hearing you", body, "Speech to Text"));
+  return typeof body?.text === "string" ? body.text.trim() : "";
 }
