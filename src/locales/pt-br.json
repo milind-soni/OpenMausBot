@@ -10657,5 +10657,11 @@
   "computer.recovery.restart": "Reiniciar computador",
   "computer.recovery.restartTitle": "Para e inicia de novo este computador na nuvem. Os programas abertos são fechados; os arquivos continuam lá.",
   "computer.recovery.replace": "Substituir computador",
-  "computer.recovery.replaceTitle": "Exclui este computador na nuvem e dá um novo ao bot. Os arquivos que estão só nele são perdidos."
+  "computer.recovery.replaceTitle": "Exclui este computador na nuvem e dá um novo ao bot. Os arquivos que estão só nele são perdidos.",
+  "settings.browser.proxy": "Proxy SOCKS5",
+  "settings.browser.proxyDetail": "Proxy SOCKS5 opcional, sem autenticação, para sites públicos no navegador integrado. O Meu Chrome mantém as próprias configurações; destinos privados e locais continuam com as proteções de sempre.",
+  "settings.browser.proxyConfigured": "As novas conexões do navegador integrado usam este proxy SOCKS5. O Meu Chrome mantém as próprias configurações; destinos privados e locais continuam protegidos.",
+  "settings.browser.proxyInactive": "Salvo, mas só funciona com o navegador integrado em hosts compatíveis.",
+  "settings.browser.proxySave": "Salvar",
+  "settings.browser.proxyClear": "Remover"
 }
