@@ -1285,6 +1285,21 @@ describe("Store", () => {
     expect(restored.bot(lead.id)?.managedSections).toEqual(["", "Research"]);
   });
 
+  it("gives the main Chief each department one run makes before the first grant lands, except one removed again", async () => {
+    const store = new Store(selection);
+    const chief = store.createBot({ name: "Chief" });
+    store.setChiefOfStaff(chief.id);
+    store.createBot({ name: "First", section: "First team" });
+    store.createBot({ name: "Second", section: "Second team" });
+    // A failed import rolls its new department back the same way.
+    const member = store.createBot({ name: "Imported", section: "Imported team" });
+    store.deleteBot(member.id);
+    expect(store.changeEmptySection("Imported team", null)).toBeUndefined();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(store.bot(chief.id)?.managedSections).toEqual(["First team", "Second team"]);
+    expect(new Store(selection).bot(chief.id)?.managedSections).toEqual(["First team", "Second team"]);
+  });
+
   it("lands a created specialist in its proposed working folder, keeping the private workspace clean", () => {
     const store = new Store(selection);
     const chief = store.createBot({ name: "Chief", section: "Ops" });

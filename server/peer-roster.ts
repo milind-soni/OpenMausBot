@@ -43,7 +43,7 @@ export function inChargeOfEvery(
   bot: Pick<RosterMember, "section" | "chiefOfStaff" | "managedSections" | "createdBy" | "reportsTo" | "defaultBot">,
   departments: readonly string[],
 ): boolean {
-  if (bot.chiefOfStaff !== true || botOwner(bot) || !Array.isArray(bot.managedSections) || !bot.managedSections.length) return false;
+  if (bot.chiefOfStaff !== true || botOwner(bot)) return false;
   return ["", ...departments].every(name => hasTeamAuthority(bot, name));
 }
 
