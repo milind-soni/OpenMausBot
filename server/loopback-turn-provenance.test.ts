@@ -88,8 +88,10 @@ describe("loopback shared-computer request provenance", () => {
     const proof = { kind: "companion" as const, deviceId: "paired-device", credentialId: "rotated-proof" };
     const request = { requestProvenance: proof, messageId: "request-message", generations: new Set(["new-generation"]) };
     expect(authz.principal(request, "old-generation", own, [], () => false, [])).toBeNull();
+    const credentialIsCurrent = (candidate: typeof proof) => candidate.credentialId === proof.credentialId;
+    expect(authz.principal(request, "new-generation", own, [], () => false, [], credentialIsCurrent)).toBe(OWN_SERVER_LENDER);
     authz.revokeCompanion("paired-device", [request]);
     expect(request).toHaveProperty("stopped", true);
-    expect(authz.principal(request, "new-generation", own, [], () => false, [])).toBeNull();
+    expect(authz.principal(request, "new-generation", own, [], () => false, [], credentialIsCurrent)).toBeNull();
   });
 });
