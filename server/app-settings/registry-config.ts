@@ -8,6 +8,7 @@ import { IMAGE_PROVIDERS } from "../../shared/image-generation.ts";
 import { EFFORT_LEVELS } from "../../shared/wire.ts";
 import { DEFAULT_WINDOW_MINUTES } from "../cache-keepwarm.ts";
 import { botsTowardLimit } from "../../shared/bot-limit.ts";
+import { parseSocks5Proxy } from "../browser/egress/policy.ts";
 import { CONFIG_PATCH_FIELDS as F, MAX_THREAD_EVENT_LOG_BYTES, MIN_THREAD_EVENT_LOG_BYTES } from "../config.ts";
 import { display, withoutKeys, type RegistryDeps, type SettingEntry, type Where, type WritableSpec } from "./registry.ts";
 
@@ -127,6 +128,14 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
       synonyms: ["local network", "lan", "browser sites", "intranet"], value: z.boolean(), allowed: "true or false",
       current: () => cfg().browserEngine?.egress?.localNetwork === true, patch: (localNetwork) => ({ browserEngine: { egress: { localNetwork } } }),
       says: (on) => (on ? "Let bots' browsers open sites on your local network" : "Keep bots' browsers off your local network"),
+    }),
+    section({
+      id: "desktops.browserProxy", label: "Browser proxy", help: "An unauthenticated SOCKS5 proxy bots' browsers reach public sites through; empty sends them direct. Its address is never shown, only whether one is set.",
+      where: "Settings → Desktops & browser", synonyms: ["proxy", "socks", "socks5", "browser proxy"],
+      value: z.string().trim().max(512).refine((text) => text === "" || parseSocks5Proxy(text) !== null, "an unauthenticated socks5://host:port address, or empty"),
+      allowed: 'an unauthenticated "socks5://host:port", or "" for no proxy', current: () => cfg().browserEngine?.egress?.proxy ?? "",
+      read: () => (cfg().browserEngine?.egress?.proxy ? "set" : ""), patch: (proxy) => ({ browserEngine: { egress: { proxy } } }),
+      says: (proxy) => (proxy ? "Send bots' browsers to public sites through the SOCKS5 proxy you named" : "Send bots' browsers to public sites directly, with no proxy"),
     }),
     section({
       id: "desktops.browserEngine", label: "Browser engine", help: "What runs bots' browsers: agent-browser (the default) or MausBot's own Chrome driver (early).", where: "Settings → Desktops & browser",

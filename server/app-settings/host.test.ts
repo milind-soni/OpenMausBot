@@ -406,6 +406,16 @@ describe("every other setting applies at once with Undo, Full access or not", ()
     expect(fx.botPatches).toEqual([{ botId: "kiwi", body: { memoryEnabled: false, computer: "local" } }, { botId: "kiwi", body: { memoryEnabled: true, computer: null } }]);
   });
 
+  it("the browser proxy takes only a socks5 address, reads as set or not set, and Undo clears it", async () => {
+    const fx = fixture();
+    expect((await fx.set("desktops.browserProxy", "http://proxy.example:8080")).status).toBe(400);
+    const result = await fx.set("desktops.browserProxy", "socks5://proxy.example:1080");
+    expect(result.body.text).toMatch(/^Done: Send bots' browsers to public sites through the SOCKS5 proxy you named\. Browser proxy now: set\./);
+    expect(JSON.stringify(fx.messages)).not.toContain("proxy.example");
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.saved).toEqual([{ browserEngine: { egress: { proxy: "socks5://proxy.example:1080" } } }, { browserEngine: { egress: { proxy: "" } } }]);
+  });
+
   it("a bot's library skills are set from the full list, and Undo gives back the earlier list", async () => {
     const fx = fixture();
     await fx.set("bots.skills", JSON.stringify({ botId: "clive", skills: [] }));
