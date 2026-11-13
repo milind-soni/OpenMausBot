@@ -1,7 +1,7 @@
 import { SKIN_IDS } from "../../shared/app-settings";
 import { paintAuroraField } from "./aurora-field";
 import { hasPriorRun } from "./prior-run";
-import { reportWindowPrefs } from "./window-prefs";
+import { windowPrefChanged } from "./window-pref-changes";
 
 export { SKIN_IDS };
 export type SkinId = (typeof SKIN_IDS)[number];
@@ -134,7 +134,7 @@ export function applySkinChoice(choice: SkinChoice): void {
   }
   followSystem(choice === "system");
   paintSkin(resolveSkin(choice));
-  reportWindowPrefs();
+  windowPrefChanged();
 }
 
 export function applySkin(id: SkinId): void {

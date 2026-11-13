@@ -1,5 +1,5 @@
 import { FONT_IDS } from "../../shared/app-settings";
-import { reportWindowPrefs } from "./window-prefs";
+import { windowPrefChanged } from "./window-pref-changes";
 
 export { FONT_IDS };
 export type FontId = (typeof FONT_IDS)[number];
@@ -36,5 +36,5 @@ export function applyFont(id: FontId): void {
     getStore()?.setItem(FONT_KEY, id);
   } catch {
   }
-  reportWindowPrefs();
+  windowPrefChanged();
 }

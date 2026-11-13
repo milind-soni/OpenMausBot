@@ -20,6 +20,7 @@ import { setShowThreads, showThreads } from "./thread-preferences";
 import { readColorUserBubbles, setColorUserBubbles } from "./user-bubble-preference";
 import { latestWebPanels, setWebPanels } from "./web-panel-preferences";
 import { newWebPanelId, validateWebPanel, type WebPanel } from "./web-panels";
+import { onWindowPrefChanged } from "./window-pref-changes";
 
 type Pref<I extends WindowPrefId> = { read(): unknown; write(value: WindowPrefValue<I>): unknown };
 const ogb = () => (typeof window === "undefined" ? undefined : window.ogb);
@@ -36,12 +37,12 @@ const route = (name: CompanionRoute): { read(): unknown; write(on: boolean): unk
 
 // Called, never referenced at load: many tests mock these modules with only the exports they use.
 const PREFS: { [I in WindowPrefId]: Pref<I> } = {
-  "appearance.skin": { read: readSkinChoice, write: applySkinChoice },
-  "appearance.advanced": { read: readAdvancedMode, write: setAdvancedMode },
-  "appearance.font": { read: readFont, write: applyFont },
-  "appearance.chatWidth": { read: readChatWidth, write: applyChatWidth },
-  "general.sendKey": { read: readSendKey, write: setSendKey },
-  "general.notificationSounds": { read: notificationSoundsEnabled, write: setNotificationSounds },
+  "appearance.skin": { read: () => readSkinChoice(), write: (choice) => applySkinChoice(choice) },
+  "appearance.advanced": { read: () => readAdvancedMode(), write: (on) => setAdvancedMode(on) },
+  "appearance.font": { read: () => readFont(), write: (font) => applyFont(font) },
+  "appearance.chatWidth": { read: () => readChatWidth(), write: (width) => applyChatWidth(width) },
+  "general.sendKey": { read: () => readSendKey(), write: (key) => setSendKey(key) },
+  "general.notificationSounds": { read: () => notificationSoundsEnabled(), write: (on) => setNotificationSounds(on) },
   "appearance.userBubbles": { read: () => readColorUserBubbles(), write: (on) => setColorUserBubbles(on) },
   "appearance.runCard": { read: () => showRunCard(), write: (on) => setShowRunCard(on) },
   "appearance.showThreads": { read: () => showThreads(), write: (on) => setShowThreads(on) },
@@ -121,3 +122,5 @@ export function reportWindowPrefs(): void {
       .catch(() => undefined);
   }, 200);
 }
+
+onWindowPrefChanged(reportWindowPrefs);

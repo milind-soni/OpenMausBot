@@ -3,7 +3,7 @@ import { useSyncExternalStore } from "react";
 import { SEND_KEYS } from "../../shared/app-settings";
 import { activeLocale } from "./i18n";
 import { isMacPlatform } from "./keyboard-shortcuts";
-import { reportWindowPrefs } from "./window-prefs";
+import { windowPrefChanged } from "./window-pref-changes";
 
 export const SEND_KEY_KEY = "omb-send-key";
 
@@ -87,7 +87,7 @@ export function setSendKey(mode: SendKey): void {
   } catch {
   }
   notify();
-  reportWindowPrefs();
+  windowPrefChanged();
 }
 
 export function useSendKey(): SendKey {
