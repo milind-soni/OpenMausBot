@@ -75,6 +75,21 @@ describe("J11: a failed place's row", () => {
     expect(show(pinned).buttons[0]).toContain("Clear this conversation&#x27;s place");
   });
 
+  it("names the bot's own setting as the cause of a missing Boat account, and both ways out", () => {
+    const { html, buttons } = show(stored({ state: "cc-needs-key", params: { bot: "Scout" }, source: "works-on" }));
+    expect(html).toContain("Scout is set to work on a cloud desktop, but no Boat account is connected. To work without one, choose another place in the Screen panel.");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toContain("Connect Boat");
+  });
+
+  it("doesn't send a User to a setting only an Admin can change", () => {
+    fixture.ownerOrAdmin = false;
+    const { html, buttons } = show(stored({ state: "cc-needs-key", params: { bot: "Scout" }, source: "works-on" }));
+    expect(html).toContain("Scout is set to work on a cloud desktop, but no Boat account is connected. Ask an Admin to change it.");
+    expect(html).not.toContain("Screen panel");
+    expect(buttons).toHaveLength(0);
+  });
+
   it("gives a User no button that changes a setting, and says who can", () => {
     fixture.ownerOrAdmin = false;
     const { html, buttons } = show(stored(hours), vi.fn());
@@ -84,7 +99,7 @@ describe("J11: a failed place's row", () => {
 
   it("reads the Boat sign-up as My Cloud's on a desktop with a paid plan", () => {
     const needsKey: PlaceRow = { state: "cc-needs-key", params: { bot: "Scout" }, source: "works-on" };
-    expect(show(stored(needsKey)).html).toContain("Bots here can get their own cloud desktops from Boat, a paid service.");
+    expect(show(stored(needsKey)).html).toContain("Scout is set to work on a cloud desktop, but no Boat account is connected.");
     const seat = { server: "mac", plan: true, role: "admin", mode: "simple" } as const;
     expect(placeRowViewFor(needsKey, seat)).toMatchObject({
       state: "cc-on-my-cloud", line: "Cloud desktops from your plan work for Cloud bots for now.", action: { id: "open-my-cloud" },
@@ -105,6 +120,10 @@ describe("the phone row", () => {
         "Cloud desktops can't start right now. It isn't anything you did. This conversation is back on Auto. Send your message again."],
       [{ state: "cc-unavailable", params: { bot: "Scout" }, source: "routine" },
         "Cloud desktops can't start right now. It isn't anything you did. Change where this routine runs."],
+      [{ state: "cc-needs-key", params: { bot: "Scout" }, source: "works-on" },
+        "Scout is set to work on a cloud desktop, but no Boat account is connected. To work without one, choose another place in the Screen panel. Connect your Boat account in Settings → API keys."],
+      [{ state: "cc-needs-key", params: { bot: "Scout" }, source: "pin" },
+        "This conversation is set to work on a cloud desktop, but no Boat account is connected. Connect your Boat account in Settings → API keys."],
       [{ state: "cc-at-once", params: { bot: "Bo", plan: "Personal", max: 1, holders: ["Ada"] }, source: "works-on" },
         "Your Personal plan includes 1 cloud desktop, and Ada has it. Manage your cloud desktops in Settings → Bot desktops."],
     ];
