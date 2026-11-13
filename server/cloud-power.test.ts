@@ -131,6 +131,24 @@ describe("the home's idle verdict", () => {
 });
 
 describe("the sleep handshake", () => {
+  it("keeps the home awake until its sleep marker is durable, then allows a retry", () => {
+    const h = home();
+    h.pass(CLOUD_IDLE_AWAKE_MS);
+    const marker = join(h.dataDir, "cloud-sleep.json");
+    mkdirSync(marker);
+    const held = h.power.sleepSignal();
+    expect(h.power.prepareSleep()).toEqual({ ok: false, busy: ["maintenance"] });
+    expect(h.power.sleeping()).toBe(false);
+    expect(held.aborted).toBe(false);
+    expect(h.sent).toEqual([]);
+    expect(wokeFromSleep(h.dataDir)).toBe(false);
+    rmSync(marker, { recursive: true });
+    expect(h.power.prepareSleep()).toEqual({ ok: true, nextDueAt: null });
+    expect(held.aborted).toBe(true);
+    expect(h.sent).toEqual([{ kind: "power", state: "sleeping" }]);
+    expect(wokeFromSleep(h.dataDir)).toBe(true);
+  });
+
   it("says no while busy, and yes when idle: tells clients, marks the volume and aborts held polls", () => {
     const h = home();
     expect(h.power.prepareSleep()).toEqual({ ok: false, busy: ["just-woke"] });
@@ -298,6 +316,18 @@ describe("the Admin's signed power routes", () => {
     const bad = JSON.stringify({ v: 1, idleMinutes: 0 });
     expect((await send("POST", CLOUD_POWER_SLEEP_PATH, json(sign(CLOUD_POWER_SLEEP_PATH, "POST", bad)), bad)).body).toEqual({ error: "invalid_idle_minutes" });
     expect((await send("POST", CLOUD_POWER_SLEEP_PATH, json(sign(CLOUD_POWER_SLEEP_PATH, "POST", "{}")), body)).status).toBe(401);
+  });
+
+  it("does not tell the Admin to stop the home after a marker write failure", async () => {
+    const h = home();
+    const { sign, send } = routes(h);
+    h.pass(CLOUD_IDLE_AWAKE_MS);
+    mkdirSync(join(h.dataDir, "cloud-sleep.json"));
+    const body = JSON.stringify({ v: 1, idleMinutes: 10 });
+    const headers = { ...sign(CLOUD_POWER_SLEEP_PATH, "POST", body), "content-type": "application/json" };
+    expect(await send("POST", CLOUD_POWER_SLEEP_PATH, headers, body)).toEqual({ status: 409, body: { ok: false, busy: ["maintenance"] } });
+    expect(h.power.sleeping()).toBe(false);
+    expect(h.power.sleepSignal().aborted).toBe(false);
   });
 
   it("is not a route on a server without power (every route but these answers as before)", async () => {
