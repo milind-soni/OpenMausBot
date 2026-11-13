@@ -37,6 +37,19 @@ export function useChatFindRequests(threadId: string, open: boolean, setOpen: Di
   }, [threadId, open]);
 }
 
+export function useChatFindShortcut(inForkPanel: boolean, panelOpen: boolean, setOpen: Dispatch<SetStateAction<boolean>>): void {
+  useEffect(() => {
+    const onFind = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f" && inForkPanel === panelOpen) {
+        event.preventDefault();
+        setOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onFind);
+    return () => window.removeEventListener("keydown", onFind);
+  }, [inForkPanel, panelOpen, setOpen]);
+}
+
 function subscribe(watch: () => void) {
   watchers.add(watch);
   return () => {

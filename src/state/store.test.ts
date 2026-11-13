@@ -1000,18 +1000,25 @@ describe("notification routing", () => {
       selectedId: "bot-1",
       bots,
       groups,
+      forkPanel: null,
     })).toBe("main-thread");
     expect(visibleNotificationThread({
       activeView: "chat",
       selectedId: "room-1",
       bots,
       groups,
+      forkPanel: null,
     })).toBe("room-thread");
+    expect(visibleNotificationThread({
+      activeView: "chat", selectedId: "room-1", bots, groups,
+      forkPanel: { kind: "group", ownerId: "room-1", threadId: "fork-thread" } as AppState["forkPanel"],
+    }, "fork-thread")).toBe("fork-thread");
     expect(visibleNotificationThread({
       activeView: "routines",
       selectedId: "bot-1",
       bots,
       groups,
+      forkPanel: null,
     })).toBeNull();
   });
 });
