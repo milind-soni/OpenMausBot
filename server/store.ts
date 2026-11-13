@@ -1979,8 +1979,8 @@ export class Store {
   }
 
   reorderGroups(groupIds: string[]): GroupRecord[] | null {
-    if (!reorderInPlace(this.groups, groupIds)) return null;
-    this.saveGroups(this.groups, false); this.emit({ type: "groups.order" }); return this.groups;
+    const next = [...this.groups]; if (!reorderInPlace(next, groupIds)) return null; // saved before the live list changes
+    this.saveGroups(next, false); this.groups.splice(0, this.groups.length, ...next); this.emit({ type: "groups.order" }); return this.groups;
   }
 
   deleteProject(botId: string, projectId: string): BotRecord | null {
