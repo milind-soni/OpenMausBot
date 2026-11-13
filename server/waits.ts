@@ -147,6 +147,7 @@ export class WaitManager {
   private running = false;
   private stopped = false;
   private ticking = false;
+  private decisionSavePending = false;
   private pageTail: Promise<unknown> = Promise.resolve();
   private pagesQueued = 0;
 
@@ -357,7 +358,12 @@ export class WaitManager {
         }
         decided = true;
       }
-      if (decided) this.save();
+      // A failed save leaves its decisions in memory; a later tick must persist them before posting them.
+      if (decided) this.decisionSavePending = true;
+      if (this.decisionSavePending) {
+        this.save();
+        this.decisionSavePending = false;
+      }
 
       for (const wait of this.waits.slice()) {
         if (!wait.ending) continue;
