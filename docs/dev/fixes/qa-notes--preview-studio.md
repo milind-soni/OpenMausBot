@@ -173,3 +173,35 @@ All QA-owned browser, fixture-server, Vite, and harness processes are to be stop
 Actual Electron was not launched: native isolation from the live app/profile was not established. Native webview capture/history, Electron window integration and OS-specific behavior remain unverified; browser PDF native-viewer rendering is not an Electron test. Focus/roles/labels were inspected in Chrome; no physical screen reader was run.
 
 Both disposable environments have stopped. Fresh-run finally cleanup closed Chrome and owned harness/Vite/fixture processes and deleted the profile/project directory; port checks verify cleanup before delivery. Only this notes file is retained in this checkout; temporary screenshots and test scripts were removed after inspection. The notes-only local commit does not change application code.
+
+## Final gate at 2528492
+
+Independent Dell retest, 2026-11-13. **PASS / GO for the requested browser merge gate.** Tested exact detached `2528492` in `dell-preview-final`, including Z's `7492797` and SoSo's `8a994c6` / `776b9f0`. No product code changed. No new bugs found.
+
+### Isolation and method
+
+- Disposable harness/Vite listeners allocated by the OS, fresh headless real Chrome contexts, temporary project registry, `GBS_DATA_DIR`, and throwaway host-home fixture. `os.homedir()` was overridden in a child-only preload; no real home configuration was read or changed. No install, paid model turns, main checkout changes, merges or pushes.
+- Ran the retained `scripts/testing/preview-share-regression.mjs` logic through a temporary QA copy with the isolated-home adjustment. Independently added focus, single-image, link-only, actual opaque-origin, raw-path security and decoded-pixel assertions. Outgoing sharing POSTs were intercepted before delivery; this verifies payload/capture generation rather than a model response. Removed all browser route mocks before actual security requests.
+- Used the source Markdown heading, subheading, bold paragraph and four-cell table. Extended the image fixture to a known 160x120 green/red pattern for pixel validation, beyond the retained one-pixel fixture. This avoids mistaking a tiny, naturally centered source image for an empty capture.
+
+### Per-item results and reproduction
+
+| Item | Verdict | Steps and actual evidence |
+|---|---|---|
+| abe7fe48 — picker focus | PASS | In Preview Single, explicitly focus Choose a file from a project and open it. Focus enters Filter project files. Tab from the last control and Shift+Tab from the first remain inside the dialog. Close once with Escape, reopen and close with Close file picker. Both closures restore activeElement to the original choose-file trigger. |
+| abe7fe48 — Share focus and status | PASS | Explicitly focus Share to chat, open it: focus enters Send to. Repeat both trap directions. Escape and Close modal each restore the Share trigger, rather than BODY. The loaded preview still exposes a role=status containing Loaded. |
+| 9d4f135b and b0a8734e residual — Markdown fidelity | PASS | Preview sample.md in Single; share current size. The standalone export heading has the same computed 600 weight and 16px size as the live heading. Bold remains at least 600; all four table cells are present; neither raw # heading nor **bold** syntax appears. Decoded PNG was visually inspected: heading/subheading, bold paragraph and table are rendered. All eight source-based Markdown exports also contain the rendered heading/bold text and real text pixels. |
+| 8fc3c43f — eight Markdown sizes | PASS | Canvas, all eight presets, Share to chat, All selected sizes. One intercepted send contains exactly eight PNG attachments in preset order with correct bounded dimensions and size labels. Each PNG decodes and contains real text pixels; each exported SVG contains rendered Markdown. DOM mutation observation records at most six live artboard cards, no iframe/webview additions, and no retained temporary capture stages. |
+| 8fc3c43f — eight PNG sizes | PASS | Repeat with the known green/red PNG. One intercepted send contains eight correctly sized PNGs. Every decoded capture contains the colored source pixels (19,200 colored pixels for the first seven; 13,400 after bounded scaling on the eighth). Maximum six live cards; zero additional iframe/webviews and zero retained stages. |
+| 8fc3c43f — accurate atomic failure | PASS | Independently for Markdown and PNG, make canvas.toDataURL throw on the eighth capture, after seven successful captures. Modal remains open, error names the eighth preset and the underlying QA failure, and no send occurs. No misleading desktop-only advice and no partial attachment dispatch. Temporary stages are released. |
+| Single-size capture regression | PASS | Single Markdown produces one real PNG with preserved typography; Single PNG produces one PNG attachment. |
+| HTML/PDF browser sharing regression | PASS | Open project HTML, then project PDF, and Share to chat. Both show the desktop-app notice and send a source link with zero screenshot attachments. This is a link-sharing check; native PDF rendering was not requalified in this gate. |
+| Actual opaque-origin API smoke | PASS | Directly navigate fresh Chrome tabs to scripted project HTML on the isolated harness and Vite origins. CSP creates an opaque origin. Script fetches GET /api/bots and text/plain POST /api/bots/TEST_ID/messages. CDP response extra-info records actual 403/403 on each origin; JavaScript receives only rejected fetches. Test bot state contains no SECURITY_PROBE message. No route mocks are installed for these requests. |
+| Encoded dot-segment bypass and valid asset | PASS | Against both direct harness and actual Vite proxy, raw HTTP requests preserve four parent segments under a valid capability asset prefix, using literal .., %2e%2e, .%2E and %2e. variants, normalizing toward /api/bots. With Origin:null and Sec-Fetch-Site:cross-site, all eight requests return 403. A valid capability PNG asset still returns 200 from each endpoint. Security smoke used ports 50930/50931. |
+
+### Validation, limits and cleanup
+
+- **PASS:** `pnpm typecheck`; `pnpm test` — **424/424 tests across 51 files**; `pnpm build`. Existing >500KB chunk advisory remains.
+- An initial security observer used Network.responseReceived, which does not expose these CORS-refused responses; it timed out and was not accepted as evidence. The separate successful security run used Network.responseReceivedExtraInfo to verify the real HTTP status codes.
+- Actual native Electron was not launched because safe isolation from the running desktop app has not been established. Native webview capture, OS integration and a physical screen reader remain unverified. This gate approves the requested browser repairs and security smoke; it does not claim new native coverage or re-run every original Preview scenario.
+- All owned Chrome/harness/Vite processes exited; temporary profiles, fixtures, scripts and screenshots were removed. No live app data was touched. Notes only are committed locally; nothing pushed.
