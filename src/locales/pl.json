@@ -7147,6 +7147,8 @@
   "connectedWorkspaces.localTitle": "Środowiska na tym komputerze",
   "connectedWorkspaces.newEnvironment": "Nowe środowisko",
   "defaultBot.hidden": "{name} nie ma już na pasku bocznym. Pokaż go znowu w Ustawienia → Ogólne.",
+  "defaultBot.demote": "Zmień w zwykłego bota",
+  "defaultBot.demoteHint": "Usuwa wbudowaną ochronę: potem można go zarchiwizować lub usunąć jak każdego innego bota.",
   "defaultBot.hide": "Ukryj na pasku bocznym",
   "defaultBot.hideHint": "Dalej pracuje. Pokaż go znowu w Ustawienia → Ogólne.",
   "defaultBot.show.title": "Pokaż {name} na pasku bocznym",

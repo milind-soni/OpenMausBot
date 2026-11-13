@@ -4727,6 +4727,8 @@
   "defaultBot.hide": "Ẩn khỏi thanh bên",
   "defaultBot.hideHint": "Nó vẫn tiếp tục hoạt động. Hiện lại trong Cài đặt → Chung.",
   "defaultBot.hidden": "{name} đã được ẩn khỏi thanh bên. Hiện lại trong Cài đặt → Chung.",
+  "defaultBot.demote": "Chuyển thành bot thường",
+  "defaultBot.demoteHint": "Gỡ lớp bảo vệ có sẵn: sau đó có thể lưu trữ hoặc xóa nó như mọi bot khác.",
   "defaultBot.show.title": "Hiện {name} trên thanh bên",
   "defaultBot.show.subtitle": "Trợ lý cho mọi việc trong ứng dụng. Khi ẩn, nó vẫn hoạt động và tìm kiếm vẫn thấy nó.",
   "teamMove.blockedDefault": "{name} ở lại đây: mỗi người trong nhóm có một trợ lý riêng",

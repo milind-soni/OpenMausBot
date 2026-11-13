@@ -2259,6 +2259,8 @@
   "defaultBot.hide": "Masquer de la barre latérale",
   "defaultBot.hideHint": "Il continue de fonctionner. Réaffichez-le dans Paramètres → Général.",
   "defaultBot.hidden": "{name} n'est plus dans la barre latérale. Réaffichez-le dans Paramètres → Général.",
+  "defaultBot.demote": "En faire un bot ordinaire",
+  "defaultBot.demoteHint": "Retire la protection intégrée : il peut ensuite être archivé ou supprimé comme n'importe quel autre bot.",
   "defaultBot.show.title": "Afficher {name} dans la barre latérale",
   "defaultBot.show.subtitle": "Votre assistant pour tout dans l'app. Masqué, il continue de fonctionner et la recherche le trouve.",
   "teamMove.blockedDefault": "{name} reste ici : chaque membre de l'équipe a le sien",

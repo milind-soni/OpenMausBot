@@ -29,6 +29,8 @@ export interface GateOptions {
   /** Decided per connection, after the name check, for a public destination only; one that ends before it answers
    * goes the gate's own way. */
   upstream?(target: GateTarget): GateUpstream | null;
+  /** A configured unauthenticated SOCKS5 proxy for public destinations after the local destination policy passes. */
+  upstreamProxy?: () => { host: string; port: number } | null;
   /** This machine's own addresses, which never go upstream: its interfaces unless a test passes them. */
   own?(): BlockList;
 }
@@ -85,6 +87,83 @@ const reply = (code: number) => Buffer.from([5, code, 0, 1, 0, 0, 0, 0, 0, 0]);
 
 // What a client may send before its tunnel opens; a TLS hello fits easily.
 const MAX_EARLY_BYTES = 64 * 1024;
+
+function socksAddress(host: string): Buffer {
+  const kind = isIP(host);
+  if (kind === 4) return Buffer.concat([Buffer.from([1]), Buffer.from(host.split(".").map(Number))]);
+  if (kind === 6) {
+    const [head = "", tail = ""] = host.split("::");
+    const groupsFor = (part: string) => {
+      const groups = part ? part.split(":") : [];
+      const last = groups.at(-1);
+      if (last?.includes(".")) {
+        const octets = last.split(".").map(Number);
+        if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) throw new Error("The checked proxy destination is not a valid IP address.");
+        groups.splice(-1, 1, ((octets[0]! << 8) | octets[1]!).toString(16), ((octets[2]! << 8) | octets[3]!).toString(16));
+      }
+      return groups;
+    };
+    const left = groupsFor(head);
+    const right = groupsFor(tail);
+    const groups = [...left, ...Array(8 - left.length - right.length).fill("0"), ...right];
+    const address = Buffer.alloc(16);
+    groups.forEach((group, index) => address.writeUInt16BE(Number.parseInt(group, 16), index * 2));
+    return Buffer.concat([Buffer.from([4]), address]);
+  }
+  throw new Error("The checked proxy destination is not an IP address.");
+}
+
+/** Open a no-auth SOCKS5 tunnel to a numeric, already policy-checked destination. */
+async function connectSocks5(proxy: { host: string; port: number }, target: GateTarget): Promise<Socket> {
+  const socket = connect({ host: proxy.host, port: proxy.port });
+  socket.on("error", () => {});
+  socket.setTimeout(10_000, () => socket.destroy(new Error("SOCKS5 proxy handshake timed out.")));
+  let pending = Buffer.alloc(0);
+  const readAtLeast = (size: number): Promise<Buffer> => new Promise((resolve, reject) => {
+    const cleanup = () => { socket.off("data", onData); socket.off("error", onError); socket.off("close", onClose); };
+    const onError = (error: Error) => { cleanup(); reject(error); };
+    const onClose = () => { cleanup(); reject(new Error("SOCKS5 proxy closed during handshake.")); };
+    const onData = (chunk: Buffer) => {
+      pending = Buffer.concat([pending, chunk]);
+      if (pending.length >= size) {
+        cleanup();
+        const result = pending.subarray(0, size);
+        pending = pending.subarray(size);
+        resolve(result);
+      }
+    };
+    if (pending.length >= size) {
+      const result = pending.subarray(0, size);
+      pending = pending.subarray(size);
+      resolve(result);
+      return;
+    }
+    socket.on("data", onData); socket.once("error", onError); socket.once("close", onClose);
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      socket.once("connect", resolve); socket.once("error", reject);
+    });
+    socket.write(Buffer.from([5, 1, 0]));
+    const greeting = await readAtLeast(2);
+    if (greeting[0] !== 5 || greeting[1] !== 0) throw new Error("SOCKS5 proxy must allow connections without authentication.");
+    const address = socksAddress(target.host);
+    const port = Buffer.alloc(2); port.writeUInt16BE(target.port);
+    socket.write(Buffer.concat([Buffer.from([5, 1, 0]), address, port]));
+    const head = await readAtLeast(4);
+    const domainLength = head[3] === 3 ? await readAtLeast(1) : null;
+    const length = head[3] === 1 ? 4 : head[3] === 4 ? 16 : domainLength?.[0] ?? 0;
+    if (!length) throw new Error("SOCKS5 proxy returned an invalid response.");
+    await readAtLeast(length + 2);
+    if (head[1] !== 0) throw Object.assign(new Error("SOCKS5 proxy refused the connection."), { code: head[1] === 2 ? "EACCES" : "ECONNREFUSED" });
+    if (pending.length) socket.unshift(pending);
+    socket.setTimeout(0);
+    return socket;
+  } catch (error) {
+    socket.destroy();
+    throw error;
+  }
+}
 
 /** A name for this machine, or an address that is not on the public internet: always the gate's own way, under its own
  * policy, so a bot's dev server here stays reachable and nothing private is asked of the person's computer. */
@@ -223,12 +302,63 @@ export function openGate(options: GateOptions): Promise<EgressGate> {
         const addresses = named === null ? await resolve(target.host) : [];
         const refusal = named ?? (addresses.length ? await options.decide(target, addresses).catch(() => "error") : null);
         if (client.destroyed) return;
-        client.off("data", holdEarly);
         if (refusal !== null) {
+          client.off("data", holdEarly);
           options.onRefusal?.(target, refusal);
           return refuse(client, NOT_ALLOWED);
         }
-        if (!addresses.length) return refuse(client, HOST_UNREACHABLE);
+        if (!addresses.length) {
+          client.off("data", holdEarly);
+          return refuse(client, HOST_UNREACHABLE);
+        }
+        const own = options.own?.();
+        const configuredProxy = options.upstreamProxy?.() ?? null;
+        const proxy = configuredProxy && !staysHere(target.host, own) ? configuredProxy : null;
+        if (proxy) {
+          let tunnel: Socket | null = null;
+          let lastError: unknown;
+          const publicAddresses = addresses.filter(({ address }) => addressClass(address, own) === "public");
+          for (const { address } of publicAddresses) {
+            if (client.destroyed) return;
+            try {
+              // The proxy receives only the checked IPs above, not a hostname it could resolve differently.
+              tunnel = await connectSocks5(proxy, { host: address, port: target.port });
+              break;
+            } catch (error) {
+              lastError = error;
+              if (client.destroyed) return;
+              if ((error as NodeJS.ErrnoException).code === "EACCES") return refuse(client, NOT_ALLOWED);
+            }
+          }
+          if (!tunnel) {
+            const directAddresses = addresses.filter(({ address }) => addressClass(address, own) !== "public");
+            if (directAddresses.length) {
+              try {
+                client.pause();
+                tunnel = await connectChecked(target.port, directAddresses, track, client);
+              } catch (error) {
+                if (client.destroyed) return;
+                lastError = error;
+              }
+            }
+          }
+          if (!tunnel) {
+            client.off("data", holdEarly);
+            const code = (lastError as NodeJS.ErrnoException | undefined)?.code;
+            return refuse(client, code === "ECONNREFUSED" || lastError === undefined ? CONNECTION_REFUSED : HOST_UNREACHABLE);
+          }
+          if (client.destroyed) return void tunnel.destroy();
+          client.off("data", holdEarly);
+          client.write(reply(SUCCEEDED));
+          for (const chunk of early) tunnel.write(chunk);
+          tunnel.pipe(client);
+          client.pipe(tunnel);
+          tunnel.on("error", () => client.destroy());
+          client.on("close", () => tunnel.destroy());
+          tunnel.on("close", () => client.destroy());
+          return;
+        }
+        client.off("data", holdEarly);
         client.pause();
         // Every checked address, IPv6 and IPv4 alike, so a host is still reached where one family is broken. The
         // attempts go to exactly the checked addresses, so a name that now resolves elsewhere changes nothing.

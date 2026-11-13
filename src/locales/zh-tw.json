@@ -6919,6 +6919,8 @@
   "defaultBot.hide": "從側邊欄隱藏",
   "defaultBot.hideHint": "它會繼續運作。可在 設定 → 一般 中重新顯示。",
   "defaultBot.hidden": "{name} 已從側邊欄隱藏。可在 設定 → 一般 中重新顯示。",
+  "defaultBot.demote": "改為一般機器人",
+  "defaultBot.demoteHint": "移除內建保護：之後可以像其他機器人一樣封存或刪除。",
   "defaultBot.show.title": "在側邊欄顯示 {name}",
   "defaultBot.show.subtitle": "你在應用程式中處理一切事務的助手。隱藏後它仍會運作，搜尋也找得到它。",
   "teamMove.blockedDefault": "{name} 會留在這裡：團隊中每個人都有自己的",
