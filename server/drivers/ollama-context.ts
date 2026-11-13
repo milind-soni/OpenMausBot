@@ -17,6 +17,10 @@ const nameFor = (model: string, window: number) => `${model.includes(":") ? mode
 
 export const isContextName = (model: string) => SUFFIX.test(model);
 
+/** Ollama's own rule (internal/modelref, v0.40.16): a tag of `cloud`, or one ending in `-cloud`, runs on ollama.com, whose
+ * /api/show answer carries no remote_host or remote_model. */
+const CLOUD_TAG = /:(?:[^:/]*-)?cloud$/i;
+
 /** The name a person picked, for one of ours coming back in a server's lists. */
 export const pickedName = (model: string) => model.replace(SUFFIX, "");
 
@@ -69,7 +73,7 @@ const post = (body: unknown): RequestInit => ({ method: "POST", headers: { "cont
 
 async function decide(origin: string, model: string, fetchImpl: typeof fetch, memoryBytes: number | undefined): Promise<ServedModel> {
   const facts = showFacts(await json(fetchImpl, `${origin}/api/show`, post({ model }), 3_000));
-  if (facts.remote) return { model };
+  if (facts.remote || CLOUD_TAG.test(model)) return { model, ...(facts.trained ? { window: facts.trained } : {}) };
   if (facts.pinned) return { model, window: facts.pinned };
   const running = await json(fetchImpl, `${origin}/api/ps`, {}, 3_000).catch(() => null) as { models?: Array<{ name?: unknown; model?: unknown; context_length?: unknown }> } | null;
   const loaded = running?.models?.find((entry) => entry.name === model || entry.model === model || entry.name === `${model}:latest`)?.context_length;
