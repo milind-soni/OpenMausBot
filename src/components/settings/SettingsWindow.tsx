@@ -185,7 +185,7 @@ export function SettingsWindow() {
               {(!narrow || !showList) && (
                 <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
                   {!narrow && closeButton}
-                  <div ref={scrollRef} data-settings-scroll data-settings-content=""
+                  <div ref={scrollRef} data-settings-scroll
                     className={cn("settings-scroll min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]", narrow ? "pb-12" : "px-8 pb-12")}>
                     <div className={cn("flex max-w-[640px] flex-col", narrow && "max-w-none")}>
                       <SettingsPageHeader page={page} ctx={ctx} place={place} narrow={narrow} missing={missing} />

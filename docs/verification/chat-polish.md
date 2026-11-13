@@ -33,6 +33,10 @@ No personal provider account, real credentials, or user workspace is used.
 6. Check 1280×900 and 390×844, in Midnight and Atelier. Controls must remain
    reachable, filenames/results wrap or truncate within their surfaces, and the
    document must not overflow horizontally. Restore the viewport afterward.
+7. On a long Settings page, check both scroll edges: the top starts fully readable
+   and fades once scrolled; the bottom fades while more content remains and clears
+   at the end. Check the main content and sidebar independently, including a short
+   page with nothing to scroll. Use only the disposable fixture in screenshots.
 
 ## Regression checks
 

@@ -1870,11 +1870,6 @@ body {
     animation: settings-fade linear both, settings-fade-top linear both;
     animation-timeline: scroll(self), scroll(self);
   }
-  .settings-scroll[data-settings-content] {
-    mask-image: linear-gradient(to bottom, #000 calc(100% - var(--settings-fade)), transparent);
-    animation: settings-fade linear both;
-    animation-timeline: scroll(self);
-  }
 }
 /* Over a light scrim the sheet needs its own lift. */
 :root[data-skin="daylight"] [data-settings-look] .glass-surface {
