@@ -42,12 +42,20 @@ registerHooks({
     ` };
     if (url === mock) return { format: 'module', shortCircuit: true, source: `
       export * from ${JSON.stringify(actual)};
-      import { SHARED_LOCAL_VM_TARGET } from ${JSON.stringify(actual)};
+      import { SHARED_LOCAL_VM_TARGET, containerComputerFrame as actualFrame } from ${JSON.stringify(actual)};
       import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
       import { writeFileAtomic } from ${JSON.stringify(atomic)};
       const file = ${JSON.stringify(state)};
       const read = () => JSON.parse(readFileSync(file, 'utf8'));
-      export async function containerRuntimeStatus() { return { runtime: 'podman', daemonUp: true }; }
+      export async function containerRuntimeStatus() {
+        while (read().holdRuntime) { writeFileSync(file + '.runtime', '1'); await new Promise(r => setTimeout(r, 30)); }
+        return { runtime: 'podman', daemonUp: true };
+      }
+      export async function containerComputerFrame(...args) {
+        if (!read().frames) return actualFrame(...args);
+        writeFileSync(file + '.frame', '1');
+        return { png: 'iVBORw0KGgo=', format: 'png' };
+      }
       export async function containerExec(target, command) {
         writeFileSync(file + '.exec', JSON.stringify({ target, command }));
         return { exitCode: 0, stdout: 'fixture command completed', stderr: '', timedOut: false };
@@ -70,6 +78,7 @@ registerHooks({
           imageMatches: !outdated && image, network: 'loopback', security: 'hardened', persistence: 'durable', resumable: Boolean(stopped) && !outdated && image,
           stopped_at: stopped ? read().stoppedAt : null,
           problem: ready ? null : outdated ? 'The existing Local VM uses an older desktop or Cua Driver; recreate it' : 'fixture desktop unavailable',
+          viewer_port: ready ? (read().viewerPort ?? 6080) : null, viewer_url: ready ? 'http://127.0.0.1:' + (read().viewerPort ?? 6080) + '/vnc.html#autoconnect=true&resize=scale&password=fixture-vnc' : '',
           container_name: target.containerName, target_key: target.key, workspace_path: target.workspaceDir };
       }
       export async function containerComputerAction(action, _run, _platform, target = SHARED_LOCAL_VM_TARGET) {
@@ -102,6 +111,12 @@ registerHooks({
       }
     ` };
     const result = nextLoad(url, context);
+    if (url.endsWith('/computer-control.ts') && process.env.OMB_TEST_LEASE_GRACE_MS) {
+      return { ...result, source: String(result.source).replace('const LEASE_GRACE_MS = 60_000;', `const LEASE_GRACE_MS = ${Number(process.env.OMB_TEST_LEASE_GRACE_MS)};`) };
+    }
+    if (url.endsWith('/routes/desktop-viewer.ts') && process.env.OMB_TEST_VIEWER_RECHECK_MS) {
+      return { ...result, source: String(result.source).replace('const RECHECK_MS = 5_000;', `const RECHECK_MS = ${Number(process.env.OMB_TEST_VIEWER_RECHECK_MS)};`) };
+    }
     if (url.endsWith('/computer-idle.ts')) {
       return { ...result, source: `import { readFileSync as readVmIdle } from 'node:fs';\n` +
         String(result.source).replaceAll('checkedIdleMs(idleMs)', `(JSON.parse(readVmIdle(${JSON.stringify(state)}, 'utf8')).idleMs ?? checkedIdleMs(idleMs))`) };
