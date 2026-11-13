@@ -301,7 +301,7 @@ describe("egress gate", () => {
       let data = Buffer.alloc(0);
       let greeted = false;
       socket.on("data", (chunk) => {
-        data = Buffer.concat([data, chunk]);
+        data = Buffer.concat([data, chunk as Buffer]);
         if (!greeted && data.length >= 3) {
           data = data.subarray(3);
           greeted = true;
@@ -326,7 +326,7 @@ describe("egress gate", () => {
     let received = Buffer.alloc(0);
     const response = new Promise<Buffer>((resolve) => {
       socket.on("data", (chunk) => {
-        received = Buffer.concat([received, chunk]);
+        received = Buffer.concat([received, chunk as Buffer]);
         if (received.includes(first)) resolve(received);
       });
     });
@@ -346,7 +346,7 @@ describe("egress gate", () => {
       let data = Buffer.alloc(0);
       let greeted = false;
       socket.on("data", (chunk) => {
-        data = Buffer.concat([data, chunk]);
+        data = Buffer.concat([data, chunk as Buffer]);
         if (!greeted && data.length >= 3) {
           data = data.subarray(3);
           greeted = true;
