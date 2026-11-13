@@ -79,12 +79,12 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
           setOpen((o) => !o);
           if (!open) refresh();
         }}
-        className="flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised"
+        className="flex shrink-0 items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised"
         title={active ? `${active.displayName} · ${modelLabel(active, selection.model, selection.label)}` : selection.model}
       >
-        {active && <ProviderMark driverKind={active.driverKind} size={14} />}
-        <span className="max-w-[160px] truncate">{modelLabel(active, selection.model, selection.label)}{retired ? " (retired)" : ""}</span>
-        <ChevronDown size={14} className="text-ink-secondary" />
+        {active && <ProviderMark driverKind={active.driverKind} size={14} className="shrink-0" />}
+        <span className="max-w-[70px] min-[1600px]:max-w-[140px] truncate">{modelLabel(active, selection.model, selection.label)}{retired ? " (retired)" : ""}</span>
+        <ChevronDown size={14} className="text-ink-secondary shrink-0" />
       </button>
 
       {open && (

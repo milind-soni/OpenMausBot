@@ -2,7 +2,6 @@ import { PAGE_SHARE_NOTICE, previewShareLink, sharesLinkOnly } from "@/lib/previ
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeftRight,
-  ArrowRight,
   Camera,
   Check,
   ChevronDown,
@@ -11,10 +10,14 @@ import {
   ExternalLink,
   FolderOpen,
   History,
+  Laptop,
   Maximize2,
+  Monitor,
   MoreHorizontal,
   RotateCw,
+  SlidersHorizontal,
   Smartphone,
+  Tablet,
   Trash2,
   X,
 } from "lucide-react";
@@ -25,6 +28,8 @@ import {
   PREVIEW_SIZE_GROUPS,
   PREVIEW_ZOOM_OPTIONS,
   resolvePreviewSize,
+  type PreviewSizeGroup,
+  type PreviewSizePreset,
   type PreviewZoomMode,
 } from "@/lib/previewSizes";
 import {
@@ -48,6 +53,37 @@ import { PreviewFrame, type PreviewFrameHandle, type PreviewFrameStatus } from "
 import { PreviewFilePicker, usePreviewAutoRefreshWatcher } from "@/components/PreviewFilePicker";
 import { cn } from "@/lib/cn";
 import { useStore, type Attachment } from "@/state/store";
+
+function getDeviceGroupIcon(group: PreviewSizeGroup) {
+  switch (group) {
+    case "tablet":
+      return Tablet;
+    case "laptop":
+      return Laptop;
+    case "desktop":
+      return Monitor;
+    case "custom":
+      return SlidersHorizontal;
+    case "phone":
+    default:
+      return Smartphone;
+  }
+}
+
+function shortDeviceLabel(preset: PreviewSizePreset): string {
+  if (preset.id === "custom") return "Custom";
+  switch (preset.group) {
+    case "tablet":
+      return "Tablet";
+    case "laptop":
+      return "Laptop";
+    case "desktop":
+      return "Desktop";
+    case "phone":
+    default:
+      return "Phone";
+  }
+}
 
 export interface MobilePreviewPanelProps {
   open?: boolean;
@@ -321,12 +357,13 @@ export function MobilePreviewPanel({
   if (!open) return null;
 
   const canCaptureScreenshot = Boolean(onScreenshot || onSendScreenshotToChat);
+  const DeviceIcon = getDeviceGroupIcon(preset.group);
 
   return (
     <aside
       aria-label="Quick preview panel"
       className={cn(
-        "flex h-full w-[380px] shrink-0 select-none flex-col border-l border-hairline/60 bg-panel xl:w-[420px]",
+        "flex h-full w-[380px] shrink-0 select-none flex-col border-l border-hairline/60 bg-panel 2xl:w-[420px]",
         className,
       )}
     >
@@ -336,14 +373,14 @@ export function MobilePreviewPanel({
           /* State A: Web / HTML document preview */
           <>
             {/* Title */}
-            <div className="flex items-center gap-1.5 shrink-0 text-ink">
+            <div className="flex items-center gap-1.5 shrink-0 text-ink" title="Quick preview">
               <Smartphone size={15} className="text-accent shrink-0" />
-              <span className="text-[13px] font-semibold text-ink hidden sm:inline">Preview</span>
+              <span className="text-[13px] font-semibold text-ink hidden 2xl:inline">Preview</span>
             </div>
 
             {/* Compact Address Field */}
             <div
-              className="relative flex min-w-[90px] flex-1 items-center rounded-lg border border-hairline/60 bg-inset h-8 px-1 focus-within:border-accent/60 transition-colors"
+              className="relative flex min-w-[130px] flex-1 items-center rounded-lg border border-hairline/60 bg-inset h-8 px-1 focus-within:border-accent/60 transition-colors"
               ref={historyDropdownRef}
             >
               <button
@@ -385,16 +422,6 @@ export function MobilePreviewPanel({
                   <History className="h-3 w-3" />
                 </button>
               )}
-
-              <button
-                type="button"
-                onClick={() => handleNavigate()}
-                aria-label="Open preview address"
-                title="Open address (Enter)"
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-secondary transition-colors hover:bg-raised-hover hover:text-accent"
-              >
-                <ArrowRight className="h-3 w-3" />
-              </button>
 
               {/* History Dropdown */}
               {historyOpen && historyList.length > 0 && (
@@ -453,17 +480,18 @@ export function MobilePreviewPanel({
                 <RotateCw className={cn("h-3.5 w-3.5", frameStatus === "loading" && "animate-spin")} />
               </button>
 
-              {/* Grouped Size Selector */}
-              <div className="relative" ref={sizeDropdownRef}>
+              {/* Grouped Size Selector (Icon + Short Label) */}
+              <div className="relative shrink-0" ref={sizeDropdownRef}>
                 <button
                   type="button"
                   onClick={() => setSizeMenuOpen((v) => !v)}
                   aria-label="Choose preview size"
                   aria-expanded={sizeMenuOpen}
                   title={`${preset.label} (${effectiveDims.width}×${effectiveDims.height})`}
-                  className="inline-flex h-7 items-center gap-1 rounded-md border border-hairline/60 bg-inset px-2 text-[11px] font-medium text-ink transition-colors hover:border-hairline hover:bg-raised-hover"
+                  className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-hairline/60 bg-inset px-1.5 text-[11px] font-medium text-ink transition-colors hover:border-hairline hover:bg-raised-hover"
                 >
-                  <span className="max-w-[70px] truncate">{preset.label}</span>
+                  <DeviceIcon className="h-3 w-3 text-ink-secondary shrink-0" />
+                  <span className="shrink-0">{shortDeviceLabel(preset)}</span>
                   <ChevronDown className="h-3 w-3 text-ink-secondary shrink-0" />
                 </button>
 

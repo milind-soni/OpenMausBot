@@ -21,6 +21,7 @@ import { MobilePreviewPanel } from "./MobilePreviewPanel";
 import { TasksPanel } from "./TasksPanel";
 import { OptionCard } from "./OptionCard";
 import { AttachmentList } from "./AttachmentViewer";
+import { useMediaQuery } from "@/lib/useMediaQuery";
 
 function dayLabel(at: number): string {
   const d = new Date(at);
@@ -150,6 +151,8 @@ export function GroupView({ group }: { group: Group }) {
   );
   const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
   const [tasksOpen, setTasksOpen] = useState(() => localStorage.getItem("room-tasks-open") === "true");
+  const isDualPanelWide = useMediaQuery("(min-width: 1400px)");
+  const previewAsDrawer = !isDualPanelWide && tasksOpen;
 
   const members = useMemo(
     () => group.memberIds.map((id) => state.bots.find((b) => b.id === id)).filter((b): b is Bot => Boolean(b)),
@@ -211,11 +214,11 @@ export function GroupView({ group }: { group: Group }) {
 
   return (
     <main className="relative flex h-full min-w-0 flex-1 bg-app">
-      <section className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+      <section className="relative flex h-full min-w-[360px] flex-1 flex-col">
       {/* Header: name left, member mauses right — their motion IS the status */}
-      <div className={cn("flex items-center justify-between px-5 py-3", isWin && "pr-[148px]")} style={drag}>
-        <span className="text-[15px] font-semibold text-ink">{group.name}</span>
-        <div className="flex shrink min-w-0 items-center gap-2" style={noDrag}>
+      <div className={cn("flex items-center justify-between gap-2 px-5 py-3", isWin && "pr-[148px]")} style={drag}>
+        <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
+        <div className="flex shrink-0 items-center gap-1.5" style={noDrag}>
           <div className="flex items-center gap-1.5">
             {members.map((b) => (
               <span key={b.id} title={`${b.name}${group.busyBotId === b.id ? " — working…" : ""}`}>
@@ -242,7 +245,7 @@ export function GroupView({ group }: { group: Group }) {
             )}
           >
             <Activity size={14} />
-            <span className="hidden sm:inline">Activity</span>
+            <span className="hidden min-[1600px]:inline">Activity</span>
             {activityCount > 0 && (
               <span className="flex min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
                 {activityCount}
@@ -260,7 +263,7 @@ export function GroupView({ group }: { group: Group }) {
             )}
           >
             <Smartphone size={14} />
-            <span className="hidden sm:inline">Preview</span>
+            <span className="hidden min-[1600px]:inline">Preview</span>
           </button>
           <button
             type="button"
@@ -273,7 +276,7 @@ export function GroupView({ group }: { group: Group }) {
             )}
           >
             <ClipboardList size={14} />
-            <span className="hidden sm:inline">Tasks</span>
+            <span className="hidden min-[1600px]:inline">Tasks</span>
             {roomTasks.length > 0 && (
               <span className="flex min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
                 {roomTasks.length}
@@ -440,12 +443,18 @@ export function GroupView({ group }: { group: Group }) {
             type="button"
             aria-label="Close mobile preview panel"
             onClick={() => setMobilePreviewOpen(false)}
-            className="absolute inset-0 z-20 bg-black/55 min-[1180px]:hidden"
+            className={cn(
+              "absolute inset-0 z-20 bg-black/55",
+              previewAsDrawer ? "block" : "min-[1180px]:hidden",
+            )}
           />
           <MobilePreviewPanel
             onClose={() => setMobilePreviewOpen(false)}
             onScreenshot={setPreviewAttachment}
-            className="absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl min-[1180px]:static min-[1180px]:inset-auto min-[1180px]:z-auto min-[1180px]:max-w-none min-[1180px]:shadow-none"
+            className={cn(
+              "absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl",
+              !previewAsDrawer && "min-[1180px]:static min-[1180px]:inset-auto min-[1180px]:z-auto min-[1180px]:max-w-none min-[1180px]:shadow-none",
+            )}
           />
         </>
       )}

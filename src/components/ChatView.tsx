@@ -33,6 +33,7 @@ import { ProjectMentionText } from "./ProjectMentionText";
 import { botIntro } from "@/lib/botIntro";
 import { AttachmentList } from "./AttachmentViewer";
 import { MobilePreviewPanel } from "./MobilePreviewPanel";
+import { useMediaQuery } from "@/lib/useMediaQuery";
 import type { Attachment } from "@/state/store";
 
 /** Long user messages collapse behind a fade so pasted walls of text don't
@@ -619,6 +620,8 @@ export function ChatView({ bot }: { bot: Bot }) {
   const clearStarterText = useCallback(() => setStarterText(null), []);
   const [tasksOpen, setTasksOpen] = useState(() => localStorage.getItem("chat-tasks-open") === "true");
   const botTasks = useMemo(() => state.tasks.filter((task) => task.assigneeBotId === bot.id), [state.tasks, bot.id]);
+  const isDualPanelWide = useMediaQuery("(min-width: 1400px)");
+  const previewAsDrawer = !isDualPanelWide && tasksOpen;
 
   useEffect(() => setFollow(true), [bot.id]);
   useEffect(() => localStorage.setItem("chat-mobile-preview-open", String(mobilePreviewOpen)), [mobilePreviewOpen]);
@@ -654,15 +657,15 @@ export function ChatView({ bot }: { bot: Bot }) {
 
   return (
     <main className="relative flex h-full min-w-0 flex-1 bg-app">
-      <section className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+      <section className="relative flex h-full min-w-[360px] flex-1 flex-col">
       {/* Header */}
       <div
-        className={cn("flex items-center justify-between px-5 py-3", isWin && "pr-[148px]")}
+        className={cn("flex items-center justify-between gap-2 px-4 min-[1600px]:px-5 py-3", isWin && "pr-[148px]")}
         style={drag}
       >
         <button
           onClick={() => dispatch({ type: "toggleSettings" })}
-          className="flex items-center gap-2.5 rounded-lg px-1.5 py-1 hover:bg-raised/50"
+          className="flex min-w-0 shrink items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-raised/50"
           title="Bot settings"
           style={noDrag}
         >
@@ -673,22 +676,22 @@ export function ChatView({ bot }: { bot: Bot }) {
             motion={mascotMotion?.kind ?? "none"}
             motionKey={mascotMotion?.nonce ?? 0}
           />
-          <span className="text-[15px] font-semibold text-ink">{bot.name}</span>
-          {bot.busy && <Loader2 size={14} className="animate-spin text-ink-secondary" />}
+          <span className="truncate text-[15px] font-semibold text-ink">{bot.name}</span>
+          {bot.busy && <Loader2 size={14} className="shrink-0 animate-spin text-ink-secondary" />}
         </button>
-        <div className="flex shrink min-w-0 items-center gap-1.5" style={noDrag}>
+        <div className="flex shrink-0 items-center gap-1.5" style={noDrag}>
           {bot.busy && (
             <button
               onClick={() => dispatch({ type: "interrupt", botId: bot.id })}
               className="flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
               title="Stop this turn"
             >
-              <Square size={12} className="fill-current" />
-              Stop
+              <Square size={12} className="shrink-0 fill-current text-danger" />
+              <span className="hidden sm:inline">Stop</span>
             </button>
           )}
           <button type="button" title="Schedule run…" aria-label="Schedule run…" onClick={() => dispatch({ type: "openSchedule", target: { botId: bot.id } })} className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised">⏰</button>
-          <UsageRings />
+          <UsageRings compact={!isDualPanelWide || tasksOpen} />
           <ModelPicker bot={bot} />
           <button
             onClick={() => dispatch({ type: "toggleComputer" })}
@@ -705,26 +708,28 @@ export function ChatView({ bot }: { bot: Bot }) {
             onClick={() => setMobilePreviewOpen((open) => !open)}
             aria-label={mobilePreviewOpen ? "Hide mobile preview" : "Show mobile preview"}
             aria-pressed={mobilePreviewOpen}
+            title={mobilePreviewOpen ? "Hide mobile preview" : "Show mobile preview"}
             className={cn(
               "relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px]",
               mobilePreviewOpen ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
             )}
           >
             <Smartphone size={14} />
-            <span className="hidden sm:inline">Preview</span>
+            <span className="hidden min-[1600px]:inline">Preview</span>
           </button>
           <button
             type="button"
             onClick={() => setTasksOpen((open) => !open)}
             aria-label={tasksOpen ? "Hide tasks" : "Show tasks"}
             aria-pressed={tasksOpen}
+            title={tasksOpen ? "Hide tasks" : "Show tasks"}
             className={cn(
               "relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px]",
               tasksOpen ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
             )}
           >
             <ClipboardList size={14} />
-            <span className="hidden sm:inline">Tasks</span>
+            <span className="hidden min-[1600px]:inline">Tasks</span>
             {botTasks.length > 0 && (
               <span className="flex min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
                 {botTasks.length}
@@ -832,12 +837,18 @@ export function ChatView({ bot }: { bot: Bot }) {
             type="button"
             aria-label="Close mobile preview panel"
             onClick={() => setMobilePreviewOpen(false)}
-            className="absolute inset-0 z-20 bg-black/55 min-[1180px]:hidden"
+            className={cn(
+              "absolute inset-0 z-20 bg-black/55",
+              previewAsDrawer ? "block" : "min-[1180px]:hidden",
+            )}
           />
           <MobilePreviewPanel
             onClose={() => setMobilePreviewOpen(false)}
             onScreenshot={setPreviewAttachment}
-            className="absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl min-[1180px]:static min-[1180px]:inset-auto min-[1180px]:z-auto min-[1180px]:max-w-none min-[1180px]:shadow-none"
+            className={cn(
+              "absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl",
+              !previewAsDrawer && "min-[1180px]:static min-[1180px]:inset-auto min-[1180px]:z-auto min-[1180px]:max-w-none min-[1180px]:shadow-none",
+            )}
           />
         </>
       )}
