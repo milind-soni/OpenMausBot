@@ -44,7 +44,7 @@ const ROUTINE_SCHEDULE_SCHEMA = {
     timeZone: {
       type: "string",
       maxLength: 128,
-      description: "Required for cron: the person's IANA timezone, such as Asia/Kolkata or UTC; never a numeric offset or an abbreviation.",
+      description: "Only for cron, and required there: the person's IANA timezone, such as Asia/Kolkata or UTC; never a numeric offset or an abbreviation.",
     },
     at: {
       type: "string",
