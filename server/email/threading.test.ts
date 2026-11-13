@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { simpleParser } from "mailparser";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import "../server-line-packs.ts";
 import { openGuard } from "./client.ts";
 import { createEmailHost } from "./host.ts";
 import { createEmailService } from "./service.ts";
