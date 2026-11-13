@@ -216,6 +216,12 @@ describe("live routes", () => {
       expect(d.calls.deviceRevoked).toHaveBeenCalledWith("phone-1");
       expect(await request(d, "POST", "/api/live/device-revoked", undefined, fromPhone("phone-2"))).toEqual({ status: 200, body: { call: null } });
     });
+    it("invalidates authenticated companion turn provenance on unpair", async () => {
+      const companionRevoked = vi.fn();
+      const d = deps({ companionRevoked });
+      expect((await request(d, "POST", "/api/live/device-revoked", undefined, fromPhone("phone-7"))).status).toBe(200);
+      expect(companionRevoked).toHaveBeenCalledWith("phone-7");
+    });
     it("takes the unpairing only from the companion, for a well-formed phone", async () => {
       const d = deps();
       expect((await request(d, "POST", "/api/live/device-revoked", undefined, { "x-openmausbot-companion-device": "phone-1" })).status).toBe(403);

@@ -42,7 +42,7 @@ class DirectSendRefused extends Error {
 
 type AcceptInput = Parameters<BotMessageRouteDeps["acceptDirectSend"]>[0];
 
-async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>> = {}, desktopManaged = true) {
+async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>> = {}, desktopManaged = true, auth: RequestAuth = { kind: "loopback", scopes: ["admin"] }) {
   const store = new Store(() => sonnet);
   const bot = store.createBot({ name: "Scout" });
   const threadId = bot.threadId;
@@ -104,6 +104,7 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
     directSendRefusal: (botId: string, thread: string) => (store.taskByThread(botId, thread) ? null : { status: 409, body: { error: "the bot switched tasks before it could receive the message" } }),
     usageTriggerFor: () => ({ kind: "user" }),
     messageSender: () => undefined,
+    requestProvenance: () => undefined,
     cloudGuestSendRefusal: () => null,
     resolveReplyTarget: replyTarget,
     requestedTaskBot: (botId: string, rawThreadId: unknown) => store.projectBotForTask(botId, String(rawThreadId))!,
@@ -131,7 +132,6 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     try {
-      const auth = { kind: "loopback", scopes: ["admin"] } as RequestAuth;
       const handled = await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth, json, readBody });
       if (!handled) json(res, 404, { from: "inline routes" });
     } catch (error) {
@@ -250,6 +250,14 @@ describe("POST /api/bots/:id/messages and who typed it", () => {
     const plain = await post({ threadId, sendId: SEND, text: words });
     expect(plain.status, JSON.stringify(plain.body)).toBe(202);
     expect(typedWords(threadId, [plain.body.message])).toBe(words);
+  });
+
+  it("passes server-derived desktop-owner provenance to the direct send", async () => {
+    const proof = { kind: "desktop-owner" as const };
+    const { threadId, post, state } = await fixture({ requestProvenance: () => proof }, true, { kind: "loopback", scopes: ["admin", "client"], desktopOwner: true });
+    const response = await post({ threadId, sendId: SEND, text: "List shared computers" });
+    expect(response.status).toBe(202);
+    expect(state.accepted[0]?.requestProvenance).toEqual(proof);
   });
 
   it("takes neither a press, whose words the widget wrote, nor a relay as a person's", async () => {

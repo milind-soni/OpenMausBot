@@ -14,6 +14,7 @@ export interface LiveRouteDeps {
   saveSettings(patch: { provider?: LiveProvider; azureEndpoint?: string; azureDeployment?: string; voice?: string; readTypedReplies?: boolean; idleMinutes?: number }): Promise<LiveSettings>;
   /** A running Fish Audio call's relay, only for the token its start answered with. */
   fishRelay(sessionId: string, token: string): { receive(events: LiveFishRelayEvent[], from?: number): void; poll(waitMs: number): Promise<{ commands: LiveFishRelayCommand[]; closed: boolean }> } | null;
+  companionRevoked?(deviceId: string): void;
 }
 
 const id = z.string().regex(/^[\w-]{1,120}$/);
@@ -113,7 +114,9 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
       if (req.headers["x-openmausbot-companion"] !== "1") return json(res, 403, { error: "Only the phone companion can report an unpaired phone." });
       const device = companionDevice(req);
       if (!device) return json(res, 400, { error: "The unpaired phone was not named." });
-      return json(res, 200, { call: deps.calls.deviceRevoked(device) });
+      const call = deps.calls.deviceRevoked(device);
+      deps.companionRevoked?.(device);
+      return json(res, 200, { call });
     }
 
     if (method === "PATCH" && path === "/api/live/settings") {

@@ -28,7 +28,7 @@ import type { ReplyTarget } from "../replies.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import { acceptedSendMatch, parseSendId } from "../send-idempotency.ts";
-import type { DirectSendInput, DirectSendReceipt } from "../direct-send.ts";
+import type { DirectSendInput, DirectSendReceipt, LoopbackTurnProvenance } from "../direct-send.ts";
 import { cancelSteeredMessage, holdSteeredQueue, queuedSteerSender, queuedSteeredMessage, restoreHeldSteeredQueue, settleHeldSteeredQueue } from "../steer-queue.ts";
 import { routeRunOwners, type Actor, type RouteRunOwners } from "../host/run-owner.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
@@ -73,11 +73,12 @@ export interface BotMessageRouteDeps {
   acceptDirectSend(input: DirectSendInput, guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>): Promise<DirectSendReceipt>;
   directSendRefusal(botId: string, threadId: string): { status: number; body: Record<string, unknown> } | null;
   startTurn(botId: string, text: string, opts?: {
-    threadId?: string; replyTo?: Message; sendId?: string; sender?: ResolvedSender; trigger?: UsageTrigger; relayed?: boolean;
+    threadId?: string; replyTo?: Message; sendId?: string; sender?: ResolvedSender; trigger?: UsageTrigger; relayed?: boolean; requestProvenance?: LoopbackTurnProvenance;
     dataContext?: DataContext; compactOnly?: boolean; cardContinuation?: boolean; editedMessageId?: string;
   }): Promise<Message>;
   usageTriggerFor(auth: RequestAuth): UsageTrigger;
   messageSender(auth: RequestAuth): ResolvedSender | undefined;
+  requestProvenance(auth: RequestAuth): LoopbackTurnProvenance | undefined;
   cloudGuestSendRefusal(auth: RequestAuth, threadId: string): string | null;
   cloudThreadRefusal(auth: RequestAuth, threadId: string): string | null;
   cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: string, behavior: string): string | null;
@@ -306,6 +307,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           }
         : undefined;
       const sender = messageSender(auth);
+      const requestProvenance = deps.requestProvenance(auth);
       const guardedStart = guarded
         ? async (currentAtStart: BotRecord): Promise<DirectSendReceipt> => {
             // No await between these checks and startTurn: never steer or enqueue under stale permissions.
@@ -328,7 +330,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
               throw Object.assign(new Error("wait for a free thread slot before retrying this message"), { status: 409, code: "guarded_busy" });
             }
             // The relayed line is named after the person it is for; with no key it is nobody's own line and acts for nobody.
-            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender: onBehalfOf ? { name: onBehalfOf.name ?? onBehalfOf.email! } : sender, trigger, relayed: true, dataContext });
+            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender: onBehalfOf ? { name: onBehalfOf.name ?? onBehalfOf.email! } : sender, trigger, relayed: true, dataContext, ...(!onBehalfOf && requestProvenance ? { requestProvenance } : {}) });
             return { ok: true as const, threadId, message };
           }
         : undefined;
@@ -341,6 +343,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       try {
         const receipt = await acceptDirectSend({
           botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext, ...(app ? { app } : {}),
+          ...(requestProvenance ? { requestProvenance } : {}),
           personPresent, admin: owners.admin(auth), ...(followUp ? { followUp } : {}),
           ...(mentions?.length && !press && !appSent ? { mentions } : {}),
         }, guardedStart);
