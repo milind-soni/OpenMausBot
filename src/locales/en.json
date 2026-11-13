@@ -338,6 +338,7 @@
   "server.rooms.finishingElsewhere": "{bot} is finishing another conversation — will reply here when free",
   "server.rooms.finishingElsewhereSpoken": "{bot} is finishing another conversation",
   "server.rooms.unavailable": "{bot} is no longer available — skipped this round",
+  "server.rooms.pickNotSent": "{bot} can't answer this line right now, so what you pointed at in its page wasn't sent. Point at it again when {bot} can answer.",
   "server.threads.posted": "{bot} posted a message here",
   "server.rooms.chiefRetargeted": "{chief} is the Chief of Staff now, so it leads this room in place of {former}.",
   "server.stop.nothingRunning": "Nothing was running here, so nothing needed stopping.",

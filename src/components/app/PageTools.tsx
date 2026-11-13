@@ -205,7 +205,7 @@ export interface PageToolsProps {
   ready: boolean;
   /** pane: the page opens in the chat's page pane, beside a usable message box, instead of covering the window. */
   fullScreen: { open: boolean; toggle(): void; pane?: boolean };
-  /** Shown in a room: view-only, so no Point and no Share. */
+  /** Shown in a room: the page acts for nobody, so no Share; Point sends the pick to the bot that made the page. */
   room?: boolean;
   pin?: ReturnType<typeof usePagePin>;
 }
@@ -226,11 +226,11 @@ export function PageToolbar({ version, point, share, save, ready, fullScreen, ro
         {version.flash && <span role="status" data-page-updated className="ms-1 rounded-full bg-accent/15 px-2 py-px font-medium text-accent-text">{t("chat.preview.updated")}</span>}
       </div>
       <div className="ms-auto flex flex-wrap items-center gap-1">
+        <button type="button" aria-pressed={point.pointing} onClick={point.toggle} disabled={!ready} title={t("chat.preview.pointHint")}
+          className={cn(ASK_CHIP, point.pointing ? ASK_CHIP_PICKED : ASK_CHIP_IDLE)}>
+          <Crosshair size={14} />{t("chat.preview.point")}
+        </button>
         {!room && <>
-          <button type="button" aria-pressed={point.pointing} onClick={point.toggle} disabled={!ready} title={t("chat.preview.pointHint")}
-            className={cn(ASK_CHIP, point.pointing ? ASK_CHIP_PICKED : ASK_CHIP_IDLE)}>
-            <Crosshair size={14} />{t("chat.preview.point")}
-          </button>
           <button type="button" onClick={() => void share.run(version.rev)} disabled={busy} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Share2 size={14} />}{t("chat.preview.share")}
           </button>

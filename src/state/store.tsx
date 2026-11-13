@@ -662,7 +662,7 @@ export type Action =
       sendId?: string;
       replyToId?: string;
       threadId?: string;
-      mode?: "chat" | "goal"; mentions?: string[];
+      mode?: "chat" | "goal"; mentions?: string[]; pointed?: import("../../shared/app-frame/point").PointedElement[];
       onError?: () => void;
     }
   | {
@@ -2665,7 +2665,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 replyToId: action.replyToId,
                 threadId,
                 sendId,
-                mode: action.mode ?? "chat", ...(action.mentions?.length ? { mentions: action.mentions } : {}),
+                mode: action.mode ?? "chat", ...(action.mentions?.length ? { mentions: action.mentions } : {}), ...(action.pointed?.length ? { pointed: action.pointed } : {}),
               }),
             }))
             .then((body) => {
