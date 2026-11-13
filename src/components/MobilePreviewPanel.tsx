@@ -88,6 +88,13 @@ export function MobilePreviewPanel({
   const [sizeMenuOpen, setSizeMenuOpen] = useState(false);
   const [screenshotMenuOpen, setScreenshotMenuOpen] = useState(false);
   const [filePickerOpen, setFilePickerOpen] = useState(false);
+  const filePickerTriggerRef = useRef<HTMLElement | null>(null);
+
+  const openFilePicker = (trigger?: HTMLElement | null) => {
+    filePickerTriggerRef.current =
+      trigger || (typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null);
+    setFilePickerOpen(true);
+  };
   const [capturing, setCapturing] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [stageBounds, setStageBounds] = useState({ width: 380, height: 640 });
@@ -295,7 +302,7 @@ export function MobilePreviewPanel({
       <div className="flex h-10 items-center gap-1.5 border-b border-hairline/50 px-2.5">
         <button
           type="button"
-          onClick={() => setFilePickerOpen(true)}
+          onClick={(e) => openFilePicker(e.currentTarget)}
           aria-label="Choose a project file"
           title="Choose a file from a project"
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-hairline/60 bg-inset text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
@@ -653,7 +660,7 @@ export function MobilePreviewPanel({
             setInputUrl(presetUrl);
             handleNavigate(presetUrl);
           }}
-          onOpenFilePicker={() => setFilePickerOpen(true)}
+          onOpenFilePicker={() => openFilePicker()}
           onStatusChange={setFrameStatus}
           onHistoryStateChange={setHistoryNav}
           frameTitle={preset.label}
@@ -704,6 +711,7 @@ export function MobilePreviewPanel({
 
       <PreviewFilePicker
         open={filePickerOpen}
+        triggerRef={filePickerTriggerRef}
         onClose={() => setFilePickerOpen(false)}
         onSelectFile={handleSelectProjectFile}
         initialProjectId={activeSource?.kind === "file" ? activeSource.projectId : undefined}
