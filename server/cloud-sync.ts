@@ -130,7 +130,7 @@ export function createCloudSync(options: { dataDir: string; root?: string; now?:
     },
     async unregister(id: string, keepCloudCopy: boolean): Promise<void> {
       return mutate(id, null, () => {
-        const folder = store.unregister(id);
+        const folder = store.pcFolders().find((entry) => entry.id === id);
         if (!folder) throw new SyncError(404, { error: "no such synced folder" });
         // Never through a link; synced files go to the trash, and what sync never carried (.git, node_modules) stays.
         if (!keepCloudCopy && lstatSync(folder.cloudPath, { throwIfNoEntry: false })?.isDirectory()) {
@@ -139,6 +139,8 @@ export function createCloudSync(options: { dataDir: string; root?: string; now?:
           for (const entry of files!) store.toTrash(folder, entry.path, join(folder.cloudPath, ...entry.path.split("/")));
           pruneEmptyDirectories(folder.cloudPath);
         }
+        // Keep the registration until cleanup succeeds, so a failed removal can resume on the next request.
+        store.unregister(id);
         noteChange(id);
       });
     },
