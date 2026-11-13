@@ -43,7 +43,7 @@ export function chiefOfStaffSystemPrompt(
   const others = chief ? reachable.filter((bot) => !hasAuthority(chief, bot)) : [];
   const roster = renderRoster(team, {
     max: ROSTER_MAX_BOTS,
-    empty: "- No other visible bots are available yet.",
+    empty: "- No other visible operators are available yet.",
     about: true,
     department: chiefSection,
   });

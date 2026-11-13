@@ -333,7 +333,7 @@ describe("memory_update", () => {
     };
     const ctx = context({ botId: bot, client });
     const saved = await callTool("memory_update", { action: "prefer", text: "Reminders  go to the task app" }, ctx);
-    expect(saved).toEqual({ text: "Saved in Ada's About me, which every bot reads in their work. Don't pass it on to other bots or save it in your own notes too." });
+    expect(saved).toEqual({ text: "Saved in Ada's About me, which every operator reads in their work. Don't pass it on to other operators or save it in your own notes too." });
     expect(profile.aboutMe).toBe("I live in Pune.\n- 2026-10-27 · learned by Scout · Reminders go to the task app");
     expect(readMemoryFile(bot).text, "nothing went into the bot's own notes").not.toContain("task app");
     expect((await callTool("memory_update", { action: "prefer", text: "Reminders go to the task app" }, ctx)).text)
@@ -356,7 +356,7 @@ describe("memory_update", () => {
 
     const forgot = await callTool("memory_update", { action: "forget", old_text: "short answers" }, ctx);
     expect(forgot.isError).toBeFalsy();
-    expect(forgot.text).toBe('Forgotten everywhere it was saved, About me included, which all their bots read: "The person prefers short answers", "The person wants short answers at work". Confirm to the person in one plain line what you forgot.');
+    expect(forgot.text).toBe('Forgotten everywhere it was saved, About me included, which all their operators read: "The person prefers short answers", "The person wants short answers at work". Confirm to the person in one plain line what you forgot.');
     expect(forgot.text).not.toMatch(/MEMORY\.md|memory\/|\.md\b/);
     expect(readMemoryFile(bot).text).not.toContain("short answers");
     expect(readMemoryFile(bot).text).toContain("The person is in India (IST)");

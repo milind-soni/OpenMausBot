@@ -468,7 +468,7 @@ describe("workspace", () => {
   it("tells a turn whose notes would be refused where facts go, and still shows it the memory", () => {
     const empty = memorySystemPrompt(BOT, { managedWrites: true, fileTools: true, writesRefused: true });
     expect(empty).toContain("Notes cannot be saved from this conversation");
-    expect(empty).toContain("in your result to that bot");
+    expect(empty).toContain("in your result to that operator");
     writeMemoryFile(BOT, "- The owner likes figs.");
     const refused = memorySystemPrompt(BOT, { managedWrites: true, fileTools: true, writesRefused: true });
     expect(refused).toContain("The owner likes figs.");
@@ -486,7 +486,7 @@ describe("workspace", () => {
     expect(REMEMBER_AND_FORGET).toContain("pass its until date again");
     // a preference for all their bots is saved once, never passed on to each bot
     expect(REMEMBER_AND_FORGET).toContain("saved once with memory_update action prefer");
-    expect(REMEMBER_AND_FORGET).toContain("Never pass it on to each bot.");
+    expect(REMEMBER_AND_FORGET).toContain("Never pass it on to each operator.");
   });
 
   it("requires explicit remove to delete a memory passage", () => {

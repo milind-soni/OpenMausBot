@@ -46,7 +46,7 @@ it("a bot asking for a teammate on the person's other place hears where it lives
   // Before the app said anything: no such bot, and that bots work together only within one place.
   const before = await coordinate(garage.base, ledger, "Scout");
   expect(before.status).toBe(403);
-  expect(before.error).toMatch(/^No bot with id or name "Scout" — call list_bots/u);
+  expect(before.error).toMatch(/^No operator with id or name "Scout" — call list_bots/u);
   expect(before.error).toContain(ONE_PLACE);
 
   fx.main.refresh();
@@ -80,7 +80,7 @@ it("a bot asking for a teammate on the person's other place hears where it lives
   expect(onComputer.status).toBe(403);
   expect(onComputer.error).toMatch(/^Ledger lives on Garage server, not here\. .* choose "Make Garage server my home"\.$/u);
   const typo = await coordinate(fx.desktopBase, scout, "Ledgr");
-  expect(typo.error, "told, and nowhere: no such bot, as before").toMatch(/^No bot with id or name "Ledgr" — call list_bots/u);
+  expect(typo.error, "told, and nowhere: no such bot, as before").toMatch(/^No operator with id or name "Ledgr" — call list_bots/u);
   expect(typo.error).not.toContain("Operators work together");
   const shared = await coordinate(family.base, helper, "Scout");
   expect(shared.error, "never told where the person's other bots live").not.toContain("Work laptop");

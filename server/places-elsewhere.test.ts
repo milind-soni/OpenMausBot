@@ -62,10 +62,10 @@ describe("where the person's other bots live", () => {
     const here = createPlacesElsewhere({ dataDir: dataDir() });
     const bots = [{ id: "ledger", name: "Ledger" }, { id: "old-scout", name: "Scout", hidden: true }];
     const from = bots[0]!;
-    expect(resolveTeammate(bots, from, "Reviewer 2", here.explain)).toEqual({ error: expect.stringMatching(/^No bot with id or name "Reviewer 2" — call list_bots.* Operators work together only within one place/su) });
+    expect(resolveTeammate(bots, from, "Reviewer 2", here.explain)).toEqual({ error: expect.stringMatching(/^No operator with id or name "Reviewer 2" — call list_bots.* Operators work together only within one place/su) });
     here.write({ v: 1, self: { name: "Garage server", kind: "server" }, places: [LAPTOP] });
     expect(resolveTeammate(bots, from, "Reviewer 2", here.explain)).toEqual({ error: expect.stringMatching(/^Reviewer 2 lives on Work laptop, the person's computer, not here\./u) });
-    expect(resolveTeammate(bots, from, "Scout", here.explain), "a bot here of that name, archived: no such reachable bot, never elsewhere").toEqual({ error: expect.stringMatching(/^No bot with id or name "Scout"/u) });
+    expect(resolveTeammate(bots, from, "Scout", here.explain), "a bot here of that name, archived: no such reachable bot, never elsewhere").toEqual({ error: expect.stringMatching(/^No operator with id or name "Scout"/u) });
     expect(resolveTeammate(bots, from, "Nobody", here.explain)).toEqual({ error: expect.not.stringContaining("Operators work together") });
   });
 });

@@ -15,7 +15,7 @@ import type { Routine, RoutineManager } from "../routines.ts";
 import type { TaskRecord } from "../store.ts";
 import type { TeamMemberLeftDeps } from "./team-member-left.ts";
 
-export const NO_SUCH_TRIGGER = "No trigger with that id belongs to this bot. Call trigger_info without trigger_id to see its ids.";
+export const NO_SUCH_TRIGGER = "No trigger with that id belongs to this operator. Call trigger_info without trigger_id to see its ids.";
 
 export interface TeamRoutinesDeps extends RoutineHomeDeps {
   team: boolean;

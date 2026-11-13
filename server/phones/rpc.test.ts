@@ -98,7 +98,7 @@ describe("phone MCP host", () => {
       command: process.execPath, args: [SPAWNED_PROXIES.harnessMcp, "device"],
       env: { ...AGENTS_NODE_FLAG, OMB_MCP_TOKEN_DEVICE: "turn-token", OMB_HARNESS_URL: "http://127.0.0.1:1" },
     });
-    expect(h.host.prompt(chief, OWNER)).toContain("Omkar's iPhone is an iPhone; this bot may use: Calendar.");
+    expect(h.host.prompt(chief, OWNER)).toContain("Omkar's iPhone is an iPhone; this operator may use: Calendar.");
     expect(h.host.prompt(chief, OWNER)).not.toContain("Guest Pixel");
     // Where the person is stays out of the phone part, in a part of its own.
     for (const place of ["phone", "computer", "unattended"] as const) {

@@ -90,7 +90,7 @@ describe("where the person is", () => {
     send(phones.sendIdFor(loopback));
     for (const place of ["phone", "computer", "unattended"] as const) {
       const [device, where] = phones.promptParts(chief, { mounted: true, offered: true, turn: TURN, place });
-      expect(device).toMatchObject({ id: "device", label: "Phone", text: expect.stringContaining("Omkar's iPhone is an iPhone; this bot may use: Calendar.") });
+      expect(device).toMatchObject({ id: "device", label: "Phone", text: expect.stringContaining("Omkar's iPhone is an iPhone; this operator may use: Calendar.") });
       expect(where).toEqual({ id: "device-place", label: "Where the person is", text: PHONE_PLACE_PROMPT[place] });
     }
     for (const text of Object.values(PHONE_PLACE_PROMPT)) {

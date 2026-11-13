@@ -75,7 +75,7 @@ describe("WebhookRequestService", () => {
     expect(() => service.submit({ botId: "bot-a", threadId: "thread-a", operation: create })).toThrow(/already exists/);
     const theirs = service.submit({ botId: "bot-b", threadId: "thread-b", operation: { ...create, webhook: { ...create.webhook, name: "Theirs" } } });
     expect(() => service.submit({ botId: "bot-a", threadId: "thread-a", operation: { action: "pause", webhookId: theirs.resultId } }))
-      .toThrow(/No webhook trigger with that id belongs to this bot/);
+      .toThrow(/No webhook trigger with that id belongs to this operator/);
     expect(() => service.submit({ botId: "bot-a", threadId: "thread-a", operation: { action: "create", webhook: { ...create.webhook, schedule: {} } } }))
       .toThrow();
     expect(store.messagesFor("thread-a")).toHaveLength(1);

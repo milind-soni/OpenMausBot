@@ -33,7 +33,7 @@ const BRIDGED: Server = {
 const DENY_VM: ToolScope = { deny: ["mcp:agents:vm_exec"] };
 const ONLY_LIST_BOTS: ToolScope = { allow: ["mcp:agents:list_bots"] };
 const NO_NEW_TRIGGERS: ToolScope = { deny: ["mcp:agents:create_trigger"] };
-const EXCLUDED = { code: -32602, message: "Tool selection excludes this tool. Check the bot's Access settings." };
+const EXCLUDED = { code: -32602, message: "Tool selection excludes this tool. Check the operator's Access settings." };
 
 type Answer = { id: number; result?: { tools?: Array<{ name: string }>; content?: Array<{ text: string }>; isError?: boolean }; error?: { code: number; message: string } };
 type Ask = (method: string, params?: unknown) => Promise<Answer>;

@@ -11,7 +11,7 @@ export const PHONE_INSTRUCTIONS =
 
 /** The system prompt part for a bot whose turn mounts the device tools. */
 export const PHONE_PROMPT =
-  " The person's own phone is reachable through the PHONE tools (calendar, reminders, contacts, location, home and messages), limited to the apps they allowed on that phone and to what this bot was granted. " +
+  " The person's own phone is reachable through the PHONE tools (calendar, reminders, contacts, location, home and messages), limited to the apps they allowed on that phone and to what this operator was granted. " +
   "Reads need no permission; every change you make is shown in the chat. A message is only sent when the person taps Send on the phone, so never claim it was sent. " +
   "If the phone is offline, ask the person to open MausBot on it. " +
   "The phone tools named mcp__phone__ are something else: they drive an Android phone plugged into the computer over USB, never the person's own phone above.";

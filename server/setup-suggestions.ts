@@ -90,7 +90,7 @@ export function setupSuggestionPrompt(facts: SuggestionFacts): string {
     ...named,
     `Connected apps: ${apps.length ? apps.join(", ") : "none"}`,
     ...(about ? [`About the person: ${about}`] : []),
-    ...(jobs.length ? [`Jobs the person's other bots already do: ${jobs.join("; ")}`] : []),
+    ...(jobs.length ? [`Jobs the person's other operators already do: ${jobs.join("; ")}`] : []),
     "[/FACTS]",
     "",
     `Reply with only a JSON array of 5 short strings (3 to 5 words each) written in ${language}, on one line. Do not wrap it in \`\`\` marks: start with [ and end with ].`,

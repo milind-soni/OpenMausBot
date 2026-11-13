@@ -295,7 +295,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     const targets: Array<[string | undefined, unknown]> = [[called, called === params.name ? params.arguments : inner],
       ...(NAME === "agents" ? [[bridgedCallTarget(params.name, params.arguments), inner] as [string | undefined, unknown]] : [])];
     if (targets.some(([target, args]) => target !== undefined && !allowsTool(scope, { kind: "mcp", server: NAME, name: target }, args ?? {}))) {
-      return rejectRequest(message.id, -32602, "Tool selection excludes this tool. Check the bot's Access settings.");
+      return rejectRequest(message.id, -32602, "Tool selection excludes this tool. Check the operator's Access settings.");
     }
   }
   if (message?.method === "tools/call" && typeof params?.name === "string") {

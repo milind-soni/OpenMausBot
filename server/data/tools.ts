@@ -49,7 +49,7 @@ const CHART_SPEC_SCHEMA = {
 export const DATA_TOOLS = [
   tool(
     "data_load",
-    "Load data into a named table of this bot's database: a local file, folder or glob (csv, tsv, json, ndjson, parquet, xlsx, sqlite; .gz/.zst too), an http(s)/s3/gs/az URL, a postgres:// or mysql:// connection string (snapshots the tables read-only), or a Google Sheets URL. Replaces a table of the same name unless replace is false. Returns each table's columns, row count and sample values.",
+    "Load data into a named table of this operator's database: a local file, folder or glob (csv, tsv, json, ndjson, parquet, xlsx, sqlite; .gz/.zst too), an http(s)/s3/gs/az URL, a postgres:// or mysql:// connection string (snapshots the tables read-only), or a Google Sheets URL. Replaces a table of the same name unless replace is false. Returns each table's columns, row count and sample values.",
     {
       source: { type: "string", minLength: 1, maxLength: 4000 },
       name: { type: "string", pattern: IDENT, description: "Table name. Default: from the file name." },
@@ -105,7 +105,7 @@ export const DATA_TOOLS = [
   ),
   tool(
     "data_export",
-    "Write a card (id), a loaded table or a SELECT to a file: csv, parquet or xlsx for data; png or svg for a chart card. The path must be inside the bot's working folder or the person's Downloads; default: Downloads.",
+    "Write a card (id), a loaded table or a SELECT to a file: csv, parquet or xlsx for data; png or svg for a chart card. The path must be inside the operator's working folder or the person's Downloads; default: Downloads.",
     {
       id: { type: "string", pattern: "^c_[0-9]+$" },
       table: { type: "string", minLength: 1, maxLength: 300 },

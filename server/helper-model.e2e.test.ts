@@ -201,7 +201,7 @@ posixOnly("the helper model, through the real server", () => {
     await waitFor(async () => (await upkeep()).lastCapture?.note === NO_TEXT_ENGINE, "the capture to be refused for want of an engine");
     expect(await memory(bot.id)).not.toContain("The person is vegetarian");
     // the skill review: three tool steps are due, and it is refused the same way
-    await waitFor(() => server.log().includes(`skill review: ${bot.id}: this bot's engine cannot run a background review`), "the review to be refused");
+    await waitFor(() => server.log().includes(`skill review: ${bot.id}: this operator's engine cannot run a background review`), "the review to be refused");
     expect((await getBot(bot.id)).messages.some((message) => message.card?.skillRequest)).toBe(false);
     // the compaction summary: excerpts, not the helper's text
     const summary = await compacted(bot);

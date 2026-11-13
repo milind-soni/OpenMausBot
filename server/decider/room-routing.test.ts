@@ -32,8 +32,8 @@ describe("room routing request", () => {
   it("offers every active member by id, plus __everyone__, in the bench's state shape", () => {
     const { state, question } = roomRoutingRequest(INPUT);
     expect(Object.keys(question.options)).toEqual(["bot-maya", "bot-theo", "bot-chief", EVERYONE_OPTION]);
-    expect(question.options["bot-maya"]).toBe("Maya, Product Designer bot. Owns UI mockups and the brand look.");
-    expect(question.options["bot-chief"]).toBe("Chief, Chief of Staff bot.");
+    expect(question.options["bot-maya"]).toBe("Maya, Product Designer operator. Owns UI mockups and the brand look.");
+    expect(question.options["bot-chief"]).toBe("Chief, Chief of Staff operator.");
     expect(question.instructions).toContain("`new_message`");
     expect(state).toEqual({
       room: "#launch",
@@ -56,7 +56,7 @@ describe("room routing request", () => {
   });
 
   it("describes a bot on one line whatever its fields hold", () => {
-    expect(memberOption({ id: "x", name: "  Nora\n", description: "Writes\ncopy." })).toBe("Nora bot. Writes copy.");
+    expect(memberOption({ id: "x", name: "  Nora\n", description: "Writes\ncopy." })).toBe("Nora operator. Writes copy.");
   });
 });
 

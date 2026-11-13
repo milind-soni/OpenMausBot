@@ -2615,7 +2615,7 @@ describe("harness HTTP API", () => {
       const nonChief = await createOperator(outsiderChannel.threadId, "Non-Chief Operator", outsider.id);
       expect(nonChief).toEqual({
         status: 403,
-        body: { error: "only a section's Chief of Staff can create operator bots" },
+        body: { error: "only a section's Chief of Staff can create operators" },
       });
       const denied = await createOperator(outsiderChannel.threadId, "Forbidden Operator");
       expect(denied).toEqual({
@@ -2865,7 +2865,7 @@ describe("harness HTTP API", () => {
       const state = (await api("GET", "/api/bots?messages=0")).body;
       expect(state.bots.find((bot: { id?: string }) => bot.id === createdId)?.soul).toBe(role);
       const longer = await create(`Longer analyst ${chief.id}`, `${role}x`);
-      expect(longer).toEqual({ status: 400, body: { error: "instructions must be at most 4000 characters; these are 4001. Shorten them to what this bot does and how it works, or create it with propose_team_setup, where soul takes up to 24000 bytes." } });
+      expect(longer).toEqual({ status: 400, body: { error: "instructions must be at most 4000 characters; these are 4001. Shorten them to what this operator does and how it works, or create it with propose_team_setup, where soul takes up to 24000 bytes." } });
     } finally {
       if (createdId) await api("DELETE", `/api/bots/${createdId}`);
       await api("DELETE", `/api/bots/${chief.id}`);
@@ -9335,7 +9335,7 @@ describe("harness HTTP API", () => {
         chiefOfStaff: true,
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
       })).status).toBe(200);
-      const roster = "Current Roster end department (your team):\n- No other visible bots are available yet.";
+      const roster = "Current Roster end department (your team):\n- No other visible operators are available yet.";
 
       const sections = (await api("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections as Array<{ id: string; text: string }>;
       const team = sections.find((section) => section.id === "coordination")?.text ?? "";
@@ -11657,7 +11657,7 @@ describe("harness HTTP API", () => {
         forBotId: outsider.id,
       });
       expect(outOfSection.status).toBe(403);
-      expect(z.object({ error: z.string() }).parse(await outOfSection.json()).error).toMatch(/set up by bots in its own department or by its Chief/);
+      expect(z.object({ error: z.string() }).parse(await outOfSection.json()).error).toMatch(/set up by operators in its own department or by its Chief/);
 
       const unknown = await post({
         fromBotId: chief.id,

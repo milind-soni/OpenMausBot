@@ -188,8 +188,8 @@ it("keeps a turn on the whole catalog until the switch is on, then mounts the br
       const names = namesOf(await ask("tools/list"));
       for (const absent of ["find_tool", "use_tool", "vm_exec"]) expect(names, absent).not.toContain(absent);
       expect(names).toEqual(whole.map((tool) => tool.name).filter((name) => name !== "vm_exec"));
-      expect((await call(ask, "vm_exec", { command: "true" })).error).toEqual({ code: -32602, message: "Tool selection excludes this tool. Check the bot's Access settings." });
-      expect((await use(ask, "vm_exec", { command: "true" })).error).toEqual({ code: -32602, message: "Tool selection excludes this tool. Check the bot's Access settings." });
+      expect((await call(ask, "vm_exec", { command: "true" })).error).toEqual({ code: -32602, message: "Tool selection excludes this tool. Check the operator's Access settings." });
+      expect((await use(ask, "vm_exec", { command: "true" })).error).toEqual({ code: -32602, message: "Tool selection excludes this tool. Check the operator's Access settings." });
       expect((await use(ask, "list_triggers")).error).toEqual({ code: -32602, message: "Unknown tool: use_tool" });
       // and what the selection allows still reaches the harness
       expect(textOf(await call(ask, "list_triggers", {}))).toMatch(/^This bot has no triggers\. Current time: /);
@@ -235,8 +235,8 @@ it("leaves every gate and limit where it was: a tool selection, a Chief-only too
       // the whole catalog but the one tool the selection leaves out, and no way round it
       expect(namesOf(list)).toEqual(expect.arrayContaining(["coordinate_bots", "trigger", "list_rooms", "post_to_room"]));
       for (const name of ["vm_exec", "find_tool", "use_tool"]) expect(namesOf(list), name).not.toContain(name);
-      expect((await call(ask, "vm_exec", { command: "true" })).error).toEqual({ code: -32602, message: "Tool selection excludes this tool. Check the bot's Access settings." });
-      expect((await use(ask, "vm_exec", { command: "true" })).error).toEqual({ code: -32602, message: "Tool selection excludes this tool. Check the bot's Access settings." });
+      expect((await call(ask, "vm_exec", { command: "true" })).error).toEqual({ code: -32602, message: "Tool selection excludes this tool. Check the operator's Access settings." });
+      expect((await use(ask, "vm_exec", { command: "true" })).error).toEqual({ code: -32602, message: "Tool selection excludes this tool. Check the operator's Access settings." });
       expect((await use(ask, "list_triggers")).error).toEqual({ code: -32602, message: "Unknown tool: use_tool" });
     });
     await control(["interrupt", "--bot", selected.id]);
@@ -257,7 +257,7 @@ it("leaves every gate and limit where it was: a tool selection, a Chief-only too
       const scout = { name: "Scout", role: "Ops", instructions: "Work." };
       const direct = await call(ask, "create_bot", scout);
       const throughBridge = await use(ask, "create_bot", scout);
-      expect(refusalOf(throughBridge)).toContain("only a section's Chief of Staff can create operator bots");
+      expect(refusalOf(throughBridge)).toContain("only a section's Chief of Staff can create operators");
       expect(throughBridge.result).toEqual(direct.result);
     });
 

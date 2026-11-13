@@ -43,10 +43,10 @@ function clip(value: string, max: number): string {
 }
 
 export function memberOption(member: RoomRoutingMember): string {
-  const name = clip(member.name, NAME_MAX) || "Unnamed bot";
+  const name = clip(member.name, NAME_MAX) || "Unnamed operator";
   const title = member.title ? clip(member.title, TITLE_MAX) : "";
   const description = member.description ? clip(member.description, DESCRIPTION_MAX) : "";
-  return `${name}${title ? `, ${title}` : ""} bot.${description ? ` ${description}` : ""}`;
+  return `${name}${title ? `, ${title}` : ""} operator.${description ? ` ${description}` : ""}`;
 }
 
 function recentWithinBudget(recent: RoomRoutingInput["recent"]): RoomRoutingInput["recent"] {

@@ -403,7 +403,7 @@ describe("the scheduler", () => {
     const write = async () => createAnswer;
     const { review, state } = harness({ engine: helperReviewer(write, null).engine });
     review.noteTurn(BOT.id, "thread-a", 3);
-    expect(await review.run(BOT.id, "thread-a")).toMatchObject({ state: "failed", note: "this bot's engine cannot run a background review" });
+    expect(await review.run(BOT.id, "thread-a")).toMatchObject({ state: "failed", note: "this operator's engine cannot run a background review" });
     expect(state.applied).toEqual([]);
   });
 

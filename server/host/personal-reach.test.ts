@@ -43,7 +43,7 @@ describe("a person's own MausBot reaching the team's bots", () => {
   it("never names a bot its person cannot see, nor another person's MausBot", () => {
     for (const hidden of [payroll, bensMausbot]) {
       expect(world().hides(mausbot, hidden)).toBe(true);
-      expect(world().refusal(mausbot, hidden, "mine")).toBe(`No bot with id "${hidden.id}" — call list_bots and copy the exact id from the result`);
+      expect(world().refusal(mausbot, hidden, "mine")).toBe(`No operator with id "${hidden.id}" — call list_bots and copy the exact id from the result`);
       expect(unreachableTeammate(bots, mausbot, hidden.name, (bot) => world().hides(mausbot, bot))?.id).not.toBe(hidden.id);
     }
     const wider = (reach = world()) => ({ reaches: (bot: RosterMember) => reach.listed(mausbot, bot, "mine"), hides: (bot: RosterMember) => reach.hides(mausbot, bot), refusal: (bot: RosterMember) => reach.refusal(mausbot, bot, "mine") });

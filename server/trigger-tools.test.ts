@@ -39,7 +39,7 @@ describe("listTriggers", () => {
     expect(one.trigger).toMatchObject({ id: "r1", kind: "schedule" });
     expect(one.trigger!.recentFires).toHaveLength(10);
     expect(listTriggers({ botId: "bot-b", triggerId: "r1", routines: [routine("r1", "bot-a")], webhooks: [], runs, timeZone: "UTC", now }).error)
-      .toContain("No trigger with that id belongs to this bot");
+      .toContain("No trigger with that id belongs to this operator");
   });
 });
 

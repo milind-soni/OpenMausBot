@@ -11152,7 +11152,7 @@ function roomPostEligibility(
   const verdict = roomTalks(bot, group, fromThreadId);
   if (verdict.ok) return verdict;
   if (verdict.problem === "dm") {
-    return { ok: false, status: 400, error: "that is a one-to-one bot channel, not a room — use coordinate_bots to reach a single bot" };
+    return { ok: false, status: 400, error: "that is a one-to-one operator channel, not a room — use coordinate_bots to reach a single operator" };
   }
   if (verdict.problem === "not-member") return { ok: false, status: 403, error: "you are not a member of that room" };
   if (verdict.problem === "private") return { ok: false, status: 403, error: PRIVATE_CHAT_ROOM_WRITE };
@@ -13729,8 +13729,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const addressed = store.bot(target.botId);
           const eligibility =
             target.botId === internalSender.id && !toSelf ? "Choose a teammate, not yourself"
-            : !addressed ? `No bot with id "${target.botId}" — call list_bots and copy the exact id from the result`
-            : addressed.hidden ? `The bot with id "${target.botId}" is no longer available — call list_bots for the ones you can reach`
+            : !addressed ? `No operator with id "${target.botId}" — call list_bots and copy the exact id from the result`
+            : addressed.hidden ? `The operator with id "${target.botId}" is no longer available — call list_bots for the ones you can reach`
             : roomHandoffProblem(target, address) ?? personalReach.handOnProblem(internalSender, addressed, address.threadId, internalCapability.generation);
           if (eligibility) return refuse(403, eligibility);
         }
@@ -13921,7 +13921,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         })).filter(g => g.members.length);
         return json(res, 200, { currentRoom: source ? { id: source.id, name: source.name, workingFolder: source.cwd || null } : null,
           bots: personalReach.peers(store.bots, internalSender, internalCapability.threadId).map(bot => ({ id: bot.id, name: bot.name, title: bot.title, section: bot.section, busy: bot.busy })),
-          rooms, note: "Each bot uses its own environment and permissions. Files are not transferred: pass absolute paths only when accessible to the recipient, otherwise pass the content." });
+          rooms, note: "Each operator uses its own environment and permissions. Files are not transferred: pass absolute paths only when accessible to the recipient, otherwise pass the content." });
       }
       if (method === "POST" && path === "/api/internal/retry-thread") {
         const body = await readInternalBody();
@@ -13935,11 +13935,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const target = store.bot(botId);
         if (!target || target.id === from.id) return json(res, 404, { error: "no such teammate" });
         if (!canManage(from, target)) {
-          return json(res, 403, { error: "that bot is not on this Chief's team — call list_bots for the ones you can reach" });
+          return json(res, 403, { error: "that operator is not on this Chief's team — call list_bots for the ones you can reach" });
         }
         if (store.groupByThread(threadId)) return json(res, 400, { error: "that is a room thread — use coordinate_bots in the room instead" });
         const task = store.taskByThread(target.id, threadId);
-        if (!task || (CLOUD_TEAM && !teamHost.readableFrom(fromThreadId)(threadId))) return json(res, 404, { error: "no such thread on that bot" });
+        if (!task || (CLOUD_TEAM && !teamHost.readableFrom(fromThreadId)(threadId))) return json(res, 404, { error: "no such thread on that operator" });
         if (!outsideLineage.mayReach(fromThreadId, threadId)) return json(res, 403, { error: OUTSIDE_STAYS_HERE });
         requireActiveInternalCapability();
         try {
@@ -14138,13 +14138,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "source conversation does not belong to sender" });
         }
         if (!chiefLevel(chief)) {
-          return json(res, 403, { error: "only a section's Chief of Staff can create operator bots" });
+          return json(res, 403, { error: "only a section's Chief of Staff can create operators" });
         }
         if (internalCapability.createdBots >= MAX_CREATED_BOTS_PER_TURN) {
-          return json(res, 429, { error: `You can create at most ${MAX_CREATED_BOTS_PER_TURN} bots in one turn. Use the team you have before adding more.` });
+          return json(res, 429, { error: `You can create at most ${MAX_CREATED_BOTS_PER_TURN} operators in one turn. Use the team you have before adding more.` });
         }
         if (store.bots.length >= MAX_WORKSPACE_BOTS) {
-          return json(res, 409, { error: `this workspace is limited to ${MAX_WORKSPACE_BOTS} bots` });
+          return json(res, 409, { error: `this workspace is limited to ${MAX_WORKSPACE_BOTS} operators` });
         }
         const fields = createBotFields(body, chief, store.bots);
         if ("error" in fields) return json(res, fields.status, { error: fields.error });
@@ -14158,7 +14158,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!fitsOnOneLine(name)) return json(res, 400, { error: "name must fit on one line" });
         if (!fitsOnOneLine(role)) return json(res, 400, { error: "role must fit on one line" });
         if (instructions.length > MAX_CREATED_BOT_INSTRUCTIONS) {
-          return json(res, 400, { error: `instructions must be at most ${MAX_CREATED_BOT_INSTRUCTIONS} characters; these are ${instructions.length}. Shorten them to what this bot does and how it works, or create it with propose_team_setup, where soul takes up to ${BOT_PROFILE_LIMITS.soul} bytes.` });
+          return json(res, 400, { error: `instructions must be at most ${MAX_CREATED_BOT_INSTRUCTIONS} characters; these are ${instructions.length}. Shorten them to what this operator does and how it works, or create it with propose_team_setup, where soul takes up to ${BOT_PROFILE_LIMITS.soul} bytes.` });
         }
         let selection: ModelSelection;
         if (body.modelSelection === undefined) {
@@ -14177,12 +14177,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         // Discovery can yield; check current authority and capacity again before writing.
         if (store.bot(chief.id) !== chief || chief.hidden || !chiefLevel(chief) || !connectorThread(chief.id, fromThreadId)) {
-          return json(res, 403, { error: "only an active Chief of Staff can create operator bots" });
+          return json(res, 403, { error: "only an active Chief of Staff can create operators" });
         }
         if (internalCapability.createdBots >= MAX_CREATED_BOTS_PER_TURN) {
-          return json(res, 429, { error: `You can create at most ${MAX_CREATED_BOTS_PER_TURN} bots in one turn. Use the team you have before adding more.` });
+          return json(res, 429, { error: `You can create at most ${MAX_CREATED_BOTS_PER_TURN} operators in one turn. Use the team you have before adding more.` });
         }
-        if (store.bots.length >= MAX_WORKSPACE_BOTS) return json(res, 409, { error: `this workspace is limited to ${MAX_WORKSPACE_BOTS} bots` });
+        if (store.bots.length >= MAX_WORKSPACE_BOTS) return json(res, 409, { error: `this workspace is limited to ${MAX_WORKSPACE_BOTS} operators` });
         const recheck = body.copyFromBotId === undefined ? fields : createBotFields(body, chief, store.bots); if ("error" in recheck) return json(res, recheck.status, { error: recheck.error }); const duplicate = store.bots.find(
           (candidate) =>
             !candidate.hidden &&
@@ -14264,7 +14264,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (!parsed.success) return json(res, 400, { error: "provide a room name, memberIds, and optional bulletin (at most 12000 characters)" });
           const memberIds = [...new Set([chief.id, ...parsed.data.memberIds])];
           if (!allowedRoster(memberIds)) {
-            return json(res, 403, { error: "include yourself and only active bots you can reach (list_bots)" });
+            return json(res, 403, { error: "include yourself and only active operators you can reach (list_bots)" });
           }
           const group = createChannel({
             name: redactSecretsInText(parsed.data.name), memberIds, section: chief.section,
@@ -14285,7 +14285,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!parsed.success) return json(res, 400, { error: "provide roomId and a supported room action; section moves are user-only" });
         const room = store.group(parsed.data.roomId);
         if (!room || room.dm || sectionKey(room.section) !== sectionKey(chief.section) || !allowedRoster(room.memberIds)) {
-          return json(res, 403, { error: "you can only manage rooms you belong to in your own department, whose members you can all reach; no bot needs adding to get work, since coordinate_bots reaches bots outside the room directly" });
+          return json(res, 403, { error: "you can only manage rooms you belong to in your own department, whose members you can all reach; no operator needs adding to get work, since coordinate_bots reaches operators outside the room directly" });
         }
         const { action, memberIds, name, bulletin } = parsed.data;
         if (cloudGuestDriven(internalCapability.threadId)) {
@@ -14306,7 +14306,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           patch.bulletin = redactSecretsInText(bulletin);
         } else {
           if (!memberIds || memberIds.some((id) => !allowedIds.has(id))) {
-            return json(res, 403, { error: "memberIds must name only yourself or active bots you can reach (list_bots)" });
+            return json(res, 403, { error: "memberIds must name only yourself or active operators you can reach (list_bots)" });
           }
           const next = action === "add_members" ? [...new Set([...room.memberIds, ...memberIds])]
             : action === "remove_members" ? room.memberIds.filter((id) => !memberIds.includes(id)) : memberIds;

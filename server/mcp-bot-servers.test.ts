@@ -141,7 +141,7 @@ describe("a bot adding a server where bots are boxed", () => {
   it("refuses one that uses another bot's files, and keeps a plain command every bot's", () => {
     const data = dataDir();
     expect(addBotMcpServer({}, { name: "theirs", ...python(join(data, "workspaces", "paul", "s.py")) }, "iris", data, true))
-      .toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/another bot's folder/) });
+      .toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/another operator's folder/) });
     const plain = addBotMcpServer({}, { name: "notes", command: "npx", args: ["-y", "@x/notes-mcp"] }, "iris", data, true);
     expect(plain.ok && plain.server).toEqual({ command: "npx", args: ["-y", "@x/notes-mcp"], env: {}, enabled: false });
   });

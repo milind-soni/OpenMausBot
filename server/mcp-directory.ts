@@ -347,7 +347,7 @@ function guidance(text: string): DirectoryResult {
   return { content: [{ type: "text", text }] };
 }
 
-export const SELECTION_EXCLUDES = "Tool selection excludes this tool. Check the bot's Access settings.";
+export const SELECTION_EXCLUDES = "Tool selection excludes this tool. Check the operator's Access settings.";
 function excluded(): DirectoryResult {
   return { content: [{ type: "text", text: SELECTION_EXCLUDES }], isError: true };
 }

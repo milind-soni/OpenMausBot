@@ -628,7 +628,7 @@ describe("internal mcp_server route, Full access", () => {
     mkdirSync(dirname(theirs), { recursive: true });
     writeFileSync(theirs, "");
     expect(await boxed.post({ action: "update", name: "notes", command: "python3", args: [theirs] })).toEqual({
-      status: 400, body: { error: "That command uses files in another bot's folder, which only that bot can reach. Use files in your own folder." },
+      status: 400, body: { error: "That command uses files in another operator's folder, which only that operator can reach. Use files in your own folder." },
     });
     expect(boxed.stored("notes")).toMatchObject({ command: "npx" });
 

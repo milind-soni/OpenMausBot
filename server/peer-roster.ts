@@ -164,7 +164,7 @@ export function resolveTeammate<T extends RosterMember>(
   const fold = foldedName, loose = looseName;
   const name = fold(wanted);
   const shown = peerName(wanted) || wanted;
-  if (!name) return { error: `No bot with id "${shown}" — call list_bots and copy the exact id from the result` };
+  if (!name) return { error: `No operator with id "${shown}" — call list_bots and copy the exact id from the result` };
   const reachable = reachablePeers(bots, from, wider?.reaches);
   const matches = reachable.filter(bot => fold(bot.name) === name);
   if (matches.length === 1) return { id: matches[0]!.id, byName: true };
@@ -177,7 +177,7 @@ export function resolveTeammate<T extends RosterMember>(
   if (apart) return { error: wider?.refusal(apart) ?? reachRefusal(from, apart, lookedAfterBy)! };
   const away = bots.some(bot => !wider?.hides(bot) && (fold(bot.name) === name || loose(bot.name) === loose(wanted))) ? null : elsewhere(wanted);
   if (away && "where" in away) return { error: away.where };
-  return { error: `No bot with id or name "${shown}" — call list_bots and copy the exact id from the result.${teammateChoices(reachable)}${away ? ` ${away.hint}` : ""} ${PEER_ACCESS_HELP}` };
+  return { error: `No operator with id or name "${shown}" — call list_bots and copy the exact id from the result.${teammateChoices(reachable)}${away ? ` ${away.hint}` : ""} ${PEER_ACCESS_HELP}` };
 }
 
 const CHOICES_MAX = 12;

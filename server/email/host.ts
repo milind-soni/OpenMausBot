@@ -125,7 +125,7 @@ export function createEmailHost(deps: EmailHostDeps) {
       if (!service.mounted()) return EMAIL_TO_CONNECT_PROMPT;
       const scopes = bot.connectorScopes ? { apps: { [EMAIL_SLUG]: bot.connectorScopes.apps[EMAIL_SLUG]! } } : undefined;
       const grant = bot.connectorTools?.[EMAIL_SLUG];
-      const granted = grant && grant.tools !== "*" ? ` Of the email tools, this bot was granted only: ${grant.tools.join(", ")}.` : "";
+      const granted = grant && grant.tools !== "*" ? ` Of the email tools, this operator was granted only: ${grant.tools.join(", ")}.` : "";
       const cantSend = service.store.list().flatMap((one) => { const problem = sendingProblem(one); return problem ? [EMAIL_CANT_SEND_PROMPT(one.address, problem)] : []; }).join("");
       return EMAIL_PROMPT(service.store.list().map((one) => one.address)) + cantSend + granted + describeConnectorScopes(scopes);
     },

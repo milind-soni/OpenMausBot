@@ -141,9 +141,9 @@ export function workspaceLocationsPrompt(botId: string, cwd: string | undefined,
     sharedBotFolder: workspaceDir(botId),
     otherThreadFiles: join(TASK_WORKSPACES_DIR, botId),
     ...(botCwd ? { configuredProjectFolder: botCwd } : {}),
-  }) + ". Different conversations can have different working folders. For an existing file, use the exact path from the conversation; if missing here, check this bot's listed folders before saying it is gone or recreating it." +
+  }) + ". Different conversations can have different working folders. For an existing file, use the exact path from the conversation; if missing here, check this operator's listed folders before saying it is gone or recreating it." +
     " Follow an explicitly requested destination. Otherwise put new task output in the current working folder and report its absolute path so another thread or room can use it." +
-    " Do not move old files, edit another active thread's work, or read another bot's private folders without authorization. These paths do not grant additional access." +
+    " Do not move old files, edit another active thread's work, or read another operator's private folders without authorization. These paths do not grant additional access." +
     " Chat links and inline images open only files in currentWorkingFolder and sharedBotFolder." +
     (opts.attachFile
       ? " When you save a file or picture for the person somewhere else, also attach it with attach_file in the same turn so it opens from chat. For many files, attach the few that matter most, such as a preview."
@@ -566,11 +566,11 @@ export const REMEMBER_AND_FORGET =
   " When the person asks you to remember something, save it now with memory_update append, one fact per call, as a plain statement about them, then confirm in one short line of their words what you will do (\"Got it: short answers, and times in India time.\")." +
   " When it changes or replaces something already in your memory (a new instruction instead of an older one), use memory_update supersede on that old entry instead of append, carrying into the new text whatever in the old entry still holds (if it had an until date that still applies, pass its until date again), so your memory never keeps both." +
   " When they ask you to forget something, call memory_update with action forget and a few words that name it, once per thing: it removes it from your notes, your topic notes and About me, and it is not learned again. Then confirm in one plain line what you forgot." +
-  " A standing preference meant for all their bots (where reminders go, how replies should sound) is saved once with memory_update action prefer: one line in their About me, which every bot reads. Never pass it on to each bot.";
+  " A standing preference meant for all their operators (where reminders go, how replies should sound) is saved once with memory_update action prefer: one line in their About me, which every operator reads. Never pass it on to each operator.";
 
 const NOTES_IN_RESULT =
-  " Notes cannot be saved from this conversation: on this Cloud only a conversation that only its owner writes in may change memory, and another bot or person wrote here." +
-  " Do not call memory_update or memory_log or edit memory files. Put any fact worth keeping in your reply; for work another bot handed you, in your result to that bot.";
+  " Notes cannot be saved from this conversation: on this Cloud only a conversation that only its owner writes in may change memory, and another operator or person wrote here." +
+  " Do not call memory_update or memory_log or edit memory files. Put any fact worth keeping in your reply; for work another operator handed you, in your result to that operator.";
 
 /** Memory is a prompt-injection persistence vector once a bot copies untrusted text into it.
  * `writesRefused`: this turn's notes would be refused, so it is told where facts go instead. */

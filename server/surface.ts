@@ -179,7 +179,7 @@ const RESTATE_SENTENCE =
 const PLACE_CONTROL = "the Screen panel";
 /** surfacePrompt swaps exactly this phrase when select_computer is mounted. */
 const ASK_TO_SWITCH = `explain the mismatch and ask the user to change where this conversation works in ${PLACE_CONTROL}`;
-const REPORT_BACK = "tell the bot that gave you this job which place you need and end your turn, because no person watches this conversation";
+const REPORT_BACK = "tell the operator that gave you this job which place you need and end your turn, because no person watches this conversation";
 
 const SURFACE_AUTHORITY =
   ` For browser and computer tasks, use OpenMausBot's mounted browser/computer tools first: inspect the target, perform the action, and verify its result before claiming success. Discover deferred tools by their server/name when needed. Do not substitute the provider's own desktop, a shell-launched browser, or another automation path for the selected OpenMausBot surface. Ordinary code and file tasks may still use their normal tools. Announcing an action is not performing it. A request naming another place does not move these tools: this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote, and the built-in browser is a separate browser. If the requested place differs from the mounted one, ${ASK_TO_SWITCH}; never act on a different computer or describe a host window as a VM.`;

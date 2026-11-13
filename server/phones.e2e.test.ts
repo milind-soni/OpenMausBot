@@ -131,7 +131,7 @@ it("a registered phone's tools reach the bot and a job round-trips", async () =>
   const launch = await turn(chief, "What is on my calendar today?");
   const device = launch.mcpConfig.mcpServers[PHONE_MCP_SERVER];
   expect(device?.env.OMB_HARNESS_URL).toBe(`http://127.0.0.1:${new URL(url).port}`);
-  expect(launch.systemPrompt).toContain(`${PHONE_NAME} is an iPhone; this bot may use: Calendar.`);
+  expect(launch.systemPrompt).toContain(`${PHONE_NAME} is an iPhone; this operator may use: Calendar.`);
   const token = device!.env[harnessMcpTokenEnv("device")]!;
   expect(token).toBeTruthy();
 
@@ -173,7 +173,7 @@ it("any bot left on the default hears where the person is talking from: the pair
   const atDesk = (await api("POST", "/api/bots", { name: "Desk helper" })).body.bot;
   const desk = await sendFrom(atDesk, "Remind me to call Ada at five.", "desk-send-000000000001");
   expect(desk.mcpConfig.mcpServers).toHaveProperty(PHONE_MCP_SERVER);
-  expect(desk.systemPromptFile).toContain(`${PHONE_NAME} is an iPhone; this bot may use: Calendar.`);
+  expect(desk.systemPromptFile).toContain(`${PHONE_NAME} is an iPhone; this operator may use: Calendar.`);
   expect(desk.systemPrompt).toContain(PHONE_PLACE_PROMPT.computer);
   expect(desk.systemPrompt).not.toContain(PHONE_PLACE_PROMPT.phone);
   // A phone's send with no id of its own (a walkie or command send) is still the phone's.

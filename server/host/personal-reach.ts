@@ -22,7 +22,7 @@ export interface PersonalReachDeps {
 
 type Placed = Pick<HandoffView, "threadId"> & Partial<Pick<HandoffView, "id" | "origin">>;
 
-export const unknownBot = (id: string) => `No bot with id "${peerName(id)}" — call list_bots and copy the exact id from the result`;
+export const unknownBot = (id: string) => `No operator with id "${peerName(id)}" — call list_bots and copy the exact id from the result`;
 
 export function createPersonalReach(deps: PersonalReachDeps) {
   const ownerOf = (from: RosterMember): string | null => defaultBotPerson(from) || null;

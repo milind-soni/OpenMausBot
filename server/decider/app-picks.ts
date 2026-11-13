@@ -5,7 +5,7 @@ import { clean } from "../records-block.ts";
 import { deciderAccount, deciderEnabled, type Decider } from "./index.ts";
 import { BOT_DECIDE_LIMITS } from "./relay.ts";
 
-export const APP_PICK_INSTRUCTIONS = "Which one app should this person connect next, so their `bots` can do more for them? Go by the `connected_apps` they already use and what the bots are for.";
+export const APP_PICK_INSTRUCTIONS = "Which one app should this person connect next, so their `bots` can do more for them? Go by the `connected_apps` they already use and what the operators are for.";
 export const APP_PICK_TIMEOUT_MS = 10_000;
 const MAX_CONNECTED = 40;
 const MAX_BOTS = 12;

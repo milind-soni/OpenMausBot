@@ -70,10 +70,10 @@ export function createConnectionPrompt(sources: ConnectionPromptSources, origin:
     return [
       from ? ` You moved to My Cloud from the person's computer ${from}, with everything in OpenMausBot. What lives outside OpenMausBot stayed on ${from}: its other folders and files, passkeys, the person's own browser sessions and apps, Local VM disks and model servers on its home network. When a task needs one, use ${from} if it is lent to My Cloud and online; otherwise say in plain words that it stayed there.` : "",
       toConnect.length ? ` Not connected on My Cloud yet: ${toConnect.join("; ")}. When a task needs one, say in plain words that it needs the person once on My Cloud and give its link; do not try another way.` : "",
-      apps.length ? ` Assigned to this bot but not connected on My Cloud yet: ${apps.join(", ")}. When a task needs one, call COMPOSIO_MANAGE_CONNECTIONS for it, which shows the person a card to connect it, and end the turn.` : "",
+      apps.length ? ` Assigned to this operator but not connected on My Cloud yet: ${apps.join(", ")}. When a task needs one, call COMPOSIO_MANAGE_CONNECTIONS for it, which shows the person a card to connect it, and end the turn.` : "",
       ...(lent
         ? (lent.size ? [` Runs on the person's own computer and can't be reached now: ${[...lent.values()].join(" ")} If a task needs one, tell the person that in plain words, and do not write your own replacement.`] : [])
-        : [...elsewhere].map(([computer, names]) => ` Runs only on the person's computer ${computer}, not on My Cloud: ${names.join("; ")}. It worked there before the bots moved here. If a task needs one, tell the person in plain words that it stayed on ${computer} and why, not that it was never set up, and do not write your own replacement.`)),
+        : [...elsewhere].map(([computer, names]) => ` Runs only on the person's computer ${computer}, not on My Cloud: ${names.join("; ")}. It worked there before the operators moved here. If a task needs one, tell the person in plain words that it stayed on ${computer} and why, not that it was never set up, and do not write your own replacement.`)),
     ].join("");
   };
 }

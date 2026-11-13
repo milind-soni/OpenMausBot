@@ -27,7 +27,7 @@ describe("phoneAccess", () => {
     expect(phoneAccess(reader, onPhone, "PHONE_LIST_EVENTS").ok).toBe(true);
   });
   it("the prompt names the phone and its apps, the same for the Chief and any other bot", () => {
-    expect(phoneSystemPrompt(chief, iphone)).toContain("Omkar's iPhone is an iPhone; this bot may use: Calendar, Contacts.");
+    expect(phoneSystemPrompt(chief, iphone)).toContain("Omkar's iPhone is an iPhone; this operator may use: Calendar, Contacts.");
     expect(phoneSystemPrompt(scout, iphone)).toBe(phoneSystemPrompt(chief, iphone));
     expect(phoneSystemPrompt(none, iphone)).toBe("");
   });

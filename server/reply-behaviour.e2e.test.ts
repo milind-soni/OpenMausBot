@@ -93,7 +93,7 @@ it("remembers at once, learns only what the person said, forgets everywhere, and
       { tool: "memory_update", arguments: { action: "forget", old_text: "short answers" } },
       { tool: "memory_update", arguments: { action: "forget", old_text: "IST" } },
     ], "Done: I've forgotten both.");
-    expect(forgot.results[0]).toBe('Forgotten everywhere it was saved, About me included, which all their bots read: "The person prefers short answers". Confirm to the person in one plain line what you forgot.');
+    expect(forgot.results[0]).toBe('Forgotten everywhere it was saved, About me included, which all their operators read: "The person prefers short answers". Confirm to the person in one plain line what you forgot.');
     expect(forgot.results[1]).toContain('"The person is in India (IST)"');
     for (const text of forgot.results) expect(text).not.toMatch(/MEMORY\.md|memory\//);
     expect(await notes(bot.id)).not.toMatch(/short answers|\(IST\)/);

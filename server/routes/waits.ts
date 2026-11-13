@@ -20,7 +20,7 @@ export const WAIT_MESSAGES = {
   guest: "File and program waits are only for the owner of this computer. Use url_contains, url_missing or bot_idle.",
   guestFollowUp: "Guests can be told when something happens, but can't set a follow-up. Make the wait without follow_up.",
   otherComputer: "You work on another computer this turn (a private desktop or a cloud desktop), and file and program waits look at the one MausBot runs on. Use url_contains, url_missing or bot_idle.",
-  noPeer: "No bot you can reach goes by that name. Use a name or id from list_bots.",
+  noPeer: "No operator you can reach goes by that name. Use a name or id from list_bots.",
   self: "You cannot wait for yourself to finish. Tell the person yourself when you are done.",
   noWait: "None of your waits in this chat has that id. Use list_waits.",
   none: "You are not waiting for anything in this chat.",

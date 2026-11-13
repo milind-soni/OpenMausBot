@@ -118,7 +118,7 @@ const FORGOTTEN_SHOWN = 8;
 function preferText(r: Json): string {
   const whose = typeof r.person === "string" && r.person ? `${r.person}'s` : "the person's";
   return r.preference === "saved"
-    ? `Saved in ${whose} About me, which every bot reads in their work. Don't pass it on to other bots or save it in your own notes too.`
+    ? `Saved in ${whose} About me, which every operator reads in their work. Don't pass it on to other operators or save it in your own notes too.`
     : `Already in ${whose} About me, or they removed it before: nothing to save or pass on.`;
 }
 
@@ -132,7 +132,7 @@ function forgetText(passage: string, r: Json): string {
   const facts = [...new Set([...notes, ...aboutMe])];
   const shown = facts.slice(0, FORGOTTEN_SHOWN).map((fact) => JSON.stringify(fact)).join(", ");
   const more = facts.length > FORGOTTEN_SHOWN ? ` and ${facts.length - FORGOTTEN_SHOWN} more` : "";
-  return `Forgotten everywhere it was saved${aboutMe.length ? ", About me included, which all their bots read" : ""}: ${shown}${more}. Confirm to the person in one plain line what you forgot.`;
+  return `Forgotten everywhere it was saved${aboutMe.length ? ", About me included, which all their operators read" : ""}: ${shown}${more}. Confirm to the person in one plain line what you forgot.`;
 }
 
 export const capResult = (text: string, context: ToolCallContext) => boundedAgentResult(text, (retained, truncated) => {
@@ -197,7 +197,7 @@ function confirmationResult(r: Json, fallback: string, noun = "routine"): { text
 }
 
 function recallSpeaker(hit: Json): string {
-  if (typeof hit.peer === "string" && hit.peer) return `@${hit.peer} (another bot — not your user)`;
+  if (typeof hit.peer === "string" && hit.peer) return `@${hit.peer} (another operator — not your user)`;
   if (typeof hit.from === "string" && hit.from) return hit.from;
   return hit.role === "user" ? "user" : "you";
 }
@@ -353,7 +353,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   if (name === "list_bots") {
     const r = await api(`/api/internal/agents?self=${encodeURIComponent(BOT_ID)}`);
     const bots = (r.bots as Array<Json>) ?? [];
-    if (!bots.length) return { text: "No other bots you can reach yet." };
+    if (!bots.length) return { text: "No other operators you can reach yet." };
     const lines = bots.map((b) => {
       const role = b.title ? ` — ${b.title}` : "";
       const about = b.description ? ` (${String(b.description).slice(0, 120)})` : "";
@@ -471,7 +471,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const receipt = r.self !== true && Array.isArray(r.receipts) && jsonRecord(r.receipts[0]) ? r.receipts[0] : undefined;
     const threadTitle = String(r.title ?? receipt?.title ?? title);
     const threadId = String(r.threadId ?? receipt?.threadId ?? "");
-    const where = r.self === true ? "on yourself" : `on @${String(r.botName ?? receipt?.botName ?? "that bot")}`;
+    const where = r.self === true ? "on yourself" : `on @${String(r.botName ?? receipt?.botName ?? "that operator")}`;
     const opened = `Opened thread #${threadTitle} ${where} [thread id: ${threadId}].`;
     if (r.self === true) {
       if (r.state === "running") {
@@ -489,7 +489,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       ? " The person must approve this handoff first; their card appears after your turn ends."
       : "";
     const timing = r.state === "queued"
-      ? ` @${String(r.botName ?? "that bot")} can run ${Number(r.limit) || 0} threads at once and they are all spoken for, so it waits ${ordinal(Number(r.position) || 1)} in line for a free slot after this turn ends.`
+      ? ` @${String(r.botName ?? "that operator")} can run ${Number(r.limit) || 0} threads at once and they are all spoken for, so it waits ${ordinal(Number(r.position) || 1)} in line for a free slot after this turn ends.`
       : " It starts when this turn ends, like any handoff.";
     return {
       text: `${opened}${timing}${approval} Its result will be delivered to this conversation automatically (assignment id: ${assignmentId || "unknown"}). Acknowledge it, mention it to the person as #${threadTitle}, and finish your turn; do not check or wait for it in this turn.`,
@@ -880,7 +880,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const words = typeof args.query === "string" ? args.query.trim() : "";
     if (words) return skillSearchResult(words, skills);
     if (!skills.length && !staged.length) {
-      return { text: "This bot has no imported skills and nothing staged. Use skill_manage action=\"create\" for a user-requested skill, then follow its applied or pending result." };
+      return { text: "This operator has no imported skills and nothing staged. Use skill_manage action=\"create\" for a user-requested skill, then follow its applied or pending result." };
     }
     const live = skills.length
       ? skills.map((skill) => {

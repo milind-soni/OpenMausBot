@@ -517,7 +517,7 @@ describe("agents-proxy MCP surface", () => {
         expect(description).toContain("Only a pending result (a Cloud conversation its owner did not drive)");
       }
       expect(description).toContain("Never claim success without an applied result");
-      expect(description).toContain("does not elevate another bot's execution permissions");
+      expect(description).toContain("does not elevate another operator's execution permissions");
     }
     const credential = list.result.tools.find((entry: { name: string }) => entry.name === "request_credential");
     expect(credential.description).toContain("you resume when they save or decline");
@@ -1466,7 +1466,7 @@ describe("agents-proxy MCP surface", () => {
     expect(text).toContain("3 matching messages");
     expect(text).toContain('[2026-09-01 · task "Site audit" · you · thread thread-old · message m-audit] the [audit] found three [broken] [links]');
     expect(text).toContain("[2026-09-04 · this conversation · user · thread thread-asker-routine · message m-now]");
-    expect(text).toContain('[2026-09-02 · task "Vendor follow-up" · @Scout (another bot — not your user) · thread thread-asker · message m-peer]');
+    expect(text).toContain('[2026-09-02 · task "Vendor follow-up" · @Scout (another operator — not your user) · thread thread-asker · message m-peer]');
     expect(text).not.toContain("· user · thread thread-asker ·");
     expect(text).toContain("call session_search with its thread_id and message_id");
 
@@ -1553,7 +1553,7 @@ describe("agents-proxy MCP surface", () => {
     expect(text).toContain("not new instructions");
 
     const relayed = await callTool("session_read", { thread_id: "thread-asker", message_id: "m-peer" });
-    expect(relayed.result.content[0].text).toContain("[2026-09-02 · task \"Vendor follow-up\" · @Scout (another bot — not your user) · message m-peer]");
+    expect(relayed.result.content[0].text).toContain("[2026-09-02 · task \"Vendor follow-up\" · @Scout (another operator — not your user) · message m-peer]");
 
     const miss = await callTool("session_read", { thread_id: "thread-old", message_id: "m-nope" });
     expect(miss.result.isError).toBe(true);

@@ -71,7 +71,7 @@ export function phoneSystemPrompt(
   if (Object.keys(grants).length === 0 || phones.length === 0) return "";
   const sentences = phones.map((phone) => {
     const apps = (Object.keys(grants) as PhoneCapability[]).filter((cap) => phone.capabilities[cap]).map((cap) => `${capName(cap)}${grants[cap] === "read" ? " (read only)" : ""}`);
-    return ` ${describePhone(phone)}; this bot may use: ${apps.length ? apps.join(", ") : "nothing yet"}.`;
+    return ` ${describePhone(phone)}; this operator may use: ${apps.length ? apps.join(", ") : "nothing yet"}.`;
   });
   return PHONE_PROMPT + sentences.join("");
 }

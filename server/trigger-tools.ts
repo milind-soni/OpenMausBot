@@ -153,7 +153,7 @@ export function listTriggers(input: {
     const routine = routines.find((candidate) => candidate.id === input.triggerId);
     const webhook = webhooks.find((candidate) => candidate.id === input.triggerId);
     const app = apps.find((candidate) => candidate.id === input.triggerId);
-    if (!routine && !webhook && !app) return { ...header, error: "No trigger with that id belongs to this bot. Call trigger_info without trigger_id to see its ids." };
+    if (!routine && !webhook && !app) return { ...header, error: "No trigger with that id belongs to this operator. Call trigger_info without trigger_id to see its ids." };
     const fires = input.runs.filter((run) => run.routineId === input.triggerId).slice(0, FIRES_SHOWN).map(agentRun);
     const shown = routine ? agentRoutine(routine, latest.get(routine.id)) : webhook ? agentWebhook(webhook, latest.get(webhook.id)) : agentAppTrigger(app!, latest.get(app!.id));
     return { ...header, trigger: { ...shown, recentFires: fires } };
@@ -223,7 +223,7 @@ export function triggerTarget<T extends RosterMember>(from: T, forBotId: unknown
   if (!id) return { status: 400, error: 'for_bot_id must be a bot id from list_bots, e.g. { "for_bot_id": "bot-abc123" }' };
   if (id === from.id) return {};
   const target = bot(id);
-  if (!target) return { status: 404, error: "no bot with that id — call list_bots and copy the exact id from the result" };
-  if (!canManage(from, target)) return { status: 403, error: "that bot's automations are set up by bots in its own department or by its Chief, or it is unavailable. You can still hand it the work itself with coordinate_bots, or tell the person what to set up there." };
+  if (!target) return { status: 404, error: "no operator with that id — call list_bots and copy the exact id from the result" };
+  if (!canManage(from, target)) return { status: 403, error: "that operator's automations are set up by operators in its own department or by its Chief, or it is unavailable. You can still hand it the work itself with coordinate_bots, or tell the person what to set up there." };
   return { forBot: { botId: target.id, name: target.name } };
 }

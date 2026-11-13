@@ -298,10 +298,10 @@ describe("surfacePrompt", () => {
 
   it("tells a bot in a thread a bot opened to report back, not to wait for a person at the Screen panel", () => {
     const mismatch = surfacePrompt({ computer: "vm", browser: false }, { botOpened: true });
-    expect(mismatch).toContain("tell the bot that gave you this job which place you need and end your turn");
+    expect(mismatch).toContain("tell the operator that gave you this job which place you need and end your turn");
     expect(mismatch).not.toContain("ask the user to change where this conversation works");
     const none = surfacePrompt({ computer: null, browser: false }, { botOpened: true });
-    expect(none).toContain("tell the bot that gave you this job which place you need and end your turn");
+    expect(none).toContain("tell the operator that gave you this job which place you need and end your turn");
     expect(none).not.toContain("ask the user to choose where this conversation works");
     expect(surfacePrompt({ computer: "vm", browser: false }, { botOpened: true, canSelect: true }))
       .toBe(surfacePrompt({ computer: "vm", browser: false }, { canSelect: true }));

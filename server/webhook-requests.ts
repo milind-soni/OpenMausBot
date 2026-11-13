@@ -131,7 +131,7 @@ export class WebhookRequestService {
   private owned(webhookId: string, owner: string): WebhookTrigger {
     const webhook = this.options.webhooks.list().find((candidate) => candidate.id === webhookId);
     if (!webhook || webhook.botId !== owner) {
-      throw new WebhookRequestError("No webhook trigger with that id belongs to this bot. Call trigger_info and copy its id.", 404);
+      throw new WebhookRequestError("No webhook trigger with that id belongs to this operator. Call trigger_info and copy its id.", 404);
     }
     return webhook;
   }

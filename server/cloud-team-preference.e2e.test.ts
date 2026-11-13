@@ -83,9 +83,9 @@ it("saves a preference once in Bob's About me, from his own chat and from work h
   await expect.poll(settled, { timeout: 20_000 }).toBe(true);
 
   const asked = turns().find((turn) => turn.botId === scout.id && turn.turnIndex === 0)!;
-  expect(preferResults(asked)).toEqual(["Saved in Bob's About me, which every bot reads in their work. Don't pass it on to other bots or save it in your own notes too."]);
+  expect(preferResults(asked)).toEqual(["Saved in Bob's About me, which every operator reads in their work. Don't pass it on to other operators or save it in your own notes too."]);
   const handed = turns().find((turn) => turn.botId === quill.id)!;
-  expect(preferResults(handed)).toEqual(["Saved in Bob's About me, which every bot reads in their work. Don't pass it on to other bots or save it in your own notes too."]);
+  expect(preferResults(handed)).toEqual(["Saved in Bob's About me, which every operator reads in their work. Don't pass it on to other operators or save it in your own notes too."]);
   // Team memory stays closed to Bob's private work, and says where his own preference goes instead.
   const shared = handed.evidence.find((entry) => entry.step?.tool === "propose_team_memory")!.response!.result!;
   expect(shared.isError).toBe(true);

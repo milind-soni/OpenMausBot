@@ -154,7 +154,7 @@ it("moves the MCP servers with their secrets and sign-ins, the keys and the conn
   expect((await onCloud("PATCH", `/api/bots/${bot.id}`, { mcpServers: ["dodo", "docs", "linear", "notes"] })).status).toBe(200);
   const sections = (await onCloud("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections as Array<{ id: string; text?: string }>;
   expect(sections.find((section) => section.id === "to-connect")?.text)
-    .toBe(` Runs only on the person's computer ${collected.computer.label}, not on My Cloud: notes (it uses files or an address only ${collected.computer.label} has). It worked there before the bots moved here. If a task needs one, tell the person in plain words that it stayed on ${collected.computer.label} and why, not that it was never set up, and do not write your own replacement.`);
+    .toBe(` Runs only on the person's computer ${collected.computer.label}, not on My Cloud: notes (it uses files or an address only ${collected.computer.label} has). It worked there before the operators moved here. If a task needs one, tell the person in plain words that it stayed on ${collected.computer.label} and why, not that it was never set up, and do not write your own replacement.`);
 
   // Moving again changes nothing and spends nothing.
   const again = await sendConnections(await collectConnections(asLocal(fx)), asTarget(fx), { local: asLocal(fx) });
@@ -191,7 +191,7 @@ it("a My Cloud with connected apps of its own keeps them, and a bot there is tol
     const told = async () => ((await fresh.onCloud("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections as Array<{ id: string; text?: string }>)
       .find((section) => section.id === "to-connect")?.text ?? "";
     await expect.poll(told, { timeout: 20_000, interval: 500 })
-      .toBe(" Assigned to this bot but not connected on My Cloud yet: Gmail. When a task needs one, call COMPOSIO_MANAGE_CONNECTIONS for it, which shows the person a card to connect it, and end the turn.");
+      .toBe(" Assigned to this operator but not connected on My Cloud yet: Gmail. When a task needs one, call COMPOSIO_MANAGE_CONNECTIONS for it, which shows the person a card to connect it, and end the turn.");
     broker.account(broker.userFor(cloudInstallation), "gmail");
     await expect.poll(told, { timeout: 40_000, interval: 2_000 }).toBe("");
   } finally {

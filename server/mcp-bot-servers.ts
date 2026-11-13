@@ -104,10 +104,10 @@ export function keepInBotFolder(server: StoredStdioMcpServer, use: BotFolderUse,
     mkdirSync(tools, { recursive: true, mode: 0o700 });
     // Security: a bot may have made tools/ a link to somewhere else; files are only ever written inside its own folder.
     if (!lstatSync(tools).isDirectory() || segments(realpathSync(tools), realpathSync(own))?.length !== 1) {
-      return { ok: false, error: "Its tools folder is not a plain folder inside this bot's own folder." };
+      return { ok: false, error: "Its tools folder is not a plain folder inside this operator's own folder." };
     }
   } catch {
-    return { ok: false, error: "This bot's own folder could not be prepared." };
+    return { ok: false, error: "This operator's own folder could not be prepared." };
   }
   const moved: Array<{ from: string; to: string }> = [];
   for (const from of use.temporary) {
@@ -153,7 +153,7 @@ export function keepForBot(server: StoredStdioMcpServer, botId: string, dataDir:
   const use = botFolderUse(server, dataDir);
   const theirs = use !== null && (use === "several" || use.botId !== botId);
   if (theirs && boxed) {
-    return { ok: false, status: 400, error: "That command uses files in another bot's folder, which only that bot can reach. Use files in your own folder." };
+    return { ok: false, status: 400, error: "That command uses files in another operator's folder, which only that operator can reach. Use files in your own folder." };
   }
   if (!use || theirs) return { ok: true, server, moved: [] };
   const kept = keepInBotFolder(server, use, dataDir);

@@ -467,7 +467,7 @@ export function createSkillReview(deps: SkillReviewDeps): SkillReview {
       return { state: "skipped", applied: [], note: "the conversation is gone" };
     }
     const engine = deps.engine(botId);
-    if (!engine) return failed(botId, threadId, "this bot's engine cannot run a background review", steps);
+    if (!engine) return failed(botId, threadId, "this operator's engine cannot run a background review", steps);
     const transcript = reviewTranscript(conversation.messages, bot, conversation.room);
     const skills = deps.skills(botId);
     const { shown } = shownSkills(skills, transcript);
