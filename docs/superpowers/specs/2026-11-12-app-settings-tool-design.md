@@ -40,16 +40,16 @@ registry's deps instead of taking a `ctx`.
 | Tier | Behaviour | Examples |
 |---|---|---|
 | `safe` | Applies at once. Posts an applied-change card with Undo. | skin/theme, Simple or Advanced, font, chat width, send key, notification sounds, language, bot order, sidebar groups, thread limits and cleanup, room turn timeout, MCP call timeout, default model for new bots |
-| `confirm` | Always posts a "Change X?" card with Change and Cancel, at every approval level including Full access. The tool call waits on the answer (outbound-hold style, 9 minutes). Allow needs owner review. | provider base URLs (`anthropic.url`, `openaiCompat.url`/`model`, `xai.url`, `groq.url`, `meta.url`, `tts.baseUrl`) |
+| `confirm` | Always posts a "Change X?" card with Change and Cancel, at every approval level including Full access. The tool call waits on the answer (outbound-hold style, 9 minutes). Allow needs owner review. | provider base URLs, AI engines, and every setting added since (each bot's approval mode, name, colour and model, remote access, server config values, the rest of the window's preferences): see the inventory below |
 | `secret` | `set` never takes a value. It posts the existing secret card (`secretCards.requestCredential` with a `CREDENTIAL_TARGETS` id). The person types the key into the card. The bot hears only provided or dismissed. | provider keys (OpenAI, Anthropic, OpenRouter, Mistral, Groq, ...) |
-| `owner-only` | Readable and explainable. `set` is refused with where to change it. | any bot's approval mode, remote access, Cloud account, Vault, backups, computer sharing, revealing a key |
+| `owner-only` | Readable and explainable. `set` is refused with where to change it. | Cloud account, Vault, backups and restore, pairing devices, lending folders, sidebar picture, organization |
 
 ## Guards
 
 - **Owner turns only for writes.** Every `set` requires `phones.turnOwner({ botId, threadId, generation }) !== null`. That already refuses peer asks, relayed lines, webhook and routine runs the owner did not write, guests, shared-membership servers, and service-trust loopback. Reads are allowed in any turn the internal gate admits.
 - **Full access never skips a confirm card.** The confirm path must not consult `fullAccess()`.
 - **No secret ever reaches the bot.** `read` returns configured-or-not for keys. Secret writes go only through the secret card.
-- **A bot cannot raise its own permissions.** Approval modes are `owner-only`.
+- **A bot cannot raise its own permissions on its own.** An approval mode change is a `confirm` card that only the owner's review can approve.
 - **Owner review on Allow.** A confirm card's Allow counts only with `ownerReview` (bot-messages.ts), so a bot's own shell cannot approve its card.
 - **One open confirm card per bot.** A second `set` on a confirm setting while one waits is refused.
 - **Write budget.** At most 10 writes per turn (generation). The rest are refused.
@@ -89,7 +89,8 @@ Skin, Simple mode, font, chat width, send key and notification sounds live in th
 
 ## Out of scope
 
-Remote access, Cloud, Vault and backup writes. Adding, signing in or removing sign-in accounts (Claude, ChatGPT, Antigravity).
+Cloud, Vault and backup writes. Adding, signing in or removing sign-in accounts (Claude, ChatGPT, Antigravity). (Remote access moved
+in, on cards; see "Everything else, on approval" below.)
 
 ## As built (2026-11-12)
 
@@ -128,3 +129,108 @@ Deviations from the design above, each chosen as the safer or simpler option:
   threads or the new-bot default uses; the card warns when it is the only working engine. Writes go through
   `POST /api/instances/*` and `DELETE /api/instances/:id`, so the Settings window's checks (including a running turn on
   the engine) still apply.
+
+## Everything else, on approval (2026-11-13)
+
+The owner asked for every remaining Settings value, each one behind a Change/Cancel card. Every newly added setting is
+`confirm`; the 15 `safe` entries stay `safe`, and the existing `confirm` and `secret` entries are unchanged. The registry
+now holds 104 settings: 15 safe, 62 confirm (8 before), 19 secret, 8 owner-only (6 before).
+
+**Owner-only moved to confirm, and why that is safe.** Per-bot approval mode (`bots.approvalModes`, value
+`{"botId","mode"}`), remote access (`remote.wifi`, `remote.relay`, `remote.tailscale`, `remote.keepAwake`,
+`remote.httpsAddress` off only, `remote.domain`) and computer sharing (`computer.sharing`, the
+`features.sharedComputers` switch) are now `confirm`. The card is what keeps them safe: its Change counts only with
+`ownerReview` (the desktop app or a paired Full-access device), so a bot's own shell on loopback gets 403, and the confirm
+path never reads `fullAccess()`, so Full access never skips it. Every card names the bot and the effect in plain words
+(`Let Kiwi act without asking (Full access)`, `Let your paired phones reach this computer from anywhere, through MausBot's
+relay`, `... A lent folder can be used to reach a shell`). `describe` refuses before any card an unknown bot, Custom
+approval (desktop app only), and Approve for me on this computer's own desktop (the route takes that only with the
+warning the bot's Settings dialog shows). The approval change is sent with `applyToAllThreads`, as the bot panel does.
+`cloud.account` and `vault.logins` stay owner-only.
+
+**How the new groups write.**
+
+- Per-bot (`server/app-settings/registry-bots.ts`): `PATCH /api/bots/:id` through `routes.botPatch`, so the route's own
+  checks run (name limits, the colour list, `checkedModelSelection` with `requireAvailableModel`, Custom and hosted
+  Full-access refusals, the default bot's rules). `current()` is undefined, so a per-bot card has no Undo.
+- Server config (`server/app-settings/registry-config.ts`): `PUT /api/config` through `routes.config`, validated first
+  with the route's own section schema (`CONFIG_PATCH_FIELDS` exported from `server/config.ts`). Other routes go through
+  a new `call(route, ...)` dep: `POST`/`DELETE /api/settings/custom-domain` (moved out of `server/index.ts` into
+  `server/routes/custom-domain.ts`), `POST /api/starter/awake`, `PATCH /api/skills-library/:name` and
+  `PUT /api/bots/:id/skills-library`. A route that throws (the domain verifier) comes back as a refusal.
+- Window and desktop (`server/app-settings/registry-window.ts`): a confirm variant of `windowPref`; the frame goes out
+  only on Change. `src/lib/window-prefs.ts` applies each with the row's own setter, and reaches desktop-only ones through
+  the preload bridge (`openAtLogin`, `talkShortcut`, `windowFrame`, `rail`, `workspaces.color`, `updatesConsent`,
+  `companion`). Reads may be async; a preference whose bridge is absent is left out of the report, and the server refuses
+  a preference the window never reported ("The open MausBot window can't change this here").
+- Keys: `withoutKeys` (the engines refusal, now shared) wraps every object value that could carry one; decider and
+  image sections drop their key fields, and `read` strips any key, token, secret or password field.
+- Anything that sends data off the computer says so on its card: decision provider, image provider, product update
+  emails (your address goes to MausBot), usage analytics (PostHog).
+
+**Inventory** (every row of `src/components/settings/settings-index.ts`):
+
+| Row | Setting id(s) | Tier | Written by |
+|---|---|---|---|
+| pair, paired | `phone.pairing` | owner-only | pairing takes a code; removal and per-device grants stay in Settings |
+| wifi | `remote.wifi` | confirm | window → `companion.setRoute("wifi")` |
+| relay | `remote.relay` | confirm | window → `companion.setRoute("relay")` (needs a MausBot sign-in) |
+| keep-awake | `remote.keepAwake` | confirm | window → `companion.keepAwake` |
+| wake-automations | — | skipped | opens Automations, not a value |
+| tailscale | `remote.tailscale`, `remote.httpsAddress` | confirm | window → `companion.setTailscale` / `setRoute("https", false)`; turning HTTPS on needs the pairing flow |
+| domain | `remote.domain` | confirm | `POST`/`DELETE /api/settings/custom-domain`, checked live |
+| sidebar-color | `appearance.sidebarColor` | confirm | window → `workspaces.color` |
+| sidebar-picture | `appearance.sidebarPicture` | owner-only | a picture file |
+| show-helper | `sidebar.showHelper` | confirm | `PATCH /api/bots/:id {sidebarHidden}` on the default bot |
+| providers | `engines` | confirm (existing) | `/api/instances/*`; sign-in accounts stay in Settings |
+| keys | `keys.*`, provider addresses | secret, confirm (existing) | secure card; `PUT /api/config` |
+| backup-model | `ai.backupModel` | confirm | `PUT /api/config {automaticRecovery}` |
+| routing | `ai.routing` | confirm | `PUT /api/config {decider}` without keys; its keys have no secure-card target, so they are typed in Settings |
+| images | `ai.images` | confirm | `PUT /api/config {imageGen}` without keys (OpenAI image key is `keys.openaiImageApiKey`) |
+| about-you | `profile.name`, `profile.email`, `profile.aboutMe`, `profile.photo` (remove only), `bots.everyBotRules` | confirm | `PUT /api/config {profile}` / `{everyBotRules}`; a new photo is a file |
+| away-emails | — | skipped | Team Cloud only and per person; a Team Cloud never has an owner turn |
+| new-bots | `bots.newBotEffort`, `bots.newBotTemplate`, `bots.defaultModel` | confirm, confirm, safe (existing) | `PUT /api/config {newBots}` / `{newBotDefaults}`; sharing as a preset is an export |
+| limits | `bots.keepWarm`, `bots.awake`, `mcp.callTimeoutMinutes` | confirm, confirm, safe (existing) | `PUT /api/config {cacheKeepWarm}`; `POST /api/starter/awake` |
+| parallel | `threads.maxConcurrentPerBot` | safe (existing) | `PUT /api/config` |
+| group-turns | `rooms.turnTimeoutMinutes` | safe (existing) | `PUT /api/config` |
+| skills | `skills.library`, `bots.skills` | confirm | `PATCH /api/skills-library/:name`, `PUT /api/bots/:id/skills-library`; importing a skill is content |
+| early | `bots.skillAuthoring`, `bots.skillReview`, `bots.shareLearnedSkills` | confirm | `PUT /api/config {features}` |
+| all-bots | — | skipped | a page |
+| browser | `desktops.browser`, `desktops.browserLocalNetwork`, `desktops.browserEngine`, `desktops.browserProfiles` | confirm | `PUT /api/config {features}` / `{browserEngine}` / `{browserProfiles}`; removing a profile deletes its logins, so it is refused |
+| desktop-kinds | `desktops.privateDesktop` | confirm | `PUT /api/config {localVm}`; pull, start, stop and remove are actions |
+| saved-steps | `desktops.savedSteps` | confirm | `PUT /api/config {features}` |
+| (computer sharing) | `computer.sharing`, `computer.lending` | confirm, owner-only | `PUT /api/config {features.sharedComputers}`; each lent folder is picked and confirmed in the desktop's own dialogs |
+| vault | `vault.logins` | owner-only | logins and secrets |
+| spending | — | skipped | information |
+| backups | `data.backups` | owner-only | no schedule or location exists; a backup takes a password, the company schedule a typed confirmation, restore and delete are destructive |
+| bring-in | — | skipped | a one-time import |
+| move | `data.keepHere` | owner-only | the desktop takes it only from the person's click |
+| storage | `threads.eventLogRetentionDays`, `threads.eventLogMaxBytes` | safe (existing), confirm | `PUT /api/config {threads}`; clearing attachments deletes data |
+| activity | — | skipped | a read-only log |
+| members | `people.signIn` | confirm | `PUT /api/config {signIn}` |
+| bot-access | — | skipped | Team Cloud only (no owner turn there) |
+| account | `cloud.account` | owner-only | sign-in |
+| organization | `account.organization` | owner-only | portal sign-in |
+| emails | `account.productEmails` | confirm | window → `updatesConsent.choose` |
+| plan, this-week | — | skipped | billing and information |
+| updates, your-computers, help, shortcuts, apps | — | skipped | actions and navigation |
+| language | `general.language` | safe (existing) | `PUT /api/config` |
+| send-key | `general.sendKey`, `general.followUp` | safe (existing), confirm | window |
+| talk | `general.talkShortcut` | confirm | window → `talkShortcut.set` |
+| notifications | `general.notificationSounds`, `general.finishedNotifications`, `general.notificationFeed` | safe (existing), confirm, confirm | window; turning device notifications on asks the system first |
+| startup | `general.openAtLogin` | confirm | window → `openAtLogin.set` |
+| analytics | `general.analytics` | confirm | window → `setAnalyticsEnabled` |
+| light-dark, theme | `appearance.skin` | safe (existing) | window |
+| bubbles | `appearance.userBubbles` | confirm | window |
+| tool-calls | `appearance.toolCalls`, `appearance.runCard`, `appearance.chatWidth`, `appearance.font` | confirm, confirm, safe, safe | `PUT /api/config {features.showToolCalls}`; window |
+| layout | `appearance.showComputers`, `appearance.windowFrame`, `appearance.showThreads`, `appearance.toolsLayout`, `appearance.pinnedCircles`, `appearance.universalPins`, `appearance.pinnedPages` | confirm | window (rail and frame through the desktop bridge) |
+| bot-settings | `bots.approvalModes`, `bots.name`, `bots.color`, `bots.model`, `bots.archived`, `bots.settings` | confirm | `PATCH /api/bots/:id` |
+
+**Not exposed.** A bot's outbound policy, connector and phone-app scopes, tool scope, MCP servers, fallback models,
+always-allow list and managed sections are left out of `bots.settings`: the bot route refuses those loosenings from the
+local API while any bot works, and the asking bot is always working while its card waits. A browser profile removal,
+attachment clearing and backup restore delete data. Away emails and bot sharing exist only on a Team Cloud, where no turn
+is the owner's. Window-side reads come from the window's last report, so a change made by hand since shows on the next
+report, and a desktop bridge that refuses a change (Tailscale not installed, no sign-in for the relay) leaves the old value
+in the next report while the bot was told it changed.
+

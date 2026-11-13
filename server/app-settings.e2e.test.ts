@@ -228,10 +228,63 @@ it("a key is never taken as a value: set with a value is refused, set without on
 }, 60_000);
 
 it("an owner-only setting is refused with where to change it", async () => {
-  await start("OWNER-ONLY", [step({ action: "set", id: "bots.approvalModes", value: JSON.stringify({ [bot.id]: "full" }) }, true)]);
+  await start("OWNER-ONLY", [step({ action: "set", id: "vault.logins", value: "on" }, true)]);
   expect(results(await finished("OWNER-ONLY"))).toEqual([expect.objectContaining({ isError: true,
-    text: "Approval modes is changed only by the owner, in a bot's Settings. Tell the user where to find it; do not try another way." })]);
+    text: "Vault and logins is changed only by the owner, in Settings → Vault. Tell the user where to find it; do not try another way." })]);
 }, 60_000);
+
+/** The unanswered card for `settingId`, once it shows. */
+const waitingCard = async (settingId: string) => {
+  let waiting: any;
+  await expect.poll(async () => (waiting = (await settingCards(bot.threadId)).find((one) => one.card.appSettingRequest.settingId === settingId && !one.card.answered)) !== undefined,
+    { timeout: 20_000, message: `an unanswered ${settingId} card` }).toBe(true);
+  return waiting.card;
+};
+const botNow = async () => (await api("GET", "/api/bots")).bots.find((one: any) => one.id === bot.id);
+
+it("a bot's own name and a server setting change through the real routes only on the owner's Change", async () => {
+  await start("BOT-AND-CONFIG", [
+    step({ action: "set", id: "bots.name", value: JSON.stringify({ botId: bot.id, name: "Setter Two" }) }),
+    step({ action: "set", id: "profile.name", value: "Ada" }),
+  ], 60_000);
+  const rename = await waitingCard("bots.name");
+  expect(rename).toMatchObject({ title: "Change Bot name?", subtitle: "Rename Setter to \"Setter Two\"", options: ["Change", "Cancel"] });
+  expect((await botNow()).name, "nothing changes while the card waits").toBe("Setter");
+  await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: rename.requestId, behavior: "allow" }, 200, ownerDevice);
+  const profile = await waitingCard("profile.name");
+  expect(profile.subtitle).toBe("not set → Ada");
+  expect(config().profile?.name).toBeUndefined();
+  await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: profile.requestId, behavior: "allow" }, 200, ownerDevice);
+  const [renamed, named] = results(await finished("BOT-AND-CONFIG"));
+  expect(renamed).toMatchObject({ isError: false, text: expect.stringMatching(/^Done: Rename Setter to "Setter Two"\./) });
+  expect(named).toMatchObject({ isError: false, text: "Changed Your name from not set to Ada." });
+  expect((await botNow()).name).toBe("Setter Two");
+  expect(config().profile.name).toBe("Ada");
+}, 90_000);
+
+it("a Full-access bot's own approval mode changes only on a card: Cancel keeps it, Change from the owner's device applies it to every thread", async () => {
+  const change = step({ action: "set", id: "bots.approvalModes", value: JSON.stringify({ botId: bot.id, mode: "ask" }) });
+  await start("APPROVAL-CANCEL", [{ ...change, expectError: true }], 60_000);
+  const first = await waitingCard("bots.approvalModes");
+  expect(first).toMatchObject({ title: "Change Approval mode?", options: ["Change", "Cancel"] });
+  expect(first.subtitle).toMatch(/^Make Setter( Two)? ask you before each command or file change \(Ask for approval\)$/);
+  // Security: a local Allow while the bot works could be the bot's own shell.
+  expect((await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: first.requestId, behavior: "allow" }, 403)).error).toMatch(/^Approve settings changes from the desktop app/);
+  await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: first.requestId, behavior: "deny" }, 200, ownerDevice);
+  expect(results(await finished("APPROVAL-CANCEL"))[0]?.text).toMatch(/^The user cancelled the change to Approval mode\./);
+  expect((await botNow()).approvalMode).toBe("full");
+
+  await start("APPROVAL-CHANGE", [change], 60_000);
+  const second = await waitingCard("bots.approvalModes");
+  expect((await botNow()).approvalMode, "Full access did not skip the card").toBe("full");
+  await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: second.requestId, behavior: "allow" }, 200, ownerDevice);
+  expect(results(await finished("APPROVAL-CHANGE"))[0]).toMatchObject({ isError: false, text: expect.stringMatching(/^Done: Make Setter/) });
+  const now = await botNow();
+  expect(now.approvalMode).toBe("ask");
+  expect(now.tasks.every((task: any) => (task.approvalMode ?? "ask") === "ask")).toBe(true);
+  // Fixture cleanup: the owner's device puts the bot back on Full access for the tests after this one.
+  await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "full", applyToAllThreads: true }, 200, ownerDevice);
+}, 120_000);
 
 it("pinning a bot goes through the sidebar's own bot route, and Undo unpins it", async () => {
   const pinnedNow = async () => (await api("GET", "/api/bots")).bots.find((one: any) => one.id === bot.id)?.pinned === true;

@@ -31,8 +31,18 @@ would. Nothing touches live app data.
 - **Secret.** `set keys.xaiApiKey` with a value is refused. Without a value it
   posts the secure key card. The key is in no tool result, message, decision
   row or saved config.
-- **Owner-only.** `set bots.approvalModes` is refused with where the owner
-  changes it.
+- **Owner-only.** `set vault.logins` is refused with where the owner changes
+  it.
+- **A bot's own settings and a config value.** One turn renames the bot through
+  `bots.name` and sets `profile.name`. Each waits on its own card; nothing
+  changes until the owner's paired device taps Change, then `GET /api/bots` shows
+  the new name (written by the real `PATCH /api/bots/:id`) and `config.json`
+  the new profile name.
+- **Approval mode.** The Full-access bot asks to put itself on Ask. The card
+  reads "Make Setter ask you before each command or file change (Ask for
+  approval)"; a local Allow is refused with 403, Cancel keeps Full access, and
+  Change from the owner's device moves the bot and every thread to Ask. The
+  fixture then puts it back on Full access for the tests after it.
 - **Stop.** Stopping a turn whose provider-address card waits closes the card as
   unavailable at once; a later Change applies nothing, and the next turn can ask again.
 - **Window preferences.** A skin change is refused while no app window's live
@@ -50,7 +60,10 @@ would. Nothing touches live app data.
 
 The scripted engine stands in for the model. This recipe does not show whether
 a real model follows the tool's instructions. It checks server and proxy
-behaviour, not the rendered cards or how phones draw them. A second open card, a Stop landing after Change,
+behaviour, not the rendered cards or how phones draw them. The desktop-bridge
+preferences (remote access, open at login, window frame, sidebar colour, talk
+shortcut, product emails) are covered only by `src/lib/window-prefs.test.ts`
+with a stubbed bridge, not a packaged desktop app. A second open card, a Stop landing after Change,
 the refusal to remove an engine in use, and the 9-minute timeout of an unanswered card are covered only by
 the unit tests in `server/app-settings/host.test.ts`. The fixture's engine reports no tool
 activity lines, so the secret check reads the thread as the fixture writes it.
