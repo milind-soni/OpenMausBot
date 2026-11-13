@@ -1163,7 +1163,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
       <>
         <div role="menu" aria-label={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")} onKeyDown={navigateThreadMenu} className={cn(
           "absolute z-40 w-max min-w-[200px] overflow-hidden", MENU_SHEET,
-          rail ? "left-full top-0 ml-4" : cn("top-full", advanced ? "mt-1" : "mt-1.5", density === "icons" ? "left-0" : "right-0"),
+          rail ? "left-full top-0 ml-4" : cn("top-full", advanced ? "mt-1" : "mt-1.5", density === "icons" ? "left-0" : "right-0 md:max-w-[calc(var(--sidebar-width)_-_48px)]"),
           plusMotion.className,
         )} {...plusMotion.exitProps}>
           {advanced && <button
@@ -1177,7 +1177,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
             <MessageSquarePlus size={16} className="text-ink-secondary" />
             {t("sidebar.newChat.title")}
           </button>}
-          {!advanced && plusBot && <><button role="menuitem" className={plusItem} onClick={() => { setPlusOpen(false); dispatch({ type: "newTask", botId: plusBot.id }); }}><SquarePen size={16} className="text-ink-secondary" />{t("sidebar.newConversationWith", { name: plusBot.name })}</button><div role="separator" className={MENU_ITEM_SEPARATOR} /></>}
+          {!advanced && plusBot && <><button role="menuitem" className={plusItem} onClick={() => { setPlusOpen(false); dispatch({ type: "newTask", botId: plusBot.id }); }}><SquarePen size={16} className="shrink-0 text-ink-secondary" /><span className="min-w-0 truncate" title={plusBot.name}>{t("sidebar.newConversationWith", { name: plusBot.name })}</span></button><div role="separator" className={MENU_ITEM_SEPARATOR} /></>}
           {(teamSettingsAllowed !== false || state.config?.team) && <button
             onClick={() => { setPlusOpen(false); dispatch({ type: "newBot" }); }}
             role="menuitem"
