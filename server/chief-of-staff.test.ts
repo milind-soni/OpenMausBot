@@ -90,6 +90,8 @@ describe("chiefOfStaffSystemPrompt", () => {
     const everywhere = bots.map(bot => bot.id === "chief" ? { ...bot, chiefOfStaff: true, managesAllSections: true } : bot);
     const prompt = chiefOfStaffSystemPrompt("chief", everywhere, true);
     expect(prompt).toContain("The owner also made you responsible for every department, including ones added later.");
+    expect(prompt).toContain("Reaching a bot outside your team gives you no authority over it");
+    expect(prompt).not.toContain("Reaching a bot gives you no authority over it");
     expect(prompt).toMatch(/Your team, in every department:\n(?:- .*\n)*- Scout — Travel planner \(Personal\) \[id: personal\]/);
     expect(prompt).not.toContain("Other bots you can reach, in other departments:");
     expect(chiefOfStaffSystemPrompt("chief", bots, true)).not.toContain("every department");

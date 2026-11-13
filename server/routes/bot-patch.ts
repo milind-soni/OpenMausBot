@@ -648,6 +648,10 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         section !== undefined &&
         sectionKey(existingBot?.section) !== sectionKey(section);
       let bot: BotRecord | null;
+      // Rechecked: a turn can start during the awaits above, and nothing awaits between here and the write.
+      if ((loosened.includes("managedSections") || loosened.includes("managesAllSections")) && auth.kind === "loopback" && !DESKTOP_MANAGED && store.bots.some(bot => bot.busy)) {
+        return json(res, 409, userError("serverError.department.stopBots"));
+      }
       const freshBrowserBot = store.bot(m[1]);
       // Rechecked: the awaits above can yield after the first memory check.
       if (freshBrowserBot && body.memoryEnabled !== undefined &&
