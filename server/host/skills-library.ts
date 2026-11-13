@@ -289,7 +289,8 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       const assigned = threadId === undefined ? (skillsLibraryEnabled(cfg) ? bot.assignedSkills ?? [] : undefined) : conversationSkills(bot, threadId);
       const available = importsFor(bot, assigned, instance);
       const listed = listedImports(bot, available);
-      const project = projectInUse(bot, threadId ?? bot.threadId, cwd, instance, assigned);
+      const thread = threadId ?? bot.threadId;
+      const project = thread ? projectInUse(bot, thread, cwd, instance, assigned) : [];
       return skillsSystemPrompt(bot.id, assigned, threadId === undefined ? undefined : conversationStartedAt(threadId)) +
         importedSkillsPrompt(listed, available.length - listed.length) + projectSkillsPrompt(project);
     },
