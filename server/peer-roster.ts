@@ -36,6 +36,17 @@ export function hasTeamAuthority(
       typeof value === "string" && sectionKey(value) === target));
 }
 
+/** A Chief the owner put in charge of every department there is (General and each one ticked under "Also in charge of"),
+ * which is why it also gets each new one (server/department-grants.ts). Never a Chief someone owns on a Team Cloud: it
+ * answers for its person's bots, not for departments. */
+export function inChargeOfEvery(
+  bot: Pick<RosterMember, "section" | "chiefOfStaff" | "managedSections" | "createdBy" | "reportsTo" | "defaultBot">,
+  departments: readonly string[],
+): boolean {
+  if (bot.chiefOfStaff !== true || botOwner(bot) || !Array.isArray(bot.managedSections) || !bot.managedSections.length) return false;
+  return ["", ...departments].every(name => hasTeamAuthority(bot, name));
+}
+
 /** What widens `bot`'s departments, so a refused Chief can tell the person the one step instead of guessing. Only a
  * Chief of Staff's grants count (hasTeamAuthority), and only the person can change them. */
 export function managedDepartmentsHelp(bot: Pick<RosterMember, "name" | "chiefOfStaff">): string {

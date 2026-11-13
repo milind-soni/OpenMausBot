@@ -10273,5 +10273,22 @@
   "settings.domain.change": "變更",
   "settings.domain.httpsFirst": "請先為這個網址開啟 HTTPS，再到這裡連接。",
   "settings.backTo": "返回設定",
-  "devices.route.httpsAccount": "使用你的 {app} 帳號。"
+  "devices.route.httpsAccount": "使用你的 {app} 帳號。",
+  "server.cloudComputer.replaced": "{name} 的雲端電腦停止回應，所以 MausBot 用一台新的取代了它。只存在舊電腦上的檔案已經不見了。",
+  "server.cloudComputer.restarted": "{name} 的雲端電腦停止回應，所以 MausBot 重新啟動了它。它已恢復回應；上面開著的程式已被關閉。",
+  "server.cloudComputer.capped": "{name} 的雲端電腦在被取代後一小時內又停止回應，所以 MausBot 沒有再動它。在電腦面板中按「取代電腦」可以再試一次。",
+  "server.cloudComputer.unreachable": "目前無法連線到雲端電腦。MausBot 保留了 {name} 的雲端電腦，稍後會再檢查。",
+  "server.cloudComputer.needsPerson": "{name} 的雲端電腦停止回應了。在電腦面板中按「取代電腦」可換一台新的；只存在舊電腦上的檔案會遺失。",
+  "server.cloudComputer.teamNotResponding": "{name} 沒有回應。請在「設定 → 電腦」中刪除它，然後在團隊地圖中重新建立；只存在它上面的檔案會遺失。",
+  "computer.recovery.notResponding": "這台雲端電腦沒有回應。MausBot 正在檢查，並會重新啟動或取代它。",
+  "computer.recovery.restarting": "這台雲端電腦沒有回應。MausBot 正在重新啟動它。",
+  "computer.recovery.replacing": "這台雲端電腦沒有回應。MausBot 正在取代它。",
+  "computer.recovery.replacedManual": "已取代。{name} 下次需要時會取得一台新的雲端電腦。",
+  "computer.recovery.restartedManual": "已重新啟動。雲端電腦已恢復回應。",
+  "computer.recovery.stillNotAnswering": "重新啟動後雲端電腦仍然沒有回應。「取代電腦」會給 {name} 一台新的。",
+  "computer.recovery.confirmReplace": "要把 {name} 的雲端電腦取代成一台新的嗎？只存在這台電腦上的檔案會遺失。",
+  "computer.recovery.restart": "重新啟動電腦",
+  "computer.recovery.restartTitle": "停止並重新啟動這台雲端電腦。開著的程式會被關閉；檔案會保留。",
+  "computer.recovery.replace": "取代電腦",
+  "computer.recovery.replaceTitle": "刪除這台雲端電腦並給機器人一台新的。只存在上面的檔案會遺失。"
 }

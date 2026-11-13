@@ -185,6 +185,8 @@ export function createDesktopViewer(deps: {
       }
       return closed;
     },
+    /** Desktop viewers open on this bot's computer now. */
+    viewing: (botId: string) => [...viewers.values()].filter((viewer) => viewer.botId === botId && !viewer.socket.destroyed).length,
     closeAll: () => {
       stopped = true;
       if (ownGate) upgrades.close();
