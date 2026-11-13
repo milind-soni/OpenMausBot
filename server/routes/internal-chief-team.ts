@@ -1,4 +1,4 @@
-import { hasTeamAuthority, managedDepartmentsHelp, peerAllowed } from "../peer-roster.ts"; import { chiefLevel } from "../chief-level.ts";
+import { hasTeamAuthority, peerAllowed } from "../peer-roster.ts"; import { chiefLevel } from "../chief-level.ts";
 import type { BotRecord } from "../store.ts";
 import { libraryTeamRoles } from "../team-library.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -51,7 +51,7 @@ export function createInternalChiefTeamRoutes(deps: {
         .map((bot) => ({ id: bot.id, name: bot.name, title: bot.title, section: bot.section ?? "", modelSelection: bot.modelSelection, chiefOfStaff: Boolean(bot.chiefOfStaff) })),
       instances: instances.map((instance) => ({ instanceId: instance.instanceId, driverKind: instance.driverKind, displayName: instance.displayName,
         state: instance.snapshot.state, models: instance.models, effortLevels: instance.capabilities?.effortLevels ?? [] })),
-      scope: `Bot model defaults apply to groups and new threads; existing threads retain their models. Requested team setup applies immediately, and the person can undo it. Existing unauthorized teams remain outside this Chief's scope. ${managedDepartmentsHelp(current)}`,
+      scope: "Bot model defaults apply to groups and new threads; existing threads retain their models. Requested team setup applies immediately, and the person can undo it. Existing unauthorized teams remain outside this Chief's scope.",
     });
   };
 }
