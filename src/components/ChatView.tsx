@@ -13,6 +13,7 @@ import {
   Copy,
   Loader2,
   Monitor,
+  MoreHorizontal,
   Pencil,
   RefreshCw,
   Smartphone,
@@ -34,6 +35,9 @@ import { botIntro } from "@/lib/botIntro";
 import { AttachmentList } from "./AttachmentViewer";
 import { MobilePreviewPanel } from "./MobilePreviewPanel";
 import { useMediaQuery } from "@/lib/useMediaQuery";
+import { useContainerWidth } from "@/lib/useContainerWidth";
+import { resolveHeaderCollapse } from "@/lib/headerCollapse";
+import { SHARED_HEADER_HEIGHT_CLASS } from "@/lib/layoutTokens";
 import type { Attachment } from "@/state/store";
 
 /** Long user messages collapse behind a fade so pasted walls of text don't
@@ -620,8 +624,63 @@ export function ChatView({ bot }: { bot: Bot }) {
   const clearStarterText = useCallback(() => setStarterText(null), []);
   const [tasksOpen, setTasksOpen] = useState(() => localStorage.getItem("chat-tasks-open") === "true");
   const botTasks = useMemo(() => state.tasks.filter((task) => task.assigneeBotId === bot.id), [state.tasks, bot.id]);
+  const isLargeScreen = useMediaQuery("(min-width: 1180px)");
   const isDualPanelWide = useMediaQuery("(min-width: 1400px)");
   const previewAsDrawer = !isDualPanelWide && tasksOpen;
+
+  const [lastRequestedDrawer, setLastRequestedDrawer] = useState<"preview" | "tasks">("preview");
+
+  const togglePreview = useCallback(() => {
+    setMobilePreviewOpen((open) => {
+      const next = !open;
+      if (next && !isLargeScreen) {
+        setLastRequestedDrawer("preview");
+      }
+      return next;
+    });
+  }, [isLargeScreen]);
+
+  const toggleTasks = useCallback(() => {
+    setTasksOpen((open) => {
+      const next = !open;
+      if (next && !isLargeScreen) {
+        setLastRequestedDrawer("tasks");
+      }
+      return next;
+    });
+  }, [isLargeScreen]);
+
+  const activeMobileDrawer: "preview" | "tasks" | null = useMemo(() => {
+    if (isLargeScreen) return null;
+    if (mobilePreviewOpen && tasksOpen) return lastRequestedDrawer;
+    if (mobilePreviewOpen) return "preview";
+    if (tasksOpen) return "tasks";
+    return null;
+  }, [isLargeScreen, mobilePreviewOpen, tasksOpen, lastRequestedDrawer]);
+
+  const headerRef = useRef<HTMLDivElement>(null);
+  const headerWidth = useContainerWidth(headerRef);
+  const collapse = resolveHeaderCollapse(headerWidth);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!moreMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!moreMenuRef.current?.contains(e.target as Node)) {
+        setMoreMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMoreMenuOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [moreMenuOpen]);
 
   useEffect(() => setFollow(true), [bot.id]);
   useEffect(() => localStorage.setItem("chat-mobile-preview-open", String(mobilePreviewOpen)), [mobilePreviewOpen]);
@@ -657,15 +716,20 @@ export function ChatView({ bot }: { bot: Bot }) {
 
   return (
     <main className="relative flex h-full min-w-0 flex-1 bg-app">
-      <section className="relative flex h-full min-w-[360px] flex-1 flex-col">
+      <section className="relative flex h-full min-w-[360px] flex-1 flex-col overflow-hidden">
       {/* Header */}
       <div
-        className={cn("flex items-center justify-between gap-2 px-4 min-[1600px]:px-5 py-3", isWin && "pr-[148px]")}
+        ref={headerRef}
+        className={cn(
+          "flex shrink-0 items-center justify-between gap-2 px-3.5 min-[1600px]:px-5 border-b border-transparent min-w-0 max-w-full overflow-hidden",
+          SHARED_HEADER_HEIGHT_CLASS,
+          isWin && "pr-[148px]",
+        )}
         style={drag}
       >
         <button
           onClick={() => dispatch({ type: "toggleSettings" })}
-          className="flex shrink-0 items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-raised/50"
+          className="flex min-w-0 shrink-0 items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-raised/50"
           title="Bot settings"
           style={noDrag}
         >
@@ -690,22 +754,95 @@ export function ChatView({ bot }: { bot: Bot }) {
               <span className="hidden sm:inline">Stop</span>
             </button>
           )}
-          <button type="button" title="Schedule run…" aria-label="Schedule run…" onClick={() => dispatch({ type: "openSchedule", target: { botId: bot.id } })} className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised">⏰</button>
-          <UsageRings compact={!isDualPanelWide || tasksOpen} />
-          <ModelPicker bot={bot} />
-          <button
-            onClick={() => dispatch({ type: "toggleComputer" })}
-            className={cn(
-              "rounded-md p-1.5 hover:bg-raised",
-              state.computerOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
-            )}
-            title="Bot's computer"
-          >
-            <Monitor size={18} />
-          </button>
+
+          {!collapse.collapseSecondaryToMenu && (
+            <button
+              type="button"
+              title="Schedule run…"
+              aria-label="Schedule run…"
+              onClick={() => dispatch({ type: "openSchedule", target: { botId: bot.id } })}
+              className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised"
+            >
+              ⏰
+            </button>
+          )}
+
+          <UsageRings compact={collapse.isTight || !isDualPanelWide || tasksOpen} />
+
+          <ModelPicker
+            bot={bot}
+            compact={collapse.modelMode === "compact"}
+            iconOnly={collapse.modelMode === "iconOnly"}
+          />
+
+          {!collapse.collapseSecondaryToMenu && (
+            <button
+              onClick={() => dispatch({ type: "toggleComputer" })}
+              className={cn(
+                "rounded-md p-1.5 hover:bg-raised",
+                state.computerOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+              )}
+              title="Bot's computer"
+            >
+              <Monitor size={18} />
+            </button>
+          )}
+
+          {collapse.collapseSecondaryToMenu && (
+            <div className="relative" ref={moreMenuRef}>
+              <button
+                type="button"
+                onClick={() => setMoreMenuOpen((o) => !o)}
+                aria-label="More actions"
+                aria-expanded={moreMenuOpen}
+                title="More actions"
+                className={cn(
+                  "rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink transition-colors",
+                  moreMenuOpen && "bg-raised text-ink",
+                )}
+              >
+                <MoreHorizontal size={16} />
+              </button>
+
+              {moreMenuOpen && (
+                <div
+                  role="menu"
+                  aria-label="More actions"
+                  className="absolute right-0 top-full z-40 mt-1 w-44 overflow-hidden rounded-xl border border-hairline/60 bg-panel p-1.5 shadow-xl"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMoreMenuOpen(false);
+                      dispatch({ type: "openSchedule", target: { botId: bot.id } });
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-ink transition-colors hover:bg-raised-hover"
+                  >
+                    <span>⏰</span>
+                    <span>Schedule run…</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMoreMenuOpen(false);
+                      dispatch({ type: "toggleComputer" });
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-ink transition-colors hover:bg-raised-hover"
+                  >
+                    <Monitor size={14} className="text-ink-secondary" />
+                    <span>Bot's computer</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           <button
             type="button"
-            onClick={() => setMobilePreviewOpen((open) => !open)}
+            onClick={togglePreview}
             aria-label={mobilePreviewOpen ? "Hide mobile preview" : "Show mobile preview"}
             aria-pressed={mobilePreviewOpen}
             title={mobilePreviewOpen ? "Hide mobile preview" : "Show mobile preview"}
@@ -715,11 +852,12 @@ export function ChatView({ bot }: { bot: Bot }) {
             )}
           >
             <Smartphone size={14} />
-            <span className="hidden min-[1600px]:inline">Preview</span>
+            {collapse.showButtonsText && <span>Preview</span>}
           </button>
+
           <button
             type="button"
-            onClick={() => setTasksOpen((open) => !open)}
+            onClick={toggleTasks}
             aria-label={tasksOpen ? "Hide tasks" : "Show tasks"}
             aria-pressed={tasksOpen}
             title={tasksOpen ? "Hide tasks" : "Show tasks"}
@@ -729,7 +867,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             )}
           >
             <ClipboardList size={14} />
-            <span className="hidden min-[1600px]:inline">Tasks</span>
+            {collapse.showButtonsText && <span>Tasks</span>}
             {botTasks.length > 0 && (
               <span className="flex min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
                 {botTasks.length}
@@ -831,52 +969,69 @@ export function ChatView({ bot }: { bot: Bot }) {
       />
       </section>
 
-      {mobilePreviewOpen && (
-        <>
-          <button
-            type="button"
-            aria-label="Close mobile preview panel"
-            onClick={() => setMobilePreviewOpen(false)}
-            className={cn(
-              "absolute inset-0 z-20 bg-black/55",
-              previewAsDrawer ? "block" : "min-[1180px]:hidden",
-            )}
-          />
-          <MobilePreviewPanel
-            onClose={() => setMobilePreviewOpen(false)}
-            onScreenshot={setPreviewAttachment}
-            className={cn(
-              "absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl",
-              !previewAsDrawer && "min-[1180px]:static min-[1180px]:inset-auto min-[1180px]:z-auto min-[1180px]:max-w-none min-[1180px]:shadow-none",
-            )}
-          />
-        </>
+      {/* Drawer mode: Single backdrop for narrow viewports (< 1180px) */}
+      {!isLargeScreen && activeMobileDrawer && (
+        <button
+          type="button"
+          aria-label={activeMobileDrawer === "preview" ? "Close mobile preview panel" : "Close tasks panel"}
+          onClick={() => {
+            if (activeMobileDrawer === "preview") setMobilePreviewOpen(false);
+            else setTasksOpen(false);
+          }}
+          className="absolute inset-0 z-20 bg-black/55"
+        />
       )}
 
-      {tasksOpen && (
+      {/* Preview drawer below 1180px */}
+      {!isLargeScreen && mobilePreviewOpen && activeMobileDrawer === "preview" && (
+        <MobilePreviewPanel
+          onClose={() => setMobilePreviewOpen(false)}
+          onScreenshot={setPreviewAttachment}
+          className="absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl"
+        />
+      )}
+
+      {/* Tasks drawer below 1180px */}
+      {!isLargeScreen && tasksOpen && activeMobileDrawer === "tasks" && (
         <TasksPanel
           tasks={botTasks}
           emptyLabel="No tasks assigned to this agent yet."
           onClose={() => setTasksOpen(false)}
-          className="hidden min-[1180px]:flex"
+          className="absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl"
         />
       )}
 
-      {tasksOpen && (
+      {/* Large screen (>= 1180px): Preview (docked or overlay drawer) */}
+      {isLargeScreen && mobilePreviewOpen && (
         <>
-          <button
-            type="button"
-            aria-label="Close tasks panel"
-            onClick={() => setTasksOpen(false)}
-            className="absolute inset-0 z-20 bg-black/55 min-[1180px]:hidden"
-          />
-          <TasksPanel
-            tasks={botTasks}
-            emptyLabel="No tasks assigned to this agent yet."
-            onClose={() => setTasksOpen(false)}
-            className="absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl min-[1180px]:hidden"
+          {previewAsDrawer && (
+            <button
+              type="button"
+              aria-label="Close mobile preview panel"
+              onClick={() => setMobilePreviewOpen(false)}
+              className="absolute inset-0 z-20 bg-black/55"
+            />
+          )}
+          <MobilePreviewPanel
+            onClose={() => setMobilePreviewOpen(false)}
+            onScreenshot={setPreviewAttachment}
+            className={cn(
+              previewAsDrawer
+                ? "absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl"
+                : "static inset-auto z-auto max-w-none shadow-none flex",
+            )}
           />
         </>
+      )}
+
+      {/* Large screen (>= 1180px): Tasks docks statically */}
+      {isLargeScreen && tasksOpen && (
+        <TasksPanel
+          tasks={botTasks}
+          emptyLabel="No tasks assigned to this agent yet."
+          onClose={() => setTasksOpen(false)}
+          className="flex"
+        />
       )}
     </main>
   );

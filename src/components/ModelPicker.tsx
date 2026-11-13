@@ -12,7 +12,17 @@ function modelLabel(instance: InstanceInfo | undefined, model: string, savedLabe
   return instance?.models.options.find((o) => o.id === model)?.label ?? savedLabel ?? model;
 }
 
-export function ModelPicker({ bot, className }: { bot: Bot; className?: string }) {
+export function ModelPicker({
+  bot,
+  className,
+  compact = false,
+  iconOnly = false,
+}: {
+  bot: Bot;
+  className?: string;
+  compact?: boolean;
+  iconOnly?: boolean;
+}) {
   const { state, dispatch } = useStore();
   const [backupOpen, setBackupOpen] = useState(false);
   const [backupError, setBackupError] = useState("");
@@ -79,12 +89,27 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
           setOpen((o) => !o);
           if (!open) refresh();
         }}
-        className="flex shrink-0 items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised"
+        className={cn(
+          "flex shrink-0 items-center rounded-full border border-hairline/40 bg-raised/60 text-[13px] text-ink hover:bg-raised transition-colors",
+          iconOnly ? "p-1.5" : "gap-1.5 py-1 pl-2 pr-2.5",
+        )}
         title={active ? `${active.displayName} · ${modelLabel(active, selection.model, selection.label)}` : selection.model}
+        aria-label={active ? `Model: ${modelLabel(active, selection.model, selection.label)}` : `Model: ${selection.model}`}
       >
         {active && <ProviderMark driverKind={active.driverKind} size={14} className="shrink-0" />}
-        <span className="max-w-[70px] min-[1600px]:max-w-[140px] truncate">{modelLabel(active, selection.model, selection.label)}{retired ? " (retired)" : ""}</span>
-        <ChevronDown size={14} className="text-ink-secondary shrink-0" />
+        {!iconOnly && (
+          <span
+            className={cn(
+              "truncate",
+              compact
+                ? "max-w-[45px]"
+                : "max-w-[70px] min-[1600px]:max-w-[140px]",
+            )}
+          >
+            {modelLabel(active, selection.model, selection.label)}{retired ? " (retired)" : ""}
+          </span>
+        )}
+        <ChevronDown size={iconOnly ? 10 : 14} className="text-ink-secondary shrink-0" />
       </button>
 
       {open && (

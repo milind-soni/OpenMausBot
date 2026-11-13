@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, CalendarDays, ChevronDown, ChevronRight, ClipboardList, Tag, X } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { SHARED_HEADER_HEIGHT_CLASS } from "@/lib/layoutTokens";
 import { STATUS_ICONS, STATUS_LABELS, PRIORITY_STYLES } from "./TaskBoardScreen";
 import type { TaskRecord, TaskStatus } from "@/lib/taskBoard";
 import { useStore } from "@/state/store";
@@ -88,8 +89,8 @@ export function TasksPanel({
 
   return (
     <aside className={cn("flex h-full w-[320px] shrink-0 flex-col border-l border-hairline/40 bg-panel", className)} aria-label="Tasks">
-      <div className="shrink-0 border-b border-hairline/40 px-4 py-3">
-        <div className="flex items-center justify-between">
+      <div className="shrink-0 border-b border-hairline/40">
+        <div className={cn("flex items-center justify-between px-4", SHARED_HEADER_HEIGHT_CLASS)}>
           <div className="flex items-center gap-2 text-[14px] font-semibold text-ink">
             <ClipboardList size={16} className="text-accent" /> Tasks
             {tasks.length > 0 && (
@@ -102,7 +103,7 @@ export function TasksPanel({
             </button>
           )}
         </div>
-        {headerExtra}
+        {headerExtra && <div className="px-4 pb-3">{headerExtra}</div>}
       </div>
       <div className="flex-1 overflow-y-auto p-3">
         {tasks.length === 0 ? (

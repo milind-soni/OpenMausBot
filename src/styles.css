@@ -31,6 +31,10 @@
   --radius-xl: 10px;
 }
 
+:root {
+  --header-height: 60px;
+}
+
 html,
 body,
 #root {

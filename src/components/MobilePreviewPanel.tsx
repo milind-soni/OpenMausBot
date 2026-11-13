@@ -52,6 +52,7 @@ import {
 import { PreviewFrame, type PreviewFrameHandle, type PreviewFrameStatus } from "@/components/PreviewFrame";
 import { PreviewFilePicker, usePreviewAutoRefreshWatcher } from "@/components/PreviewFilePicker";
 import { cn } from "@/lib/cn";
+import { SHARED_HEADER_HEIGHT_CLASS } from "@/lib/layoutTokens";
 import { isDeviceSource as isWebPreviewSource } from "@/lib/previewSource";
 import { useStore, type Attachment } from "@/state/store";
 
@@ -361,24 +362,24 @@ export function MobilePreviewPanel({
     <aside
       aria-label="Quick preview panel"
       className={cn(
-        "flex h-full w-[380px] shrink-0 select-none flex-col border-l border-hairline/60 bg-panel 2xl:w-[420px]",
+        "flex h-full w-[380px] shrink-0 select-none flex-col border-l border-hairline/60 bg-panel 2xl:w-[420px] max-w-full overflow-hidden",
         className,
       )}
     >
-      {/* Redesigned Single Header (h-[53px] aligned with Chat & Tasks headers) */}
-      <header className="flex h-[53px] shrink-0 items-center justify-between gap-1.5 border-b border-hairline/40 bg-panel px-3">
+      {/* Redesigned Single Header (h-[60px] aligned with Chat & Tasks headers) */}
+      <header className={cn("flex shrink-0 items-center justify-between gap-1.5 border-b border-hairline/40 bg-panel px-2.5 min-w-0 max-w-full overflow-hidden", SHARED_HEADER_HEIGHT_CLASS)}>
         {isDeviceSource ? (
           /* State A: Web / HTML document preview */
           <>
             {/* Title */}
-            <div className="flex items-center gap-1.5 shrink-0 text-ink" title="Quick preview">
+            <div className="flex items-center gap-1 shrink-0 text-ink" title="Quick preview">
               <Smartphone size={15} className="text-accent shrink-0" />
-              <span className="text-[13px] font-semibold text-ink hidden 2xl:inline">Preview</span>
+              <span className="text-[13px] font-semibold text-ink">Preview</span>
             </div>
 
             {/* Compact Address Field */}
             <div
-              className="relative flex min-w-[130px] flex-1 items-center rounded-lg border border-hairline/60 bg-inset h-8 px-1 focus-within:border-accent/60 transition-colors"
+              className="relative flex min-w-[110px] flex-1 items-center rounded-lg border border-hairline/60 bg-inset h-8 px-1 focus-within:border-accent/60 transition-colors overflow-hidden"
               ref={historyDropdownRef}
             >
               <button
