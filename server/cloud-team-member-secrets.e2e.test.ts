@@ -79,11 +79,14 @@ beforeAll(async () => {
   expect(made.status, JSON.stringify(made.body)).toBe(201);
   const ran = await as(ben, "POST", `/api/routines/${made.body.routine.id}/run`);
   expect(ran.status, JSON.stringify(ran.body)).toBe(201);
+  // Wait for the run to finish, not just for its thread: a bearer minted while the run's own turn is live belongs to that
+  // turn and stops answering (401) the moment the run ends, so asking any earlier races the routine.
   let run: Run | undefined;
   await until(async () => {
     run = ((await as(ben, "GET", "/api/routines")).body.runs as Run[]).find((candidate) => candidate.id === ran.body.run.id);
-    return Boolean(run?.threadId);
+    return Boolean(run?.threadId) && !["queued", "running", "waiting"].includes(run!.status);
   }, 90_000);
+  expect(run!.status, "Ben's routine run").toBe("completed");
   benRunThread = run!.threadId!;
 
   const card = await ask(adaThread);
