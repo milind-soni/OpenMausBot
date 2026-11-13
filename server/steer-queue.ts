@@ -213,6 +213,7 @@ export function drainSteeredMessages(
     if (isAuthorized && !isAuthorized(entry.botId, threadId, head)) {
       const rest = entry.items.slice(group.length);
       settleChatFollowups(ids, "cancelled");
+      reopenCancelledWidgetPresses(store, threadId, ids);
       queues.delete(threadId);
       if (rest.length > 0) queues.set(threadId, { botId: entry.botId, items: rest });
       changed();
@@ -266,6 +267,19 @@ export function drainSteeredMessages(
       () => settleChatFollowups(ids, null),
       () => settleChatFollowups(ids, "interrupted"),
     ).catch((error) => console.warn("steer-queue: could not settle durable follow-up", error));
+  }
+}
+
+/** A cancelled queued widget press never reached the bot, so its recorded answer must be live again. */
+function reopenCancelledWidgetPresses(store: SteerStore, threadId: string, queueIds: string[]): void {
+  const messagesFor = store.messagesFor;
+  if (!messagesFor) return;
+  const ids = new Set(queueIds);
+  for (const message of messagesFor.call(store, threadId)) {
+    const settled = message.kind === "widget" ? message.widget?.settled : undefined;
+    if (!settled?.queueId || !ids.has(settled.queueId)) continue;
+    const { settled: _settled, ...live } = message.widget!;
+    store.patchMessage(threadId, message.id, { widget: live });
   }
 }
 

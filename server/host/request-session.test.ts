@@ -59,6 +59,8 @@ describe("request session provenance", () => {
     const previous = { messageId: "message-a", requestSessionId: "session-a" };
     expect(requestSessionOptions(undefined, true, previous, "message-a")).toEqual({ requestSessionId: "session-a" });
     expect(requestSessionOptions(undefined, true, previous, "message-b")).toEqual({});
+    expect(requestSessionOptions(undefined, true, { messageId: undefined, requestSessionId: "session-a" }, undefined)).toEqual({});
+    expect(requestSessionOptions("session-b", true, { messageId: undefined, requestSessionId: "session-a" }, undefined)).toEqual({ requestSessionId: "session-b" });
     expect(requestSessionOptions("session-b", true, previous, "message-a")).toEqual({ requestSessionId: "session-b" });
   });
 

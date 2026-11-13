@@ -61,6 +61,7 @@ function fakeStore(bots: BotRecord[]): SteerStore & { messages: Message[] } {
       messages.push(full);
       return full;
     },
+    messagesFor: () => messages,
     patchMessage: (_threadId, messageId, patch) => {
       const at = messages.findIndex((m) => m.id === messageId);
       if (at === -1) return null;
@@ -107,6 +108,10 @@ describe("steer-queue module", () => {
     const store = fakeStore([bot]);
     const revoked = queueSteeredMessage(bot.id, bot.threadId, "from revoked device", { sender: { name: "Owner", id: "p_owner" }, requestSessionId: "session-revoked" });
     const live = queueSteeredMessage(bot.id, bot.threadId, "from live device", { sender: { name: "Owner", id: "p_owner" }, requestSessionId: "session-live" });
+    const widget = store.appendMessage(bot.threadId, {
+      role: "bot", kind: "widget", text: "Confirm action",
+      widget: { v: 1, root: { type: "Card", id: "root" }, settled: { ref: "confirm", label: "Confirm", tone: "confirm", at: 1, queueId: revoked.id } },
+    });
     bot.busy = false;
     const run = vi.fn();
     const authorized = (_botId: string, _threadId: string, head: { requestSessionId?: string | null }) => head.requestSessionId !== "session-revoked";
@@ -115,6 +120,7 @@ describe("steer-queue module", () => {
     expect(store.messages.filter(message => message.role === "user").map(message => message.text)).toEqual(["from live device"]);
     expect(_queuedCount(bot.threadId)).toBe(0);
     expect(run.mock.calls[0]![6]).toMatchObject({ requestSessionId: "session-live" });
+    expect(store.messages.find((message) => message.id === widget.id)?.widget?.settled).toBeUndefined();
     await Promise.resolve();
     expect(chatFollowups("bot").find((item) => item.id === revoked.id)).toMatchObject({ status: "cancelled", payload: { text: "" } });
     expect(chatFollowups("bot").some((item) => item.id === live.id)).toBe(false);

@@ -33,7 +33,9 @@ export function requestSessionOptions<T extends { messageId?: string; requestSes
   previousRequest: T | undefined,
   requestMessageId: string | undefined,
 ): { requestSessionId?: string } {
-  const inherited = continuation && previousRequest?.messageId === requestMessageId ? previousRequest?.requestSessionId : undefined;
+  const inherited = continuation && requestMessageId !== undefined && previousRequest?.messageId === requestMessageId
+    ? previousRequest?.requestSessionId
+    : undefined;
   const requestSessionId = explicitSessionId || inherited;
   return requestSessionId ? { requestSessionId } : {};
 }
