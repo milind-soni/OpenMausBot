@@ -313,14 +313,17 @@ export function saveAttachment(folder: string, name: string, content: Buffer): s
     }
     let saved = false;
     try {
-      for (let offset = 0; offset < content.length;) {
-        const written = writeSync(fd, content, offset, content.length - offset);
-        if (written <= 0) throw new Error("The attachment could not be completely written.");
-        offset += written;
+      try {
+        for (let offset = 0; offset < content.length;) {
+          const written = writeSync(fd, content, offset, content.length - offset);
+          if (written <= 0) throw new Error("The attachment could not be completely written.");
+          offset += written;
+        }
+      } finally {
+        closeSync(fd);
       }
       saved = true;
     } finally {
-      closeSync(fd);
       if (!saved) { try { unlinkSync(path); } catch {} }
     }
     return path;
