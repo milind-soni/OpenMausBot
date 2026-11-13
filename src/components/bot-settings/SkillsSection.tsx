@@ -20,11 +20,15 @@ export interface ManagedSkill {
   source: string;
   warnings: string[];
   /** "imported": one copy brought in from this computer for every bot, switched per bot and never removed from one.
-   * "native": loaded by the bot's engine from a skills folder of its own; changed only there. */
-  origin?: "private" | "library" | "imported" | "native";
+   * "native": loaded by the bot's engine from a skills folder of its own; changed only there.
+   * "project": shipped in the folder the bot works in; used while the owner trusts project skills, changed only there. */
+  origin?: "private" | "library" | "imported" | "native" | "project";
   /** An imported skill that is on but not in this bot's list: the bot finds it when a task needs it. */
   listed?: boolean;
 }
+
+/** A skill that lives in a folder of the person's, read only here. */
+const inFolder = (skill: ManagedSkill): boolean => skill.origin === "native" || skill.origin === "project";
 
 /** A skill's switch: on whenever the skill is on, including an imported one the bot finds only when a task needs it,
  * so one click always turns it fully off. */
@@ -480,24 +484,26 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                     className="min-w-0 flex-1 text-left"
                   >
                     <div className="truncate font-mono text-[13px] text-ink">{skill.name}</div>
-                    {(libraryOn || skill.origin === "imported" || skill.origin === "native") && (
+                    {(libraryOn || skill.origin === "imported" || inFolder(skill)) && (
                       <span
                         className="ml-1.5 rounded bg-control px-1 py-px font-mono text-[10px] uppercase tracking-wide text-ink-secondary"
-                        title={skill.origin === "imported" ? t("skills.origin.importedHint") : skill.origin === "native" ? t("skills.origin.nativeHint") : undefined}
+                        title={skill.origin === "imported" ? t("skills.origin.importedHint") : skill.origin === "native" ? t("skills.origin.nativeHint") : skill.origin === "project" ? t("skills.origin.projectHint") : undefined}
                       >
-                        {skill.origin === "imported" ? t("skills.origin.imported") : skill.origin === "native" ? t("skills.origin.native") : skill.origin === "library" ? t("skills.origin.library") : t("skills.origin.private")}
+                        {skill.origin === "imported" ? t("skills.origin.imported") : skill.origin === "native" ? t("skills.origin.native") : skill.origin === "project" ? t("skills.origin.project") : skill.origin === "library" ? t("skills.origin.library") : t("skills.origin.private")}
                       </span>
                     )}
                     <div className="mt-0.5 line-clamp-2 text-[12px] text-ink-secondary">{skill.description}</div>
-                    <div className="mt-0.5 text-[11px] text-ink-secondary">{t(skill.enabled && skill.listed === false ? "skills.foundWhenNeeded" : "skills.usedWhenRelevant")}</div>
+                    <div className="mt-0.5 text-[11px] text-ink-secondary">{t(skill.origin === "project" && !skill.enabled ? "skills.projectOff" : skill.enabled && skill.listed === false ? "skills.foundWhenNeeded" : "skills.usedWhenRelevant")}</div>
                   </button>
-                  <Switch
-                    checked={skillSwitchOn(skill)}
-                    aria-label={t(skillSwitchOn(skill) ? "skills.disableName" : "skills.enableName", { name: skill.name })}
-                    disabled={Boolean(working)}
-                    onClick={() => void toggle(skill)}
-                  />
-                  {skill.origin !== "imported" && skill.origin !== "native" && (
+                  {skill.origin !== "project" && (
+                    <Switch
+                      checked={skillSwitchOn(skill)}
+                      aria-label={t(skillSwitchOn(skill) ? "skills.disableName" : "skills.enableName", { name: skill.name })}
+                      disabled={Boolean(working)}
+                      onClick={() => void toggle(skill)}
+                    />
+                  )}
+                  {skill.origin !== "imported" && !inFolder(skill) && (
                     <button
                       aria-label={t("skills.removeName", { name: skill.name })}
                       title={t("skills.remove")}
