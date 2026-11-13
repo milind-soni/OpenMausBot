@@ -59,6 +59,19 @@ export function directTurnRequestSessionMayDispatch(request: { requestSessionId?
   return !request?.requestSessionId || isLive(request.requestSessionId);
 }
 
+/** A deferred retry belongs to its captured generation and session, never a newer request on the same thread. */
+export function quickRetryRequestMayDispatch(
+  owner: { botId: string; generation: string; requestSessionId?: string } | undefined,
+  currentGeneration: string | undefined,
+  request: DirectRequestOwner | undefined,
+  claimIsCurrent: (botId: string, generation: string) => boolean,
+  isLive: (id: string) => boolean,
+): boolean {
+  return Boolean(owner && currentGeneration === owner.generation && claimIsCurrent(owner.botId, owner.generation) &&
+    request?.generations.has(owner.generation) && request.requestSessionId === owner.requestSessionId && !request.stopped &&
+    directTurnRequestSessionMayDispatch(request, isLive));
+}
+
 export function requireLiveBeforeSteerFallback(outcome: "steered" | "refused" | "indeterminate", requireLive: () => void): void {
   if (outcome === "refused") requireLive();
 }

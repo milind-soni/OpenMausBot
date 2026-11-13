@@ -4,6 +4,7 @@ import {
   queuedRequestSessionMayDispatch,
   cloudHandoffSessionMayResume,
   directTurnRequestSessionMayDispatch,
+  quickRetryRequestMayDispatch,
   requestSessionGuard,
   requireLiveBeforeSteerFallback,
   requestSessionOptions,
@@ -72,6 +73,22 @@ describe("request session provenance", () => {
     const continuationOwner = { requestSessionId: "original-session" };
     expect(directTurnRequestSessionMayDispatch(continuationOwner, (id) => id === "original-session")).toBe(true);
     expect(directTurnRequestSessionMayDispatch(continuationOwner, (id) => id === "new-caller-session")).toBe(false);
+  });
+
+  it("authorizes a deferred retry only for its exact live generation and captured session", () => {
+    const owner = { botId: "bot-a", generation: "generation-a", requestSessionId: "session-a" };
+    const request = { generation: "generation-a", generations: new Set(["generation-a"]), requestSessionId: "session-a", turnId: null };
+    const current = (sessionId: string | undefined, generation = "generation-a") => quickRetryRequestMayDispatch(
+      owner, generation, { ...request, requestSessionId: sessionId }, (botId, id) => botId === "bot-a" && id === "generation-a", (id) => id === "session-a",
+    );
+    expect(current("session-a")).toBe(true);
+    expect(current("revoked-session")).toBe(false);
+    expect(current("session-b")).toBe(false);
+    expect(current("session-a", "generation-b")).toBe(false);
+    expect(quickRetryRequestMayDispatch(undefined, "generation-a", request, () => true, () => true)).toBe(false);
+    expect(quickRetryRequestMayDispatch({ botId: "bot-a", generation: "generation-a" }, "generation-a",
+      { ...request, requestSessionId: undefined }, () => true, () => false)).toBe(true);
+    expect(quickRetryRequestMayDispatch(owner, "generation-a", { ...request, stopped: true }, () => true, () => true)).toBe(false);
   });
 
   it("requires a live session for Cloud-home lending and restored lending handoffs", () => {
