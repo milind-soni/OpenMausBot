@@ -4190,7 +4190,7 @@
   "routines.editor.goalWhere": "Dónde se ejecuta",
   "routines.editor.goalOneOnOne": "Solo el bot, en su propio chat",
   "routines.editor.goalOneOnOneHelp": "El bot trabaja en el objetivo en su propio chat hasta completarlo.",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "Teléfono",
   "computer.browserSwitch.title": "Permitir que {name} use un navegador",
   "computer.tab.browser": "Navegador",
   "computer.tab.data": "Datos",

@@ -3622,7 +3622,7 @@
   "routines.editor.goalWhere": "Chạy ở đâu",
   "routines.editor.goalOneOnOne": "Chỉ bot, trong cuộc trò chuyện riêng của nó",
   "routines.editor.goalOneOnOneHelp": "Bot làm việc với mục tiêu trong cuộc trò chuyện riêng cho đến khi hoàn thành.",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "Điện thoại",
   "computer.browserSwitch.title": "Cho phép {name} sử dụng trình duyệt",
   "computer.tab.browser": "Trình duyệt",
   "computer.tab.data": "Dữ liệu",

@@ -5355,7 +5355,7 @@
   "routines.botCountOne": "{count} 个机器人",
   "routines.botCountMany": "{count} 个机器人",
   "routines.group": "群组聊天",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "手机",
   "computer.browserSwitch.title": "让 {name} 使用浏览器",
   "computer.tab.browser": "浏览器",
   "computer.tab.data": "数据",

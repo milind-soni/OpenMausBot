@@ -4599,7 +4599,7 @@
   "routines.botCountOne": "{count} бот",
   "routines.botCountMany": "{count} ботов",
   "routines.group": "Группа",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "Телефон",
   "computer.browserSwitch.title": "Разрешить {name} пользоваться браузером",
   "computer.tab.browser": "Браузер",
   "computer.tab.data": "Данные",

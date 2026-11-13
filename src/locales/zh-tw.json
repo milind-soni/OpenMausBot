@@ -5351,7 +5351,7 @@
   "routines.botCountOne": "{count} 個機器人",
   "routines.botCountMany": "{count} 個機器人",
   "routines.group": "群組",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "手機",
   "computer.browserSwitch.title": "讓 {name} 使用瀏覽器",
   "computer.tab.browser": "瀏覽器",
   "computer.tab.data": "資料",

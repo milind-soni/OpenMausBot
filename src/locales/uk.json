@@ -2173,7 +2173,7 @@
   "routines.editor.goalWhere": "Де це працює",
   "routines.editor.goalOneOnOne": "Лише бот, у власному чаті",
   "routines.editor.goalOneOnOneHelp": "Бот працює над ціллю у власному чаті, доки її не досягне.",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "Телефон",
   "computer.tab.browser": "Браузер",
   "computer.tabsAria": "Перегляд панелі бота",
   "computer.simple.needsSetup": "Робочому столу {name} спершу потрібен крок налаштування.",
