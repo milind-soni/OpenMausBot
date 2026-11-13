@@ -606,13 +606,13 @@ function PeerLabel({ peer }: { peer: PeerLine }) {
       <BotAvatar
         bot={author ?? { name: peer.name, color: "blue" }}
         state={normalizeState(author?.mascotExpression) ?? "happy"}
-        size={16}
+        size={20}
         motion="none"
         motionKey={0}
         animated={false}
       />
-      <span className="text-[11px] font-medium text-ink-secondary">{peer.name}</span>
-      <span className="text-[11px] text-ink-tertiary">· {how}</span>
+      <span className={cn("text-[13px] font-semibold", author ? "bot-identity" : "text-ink-secondary")} data-bot-color={author?.color}>{peer.name}</span>
+      <span className="text-[12px] text-ink-tertiary">· {how}</span>
     </div>
   );
 }
