@@ -131,7 +131,7 @@ describe("reviewed Chief team setup", () => {
     const h = harness();
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: "true" } }])).toThrow();
     h.peer.section = "Private";
-    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }])).toThrow(/authorized/);
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }])).toThrow(/Private department, which Clive is not in charge of/);
     h.peer.section = "Engineering";
     h.chief.chiefOfStaff = false;
     expect(() => h.propose([{ action: "update", botId: h.chief.id, fields: { chiefOfStaff: true } }])).toThrow(/Only an active Chief/);
@@ -210,7 +210,7 @@ describe("reviewed Chief team setup", () => {
   it("rejects unknown models, foreign teams, missing specialists and duplicate names", () => {
     const h = harness();
     expect(() => h.propose([specialist("Mira", "Engineering", { instanceId: "codex", model: "made-up" })])).toThrow(/catalog/);
-    expect(() => h.propose([specialist("Mira", "Private")])).toThrow(/authorized/);
+    expect(() => h.propose([specialist("Mira", "Private")])).toThrow(/Private department, which Clive is not in charge of/);
     expect(() => h.propose([specialist("Mira", "Private")], ["Private"])).toThrow(/exists/);
     expect(() => h.propose([specialist("Mira", "Engineering")], ["Growth"])).toThrow(/needs a specialist/);
     expect(() => h.propose([specialist("Ada", "Work")])).toThrow(/already exists/);
@@ -477,9 +477,20 @@ describe("team setup that applies on its own", () => {
     expect(h.apply).toHaveBeenCalledTimes(1);
   });
 
+  it("names the department and the setting that unlocks it when a bot is outside the Chief's departments", async () => {
+    const h = harness(); h.autoApply.mockReturnValue("full-access");
+    const outsider = h.bot("Rex", { section: "Private" });
+    const unlock = 'which Clive is not in charge of. Only the person can add a department, in Clive\'s bot settings, Permissions, "Also in charge of".';
+    await expect(h.submit([{ action: "update", botId: outsider.id, fields: { title: "Must not apply" } }])).rejects.toThrow(`@Rex is in the Private department, ${unlock}`);
+    await expect(h.submit([{ action: "update", botId: h.peer.id, fields: { section: "Private" } }])).rejects.toThrow(`That is the Private department, ${unlock}`);
+    await expect(h.service.submitDeletion({ botId: h.chief.id, threadId: h.chief.threadId, targetBotId: outsider.id, reason: "remove" })).rejects.toThrow(`@Rex is in the Private department, ${unlock}`);
+    expect(outsider.title).toBe(""); expect(h.peer.section).toBe("Work");
+    expect(h.messages).toHaveLength(0); expect(h.apply).not.toHaveBeenCalled(); expect(h.deleteBot).not.toHaveBeenCalled();
+  });
+
   it("retains model, scope, source, permission-field and deletion safety checks", async () => {
     const h = harness(); h.autoApply.mockReturnValue("full-access");
-    await expect(h.submit([specialist("Mira", "Private")])).rejects.toThrow(/authorized/);
+    await expect(h.submit([specialist("Mira", "Private")])).rejects.toThrow(/Private department, which Clive is not in charge of/);
     await expect(h.submit([specialist("Mira", "Work", { instanceId: "claude", model: "unknown" })])).rejects.toThrow(/catalog/);
     await expect(h.submit([{ action: "update", botId: h.peer.id, fields: { approvalMode: "full" } }])).rejects.toThrow();
     await expect(h.service.submitDeletion({ botId: h.chief.id, threadId: h.chief.threadId, targetBotId: h.chief.id, reason: "remove" })).rejects.toThrow(/authorized/);

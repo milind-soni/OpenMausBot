@@ -10,3 +10,19 @@ export function reorderStable<T extends { id: string }>(items: readonly T[], ids
   slots.forEach((slot, index) => { out[slot] = moved[index]!; });
   return out;
 }
+
+/** Reorders `items` itself the same way (the server's schedulers and other readers hold the array and its records).
+ * False, and nothing changes, for an empty list, a repeated id or an id it does not have. */
+export function reorderInPlace<T extends { id: string }>(items: T[], ids: readonly string[]): boolean {
+  if (!ids.length || new Set(ids).size !== ids.length) return false;
+  const known = new Set(items.map((item) => item.id));
+  if (ids.some((id) => !known.has(id))) return false;
+  items.splice(0, items.length, ...reorderStable(items, ids));
+  return true;
+}
+
+/** The reordered list, or null when no item moved (a client then keeps its state as it is). */
+export function reorderIfMoved<T extends { id: string }>(items: readonly T[], ids: readonly string[]): T[] | null {
+  const next = reorderStable(items, ids);
+  return next.some((item, index) => item !== items[index]) ? next : null;
+}
