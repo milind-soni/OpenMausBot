@@ -153,10 +153,10 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     expect(pageDoc).toMatchObject({ room: true, can: { message: false, modelContext: false, serverTools: false, openLinks: true } });
     expect(await api("GET", `/api/threads/${room.threadId}/messages/${boardRow.id}/app`)).toMatchObject({ room: true, can: { serverTools: false, serverResources: false, message: false } });
 
-    // Both rows render in the room for the person, view-only: no Point and no Share on the page.
+    // Both rows render in the room for the person, view-only: Point (its pick goes to the page's bot), no Share.
     const live = (id: string) => `[data-app="${id}"][data-app-room][data-app-state="live"] iframe[data-app-frame]`;
     await until(() => evaluate(`Boolean(document.querySelector('${live(pageId)}') && document.querySelector('${live(boardRow.id)}'))`), "both frames to go live", 30_000);
-    expect(await evaluate(`[...document.querySelectorAll('[data-app="${pageId}"] button')].map((b) => b.textContent.trim()).filter((t) => t === "Point" || t === "Share")`)).toEqual([]);
+    expect(await evaluate(`[...document.querySelectorAll('[data-app="${pageId}"] button')].map((b) => b.textContent.trim()).filter((t) => t === "Point" || t === "Share")`)).toEqual(["Point"]);
     expect(await evaluate(`Boolean([...document.querySelectorAll('[data-app="${pageId}"] button')].find((b) => b.getAttribute("aria-label") === "Full screen"))`)).toBe(true);
     mkdirSync(evidenceDir, { recursive: true });
 

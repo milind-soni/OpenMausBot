@@ -17,6 +17,8 @@ import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { ProviderInstance, SteerOutcome } from "../contracts.ts";
 import { cancelledChatFollowup } from "../message-db.ts";
 import { messageTextRefusal } from "../message-text.ts";
+import { prepareRoomPointed, roomPickBots, type RoomPick } from "../room-pointed.ts";
+import { refusalBody } from "../user-errors.ts";
 import type { PhoneSecretSubmissionRegistry } from "../phone-secret.ts";
 import { promptWithReply, type PersonName } from "../replies.ts";
 import { clientGroupPatchViolation, requestSource, type RequestAuth } from "../request-auth.ts";
@@ -92,7 +94,7 @@ export interface ChannelRouteDeps {
     sendId: string | undefined,
     channelMode: "chat" | "goal",
     queueId: undefined,
-    options: { via?: "api"; sender?: ResolvedSender; trigger?: UsageTrigger; threadId?: string; mentions?: string[] },
+    options: { via?: "api"; sender?: ResolvedSender; trigger?: UsageTrigger; threadId?: string; mentions?: string[]; pointed?: RoomPick },
   ): Message;
   applyRoomHoldsFromMessage(groupId: string, text: string, mentions?: readonly string[]): void;
   cancelGroupTurnOperations(groupId: string, threadId: string): void;
@@ -354,6 +356,15 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (!ownsThread) {
         return json(res, 409, { error: "the channel switched tasks before it could receive the message" });
       }
+      // What the person pointed at in a member's page: only a typed chat line carries it, and it goes to the page's bot.
+      const pointing = body.pointed !== undefined && body.pointed !== null;
+      if (pointing && channelMode === "goal") return json(res, 400, { error: "a goal is a plain typed message" });
+      const pointed = pointing ? prepareRoomPointed(store, threadId, body.pointed) : null;
+      if (pointed && !pointed.ok) return json(res, pointed.status, refusalBody(pointed));
+      const pick = pointed?.pick;
+      if (pick && !roomPickBots(pick).some((id) => group.memberIds.includes(id) && store.bot(id))) {
+        return json(res, 409, { error: "the bot that made this page is no longer in this room" });
+      }
       const sendId = parseSendId(body.sendId);
       const replyTo = resolveReplyTarget(threadId, body.replyToId);
       // A bot's shell is a loopback caller too: with no paired session and no browser origin the message
@@ -417,10 +428,11 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
               sender: messageSender(auth),
               trigger,
               mentions,
+              ...(pick ? { pointed: pick } : {}),
             });
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
-          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via, sender: messageSender(auth), trigger, threadId, mentions });
+          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via, sender: messageSender(auth), trigger, threadId, mentions, ...(pick ? { pointed: pick } : {}) });
           return { ok: true as const, threadId, message };
         },
       );
@@ -488,7 +500,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
         restoreHeldChannelQueue(held);
         return json(res, 409, { error: "only the first queued message can steer" });
       }
-      if (decision.action === "queue" || !steerInput) {
+      if (decision.action === "queue" || !steerInput || headGroup.some((item) => item.pointed)) {
         restoreHeldChannelQueue(held);
         return json(res, 200, {
           ok: true,
