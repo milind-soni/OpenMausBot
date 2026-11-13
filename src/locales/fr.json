@@ -818,6 +818,8 @@
   "chat.pinnedJump": "Aller au message épinglé",
   "chat.you": "Vous",
   "chat.peer.handedTask": "a confié une tâche",
+  "chat.peer.viewExchange": "Voir l’échange",
+  "chat.peer.exchangeTitle": "{peer} et {bot}",
   "chat.assistant": "Assistant",
   "chat.webhookTask": "Tâche de webhook",
   "chat.viewPayload": "Voir la charge utile de l'événement",

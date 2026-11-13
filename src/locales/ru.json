@@ -2092,6 +2092,8 @@
   "chat.peer.handedTask": "передал задачу",
   "chat.peer.openedThread": "открыл этот тред",
   "chat.peer.requested": "отправил запрос",
+  "chat.peer.viewExchange": "Показать переписку",
+  "chat.peer.exchangeTitle": "{peer} и {bot}",
   "chat.automation.openRun": "Открыть выполнение",
   "chat.automation.openRunFor": "Открыть выполнение, лежащее в основе сообщения {name}",
   "chat.automation.needsYou": "нужно ваше участие",

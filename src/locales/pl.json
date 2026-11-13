@@ -2058,6 +2058,8 @@
   "chat.peer.handedTask": "przekazanie zadania",
   "chat.peer.openedThread": "otwarcie tego wątku",
   "chat.peer.requested": "wysłane żądanie",
+  "chat.peer.viewExchange": "Zobacz wymianę",
+  "chat.peer.exchangeTitle": "{peer} i {bot}",
   "chat.automation.openRun": "Zobacz uruchomienie",
   "chat.automation.openRunFor": "Zobacz uruchomienie, którego dotyczy ta wiadomość bota {name}",
   "chat.automation.needsYou": "czeka na ciebie",

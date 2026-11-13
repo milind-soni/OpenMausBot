@@ -2322,6 +2322,8 @@
   "chat.peer.handedTask": "タスクを任せました",
   "chat.peer.openedThread": "このスレッドを開きました",
   "chat.peer.requested": "リクエストを送りました",
+  "chat.peer.viewExchange": "やり取りを見る",
+  "chat.peer.exchangeTitle": "{peer} と {bot}",
   "chat.automation.openRun": "実行を見る",
   "chat.automation.openRunFor": "この{name}のメッセージを生んだ実行を見る",
   "chat.automation.needsYou": "対応が必要",

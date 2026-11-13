@@ -1630,6 +1630,8 @@
   "chat.peer.handedTask": "đã giao một nhiệm vụ",
   "chat.peer.openedThread": "đã mở luồng này",
   "chat.peer.requested": "đã gửi một yêu cầu",
+  "chat.peer.viewExchange": "Xem trao đổi",
+  "chat.peer.exchangeTitle": "{peer} và {bot}",
   "chat.automation.openRun": "Xem lần chạy",
   "chat.automation.openRunFor": "Xem lần chạy đã tạo tin nhắn {name} này",
   "chat.automation.needsYou": "cần bạn",

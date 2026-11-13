@@ -957,6 +957,8 @@
   "chat.peer.asked": "запитав через ask_bot",
   "chat.peer.handedTask": "передав завдання",
   "chat.peer.openedThread": "відкрив цю гілку",
+  "chat.peer.viewExchange": "Переглянути листування",
+  "chat.peer.exchangeTitle": "{peer} і {bot}",
   "chat.assistant": "Асистент",
   "chat.webhookTask": "Завдання вебхука",
   "chat.viewPayload": "Переглянути payload події",

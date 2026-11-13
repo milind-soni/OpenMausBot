@@ -2440,6 +2440,8 @@
   "chat.peer.handedTask": "repassou uma tarefa",
   "chat.peer.openedThread": "abriu esta conversa",
   "chat.peer.requested": "enviou um pedido",
+  "chat.peer.viewExchange": "Ver conversa",
+  "chat.peer.exchangeTitle": "{peer} e {bot}",
   "chat.automation.openRun": "Ver execução",
   "chat.automation.openRunFor": "Ver a execução que gerou esta mensagem de {name}",
   "chat.automation.needsYou": "aguardando você",

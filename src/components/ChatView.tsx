@@ -54,7 +54,7 @@ import { BotAvatar } from "./Avatar";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { normalizeState, stateForBot } from "@/lib/mascot";
-import { peerLine, peerRequest, type PeerLine } from "@/lib/peer-message";
+import { peerLine, peerPreview, peerRequest, type PeerLine } from "@/lib/peer-message"; import { PEER_HOW, PeerCompactRow, PeerMessagesContext, PeerOpenedActions } from "./PeerExchange";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { lastNonReceipt } from "@/lib/receipts";
 import { useTurnLive } from "@/state/turn-status"; import { isLiveReply, StreamingReplyContext, streamedReply, useHasLiveReply, useLiveTranscript } from "@/state/live-reply"; import { useTurnNow } from "./NowCard"; import { useThreadRoutineRun } from "@/state/older-routine-runs";
@@ -336,7 +336,7 @@ const Bubble = memo(function Bubble({
   const user = message.role === "user" && !peer;
   const speaker = user ? otherSpeaker(message, speakerViewer ?? null) : null;
   const ownBubbleStyle = speaker ? undefined : bubbleStyle;
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(false), [folded, setFolded] = useState(false);
   const focusedSearch = focus?.messageId === message.id && Boolean(focus.matchText);
   const [viewRaw, setViewRaw] = useState(false);
   const speech = useSpeech();
@@ -390,8 +390,9 @@ const Bubble = memo(function Bubble({
   const collapsible =
     user && !webhookView && !expanded && (visibleText.length > USER_COLLAPSE_CHARS || visibleText.split("\n").length > USER_COLLAPSE_LINES);
   useEffect(() => {
-    if (focusedSearch && collapsible) setExpanded(true);
-  }, [focusedSearch, collapsible, focus?.nonce]);
+    setFolded(false);
+    if (focusedSearch && (collapsible || peer)) setExpanded(true);
+  }, [focusedSearch, collapsible, Boolean(peer), focus?.nonce]);
 
   if (user && editing && !webhookView && !hasAttachments) {
     return (
@@ -401,6 +402,9 @@ const Bubble = memo(function Bubble({
     );
   }
 
+  // A long request from another bot is one line until opened.
+  const peerLong = peer ? peerPreview(text) : null;
+  if (peer && peerLong && !expanded && (!focusedSearch || folded)) return <div {...{ [MESSAGE_ROW]: "" }} className="group flex w-full flex-col items-start"><PeerLabel peer={peer} /><PeerCompactRow preview={peerLong} onOpen={() => setExpanded(true)} /></div>;
   const forks = user && versions ? versions : [message];
   const versionIndex = forks.findIndex((v) => v.id === message.id);
   const switchTo = (v: Message | undefined) => {
@@ -562,6 +566,7 @@ const Bubble = memo(function Bubble({
         </span>
       </div>
       <ReactionChips threadId={threadId} message={message} bots={bots} align={user ? "end" : "start"} canReact={canReact} />
+      {peer && expanded && peerLong && <PeerOpenedActions peer={peer} bots={bots} botId={botId} botName={botName} onFold={() => { setExpanded(false); setFolded(true); }} />}
       {forks.length > 1 && (
         <div className="mt-1 flex items-center gap-0.5 pr-1 text-[12px] text-ink-secondary">
           <button
@@ -593,14 +598,7 @@ function PeerLabel({ peer }: { peer: PeerLine }) {
   const { bots } = useChatRows();
   const author =
     bots.find((b) => b.id === peer.botId) ?? bots.find((b) => b.name === peer.name);
-  const how =
-    peer.delivery === "delegate_bot"
-      ? t("chat.peer.handedTask")
-      : peer.delivery === "start_thread"
-        ? t("chat.peer.openedThread")
-        : peer.delivery === "coordinate_bots"
-          ? t("chat.peer.requested")
-          : t("chat.peer.asked");
+  const how = t(PEER_HOW[peer.delivery]);
   return (
     <div className="mb-1 flex items-center gap-1.5 pl-0.5" data-testid="peer-label">
       <BotAvatar
@@ -688,7 +686,7 @@ const MessagesList = memo(function MessagesList({
     return <NewMessagesDivider fading={unreadDividerFading} />;
   };
   return (
-    <>
+    <PeerMessagesContext value={transcript}>
       {items.map((item, i) => {
         const previous = items[i - 1];
         const prev = previous && (previous.kind === "message" ? previous.message : previous.messages.at(-1));
@@ -794,7 +792,7 @@ const MessagesList = memo(function MessagesList({
           </div>
         );
       })}
-    </>
+    </PeerMessagesContext>
   );
 });
 

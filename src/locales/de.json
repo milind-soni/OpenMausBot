@@ -982,6 +982,8 @@
   "chat.pinnedJump": "Zur angehefteten Nachricht springen",
   "chat.you": "Du",
   "chat.peer.handedTask": "hat eine Aufgabe weitergegeben",
+  "chat.peer.viewExchange": "Austausch ansehen",
+  "chat.peer.exchangeTitle": "{peer} und {bot}",
   "chat.assistant": "Assistent",
   "chat.webhookTask": "Webhook-Aufgabe",
   "chat.viewPayload": "Ereignis-Payload ansehen",

@@ -2612,6 +2612,8 @@
   "chat.peer.handedTask": "handed on a task",
   "chat.peer.openedThread": "opened this thread",
   "chat.peer.requested": "sent a request",
+  "chat.peer.viewExchange": "View exchange",
+  "chat.peer.exchangeTitle": "{peer} and {bot}",
   "chat.automation.openRun": "See run",
   "chat.automation.openRunFor": "See the run behind this {name} message",
   "chat.automation.needsYou": "needs you",

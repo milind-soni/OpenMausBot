@@ -1926,6 +1926,8 @@
   "chat.peer.handedTask": "encargó una tarea",
   "chat.peer.openedThread": "abrió este hilo",
   "chat.peer.requested": "envió una solicitud",
+  "chat.peer.viewExchange": "Ver intercambio",
+  "chat.peer.exchangeTitle": "{peer} y {bot}",
   "chat.automation.openRun": "Ver ejecución",
   "chat.automation.openRunFor": "Ver la ejecución detrás de este mensaje de {name}",
   "chat.automation.needsYou": "te necesita",
