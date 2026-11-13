@@ -47,6 +47,7 @@ import {
 import { PreviewFrame, type PreviewFrameHandle, type PreviewFrameStatus } from "@/components/PreviewFrame";
 import { PreviewFilePicker, usePreviewAutoRefreshWatcher } from "@/components/PreviewFilePicker";
 import { cn } from "@/lib/cn";
+import { isDeviceSource as isWebPreviewSource } from "@/lib/previewSource";
 import { useStore, type Attachment } from "@/state/store";
 
 export interface MobilePreviewPanelProps {
@@ -163,11 +164,8 @@ export function MobilePreviewPanel({
     });
   }, [activeSource, customSize, inputUrl, presetId, rotated, zoom]);
 
-  const isDeviceSource = useMemo(() => {
-    if (!activeSource) return true;
-    if (activeSource.kind === "url") return true;
-    return activeSource.fileType === "html";
-  }, [activeSource]);
+  // An empty panel starts in the web header so the address field is available.
+  const isDeviceSource = !activeSource || isWebPreviewSource(activeSource);
 
   const handleOpenExternally = useCallback(() => {
     if (!activeSource) return;
