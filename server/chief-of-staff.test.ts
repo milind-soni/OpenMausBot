@@ -97,6 +97,13 @@ describe("chiefOfStaffSystemPrompt", () => {
     expect(chiefOfStaffSystemPrompt("chief", bots, true)).not.toContain("every department");
   });
 
+  it("limits the no-authority line to bots outside the team of a person's Chief", () => {
+    const personal = [{ id: "maus", name: "MausBot", chiefOfStaff: true, defaultBot: { person: "ada@example.test" } }, { id: "mail", name: "Mail" }];
+    const prompt = chiefOfStaffSystemPrompt("maus", personal, true);
+    expect(prompt).toContain("Reaching a bot outside your team gives you no authority over it");
+    expect(prompt).not.toContain("Reaching a bot gives you no authority over it");
+  });
+
   it("is the person's assistant, does the work itself and adds a specialist without asking", () => {
     const prompt = chiefOfStaffSystemPrompt("chief", [{ id: "chief", name: "Atlas" }], true);
 
