@@ -30,6 +30,9 @@ export interface WebhookTrigger {
   verifiedAt?: number;
   verificationSample?: WebhookVerificationSample;
   eventTypes?: string[];
+  /** Field path in the call's JSON (dots for nesting, e.g. "pull_request.state") -> the text it must have. Every field must
+   *  match (case-insensitive; a list matches when any item does), else the call is recorded as ignored and starts no run. */
+  payloadFilter?: Record<string, string>;
   /** Unfinished runs this webhook may hold before new deliveries get 429.
    * Absent means the default (3). */
   maxPendingRuns?: number;
@@ -48,6 +51,8 @@ export interface WebhookTriggerInput {
   enabled?: boolean;
   verificationPending?: boolean;
   eventTypes?: string[];
+  /** `null` or `{}` on an edit removes the filter. */
+  payloadFilter?: Record<string, string> | null;
   /** 1–50; `null` goes back to the default. */
   maxPendingRuns?: number | null;
   sameConversation?: boolean;
