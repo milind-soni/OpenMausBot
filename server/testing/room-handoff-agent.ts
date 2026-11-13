@@ -1,5 +1,5 @@
 // Scripted provider fixture that exercises the REAL injected agents MCP proxy.
-import { splitLaunchNote } from "./launch-note.ts";
+import { splitChangedNote, splitLaunchNote } from "./launch-note.ts";
 import { spawn } from "node:child_process";
 import { appendFileSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -13,6 +13,8 @@ type ScriptEntry = { key: string; match: string[]; repeat?: boolean; [field: str
 
 // Claude reads its MCP config and system prompt once at launch; the harness deletes both after the first turn.
 const launchFiles = new Map<string, string>();
+/** The volatile half this session holds now: from its launch note, then from each note that changed it. */
+let volatileNote: string | null = null;
 const readAtLaunch = (path: string) => {
   if (!launchFiles.has(path)) launchFiles.set(path, readFileSync(path, "utf8"));
   return launchFiles.get(path)!;
@@ -130,9 +132,11 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
   const agent = agentEnv(integration);
   const botId = agent.OMB_BOT_ID;
   const launchNote = splitLaunchNote(prompt);
-  prompt = launchNote.prompt;
+  const changedNote = splitChangedNote(launchNote.prompt);
+  prompt = changedNote.prompt;
+  volatileNote = launchNote.note ?? changedNote.note ?? volatileNote;
   const launchSystem = launch?.system ?? readAtLaunch(arg("--append-system-prompt-file"));
-  const system = launchNote.note && typeof launchSystem === "string" ? `${launchSystem}\n\n${launchNote.note}` : launchSystem;
+  const system = volatileNote && typeof launchSystem === "string" ? `${launchSystem}\n\n${volatileNote}` : launchSystem;
   // Claude snapshots the launch-time system prompt; later instructions arrive in the user message.
   const turnContext = `${system}\n${JSON.stringify(prompt)}`;
   const resumed = turnContext.includes("Your downstream room requests have settled.");
