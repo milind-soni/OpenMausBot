@@ -1163,7 +1163,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
       <>
         <div role="menu" aria-label={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")} onKeyDown={navigateThreadMenu} className={cn(
           "absolute z-40 w-max min-w-[200px] overflow-hidden", MENU_SHEET,
-          rail ? "left-full top-0 ml-4" : cn("top-full", advanced ? "mt-1" : "mt-1.5", density === "icons" ? "left-0" : "right-0 md:max-w-[calc(min(var(--sidebar-width),var(--sidebar-max))_-_48px)]"),
+          rail ? "left-full top-0 ml-4" : cn("top-full", advanced ? "mt-1" : "mt-1.5", density === "icons" ? "left-0" : "right-0 max-w-[calc(100vw_-_48px)] md:max-w-[calc(min(var(--sidebar-width),var(--sidebar-max))_-_48px)]"),
           plusMotion.className,
         )} {...plusMotion.exitProps}>
           {advanced && <button

@@ -95,6 +95,8 @@ describe("the sidebar's + menu with a long bot name (simple mode)", () => {
     const menu = withLongBot().find((node) => node.props.role === "menu")!;
     expect(menu.props.className).toContain("right-0");
     expect(menu.props.className).toContain("md:max-w-[calc(min(var(--sidebar-width),var(--sidebar-max))_-_48px)]");
+    // Below md the sidebar fills the window, so the menu is capped by the window instead.
+    expect(menu.props.className).toMatch(/(^|\s)max-w-\[calc\(100vw_-_48px\)\]/);
   });
 
   it("caps the menu by the sidebar's own cap, which is narrower than a saved width while a side panel is open", () => {
