@@ -4,6 +4,7 @@ import { refreshTime, urgentUsage, usageLabel, usageView } from "@/lib/usage";
 import { UsageRingGraphic } from "./UsageRingGraphic";
 import { UsageTooltip } from "./UsageTooltip";
 import { UsagePopover, type UsageItem } from "./UsagePopover";
+import { cn } from "@/lib/cn";
 
 function RingButton({ item, now, summaryCount, expanded, onOpen }: { item: UsageItem; now: number; summaryCount?: number; expanded: boolean; onOpen: () => void }) {
   const [tooltip, setTooltip] = useState(false);
@@ -24,7 +25,7 @@ function RingButton({ item, now, summaryCount, expanded, onOpen }: { item: Usage
   </span>;
 }
 
-export function UsageRings() {
+export function UsageRings({ compact }: { compact?: boolean } = {}) {
   const { state } = useStore();
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLElement | null>(null);
@@ -50,10 +51,12 @@ export function UsageRings() {
   const show = (id: string) => { trigger.current = document.activeElement as HTMLElement; setNow(Date.now()); setOpen(open === id ? null : id); };
   const selected = open === "all" ? items : items.filter(item => item.instance.instanceId === open);
   return <div ref={root} className="relative flex shrink-0 items-center gap-2" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
-    <div className="hidden items-center gap-1 rounded-full border border-hairline/40 bg-panel/70 px-1 py-0.5 min-[900px]:flex" aria-label="AI usage left">
-      {items.map(item => <RingButton key={item.instance.instanceId} item={item} now={now} expanded={open === item.instance.instanceId} onOpen={() => show(item.instance.instanceId)} />)}
-    </div>
-    <div className="flex rounded-full border border-hairline/40 bg-panel/70 px-1 py-0.5 min-[900px]:hidden"><RingButton item={urgent} now={now} summaryCount={items.length - 1} expanded={open === "all"} onOpen={() => show("all")} /></div>
+    {!compact && (
+      <div className="hidden items-center gap-1 rounded-full border border-hairline/40 bg-panel/70 px-1 py-0.5 min-[900px]:flex" aria-label="AI usage left">
+        {items.map(item => <RingButton key={item.instance.instanceId} item={item} now={now} expanded={open === item.instance.instanceId} onOpen={() => show(item.instance.instanceId)} />)}
+      </div>
+    )}
+    <div className={cn("flex rounded-full border border-hairline/40 bg-panel/70 px-1 py-0.5", !compact && "min-[900px]:hidden")}><RingButton item={urgent} now={now} summaryCount={items.length - 1} expanded={open === "all"} onOpen={() => show("all")} /></div>
     <span className="h-4 w-px bg-hairline/50" aria-hidden="true" />
     {open && selected.length > 0 && <UsagePopover items={selected} now={now} onClose={close} />}
   </div>;
