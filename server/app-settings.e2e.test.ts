@@ -179,7 +179,7 @@ it("a key is never taken as a value: set with a value is refused, set without on
 it("an owner-only setting is refused with where to change it", async () => {
   await start("OWNER-ONLY", [step({ action: "set", id: "vault.logins", value: "on" }, true)]);
   expect(results(await finished("OWNER-ONLY"))).toEqual([expect.objectContaining({ isError: true,
-    text: "Vault and logins is changed only by the owner, in Settings → Vault. Tell the user where to find it; do not try another way." })]);
+    text: "Vault and logins is changed only by the person, in Settings → Vault. Tell them where in one line; do not try another way." })]);
 }, 60_000);
 
 const botNow = async () => (await api("GET", "/api/bots")).bots.find((one: any) => one.id === bot.id);
