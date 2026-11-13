@@ -80,3 +80,20 @@ export interface DeciderConfig {
   workersAiBaseUrl?: string;
   jobs?: { roomRouting?: boolean; inboxTriage?: boolean };
 }
+
+const CREDENTIAL_ENV = [
+  ["key", "OMB_JEV_API_KEY"],
+  ["geminiKey", "OMB_GEMINI_DECIDER_KEY"],
+  ["openrouterKey", "OMB_OPENROUTER_DECIDER_KEY"],
+  ["workersAiToken", "OMB_WORKERS_AI_TOKEN"],
+] as const;
+
+export function deciderConfigWithEnv(config: DeciderConfig | undefined, env: NodeJS.ProcessEnv = process.env): DeciderConfig {
+  const next = { ...config };
+  for (const [field, name] of CREDENTIAL_ENV) if (env[name] !== undefined) next[field] = env[name];
+  return next;
+}
+
+export function deciderCredentialEnv(config: DeciderConfig | undefined): Array<[string | undefined, string]> {
+  return CREDENTIAL_ENV.map(([field, name]) => [config?.[field], name]);
+}

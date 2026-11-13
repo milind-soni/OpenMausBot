@@ -7,11 +7,24 @@ import {
   changedInstanceIds, DATA_DIR, instanceConfigs, loadConfig, parseConfigPatch, parseStoredConfig, saveConfig, stripWorkspaceCredentialEnv, syncCredentialEnv,
 } from "../config.ts";
 import { createDecider, deciderSavePatch, describeDecider } from "./index.ts";
+import { deciderConfigWithEnv, deciderCredentialEnv } from "./config.ts";
 
 const KEY = "tsk_config_secret_0123456789";
 const OR_KEY = "sk-or-v1-config-secret-0123456789";
 
 describe("decider config", () => {
+  it("overlays only defined environment credentials and keeps explicit empty values", () => {
+    const saved = { key: "jev-saved", geminiKey: "gemini-saved", openrouterKey: "router-saved", workersAiToken: "workers-saved", enabled: true };
+    const next = deciderConfigWithEnv(saved, { OMB_JEV_API_KEY: "jev-env", OMB_GEMINI_DECIDER_KEY: "", OMB_WORKERS_AI_TOKEN: "workers-env" });
+    expect(next).toEqual({ ...saved, key: "jev-env", geminiKey: "", workersAiToken: "workers-env" });
+    expect(saved.geminiKey).toBe("gemini-saved");
+    expect(deciderConfigWithEnv(undefined, {})).toEqual({});
+    expect(deciderCredentialEnv(next)).toEqual([
+      ["jev-env", "OMB_JEV_API_KEY"], ["", "OMB_GEMINI_DECIDER_KEY"],
+      ["router-saved", "OMB_OPENROUTER_DECIDER_KEY"], ["workers-env", "OMB_WORKERS_AI_TOKEN"],
+    ]);
+    expect(deciderCredentialEnv(undefined).every(([value]) => value === undefined)).toBe(true);
+  });
   beforeEach(() => {
     rmSync(DATA_DIR, { recursive: true, force: true });
     mkdirSync(DATA_DIR, { recursive: true });
