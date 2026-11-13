@@ -9,6 +9,8 @@ describe("ElevenLabs speech model", () => {
     expect(speechModel("Done. ส่งไฟล์แล้ว")).toBe("eleven_v3");
     expect(speechModel("שלום")).toBe("eleven_v3");
     expect(speechModel("নমস্কার")).toBe("eleven_v3");
+    expect(speechModel("გამარჯობა")).toBe("eleven_v3");
+    expect(speechModel("ᲒᲐᲛᲐᲠᲯᲝᲑᲐ")).toBe("eleven_v3");
   });
 
   it("keeps Flash for languages it speaks", () => {

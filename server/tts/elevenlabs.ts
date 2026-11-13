@@ -6,7 +6,7 @@ import { userErrorThrown } from "../user-errors.ts";
 const MODEL = "eleven_flash_v2_5";
 // Flash v2.5 has no Thai, Bengali, Hebrew, Georgian, Armenian, Gujarati, Punjabi, Telugu, Kannada or Malayalam; Eleven v3
 // speaks them. Text in one of their scripts goes to v3, everything else stays on the faster Flash.
-const BEYOND_FLASH = /[\u0E00-\u0E7F\u0980-\u09FF\u0590-\u05FF\u10A0-\u10FF\u0530-\u058F\u0A80-\u0AFF\u0A00-\u0A7F\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F]/;
+const BEYOND_FLASH = /[\u0E00-\u0E7F\u0980-\u09FF\u0590-\u05FF\u10A0-\u10FF\u1C90-\u1CBF\u0530-\u058F\u0A80-\u0AFF\u0A00-\u0A7F\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F]/;
 export const speechModel = (text: string): string => (BEYOND_FLASH.test(text) ? "eleven_v3" : MODEL);
 const HEARING_MODEL = "scribe_v2";
 // 64kbps mono is indistinguishable for speech and a third of the bytes
