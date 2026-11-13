@@ -16,15 +16,15 @@ const HARD_CAP = 2000;
 const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
-  "server/index.ts": 15516,
+  "server/index.ts": 15515,
   "src/state/store.tsx": 3334,
   "electron/main.mjs": 3160,
   "server/store.ts": 2291,
   "src/components/Sidebar.tsx": 1687,
-  "server/drivers/claude.ts": 2090,
+  "server/drivers/claude.ts": 2087,
   "server/drivers/acp/core.ts": 1704,
   "server/drivers/codex.ts": 1718,
-  "server/routines.ts": 1567,
+  "server/routines.ts": 1555,
   "src/components/ComputerPanel.tsx": 1782,
   "src/components/RoutineCalendarPage.tsx": 1622,
   "server/config.ts": 1245,
@@ -43,8 +43,8 @@ const LINES: Record<string, number> = {
   "server/container-computer.ts": 1175,
   "src/components/ModelPicker.tsx": 1039,
   "src/components/PhoneSetupFlow.tsx": 1089,
-  "server/cli.ts": 1062,
-  "src/components/AttachmentPreview.tsx": 1035,
+  "server/cli.ts": 1053,
+  "src/components/AttachmentPreview.tsx": 1034,
   "server/meetings/meetbot.ts": 1047,
 };
 
