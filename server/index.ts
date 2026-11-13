@@ -327,7 +327,7 @@ import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-rec
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { createTtsRoutes } from "./routes/tts.ts";
 import { turnStartLogLine } from "./turn-log.ts";
-import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts"; import { cloudHandoffSessionMayResume, queuedRequestSessionMayDispatch, requestSessionGuard, requestSessionOptions, requireLiveBeforeSteerFallback, settledPrincipalRemainsAuthorized, sharedComputerPrincipalForRequest, turnOriginForRequest, type DirectRequestOwner } from "./host/request-session.ts";
+import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts"; import { cloudHandoffSessionMayResume, directTurnRequestSessionMayDispatch, queuedRequestSessionMayDispatch, requestSessionGuard, requestSessionOptions, requireLiveBeforeSteerFallback, settledPrincipalRemainsAuthorized, sharedComputerPrincipalForRequest, turnOriginForRequest, type DirectRequestOwner } from "./host/request-session.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts";
 import { extractReplayImages, extractTurnImages, videoFramesWithin } from "./turn-images.ts";
@@ -8410,9 +8410,6 @@ async function beginTurn(
         conversations: commsDepth === 0 && !coordinationNode && !opts?.automationSource && !opts?.unattended && !apiFenced,
         userName: userNameFor(threadId),
       });
-      if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) {
-        throw new DirectTurnSetupCancelled("turn stopped before dispatch");
-      }
       runningTurnEngines.set(threadId, instance);
       // Re-decide from the soul actually sent, except on an unattended continuation wake, so a session started under an old soul never survives a soul change by laundering its record.
       const dispatchedConfig = sessionConfig(liveBot?.soul ?? bot.soul);
@@ -8424,6 +8421,7 @@ async function beginTurn(
       const startupRecovery = (opts?.automaticRecoveryIndex ?? 0) < startupBackups(liveBot ?? bot, cfg.automaticRecovery).length; const posted = unreadThreadPosts(store.activePath(threadId)); // post_to_thread messages left here since its last run
       const held = limitTakeover.heldAtStart(bot, { instanceId, model }, startupRecovery); // a limit or a sign-out already known: straight to an AI that can carry on, with the reset only when one was named
       if (held) throw held.scope === "signed-out" ? Object.assign(new TurnAuthenticationRefusedError(`signed-out-${randomUUID()}`, `${engineName(instanceId)} is signed out.`, true), userErrorFields(userError("serverError.engine.signedOut", { name: engineName(instanceId) }))) : new TurnUsageLimitRefusedError(`limit-${randomUUID()}`, `${engineName(instanceId)} is at its usage limit.`, held.resetsAt, held.scope, true);
+      if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId) || !directTurnRequestSessionMayDispatch(directRequestOwners.get(threadId), (sessionId) => sessions.isLive(sessionId))) throw new DirectTurnSetupCancelled("turn stopped before dispatch");
       const dispatch = await guardTurnDispatch(shareNote.after(savedSteps.dispatch.sendTurn(instance, personLine && !opts?.unattended && !opts?.app?.context && !guestConfined ? { botId: bot.id, message: userMessage, turnText: text, placePicked: wants === "local" && placeSource !== "auto-pin" } : null, {
         threadId,
         botId: bot.id,

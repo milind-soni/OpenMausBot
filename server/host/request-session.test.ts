@@ -3,6 +3,7 @@ import { OUTSIDE } from "../peer-provenance.ts";
 import {
   queuedRequestSessionMayDispatch,
   cloudHandoffSessionMayResume,
+  directTurnRequestSessionMayDispatch,
   requestSessionGuard,
   requireLiveBeforeSteerFallback,
   requestSessionOptions,
@@ -45,6 +46,32 @@ describe("request session provenance", () => {
     expect(sharedComputerPrincipalForRequest("session-a", () => false, resolve)).toBeNull();
     expect(resolve).not.toHaveBeenCalled();
     expect(sharedComputerPrincipalForRequest("session-a", () => true, resolve)).toBe("owner");
+  });
+
+  it("rechecks the recorded request session after asynchronous turn preparation and before dispatch", async () => {
+    let liveSession = "session-a";
+    let finishPreparation!: () => void;
+    const preparation = new Promise<void>((resolve) => { finishPreparation = resolve; });
+    const dispatch = vi.fn();
+    const owner = { requestSessionId: "session-a" };
+    const preparing = (async () => {
+      await preparation;
+      if (!directTurnRequestSessionMayDispatch(owner, (id) => id === liveSession)) throw new Error("setup cancelled");
+      dispatch();
+    })();
+
+    liveSession = "session-b";
+    finishPreparation();
+    await expect(preparing).rejects.toThrow("setup cancelled");
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(directTurnRequestSessionMayDispatch(owner, (id) => id === "session-a")).toBe(true);
+    expect(directTurnRequestSessionMayDispatch(undefined, () => false)).toBe(true);
+  });
+
+  it("checks a continuation against its recorded effective session, not the current caller", () => {
+    const continuationOwner = { requestSessionId: "original-session" };
+    expect(directTurnRequestSessionMayDispatch(continuationOwner, (id) => id === "original-session")).toBe(true);
+    expect(directTurnRequestSessionMayDispatch(continuationOwner, (id) => id === "new-caller-session")).toBe(false);
   });
 
   it("requires a live session for Cloud-home lending and restored lending handoffs", () => {

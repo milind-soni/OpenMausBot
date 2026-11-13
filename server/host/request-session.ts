@@ -54,6 +54,11 @@ export function requestSessionGuard(sessionId: string | undefined, isLive: (id: 
   return () => { if (sessionId && !isLive(sessionId)) throw refuse(); };
 }
 
+/** Checks the session bound to the active request owner immediately before provider dispatch. */
+export function directTurnRequestSessionMayDispatch(request: { requestSessionId?: string } | undefined, isLive: (id: string) => boolean): boolean {
+  return !request?.requestSessionId || isLive(request.requestSessionId);
+}
+
 export function requireLiveBeforeSteerFallback(outcome: "steered" | "refused" | "indeterminate", requireLive: () => void): void {
   if (outcome === "refused") requireLive();
 }
