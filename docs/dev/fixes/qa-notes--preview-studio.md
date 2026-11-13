@@ -1,7 +1,7 @@
 ---
 status: review
 created: 2026-11-12
-updated: 2026-11-12
+updated: 2026-11-13
 scope: preview-studio-qa
 owner: Dell
 commit-tested: 0976b17
@@ -119,3 +119,57 @@ Both file URL forms were exercised: /api/preview/file?projectId=ID&path=PATH and
 ## Cleanup and limits
 
 All QA-owned browser, fixture-server, Vite, and harness processes are to be stopped and the throwaway directory removed after recording the result. Only this report is retained in the worktree. No code fixes, installation, branch changes, commits, pushes, or real-bot messages. Electron remains unverified. Share transport was intercepted, so no completed provider turn is claimed. Security PASS applies to the exercised routes and browser attacks, not a proof against every possible sandbox escape.
+
+
+## Retest at c1cc144
+
+**Verdict: CHANGES REQUIRED.** Seven original findings pass the browser retest; two remain partial (Markdown heading fidelity and dialog focus return). An additional all-eight-size sharing failure is filed. Security smoke passes. This is a browser verdict, not native Electron approval.
+
+### Scope and isolation
+
+- Tested source: c1cc144c8c5d3fb3263aa4df474de27e6392ef34 in this detached dell-preview-final checkout. Prior broader browser work in this same review was performed on November 12; a fresh full nine-finding browser/HTTP confirmation ran November 13 after temporary processes/data had disappeared.
+- Fresh harness/UI/blocked-site fixture ports: 8927 / 5227 / 8928. Throwaway Chrome persistent profile, explicit GBS_DATA_DIR and GBS_PROJECTS_FILE, inert unknown driver. Prior run used 8925 / 5225 / 8926 / 9325. No main/active worktree changes, real bot messages, paid model turns, merges or pushes.
+- Message POSTs were intercepted only to inspect sharing payloads. That route interception was explicitly removed before final security POST checks. An initial mocked 200 was identified as a test-harness artifact and was not accepted as security evidence; the final real guard produced two 403s.
+
+### All nine original findings
+
+| Finding | Result | Actual evidence |
+| --- | --- | --- |
+| e5be992f | PASS | Relative CSS, image and module load in an opaque HTML frame: background rgb(1,123,77), image width 64, module marker present. |
+| 547ac215 | PASS | Valid one-page PDF visibly renders text and native controls in the browser preview; PDF alone omits iframe sandbox. HTML/SVG isolation remains. |
+| b0a8734e | PARTIAL | Page/PDF shares show the desktop notice and send honest links with zero fabricated attachments. PNG capture pixels and bold/table Markdown capture pass; heading styling is still lost. Residual bug 9d4f135b-b093-4c2f-8b97-6b1d4fde1826. |
+| 08c270e2 | PASS | X-Frame-Options DENY fixture exposes persistent recovery; Preview blank? opens stable recovery with Open in new tab / Retry. Retry remains usable. |
+| fae0fe45 | PASS | Bot panel preserves source/size/rotation/zoom across 1024/1179/1180/1280/1920 with one frame. Room resize/rotate/zoom also pass. |
+| 2be95016 | PASS | Eight Canvas header rectangles do not overlap; labels remain at 12px. Real mouse click opens the requested Single view. Six-live-frame cap and promotion pass. |
+| abe7fe48 | PARTIAL | Focus entry, Tab/Shift+Tab traps, Escape dismissal, Preview-page Escape and loaded status pass. Both picker and Share close onto BODY instead of restoring the trigger. |
+| 8387c080 | PASS (browser alternative) | Dead browser Back/Forward buttons are replaced by visible "History needs the desktop app" wording; Reload and Open in new tab remain. Native history is unverified. |
+| e3c9e7ce | PASS | Size menu and modal surfaces are opaque rgb(17,17,17), readable over white HTML. |
+
+### Remaining fixes and reproduction
+
+1. **Medium — dialog focus return, original abe7fe48 (returned to doing).** Explicitly focus Choose a file from a project, open the picker, press Escape, wait for its removal, then inspect activeElement: BODY. Repeat with Share to chat: same result. Entry, trapping and dismissal now work; return-to-trigger does not. Both controls use autoFocus before the effect records previousFocus, which appears to capture the newly mounted modal child rather than its invoker. Fix the trigger restoration for both dialogs.
+2. **Medium — Markdown heading fidelity, new 9d4f135b-b093-4c2f-8b97-6b1d4fde1826; b0a8734e remains partial.** Residual of b0a8734e at c1cc144. Preview sample.md containing # Markdown Heading, a paragraph with **bold**, and a table. Share the current size and inspect its PNG. Actual: bold/table render, but the heading becomes plain normal-weight text. Live heading is a DIV with font-semibold (computed 600); the exported SVG/raster has the same class without its stylesheet, so it renders at weight 400. captureMarkdown adds h1/h2 CSS but ChatMarkdown emits DIVs for headings. Current Nov 13 PNG visually reconfirms normal-weight heading; the prior same-hash SVG computed-style check measured 600 -> 400. Expected: retain rendered heading hierarchy/weight in the real capture. No fabricated page screenshot remains; HTML/PDF link fallback now passes.
+3. **Medium — eight-size image/Markdown sharing, new 8fc3c43f-7d06-47d0-9c46-0068df5550b3.** At c1cc144 in browser Preview Studio, choose a project Markdown or PNG file, switch to Canvas, choose All sizes (8), and open Share to chat. Select All selected sizes (8 screenshots) and a TEST target, then Send. Actual: no message is sent and the modal reports "Page screenshots need the desktop app. Share the preview link instead." Current Nov 13 confirmation reproduces Markdown; prior same-hash browser run also reproduces PNG. Single-size captures work. Six artboards are live and the other two are placeholders; the capture loop calls unloaded/non-live frame handles without promoting them. Expected: capture all selected sizes while respecting the six-live-frame cap, or explicitly disable unsupported capture with accurate guidance before submit. This is not a page/PDF capture and the desktop-only page error is misleading.
+
+### Security smoke
+
+- **PASS:** actual opaque HTML-frame GET /api/bots and text/plain POST /api/bots/TEST_ID/messages both reject; CDP on the actual opaque frame records **403, 403**. No SECURITY_PROBE message is appended. Prior same-hash panel/direct HTML checks also passed.
+- **PASS:** directly opened SVG executes its embedded GET probes to /api/bots and /api/config; both produce 403. SVGs rendered as images remain inert.
+- **PASS, direct harness and actual Vite proxy:** raw HTTP preserves literal .., %2e%2e, .%2E and %2e. segments under a capability asset prefix. Four-level traversal normalizing to /api/bots is refused with 403. This checks the ab0f162 regression without fetch pre-normalization.
+- **PASS, both endpoints:** file symlink, directory symlink and encoded outside-project traversal are refused with 403. Valid opaque capability CSS reads still return 200. Prior same-hash tests additionally refused wrong capabilities, asset writes, hostile Host values and normal cross-origin API reads.
+- HTML/SVG retain CSP sandbox without allow-same-origin; PDF remains the native-viewer exception. Security PASS applies to these exercised routes/attacks, not a universal sandbox guarantee.
+
+### Additional regressions and validation
+
+- Bot/room controls, all eight presets, Custom bounds 240–3840, rotate, Fit/50/75/100, panel-to-page carry-over, Single shortcuts with typing guard, and 1024/1280/1920 layouts pass.
+- Canvas fit/zoom, Ctrl-scroll, Space-drag, six-frame cap and placeholder promotion pass. Staggered headers have zero pairwise overlap; the UI may still need panning at extreme zoom/size combinations.
+- Panel link staging preserves the existing composer draft and labels the link honestly. Single-size image pixels match the fixture. Formatted Markdown bold/table content passes; heading failure is recorded above.
+- Public site, local-page confirmation, auto-refresh on/off and watcher release on close pass in the broader same-hash run.
+- **November 13 focused checks:** 18 tests pass in 4 discovered files (request guard, dev proxy guard, preview sizes and preview sharing). A supplied nonexistent previewFiles test path did not add a test file; no coverage from that path is claimed.
+- **November 12 at the same exact source:** typecheck, full suite **349/349 tests in 45 files**, and production build pass, with the existing large-chunk advisory. No application changes were made between those checks and this confirmation.
+
+### Desktop limits and cleanup
+
+Actual Electron was not launched: native isolation from the live app/profile was not established. Native webview capture/history, Electron window integration and OS-specific behavior remain unverified; browser PDF native-viewer rendering is not an Electron test. Focus/roles/labels were inspected in Chrome; no physical screen reader was run.
+
+Both disposable environments have stopped. Fresh-run finally cleanup closed Chrome and owned harness/Vite/fixture processes and deleted the profile/project directory; port checks verify cleanup before delivery. Only this notes file is retained in this checkout; temporary screenshots and test scripts were removed after inspection. The notes-only local commit does not change application code.
