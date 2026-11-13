@@ -15,13 +15,24 @@ export function previewShareLink(source: PreviewSource, origin: string): string 
  */
 export async function captureMarkdown(container: HTMLElement, width: number, height: number, full: boolean): Promise<string> {
   const clone = container.cloneNode(true) as HTMLElement;
+  // ChatMarkdown uses styled DIV headings. Copy typography/layout while the
+  // nodes are still attached; class names alone cannot style a standalone SVG.
+  const properties = ["font-family", "font-size", "font-weight", "font-style", "line-height", "letter-spacing", "text-align", "text-decoration", "white-space", "display", "vertical-align", "border-collapse", "table-layout", "margin-top", "margin-right", "margin-bottom", "margin-left", "padding-top", "padding-right", "padding-bottom", "padding-left", "border-top-width", "border-right-width", "border-bottom-width", "border-left-width", "border-top-style", "border-right-style", "border-bottom-style", "border-left-style"];
+  const originals = [container, ...container.querySelectorAll<HTMLElement>("*")];
+  const copies = [clone, ...clone.querySelectorAll<HTMLElement>("*")];
+  originals.forEach((node, index) => {
+    const computed = getComputedStyle(node);
+    properties.forEach(property => copies[index].style.setProperty(property, computed.getPropertyValue(property)));
+  });
   clone.querySelectorAll("button").forEach((node) => node.remove());
   clone.querySelectorAll("img").forEach((node) => {
     const alt = document.createElement("span");
     alt.textContent = `[Image: ${node.alt || "image"}]`;
     node.replaceWith(alt);
   });
-  clone.style.cssText = `box-sizing:border-box;width:${width}px;padding:24px;background:#fff;color:#202124;font:16px/1.6 system-ui;overflow:hidden;`;
+  clone.style.cssText = `box-sizing:border-box;width:${width}px;padding:24px;background:#fff;color:#202124;overflow:hidden;`;
+  const rootTypography = getComputedStyle(container);
+  for (const property of ["font-family", "font-size", "font-weight", "line-height"]) clone.style.setProperty(property, rootTypography.getPropertyValue(property));
   const style = document.createElement("style");
   style.textContent = "h1{font-size:2em}h2{font-size:1.5em}h3{font-size:1.2em}p,pre,table,blockquote,ul,ol{margin:12px 0}pre{white-space:pre-wrap;background:#f3f4f6;padding:12px}code{font-family:monospace}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:6px}a{color:#2563eb}blockquote{border-left:3px solid #aaa;padding-left:12px}li{margin:4px 0}";
   clone.prepend(style);
@@ -57,3 +68,4 @@ export async function captureMarkdown(container: HTMLElement, width: number, hei
   context.drawImage(image, 0, 0);
   return canvas.toDataURL("image/png");
 }
+
