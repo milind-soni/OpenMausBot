@@ -15,7 +15,7 @@ const OPENAI_KEY = "sk-live-9f8e7d6c5b4a3210";
 const GATEWAY_KEY = "sk-gateway-0a1b2c3d";
 const dirs: string[] = [];
 afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 });
 
 function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; window?: boolean } = {}) {
