@@ -72,7 +72,10 @@ function normalizeScheduleInput(args: Json): NormalizedSchedule {
   // Providers may send unused optional fields as null; any other unknown field refuses the call.
   const unsupported = fields && Object.keys(raw).find((key) => raw[key] != null && !fields.includes(key));
   if (unsupported) {
-    return { error: `Unsupported ${type} schedule field "${unsupported}". Weekly and daily times use the computer's timezone from trigger_info. ${SUPPORTED_SCHEDULES}` };
+    const hint = type === "once" && unsupported === "timeZone"
+      ? 'A once schedule takes no "timeZone": its zone is the offset inside "at", for example 2026-09-01T09:00:00+05:30.'
+      : "Weekly and daily times use the computer's timezone from trigger_info.";
+    return { error: `Unsupported ${type} schedule field "${unsupported}". ${hint} ${SUPPORTED_SCHEDULES}` };
   }
   if (type === "cron") {
     try {
