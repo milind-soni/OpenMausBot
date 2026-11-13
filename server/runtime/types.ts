@@ -173,6 +173,8 @@ export interface TurnEvidence {
   /** Outward actions this execution completed — sends, posts, publishes, commits, pushes, payments —
    * as short labels ("GMAIL_SEND_EMAIL", "git push", "COMPOSIO_PROXY_EXECUTE"). */
   outward?: string[];
+  /** The AI that did this execution's work when it is not the assignee's own, as "<engine> <model>". */
+  servedBy?: string;
 }
 
 export type EventKind =
