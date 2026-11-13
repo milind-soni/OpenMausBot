@@ -66,7 +66,9 @@ function fieldProblem(name: string, spec: unknown): string | null {
 function imageProblem(image: unknown, index: number): string | null {
   if (!isRecord(image) || Object.keys(image).some((key) => key !== "mime" && key !== "data")) return `images[${index}] must be {mime, data}`;
   if (typeof image.mime !== "string" || !IMAGE_MIMES.has(image.mime)) return `images[${index}]: a PNG, JPEG or WebP image`;
-  if (typeof image.data !== "string" || !image.data || !BASE64.test(image.data)) return `images[${index}]: data must be base64`;
+  if (typeof image.data !== "string" || !image.data || !BASE64.test(image.data) || image.data.length % 4 === 1 || (image.data.endsWith("=") && image.data.length % 4 !== 0)) {
+    return `images[${index}]: data must be base64`;
+  }
   return base64Bytes(image.data) <= EXTRACT_LIMITS.imageBytes ? null : `images[${index}] is over 1 MB`;
 }
 
