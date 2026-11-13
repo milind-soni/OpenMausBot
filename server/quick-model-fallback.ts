@@ -25,9 +25,9 @@ export interface QuickRoute {
 
 /** Immutable provenance for the request generation that owns a possible retry. */
 export interface QuickRetryOwner {
-  botId: string;
-  generation: string;
-  requestSessionId?: string;
+  readonly botId: string;
+  readonly generation: string;
+  readonly requestSessionId?: string;
 }
 
 type Engine = { instanceId: string; adapter: Pick<ProviderAdapter, "sendTurn" | "interruptTurn"> };
@@ -105,7 +105,7 @@ export class QuickModelFallback {
   sendTurn(engine: Engine, input: SendTurnInput, quick?: QuickRoute, retryOwner?: QuickRetryOwner): Promise<TurnStartResult> {
     this.armed.delete(input.threadId);
     if (!quick) return engine.adapter.sendTurn(input);
-    const armed: Armed = { engine, input, quick, ...(retryOwner ? { retryOwner } : {}), phase: "quick", held: [] };
+    const armed: Armed = { engine, input, quick, ...(retryOwner ? { retryOwner: Object.freeze({ ...retryOwner }) } : {}), phase: "quick", held: [] };
     this.armed.set(input.threadId, armed);
     return engine.adapter.sendTurn(input).then((sent) => {
       armed.turnId ??= sent.turnId;
