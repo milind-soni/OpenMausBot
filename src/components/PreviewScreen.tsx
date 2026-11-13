@@ -1,4 +1,5 @@
-import { sharesLinkOnly, previewShareLink, captureProjectFileSizes } from "@/lib/previewSharing";
+import { isDeviceSource } from "@/lib/previewSource";
+import { sharesLinkOnly, previewShareLink } from "@/lib/previewSharing";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -65,6 +66,7 @@ export default function PreviewScreen() {
     }
     return null;
   });
+  const deviceSource = isDeviceSource(activeSource);
   const [sourceKindTab, setSourceKindTab] = useState<"url" | "file">(() =>
     initial.source?.kind === "file" ? "file" : "url",
   );
@@ -128,7 +130,7 @@ export default function PreviewScreen() {
   // Measure Single mode stage bounds
   useEffect(() => {
     const el = singleStageRef.current;
-    if (!el || mode !== "single") return;
+    if (!el || (deviceSource && mode !== "single")) return;
     const updateSize = () => {
       const rect = el.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
@@ -141,7 +143,7 @@ export default function PreviewScreen() {
       observer.observe(el);
       return () => observer.disconnect();
     }
-  }, [mode]);
+  }, [mode, deviceSource]);
 
   // Persist Preview Studio state & keep quick preview state in sync
   useEffect(() => {
@@ -216,7 +218,7 @@ export default function PreviewScreen() {
 
   // Single-mode keyboard shortcuts: [ and ] cycle sizes, R rotates
   useEffect(() => {
-    if (mode !== "single") return;
+    if (!deviceSource || mode !== "single") return;
     const allIds = [...PREVIEW_SIZE_PRESETS.map((p) => p.id), "custom"];
     const isTypingTarget = (target: EventTarget | null) => {
       const tag = (target as HTMLElement | null)?.tagName;
@@ -244,7 +246,7 @@ export default function PreviewScreen() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activePreset.id, activePreset.rotatable, mode]);
+  }, [activePreset.id, activePreset.rotatable, mode, deviceSource]);
 
   const commitUrl = useCallback((url: string) => {
     setPendingLocalUrl(null);
@@ -316,12 +318,10 @@ export default function PreviewScreen() {
       const linkOnly = sharesLinkOnly(activeSource, Boolean(window.gbs));
       if (linkOnly) {
         // Browser frames cannot supply a faithful page screenshot.
-      } else if (activeSource.kind === "file" && (activeSource.fileType === "markdown" || activeSource.fileType === "image") && request.scope === "all" && mode === "canvas" && !shareOverrideArtboard) {
-        const sizes = selectedSizeIds.map(id => {
-          const preset = resolvePreviewSize(id, customSize);
-          return { title: preset.label, ...applyRotation(preset, Boolean(rotatedById[id])) };
-        });
-        attachments.push(...await captureProjectFileSizes(activeSource, sizes, request.area === "full"));
+      } else if (!deviceSource) {
+        const handle = singleFrameRef.current;
+        if (!handle) throw new Error("Open the file viewer before sharing it.");
+        attachments.push(await handle.captureScreenshot(request.area, { title: "Full-screen file", width: stageBounds.width, height: stageBounds.height }));
       } else if (shareOverrideArtboard) {
         const handle = canvasFrameRefs.current.get(shareOverrideArtboard.id);
         if (!handle) throw new Error("This preview is not ready to capture. Reload it and try again.");
@@ -360,7 +360,7 @@ export default function PreviewScreen() {
       const defaultCaption =
         attachments.length > 1
           ? `Shared ${attachments.length} preview sizes for ${sourceDesc}`
-          : `Preview (${shareOverrideArtboard?.preset.label ?? activePreset.label}): ${sourceDesc}`;
+          : deviceSource ? `Preview (${shareOverrideArtboard?.preset.label ?? activePreset.label}): ${sourceDesc}` : `Preview: ${sourceDesc}`;
       const caption = linkOnly ? `${defaultCaption}\nShared as a link; no screenshot was captured.` : defaultCaption;
       const text = request.note ? `${request.note}\n\n${caption}` : caption;
 
@@ -385,6 +385,9 @@ export default function PreviewScreen() {
       setTimeout(() => setToast(null), 3000);
     },
     [
+      deviceSource,
+      stageBounds.width,
+      stageBounds.height,
       activePreset.id,
       activePreset.label,
       activeSource,
@@ -399,8 +402,8 @@ export default function PreviewScreen() {
     ],
   );
 
-  const modalSizeLabel = shareOverrideArtboard?.preset.label ?? activePreset.label;
-  const modalDimensionsLabel = shareOverrideArtboard
+  const modalSizeLabel = deviceSource ? shareOverrideArtboard?.preset.label ?? activePreset.label : "Full-screen file";
+  const modalDimensionsLabel = !deviceSource ? "Viewer" : shareOverrideArtboard
     ? `${shareOverrideArtboard.width} × ${shareOverrideArtboard.height}`
     : `${singleDims.width} × ${singleDims.height}`;
 
@@ -596,7 +599,7 @@ export default function PreviewScreen() {
             </span>
           )}
 
-          <div
+          {deviceSource && <div
             role="tablist"
             aria-label="Preview layout mode"
             className="flex items-center rounded-lg border border-hairline/60 bg-inset p-0.5"
@@ -629,14 +632,14 @@ export default function PreviewScreen() {
               <LayoutGrid className="h-3.5 w-3.5" />
               Canvas
             </button>
-          </div>
+          </div>}
 
           <button
             type="button"
             disabled={!activeSource}
             onClick={(e) => {
               setShareOverrideArtboard(null);
-              setShareDefaultScope(mode === "canvas" && selectedSizeIds.length > 1 ? "all" : "current");
+              setShareDefaultScope(deviceSource && mode === "canvas" && selectedSizeIds.length > 1 ? "all" : "current");
               openShareModal(e.currentTarget);
             }}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-[12px] font-medium text-white transition-colors hover:brightness-110 disabled:opacity-45"
@@ -648,7 +651,7 @@ export default function PreviewScreen() {
       </header>
 
       {/* Top Bar Row 2: Size Bar & Viewport Controls */}
-      <div className="flex min-h-[40px] flex-wrap items-center justify-between gap-2 border-b border-hairline/60 bg-raised/50 px-4 py-1.5">
+      {deviceSource && <div className="flex min-h-[40px] flex-wrap items-center justify-between gap-2 border-b border-hairline/60 bg-raised/50 px-4 py-1.5">
         {mode === "single" ? (
           <>
             <div className="flex flex-wrap items-center gap-1">
@@ -877,6 +880,8 @@ export default function PreviewScreen() {
         )}
       </div>
 
+      }
+
       {/* Inline URL validation error banner */}
       {urlError && (
         <div
@@ -888,10 +893,10 @@ export default function PreviewScreen() {
       )}
 
       {/* Main Stage: Single Mode or Canvas Mode */}
-      {mode === "single" ? (
+      {!deviceSource || mode === "single" ? (
         <div
           ref={singleStageRef}
-          className="relative flex flex-1 items-start justify-center overflow-auto bg-inset/50 p-6"
+          className={`relative flex min-h-0 flex-1 items-start justify-center bg-inset/50 ${deviceSource ? "overflow-auto p-6" : "overflow-hidden"}`}
         >
           <PreviewFrame
             ref={singleFrameRef}
@@ -962,6 +967,7 @@ export default function PreviewScreen() {
       <SharePreviewModal
         open={shareModalOpen}
         triggerRef={shareTriggerRef}
+        fileViewer={!deviceSource}
         linkOnly={sharesLinkOnly(activeSource, Boolean(window.gbs))}
         onClose={() => {
           setShareModalOpen(false);
@@ -969,8 +975,8 @@ export default function PreviewScreen() {
         }}
         currentSizeLabel={modalSizeLabel}
         currentDimensionsLabel={modalDimensionsLabel}
-        selectedSizesCount={mode === "canvas" ? selectedSizeIds.length : 1}
-        defaultScope={shareDefaultScope}
+        selectedSizesCount={deviceSource && mode === "canvas" ? selectedSizeIds.length : 1}
+        defaultScope={deviceSource ? shareDefaultScope : "current"}
         onSubmit={handleShareSubmit}
       />
     </main>

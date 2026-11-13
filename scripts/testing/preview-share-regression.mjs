@@ -81,36 +81,37 @@ try {
   if (process.env.GBS_QA_ARTIFACTS) { mkdirSync(process.env.GBS_QA_ARTIFACTS, { recursive: true }); writeFileSync(join(process.env.GBS_QA_ARTIFACTS, 'markdown.png'), Buffer.from(sends[0].attachments[0].dataUrl.split(',')[1], 'base64')); }
   for (const type of ['markdown', 'image']) {
     await open(type); const before = sends.length;
-    await share(true); await until(async () => sends.length, n => n === before + 1);
+    await share(false); await until(async () => sends.length, n => n === before + 1);
     const attachments = sends.at(-1).attachments;
-    assert.equal(attachments.length, 8);
-    for (let i = 0; i < 8; i++) {
-      assert.ok(attachments[i].name.includes(`${PREVIEW_SIZE_PRESETS[i].width}x${PREVIEW_SIZE_PRESETS[i].height}`));
+    assert.equal(attachments.length, 1);
+    for (let i = 0; i < 1; i++) {
+      const viewer = await page.locator("main [data-preview-file-viewer]").boundingBox();
+      assert.ok(attachments[i].name.includes(`${Math.round(viewer.width)}x${Math.round(viewer.height)}`));
       assert.equal(attachments[i].mimeType, 'image/png'); assert.ok(attachments[i].dataUrl.startsWith('data:image/png;base64,'));
       const png = Buffer.from(attachments[i].dataUrl.split(',')[1], 'base64');
-      const preset = PREVIEW_SIZE_PRESETS[i];
+      const preset = { width: Math.round(viewer.width), height: Math.round(viewer.height) };
       const ratio = type === 'image' ? Math.min(1, 1600 / preset.width, 1200 / preset.height) : Math.min(1, 1600 / preset.width, Math.sqrt(8_000_000 / (preset.width * preset.height)));
       assert.equal(png.readUInt32BE(16), Math.round(preset.width * ratio));
       assert.equal(png.readUInt32BE(20), Math.round(preset.height * ratio));
     }
     const observed = await page.evaluate(() => ({ maximum: window.qaMaximumLive, stages: document.querySelectorAll('[data-preview-capture]').length, frames: document.querySelectorAll('iframe, webview').length }));
-    assert.equal(observed.maximum, 6); assert.equal(observed.stages, 0); assert.equal(observed.frames, 0);
-    console.log(`PASS ${type}: one intercepted send with all eight PNGs, max ${observed.maximum} live cards, no extra frames or retained stages`);
+    assert.equal(observed.maximum, 0); assert.equal(observed.stages, 0); assert.equal(observed.frames, 0);
+    console.log(`PASS ${type}: one full-screen PNG in one intercepted send, max ${observed.maximum} live cards, no extra frames or retained stages`);
   }
-  // Fail the final capture after seven successful exports for each source.
+  // A failed full-screen capture must send nothing.
   for (const type of ['markdown', 'image']) {
     await open(type); const before = sends.length;
     await page.evaluate(() => {
       window.qaToDataURL = HTMLCanvasElement.prototype.toDataURL; let calls = 0;
-      HTMLCanvasElement.prototype.toDataURL = function (...args) { if (++calls === 8) throw Error('QA final capture failed'); return window.qaToDataURL.apply(this, args); };
+      HTMLCanvasElement.prototype.toDataURL = function (...args) { if (++calls === 1) throw Error('QA final capture failed'); return window.qaToDataURL.apply(this, args); };
     });
-    const modal = await share(true); await modal.getByRole('alert').waitFor();
+    const modal = await share(false); await modal.getByRole('alert').waitFor();
     const error = await modal.getByRole('alert').innerText();
-    assert.ok(error.includes(PREVIEW_SIZE_PRESETS[7].label) && error.includes('QA final capture failed'));
+    assert.ok(error.includes('QA final capture failed'));
     assert.ok(!error.includes('desktop app')); assert.equal(sends.length, before);
     await page.evaluate(() => { HTMLCanvasElement.prototype.toDataURL = window.qaToDataURL; });
     assert.equal(await page.locator('[data-preview-capture]').count(), 0);
-    console.log(`PASS ${type}: final-size failure names the size, keeps the modal open and sends no partial message`);
+    console.log(`PASS ${type}: capture failure reports its cause, keeps the modal open and sends no partial message`);
   }
   console.log(`5 browser regressions passed on isolated ports ${serverPort}/${uiPort}; every chat send intercepted; no AI turns.`);
 } finally { await browser?.close(); for (const child of children) await stop(child); rmSync(temp, { recursive: true, force: true }); }

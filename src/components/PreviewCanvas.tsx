@@ -1,3 +1,5 @@
+import { isDeviceSource } from "@/lib/previewSource";
+import { scrollSyncSupport } from "@/lib/previewScrollSync";
 import {
   useCallback,
   useEffect,
@@ -73,7 +75,14 @@ function groupIcon(group: PreviewSizeGroup) {
   }
 }
 
-export function PreviewCanvas({
+export function PreviewCanvas(props: PreviewCanvasProps) {
+  if (!isDeviceSource(props.source)) return <div className="flex min-h-0 flex-1 overflow-hidden bg-inset">
+    <PreviewFrame source={props.source} width={1} height={1} onStatusChange={props.onStatusChange} onOpenFilePicker={props.onOpenFilePicker} />
+  </div>;
+  return <DevicePreviewCanvas {...props} />;
+}
+
+function DevicePreviewCanvas({
   source,
   selectedSizeIds,
   rotatedById,
@@ -115,6 +124,8 @@ export function PreviewCanvas({
   const [sharedScroll, setSharedScroll] = useState<{ sourceId: string; ratioY: number } | null>(
     null,
   );
+
+  useEffect(() => { setSharedScroll(null); }, [source, scrollSync]);
 
   const hasAutoFittedRef = useRef(Boolean(initialTransform));
   const panOriginRef = useRef<{ startX: number; startY: number; viewX: number; viewY: number }>({
@@ -309,9 +320,9 @@ export function PreviewCanvas({
     if (panning) setPanning(false);
   };
 
-  if (!source || pendingConfirmUrl) {
+  if (!isDeviceSource(source) || pendingConfirmUrl) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-inset p-6">
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-inset">
         <PreviewFrame
           source={source}
           width={393}
@@ -327,6 +338,8 @@ export function PreviewCanvas({
     );
   }
 
+  const syncSupport = scrollSyncSupport(source, Boolean(window.gbs));
+  const syncActive = scrollSync && syncSupport.supported;
   const snapshotCount = Math.max(0, artboards.length - liveIds.size);
 
   return (
@@ -496,12 +509,12 @@ export function PreviewCanvas({
                   onStatusChange={artboard.id === primaryLiveId ? onStatusChange : undefined}
                   scrollSyncSourceId={artboard.id}
                   onScrollSync={
-                    scrollSync
+                    syncActive
                       ? (sourceId, ratioY) => setSharedScroll({ sourceId, ratioY })
                       : undefined
                   }
                   externalScrollRatioY={
-                    scrollSync && sharedScroll && sharedScroll.sourceId !== artboard.id
+                    syncActive && sharedScroll && sharedScroll.sourceId !== artboard.id
                       ? sharedScroll.ratioY
                       : null
                   }
@@ -514,15 +527,19 @@ export function PreviewCanvas({
         })}
       </div>
 
+      {!syncSupport.supported && <p id="preview-scroll-sync-guidance" role="status" className="absolute right-4 bottom-16 z-20 max-w-[330px] rounded-xl border border-hairline bg-panel px-3 py-2 text-[12px] text-ink-secondary">{syncSupport.guidance}</p>}
+      {syncSupport.supported && <span id="preview-scroll-sync-guidance" className="sr-only">{syncSupport.guidance}</span>}
       {/* Bottom-right Canvas HUD */}
       <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 rounded-xl border border-hairline bg-panel px-2 py-1 shadow-lg">
         <button
           type="button"
           onClick={onToggleScrollSync}
-          aria-pressed={scrollSync}
-          title="Synchronize vertical scrolling across Markdown/document frames"
+          aria-pressed={syncActive}
+          disabled={!syncSupport.supported}
+          aria-describedby="preview-scroll-sync-guidance"
+          title={syncSupport.guidance}
           className={`inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] font-medium transition-colors ${
-            scrollSync
+            syncActive
               ? "bg-accent/15 text-accent"
               : "text-ink-secondary hover:bg-raised-hover hover:text-ink"
           }`}

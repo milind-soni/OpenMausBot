@@ -1,3 +1,5 @@
+import { isDeviceSource } from "@/lib/previewSource";
+import { scrollRatio, syncWebviewScroll } from "@/lib/previewScrollSync";
 import {
   forwardRef,
   useCallback,
@@ -105,6 +107,14 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const markdownScrollRef = useRef<HTMLDivElement | null>(null);
+  const viewerRef = useRef<HTMLDivElement | null>(null);
+  const deviceSource = isDeviceSource(source);
+  const fileViewer = Boolean(source && !deviceSource);
+  const pageScrollSync = useRef<ReturnType<typeof syncWebviewScroll> | null>(null);
+  const scrollReporter = useRef(onScrollSync);
+  scrollReporter.current = onScrollSync;
+  const syncEnabled = Boolean(deviceSource && onScrollSync && scrollSyncSourceId);
+
   const loadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -181,6 +191,11 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
       mode: "visible" | "full",
       meta: { title: string; width: number; height: number },
     ): Promise<Attachment> => {
+      if (fileViewer) {
+        const bounds = viewerRef.current?.getBoundingClientRect();
+        if (!bounds || bounds.width < 1 || bounds.height < 1) throw new Error("Open the file viewer before sharing it.");
+        meta = { title: "Full-screen file", width: Math.round(bounds.width), height: Math.round(bounds.height) };
+      }
       const safeSlug = meta.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "preview";
       const fileName = `preview-${safeSlug}-${meta.width}x${meta.height}-${Date.now()}.png`;
 
@@ -236,7 +251,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
         dataUrl,
       };
     },
-    [isElectron, source],
+    [fileViewer, isElectron, source],
   );
 
   useImperativeHandle(
@@ -264,16 +279,22 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
     return () => window.removeEventListener("gbs:preview-reload", onPreviewReload);
   }, [source]);
 
-  // Apply external scroll ratio for Markdown previews when scroll sync is active
   useEffect(() => {
-    if (externalScrollRatioY === null || externalScrollRatioY === undefined) return;
-    const container = markdownScrollRef.current;
-    if (!container) return;
-    const maxScroll = container.scrollHeight - container.clientHeight;
-    if (maxScroll > 0) {
-      container.scrollTop = externalScrollRatioY * maxScroll;
-    }
-  }, [externalScrollRatioY]);
+    const view = webviewRef.current as any;
+    if (!isElectron || !view || !live || !syncEnabled || !source ||
+        (source.kind === "file" && source.fileType !== "html")) return;
+    const bridge = syncWebviewScroll(view, ratio => {
+      if (scrollSyncSourceId) scrollReporter.current?.(scrollSyncSourceId, ratio);
+    });
+    pageScrollSync.current = bridge;
+    return () => { bridge.close(); if (pageScrollSync.current === bridge) pageScrollSync.current = null; };
+  }, [isElectron, live, source, reloadNonce, syncEnabled, scrollSyncSourceId]);
+
+  useEffect(() => {
+    const ratio = scrollRatio(externalScrollRatioY);
+    if (!live || !syncEnabled || ratio === null) return;
+    pageScrollSync.current?.apply(ratio);
+  }, [externalScrollRatioY, live, syncEnabled, source, reloadNonce]);
 
   // Manage loading states & Markdown fetching
   useEffect(() => {
@@ -489,18 +510,20 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
 
   return (
     <div
-      style={{ width: `${scaledW}px`, height: `${scaledH}px` }}
+      ref={viewerRef}
+      data-preview-file-viewer={fileViewer || undefined}
+      style={fileViewer ? { width: "100%", height: "100%", flex: "1 1 auto", minHeight: 0 } : { width: `${scaledW}px`, height: `${scaledH}px` }}
       className="relative shrink-0 select-none"
     >
       <div
         style={{
-          width: `${width}px`,
-          height: `${height}px`,
-          transform: scale !== 1 ? `scale(${scale})` : undefined,
+          width: fileViewer ? "100%" : `${width}px`,
+          height: fileViewer ? "100%" : `${height}px`,
+          transform: !fileViewer && scale !== 1 ? `scale(${scale})` : undefined,
           transformOrigin: "top left",
         }}
         className={
-          showDeviceBezel
+          fileViewer ? "relative h-full w-full overflow-hidden bg-panel" : showDeviceBezel
             ? "relative overflow-hidden rounded-[22px] border-[3px] border-hairline bg-panel shadow-xl"
             : "relative overflow-hidden rounded-xl border border-hairline bg-panel shadow-lg"
         }
@@ -647,14 +670,6 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
         ) : source.kind === "file" && source.fileType === "markdown" ? (
           <div
             ref={markdownScrollRef}
-            onScroll={(e) => {
-              if (!onScrollSync || !scrollSyncSourceId) return;
-              const target = e.currentTarget;
-              const maxScroll = target.scrollHeight - target.clientHeight;
-              if (maxScroll > 0) {
-                onScrollSync(scrollSyncSourceId, target.scrollTop / maxScroll);
-              }
-            }}
             className="h-full w-full overflow-y-auto bg-panel p-6 text-left text-ink select-text"
           >
             <ChatMarkdown text={markdownContent} />
