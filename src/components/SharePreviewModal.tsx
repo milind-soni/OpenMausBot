@@ -20,6 +20,7 @@ export interface SharePreviewRequest {
 export interface SharePreviewModalProps {
   open: boolean;
   linkOnly?: boolean;
+  fileViewer?: boolean;
   onClose: () => void;
   currentSizeLabel: string;
   currentDimensionsLabel: string;
@@ -32,6 +33,7 @@ export interface SharePreviewModalProps {
 export function SharePreviewModal({
   open,
   linkOnly = false,
+  fileViewer = false,
   onClose,
   currentSizeLabel,
   currentDimensionsLabel,
@@ -105,7 +107,7 @@ export function SharePreviewModal({
     setError("");
     try {
       await onSubmit({
-        scope,
+        scope: fileViewer ? "current" : scope,
         area,
         target,
         note: note.trim(),
@@ -180,12 +182,12 @@ export function SharePreviewModal({
                     className="accent-accent"
                   />
                   <span>
-                    Current size (<span className="font-medium text-ink">{currentSizeLabel}</span> —{" "}
-                    <span className="font-mono text-[11.5px]">{currentDimensionsLabel}</span>)
+                    {fileViewer ? "Full-screen file" : <>Current size (<span className="font-medium text-ink">{currentSizeLabel}</span> —{" "}
+                    <span className="font-mono text-[11.5px]">{currentDimensionsLabel}</span>)</>}
                   </span>
                 </label>
 
-                {selectedSizesCount > 1 && (
+                {!fileViewer && selectedSizesCount > 1 && (
                   <label
                     className={`flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2 text-[12.5px] transition-colors ${
                       scope === "all"
