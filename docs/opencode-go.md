@@ -58,6 +58,9 @@ A model OpenCode hides through a `whitelist` (or `blacklist`) under its
 provider in `opencode.json` is missing from the picker too; add its id to
 that list to see it.
 
+Attached images and video frames go to the model as ACP image blocks. A model
+without image input answers that it cannot see them; the turn still completes.
+
 Some models take a limited number of tools per request (OpenCode Zen's free
 models refuse more than 128). When a model refuses a turn for that,
 OpenMausBot retries it once with each MCP server listing only its share of

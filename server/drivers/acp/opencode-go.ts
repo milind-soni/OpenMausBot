@@ -663,6 +663,7 @@ const support = (
   models: NO_MODELS,
   defaultCli: "opencode",
   nativeSource: "opencode.acp",
+  images: true,
   loginNote: "OpenCode has no usable models. Add an OpenCode key in Settings → API keys.",
   install: {
     command: {
