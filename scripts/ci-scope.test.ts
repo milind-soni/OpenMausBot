@@ -288,6 +288,7 @@ describe("CI outputs", () => {
       "server/chat-notices.test.ts",
       "server/recall-disclosure.test.ts",
       "server/routine-cron-text.test.ts",
+      "server/routine-cron-text-zh.test.ts",
       "server/routine-requests.test.ts",
       "server/cloud-send-arrived.test.ts",
       "server/cloud-team-bot-access.e2e.test.ts",
