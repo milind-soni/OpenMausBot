@@ -25,6 +25,7 @@ import {
   claudeCostSnapshot,
   restoredCostBase,
   STEERED_CONTINUATION_GRACE_MS,
+  spawnContractDiff,
   sumNativeTurnResults,
   turnCostFromRunningTotal,
   type ClaudeConfig,
@@ -408,6 +409,53 @@ describe("ClaudeDriver.decodeConfig", () => {
       }
     },
   );
+});
+
+describe("spawnContractDiff", () => {
+  const key = (overrides: Record<string, unknown> = {}) => JSON.stringify({
+    args: ["--model", "opus"],
+    system: "stable",
+    mcpServers: { agents: { command: "node", args: ["agents"], env: { TOKEN: "secret" } } },
+    cwd: "/work",
+    model: "opus",
+    base: null,
+    configDir: null,
+    hooks: false,
+    toolSearch: false,
+    botSettings: "aaa",
+    auth: "bbb",
+    ...overrides,
+  });
+
+  it("reports nothing for identical keys", () => {
+    expect(spawnContractDiff(key(), key())).toEqual([]);
+  });
+
+  it("names changed scalar fields", () => {
+    expect(spawnContractDiff(key(), key({ model: "sonnet" }))).toEqual(["model"]);
+  });
+
+  it("names added and removed MCP servers without their configs", () => {
+    expect(spawnContractDiff(key(), key({ mcpServers: {} }))).toEqual(["mcpServers:-agents"]);
+    expect(spawnContractDiff(key({ mcpServers: {} }), key())).toEqual(["mcpServers:+agents"]);
+  });
+
+  it("names a server whose config changed, not the config", () => {
+    const changed = spawnContractDiff(key(), key({ mcpServers: { agents: { command: "node", args: ["agents"], env: { TOKEN: "rotated" } } } }));
+    expect(changed).toEqual(["mcpServers:~agents"]);
+    expect(JSON.stringify(changed)).not.toContain("rotated");
+  });
+
+  it("reports nothing for unparseable keys", () => {
+    expect(spawnContractDiff("not json", key())).toEqual([]);
+    expect(spawnContractDiff(key(), "{")).toEqual([]);
+  });
+
+  it("names a server called constructor, which Object.prototype also has", () => {
+    const withConstructor = { constructor: { command: "node", args: ["ctor"] } };
+    expect(spawnContractDiff(key({ mcpServers: {} }), key({ mcpServers: withConstructor }))).toEqual(["mcpServers:+constructor"]);
+    expect(spawnContractDiff(key({ mcpServers: withConstructor }), key({ mcpServers: {} }))).toEqual(["mcpServers:-constructor"]);
+  });
 });
 
 describe("ClaudeDriver turns (fake CLI)", () => {
@@ -3534,6 +3582,48 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(dump.argv).toContain("--resume");
     expect(dump.argv).toContain("claude-other");
   });
+
+  it("names the changed contract fields when a warm process is replaced", async () => {
+    await create();
+    await instance.adapter.sendTurn({
+      threadId: "t-contract-diff",
+      text: "one",
+      integrations: { agents: { command: "node", args: ["agents"], env: {} } },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-contract-diff",
+      text: "two",
+      resumeCursor: announced,
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    // The native log flushes after the turn; poll for the close line instead of sleeping.
+    const close = await new Promise<{ contractChanged?: string[] }>((resolve, reject) => {
+      const deadline = Date.now() + 10_000;
+      const log = join(NATIVE_DIR, "t-contract-diff.ndjson");
+      const check = () => {
+        if (Date.now() > deadline) return reject(new Error("contract-change close was never logged"));
+        try {
+          const lines = readFileSync(log, "utf8").split("\n").filter(Boolean);
+          for (const line of lines) {
+            let entry: { msg?: { close?: string; contractChanged?: string[] } };
+            try {
+              entry = JSON.parse(line);
+            } catch {
+              continue;
+            }
+            if (entry.msg?.close === "spawn contract changed" && entry.msg.contractChanged) return resolve(entry.msg);
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") return reject(error);
+        }
+        setTimeout(check, 50);
+      };
+      check();
+    });
+    expect(close.contractChanged).toContain("mcpServers:-agents");
+  }, 20_000);
 
   it("closes an idle session after the configured window", async () => {
     // Ten seconds is the floor; poll the native log for the close instead of sleeping past it.
