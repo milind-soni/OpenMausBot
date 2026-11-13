@@ -561,8 +561,8 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   sendId?: string;
   /** Per-send channel behavior. Absent is legacy quick chat. */
   channelMode?: "chat" | "goal";
-  /** group threads: which member said this (sender attribution). */
-  from?: { botId: string; name: string; color: string };
+  /** from: which member said this (group threads, and post_to_thread). threadPost: a bot posted this row with post_to_thread; seen once a run has read it. */
+  from?: { botId: string; name: string; color: string }; threadPost?: { deliveryId: string; fromBotId: string; fromThreadId: string; seen?: boolean };
   /** Set on a room message a bot pushed in with post_to_room. */
   peerPost?: { unattended?: boolean };
   /** A room reply whose speaker the decision model picked (an Auto room),

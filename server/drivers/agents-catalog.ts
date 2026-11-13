@@ -8,6 +8,7 @@ import { CHAT_CARD_TOOL_DEFINITIONS } from "./agents-chat-card-tools.ts";
 import { DEVS_TOOL_DEFINITIONS } from "./agents-devs-tools.ts";
 import { HELPER_TOOL_DEFINITIONS } from "./agents-helper-tools.ts";
 import { USAGE_LIMITS_TOOL_DEFINITION } from "./agents-usage-tool.ts";
+import { THREAD_POST_TOOL_DEFINITION } from "./agents-thread-post-tool.ts";
 import { WAIT_TOOL_DEFINITIONS, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
 import { COMPUTER_ASK_TOOL_DEFINITIONS, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
 import { IMAGE_TOOL_DEFINITIONS, IMAGE_TOOL_NAMES } from "./agents-image-tools.ts";
@@ -117,6 +118,12 @@ const TRIGGER_FIELDS_SCHEMA = {
     maxItems: 20,
     items: { type: "string", maxLength: 200 },
     description: "Only for when=webhook: optional event names to accept (from the caller's event-type header, e.g. push). Omit to accept every call.",
+  },
+  webhook_payload_filter: {
+    type: "object",
+    maxProperties: 10,
+    additionalProperties: { type: "string", maxLength: 200 },
+    description: "Only for when=webhook: optional fields the call's JSON must have before a run starts, path to text, e.g. {\"action\":\"opened\",\"pull_request.base.ref\":\"main\"}. All must match (case-insensitive); other calls are ignored. {} in an update removes it.",
   },
   filter: {
     type: "object",
@@ -396,6 +403,7 @@ const TOOL_DEFINITIONS = [
       required: ["group_id", "message"],
     },
   },
+  THREAD_POST_TOOL_DEFINITION,
   {
     name: "create_bot",
     description:

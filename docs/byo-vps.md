@@ -110,6 +110,22 @@ it goes ahead, and the app says what may be left on that server and the command 
 is back. (Changing the default alias still waits until its server can be listed.) Any alias from your
 `~/.ssh/config`, host key already verified by hand, is all it takes. A new bot starts on the default server.
 
+### A server that pauses when idle
+
+Some cloud boxes pause after a while without traffic and refuse SSH until they are resumed. On macOS and Linux
+you can give the app a wake step: put an executable script named `wake` in the app's SSH folder
+(`~/.openmausbot/ssh/wake`, or `ssh/wake` in your data directory). When a server cannot be reached, the app
+runs it once with the alias as its only argument (`wake my-vps`), then tries the connection once more. Make the
+script resume the box with your provider's command or API and return once the server accepts SSH again; it gets
+up to two minutes. If it exits with an error, the app shows that error next to the SSH one. Without the file
+nothing changes. Only someone who can write to the data directory can add it; nothing in the app sets it.
+
+```sh
+#!/bin/sh
+# ~/.openmausbot/ssh/wake: $1 is the SSH alias the app could not reach.
+my-provider resume "$1" && my-provider wait-ready "$1"
+```
+
 **Host key first, by hand.** Connect once manually before pointing OpenMausBot at the alias:
 
 ```sh

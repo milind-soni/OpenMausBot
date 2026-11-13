@@ -130,6 +130,22 @@ describe("shared computer authority and lifecycle", () => {
     await expect(broker.request(operation, alice.person, () => true)).rejects.toThrow(/offline/);
     broker.close();
   });
+  it("tells the computer which bot an action is for: its name and colour only", async () => {
+    const broker = new SharedComputers(() => true);
+    const computer = registration({ computer: true }); broker.register(computer, alice, secret);
+    const operation = { computer_id: computer.id, action: "computer_tools" as const };
+    const bot = { id: "b1", name: "IT Support", color: "teal", soul: "private" };
+    const result = broker.request(operation, alice.person, () => true, bot);
+    const job = await broker.poll(computer.id, "owner", secret);
+    expect(job).toEqual({ id: job!.id, operation, by: { name: "IT Support", color: "teal" } });
+    broker.complete(computer.id, "owner", secret, job!.id, { ok: true });
+    await expect(result).resolves.toEqual({ ok: true });
+    const unnamed = broker.request(operation, alice.person, () => true);
+    const plain = await broker.poll(computer.id, "owner", secret);
+    expect(plain).toEqual({ id: plain!.id, operation });
+    broker.complete(computer.id, "owner", secret, plain!.id, {}); await unnamed;
+    broker.close();
+  });
   it("waits for a command as long as the command may run, and a non-command action still 45 seconds", async () => {
     vi.useFakeTimers();
     const lent = () => {

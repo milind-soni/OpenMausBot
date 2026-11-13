@@ -24,6 +24,8 @@ export type CoordinateBotsCall = {
   answers?: string;
   /** start_thread's report_back: the one target is the sender's own new thread, run on this model. */
   ownThread?: { modelSelection?: ModelSelection; approvalMode?: "ask" };
+  /** post_to_thread: one message into this existing thread; wake starts a run there, else it waits for the next one. */
+  post?: { deliveryId: string; wake: boolean };
 };
 
 export type { LegacyThreadResolver };

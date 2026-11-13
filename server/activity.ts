@@ -111,6 +111,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   memory_update: "activity.tool.team.memoryUpdate",
   message_person: "activity.tool.team.messagePerson",
   post_to_room: "activity.tool.team.postToRoom",
+  post_to_thread: "activity.tool.team.postToThread",
   propose_bot_deletion: "activity.tool.team.proposeBotDeletion",
   propose_model: "activity.tool.team.proposeModel",
   propose_profile: "activity.tool.team.proposeProfile",

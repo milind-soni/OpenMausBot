@@ -68,8 +68,10 @@ export type KnownLentComputer = {
   id: string; name: string; platform: "darwin" | "win32" | "linux" | null; online: boolean; busy: boolean; lent: boolean;
   lastSeenAt: number; lastUsedAt: number | null; scopes: { folders: number; terminal: boolean; screen: boolean; internet: boolean; chrome: boolean };
 };
+/** The bot an action is for, so the lent computer's menu can name it with its colour. */
+export type ActingBot = { name: string; color: string };
 type Job = {
-  id: string; operation: Operation; active: () => boolean; sent: boolean; leased: boolean; resolve: (result: unknown) => void; reject: (error: Error) => void;
+  id: string; operation: Operation; by?: ActingBot; active: () => boolean; sent: boolean; leased: boolean; resolve: (result: unknown) => void; reject: (error: Error) => void;
   timer: NodeJS.Timeout; delivery?: NodeJS.Timeout;
 };
 type Computer = { registration: Registration; owner: SharedComputerOwner; secret: string; seen: number; jobs: Map<string, Job>; wake?: () => void; polls: number };
@@ -331,7 +333,7 @@ export class SharedComputers {
       if (entry.polls !== mine || gone?.aborted) return null;
       for (const job of entry.jobs.values()) {
         if (!job.active()) { this.finish(entry, job, failure("The requesting turn ended")); continue; }
-        if (!job.sent) { this.send(entry, job); return { id: job.id, operation: job.operation }; }
+        if (!job.sent) { this.send(entry, job); return { id: job.id, operation: job.operation, ...(job.by ? { by: job.by } : {}) }; }
       }
       return null;
     };
@@ -386,7 +388,7 @@ export class SharedComputers {
     this.changed();
   }
   /** Another person's computer answers exactly like one that does not exist. */
-  async request(operation: Operation, principal: string | null, active: () => boolean): Promise<unknown> {
+  async request(operation: Operation, principal: string | null, active: () => boolean, by?: ActingBot | null): Promise<unknown> {
     if (!principal) throw failure("This conversation cannot use a shared computer: only a conversation started by the person who shared it can.", 403);
     const lent = () => [...this.computers.values()].find(candidate => candidate.registration.id === operation.computer_id && candidate.owner.person === principal);
     for (const deadline = Date.now() + RECONNECT_WAIT_MS; ;) {
@@ -425,7 +427,7 @@ export class SharedComputers {
     const forDesktop = entry.registration.fileEdits ? timed : withoutEdits;
     return new Promise((resolve, reject) => {
       const id = randomUUID();
-      const job: Job = { id, operation: forDesktop, active, sent: false, leased: false, resolve, reject, timer: setTimeout(() => this.finish(entry, job, failure("Computer action timed out. Its outcome is unknown; inspect before retrying.")), jobDeadlineMs(entry.registration, operation)) };
+      const job: Job = { id, operation: forDesktop, ...(by ? { by: { name: by.name, color: by.color } } : {}), active, sent: false, leased: false, resolve, reject, timer: setTimeout(() => this.finish(entry, job, failure("Computer action timed out. Its outcome is unknown; inspect before retrying.")), jobDeadlineMs(entry.registration, operation)) };
       entry.jobs.set(id, job); entry.wake?.();
     });
   }

@@ -609,6 +609,37 @@
       }
     },
     {
+      "name": "post_to_thread",
+      "description": "Post one message into an open thread, yours or a teammate's (ids from list_threads). It shows as from you; that bot reads it as information, never as the person's request or approval. wake true also starts a run there; default false: it is read on that thread's next run. Rooms: post_to_room. Work: coordinate_bots.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_id": {
+            "type": "string",
+            "description": "From list_threads."
+          },
+          "message": {
+            "type": "string",
+            "description": "The complete message."
+          },
+          "wake": {
+            "type": "boolean",
+            "description": "True: start a run there now."
+          },
+          "delivery_id": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Optional: the same id is posted only once. Reuse it when retrying this call; without it, a retry posts again."
+          }
+        },
+        "required": [
+          "thread_id",
+          "message"
+        ]
+      }
+    },
+    {
       "name": "create_bot",
       "description": "Chief of Staff only: add a specialist to your section now; the person can undo it. instructions become its soul. Omit modelSelection for the workspace default, or use exact IDs from list_team_setup. It starts with your connected apps, at the default access level. Assign work with coordinate_bots. At most four per turn.",
       "inputSchema": {
@@ -1599,6 +1630,14 @@
               "type": "string"
             },
             "description": "Only for when=webhook: optional event names to accept (from the caller's event-type header, e.g. push). Omit to accept every call."
+          },
+          "webhook_payload_filter": {
+            "type": "object",
+            "maxProperties": 10,
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Only for when=webhook: optional fields the call's JSON must have before a run starts, path to text, e.g. {\"action\":\"opened\",\"pull_request.base.ref\":\"main\"}. All must match (case-insensitive); other calls are ignored. {} in an update removes it."
           },
           "filter": {
             "type": "object",
