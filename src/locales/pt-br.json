@@ -321,6 +321,7 @@
   "server.rooms.finishingElsewhere": "{bot} está terminando outra conversa — vai responder aqui assim que estiver livre",
   "server.rooms.finishingElsewhereSpoken": "{bot} está terminando outra conversa",
   "server.rooms.unavailable": "{bot} não está mais disponível — ficou fora desta rodada",
+  "server.rooms.pickNotSent": "{bot} não pode responder a esta mensagem agora, então o que você apontou na página dele não foi enviado. Aponte de novo quando {bot} puder responder.",
   "server.threads.posted": "{bot} publicou uma mensagem aqui",
   "server.rooms.chiefRetargeted": "{chief} agora é o chefe de gabinete, então lidera este grupo no lugar de {former}.",
   "server.stop.nothingRunning": "Não havia nada em execução aqui, então não foi preciso parar nada.",

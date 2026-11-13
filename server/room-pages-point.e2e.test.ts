@@ -49,7 +49,8 @@ it("sends a pick on a room page to the bot that made it, and to no other member"
   plan([]);
   const designerTurns = evidence(designer.id).length, helperTurns = evidence(helper.id).length;
   const pointed = { appId: page.id, rev: 0, tag: "button", role: "", text: "Go", selector: "main > button", html: "<button>Go</button>" };
-  const sent = await api(`/api/groups/${group.id}/messages`, { text: "Make this one bigger", pointed: [pointed] });
+  const firstSend = { text: "Make this one bigger", pointed: [pointed], sendId: "room-pick-first-0001" };
+  const sent = await api(`/api/groups/${group.id}/messages`, firstSend);
   expect(sent.status, JSON.stringify(sent.body)).toBe(202);
   expect(sent.body.message).toMatchObject({ role: "user", text: "Make this one bigger", pointed: [{ appId: page.id }] });
   await expect.poll(() => evidence(designer.id).length, { timeout: 30_000 }).toBe(designerTurns + 1);
@@ -76,5 +77,24 @@ it("sends a pick on a room page to the bot that made it, and to no other member"
   const held = await api(`/api/groups/${group.id}/messages`, { text: "This", pointed: [pointed] });
   expect(held.status, JSON.stringify(held.body)).toBe(409);
   expect(held.body.error).toContain("on hold");
+  expect(evidence(designer.id).length).toBe(designerTurns + 1);
+  // A retry of a pick the room already took keeps its receipt, even with the page's bot on hold now.
+  const retried = await api(`/api/groups/${group.id}/messages`, firstSend);
+  expect(retried.status, JSON.stringify(retried.body)).toBe(202);
+  expect(retried.body.message?.id).toBe(sent.body.message.id);
+
+  // A pick queued behind a busy room whose page bot goes on hold before it runs is reported, never silently lost.
+  expect((await api(`/api/groups/${group.id}/holds`, { botId: designer.id, held: false })).status).toBeLessThan(300);
+  const readyFile = join(fixture.info.dataDir, "helper-ready"), gateFile = join(fixture.info.dataDir, "helper-gate");
+  writeFileSync(planPath, JSON.stringify({ [designer.id]: { steps: [], reply: "Done." }, [helper.id]: { steps: [], reply: "Done.", readyFile, gateFile } }));
+  expect((await api(`/api/groups/${group.id}/messages`, { text: "Plan the week" })).status).toBe(202);
+  await expect.poll(() => existsSync(readyFile), { timeout: 30_000 }).toBe(true);
+  const queued = await api(`/api/groups/${group.id}/messages`, { text: "Make this one round", pointed: [pointed] });
+  expect(queued.status, JSON.stringify(queued.body)).toBe(202);
+  expect(queued.body.queued).toBe(true);
+  expect((await api(`/api/groups/${group.id}/holds`, { botId: designer.id, held: true })).status).toBeLessThan(300);
+  writeFileSync(gateFile, "go");
+  await settled(helper.id);
+  await expect.poll(async () => (await transcript()).some((message) => message.kind === "activity" && String(message.tool?.name).includes("what you pointed at in its page wasn't sent")), { timeout: 30_000 }).toBe(true);
   expect(evidence(designer.id).length).toBe(designerTurns + 1);
 }, 120_000);

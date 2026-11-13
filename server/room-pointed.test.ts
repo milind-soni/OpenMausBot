@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { copyRoomPick, pointedResponders, roomPickBots, takeRoomPick, type RoomPick } from "./room-pointed.ts";
+import { copyRoomPick, pointedResponders, roomPickBots, takeRoomPick, undeliveredPickBots, type RoomPick } from "./room-pointed.ts";
 
 const pick = (blocks: Record<string, string>): RoomPick => ({ refs: [{ appId: "app-1", label: "Go" }], blocks });
 
@@ -29,5 +29,11 @@ describe("room picks", () => {
     expect(pointedResponders(pick({ designer: "A" }), members, () => [helper, designer])).toEqual([designer, helper]);
     expect(pointedResponders(pick({ writer: "B" }), members, () => [helper])).toEqual([]);
     expect(pointedResponders(undefined, members, () => [helper])).toEqual([]);
+  });
+  it("names the page bots that will not answer the line, so their part can be reported", () => {
+    const both = pick({ a: "A", b: "B" });
+    expect(undeliveredPickBots(both, [{ id: "a" }, { id: "c" }])).toEqual(["b"]);
+    expect(undeliveredPickBots(both, [{ id: "a" }, { id: "b" }])).toEqual([]);
+    expect(undeliveredPickBots(undefined, [])).toEqual([]);
   });
 });

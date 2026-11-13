@@ -362,14 +362,6 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       const pointed = pointing ? prepareRoomPointed(store, threadId, body.pointed) : null;
       if (pointed && !pointed.ok) return json(res, pointed.status, refusalBody(pointed));
       const pick = pointed?.pick;
-      // Every page bot must still be here and free to answer, or part of the pick would reach no one.
-      const pageBotIds = roomPickBots(pick);
-      if (!pageBotIds.every((id) => group.memberIds.includes(id) && store.bot(id))) {
-        return json(res, 409, { error: "the bot that made this page is no longer in this room" });
-      }
-      if (!group.dm && pageBotIds.some((id) => group.holds?.[id])) {
-        return json(res, 409, { error: "the bot that made this page is on hold in this room; let it answer again first" });
-      }
       const sendId = parseSendId(body.sendId);
       const replyTo = resolveReplyTarget(threadId, body.replyToId);
       // A bot's shell is a loopback caller too: with no paired session and no browser origin the message
@@ -416,6 +408,14 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
             });
           }
           const members = current.memberIds.map((id) => store.bot(id)).filter((bot): bot is BotRecord => Boolean(bot));
+          // A new pick only (a retry above keeps its receipt): every page bot must still be here and free to answer.
+          const pageBotIds = roomPickBots(pick);
+          if (!pageBotIds.every((id) => current.memberIds.includes(id) && store.bot(id))) {
+            throw Object.assign(new Error("the bot that made this page is no longer in this room"), { status: 409 });
+          }
+          if (!current.dm && pageBotIds.some((id) => current.holds?.[id])) {
+            throw Object.assign(new Error("the bot that made this page is on hold in this room; let it answer again first"), { status: 409 });
+          }
           // A program on this machine (a bot's shell, a script) reads the ids it can send again with; a person never sees them.
           const sameName = auth.kind === "loopback" && !browserOrigin
             ? sameNameRefusalForBots(text, members, mentions, current.name, "sent")

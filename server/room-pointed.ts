@@ -33,6 +33,11 @@ export function roomPickBots(pick: RoomPick | undefined): string[] {
   return pick ? Object.keys(pick.blocks) : [];
 }
 
+/** Page bots of a pick that will not answer this line (held or gone since it was queued): their part reaches no one. */
+export function undeliveredPickBots(pick: RoomPick | undefined, responders: ReadonlyArray<{ id: string }>): string[] {
+  return roomPickBots(pick).filter((id) => !responders.some((responder) => responder.id === id));
+}
+
 /** A line that points at a member's page goes to that member first, with anyone the person named too; none otherwise. */
 export function pointedResponders<T extends { id: string; hidden?: boolean }>(pick: RoomPick | undefined, members: T[], named: () => T[]): T[] {
   const ids = roomPickBots(pick);
