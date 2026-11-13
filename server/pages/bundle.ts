@@ -117,19 +117,34 @@ export async function stillReadable(folder: string, roots: readonly string[] | n
 /** Where the open `handle` really is, as the kernel names it (Linux): no folder swapped around the open can fake it. */
 const openedPath = (handle: FileHandle) => readlink(`/proc/self/fd/${handle.fd}`).catch(() => null);
 
+/** Reads at most one byte beyond the budget, even if the file grows after its earlier stat. */
+async function readPageBytes(handle: FileHandle, maxBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for (;;) {
+    const chunk = Buffer.alloc(Math.min(64 * 1024, maxBytes - bytes + 1));
+    const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+    if (bytesRead === 0) return Buffer.concat(chunks, bytes);
+    bytes += bytesRead;
+    if (bytes > maxBytes) throw new PageBundleError("The page's files exceed its byte limit. Make the images smaller or leave some out.", 413);
+    chunks.push(chunk.subarray(0, bytesRead));
+  }
+}
+
 /** The file at `real`, read only when the file opened is inside `root`. On Linux the kernel names the opened file, so a
  * folder on the way swapped for a link before, during or after the open cannot hand over a file from elsewhere; other
  * systems check that the path still resolves inside `root` to the same file. Null when it moved. */
-export async function readContained(real: string, root: string): Promise<Buffer | null> {
+export async function readContained(real: string, root: string, maxBytes?: number): Promise<Buffer | null> {
   const handle = await open(real, "r");
   try {
+    const read = () => maxBytes === undefined ? handle.readFile() : readPageBytes(handle, maxBytes);
     const inside = (path: string | null): path is string => path !== null && containedBy(root, path) && !inSecretFolder(path);
     const kernel = await openedPath(handle);
-    if (kernel !== null) return inside(kernel) ? await handle.readFile() : null;
+    if (kernel !== null) return inside(kernel) ? await read() : null;
     const [opened, now] = await Promise.all([handle.stat({ bigint: true }), realpath(real).catch(() => null)]);
     if (!inside(now)) return null;
     const there = await stat(now, { bigint: true });
-    return there.dev === opened.dev && there.ino === opened.ino ? await handle.readFile() : null;
+    return there.dev === opened.dev && there.ino === opened.ino ? await read() : null;
   } finally {
     await handle.close();
   }
@@ -142,7 +157,7 @@ export async function readPageBundle(requested: string, roots: readonly string[]
   if (info.isFile()) {
     if (!isHtml(target)) throw new PageBundleError("A single file must be an .html page. For anything else, publish a folder with an index.html.");
     if (info.size > limits.bytes) throw new PageBundleError(`The page is ${info.size} bytes; a page can be at most ${limits.bytes}.`, 413);
-    const data = await readContained(target, root);
+    const data = await readContained(target, root, limits.bytes);
     if (!data) throw new PageBundleError("The page moved while it was being read. Publish it again.");
     return { source: target, files: [{ path: "index.html", data }], bytes: data.byteLength, skipped: [] };
   }
@@ -174,11 +189,11 @@ export async function readPageBundle(requested: string, roots: readonly string[]
         videos[path] = { file: real, bytes: Number(identity.size), dev: String(identity.dev), ino: String(identity.ino), mtimeNs: String(identity.mtimeNs) };
         continue;
       }
-      if (files.length >= limits.files) throw new PageBundleError(`The folder has more than ${limits.files} files a page can hold. Publish a smaller folder.`, 413);
-      bytes += entry.size;
-      if (bytes > limits.bytes) throw new PageBundleError(`The folder's files come to more than ${limits.bytes} bytes, a page's limit. Make the images smaller or leave some out.`, 413);
-      const data = await readContained(real, root);
+      if (files.length + Object.keys(videos).length >= limits.files) throw new PageBundleError(`The folder has more than ${limits.files} files a page can hold. Publish a smaller folder.`, 413);
+      if (bytes + entry.size > limits.bytes) throw new PageBundleError(`The folder's files come to more than ${limits.bytes} bytes, a page's limit. Make the images smaller or leave some out.`, 413);
+      const data = await readContained(real, root, limits.bytes - bytes);
       if (!data) { skipped.push({ path, why: "link" }); continue; }
+      bytes += data.byteLength;
       files.push({ path, data });
     }
   };
