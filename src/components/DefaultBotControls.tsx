@@ -40,7 +40,6 @@ export function DemoteDefaultBotItem({ bot, onDone, className = "flex w-full ite
       data-default-bot-demote=""
       onClick={() => {
         dispatch({ type: "updateBot", botId: bot.id, patch: { defaultBot: null } });
-        dispatch({ type: "notice", notice: { kind: "note", botName: null, text: t("defaultBot.demoted", { name: bot.name }) } });
         onDone();
       }}
       title={t("defaultBot.demoteHint")}
