@@ -47,6 +47,13 @@ describe("buildBotOverview", () => {
     expect(buildBotOverview(facts).reaches.join(" ")).not.toContain("Engineering");
   });
 
+  it("says when a Chief is in charge of every department, only while it is the Chief", () => {
+    const facts = baseFacts({ bot: { ...baseFacts().bot, chiefOfStaff: true, managesAllSections: true }, engine: { agentsMcp: true }, sectionPeers: 3 });
+    expect(buildBotOverview(facts).reaches).toContain("In charge of every department, including new ones.");
+    facts.bot.chiefOfStaff = false;
+    expect(buildBotOverview(facts).reaches.join(" ")).not.toContain("every department, including new ones");
+  });
+
   it("says a bot can talk to every other bot", () => {
     const open = baseFacts({ bot: baseFacts().bot, engine: { agentsMcp: true }, sectionPeers: 3 });
     expect(buildBotOverview(open).reaches).toContain("Can talk to all 3 other bots, in any department.");

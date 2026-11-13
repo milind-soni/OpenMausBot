@@ -12,6 +12,7 @@ export interface RosterMember extends Pick<DefaultBotFields, "defaultBot"> {
   section?: string;
   chiefOfStaff?: boolean;
   managedSections?: string[];
+  managesAllSections?: boolean;
   createdBy?: string;
   reportsTo?: string;
   activity?: BotActivity;
@@ -27,10 +28,11 @@ export const PEER_ACCESS_HELP = "Every bot can reach every other bot, in any dep
 
 /** A title, peer id, imported persona or room membership is not a grant; invalid saved grants fail closed. */
 export function hasTeamAuthority(
-  from: Pick<RosterMember, "section" | "chiefOfStaff" | "managedSections">,
+  from: Pick<RosterMember, "section" | "chiefOfStaff" | "managedSections" | "managesAllSections">,
   section?: string,
 ): boolean {
   const target = sectionKey(section);
+  if (from.chiefOfStaff === true && from.managesAllSections === true) return true;
   return target === sectionKey(from.section) || Boolean(from.chiefOfStaff &&
     Array.isArray(from.managedSections) && from.managedSections.some(value =>
       typeof value === "string" && sectionKey(value) === target));

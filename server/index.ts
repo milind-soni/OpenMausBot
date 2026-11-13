@@ -1263,7 +1263,7 @@ function requestedBotFields(req: IncomingMessage, path: string): string[] {
   if (!body || typeof body !== "object" || Array.isArray(body)) return [];
   const fields = new Set(Object.keys(body));
   if (fields.has("autoApprove") || fields.has("approvalMode")) fields.add("autoApprove").add("approvalMode");
-  if (fields.has("chiefOfStaff")) fields.add("managedSections");
+  if (fields.has("chiefOfStaff")) fields.add("managedSections").add("managesAllSections");
   return [...fields];
 }
 
@@ -3035,7 +3035,7 @@ async function botOverview(bot: BotRecord, shown: { routine(routine: Routine): b
       connectorTools: bot.connectorTools,
       browser: bot.browser,
       chiefOfStaff: bot.chiefOfStaff,
-      managedSections: bot.managedSections,
+      managedSections: bot.managedSections, managesAllSections: bot.managesAllSections,
     },
     routines: routines!.listRoutines()
       .filter((routine) => routine.botId === bot.id && shown.routine(routine))

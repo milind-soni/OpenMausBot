@@ -86,6 +86,17 @@ describe("chiefOfStaffSystemPrompt", () => {
     expect(prompt).toContain("structured result");
   });
 
+  it("puts every department's bots on the team of a Chief responsible for all of them", () => {
+    const everywhere = bots.map(bot => bot.id === "chief" ? { ...bot, chiefOfStaff: true, managesAllSections: true } : bot);
+    const prompt = chiefOfStaffSystemPrompt("chief", everywhere, true);
+    expect(prompt).toContain("The owner also made you responsible for every department, including ones added later.");
+    expect(prompt).toContain("Reaching a bot outside your team gives you no authority over it");
+    expect(prompt).not.toContain("Reaching a bot gives you no authority over it");
+    expect(prompt).toMatch(/Your team, in every department:\n(?:- .*\n)*- Scout — Travel planner \(Personal\) \[id: personal\]/);
+    expect(prompt).not.toContain("Other bots you can reach, in other departments:");
+    expect(chiefOfStaffSystemPrompt("chief", bots, true)).not.toContain("every department");
+  });
+
   it("is the person's assistant, does the work itself and adds a specialist without asking", () => {
     const prompt = chiefOfStaffSystemPrompt("chief", [{ id: "chief", name: "Atlas" }], true);
 
