@@ -327,7 +327,7 @@ const CELL_CHARS_MAX = 2000;
 export function boundRows(rows: RunResult["rows"], maxRows: number, maxBytes: number): { rows: RunResult["rows"]; truncated: boolean } {
   let truncated = rows.length > maxRows;
   let kept = rows.slice(0, maxRows).map((row) => row.map((cell) => (typeof cell === "string" && cell.length > CELL_CHARS_MAX ? `${cell.slice(0, CELL_CHARS_MAX)}…` : cell)));
-  while (kept.length && JSON.stringify(kept).length > maxBytes) {
+  while (kept.length && Buffer.byteLength(JSON.stringify(kept)) > maxBytes) {
     kept = kept.slice(0, Math.max(0, kept.length - Math.max(1, Math.ceil(kept.length / 10))));
     truncated = true;
   }
@@ -342,7 +342,7 @@ export function boundColumns(columns: DataColumn[], maxBytes: number, columnsMax
   let kept: DataColumn[] = truncated
     ? columns.map(({ name, type }) => ({ name, type }))
     : columns.map((column) => ({ ...column, ...(column.sample ? { sample: trimSample(column.sample) } : {}) }));
-  const size = () => JSON.stringify(kept).length;
+  const size = () => Buffer.byteLength(JSON.stringify(kept));
   if (size() > maxBytes) { kept = kept.map(({ sample: _sample, ...rest }) => rest); truncated = true; }
   if (size() > maxBytes) kept = kept.map(({ min: _min, max: _max, ...rest }) => rest);
   if (size() > maxBytes) kept = kept.map(({ name, type }) => ({ name, type }));
