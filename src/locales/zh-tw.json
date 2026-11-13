@@ -4241,6 +4241,7 @@
   "botPanel.backups.remove": "從備用中移除 {model}",
   "botPanel.backups.choose": "選擇備用 AI",
   "botPanel.backups.sameAccount": "與主要 AI 使用同一個帳號：共用用量上限。",
+  "botPanel.backups.otherSignIn": "主要 AI 的另一個登入帳號：只在主要帳號登出時使用，達到用量上限時不會使用（服務條款）。",
   "botPanel.appsNoneYet": "目前還沒有",
   "botPanel.apps.intro": "開啟 {name} 可以使用的應用程式。其他一律保持關閉。",
   "botPanel.apps.connectAnother": "連接其他應用程式",

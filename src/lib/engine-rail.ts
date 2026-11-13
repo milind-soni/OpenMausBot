@@ -1,4 +1,6 @@
 import type { InstanceInfo } from "@/state/store";
+import { otherSignInOfSameSubscription } from "../../shared/limit-backup";
+import { t } from "@/lib/i18n";
 
 export { engineDisplayName } from "@/lib/engine-name";
 
@@ -50,4 +52,15 @@ export function splitEngineRail<T>(instances: readonly T[]): {
     else subscription.push(instance);
   }
   return { subscription, api, custom };
+}
+
+/** What a person should know about `backup` as a backup for the main AI `main`, if anything. Another subscription
+ * sign-in to the main AI takes over only while the main one is signed out, never at its usage limit (the server's
+ * limitBackupAllowed rule); a pay-per-use key on it still does. */
+export function backupNote(main: InstanceInfo | undefined, backup: InstanceInfo): string | undefined {
+  if (!main) return undefined;
+  if (backup.instanceId === main.instanceId) return t("botPanel.backups.sameAccount");
+  const billsEachUse = backup.access === "api" || backup.snapshot.account?.method === "api-key";
+  if (otherSignInOfSameSubscription(main, backup) && !billsEachUse) return t("botPanel.backups.otherSignIn");
+  return undefined;
 }

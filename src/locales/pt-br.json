@@ -7897,6 +7897,7 @@
   "botPanel.backups.remove": "Remover {model} das reservas",
   "botPanel.backups.choose": "Escolher uma IA reserva",
   "botPanel.backups.sameAccount": "Usa a mesma conta da IA principal e compartilha o limite de uso.",
+  "botPanel.backups.otherSignIn": "Outra conta da IA principal: usada só enquanto a principal estiver desconectada, nunca no limite de uso (termos do provedor).",
   "botPanel.appsNoneYet": "Nenhum ainda",
   "botPanel.apps.intro": "Ligue os apps que {name} pode usar. Todo o resto fica desligado.",
   "botPanel.apps.connectAnother": "Conectar outro app",

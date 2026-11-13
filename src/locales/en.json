@@ -4492,6 +4492,7 @@
   "botPanel.backups.remove": "Remove {model} from backups",
   "botPanel.backups.choose": "Choose a backup AI",
   "botPanel.backups.sameAccount": "Same account as the main AI: it shares the usage limit.",
+  "botPanel.backups.otherSignIn": "Another sign-in to the main AI: used only while the main one is signed out, never at its usage limit (provider terms).",
   "botPanel.appsNoneYet": "None yet",
   "botPanel.apps.intro": "Switch on the apps {name} may use. Everything else stays off.",
   "botPanel.apps.connectAnother": "Connect another app",
