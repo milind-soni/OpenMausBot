@@ -1202,10 +1202,7 @@ export function reducer(state: AppState, action: Action): AppState {
         hasMore: switchedThread ? undefined : b.hasMore,
       }));
       const demoted = Boolean(before.defaultBot) && !action.bot.defaultBot;
-      const confirmed = demoted
-        ? { ...patched, notice: { kind: "note" as const, botName: null, text: t("defaultBot.demoted", { name: action.bot.name }) } }
-        : patched;
-      return reconcileModelVariantSessions(confirmed);
+      return reconcileModelVariantSessions(demoted ? { ...patched, notice: { kind: "note" as const, botName: null, text: t("defaultBot.demoted", { name: action.bot.name }) } } : patched);
     }
     case "messageAdded": {
       const bot = state.bots.find((b) => b.threadId === action.threadId);
