@@ -441,52 +441,147 @@ describe("automation reports", () => {
     expect(f.lines()).toEqual([expect.objectContaining({ text: "Here is this week's report.", attachments })]);
   });
 
+  /** A file, and the line attach_file posts for it in `turn`. */
+  const pdf = (name: string) => ({ kind: "file" as const, path: `${name}-1.pdf`, mime: "application/pdf", name: `${name}.pdf` });
+  const sent = (store: Store, threadId: string, sentInTurn: string, file: NonNullable<Message["attachments"]>[number]) =>
+    store.appendMessage(threadId, { role: "bot", kind: "text", text: "", attachments: [file], sentInTurn });
+
+  it("carries only a reply's own files after a restart when no line of the run names a turn", () => {
+    const f = fixture();
+    const run = f.finished(null);
+    const attachments = [{ kind: "file" as const, path: "report-1.pdf", mime: "application/pdf", name: "Weekly report.pdf" }];
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "text", text: "", attachments: [pdf("Earlier")] });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "text", text: "Here is this week's report.", attachments });
+    f.runs.get(run.id)!.report = { state: "pending" };
+    f.create().flush();
+    expect(f.lines()).toEqual([expect.objectContaining({ text: "Here is this week's report.", attachments })]);
+  });
+
   it("carries the files the run's last turn sent, in order, and not the images its tools returned", () => {
     const f = fixture();
     const run = f.finished(null);
     const thread = run.threadId!;
-    const earlier = { kind: "file" as const, path: "old.pdf", mime: "application/pdf", name: "Old.pdf" };
-    const pdf = { kind: "file" as const, path: "brief-1.pdf", mime: "application/pdf", name: "Brief.pdf" };
-    const mp3 = { kind: "file" as const, path: "brief-1.mp3", mime: "audio/mpeg", name: "Brief.mp3" };
+    const turn = `turn-${run.id}`;
     const page = { kind: "image" as const, path: "page-1.png", mime: "image/png", fromTool: true as const };
     const drawn = { kind: "image" as const, path: "chart-1.png", mime: "image/png" };
     const note = { kind: "audio" as const, path: "note-1.ogg", mime: "audio/ogg", text: "Today's brief." };
-    const slides = { kind: "file" as const, path: "brief-1.pptx", mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation", name: "Brief.pptx" };
-    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "", attachments: [earlier] });
+    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "", attachments: [pdf("Unowned")] });
+    sent(f.store, thread, "turn-before", pdf("Earlier"));
     f.store.appendMessage(thread, { role: "user", kind: "text", text: "Go on." });
-    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "", attachments: [pdf] });
+    sent(f.store, thread, turn, pdf("Brief"));
     f.store.appendMessage(thread, { role: "user", kind: "text", text: "Add the audio too.", steered: true });
-    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "", attachments: [mp3] });
-    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "Your brief.", attachments: [page, drawn, note], turnId: `turn-${run.id}` });
-    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "", attachments: [slides] });
-    f.reports.runSettled(run, `turn-${run.id}`);
-    expect(f.lines()).toEqual([expect.objectContaining({ text: "Your brief.", attachments: [pdf, mp3, drawn, note, slides] })]);
+    sent(f.store, thread, turn, pdf("Audio"));
+    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "Your brief.", attachments: [page, drawn, note], turnId: turn });
+    sent(f.store, thread, turn, pdf("Slides"));
+    f.reports.runSettled(run, turn);
+    expect(f.lines()).toEqual([expect.objectContaining({ text: "Your brief.", attachments: [pdf("Brief"), pdf("Audio"), drawn, note, pdf("Slides")] })]);
   });
 
-  it("reports a run that only sent files, without a word", () => {
+  it("keeps the files sent before and after a goal asked while the run's turn worked", () => {
     const f = fixture();
     const run = f.finished(null);
-    const pdf = { kind: "file" as const, path: "brief-1.pdf", mime: "application/pdf", name: "Brief.pdf" };
-    f.store.appendMessage(run.threadId!, { role: "user", kind: "text", text: "Do the Daily brief check." });
-    f.store.appendMessage(run.threadId!, { role: "bot", kind: "text", text: "", attachments: [pdf] });
-    f.store.appendMessage(run.threadId!, { role: "bot", kind: "activity", tool: { name: "Bash", ok: true }, turnId: `turn-${run.id}` });
+    const thread = run.threadId!;
+    const turn = `turn-${run.id}`;
+    f.store.appendMessage(thread, { role: "user", kind: "text", text: "Do the Daily brief check." });
+    sent(f.store, thread, turn, pdf("Brief"));
+    f.store.appendMessage(thread, { role: "user", kind: "text", text: "Also plan next week.", channelMode: "goal" });
+    sent(f.store, thread, turn, pdf("Audio"));
+    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "Your brief.", turnId: turn, turnTerminal: true });
+    f.reports.runSettled(run, turn);
+    expect(f.lines()).toEqual([expect.objectContaining({ text: "Your brief.", attachments: [pdf("Brief"), pdf("Audio")] })]);
+  });
+
+  it("leaves out the files of earlier turns and of a goal that ran before the run resumed", () => {
+    const f = fixture();
+    const run = f.finished(null);
+    const thread = run.threadId!;
+    const turn = `turn-${run.id}`;
+    f.store.appendMessage(thread, { role: "user", kind: "text", text: "Do the Stock check." });
+    sent(f.store, thread, "turn-before", pdf("Earlier"));
+    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "Asked Sam to count the stock.", turnId: "turn-before", turnTerminal: true });
+    f.store.appendMessage(thread, { role: "user", kind: "text", text: "Plan next week.", channelMode: "goal" });
+    sent(f.store, thread, "turn-goal", pdf("Plan"));
+    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "Next week is planned.", turnId: "turn-goal", turnTerminal: true });
+    sent(f.store, thread, turn, pdf("Stock"));
+    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "We have 42 boxes in stock.", turnId: turn, turnTerminal: true });
+    f.reports.runSettled(run, turn);
+    expect(f.lines()).toEqual([expect.objectContaining({ text: "We have 42 boxes in stock.", attachments: [pdf("Stock")] })]);
+  });
+
+  it("reports a run whose last turn only sent files, without a word", () => {
+    const f = fixture();
+    const run = f.finished(null);
+    const thread = run.threadId!;
+    f.store.appendMessage(thread, { role: "user", kind: "text", text: "Do the Daily brief check." });
+    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "Asked Sam for the numbers.", turnId: "turn-before", turnTerminal: true });
+    sent(f.store, thread, `turn-${run.id}`, pdf("Brief"));
     f.reports.runSettled(run, `turn-${run.id}`);
-    expect(f.lines()).toEqual([expect.objectContaining({ text: "", attachments: [pdf] })]);
+    expect(f.lines()).toEqual([expect.objectContaining({ text: "", attachments: [pdf("Brief")] })]);
     expect(f.runs.get(run.id)!.report).toMatchObject({ state: "posted" });
+  });
+
+  it("reports what a run's last turn sent after a restart, though that turn wrote no words", () => {
+    const f = fixture();
+    const run = f.finished(null);
+    const thread = run.threadId!;
+    sent(f.store, thread, "turn-before", pdf("Earlier"));
+    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "Asked Sam to count the stock.", turnId: "turn-before", turnTerminal: true });
+    sent(f.store, thread, `turn-${run.id}`, pdf("Stock"));
+    f.busy.add(f.main);
+    f.reports.runSettled(run, `turn-${run.id}`);
+    f.busy.delete(f.main);
+    f.create().flush();
+    expect(f.lines()).toEqual([expect.objectContaining({ text: "", attachments: [pdf("Stock")] })]);
+  });
+
+  it("reports what a run's last turn sent after a restart, though a later turn in the run was cut off mid-reply", () => {
+    const f = fixture();
+    const run = f.finished(null);
+    const thread = run.threadId!;
+    sent(f.store, thread, `turn-${run.id}`, pdf("Stock"));
+    f.store.appendMessage(thread, { role: "user", kind: "text", text: "Count the shelves too." });
+    f.store.appendMessage(thread, { role: "bot", kind: "text", text: "Counting the shelves", turnId: "turn-after" });
+    f.runs.get(run.id)!.report = { state: "pending" };
+    f.create().flush();
+    expect(f.lines()).toEqual([expect.objectContaining({ text: "", attachments: [pdf("Stock")] })]);
+  });
+
+  it("reads a run's words and the file it sent after them again after a restart, without an earlier turn's file", () => {
+    const f = fixture();
+    const run = f.finished(null);
+    sent(f.store, run.threadId!, "turn-before", pdf("Earlier"));
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "text", text: "Asked Sam for the numbers.", turnId: "turn-before", turnTerminal: true });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "text", text: "Your brief.", turnId: `turn-${run.id}`, turnTerminal: true });
+    sent(f.store, run.threadId!, `turn-${run.id}`, pdf("Brief"));
+    f.runs.get(run.id)!.report = { state: "pending" };
+    f.create().flush();
+    expect(f.lines()).toEqual([expect.objectContaining({ text: "Your brief.", attachments: [pdf("Brief")] })]);
+  });
+
+  it("says only that an automation recovered when the turn that resumed its run said and sent nothing", () => {
+    const f = fixture();
+    const failed = f.finished(null, "Inbox brief", { status: "failed", error: "Timed out" });
+    f.reports.runFailed(failed, "it ran past its 25-minute limit.");
+    const finishedAt = Date.UTC(2026, 9, 26, 2, 40);
+    const run = f.finished(null, "Inbox brief", { finishedAt });
+    sent(f.store, run.threadId!, "turn-before", pdf("Earlier"));
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "text", text: "Asked Sam to count the stock.", turnId: "turn-before", turnTerminal: true });
+    f.reports.runSettled(run, `turn-${run.id}`);
+    expect(f.lines().at(-1)).toMatchObject({ text: recoveredText("Inbox brief", finishedAt), automation: expect.objectContaining({ recovered: true }) });
+    expect(f.lines().at(-1)).not.toHaveProperty("attachments");
   });
 
   it("still carries the turn's files when the person wrote in the run before its report was written", () => {
     const f = fixture();
     const run = f.finished(null);
-    const pdf = { kind: "file" as const, path: "brief-1.pdf", mime: "application/pdf", name: "Brief.pdf" };
-    f.store.appendMessage(run.threadId!, { role: "bot", kind: "text", text: "", attachments: [pdf] });
+    sent(f.store, run.threadId!, `turn-${run.id}`, pdf("Brief"));
     f.store.appendMessage(run.threadId!, { role: "bot", kind: "text", text: "Your brief.", turnId: `turn-${run.id}`, turnTerminal: true });
     f.busy.add(f.main);
     f.reports.runSettled(run, `turn-${run.id}`);
     f.store.appendMessage(run.threadId!, { role: "user", kind: "text", text: "Thanks." });
     f.busy.delete(f.main);
     f.reports.flush();
-    expect(f.lines()).toEqual([expect.objectContaining({ text: "Your brief.", attachments: [pdf] })]);
+    expect(f.lines()).toEqual([expect.objectContaining({ text: "Your brief.", attachments: [pdf("Brief")] })]);
   });
 
   it("says only that an automation recovered, without the files its quiet run sent", () => {
@@ -494,7 +589,7 @@ describe("automation reports", () => {
     const failed = f.finished(null, "Inbox brief", { status: "failed", error: "Timed out" });
     f.reports.runFailed(failed, "it ran past its 25-minute limit.");
     const ok = f.finished(null);
-    f.store.appendMessage(ok.threadId!, { role: "bot", kind: "text", text: "", attachments: [{ kind: "file", path: "brief-1.pdf", mime: "application/pdf", name: "Brief.pdf" }] });
+    sent(f.store, ok.threadId!, `turn-${ok.id}`, pdf("Brief"));
     f.store.appendMessage(ok.threadId!, { role: "bot", kind: "text", text: "NOTHING NEW", turnId: `turn-${ok.id}`, turnTerminal: true });
     f.reports.runSettled(ok, `turn-${ok.id}`);
     expect(f.lines().at(-1)).toMatchObject({ automation: expect.objectContaining({ recovered: true }) });
@@ -505,6 +600,7 @@ describe("automation reports", () => {
     const f = fixture();
     const run = f.finished(null);
     f.store.appendMessage(run.threadId!, { role: "user", kind: "text", text: "Do the Stock check." });
+    sent(f.store, run.threadId!, "turn-before", pdf("Earlier"));
     f.store.appendMessage(run.threadId!, { role: "bot", kind: "text", text: "Asked Sam to count the stock.", turnId: "turn-before", turnTerminal: true });
     f.reports.runSettled(run, `turn-${run.id}`);
     expect(f.added()).toEqual([]);
