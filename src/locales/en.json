@@ -9917,7 +9917,6 @@
   "server.routines.cron.nthWeekend.last": "Monthly on the last {weekday} at {time}",
   "attach.imagesLeftOutOne": "A message takes up to {count} images, {megabytes} MB in all. {names} wasn't attached.",
   "attach.imagesLeftOutMany": "A message takes up to {count} images, {megabytes} MB in all. {names} weren't attached.",
-  "attach.archivesUnsupported": "Archives can't be attached: unzip {names} and attach the files inside.",
   "native.home.ownCopyNotReady": "OpenMausBot on this computer could not go back to its own copy yet.",
   "native.home.ownCopyNotRunning": "This computer's own copy isn't running.",
   "native.cloud.connectedAppsStay": "Your connected apps stay on this computer: that server has no connected-apps service of its own. Connect them again there in Apps.",
