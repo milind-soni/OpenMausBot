@@ -16,19 +16,36 @@ export const departmentGrants = new AsyncLocalStorage<DepartmentGrant[]>();
 /** The settings page saves at most this many departments for one Chief (server/routes/bot-patch.ts). */
 const MAX_MANAGED = 100;
 
+/** Grants decided but not yet written, per store: a second department made before they land (a backup import that makes
+ * one department per team it copies) still finds the Chief in charge of every department. */
+const queued = new WeakMap<object, Map<string, string[]>>();
+
 /** `added` just joined the departments. Who qualifies is read now, from the bots as they were before the write that
- * made the department (a bot made Chief by that same write does not count); the grant waits until that write is done,
- * since it may still be saving a copy of the bots, and goes only to a Chief that still qualifies then. */
+ * made the department (a bot made Chief by that same write does not count) with the grants still queued; the grant waits
+ * until that write is done, since it may still be saving a copy of the bots, and goes only to a Chief that still
+ * qualifies then. */
 export function grantNewDepartments(store: Pick<Store, "sections" | "bots" | "bot" | "patchBot">, added: readonly string[]): void {
   const before = store.sections.filter((name) => !added.includes(name));
-  const chiefs = store.bots.filter((bot) => inChargeOfEvery(bot, before)).map((bot) => bot.id);
+  const waiting = queued.get(store) ?? new Map<string, string[]>();
+  const chiefs = store.bots.filter((bot) =>
+    inChargeOfEvery({ ...bot, managedSections: [...(bot.managedSections ?? []), ...(waiting.get(bot.id) ?? [])] }, before)).map((bot) => bot.id);
   if (!chiefs.length) return;
+  for (const id of chiefs) waiting.set(id, [...(waiting.get(id) ?? []), ...added]);
+  queued.set(store, waiting);
   void Promise.resolve().then(() => {
     for (const id of chiefs) {
+      const rest = waiting.get(id)?.filter((name) => !added.includes(name)) ?? [];
+      if (rest.length) waiting.set(id, rest); else waiting.delete(id);
+    }
+    if (!waiting.size) queued.delete(store);
+    // A department removed again since (a failed import rolls its new department back) is not granted.
+    const live = added.filter((name) => store.sections.includes(name));
+    const others = before.filter((name) => store.sections.includes(name));
+    for (const id of live.length ? chiefs : []) {
       const chief = store.bot(id);
-      if (!chief || !inChargeOfEvery(chief, before)) continue;
+      if (!chief || !inChargeOfEvery(chief, others)) continue;
       const previous = [...(chief.managedSections ?? [])];
-      const managedSections = [...new Set([...previous, ...added])];
+      const managedSections = [...new Set([...previous, ...live])];
       if (managedSections.length === previous.length || managedSections.length > MAX_MANAGED) continue;
       try {
         store.patchBot(chief.id, { managedSections });
