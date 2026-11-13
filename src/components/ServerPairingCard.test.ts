@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { codeUntil, lastSeen } from "../lib/pairing-time";
-import { canPairDevices, pairingBlockedReason, ServerPairingCard, shownDevices } from "./ServerPairingCard";
+import { canPairDevices, pairingBlockedReason, phoneSecretNote, ServerPairingCard, shownDevices } from "./ServerPairingCard";
 
 describe("pairing devices from a hosted server's settings", () => {
   it("is offered to the owner on the box and to admin sessions, never to chat-only sessions", () => {
@@ -86,5 +86,11 @@ describe("pairing devices from a hosted server's settings", () => {
     ];
     expect(shownDevices(devices, true).map((device) => device.id)).toEqual(["a"]);
     expect(shownDevices(devices, false).map((device) => device.id)).toEqual(["a", "b"]);
+  });
+
+  it("says under the code that secrets go on the web when the server has no phone key, and nothing otherwise", () => {
+    expect(phoneSecretNote({ phoneSecrets: false })).toBe("This phone can chat and approve here, but secrets must be entered on the web or computer.");
+    expect(phoneSecretNote({ phoneSecrets: true })).toBeNull();
+    expect(phoneSecretNote({})).toBeNull();
   });
 });

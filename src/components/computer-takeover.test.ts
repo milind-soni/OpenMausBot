@@ -149,3 +149,10 @@ describe("the app's viewer window", () => {
     expect(viewerClosedRelease("scout")).toBeNull();
   });
 });
+
+it.each([true, false])("the join is told the lease its take owns (owned: %s), so a Local VM join can name it", async (owned) => {
+  owns = owned;
+  const join = vi.fn(async (_signal: AbortSignal, _lease: string | null) => ({ joinUrl: "https://desktop.invalid/scout" }));
+  await openProviderDesktop({ botId: "scout", title: "Scout's live desktop", request, current: () => true, join });
+  expect(join).toHaveBeenCalledWith(expect.any(AbortSignal), owned ? requests[0]!.lease : null);
+});
