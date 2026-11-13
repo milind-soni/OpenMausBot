@@ -111,8 +111,7 @@ WebRTC sends no UDP around it. If the gate is not running, the browser
 connects nowhere.
 
 The owner can set an optional unauthenticated SOCKS5 upstream in Settings →
-Computer → Built-in browser in simple settings, or Settings → Devices → Bot
-desktops in advanced settings. The gate still resolves and checks every
+Bot desktops → Built-in browser. The gate still resolves and checks every
 destination locally, then passes only a checked public IP to that proxy; local,
 private, own-service, link-local and metadata destinations are never sent
 through it. New connections use the saved proxy immediately. My Chrome keeps
