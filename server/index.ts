@@ -262,7 +262,7 @@ import {
   drainChannelMessages,
   restoreChannelMessages,
   type ChannelQueueItem,
-} from "./channel-queue.ts";
+} from "./channel-queue.ts"; import { copyRoomPick, pointedResponders, roomPickBots, takeRoomPick, undeliveredPickBots, type RoomPick } from "./room-pointed.ts";
 import {
   acceptedSendMatch,
   sendFingerprint,
@@ -3526,7 +3526,7 @@ type GroupTurnOperation = {
   line?: RoomRoundLine;
   /** The person's room line this run answers (its member turns, mentions included, act for whoever wrote it), or the handed-on work it does. */
   requestMessageId?: string; handedFor?: HandedRun;
-  goalRun?: LiveGoalRun;
+  goalRun?: LiveGoalRun; /** What the person pointed at in a member's page; taken once by the page's bot (takeRoomPick). */ pick?: RoomPick;
 };
 
 // Wider than busyBotId (setup and queued responders too), so polling clients never mistake a handoff for completion.
@@ -10320,13 +10320,13 @@ async function runClaimedGroupMemberTurn(
     }
     if (roomReset || displaced) broadcast({ kind: "group", group: publicGroupState(store.group(groupId) ?? group) });
     const roomShareNote = skillsHost.shareNote(bot, threadId, Boolean(workspace));
-    const clock = turnClockLine(Date.now(), hostTimeZone());
+    const clock = turnClockLine(Date.now(), hostTimeZone()), roomPick = cardContinuation ? "" : takeRoomPick(operation, readyBot.id);
     const roomToolScope = toolScopeForTurn(readyBot.id), roomUserMcp = claudeUserMcpEnabled(cfg) && !managedPolicy.restrictsMcp();
     const roomSession = roomSessions.dispatch({
       threadId, botId: readyBot.id, claimId: internalGeneration, instance, guestConfined: roomGuestConfined, reset: Boolean(roomReset), hooks: Boolean(integrations.hooks),
       context: () => ({ ...roomMemberContexts.forThread(threadId)?.[readyBot.id], compactAt: nativeCompactTokens(instance) }),
       config: [roomSystem.stable, cwd, readyBot.modelSelection, turnApprovalMode, roomToolScope, roomUserMcp, integrations],
-      window: roomWindow, tail: roomTail, wrap: (body) => withTurnClock(clock, withRecalled(roomRecalled, attachmentsForBox(body, cwd) + roomShareNote.text + devsReports.note(threadId, Boolean(integrations.agents)))),
+      window: roomWindow, tail: roomTail, wrap: (body) => withTurnClock(clock, withRecalled(roomRecalled, roomPick + attachmentsForBox(body, cwd) + roomShareNote.text + devsReports.note(threadId, Boolean(integrations.agents)))),
     });
     guardTurnDispatch(roomShareNote.after(instance.adapter.sendTurn({
         ...roomSession.send,
@@ -10727,7 +10727,7 @@ type StartGroupTurnOptions = {
   via?: "api";
   sender?: ResolvedSender;
   trigger?: UsageTrigger;
-  queuedGroup?: ChannelQueueItem[];
+  queuedGroup?: ChannelQueueItem[]; /** What the person pointed at in a member's page: the page's bot reads it on its turn, and the line shows the chips. */ pointed?: RoomPick;
 };
 
 function startGroupTurn(
@@ -10787,7 +10787,7 @@ function startGroupTurn(
             channelMode: item.mode,
             queueId: item.id,
             via: item.via,
-            sender: item.sender,
+            sender: item.sender, ...(item.pointed ? { pointed: item.pointed.refs } : {}),
           });
         }
         const last = queuedGroup[queuedGroup.length - 1]!;
@@ -10801,7 +10801,7 @@ function startGroupTurn(
           channelMode: last.mode,
           queueId: last.id,
           via: last.via,
-          sender: last.sender,
+          sender: last.sender, ...(last.pointed ? { pointed: last.pointed.refs } : {}),
         });
       })()
     : store.appendMessage(threadId, {
@@ -10814,7 +10814,7 @@ function startGroupTurn(
         channelMode,
         queueId,
         via: options.via,
-        sender: options.sender,
+        sender: options.sender, ...(options.pointed ? { pointed: options.pointed.refs } : {}),
       });
   if (options.trigger) turnTriggers.set(threadId, options.trigger);
   const titled = group.dm ? null : store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
@@ -10832,12 +10832,13 @@ function startGroupTurn(
       },
     });
   }
-  let responders = roomResponders(text, members, group.defaultResponder, options.mentions);
+  const pageBots = channelMode === "chat" ? pointedResponders(options.pointed, availableMembers, () => roomResponders(text, availableMembers, { kind: "mentions" }, options.mentions)) : [];
+  let responders = pageBots.length ? pageBots : roomResponders(text, members, group.defaultResponder, options.mentions);
   if (!group.dm) {
     const addressed = stopWordPlacement(text) === "adjacent" ? undefined : message.id;
     for (const held of responders.filter(isHeld)) noteHeldSkip(group.id, threadId, held, addressed);
     responders = responders.filter((responder) => !isHeld(responder));
-  }
+  } const unsentPick = undeliveredPickBots(options.pointed, responders), notePickNotSent = (id: string) => store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(threadLanguage(threadId), "server.rooms.pickNotSent", { bot: store.bot(id)?.name ?? id }), ok: false } }); for (const id of unsentPick) notePickNotSent(id);
   const explicitlyMentionedLead = roomResponders(text, routableMembers, { kind: "mentions" }, options.mentions)[0];
   const goalCoordinator = channelMode === "goal"
     ? requestedGoalCoordinator ?? explicitlyMentionedLead ?? selectGroupGoalCoordinator(routableMembers, group.defaultResponder)
@@ -10850,7 +10851,7 @@ function startGroupTurn(
     responders = last ? [last] : [];
   }
   // Auto's responders are a fallback until the decision model answers; the append and the return stay synchronous.
-  const autoRoute = autoCandidate && !goalCoordinator && routableMembers.length > 1 &&
+  const autoRoute = autoCandidate && !goalCoordinator && !pageBots.length && routableMembers.length > 1 &&
     roomResponders(text, availableMembers, { kind: "mentions" }, options.mentions).length === 0;
 
   if (!responders.length && !goalCoordinator && !autoRoute) {
@@ -10900,9 +10901,8 @@ function startGroupTurn(
         signal: operation.cancellation.signal,
       })
     : null;
-  if (queuedGroup && queuedGroup.length > 0) {
-    operation.queuedQueueIds = queuedGroup.map((item) => item.id);
-  }
+  if (queuedGroup?.length) operation.queuedQueueIds = queuedGroup.map((item) => item.id);
+  if (options.pointed && !goalCoordinator) operation.pick = copyRoomPick(options.pointed);
   if (goalCoordinator) {
     operation.goalRun = goalCards.start(threadId, goalCoordinator, text, options.goalRunId?.trim() || `goal-${Date.now().toString(36)}-${randomUUID()}`);
   }
@@ -10978,7 +10978,7 @@ function startGroupTurn(
       }
     }
   });
-  const tracked = next.finally(() => finishGroupTurnOperation(groupId, operation));
+  const tracked = next.finally(() => { try { for (const id of roomPickBots(operation.pick)) if (!unsentPick.includes(id)) notePickNotSent(id); } finally { finishGroupTurnOperation(groupId, operation); } });
   groupQueues.set(threadId, tracked.catch(() => {}));
   return message;
 }
@@ -11010,7 +11010,7 @@ function drainQueuedChannelSendsNow(): void {
           threadId,
           sender: head.sender,
           trigger: queuedTurnTrigger({ trigger: head.trigger, sender: head.sender }),
-          queuedGroup: items, mentions: items.flatMap((item) => item.mentions ?? []),
+          queuedGroup: items, mentions: items.flatMap((item) => item.mentions ?? []), pointed: items.find((item) => item.pointed)?.pointed,
         });
       } catch (error) {
         for (const item of items) {

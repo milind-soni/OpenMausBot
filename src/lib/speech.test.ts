@@ -43,6 +43,14 @@ describe("listening readiness", () => {
     expect(listensHere(withDictation(FISH), null)).toBe(false);
   });
 
+  it("listens through the person's own ElevenLabs key, but not the plan's included voice", () => {
+    const ownEleven = { savedKeys: { ttsKey: { configured: true } } } as unknown as ConfigStatus;
+    const includedEleven = { savedKeys: { ttsKey: { configured: true } }, tts: { included: true } } as unknown as ConfigStatus;
+    expect(fishListeningReady(ownEleven)).toBe(true);
+    expect(listensHere(withDictation(FISH), ownEleven)).toBe(true);
+    expect(fishListeningReady(includedEleven)).toBe(false);
+  });
+
   it("needs no key for the Mac's own recognizer, and nothing where dictation is unavailable", () => {
     expect(listensHere(withDictation(APPLE), null)).toBe(true);
     expect(listensHere(withDictation({ available: false, engine: "none", onDevice: false }), savedFish)).toBe(false);

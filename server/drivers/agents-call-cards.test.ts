@@ -155,8 +155,10 @@ describe("the chat-app tools", () => {
     const tools = new Map(availableTools(PROFILE).map((tool) => [tool.name, tool as { description: string; inputSchema: { required: string[] }; annotations?: unknown }]));
     expect(tools.get("show_html")!.description).toMatch(/^Show a small self-contained web page in this chat, where the person watches it appear and can point at a part to change: /);
     expect(tools.get("show_html")!.description).toContain("or `jsx`, one React component file with a default export");
-    // Its last sentence points a dashboard at the bundled data-dashboards skill.
-    expect(tools.get("show_html")!.description).toMatch(/At most 256 KB\. To replace a page you showed, in place, call this again with the app_id it returned and new html, jsx or path \(was update_html\); it reloads, so anything the person did in it is lost\. Never put secrets in it\. In rooms everyone sees it, view-only: send and setContext do nothing\. For a data dashboard, follow the data-dashboards skill\.$/);
+    // It points a dashboard at the bundled data-dashboards skill.
+    expect(tools.get("show_html")!.description).toMatch(/At most 256 KB\. To replace a page you showed, in place, call this again with the app_id it returned and new html, jsx or path \(was update_html\); it reloads, so anything the person did in it is lost\. Never put secrets in it\. In rooms everyone sees it, view-only: send and setContext do nothing\. For a data dashboard, follow the data-dashboards skill\. /);
+    // A claude.ai Artifact needs Claude's own claude.ai sign-in: the bot says so and offers our own pages instead.
+    expect(tools.get("show_html")!.description).toMatch(/Asked for a claude\.ai Artifact\? Those need Claude's own claude\.ai sign-in and are not available to bots here: say so in one line, then make it with this tool, or publish_page for a public link\.$/);
     expect(tools.get("show_html")!.inputSchema).not.toHaveProperty("required");
     expect(Object.keys((tools.get("show_html")!.inputSchema as unknown as { properties: object }).properties)).toEqual(expect.arrayContaining(["html", "jsx", "path", "title", "app_id"]));
     expect(Buffer.byteLength(JSON.stringify(tools.get("show_html")))).toBeLessThan(12 * 1024);
