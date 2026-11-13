@@ -17,6 +17,9 @@ const nameFor = (model: string, window: number) => `${model.includes(":") ? mode
 
 export const isContextName = (model: string) => SUFFIX.test(model);
 
+/** Ollama 0.40.16 leaves `remote_host` off `/api/show` for a hosted model's own name; its tag still says so. */
+export const isCloudName = (model: string) => /:(?:[^:]+-)?cloud$/.test(model);
+
 /** The name a person picked, for one of ours coming back in a server's lists. */
 export const pickedName = (model: string) => model.replace(SUFFIX, "");
 
@@ -69,12 +72,13 @@ const post = (body: unknown): RequestInit => ({ method: "POST", headers: { "cont
 
 async function decide(origin: string, model: string, fetchImpl: typeof fetch, memoryBytes: number | undefined): Promise<ServedModel> {
   const facts = showFacts(await json(fetchImpl, `${origin}/api/show`, post({ model }), 3_000));
-  if (facts.remote) return { model };
+  if (facts.remote || isCloudName(model)) return { model };
   if (facts.pinned) return { model, window: facts.pinned };
   const running = await json(fetchImpl, `${origin}/api/ps`, {}, 3_000).catch(() => null) as { models?: Array<{ name?: unknown; model?: unknown; context_length?: unknown }> } | null;
   const loaded = running?.models?.find((entry) => entry.name === model || entry.model === model || entry.name === `${model}:latest`)?.context_length;
-  const tags = await json(fetchImpl, `${origin}/api/tags`, {}, 3_000).catch(() => null) as { models?: Array<{ name?: unknown; size?: unknown }> } | null;
+  const tags = await json(fetchImpl, `${origin}/api/tags`, {}, 3_000).catch(() => null) as { models?: Array<{ name?: unknown; size?: unknown; remote_host?: unknown; remote_model?: unknown }> } | null;
   const row = tags?.models?.find((entry) => entry.name === model || entry.name === `${model}:latest`);
+  if (row?.remote_host || row?.remote_model) return { model };
   const window = windowFor(typeof row?.size === "number" ? row.size : undefined, facts.trained, memoryBytes);
   // Already running with enough, from the person's OLLAMA_CONTEXT_LENGTH or a large machine's default: leave it so.
   if (typeof loaded === "number" && loaded >= window) return { model, window: loaded };
