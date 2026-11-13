@@ -8,7 +8,7 @@ import { recordEvents } from "../testing/events.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 
 import { applyClaudeInject, decodeInjectId, encodeInjectId, injectedContextWindow, localHost, withLocalContext } from "./local-inject.ts";
-import { forgetServedModels, isContextName, isOllama, pickedName, servedModel, serveWithWindow, showFacts, windowFor } from "./ollama-context.ts";
+import { forgetServedModels, isCloudName, isContextName, isOllama, pickedName, servedModel, serveWithWindow, showFacts, windowFor } from "./ollama-context.ts";
 import type { ProviderInstance } from "../contracts.ts";
 
 const GB = 1024 ** 3;
@@ -17,7 +17,7 @@ const ORIGIN = "http://127.0.0.1:11434";
 afterEach(() => forgetServedModels());
 
 /** A server speaking the routes this reads, recording what it was asked to create. */
-function ollama(options: { show?: unknown; size?: number; running?: unknown[]; createStatus?: number; gone?: string[] } = {}) {
+function ollama(options: { show?: unknown; size?: number; running?: unknown[]; tags?: unknown[]; createStatus?: number; gone?: string[] } = {}) {
   const created: Array<{ model: string; from: string; parameters: { num_ctx: number }; stream: boolean }> = [];
   const asked: string[] = [];
   const server = (async (url: string, init?: RequestInit) => {
@@ -28,7 +28,7 @@ function ollama(options: { show?: unknown; size?: number; running?: unknown[]; c
     if (path === "/api/show" && options.gone?.includes((JSON.parse(String(init?.body)) as { model: string }).model)) return reply({ error: "not found" }, 404);
     if (path === "/api/show") return reply(options.show ?? { model_info: { "qwen3.context_length": 262_144 }, parameters: "temperature 1" });
     if (path === "/api/ps") return reply({ models: options.running ?? [] });
-    if (path === "/api/tags") return reply({ models: [{ name: "qwen3.5:4b", size: options.size ?? 3 * GB }] });
+    if (path === "/api/tags") return reply({ models: options.tags ?? [{ name: "qwen3.5:4b", size: options.size ?? 3 * GB }] });
     if (path === "/api/create") {
       created.push(JSON.parse(String(init?.body)));
       return reply({ status: "success" }, options.createStatus ?? 200);
@@ -143,6 +143,24 @@ describe("serveWithWindow", () => {
     expect(lab.created).toEqual([]);
   });
 
+  it.each(["deepseek-v4.1-flash:1017-cloud", "gemma4:cloud"])("leaves %s alone when /api/show omits remote_host", async (model) => {
+    const lab = ollama({
+      show: { model_info: { "deepseek_v41.context_length": 1_048_576 }, capabilities: ["completion"] },
+      tags: [{ name: model, size: 336 }],
+    });
+    expect(await serveWithWindow(ORIGIN, model, lab.server, 64 * GB)).toEqual({ model });
+    expect(lab.created).toEqual([]);
+  });
+
+  it("leaves a model alone when only its tags row says it is remote", async () => {
+    const lab = ollama({
+      show: { model_info: { "glm.context_length": 202_752 } },
+      tags: [{ name: "glm-5.1:latest", size: 400, remote_host: "https://ollama.com:443", remote_model: "glm-5.1" }],
+    });
+    expect(await serveWithWindow(ORIGIN, "glm-5.1", lab.server, 64 * GB)).toEqual({ model: "glm-5.1" });
+    expect(lab.created).toEqual([]);
+  });
+
   it.each([
     ["a refused create", ollama({ createStatus: 500 }).server],
     ["a dead server", (async () => { throw new Error("ECONNREFUSED"); }) as unknown as typeof fetch],
@@ -158,6 +176,16 @@ describe("serveWithWindow", () => {
 });
 
 describe("names", () => {
+  it.each([
+    ["gemma4:cloud", true],
+    ["deepseek-v4.1-flash:1017-cloud", true],
+    ["qwen3.5:4b", false],
+    ["cloudy:latest", false],
+    ["my-cloud", false],
+  ])("isCloudName(%s) is %s", (model, expected) => {
+    expect(isCloudName(model)).toBe(expected);
+  });
+
   it("goes back to the name a person picked", () => {
     expect(pickedName("qwen3.5:4b-omb-64k")).toBe("qwen3.5:4b");
     expect(pickedName("mymodel:latest-omb-16k")).toBe("mymodel:latest");
