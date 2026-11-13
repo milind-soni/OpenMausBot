@@ -77,6 +77,9 @@ describe("request session provenance", () => {
   it("requires a live session for Cloud-home lending and restored lending handoffs", () => {
     const resolve = vi.fn(() => "cloud-home");
     expect(sharedComputerPrincipalForRequest(undefined, () => true, resolve, true)).toBeNull();
+    expect(sharedComputerPrincipalForRequest(undefined, () => true, resolve, false)).toBe("cloud-home");
+    expect(resolve).toHaveBeenCalledTimes(1);
+    resolve.mockClear();
     expect(sharedComputerPrincipalForRequest("session-a", () => false, resolve, true)).toBeNull();
     expect(resolve).not.toHaveBeenCalled();
     expect(sharedComputerPrincipalForRequest("session-a", () => true, resolve, true)).toBe("cloud-home");

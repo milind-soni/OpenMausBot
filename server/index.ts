@@ -895,7 +895,7 @@ function turnOrigin(capability: Pick<InternalCapability, "threadId" | "generatio
 /** Fail closed: only the person whose own message provably started this exact turn generation. Deliberately not the usage ledger's trigger, which defaults to the owner. */
 function sharedComputerPrincipal(capability: Pick<InternalCapability, "botId" | "threadId" | "generation">): string | null {
   const request = directRequestOwners.get(capability.threadId);
-  return sharedComputerPrincipalForRequest(request?.requestSessionId, (sessionId) => sessions.isLive(sessionId), () => CLOUD_HOME ? (cloudLendingRefusal(capability) === null ? CLOUD_HOME_LENDER : null) : lendingPerson(provenRequestPerson(request, capability.generation, (messageId) => linePersonKey(store.messagesFor(capability.threadId).find((message) => message.id === messageId))), ownHome.ownServer(), () => sessions.list()), CLOUD_HOME !== null);
+  return sharedComputerPrincipalForRequest(request?.requestSessionId, (sessionId) => sessions.isLive(sessionId), () => CLOUD_HOME ? (cloudLendingRefusal(capability) === null ? CLOUD_HOME_LENDER : null) : lendingPerson(provenRequestPerson(request, capability.generation, (messageId) => linePersonKey(store.messagesFor(capability.threadId).find((message) => message.id === messageId))), ownHome.ownServer(), () => sessions.list()), CLOUD_HOME !== null && request?.origin?.kind === "user");
 }
 
 /** The only conversations that may feed a bot's memory, daily log, recall or brief; dropped whenever a session is revoked. */
