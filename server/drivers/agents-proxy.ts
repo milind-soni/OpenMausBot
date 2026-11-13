@@ -3,7 +3,6 @@
 //   OMB_HARNESS_URL  base URL of the harness (http://127.0.0.1:8799)
 //   OMB_BOT_ID  the calling bot's id
 //   OMB_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
-//   OMB_TURN_DEPTH  this turn's comms depth (the harness refuses recursion)
 //   OMB_EXTERNAL_RUNTIME  "1" for a standing process: oversized results are cut instead of cached
 //   OMB_CHIEF_OF_STAFF  "1" for a Chief of Staff, the only bot shown the Chief-only tools
 //   OMB_MAUSBOT  "1" for the person's MausBot, the only bot shown its notification tools
