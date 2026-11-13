@@ -19,6 +19,44 @@ function withTempDataDir(): string {
 }
 
 describe("writeTurnHandoff", () => {
+  it("uses the active task instead of an older request or a later image message", () => {
+    withTempDataDir();
+    const path = writeTurnHandoff({
+      threadId: "current", turnId: "turn", toolCalls: 0,
+      task: "Repair the parser test",
+      messages: [
+        { role: "user", content: "List repository files" },
+        { role: "assistant", content: "Listed the files" },
+        { role: "user", content: [{ type: "text", text: "Repair the parser test" }, { type: "image_url", image_url: { url: "data:image/png;base64,fixture" } }] },
+        { role: "user", content: [{ type: "text", text: "Screenshot result from tool call read" }] },
+      ],
+    });
+    const text = readFileSync(path!, "utf8");
+    expect(text).toContain("Repair the parser test");
+    expect(text).not.toContain("List repository files");
+    expect(text).not.toContain("data:image");
+    expect(text).not.toContain("Screenshot result");
+  });
+
+  it("retains delivered updates in order without treating internal user messages as instructions", () => {
+    withTempDataDir();
+    const path = writeTurnHandoff({
+      threadId: "updated", turnId: "turn", toolCalls: 0, task: "Prepare a release",
+      updates: ["Draft only; do not publish", "Use version 2"],
+      messages: [
+        { role: "user", content: "Prepare a release" },
+        { role: "user", content: "Draft only; do not publish" },
+        { role: "user", content: "Use version 2" },
+        { role: "user", content: "Synthetic internal corrective prompt" },
+      ],
+    });
+    const text = readFileSync(path!, "utf8");
+    expect(text).toContain("Draft only; do not publish");
+    expect(text).toContain("Use version 2");
+    expect(text.indexOf("Draft only")).toBeLessThan(text.indexOf("Use version 2"));
+    expect(text).not.toContain("Synthetic internal corrective prompt");
+  });
+
   it("writes a structured handoff with the original task, ordered tool calls, and last text", () => {
     const dir = withTempDataDir();
     const path = writeTurnHandoff({
@@ -26,6 +64,7 @@ describe("writeTurnHandoff", () => {
       hasUsage: true, usage: { input: 10, output: 20 },
       failure: "Stopped after 64 steps without a final answer",
       toolCalls: 3,
+      task: "Build the thing",
       messages: [
         { role: "user", content: "Build the thing" },
         { role: "assistant", content: null, tool_calls: [{ function: { name: "host_shell_exec", arguments: "{\"command\":\"ls\"}" } }] },
@@ -50,7 +89,7 @@ describe("writeTurnHandoff", () => {
   it("returns an absolute handoff when OMB_DATA_DIR is relative", () => {
     const dir = withTempDataDir();
     process.env.OMB_DATA_DIR = relative(process.cwd(), dir);
-    const path = writeTurnHandoff({ threadId: "relative", turnId: "turn", toolCalls: 0, messages: [] });
+    const path = writeTurnHandoff({ threadId: "relative", turnId: "turn", toolCalls: 0, task: "Continue", messages: [] });
     expect(path).not.toBeNull();
     expect(isAbsolute(path!)).toBe(true);
     expect(dirname(path!)).toBe(join(dir, "handoffs"));
@@ -59,7 +98,7 @@ describe("writeTurnHandoff", () => {
 
   it("returns null when the handoff cannot be written", () => {
     process.env.OMB_DATA_DIR = join(tmpdir(), "omb-handoff-", "does-not-exist", "nested");
-    expect(writeTurnHandoff({ threadId: "t", turnId: "u", toolCalls: 0, messages: [] })).not.toBeNull();
+    expect(writeTurnHandoff({ threadId: "t", turnId: "u", toolCalls: 0, task: "Continue", messages: [] })).not.toBeNull();
     rmSync(join(tmpdir(), "omb-handoff-"), { recursive: true, force: true });
   });
 });
