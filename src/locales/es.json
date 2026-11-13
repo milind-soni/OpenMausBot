@@ -6480,5 +6480,22 @@
   "settings.simple.billing.included": "Uso incluido de este mes",
   "settings.simple.billing.summary": "{percent} % del uso incluido de este mes",
   "settings.simple.billing.used": "usado",
-  "settings.skin.dressUp.title": "Disfrazar a mis bots"
+  "settings.skin.dressUp.title": "Disfrazar a mis bots",
+  "server.cloudComputer.replaced": "La computadora en la nube de {name} dejó de responder, así que MausBot la reemplazó por una nueva. Los archivos que solo estaban en la computadora anterior se perdieron.",
+  "server.cloudComputer.restarted": "La computadora en la nube de {name} dejó de responder, así que MausBot la reinició. Ya responde de nuevo; los programas que tenía abiertos se cerraron.",
+  "server.cloudComputer.capped": "La computadora en la nube de {name} volvió a dejar de responder menos de una hora después de ser reemplazada, así que MausBot la dejó como está. Reemplazar computadora, en el panel de la computadora, lo intenta una vez más.",
+  "server.cloudComputer.unreachable": "Ahora mismo no se puede acceder a las computadoras en la nube. MausBot conservó la computadora en la nube de {name} y la volverá a revisar.",
+  "server.cloudComputer.needsPerson": "La computadora en la nube de {name} dejó de responder. Reemplazar computadora, en el panel de la computadora, le da una nueva; los archivos que solo están en la computadora anterior se pierden.",
+  "server.cloudComputer.teamNotResponding": "{name} no responde. Elimínala en Ajustes → Computadoras y vuelve a crearla desde el mapa del equipo; los archivos que solo están en ella se pierden.",
+  "computer.recovery.notResponding": "Esta computadora en la nube no responde. MausBot la está revisando y la reiniciará o la reemplazará.",
+  "computer.recovery.restarting": "Esta computadora en la nube no responde. MausBot la está reiniciando.",
+  "computer.recovery.replacing": "Esta computadora en la nube no responde. MausBot la está reemplazando.",
+  "computer.recovery.replacedManual": "Reemplazada. {name} recibirá una computadora en la nube nueva la próxima vez que la necesite.",
+  "computer.recovery.restartedManual": "Reiniciada. La computadora en la nube vuelve a responder.",
+  "computer.recovery.stillNotAnswering": "La computadora en la nube sigue sin responder después de reiniciarla. Reemplazar computadora le da a {name} una nueva.",
+  "computer.recovery.confirmReplace": "¿Reemplazar la computadora en la nube de {name} por una nueva? Los archivos que solo están en esta computadora se perderán.",
+  "computer.recovery.restart": "Reiniciar computadora",
+  "computer.recovery.restartTitle": "Detiene y vuelve a iniciar esta computadora en la nube. Los programas abiertos se cierran; sus archivos se conservan.",
+  "computer.recovery.replace": "Reemplazar computadora",
+  "computer.recovery.replaceTitle": "Elimina esta computadora en la nube y le da una nueva al bot. Los archivos que solo están en ella se pierden."
 }

@@ -7244,5 +7244,22 @@
   "backup.excluded": "Zapisane dane logowania do kont i połączenia nie są uwzględnione. Połącz konta ponownie na nowym komputerze; istniejące dane logowania w miejscu docelowym się nie zmienią. Nie są też uwzględnione logowania do innych aplikacji AI ani dyski zdalnych pulpitów.",
   "settings.simple.billing.included": "Uwzględnione użycie w tym miesiącu",
   "settings.simple.billing.summary": "{percent}% uwzględnionego użycia w tym miesiącu",
-  "settings.simple.billing.used": "użyto"
+  "settings.simple.billing.used": "użyto",
+  "server.cloudComputer.replaced": "Komputer w chmurze bota {name} przestał odpowiadać, więc MausBot zastąpił go nowym. Pliki, które były tylko na starym komputerze, przepadły.",
+  "server.cloudComputer.restarted": "Komputer w chmurze bota {name} przestał odpowiadać, więc MausBot go uruchomił ponownie. Znów odpowiada; otwarte na nim programy zostały zamknięte.",
+  "server.cloudComputer.capped": "Komputer w chmurze bota {name} znów przestał odpowiadać w ciągu godziny od wymiany, więc MausBot zostawił go bez zmian. Zastąp komputer w panelu komputera spróbuje jeszcze raz.",
+  "server.cloudComputer.unreachable": "Komputery w chmurze są teraz nieosiągalne. MausBot zachował komputer w chmurze bota {name} i sprawdzi go ponownie.",
+  "server.cloudComputer.needsPerson": "Komputer w chmurze bota {name} przestał odpowiadać. Zastąp komputer w panelu komputera daje nowy; pliki, które są tylko na starym komputerze, zostaną utracone.",
+  "server.cloudComputer.teamNotResponding": "{name} nie odpowiada. Usuń go w Ustawienia → Komputery, a potem utwórz ponownie z mapy zespołu; pliki, które są tylko na nim, zostaną utracone.",
+  "computer.recovery.notResponding": "Ten komputer w chmurze nie odpowiada. MausBot go sprawdza i uruchomi go ponownie albo zastąpi.",
+  "computer.recovery.restarting": "Ten komputer w chmurze nie odpowiada. MausBot uruchamia go ponownie.",
+  "computer.recovery.replacing": "Ten komputer w chmurze nie odpowiada. MausBot go zastępuje.",
+  "computer.recovery.replacedManual": "Zastąpiono. {name} dostanie nowy komputer w chmurze, gdy następnym razem będzie go potrzebować.",
+  "computer.recovery.restartedManual": "Uruchomiono ponownie. Komputer w chmurze znów odpowiada.",
+  "computer.recovery.stillNotAnswering": "Komputer w chmurze nadal nie odpowiada po ponownym uruchomieniu. Zastąp komputer da botowi {name} nowy.",
+  "computer.recovery.confirmReplace": "Zastąpić komputer w chmurze bota {name} nowym? Pliki, które są tylko na tym komputerze, zostaną utracone.",
+  "computer.recovery.restart": "Uruchom komputer ponownie",
+  "computer.recovery.restartTitle": "Zatrzymuje i ponownie uruchamia ten komputer w chmurze. Otwarte programy zostaną zamknięte; pliki zostają.",
+  "computer.recovery.replace": "Zastąp komputer",
+  "computer.recovery.replaceTitle": "Usuwa ten komputer w chmurze i daje botowi nowy. Pliki, które są tylko na nim, zostaną utracone."
 }
