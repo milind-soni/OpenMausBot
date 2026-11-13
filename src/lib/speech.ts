@@ -12,8 +12,11 @@ export function speechBridge(): SpeechBridge | Window["ogb"] {
   return desktopCapabilitiesNow().dictation.engine === "fish-audio" ? fishSpeech : globalThis.window?.ogb;
 }
 
+/** A key the server listens with: Fish Audio, or the person's own ElevenLabs key (not the plan's included voice). */
 export function fishListeningReady(config: ConfigStatus | null | undefined): boolean {
-  return savedState(keyEntry("fishAudio"), config).configured;
+  if (savedState(keyEntry("fishAudio"), config).configured) return true;
+  const eleven = savedState(keyEntry("elevenlabs"), config);
+  return eleven.configured && !eleven.included;
 }
 
 /** Whether speech can be heard here: the engine is there and, through Fish Audio, so is a saved key. */

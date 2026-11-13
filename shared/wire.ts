@@ -34,10 +34,12 @@ import type { WebhookAttempt, WebhookTrigger } from "./webhooks.ts";
 import type { PublishedPageCard } from "./published-page.ts";
 import type { InboxItem, InboxTask } from "./inbox.ts";
 import type { LiveCallRecord, LiveCallState } from "./live-call-wire.ts";
+import type { ForkOrigin, TaskClosedBy, TaskOpenedBy } from "./task-provenance.ts";
 /** What a team bot's main chat is called, beside each person's own chats. */
 export const SHARED_CHAT_TITLE = "Shared chat";
 
 export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveEndReason, LiveFishRelayCommand, LiveFishRelayEvent, LiveFishSessionToken, LiveFishTransport, LiveKeySource, LiveProvider, LiveSettings } from "./live-call-wire.ts";
+export type { ForkOrigin, TaskClosedBy, TaskOpenedBy } from "./task-provenance.ts";
 
 /** Reasoning-effort levels, ascending: a union of what any engine accepts;
  * each driver declares the subset its CLI will take. */
@@ -83,30 +85,6 @@ export type MausExpression = string;
  * never counts as busy. */
 export type BotActivity = "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | "parked.computer";
 
-/** The bot that opened a thread on itself or a teammate. */
-export interface TaskOpenedBy {
-  botId: string;
-  name: string;
-  delegationId?: string;
-  /** What kind of conversation the opener made this: "pair" is the one
-   * durable conversation between two bots; "work" closes itself once its
-   * result has been reported. */
-  kind?: "pair" | "work"; /** The burst this thread is one part of: it is listed under that burst's card, not on its own. */ burstId?: string;
-  /** The opener's own conversation this "work" thread was opened from.
-   * Everything that conversation later sends this bot continues here. */
-  threadId?: string;
-  /** A parallel room job's thread: `threadId` is the room thread it came from, and the member must stay in that room. */
-  roomLane?: true;
-  /** Security invariant: harness-set only, when a turn that could itself use the owner's lent computer opened this thread (server/cloud-lending.ts); any other hand-in clears it for good. */ forOwner?: true; at: number;
-}
-
-/** The bot that closed a thread it opened (or one of its own). */
-export interface TaskClosedBy {
-  botId: string;
-  name: string;
-  at: number;
-}
-
 /** What a task has spent, banked once per settled turn. */
 export interface TaskUsage {
   input: number;
@@ -133,12 +111,13 @@ export interface BotMovedTo {
   at: number;
 }
 
-/** One task = one conversation with its own context, thread and provider
- * session. */
+/** One task = one conversation with its own context, thread and provider session. */
 export interface WireTask extends InboxTask {
   /** Outstanding handoffs, not an active provider turn. */
   waitingForTeammates?: boolean;
   threadId: string;
+  /** The completed message whose visible history seeded this conversation. */
+  origin?: ForkOrigin;
   title: string;
   createdAt: number;
   /** The first message already drove a title attempt for this thread, so a
@@ -815,6 +794,11 @@ export type GroupDefaultResponder =
 /** One independent conversation inside a user-created channel. */
 export interface GroupTask {
   threadId: string;
+  /** Replies in this conversation that have not been read. */
+  unread?: boolean;
+  lastReadMessageId?: string;
+  /** The completed message whose visible history seeded this conversation. */
+  origin?: ForkOrigin;
   title: string;
   createdAt: number;
   pinnedCwd?: string | null;
