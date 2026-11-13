@@ -2333,6 +2333,7 @@
   "inbox.headline.signIn": "Sign in to {site}",
   "inbox.headline.connect": "Connect {app}",
   "inbox.youReplied": "You replied",
+  "inbox.markAllRead": "Mark all as read",
   "sidebar.people.mention": "Write to {name}",
   "sidebar.people.mentionHere": "Write to {name}. Here now",
   "sidebar.people.loading": "Loading people…",

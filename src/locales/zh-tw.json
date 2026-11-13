@@ -2223,6 +2223,7 @@
   "inbox.headline.signIn": "登入 {site}",
   "inbox.headline.connect": "連線 {app}",
   "inbox.youReplied": "你的回覆",
+  "inbox.markAllRead": "全部標示為已讀",
   "sidebar.people.mention": "寫給 {name}",
   "sidebar.bot.markUnread": "標示為未讀",
   "sidebar.bot.rename": "重新命名",

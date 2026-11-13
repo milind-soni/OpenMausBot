@@ -3193,6 +3193,7 @@
   "ask.error": "Не вдалося надіслати відповідь. Спробуйте ще раз.",
   "ask.detail.more": "Показати все",
   "inbox.action.closeQuestion": "Закрити без відповіді",
+  "inbox.markAllRead": "Позначити все як прочитане",
   "question.somethingElse": "Щось інше…",
   "question.done": "Готово",
   "common.done": "Готово",

@@ -5172,6 +5172,7 @@
   "ask.error": "Yanıtınız gönderilemedi. Tekrar deneyin.",
   "ask.detail.more": "Tümünü göster",
   "inbox.action.closeQuestion": "Yanıtlamadan kapat",
+  "inbox.markAllRead": "Tümünü okundu olarak işaretle",
   "question.somethingElse": "Başka bir şey…",
   "question.done": "Tamam",
   "common.done": "Tamam",

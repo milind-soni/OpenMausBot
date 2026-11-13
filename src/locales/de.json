@@ -2860,6 +2860,7 @@
   "ask.error": "Deine Antwort konnte nicht gesendet werden. Versuch es noch einmal.",
   "ask.detail.more": "Alles anzeigen",
   "inbox.action.closeQuestion": "Ohne Antwort schließen",
+  "inbox.markAllRead": "Alle als gelesen markieren",
   "question.somethingElse": "Etwas anderes…",
   "question.answerPlaceholder": "Deine Antwort",
   "question.status.closed": "Ohne Antwort geschlossen",

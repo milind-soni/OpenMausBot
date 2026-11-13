@@ -5676,6 +5676,7 @@
   "ask.error": "No se pudo enviar tu respuesta. Inténtalo de nuevo.",
   "ask.detail.more": "Mostrar todo",
   "inbox.action.closeQuestion": "Cerrar sin responder",
+  "inbox.markAllRead": "Marcar todo como leído",
   "question.somethingElse": "Otra cosa…",
   "question.done": "Listo",
   "common.done": "Listo",

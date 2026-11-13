@@ -2756,6 +2756,7 @@
   "ask.error": "आपका जवाब नहीं भेजा जा सका। फिर से कोशिश करें।",
   "ask.detail.more": "सब दिखाएँ",
   "inbox.action.closeQuestion": "बिना जवाब दिए बंद करें",
+  "inbox.markAllRead": "सभी को पढ़ा हुआ चिह्नित करें",
   "question.somethingElse": "कुछ और…",
   "question.done": "हो गया",
   "common.done": "हो गया",

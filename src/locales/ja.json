@@ -7346,6 +7346,7 @@
   "ask.error": "回答を送信できませんでした。もう一度お試しください。",
   "ask.detail.more": "すべて表示",
   "inbox.action.closeQuestion": "回答せずに閉じる",
+  "inbox.markAllRead": "すべて既読にする",
   "question.somethingElse": "その他…",
   "question.done": "完了",
   "question.yourAnswer": "自分の回答",
