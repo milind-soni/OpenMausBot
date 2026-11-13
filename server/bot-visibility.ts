@@ -351,7 +351,7 @@ export function pathSubject(path: string): PathSubject | null {
   m = /^\/api\/threads\/([\w-]+)(?:\/|$)/.exec(path);
   if (m) return { kind: "thread", id: m[1]! };
   m = /^\/api\/groups\/([\w-]+)(?:\/|$)/.exec(path);
-  if (m) return { kind: "group", id: m[1]! };
+  if (m && m[1] !== "order") return { kind: "group", id: m[1]! };
   m = /^\/api\/routines\/([\w-]+)(?:\/|$)/.exec(path);
   if (m && m[1] !== "wake") return { kind: "routine", id: m[1]! };
   m = /^\/api\/routine-runs\/([\w-]+)\//.exec(path);
