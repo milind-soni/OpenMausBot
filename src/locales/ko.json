@@ -6459,6 +6459,8 @@
   "defaultBot.hide": "사이드바에서 숨기기",
   "defaultBot.hideHint": "계속 일해요. 설정 → 일반에서 다시 표시할 수 있어요.",
   "defaultBot.hidden": "{name}이(가) 사이드바에서 숨겨졌어요. 설정 → 일반에서 다시 표시할 수 있어요.",
+  "defaultBot.demote": "일반 봇으로 바꾸기",
+  "defaultBot.demoteHint": "기본 보호를 해제합니다. 이후 다른 봇처럼 보관하거나 삭제할 수 있습니다.",
   "defaultBot.show.title": "사이드바에 {name} 표시",
   "defaultBot.show.subtitle": "앱의 모든 일을 돕는 도우미예요. 숨겨도 계속 일하고 검색으로 찾을 수 있어요.",
   "teamMove.blockedDefault": "{name}은(는) 여기에 남아요: 팀원마다 각자의 도우미가 있어요",
@@ -7775,5 +7777,11 @@
   "computer.recovery.restart": "컴퓨터 다시 시작",
   "computer.recovery.restartTitle": "이 클라우드 컴퓨터를 멈췄다가 다시 시작해요. 열린 프로그램은 닫히고 파일은 그대로 남아요.",
   "computer.recovery.replace": "컴퓨터 교체",
-  "computer.recovery.replaceTitle": "이 클라우드 컴퓨터를 삭제하고 봇에게 새 컴퓨터를 줘요. 이 컴퓨터에만 있는 파일은 사라져요."
+  "computer.recovery.replaceTitle": "이 클라우드 컴퓨터를 삭제하고 봇에게 새 컴퓨터를 줘요. 이 컴퓨터에만 있는 파일은 사라져요.",
+  "settings.browser.proxy": "SOCKS5 프록시",
+  "settings.browser.proxyDetail": "기본 브라우저에서 공개 사이트에 사용할 수 있는 인증 없는 SOCKS5 프록시입니다. My Chrome은 자체 설정을 따르며, 사설·로컬 주소는 기존 차단 규칙을 유지합니다.",
+  "settings.browser.proxyConfigured": "새로 여는 기본 브라우저 연결에 이 SOCKS5 프록시를 사용합니다. My Chrome에는 적용되지 않으며, 사설·로컬 주소는 기존 차단 규칙을 유지합니다.",
+  "settings.browser.proxyInactive": "저장되어 있지만 지원되는 환경에서 기본 브라우저를 사용할 때만 적용됩니다.",
+  "settings.browser.proxySave": "저장",
+  "settings.browser.proxyClear": "삭제"
 }

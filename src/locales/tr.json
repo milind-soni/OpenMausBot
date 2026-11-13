@@ -4727,6 +4727,8 @@
   "defaultBot.hide": "Kenar çubuğundan gizle",
   "defaultBot.hideHint": "Çalışmaya devam eder. Ayarlar → Genel'den yeniden gösterebilirsin.",
   "defaultBot.hidden": "{name} kenar çubuğundan gizlendi. Ayarlar → Genel'den yeniden gösterebilirsin.",
+  "defaultBot.demote": "Normal bir bot yap",
+  "defaultBot.demoteHint": "Yerleşik korumayı kaldırır: ardından diğer botlar gibi arşivlenebilir veya silinebilir.",
   "defaultBot.show.title": "{name} kenar çubuğunda görünsün",
   "defaultBot.show.subtitle": "Uygulamadaki her şey için yardımcın. Gizliyken de çalışır ve aramada bulunur.",
   "teamMove.blockedDefault": "{name} burada kalır: ekipteki herkesin kendine ait bir tane var",

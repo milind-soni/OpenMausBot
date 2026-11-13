@@ -2368,6 +2368,8 @@
   "defaultBot.hide": "Aus der Seitenleiste ausblenden",
   "defaultBot.hideHint": "Er arbeitet weiter. Blende ihn unter Einstellungen → Allgemein wieder ein.",
   "defaultBot.hidden": "{name} ist aus der Seitenleiste ausgeblendet. Blende ihn unter Einstellungen → Allgemein wieder ein.",
+  "defaultBot.demote": "Zu einem normalen Bot machen",
+  "defaultBot.demoteHint": "Entfernt den eingebauten Schutz: Danach lässt er sich wie jeder andere Bot archivieren oder löschen.",
   "defaultBot.show.title": "{name} in der Seitenleiste zeigen",
   "defaultBot.show.subtitle": "Dein Helfer für alles in der App. Ausgeblendet arbeitet er weiter, und die Suche findet ihn.",
   "teamMove.blockedDefault": "{name} bleibt hier: Jede Person im Team bekommt ihren eigenen",
