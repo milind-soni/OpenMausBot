@@ -1,21 +1,9 @@
+import { SKIN_IDS } from "../../shared/app-settings";
 import { paintAuroraField } from "./aurora-field";
 import { hasPriorRun } from "./prior-run";
+import { windowPrefChanged } from "./window-pref-changes";
 
-export const SKIN_IDS = [
-  "midnight",
-  "atelier",
-  "foundry",
-  "lagoon",
-  "graphite",
-  "linen",
-  "dusk",
-  "daylight",
-  "meadow",
-  "pop",
-  "halloween",
-  "diwali",
-  "aurora",
-] as const;
+export { SKIN_IDS };
 export type SkinId = (typeof SKIN_IDS)[number];
 
 export type Skin = {
@@ -146,6 +134,7 @@ export function applySkinChoice(choice: SkinChoice): void {
   }
   followSystem(choice === "system");
   paintSkin(resolveSkin(choice));
+  windowPrefChanged();
 }
 
 export function applySkin(id: SkinId): void {

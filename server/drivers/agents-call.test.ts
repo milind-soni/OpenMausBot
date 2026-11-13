@@ -218,6 +218,23 @@ describe("mcp_server", () => {
   });
 });
 
+describe("app_settings", () => {
+  it("posts the action, id and value and returns the route's text or refusal", async () => {
+    const calls: Array<{ path: string; method?: string; body: unknown }> = [];
+    const client = {
+      api: async () => ({}),
+      apiResponse: async (path: string, init?: { method?: string; body?: string }) => {
+        calls.push({ path, method: init?.method, body: JSON.parse(String(init?.body)) });
+        return path.endsWith("app-settings") && calls.length === 1 ? { ok: true, status: 200, body: { text: "Changed Skin from daylight to midnight." } } : { ok: false, status: 403, body: { error: "Approval modes is changed only by the owner." } };
+      },
+    };
+    expect(await callTool("app_settings", { action: "set", id: "appearance.skin", value: "midnight" }, context({ client }))).toEqual({ text: "Changed Skin from daylight to midnight." });
+    expect(await callTool("app_settings", { action: "set", id: "bots.approvalModes", value: "full" }, context({ client }))).toEqual({ text: "Approval modes is changed only by the owner.", isError: true });
+    expect(calls.map((call) => call.path)).toEqual(["/api/internal/app-settings", "/api/internal/app-settings"]);
+    expect(calls[0]).toMatchObject({ method: "POST", body: { action: "set", id: "appearance.skin", value: "midnight" } });
+  });
+});
+
 describe("propose_profile", () => {
   it("rejects a non-boolean toggle without proposing the valid half", async () => {
     const calls: Array<{ path: string; body: any }> = [];

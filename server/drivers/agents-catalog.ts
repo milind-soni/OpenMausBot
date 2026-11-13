@@ -8,6 +8,7 @@ import { CHAT_CARD_TOOL_DEFINITIONS } from "./agents-chat-card-tools.ts";
 import { DEVS_TOOL_DEFINITIONS } from "./agents-devs-tools.ts";
 import { HELPER_TOOL_DEFINITIONS } from "./agents-helper-tools.ts";
 import { USAGE_LIMITS_TOOL_DEFINITION } from "./agents-usage-tool.ts";
+import { APP_SETTINGS_TOOL_DEFINITION } from "./agents-app-settings-tool.ts";
 import { THREAD_POST_TOOL_DEFINITION } from "./agents-thread-post-tool.ts";
 import { WAIT_TOOL_DEFINITIONS, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
 import { COMPUTER_ASK_TOOL_DEFINITIONS, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
@@ -923,6 +924,7 @@ const TOOL_DEFINITIONS = [
       required: ["action"],
     },
   },
+  APP_SETTINGS_TOOL_DEFINITION,
 ].map((tool) => {
   const annotations = agentToolAnnotations(tool.name);
   return annotations ? { ...tool, annotations } : tool;
