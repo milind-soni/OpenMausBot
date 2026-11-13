@@ -73,7 +73,7 @@ describe("words a person typed", () => {
       patchAssigned: (id, assigned) => { if (id === mate.id) mate.assignedSkills = assigned; },
     })).not.toHaveProperty("error");
     const libraryHost = createSkillsLibraryHost({
-      store: { bot: () => mate, messagesFor: () => [{ at: 500 }] } as unknown as Store,
+      store: { bot: () => mate, messagesFor: () => [{ at: 500 }], taskByThread: () => undefined } as unknown as Store,
       cfg: { features: { skillsLibrary: true } } as AppConfig,
       appendSkillRequestCard: () => ({ requestId: "", summary: "" }),
     });

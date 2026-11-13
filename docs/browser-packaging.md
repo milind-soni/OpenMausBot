@@ -110,6 +110,15 @@ loopback traffic through it too (`--proxy-bypass-list=<-loopback>`), and
 WebRTC sends no UDP around it. If the gate is not running, the browser
 connects nowhere.
 
+The owner can set an optional unauthenticated SOCKS5 upstream in Settings →
+Bot desktops → Built-in browser. The gate still resolves and checks every
+destination locally, then passes only a checked public IP to that proxy; local,
+private, own-service, link-local and metadata destinations are never sent
+through it. New connections use the saved proxy immediately. My Chrome keeps
+using the person's own Chrome settings. The built-in browser also follows the
+app's language setting for its Chrome locale and `Accept-Language`; an explicit
+`OMB_BROWSER_LANG` environment value takes precedence.
+
 | Destination | Desktop | Self-hosted server | MausBot Cloud |
 |---|---|---|---|
 | Public internet | yes | yes | yes |
