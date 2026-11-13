@@ -145,7 +145,7 @@ import {
   type Runtime,
 } from "./container-computer.ts";
 import { containerComputerMcp } from "./local-vm-box.ts";
-import { attachForTurn, saveBotAttachment } from "./bot-attachment.ts";
+import { attachedFileLine, attachForTurn, saveBotAttachment } from "./bot-attachment.ts";
 import {
   cacheUntilConfigChanges,
   ensureDirs,
@@ -2098,6 +2098,7 @@ function claimTurnResource(owner: TurnOwner, resource: string): boolean {
   turnResourceOwners.set(owner.threadId, owner);
   return true;
 }
+const parkedSeatTaken = (nodeId: string): boolean => { const seat = parkedSeats.get(nodeId); return seat !== undefined && (!turnResources.free(seat) || sharedVm.personHolds(seat)); };
 
 function releaseTurnResources(owner: TurnOwner | undefined): void {
   if (!owner) return;
@@ -3769,7 +3770,7 @@ function coordinationSystemInstructions(): string {
 
 const threadReadableFrom = (threadId: string) => (other: string): boolean => !proactive.fence.confines(other) && !botApiThread(other) && (CLOUD_TEAM ? teamHost.readableFrom(threadId)(other) : !CLOUD_HOME || cloudOwnerOnlyThread(other));
 const queuedDeps = { botName: (id: string) => store.bot(id)?.name, threadBusy, groupTurn: (id: string) => Boolean(activeGroupTurnForBot(id)), behindPerson: queuedBehindPerson,
-  waitsForComputer: (node: HandoffView) => { const seat = parkedSeats.get(node.id); return Boolean(seat && !turnResources.free(seat)); },
+  waitsForComputer: (node: HandoffView) => parkedSeatTaken(node.id),
   slots: (id: string) => ({ busy: store.tasks(id).filter((task) => threadBusy(id, task.threadId)).map(({ threadId, title }) => ({ threadId, title })), limit: maxConcurrentChildThreads(cfg, botThreadsHost(cloudPlanTier.starter())) }) }; const queuedStatus = createQueuedReason(queuedDeps), queuedNotes = createQueuedNotes({ ...queuedDeps, now: Date.now, language: (threadId) => threadLanguage(threadId), parent: (node) => node.parentId ? coordinator.node(node.parentId) : undefined, node: (id) => coordinator.node(id), post: (parent, node, line) => { const bot = store.bot(node.botId), title = store.taskByThread(node.botId, node.threadId)?.title; store.appendMessage(parent.threadId, { role: "bot", kind: "activity", ...(bot ? { from: { botId: bot.id, name: bot.name, color: bot.color } } : {}), tool: { name: line, ok: true }, ...(title ? { threadRef: { botId: node.botId, threadId: node.threadId, title } } : {}) }); } });
 const asksActingPerson = createAsksActingPerson({ team: Boolean(CLOUD_TEAM), requester: (threadId, generation) => actingPeople.requester(threadId, generation), askedPerson: (botId, threadId) => teamOwners.routing.askedPerson(botId, threadId) });
 const teammatePrompts = createTeammatePrompts({ store, asksActingPerson, outstandingDirect: (threadId) => coordinator.outstandingDirect(threadId), openPersonCard, queuedStatus, isUnattended, fullAccess: fullAccessForSource, startedOutside, guestDriven: cloudGuestDriven, confined: (threadId) => proactive.fence.confines(threadId), readableFrom: threadReadableFrom, waitingForPerson: (chief, teammates, readable) => questionRouting.waitingForPerson(chief, teammates, readable) });
@@ -3916,8 +3917,7 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
       : !node.parentId && node.groupId ? roomRootProblem(node)
       : roomHandoffProblem(node, parent),
     busy: n => {
-      const seat = parkedSeats.get(n.id);
-      if (seat && !turnResources.free(seat)) return true;
+      if (parkedSeatTaken(n.id)) return true;
       if (n.groupId) return Boolean(store.bot(n.botId)?.busy || groupThreadIsWorking(n.groupId, n.threadId));
       if (canAdmitDirectTurn(n.botId, n.threadId)) return false;
       noteQueuedBehindPerson(n); queuedNotes(n);
@@ -13192,15 +13192,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             },
             stillLive: () => internalCapabilityIsActive({ ...internalCapability, ...(vm ? { localVmTarget: vm } : {}) }) &&
               connectorThread(from.id, threadId) !== null,
-            publish: (saved) => {
-              store.appendMessage(threadId, {
-                role: "bot",
-                kind: "text",
-                text: "",
-                attachments: [saved.attachment],
-                ...(source.group ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
-              });
-            },
+            publish: (saved) => store.appendMessage(threadId, attachedFileLine(saved.attachment, liveTurnByThread.get(threadId),
+              source.group ? { botId: from.id, name: from.name, color: from.color } : undefined)),
             discard: (saved) => deleteAttachment(saved.attachment.path),
           });
           if (outcome.status === "limit") {

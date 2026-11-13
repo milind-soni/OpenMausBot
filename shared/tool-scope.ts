@@ -1,4 +1,5 @@
 import { agentsCallIdentities } from "./agents-tool-names.ts";
+import { PHONE_STEP_TOOLS } from "./phone-steps.ts";
 
 export type ToolScope = {
   allow?: string[];
@@ -75,6 +76,10 @@ function permitsNamed(scope: ToolScope | undefined, tool: ToolIdentity, names: r
 
 function permits(scope: ToolScope | undefined, tool: ToolIdentity, args?: unknown): boolean {
   if (!validName(tool.name) || (tool.kind === "mcp" && !SERVER_NAME.test(tool.server))) return false;
+  // A phone batch runs the step tools, so a selection that refuses any of them refuses the batch.
+  if (tool.kind === "mcp" && tool.server === "phone" && tool.name === "batch") {
+    return ["batch", ...PHONE_STEP_TOOLS].every((name) => permitsNamed(scope, tool, [name]));
+  }
   // An agents call is named by what it does: a selector naming one action's own tool name allows or refuses that action.
   const named = tool.kind === "mcp" && tool.server === "agents" ? agentsCallIdentities(tool.name, args) : [[tool.name]];
   return named.some((names) => permitsNamed(scope, tool, names));

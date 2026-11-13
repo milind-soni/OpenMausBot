@@ -4,6 +4,7 @@ import { createServer, type Server } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { writeFileAtomic } from "./atomic.ts";
@@ -54,6 +55,8 @@ const dump = () => until(() => {
   if (!existsSync(dumpFile)) return null;
   try { return JSON.parse(readFileSync(dumpFile, "utf8")); } catch { return null; }
 }, Boolean);
+const activityRows = async (threadId: string, text: string) => (await api("GET", `/api/threads/${threadId}/messages`)).messages
+  .filter((message: any) => message.tool?.name?.includes(text)).length;
 // The seeded Chief answers a failed run with a Problems to look at turn on this same engine, and that turn writes the dump.
 async function stepDownSeededChief() {
   const seeded = (await api("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff);
@@ -1017,6 +1020,8 @@ describe("Group Local VM ownership on the real isolated server", () => {
       });
       const task = parked.bots.find((bot: any) => bot.id === auto.id).tasks.find((task: any) => task.threadId === auto.threadId);
       expect(task).toMatchObject({ busy: false, activity: "parked.computer" });
+      await new Promise(resolve => setTimeout(resolve, 2_500));
+      expect(await activityRows(auto.threadId, "Parked — it continues automatically")).toBe(1);
       expect(existsSync(dumpFile)).toBe(false);
       expect(JSON.parse(readFileSync(stateFile, "utf8")).actions ?? []).toEqual([]);
       await api("POST", `/api/bots/${holder.id}/interrupt`, { threadId: holder.threadId });
@@ -1032,6 +1037,40 @@ describe("Group Local VM ownership on the real isolated server", () => {
         await idle(bot.id);
         await api("DELETE", `/api/bots/${bot.id}`);
       }
+      vmState();
+      await waitForExit(child, { signal: "SIGTERM" });
+      await startServer();
+    }
+  }, 60_000);
+
+  it("keeps a turn parked while a person holds the shared VM, and resumes it on the hand-back", async () => {
+    await waitForExit(child, { signal: "SIGTERM" });
+    await startServer(2_000);
+    vmState({ containers: ["shared"], stopped: ["shared"] });
+    rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot } = await api("POST", "/api/bots", { name: "Parked behind a person", computer: "vm", browser: false });
+    try {
+      await api("GET", "/api/local-computer");
+      await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "take" });
+      await api("POST", `/api/bots/${bot.id}/messages`, { text: "Use the shared VM after the person" });
+      await until(() => activityRows(bot.threadId, "Parked — it continues automatically"), count => count === 1);
+      await new Promise(resolve => setTimeout(resolve, 5_000));
+      expect(await activityRows(bot.threadId, "Waiting for its turn on this computer")).toBe(1);
+      expect(await activityRows(bot.threadId, "Parked — it continues automatically")).toBe(1);
+      expect(existsSync(dumpFile)).toBe(false);
+      const root = readHandoffs(join(fixtureHome, "data")).findLast(node => node.threadId === bot.threadId)!;
+      const db = new DatabaseSync(join(fixtureHome, "data", "runtime.db"), { readOnly: true });
+      try {
+        expect((db.prepare("SELECT detail FROM assignment_events WHERE assignment_id = ? AND kind = 'held'").all(root.id) as Array<{ detail: string }>).at(-1)?.detail)
+          .toBe("waiting for the computer it needs, which another turn or a person is using");
+      } finally { db.close(); }
+      await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "release" });
+      expect(await dump()).toMatchObject({ prompt: { message: { content: expect.stringContaining("Continue the task that parked waiting for it") } } });
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "release" });
+      await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId });
+      await idle(bot.id);
+      await api("DELETE", `/api/bots/${bot.id}`);
       vmState();
       await waitForExit(child, { signal: "SIGTERM" });
       await startServer();
