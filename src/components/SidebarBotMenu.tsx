@@ -7,7 +7,7 @@ import { useHeldMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";
 import { allThreadRows, BotDeleteMenuItem, useDeleteAllThreads } from "./BotMenuDelete";
-import { HideDefaultBotItem } from "./DefaultBotControls";
+import { DemoteDefaultBotItem, HideDefaultBotItem } from "./DefaultBotControls";
 import { navigateThreadMenu } from "./BotProjects";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { userBotMenu } from "@/lib/own-team-bot";
@@ -285,7 +285,7 @@ export function BotContextMenu({
     );
     const threads = [divider("threads"), newThread, viewThreads, setMain];
     const moreRow = flyoutButton("more", moreRef, <MoreHorizontal size={16} className="text-ink-secondary" />, t("sidebar.bot.more"));
-    const leave = bot.defaultBot ? [<HideDefaultBotItem key="hide" bot={bot} onDone={onClose} className={MENU_ITEM} />] : member ? ownDelete() : [
+    const leave = bot.defaultBot ? [<HideDefaultBotItem key="hide" bot={bot} onDone={onClose} className={MENU_ITEM} />, <DemoteDefaultBotItem key="demote" bot={bot} onDone={onClose} className={MENU_ITEM} />] : member ? ownDelete() : [
       item(<Archive size={16} className="text-ink-secondary" />, t("sidebar.bot.archive"), () => onArchive(bot), { disabled: archiveBlocked, hint: archiveHint }),
       <BotDeleteMenuItem key="delete" deleting={deleting} className={MENU_ITEM} onClick={() => { onClose(); onDelete(bot); }} />,
     ];
@@ -430,7 +430,7 @@ export function BotContextMenu({
           void copyText(bot.threadId);
         }),
         divider("d3"), ...moveToTeam.items(bot, item), ...moveToCloud.items(bot, item),
-        ...(bot.defaultBot ? [<HideDefaultBotItem key="hide" bot={bot} onDone={onClose} className={MENU_ITEM} />] : member ? ownDelete() : [
+        ...(bot.defaultBot ? [<HideDefaultBotItem key="hide" bot={bot} onDone={onClose} className={MENU_ITEM} />, <DemoteDefaultBotItem key="demote" bot={bot} onDone={onClose} className={MENU_ITEM} />] : member ? ownDelete() : [
           item(<Archive size={16} className="text-ink-secondary" />, t("sidebar.bot.archive"), () => onArchive(bot), { disabled: archiveBlocked, hint: archiveHint }),
           <BotDeleteMenuItem key="delete" deleting={deleting} className={MENU_ITEM} onClick={() => { onClose(); onDelete(bot); }} />,
         ]),

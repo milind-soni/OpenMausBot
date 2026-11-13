@@ -1,4 +1,4 @@
-import { EyeOff } from "lucide-react";
+import { EyeOff, UserMinus } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -26,6 +26,28 @@ export function HideDefaultBotItem({ bot, onDone, className = "flex w-full items
     >
       <EyeOff size={16} className="text-ink-secondary" />
       {t("defaultBot.hide")}
+    </button>
+  );
+}
+
+/** Demotes the default bot to a regular bot: the mark is cleared server-side, so it can then be archived or deleted. */
+export function DemoteDefaultBotItem({ bot, onDone, className = "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px]" }: { bot: Bot; onDone: () => void; className?: string }) {
+  const { dispatch } = useStore();
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      data-default-bot-demote=""
+      onClick={() => {
+        dispatch({ type: "updateBot", botId: bot.id, patch: { defaultBot: null } });
+        dispatch({ type: "notice", notice: { kind: "note", botName: null, text: t("defaultBot.demoted", { name: bot.name }) } });
+        onDone();
+      }}
+      title={t("defaultBot.demoteHint")}
+      className={cn(className, "text-ink hover:bg-menu-hover")}
+    >
+      <UserMinus size={16} className="text-ink-secondary" />
+      {t("defaultBot.demote")}
     </button>
   );
 }

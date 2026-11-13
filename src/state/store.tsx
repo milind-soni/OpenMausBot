@@ -1562,7 +1562,6 @@ export function reducer(state: AppState, action: Action): AppState {
         ? withMascotMotion(state, action.botId, "customize")
         : state;
       const target = animated.bots.find((bot) => bot.id === action.botId);
-      const next = action.patch.chiefOfStaff ? { ...animated, bots: withOneChief(animated.bots, { ...target, ...action.patch, id: action.botId }) } : animated;
       const {
         acknowledgeLocalAuto: _localAck,
         applyToAllThreads: _allThreads,
@@ -1570,11 +1569,15 @@ export function reducer(state: AppState, action: Action): AppState {
         computer,
         connectorTools,
         connectorScopes, phoneApps,
+        defaultBot,
         ...rest
       } = action.patch;
+      const next = action.patch.chiefOfStaff ? { ...animated, bots: withOneChief(animated.bots, { ...target, ...rest, id: action.botId }) } : animated;
       const botPatch: Partial<Bot> = { ...rest, ...(phoneApps !== undefined && { phoneApps: phoneApps ?? undefined }), ...(typeof mainThreadChoice === "string" && { mainThreadId: mainThreadChoice }) };
       if (computer === null) botPatch.computer = undefined;
       else if (computer !== undefined) botPatch.computer = computer;
+      if (defaultBot === null) botPatch.defaultBot = undefined;
+      else if (defaultBot !== undefined) botPatch.defaultBot = defaultBot;
       if (connectorTools === null) botPatch.connectorTools = undefined;
       else if (connectorTools !== undefined) botPatch.connectorTools = connectorTools;
       if (connectorScopes === null) botPatch.connectorScopes = undefined;
