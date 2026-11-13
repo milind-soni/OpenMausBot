@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { codeUntil, lastSeen } from "../lib/pairing-time";
-import { canPairDevices, pairingBlockedReason, ServerPairingCard, shownDevices } from "./ServerPairingCard";
+import { canPairDevices, pairingBlockedReason, phoneSecretNote, sameWifiOnlyLink, ServerPairingCard, shownDevices } from "./ServerPairingCard";
 
 describe("pairing devices from a hosted server's settings", () => {
   it("is offered to the owner on the box and to admin sessions, never to chat-only sessions", () => {
@@ -86,5 +86,24 @@ describe("pairing devices from a hosted server's settings", () => {
     ];
     expect(shownDevices(devices, true).map((device) => device.id)).toEqual(["a"]);
     expect(shownDevices(devices, false).map((device) => device.id)).toEqual(["a", "b"]);
+  });
+
+  it("says under the code that secrets go on the web when the server has no phone key, and nothing otherwise", () => {
+    expect(phoneSecretNote({ phoneSecrets: false })).toBe("This phone can chat and approve here, but secrets must be entered on the web or computer.");
+    expect(phoneSecretNote({ phoneSecrets: true })).toBeNull();
+    expect(phoneSecretNote({})).toBeNull();
+  });
+
+  it("says a pairing link works on the same Wi-Fi only when it is a plain http address on this network", () => {
+    expect(sameWifiOnlyLink("http://192.168.1.20:5199/pair#code=ABCD-EFGH-IJKL")).toBe(true);
+    expect(sameWifiOnlyLink("http://10.0.0.5:5199/pair#code=ABCD-EFGH-IJKL")).toBe(true);
+    expect(sameWifiOnlyLink("http://my-pc.local:5199/pair#code=ABCD-EFGH-IJKL")).toBe(true);
+    expect(sameWifiOnlyLink("https://bots.example.com/pair#code=ABCD-EFGH-IJKL")).toBe(false);
+    expect(sameWifiOnlyLink("http://my-pc.tail1234.ts.net:5199/pair#code=ABCD-EFGH-IJKL")).toBe(false);
+    expect(sameWifiOnlyLink("http://100.101.102.103:5199/pair#code=ABCD-EFGH-IJKL")).toBe(false);
+    expect(sameWifiOnlyLink("http://[fd7a:115c:a1e0::1]:5199/pair#code=ABCD-EFGH-IJKL")).toBe(false);
+    expect(sameWifiOnlyLink("http://bots.example.com/pair#code=ABCD-EFGH-IJKL")).toBe(false);
+    expect(sameWifiOnlyLink(null)).toBe(false);
+    expect(sameWifiOnlyLink("not a link")).toBe(false);
   });
 });

@@ -7,7 +7,7 @@ import { expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import { runControlOmb } from "../control-omb.ts";
-import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
+import { ENABLE_ADVANCED_UI, UI_TOOLS_DIR } from "./control-omb-ui.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const binary = resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env });
@@ -31,6 +31,7 @@ type Bot = { id: string; name: string; threadId: string; chiefOfStaff?: boolean;
       try { info = JSON.parse(stdout); return Boolean(info.ui); } catch { return false; }
     }, { timeout: binary ? 180_000 : 600_000, interval: 250 }).toBe(true);
     const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", info.ui, ...args]) as Promise<Record<string, any>>;
+    await ui("eval", "--js", ENABLE_ADVANCED_UI);
     const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
     const call = async (method: string, path: string, body?: unknown) => {
       const response = await fetch(`${info.url}${path}`, { method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
@@ -51,7 +52,6 @@ type Bot = { id: string; name: string; threadId: string; chiefOfStaff?: boolean;
       await call("PATCH", `/api/bots/${first.id}`, { chiefOfStaff: true, acknowledgePeerScope: true });
       chief = { ...first, chiefOfStaff: true };
     }
-    await evaluate("location.reload(); true");
     await expect.poll(pageText, { timeout: 20_000 }).toContain("Calendar");
     if (!await press("Team map")) await press("Tools");
     await expect.poll(() => press("Team map").then(() => evaluate("Boolean(document.querySelector('textarea[aria-label=\"Message bots on the map\"]'))")), { timeout: 20_000 }).toBe(true);
@@ -75,16 +75,14 @@ type Bot = { id: string; name: string; threadId: string; chiefOfStaff?: boolean;
     // A stop reaches every bot at once, as its own words, so each bot's own send path stops it.
     await say("@everyone stop");
     await send();
-    for (const bot of await bots()) await expect.poll(() => linesTo(bot), { message: bot.name }).toContain("stop");
+    for (const bot of await bots()) await expect.poll(() => linesTo(bot), { message: bot.name, timeout: 10_000 }).toContain("stop");
     await shot("everyone-stop");
 
     // No Chief: everyone gets the line, as before.
     await call("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: false });
-    await evaluate("location.reload(); true");
-    await expect.poll(() => press("Team map").then(() => evaluate("Boolean(document.querySelector('textarea[aria-label=\"Message bots on the map\"]'))")), { timeout: 20_000 }).toBe(true);
     await say("@everyone hello all");
     await expect.poll(pageText).not.toContain("who passes it on");
     await send();
-    for (const bot of await bots()) await expect.poll(() => linesTo(bot), { message: bot.name }).toContain("@everyone hello all");
+    for (const bot of await bots()) await expect.poll(() => linesTo(bot), { message: bot.name, timeout: 10_000 }).toContain("@everyone hello all");
   } finally { await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 }); }
 }, 720_000);

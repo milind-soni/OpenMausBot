@@ -34,10 +34,12 @@ import type { WebhookAttempt, WebhookTrigger } from "./webhooks.ts";
 import type { PublishedPageCard } from "./published-page.ts";
 import type { InboxItem, InboxTask } from "./inbox.ts";
 import type { LiveCallRecord, LiveCallState } from "./live-call-wire.ts";
+import type { ForkOrigin, TaskClosedBy, TaskOpenedBy } from "./task-provenance.ts";
 /** What a team bot's main chat is called, beside each person's own chats. */
 export const SHARED_CHAT_TITLE = "Shared chat";
 
 export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveEndReason, LiveFishRelayCommand, LiveFishRelayEvent, LiveFishSessionToken, LiveFishTransport, LiveKeySource, LiveProvider, LiveSettings } from "./live-call-wire.ts";
+export type { ForkOrigin, TaskClosedBy, TaskOpenedBy } from "./task-provenance.ts";
 
 /** Reasoning-effort levels, ascending: a union of what any engine accepts;
  * each driver declares the subset its CLI will take. */
@@ -83,30 +85,6 @@ export type MausExpression = string;
  * never counts as busy. */
 export type BotActivity = "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | "parked.computer";
 
-/** The bot that opened a thread on itself or a teammate. */
-export interface TaskOpenedBy {
-  botId: string;
-  name: string;
-  delegationId?: string;
-  /** What kind of conversation the opener made this: "pair" is the one
-   * durable conversation between two bots; "work" closes itself once its
-   * result has been reported. */
-  kind?: "pair" | "work"; /** The burst this thread is one part of: it is listed under that burst's card, not on its own. */ burstId?: string;
-  /** The opener's own conversation this "work" thread was opened from.
-   * Everything that conversation later sends this bot continues here. */
-  threadId?: string;
-  /** A parallel room job's thread: `threadId` is the room thread it came from, and the member must stay in that room. */
-  roomLane?: true;
-  /** Security invariant: harness-set only, when a turn that could itself use the owner's lent computer opened this thread (server/cloud-lending.ts); any other hand-in clears it for good. */ forOwner?: true; at: number;
-}
-
-/** The bot that closed a thread it opened (or one of its own). */
-export interface TaskClosedBy {
-  botId: string;
-  name: string;
-  at: number;
-}
-
 /** What a task has spent, banked once per settled turn. */
 export interface TaskUsage {
   input: number;
@@ -133,12 +111,13 @@ export interface BotMovedTo {
   at: number;
 }
 
-/** One task = one conversation with its own context, thread and provider
- * session. */
+/** One task = one conversation with its own context, thread and provider session. */
 export interface WireTask extends InboxTask {
   /** Outstanding handoffs, not an active provider turn. */
   waitingForTeammates?: boolean;
   threadId: string;
+  /** The completed message whose visible history seeded this conversation. */
+  origin?: ForkOrigin;
   title: string;
   createdAt: number;
   /** The first message already drove a title attempt for this thread, so a
@@ -561,8 +540,8 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   sendId?: string;
   /** Per-send channel behavior. Absent is legacy quick chat. */
   channelMode?: "chat" | "goal";
-  /** group threads: which member said this (sender attribution). */
-  from?: { botId: string; name: string; color: string };
+  /** from: which member said this (group threads, and post_to_thread). threadPost: a bot posted this row with post_to_thread; seen once a run has read it. */
+  from?: { botId: string; name: string; color: string }; threadPost?: { deliveryId: string; fromBotId: string; fromThreadId: string; seen?: boolean };
   /** Set on a room message a bot pushed in with post_to_room. */
   peerPost?: { unattended?: boolean };
   /** A room reply whose speaker the decision model picked (an Auto room),
@@ -815,6 +794,11 @@ export type GroupDefaultResponder =
 /** One independent conversation inside a user-created channel. */
 export interface GroupTask {
   threadId: string;
+  /** Replies in this conversation that have not been read. */
+  unread?: boolean;
+  lastReadMessageId?: string;
+  /** The completed message whose visible history seeded this conversation. */
+  origin?: ForkOrigin;
   title: string;
   createdAt: number;
   pinnedCwd?: string | null;
@@ -989,8 +973,8 @@ export type ServerFrame =
   /** A bot's data sheet changed. Whole sheet each time. */
   | DataBroadcast
   | { kind: "bot.deleted"; botId: string }
-  /** The whole fleet in its new order (PUT /api/bots/order); a member is sent only the bots they see. */
-  | { kind: "bots.order"; botIds: string[] }
+  /** The whole fleet (PUT /api/bots/order) or every room (PUT /api/groups/order) in its new order; a member is sent only the ones they see. */
+  | { kind: "bots.order"; botIds: string[] } | { kind: "groups.order"; groupIds: string[] }
   | { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }
   /** A job is waiting for the phone whose registry key this is; it polls now. */
   | { kind: "device.job"; phone: string; id: string }

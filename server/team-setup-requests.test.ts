@@ -131,7 +131,7 @@ describe("reviewed Chief team setup", () => {
     const h = harness();
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: "true" } }])).toThrow();
     h.peer.section = "Private";
-    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }])).toThrow(/authorized/);
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }])).toThrow(/Private department, which Clive is not in charge of/);
     h.peer.section = "Engineering";
     h.chief.chiefOfStaff = false;
     expect(() => h.propose([{ action: "update", botId: h.chief.id, fields: { chiefOfStaff: true } }])).toThrow(/Only an active Chief/);
@@ -210,7 +210,7 @@ describe("reviewed Chief team setup", () => {
   it("rejects unknown models, foreign teams, missing specialists and duplicate names", () => {
     const h = harness();
     expect(() => h.propose([specialist("Mira", "Engineering", { instanceId: "codex", model: "made-up" })])).toThrow(/catalog/);
-    expect(() => h.propose([specialist("Mira", "Private")])).toThrow(/authorized/);
+    expect(() => h.propose([specialist("Mira", "Private")])).toThrow(/Private department, which Clive is not in charge of/);
     expect(() => h.propose([specialist("Mira", "Private")], ["Private"])).toThrow(/exists/);
     expect(() => h.propose([specialist("Mira", "Engineering")], ["Growth"])).toThrow(/needs a specialist/);
     expect(() => h.propose([specialist("Ada", "Work")])).toThrow(/already exists/);
@@ -337,6 +337,50 @@ describe("reviewed Chief team setup", () => {
       modelSelection: { instanceId: "codex", model: "gpt-fixture" },
     } }]);
     expect(card.detail).toContain("Default AI and model: claude/sonnet (variant high) → codex/gpt-fixture (no variant)");
+  });
+
+  it("switches the model of 40 existing bots in one setup, while still reviewing at most eight new bots", async () => {
+    const h = harness();
+    const team = Array.from({ length: 39 }, (_, index) => h.bot(`Worker${index}`));
+    const switchModel = (bot: BotRecord) => ({ action: "update", botId: bot.id, fields: { modelSelection: { instanceId: "claude", model: "opus" } } });
+    const card = h.propose([h.peer, ...team].map(switchModel));
+    expect(card.title).toBe("Apply setup for 40 bots?");
+    expect((await h.resolve(card.requestId))?.result.state).toBe("applied");
+    expect([h.peer, ...team].every((bot) => bot.modelSelection.model === "opus")).toBe(true);
+    expect(() => h.propose([h.peer, ...team, h.bot("Extra")].map(switchModel))).toThrow(/at most 40 bots/);
+    expect(() => h.propose(Array.from({ length: 9 }, (_, index) => specialist(`New${index}`, "Work")))).toThrow(/at most 8 new bots/);
+  });
+
+  it("adds a rule to the end of each bot's instructions without restating them, with a diff and one Undo", async () => {
+    const h = harness(); h.autoApply.mockReturnValue("level");
+    h.peer.soul = "Verify sources.\n"; const blank = h.bot("Blank");
+    const add = (bot: BotRecord) => ({ action: "update", botId: bot.id, fields: { soulAppend: "Reply in English." } });
+    const preview = h.propose([add(h.peer), add(blank)]);
+    expect(preview.detail).toContain(" Verify sources.");
+    expect(preview.detail).toContain("+Reply in English.");
+    const response = await h.submit([add(h.peer), add(blank)]);
+    expect(response).toMatchObject({ state: "applied", applied: true });
+    expect(h.peer.soul).toBe("Verify sources.\n\nReply in English.");
+    expect(blank.soul).toBe("Reply in English.");
+    const twice = h.propose([{ action: "update", botId: blank.id, fields: { soulAppend: "Be brief." } }, { action: "update", botId: blank.id, fields: { soulAppend: "Cite sources." } }]);
+    expect(twice.detail).toContain("+Be brief.");
+    expect(twice.detail).toContain("+Cite sources.");
+    expect(await h.service.undo({ botId: h.chief.id, threadId: h.chief.threadId, requestId: response.requestId })).toMatchObject({ state: "undone" });
+    expect(h.peer.soul).toBe("Verify sources.\n");
+    expect(blank.soul).toBe("");
+  });
+
+  it("refuses an added rule on a new bot, beside replacement instructions, or where re-saving would redact existing text", () => {
+    const h = harness();
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { soul: "New.", soulAppend: "More." } }])).toThrow(/either soul or soulAppend/);
+    expect(() => h.propose([{ ...specialist("Mira", "Work"), fields: { ...specialist("Mira", "Work").fields, soul: undefined, soulAppend: "More." } }])).toThrow(/soulAppend only adds to an existing bot/);
+    const outsider = h.bot("Outsider", { section: "Private", soul: `Use key sk-${"b".repeat(24)} for the API.` });
+    expect(() => h.propose([{ action: "update", botId: outsider.id, fields: { soulAppend: "More." } }])).toThrow(/Private/);
+    h.peer.soul = `Use key sk-${"a".repeat(24)} for the API.`;
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { soulAppend: "More." } }])).toThrow(/credential-like text/);
+    // Clean on its own, but the added rule completes a pattern that reaches back into the existing text.
+    h.peer.soul = "Paste keys after -----BEGIN RSA PRIVATE KEY----- and keep them out of chat.";
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { soulAppend: "Stop at -----END RSA PRIVATE KEY-----." } }])).toThrow(/credential-like text/);
   });
 });
 
@@ -477,9 +521,20 @@ describe("team setup that applies on its own", () => {
     expect(h.apply).toHaveBeenCalledTimes(1);
   });
 
+  it("names the department and the setting that unlocks it when a bot is outside the Chief's departments", async () => {
+    const h = harness(); h.autoApply.mockReturnValue("full-access");
+    const outsider = h.bot("Rex", { section: "Private" });
+    const unlock = 'which Clive is not in charge of. Only the person can add a department, in Clive\'s bot settings, Permissions, "Also in charge of".';
+    await expect(h.submit([{ action: "update", botId: outsider.id, fields: { title: "Must not apply" } }])).rejects.toThrow(`@Rex is in the Private department, ${unlock}`);
+    await expect(h.submit([{ action: "update", botId: h.peer.id, fields: { section: "Private" } }])).rejects.toThrow(`That is the Private department, ${unlock}`);
+    await expect(h.service.submitDeletion({ botId: h.chief.id, threadId: h.chief.threadId, targetBotId: outsider.id, reason: "remove" })).rejects.toThrow(`@Rex is in the Private department, ${unlock}`);
+    expect(outsider.title).toBe(""); expect(h.peer.section).toBe("Work");
+    expect(h.messages).toHaveLength(0); expect(h.apply).not.toHaveBeenCalled(); expect(h.deleteBot).not.toHaveBeenCalled();
+  });
+
   it("retains model, scope, source, permission-field and deletion safety checks", async () => {
     const h = harness(); h.autoApply.mockReturnValue("full-access");
-    await expect(h.submit([specialist("Mira", "Private")])).rejects.toThrow(/authorized/);
+    await expect(h.submit([specialist("Mira", "Private")])).rejects.toThrow(/Private department, which Clive is not in charge of/);
     await expect(h.submit([specialist("Mira", "Work", { instanceId: "claude", model: "unknown" })])).rejects.toThrow(/catalog/);
     await expect(h.submit([{ action: "update", botId: h.peer.id, fields: { approvalMode: "full" } }])).rejects.toThrow();
     await expect(h.service.submitDeletion({ botId: h.chief.id, threadId: h.chief.threadId, targetBotId: h.chief.id, reason: "remove" })).rejects.toThrow(/authorized/);

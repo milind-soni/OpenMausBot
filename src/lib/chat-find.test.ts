@@ -3,7 +3,7 @@ import { createElement, useState } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { requestChatFind, useChatFindOpen, useChatFindRequests } from "./chat-find";
+import { requestChatFind, useChatFindOpen, useChatFindRequests, useChatFindShortcut } from "./chat-find";
 
 let root: Root;
 let container: HTMLDivElement;
@@ -17,6 +17,11 @@ function Chat({ threadId }: { threadId: string }) {
 function Menu({ threadId }: { threadId: string }) {
   seen[threadId] = useChatFindOpen(threadId);
   return null;
+}
+function ShortcutChat({ panel, panelOpen }: { panel: boolean; panelOpen: boolean }) {
+  const [open, setOpen] = useState(false);
+  useChatFindShortcut(panel, panelOpen, setOpen);
+  return createElement("span", { "data-panel": panel ? "fork" : "main", "data-open": open ? "yes" : "no" });
 }
 const bar = () => container.querySelector("[data-find]")?.getAttribute("data-find");
 const render = (threadId: string) => flushSync(() => root.render([
@@ -62,4 +67,14 @@ describe("the chat find bar, opened from a menu outside the chat", () => {
     flushSync(() => root.render(createElement(Menu, { threadId: "t2" })));
     expect(seen.t2).toBe(false);
   });
+});
+
+it("routes Cmd+F to the fork when its panel is open", () => {
+  flushSync(() => root.render([
+    createElement(ShortcutChat, { key: "main", panel: false, panelOpen: true }),
+    createElement(ShortcutChat, { key: "fork", panel: true, panelOpen: true }),
+  ]));
+  flushSync(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, cancelable: true })));
+  expect(container.querySelector('[data-panel="main"]')?.getAttribute("data-open")).toBe("no");
+  expect(container.querySelector('[data-panel="fork"]')?.getAttribute("data-open")).toBe("yes");
 });

@@ -657,6 +657,7 @@ describe("agents-proxy MCP surface", () => {
       "publish_page",
       "unpublish_page",
       "post_to_room",
+      "post_to_thread",
       "create_bot",
       "list_team_setup",
       "list_team_library",
@@ -1755,6 +1756,24 @@ describe("agents-proxy MCP surface", () => {
     });
   });
 
+  it("tells a one-time routine given a timeZone that its zone is the offset in at", async () => {
+    lastRoutineRequestBody = null;
+    const res = await callTool("create_trigger", { when: "schedule",
+      name: "One check",
+      instructions: "Check the release page.",
+      schedule: { type: "once", at: "2026-09-01T09:00:00+08:00", timeZone: "Asia/Shanghai" },
+    });
+    expect(res.result.isError).toBe(true);
+    expect(lastRoutineRequestBody).toBeNull();
+    const text = res.result.content[0].text;
+    expect(text).toContain('A once schedule takes no "timeZone"');
+    expect(text).toContain('offset inside "at"');
+    expect(text).not.toContain("Weekly and daily times");
+    const list = await rpc("tools/list");
+    const routine = list.result.tools.find((entry: { name: string }) => entry.name === "trigger");
+    expect(routine.inputSchema.properties.schedule.properties.timeZone.description).toMatch(/^Only for cron/);
+  });
+
   it("proposes an interval routine with an optional start anchor", async () => {
     await callTool("create_trigger", { when: "schedule",
       name: "Frequent check",
@@ -2478,7 +2497,7 @@ describe("tool bridge", () => {
   /** The main child's switches: a Chief with skills and shared computers. */
   const CHIEF = { OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1", OMB_CHIEF_OF_STAFF: "1", OMB_COMPUTER_SELECTION: "1" };
   const CHIEF_ONLY = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
-  const HOT = ["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "request_credential", "request_sign_in", "fill_login", "message_person", "memory_update"];
+  const HOT = ["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "post_to_thread", "request_credential", "request_sign_in", "fill_login", "message_person", "memory_update"];
   let chief: Rpc;
   let plain: Rpc;
   let off: Rpc;
