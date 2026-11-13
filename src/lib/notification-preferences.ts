@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { reportWindowPrefs } from "./window-prefs";
 
 export const NOTIFICATION_SOUNDS_KEY = "omb-notification-sounds";
 export const NOTIFICATION_FEED_KEY = "omb-notification-feed";
@@ -63,6 +64,7 @@ export function setNotificationSounds(enabled: boolean): void {
   } catch {
   }
   notify();
+  reportWindowPrefs();
 }
 
 export function useNotificationSounds(): boolean {

@@ -687,6 +687,7 @@ describe("agents-proxy MCP surface", () => {
       "skills_list",
       "skill_manage",
       "mcp_server",
+      "app_settings",
     ]);
     const tool = (name: string) => list.result.tools.find((entry: { name: string }) => entry.name === name);
     const coordinate = tool("coordinate_bots");

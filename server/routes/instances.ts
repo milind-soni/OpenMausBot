@@ -67,6 +67,12 @@ export interface InstanceRouteDeps {
   checkInstance?(instance: ProviderInstance): Promise<EngineCheck>;
 }
 
+/** Whether a bot, its backups or threads, or the new-bot default is set to this engine. */
+export function engineChosen(store: Pick<Store, "bots" | "tasks">, cfg: Pick<AppConfig, "defaultModelSelection">, instanceId: string): boolean {
+  return cfg.defaultModelSelection?.instanceId === instanceId || store.bots.some((bot) => bot.modelSelection.instanceId === instanceId ||
+    bot.fallback?.some(candidate => candidate.instanceId === instanceId) || store.tasks(bot.id).some((task) => task.modelSelection?.instanceId === instanceId));
+}
+
 export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
   const {
     store, cfg, registry, sessions, providerAuthSessions, hostedModels, providerConfigBusy, providerInstancesChanging,
@@ -75,10 +81,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
   } = deps;
   const describeInstances = async () => hostedModels ? deps.describeInstances()
     : withEndpointUrls(withCodexEndpointInfo(withClaudeBedrockInfo(withClaudeEndpointInfo(await deps.describeInstances(), cfg.instances ?? {}), cfg.instances ?? {}), cfg.instances ?? {}), cfg.instances ?? {});
-  /** Bots, their backups and threads, the new-bot default, or a turn running on it: a provider in use can't go away. */
-  const providerInUse = (instanceId: string): boolean => cfg.defaultModelSelection?.instanceId === instanceId || store.bots.some((bot) =>
-    bot.modelSelection.instanceId === instanceId || bot.fallback?.some(candidate => candidate.instanceId === instanceId) || store.tasks(bot.id).some((task) => task.modelSelection?.instanceId === instanceId)) ||
-    busyProviderSelections().some((selection) => selection.instanceId === instanceId);
+  /** Chosen for a bot or the new-bot default, or running a turn: a provider in use can't go away. */
+  const providerInUse = (instanceId: string): boolean => engineChosen(store, cfg, instanceId) || busyProviderSelections().some((selection) => selection.instanceId === instanceId);
   const busyProviderSelections = () => store.bots.flatMap((bot) => {
     const busyTasks = store.tasks(bot.id).filter((task) => threadBusy(bot.id, task.threadId));
     const selections = busyTasks.map((task) => botForThread(bot.id, task.threadId)!.modelSelection);

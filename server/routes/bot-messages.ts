@@ -100,6 +100,8 @@ export interface BotMessageRouteDeps {
   resolveAndSendTrust(res: ServerResponse, threadId: string, requestId: string, behavior: Behavior): boolean;
   resolveAndSendTeamSetup(res: ServerResponse, args: { botId: string; threadId: string; requestId: string; behavior: string }, ownerReview: boolean): Promise<boolean>;
   resolveAndSendMcp(res: ServerResponse, args: { botId: string; threadId: string; requestId: string; behavior: string }, ownerReview: boolean): Promise<boolean>;
+  /** A "Change X?" card for an app setting; Allow counts only with ownerReview. */
+  resolveAndSendAppSettings?(res: ServerResponse, args: { threadId: string; requestId: string; behavior: string }, ownerReview: boolean): boolean;
   resolveAndSendRoutine(res: ServerResponse, args: CardAnswer): boolean;
   resolveAndSendProfile(res: ServerResponse, args: CardAnswer): boolean;
   resolveAndSendModel(res: ServerResponse, args: CardAnswer): boolean;
@@ -588,6 +590,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         const answer = { botId: bot.id, threadId: bot.threadId, requestId: String(body.requestId), behavior };
         if (await resolveAndSendTeamSetup(res, answer, ownerReview(auth, req))) return;
         if (await resolveAndSendMcp(res, answer, ownerReview(auth, req))) return;
+        if (deps.resolveAndSendAppSettings?.(res, answer, ownerReview(auth, req))) return;
         if (resolveAndSendRoutine(res, {
           botId: bot.id,
           botName: bot.name,
@@ -700,6 +703,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           if (!mcpBotId) return json(res, 400, { error: "This MCP server card has no valid owner" });
           if (await resolveAndSendMcp(res, { botId: mcpBotId, threadId, requestId, behavior }, ownerReview(auth, req))) return;
         }
+        if (deps.resolveAndSendAppSettings?.(res, { threadId, requestId, behavior }, ownerReview(auth, req))) return;
         const profileCard = store.messagesFor(threadId).find(
           (message) => message.card?.requestId === requestId && message.card.profileRequest,
         );
