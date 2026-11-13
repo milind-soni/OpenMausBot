@@ -54,6 +54,8 @@ export interface AppTrigger {
   remote: { triggerId?: string; state: "active" | "pending" | "error"; error?: string; syncedAt?: number };
   problem?: AppTriggerProblem;
   sourceThreadId?: string;
+  /** Each run continues this automation's previous run conversation instead of starting a new one. */
+  sameConversation?: boolean;
   /** Events that started a run or joined one. */
   received: number;
   filtered: number;
@@ -120,9 +122,11 @@ export interface AppTriggerDefinition {
   filter?: AppTriggerFilter;
   config?: Record<string, unknown>;
   runOn?: RoutineRunOn;
+  /** Each run continues the automation's previous run conversation. */
+  sameConversation?: boolean;
 }
 
-export type AppTriggerChange = Partial<Pick<AppTriggerDefinition, "name" | "instructions" | "filter" | "config" | "runOn">>;
+export type AppTriggerChange = Partial<Pick<AppTriggerDefinition, "name" | "instructions" | "filter" | "config" | "runOn" | "sameConversation">>;
 
 export type AppTriggerRequestOperation =
   | { action: "create"; trigger: AppTriggerDefinition; forBot?: { botId: string; name: string } }
@@ -142,7 +146,7 @@ export interface AppTriggerRequestCardData {
     name: string;
     /** The automation's revision right after the change; Undo refuses once it moved. */
     appliedUpdatedAt?: number;
-    before?: { name: string; prompt: string; runOn: RoutineRunOn; enabled: boolean; filter?: AppTriggerFilter; config: Record<string, unknown> };
+    before?: { name: string; prompt: string; runOn: RoutineRunOn; enabled: boolean; filter?: AppTriggerFilter; config: Record<string, unknown>; sameConversation?: boolean };
   };
 }
 

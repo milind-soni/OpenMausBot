@@ -150,6 +150,10 @@ const TRIGGER_FIELDS_SCHEMA = {
     type: "boolean",
     description: "Only for updates: set true to remove an existing safety limit. Do not combine with timeout_minutes.",
   },
+  same_conversation: {
+    type: "boolean",
+    description: "app_event and webhook only: each run continues the previous run's conversation, so it sees earlier runs. Default false.",
+  },
   continuity: {
     type: "boolean",
     description: "Schedules only: give each run the last completed run's report, for work that builds on last time (QA passes, monitoring, follow-ups). Default false; false in an update starts fresh.",
@@ -269,6 +273,20 @@ const TOOL_DEFINITIONS = [
       surface: { type: "string", enum: ["auto", "cloud", "vm", "local", "browser"],
         description: "auto = suitable configured computer, cloud = the bot's cloud computer or self-hosted VPS, vm = isolated Local VM, local = user's own desktop, browser = built-in browser. Omit to list." },
     } },
+  },
+  {
+    name: "reset_cloud_computer",
+    description:
+      "Reset your cloud computer when it is stuck: it is deleted with everything on it once your turn ends, and your next turn makes a fresh one. Only for a stuck computer. End your turn after calling it." + CHIEF_PROFILE_TARGET,
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        why: { type: "string", description: "One sentence shown in the chat: what is wrong with the computer." },
+        for_bot_id: { type: "string", description: "Chief of Staff only: the bot whose cloud computer to reset, from list_bots." },
+      },
+      required: ["why"],
+    },
   },
   {
     name: "list_threads",
@@ -908,7 +926,7 @@ const VOICE_TOOL_NAMES = new Set(["send_voice_note"]);
 const CHIEF_ONLY_TOOL_NAMES = new Set([
   "create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread",
 ]);
-const CHIEF_TARGET_TOOL_NAMES = new Set(["propose_profile", "propose_model"]);
+const CHIEF_TARGET_TOOL_NAMES = new Set(["propose_profile", "propose_model", "reset_cloud_computer"]);
 const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
 
 const LOCAL_VM_TOOL_NAMES = new Set(["vm_exec"]);
@@ -943,7 +961,7 @@ function catalogTools(profile: CatalogProfile) {
     (profile.computerSelection === true || tool.name !== "select_computer") &&
     (profile.room !== true || !ROOM_REFUSED_TOOL_NAMES.has(tool.name)) &&
     (profile.imageGeneration === true || !IMAGE_TOOL_NAMES.has(tool.name)) && (profile.appHosting === true || !HOSTING_TOOL_NAMES.has(tool.name)) &&
-    (profile.meetings === true || !MEETING_TOOL_NAMES.has(tool.name)));
+    (profile.meetings === true || (!MEETING_TOOL_NAMES.has(tool.name) && tool.name !== "reset_cloud_computer")));
   const AUTHORING_TOOLS = profile.skillAuthoring
     ? BOT_SCOPED_TOOLS
     : BOT_SCOPED_TOOLS.filter((tool) => !SKILL_TOOL_NAMES.has(tool.name));

@@ -35,6 +35,7 @@ const MEMORY_FILES = 100;
 const SCOPED_READ = /^\/api\/cloud-send(?:\?move=1|\/manifest|\/chats(?:\?attachments=1)?|\/files)$/u;
 const PICTURE_TYPES = { png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 const VAULT_ID = /^[\w-]{1,128}$/u;
+const ITEM_KEY = /^[\w-]{1,128}:[\w-]{1,128}$/u;
 /** Whole sends, which carry the chats too; a send of some items (Use this computer's, one login) never does. */
 const CHAT_REASONS = new Set(["button", "my-cloud", "menu", "move"]);
 /** Bring newer chats' copy of the whole workspace, for a Cloud too old to take chats by row: never a move, which such a
@@ -334,12 +335,12 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
 
   /** One send at a time; one asked while another runs waits for it, then runs as it was asked. A move (`reason: "move"`)
    * carries everything; its final pass (`final`) carries the sign-ins that refresh themselves too, and this computer lets
-   * go of each once My Cloud has it. */
-  async function send({ keys = null, force = [], reason = "button", final = false, scope = null } = {}) {
+   * go of each once My Cloud has it. `files: false` leaves the bots' files. */
+  async function send({ keys = null, force = [], reason = "button", final = false, scope = null, files = true } = {}) {
     while (running) await running.promise.catch(() => {});
     const origin = cloud.origin();
     if (!origin) throw new CloudSendError("no_cloud", "This computer has no My Cloud yet.");
-    const job = { reason, final: reason === "move" && final === true, scope, promise: null, chats: false };
+    const job = { reason, final: reason === "move" && final === true, scope, files: files !== false, promise: null, chats: false };
     running = job;
     progress = null;
     localScope = scope;
@@ -431,8 +432,10 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       if (move) {
         // Its notes about the person stay with them when a bot moves into a team.
         if (!team) await kinds.moveMemory(ctx, moved);
-        try { await kinds.moveFiles(ctx, moved, computer?.label); }
-        catch (error) { result.failed.push({ key: "files", kind: "files", label: "Files", error: sentence(error?.message) ?? "The files could not be sent." }); }
+        if (job.files) {
+          try { await kinds.moveFiles(ctx, moved, computer?.label); }
+          catch (error) { result.failed.push({ key: "files", kind: "files", label: "Files", error: sentence(error?.message) ?? "The files could not be sent." }); }
+        }
       }
       const after = parseSendSummary((await session.call("GET", summaryRoute)).body);
       if (after) remember(origin, ctx, after);
@@ -897,14 +900,39 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     const onePassword = handed?.onePassword;
     if (!record(onePassword) || typeof onePassword.token !== "string") throw new CloudSendError("local", "1Password is not connected on this computer.");
     const parts = row.parts ?? ["token", "vaults"];
-    if (row.state === "only-here" || parts.includes("token")) {
+    const connecting = row.state === "only-here" || parts.includes("token");
+    // My Cloud's item choices become this computer's. Its own go ahead of the token (`keep`: other items there stay as they
+    // were), so none is readable there under its vault's wider choice; ones handed back here go back there last, once all took.
+    const items = Object.fromEntries(Object.entries(onePassword.itemGrants ?? {}).filter(([item]) => ITEM_KEY.test(item))
+      .map(([item, bots]) => [item, botsOnCloud(bots, ctx.cloudBots)]));
+    const putItems = async (keep) => {
+      const kept = await ctx.session.call("PUT", "/api/logins/1password/items", keep ? { items, keep } : { items });
+      // A Cloud too old for item choices has none to undo, but an item narrowed here must not open to every bot there.
+      if (!kept.ok && !(kept.status === 405 && !Object.keys(items).length)) {
+        throw refusedError("refused", kept, "My Cloud could not keep its 1Password logins to the same bots. Update My Cloud and send again.");
+      }
+    };
+    await putItems(true);
+    if (connecting) {
       const connected = await ctx.session.call("POST", "/api/logins/1password", { token: onePassword.token });
       if (!connected.ok) throw onePasswordRefusal(connected);
     }
-    for (const [vault, bots] of Object.entries(onePassword.grants ?? {})) {
-      if (!VAULT_ID.test(vault)) continue;
-      const granted = await ctx.session.call("PATCH", `/api/logins/1password/vaults/${encodeURIComponent(vault)}`, { bots: botsOnCloud(bots, ctx.cloudBots) });
-      if (!granted.ok && granted.status !== 404) throw refusedError("refused", granted, "My Cloud connected 1Password but could not keep its vaults to the same bots.");
+    try {
+      for (const [vault, bots] of Object.entries(onePassword.grants ?? {})) {
+        if (!VAULT_ID.test(vault)) continue;
+        const granted = await ctx.session.call("PATCH", `/api/logins/1password/vaults/${encodeURIComponent(vault)}`, { bots: botsOnCloud(bots, ctx.cloudBots) });
+        if (!granted.ok && granted.status !== 404) throw refusedError("refused", granted, "My Cloud connected 1Password but could not keep its vaults to the same bots.");
+      }
+      await putItems(false);
+    } catch (error) {
+      // Fail closed: a token this send connected is taken off again rather than left open wider than here.
+      if (connecting) {
+        const removed = await ctx.session.call("DELETE", "/api/logins/1password").catch(() => null);
+        if (!removed?.ok) {
+          throw new CloudSendError("refused", "My Cloud connected 1Password but could not keep its vaults to the same bots, nor disconnect it again. Disconnect 1Password in My Cloud's settings, then send again.", { cause: error });
+        }
+      }
+      throw error;
     }
     done(ctx, row.key);
     ctx.result.onePassword = true;

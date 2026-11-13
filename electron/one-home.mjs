@@ -168,7 +168,7 @@ export function arrivedCounts(here, there) {
  *   journal: { read(): unknown, write(value: unknown): void },
  *   cloud(): null | { origin: string | null, account: string, machine: string | null, ready: boolean, moves: boolean, ended: boolean, paid: boolean,
  *     homecoming?: { installationId: string, name: string }, signIn?: string, verified?: boolean, id?: string, formerOrigins?: string[] },
- *   send: { move(options?: { final?: boolean }): Promise<unknown>, check(): Promise<{ ok: boolean }>, switches(): Record<string, boolean>, snapshot(): any },
+ *   send: { move(options?: { final?: boolean, files?: boolean }): Promise<unknown>, check(): Promise<{ ok: boolean }>, switches(): Record<string, boolean>, snapshot(): any },
  *   local: { freeze(origin: string): Promise<{ frozen: true } | { busy: string, what?: string }>, unfreeze(options?: { automations?: "off" }): Promise<void>, frozen(): Promise<boolean>, json(route: string): Promise<any>,
  *     call(method: string, route: string, body?: unknown): Promise<{ ok: boolean, status: number, body: any }>, forget?(): Promise<void>,
  *     marker?(): Promise<{ frozen: boolean, cloud?: string, place?: string }> },
@@ -475,14 +475,14 @@ export function createOneHome(deps) {
     return next;
   }
 
-  /** Home is My Cloud: tops up what a newer app learned to move, deletes this computer's copy once it is old enough and
-   * My Cloud was paid for, and comes home if My Cloud ends. */
+  /** Home is My Cloud: tops up what a newer app learned to move, never the bots' files the server already has, deletes this
+   * computer's copy once it is old enough and My Cloud was paid for, and comes home if My Cloud ends. */
   async function steady(journal, cloud, waiting) {
     let next = await settle(journal, cloud);
     if (cloud?.ended) return ended(next, cloud);
     // Not while this computer's own copy isn't the server answering: it goes as soon as it is, rather than an hour later.
     if (!waiting && !next.forgot && deps.version && next.version !== deps.version && cloud?.ready && deps.ownCopy?.() !== false) {
-      try { await deps.send.move({ final: true }); next = write({ ...next, version: deps.version, retryAt: undefined }); }
+      try { await deps.send.move({ final: true, files: false }); next = write({ ...next, version: deps.version, retryAt: undefined }); }
       catch (error) { log(`one home: the top-up waits (${error?.message ?? error})`); next = write({ ...next, retryAt: now() + HOUR }); }
     }
     if (!next.forgot && cloud?.paid && now() - next.doneAt >= KEPT_MS && deps.local.forget) {

@@ -9,6 +9,8 @@ export interface WebhookRequestDefinition {
   instructions: string;
   runOn: "maus" | "cloud";
   eventTypes?: string[];
+  /** Each run continues the webhook's previous run conversation. */
+  sameConversation?: boolean;
 }
 
 export type WebhookRequestOperation =

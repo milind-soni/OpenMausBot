@@ -89,6 +89,19 @@ describe("Settings full backups", () => {
     expect(link.click).toHaveBeenCalledOnce();
     expect([...storage.values()]).not.toContain("correct horse battery");
     expect(render().html).not.toContain('value="correct horse battery"');
+    expect(render().html).not.toContain('id="backup-export"');
+  });
+
+  it("keeps the export dialog open with its reason when the export fails, so it can be tried again", async () => {
+    await ready();
+    open("export");
+    const passwords = render().nodes.filter((node) => node.type === "input" && node.props.type === "password");
+    change(passwords[0], "correct horse battery"); change(passwords[1], "correct horse battery");
+    fixture.api.mockRejectedValueOnce(new Error("Disk full"));
+    submit(formOf("backup-export")); await flush();
+    const html = render().html;
+    expect(html).toContain('id="backup-export"');
+    expect(html).toMatch(/role="alert"[^>]*>Disk full</);
   });
 
   it("uploads a raw file, validates it, and requires exact REPLACE with the staged ID", async () => {

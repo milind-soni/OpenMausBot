@@ -77,7 +77,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     botState: deps.botState,
     runs: {
       enqueue: (input) => deps.routines().enqueueWebhook(input),
-      merge: (triggerId, eventId, merge) => deps.routines().mergeIntoQueuedRun(triggerId, eventId, merge),
+      merge: (triggerId, eventId, sameConversation, merge) => deps.routines().mergeIntoQueuedRun(triggerId, eventId, sameConversation, merge),
       receipt: (triggerId, eventId) => deps.routines().webhookRunReceipt(triggerId, eventId),
       pending: (triggerId) => deps.routines().activeWebhookRunCount(triggerId),
       cancelQueued: (triggerId, message) => deps.routines().cancelQueuedWebhook(triggerId, message),
@@ -133,6 +133,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
           ...(body.filter && typeof body.filter === "object" ? { filter: body.filter as never } : {}),
           ...(body.config && typeof body.config === "object" ? { config: body.config as Record<string, unknown> } : {}),
           ...(body.runOn === "cloud" ? { runOn: "cloud" as const } : {}),
+          ...(body.sameConversation === true ? { sameConversation: true } : {}),
         });
         return json(res, 201, { trigger });
       }
@@ -152,6 +153,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
           ...(body.filter === null || (body.filter && typeof body.filter === "object") ? { filter: body.filter as never } : {}),
           ...(body.config && typeof body.config === "object" ? { config: body.config as Record<string, unknown> } : {}),
           ...(typeof body.enabled === "boolean" ? { enabled: body.enabled } : {}),
+          ...(typeof body.sameConversation === "boolean" ? { sameConversation: body.sameConversation } : {}),
         };
         const trigger = await manager.update(id, patch);
         return trigger ? json(res, 200, { trigger }) : json(res, 404, { error: "no such automation" });
