@@ -17,9 +17,9 @@ Skills are reference material, and the bot is told so explicitly: a skill cannot
 ## Where to find them
 
 - **A bot's skills** live in its profile, under **Skills**. Each row can be switched on or off, opened to read the full text, or deleted. Switching one off keeps its files; deleting removes them for good. A skill imported into a bot's profile arrives switched off, so you can read it first.
-- **The skills library** is in **App settings → Skills** (it needs Advanced mode). Import a skill by pasting its `SKILL.md` exactly as it is on disk — nothing is fetched from the network during the import — then switch it on and assign it to one bot, several, or every current and future bot. A library skill starts out switched off: open it to read the text, then switch it on. Only a library skill that is switched on reaches the bots it is assigned to, and if its text changes later it goes back to waiting for review and stops reaching them until you switch it on again.
+- **The skills library** is in **App settings → Skills**, on an installation where the skills library feature is switched on in the config — there is no switch for it in the settings themselves. Import a skill by pasting its `SKILL.md` exactly as it is on disk — nothing is fetched from the network during the import — then switch it on and assign it to one bot, several, or every current and future bot. A library skill starts out switched off: open it to read the text, then switch it on. Only a library skill that is switched on reaches the bots it is assigned to, and if its text changes later it goes back to waiting for review and stops reaching them until you switch it on again.
 
-The index a bot sees each turn lists at most 30 skills and at most 4,000 bytes, so a long list is trimmed with a note to the bot saying which skills were left out. The skills are still there — it is only the index that is trimmed.
+The index a bot sees each turn lists at most 30 skills and at most 4,000 bytes, so a long list is trimmed, and the bot gets a note saying how many were left out and why — the skill cap or the byte cap. The names of the skills left out go to the server log rather than into the note. The skills are still there — it is only the index that is trimmed.
 
 ## Writing one
 
@@ -30,7 +30,7 @@ changelog-style/
 └── SKILL.md
 ```
 
-The name must be lowercase letters, digits and single hyphens (up to 64 characters) and must match the folder name. The file starts with frontmatter:
+The name must be lowercase letters, digits and single hyphens (up to 64 characters); the spec also asks for it to match the folder that holds the skill, and an imported skill gets a folder named after it. The file starts with frontmatter:
 
 ```markdown
 ---
