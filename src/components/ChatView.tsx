@@ -654,7 +654,7 @@ export function ChatView({ bot }: { bot: Bot }) {
 
   return (
     <main className="relative flex h-full min-w-0 flex-1 bg-app">
-      <section className="relative flex h-full min-w-0 flex-1 flex-col">
+      <section className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       {/* Header */}
       <div
         className={cn("flex items-center justify-between px-5 py-3", isWin && "pr-[148px]")}
@@ -676,7 +676,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           <span className="text-[15px] font-semibold text-ink">{bot.name}</span>
           {bot.busy && <Loader2 size={14} className="animate-spin text-ink-secondary" />}
         </button>
-        <div className="flex items-center gap-2" style={noDrag}>
+        <div className="flex shrink min-w-0 items-center gap-1.5" style={noDrag}>
           {bot.busy && (
             <button
               onClick={() => dispatch({ type: "interrupt", botId: bot.id })}

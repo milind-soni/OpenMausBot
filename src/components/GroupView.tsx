@@ -211,11 +211,11 @@ export function GroupView({ group }: { group: Group }) {
 
   return (
     <main className="relative flex h-full min-w-0 flex-1 bg-app">
-      <section className="relative flex h-full min-w-0 flex-1 flex-col">
+      <section className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       {/* Header: name left, member mauses right — their motion IS the status */}
       <div className={cn("flex items-center justify-between px-5 py-3", isWin && "pr-[148px]")} style={drag}>
         <span className="text-[15px] font-semibold text-ink">{group.name}</span>
-        <div className="flex items-center gap-2.5" style={noDrag}>
+        <div className="flex shrink min-w-0 items-center gap-2" style={noDrag}>
           <div className="flex items-center gap-1.5">
             {members.map((b) => (
               <span key={b.id} title={`${b.name}${group.busyBotId === b.id ? " — working…" : ""}`}>
