@@ -229,6 +229,7 @@ export async function listMessages(account: EmailAccount, guard: EmailGuard, inp
     try {
       const total = client.mailbox ? client.mailbox.exists : 0;
       if (!total) return { total: 0, messages: [] };
+      if (input.beforeUid === 1) return { total, messages: [] };
       const out: MessageSummary[] = [];
       if (input.beforeUid) {
         const uids = (await client.search({ uid: `1:${input.beforeUid - 1}` }, { uid: true })) || [];
