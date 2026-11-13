@@ -4633,6 +4633,7 @@
   "accounts.addClaude": "Add another Claude account",
   "accounts.addChatgpt": "Add another ChatGPT account",
   "accounts.addChatgptWorkspaceNote": "ChatGPT Business and Enterprise organizations can block adding an account here (OpenAI shows 3p_delegated_access_policy_denied).",
+  "accounts.chatgptSharedSetupNote": "Bots that use these accounts also follow your own Codex setup: your instructions (AGENTS.md), config.toml, skills and plugins.",
   "accounts.nameLabel": "Account name",
   "accounts.namePlaceholder": "Work",
   "accounts.addSubmit": "Add and sign in",
