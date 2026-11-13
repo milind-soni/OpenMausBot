@@ -9,6 +9,10 @@ export interface WebhookRequestDefinition {
   instructions: string;
   runOn: "maus" | "cloud";
   eventTypes?: string[];
+  /** Field path -> text it must have; all must match before a run starts. Empty removes it on an update. */
+  payloadFilter?: Record<string, string>;
+  /** Each run continues the webhook's previous run conversation. */
+  sameConversation?: boolean;
 }
 
 export type WebhookRequestOperation =

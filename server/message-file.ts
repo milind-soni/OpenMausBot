@@ -410,7 +410,8 @@ export async function openMessageFile(
     let handle: FileHandle | undefined;
     try {
       const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
-      handle = await open(canonicalBefore, constants.O_RDONLY | noFollow);
+      const nonBlock = typeof constants.O_NONBLOCK === "number" ? constants.O_NONBLOCK : 0;
+      handle = await open(canonicalBefore, constants.O_RDONLY | noFollow | nonBlock);
       const opened = await handle.stat();
       if (opened.isDirectory()) throw statusError(400, "the link points to a folder, not a file", "directory");
       if (!opened.isFile()) throw statusError(400, "the link does not point to a regular file");

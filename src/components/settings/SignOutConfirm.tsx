@@ -15,6 +15,7 @@ export function SignOutConfirm({ here, cloud, browser = false, onConfirm, onClos
   onClose: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
   const line = browser ? t("settings.signOut.browserLine", { place: here })
     : cloud ? t("settings.signOut.keepRunningBoth", { here, cloud }) : t("settings.signOut.keepRunning");
   return (
@@ -22,11 +23,12 @@ export function SignOutConfirm({ here, cloud, browser = false, onConfirm, onClos
       footer={<>
         <button type="button" className="ui-button ui-button-md rounded-full" data-autofocus="" onClick={onClose}>{t("common.cancel")}</button>
         <button type="button" disabled={busy} data-sign-out-confirm="" className="ui-button ui-button-md rounded-full !bg-danger !text-danger-ink"
-          onClick={() => { setBusy(true); void Promise.resolve(onConfirm()).catch(() => {}).finally(() => { setBusy(false); onClose(); }); }}>
+          onClick={() => { setBusy(true); setFailed(false); void Promise.resolve(onConfirm()).then(onClose, () => { setBusy(false); setFailed(true); }); }}>
           {t("settings.account.signOutShort")}
         </button>
       </>}>
       <p className="text-[13px] leading-[18px] text-ink-secondary">{line}</p>
+      {failed && <p role="alert" className="text-[12px] leading-4 text-danger">{t("cloudAccount.actionFailed")}</p>}
     </SettingsDialog>
   );
 }

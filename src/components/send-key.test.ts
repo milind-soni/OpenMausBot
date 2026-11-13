@@ -337,7 +337,7 @@ describe("a message sent while a one-to-one bot works", () => {
     expect(choices.map((choice) => choice.textContent)).toEqual([
       "Steer nowInterrupt what Pepper is doingEnter",
       "QueueRun after the current turnCtrl+Enter",
-      "Restart turnStart the turn over with this message",
+      "Restart turnStart the turn over with this message. Also stops work it handed to other bots",
     ]);
     flushSync(() => choices[2]!.click());
     expect(sends().at(-1)).toMatchObject({ type: "send", text: "start again with this", followUp: "restart" });
@@ -354,7 +354,7 @@ describe("a message sent while a one-to-one bot works", () => {
     type(textarea(), "c");
     expect(openChoices().map((choice) => choice.textContent)).toEqual([
       "QueueRun after the current turnEnter",
-      "Restart turnStart the turn over with this message",
+      "Restart turnStart the turn over with this message. Also stops work it handed to other bots",
     ]);
   });
 

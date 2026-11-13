@@ -117,5 +117,8 @@ export function botMemoryUpdate(
     return { ok: true, forgotten, aboutMe };
   }
   if (body.action === "append" && typeof body.text === "string") clearForgotten(body.text);
-  return updateMemory(layer, { action: body.action, text: body.text, oldText: body.oldText, ...(body.until !== undefined ? { until: body.until } : {}) } as MemoryUpdate, { source: opts.source });
+  const result = updateMemory(layer, { action: body.action, text: body.text, oldText: body.oldText, ...(body.until !== undefined ? { until: body.until } : {}) } as MemoryUpdate, { source: opts.source });
+  // A supersede restores the fact only once the old entry was really replaced; a stale old_text keeps the marker.
+  if (body.action === "supersede" && result.ok && typeof body.text === "string") clearForgotten(body.text);
+  return result;
 }

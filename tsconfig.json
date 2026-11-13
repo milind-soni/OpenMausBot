@@ -15,9 +15,8 @@
     "allowImportingTsExtensions": true,
     "types": ["vite/client", "node"],
     "noEmit": true,
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src", "vite.config.ts"]

@@ -327,13 +327,14 @@ describe("the helpers", () => {
 
   it("finds each engine's folder from the environment its instance runs with", () => {
     const { dataDir, home } = fixture();
-    mkdirSync(join(dataDir, "providers", "chatgpt-plan", "abc", "codex"), { recursive: true });
+    for (const kind of ["chatgpt-plan", "codex-own"]) mkdirSync(join(dataDir, "providers", kind, "abc", "codex"), { recursive: true });
     const work = instanceEnvironment({ HOME: home }, { config: { configDir: "~/.claude-work" } });
     const endpoint = instanceEnvironment({ HOME: home }, { environment: { CODEX_HOME: join(dataDir, "providers", "relay") } });
     expect(instanceEnvironment({ HOME: home }, { config: { configDir: "relative" } }).CLAUDE_CONFIG_DIR).toBeUndefined();
     expect(engineSessionFolders(dataDir, [{ HOME: home }, work, endpoint, {}])).toEqual({
       claude: [join(home, ".claude"), join(home, ".claude-work")],
-      codex: [join(home, ".codex"), join(dataDir, "providers", "relay"), join(dataDir, "providers", "chatgpt-plan", "abc", "codex")],
+      codex: [join(home, ".codex"), join(dataDir, "providers", "relay"), join(dataDir, "providers", "chatgpt-plan", "abc", "codex"),
+        join(dataDir, "providers", "codex-own", "abc", "codex")],
       pi: [join(home, ".pi", "agent")],
     });
   });

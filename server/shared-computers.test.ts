@@ -21,6 +21,34 @@ const nothingQueued = async (broker: SharedComputers, id: string) => {
   return poll;
 };
 describe("shared computer authority and lifecycle", () => {
+  it("a computer whose person changed is found under its new key after it connects again", () => {
+    const broker = new SharedComputers(id => id === "owner");
+    const computer = registration(); broker.register(computer, alice, secret);
+    broker.register(computer, { session: alice.session, person: "p_lender" }, secret);
+    expect(broker.list(alice.person)).toEqual([]);
+    expect(broker.list("p_lender").map(entry => entry.id)).toEqual([computer.id]);
+    broker.close();
+  });
+  it("a computer whose person changed is no longer lent to its former person", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-lent-rekey-"));
+    const lent = new LentComputers(join(dir, "lent.json"));
+    const broker = new SharedComputers(id => id === "owner", lent);
+    const computer = registration(); broker.register(computer, alice, secret);
+    broker.register(computer, { session: alice.session, person: "p_lender" }, secret);
+    expect(lent.list(alice.person).map(record => [record.id, record.stoppedAt !== null])).toEqual([[computer.id, true]]);
+    expect(lent.list("p_lender").map(record => [record.id, record.stoppedAt])).toEqual([[computer.id, null]]);
+    broker.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  it("a poll from a session that is now someone else drops the computer so it connects again", async () => {
+    const broker = new SharedComputers(id => id === "owner");
+    const computer = registration(); broker.register(computer, alice, secret);
+    await expect(broker.poll(computer.id, alice.session, secret, undefined, "p_lender")).rejects.toMatchObject({ status: 403 });
+    expect(broker.list(alice.person)).toEqual([]);
+    broker.register(computer, { session: alice.session, person: "p_lender" }, secret);
+    expect(broker.list("p_lender").map(entry => entry.id)).toEqual([computer.id]);
+    broker.close();
+  });
   it("requires both the owning paired session and the connector secret", async () => {
     const broker = new SharedComputers(id => id === "owner");
     const computer = registration(); broker.register(computer, alice, secret);
@@ -67,6 +95,22 @@ describe("shared computer authority and lifecycle", () => {
     broker.disconnect(computer.id, "owner", secret); await rejection;
     expect(broker.list(alice.person)).toEqual([]);
     await expect(broker.request(operation, alice.person, () => true)).rejects.toThrow(/offline/);
+    broker.close();
+  });
+  it("tells the computer which bot an action is for: its name and colour only", async () => {
+    const broker = new SharedComputers(() => true);
+    const computer = registration({ computer: true }); broker.register(computer, alice, secret);
+    const operation = { computer_id: computer.id, action: "computer_tools" as const };
+    const bot = { id: "b1", name: "IT Support", color: "teal", soul: "private" };
+    const result = broker.request(operation, alice.person, () => true, bot);
+    const job = await broker.poll(computer.id, "owner", secret);
+    expect(job).toEqual({ id: job!.id, operation, by: { name: "IT Support", color: "teal" } });
+    broker.complete(computer.id, "owner", secret, job!.id, { ok: true });
+    await expect(result).resolves.toEqual({ ok: true });
+    const unnamed = broker.request(operation, alice.person, () => true);
+    const plain = await broker.poll(computer.id, "owner", secret);
+    expect(plain).toEqual({ id: plain!.id, operation });
+    broker.complete(computer.id, "owner", secret, plain!.id, {}); await unnamed;
     broker.close();
   });
   it("waits for a command as long as the command may run, and a non-command action still 45 seconds", async () => {

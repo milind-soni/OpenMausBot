@@ -4,7 +4,7 @@ import { ArrowDown, ArrowDownToLine, Loader2, PackageOpen, RefreshCw, X } from "
 
 import { updaterMessage, useUpdaterState, type UpdaterState } from "@/lib/updater";
 import { releaseHighlights } from "@/lib/release-highlights";
-import { RELEASES_URL, appVersion, openExternalLink } from "@/lib/app-links";
+import { RELEASES_URL, desktopAppVersion, openExternalLink } from "@/lib/app-links";
 import { productName } from "../lib/brand";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -210,7 +210,7 @@ export function UpdateCard({
               {t("update.card.title")}
             </h2>
             <p className="text-[13px] leading-5 text-ink-secondary">
-              {[state.version ? `${productName()} ${state.version}` : productName(), appVersion() ? t("update.card.current", { version: appVersion() }) : ""].filter(Boolean).join(" · ")}
+              {[state.version ? `${productName()} ${state.version}` : productName(), t("update.card.current", { version: desktopAppVersion() })].join(" · ")}
             </p>
           </div>
         </div>

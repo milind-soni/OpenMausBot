@@ -36,6 +36,21 @@ export function hasTeamAuthority(
       typeof value === "string" && sectionKey(value) === target));
 }
 
+/** What widens `bot`'s departments, so a refused Chief can tell the person the one step instead of guessing. Only a
+ * Chief of Staff's grants count (hasTeamAuthority), and only the person can change them. */
+export function managedDepartmentsHelp(bot: Pick<RosterMember, "name" | "chiefOfStaff">): string {
+  return bot.chiefOfStaff
+    ? `Only the person can add a department, in ${peerName(bot.name)}'s bot settings, Permissions, "Also in charge of".`
+    : "Only a Chief of Staff can be put in charge of more departments.";
+}
+
+/** Why the department rule keeps `chief` out of a department, and what changes that. Names are user-typed: flattened. */
+export function outsideDepartmentReason(chief: Pick<RosterMember, "name" | "chiefOfStaff">, target: { name?: string; section?: string }): string {
+  const department = peerName(sectionKey(target.section)) || "General";
+  return `${target.name ? `@${peerName(target.name)} is in` : "That is"} the ${department} department, which ${peerName(chief.name)} is not in charge of. ` +
+    managedDepartmentsHelp(chief);
+}
+
 /** A Team Cloud Chief its person owns: that person's email. */
 const ownedChief = (bot: Pick<RosterMember, "chiefOfStaff" | "createdBy" | "reportsTo">): string | null => bot.chiefOfStaff ? botOwner(bot) : null;
 
@@ -52,6 +67,12 @@ export function hasAuthority(from: RosterMember, target: RosterMember): boolean 
 /** May change `target`'s setup, automations or threads: authority, and never past what reach allows. */
 export function canManage(from: RosterMember, target: RosterMember): boolean {
   return canReach(from, target) && hasAuthority(from, target);
+}
+
+/** Why `from` may not manage `target` when the department rule alone decided; otherwise null. */
+export function departmentRefusal(from: RosterMember, target: RosterMember): string | null {
+  if (!canReach(from, target) || ownedChief(from) || ownedChief(target) || hasTeamAuthority(from, target.section)) return null;
+  return outsideDepartmentReason(from, target);
 }
 
 export type PeerStatus = "available" | "working" | "waiting-on-user" | "not-responding" | "unavailable";

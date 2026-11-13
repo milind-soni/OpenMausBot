@@ -24,6 +24,8 @@ export interface PairingOffer {
   expiresAt: number;
   url: string | null;
   hint: string | null;
+  /** False when this server has no phone key, so a paired phone cannot enter secrets here. Absent on older servers. */
+  phoneSecrets?: boolean;
 }
 
 export interface PairedDevice {
@@ -45,6 +47,11 @@ export function canPairDevices(state: SessionState | null): boolean {
 
 export function pairingBlockedReason(state: SessionState | null): "chat-only" | null {
   return state?.kind === "session" && !state.scopes.includes("admin") ? "chat-only" : null;
+}
+
+/** The line a pairing code shows when the phone will not be able to enter secrets on this server. */
+export function phoneSecretNote(offer: Pick<PairingOffer, "phoneSecrets">): string | null {
+  return offer.phoneSecrets === false ? t("remote.serverPairing.noPhoneSecrets") : null;
 }
 
 export function shownDevices(devices: PairedDevice[], cloudHome: boolean): PairedDevice[] {
@@ -161,6 +168,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     if (result !== "empty") setCopied(result);
   }
 
+  const secretNote = offer ? phoneSecretNote(offer) : null;
   const offerPanel = pairingCodes && offer ? (
     <Layer modal>
       <div role="dialog" aria-modal="true" aria-label={t("phone.pair.dialogTitle", { place: placeName })} data-settings-look="simple" data-pair-dialog="code"
@@ -189,6 +197,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
                 <div className="text-[12px] leading-4 text-ink-secondary">{codeUntil(offer.expiresAt)}</div>
               </div>
               <p className="text-[12px] leading-4 text-ink-secondary">{t(cloudHome ? "phone.pair.cloudPersonal" : "remote.serverPairing.subtitle", { app: productName() })}</p>
+              {secretNote ? <p data-pair-no-phone-secrets="" className="text-[12px] leading-4 text-ink-secondary">{secretNote}</p> : null}
             </div>
           )}
           <div className="flex items-center justify-end gap-2">
@@ -217,6 +226,8 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       <option value="client">{t("remote.serverPairing.scope.client")}</option>
     </Select>
   ) : null;
+  const nameRow = !simple && pairingCodes && !cloudHome && computerName !== null
+    ? <SettingsRows><ComputerNameRow saved={computerName} onSaved={setComputerName} className="px-4 py-3" /></SettingsRows> : null;
   const pairRow = (
     <PairRow reason={pairingCodes ? null : t("remote.serverPairing.portalShort")}>
       {choices}{pairButton}
@@ -229,7 +240,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       {listed.length === 0 ? (
         <SettingsGroup block="pair">
           <SettingsRows>{pairRow}</SettingsRows>
-          {!simple && pairingCodes && !cloudHome && computerName !== null && <SettingsRows><ComputerNameRow saved={computerName} onSaved={setComputerName} className="px-4 py-3" /></SettingsRows>}
+          {nameRow}
           {!pairingCodes && <p data-server-pairing-portal className="px-4 text-[12px] leading-4 text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
         </SettingsGroup>
       ) : (
@@ -250,6 +261,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
                 </div>
               ))}
             </SettingsRows>
+            {nameRow}
             {!pairingCodes && <p data-server-pairing-portal className="px-4 text-[12px] leading-4 text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
           </SettingsGroup>
       )}

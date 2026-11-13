@@ -11,6 +11,61 @@ afterEach(async () => {
 });
 
 describe("a server's own requests to the client", () => {
+  it("keeps the shared SSE stream alive after the opening request's signal expires", async () => {
+    fake = await startFakeHttpMcp({ transport: "sse", tools: [{ name: "still_available" }] });
+    let streamSignal: AbortSignal | null | undefined;
+    client = new RemoteMcpClient({ type: "sse", url: fake.url, headers: {} }, { fetch: (url, init) => {
+      if (init?.method === "GET") streamSignal = init.signal;
+      return fetch(url, init);
+    } });
+    const opening = new AbortController();
+    await client.initialize("fixture", opening.signal);
+    opening.abort();
+    await expect(client.request("tools/list", {}, AbortSignal.timeout(1_000))).resolves.toEqual({ tools: [{ name: "still_available" }] });
+    expect(streamSignal?.aborted).toBe(false);
+    await client.close();
+    expect(streamSignal?.aborted).toBe(true);
+  });
+
+  it("still aborts an SSE connection before the endpoint arrives", async () => {
+    let streamSignal: AbortSignal | null | undefined;
+    client = new RemoteMcpClient({ type: "sse", url: "https://fixture.example/sse", headers: {} }, { fetch: async (_url, init) => {
+      streamSignal = init?.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        streamSignal?.addEventListener("abort", () => reject(new Error("opening cancelled")), { once: true });
+      });
+    } });
+    const opening = new AbortController();
+    const reply = client.request("initialize", {}, opening.signal);
+    opening.abort();
+    await expect(reply).rejects.toThrow("aborted");
+    expect(streamSignal?.aborted).toBe(true);
+  });
+
+  it("finds a JSON batch response after a server request with the same ID, including a null result", async () => {
+    const replies: unknown[] = [];
+    client = new RemoteMcpClient({ type: "http", url: "https://fixture.example/mcp", headers: {} }, { fetch: async (_url, init) => {
+      const frame = JSON.parse(String(init?.body)) as { id?: number; method?: string };
+      if (frame.method) return new Response(JSON.stringify([
+        { jsonrpc: "2.0", id: frame.id, method: "ping" },
+        { jsonrpc: "2.0", id: frame.id, result: null },
+      ]), { headers: { "content-type": "application/json" } });
+      replies.push(frame);
+      return new Response(null, { status: 202 });
+    } });
+    await expect(client.request("tools/list", {}, AbortSignal.timeout(1_000))).resolves.toBeNull();
+    expect(replies).toEqual([{ jsonrpc: "2.0", id: 1, result: {} }]);
+  });
+
+  it.each(["http", "sse"] as const)("do not complete a client request with the same numeric ID over %s", async (transport) => {
+    fake = await startFakeHttpMcp({ transport, tools: [{ name: "ask_first" }], askOnCall: "ping", askId: 2 });
+    client = new RemoteMcpClient({ type: transport, url: fake.url, headers: {} });
+    await client.initialize("fixture", AbortSignal.timeout(5_000));
+    const result = await client.request("tools/call", { name: "ask_first", arguments: {} }, AbortSignal.timeout(5_000));
+    expect(result).toEqual({ content: [{ type: "text", text: "remote execution recorded" }] });
+    expect(fake.replies).toEqual([{ jsonrpc: "2.0", id: 2, result: {} }]);
+  });
+
   it.each(["http", "sse"] as const)("are refused at once over %s, so the call they interrupt still finishes", async (transport) => {
     fake = await startFakeHttpMcp({ transport, tools: [{ name: "ask_first", inputSchema: { type: "object" } }], askOnCall: "elicitation/create" });
     client = new RemoteMcpClient({ type: transport, url: fake.url, headers: {} });

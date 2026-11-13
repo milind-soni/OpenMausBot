@@ -45,18 +45,20 @@ export interface LiveCallRecord {
   title?: string;
 }
 
-/** Who runs a Live call's GPT-Live session: OpenAI itself, or a GPT-Live deployment on the user's own Azure OpenAI / Foundry resource. */
-export type LiveProvider = "openai" | "azure";
+/** Who runs a Live call's voice session: OpenAI itself, a GPT-Live deployment on the user's own Azure OpenAI / Foundry
+ * resource, or a Fish Audio Live 3 agent the harness sets up on the person's Fish Audio account, whose session the client joins with Fish's SDK. */
+export type LiveProvider = "openai" | "azure" | "fish";
 
-/** `live`: the key saved for Live calls only; `openai`: the OpenAI API key from Settings → API keys, used when there is no `live` key. */
-export type LiveKeySource = "live" | "openai";
+/** `live`: the key saved for Live calls only; `openai`: the OpenAI API key from Settings → API keys, used when there is no `live` key;
+ * `fishAudio`: the Fish Audio key from Settings → API keys, the only key a Fish Audio call uses. */
+export type LiveKeySource = "live" | "openai" | "fishAudio";
 
 /** Non-secret Live settings, as GET /api/config and PATCH /api/live/settings report them. */
 export interface LiveSettings {
-  /** A Live call has everything it needs: a key (`keySource` says which; never the key itself) and, for Azure, a valid endpoint and deployment. */
+  /** A Live call has everything it needs: a key (`keySource` says which; never the key itself), and for Azure a valid endpoint and deployment. */
   configured: boolean;
   keySource?: LiveKeySource;
-  /** Absent means "openai". With "azure" only the `live` key is used, never the OpenAI API key. */
+  /** Absent means "openai". With "azure" only the `live` key is used and with "fish" only the Fish Audio key, never the OpenAI API key. */
   provider?: LiveProvider;
   /** The Azure resource endpoint as saved, e.g. `https://my-resource.openai.azure.com`. Not a secret. */
   azureEndpoint?: string;
@@ -66,3 +68,37 @@ export interface LiveSettings {
   readTypedReplies: boolean;
   idleMinutes: number;
 }
+
+/** The single-use token Fish Audio returns for one agent session (Fish API v1 `LiveKitSessionToken`), passed verbatim to
+ * `AgentSession.start({ sessionToken })` of `@fishaudio/agent-client` 1.x. Holds no API key. */
+export interface LiveFishSessionToken {
+  transport: "livekit";
+  session_id: string;
+  /** ISO time by which the client must join */
+  expires_at: string;
+  max_duration_seconds: number;
+  livekit_url: string;
+  token: string;
+}
+
+/** A "fish" call's transport, answered only to the client that started the call: Fish's session token, and the token
+ * that client presents on POST /api/live/relay, the call's only route for what it heard and for the bot's replies. */
+export interface LiveFishTransport {
+  type: "fish";
+  session: LiveFishSessionToken;
+  relayToken: string;
+}
+
+/** What the client of a "fish" call reports on POST /api/live/relay. Times are ms since the client joined the session. */
+export type LiveFishRelayEvent =
+  | { type: "connected" }
+  | { type: "heard"; text: string; startMs: number; endMs: number }
+  | { type: "spoke"; startMs: number; endMs: number }
+  | { type: "delegate"; id: string; atMs: number }
+  | { type: "ended"; reason: string }
+  | { type: "error"; code: string };
+
+/** What the harness hands the client of a "fish" call: words for the agent to speak or know (`kind` as on GPT-Live), or the end of the call. */
+export type LiveFishRelayCommand =
+  | { type: "append"; kind: "instructions" | "thinking" | "commentary"; content: string; delegationId: string | null }
+  | { type: "close" };

@@ -20,8 +20,7 @@ import type { ProfileRequestCardData } from "./profile-request.ts";
 import type { ServerTextLine, ServerTextParams } from "./server-text.ts";
 import type { WireTool } from "./wire-tool.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
-import type { ConnectorCardData } from "./connector-card.ts"; import type { McpChangeRequest } from "./mcp-request.ts";
-import type { AppSettingRequest, WindowPrefFrame } from "./app-settings.ts";
+import type { ConnectorCardData } from "./connector-card.ts"; import type { McpChangeRequest } from "./mcp-request.ts"; import type { AppSettingCardField, WindowPrefFrame } from "./app-settings.ts";
 import type { SkillRequestCardData } from "./skill-request.ts"; import type { OutsideWriteCardField } from "./outside-write.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
 import type { AutomationLine, RoutineRunCardData } from "./routine-run.ts";
@@ -38,7 +37,7 @@ import type { LiveCallRecord, LiveCallState } from "./live-call-wire.ts";
 /** What a team bot's main chat is called, beside each person's own chats. */
 export const SHARED_CHAT_TITLE = "Shared chat";
 
-export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveEndReason, LiveKeySource, LiveProvider, LiveSettings } from "./live-call-wire.ts";
+export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveEndReason, LiveFishRelayCommand, LiveFishRelayEvent, LiveFishSessionToken, LiveFishTransport, LiveKeySource, LiveProvider, LiveSettings } from "./live-call-wire.ts";
 
 /** Reasoning-effort levels, ascending: a union of what any engine accepts;
  * each driver declares the subset its CLI will take. */
@@ -562,8 +561,8 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   sendId?: string;
   /** Per-send channel behavior. Absent is legacy quick chat. */
   channelMode?: "chat" | "goal";
-  /** group threads: which member said this (sender attribution). */
-  from?: { botId: string; name: string; color: string };
+  /** from: which member said this (group threads, and post_to_thread). threadPost: a bot posted this row with post_to_thread; seen once a run has read it. */
+  from?: { botId: string; name: string; color: string }; threadPost?: { deliveryId: string; fromBotId: string; fromThreadId: string; seen?: boolean };
   /** Set on a room message a bot pushed in with post_to_room. */
   peerPost?: { unattended?: boolean };
   /** A room reply whose speaker the decision model picked (an Auto room),
@@ -643,7 +642,7 @@ export function nextOpenThread<T extends OpenThreadCandidate>(tasks: readonly T[
   return [listed, open, own].map((candidates) => orderedThreadList(candidates)[0]).find((task) => task !== undefined);
 }
 
-export interface OptionCardData extends WaitCardField, ComputerAskField, AccessRequestCardField, OutsideWriteCardField {
+export interface OptionCardData extends WaitCardField, ComputerAskField, AccessRequestCardField, OutsideWriteCardField, AppSettingCardField {
   /** The harness asks the owner to let this line of theirs use the lent computer (server/host/lending-lifts.ts). */ lendingLift?: { requestMessageId: string; memoryToken?: string; outside?: true; botOpened?: true; allowedAt?: number };
   /** calls: one per outbound call the card covers, in subtitle order. */
   outboundRequest?: { tool: string; app: string | null; calls?: Array<{ app: string | null; label: string }> };
@@ -704,8 +703,6 @@ export interface OptionCardData extends WaitCardField, ComputerAskField, AccessR
   teamSetupRequest?: TeamSetupRequest;
   /** A bot's MCP server change waiting on the person (Ask, Edits or Auto). */
   mcpRequest?: McpChangeRequest;
-  /** A bot's change to one of the app's own settings: applied with Undo, or waiting on Change/Cancel. */
-  appSettingRequest?: AppSettingRequest;
   /** A durable learned-skill proposal. */
   skillRequest?: SkillRequestCardData;
   /** A provider's structured question set. */
@@ -992,9 +989,8 @@ export type ServerFrame =
   /** A bot's data sheet changed. Whole sheet each time. */
   | DataBroadcast
   | { kind: "bot.deleted"; botId: string }
-  /** The whole fleet in its new order (PUT /api/bots/order); a member is sent only the bots they see. */
-  | { kind: "bots.order"; botIds: string[] }
-  | WindowPrefFrame
+  /** The whole fleet (PUT /api/bots/order) or every room (PUT /api/groups/order) in its new order; a member is sent only the ones they see. */
+  | { kind: "bots.order"; botIds: string[] } | { kind: "groups.order"; groupIds: string[] } | WindowPrefFrame
   | { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }
   /** A job is waiting for the phone whose registry key this is; it polls now. */
   | { kind: "device.job"; phone: string; id: string }

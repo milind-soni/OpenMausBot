@@ -1,5 +1,6 @@
 import { z, type ZodString } from "zod";
 import * as boat from "../boat.ts";
+import { boatHealth } from "../boat-health.ts";
 import type { ComputerControl } from "../computer-control.ts";
 import { isValidSshAlias, localVmMaxInstances, localVmMode, localVmResources, type AppConfig } from "../config.ts";
 import {
@@ -26,6 +27,7 @@ import { teamComputerAssignment, teamComputerCreate, teamComputerOwner, type Tea
 import * as vps from "../vps-computer.ts";
 import { vpsAliasesInPlay } from "../vps-hosts.ts";
 import type { BusyFlag, RemoteComputerProvider } from "./config.ts";
+import { createCloudComputerRecoveryRoutes, type CloudComputerRecoveryRouteDeps } from "./cloud-computer-recovery.ts";
 import { createComputerFramesRoutes } from "./computer-frames.ts";
 import { createComputerUsageRoutes } from "./computer-usage.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -41,7 +43,7 @@ export interface ComputerRouteDeps {
   cfg: AppConfig;
   sessions: Pick<SessionRegistry, "isLive">;
   teamComputers: Pick<TeamComputers, "get" | "create" | "assign" | "setProblem" | "list">;
-  computerControl: Pick<ComputerControl, "snapshot" | "take" | "release" | "acquireLease" | "releaseLease" | "ownsLease">;
+  computerControl: Pick<ComputerControl, "snapshot" | "take" | "release" | "acquireLease" | "releaseLease" | "beat">;
   routines(): Pick<RoutineManager, "activeRunForBot"> | null;
   controlLeaseIdSchema: ZodString;
   boatLifecycleBusyBots: Pick<Set<string>, "has">;
@@ -66,8 +68,9 @@ export interface ComputerRouteDeps {
   managedBoatOwners(): boat.ManagedBoatOwner[];
   providerTransitionMessage(provider: RemoteComputerProvider): string;
   botHasActiveTurn(botId: string): boolean;
-  botComputerControlKey(bot: BotRecord): string;
-  botComputerControlSnapshot(botId: string): { held: boolean };
+  /** The control key whose lease opens this conversation's Local VM to a phone. */
+  localVmLeaseKey(bot: BotRecord, threadId?: string): string;
+  botComputerControlSnapshot(botId: string): ReturnType<ComputerControl["snapshot"]>;
   computerPreviewBot(botId: string, url: URL): BotRecord | null;
   computerPreviewSurface(bot: BotRecord, threadId?: string): Promise<string | undefined>;
   claimTeamComputerLifecycle(computer: TeamComputerRecord): () => void;
@@ -78,6 +81,9 @@ export interface ComputerRouteDeps {
   claimManagedVpsMutation(containerName: string): () => void;
   /** A cloud computer was just woken, created or opened: its idle window starts again. */
   cloudComputerUsed(owner: string): void;
+  boatRecovery: CloudComputerRecoveryRouteDeps["boatRecovery"];
+  /** Whose cloud computer a bot uses: its own id, or its team computer's key. */
+  cloudComputerOwner(bot: BotRecord): string;
 }
 
 export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
@@ -87,15 +93,18 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
     localVmProvisionBusy, localVmModeChangeBusy, localVmOwnerBusy, localVmIdleMs, localVmLeaseFor, localVmIdleFor,
     localVmTargetForBot, localVmTargetForStatus, localVmPayload, localVmInventoryPayload, existingPerBotLocalVmCount,
     teamComputersPayload, teamComputerInUse, managedBoatOwners, providerTransitionMessage, botHasActiveTurn,
-    botComputerControlKey, botComputerControlSnapshot, computerPreviewBot, computerPreviewSurface,
+    localVmLeaseKey, botComputerControlSnapshot, computerPreviewBot, computerPreviewSurface,
     claimTeamComputerLifecycle, claimBotComputerLifecycle, claimBoatInventoryRequest, claimManagedBoatMutation,
     claimManagedVpsMutation, cloudComputerUsed,
   } = deps;
   const usage = createComputerUsageRoutes(deps);
-  const frames = createComputerFramesRoutes(deps);
+  // A map owner is a bot id or a team computer's key; a bot's hold may sit on the shared desktop's key.
+  const frames = createComputerFramesRoutes({ ...deps, computerControl: { snapshot: botComputerControlSnapshot } });
+  const recovery = createCloudComputerRecoveryRoutes({ ...deps, botComputerControlKey: deps.cloudComputerOwner });
   return async (context) => {
     if (await usage(context) !== PASS) return;
     if (await frames(context) !== PASS) return;
+    if (await recovery(context) !== PASS) return;
     const { req, res, url, path, method, auth, json, readBody } = context;
     const routines = deps.routines();
     let m: RegExpMatchArray | null = null;
@@ -202,7 +211,10 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
     // Read-only; lifecycle changes are revalidated against a fresh provider listing. The path keeps its historical /boxes segment.
     if (method === "GET" && path === "/api/computers/boxes") {
       res.setHeader("cache-control", "private, no-store");
-      return json(res, 200, await boat.listManagedBoats(cfg, managedBoatOwners()));
+      const inventory = await boat.listManagedBoats(cfg, managedBoatOwners());
+      // A computer that stopped answering is not shown running, whatever the provider still says.
+      return json(res, 200, { ...inventory, instances: inventory.instances.map((instance) =>
+        boatHealth.notRespondingSince(instance.boxId) === null ? instance : { ...instance, state: "error" }) });
     }
     m = path.match(/^\/api\/computers\/boxes\/([\w-]+)\/(sleep|delete)$/);
     if (m && method === "POST") {
@@ -432,13 +444,12 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
       if (threadId && await computerPreviewSurface(bot, threadId) !== "vm") {
         return json(res, 409, { error: "This conversation is not using the Local VM" });
       }
-      if (localVmMode(cfg) !== "per-bot") {
-        return json(res, 409, { error: "Phone control requires a per-bot Local VM. Select per-bot mode in Settings → Computers." });
+      if (localVmMode(cfg) === "pool") {
+        return json(res, 409, { error: "Phone control is not available in pool mode. Select shared or per-bot mode in Settings → Computers." });
       }
       const lease = controlLeaseIdSchema.safeParse(url.searchParams.get("controlLeaseId") ?? undefined);
       if (!lease.success) return json(res, 400, { error: "controlLeaseId is required" });
-      const controlBot = store.bot(bot.id);
-      if (!controlBot || !computerControl.ownsLease(botComputerControlKey(controlBot), lease.data)) {
+      if (!store.bot(bot.id) || !computerControl.beat(localVmLeaseKey(bot, threadId), lease.data)) {
         return json(res, 409, { error: "Take control of this computer first" });
       }
       const target = localVmTargetForStatus(bot.id, threadId);

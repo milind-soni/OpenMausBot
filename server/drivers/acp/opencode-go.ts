@@ -748,10 +748,18 @@ const ACCOUNT_ERROR_TEXT: ReadonlyArray<readonly [RegExp, AccountErrorCode]> = [
  * refusal holds that login's free models and leaves the account available. */
 const FREE_MODEL_LIMIT = /\bfree(?:UsageLimitError|\s+usage\s+limit)\b/iu;
 
+/** OpenCode Go's subscription models: its weekly or monthly allowance holds them all, never Zen's free models on the same
+ * login, which have an allowance of their own. */
+const GO_PROVIDER = "opencode-go/";
+
 /** How far a usage limit OpenCode reported reaches: one provider's shared free allowance (with the free models that
- * allowance holds), or the whole account. */
+ * allowance holds), the Go subscription's models, or the whole account. */
 export function openCodeLimitFacts(text: string, model?: string): { limit: "engine" | "model"; limitModels?: string[] } {
-  if (!FREE_MODEL_LIMIT.test(text)) return { limit: "engine" };
+  if (!FREE_MODEL_LIMIT.test(text)) {
+    if (!model?.startsWith(GO_PROVIDER)) return { limit: "engine" };
+    const listed = [...lastSuccessfulCatalog.values()].flatMap((catalog) => catalog.options.map((option) => option.id));
+    return { limit: "model", limitModels: [...new Set([model, ...paidModels, ...listed].filter((id) => id.startsWith(GO_PROVIDER)))] };
+  }
   const provider = model?.includes("/") ? model.slice(0, model.indexOf("/")) : "";
   const shared = provider ? [...freeModels].filter((id) => id.startsWith(`${provider}/`)) : [];
   const models = [...new Set(model ? [model, ...shared] : shared)];

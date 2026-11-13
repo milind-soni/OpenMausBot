@@ -12,6 +12,10 @@ export interface AppSettingRequest {
   after: string;
   tier: SettingTier;
 }
+export interface AppSettingCardField {
+  /** A bot's change to one of the app's own settings: applied with Undo, or waiting on Change/Cancel. */
+  appSettingRequest?: AppSettingRequest;
+}
 
 export const SKIN_IDS = [
   "midnight",

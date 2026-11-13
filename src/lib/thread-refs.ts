@@ -124,6 +124,21 @@ export function threadRefUrl(ref: { botId: string; threadId: string }): string {
   return THREAD_URL_PREFIX + encodeURIComponent(ref.threadId) + "?bot=" + encodeURIComponent(ref.botId);
 }
 
+/** `?thread=<threadId>&bot=<botId>` on the web app's address: a chat link that works outside the app. */
+export function takeThreadLinkFromLocation(): string | null {
+  const location = window.location;
+  if (!location) return null;
+  const params = new URLSearchParams(location.search);
+  const thread = params.get("thread");
+  if (thread === null) return null;
+  const bot = params.get("bot");
+  params.delete("thread");
+  params.delete("bot");
+  const search = params.toString();
+  window.history.replaceState(null, "", location.pathname + (search ? `?${search}` : "") + location.hash);
+  return THREAD_URL_PREFIX + encodeURIComponent(thread) + (bot === null ? "" : "?bot=" + encodeURIComponent(bot));
+}
+
 export function parseThreadRefUrl(value: string): ThreadRefAddress | null {
   const raw = value.trim();
   if (!raw.toLowerCase().startsWith(THREAD_URL_PREFIX)) return null;

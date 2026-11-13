@@ -197,6 +197,26 @@ capabilities or account access.
 See [Alibaba Cloud's OpenAI-compatible API guide](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope)
 for current addresses, model availability and region requirements.
 
+### Example: GLM through Z.ai or Zhipu BigModel
+
+Use the `openai-compat` instance above with a general API key from your
+chosen service. Set `config.url` to its OpenAI-compatible base URL:
+
+| Service | Base URL |
+|---|---|
+| Z.ai (international) | `https://api.z.ai/api/paas/v4` |
+| Zhipu BigModel (mainland China) | `https://open.bigmodel.cn/api/paas/v4` |
+
+Set `environment.MY_ENDPOINT_KEY` to that service's API key and keep
+`config.apiKeyEnv` as `MY_ENDPOINT_KEY`. Set `config.model` to an exact model
+ID available to your account, such as `glm-5.3`. The driver appends
+`/chat/completions` to the base URL and attempts `/models` discovery; a
+manually configured model stays selectable if discovery is unavailable.
+
+Both services document this general API setup and their current model IDs
+in their OpenAI compatibility guides. See the [Z.ai guide](https://docs.z.ai/guides/develop/openai/python)
+and the [Zhipu BigModel guide](https://docs.bigmodel.cn/cn/guide/develop/openai/introduction).
+
 ## Notes
 
 - `config.json` is written with mode 0600; values in `environment` are stored

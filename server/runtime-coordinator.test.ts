@@ -954,6 +954,56 @@ describe("RuntimeCoordinator: a stop the person made is remembered", () => {
   });
 });
 
+// From a bug report: the chief of staff handed a long job to a teammate, then sent it a one-way follow-up, which queued
+// behind the running job. The system then cut the teammate's running step (a waiting message went first), which ended
+// the job, and the teammate's own thread stopping with it (the host's abort handler) was remembered as the person's stop:
+// handing the job out again was refused until the person asked again, though the person never stopped anything.
+describe("RuntimeCoordinator: a stop the system made is never remembered as the person's", () => {
+  const tick = () => sleep(2);
+  /** Like the host: a teammate's coordinated turn that is aborted stops its own thread, with no reason of its own. */
+  const stopsItsThread = (w: World) => {
+    for (const run of w.host.runs) run.signal.addEventListener("abort", () => w.coordinator.stopAwaitingDirect(run.node.threadId), { once: true });
+  };
+  const handedOut = async () => {
+    const w = world(hold);
+    const { node: work } = send(w, chief, "gen-1", undefined, builder, "Plan the pricing feature");
+    w.coordinator.tick();
+    await tick();
+    const { node: followUp } = w.coordinator.enqueue(chief, "gen-1", undefined, builder, "Also cover the trial page", { mode: "notify", reply: "none" });
+    w.coordinator.tick();
+    stopsItsThread(w);
+    return { w, work, followUp };
+  };
+
+  it("keeps a one-way follow-up queued behind the running work, without touching that work", async () => {
+    const { w, work, followUp } = await handedOut();
+    expect(w.coordinator.node(work.id)?.status).toBe("running");
+    expect(w.coordinator.node(followUp.id)?.status).toBe("queued");
+    expect(w.host.runs.filter(r => r.node.botId === "builder")).toHaveLength(1);
+    expect(w.host.runs[0]!.signal.aborted).toBe(false);
+  });
+
+  it.each([
+    ["the teammate's step cut so a waiting message goes first", (w: World) => w.coordinator.stopAwaitingDirect("builder-work", "Stopped after 9 min so a waiting message could go first")],
+    ["the teammate's thread cut by a routine restart", (w: World) => w.coordinator.cancelDirect("builder-work", "The routine restarted")],
+  ])("lets the work be handed out again after %s", async (_, stop) => {
+    const { w, work, followUp } = await handedOut();
+    stop(w);
+    expect(w.coordinator.node(work.id)?.status).toBe("cancelled");
+    expect(w.coordinator.node(followUp.id)?.status).toBe("cancelled");
+    await tick();
+    expect(send(w, chief, "gen-1", undefined, builder, "Plan the pricing feature", { rework: true }).node).toMatchObject({ botId: "builder", status: "queued" });
+  });
+
+  it("still remembers the person's own stop of that work, with the same follow-up queued", async () => {
+    const { w, work } = await handedOut();
+    w.coordinator.stopAwaitingDirect("builder-work");
+    expect(w.coordinator.node(work.id)?.status).toBe("cancelled");
+    await tick();
+    expect(() => send(w, chief, "gen-1", undefined, builder, "Plan the pricing feature", { rework: true })).toThrow("The person stopped this teammate's work on this request.");
+  });
+});
+
 describe("RuntimeCoordinator: read models", () => {
   it("awaitingTeammateThreads answers, for every thread at once, what outstandingDirect and the parked roots answer per thread", async () => {
     const w = world(hold);

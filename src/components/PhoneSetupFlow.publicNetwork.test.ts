@@ -51,7 +51,7 @@ const controller = (over: Partial<PhoneSetupController>): PhoneSetupController =
   cancel: noop,
   refreshCode: noop,
   finish: noop,
-  act: async () => {},
+  act: async () => null,
   accountAct: async () => {},
   ...over,
 });
