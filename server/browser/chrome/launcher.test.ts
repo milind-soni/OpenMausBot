@@ -41,6 +41,19 @@ function mac(options: { chrome?: boolean; env?: NodeJS.ProcessEnv } = {}) {
   return { root, app, chrome, dataDir, env, host };
 }
 
+/** A Windows machine with a Google Chrome at a temporary path and no registry. */
+function windows(options: { env?: NodeJS.ProcessEnv } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "omb-launcher-win-"));
+  folders.push(root);
+  const chrome = join(root, "chrome.exe");
+  writeFileSync(chrome, "MZ");
+  const dataDir = join(root, "data");
+  const env = { OMB_CHROME_PATH: chrome, USERPROFILE: root, LOCALAPPDATA: join(root, "Local"), ProgramFiles: join(root, "Program Files"), ...options.env };
+  const real = chromeHost({ dataDir, env, platform: "win32", arch: "x64" });
+  const host = { ...real, exists: (path: string) => path === chrome || existsSync(path), list: () => [], registryValue: () => null, registryKeyExists: () => false };
+  return { root, chrome, dataDir, env, host };
+}
+
 function sidecars() {
   return { ensure: vi.fn(async () => {}), forget: vi.fn(), attached: () => false } as unknown as IdentitySidecars & { ensure: ReturnType<typeof vi.fn>; forget: ReturnType<typeof vi.fn> };
 }
@@ -59,6 +72,36 @@ function launcher(machine: ReturnType<typeof mac>, overrides: Partial<Constructo
 const headless = (path: string) => ({ command: "/engine/agent-browser", env: { AGENT_BROWSER_EXECUTABLE_PATH: path, AGENT_BROWSER_HEADLESS: "1" } });
 
 describe("the Chrome launcher", () => {
+  it("starts a Windows Chrome directly, with the launcher's flags in the engine's environment", async () => {
+    const machine = windows();
+    const calibrate = vi.fn(async () => identity("155"));
+    const chrome = new ChromeLauncher({
+      dataDir: machine.dataDir, env: machine.env, platform: "win32", arch: "x64", host: machine.host,
+      engine: () => ({ managed: true }), calibrate, screen: async () => ({ width: 1440, height: 900 }), sidecars: sidecars(),
+      language: () => "es", log: () => {}, install: async () => { throw new Error("offline"); },
+    });
+    expect(chrome.env()).toEqual({
+      AGENT_BROWSER_EXECUTABLE_PATH: machine.chrome,
+      AGENT_BROWSER_HIDE_SCROLLBARS: "0",
+      AGENT_BROWSER_ARGS: "--disable-blink-features=AutomationControlled\n--lang=es",
+    });
+
+    await chrome.ready(headless(machine.chrome));
+
+    expect(calibrate).toHaveBeenCalledOnce();
+    expect(existsSync(chrome.path)).toBe(false);
+  });
+
+  it("keeps OMB_BROWSER_SCREEN on the direct Windows path", () => {
+    const machine = windows({ env: { OMB_BROWSER_SCREEN: "1280x720" } });
+    const chrome = new ChromeLauncher({
+      dataDir: machine.dataDir, env: machine.env, platform: "win32", arch: "x64", host: machine.host,
+      engine: () => ({ managed: true }), calibrate: async () => identity("155"), screen: async () => ({ width: 1440, height: 900 }), sidecars: sidecars(),
+      language: () => "es", log: () => {}, install: async () => { throw new Error("offline"); },
+    });
+    expect(chrome.env().AGENT_BROWSER_ARGS).toBe("--disable-blink-features=AutomationControlled\n--screen-info={1280x720}\n--lang=es");
+  });
+
   it("gives agent-browser a launcher for the installed Google Chrome, with the identity read from that binary", async () => {
     const machine = mac();
     const calibrate = vi.fn(async () => identity("155"));

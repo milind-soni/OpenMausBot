@@ -14,7 +14,7 @@ import { needsNoSandbox, type ChromeIdentity } from "./identity.ts";
 import { installChromeForTesting, type ChromeForTestingPin, type DownloadProgress } from "./install.ts";
 import { chromeHost, resolveChromePlan, type ChromeEngine, type ChromeHost, type ChromePlan, type FoundChrome } from "./resolve.ts";
 import { IdentitySidecars } from "./sidecar.ts";
-import { browserLanguage, browserTimeZone, languageList, launcherPath, primaryScreen, writeLauncher, type LauncherBox, type LauncherSettings, type Screen } from "./wrapper.ts";
+import { browserLanguage, browserTimeZone, languageList, launcherPath, primaryScreen, screenOverride, writeLauncher, type LauncherBox, type LauncherSettings, type Screen } from "./wrapper.ts";
 
 type Ready = { kind: "ready"; chrome: FoundChrome; identity: ChromeIdentity; product: string; fingerprint: string; launcher?: LauncherSettings };
 type State =
@@ -128,11 +128,37 @@ export class ChromeLauncher implements BrowserLaunch {
 
   /** What agent-browser's environment gains: nothing while the engine keeps its own browser. */
   env(): Record<string, string> {
-    if (this.state.kind === "failed" || this.plan().kind === "legacy") return {};
+    const plan = this.plan();
+    if (this.state.kind === "failed" || plan.kind === "legacy") return {};
     void this.prepare();
     this.followTimeZone();
     this.followLanguage();
-    return { AGENT_BROWSER_EXECUTABLE_PATH: this.path, AGENT_BROWSER_HIDE_SCROLLBARS: "0" };
+    const direct = this.directChromePath(plan);
+    if (!direct) return { AGENT_BROWSER_EXECUTABLE_PATH: this.path, AGENT_BROWSER_HIDE_SCROLLBARS: "0" };
+    // Windows starts Chrome itself: a batch launcher would make cmd.exe allocate a console window for the whole session.
+    return {
+      AGENT_BROWSER_EXECUTABLE_PATH: direct,
+      AGENT_BROWSER_HIDE_SCROLLBARS: "0",
+      AGENT_BROWSER_ARGS: this.windowsLaunchArgs(),
+    };
+  }
+
+  /** A resolved Chrome on Windows runs without the generated batch file. */
+  private directChromePath(plan: ChromePlan = this.plan()): string | null {
+    if (this.options.platform !== "win32") return null;
+    if (this.state.kind === "ready") return this.state.chrome.path;
+    return plan.kind === "chrome" ? plan.chrome.path : null;
+  }
+
+  /** The launcher's Chrome arguments that carry no comma, which the engine splits its argument value at. */
+  private windowsLaunchArgs(): string {
+    const language = this.resolvedLanguage();
+    const screen = screenOverride(this.options.env);
+    return [
+      "--disable-blink-features=AutomationControlled",
+      ...(screen ? [`--screen-info={${screen.width}x${screen.height}}`] : []),
+      ...(language ? [`--lang=${language}`] : []),
+    ].join("\n");
   }
 
   /** The owner's app can give a Cloud its time zone at any time (server/time-zone.ts): the next Chrome this starts tells
@@ -236,7 +262,8 @@ export class ChromeLauncher implements BrowserLaunch {
   }
 
   private uses(spec: LaunchSpec): boolean {
-    return spec.env?.AGENT_BROWSER_EXECUTABLE_PATH === this.path && !attachesToChrome(spec.env);
+    const path = spec.env?.AGENT_BROWSER_EXECUTABLE_PATH;
+    return (path === this.path || path === this.directChromePath()) && !attachesToChrome(spec.env ?? {});
   }
 
   private fresh(state: Ready): boolean {
@@ -260,7 +287,7 @@ export class ChromeLauncher implements BrowserLaunch {
     }
     const { env, platform } = this.options;
     let launcher: LauncherSettings | undefined;
-    if (this.options.wrapper !== false) {
+    if (this.options.wrapper !== false && this.directChromePath(plan) === null) {
       this.screen ??= this.options.screen ? this.options.screen() : primaryScreen(platform, env);
       launcher = {
         chrome: chrome.path, userAgent: identity.userAgent, screen: await this.screen,
