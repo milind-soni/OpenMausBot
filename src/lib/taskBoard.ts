@@ -124,3 +124,52 @@ export function positionForDrop(
 export function activeTaskFilterCount(filters: TaskFilters): number {
   return Object.entries(filters).filter(([, value]) => typeof value === "boolean" ? value : Boolean(value)).length;
 }
+
+export function secondaryTaskFilterCount(filters: TaskFilters): number {
+  let count = 0;
+  if (filters.type) count += 1;
+  if (filters.priority) count += 1;
+  if (filters.tag.trim()) count += 1;
+  if (filters.overdue) count += 1;
+  return count;
+}
+
+export interface TaskStarterPreset {
+  id: string;
+  label: string;
+  title: string;
+  description: string;
+  criteria: string;
+  type: TaskType;
+  priority: TaskPriority;
+}
+
+export const TASK_STARTER_PRESETS: TaskStarterPreset[] = [
+  {
+    id: "roadmap",
+    label: "Plan project roadmap",
+    title: "Outline milestones and priorities for the next release",
+    description: "Break down our upcoming goals into clear, actionable tasks for the team.",
+    criteria: "Milestones are listed in order\nEach milestone has an owner",
+    type: "feature",
+    priority: "high",
+  },
+  {
+    id: "research",
+    label: "Research a topic",
+    title: "Gather key findings and summarize options",
+    description: "Compare approaches, note trade-offs, and recommend a clear next step.",
+    criteria: "Key sources are linked\nSummary includes a recommendation",
+    type: "research",
+    priority: "normal",
+  },
+  {
+    id: "docs",
+    label: "Draft a guide or doc",
+    title: "Write a plain-language guide for new readers",
+    description: "Explain how the workflow works with clear examples and zero jargon.",
+    criteria: "Draft is reviewed for clarity\nExamples are up to date",
+    type: "documentation",
+    priority: "normal",
+  },
+];

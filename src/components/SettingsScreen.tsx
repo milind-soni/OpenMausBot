@@ -138,9 +138,9 @@ function ProfileSection() {
         <div className="flex items-start gap-3">
           <ShieldCheck size={20} className="mt-0.5 text-accent shrink-0" />
           <div>
-            <h3 className="text-[14px] font-medium text-ink">Local Privacy</h3>
+            <h3 className="text-[14px] font-medium text-ink">Local Storage & AI Processing</h3>
             <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
-              Gerer Build Studio stores your profiles, bot threads, and configurations locally. Usage analytics is off until you enable it in System settings.
+              Gerer Build Studio stores your profiles, conversations, and project folders on the computer running Studio. When you message a bot, the connected AI app receives your messages and relevant content needed for the requested work under that service&apos;s policy. Usage analytics is off until you enable it in System settings.
             </p>
           </div>
         </div>

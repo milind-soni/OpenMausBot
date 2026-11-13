@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll } from "vitest";
 import { mentionedProjects, readRegisteredProjects, resolveProjectContext, type RegisteredProject } from "./projects.ts";
+import { applySuggestedFolder } from "../src/lib/projectSuggestions.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -119,7 +120,7 @@ posixOnly("project context turn integration", () => {
     }));
     const projectsFile = join(home, "projects.json");
     writeFileSync(projectsFile, JSON.stringify([
-      { id: "trusted", name: "Trusted Workspace", mention: "trusted", path: workspace },
+      { id: "trusted", name: "Trusted Workspace", mention: "trusted", path: workspace, source: "existing", addedAt: 1 },
     ]));
 
     child = spawn(process.execPath, [join(serverDirectory, "index.ts")], {
@@ -182,4 +183,66 @@ posixOnly("project context turn integration", () => {
     expect(context.prompt).toContain(`#trusted (Trusted Workspace): ${workspace}`);
     expect(context.prompt).toContain("Use only these canonical paths");
   }, 20_000);
+
+  it("accepts chip-generated ~/ paths on /api/projects/* and rejects traversal or symlink escapes", async () => {
+    const projectsDir = join(home, "Projects");
+    mkdirSync(projectsDir, { recursive: true });
+    const canonicalProjectsDir = realpathSync(projectsDir);
+
+    const outside = mkdtempSync(join(tmpdir(), "gbs-outside-home-"));
+    roots.push(outside);
+    symlinkSync(outside, join(home, "escape-link"), "dir");
+
+    const addChipPath = applySuggestedFolder("~/Projects", { mode: "existing" });
+    const added = await api("POST", "/api/projects/add-existing", { projectPath: addChipPath });
+    expect(added.status).toBe(201);
+    expect(added.body.project).toMatchObject({
+      name: "Projects",
+      path: canonicalProjectsDir,
+      source: "existing",
+    });
+
+    const createChipParent = applySuggestedFolder("~/Projects", { mode: "create" });
+    const created = await api("POST", "/api/projects/create", {
+      parentPath: createChipParent,
+      name: "qa-chip-folder",
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.project).toMatchObject({
+      name: "qa-chip-folder",
+      path: join(canonicalProjectsDir, "qa-chip-folder"),
+      source: "created",
+    });
+
+    const cloneChipDest = applySuggestedFolder("~/Projects", {
+      mode: "clone",
+      repositoryUrl: "https://github.com/example/qa-chip-folder",
+    });
+    const cloneExistingCheck = await api("POST", "/api/projects/clone", {
+      repositoryUrl: "https://github.com/example/qa-chip-folder",
+      destinationPath: cloneChipDest,
+    });
+    expect(cloneExistingCheck.status).toBe(400);
+    expect(cloneExistingCheck.body.error).toContain("clone destination already exists");
+
+    for (const badPath of ["~/../outside", "~/escape-link"]) {
+      const badAdd = await api("POST", "/api/projects/add-existing", { projectPath: badPath });
+      expect(badAdd.status).toBe(400);
+      expect(badAdd.body.error).toContain("inside your home directory");
+
+      const badCreate = await api("POST", "/api/projects/create", {
+        parentPath: badPath,
+        name: "escaped",
+      });
+      expect(badCreate.status).toBe(400);
+      expect(badCreate.body.error).toContain("inside your home directory");
+
+      const badClone = await api("POST", "/api/projects/clone", {
+        repositoryUrl: "https://github.com/example/repo",
+        destinationPath: `${badPath}/repo`,
+      });
+      expect(badClone.status).toBe(400);
+      expect(badClone.body.error).toContain("inside your home directory");
+    }
+  });
 });

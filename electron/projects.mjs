@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { access, mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 
 const PROJECTS_FILE = "projects.json";
@@ -125,6 +126,34 @@ async function isDirectory(targetPath) {
   }
 }
 
+function resolveHomeDirectory(explicitHome) {
+  return String(explicitHome || process.env.HOME || process.env.USERPROFILE || homedir() || "").trim();
+}
+
+export function isHomeRelativePath(targetPath) {
+  const value = String(targetPath ?? "").trim();
+  return value === "~" || value.startsWith("~/") || value.startsWith("~\\");
+}
+
+export function expandHostHomePath(targetPath, homeDirectory, label = "Folder") {
+  const value = String(targetPath ?? "").trim();
+  if (!isHomeRelativePath(value)) {
+    return { resolvedPath: value, usedHomeRelative: false, homeRoot: null };
+  }
+  const homeRoot = resolveHomeDirectory(homeDirectory);
+  if (!homeRoot || !path.isAbsolute(homeRoot)) {
+    throw projectError(`${label} must be an absolute path.`);
+  }
+  const normalizedHome = path.resolve(homeRoot);
+  const suffix = value.slice(1).replace(/^[/\\]+/, "");
+  const expanded = suffix ? path.resolve(normalizedHome, suffix) : normalizedHome;
+  const relativePath = path.relative(normalizedHome, expanded);
+  if (relativePath === ".." || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
+    throw projectError("Browser projects can only be created or cloned inside your home directory.");
+  }
+  return { resolvedPath: expanded, usedHomeRelative: true, homeRoot: normalizedHome };
+}
+
 async function canonicalDirectory(targetPath, label = "Folder") {
   const value = String(targetPath ?? "").trim();
   if (!value || !path.isAbsolute(value)) throw projectError(`${label} must be an absolute path.`);
@@ -188,12 +217,13 @@ export function runGitClone({ repositoryUrl, destinationPath }) {
 }
 
 export class ProjectService {
-  constructor({ dataDir, filePath, cloneRepository = runGitClone }) {
+  constructor({ dataDir, filePath, cloneRepository = runGitClone, homeDir }) {
     if (!dataDir || !path.isAbsolute(dataDir)) throw projectError("Project data directory must be absolute.");
     this.dataDir = dataDir;
     if (filePath && !path.isAbsolute(filePath)) throw projectError("Project registry path must be absolute.");
     this.filePath = filePath || path.join(dataDir, PROJECTS_FILE);
     this.cloneRepository = cloneRepository;
+    this.homeDir = homeDir;
   }
 
   async readRecords() {
@@ -237,8 +267,17 @@ export class ProjectService {
     return Promise.all(records.map(async (record) => ({ ...record, missing: !(await isDirectory(record.path)) })));
   }
 
-  async addRecord({ projectPath, source, repositoryUrl }) {
-    const canonicalPath = await canonicalDirectory(projectPath, "Project folder");
+  async addRecord({ projectPath, source, repositoryUrl, allowedRoot }) {
+    const effectiveRoot = allowedRoot || this.homeDir;
+    const { resolvedPath, usedHomeRelative, homeRoot } = expandHostHomePath(
+      projectPath,
+      effectiveRoot,
+      "Project folder",
+    );
+    const canonicalPath = await canonicalDirectory(resolvedPath, "Project folder");
+    if (usedHomeRelative || allowedRoot) {
+      await assertWithinAllowedRoot(canonicalPath, effectiveRoot || homeRoot);
+    }
     const records = await this.readRecords();
     const duplicate = records.find((record) => pathKey(record.path) === pathKey(canonicalPath));
     if (duplicate) return { ...duplicate, missing: false };
@@ -262,13 +301,20 @@ export class ProjectService {
     return { ...record, missing: false };
   }
 
-  async addExisting(projectPath) {
-    return this.addRecord({ projectPath, source: "existing" });
+  async addExisting(projectPath, options = {}) {
+    return this.addRecord({ projectPath, source: "existing", allowedRoot: options?.allowedRoot });
   }
 
   async createProject({ parentPath, name, allowedRoot }) {
-    const parent = await canonicalDirectory(parentPath, "Parent folder");
-    await assertWithinAllowedRoot(parent, allowedRoot);
+    const effectiveRoot = allowedRoot || this.homeDir;
+    const { resolvedPath: expandedParent, usedHomeRelative, homeRoot } = expandHostHomePath(
+      parentPath,
+      effectiveRoot,
+      "Parent folder",
+    );
+    const containmentRoot = effectiveRoot || (usedHomeRelative ? homeRoot : undefined);
+    const parent = await canonicalDirectory(expandedParent, "Parent folder");
+    await assertWithinAllowedRoot(parent, containmentRoot);
     const folderName = validateFolderName(name);
     const projectPath = path.join(parent, folderName);
     try {
@@ -277,17 +323,28 @@ export class ProjectService {
       if (error?.code === "EEXIST") throw projectError("A file or folder already exists at that path.");
       throw projectError(`Could not create the project folder: ${error.message}`, error);
     }
-    return this.addRecord({ projectPath, source: "created" });
+    return this.addRecord({ projectPath, source: "created", allowedRoot: containmentRoot });
   }
 
   async cloneProject({ repositoryUrl, destinationPath, allowedRoot }) {
     const parsed = parseGitHubRepositoryUrl(repositoryUrl);
-    const destination = path.resolve(String(destinationPath ?? "").trim());
-    if (!destinationPath || !path.isAbsolute(String(destinationPath))) {
+    const effectiveRoot = allowedRoot || this.homeDir;
+    const { resolvedPath: expandedDestination, usedHomeRelative, homeRoot } = expandHostHomePath(
+      destinationPath,
+      effectiveRoot,
+      "Clone destination",
+    );
+    if (!expandedDestination || !path.isAbsolute(String(expandedDestination))) {
       throw projectError("Clone destination must be an absolute path.");
     }
+    const destination = path.resolve(String(expandedDestination).trim());
+    const containmentRoot = effectiveRoot || (usedHomeRelative ? homeRoot : undefined);
+    if (containmentRoot && path.resolve(containmentRoot) === destination) {
+      throw projectError("Browser projects can only be created or cloned inside your home directory.");
+    }
+    validateFolderName(path.basename(destination));
     const parent = await canonicalDirectory(path.dirname(destination), "Destination parent folder");
-    await assertWithinAllowedRoot(parent, allowedRoot);
+    await assertWithinAllowedRoot(parent, containmentRoot);
     const normalizedDestination = path.join(parent, path.basename(destination));
     try {
       await access(normalizedDestination, fsConstants.F_OK);
@@ -304,6 +361,7 @@ export class ProjectService {
       projectPath: normalizedDestination,
       source: "github",
       repositoryUrl: parsed.repositoryUrl,
+      allowedRoot: containmentRoot,
     });
   }
 
