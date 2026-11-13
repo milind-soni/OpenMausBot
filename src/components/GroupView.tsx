@@ -21,7 +21,6 @@ import { MobilePreviewPanel } from "./MobilePreviewPanel";
 import { TasksPanel } from "./TasksPanel";
 import { OptionCard } from "./OptionCard";
 import { AttachmentList } from "./AttachmentViewer";
-import { useMediaQuery } from "@/lib/useMediaQuery";
 import { useHeaderCollapse } from "@/lib/useHeaderCollapse";
 import { HeaderMoreMenu } from "./HeaderMoreMenu";
 import { SHARED_HEADER_HEIGHT_CLASS } from "@/lib/layoutTokens";
@@ -154,9 +153,39 @@ export function GroupView({ group }: { group: Group }) {
   );
   const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
   const [tasksOpen, setTasksOpen] = useState(() => localStorage.getItem("room-tasks-open") === "true");
-  const isLargeScreen = useMediaQuery("(min-width: 1180px)");
-  const isDualPanelWide = useMediaQuery("(min-width: 1400px)");
+  const mainRef = useRef<HTMLElement>(null);
+  const [mainWidth, setMainWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return 1180 - 320;
+    const sidebar = 320;
+    return Math.max(0, window.innerWidth - sidebar);
+  });
+
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    const update = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0) setMainWidth(rect.width);
+    };
+    update();
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = entry.contentRect.width;
+        if (w > 0) setMainWidth(w);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const isLargeScreen = mainWidth >= 860;
+  const isDualPanelWide = mainWidth >= 1080;
   const previewAsDrawer = !isDualPanelWide && tasksOpen;
+
+  const closeAllDrawers = useCallback(() => {
+    setMobilePreviewOpen(false);
+    setTasksOpen(false);
+  }, []);
 
   const [lastRequestedDrawer, setLastRequestedDrawer] = useState<"preview" | "tasks">("preview");
 
@@ -218,7 +247,7 @@ export function GroupView({ group }: { group: Group }) {
     const sidebarWidth = 320;
     const previewWidth = isDualPanelWide && mobilePreviewOpen ? 380 : 0;
     const tasksWidth = isDualPanelWide && tasksOpen ? 320 : 0;
-    return window.innerWidth - sidebarWidth - previewWidth - tasksWidth;
+    return Math.max(300, window.innerWidth - sidebarWidth - previewWidth - tasksWidth);
   }, [isDualPanelWide, mobilePreviewOpen, tasksOpen]);
 
   const headerRef = useRef<HTMLDivElement>(null);
@@ -291,7 +320,7 @@ export function GroupView({ group }: { group: Group }) {
   );
 
   return (
-    <main className="relative flex h-full min-w-0 flex-1 bg-app">
+    <main ref={mainRef} className="relative flex h-full min-w-0 flex-1 bg-app overflow-hidden">
       <section className="relative flex h-full min-w-[360px] flex-1 flex-col overflow-hidden">
       {/* Header: name left, member mauses right — their motion IS the status */}
       <div
@@ -580,35 +609,32 @@ export function GroupView({ group }: { group: Group }) {
         </>
       )}
 
-      {/* Drawer mode: Single backdrop for narrow viewports (< 1180px) */}
+      {/* Drawer mode: Single backdrop for narrow viewports (< 860px main width) */}
       {!isLargeScreen && activeMobileDrawer && (
         <button
           type="button"
           aria-label={activeMobileDrawer === "preview" ? "Close mobile preview panel" : "Close tasks panel"}
-          onClick={() => {
-            if (activeMobileDrawer === "preview") setMobilePreviewOpen(false);
-            else setTasksOpen(false);
-          }}
+          onClick={closeAllDrawers}
           className="absolute inset-0 z-20 bg-black/55"
         />
       )}
 
-      {/* Preview drawer below 1180px */}
+      {/* Preview drawer below 860px main width */}
       {!isLargeScreen && mobilePreviewOpen && activeMobileDrawer === "preview" && (
         <MobilePreviewPanel
-          onClose={() => setMobilePreviewOpen(false)}
+          onClose={closeAllDrawers}
           onScreenshot={setPreviewAttachment}
           className="absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl"
         />
       )}
 
-      {/* Tasks drawer below 1180px */}
+      {/* Tasks drawer below 860px main width */}
       {!isLargeScreen && tasksOpen && activeMobileDrawer === "tasks" && (
         <TasksPanel
           tasks={roomTasks}
           emptyLabel={group.projectId ? "No tasks in this project yet." : "Set a project above to see its tasks here."}
           headerExtra={tasksProjectPicker}
-          onClose={() => setTasksOpen(false)}
+          onClose={closeAllDrawers}
           className="absolute inset-y-0 right-0 z-30 flex max-w-[88vw] shadow-2xl"
         />
       )}

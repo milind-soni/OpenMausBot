@@ -1,19 +1,16 @@
 import { PAGE_SHARE_NOTICE, previewShareLink, sharesLinkOnly } from "@/lib/previewSharing";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowLeftRight,
   Camera,
-  Check,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   ExternalLink,
   FolderOpen,
   History,
   Laptop,
   Maximize2,
   Monitor,
-  MoreHorizontal,
   RotateCw,
   SlidersHorizontal,
   Smartphone,
@@ -26,7 +23,6 @@ import {
   clampCustomDimension,
   computeFrameScale,
   PREVIEW_SIZE_GROUPS,
-  PREVIEW_ZOOM_OPTIONS,
   resolvePreviewSize,
   type PreviewSizeGroup,
   type PreviewSizePreset,
@@ -51,6 +47,7 @@ import {
 } from "@/lib/mobilePreviewState";
 import { PreviewFrame, type PreviewFrameHandle, type PreviewFrameStatus } from "@/components/PreviewFrame";
 import { PreviewFilePicker, usePreviewAutoRefreshWatcher } from "@/components/PreviewFilePicker";
+import { PreviewMoreMenu } from "@/components/PreviewMoreMenu";
 import { cn } from "@/lib/cn";
 import { SHARED_HEADER_HEIGHT_CLASS } from "@/lib/layoutTokens";
 import { isDeviceSource as isWebPreviewSource } from "@/lib/previewSource";
@@ -131,9 +128,47 @@ export function MobilePreviewPanel({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [sizeMenuOpen, setSizeMenuOpen] = useState(false);
   const [screenshotMenuOpen, setScreenshotMenuOpen] = useState(false);
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [filePickerOpen, setFilePickerOpen] = useState(false);
   const filePickerTriggerRef = useRef<HTMLElement | null>(null);
+
+  const [sizeCoords, setSizeCoords] = useState<{ top: number; right: number } | null>(null);
+  const [historyCoords, setHistoryCoords] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [screenshotCoords, setScreenshotCoords] = useState<{ top: number; right: number } | null>(null);
+
+  const sizeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const sizeMenuRef = useRef<HTMLDivElement | null>(null);
+  const historyButtonRef = useRef<HTMLButtonElement | null>(null);
+  const historyMenuRef = useRef<HTMLDivElement | null>(null);
+  const screenshotButtonRef = useRef<HTMLButtonElement | null>(null);
+  const screenshotMenuRef = useRef<HTMLDivElement | null>(null);
+
+  const updateSizePosition = useCallback(() => {
+    if (!sizeButtonRef.current) return;
+    const rect = sizeButtonRef.current.getBoundingClientRect();
+    setSizeCoords({
+      top: rect.bottom + 6,
+      right: Math.max(8, window.innerWidth - rect.right),
+    });
+  }, []);
+
+  const updateHistoryPosition = useCallback(() => {
+    if (!historyDropdownRef.current) return;
+    const rect = historyDropdownRef.current.getBoundingClientRect();
+    setHistoryCoords({
+      top: rect.bottom + 4,
+      left: rect.left,
+      width: Math.max(220, rect.width),
+    });
+  }, []);
+
+  const updateScreenshotPosition = useCallback(() => {
+    if (!screenshotButtonRef.current) return;
+    const rect = screenshotButtonRef.current.getBoundingClientRect();
+    setScreenshotCoords({
+      top: rect.bottom + 6,
+      right: Math.max(8, window.innerWidth - rect.right),
+    });
+  }, []);
 
   const openFilePicker = (trigger?: HTMLElement | null) => {
     filePickerTriggerRef.current =
@@ -149,7 +184,6 @@ export function MobilePreviewPanel({
   const historyDropdownRef = useRef<HTMLDivElement | null>(null);
   const sizeDropdownRef = useRef<HTMLDivElement | null>(null);
   const screenshotDropdownRef = useRef<HTMLDivElement | null>(null);
-  const moreDropdownRef = useRef<HTMLDivElement | null>(null);
 
   usePreviewAutoRefreshWatcher("quick-preview-panel", activeSource, open);
 
@@ -216,46 +250,73 @@ export function MobilePreviewPanel({
 
   // Close menus on outside click or Escape
   useEffect(() => {
-    if (!historyOpen && !sizeMenuOpen && !screenshotMenuOpen && !moreMenuOpen) return;
+    if (!historyOpen && !sizeMenuOpen && !screenshotMenuOpen) return;
     const handlePointerDown = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (historyOpen && historyDropdownRef.current && !historyDropdownRef.current.contains(target)) {
+      if (
+        historyOpen &&
+        historyDropdownRef.current &&
+        !historyDropdownRef.current.contains(target) &&
+        historyMenuRef.current &&
+        !historyMenuRef.current.contains(target)
+      ) {
         setHistoryOpen(false);
       }
-      if (sizeMenuOpen && sizeDropdownRef.current && !sizeDropdownRef.current.contains(target)) {
+      if (
+        sizeMenuOpen &&
+        sizeButtonRef.current &&
+        !sizeButtonRef.current.contains(target) &&
+        sizeMenuRef.current &&
+        !sizeMenuRef.current.contains(target)
+      ) {
         setSizeMenuOpen(false);
       }
       if (
         screenshotMenuOpen &&
-        screenshotDropdownRef.current &&
-        !screenshotDropdownRef.current.contains(target)
+        screenshotButtonRef.current &&
+        !screenshotButtonRef.current.contains(target) &&
+        screenshotMenuRef.current &&
+        !screenshotMenuRef.current.contains(target)
       ) {
         setScreenshotMenuOpen(false);
       }
-      if (
-        moreMenuOpen &&
-        moreDropdownRef.current &&
-        !moreDropdownRef.current.contains(target)
-      ) {
-        setMoreMenuOpen(false);
-      }
     };
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.preventDefault();
       e.stopPropagation();
-      setHistoryOpen(false);
-      setSizeMenuOpen(false);
-      setScreenshotMenuOpen(false);
-      setMoreMenuOpen(false);
+      if (historyOpen) {
+        setHistoryOpen(false);
+        historyButtonRef.current?.focus();
+      }
+      if (sizeMenuOpen) {
+        setSizeMenuOpen(false);
+        sizeButtonRef.current?.focus();
+      }
+      if (screenshotMenuOpen) {
+        setScreenshotMenuOpen(false);
+        screenshotButtonRef.current?.focus();
+      }
     };
-    document.addEventListener("mousedown", handlePointerDown);
-    window.addEventListener("keydown", handleKeyDown);
+
+    const handleScrollOrResize = () => {
+      if (sizeMenuOpen) updateSizePosition();
+      if (historyOpen) updateHistoryPosition();
+      if (screenshotMenuOpen) updateScreenshotPosition();
+    };
+
+    document.addEventListener("mousedown", handlePointerDown, true);
+    window.addEventListener("keydown", handleKeyDown, true);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
     return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      window.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("mousedown", handlePointerDown, true);
+      window.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
     };
-  }, [historyOpen, moreMenuOpen, screenshotMenuOpen, sizeMenuOpen]);
+  }, [historyOpen, screenshotMenuOpen, sizeMenuOpen, updateHistoryPosition, updateScreenshotPosition, updateSizePosition]);
 
   const commitUrl = useCallback((url: string) => {
     setPendingLocalUrl(null);
@@ -367,7 +428,7 @@ export function MobilePreviewPanel({
       )}
     >
       {/* Redesigned Single Header (h-[60px] aligned with Chat & Tasks headers) */}
-      <header className={cn("flex shrink-0 items-center justify-between gap-1.5 border-b border-hairline/40 bg-panel px-2.5 min-w-0 max-w-full overflow-hidden", SHARED_HEADER_HEIGHT_CLASS)}>
+      <header className={cn("flex shrink-0 items-center justify-between gap-1 border-b border-hairline/40 bg-panel px-2 min-w-0 max-w-full overflow-hidden", SHARED_HEADER_HEIGHT_CLASS)}>
         {isDeviceSource ? (
           /* State A: Web / HTML document preview */
           <>
@@ -379,7 +440,7 @@ export function MobilePreviewPanel({
 
             {/* Compact Address Field */}
             <div
-              className="relative flex min-w-[110px] flex-1 items-center rounded-lg border border-hairline/60 bg-inset h-8 px-1 focus-within:border-accent/60 transition-colors overflow-hidden"
+              className="relative flex min-w-0 flex-1 items-center rounded-lg border border-hairline/60 bg-inset h-8 px-1 focus-within:border-accent/60 transition-colors overflow-hidden"
               ref={historyDropdownRef}
             >
               <button
@@ -412,8 +473,12 @@ export function MobilePreviewPanel({
 
               {historyList.length > 0 && (
                 <button
+                  ref={historyButtonRef}
                   type="button"
-                  onClick={() => setHistoryOpen((v) => !v)}
+                  onClick={() => {
+                    if (!historyOpen) updateHistoryPosition();
+                    setHistoryOpen((v) => !v);
+                  }}
                   aria-label="Recent preview addresses"
                   title="Recent addresses"
                   className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
@@ -421,52 +486,10 @@ export function MobilePreviewPanel({
                   <History className="h-3 w-3" />
                 </button>
               )}
-
-              {/* History Dropdown */}
-              {historyOpen && historyList.length > 0 && (
-                <div
-                  role="listbox"
-                  aria-label="Recent preview addresses"
-                  className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-xl border border-hairline bg-panel shadow-xl"
-                >
-                  <div className="flex items-center justify-between border-b border-hairline/40 px-2.5 py-1.5">
-                    <span className="text-[10px] font-medium uppercase tracking-wider text-ink-secondary">
-                      Recent addresses
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        clearMobilePreviewUrlHistory();
-                        setHistoryList([]);
-                        setHistoryOpen(false);
-                      }}
-                      className="inline-flex items-center gap-1 text-[10px] text-ink-secondary transition-colors hover:text-danger"
-                    >
-                      <Trash2 className="h-2.5 w-2.5" />
-                      Clear
-                    </button>
-                  </div>
-                  <div className="max-h-48 overflow-y-auto py-1">
-                    {historyList.map((item) => (
-                      <button
-                        key={item}
-                        type="button"
-                        onClick={() => {
-                          setInputUrl(item);
-                          handleNavigate(item);
-                        }}
-                        className="block w-full truncate px-2.5 py-1.5 text-left font-mono text-[11px] text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
-                      >
-                        {item}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Primary Controls */}
-            <div className="flex items-center gap-0.5 shrink-0">
+            <div className="flex items-center gap-0.5 shrink-0 ml-auto">
               {/* Reload */}
               <button
                 type="button"
@@ -474,7 +497,7 @@ export function MobilePreviewPanel({
                 disabled={!activeSource}
                 aria-label="Reload preview"
                 title="Reload preview"
-                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
               >
                 <RotateCw className={cn("h-3.5 w-3.5", frameStatus === "loading" && "animate-spin")} />
               </button>
@@ -482,8 +505,12 @@ export function MobilePreviewPanel({
               {/* Grouped Size Selector (Icon + Short Label) */}
               <div className="relative shrink-0" ref={sizeDropdownRef}>
                 <button
+                  ref={sizeButtonRef}
                   type="button"
-                  onClick={() => setSizeMenuOpen((v) => !v)}
+                  onClick={() => {
+                    if (!sizeMenuOpen) updateSizePosition();
+                    setSizeMenuOpen((v) => !v);
+                  }}
                   aria-label="Choose preview size"
                   aria-expanded={sizeMenuOpen}
                   title={`${preset.label} (${effectiveDims.width}×${effectiveDims.height})`}
@@ -493,96 +520,9 @@ export function MobilePreviewPanel({
                   <span className="shrink-0">{shortDeviceLabel(preset)}</span>
                   <ChevronDown className="h-3 w-3 text-ink-secondary shrink-0" />
                 </button>
-
-                {sizeMenuOpen && (
-                  <div className="absolute right-0 top-full z-50 mt-1 w-64 overflow-hidden rounded-xl border border-hairline bg-panel p-1.5 shadow-xl">
-                    <div className="max-h-72 overflow-y-auto">
-                      {PREVIEW_SIZE_GROUPS.map((group) => (
-                        <div key={group.group} className="mb-1.5 last:mb-0">
-                          <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-ink-secondary">
-                            {group.label}
-                          </div>
-                          {group.presets.map((item) => {
-                            const active = item.id === preset.id;
-                            return (
-                              <button
-                                key={item.id}
-                                type="button"
-                                onClick={() => {
-                                  setPresetId(item.id);
-                                  setSizeMenuOpen(false);
-                                }}
-                                className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-[11.5px] transition-colors ${
-                                  active
-                                    ? "bg-accent/15 font-medium text-ink"
-                                    : "text-ink-secondary hover:bg-raised-hover hover:text-ink"
-                                }`}
-                              >
-                                <span>{item.label}</span>
-                                <span className="font-mono text-[10.5px] text-ink-secondary">
-                                  {item.width} × {item.height}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ))}
-
-                      <div className="mt-1 border-t border-hairline/50 pt-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setPresetId("custom")}
-                          className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-[11.5px] transition-colors ${
-                            preset.id === "custom"
-                              ? "bg-accent/15 font-medium text-ink"
-                              : "text-ink-secondary hover:bg-raised-hover hover:text-ink"
-                          }`}
-                        >
-                          <span>Custom size</span>
-                          <span className="font-mono text-[10.5px] text-ink-secondary">
-                            {customSize.width} × {customSize.height}
-                          </span>
-                        </button>
-                        {preset.id === "custom" && (
-                          <div className="mt-1.5 flex items-center gap-1.5 px-2 pb-1">
-                            <input
-                              type="number"
-                              min={240}
-                              max={3840}
-                              value={customSize.width}
-                              onChange={(e) =>
-                                setCustomSize((prev) => ({
-                                  ...prev,
-                                  width: clampCustomDimension(Number(e.target.value)),
-                                }))
-                              }
-                              aria-label="Custom width"
-                              className="h-7 w-20 rounded border border-hairline/70 bg-inset px-2 font-mono text-[11px] text-ink"
-                            />
-                            <span className="text-[11px] text-ink-secondary">×</span>
-                            <input
-                              type="number"
-                              min={240}
-                              max={3840}
-                              value={customSize.height}
-                              onChange={(e) =>
-                                setCustomSize((prev) => ({
-                                  ...prev,
-                                  height: clampCustomDimension(Number(e.target.value)),
-                                }))
-                              }
-                              aria-label="Custom height"
-                              className="h-7 w-20 rounded border border-hairline/70 bg-inset px-2 font-mono text-[11px] text-ink"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
 
-              {/* Rotate */}
+              {/* Rotate (secondary control - visible on extra wide 2xl:flex, otherwise folded into More) */}
               <button
                 type="button"
                 onClick={() => setRotated((v) => !v)}
@@ -591,7 +531,7 @@ export function MobilePreviewPanel({
                 aria-pressed={rotated}
                 title="Rotate (swap width and height)"
                 className={cn(
-                  "flex h-7 w-7 items-center justify-center rounded-md border transition-colors disabled:opacity-35",
+                  "hidden 2xl:flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-colors disabled:opacity-35",
                   rotated
                     ? "border-accent/40 bg-accent/15 text-accent"
                     : "border-transparent text-ink-secondary hover:bg-raised-hover hover:text-ink",
@@ -601,153 +541,21 @@ export function MobilePreviewPanel({
               </button>
 
               {/* Overflow Menu (•••) */}
-              <div className="relative" ref={moreDropdownRef}>
-                <button
-                  type="button"
-                  onClick={() => setMoreMenuOpen((v) => !v)}
-                  aria-label="More preview options"
-                  aria-expanded={moreMenuOpen}
-                  title="More options"
-                  className={cn(
-                    "flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink",
-                    moreMenuOpen && "bg-raised text-ink",
-                  )}
-                >
-                  <MoreHorizontal className="h-3.5 w-3.5" />
-                </button>
-
-                {moreMenuOpen && (
-                  <div
-                    role="menu"
-                    aria-label="More preview options"
-                    className="absolute right-0 top-full z-50 mt-1 w-56 overflow-hidden rounded-xl border border-hairline bg-panel p-1.5 shadow-xl"
-                  >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setMoreMenuOpen(false);
-                        handleOpenInPreviewPage();
-                      }}
-                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-ink transition-colors hover:bg-raised-hover"
-                    >
-                      <Maximize2 className="h-3.5 w-3.5 text-ink-secondary" />
-                      <span>Open in Preview page</span>
-                    </button>
-
-                    {canCaptureScreenshot && (
-                      <div className="mt-1 border-t border-hairline/40 pt-1">
-                        <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-ink-secondary">
-                          Share to chat
-                        </div>
-                        {sharesLinkOnly(activeSource, Boolean(window.gbs)) ? (
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              setMoreMenuOpen(false);
-                              void handleCaptureScreenshot("visible");
-                            }}
-                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-ink transition-colors hover:bg-raised-hover"
-                          >
-                            <Camera className="h-3.5 w-3.5 text-ink-secondary" />
-                            <span>Add preview link to chat</span>
-                          </button>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              disabled={!activeSource || capturing}
-                              onClick={() => {
-                                setMoreMenuOpen(false);
-                                void handleCaptureScreenshot("visible");
-                              }}
-                              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-ink transition-colors hover:bg-raised-hover disabled:opacity-35"
-                            >
-                              <Camera className="h-3.5 w-3.5 text-ink-secondary" />
-                              <span>Send visible area</span>
-                            </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              disabled={!activeSource || capturing}
-                              onClick={() => {
-                                setMoreMenuOpen(false);
-                                void handleCaptureScreenshot("full");
-                              }}
-                              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-ink transition-colors hover:bg-raised-hover disabled:opacity-35"
-                            >
-                              <Camera className="h-3.5 w-3.5 text-ink-secondary" />
-                              <span>Send full page</span>
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="mt-1 border-t border-hairline/40 pt-1">
-                      <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-ink-secondary">
-                        Zoom
-                      </div>
-                      {PREVIEW_ZOOM_OPTIONS.map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            setZoom(opt.value as PreviewZoomMode);
-                            setMoreMenuOpen(false);
-                          }}
-                          className={cn(
-                            "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[12px] transition-colors",
-                            zoom === opt.value
-                              ? "bg-accent/15 font-medium text-ink"
-                              : "text-ink-secondary hover:bg-raised-hover hover:text-ink",
-                          )}
-                        >
-                          <span>{opt.label}</span>
-                          {zoom === opt.value && <Check className="h-3 w-3 text-accent" />}
-                        </button>
-                      ))}
-                    </div>
-
-                    {window.gbs && (
-                      <div className="mt-1 border-t border-hairline/40 pt-1">
-                        <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-ink-secondary">
-                          History
-                        </div>
-                        <div className="flex items-center gap-1 px-1">
-                          <button
-                            type="button"
-                            disabled={!historyNav.canGoBack}
-                            onClick={() => {
-                              frameRef.current?.goBack();
-                              setMoreMenuOpen(false);
-                            }}
-                            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-hairline/50 bg-inset px-2 py-1 text-[11px] text-ink-secondary hover:bg-raised-hover hover:text-ink disabled:opacity-35"
-                          >
-                            <ChevronLeft className="h-3 w-3" />
-                            <span>Back</span>
-                          </button>
-                          <button
-                            type="button"
-                            disabled={!historyNav.canGoForward}
-                            onClick={() => {
-                              frameRef.current?.goForward();
-                              setMoreMenuOpen(false);
-                            }}
-                            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-hairline/50 bg-inset px-2 py-1 text-[11px] text-ink-secondary hover:bg-raised-hover hover:text-ink disabled:opacity-35"
-                          >
-                            <span>Forward</span>
-                            <ChevronRight className="h-3 w-3" />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
+              <PreviewMoreMenu
+                activeSource={activeSource}
+                capturing={capturing}
+                canCaptureScreenshot={canCaptureScreenshot}
+                zoom={zoom}
+                setZoom={setZoom}
+                rotated={rotated}
+                setRotated={setRotated}
+                isRotatable={Boolean(preset.rotatable)}
+                onOpenInPreviewPage={handleOpenInPreviewPage}
+                onCaptureScreenshot={handleCaptureScreenshot}
+                historyNav={historyNav}
+                onGoBack={() => frameRef.current?.goBack()}
+                onGoForward={() => frameRef.current?.goForward()}
+              />
 
               {/* Close Button */}
               <button
@@ -755,7 +563,7 @@ export function MobilePreviewPanel({
                 onClick={onClose}
                 aria-label="Close quick preview"
                 title="Close preview"
-                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised hover:text-ink"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised hover:text-ink"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -799,13 +607,13 @@ export function MobilePreviewPanel({
               </button>
             </div>
 
-            <div className="flex items-center gap-0.5 shrink-0">
+            <div className="flex items-center gap-0.5 shrink-0 ml-auto">
               <button
                 type="button"
                 onClick={() => frameRef.current?.reload()}
                 aria-label="Reload file"
                 title="Reload file"
-                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
               >
                 <RotateCw className={cn("h-3.5 w-3.5", frameStatus === "loading" && "animate-spin")} />
               </button>
@@ -815,41 +623,27 @@ export function MobilePreviewPanel({
                 onClick={handleOpenExternally}
                 aria-label="Open externally in new tab"
                 title="Open in new tab"
-                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
               >
                 <ExternalLink className="h-3.5 w-3.5" />
               </button>
 
               {canCaptureScreenshot && (
-                <div className="relative" ref={screenshotDropdownRef}>
+                <div className="relative shrink-0" ref={screenshotDropdownRef}>
                   <button
+                    ref={screenshotButtonRef}
                     type="button"
-                    onClick={() => setScreenshotMenuOpen((v) => !v)}
+                    onClick={() => {
+                      if (!screenshotMenuOpen) updateScreenshotPosition();
+                      setScreenshotMenuOpen((v) => !v);
+                    }}
                     disabled={!activeSource || capturing}
                     aria-label="Send screenshot to chat"
                     title="Send screenshot to chat"
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink disabled:opacity-35"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink disabled:opacity-35"
                   >
                     <Camera className="h-3.5 w-3.5" />
                   </button>
-                  {screenshotMenuOpen && (
-                    <div className="absolute right-0 top-full z-50 mt-1 w-48 overflow-hidden rounded-xl border border-hairline bg-panel p-1 shadow-xl">
-                      <button
-                        type="button"
-                        onClick={() => void handleCaptureScreenshot("visible")}
-                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[11.5px] text-ink transition-colors hover:bg-raised-hover"
-                      >
-                        Send visible area to chat
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleCaptureScreenshot("full")}
-                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[11.5px] text-ink transition-colors hover:bg-raised-hover"
-                      >
-                        Send full page to chat
-                      </button>
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -858,7 +652,7 @@ export function MobilePreviewPanel({
                 onClick={handleOpenInPreviewPage}
                 aria-label="Open in Preview page"
                 title="Open in Preview page"
-                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
               >
                 <Maximize2 className="h-3.5 w-3.5" />
               </button>
@@ -868,7 +662,7 @@ export function MobilePreviewPanel({
                 onClick={onClose}
                 aria-label="Close quick preview"
                 title="Close preview"
-                className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised hover:text-ink"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised hover:text-ink"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -972,6 +766,207 @@ export function MobilePreviewPanel({
           ) : null}
         </div>
       </div>
+
+      {/* Portaled Size Selector Dropdown */}
+      {sizeMenuOpen &&
+        sizeCoords &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={sizeMenuRef}
+            style={{
+              position: "fixed",
+              top: `${sizeCoords.top}px`,
+              right: `${sizeCoords.right}px`,
+              zIndex: 60,
+            }}
+            className="w-64 max-h-[min(360px,calc(100vh-80px))] overflow-y-auto rounded-xl border border-hairline/60 bg-panel p-1.5 shadow-2xl animate-in fade-in zoom-in-95 duration-100"
+          >
+            <div className="max-h-72 overflow-y-auto">
+              {PREVIEW_SIZE_GROUPS.map((group) => (
+                <div key={group.group} className="mb-1.5 last:mb-0">
+                  <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-ink-secondary">
+                    {group.label}
+                  </div>
+                  {group.presets.map((item) => {
+                    const active = item.id === preset.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          setPresetId(item.id);
+                          setSizeMenuOpen(false);
+                          sizeButtonRef.current?.focus();
+                        }}
+                        className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-[11.5px] transition-colors ${
+                          active
+                            ? "bg-accent/15 font-medium text-ink"
+                            : "text-ink-secondary hover:bg-raised-hover hover:text-ink"
+                        }`}
+                      >
+                        <span>{item.label}</span>
+                        <span className="font-mono text-[10.5px] text-ink-secondary">
+                          {item.width} × {item.height}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+
+              <div className="mt-1 border-t border-hairline/50 pt-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPresetId("custom")}
+                  className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-[11.5px] transition-colors ${
+                    preset.id === "custom"
+                      ? "bg-accent/15 font-medium text-ink"
+                      : "text-ink-secondary hover:bg-raised-hover hover:text-ink"
+                  }`}
+                >
+                  <span>Custom size</span>
+                  <span className="font-mono text-[10.5px] text-ink-secondary">
+                    {customSize.width} × {customSize.height}
+                  </span>
+                </button>
+                {preset.id === "custom" && (
+                  <div className="mt-1.5 flex items-center gap-1.5 px-2 pb-1">
+                    <input
+                      type="number"
+                      min={240}
+                      max={3840}
+                      value={customSize.width}
+                      onChange={(e) =>
+                        setCustomSize((prev) => ({
+                          ...prev,
+                          width: clampCustomDimension(Number(e.target.value)),
+                        }))
+                      }
+                      aria-label="Custom width"
+                      className="h-7 w-20 rounded border border-hairline/70 bg-inset px-2 font-mono text-[11px] text-ink"
+                    />
+                    <span className="text-[11px] text-ink-secondary">×</span>
+                    <input
+                      type="number"
+                      min={240}
+                      max={3840}
+                      value={customSize.height}
+                      onChange={(e) =>
+                        setCustomSize((prev) => ({
+                          ...prev,
+                          height: clampCustomDimension(Number(e.target.value)),
+                        }))
+                      }
+                      aria-label="Custom height"
+                      className="h-7 w-20 rounded border border-hairline/70 bg-inset px-2 font-mono text-[11px] text-ink"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {/* Portaled History Dropdown */}
+      {historyOpen &&
+        historyList.length > 0 &&
+        historyCoords &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={historyMenuRef}
+            role="listbox"
+            aria-label="Recent preview addresses"
+            style={{
+              position: "fixed",
+              top: `${historyCoords.top}px`,
+              left: `${historyCoords.left}px`,
+              width: `${historyCoords.width}px`,
+              zIndex: 60,
+            }}
+            className="max-h-48 overflow-y-auto rounded-xl border border-hairline/60 bg-panel shadow-2xl animate-in fade-in zoom-in-95 duration-100"
+          >
+            <div className="flex items-center justify-between border-b border-hairline/40 px-2.5 py-1.5">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-ink-secondary">
+                Recent addresses
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  clearMobilePreviewUrlHistory();
+                  setHistoryList([]);
+                  setHistoryOpen(false);
+                  historyButtonRef.current?.focus();
+                }}
+                className="inline-flex items-center gap-1 text-[10px] text-ink-secondary transition-colors hover:text-danger"
+              >
+                <Trash2 className="h-2.5 w-2.5" />
+                Clear
+              </button>
+            </div>
+            <div className="max-h-48 overflow-y-auto py-1">
+              {historyList.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => {
+                    setInputUrl(item);
+                    handleNavigate(item);
+                    setHistoryOpen(false);
+                    historyButtonRef.current?.focus();
+                  }}
+                  className="block w-full truncate px-2.5 py-1.5 text-left font-mono text-[11px] text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {/* Portaled Screenshot Dropdown in State B */}
+      {screenshotMenuOpen &&
+        screenshotCoords &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={screenshotMenuRef}
+            style={{
+              position: "fixed",
+              top: `${screenshotCoords.top}px`,
+              right: `${screenshotCoords.right}px`,
+              zIndex: 60,
+            }}
+            className="w-48 overflow-hidden rounded-xl border border-hairline/60 bg-panel p-1 shadow-2xl animate-in fade-in zoom-in-95 duration-100"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setScreenshotMenuOpen(false);
+                void handleCaptureScreenshot("visible");
+                screenshotButtonRef.current?.focus();
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[11.5px] text-ink transition-colors hover:bg-raised-hover"
+            >
+              Send visible area to chat
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setScreenshotMenuOpen(false);
+                void handleCaptureScreenshot("full");
+                screenshotButtonRef.current?.focus();
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[11.5px] text-ink transition-colors hover:bg-raised-hover"
+            >
+              Send full page to chat
+            </button>
+          </div>,
+          document.body,
+        )}
 
       <PreviewFilePicker
         open={filePickerOpen}

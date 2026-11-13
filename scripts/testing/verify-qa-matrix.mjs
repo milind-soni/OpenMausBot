@@ -191,8 +191,230 @@ try {
   });
 
   console.log("\n========================================================");
-  console.log("TEST CASE (a): Bot chat with LONG name at 1440, Preview + Tasks open");
+  console.log("TEST CASE (cb76884d): Quick preview More menu at 1024px & Close button position");
   console.log("========================================================");
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await page.evaluate(() => {
+    localStorage.setItem("chat-mobile-preview-open", "true");
+    localStorage.setItem("chat-tasks-open", "false");
+  });
+  await page.goto(ui);
+  await page.waitForSelector("main");
+  await page.locator('button[data-conversation-id="bot-long-name"]').click();
+  await page.waitForTimeout(500);
+
+  // Measure Close quick preview button at 1024
+  const close1024 = await page.evaluate(() => {
+    const btn = document.querySelector('button[aria-label="Close quick preview"]');
+    const panel = document.querySelector('aside[aria-label="Quick preview panel"]');
+    if (!btn || !panel) return null;
+    const bRect = btn.getBoundingClientRect();
+    const pRect = panel.getBoundingClientRect();
+    const center = bRect.left + bRect.width / 2;
+    const hit = document.elementFromPoint(center, bRect.top + bRect.height / 2);
+    return {
+      btnRect: { left: bRect.left, right: bRect.right, width: bRect.width },
+      panelRect: { left: pRect.left, right: pRect.right },
+      center,
+      fullyInside: bRect.right <= 1024 && bRect.right <= pRect.right,
+      hitTestPass: btn.contains(hit),
+    };
+  });
+  console.log("Close button at 1024px measurements:", close1024);
+  assert.ok(close1024?.fullyInside, "Close button must be fully inside panel and viewport at 1024px");
+  assert.ok(close1024?.hitTestPass, "Close button center must pass elementFromPoint at 1024px");
+
+  // Open "More preview options" at 1024
+  const morePreviewBtn = page.getByRole("button", { name: "More preview options" });
+  await morePreviewBtn.click();
+  await page.waitForTimeout(200);
+
+  // Verify More menu items via elementFromPoint at 1024
+  const moreMenu1024 = await page.evaluate(() => {
+    const menu = document.querySelector('div[role="menu"][aria-label="More preview options"]');
+    if (!menu) return null;
+    const mRect = menu.getBoundingClientRect();
+    const items = Array.from(menu.querySelectorAll('[role="menuitem"]')).map((el) => {
+      const rect = el.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const hit = document.elementFromPoint(cx, cy);
+      return {
+        text: el.textContent?.trim(),
+        rect: { top: rect.top, bottom: rect.bottom },
+        hitTestPass: el.contains(hit),
+      };
+    });
+    return {
+      menuRect: { top: mRect.top, bottom: mRect.bottom, right: mRect.right },
+      items,
+      allItemsPass: items.length > 0 && items.every((i) => i.hitTestPass),
+    };
+  });
+  console.log("Quick preview More menu at 1024px:", moreMenu1024);
+  assert.ok(moreMenu1024?.allItemsPass, "All Quick preview More menu items must be hit-testable via elementFromPoint at 1024px");
+
+  const screenshotMore1024 = join(screenshotsDir, "quick_preview_more_menu_open_1024.png");
+  await page.screenshot({ path: screenshotMore1024 });
+  console.log(`Saved screenshot to ${screenshotMore1024}`);
+
+  // Test Escape closes More menu and restores focus
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  const moreClosed1024 = await page.evaluate(() => {
+    const menu = document.querySelector('div[role="menu"][aria-label="More preview options"]');
+    const active = document.activeElement;
+    const btn = document.querySelector('button[aria-label="More preview options"]');
+    return { menuClosed: !menu, focusRestored: active === btn };
+  });
+  console.log("Escape on More menu at 1024px:", moreClosed1024);
+  assert.ok(moreClosed1024.menuClosed, "Escape must close Quick preview More menu");
+  assert.ok(moreClosed1024.focusRestored, "Escape must restore focus to More preview options button");
+
+  console.log("\n========================================================");
+  console.log("TEST CASE (cb76884d): Quick preview More menu at 1440px & Close button with Tasks closed");
+  console.log("========================================================");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(300);
+
+  // Measure Close button at 1440 with Tasks closed
+  const close1440 = await page.evaluate(() => {
+    const btn = document.querySelector('button[aria-label="Close quick preview"]');
+    const panel = document.querySelector('aside[aria-label="Quick preview panel"]');
+    if (!btn || !panel) return null;
+    const bRect = btn.getBoundingClientRect();
+    const pRect = panel.getBoundingClientRect();
+    const center = bRect.left + bRect.width / 2;
+    const hit = document.elementFromPoint(center, bRect.top + bRect.height / 2);
+    return {
+      btnRect: { left: bRect.left, right: bRect.right, width: bRect.width },
+      panelRect: { left: pRect.left, right: pRect.right },
+      center,
+      fullyInside: bRect.right <= 1440 && bRect.right <= pRect.right,
+      hitTestPass: btn.contains(hit),
+    };
+  });
+  console.log("Close button at 1440px measurements:", close1440);
+  assert.ok(close1440?.fullyInside, "Close button must be fully inside panel and viewport at 1440px");
+  assert.ok(close1440?.hitTestPass, "Close button center must pass elementFromPoint at 1440px");
+
+  // Open More menu at 1440
+  await page.getByRole("button", { name: "More preview options" }).click();
+  await page.waitForTimeout(200);
+
+  const moreMenu1440 = await page.evaluate(() => {
+    const menu = document.querySelector('div[role="menu"][aria-label="More preview options"]');
+    if (!menu) return null;
+    const mRect = menu.getBoundingClientRect();
+    const items = Array.from(menu.querySelectorAll('[role="menuitem"]')).map((el) => {
+      const rect = el.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const hit = document.elementFromPoint(cx, cy);
+      return {
+        text: el.textContent?.trim(),
+        hitTestPass: el.contains(hit),
+      };
+    });
+    return {
+      menuRect: { top: mRect.top, bottom: mRect.bottom, right: mRect.right },
+      allItemsPass: items.length > 0 && items.every((i) => i.hitTestPass),
+    };
+  });
+  console.log("Quick preview More menu at 1440px:", moreMenu1440);
+  assert.ok(moreMenu1440?.allItemsPass, "All Quick preview More menu items must be hit-testable via elementFromPoint at 1440px");
+
+  const screenshotMore1440 = join(screenshotsDir, "quick_preview_more_menu_open_1440.png");
+  await page.screenshot({ path: screenshotMore1440 });
+  console.log(`Saved screenshot to ${screenshotMore1440}`);
+
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+
+  console.log("\n========================================================");
+  console.log("TEST CASE (0d25eafe): Bot Settings open at 1440px with Preview + Tasks");
+  console.log("========================================================");
+  // Ensure Preview and Tasks are both open at 1440
+  await page.evaluate(() => {
+    localStorage.setItem("chat-mobile-preview-open", "true");
+    localStorage.setItem("chat-tasks-open", "true");
+  });
+  await page.goto(ui);
+  await page.waitForSelector("main");
+  await page.locator('button[data-conversation-id="bot-long-name"]').click();
+  await page.waitForTimeout(500);
+
+  // Click bot settings trigger (name button in header)
+  const botSettingsTrigger = page.locator('main button[title="Bot settings"]');
+  await botSettingsTrigger.click();
+  console.log("Waiting 900ms for settings animation...");
+  await page.waitForTimeout(1000);
+
+  // Verify SettingsPanel layout & controls
+  const settingsMeasurements = await page.evaluate(() => {
+    const settingsAside = Array.from(document.querySelectorAll("aside")).find(
+      (a) =>
+        a.querySelector('button[aria-label="Use idle expression"]') ||
+        (a.textContent?.includes("Settings") && a.textContent?.includes("Expression")),
+    );
+    if (!settingsAside) return { found: false };
+    const sRect = settingsAside.getBoundingClientRect();
+
+    // Find "Use idle expression" button
+    const idleToggle = settingsAside.querySelector('button[aria-label="Use idle expression"]');
+    const idleRect = idleToggle?.getBoundingClientRect();
+    const idleHit = idleRect
+      ? document.elementFromPoint(idleRect.left + idleRect.width / 2, idleRect.top + idleRect.height / 2)
+      : null;
+
+    // Check expression / color buttons in the visible portion of Settings
+    const buttons = Array.from(
+      settingsAside.querySelectorAll('button[aria-label*="expression"], button[aria-label*="color"], button[aria-label="Close settings"]'),
+    ).map((b) => {
+      const rect = b.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return {
+        label: b.getAttribute("aria-label") || b.textContent?.trim(),
+        rect: { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right },
+        hitPass: b.contains(hit),
+      };
+    });
+
+    const tasksPanel = document.querySelector('aside[aria-label="Tasks"]');
+    const previewPanel = document.querySelector('aside[aria-label="Quick preview panel"]');
+    const tRect = tasksPanel?.getBoundingClientRect();
+    const pRect = previewPanel?.getBoundingClientRect();
+
+    return {
+      found: true,
+      settingsRect: { left: sRect.left, right: sRect.right, width: sRect.width },
+      idleRect: idleRect ? { left: idleRect.left, top: idleRect.top } : null,
+      idleHitPass: idleToggle && idleHit ? settingsAside.contains(idleHit) : false,
+      buttons,
+      allButtonsPass: buttons.every((b) => b.hitPass),
+      tasksRect: tRect ? { left: tRect.left, right: tRect.right } : null,
+      previewRect: pRect ? { left: pRect.left, right: pRect.right } : null,
+      noOverlap: (!tRect || tRect.right <= sRect.left + 1) && (!pRect || pRect.right <= sRect.left + 1),
+    };
+  });
+  console.log("Settings panel at 1440px measurements:", settingsMeasurements);
+  assert.ok(settingsMeasurements.found, "Settings panel must be open");
+  assert.ok(settingsMeasurements.idleHitPass, "'Use idle expression' must hit-test to Settings, NOT Tasks!");
+  assert.ok(settingsMeasurements.allButtonsPass, "All Settings panel expression and color buttons must be hit-testable");
+  assert.ok(settingsMeasurements.noOverlap, "Neither Preview nor Tasks may overlap Settings panel");
+
+  const screenshotSettings = join(screenshotsDir, "bot_settings_open_1440_preview_tasks.png");
+  await page.screenshot({ path: screenshotSettings });
+  console.log(`Saved screenshot to ${screenshotSettings}`);
+
+  // Close settings panel
+  await page.locator('aside button[aria-label="Close settings"]').click();
+  await page.waitForTimeout(400);
+
+  console.log("\n========================================================");
+  console.log("TEST CASE (8fa5a743 remaining): 1024px drawer chaining on Close & backdrop");
+  console.log("========================================================");
+  // Open Preview + Tasks at 1440, then resize to 1024
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => {
     localStorage.setItem("chat-mobile-preview-open", "true");
@@ -200,295 +422,52 @@ try {
   });
   await page.goto(ui);
   await page.waitForSelector("main");
-
-  // Select the bot with long name
   await page.locator('button[data-conversation-id="bot-long-name"]').click();
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(400);
 
-  // Verify header rect & Hide tasks button rect
-  const caseAMeasurements = await page.evaluate(() => {
-    const header = document.querySelector("main section > div:first-child");
-    const hideTasksBtn = Array.from(header.querySelectorAll("button")).find(
-      (b) => b.getAttribute("aria-label") === "Hide tasks" || b.getAttribute("title") === "Hide tasks",
-    );
-    const hRect = header.getBoundingClientRect();
-    const tRect = hideTasksBtn.getBoundingClientRect();
-    const scrollWidth = document.documentElement.scrollWidth;
-    const innerWidth = window.innerWidth;
-
-    // elementFromPoint check
-    const ptLeft = document.elementFromPoint(tRect.left + 5, tRect.top + tRect.height / 2);
-    const ptRight = document.elementFromPoint(tRect.right - 5, tRect.top + tRect.height / 2);
-
-    return {
-      header: { left: hRect.left, right: hRect.right, width: hRect.width },
-      hideTasks: { left: tRect.left, right: tRect.right, width: tRect.width },
-      uncut: tRect.right <= hRect.right + 0.5,
-      marginRemaining: hRect.right - tRect.right,
-      scrollWidthMatches: scrollWidth === innerWidth,
-      scrollWidth,
-      innerWidth,
-      ptLeftTag: ptLeft?.tagName,
-      ptRightTag: ptRight?.tagName,
-      hitTestPass: hideTasksBtn.contains(ptLeft) && hideTasksBtn.contains(ptRight),
-    };
-  });
-
-  console.log("Case (a) measurements:", caseAMeasurements);
-  assert.ok(caseAMeasurements.uncut, `Hide tasks right (${caseAMeasurements.hideTasks.right}) exceeds header right (${caseAMeasurements.header.right})`);
-  assert.ok(caseAMeasurements.hitTestPass, "elementFromPoint hit test failed on Hide tasks button");
-  assert.ok(caseAMeasurements.scrollWidthMatches, "Horizontal document overflow detected");
-
-  const screenshotPathA = join(screenshotsDir, "bot_chat_long_name_1440_preview_tasks.png");
-  await page.screenshot({ path: screenshotPathA });
-  console.log(`Saved screenshot (a) to ${screenshotPathA}`);
-
-  console.log("\n========================================================");
-  console.log("TEST CASE (b): Same layout with More actions menu OPEN");
-  console.log("========================================================");
-  const moreBtn = page.getByRole("button", { name: "More actions" });
-  await moreBtn.click();
-  await page.waitForTimeout(200);
-
-  const caseBMeasurements = await page.evaluate(() => {
-    const menu = document.querySelector('[role="menu"][aria-label="More actions"]');
-    const items = menu ? Array.from(menu.querySelectorAll('[role="menuitem"]')) : [];
-    const header = document.querySelector("main section > div:first-child");
-    const mRect = menu.getBoundingClientRect();
-
-    const itemHits = items.map((it) => {
-      const rect = it.getBoundingClientRect();
-      const pt = document.elementFromPoint(rect.left + 10, rect.top + rect.height / 2);
-      return {
-        text: it.textContent?.trim(),
-        rect: { top: rect.top, bottom: rect.bottom, height: rect.height },
-        hit: it.contains(pt),
-      };
-    });
-
-    return {
-      menuCount: items.length,
-      menuRect: { top: mRect.top, bottom: mRect.bottom, right: mRect.right },
-      headerScrollTop: header.scrollTop,
-      itemHits,
-      allHitPass: itemHits.length === 2 && itemHits.every((h) => h.hit),
-    };
-  });
-
-  console.log("Case (b) measurements:", caseBMeasurements);
-  assert.equal(caseBMeasurements.menuCount, 2, "Expected 2 items in More menu");
-  assert.ok(caseBMeasurements.allHitPass, "More menu items must be fully visible and hit-testable via elementFromPoint");
-  assert.equal(caseBMeasurements.headerScrollTop, 0, "Header scrollTop must stay 0");
-
-  const screenshotPathB = join(screenshotsDir, "bot_chat_long_name_1440_more_menu_open.png");
-  await page.screenshot({ path: screenshotPathB });
-  console.log(`Saved screenshot (b) to ${screenshotPathB}`);
-
-  // Test keyboard navigation for More menu (Item 3: e425564e)
-  console.log("Verifying More menu keyboard accessibility (e425564e)...");
-  await page.keyboard.press("Escape");
-  await page.waitForTimeout(100);
-
-  // Focus trigger and press Enter
-  await moreBtn.focus();
-  await page.keyboard.press("Enter");
-  await page.waitForTimeout(100);
-
-  const focusedFirst = await page.evaluate(() => {
-    const active = document.activeElement;
-    return active?.getAttribute("role") === "menuitem" && active?.textContent?.includes("Schedule run");
-  });
-  assert.ok(focusedFirst, "Opening menu via keyboard must focus the first menuitem");
-
-  // ArrowDown to second item
-  await page.keyboard.press("ArrowDown");
-  const focusedSecond = await page.evaluate(() => {
-    const active = document.activeElement;
-    return active?.getAttribute("role") === "menuitem" && active?.textContent?.includes("Bot's computer");
-  });
-  assert.ok(focusedSecond, "ArrowDown must move focus to second menuitem");
-
-  // ArrowUp back to first
-  await page.keyboard.press("ArrowUp");
-  const focusedBackFirst = await page.evaluate(() => {
-    const active = document.activeElement;
-    return active?.getAttribute("role") === "menuitem" && active?.textContent?.includes("Schedule run");
-  });
-  assert.ok(focusedBackFirst, "ArrowUp must move focus back to first menuitem");
-
-  // Escape closes and restores focus to More actions button
-  await page.keyboard.press("Escape");
-  await page.waitForTimeout(100);
-  const returnedFocus = await page.evaluate(() => {
-    const active = document.activeElement;
-    return active?.getAttribute("aria-label") === "More actions";
-  });
-  assert.ok(returnedFocus, "Escape must close menu and return focus to More actions trigger");
-
-  console.log("PASS: More menu keyboard accessibility verified 100%!");
-
-  console.log("\n========================================================");
-  console.log("TEST CASE (c): Model picker open at 1280 + Tasks");
-  console.log("========================================================");
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await page.evaluate(() => {
-    localStorage.setItem("chat-mobile-preview-open", "false");
-    localStorage.setItem("chat-tasks-open", "true");
-  });
-  await page.goto(ui);
-  await page.waitForSelector("main");
-  await page.locator('button[data-conversation-id="bot-long-name"]').click();
-  await page.waitForTimeout(500);
-
-  // Open model picker
-  const modelPickerBtn = page.getByRole("button", { name: /^Model:/i });
-  await modelPickerBtn.click();
-  await page.waitForTimeout(300);
-
-  const caseCMeasurements = await page.evaluate(() => {
-    const header = document.querySelector("main section > div:first-child");
-    const hideTasksBtn = Array.from(header.querySelectorAll("button")).find(
-      (b) => b.getAttribute("aria-label") === "Hide tasks" || b.getAttribute("title") === "Hide tasks",
-    );
-    const hRect = header.getBoundingClientRect();
-    const tRect = hideTasksBtn.getBoundingClientRect();
-
-    const popup = document.querySelector("[data-model-picker-content]");
-    const pRect = popup?.getBoundingClientRect();
-
-    // Check hit test on items inside model picker popup
-    const buttonOnRail = popup?.querySelector("button");
-    const bRect = buttonOnRail?.getBoundingClientRect();
-    const pt = bRect ? document.elementFromPoint(bRect.left + 10, bRect.top + bRect.height / 2) : null;
-
-    return {
-      header: { left: hRect.left, right: hRect.right, width: hRect.width },
-      hideTasks: { left: tRect.left, right: tRect.right },
-      uncut: tRect.right <= hRect.right + 0.5,
-      popupRect: pRect ? { top: pRect.top, bottom: pRect.bottom, width: pRect.width, height: pRect.height } : null,
-      popupHTML: popup?.innerHTML,
-      buttonOnRailHit: buttonOnRail ? buttonOnRail.contains(pt) : false,
-      ptTag: pt?.tagName,
-    };
-  });
-
-  console.log("Case (c) measurements:", caseCMeasurements);
-  assert.ok(caseCMeasurements.uncut, "Hide tasks button must not be cut off at 1280 + Tasks");
-  assert.ok(caseCMeasurements.buttonOnRailHit, "Model picker buttons must be hit-testable via elementFromPoint");
-
-  const screenshotPathC = join(screenshotsDir, "model_picker_open_1280_tasks.png");
-  await page.screenshot({ path: screenshotPathC });
-  console.log(`Saved screenshot (c) to ${screenshotPathC}`);
-
-  // Close model picker
-  await page.keyboard.press("Escape");
-  await page.waitForTimeout(100);
-
-  console.log("\n========================================================");
-  console.log("TEST CASE (d): Six-member room at 1280 + Tasks");
-  console.log("========================================================");
-  await page.locator('button[data-conversation-id="group-six-members"]').click();
-  await page.waitForTimeout(500);
-
-  const caseDMeasurements = await page.evaluate(() => {
-    const header = document.querySelector("main section > div:first-child");
-    const allButtons = Array.from(header.querySelectorAll("button")).map((b) => ({
-      ariaLabel: b.getAttribute("aria-label"),
-      title: b.getAttribute("title"),
-      text: b.textContent?.trim(),
-    }));
-    const hideTasksBtn = Array.from(header.querySelectorAll("button")).find(
-      (b) => b.getAttribute("aria-label")?.includes("tasks") || b.getAttribute("title")?.includes("tasks"),
-    );
-    const hRect = header.getBoundingClientRect();
-    const tRect = hideTasksBtn?.getBoundingClientRect();
-
-    const pt = tRect ? document.elementFromPoint(tRect.left + 5, tRect.top + tRect.height / 2) : null;
-
-    return {
-      allButtons,
-      header: { left: hRect.left, right: hRect.right, width: hRect.width },
-      hideTasks: tRect ? { left: tRect.left, right: tRect.right } : null,
-      uncut: tRect ? tRect.right <= hRect.right + 0.5 : false,
-      hitTestPass: hideTasksBtn && pt ? hideTasksBtn.contains(pt) : false,
-    };
-  });
-
-  console.log("Case (d) measurements:", caseDMeasurements);
-  assert.ok(caseDMeasurements.uncut, "Hide tasks button must not be cut off in six-member room at 1280 + Tasks");
-  assert.ok(caseDMeasurements.hitTestPass, "elementFromPoint hit test failed on Hide tasks in room");
-
-  const screenshotPathD = join(screenshotsDir, "room_six_members_1280_tasks.png");
-  await page.screenshot({ path: screenshotPathD });
-  console.log(`Saved screenshot (d) to ${screenshotPathD}`);
-
-  console.log("\n========================================================");
-  console.log("VERIFYING ITEM 4 (8fa5a743): Tasks divider & 1024 drawer Escape");
-  console.log("========================================================");
-
-  // Switch back to bot chat
-  await page.locator('button[data-conversation-id="bot-long-name"]').click();
-  await page.waitForTimeout(300);
-
-  // Open tasks panel to inspect header divider
-  const showTasksBtn = page.locator('button[aria-label="Show tasks"]');
-  if ((await showTasksBtn.count()) > 0) {
-    await showTasksBtn.click();
-    await page.waitForTimeout(300);
-  }
-
-  // Check Tasks divider bottom at 60px
-  const dividerY = await page.evaluate(() => {
-    const tasksHeader = document.querySelector('aside[aria-label="Tasks"] > div > div:first-child');
-    return tasksHeader?.getBoundingClientRect().bottom;
-  });
-  console.log("Tasks 60px header bottom Y:", dividerY);
-  assert.equal(Math.round(dividerY), 60, "Tasks header divider bottom must be at y=60");
-
-  // Test 1024 drawer Escape & chaining in bot chat
+  // Resize to 1024
   await page.setViewportSize({ width: 1024, height: 800 });
   await page.waitForTimeout(300);
 
-  // At 1024px, Tasks is currently open as a drawer
-  const tasksDrawerOpen = await page.evaluate(() => Boolean(document.querySelector('aside[aria-label="Tasks"]')));
-  assert.ok(tasksDrawerOpen, "Tasks drawer must be open at 1024px");
-
-  // Press Escape -> Tasks drawer closes back to chat
-  await page.keyboard.press("Escape");
+  // Preview is visible. Click "Close quick preview" button
+  const closeBtn1024 = page.locator('button[aria-label="Close quick preview"]');
+  await closeBtn1024.click();
   await page.waitForTimeout(300);
 
-  const afterTasksEscape = await page.evaluate(() => ({
-    tasksOpen: Boolean(document.querySelector('aside[aria-label="Tasks"]')),
-    previewOpen: Boolean(document.querySelector('aside[aria-label="Mobile preview"]')),
-  }));
-  console.log("After Escape on Tasks drawer at 1024px:", afterTasksEscape);
-  assert.ok(!afterTasksEscape.tasksOpen && !afterTasksEscape.previewOpen, "Escape must close Tasks drawer back to chat");
-
-  // Now open Preview drawer
-  await page.getByRole("button", { name: "Show mobile preview" }).click();
-  await page.waitForTimeout(300);
-
-  const previewDrawerOpen = await page.evaluate(() => Boolean(document.querySelector('aside[aria-label="Quick preview panel"]')));
-  assert.ok(previewDrawerOpen, "Preview drawer must open at 1024px");
-
-  // Press Escape -> Preview drawer closes back to chat
-  await page.keyboard.press("Escape");
-  await page.waitForTimeout(300);
-
-  const afterPreviewEscape = await page.evaluate(() => ({
+  // Verify Tasks does NOT pop open!
+  const afterClosePreview = await page.evaluate(() => ({
     previewOpen: Boolean(document.querySelector('aside[aria-label="Quick preview panel"]')),
     tasksOpen: Boolean(document.querySelector('aside[aria-label="Tasks"]')),
   }));
-  console.log("After Escape on Preview drawer at 1024px:", afterPreviewEscape);
-  assert.ok(!afterPreviewEscape.previewOpen && !afterPreviewEscape.tasksOpen, "Escape must close Preview drawer back to chat");
+  console.log("After clicking Close preview at 1024:", afterClosePreview);
+  assert.ok(!afterClosePreview.previewOpen, "Preview must be closed");
+  assert.ok(!afterClosePreview.tasksOpen, "Tasks drawer must NOT pop open after closing Preview!");
 
-  console.log("PASS: All browser test cases verified!");
+  // Test backdrop click: re-open both, resize to 1024
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole("button", { name: "Show mobile preview" }).click();
+  await page.waitForTimeout(200);
+  await page.getByRole("button", { name: "Show tasks" }).click();
+  await page.waitForTimeout(200);
 
-  // Now test in an isolated Electron instance!
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await page.waitForTimeout(300);
+
+  // Click the backdrop (e.g. at x=340, y=300)
+  const backdrop = page.locator('button.bg-black\\/55');
+  await backdrop.click({ position: { x: 50, y: 50 } });
+  await page.waitForTimeout(300);
+
+  const afterBackdropClick = await page.evaluate(() => ({
+    previewOpen: Boolean(document.querySelector('aside[aria-label="Quick preview panel"]')),
+    tasksOpen: Boolean(document.querySelector('aside[aria-label="Tasks"]')),
+  }));
+  console.log("After clicking backdrop at 1024:", afterBackdropClick);
+  assert.ok(!afterBackdropClick.previewOpen && !afterBackdropClick.tasksOpen, "Backdrop click must close drawers back to chat!");
+
   console.log("\n========================================================");
   console.log("DESKTOP CHECK: Isolated second Electron instance");
   console.log("========================================================");
-
   const electronExecutable =
     "/Users/esoefildine/Documents/Dev/GererBuildStudio/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron";
 
@@ -518,27 +497,62 @@ try {
   await electronWindow.locator('button[data-conversation-id="bot-long-name"]').click();
   await electronWindow.waitForTimeout(500);
 
-  const electronCaseA = await electronWindow.evaluate(() => {
-    const header = document.querySelector("main section > div:first-child");
-    const hideTasksBtn = Array.from(header.querySelectorAll("button")).find(
-      (b) => b.getAttribute("aria-label") === "Hide tasks" || b.getAttribute("title") === "Hide tasks",
-    );
-    const hRect = header.getBoundingClientRect();
-    const tRect = hideTasksBtn?.getBoundingClientRect();
+  // Verify More menu in Electron at 1440
+  await electronWindow.getByRole("button", { name: "More preview options" }).click();
+  await electronWindow.waitForTimeout(300);
 
+  const electronMoreMenu = await electronWindow.evaluate(() => {
+    const menu = document.querySelector('div[role="menu"][aria-label="More preview options"]');
+    if (!menu) return null;
+    const items = Array.from(menu.querySelectorAll('[role="menuitem"]')).map((el) => {
+      const rect = el.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const hit = document.elementFromPoint(cx, cy);
+      return {
+        text: el.textContent?.trim(),
+        hitTestPass: el.contains(hit),
+      };
+    });
     return {
-      headerRight: hRect.right,
-      hideTasksRight: tRect?.right,
-      uncut: tRect ? tRect.right <= hRect.right + 0.5 : false,
+      allItemsPass: items.length > 0 && items.every((i) => i.hitTestPass),
     };
   });
-  console.log("Electron Case (a) measurements:", electronCaseA);
-  assert.ok(electronCaseA.uncut, "In Electron, Hide tasks button must not be cut off");
+  console.log("Electron Quick preview More menu:", electronMoreMenu);
+  assert.ok(electronMoreMenu?.allItemsPass, "In Electron, Quick preview More menu items must be hit-testable");
+  await electronWindow.keyboard.press("Escape");
+  await electronWindow.waitForTimeout(200);
 
-  console.log("PASS: Electron isolated verification succeeded!");
+  // Open Settings in Electron at 1440 with Preview + Tasks open
+  const electronBotSettingsTrigger = electronWindow.locator('main button[title="Bot settings"]');
+  await electronBotSettingsTrigger.click();
+  await electronWindow.waitForTimeout(1000);
+
+  const electronSettings = await electronWindow.evaluate(() => {
+    const settingsAside = Array.from(document.querySelectorAll("aside")).find(
+      (a) =>
+        a.querySelector('button[aria-label="Use idle expression"]') ||
+        (a.textContent?.includes("Settings") && a.textContent?.includes("Expression")),
+    );
+    if (!settingsAside) return { found: false };
+    const idleToggle = settingsAside.querySelector('button[aria-label="Use idle expression"]');
+    const idleRect = idleToggle?.getBoundingClientRect();
+    const idleHit = idleRect
+      ? document.elementFromPoint(idleRect.left + idleRect.width / 2, idleRect.top + idleRect.height / 2)
+      : null;
+    return {
+      found: true,
+      idleHitPass: idleToggle && idleHit ? settingsAside.contains(idleHit) : false,
+    };
+  });
+  console.log("Electron Settings measurements:", electronSettings);
+  assert.ok(electronSettings.found, "Settings must be open in Electron");
+  assert.ok(electronSettings.idleHitPass, "In Electron, 'Use idle expression' must hit-test to Settings, NOT Tasks!");
+
+  console.log("PASS: Isolated Electron verification succeeded!");
 
   console.log("\n========================================================");
-  console.log("ALL VERIFICATIONS COMPLETED SUCCESSFULLY!");
+  console.log("ALL NEW QA MATRIX VERIFICATIONS COMPLETED SUCCESSFULLY!");
   console.log("========================================================");
 } finally {
   if (browser) await browser.close();
