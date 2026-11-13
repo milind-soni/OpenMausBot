@@ -83,9 +83,8 @@ const isAccountError = (code: ProviderErrorCode | undefined): code is AccountErr
   code !== undefined && ACCOUNT_ERROR_CODES.has(code);
 
 export interface AcpConfig {
-  cli: string;
-  fullAuto: boolean;
-  workspace?: string;
+  cli: string; fullAuto: boolean; workspace?: string;
+  /** Custom ACP only: the agent advertises a `steer` command and answers `/steer <text>` during a turn as Hermes does. */ steer?: boolean;
 }
 
 /** Per-CLI specifics plugged into the shared ACP runtime; `askTool` is the native tool `questionRequests` come from. */

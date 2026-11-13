@@ -206,6 +206,7 @@
   "server.rooms.finishingElsewhere": "{bot} beendet gerade eine andere Unterhaltung und antwortet hier, sobald er frei ist",
   "server.rooms.finishingElsewhereSpoken": "{bot} beendet gerade eine andere Unterhaltung",
   "server.rooms.unavailable": "{bot} ist nicht mehr verfügbar, daher diese Runde übersprungen",
+  "server.rooms.pickNotSent": "{bot} kann gerade nicht auf diese Nachricht antworten, daher wurde das, worauf du auf seiner Seite gezeigt hast, nicht gesendet. Zeig noch einmal darauf, sobald {bot} antworten kann.",
   "server.threads.posted": "{bot} hat hier eine Nachricht gepostet",
   "server.rooms.chiefRetargeted": "{chief} ist jetzt der Stabschef und leitet diesen Raum anstelle von {former}.",
   "server.stop.nothingRunning": "Hier lief nichts, es gab also nichts zu stoppen.",

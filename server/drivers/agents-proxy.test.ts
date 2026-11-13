@@ -1757,6 +1757,24 @@ describe("agents-proxy MCP surface", () => {
     });
   });
 
+  it("tells a one-time routine given a timeZone that its zone is the offset in at", async () => {
+    lastRoutineRequestBody = null;
+    const res = await callTool("create_trigger", { when: "schedule",
+      name: "One check",
+      instructions: "Check the release page.",
+      schedule: { type: "once", at: "2026-09-01T09:00:00+08:00", timeZone: "Asia/Shanghai" },
+    });
+    expect(res.result.isError).toBe(true);
+    expect(lastRoutineRequestBody).toBeNull();
+    const text = res.result.content[0].text;
+    expect(text).toContain('A once schedule takes no "timeZone"');
+    expect(text).toContain('offset inside "at"');
+    expect(text).not.toContain("Weekly and daily times");
+    const list = await rpc("tools/list");
+    const routine = list.result.tools.find((entry: { name: string }) => entry.name === "trigger");
+    expect(routine.inputSchema.properties.schedule.properties.timeZone.description).toMatch(/^Only for cron/);
+  });
+
   it("proposes an interval routine with an optional start anchor", async () => {
     await callTool("create_trigger", { when: "schedule",
       name: "Frequent check",
