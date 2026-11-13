@@ -411,3 +411,15 @@ describe("browser control", () => {
     expect(isBrowserControlAccess("GET", "/api/bots/b1/browser/live/extra")).toBe(false);
   });
 });
+
+describe("slash skill discovery", () => {
+  it("allows only authenticated metadata reads and leaves skill management closed", () => {
+    expect(ask("GET", "/api/bots/b1/slash-skills")).toBeNull();
+    expect(ask("GET", "/api/bots/b1/slash-skills", false)?.status).toBe(401);
+    for (const method of ["POST", "PATCH", "DELETE"]) expect(allowed(method, "/api/bots/b1/slash-skills")).toBe(false);
+    for (const path of ["/api/bots/b1/skills", "/api/bots/b1/skills/weekly-report", "/api/skills-library"]) {
+      expect(allowed("GET", path)).toBe(false);
+      expect(allowed("POST", path)).toBe(false);
+    }
+  });
+});

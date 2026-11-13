@@ -2940,6 +2940,8 @@
   "composer.failed.dismiss": "Dismiss",
   "composer.failed.dismissAria": "Dismiss failed message",
   "composer.commands.aria": "Composer commands",
+  "composer.commands.skillsLoading": "Loading skills…",
+  "composer.commands.skillsError": "Couldn’t load skills.",
   "composer.commands.title": "Commands",
   "composer.mention.aria": "Tag a bot",
   "composer.mention.agent": "Agent",

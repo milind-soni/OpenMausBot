@@ -295,7 +295,8 @@ export function Composer({
 
   const slash = composerSlashTrigger(text, caret);
   const locale = activeLocale();
-  const slashSkills = useSlashSkills(group ? undefined : bot?.id, threadId, Boolean(slash) && slash?.start !== dismissedSlashAt);
+  const slashSkillState = useSlashSkills(group ? undefined : bot?.id, threadId, Boolean(slash) && slash?.start !== dismissedSlashAt);
+  const slashSkills = slashSkillState.skills;
   const canLearn = skillAuthoringEnabled(state.config) &&
     (group ? (members ?? []).some((member) => supportsAgents(state.instances, member)) : supportsAgents(state.instances, bot));
   const commandCandidates = useMemo(() => {
@@ -325,7 +326,7 @@ export function Composer({
     available.push(...skillSlashCommands(slashSkills));
     return available.filter((command) => slashCommandMatches(command, slash.query));
   }, [slash, dismissedSlashAt, group, bot, canLearn, state.instances, locale, slashSkills]);
-  const commandPickerOpen = commandCandidates.length > 0;
+  const commandPickerOpen = commandCandidates.length > 0 || slashSkillState.status === "loading" || slashSkillState.status === "error";
 
   const mention = mentionQueryAt(text, caret); const teammates = useTeammates(); const viewer = useViewerEmail();
   const candidates = useMemo(() => {
@@ -352,7 +353,7 @@ export function Composer({
 
   useEffect(() => {
     if (!commandPickerOpen) return;
-    setHighlight((current) => Math.min(current, commandCandidates.length - 1));
+    setHighlight((current) => Math.max(0, Math.min(current, commandCandidates.length - 1)));
   }, [commandCandidates.length, commandPickerOpen]);
 
   useEffect(() => {
@@ -716,7 +717,7 @@ export function Composer({
           </div>
         ))}
         <SlashCommandMenu listRef={commandListRef} motion={commandMotion} commands={commandCandidates} highlight={highlight}
-          onPick={pickCommand} onHighlight={setHighlight} />
+          onPick={pickCommand} onHighlight={setHighlight} skillsStatus={slashSkillState.status} onRetrySkills={slashSkillState.retry} />
         <MentionMenu listRef={mentionListRef} motion={mentionMotion} choices={candidates} highlight={highlight}
           everyoneCount={mentionEveryoneCount} onPick={pickMention} onHighlight={setHighlight} />
         {approval && (
@@ -852,13 +853,14 @@ export function Composer({
             if (commandPickerOpen) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
+                if (!commandCandidates.length) return;
                 const delta = e.key === "ArrowDown" ? 1 : -1;
                 setHighlight((current) =>
                   (current + delta + commandCandidates.length) % commandCandidates.length,
                 );
                 return;
               }
-              if (e.key === "Enter" || e.key === "Tab") {
+              if ((e.key === "Enter" || e.key === "Tab") && commandCandidates.length > 0) {
                 e.preventDefault();
                 pickCommand(commandCandidates[highlight]);
                 return;

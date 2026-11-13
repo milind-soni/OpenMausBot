@@ -6,8 +6,10 @@ import type { ComposerSlashCommand } from "@/lib/composer-commands";
 import type { MenuMotion } from "./MenuMotion";
 
 /** The composer's / list: room commands like /goal, then the bot's skills. */
-export function SlashCommandMenu({ listRef, motion, commands, highlight, onPick, onHighlight }: {
+export function SlashCommandMenu({ listRef, motion, commands, highlight, onPick, onHighlight, skillsStatus, onRetrySkills }: {
   listRef: RefObject<HTMLDivElement | null>;
+  skillsStatus?: "idle" | "loading" | "ready" | "error";
+  onRetrySkills?: () => void;
   motion: MenuMotion;
   commands: ComposerSlashCommand[];
   highlight: number;
@@ -25,6 +27,11 @@ export function SlashCommandMenu({ listRef, motion, commands, highlight, onPick,
       <div className="border-b border-hairline/20 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">
         {t("composer.commands.title")}
       </div>
+      {skillsStatus === "loading" && <div role="status" className="px-3 py-2 text-xs text-ink-secondary">{t("composer.commands.skillsLoading")}</div>}
+      {skillsStatus === "error" && <div className="flex items-center gap-2 px-3 py-2 text-xs">
+        <span role="alert" className="flex-1 text-warning">{t("composer.commands.skillsError")}</span>
+        <button type="button" onMouseDown={event => event.preventDefault()} onClick={onRetrySkills} className="rounded px-2 py-1 text-accent hover:bg-raised-hover focus-visible:outline-2 focus-visible:outline-focus">{t("chat.retry")}</button>
+      </div>}
       {commands.map((command, index) => (
         <button
           key={`${command.kind}:${command.id}`}

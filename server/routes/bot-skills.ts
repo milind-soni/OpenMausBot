@@ -44,6 +44,18 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
       }
       return json(res, 201, { installed });
     }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/slash-skills$/);
+    if (m && method === "GET") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const asked = url.searchParams.get("threadId");
+      if (!asked) return json(res, 400, { error: "threadId is required" });
+      if (!store.taskByThread(bot.id, asked)) return json(res, 404, { error: "no such conversation" });
+      const skills = listBotSkills(bot, asked)
+        .filter(skill => skill.enabled)
+        .map(({ name, description }) => ({ name, description, enabled: true }));
+      return json(res, 200, { skills });
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/skills$/);
     if (m && method === "GET") {
       const bot = store.bot(m[1]);

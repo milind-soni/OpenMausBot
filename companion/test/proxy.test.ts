@@ -237,6 +237,26 @@ describe("the sidecar in front of an unmodified harness", () => {
     expect((await device("GET", "/api/bots")).status).toBe(200);
   });
 
+  it("lists enabled slash skill metadata through a paired connection without opening skill management", async () => {
+    const bot = (await device("GET", "/api/bots")).body.bots[0];
+    for (const [name, enabled] of [["paired-report", true], ["paired-disabled", false]] as const) {
+      const response = await fetch(`${HARNESS}/api/bots/${bot.id}/skill-template`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, description: "Paired slash skill fixture.", source: "fixture", enabled, text: `---\nname: ${name}\ndescription: Paired slash skill fixture.\n---\n\nPrepare a report.\n` }),
+      });
+      expect(response.status).toBe(201);
+    }
+    const path = `/api/bots/${bot.id}/slash-skills?threadId=${bot.threadId}`;
+    expect((await device("GET", path, { token: null })).status).toBe(401);
+    const response = await device("GET", path);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ skills: [{ name: "paired-report", description: "Paired slash skill fixture.", enabled: true }] });
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect((await device("GET", `/api/bots/${bot.id}/skills`)).status).toBe(404);
+    expect((await device("POST", `/api/bots/${bot.id}/slash-skills`, { body: {} })).status).toBe(404);
+    expect((await device("GET", `/api/bots/${bot.id}/slash-skills?threadId=not-owned`)).status).toBe(404);
+  });
+
   it("serves a minimal, non-cacheable companion health identity", async () => {
     const health = await device("GET", "/api/health", { token: null });
     expect(health.status).toBe(200);

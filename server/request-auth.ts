@@ -303,6 +303,7 @@ export function clearSessionCookie(name: string): string {
 
 /** What a `client` session may do. Default deny: a new route is admin-only until listed here. */
 export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: RegExp; feature?: "sharedComputers" }> = [
+  { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/slash-skills$/ },
   { methods: ["GET"], path: /^\/api\/auth\/session$/ },
   { methods: ["GET"], path: /^\/api\/notifications$/ },
   { methods: ["POST"], path: /^\/api\/notifications\/read-all$/ },

@@ -132,6 +132,8 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // Names and on/off only. The MCP settings list, which carries commands and
   // addresses, stays closed.
   { method: "GET", path: /^\/api\/bots\/[\w-]+\/mcp-servers$/ },
+  // Metadata only; skill files, staging and management remain host-only.
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/slash-skills$/ },
   // Team memory edits are content, not execution policy. The section rides as
   // a query string.
   { method: "GET", path: /^\/api\/team-memory$/ },
