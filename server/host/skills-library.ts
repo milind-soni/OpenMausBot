@@ -129,10 +129,11 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   const conversationSkills = (bot: BotRecord, threadId: string): string[] | undefined =>
     skillsLibraryEnabled(cfg) ? conversationAssignedSkills(bot.id, liveAssigned(bot), conversationStartedAt(threadId)) : undefined;
   const turnSkillFiles = (bot: BotRecord, threadId: string, instance?: TurnInstance): string[] => {
-    const assigned = conversationSkills(bot, threadId);
+    const assigned = skillsLibraryEnabled(cfg) ? liveAssigned(bot) : undefined;
     const names = resolveBotSkills(bot.id, assigned).filter((skill) => skill.enabled).map((skill) => skill.name);
-    return [...enabledSkillFiles(bot.id, names, assigned).values(),
-      ...importsFor(bot, assigned, instance).map((skill) => skill.file)];
+    return [...new Set([...enabledSkillFiles(bot.id, names, assigned).values(),
+      ...importsFor(bot, conversationSkills(bot, threadId), instance).map((skill) => skill.file),
+      ...importsFor(bot, assigned, instance).map((skill) => skill.file)])];
   };
 
   const engineOf = (instance: TurnInstance | undefined): SkillTurnEngine | undefined => {

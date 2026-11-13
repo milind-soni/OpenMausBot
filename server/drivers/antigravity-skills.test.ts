@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -7,7 +7,7 @@ import { stageAntigravitySkills } from "./antigravity-skills.ts";
 
 function fixture(name: string) {
   const source = join(DATA_DIR, name, "skills", ".revisions", "revision");
-  const cwd = join(DATA_DIR, name, "task");
+  const cwd = join(DATA_DIR, name, "profile");
   mkdirSync(join(source, "references"), { recursive: true });
   mkdirSync(cwd, { recursive: true });
   const file = join(source, "SKILL.md");
@@ -17,7 +17,7 @@ function fixture(name: string) {
 }
 
 describe("Antigravity skill staging", () => {
-  it("stages selected skills and references inside cwd, rewriting every prompt half and slash command", () => {
+  it("stages selected skills and references inside the managed profile, rewriting every prompt half and slash command", () => {
     const { source, cwd, file } = fixture("stage");
     const text = "Read " + JSON.stringify(file);
     const turn = { threadId: "thread", text, system: text, systemStable: text, systemVolatile: text, recoveryText: text, skillFiles: [file] };
@@ -28,6 +28,7 @@ describe("Antigravity skill staging", () => {
     expect(readFileSync(join(target, "..", "references", "guide.md"), "utf8")).toBe("Reviewed reference");
     for (const field of ["system", "systemStable", "systemVolatile", "recoveryText"] as const) expect(staged[field]).toBe(staged.text);
     expect(turn.text).toBe(text);
+    expect(staged.skillFiles).toEqual([target]);
     expect(stageAntigravitySkills(turn, cwd).text).toBe(staged.text);
 
     writeFileSync(join(source, "references", "guide.md"), "Updated reference");
@@ -60,7 +61,31 @@ describe("Antigravity skill staging", () => {
     const turn = { threadId: "thread", text: "Read " + JSON.stringify(file), skillFiles: [file] };
     expect(() => stageAntigravitySkills(turn, cwd)).toThrow("unsafe file");
     const other = fixture("root-link");
-    symlinkSync(outside, join(other.cwd, ".omb-skills"), process.platform === "win32" ? "junction" : "dir");
+    symlinkSync(outside, join(other.cwd, "omb-skills"), process.platform === "win32" ? "junction" : "dir");
     expect(() => stageAntigravitySkills({ ...turn, text: "Read " + JSON.stringify(other.file), skillFiles: [other.file] }, other.cwd)).toThrow("staging path");
+  });
+
+  it("never stages through a task directory link", () => {
+    const { cwd, file } = fixture("task-race");
+    const task = join(DATA_DIR, "replaceable-task");
+    const outside = join(DATA_DIR, "race-outside");
+    mkdirSync(task, { recursive: true });
+    mkdirSync(outside, { recursive: true });
+    symlinkSync(outside, join(task, ".omb-skills"), process.platform === "win32" ? "junction" : "dir");
+    const staged = stageAntigravitySkills({ threadId: "thread", text: "Read " + JSON.stringify(file), skillFiles: [file], cwd: task }, cwd);
+    expect(staged.text).toContain("omb-skills");
+    expect(readdirSync(outside)).toEqual([]);
+    expect(existsSync(join(task, "omb-skills"))).toBe(false);
+  });
+
+  it.each(["file", "link", "folder"])("rejects an unexpected %s in a reused staged copy", (kind) => {
+    const { cwd, file } = fixture("unexpected-" + kind);
+    const turn = { threadId: "thread", text: "Read " + JSON.stringify(file), skillFiles: [file] };
+    const staged = stageAntigravitySkills(turn, cwd);
+    const folder = join(JSON.parse(staged.text.slice(5)) as string, "..");
+    if (kind === "file") writeFileSync(join(folder, "unexpected.py"), "malicious");
+    else if (kind === "folder") mkdirSync(join(folder, "unexpected"));
+    else symlinkSync(cwd, join(folder, "unexpected"), process.platform === "win32" ? "junction" : "dir");
+    expect(() => stageAntigravitySkills(turn, cwd)).toThrow("staged skill files changed");
   });
 });

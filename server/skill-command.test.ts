@@ -4,7 +4,9 @@ import { join } from "node:path";
 
 import type { AppConfig } from "./config.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
-import { enabledSkillFile, installSkill, setSkillEnabled } from "./skills.ts";
+import { applyStagedSkillWrite, enabledSkillFile, installSkill, setSkillEnabled, stageSkillWrite } from "./skills.ts";
+import { librarySkillFilePath } from "./skill-library.ts";
+import { shareLearnedSkill } from "./skill-share.ts";
 import type { BotRecord, Store } from "./store.ts";
 import { noteTypedSend, typedWords } from "./typed-sends.ts";
 import { workspaceDir } from "./workspace.ts";
@@ -60,6 +62,27 @@ describe("parseSkillCommand", () => {
 });
 
 describe("words a person typed", () => {
+  it("stages an explicitly called team skill shared after the conversation started", () => {
+    const name = "late-" + randomUUID().slice(0, 8);
+    const author = { id: "author-" + randomUUID().slice(0, 8), name: "Author", section: "Team" };
+    const mate = { id: "mate-" + randomUUID().slice(0, 8), name: "Mate", section: "Team", assignedSkills: [] as string[] } as BotRecord;
+    const staged = stageSkillWrite(author.id, { action: "create", files: [{ path: "SKILL.md", content: SKILL(name) }], source: "learn:conversation" });
+    if ("error" in staged) throw new Error(staged.error);
+    expect(applyStagedSkillWrite(author.id, staged.id, { expectedSha256: staged.sha256 })).not.toHaveProperty("error");
+    expect(shareLearnedSkill({ author, bots: [author, mate], name, now: 1000,
+      patchAssigned: (id, assigned) => { if (id === mate.id) mate.assignedSkills = assigned; },
+    })).not.toHaveProperty("error");
+    const libraryHost = createSkillsLibraryHost({
+      store: { bot: () => mate, messagesFor: () => [{ at: 500 }] } as unknown as Store,
+      cfg: { features: { skillsLibrary: true } } as AppConfig,
+      appendSkillRequestCard: () => ({ requestId: "", summary: "" }),
+    });
+    const engine = { instanceId: "antigravity", driverKind: "antigravityAgent" };
+    expect(libraryHost.skillsIndex(mate, "thread", engine)).not.toContain(name);
+    expect(libraryHost.expandSkillCommand(mate, "thread", "/" + name, engine, [], true)).toContain(JSON.stringify(librarySkillFilePath(name)));
+    expect(libraryHost.turnSkillFiles(mate, "thread", engine)).toContain(librarySkillFilePath(name));
+  });
+
   it("offers only enabled skill files for driver staging", () => {
     const bot = botWith("standup");
     const record = { id: bot } as BotRecord;
