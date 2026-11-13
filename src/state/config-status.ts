@@ -7,7 +7,7 @@ import type { ModelSelection } from "./store";
 /** A saved credential: whether it is set and, for admins, its last four characters. The key itself never comes back. */
 export interface SavedKey { configured: boolean; last4?: string }
 
-export type NestedKeyName = "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "geminiImageApiKey";
+export type NestedKeyName = "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "geminiDeciderKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "geminiImageApiKey";
 
 export interface ImageSlotStatus { provider: ImageProvider; model: string; configured: boolean }
 
@@ -101,7 +101,9 @@ export interface ConfigStatus {
    * saved. OpenRouter only: `keySource` says which key is in use (its own, or
    * the one under Settings → API keys); `sharedKey`: that one is on file. */
   decider?: {
-    provider: "jev" | "workersai" | "openrouter";
+    provider: "jev" | "gemini" | "workersai" | "openrouter";
+    geminiKeySource?: "own" | "speech" | "images";
+    geminiKeySources?: { speech: boolean; images: boolean };
     /** The OpenRouter model in use; present only while OpenRouter is the provider. */
     model?: string;
     configured: boolean;
@@ -116,7 +118,7 @@ export interface ConfigStatus {
     own: { jev: boolean; workersAi: boolean; openrouter: boolean };
     sharedKey?: boolean;
     workersAiAccountId?: string;
-    extraction: { provider?: "jev" | "workersai" | "openrouter"; included?: boolean; ready: boolean };
+    extraction: { provider?: "jev" | "gemini" | "workersai" | "openrouter"; included?: boolean; ready: boolean };
   };
   /** Live calls (OpenAI GPT-Live): configured-or-not, never the key. */
   live?: LiveSettings;

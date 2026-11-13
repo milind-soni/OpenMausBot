@@ -24,8 +24,10 @@ const optionalText = z.string().optional();
  * log's retention. */
 export const deciderConfigSchema = z.object({
   enabled: z.boolean().optional(),
-  provider: z.enum(["jev", "openrouter", "off"]).optional(),
+  provider: z.enum(["jev", "gemini", "openrouter", "off"]).optional(),
   key: optionalText,
+  geminiKey: optionalText,
+  geminiKeySource: z.enum(["own", "speech", "images"]).optional(),
   openrouterKey: optionalText,
   workersAiToken: optionalText,
   workersAiAccountId: z.string().trim().refine((value) => !value || WORKERS_AI_ACCOUNT_ID.test(value), "a Cloudflare account ID is 32 letters and digits").optional(),
@@ -60,8 +62,12 @@ export const deciderConfigSchema = z.object({
 /** The decision model; see `deciderConfigSchema`. */
 export interface DeciderConfig {
   enabled?: boolean;
-  provider?: "jev" | "openrouter" | "off";
+  provider?: "jev" | "gemini" | "openrouter" | "off";
   key?: string;
+  /** Write-only Google AI Studio key for Gemini Decision 1. */
+  geminiKey?: string;
+  /** Defaults to `own`; speech and image sources reference their saved key without copying it. */
+  geminiKeySource?: "own" | "speech" | "images";
   baseUrl?: string;
   openrouterKey?: string;
   openrouterModel?: string;

@@ -547,7 +547,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** A room reply whose speaker the decision model picked (an Auto room),
    * with how sure it was. Absent on every other message; clients that do
    * not know it ignore it. */
-  routedBy?: { provider: "jev" | "workersai" | "openrouter"; probability: number };
+  routedBy?: { provider: "jev" | "gemini" | "workersai" | "openrouter"; probability: number };
   /** On a conversational bot's user line: the picker label of the quick model its reply ran on. */
   quickModel?: string;
   /** On a "Sent to" hand-off row: the done_when the sender set, redacted, so the chip can show what counts as finished. */

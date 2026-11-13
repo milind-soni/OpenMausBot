@@ -20,6 +20,7 @@ export const CREDENTIAL_PATCH = {
   fishAudioKey: (value) => ({ tts: { fishKey: value } }),
   geminiTtsKey: (value) => ({ tts: { geminiKey: value } }),
   jevApiKey: (value) => ({ decider: { key: value } }),
+  geminiDeciderKey: (value) => ({ decider: { geminiKey: value } }),
   openrouterDeciderKey: (value) => ({ decider: { openrouterKey: value } }),
   workersAiToken: (value) => ({ decider: { workersAiToken: value } }),
   openaiImageApiKey: (value) => ({ imageGen: { key: value } }),
@@ -33,6 +34,7 @@ export const CREDENTIAL_PATCH = {
 const DECIDER_ERRORS = Object.freeze({
   "serverError.decider.accountRequired": "native.decider.accountRequired",
   "serverError.decider.jevRejected": "native.decider.jevRejected",
+  "serverError.decider.geminiRejected": "native.decider.geminiRejected",
   "serverError.decider.workersRejected": "native.decider.workersRejected",
   "serverError.decider.routerRejected": "native.decider.routerRejected",
 });

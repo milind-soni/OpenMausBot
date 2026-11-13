@@ -47,7 +47,7 @@ export interface KeyTarget {
 export type KeyId =
   | "openai" | "anthropic" | "xai" | "openrouter" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "deepseek" | "opencodeGo" | "opencodeProviders"
   | "ollama" | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "geminiTts" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
-  | "jev" | "openrouterHelper" | "workersAi" | "imageOpenai" | "imageGemini" | "imageCustom";
+  | "jev" | "geminiDecider" | "openrouterHelper" | "workersAi" | "imageOpenai" | "imageGemini" | "imageCustom";
 
 export type KeyMark = { driverKind: string; preset?: ProviderIconPreset } | { icon: LucideIcon };
 
@@ -186,6 +186,11 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
     target: { patch: (value) => ({ decider: { key: value } }), slot: "jevApiKey", verifiedOnSave: true,
       saved: (config) => ({ ...flag(config.savedKeys?.jevApiKey ?? { configured: config.helpers?.own.jev === true }), ...(config.decider?.included ? { included: true } : {}) }),
       placeholder: "…", placeholderKey: "decider.key.placeholder", href: "https://typesafe.ai", analytics: "jev" } },
+  { id: "geminiDecider", section: "helpers", labelKey: "decider.gemini.key.label", purposeKey: "decider.gemini.purpose", name: "Gemini", env: ["OMB_GEMINI_DECIDER_KEY"],
+    words: ["gemini", "google", "decisions", "helper", "rooms"], mark: { icon: Zap }, kind: "key",
+    target: { patch: (value) => ({ decider: { geminiKey: value } }), slot: "geminiDeciderKey", verifiedOnSave: true,
+      saved: (config) => flag(config.savedKeys?.geminiDeciderKey), placeholder: "...", placeholderKey: "voice.gemini.keyPlaceholder",
+      href: "https://aistudio.google.com/apikey", analytics: "gemini_decider" } },
   { id: "openrouterHelper", section: "helpers", labelKey: "keys.label.openrouterHelper", purposeKey: "keys.purpose.openrouterHelper", name: "OpenRouter", env: ["OMB_OPENROUTER_DECIDER_KEY"],
     words: ["openrouter", "decisions", "helper"], mark: provider("openai-compat", "openrouter"), kind: "key",
     target: { patch: (value) => ({ decider: { openrouterKey: value } }), slot: "openrouterDeciderKey", verifiedOnSave: true,

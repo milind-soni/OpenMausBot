@@ -11,6 +11,12 @@ import {
 } from "./workspace-credentials.mjs";
 
 describe("workspace credential migration", () => {
+  it("keeps the Gemini decision secret encrypted and source references as settings", () => {
+    const result = migrateWorkspaceCredentials({ decider: { provider: "gemini", geminiKeySource: "speech", geminiKey: "decision-secret" }, tts: { geminiKey: "speech-secret" } }, {});
+    expect(result.credentials).toEqual({ geminiDeciderKey: "decision-secret", geminiTtsKey: "speech-secret" });
+    expect(result.config.decider).toEqual({ provider: "gemini", geminiKeySource: "speech" });
+    expect(workspaceCredentialEnv(result.credentials)).toMatchObject({ OMB_GEMINI_DECIDER_KEY: "decision-secret", OMB_GEMINI_API_KEY: "speech-secret" });
+  });
   it("stores the router key separately while keeping provider settings", () => {
     const result = migrateWorkspaceCredentials({ imageGen: {
       provider: "custom", key: "openai-only", customApiKey: "router-only",

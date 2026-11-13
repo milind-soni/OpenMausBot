@@ -20,6 +20,7 @@ export function nestedKeyStatus(cfg: AppConfig) {
     fishAudioKey: keyStatus(cfg.tts?.fishKey),
     geminiTtsKey: keyStatus(cfg.tts?.geminiKey),
     jevApiKey: keyStatus(cfg.decider?.key),
+    geminiDeciderKey: keyStatus(cfg.decider?.geminiKey),
     openrouterDeciderKey: keyStatus(cfg.decider?.openrouterKey),
     workersAiToken: keyStatus(cfg.decider?.workersAiToken),
     openaiImageApiKey: keyStatus(cfg.imageGen?.key),

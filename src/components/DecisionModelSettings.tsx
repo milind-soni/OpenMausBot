@@ -5,15 +5,15 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { LearnMore, SETTINGS_INPUT, SettingRow, SettingsField, SettingsFormFoot, SettingsGroup, SettingsRows, StatusDot, Switch } from "./SettingsPrimitives";
-import { Select } from "./Select";
+import { DecisionSelect } from "./DecisionSelect";
 import { WorkersAiKeyCard } from "./WorkersAiKeyCard";
 import { openKeySettings } from "./keys/key-focus";
 
-const KEY_URL = { jev: "https://typesafe.ai", openrouter: "https://openrouter.ai/keys" } as const;
+const KEY_URL = { jev: "https://typesafe.ai", gemini: "https://aistudio.google.com/apikey", openrouter: "https://openrouter.ai/keys" } as const;
 /** The room decision budget in server/decider/room-routing.ts; slower falls back to the lead. */
 const ROOM_BUDGET_MS = 1_500;
 
-type Provider = "jev" | "openrouter";
+type Provider = "jev" | "gemini" | "openrouter";
 type ModelList = { source: "openrouter" | "builtin"; models: Array<{ id: string; name: string; group: "recommended" | "more"; api?: "chat" | "decisions" }> };
 type TestResult = { ok: true; latencyMs: number } | { ok: false; reason: string; status?: number };
 
@@ -44,6 +44,16 @@ const OPENROUTER_FAILURES: Record<string, LocaleKey> = {
   malformed: "decider.openrouter.error.malformed",
 };
 
+const GEMINI_FAILURES: Record<string, LocaleKey> = {
+  ...FAILURES,
+  rejected: "decider.gemini.error.rejected",
+  unreachable: "decider.gemini.error.unreachable",
+  timeout: "decider.gemini.error.timeout",
+  rate_limited: "decider.gemini.error.rateLimited",
+  overloaded: "decider.gemini.error.overloaded",
+  malformed: "decider.gemini.error.malformed",
+};
+
 const WORKERS_AI_FAILURES: Record<string, LocaleKey> = {
   ...FAILURES,
   rejected: "decider.workersAi.error.rejected",
@@ -54,7 +64,8 @@ const WORKERS_AI_FAILURES: Record<string, LocaleKey> = {
   malformed: "decider.workersAi.error.malformed",
 };
 
-const BY: Record<"jev" | "workersai" | "openrouter", LocaleKey> = {
+const BY: Record<Provider | "workersai", LocaleKey> = {
+  gemini: "decider.status.byGemini",
   jev: "decider.status.byJev", workersai: "decider.status.byWorkersAi", openrouter: "decider.status.byOpenRouter",
 };
 
@@ -71,6 +82,11 @@ export function helpersStatusLine(config: ConfigStatus | null): string {
 
 /** A fixed sentence per failure: the vendor's own body never reaches the UI. */
 export function deciderFailureText(result: { reason: string; status?: number }, included = false, provider: Provider | "workersai" = "jev"): string {
+  if (provider === "gemini") {
+    if (result.reason === "http_error") return t("decider.gemini.error.http", { status: String(result.status ?? "?") });
+    const key = GEMINI_FAILURES[result.reason];
+    return key ? t(key) : t("decider.error.other");
+  }
   if (provider === "workersai") {
     if (result.reason === "http_error") return t("decider.workersAi.error.http", { status: String(result.status ?? "?") });
     const key = WORKERS_AI_FAILURES[result.reason];
@@ -94,13 +110,16 @@ export function deciderFailureText(result: { reason: string; status?: number }, 
 export function DecisionModelSettings() {
   const { state, dispatch } = useStore();
   const decider = state.config?.decider;
-  const provider: Provider = decider?.provider === "openrouter" ? "openrouter" : "jev";
+  const provider: Provider = decider?.provider === "gemini" ? "gemini" : decider?.provider === "openrouter" ? "openrouter" : "jev";
+  const gemini = provider === "gemini";
+  const geminiKeySource = decider?.geminiKeySource ?? "own";
+  const reusingGemini = gemini && geminiKeySource !== "own";
   const openrouter = provider === "openrouter";
   const configured = decider?.configured ?? false;
   const included = configured && decider?.included === true;
   const usingShared = openrouter && configured && decider?.keySource === "shared";
   const sharedKey = openrouter && decider?.sharedKey === true;
-  const ownKey = configured && !included && !usingShared;
+  const ownKey = configured && !included && !usingShared && !reusingGemini;
   const enabled = decider?.enabled ?? false;
   const roomRouting = decider?.jobs.roomRouting ?? true;
   const [value, setValue] = useState("");
@@ -148,21 +167,21 @@ export function DecisionModelSettings() {
     return () => { cancelled = true; };
   }, [openrouter, models]);
 
-  const choose = (decision: { provider: Provider } | { openrouterModel: string; openrouterApi: "chat" | "decisions" }) => {
+  const choose = (decision: { provider: Provider } | { geminiKeySource: "own" | "speech" | "images" } | { openrouterModel: string; openrouterApi: "chat" | "decisions" }) => {
     setValue("");
     setVerdict(null);
     void patch(decision);
   };
 
   const save = async () => {
-    if (saving || (!draft && !ownKey)) return;
+    if (saving || reusingGemini || (!draft && !ownKey)) return;
     setSaving(true);
     setError(null);
     setVerdict(null);
     try {
       const status = window.ogb?.setCredential
-        ? await window.ogb.setCredential(openrouter ? "openrouterDeciderKey" : "jevApiKey", draft)
-        : await api<ConfigStatus>("/api/config", { method: "PUT", body: JSON.stringify({ decider: { [openrouter ? "openrouterKey" : "key"]: draft } }) });
+        ? await window.ogb.setCredential(gemini ? "geminiDeciderKey" : openrouter ? "openrouterDeciderKey" : "jevApiKey", draft)
+        : await api<ConfigStatus>("/api/config", { method: "PUT", body: JSON.stringify({ decider: { [gemini ? "geminiKey" : openrouter ? "openrouterKey" : "key"]: draft } }) });
       applied(status);
       setValue("");
     } catch (cause) {
@@ -180,7 +199,7 @@ export function DecisionModelSettings() {
     const testingIncluded = !draft && included;
     const testingShared = !draft && usingShared;
     try {
-      const result = await api<TestResult>("/api/decider/test", { method: "POST", body: JSON.stringify(draft ? { key: draft } : {}) });
+      const result = await api<TestResult>("/api/decider/test", { method: "POST", body: JSON.stringify(gemini ? { provider, ...(draft ? { key: draft } : {}) } : draft ? { key: draft } : {}) });
       setVerdict(result.ok
         ? {
           ok: true,
@@ -189,7 +208,7 @@ export function DecisionModelSettings() {
               t(testingShared ? "decider.openrouter.test.okShared" : "decider.openrouter.test.ok", { ms: String(result.latencyMs) }),
               ...(result.latencyMs > ROOM_BUDGET_MS ? [t("decider.test.slow")] : []),
             ].join(" ")
-            : t("decider.test.ok", { ms: String(result.latencyMs) }),
+            : t(gemini ? "decider.gemini.test.ok" : "decider.test.ok", { ms: String(result.latencyMs) }),
         }
         : { ok: false, text: deciderFailureText(result, testingIncluded, provider) });
     } catch (cause) {
@@ -199,7 +218,7 @@ export function DecisionModelSettings() {
     }
   };
 
-  const keyLabel = t(openrouter ? "decider.openrouter.key.label" : "decider.key.label");
+  const keyLabel = t(gemini ? "decider.gemini.key.label" : openrouter ? "decider.openrouter.key.label" : "decider.key.label");
   const keyStatus = included
     ? t("keys.includedWithCloudPro")
     : usingShared
@@ -233,67 +252,79 @@ export function DecisionModelSettings() {
       <SettingsGroup label={t("decider.provider.label")} block="routing-key">
         <SettingsRows selectWidth={200}>
           <SettingRow title={t("decider.provider.title")}>
-            <Select
+            <DecisionSelect
               data-testid="decider-provider"
               value={provider}
-              onChange={(event) => choose({ provider: event.target.value === "openrouter" ? "openrouter" : "jev" })}
+              onChange={(value) => choose({ provider: value === "gemini" ? "gemini" : value === "openrouter" ? "openrouter" : "jev" })}
               disabled={switching || !state.config}
               aria-label={t("decider.provider.label")}
-            >
-              <option value="jev">{t("decider.provider.jev")}</option>
-              <option value="openrouter">{t("decider.provider.openrouter")}</option>
-            </Select>
+              options={[
+                { value: "jev", label: t("decider.provider.jev") },
+                { value: "gemini", label: t("decider.provider.gemini") },
+                { value: "openrouter", label: t("decider.provider.openrouter") },
+              ]}
+            />
           </SettingRow>
+          {gemini && (
+            <SettingRow title={t("decider.gemini.source.label")} subtitle={reusingGemini && !configured ? t("decider.gemini.source.missing") : undefined}>
+              <DecisionSelect data-testid="decider-gemini-source" value={geminiKeySource} disabled={switching || saving || testing}
+                aria-label={t("decider.gemini.source.label")}
+                onChange={(value) => choose({ geminiKeySource: value === "speech" ? "speech" : value === "images" ? "images" : "own" })}
+                options={[
+                  { value: "own", label: t("decider.gemini.source.own") },
+                  ...(decider?.geminiKeySources?.speech || geminiKeySource === "speech" ? [{ value: "speech", label: t("decider.gemini.source.speech"), disabled: !decider?.geminiKeySources?.speech }] : []),
+                  ...(decider?.geminiKeySources?.images || geminiKeySource === "images" ? [{ value: "images", label: t("decider.gemini.source.images"), disabled: !decider?.geminiKeySources?.images }] : []),
+                ]}
+              />
+            </SettingRow>
+          )}
           {openrouter && (
             <SettingRow title={t("decider.model.label")} subtitle={models?.source === "builtin" ? t("decider.model.builtinNote") : undefined}>
-              <Select
+              <DecisionSelect
                 data-testid="decider-model"
                 value={decider?.model ?? ""}
-                onChange={(event) => choose({
-                  openrouterModel: event.target.value,
-                  openrouterApi: models?.models.find((model) => model.id === event.target.value)?.api ?? "chat",
+                onChange={(value) => choose({
+                  openrouterModel: value,
+                  openrouterApi: models?.models.find((model) => model.id === value)?.api ?? "chat",
                 })}
                 disabled={switching}
                 aria-label={t("decider.model.label")}
-              >
-                {decider?.model && !models?.models.some((model) => model.id === decider.model) && (
-                  <option value={decider.model}>{decider.model}</option>
-                )}
-                {(["recommended", "more"] as const).map((group) => {
-                  const inGroup = models?.models.filter((model) => model.group === group) ?? [];
-                  return inGroup.length > 0 && (
-                    <optgroup key={group} label={t(group === "recommended" ? "decider.model.recommended" : "decider.model.more")}>
-                      {inGroup.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
-                    </optgroup>
-                  );
-                })}
-              </Select>
+                options={[
+                  ...(decider?.model && !models?.models.some((model) => model.id === decider.model) ? [{ value: decider.model, label: decider.model }] : []),
+                  ...(["recommended", "more"] as const).flatMap((group) => (models?.models.filter((model) => model.group === group) ?? []).map((model) => ({
+                    value: model.id, label: model.name, group: t(group === "recommended" ? "decider.model.recommended" : "decider.model.more"),
+                  }))),
+                ]}
+              />
             </SettingRow>
           )}
           <div data-decider-key="" className="flex flex-col gap-2 px-4 pb-1 pt-3">
-            <SettingsField label={keyLabel}>
+            {!reusingGemini && <SettingsField label={keyLabel}>
               <input
                 type="password"
                 value={value}
                 onChange={(event) => { setVerdict(null); setError(null); setValue(event.target.value); }}
                 onKeyDown={(event) => event.key === "Enter" && void save()}
                 disabled={saving}
-                placeholder={ownKey ? t("keys.replace") : t(usingShared ? "decider.openrouter.key.overridePlaceholder" : openrouter ? "decider.openrouter.key.placeholder" : "decider.key.placeholder")}
+                placeholder={ownKey ? t("keys.replace") : t(gemini ? "voice.gemini.keyPlaceholder" : usingShared ? "decider.openrouter.key.overridePlaceholder" : openrouter ? "decider.openrouter.key.placeholder" : "decider.key.placeholder")}
                 aria-label={keyLabel}
                 autoComplete="off"
                 spellCheck={false}
                 className={SETTINGS_INPUT}
               />
-            </SettingsField>
+            </SettingsField>}
             <p className="text-[13px] leading-[18px] text-ink-secondary">
               {keyHint && <>{t(keyHint)}{" "}</>}
               {keyHint && !ownKey && (
                 <><button type="button" data-testid="decider-manage-keys" onClick={() => dispatch(openKeySettings("openrouter"))}
                   className="cursor-pointer text-accent-text hover:underline">{t("decider.openrouter.key.manageLink")}</button>{" "}</>
               )}
-              {!usingShared && (
+              {reusingGemini && <><span>{t(geminiKeySource === "speech" ? "decider.gemini.source.speech" : "decider.gemini.source.images")}</span>{" "}
+                <button type="button" data-testid="decider-gemini-manage" onClick={() => dispatch(openKeySettings(geminiKeySource === "speech" ? "geminiTts" : "imageGemini"))}
+                  className="cursor-pointer text-accent-text hover:underline">{t("decider.gemini.key.manage")}</button></>}
+              {!usingShared && !reusingGemini && (
                 <a href={KEY_URL[provider]} target="_blank" rel="noopener noreferrer" className="cursor-pointer text-accent-text hover:underline focus-visible:underline">
-                  {t(openrouter ? "decider.openrouter.key.getKey" : "decider.key.getKey")}
+                  {t(gemini ? "decider.gemini.key.getKey" : openrouter ? "decider.openrouter.key.getKey" : "decider.key.getKey")}
                 </a>
               )}
             </p>
@@ -312,7 +343,7 @@ export function DecisionModelSettings() {
             >
               {testing ? t("keys.testing") : t("keys.test")}
             </button>
-            <button
+            {!reusingGemini && <button
               type="button"
               data-testid="decider-save"
               onClick={() => void save()}
@@ -321,7 +352,7 @@ export function DecisionModelSettings() {
               className={cn("ui-button ui-button-md cursor-pointer rounded-full", clearing && "!text-danger")}
             >
               {saving ? t("settings.threads.saving") : clearing ? t("keys.clear") : t("common.save")}
-            </button>
+            </button>}
           </SettingsFormFoot>
         </SettingsRows>
       </SettingsGroup>

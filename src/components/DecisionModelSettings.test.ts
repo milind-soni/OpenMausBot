@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigStatus } from "@/state/store";
 import { setLocale } from "@/lib/i18n";
+import { en, localeChoices, locales } from "@/locales";
 import { DecisionModelSettings, deciderFailureText, helpersStatusLine } from "./DecisionModelSettings";
 import { Switch } from "./SettingsPrimitives";
 
@@ -46,6 +47,8 @@ function render() {
     master: byTestId("decider-master")[0]!,
     job: byTestId("decider-job-roomRouting")[0]!,
     provider: byTestId("decider-provider")[0],
+    source: byTestId("decider-gemini-source")[0],
+    geminiManage: byTestId("decider-gemini-manage")[0],
     model: byTestId("decider-model")[0],
     save: byTestId("decider-save")[0]!,
     test: byTestId("decider-test")[0]!,
@@ -57,7 +60,7 @@ const click = (node: Node) => (node.props.onClick as () => void)();
 const type = (node: Node, value: string) => (node.props.onChange as (event: { target: { value: string } }) => void)({ target: { value } });
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
 const status = (decider: NonNullable<ConfigStatus["decider"]>) => ({ decider } as ConfigStatus);
-const change = (node: Node, value: string) => (node.props.onChange as (event: { target: { value: string } }) => void)({ target: { value } });
+const change = (node: Node, value: string) => (node.props.onChange as (value: string) => void)(value);
 const runEffects = () => { for (const effect of fixture.effects) effect(); };
 const SHARED = { configured: true, keySource: "shared", sharedKey: true } as const;
 const openrouter = (extra: Partial<NonNullable<ConfigStatus["decider"]>> = {}) =>
@@ -70,7 +73,7 @@ const MODELS = {
     { id: "acme/zippy", name: "Acme: Zippy", group: "more" },
   ],
 };
-const optionsOf = (node: Node) => nodes(node.props.children).filter((child) => child.type === "option").map((child) => child.props.value);
+const optionsOf = (node: Node) => (node.props.options as Array<{ value: string }>).map((option) => option.value);
 
 beforeEach(() => {
   fixture.values = [];
@@ -83,6 +86,73 @@ beforeEach(() => {
 afterEach(() => { setLocale("en"); vi.unstubAllGlobals(); });
 
 describe("DecisionModelSettings", () => {
+  it("has translations for every new Gemini string in every bundled language", () => {
+    const keys = Object.keys(en).filter((key) => key.startsWith("decider.gemini.") || key.startsWith("serverError.decider.gemini") || ["decider.provider.gemini", "decider.status.byGemini", "native.decider.geminiRejected", "room.routedBy.gemini"].includes(key));
+    for (const { code } of localeChoices) for (const key of keys) expect(Object.hasOwn(locales[code] ?? {}, key), `${code}: ${key}`).toBe(true);
+  });
+  const gemini = (extra: Partial<NonNullable<ConfigStatus["decider"]>> = {}) => status({ provider: "gemini", configured: false, enabled: false, jobs: { roomRouting: true }, geminiKeySource: "own", geminiKeySources: { speech: true, images: true }, ...extra });
+
+  it("offers saved Gemini sources and an empty separate-key field", async () => {
+    fixture.config = gemini();
+    const view = render();
+    expect(view.provider!.props.value).toBe("gemini");
+    expect(view.model).toBeUndefined();
+    expect(optionsOf(view.source!)).toEqual(["own", "speech", "images"]);
+    expect(view.input.props.value).toBe("");
+    expect(view.html).toContain("Gemini decision API key");
+    fixture.api.mockResolvedValueOnce(gemini({ configured: true, enabled: true, geminiKeySource: "speech" }));
+    change(view.source!, "speech");
+    await flush();
+    expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { geminiKeySource: "speech" } }) });
+    expect(render().input).toBeUndefined();
+    expect(render().save).toBeUndefined();
+    expect(helpersStatusLine(fixture.config)).toContain("Decisions: Gemini");
+    click(render().geminiManage!);
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ type: "toggleAppSettings" }));
+  });
+
+  it("retains a missing selected source and does not show other missing sources", () => {
+    fixture.config = gemini({ geminiKeySource: "speech", geminiKeySources: { speech: false, images: false } });
+    const view = render();
+    expect(optionsOf(view.source!)).toEqual(["own", "speech"]);
+    expect(view.source!.props.value).toBe("speech");
+    expect(view.html).toContain("The selected key is no longer available");
+    expect(view.test.props.disabled).toBe(true);
+    expect(view.input).toBeUndefined();
+  });
+
+  it("keeps the previous source when the server cannot verify a source change", async () => {
+    fixture.config = gemini();
+    fixture.api.mockRejectedValueOnce(new Error("Gemini could not verify the selected key."));
+    change(render().source!, "images");
+    await flush();
+    expect(render().source!.props.value).toBe("own");
+    expect(render().html).toContain("Gemini could not verify the selected key.");
+  });
+
+  it.each([false, true])("saves a separate Gemini key through the correct credential channel (desktop=%s)", async (desktop) => {
+    fixture.config = gemini();
+    const setCredential = vi.fn().mockResolvedValue(gemini({ configured: true, enabled: true }));
+    if (desktop) vi.stubGlobal("window", { ogb: { setCredential } });
+    else fixture.api.mockResolvedValueOnce(gemini({ configured: true, enabled: true }));
+    type(render().input, KEY);
+    click(render().save);
+    await flush();
+    if (desktop) expect(setCredential).toHaveBeenCalledWith("geminiDeciderKey", KEY);
+    else expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { geminiKey: KEY } }) });
+    expect(render().input.props.value).toBe("");
+  });
+
+  it("tests a reused Gemini key without sending a credential back from the UI", async () => {
+    fixture.config = gemini({ configured: true, enabled: true, geminiKeySource: "images" });
+    fixture.api.mockResolvedValueOnce({ ok: true, latencyMs: 210 });
+    click(render().test);
+    await flush();
+    expect(fixture.api).toHaveBeenCalledWith("/api/decider/test", { method: "POST", body: JSON.stringify({ provider: "gemini" }) });
+    expect(render().html).toContain("Gemini answered in 210 ms.");
+    expect(deciderFailureText({ reason: "rejected" }, false, "gemini")).toContain("Gemini rejected");
+  });
+
   it("explains itself, then the switch, the key, and what it decides", () => {
     const view = render();
     const order = ["Small, fast models that sort and read things for your bots", "Use fast decisions and extraction", "Decisions: not set up · Extraction: not set up",
@@ -102,13 +172,12 @@ describe("DecisionModelSettings", () => {
     expect(helpersStatusLine(null)).toBe("Decisões: sem configuração · Extração: sem configuração");
   });
 
-  it("offers both providers, with Jev selected for an existing install and no model picker", () => {
+  it("offers the providers, with Jev selected for an existing install and no model picker", () => {
     const view = render();
     expect(view.provider!.props.value).toBe("jev");
-    expect(optionsOf(view.provider!)).toEqual(["jev", "openrouter"]);
+    expect(optionsOf(view.provider!)).toEqual(["jev", "gemini", "openrouter"]);
     expect(view.html).toContain("TypeSafe Jev");
     expect(view.model).toBeUndefined();
-    expect(fixture.effects).toHaveLength(1);
     runEffects();
     expect(fixture.api).not.toHaveBeenCalled();
   });
@@ -280,9 +349,10 @@ describe("DecisionModelSettings", () => {
       expect(fixture.api).toHaveBeenCalledWith("/api/decider/models");
       let view = render();
       expect(optionsOf(view.model!)).toEqual(["openai/gpt-4.1-nano", "meta-llama/llama-3.3-70b-instruct", "acme/zippy"]);
-      expect(view.html).toContain("Recommended");
-      expect(view.html).toContain("More models");
-      expect(view.html).toContain("Meta: Llama 3.3 70B Instruct");
+      expect(view.model!.props.options).toEqual(expect.arrayContaining([
+        expect.objectContaining({ label: "Meta: Llama 3.3 70B Instruct", group: "Recommended" }),
+        expect.objectContaining({ label: "Acme: Zippy", group: "More models" }),
+      ]));
       expect(view.html).not.toContain("built-in list");
       runEffects();
       expect(fixture.api).toHaveBeenCalledTimes(1);
