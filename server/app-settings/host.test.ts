@@ -24,12 +24,14 @@ function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; w
   const dataDir = mkdtempSync(join(tmpdir(), "app-settings-"));
   dirs.push(dataDir);
   const bots: BotRecord[] = [
-    { id: "kiwi", name: "Kiwi", color: "#0f0", threadId: "t-kiwi", approvalMode: "full", section: "Sales" } as unknown as BotRecord,
-    { id: "clive", name: "Clive", color: "#00f", threadId: "t-clive", approvalMode: "ask" } as unknown as BotRecord,
+    { id: "kiwi", name: "Kiwi", color: "green", threadId: "t-kiwi", approvalMode: "full", section: "Sales", modelSelection: { instanceId: "claude", model: "opus" } } as unknown as BotRecord,
+    { id: "clive", name: "Clive", color: "blue", threadId: "t-clive", approvalMode: "ask", modelSelection: { instanceId: "claude", model: "sonnet" } } as unknown as BotRecord,
   ];
   const cfg = { language: "en", rooms: { turnTimeoutMinutes: 30 }, mcp: {}, threads: { maxConcurrentPerBot: 3 }, openai: { key: OPENAI_KEY }, anthropic: { url: "https://api.anthropic.com" },
     instances: { "openai-compat-gw": { driver: "openai-compat", displayName: "Gateway", config: { key: GATEWAY_KEY, url: "https://gw.example/v1" } } } } as unknown as AppConfig;
   const engineCalls: unknown[] = [];
+  const botPatches: Array<{ botId: string; body: Record<string, unknown> }> = [];
+  const routeCalls: unknown[] = [];
   const chosen = new Set<string>(options.chosen ?? []);
   const saved: Record<string, unknown>[] = [];
   const messages: Array<Record<string, any>> = [];
@@ -63,6 +65,8 @@ function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; w
     bots: () => bots,
     sections: () => ["Sales"],
     reorderBots: async (botIds) => { bots.sort((a, b) => botIds.indexOf(a.id) - botIds.indexOf(b.id)); return null; },
+    patchBot: async (botId, body) => { botPatches.push({ botId, body }); Object.assign(bots.find((bot) => bot.id === botId)!, body); return null; },
+    call: async (route, method, path, body) => { routeCalls.push({ route, method, path, body }); return null; },
     pinBot: async (botId, pinned) => { (bots.find((bot) => bot.id === botId) as { pinned?: boolean }).pinned = pinned || undefined; return null; },
     groupBots: async (name, botIds) => { for (const bot of bots) if (botIds.includes(bot.id)) (bot as { section?: string }).section = name || undefined; return null; },
     credentials: () => cfg,
@@ -95,7 +99,7 @@ function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; w
     return { claimed, sent: sent as { status: number; body: Record<string, unknown> } | null };
   };
   const cards = () => messages.filter((message) => message.card?.appSettingRequest);
-  return { host, cfg, saved, messages, cards, credentialCards, notified, windowValues, bots, turn, set, answer, dataDir, engineCalls };
+  return { host, cfg, saved, messages, cards, credentialCards, notified, windowValues, bots, turn, set, answer, dataDir, engineCalls, botPatches, routeCalls };
 }
 
 describe("reads", () => {
@@ -400,13 +404,114 @@ describe("secret tier", () => {
 });
 
 describe("owner-only tier", () => {
-  it("explains and refuses with where to change it, approval modes included", async () => {
-    const { host, set, turn } = fixture();
-    const got = await host.handle({ action: "get", id: "bots.approvalModes" }, turn);
-    expect(JSON.parse(String(got.body.text))).toMatchObject({ tier: "owner-only", value: "Kiwi: full; Clive: ask", change: "only the owner, in a bot's Settings" });
-    const refused = await set("bots.approvalModes", { kiwi: "full" });
-    expect(refused.status).toBe(403);
-    expect(refused.body.error).toContain("a bot's Settings");
-    expect((await set("remote.access", "tunnel")).status).toBe(403);
+  it("explains and refuses with where to change it: sign-in, logins, pairing, backups", async () => {
+    const { host, set, turn, cards } = fixture();
+    const got = await host.handle({ action: "get", id: "vault.logins" }, turn);
+    expect(JSON.parse(String(got.body.text))).toMatchObject({ tier: "owner-only", change: "only the owner, in Settings → Vault" });
+    for (const id of ["cloud.account", "vault.logins", "phone.pairing", "data.backups"]) {
+      const refused = await set(id, "on");
+      expect(refused.status, id).toBe(403);
+      expect(refused.body.error, id).toContain("is changed only by the owner");
+    }
+    expect(cards()).toEqual([]);
+  });
+});
+
+describe("every other setting, on a Change card", () => {
+  /** Starts a set and returns its waiting card. */
+  const carded = async (fx: ReturnType<typeof fixture>, id: string, value: unknown) => {
+    const pending = fx.set(id, typeof value === "string" ? value : JSON.stringify(value));
+    await vi.waitFor(() => expect(fx.cards().filter((card) => !card.card.answered)).toHaveLength(1));
+    return { pending, card: fx.cards().at(-1)!.card };
+  };
+  const written = (fx: ReturnType<typeof fixture>) => JSON.stringify([fx.botPatches, fx.saved, fx.routeCalls, [...fx.windowValues]]);
+
+  it.each([
+    ["a bot's own setting", "bots.name", { botId: "clive", name: "Clover" }, "Rename Clive to \"Clover\"", (fx: ReturnType<typeof fixture>) => expect(fx.botPatches).toEqual([{ botId: "clive", body: { name: "Clover" } }])],
+    ["a server setting", "profile.name", "Ada", "not set → Ada", (fx: ReturnType<typeof fixture>) => expect(fx.saved).toEqual([{ profile: { name: "Ada" } }])],
+    ["another Settings route", "remote.domain", "bots.example.com", "Serve this place at bots.example.com (checked live), and give it in new pairing links",
+      (fx: ReturnType<typeof fixture>) => expect(fx.routeCalls).toEqual([{ route: "customDomain", method: "POST", path: "/api/settings/custom-domain", body: { domain: "bots.example.com" } }])],
+    ["a window preference", "remote.relay", true, "Let your paired phones reach this computer from anywhere, through MausBot's relay", (fx: ReturnType<typeof fixture>) => expect(fx.windowValues.get("remote.relay")).toBe(true)],
+  ])("%s waits on its card: Cancel writes nothing, and only the owner's Change writes it", async (_kind, id, value, subtitle, check) => {
+    const fx = fixture();
+    const before = written(fx);
+    const cancelled = await carded(fx, id, value);
+    expect(cancelled.card).toMatchObject({ options: ["Change", "Cancel"], subtitle, appSettingRequest: { settingId: id, tier: "confirm" } });
+    expect(fx.answer(String(cancelled.card.requestId), "allow", false).sent).toMatchObject({ status: 403 });
+    fx.answer(String(cancelled.card.requestId), "deny");
+    expect((await cancelled.pending).body.error).toContain("cancelled");
+    expect(written(fx)).toBe(before);
+    const changed = await carded(fx, id, value);
+    expect(written(fx)).toBe(before);
+    fx.answer(String(changed.card.requestId), "allow");
+    expect((await changed.pending).status).toBe(200);
+    check(fx);
+  });
+
+  it("an approval mode change says what it allows, at Full access too, and a loopback Allow can't approve it", async () => {
+    const fx = fixture();
+    const got = JSON.parse(String((await fx.host.handle({ action: "get", id: "bots.approvalModes" }, fx.turn)).body.text));
+    expect(got).toMatchObject({ tier: "confirm", value: "Kiwi: Full access; Clive: Ask for approval" });
+    const { pending, card } = await carded(fx, "bots.approvalModes", { botId: "clive", mode: "full" });
+    expect(card.subtitle).toBe("Let Clive act without asking (Full access)");
+    expect(fx.answer(String(card.requestId), "allow", false).sent).toMatchObject({ status: 403 });
+    expect(fx.botPatches).toEqual([]);
+    fx.answer(String(card.requestId), "allow");
+    expect((await pending).status).toBe(200);
+    expect(fx.botPatches).toEqual([{ botId: "clive", body: { approvalMode: "full", applyToAllThreads: true } }]);
+  });
+
+  it("refuses before any card an unknown bot, an invalid mode, Custom, and Approve for me on this computer's own desktop", async () => {
+    const fx = fixture();
+    expect((await fx.set("bots.approvalModes", JSON.stringify({ botId: "ghost", mode: "ask" })))).toMatchObject({ status: 409, body: { error: "No bot has the id ghost. Use list_bots for the ids." } });
+    expect((await fx.set("bots.name", JSON.stringify({ botId: "ghost", name: "Boo" }))).status).toBe(409);
+    expect((await fx.set("bots.approvalModes", JSON.stringify({ botId: "clive", mode: "custom" }))).status).toBe(400);
+    (fx.bots[1] as { computer?: string }).computer = "local";
+    expect((await fx.set("bots.approvalModes", JSON.stringify({ botId: "clive", mode: "auto" }))).body.error).toMatch(/needs a warning only Clive's Settings shows/);
+    expect((await fx.set("bots.model", JSON.stringify({ botId: "clive", instanceId: "nowhere", model: "x" }))).body.error).toContain("No engine has the id nowhere");
+    expect(fx.cards()).toEqual([]);
+    expect(fx.botPatches).toEqual([]);
+  });
+
+  it("never takes a key or token in a value", async () => {
+    const fx = fixture();
+    for (const [id, value] of [["bots.settings", { botId: "kiwi", apiKey: OPENAI_KEY }], ["ai.routing", { enabled: true, openrouterKey: OPENAI_KEY }], ["ai.images", { key: OPENAI_KEY }]] as const) {
+      const refused = await fx.set(id, JSON.stringify(value));
+      expect(refused.status, id).toBe(400);
+      expect(refused.body.error, id).toContain("Never put a key or token in the value");
+    }
+    expect(fx.cards()).toEqual([]);
+    expect(JSON.stringify(fx.messages)).not.toContain(OPENAI_KEY);
+  });
+
+  it("a window preference on a card is refused while no window is open, before any card", async () => {
+    const fx = fixture({ window: false });
+    const pending = fx.set("general.openAtLogin", true);
+    await vi.waitFor(() => expect(fx.cards()).toHaveLength(1));
+    expect(fx.cards()[0]!.card.subtitle).toBe("Open MausBot when you log in");
+    fx.answer(String(fx.cards()[0]!.card.requestId), "allow");
+    expect((await pending).body.error).toContain("Open MausBot on this computer first");
+    expect(fx.windowValues.size).toBe(0);
+  });
+
+  it("a browser profile is added on a card naming whose browser it uses, and never removed by a bot", async () => {
+    const fx = fixture();
+    (fx.cfg as { browserProfiles?: unknown }).browserProfiles = [{ id: "work", name: "Work" }];
+    expect((await fx.set("desktops.browserProfiles", JSON.stringify([]))).body.error).toMatch(/^Removing the browser profile "Work" deletes its saved logins/);
+    expect(fx.cards()).toEqual([]);
+    const { pending, card } = await carded(fx, "desktops.browserProfiles", [{ id: "work", name: "Work" }, { name: "Mine", browser: "chrome" }]);
+    expect(card.subtitle).toBe("Browser profiles: add the profile \"Mine\" on your own running Chrome, with its logins");
+    fx.answer(String(card.requestId), "allow");
+    await pending;
+    expect(fx.saved).toEqual([{ browserProfiles: [{ id: "work", name: "Work" }, { id: expect.stringMatching(/^profile-[0-9a-f]{32}$/), name: "Mine", browser: "chrome" }], expectedBrowserProfiles: [{ id: "work", name: "Work" }] }]);
+  });
+
+  it("other bot settings name each change, and a computer change says what it hands over", async () => {
+    const fx = fixture();
+    const { pending, card } = await carded(fx, "bots.settings", { botId: "kiwi", memoryEnabled: false, computer: "local" });
+    expect(card.subtitle).toBe("Kiwi: memory off; computer use this computer's own desktop, as you");
+    fx.answer(String(card.requestId), "allow");
+    await pending;
+    expect(fx.botPatches).toEqual([{ botId: "kiwi", body: { memoryEnabled: false, computer: "local" } }]);
   });
 });
