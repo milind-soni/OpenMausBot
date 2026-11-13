@@ -15,6 +15,9 @@ const cfg: AppConfig = { box: { token: "synthetic-box-key" } } as AppConfig;
 
 beforeAll(async () => {
   server = createServer(async (req, res) => {
+    // Every answer closes its connection: the tests that leave a command hanging close the server's sockets, and a pooled
+    // keep-alive socket reused after that fails the next test's request with "other side closed".
+    res.setHeader("connection", "close");
     let body = "";
     for await (const part of req) body += part;
     const path = req.url ?? "";
