@@ -89,7 +89,6 @@ export const HOSTED_MCP_APPS = [
     id: "bubblav",
     label: "BubblaV",
     url: "https://www.bubblav.com/mcp",
-    // BubblaV supplies its logo for this card (src/assets/bubblav/README.md).
     icon: { image: bubblavLogo },
     description: "bubblav.description",
     notice: "bubblav.notice",
