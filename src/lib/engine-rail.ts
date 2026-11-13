@@ -60,7 +60,8 @@ export function splitEngineRail<T>(instances: readonly T[]): {
 export function backupNote(main: InstanceInfo | undefined, backup: InstanceInfo): string | undefined {
   if (!main) return undefined;
   if (backup.instanceId === main.instanceId) return t("botPanel.backups.sameAccount");
-  const billsEachUse = backup.access === "api" || backup.snapshot.account?.method === "api-key";
-  if (otherSignInOfSameSubscription(main, backup) && !billsEachUse) return t("botPanel.backups.otherSignIn");
+  // Same rule as the server's billsEachUse: only an API-access engine counts as pay-per-use here. A key the CLI stored
+  // itself (account method "api-key") does not, so the server still keeps it from taking over at the usage limit.
+  if (otherSignInOfSameSubscription(main, backup) && backup.access !== "api") return t("botPanel.backups.otherSignIn");
   return undefined;
 }

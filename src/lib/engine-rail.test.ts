@@ -188,13 +188,14 @@ describe("backupNote", () => {
     expect(backupNote(main, engine("codex-sub1", "codex"))).toBe(
       "Another sign-in to the main AI: used only while the main one is signed out, never at its usage limit (provider terms).");
     expect(backupNote(engine("claude", "claudeAgent"), engine("claude-2", "claudeAgent"))).toMatch(/^Another sign-in/);
+    // A key the CLI stored itself is not pay-per-use to the server's limit rule, so the note still applies.
+    expect(backupNote(main, engine("codex-stored-key", "codex", { snapshot: { state: "available", account: { method: "api-key" } } }))).toMatch(/^Another sign-in/);
   });
 
   it("keeps the same-account note and says nothing for other AIs or pay-per-use keys", () => {
     expect(backupNote(main, main)).toBe("Same account as the main AI: it shares the usage limit.");
     expect(backupNote(main, engine("claude", "claudeAgent"))).toBeUndefined();
     expect(backupNote(main, engine("codex-key", "codex", { access: "api" }))).toBeUndefined();
-    expect(backupNote(main, engine("codex-env", "codex", { snapshot: { state: "available", account: { method: "api-key" } } }))).toBeUndefined();
     expect(backupNote(engine("ollama", "openaiChat"), engine("ollama-2", "openaiChat"))).toBeUndefined();
     expect(backupNote(undefined, engine("codex-sub1", "codex"))).toBeUndefined();
   });
