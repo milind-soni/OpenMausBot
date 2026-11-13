@@ -845,6 +845,19 @@ describe("Antigravity driver over shared ACP", () => {
     expect(antigravityPermissionMode(true, "edits")).toBe("yolo");
   });
 
+  it("returns staging failures as rejected promises before dispatch", async () => {
+    const fake = fakeRuntime();
+    instance = await AntigravityDriver.create({
+      instanceId: "antigravity-staging-failure", displayName: "Antigravity",
+      environment: {}, enabled: true, config: { cli: fake.executable, fullAuto: false },
+    });
+    const file = join(fake.directory, "missing-skill", "SKILL.md");
+    const pending = instance.adapter.sendTurn({
+      threadId: "staging-failure", text: "Read " + JSON.stringify(file), skillFiles: [file], cwd: fake.directory,
+    });
+    await expect(pending).rejects.toThrow("Antigravity skill folders must be real directories.");
+  });
+
   it.each(["ask", "edits", "auto", "full"] as const)("runs an authenticated %s turn with explicit mode and session-scoped MCP", async (approvalMode) => {
     ensureDirs();
     const fake = fakeRuntime();

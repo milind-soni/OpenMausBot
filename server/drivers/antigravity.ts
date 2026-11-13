@@ -175,7 +175,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       ...base,
       adapter: {
         ...base.adapter,
-        sendTurn: (turn) => base.adapter.sendTurn(stageAntigravitySkills(turn, antigravityProfileDirectory(input.instanceId))),
+        sendTurn: async (turn) => base.adapter.sendTurn(stageAntigravitySkills(turn, antigravityProfileDirectory(input.instanceId))),
       },
       get models() {
         return base.models;
