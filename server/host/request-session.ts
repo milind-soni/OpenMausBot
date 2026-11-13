@@ -59,6 +59,34 @@ export function directTurnRequestSessionMayDispatch(request: { requestSessionId?
   return !request?.requestSessionId || isLive(request.requestSessionId);
 }
 
+/** A delayed part of a direct turn must remain bound to the request owner that created its generation. */
+export function directTurnRequestMayContinue(
+  expected: { botId: string; generation: string; requestSessionId?: string } | undefined,
+  currentGeneration: string | undefined,
+  request: DirectRequestOwner | undefined,
+  claimIsCurrent: () => boolean,
+  shuttingDown: boolean,
+  isLive: (id: string) => boolean,
+): boolean {
+  return Boolean(expected && !shuttingDown && currentGeneration === expected.generation && claimIsCurrent() &&
+    request?.generation === expected.generation && request.generations.has(expected.generation) &&
+    request.requestSessionId === expected.requestSessionId && !request.stopped &&
+    directTurnRequestSessionMayDispatch(request, isLive));
+}
+
+export function directTurnRequestContext(botId: string, generation: string, owner: DirectRequestOwner | undefined): { botId: string; generation: string; requestSessionId?: string } | undefined {
+  return owner?.generation === generation && owner.generations.has(generation)
+    ? { botId, generation, ...(owner.requestSessionId ? { requestSessionId: owner.requestSessionId } : {}) }
+    : undefined;
+}
+
+/** Settle the accepted line only while the generation that was cancelled still owns it. */
+export function cancelledDirectRequestOutcome(request: DirectRequestOwner | undefined, generation: string): { messageId: string; patch: { requestPending: false; requestCancelled: true } } | undefined {
+  return request?.generation === generation && request.messageId
+    ? { messageId: request.messageId, patch: { requestPending: false, requestCancelled: true } }
+    : undefined;
+}
+
 /** A deferred retry belongs to its captured generation and session, never a newer request on the same thread. */
 export function quickRetryRequestMayDispatch(
   owner: { botId: string; generation: string; requestSessionId?: string } | undefined,

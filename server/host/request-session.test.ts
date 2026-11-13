@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { OUTSIDE } from "../peer-provenance.ts";
 import {
   queuedRequestSessionMayDispatch,
+  cancelledDirectRequestOutcome,
   cloudHandoffSessionMayResume,
+  directTurnRequestMayContinue,
+  directTurnRequestContext,
   directTurnRequestSessionMayDispatch,
   quickRetryRequestMayDispatch,
   requestSessionGuard,
@@ -14,6 +17,11 @@ import {
 } from "./request-session.ts";
 
 describe("request session provenance", () => {
+  it("captures only the exact active request generation and session", () => {
+    const owner = { generation: "g1", generations: new Set(["g1"]), turnId: null, requestSessionId: "s1" };
+    expect(directTurnRequestContext("bot", "g1", owner)).toEqual({ botId: "bot", generation: "g1", requestSessionId: "s1" });
+    expect(directTurnRequestContext("bot", "g2", owner)).toBeUndefined();
+  });
   it("revalidates after a refused asynchronous steer before fallback", async () => {
     let live = true;
     let release!: (outcome: "refused" | "steered" | "indeterminate") => void;
@@ -67,6 +75,34 @@ describe("request session provenance", () => {
     expect(dispatch).not.toHaveBeenCalled();
     expect(directTurnRequestSessionMayDispatch(owner, (id) => id === "session-a")).toBe(true);
     expect(directTurnRequestSessionMayDispatch(undefined, () => false)).toBe(true);
+  });
+
+  it("keeps delayed work bound to the exact active generation and request session", () => {
+    const expected = { botId: "bot-a", generation: "generation-a", requestSessionId: "session-a" };
+    const request = { ...expected, generations: new Set(["generation-a"]), turnId: null };
+    const mayContinue = (overrides: Partial<typeof request> = {}, live = true, shutdown = false, claim = true) =>
+      directTurnRequestMayContinue(expected, "generation-a", { ...request, ...overrides }, () => claim, shutdown, (id) => live && id === "session-a");
+    expect(mayContinue()).toBe(true);
+    expect(mayContinue({}, false)).toBe(false);
+    expect(mayContinue({ requestSessionId: "session-b" })).toBe(false);
+    expect(mayContinue({ generation: "generation-b" })).toBe(false);
+    expect(mayContinue({ generations: new Set(["generation-b"]) })).toBe(false);
+    expect(directTurnRequestMayContinue(expected, "generation-a", { ...request, stopped: true }, () => true, false, () => true)).toBe(false);
+    expect(mayContinue({}, true, true)).toBe(false);
+    expect(mayContinue({}, true, false, false)).toBe(false);
+
+    const sessionlessRoutine = { ...expected, requestSessionId: undefined, generations: new Set(["generation-a"]), turnId: null };
+    expect(directTurnRequestMayContinue({ botId: "bot-a", generation: "generation-a" }, "generation-a", sessionlessRoutine,
+      () => true, false, () => false)).toBe(true);
+  });
+
+  it("marks only the cancelled generation's accepted user request as settled and cancelled", () => {
+    const request = { generation: "generation-a", messageId: "message-a", generations: new Set(["generation-a"]), turnId: null };
+    expect(cancelledDirectRequestOutcome(request, "generation-a")).toEqual({
+      messageId: "message-a", patch: { requestPending: false, requestCancelled: true },
+    });
+    expect(cancelledDirectRequestOutcome(request, "generation-b")).toBeUndefined();
+    expect(cancelledDirectRequestOutcome({ ...request, messageId: undefined }, "generation-a")).toBeUndefined();
   });
 
   it("checks a continuation against its recorded effective session, not the current caller", () => {

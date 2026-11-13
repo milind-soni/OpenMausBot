@@ -1,8 +1,9 @@
 import { expect, it, vi } from "vitest";
 import { EXCERPT_SUMMARY_HEADER } from "../shared/wire.ts";
-import { deterministicSummary, draftSummary, foldPoint, summaryPrompt } from "./compaction-summary.ts";
+import { deterministicSummary, draftSummary, draftSummaryWhileAuthorized, foldPoint, summaryPrompt } from "./compaction-summary.ts";
 import type { ReplayEntry } from "./context-rebuild.ts";
 import { createSideJobs, type SideJobInstance, type SideJobsDeps } from "./side-jobs.ts";
+import { directTurnRequestMayContinue } from "./host/request-session.ts";
 
 const history: ReplayEntry[] = [
   { id: "1", role: "user", text: "Deploy release" },
@@ -70,6 +71,89 @@ it("Stop prevents a late helper result from being committed, even if it ignores 
   controller.abort(new Error("stopped"));
   await expect(result).rejects.toThrow("stopped");
   finish("late summary");
+});
+
+it("does not invoke the summary model when the request is revoked during warm-summary preparation", async () => {
+  let live = true;
+  let finishWarm!: () => void;
+  const warm = new Promise<void>((resolve) => { finishWarm = resolve; });
+  const controller = new AbortController();
+  const owner = { botId: "bot-a", generation: "generation-a", requestSessionId: "session-a" };
+  const request = { ...owner, generations: new Set(["generation-a"]), turnId: null };
+  const generateText = vi.fn(async () => "should not run");
+  const checking = (async () => {
+    await warm;
+    return draftSummaryWhileAuthorized(history, { signal: controller.signal, generateText },
+      () => directTurnRequestMayContinue(owner, "generation-a", request, () => true, false, (id) => live && id === "session-a"),
+      () => new Error("context summarization stopped"));
+  })();
+
+  live = false;
+  controller.abort(new Error("session revoked"));
+  finishWarm();
+  await expect(checking).rejects.toThrow("session revoked");
+  expect(generateText).not.toHaveBeenCalled();
+});
+
+it("rechecks authorization at helper dispatch and after asynchronous compaction", async () => {
+  let live = true;
+  const controller = new AbortController();
+  const owner = { botId: "bot-a", generation: "generation-a", requestSessionId: "session-a" };
+  const request = { ...owner, generations: new Set(["generation-a"]), turnId: null };
+  const generateText = vi.fn(async () => "summary");
+  const checking = draftSummaryWhileAuthorized(history, { signal: controller.signal, generateText },
+    () => directTurnRequestMayContinue(owner, "generation-a", request, () => true, false, (id) => live && id === "session-a"),
+    () => new Error("context summarization stopped"));
+  live = false;
+  await expect(checking).rejects.toThrow("context summarization stopped");
+  expect(generateText).not.toHaveBeenCalled();
+
+  const replaced = { ...request, generation: "generation-b", requestSessionId: "session-b", generations: new Set(["generation-b"]) };
+  expect(directTurnRequestMayContinue(owner, "generation-b", replaced, () => true, false, () => true)).toBe(false);
+  const sessionless = { ...request, requestSessionId: undefined };
+  expect(directTurnRequestMayContinue({ botId: "bot-a", generation: "generation-a" }, "generation-a", sessionless,
+    () => true, false, () => false)).toBe(true);
+});
+
+it("does not let a replacement request authorize an older in-flight summary", async () => {
+  let currentGeneration = "generation-a";
+  let currentRequest = { botId: "bot-a", generation: "generation-a", requestSessionId: "session-a", generations: new Set(["generation-a"]), turnId: null };
+  let finish!: (value: string) => void;
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  const controller = new AbortController();
+  const owner = { botId: "bot-a", generation: "generation-a", requestSessionId: "session-a" };
+  const generateText = vi.fn(() => new Promise<string>((resolve) => { finish = resolve; entered(); }));
+  const summarize = draftSummaryWhileAuthorized(history, { signal: controller.signal, generateText },
+    () => directTurnRequestMayContinue(owner, currentGeneration, currentRequest, () => true, false, () => true),
+    () => new Error("context summarization stopped"));
+  await started;
+  currentGeneration = "generation-b";
+  currentRequest = { botId: "bot-a", generation: "generation-b", requestSessionId: "session-b", generations: new Set(["generation-b"]), turnId: null };
+  finish("late summary");
+  await expect(summarize).rejects.toThrow("context summarization stopped");
+  expect(generateText).toHaveBeenCalledTimes(1);
+});
+
+it("does not dispatch an older summary after a new request replaces it during warm preparation", async () => {
+  let currentGeneration = "generation-a";
+  let currentRequest = { botId: "bot-a", generation: "generation-a", requestSessionId: "session-a", generations: new Set(["generation-a"]), turnId: null };
+  let finishWarm!: () => void;
+  const warm = new Promise<void>((resolve) => { finishWarm = resolve; });
+  const owner = { botId: "bot-a", generation: "generation-a", requestSessionId: "session-a" };
+  const generateText = vi.fn(async () => "must not run");
+  const controller = new AbortController();
+  const summary = (async () => {
+    await warm;
+    return draftSummaryWhileAuthorized(history, { signal: controller.signal, generateText },
+      () => directTurnRequestMayContinue(owner, currentGeneration, currentRequest, () => true, false, () => true),
+      () => new Error("context summarization stopped"));
+  })();
+  currentGeneration = "generation-b";
+  currentRequest = { botId: "bot-a", generation: "generation-b", requestSessionId: "session-b", generations: new Set(["generation-b"]), turnId: null };
+  finishWarm();
+  await expect(summary).rejects.toThrow("context summarization stopped");
+  expect(generateText).not.toHaveBeenCalled();
 });
 
 it("bounds model output without losing the latest source correction", async () => {

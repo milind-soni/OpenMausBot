@@ -66,3 +66,26 @@ export async function draftSummary(history: readonly ReplayEntry[], options: {
   if (!model?.trim()) return fallback;
   return boundedContextText(`Model-written historical summary (may be incomplete):\n${boundedContextText(model.trim(), 2_600)}\n\n${deterministicSummary(history, 3_200)}`, MAX_SUMMARY_BYTES);
 }
+
+/** Keep the authorization check at the actual helper-model call as well as around the asynchronous summary. */
+export async function draftSummaryWhileAuthorized(history: readonly ReplayEntry[], options: {
+  generateText?: (prompt: string, options?: { signal?: AbortSignal }) => Promise<string>;
+  signal: AbortSignal;
+  timeoutMs?: number;
+}, mayProceed: () => boolean, cancelled: () => Error): Promise<string> {
+  const assertMayProceed = () => {
+    options.signal.throwIfAborted();
+    if (!mayProceed()) throw cancelled();
+  };
+  assertMayProceed();
+  const generateText = options.generateText;
+  const summary = await draftSummary(history, {
+    ...options,
+    ...(generateText ? { generateText: (prompt, callOptions) => {
+      assertMayProceed();
+      return generateText(prompt, callOptions);
+    } } : {}),
+  });
+  assertMayProceed();
+  return summary;
+}

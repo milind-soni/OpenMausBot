@@ -8,6 +8,7 @@ import { Handoffs, unseenMessages, type HandedState, type Handoff } from "../del
 import { EventBus } from "../harness/bus.ts";
 import { LimitResetClock } from "../limit-resets.ts";
 import { QuickModelFallback } from "../quick-model-fallback.ts";
+import { directTurnRequestMayContinue } from "../host/request-session.ts";
 import type { Message } from "../store.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { completeWindowState, windowState } from "../testing/saved-steps-fixtures.ts";
@@ -387,6 +388,70 @@ describe("SavedStepsDispatch.sendTurn", () => {
     expect(events.at(-2)).toMatchObject({ text: "Done by the AI." });
     expect(dispatch.take(ev("item.completed", "e1"))).toBe(false);
     expect(dispatch.replayed("t1", turnId)).toBeUndefined();
+  });
+
+  it("does not start the saved-step fallback after its original request session is revoked", async () => {
+    failAt = "set_value";
+    let sessionLive = true;
+    let currentGeneration = "generation-a";
+    const owner = { botId: "b1", generation: "generation-a", requestSessionId: "session-a" };
+    let currentOwner = { ...owner, generations: new Set([owner.generation]), turnId: null };
+    const fallbackStart = vi.fn(async (input: SendTurnInput) => {
+      if (!directTurnRequestMayContinue(owner, currentGeneration, currentOwner, () => true, false, (id) => sessionLive && id === "session-a")) {
+        throw new Error("turn stopped before saved-step fallback");
+      }
+      return start(input);
+    });
+    answer = (event) => {
+      if (event.tool === "mcp__computer__set_value") {
+        sessionLive = false;
+        currentGeneration = "generation-b";
+        currentOwner = { botId: "b1", generation: "generation-b", requestSessionId: "session-b", generations: new Set(["generation-b"]), turnId: null };
+      }
+      return "allow";
+    };
+
+    const { turnId } = await dispatch.sendTurn(engine, REQ, INPUT, fallbackStart);
+    await vi.waitFor(() => expect(turnCompleted()).toHaveLength(1));
+
+    expect(fallbackStart).toHaveBeenCalledTimes(1);
+    expect(start).not.toHaveBeenCalled();
+    expect(engine.adapter.sendTurn).not.toHaveBeenCalled();
+    expect(events.slice(-2)).toMatchObject([
+      { type: "runtime.error", turnId, message: "turn stopped before saved-step fallback" },
+      { type: "turn.completed", turnId, ok: false },
+    ]);
+  });
+
+  it("keeps an explicitly sessionless fallback eligible for its current generation", async () => {
+    failAt = "set_value";
+    const owner = { botId: "b1", generation: "generation-a" };
+    const currentOwner = { ...owner, generations: new Set([owner.generation]), turnId: null };
+    const fallbackStart = vi.fn(async (input: SendTurnInput) => {
+      if (!directTurnRequestMayContinue(owner, "generation-a", currentOwner, () => true, false, () => false)) {
+        throw new Error("turn stopped before saved-step fallback");
+      }
+      return start(input);
+    });
+    await dispatch.sendTurn(engine, REQ, INPUT, fallbackStart);
+    await settled();
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an authorized live-session fallback working after saved-step replay fails", async () => {
+    failAt = "set_value";
+    const owner = { botId: "b1", generation: "generation-a", requestSessionId: "session-a" };
+    const currentOwner = { ...owner, generations: new Set([owner.generation]), turnId: null };
+    const fallbackStart = vi.fn(async (input: SendTurnInput) => {
+      if (!directTurnRequestMayContinue(owner, "generation-a", currentOwner, () => true, false, (id) => id === "session-a")) {
+        throw new Error("turn stopped before saved-step fallback");
+      }
+      return start(input);
+    });
+    await dispatch.sendTurn(engine, REQ, INPUT, fallbackStart);
+    await settled();
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0]![0].text).toContain(fallbackNote(FAILED));
   });
 
   it.each(["", "hello world"])("types into a field that holds %j: empty, or already what the steps type", async (held) => {

@@ -14,7 +14,7 @@ import { basename, join } from "node:path";
 import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntimeGrant } from "./external-runtime.ts";
 import { z } from "zod";
 import { selectReplay, replayToolCalls, DEFAULT_REBUILD_BYTES, MAX_SUMMARY_BYTES } from "./context-rebuild.ts";
-import { draftSummary, foldPoint } from "./compaction-summary.ts";
+import { draftSummaryWhileAuthorized, foldPoint } from "./compaction-summary.ts";
 import { compactBudget, compactionReading, contextWindowFor, shouldCompact } from "./context-budget.ts";
 import { autoCompactWindow } from "./drivers/claude.ts";
 import { RoomContextTracker, roomResetNote } from "./room-context.ts";
@@ -327,7 +327,7 @@ import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-rec
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { createTtsRoutes } from "./routes/tts.ts";
 import { turnStartLogLine } from "./turn-log.ts";
-import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts"; import { cloudHandoffSessionMayResume, directTurnRequestSessionMayDispatch, queuedRequestSessionMayDispatch, quickRetryRequestMayDispatch, requestSessionGuard, requestSessionOptions, requireLiveBeforeSteerFallback, settledPrincipalRemainsAuthorized, sharedComputerPrincipalForRequest, turnOriginForRequest, type DirectRequestOwner } from "./host/request-session.ts";
+import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts"; import { cancelledDirectRequestOutcome, cloudHandoffSessionMayResume, directTurnRequestContext, directTurnRequestMayContinue, queuedRequestSessionMayDispatch, quickRetryRequestMayDispatch, requestSessionGuard, requestSessionOptions, requireLiveBeforeSteerFallback, settledPrincipalRemainsAuthorized, sharedComputerPrincipalForRequest, turnOriginForRequest, type DirectRequestOwner } from "./host/request-session.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts";
 import { extractReplayImages, extractTurnImages, videoFramesWithin } from "./turn-images.ts";
@@ -2350,7 +2350,7 @@ function clearDirectTurnDispatch(threadId: string, claimId: string): void {
   }
 }
 
-const compactionControllers = new Map<string, { generation: string; controller: AbortController }>();
+const compactionControllers = new Map<string, { generation: string; requestSessionId?: string; controller: AbortController }>();
 
 function cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): DirectTurnDispatchClaim | null {
   const threadId = expectedThreadId ?? store.bot(botId)?.threadId;
@@ -4673,6 +4673,7 @@ sessions.onSessionRevoked((sessionId) => {
   providerAuthSessions.revokeOwner(sessionId);
   mcpOAuth.revokeOwner(sessionId);
   closeSessionStreams(sessionId);
+  for (const compaction of compactionControllers.values()) if (compaction.requestSessionId === sessionId) compaction.controller.abort(new DirectTurnSetupCancelled("context summarization stopped"));
   // A revoked owner device no longer vouches for its lines (cloudOwnerPerson).
   ownerOnlyCache.clear();
 });
@@ -7001,11 +7002,11 @@ function peerReplayText(m: Message, name: string, text: string): string {
 const { lineLabels, personPrompt, routineRunNote } = createLineLabels({ sharedChat: (threadId) => sharedMembership() && !store.groupByThread(threadId) && audienceMember(teamHost.audienceOf(threadId)) === null, userName: userNameFor, teamRole: (key) => (teamOwners.people?.list() ?? []).find((one) => personKey({ id: "", email: one.email }) === key)?.role, routineName: (threadId) => { const run = routines?.runForThread(threadId); return routines?.listRoutines().find((one) => one.id === run?.routineId)?.name; } });
 
 async function compactConversation(input: {
-  bot: BotRecord; threadId: string; generation: string;
-  instance: NonNullable<ReturnType<typeof registry.get>>; model: string;
+  bot: BotRecord; threadId: string; generation: string; instance: NonNullable<ReturnType<typeof registry.get>>; model: string;
   excludedIds: ReadonlySet<string>; manual: boolean; idle?: AbortSignal;
+  requestSessionId?: string; mayContinue?: () => boolean;
 }): Promise<void> {
-  const { bot, threadId, generation, instance, model, excludedIds, manual, idle } = input;
+  const { bot, threadId, generation, instance, model, excludedIds, manual, idle, requestSessionId, mayContinue: requestMayContinue } = input;
   const task = store.taskByThread(bot.id, threadId);
   if (!task || (!manual && cfg.context?.autoCompact === false)) return;
   const messages = sinceFreshStart(store.activePath(threadId));
@@ -7039,10 +7040,9 @@ async function compactConversation(input: {
   if (!foldedThroughId) return;
   const prefix = JSON.stringify(messages);
   const controller = new AbortController(); idle?.addEventListener("abort", () => controller.abort(), { once: true }); if (idle?.aborted) controller.abort();
-  compactionControllers.set(threadId, { generation, controller });
-  try {
-    const summary = await draftSummary(fold.folded, { signal: controller.signal, generateText: sideJobs.text("compaction", bot.id, { instance })?.generateText });
-    if (!idle && !directTurnClaimIsCurrent(bot.id, generation, threadId)) throw new DirectTurnSetupCancelled("context summarization stopped");
+    compactionControllers.set(threadId, { generation, ...(requestSessionId ? { requestSessionId } : {}), controller });
+    try {
+    const summary = await draftSummaryWhileAuthorized(fold.folded, { signal: controller.signal, generateText: sideJobs.text("compaction", bot.id, { instance })?.generateText }, () => idle ? !idle.aborted : requestMayContinue?.() === true, () => new DirectTurnSetupCancelled("context summarization stopped"));
     controller.signal.throwIfAborted();
     if (prefix !== JSON.stringify(sinceFreshStart(store.activePath(threadId)).slice(0, messages.length))) {
       if (manual) throw new Error("the conversation changed during summarization — please retry");
@@ -7739,6 +7739,8 @@ async function beginTurn(
   if (settleOutcome) directCoordinationSettlers.set(dispatchClaimId, { nodeId: opts?.coordination?.id ?? dispatchClaimId, settle: settleOutcome });
   directFollowupSettlers.set(dispatchClaimId, { threadId, settle: opts?.onTurnSettled });
   directTurnDispatchClaims.set(threadId, { id: dispatchClaimId, botId, threadId, phase: "setup" }); liveTurns.dispatchStarted(threadId);
+  const directRequestContext = directTurnRequestContext(botId, dispatchClaimId, directRequestOwners.get(threadId));
+  const requestMayContinue = () => directTurnRequestMayContinue(directRequestContext, directTurnGenerationByThread.get(threadId), directRequestOwners.get(threadId), () => directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId), companyShutdown, (sessionId) => sessions.isLive(sessionId));
   directTurnBots.set(threadId, bot);
   beginInternalCapabilityGeneration(threadId, dispatchClaimId);
   if (!opts?.coordination && !opts?.compactOnly && (!opts?.cardContinuation || opts.goalRunId)) {
@@ -7777,8 +7779,7 @@ async function beginTurn(
       }
       await warmSummaries.beforeTurn(threadId, () => directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId));
       if (usesNativeImageInput && !opts?.compactOnly) turnImages.push(...await videoFramesWithin(turnImages.length, resolvedImages.videos));
-      await compactConversation({ bot, threadId, generation: dispatchClaimId, instance, model,
-        excludedIds: new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]), manual: opts?.compactOnly === true });
+      await compactConversation({ bot, threadId, generation: dispatchClaimId, instance, model, excludedIds: new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]), manual: opts?.compactOnly === true, requestSessionId: directRequestContext?.requestSessionId, mayContinue: requestMayContinue });
       if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) throw new DirectTurnSetupCancelled("turn stopped during context setup");
       if (opts?.compactOnly) {
         clearDirectTurnDispatch(threadId, dispatchClaimId);
@@ -8421,7 +8422,7 @@ async function beginTurn(
       const startupRecovery = (opts?.automaticRecoveryIndex ?? 0) < startupBackups(liveBot ?? bot, cfg.automaticRecovery).length; const posted = unreadThreadPosts(store.activePath(threadId)); // post_to_thread messages left here since its last run
       const held = limitTakeover.heldAtStart(bot, { instanceId, model }, startupRecovery); // a limit or a sign-out already known: straight to an AI that can carry on, with the reset only when one was named
       if (held) throw held.scope === "signed-out" ? Object.assign(new TurnAuthenticationRefusedError(`signed-out-${randomUUID()}`, `${engineName(instanceId)} is signed out.`, true), userErrorFields(userError("serverError.engine.signedOut", { name: engineName(instanceId) }))) : new TurnUsageLimitRefusedError(`limit-${randomUUID()}`, `${engineName(instanceId)} is at its usage limit.`, held.resetsAt, held.scope, true);
-      if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId) || !directTurnRequestSessionMayDispatch(directRequestOwners.get(threadId), (sessionId) => sessions.isLive(sessionId))) throw new DirectTurnSetupCancelled("turn stopped before dispatch");
+      if (!requestMayContinue()) throw new DirectTurnSetupCancelled("turn stopped before dispatch");
       const dispatch = await guardTurnDispatch(shareNote.after(savedSteps.dispatch.sendTurn(instance, personLine && !opts?.unattended && !opts?.app?.context && !guestConfined ? { botId: bot.id, message: userMessage, turnText: text, placePicked: wants === "local" && placeSource !== "auto-pin" } : null, {
         threadId,
         botId: bot.id,
@@ -8449,7 +8450,7 @@ async function beginTurn(
         ...settingsTurnFields(cfg, DATA_DIR, managedPolicy.restrictsMcp()),
         cwd, ...(worksInWorkspace || guestConfined || cloudGuestOpened(threadId) ? {} : { toolResultFolder: messageFileRootsForThread(bot.id, threadId).find((root) => root !== ATTACHMENTS_DIR) }),
         botSettingsFile: botSettingsFile(bot),
-      }, (input) => quickFallback.sendTurn(instance, input, route.quickModel ? { model, own: bot.modelSelection, onFallback: () => store.patchMessage(threadId, userMessage.id, { quickModel: undefined }) } : undefined, { botId: bot.id, generation: dispatchClaimId, requestSessionId: directRequestOwners.get(threadId)?.requestSessionId }))), () => companyShutdown || !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
+      }, (input) => { if (!requestMayContinue()) throw new DirectTurnSetupCancelled("turn stopped before saved-step fallback"); return quickFallback.sendTurn(instance, input, route.quickModel ? { model, own: bot.modelSelection, onFallback: () => store.patchMessage(threadId, userMessage.id, { quickModel: undefined }) } : undefined, directRequestContext); })), () => companyShutdown || !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
         await (runningTurnEngines.get(threadId) ?? instance).adapter.interruptTurn(threadId).catch(() => {});
       });
       if (dispatch.cancelled) {
@@ -8523,6 +8524,7 @@ async function beginTurn(
       if (e instanceof DirectTurnSetupCancelled) {
         settleDirectFollowup(dispatchClaimId, { ok: false, text: e.message });
         opts?.onDispatchError?.(e.message);
+        if (ownsLatestGeneration) { const cancelled = cancelledDirectRequestOutcome(directRequestOwners.get(threadId), dispatchClaimId); if (cancelled) store.patchMessage(threadId, cancelled.messageId, cancelled.patch); }
         if (ownsLatestGeneration && threadBusy(bot.id, threadId)) {
           store.setTaskActivity(bot.id, threadId, "idle");
           directTurnBots.delete(threadId);
