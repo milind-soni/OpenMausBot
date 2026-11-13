@@ -165,7 +165,7 @@ export interface AcpSupport {
     env: Record<string, string | undefined>,
     config: AcpConfig,
     instanceId: string,
-  ): Promise<{ command: string; args?: string[]; env?: Record<string, string | undefined> }>;
+  ): Promise<{ command: string; args?: string[]; env?: Record<string, string | undefined>; ro?: readonly string[] }>;
   /** Snapshot override for agents whose binary has no conventional --version. */
   snapshot?(
     env: Record<string, string | undefined>,
@@ -600,11 +600,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         for (const host of hosts) if (host.key === hostKey && host.accepts(SHARED_SESSIONS_MAX, SHARED_SESSIONS_LIFETIME, threadId, cwd)) return host;
         return null;
       };
-      const hostFor = (threadId: string, launch: { command: string }, argv: string[], env: Record<string, string | undefined>, cwd: string,
+      const hostFor = (threadId: string, launch: { command: string; ro?: readonly string[] }, argv: string[], env: Record<string, string | undefined>, cwd: string,
         hostKey: string | null): AcpHost => {
         const running = sharedHost(hostKey, threadId, cwd);
         if (running) return running;
-        const child = spawnCli(launch.command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env), botThreads: hostKey !== null } }, "bot");
+        const child = spawnCli(launch.command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env), botThreads: hostKey !== null, ro: launch.ro } }, "bot");
         const host = new AcpHost(child, hostKey, { source: SOURCE, logMessage: nativeLogMessage, unrouted: refuse });
         hosts.add(host);
         child.once("close", () => hosts.delete(host));
@@ -614,7 +614,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
       const openSession = (
         threadId: string,
-        launch: { command: string; args?: string[] },
+        launch: { command: string; args?: string[]; ro?: readonly string[] },
         argv: string[],
         env: Record<string, string | undefined>,
         cwd: string,
@@ -1001,7 +1001,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           resolvedModel !== undefined && resolvedModel !== turn.model
             ? { ...turn, model: resolvedModel }
             : turn;
-        let launch: { command: string; args?: string[]; env?: Record<string, string | undefined> };
+        let launch: { command: string; args?: string[]; env?: Record<string, string | undefined>; ro?: readonly string[] };
         try {
           launch = support.resolveCommand
             ? await support.resolveCommand(env, turnConfig, instanceId)
@@ -1028,7 +1028,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           ? createHash("sha256").update(support.toolScopeCacheKey({ config: turnConfig, env, cwd })).digest("hex") : null;
         const processContract = [launch.command, launch.args ?? [], spawnArgs,
           support.sessionScopedApproval ? null : turnConfig.fullAuto === true, envFingerprint,
-          support.spawnFingerprint?.(spawnEnv, turnConfig) ?? null];
+          support.spawnFingerprint?.(spawnEnv, turnConfig) ?? null, launch.ro ?? []];
         const contractKey = JSON.stringify([...processContract, cwd, turn.toolScope ?? null, inheritedScopeFingerprint]);
         const launchModel = support.sessionModelEnv && cliTurn.model && /^[\w.:/-]{1,200}$/u.test(cliTurn.model)
           && catalog.accountModels?.has(cliTurn.model) ? cliTurn.model : undefined;
@@ -1563,11 +1563,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         try {
           const turn = { threadId: `memory-text-${newId()}`, text: prompt, approvalMode: "ask", cwd } as SendTurnInput;
           support.applyTurnEnv?.(env, { fullAuto: false, cwd, threadId: turn.threadId, mcpServers: [] });
-          const launch = support.resolveCommand ? await support.resolveCommand(env, turnConfig, instanceId) : { command: turnConfig.cli };
+          const launch: { command: string; args?: string[]; env?: Record<string, string | undefined>; ro?: readonly string[] } = support.resolveCommand ? await support.resolveCommand(env, turnConfig, instanceId) : { command: turnConfig.cli };
           const spawnEnv = launch.env ?? env;
           return await runAcpOneShot({
             displayName: support.displayName,
-            spawn: spawnCli, kill: killCliTree, box: { allowEnv: instanceEnvNames(input.environment, spawnEnv) },
+            spawn: spawnCli, kill: killCliTree, box: { allowEnv: instanceEnvNames(input.environment, spawnEnv), ro: launch.ro },
             command: launch.command,
             argv: [...(launch.args ?? []), ...support.spawnArgs(turnConfig, turn)],
             env: spawnEnv,

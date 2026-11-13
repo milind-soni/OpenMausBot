@@ -1,7 +1,7 @@
 // Google Antigravity through its official ACP server: managed runtime, isolated Google profile,
 // model/mode configuration and OAuth.
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { stageAntigravitySkills } from "./antigravity-skills.ts";
 import { antigravityAccount } from "./antigravity-account.ts";
 import type {
@@ -90,6 +90,7 @@ const support: AcpSupport = {
       command: runtime.executablePath,
       args: process.platform === "linux" ? ["--uid="] : [],
       env: profile.environment,
+      ro: [join(profile.directory, "omb-skills")],
     };
   },
 

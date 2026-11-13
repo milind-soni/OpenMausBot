@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -568,6 +568,19 @@ describe("official Antigravity runtime", () => {
     expect(readdirSync(acpDirectory).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 
+  it("refuses a symlinked staging root before launching a profile process", async () => {
+    const fake = fakeRuntime();
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const profileDirectory = join(fake.directory, "profile");
+    const outside = join(fake.directory, "outside");
+    mkdirSync(profileDirectory);
+    mkdirSync(outside);
+    symlinkSync(outside, join(profileDirectory, "omb-skills"), process.platform === "win32" ? "junction" : "dir");
+    await expect(prepareAntigravityProfile({ instanceId: "linked-staging", runtime, baseEnv: {}, profileDirectory }))
+      .rejects.toThrow("Antigravity staging path must be a real directory.");
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
   it("keeps the existing Google sign-in when the runtime version changes", async () => {
     const fake = fakeRuntime();
     const runtime = await resolveAntigravityRuntime(fake.executable);
@@ -958,6 +971,8 @@ describe("Antigravity driver over shared ACP", () => {
     expect(replies.get("skill-write").error.message).toContain("outside");
     expect(replies.get("token-read").error.message).toContain("outside");
     const dumpState = JSON.parse(readFileSync(dump, "utf8"));
+    const turnSpawn = vi.mocked(procs.spawnCli).mock.calls.find((call) => call[2].cwd === fake.directory);
+    expect(turnSpawn?.[2].box).toMatchObject({ ro: [join(antigravityProfileDirectory(instanceId), "omb-skills")] });
     expect(dumpState.argv).toEqual(process.platform === "linux" ? ["--uid="] : []);
     expect(dumpState.env.GEMINI_HOME).toBe(antigravityProfileDirectory(instanceId));
     expect(dumpState.env.GEMINI_API_KEY).toBeUndefined();

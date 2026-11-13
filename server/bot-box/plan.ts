@@ -247,7 +247,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     // gave no bot (a configured server's program lives in the folder of the bot that added it).
     if (!named.has(full) && (under(full, dataDir) || under(dataDir, full)) && !covered(full) && !inBotFolder(full)) continue;
     // Code and the system are already there; a file under HOME or /tmp the command line names is put back read-only.
-    if (covered(full) || readOnly.has(full)) continue;
+    if ((!named.has(full) && covered(full)) || readOnly.has(full)) continue;
     if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base)))) continue;
     readOnly.add(full);
     mounts.push({ kind: "ro", source: full, target: full, optional: true });
