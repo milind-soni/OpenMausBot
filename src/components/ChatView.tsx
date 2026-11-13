@@ -665,7 +665,7 @@ export function ChatView({ bot }: { bot: Bot }) {
       >
         <button
           onClick={() => dispatch({ type: "toggleSettings" })}
-          className="flex min-w-0 shrink items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-raised/50"
+          className="flex shrink-0 items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-raised/50"
           title="Bot settings"
           style={noDrag}
         >
@@ -676,7 +676,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             motion={mascotMotion?.kind ?? "none"}
             motionKey={mascotMotion?.nonce ?? 0}
           />
-          <span className="truncate text-[15px] font-semibold text-ink">{bot.name}</span>
+          <span className="max-w-[10rem] truncate text-[15px] font-semibold text-ink">{bot.name}</span>
           {bot.busy && <Loader2 size={14} className="shrink-0 animate-spin text-ink-secondary" />}
         </button>
         <div className="flex shrink-0 items-center gap-1.5" style={noDrag}>

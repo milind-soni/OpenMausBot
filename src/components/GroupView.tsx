@@ -217,7 +217,7 @@ export function GroupView({ group }: { group: Group }) {
       <section className="relative flex h-full min-w-[360px] flex-1 flex-col">
       {/* Header: name left, member mauses right — their motion IS the status */}
       <div className={cn("flex items-center justify-between gap-2 px-5 py-3", isWin && "pr-[148px]")} style={drag}>
-        <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
+        <span className="max-w-[10rem] shrink-0 truncate text-[15px] font-semibold text-ink">{group.name}</span>
         <div className="flex shrink-0 items-center gap-1.5" style={noDrag}>
           <div className="flex items-center gap-1.5">
             {members.map((b) => (
