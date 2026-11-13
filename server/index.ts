@@ -262,7 +262,7 @@ import {
   drainChannelMessages,
   restoreChannelMessages,
   type ChannelQueueItem,
-} from "./channel-queue.ts"; import { copyRoomPick, pointedResponders, takeRoomPick, undeliveredPickBots, type RoomPick } from "./room-pointed.ts";
+} from "./channel-queue.ts"; import { copyRoomPick, pointedResponders, roomPickBots, takeRoomPick, undeliveredPickBots, type RoomPick } from "./room-pointed.ts";
 import {
   acceptedSendMatch,
   sendFingerprint,
@@ -10838,7 +10838,7 @@ function startGroupTurn(
     const addressed = stopWordPlacement(text) === "adjacent" ? undefined : message.id;
     for (const held of responders.filter(isHeld)) noteHeldSkip(group.id, threadId, held, addressed);
     responders = responders.filter((responder) => !isHeld(responder));
-  } for (const id of undeliveredPickBots(options.pointed, responders)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(threadLanguage(threadId), "server.rooms.pickNotSent", { bot: store.bot(id)?.name ?? id }), ok: false } });
+  } const unsentPick = undeliveredPickBots(options.pointed, responders), notePickNotSent = (id: string) => store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(threadLanguage(threadId), "server.rooms.pickNotSent", { bot: store.bot(id)?.name ?? id }), ok: false } }); for (const id of unsentPick) notePickNotSent(id);
   const explicitlyMentionedLead = roomResponders(text, routableMembers, { kind: "mentions" }, options.mentions)[0];
   const goalCoordinator = channelMode === "goal"
     ? requestedGoalCoordinator ?? explicitlyMentionedLead ?? selectGroupGoalCoordinator(routableMembers, group.defaultResponder)
@@ -10978,7 +10978,7 @@ function startGroupTurn(
       }
     }
   });
-  const tracked = next.finally(() => finishGroupTurnOperation(groupId, operation));
+  const tracked = next.finally(() => { try { for (const id of roomPickBots(operation.pick)) if (!unsentPick.includes(id)) notePickNotSent(id); } finally { finishGroupTurnOperation(groupId, operation); } });
   groupQueues.set(threadId, tracked.catch(() => {}));
   return message;
 }

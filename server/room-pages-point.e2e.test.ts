@@ -97,4 +97,21 @@ it("sends a pick on a room page to the bot that made it, and to no other member"
   await settled(helper.id);
   await expect.poll(async () => (await transcript()).some((message) => message.kind === "activity" && String(message.tool?.name).includes("what you pointed at in its page wasn't sent")), { timeout: 30_000 }).toBe(true);
   expect(evidence(designer.id).length).toBe(designerTurns + 1);
-}, 120_000);
+
+  // A line pointing at two bots' pages whose round stops during the first bot's turn reports the other bot's part.
+  expect((await api(`/api/groups/${group.id}/holds`, { botId: designer.id, held: false })).status).toBeLessThan(300);
+  writeFileSync(planPath, JSON.stringify({ [designer.id]: { steps: [], reply: "Done." }, [helper.id]: { steps: [{ tool: "show_html", arguments: { html: "<main><p>Notes</p></main>", title: "Notes" } }], reply: "Done." } }));
+  expect((await api(`/api/groups/${group.id}/messages`, { text: "@Helper make a notes page", mentions: [helper.id] })).status).toBe(202);
+  await expect.poll(async () => (await transcript()).find((message) => message.kind === "app" && message.from?.botId === helper.id)?.id, { timeout: 30_000 }).toBeTruthy();
+  await settled(helper.id);
+  const notes = (await transcript()).find((message) => message.kind === "app" && message.from?.botId === helper.id);
+  const designerReady = join(fixture.info.dataDir, "designer-ready");
+  writeFileSync(planPath, JSON.stringify({ [designer.id]: { steps: [], reply: "Done.", readyFile: designerReady, gateFile: join(fixture.info.dataDir, "designer-gate") }, [helper.id]: { steps: [], reply: "Done." } }));
+  const helperBefore = evidence(helper.id).length;
+  const both = await api(`/api/groups/${group.id}/messages`, { text: "Line these up", pointed: [pointed, { ...pointed, appId: notes.id, tag: "p", text: "Notes", selector: "main > p", html: "<p>Notes</p>" }] });
+  expect(both.status, JSON.stringify(both.body)).toBe(202);
+  await expect.poll(() => existsSync(designerReady), { timeout: 30_000 }).toBe(true);
+  expect((await api(`/api/groups/${group.id}/interrupt`, {})).status).toBeLessThan(300);
+  await expect.poll(async () => (await transcript()).some((message) => message.kind === "activity" && String(message.tool?.name).startsWith("Helper can't answer this line right now")), { timeout: 30_000 }).toBe(true);
+  expect(evidence(helper.id).length).toBe(helperBefore);
+}, 180_000);

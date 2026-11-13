@@ -33,7 +33,8 @@ export function roomPickBots(pick: RoomPick | undefined): string[] {
   return pick ? Object.keys(pick.blocks) : [];
 }
 
-/** Page bots of a pick that will not answer this line (held or gone since it was queued): their part reaches no one. */
+/** Page bots of a pick that will not answer this line (held or gone since it was queued): their part reaches no one.
+ * startGroupTurn also reports parts still in the run's pick when its round ends (a turn failed or the round stopped). */
 export function undeliveredPickBots(pick: RoomPick | undefined, responders: ReadonlyArray<{ id: string }>): string[] {
   return roomPickBots(pick).filter((id) => !responders.some((responder) => responder.id === id));
 }
