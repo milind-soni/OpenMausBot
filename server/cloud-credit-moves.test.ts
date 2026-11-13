@@ -141,6 +141,34 @@ describe("which engine a Cloud home's bots run on while it has the trial credit"
     expect(find("copied").modelSelection).toEqual({ instanceId: CREDIT, model: "claude-sonnet-5" });
   });
 
+  it.each([true, false])("retries saving the own-engine marker after a write failure, with signed-in=%s", (stillSignedIn) => {
+    const marker = join(storage(), "own.json");
+    mkdirSync(marker); // An existing directory prevents the atomic file replacement.
+    const moves = make();
+    moves.settle([credit(), claude(true), codex(false)]);
+    expect(find("seeded").modelSelection.instanceId).toBe("claude");
+    expect(moves.away([credit(), claude(false), codex(false)]), "the current process still remembers the sign-in").toBe(true);
+
+    rmSync(marker, { recursive: true });
+    moves.settle([credit(), claude(stillSignedIn), codex(false)]);
+    expect(JSON.parse(readFileSync(marker, "utf8"))).toEqual({ at: expect.any(Number) });
+    const restarted = make();
+    restarted.settle([credit(), claude(false), codex(false)]);
+    expect(find("seeded").modelSelection.instanceId, "a restart must not put the bot back on trial credit").toBe("claude");
+    expect(restarted.away([credit(), claude(false), codex(false)])).toBe(true);
+  });
+
+  it("does not turn read-only checks into marker write retries", () => {
+    const marker = join(storage(), "own.json");
+    mkdirSync(marker);
+    const moves = make();
+    moves.settle([credit(), claude(true), codex(false)]);
+    rmSync(marker, { recursive: true });
+    expect(moves.due(find("seeded"), "seeded-main", [credit(), claude(false), codex(false)])).toBe(false);
+    expect(moves.away([credit(), claude(false), codex(false)])).toBe(true);
+    expect(() => readFileSync(marker)).toThrow(/ENOENT/);
+  });
+
   it("an engine whose sign-in can't be read never takes the bots off the credit", () => {
     make().settle([credit(), claude(undefined), codex(false)]);
     expect(find("seeded").modelSelection.instanceId).toBe(CREDIT);
