@@ -303,6 +303,8 @@ export class StreamV2 {
     };
     try {
       const viewer = await this.#service.attachViewer(request.target, options, (output) => session.push(output));
+      // Access may expire during attachment, after input was queued but before it can reach the browser.
+      if (!session.theirs()) session.close(STREAM_CLOSE.gone, GONE);
       if (session.closed || session.closing) await viewer.close({ dropped: session.lost && session.theirs() });
       else session.attached(viewer, this.#service);
     } catch (error) {
