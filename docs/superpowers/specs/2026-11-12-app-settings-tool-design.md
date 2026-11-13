@@ -10,6 +10,7 @@ person changes it. That adds `people.signIn` (changing sign-in), `remote.domain`
 off remote access the person may be using), `profile.photo` (a file), removing an AI engine (its setup and key are
 deleted) and turning off `remote.wifi`, `remote.relay` or `remote.tailscale`. Where the sections below say `confirm`,
 read `safe`, except for those.
+The browser SOCKS5 proxy (`desktops.browserProxy`) is `safe` too; it reads only as set or not set.
 
 ## Goal
 
