@@ -11,8 +11,9 @@ import { BotDropLine, botRowDropClass } from "./SidebarBotDrag";
 const failure = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
 /** Room-order saves run one at a time, in the order asked, so the server ends on the last order asked for. Once the
- * last one settles after any failed, the rooms go back to the order the server confirmed (never an older one). */
-const roomOrder = { saves: Promise.resolve(), pending: 0, failed: false, cause: undefined as unknown, confirmed: [] as { id: string }[] };
+ * last one settles after any failed, only the rooms those saves moved go back to the order the server confirmed (never an
+ * older one); lists they did not touch keep any order another client set meanwhile. */
+const roomOrder = { saves: Promise.resolve(), pending: 0, failed: false, cause: undefined as unknown, confirmed: [] as { id: string }[], moved: new Set<string>() };
 
 /** Saves the rooms' new order: shown at once, then stored on the server (every client gets it); put back on failure. */
 export function saveRoomOrder(dispatch: Dispatch<Action>, groups: readonly Pick<Group, "id">[], groupIds: string[]): void {
@@ -20,6 +21,7 @@ export function saveRoomOrder(dispatch: Dispatch<Action>, groups: readonly Pick<
   if (before.length === groupIds.length && before.every((id, index) => id === groupIds[index])) return;
   if (!roomOrder.pending) roomOrder.confirmed = groups.map(({ id }) => ({ id }));
   roomOrder.pending += 1;
+  for (const id of groupIds) roomOrder.moved.add(id);
   dispatch({ type: "groupsOrdered", groupIds });
   roomOrder.saves = roomOrder.saves
     .then(() => api("/api/groups/order", { method: "PUT", body: JSON.stringify({ groupIds }) }))
@@ -28,9 +30,12 @@ export function saveRoomOrder(dispatch: Dispatch<Action>, groups: readonly Pick<
       (cause: unknown) => { roomOrder.failed = true; roomOrder.cause = cause; },
     )
     .finally(() => {
-      if (--roomOrder.pending || !roomOrder.failed) return;
+      if (--roomOrder.pending) return;
+      const moved = roomOrder.moved;
+      roomOrder.moved = new Set();
+      if (!roomOrder.failed) return;
       roomOrder.failed = false;
-      dispatch({ type: "groupsOrdered", groupIds: roomOrder.confirmed.map(({ id }) => id) });
+      dispatch({ type: "groupsOrdered", groupIds: roomOrder.confirmed.map(({ id }) => id).filter((id) => moved.has(id)) });
       dispatch({ type: "error", message: failure(roomOrder.cause) });
     });
 }
