@@ -27,7 +27,7 @@ export function grantNewDepartments(store: Pick<Store, "sections" | "bots" | "bo
     for (const id of chiefs) {
       const chief = store.bot(id);
       if (!chief || !inChargeOfEvery(chief, before)) continue;
-      const previous = [...chief.managedSections!];
+      const previous = [...(chief.managedSections ?? [])];
       const managedSections = [...new Set([...previous, ...added])];
       if (managedSections.length === previous.length || managedSections.length > MAX_MANAGED) continue;
       try {
