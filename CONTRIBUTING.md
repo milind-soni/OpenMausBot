@@ -12,8 +12,8 @@ makes a PR easy to merge. Read it once before opening anything; it's short on pu
   on the server, one store, one event bus. Don't introduce a dependency where thirty lines of code
   will do. New runtime dependencies need a reason in the PR description.
 - **Keep it green.** `pnpm typecheck && pnpm test` must pass. Server changes need tests (see below).
-- **UI changes need screenshots.** Before/after images in the PR body; video for anything animated.
-  Match the existing palette and tone in [`src/styles.css`](src/styles.css).
+- **UI changes follow [`DESIGN.md`](DESIGN.md).** Tokens, type, spacing, components, words and
+  states. Before/after screenshots in Midnight and Daylight go in the PR body; video for anything animated.
 
 ## Dev setup
 
@@ -396,7 +396,7 @@ Provider fakes under `server/testing/fake-*.ts` must stay dependency-free: they 
 - [ ] New server behavior has a test; driver changes keep the contract tests green
 - [ ] No `dist-server/` churn, no lockfile churn beyond your actual dependency change
 - [ ] macOS-only code is platform-gated; nothing breaks the packaged app
-- [ ] UI changes include before/after screenshots
+- [ ] UI changes follow [`DESIGN.md`](DESIGN.md) and include before/after screenshots
 
 By contributing you agree your contributions are licensed under the
 [Apache License, Version 2.0](LICENSE).
