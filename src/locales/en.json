@@ -7260,6 +7260,7 @@
   "botOverview.line.talksToAll": "Can talk to all {count} other bots, in any department.",
   "botOverview.line.talksToOne": "Can talk to the other bot.",
   "botOverview.line.talksToChosen": "Talks only to the bots chosen for it.",
+  "botOverview.line.allDepartments": "In charge of every department, including new ones.",
   "botOverview.line.alsoInCharge": "Also in charge of these departments: {departments}.",
   "botOverview.preference.auto": "Auto; availability is checked when a task starts",
   "botOverview.preference.cloud": "cloud desktop",

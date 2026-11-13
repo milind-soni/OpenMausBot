@@ -39,6 +39,7 @@ const EXACT: Record<string, LocaleKey> = {
   "Can't use a computer.": "botOverview.line.noComputer",
   "Profile proposal cards require your approval.": "botOverview.line.profileApproval",
   "Connected apps could not be checked.": "botOverview.line.appsUnchecked",
+  "In charge of every department, including new ones.": "botOverview.line.allDepartments",
 };
 
 const PREFERENCE: Record<string, LocaleKey> = {

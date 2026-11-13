@@ -6924,6 +6924,7 @@
   "botOverview.line.talksToAll": "Pode falar com todos os outros {count} bots, de qualquer equipe.",
   "botOverview.line.talksToOne": "Pode falar com o outro bot.",
   "botOverview.line.talksToChosen": "Fala apenas com os bots escolhidos para ele.",
+  "botOverview.line.allDepartments": "Responsável por todas as equipes, incluindo as novas.",
   "botOverview.line.alsoInCharge": "Também é responsável por estas equipes: {departments}.",
   "botOverview.preference.auto": "Auto; a disponibilidade é verificada quando uma tarefa começa",
   "botOverview.preference.cloud": "desktop na nuvem",

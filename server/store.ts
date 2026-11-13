@@ -6,7 +6,7 @@ import { commitRegistryChange, keptRevocation, saveRegistryFor, touchesPermissio
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts"; import { grantScopedApps } from "../shared/connector-scopes.ts"; import { dropRetiredApps } from "./retired-apps.ts";
 import { reorderInPlace } from "../shared/bot-order.ts"; import { trimOutboundPolicy } from "../shared/outbound.ts";
 import { botOwner, chiefConflict, chiefScope, ownerEmail } from "../shared/bot-owner.ts"; import { reshowWhenMoved } from "../shared/default-bot.ts";
-import { ensureSections, readSections, changeEmptySection } from "./section-context.ts";
+import { ensureSections, readSections, changeEmptySection } from "./section-context.ts"; import { grantNewDepartments } from "./department-grants.ts";
 import type { TeamComputers } from "./team-computers.ts";
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
 import type { BotProfilePatch } from "./bot-profile.ts";
@@ -697,7 +697,8 @@ export class Store {
 
   private rememberSections(names: (string | undefined)[]) {
     try {
-      if (ensureSections(names)) this.emit({ type: "sections" });
+      const added = ensureSections(names); // a name an older save left unregistered at startup is not a new department
+      if (added.length) { this.emit({ type: "sections" }); if (!this.registeringInitialSections) grantNewDepartments(this, added); }
     } catch (error) {
       if (!this.registeringInitialSections) throw error;
       console.warn(`[teams] Startup could not register team names; saved teams and shared instructions were left unchanged: ${(error as Error).message}`);
@@ -1678,8 +1679,7 @@ export class Store {
       const next = bot.id === id;
       if (Boolean(bot.chiefOfStaff) === next && !(next && bot.hidden)) continue;
       if (next) {
-        bot.chiefOfStaff = true;
-        bot.hidden = false;
+        bot.chiefOfStaff = true; bot.hidden = false;
       } else {
         bot.chiefOfStaff = false;
         delete bot.managedSections;

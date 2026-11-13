@@ -128,7 +128,7 @@ import { createSideJobs, helperSelection } from "./side-jobs.ts";
 import type { CaptureTurn, RoomLine } from "./memory-capture.ts";
 import { createAboutMe } from "./about-me.ts"; import { createPersonPreference } from "./host/person-preference.ts";
 import { botMemoryUpdate, ownersOwnAsk } from "./memory-forget.ts";
-import { canManage, canReach, departmentRefusal, hasTeamAuthority, livePeerRoster, livePeerRosterBlock, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts"; import { roomPostRefusal, sharedNamesNote, unreachedMentionLines } from "./same-name-mentions.ts";
+import { canManage, canReach, departmentRefusal, hasTeamAuthority, inChargeOfEvery, livePeerRoster, livePeerRosterBlock, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts"; import { roomPostRefusal, sharedNamesNote, unreachedMentionLines } from "./same-name-mentions.ts";
 import {
   containerComputerAction,
   containerComputerFrame,
@@ -193,7 +193,7 @@ import { GroupUsageReader } from "./group-thread-usage.ts";
 import { ledgerCost } from "./model-prices.ts";
 import type { PriceList } from "./prices.ts";
 import type { RequestAuth } from "./request-auth.ts";
-import { adminAuditPlan, type AuditPlan } from "./admin-audit-plan.ts";
+import { adminAuditPlan, type AuditPlan } from "./admin-audit-plan.ts"; import { departmentGrants, type DepartmentGrant } from "./department-grants.ts";
 import { onKeyRejectionChange } from "./key-rejections.ts";
 import { assertWithinBudget, noteSpend, spendAlertText, spendState, takeSpendAlert } from "./spend.ts";
 import { fleetAvailable, fleetSocketPath } from "./fleet-client.ts";
@@ -1273,14 +1273,14 @@ function beginAdminAudit(req: IncomingMessage, res: ServerResponse, method: stri
   const actor = plan ? adminActorFor(auth, req) : null;
   const sharedAtStart = plan ? adminActivityRecording() : false;
   // Set for every request, so a kept-alive connection never inherits one.
-  adminActorScope.enterWith(plan?.config && actor ? { actor, sharedAtStart } : null);
+  adminActorScope.enterWith(plan?.config && actor ? { actor, sharedAtStart } : null); const granted: DepartmentGrant[] = []; departmentGrants.enterWith(granted);
   if (!plan || !actor || store.bot(plan.botId ?? plan.deletesBot ?? "")?.defaultBot?.person) return; // a person's own MausBot is not the team's: what they do with it is never an admin's to read
   const before = {
     bot: auditBot(plan.botId ?? plan.deletesBot),
     botName: store.bot(plan.botId ?? plan.deletesBot ?? "")?.name,
     hook: auditHook(plan.webhookId),
     session: plan.sessionId ? sessions.list().find((session) => session.id === plan.sessionId) : undefined,
-    roomFloor: plan.roomId ? store.group(plan.roomId)?.audienceFloor ?? "everyone" : undefined,
+    roomFloor: plan.roomId ? store.group(plan.roomId)?.audienceFloor ?? "everyone" : undefined, granted,
   };
   let answered: unknown;
   if (plan.createsBots || plan.createsWebhook || plan.pairing) onJsonBody(res, (body) => (answered = body));
@@ -1298,15 +1298,15 @@ function adminAuditRows(
   plan: AuditPlan,
   req: IncomingMessage,
   path: string,
-  before: { bot: Record<string, unknown> | null; botName?: string; hook?: WebhookTrigger; session?: ReturnType<typeof sessions.list>[number]; roomFloor?: unknown },
+  before: { bot: Record<string, unknown> | null; botName?: string; hook?: WebhookTrigger; session?: ReturnType<typeof sessions.list>[number]; roomFloor?: unknown; granted: DepartmentGrant[] },
   answered: unknown,
 ): Array<Omit<AdminActionRow, "at" | "actor">> {
   const rows: Array<Omit<AdminActionRow, "at" | "actor">> = [];
   const reply = answered && typeof answered === "object" ? answered as Record<string, unknown> : {};
   const idOf = (value: unknown) => (value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string" ? (value as { id: string }).id : undefined);
-  if (plan.botId) {
-    rows.push(...botChangeRows({ id: plan.botId, name: store.bot(plan.botId)?.name }, before.bot, auditBot(plan.botId), requestedBotFields(req, path), BOT_AUDITED));
-  }
+  if (plan.botId) rows.push(...botChangeRows({ id: plan.botId, name: store.bot(plan.botId)?.name }, before.bot, auditBot(plan.botId), requestedBotFields(req, path), BOT_AUDITED));
+  // A new department this request made, added to a Chief in charge of every department (server/department-grants.ts).
+  for (const grant of before.granted) rows.push(...botChangeRows(grant, { managedSections: grant.before }, { managedSections: grant.after }, ["managedSections"], BOT_AUDITED));
   if (plan.createsBots) {
     const created = [idOf(reply.bot), ...(Array.isArray(reply.bots) ? reply.bots.map(idOf) : [])].filter((id): id is string => Boolean(id));
     for (const id of new Set(created)) {
@@ -2953,7 +2953,7 @@ function previewSystemPrompt(bot: BotRecord) {
   });
   const peers = reachablePeers(store.bots, bot);
   const coordination = chiefLevel(bot)
-    ? chiefOfStaffSystemPrompt(bot.id, store.bots, true)
+    ? chiefOfStaffSystemPrompt(bot.id, store.bots, true, undefined, store.sections)
     : peers.length > 0
       ? peerRosterSystemPrompt(peers, bot)
       : "";
@@ -3067,7 +3067,7 @@ async function botOverview(bot: BotRecord, shown: { routine(routine: Routine): b
     browserEnabled: builtInBrowserEnabled(cfg),
     cloudHome: Boolean(CLOUD_HOME),
     connectedApps,
-    sectionPeers,
+    sectionPeers, allDepartments: inChargeOfEvery(bot, store.sections),
     timeZone,
     recent,
   });
@@ -8268,7 +8268,7 @@ async function beginTurn(
           store.bots.filter((one) => !one.hidden).map((one) => one.name)), sectionPeers, opts?.mentions)
         : [];
       const coordinationPrompt = (chiefLevel(bot)
-        ? chiefOfStaffSystemPrompt(bot.id, store.bots, Boolean(integrations.agents), (peer) => personalReach.listed(bot, peer, threadId))
+        ? chiefOfStaffSystemPrompt(bot.id, store.bots, Boolean(integrations.agents), (peer) => personalReach.listed(bot, peer, threadId), store.sections)
         : integrations.agents && sectionPeers.length > 0
           ? peerRosterSystemPrompt(sectionPeers, bot)
           : "") + (integrations.agents ? personalReach.prompt(bot, threadId, sectionPeers) : "");
