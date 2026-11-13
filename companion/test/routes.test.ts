@@ -357,6 +357,25 @@ describe("what it may not", () => {
     ] as const) expect(allowed(method, path), `${method} ${path}`).toBe(false);
   });
 
+  it("reads a bot's Data and nothing that runs, changes or exports it", () => {
+    expect(allowed("GET", "/api/bots/bot_123/data")).toBe(true);
+    expect(allowed("POST", "/api/bots/bot_123/data/page")).toBe(true);
+    expect(allowed("GET", "/api/bots/bot_123/data/cards/c_2/image")).toBe(true);
+    for (const [method, path] of [
+      ["POST", "/api/bots/bot_123/data/run"],
+      ["POST", "/api/bots/bot_123/data/cancel"],
+      ["POST", "/api/bots/bot_123/data/export"],
+      ["PATCH", "/api/bots/bot_123/data/cards/c_2"],
+      ["DELETE", "/api/bots/bot_123/data/cards/c_2"],
+      ["GET", "/api/bots/bot_123/data/tables/orders/stats"],
+      ["POST", "/api/bots/bot_123/data"],
+      ["GET", "/api/bots/bot_123/data/page"],
+      ["GET", "/api/bots/bot_123/data/cards/../../config"],
+      ["GET", "/api/bots/bot_123/data/cards/c_2/image/extra"],
+    ] as const) expect(ask(method, path)?.status, `${method} ${path}`).toBe(404);
+    expect(ask("GET", "/api/bots/bot_123/data", false)?.status).toBe(401);
+  });
+
   it("lets a paired phone delete one bot, and nothing beside it", () => {
     expect(allowed("DELETE", "/api/bots/bot_123")).toBe(true);
     expect(allowed("DELETE", "/api/bots")).toBe(false);
