@@ -543,6 +543,10 @@ export function frameForMember(payload: Record<string, unknown>, ctx: FrameConte
       const botIds = Array.isArray(payload.botIds) ? payload.botIds.filter((id): id is string => typeof id === "string") : [];
       return { ...payload, botIds: botIds.filter((id) => visible.bot(id)) };
     }
+    case "groups.order": {
+      const groupIds = Array.isArray(payload.groupIds) ? payload.groupIds.filter((id): id is string => typeof id === "string") : [];
+      return { ...payload, groupIds: groupIds.filter((id) => visible.group(id)) };
+    }
     case "message":
     case "message.patch":
     case "thread":

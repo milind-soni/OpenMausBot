@@ -3256,6 +3256,24 @@ describe("a routine's answer and its broadcast", () => {
   });
 });
 
+describe("room order from the server", () => {
+  const room = (id: string): Group => ({ id, threadId: `${id}-thread`, name: id, memberIds: [], createdAt: 1, messages: [] } as unknown as Group);
+  const hydrated = reducer(initialState, { type: "hydrate", bots: [], groups: [room("a"), room("b"), room("c")], computerControl: {} });
+  const ids = (state: AppState) => state.groups.map((candidate) => candidate.id);
+
+  it("applies a groups.order frame as a stable partial reorder", () => {
+    expect(ids(reducer(hydrated, { type: "groupsOrdered", groupIds: ["c", "b", "a"] }))).toEqual(["c", "b", "a"]);
+    const partial = reducer(hydrated, { type: "groupsOrdered", groupIds: ["c", "a"] });
+    expect(ids(partial)).toEqual(["c", "b", "a"]);
+    expect(partial.groups[0]).toBe(hydrated.groups[2]);
+  });
+
+  it("ignores ids it does not know and leaves an unchanged order alone", () => {
+    expect(ids(reducer(hydrated, { type: "groupsOrdered", groupIds: ["ghost", "b", "a"] }))).toEqual(["b", "a", "c"]);
+    expect(reducer(hydrated, { type: "groupsOrdered", groupIds: ["a", "b", "c"] })).toBe(hydrated);
+  });
+});
+
 describe("fleet order from the server", () => {
   const bot = (id: string): Bot => ({
     id,

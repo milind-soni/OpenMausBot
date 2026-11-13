@@ -4892,6 +4892,47 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("stores the room order: a partial, stable reorder every client reads back", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const room = async (name: string) => (await api("POST", "/api/groups", { name, memberIds: [bot.id] })).body.group;
+    const first = await room("Room one"), second = await room("Room two"), third = await room("Room three");
+    const mine = new Set([first.id, second.id, third.id]);
+    const listed = async () => ((await api("GET", "/api/bots?messages=0")).body.groups as { id: string }[]).map((group) => group.id).filter((id) => mine.has(id));
+    try {
+      const start = await listed();
+      expect(start).toHaveLength(3);
+      const wanted = [...start].reverse();
+
+      const stream = await openSse(`${BASE}/api/events`);
+      try {
+        await stream.until((frame) => frame.kind === "hello");
+        const full = await api("PUT", "/api/groups/order", { groupIds: wanted });
+        expect(full.status).toBe(200);
+        expect(full.body.groupIds.filter((id: string) => mine.has(id))).toEqual(wanted);
+        const frame = await stream.until((candidate) => candidate.kind === "groups.order");
+        expect(frame.groupIds).toEqual(full.body.groupIds);
+      } finally {
+        stream.close();
+      }
+      expect(await listed()).toEqual(wanted);
+
+      // Listing two rooms moves only those two, into the positions they already share.
+      const partial = await api("PUT", "/api/groups/order", { groupIds: [wanted[2], wanted[0]] });
+      expect(partial.status).toBe(200);
+      expect(await listed()).toEqual([wanted[2], wanted[1], wanted[0]]);
+
+      expect(await api("PUT", "/api/groups/order", { groupIds: [first.id, first.id] })).toMatchObject({ status: 400, body: { error: "groupIds must be a non-empty array of distinct room ids" } });
+      expect(await api("PUT", "/api/groups/order", { groupIds: [] })).toMatchObject({ status: 400 });
+      expect(await api("PUT", "/api/groups/order", { groupIds: "nope" })).toMatchObject({ status: 400 });
+      expect(await api("PUT", "/api/groups/order", { groupIds: [first.id], extra: true })).toMatchObject({ status: 400 });
+      expect(await api("PUT", "/api/groups/order", { groupIds: [first.id, "room-nope"] })).toMatchObject({ status: 400, body: { error: "unknown room: room-nope" } });
+      expect(await listed()).toEqual([wanted[2], wanted[1], wanted[0]]);
+    } finally {
+      for (const group of [first, second, third]) await api("DELETE", `/api/groups/${group.id}`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("words a new bot's refused department access by key, keeping its English", async () => {
     expect(await api("POST", "/api/bots", { settings: { managedSections: ["Nowhere"] } })).toEqual({ status: 400,
       body: { error: "Only a Chief may manage existing additional departments", errorKey: "serverError.department.chiefOnlyExtra" } });
