@@ -20,11 +20,13 @@ export interface BoxRelay {
 export async function openBoxRelay(socketPath: string): Promise<BoxRelay> {
   rmSync(socketPath, { force: true });
   const waiting: Socket[] = [];
-  const takers: Array<(socket: Socket) => void> = [];
+  const takers: Array<{ take(socket: Socket): void; close(): void }> = [];
+  let closed = false;
   const server = createServer((socket) => {
     socket.on("error", () => {});
+    if (closed) return void socket.destroy();
     const taker = takers.shift();
-    if (taker) return taker(socket);
+    if (taker) return taker.take(socket);
     if (waiting.length >= MAX_WAITING) return void socket.destroy();
     waiting.push(socket);
     socket.once("close", () => {
@@ -43,23 +45,32 @@ export async function openBoxRelay(socketPath: string): Promise<BoxRelay> {
     socketPath,
     async connect(port, timeoutMs = RELAY_TIMEOUT_MS) {
       if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`Not a port: ${port}`);
+      if (closed) throw new Error("The sign-in's box relay is closed.");
       const socket = waiting.shift() ?? await new Promise<Socket>((resolve, reject) => {
-        const take = (dialed: Socket) => {
-          clearTimeout(timer);
-          resolve(dialed);
+        const taker = {
+          take(dialed: Socket) {
+            clearTimeout(timer);
+            resolve(dialed);
+          },
+          close() {
+            clearTimeout(timer);
+            reject(new Error("The sign-in's box relay is closed."));
+          },
         };
         const timer = setTimeout(() => {
-          takers.splice(takers.indexOf(take), 1);
+          takers.splice(takers.indexOf(taker), 1);
           reject(new Error("The sign-in's box did not answer."));
         }, timeoutMs);
-        takers.push(take);
+        takers.push(taker);
       });
       socket.write(`${port}\n`);
       return socket;
     },
     close() {
-      if (!server.listening) return;
+      if (closed) return;
+      closed = true;
       server.close();
+      for (const taker of takers.splice(0)) taker.close();
       for (const socket of waiting.splice(0)) socket.destroy();
       rmSync(socketPath, { force: true });
     },
