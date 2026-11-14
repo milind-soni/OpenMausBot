@@ -18,6 +18,8 @@ import { MAX_RELAY_PHONES, MAX_SESSIONS_PER_PHONE, PHONE_RELAY_KEY_FILE, PHONE_R
 import { requestSource, resolveRequestAuth } from "./request-auth.ts";
 import { SessionRegistry } from "./sessions.ts";
 
+const SERVER_VERSION = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
+
 const signingKey = generateKeyPairSync("ed25519").privateKey;
 const keys = new Map([["k1", ed25519RawPublicKey(signingKey)]]);
 const NODE = "relay1.openmausbot.com";
@@ -185,7 +187,7 @@ describe("phones through MausBot Relay on a server", () => {
     // A token inside the session must be the one whose key opened it.
     const other = server.sessions.issue({ label: "Laptop", scopes: ["admin", "client"] });
     expect(await http(session, "GET", "/api/auth/session", { token: other.token }).then((r) => [r.status, json(r).error])).toEqual([401, "this connection belongs to another device"]);
-    expect(json(await http(session, "GET", "/api/companion/endpoints", { token: reply.token }))).toEqual({ serverName: "VPS", endpoints: [], e2e: descriptor });
+    expect(json(await http(session, "GET", "/api/companion/endpoints", { token: reply.token }))).toEqual({ serverName: "VPS", endpoints: [], version: SERVER_VERSION, e2e: descriptor });
     session.shutdown();
 
     // The window is spent; the phone's own key opens the next session, and a session the relay never admitted cannot.
